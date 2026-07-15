@@ -1,23 +1,29 @@
 # Quote Intake Lab — Do Not Touch
 
-**Purpose:** Hard isolation boundaries for all future Cursor prompts and human implementers.  
-**Date:** 2026-07-14  
-**Only authorized future refactor target:** AI Takeoff (`app-ai-takeoff` + `backend-core/src/takeoff/*` pure/orchestration modules), and even that must go through `TakeoffAdapter` without breaking Internal Estimate import.
+**Purpose:** Hard isolation boundaries for all future Cursor prompts and human implementers.
+
+**Date:** 2026-07-14 (updated 2026-07-15 for Phase 6P.0 live-promotion authorization)
+
+**Only authorized future refactor target:** AI Takeoff (`app-ai-takeoff` + `backend-core/src/takeoff/*` pure/orchestration modules), and even that must go through a `TakeoffAdapter` / ProductionTakeoffAdapter without breaking Internal Estimate import.
+
+**Phase 6P.0 authorization update:** Live promotion may add a **pilot-gated Estimator Queue tab/view** inside `app-ai-takeoff` and a **server-side ProductionTakeoffAdapter** that invokes existing takeoff **services** (not IE import). See `PHASE_6P_0_LIVE_PROMOTION_ARCHITECTURE.md` and `PHASE_6P_0_TAKEOFF_INTEGRATION_MAP.md`. Until an implementation slice explicitly starts, treat Takeoff as carefully as before — documentation phases must not modify it.
 
 ---
 
 ## Special warning — AI Takeoff
 
-The assignment authorizes takeoff as the **only** existing module open to future refactoring.
+The assignment authorizes takeoff as the **only** existing product head open to bounded live-promotion refactoring.
 
 Repository fact: AI Takeoff is **live** (`takeoff.eliteosfab.com`, production tables, IE import path enabled under beta gates). Treat it as a **production-critical adjacent system**, not a dead prototype.
 
-**Rules when refactoring takeoff later:**
+**Rules when refactoring takeoff later (including 6P.3+):**
 
 1. Prefer extracting shared pure modules; avoid drive-by IE UI changes.
-2. Do **not** modify Internal Estimate takeoff import components or `import-from-takeoff` behavior as part of lab work.
-3. Lab must not write production `quote_takeoff_jobs` / `quote_takeoff_results` / `eliteos-quote-files` unless a later architecture decision explicitly relocates ownership.
-4. Any takeoff refactor lands behind `TakeoffAdapter` and keeps IE + Takeoff Lab green.
+2. Do **not** modify Internal Estimate takeoff import components or `import-from-takeoff` behavior as part of intake work.
+3. Local Quote Intake Lab must not write production `quote_takeoff_jobs` / `quote_takeoff_results` / `eliteos-quote-files` from the lab head. Live promotion may create takeoff jobs **only** via the server ProductionTakeoffAdapter after trusted gates (6P.6+).
+4. Any takeoff refactor lands behind adapter boundaries and keeps IE + interactive Takeoff green.
+5. Default Takeoff workbench (upload → generate → review → approve → optional import UI) must not regress; Queue is additive and pilot-gated.
+6. Intake automation must **never** call `POST /api/internal-quotes/import-from-takeoff` or auto-set `betaImportConfirmed`.
 
 ---
 
@@ -33,7 +39,7 @@ Repository fact: AI Takeoff is **live** (`takeoff.eliteosfab.com`, production ta
 | `app-pricing-admin/**` | Live pricing configuration UI | Elite100CatalogAdapter snapshot |
 | `app-home/**` | Production launcher navigation | Manual URL / quarantined head only |
 | `app-sales/**`, `app-executive/**`, `app-system-admin/**`, `app-brain-health/**`, `app-hr/**`, `app-install-dashboard/**`, `app-slab-inventory/**`, `app-visualizer/**`, `app-kiosk/**`, `app-org-directory/**`, `app-quickbooks-intelligence/**` | Unrelated production heads | No coupling |
-| `app-ai-takeoff/**` | Authorized later refactor only | Leave untouched in Phases 0–3; Phase 4 via adapter plan |
+| `app-ai-takeoff/**` | **Bounded live-promotion host (6P.3+ only)** — Estimator Queue tab/view; default workbench unchanged | Leave untouched in Phases 0–4B lab isolation and in Phase 6P.0 docs; implement only when slice prompt authorizes |
 
 ---
 
@@ -67,11 +73,14 @@ Repository fact: AI Takeoff is **live** (`takeoff.eliteosfab.com`, production ta
 | Path | Classification | Rule |
 |------|----------------|------|
 | `backend-core/src/takeoff/*.mjs` pure modules | Read / call via adapter | Do not change contracts for lab convenience without tests |
-| `backend-core/src/takeoff/takeoffWorkspaceRoutes.js` | Production API | Do not overload for email intake cases |
-| Production takeoff SQL / tables | Live | No lab migrations onto these tables |
+| `backend-core/src/takeoff/takeoffWorkspaceService.mjs` + generation/extraction services | Allowed via **ProductionTakeoffAdapter** in 6P.6+ | Prefer internal service calls; do not fork providers/prompts |
+| `backend-core/src/takeoff/takeoffWorkspaceRoutes.js` | Production interactive API | Keep contracts stable; do not overload routes as Graph/email intake APIs |
+| Production takeoff SQL / tables | Live | Interactive Takeoff continues to use them; intake links via `quote_intake_takeoff_links` — do not merge intake columns into takeoff tables unless unavoidable |
+| New `backend-core/src/quoteIntake/**` (or successor) | Authorized additive package (6P.1+) | Namespaced intake APIs only |
+| `app-ai-takeoff` Estimator Queue tab | Authorized additive UI (6P.3+) | Default workbench unchanged; pilot-gated |
 | `app-internal-estimate/**/Takeoff*` | DO NOT TOUCH | Hard boundary |
-| `POST /api/internal-quotes/import-from-takeoff` | DO NOT TOUCH | Lab never calls |
-| `shared/eliteos-ui/Takeoff*.tsx` | Safe import w/o modification | Do not repurpose for intake queue chrome |
+| `POST /api/internal-quotes/import-from-takeoff` | DO NOT TOUCH / never automate | Intake never calls; pilot keeps promotion disabled |
+| `shared/eliteos-ui/Takeoff*.tsx` | Safe import w/o modification | Do not repurpose for intake queue chrome without shared-UI approval |
 
 ---
 
