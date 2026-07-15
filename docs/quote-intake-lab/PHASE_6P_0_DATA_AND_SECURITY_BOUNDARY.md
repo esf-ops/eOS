@@ -1,6 +1,6 @@
 # Phase 6P.0 — Data and Security Boundary
 
-**Date:** 2026-07-15  
+**Date:** 2026-07-15
 **Status:** Design only — **no migrations in this phase**
 
 ---
@@ -9,11 +9,11 @@
 
 `app-quote-intake-lab` persists cases in browser IndexedDB. That cannot support:
 
-- Multiple estimators  
-- Shared org queue  
-- Durable audit  
-- Server-side Graph import  
-- Automatic Takeoff attribution  
+- Multiple estimators
+- Shared org queue
+- Durable audit
+- Server-side Graph import
+- Automatic Takeoff attribution
 
 Local IndexedDB history is **disposable test data** — no automatic migration to production.
 
@@ -30,11 +30,11 @@ Local IndexedDB history is **disposable test data** — no automatic migration t
 
 **Recommendation:** Additive namespaced tables in the **existing** production Supabase project with:
 
-- `organization_id` on every tenant row  
-- RLS (and/or service-role-only writes with explicit org checks mirroring takeoff)  
-- No FKs into `quote_headers` for automation  
-- Optional FK from `quote_intake_takeoff_links.takeoff_job_id` → `quote_takeoff_jobs` (read association only)  
-- Instant disable via feature flags without schema drops  
+- `organization_id` on every tenant row
+- RLS (and/or service-role-only writes with explicit org checks mirroring takeoff)
+- No FKs into `quote_headers` for automation
+- Optional FK from `quote_intake_takeoff_links.takeoff_job_id` → `quote_takeoff_jobs` (read association only)
+- Instant disable via feature flags without schema drops
 
 Staging project remains useful for **dev load tests**, but the live pilot should not invent a second production identity system.
 
@@ -80,10 +80,10 @@ Conceptual (not final; no SQL here):
 
 ### Current Takeoff auth (inspected)
 
-- Frontend: shared `.eliteosfab.com` Supabase cookie (`shared/eliteos-supabase`)  
-- API: Bearer JWT `requireAuth()`  
-- Head: `requireHeadAccess("ai_takeoff")` via `user_head_access`  
-- Org: server-derived `resolveOrganizationContext`  
+- Frontend: shared `.eliteosfab.com` Supabase cookie (`shared/eliteos-supabase`)
+- API: Bearer JWT `requireAuth()`
+- Head: `requireHeadAccess("ai_takeoff")` via `user_head_access`
+- Org: server-derived `resolveOrganizationContext`
 
 ### Pilot design
 
@@ -102,8 +102,8 @@ Conceptual (not final; no SQL here):
 
 **Note:** `quote_intake_lab` is not currently in `EOS_HEAD_SLUGS`. Pilot may:
 
-1. Gate under existing `ai_takeoff` + pilot claim, or  
-2. Add a new slug (e.g. `quote_intake`) in a later slice with migrations/grants  
+1. Gate under existing `ai_takeoff` + pilot claim, or
+2. Add a new slug (e.g. `quote_intake`) in a later slice with migrations/grants
 
 Prefer (1) for smallest pilot, then (2) if access must be separated.
 
@@ -132,10 +132,10 @@ Prefer (1) for smallest pilot, then (2) if access must be separated.
 
 Never log:
 
-- Subjects, bodies, addresses  
-- Attachment names/bytes  
-- Tokens, secrets  
-- Full Graph resource IDs  
+- Subjects, bodies, addresses
+- Attachment names/bytes
+- Tokens, secrets
+- Full Graph resource IDs
 
 Use correlation ids and SHA-256 prefixes. Same rule as Graph plan.
 
@@ -172,12 +172,12 @@ Code review + tests should assert absence of these import paths on the automatic
 
 ## 10. Rollback data safety
 
-- Flags off first  
-- Preserve `quote_intake_*` audit rows  
-- Stop new links/jobs  
-- Do not delete `quote_takeoff_*` production rows  
-- Drop intake tables only via deliberate cleanup migration after retention decision  
-- Rotate Graph secrets; remove Exchange RBAC if abandoning  
+- Flags off first
+- Preserve `quote_intake_*` audit rows
+- Stop new links/jobs
+- Do not delete `quote_takeoff_*` production rows
+- Drop intake tables only via deliberate cleanup migration after retention decision
+- Rotate Graph secrets; remove Exchange RBAC if abandoning
 
 ---
 
@@ -185,8 +185,8 @@ Code review + tests should assert absence of these import paths on the automatic
 
 Per workspace security rules:
 
-1. **Org scope:** every new table/path uses `organization_id`.  
-2. **Server-side auth:** queue/sync/automation enforced in backend, not UI-only.  
-3. **Secrets:** Graph + Gemini keys never in `VITE_*` / browser.  
-4. **Cross-tenant:** Graph mailbox fixed; no client mailbox param.  
+1. **Org scope:** every new table/path uses `organization_id`.
+2. **Server-side auth:** queue/sync/automation enforced in backend, not UI-only.
+3. **Secrets:** Graph + Gemini keys never in `VITE_*` / browser.
+4. **Cross-tenant:** Graph mailbox fixed; no client mailbox param.
 5. **Traceability:** automation decisions + takeoff links + audit events required for writes.

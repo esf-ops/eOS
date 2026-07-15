@@ -1,7 +1,7 @@
 # Phase 6P.0 — Microsoft Graph Deployment Plan
 
-**Date:** 2026-07-15  
-**Status:** Design only — **no Graph calls in this phase**  
+**Date:** 2026-07-15
+**Status:** Design only — **no Graph calls in this phase**
 **Related:** [`PHASE_6P_0_LIVE_PROMOTION_ARCHITECTURE.md`](./PHASE_6P_0_LIVE_PROMOTION_ARCHITECTURE.md) · [`PHASE_6P_0_DATA_AND_SECURITY_BOUNDARY.md`](./PHASE_6P_0_DATA_AND_SECURITY_BOUNDARY.md)
 
 ---
@@ -60,10 +60,10 @@ using Application permissions scoped by Exchange RBAC to **that mailbox only**.
 
 ## 5. Token acquisition & caching
 
-1. Client-credentials grant against Entra token endpoint (tenant fixed).  
-2. Cache access token in-memory (or shared cache if multi-instance) until `expires_on - skew`.  
-3. On `401`, invalidate cache and retry once.  
-4. Never log token, refresh material, or full auth headers.  
+1. Client-credentials grant against Entra token endpoint (tenant fixed).
+2. Cache access token in-memory (or shared cache if multi-instance) until `expires_on - skew`.
+3. On `401`, invalidate cache and retry once.
+4. Never log token, refresh material, or full auth headers.
 5. Token module lives next to Graph client — not in frontend packages.
 
 ---
@@ -120,9 +120,9 @@ Sync trigger (authenticated pilot)
 
 ## 8. HTML → safe plain text
 
-- Prefer Graph `uniqueBody` / text parts when available.  
-- If HTML only: strip scripts/styles, decode entities, collapse whitespace.  
-- Classification uses **text/metadata only** — **attachment bytes are not sent to email classification**.  
+- Prefer Graph `uniqueBody` / text parts when available.
+- If HTML only: strip scripts/styles, decode entities, collapse whitespace.
+- Classification uses **text/metadata only** — **attachment bytes are not sent to email classification**.
 - Plan PDF bytes go **only** to the Takeoff pipeline when automation decides.
 
 ---
@@ -142,9 +142,9 @@ Sync trigger (authenticated pilot)
 
 ## 10. Dedupe with Graph
 
-1. Immutable Graph message id unique per org.  
-2. Else `internetMessageId` unique per org.  
-3. Else normalized content-hash fallback of sender+date+subject-hash+attachment hashes (careful; document algorithm).  
+1. Immutable Graph message id unique per org.
+2. Else `internetMessageId` unique per org.
+3. Else normalized content-hash fallback of sender+date+subject-hash+attachment hashes (careful; document algorithm).
 4. Attachment SHA-256 prevents duplicate automatic Takeoff for same intake/revision.
 
 Re-sync must be a no-op for already-imported identities.
@@ -173,26 +173,26 @@ Re-sync must be a no-op for already-imported identities.
 
 ## 13. What Graph must never do in pilot
 
-- Send, reply, forward, or create messages  
-- Move/delete/mark-read  
-- Change inbox rules or categories  
-- Read Hunter or any non-scoped mailbox  
-- Expose a browser Graph proxy  
-- Accept mailbox identity from the client  
+- Send, reply, forward, or create messages
+- Move/delete/mark-read
+- Change inbox rules or categories
+- Read Hunter or any non-scoped mailbox
+- Expose a browser Graph proxy
+- Accept mailbox identity from the client
 
 ---
 
 ## 14. Implementation slice placement
 
-- **6P.4:** Manual preview/import behind flags; synthetic forwards only; no automatic Takeoff  
-- Worker code under server packages only  
+- **6P.4:** Manual preview/import behind flags; synthetic forwards only; no automatic Takeoff
+- Worker code under server packages only
 - Fixture/sim Graph client for tests (no live Network in CI by default)
 
 ---
 
 ## 15. Open questions
 
-1. Delta query vs simple `receivedDateTime` cursor for first sync.  
-2. Whether to store ciphertext-at-rest attachment blobs in Storage vs ephemeral re-fetch (prefer Storage with org scoping).  
-3. Multi-instance token cache on Vercel (likely per-instance memory OK for pilot).  
-4. Subscription lifecycle ownership for later webhook phase.  
+1. Delta query vs simple `receivedDateTime` cursor for first sync.
+2. Whether to store ciphertext-at-rest attachment blobs in Storage vs ephemeral re-fetch (prefer Storage with org scoping).
+3. Multi-instance token cache on Vercel (likely per-instance memory OK for pilot).
+4. Subscription lifecycle ownership for later webhook phase.

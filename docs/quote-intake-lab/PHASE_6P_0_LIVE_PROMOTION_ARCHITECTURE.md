@@ -1,8 +1,8 @@
 # Phase 6P.0 — Live Promotion Architecture Boundary
 
-**Date:** 2026-07-15  
-**Status:** Documentation and repository analysis only — **no implementation**  
-**Phase:** 6P.0  
+**Date:** 2026-07-15
+**Status:** Documentation and repository analysis only — **no implementation**
+**Phase:** 6P.0
 **Related:** [`PHASE_6P_0_TAKEOFF_INTEGRATION_MAP.md`](./PHASE_6P_0_TAKEOFF_INTEGRATION_MAP.md) · [`PHASE_6P_0_MICROSOFT_GRAPH_PLAN.md`](./PHASE_6P_0_MICROSOFT_GRAPH_PLAN.md) · [`PHASE_6P_0_AUTOMATIC_TAKEOFF_POLICY.md`](./PHASE_6P_0_AUTOMATIC_TAKEOFF_POLICY.md) · [`PHASE_6P_0_DATA_AND_SECURITY_BOUNDARY.md`](./PHASE_6P_0_DATA_AND_SECURITY_BOUNDARY.md) · [`PHASE_6P_0_IMPLEMENTATION_PLAN.md`](./PHASE_6P_0_IMPLEMENTATION_PLAN.md) · [`DO_NOT_TOUCH.md`](./DO_NOT_TOUCH.md) · [`PHASE_4_TAKEOFF_BOUNDARY.md`](./PHASE_4_TAKEOFF_BOUNDARY.md)
 
 ---
@@ -240,16 +240,16 @@ See [`PHASE_6P_0_DATA_AND_SECURITY_BOUNDARY.md`](./PHASE_6P_0_DATA_AND_SECURITY_
 
 ## 7. Target business flow (condensed)
 
-1. Salesperson receives customer request.  
-2. Forwards to `quotes@elitestonefabrication.com` with `[QIL TAKEOFF]` marker.  
-3. Optional structured intake block; unknown fields blank.  
-4. Microsoft ingestion imports (manual Sync in first proof).  
-5. eliteOS validates sender, message, attachments, dedupe, automation gates.  
-6. Classification extracts business fields.  
-7. If trusted gates pass → submit PDF through existing Takeoff pipeline automatically.  
-8. Estimator Queue shows processing / ready / manual / failed.  
-9. Estimator reviews completed takeoff (no Start Takeoff click for Path A).  
-10. Estimator approval mandatory.  
+1. Salesperson receives customer request.
+2. Forwards to `quotes@elitestonefabrication.com` with `[QIL TAKEOFF]` marker.
+3. Optional structured intake block; unknown fields blank.
+4. Microsoft ingestion imports (manual Sync in first proof).
+5. eliteOS validates sender, message, attachments, dedupe, automation gates.
+6. Classification extracts business fields.
+7. If trusted gates pass → submit PDF through existing Takeoff pipeline automatically.
+8. Estimator Queue shows processing / ready / manual / failed.
+9. Estimator reviews completed takeoff (no Start Takeoff click for Path A).
+10. Estimator approval mandatory.
 11. IE / Quote Library / pricing / outbound email remain disabled in pilot.
 
 ---
@@ -300,44 +300,44 @@ Notes:
 
 ## 10. Live MVP acceptance test (exact target)
 
-1. Approved salesperson forwards synthetic message to `quotes@…`  
-2. Subject begins `[QIL TAKEOFF]`  
-3. Body declares `Program: Elite 100`  
-4. One supported synthetic PDF directly attached  
-5. Pilot estimator opens Estimator Queue in live Takeoff head  
-6. Estimator clicks **Sync mailbox** (first pilot)  
-7. Message imported once  
-8. Central intake case created  
-9. Classification/extraction runs  
-10. Trusted automation gates pass  
-11. Existing Takeoff job created automatically  
-12. No estimator click to start Takeoff  
-13. Queue shows queued/processing  
-14. Pipeline completes  
-15. Queue shows ready for review  
-16. Estimator opens existing Takeoff review  
-17. Estimator verifies result  
-18. Another authorized estimator sees same case  
-19. Non-pilot cannot access queue  
-20. Re-sync does not duplicate case or job  
-21. Hunter mailbox remains inaccessible  
-22. No move/delete/mark-read  
-23. No customer email  
-24. No pricing  
-25. No IE / Quote Library record  
-26. Existing Takeoff users/upload behavior unchanged  
+1. Approved salesperson forwards synthetic message to `quotes@…`
+2. Subject begins `[QIL TAKEOFF]`
+3. Body declares `Program: Elite 100`
+4. One supported synthetic PDF directly attached
+5. Pilot estimator opens Estimator Queue in live Takeoff head
+6. Estimator clicks **Sync mailbox** (first pilot)
+7. Message imported once
+8. Central intake case created
+9. Classification/extraction runs
+10. Trusted automation gates pass
+11. Existing Takeoff job created automatically
+12. No estimator click to start Takeoff
+13. Queue shows queued/processing
+14. Pipeline completes
+15. Queue shows ready for review
+16. Estimator opens existing Takeoff review
+17. Estimator verifies result
+18. Another authorized estimator sees same case
+19. Non-pilot cannot access queue
+20. Re-sync does not duplicate case or job
+21. Hunter mailbox remains inaccessible
+22. No move/delete/mark-read
+23. No customer email
+24. No pricing
+25. No IE / Quote Library record
+26. Existing Takeoff users/upload behavior unchanged
 
 ---
 
 ## 11. Rollback (summary)
 
-- Kill Graph sync + automatic Takeoff flags  
-- Hide queue tab  
-- Preserve audit/history  
-- Stop new intake jobs without interrupting existing Takeoff users or in-flight jobs  
-- Rotate/remove Graph secret; remove Exchange RBAC if abandoning  
-- Drop `quote_intake_*` tables only via deliberate cleanup migration  
-- Never delete production Takeoff job/result rows as part of intake rollback  
+- Kill Graph sync + automatic Takeoff flags
+- Hide queue tab
+- Preserve audit/history
+- Stop new intake jobs without interrupting existing Takeoff users or in-flight jobs
+- Rotate/remove Graph secret; remove Exchange RBAC if abandoning
+- Drop `quote_intake_*` tables only via deliberate cleanup migration
+- Never delete production Takeoff job/result rows as part of intake rollback
 
 Full detail: [`PHASE_6P_0_IMPLEMENTATION_PLAN.md`](./PHASE_6P_0_IMPLEMENTATION_PLAN.md) § rollback.
 
@@ -362,14 +362,14 @@ Full detail: [`PHASE_6P_0_IMPLEMENTATION_PLAN.md`](./PHASE_6P_0_IMPLEMENTATION_P
 
 ## 13. Exact do-not-touch (still prohibited in 6P.0 and pilot)
 
-- `app-internal-estimate/**`  
-- `app-quote-library/**`, Quote Library APIs  
-- `POST /api/internal-quotes/import-from-takeoff` and detach  
-- Pricing calculate/persist authority paths for intake automation  
-- `quoteDelivery` / customer email send  
-- Monday / Moraware / QuickBooks  
-- Home Launcher registration of a separate lab card (unless later approved)  
-- Real customer plan transmission before explicit flag approval  
-- Any `Mail.Send` / mailbox mutation Graph permissions  
+- `app-internal-estimate/**`
+- `app-quote-library/**`, Quote Library APIs
+- `POST /api/internal-quotes/import-from-takeoff` and detach
+- Pricing calculate/persist authority paths for intake automation
+- `quoteDelivery` / customer email send
+- Monday / Moraware / QuickBooks
+- Home Launcher registration of a separate lab card (unless later approved)
+- Real customer plan transmission before explicit flag approval
+- Any `Mail.Send` / mailbox mutation Graph permissions
 
 **6P.0 itself:** documentation only — no Graph calls, no mailbox reads, no Gemini, no migrations, no commits.

@@ -1,7 +1,7 @@
 # Phase 6P.0 — Implementation Plan
 
-**Date:** 2026-07-15  
-**Status:** Planning only — **do not start 6P.1 in this phase**  
+**Date:** 2026-07-15
+**Status:** Planning only — **do not start 6P.1 in this phase**
 **Principle:** Small, reversible slices. Automate preparation, not approval.
 
 ---
@@ -26,18 +26,18 @@
 
 **Scope**
 
-- Namespaced API design under `/api/quote-intake/*` (exact prefix finalized in slice)  
-- Fake/in-memory repository  
-- Mount behind **off-by-default** feature flag  
-- Case / message / attachment / automation-decision / link DTOs  
-- No database, no Graph, no live Takeoff invocation  
+- Namespaced API design under `/api/quote-intake/*` (exact prefix finalized in slice)
+- Fake/in-memory repository
+- Mount behind **off-by-default** feature flag
+- Case / message / attachment / automation-decision / link DTOs
+- No database, no Graph, no live Takeoff invocation
 
 **Acceptance**
 
-- Routes unreachable when flag off  
-- In-memory CRUD + dedupe keys work in tests  
-- No production table writes  
-- `git` diff limited to backend intake package + flag wiring + tests + docs  
+- Routes unreachable when flag off
+- In-memory CRUD + dedupe keys work in tests
+- No production table writes
+- `git` diff limited to backend intake package + flag wiring + tests + docs
 
 ---
 
@@ -45,16 +45,16 @@
 
 **Scope**
 
-- Additive migrations for `quote_intake_*`  
-- RLS / organization scoping  
-- Audit + dedupe uniqueness  
-- No Graph, no automatic Takeoff  
+- Additive migrations for `quote_intake_*`
+- RLS / organization scoping
+- Audit + dedupe uniqueness
+- No Graph, no automatic Takeoff
 
 **Acceptance**
 
-- Multi-org isolation tests  
-- Duplicate message insert rejected  
-- Rollback notes for table cleanup  
+- Multi-org isolation tests
+- Duplicate message insert rejected
+- Rollback notes for table cleanup
 
 ---
 
@@ -62,16 +62,16 @@
 
 **Scope**
 
-- Queue tab/view gated for pilot users  
-- Fixture / central test data  
-- Existing default Takeoff behavior unchanged  
-- Deep-link to `?takeoffJobId=` when links exist (may be stubbed)  
+- Queue tab/view gated for pilot users
+- Fixture / central test data
+- Existing default Takeoff behavior unchanged
+- Deep-link to `?takeoffJobId=` when links exist (may be stubbed)
 
 **Acceptance**
 
-- Non-pilot cannot see/open queue  
-- Default upload/review path regression green  
-- Responsive enough for estimator use  
+- Non-pilot cannot see/open queue
+- Default upload/review path regression green
+- Responsive enough for estimator use
 
 ---
 
@@ -79,19 +79,19 @@
 
 **Scope**
 
-- Server Graph client (Mail.Read)  
-- Manual Sync  
-- Synthetic forwarding contract  
-- Persist source messages/attachments  
-- **No automatic Takeoff yet**  
+- Server Graph client (Mail.Read)
+- Manual Sync
+- Synthetic forwarding contract
+- Persist source messages/attachments
+- **No automatic Takeoff yet**
 
 **Acceptance**
 
-- Quotes mailbox only  
-- Hunter inaccessible  
-- No move/delete/mark-read  
-- Re-sync idempotent  
-- No secrets in browser/logs  
+- Quotes mailbox only
+- Hunter inaccessible
+- No move/delete/mark-read
+- Re-sync idempotent
+- No secrets in browser/logs
 
 ---
 
@@ -99,15 +99,15 @@
 
 **Scope**
 
-- Deployed classification/extraction (server)  
-- Trusted-forward decision engine (Path A/B codes)  
-- Still **no** Takeoff invocation  
+- Deployed classification/extraction (server)
+- Trusted-forward decision engine (Path A/B codes)
+- Still **no** Takeoff invocation
 
 **Acceptance**
 
-- Gate matrix unit tests  
-- Classification failure → Path B  
-- No attachment bytes in classification prompts  
+- Gate matrix unit tests
+- Classification failure → Path B
+- No attachment bytes in classification prompts
 
 ---
 
@@ -115,18 +115,18 @@
 
 **Scope**
 
-- Adapter wrapping `createTakeoffWorkspace` + generation start  
-- Automatic submission for qualifying **synthetic** messages  
-- Intake-to-takeoff link/status  
-- Queue deep-link to existing Takeoff review  
-- **No IE import**  
+- Adapter wrapping `createTakeoffWorkspace` + generation start
+- Automatic submission for qualifying **synthetic** messages
+- Intake-to-takeoff link/status
+- Queue deep-link to existing Takeoff review
+- **No IE import**
 
 **Acceptance**
 
-- Path A creates exactly one job  
-- Path B creates zero jobs  
-- Import-from-takeoff never called (static + runtime guards)  
-- Existing Takeoff interactive path unchanged  
+- Path A creates exactly one job
+- Path B creates zero jobs
+- Import-from-takeoff never called (static + runtime guards)
+- Existing Takeoff interactive path unchanged
 
 ---
 
@@ -134,15 +134,15 @@
 
 **Scope**
 
-- Manual mailbox sync  
-- Automatic Takeoff  
-- Estimator review  
-- Multiple pilot users  
-- Idempotency verification  
+- Manual mailbox sync
+- Automatic Takeoff
+- Estimator review
+- Multiple pilot users
+- Idempotency verification
 
 **Acceptance**
 
-- Full § Live MVP checklist from architecture doc (26 steps)  
+- Full § Live MVP checklist from architecture doc (26 steps)
 
 ---
 
@@ -150,36 +150,36 @@
 
 **Scope**
 
-- Strict budgets + kill switches  
-- Synthetic/pilot messages only  
+- Strict budgets + kill switches
+- Synthetic/pilot messages only
 
 **Acceptance**
 
-- Budgets enforced  
-- Emergency kill stops new ingestion/auto jobs  
+- Budgets enforced
+- Emergency kill stops new ingestion/auto jobs
 
 ---
 
 ### Later (explicit phases — out of 6P.0–6P.8)
 
-- Controlled real-email / real-plan pilot (`real-plan transmission` flag)  
-- Improved Takeoff correction UI  
-- Elite 100 catalog validation  
-- Pricing and quote drafts  
-- Missing-information communication  
-- Outbound customer communication  
-- Quote Library promotion  
+- Controlled real-email / real-plan pilot (`real-plan transmission` flag)
+- Improved Takeoff correction UI
+- Elite 100 catalog validation
+- Pricing and quote drafts
+- Missing-information communication
+- Outbound customer communication
+- Quote Library promotion
 
 ---
 
 ## 3. Rollback plan
 
-1. Set Graph + sync + auto-Takeoff flags to off.  
-2. Hide Estimator Queue UI flag.  
-3. Preserve audit/history rows.  
-4. Stop new intake jobs; do not cancel unrelated interactive Takeoff work.  
-5. Rotate/remove Graph client secret; remove Exchange RBAC if abandoning.  
-6. Drop `quote_intake_*` only via deliberate cleanup migration after retention review.  
+1. Set Graph + sync + auto-Takeoff flags to off.
+2. Hide Estimator Queue UI flag.
+3. Preserve audit/history rows.
+4. Stop new intake jobs; do not cancel unrelated interactive Takeoff work.
+5. Rotate/remove Graph client secret; remove Exchange RBAC if abandoning.
+6. Drop `quote_intake_*` only via deliberate cleanup migration after retention review.
 7. Never mass-delete `quote_takeoff_jobs` / results as intake rollback.
 
 ---
@@ -196,13 +196,13 @@
 
 ## 5. Production areas still prohibited
 
-- `app-internal-estimate/**`  
-- `POST /api/internal-quotes/import-from-takeoff` automation  
-- Quote Library / pricing / customer delivery automation  
-- Monday / Moraware / QuickBooks  
-- Weakening head auth or org scoping  
-- Real plan transmission before flag approval  
-- `Mail.Send` / mailbox mutations  
+- `app-internal-estimate/**`
+- `POST /api/internal-quotes/import-from-takeoff` automation
+- Quote Library / pricing / customer delivery automation
+- Monday / Moraware / QuickBooks
+- Weakening head auth or org scoping
+- Real plan transmission before flag approval
+- `Mail.Send` / mailbox mutations
 
 ---
 
@@ -210,9 +210,9 @@
 
 See architecture doc §12. Additionally:
 
-- Vercel background continuation reliability for long Gemini runs  
-- Distinguishing intake-origin jobs in UI without schema breakage  
-- Pilot allowlist UX for ops  
+- Vercel background continuation reliability for long Gemini runs
+- Distinguishing intake-origin jobs in UI without schema breakage
+- Pilot allowlist UX for ops
 
 ---
 
@@ -220,13 +220,13 @@ See architecture doc §12. Additionally:
 
 Every slice before merge:
 
-- Targeted tests green  
-- Typecheck/build for touched packages  
-- `git diff --check`  
-- Confirm flags default off  
-- Confirm no IE import path introduced  
-- Confirm no Graph secret leakage  
-- Confirm existing Takeoff smoke (as available) still green when Takeoff head touched  
+- Targeted tests green
+- Typecheck/build for touched packages
+- `git diff --check`
+- Confirm flags default off
+- Confirm no IE import path introduced
+- Confirm no Graph secret leakage
+- Confirm existing Takeoff smoke (as available) still green when Takeoff head touched
 
 ---
 

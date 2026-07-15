@@ -1,7 +1,7 @@
 # Phase 6P.0 — Automatic Takeoff Policy
 
-**Date:** 2026-07-15  
-**Status:** Policy design only  
+**Date:** 2026-07-15
+**Status:** Policy design only
 **Principle:** Automate preparation, not approval.
 
 ---
@@ -23,37 +23,37 @@ Automatic Takeoff may begin **only when all** required gates pass:
 
 ### 2.1 Sender
 
-- Sender is an approved internal Elite Stone salesperson.  
-- Address matched against **server-side** allowlist and/or trusted role mapping.  
+- Sender is an approved internal Elite Stone salesperson.
+- Address matched against **server-side** allowlist and/or trusted role mapping.
 - External / unknown senders → Path B.
 
 ### 2.2 Subject & program
 
-- Subject contains deliberate marker: `[QIL TAKEOFF]` (case-sensitive recommended for pilot clarity; document exact matcher in 6P.5).  
+- Subject contains deliberate marker: `[QIL TAKEOFF]` (case-sensitive recommended for pilot clarity; document exact matcher in 6P.5).
 - Body declares `Program: Elite 100` **or** classification reaches an approved equivalent decision.
 
 ### 2.3 Attachment PDF
 
 At least one supported PDF is **directly** attached and passes:
 
-- Content-type validation  
-- Filename normalization  
-- Magic-byte `%PDF` validation  
-- Size limits  
-- Page limits  
-- Empty-file detection  
-- Encryption/password detection  
-- Active-content policy (no JS/forms/embedded exec — align with lab PDF hygiene)  
-- SHA-256 calculation  
-- Attachment dedupe  
+- Content-type validation
+- Filename normalization
+- Magic-byte `%PDF` validation
+- Size limits
+- Page limits
+- Empty-file detection
+- Encryption/password detection
+- Active-content policy (no JS/forms/embedded exec — align with lab PDF hygiene)
+- SHA-256 calculation
+- Attachment dedupe
 
 ### 2.4 Message identity
 
-- Immutable Graph ID handling  
-- `internetMessageId` dedupe  
-- Content-hash fallback  
-- Sender validation  
-- Revision validation  
+- Immutable Graph ID handling
+- `internetMessageId` dedupe
+- Content-hash fallback
+- Sender validation
+- Revision validation
 
 Message is not a duplicate. Attachment has not already created a Takeoff job for this intake/revision.
 
@@ -63,21 +63,21 @@ See §5. Unambiguous single-plan package required for Path A.
 
 ### 2.6 Feature & cost gates
 
-- Automatic Takeoff feature flag **enabled**  
-- Real-plan transmission feature flag **enabled** only when approved (synthetic may use a separate synthetic-transmission allow path)  
-- Cost / rate / concurrency budgets allow another job  
-- No blocking intake/classification warning  
+- Automatic Takeoff feature flag **enabled**
+- Real-plan transmission feature flag **enabled** only when approved (synthetic may use a separate synthetic-transmission allow path)
+- Cost / rate / concurrency budgets allow another job
+- No blocking intake/classification warning
 
 ### 2.7 When Path A succeeds
 
-1. Persist intake case  
-2. Persist automation decision (pass + gate evidence codes — not raw email)  
-3. Run classification/extraction  
-4. Submit supported PDF through ProductionTakeoffAdapter  
-5. Persist intake-to-takeoff link  
-6. Display status in Estimator Queue  
-7. Internal status only if safe internal notifications exist — **never customer email**  
-8. Require estimator review and approval  
+1. Persist intake case
+2. Persist automation decision (pass + gate evidence codes — not raw email)
+3. Run classification/extraction
+4. Submit supported PDF through ProductionTakeoffAdapter
+5. Persist intake-to-takeoff link
+6. Display status in Estimator Queue
+7. Internal status only if safe internal notifications exist — **never customer email**
+8. Require estimator review and approval
 
 Estimator must **not** need to click Start Takeoff for Path A successes.
 
@@ -87,28 +87,28 @@ Estimator must **not** need to click Start Takeoff for Path A successes.
 
 Do **not** start Takeoff automatically when any of:
 
-- Sender external or not allowlisted  
-- Subject marker missing  
-- Elite 100 eligibility uncertain  
-- No supported PDF  
-- Attachment corrupt / encrypted / unsupported / oversized / empty  
-- Multiple plan packages ambiguous  
-- Revision relationship unclear  
-- Message/attachment duplicate (create/link case; do not new-job)  
-- Classification has blocking validation warnings  
-- Cost/rate/concurrency limits reached  
-- Automation disabled  
-- Real-plan transmission disabled (for real plans)  
-- Any contract invariant fails  
-- Nested `.eml` / item attachment only  
+- Sender external or not allowlisted
+- Subject marker missing
+- Elite 100 eligibility uncertain
+- No supported PDF
+- Attachment corrupt / encrypted / unsupported / oversized / empty
+- Multiple plan packages ambiguous
+- Revision relationship unclear
+- Message/attachment duplicate (create/link case; do not new-job)
+- Classification has blocking validation warnings
+- Cost/rate/concurrency limits reached
+- Automation disabled
+- Real-plan transmission disabled (for real plans)
+- Any contract invariant fails
+- Nested `.eml` / item attachment only
 
 **Path B behavior:**
 
-- Create or preserve intake case  
-- Show reason automation did not run (structured codes)  
-- Route to estimator/manual review  
-- Do not silently discard  
-- Do not create a Takeoff job  
+- Create or preserve intake case
+- Show reason automation did not run (structured codes)
+- Route to estimator/manual review
+- Do not silently discard
+- Do not create a Takeoff job
 
 ---
 
@@ -144,15 +144,15 @@ Do **not** start Takeoff automatically when any of:
 
 ### Keys
 
-- Microsoft immutable message ID  
-- `internetMessageId`  
-- `conversationId` — context only  
-- Normalized content hash fallback  
-- Attachment SHA-256  
-- Intake case ID  
-- Intake-to-takeoff mapping + idempotency key  
-- Revision identity/reference  
-- Job creation idempotency key  
+- Microsoft immutable message ID
+- `internetMessageId`
+- `conversationId` — context only
+- Normalized content hash fallback
+- Attachment SHA-256
+- Intake case ID
+- Intake-to-takeoff mapping + idempotency key
+- Revision identity/reference
+- Job creation idempotency key
 
 ### Required behavior
 
@@ -188,11 +188,11 @@ Suggested starting budgets (tune later): e.g. low single-digit concurrent; dozen
 
 ## 8. Classification role in automation
 
-- Classification may **inform** gates (Elite 100, missing fields).  
-- Attachment bytes **not** sent to email classification.  
-- Classification failure → Path B.  
-- Classification cannot trigger customer communication.  
-- Invalid evidence remains human-correctable / mark-unknown (lab pattern).  
+- Classification may **inform** gates (Elite 100, missing fields).
+- Attachment bytes **not** sent to email classification.
+- Classification failure → Path B.
+- Classification cannot trigger customer communication.
+- Invalid evidence remains human-correctable / mark-unknown (lab pattern).
 - Simulated provider remains for tests; live Gemini feature-flagged server-side.
 
 ---
@@ -255,7 +255,7 @@ Exact UI labels for queue filters: intake processing · takeoff processing · re
 
 ## 11. Safety gate (critical)
 
-Incomplete / unsupported / conflicting / missing-dimension cases must **never** become “ready for review” without appropriate blocker/manual-review state.  
+Incomplete / unsupported / conflicting / missing-dimension cases must **never** become “ready for review” without appropriate blocker/manual-review state.
 (Validated offline in Phase 4B.5A benchmark corpus; retain as regression suite for live promotion.)
 
 ---

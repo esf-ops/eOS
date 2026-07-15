@@ -1,7 +1,7 @@
 # Phase 6P.0 — Takeoff Integration Map
 
-**Date:** 2026-07-15  
-**Status:** Analysis only  
+**Date:** 2026-07-15
+**Status:** Analysis only
 **Related:** [`PHASE_6P_0_LIVE_PROMOTION_ARCHITECTURE.md`](./PHASE_6P_0_LIVE_PROMOTION_ARCHITECTURE.md)
 
 ---
@@ -46,7 +46,7 @@ Authenticated upload (app-ai-takeoff)
 
 ### 2.1 Routes — `backend-core/src/takeoff/takeoffWorkspaceRoutes.js`
 
-Mounted via `attachTakeoffWorkspaceRoutes` from `backend-core/src/server.js`.  
+Mounted via `attachTakeoffWorkspaceRoutes` from `backend-core/src/server.js`.
 Gate: `requireAuth()` + `requireHeadAccess("ai_takeoff")`.
 
 | Method | Path |
@@ -114,10 +114,10 @@ Gate: `requireAuth()` + `requireHeadAccess("ai_takeoff")`.
 
 ## 4. Ownership / org scoping
 
-- `resolveOrganizationContext({ mode: "authenticated" })` — org **never** from client body  
-- All queries `.eq("organization_id", organizationId)`  
-- `storage_path` never returned to clients  
-- Cross-org → 403/404  
+- `resolveOrganizationContext({ mode: "authenticated" })` — org **never** from client body
+- All queries `.eq("organization_id", organizationId)`
+- `storage_path` never returned to clients
+- Cross-org → 403/404
 
 ---
 
@@ -148,12 +148,12 @@ Gate: `requireAuth()` + `requireHeadAccess("ai_takeoff")`.
 
 Intake automation code **must**:
 
-1. Never import `internalQuoteTakeoffImport.mjs` into the automatic path.  
-2. Never HTTP-call `/api/internal-quotes/import-from-takeoff`.  
-3. Never write `quote_headers` / Quote Library tables.  
-4. Never call `calculateQuote` / `persistQuoteSubmission` for intake.  
-5. Never invoke `quoteDelivery` / Resend customer send.  
-6. Carry a compile-time / lint allowlist of callable takeoff symbols (implementation slice).  
+1. Never import `internalQuoteTakeoffImport.mjs` into the automatic path.
+2. Never HTTP-call `/api/internal-quotes/import-from-takeoff`.
+3. Never write `quote_headers` / Quote Library tables.
+4. Never call `calculateQuote` / `persistQuoteSubmission` for intake.
+5. Never invoke `quoteDelivery` / Resend customer send.
+6. Carry a compile-time / lint allowlist of callable takeoff symbols (implementation slice).
 7. Feature-flag `QUOTE_INTAKE_IE_PROMOTION_ENABLED=0` (pilot default) checked if any future bridge is added.
 
 Pilot UI may hide the Import task panel for intake-originated jobs if distinguishable via metadata — but **server prohibition** is authoritative.
@@ -172,12 +172,12 @@ Pilot UI may hide the Import task panel for intake-originated jobs if distinguis
 
 Server-only module (new under intake package) that calls:
 
-1. Storage ingest for the validated attachment (same `quote_files` helpers or intake-specific upload that produces a `quoteFileId`)  
-2. `createTakeoffWorkspace({ supabase, organizationId, userId|systemActor, quoteFileId })`  
-3. `startAiTakeoffGeneration` / equivalent to kick `runAiTakeoffExtraction`  
-4. Persist `quote_intake_takeoff_links` with job id + SHA-256 + automation decision id  
-5. Poll/read via `getTakeoffWorkspace` / latest result services  
-6. **Never** call import helpers  
+1. Storage ingest for the validated attachment (same `quote_files` helpers or intake-specific upload that produces a `quoteFileId`)
+2. `createTakeoffWorkspace({ supabase, organizationId, userId|systemActor, quoteFileId })`
+3. `startAiTakeoffGeneration` / equivalent to kick `runAiTakeoffExtraction`
+4. Persist `quote_intake_takeoff_links` with job id + SHA-256 + automation decision id
+5. Poll/read via `getTakeoffWorkspace` / latest result services
+6. **Never** call import helpers
 
 Preserve existing HTTP route contracts for interactive users unchanged.
 
@@ -212,7 +212,7 @@ Lab’s local interface (`run` / `getRun` / `listRuns` in `app-quote-intake-lab/
 
 ## 8. Intake-to-takeoff linkage (proposed additive model)
 
-Conceptual table: `quote_intake_takeoff_links`  
+Conceptual table: `quote_intake_takeoff_links`
 *(Not final; no migration in 6P.0.)*
 
 | Field | Purpose |
@@ -237,9 +237,9 @@ Conceptual table: `quote_intake_takeoff_links`
 
 **Rules:**
 
-- One case may have retries and revisions; prior jobs remain visible.  
-- Unique constraint on active `(organization_id, intake_case_id, attachment_sha256, revision_key)` or equivalent idempotency key.  
-- Do **not** overload `quote_takeoff_jobs` with email-specific columns unless unavoidable; use linkage table + optional `metadata.intake` markers for UI filtering.  
+- One case may have retries and revisions; prior jobs remain visible.
+- Unique constraint on active `(organization_id, intake_case_id, attachment_sha256, revision_key)` or equivalent idempotency key.
+- Do **not** overload `quote_takeoff_jobs` with email-specific columns unless unavoidable; use linkage table + optional `metadata.intake` markers for UI filtering.
 - Linkage **never** implies Internal Estimate import.
 
 ---
@@ -270,10 +270,10 @@ Conceptual table: `quote_intake_takeoff_links`
 
 ## 10. Async / runtime
 
-- Production generation: Vercel `waitUntil`, `maxDuration` ~300s (`vercel.json`)  
-- External worker (`TAKEOFF_ASYNC_WORKER_ENABLED`) **not implemented**  
-- Intake should use the same generation entry the interactive path uses  
-- Monitor timeout for multi-page plans  
+- Production generation: Vercel `waitUntil`, `maxDuration` ~300s (`vercel.json`)
+- External worker (`TAKEOFF_ASYNC_WORKER_ENABLED`) **not implemented**
+- Intake should use the same generation entry the interactive path uses
+- Monitor timeout for multi-page plans
 
 ---
 
@@ -294,16 +294,16 @@ Conceptual table: `quote_intake_takeoff_links`
 
 **Allowed in later 6P slices (with tests; no regression):**
 
-- `app-ai-takeoff` — additive Queue tab/view, pilot gating, deep-link params  
-- New `backend-core/src/quoteIntake/**` (or similar) — routes, Graph, automation  
-- Thin wrappers around `createTakeoffWorkspace` + generation start  
-- Optional non-breaking `metadata.intake` on jobs for filtering  
-- Additive `quote_intake_*` migrations (6P.2+)  
+- `app-ai-takeoff` — additive Queue tab/view, pilot gating, deep-link params
+- New `backend-core/src/quoteIntake/**` (or similar) — routes, Graph, automation
+- Thin wrappers around `createTakeoffWorkspace` + generation start
+- Optional non-breaking `metadata.intake` on jobs for filtering
+- Additive `quote_intake_*` migrations (6P.2+)
 
 **Still prohibited without separate explicit phase:**
 
-- Changing IE import semantics  
-- Auto-confirming `betaImportConfirmed`  
-- Merging intake rows into quote tables  
-- Customer outbound mail  
-- Weakening `requireHeadAccess` / org scoping  
+- Changing IE import semantics
+- Auto-confirming `betaImportConfirmed`
+- Merging intake rows into quote tables
+- Customer outbound mail
+- Weakening `requireHeadAccess` / org scoping
