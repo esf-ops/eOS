@@ -8,6 +8,11 @@ interface ImportMetaEnv {
   readonly VITE_HEAD_URL_HOME?: string;
   /** Override .eliteosfab.com cookie domain (set "false" to disable cookie storage). */
   readonly VITE_ELITEOS_AUTH_COOKIE_DOMAIN?: string;
+  /**
+   * Estimator Queue UI visibility only (Phase 6P.3). Off by default.
+   * Never authorization — backend Quote Intake flags remain authoritative.
+   */
+  readonly VITE_QUOTE_INTAKE_UI_ENABLED?: string;
 }
 
 interface ImportMeta {

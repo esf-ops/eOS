@@ -115,6 +115,15 @@ import {
 } from "./lib/api";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
+import EstimatorQueueView from "./components/intake/EstimatorQueueView";
+import { isQuoteIntakeUiEnabled } from "./lib/quoteIntakeUiConfig.mjs";
+import {
+  applyTakeoffSearchToUrl,
+  buildTakeoffSearch,
+  parseTakeoffAppLocation,
+} from "./lib/quoteIntakeView.mjs";
+
+type TakeoffAppView = "workbench" | "intake";
 
 // ── Dev-tools flag ─────────────────────────────────────────────────────────
 // Set VITE_TAKEOFF_SHOW_DEV_TOOLS=1 in .env.local to expose JSON workbench,
@@ -123,6 +132,9 @@ const showDevTools = String(
   (import.meta as unknown as { env?: Record<string, string> }).env
     ?.VITE_TAKEOFF_SHOW_DEV_TOOLS ?? ""
 ).trim() === "1";
+
+/** Estimator Queue chrome only — never authorization (Phase 6P.3). */
+const quoteIntakeUiEnabled = isQuoteIntakeUiEnabled();
 
 // ── Workspace + head constants ─────────────────────────────────────────────
 
@@ -264,10 +276,32 @@ function makeSpec73(): TakeoffResult { return buildSpec73Fixture(); }
 
 function urlJobId(): string | null {
   try {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get("takeoffJobId");
-    return id?.trim() || null;
-  } catch { return null; }
+    return parseTakeoffAppLocation(window.location.search, {
+      uiEnabled: quoteIntakeUiEnabled,
+    }).takeoffJobId;
+  } catch {
+    return null;
+  }
+}
+
+function initialAppView(): TakeoffAppView {
+  try {
+    return parseTakeoffAppLocation(window.location.search, {
+      uiEnabled: quoteIntakeUiEnabled,
+    }).view;
+  } catch {
+    return "workbench";
+  }
+}
+
+function initialIntakeCaseId(): string | null {
+  try {
+    return parseTakeoffAppLocation(window.location.search, {
+      uiEnabled: quoteIntakeUiEnabled,
+    }).intakeCaseId;
+  } catch {
+    return null;
+  }
 }
 
 type WorkspaceBootState = "idle" | "loading" | "ready" | "error";
@@ -419,6 +453,60 @@ export default function TakeoffLabApp() {
 
   // ── Workspace state (file-backed) ────────────────────────────────────────
   const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
+  const takeoffJobIdRef = useRef<string | null>(takeoffJobId);
+  takeoffJobIdRef.current = takeoffJobId;
+
+  // ── View switching (workbench default; Queue behind UI flag) ─────────────
+  const [appView, setAppView] = useState<TakeoffAppView>(initialAppView);
+  const [intakeCaseId, setIntakeCaseId] = useState<string | null>(initialIntakeCaseId);
+  const showEstimatorQueue = quoteIntakeUiEnabled && appView === "intake";
+
+  useEffect(() => {
+    const onPopState = () => {
+      const parsed = parseTakeoffAppLocation(window.location.search, {
+        uiEnabled: quoteIntakeUiEnabled,
+      });
+      setAppView(parsed.view);
+      setIntakeCaseId(parsed.intakeCaseId);
+      // Preserve existing takeoffJobId deep-link behavior when returning via history.
+      if (parsed.takeoffJobId && parsed.takeoffJobId !== takeoffJobIdRef.current) {
+        setTakeoffJobId(parsed.takeoffJobId);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const navigateAppView = useCallback(
+    (
+      next: {
+        view: TakeoffAppView;
+        intakeCaseId?: string | null;
+        takeoffJobId?: string | null;
+      },
+      mode: "push" | "replace" = "push"
+    ) => {
+      const search = buildTakeoffSearch({
+        view: next.view,
+        intakeCaseId: next.intakeCaseId ?? null,
+        takeoffJobId:
+          next.takeoffJobId !== undefined ? next.takeoffJobId : takeoffJobIdRef.current,
+        baseSearch: window.location.search,
+      });
+      applyTakeoffSearchToUrl(search, mode);
+      setAppView(next.view);
+      if (next.view === "intake") {
+        setIntakeCaseId(next.intakeCaseId ?? null);
+      } else {
+        setIntakeCaseId(null);
+      }
+      if (next.takeoffJobId !== undefined) {
+        setTakeoffJobId(next.takeoffJobId);
+      }
+    },
+    []
+  );
+
   const [planFilename, setPlanFilename] = useState<string | null>(null);
   const [planFileMeta, setPlanFileMeta] = useState<PlanFilePreviewMeta | null>(null);
   /** Deep-link boot: avoid upload-first chrome until workspace metadata hydrates. */
@@ -2659,9 +2747,42 @@ export default function TakeoffLabApp() {
       <div className="takeoff-page-hero takeoff-page-hero--compact" role="region" aria-label="AI Takeoff overview">
         <div className="takeoff-page-hero-inner">
           <div className="takeoff-page-hero-main">
-            <h1 className="takeoff-page-heading takeoff-page-heading--compact">AI Takeoff</h1>
+            <h1 className="takeoff-page-heading takeoff-page-heading--compact">
+              {showEstimatorQueue ? "Estimator Queue" : "AI Takeoff"}
+            </h1>
             <TakeoffBetaBanner compact />
-            {authToken && !isWorkspaceHydrating ? (
+            {quoteIntakeUiEnabled ? (
+              <nav className="takeoff-view-tabs" aria-label="AI Takeoff views">
+                <button
+                  type="button"
+                  className={`takeoff-view-tab${!showEstimatorQueue ? " is-active" : ""}`}
+                  aria-current={!showEstimatorQueue ? "page" : undefined}
+                  onClick={() =>
+                    navigateAppView({
+                      view: "workbench",
+                      takeoffJobId: takeoffJobIdRef.current,
+                    })
+                  }
+                >
+                  Takeoff workbench
+                </button>
+                <button
+                  type="button"
+                  className={`takeoff-view-tab${showEstimatorQueue ? " is-active" : ""}`}
+                  aria-current={showEstimatorQueue ? "page" : undefined}
+                  onClick={() =>
+                    navigateAppView({
+                      view: "intake",
+                      intakeCaseId,
+                      takeoffJobId: takeoffJobIdRef.current,
+                    })
+                  }
+                >
+                  Estimator Queue
+                </button>
+              </nav>
+            ) : null}
+            {authToken && !isWorkspaceHydrating && !showEstimatorQueue ? (
               <TakeoffWorkflowStepper
                 currentStep={currentWorkflowStep}
                 isStepComplete={workflowStepComplete}
@@ -2673,10 +2794,34 @@ export default function TakeoffLabApp() {
 
       {/* ── Main content ──────────────────────────────────────────── */}
       <main className="main" role="main">
+        {showEstimatorQueue ? (
+          <div className="lab-main-inner">
+            <EstimatorQueueView
+              authToken={authToken}
+              selectedCaseId={intakeCaseId}
+              onSelectCase={(caseId) =>
+                navigateAppView({
+                  view: "intake",
+                  intakeCaseId: caseId,
+                  takeoffJobId: takeoffJobIdRef.current,
+                })
+              }
+              onOpenLinkedTakeoff={(jobId) => {
+                navigateAppView({
+                  view: "workbench",
+                  takeoffJobId: jobId,
+                });
+                handleSelectRun(jobId);
+              }}
+            />
+          </div>
+        ) : null}
         <div
           className={`lab-main-inner${
             showPlanPreviewColumn ? " lab-main-inner--active-review" : ""
           }${takeoffJobId && planFileMeta ? " lab-main-inner--review" : ""}`}
+          hidden={showEstimatorQueue}
+          aria-hidden={showEstimatorQueue || undefined}
         >
 
           {isWorkspaceHydrating ? (
