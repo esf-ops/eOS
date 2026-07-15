@@ -33,6 +33,7 @@ import { attachSalesHeadRoutes } from "./sales/salesHead.js";
 import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
 import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
 import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoutes.js";
+import { maybeAttachQuoteIntakeRoutes } from "./quoteIntake/quoteIntakeRoutes.js";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -1212,6 +1213,13 @@ attachTakeoffWorkspaceRoutes(app, {
   requireAuth,
   getSupabase:  supabaseServerClient,
   headAccess:   headAccessAiTakeoff,
+});
+
+// Quote Intake (Phase 6P.1): in-memory API — no-op unless QUOTE_INTAKE_API_ENABLED=1
+maybeAttachQuoteIntakeRoutes(app, {
+  requireAuth,
+  headAccess: headAccessAiTakeoff,
+  getSupabase: supabaseServerClient
 });
 
 attachVisualizerRoutes(app, {
