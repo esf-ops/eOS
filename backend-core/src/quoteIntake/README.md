@@ -1,11 +1,13 @@
-# Quote Intake (live promotion) — Phase 6P.1
+# Quote Intake (live promotion) — Phase 6P.1 / 6P.2
 
-In-memory, flag-gated Quote Intake API foundation.
+Flag-gated Quote Intake API with selectable persistence.
 
 - Flag: `QUOTE_INTAKE_API_ENABLED=1` (off by default)
+- Repository: `QUOTE_INTAKE_REPOSITORY=memory` (default) | `supabase`
 - Prefix: `/api/quote-intake`
-- Repository: `InMemoryQuoteIntakeRepository` only
-- Takeoff: `FakeProductionTakeoffAdapter` contract only — no pipeline invocation
-- No Graph, Storage, migrations, IE import, or frontend
+- Auth: `requireAuth` + `ai_takeoff` head; optional `QUOTE_INTAKE_PILOT_EMAILS`
+- Org: authenticated server context only
+- Takeoff: `FakeProductionTakeoffAdapter` only — no pipeline invocation
+- Migration (manual, not auto-applied): `backend-core/supabase/eliteos_quote_intake_v1.sql`
 
-See `docs/quote-intake-lab/PHASE_6P_1_NOTES.md`.
+See `docs/quote-intake-lab/PHASE_6P_1_NOTES.md` and `PHASE_6P_2_NOTES.md`.

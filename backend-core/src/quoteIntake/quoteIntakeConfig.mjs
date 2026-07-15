@@ -1,7 +1,9 @@
 /**
- * Quote Intake — Phase 6P.1 safe config + feature flags.
+ * Quote Intake — Phase 6P.1/6P.2 safe config + feature flags.
  * Off-by-default. Never exposes secrets.
  */
+
+import { readQuoteIntakeRepositoryMode } from "./quoteIntakeRepositoryFactory.mjs";
 
 /** Env: set exactly "1" to enable API registration and handlers. */
 export const QUOTE_INTAKE_API_ENABLED_ENV = "QUOTE_INTAKE_API_ENABLED";
@@ -34,10 +36,16 @@ export function readQuoteIntakePilotEmails(env = process.env) {
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function readSafeQuoteIntakeConfig(env = process.env) {
+  let repositoryMode = "memory";
+  try {
+    repositoryMode = readQuoteIntakeRepositoryMode(env);
+  } catch {
+    repositoryMode = "misconfigured";
+  }
   return Object.freeze({
-    phase: "6P.1",
+    phase: "6P.2",
     quoteIntakeApiEnabled: isQuoteIntakeApiEnabled(env),
-    repositoryMode: "memory",
+    repositoryMode,
     graphEnabled: false,
     mailboxSyncEnabled: false,
     automaticTakeoffEnabled: false,

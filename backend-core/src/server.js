@@ -1215,7 +1215,7 @@ attachTakeoffWorkspaceRoutes(app, {
   headAccess:   headAccessAiTakeoff,
 });
 
-// Quote Intake (Phase 6P.1): in-memory API — no-op unless QUOTE_INTAKE_API_ENABLED=1
+// Quote Intake (Phase 6P.1/6P.2): flag-gated; default repository=memory
 maybeAttachQuoteIntakeRoutes(app, {
   requireAuth,
   headAccess: headAccessAiTakeoff,

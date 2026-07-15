@@ -17,6 +17,7 @@ import {
   TAKEOFF_LINK_RELATIONSHIP_STATUS,
   isQuoteIntakeCaseStatus
 } from "./quoteIntakeTypes.mjs";
+import { sanitizeQuoteIntakeAuditMetadata } from "./quoteIntakeAuditSanitize.mjs";
 
 /**
  * @typedef {Object} QuoteIntakeAttachmentMeta
@@ -167,8 +168,9 @@ export class InMemoryQuoteIntakeRepository {
         err.existingCaseId = existingId;
         throw err;
       }
-    }
-    if (sourceMessage.contentHash) {
+      // When Message-ID is present it is authoritative — do not merge on content_hash.
+    } else if (sourceMessage.contentHash) {
+      // Fallback dedupe only when Message-ID is absent.
       const key = `${organizationId}|${sourceMessage.contentHash}`;
       const existingId = this.dedupeByContentHash.get(key);
       if (existingId) {
@@ -184,7 +186,9 @@ export class InMemoryQuoteIntakeRepository {
       ? input.status
       : QUOTE_INTAKE_CASE_STATUS.RECEIVED;
 
-    const attachments = (input.attachments ?? []).map((a) => {
+    /** @type {Map<string, QuoteIntakeAttachmentMeta>} */
+    const bySha = new Map();
+    for (const a of input.attachments ?? []) {
       const sha256 = normSha(a.sha256);
       if (!/^[a-f0-9]{64}$/.test(sha256)) {
         const err = new Error("attachment.sha256 must be 64-char hex");
@@ -192,14 +196,17 @@ export class InMemoryQuoteIntakeRepository {
         err.statusCode = 400;
         throw err;
       }
-      return {
-        id: randomUUID(),
-        sha256,
-        mimeType: a.mimeType ? String(a.mimeType).slice(0, 128) : undefined,
-        sizeBytes: Number.isFinite(Number(a.sizeBytes)) ? Number(a.sizeBytes) : undefined,
-        safeFilename: a.safeFilename ? String(a.safeFilename).slice(0, 200) : undefined
-      };
-    });
+      if (!bySha.has(sha256)) {
+        bySha.set(sha256, {
+          id: randomUUID(),
+          sha256,
+          mimeType: a.mimeType ? String(a.mimeType).slice(0, 128) : undefined,
+          sizeBytes: Number.isFinite(Number(a.sizeBytes)) ? Number(a.sizeBytes) : undefined,
+          safeFilename: a.safeFilename ? String(a.safeFilename).slice(0, 200) : undefined
+        });
+      }
+    }
+    const attachments = [...bySha.values()];
 
     const ts = nowIso();
     /** @type {QuoteIntakeCase} */
@@ -217,8 +224,7 @@ export class InMemoryQuoteIntakeRepository {
     this.cases.set(row.id, row);
     if (sourceMessage.internetMessageId) {
       this.dedupeByInternetMessageId.set(`${organizationId}|${sourceMessage.internetMessageId}`, row.id);
-    }
-    if (sourceMessage.contentHash) {
+    } else if (sourceMessage.contentHash) {
       this.dedupeByContentHash.set(`${organizationId}|${sourceMessage.contentHash}`, row.id);
     }
 
@@ -454,6 +460,22 @@ export class InMemoryQuoteIntakeRepository {
     return events.slice(-limit).map((e) => structuredClone(e));
   }
 
+  /** Append-only — not supported. */
+  updateAuditEvent() {
+    const err = new Error("quote_intake_audit_events are append-only");
+    err.code = "audit_immutable";
+    err.statusCode = 405;
+    throw err;
+  }
+
+  /** Append-only — not supported. */
+  deleteAuditEvent() {
+    const err = new Error("quote_intake_audit_events are append-only");
+    err.code = "audit_immutable";
+    err.statusCode = 405;
+    throw err;
+  }
+
   /**
    * @param {Omit<QuoteIntakeAuditEvent, "id"|"createdAt"> & { id?: string, createdAt?: string }} event
    */
@@ -466,7 +488,7 @@ export class InMemoryQuoteIntakeRepository {
       createdAt: event.createdAt || nowIso(),
       actorType: event.actorType,
       actorUserId: event.actorUserId ?? null,
-      metadata: event.metadata ? { ...event.metadata } : undefined
+      metadata: sanitizeQuoteIntakeAuditMetadata(event.metadata ?? {})
     };
     const list = this.auditByCase.get(row.intakeCaseId) ?? [];
     list.push(row);

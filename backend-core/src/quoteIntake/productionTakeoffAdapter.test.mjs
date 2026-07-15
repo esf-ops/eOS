@@ -73,7 +73,7 @@ console.log("\nproductionTakeoffAdapter.test.mjs\n");
   // Routes may call resolveOrganizationContext (org identity only) — allowed.
   const routesSrc = readFileSync(join(__dirname, "quoteIntakeRoutes.js"), "utf8");
   assert.ok(routesSrc.includes("resolveOrganizationContext"));
-  assert.ok(routesSrc.includes("InMemoryQuoteIntakeRepository"));
+  assert.ok(routesSrc.includes("createQuoteIntakeRepository"));
   console.log("ok: package source boundary (no IE/takeoff providers/supabase-js/persist)");
 }
 

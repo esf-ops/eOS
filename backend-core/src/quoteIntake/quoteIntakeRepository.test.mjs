@@ -64,8 +64,24 @@ console.log("\nquoteIntakeRepository.test.mjs\n");
     () => repo.createCase({ organizationId: ORG_A, sourceMessage: { contentHash: "shared-hash" } }),
     /Duplicate contentHash/
   );
-  assert.equal(c.id, repo.listCases(ORG_A)[0].id);
-  console.log("ok: contentHash dedupe");
+  // Distinct Message-IDs with same content hash must not merge.
+  const other = repo.createCase({
+    organizationId: ORG_A,
+    sourceMessage: {
+      internetMessageId: "<m1@example.com>",
+      contentHash: "shared-hash"
+    }
+  });
+  assert.notEqual(other.id, c.id);
+  const other2 = repo.createCase({
+    organizationId: ORG_A,
+    sourceMessage: {
+      internetMessageId: "<m2@example.com>",
+      contentHash: "shared-hash"
+    }
+  });
+  assert.notEqual(other2.id, other.id);
+  console.log("ok: contentHash fallback dedupe (Message-ID absent only)");
 }
 
 {
