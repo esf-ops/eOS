@@ -11,7 +11,11 @@ import {
   resolveProvenance
 } from "../../classification/provenance.mjs";
 import { canStartClassification } from "../../classification/stateTransitions.mjs";
-import { warningsForRun } from "../../classification/validationWarnings.mjs";
+import {
+  activeBlockingWarnings,
+  fieldHasUnresolvedInvalidEvidence,
+  warningsForRun
+} from "../../classification/validationWarnings.mjs";
 import type { QuoteIntakeCase, QuoteIntakeRepository } from "../../domain/types";
 import { formatReceived } from "../../utils/format";
 
@@ -45,6 +49,8 @@ export default function ClassificationWorkspace({ caseItem, repo, actorLabel, on
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editDrafts, setEditDrafts] = useState<Record<string, string>>({});
+  const [editNotes, setEditNotes] = useState<Record<string, string>>({});
+  const [focusFieldKey, setFocusFieldKey] = useState<string | null>(null);
   const [humanEligibility, setHumanEligibility] = useState<string>("");
   const [humanIntent, setHumanIntent] = useState<string>("");
   const [providerMode, setProviderMode] = useState<string>(PROVIDER_MODE_SIMULATED);
@@ -74,7 +80,10 @@ export default function ClassificationWorkspace({ caseItem, repo, actorLabel, on
     (providerMode !== PROVIDER_MODE_LIVE || liveAck);
 
   const structuredWarnings = useMemo(() => warningsForRun(activeRun), [activeRun]);
-  const blockingWarnings = structuredWarnings.filter((w) => w.severity === "blocking");
+  const blockingWarnings = useMemo(
+    () => (activeRun ? activeBlockingWarnings(activeRun) : []),
+    [activeRun]
+  );
   const acceptBlocked = blockingWarnings.length > 0 && !immutable;
 
   const runProvenance = useMemo(() => {
@@ -184,7 +193,9 @@ export default function ClassificationWorkspace({ caseItem, repo, actorLabel, on
   async function onAccept() {
     if (!repo.acceptClassification || !activeRun) return;
     if (acceptBlocked) {
-      setError("Acceptance blocked until blocking validation warnings are resolved (re-run or correct integrity issues).");
+      setError(
+        "Acceptance blocked until unresolved evidence/schema warnings are resolved (edit with note, mark unknown, or re-run for contract defects)."
+      );
       return;
     }
     setBusy(true);
@@ -350,26 +361,87 @@ export default function ClassificationWorkspace({ caseItem, repo, actorLabel, on
         >
           <h4>Validation warnings ({structuredWarnings.length})</h4>
           <p className="qil-cell-meta">
-            Informational warnings may remain visible after a safe sanitize. Blocking warnings prevent
-            acceptance until resolved.
+            Original AI warnings stay in run history. Blocking evidence failures stop accepting until Edit
+            (with note) or Mark unknown. Informational sanitize notices may remain visible.
           </p>
           <ul className="qil-validation-list">
-            {structuredWarnings.map((w, idx) => (
-              <li key={`${w.code}-${idx}`} className={w.severity === "blocking" ? "is-blocking" : "is-info"}>
-                <div className="qil-validation-head">
-                  <strong>{w.code}</strong>
-                  <span className="qil-cell-meta">
-                    {" "}
-                    · {w.severity} · {w.stage} · {w.category}
-                  </span>
-                </div>
-                <div>{w.explanation}</div>
-                <div className="qil-cell-meta">
-                  {w.fieldKey ? `Field: ${w.fieldKey} · ` : ""}
-                  Estimator action required: {w.estimatorActionRequired ? "yes" : "no"}
-                </div>
-              </li>
-            ))}
+            {structuredWarnings.map((w) => {
+              const resolved =
+                w.resolutionState === "resolved_by_human_correction" ||
+                w.resolutionState === "resolved_by_marked_unknown" ||
+                w.resolutionState === "resolved_by_cleared";
+              const stillBlocks = w.severity === "blocking" && !resolved;
+              return (
+                <li
+                  key={w.warningId}
+                  className={`${stillBlocks ? "is-blocking" : "is-info"}${resolved ? " is-resolved" : ""}${
+                    w.blockingState === "contract_defect" ? " is-contract-defect" : ""
+                  }`}
+                >
+                  <div className="qil-validation-head">
+                    <strong className="qil-warning-code">{w.code}</strong>
+                    <span className={`qil-sev-pill ${stillBlocks ? "sev-block" : "sev-info"}`}>
+                      {stillBlocks ? "blocking" : resolved ? "resolved" : w.severity}
+                    </span>
+                  </div>
+                  <div className="qil-validation-meta">
+                    {w.stage} · {w.category}
+                    {w.fieldLabel ? (
+                      <>
+                        {" "}
+                        · Field: <strong>{w.fieldLabel}</strong>
+                      </>
+                    ) : stillBlocks ? (
+                      <> · <strong>Contract defect (no fieldKey)</strong></>
+                    ) : null}
+                  </div>
+                  <div className="qil-validation-body">{w.explanation}</div>
+                  {w.safeRejectedValueSummary ? (
+                    <div className="qil-cell-meta">Rejected value: {w.safeRejectedValueSummary}</div>
+                  ) : null}
+                  {w.claimedSourceType ? (
+                    <div className="qil-cell-meta">Claimed source: {w.claimedSourceType}</div>
+                  ) : null}
+                  {w.safeEvidenceExcerpt ? (
+                    <div className="qil-cell-meta">Evidence excerpt: “{w.safeEvidenceExcerpt}”</div>
+                  ) : null}
+                  {w.validationFailureReason ? (
+                    <div className="qil-cell-meta">Failure: {w.validationFailureReason}</div>
+                  ) : null}
+                  <div className="qil-cell-meta">
+                    Resolution:{" "}
+                    {resolved
+                      ? w.resolutionState === "resolved_by_human_correction"
+                        ? "Resolved by human correction"
+                        : w.resolutionState === "resolved_by_marked_unknown"
+                          ? "Resolved by marked unknown"
+                          : "Resolved by clear"
+                      : w.resolutionState}
+                    {w.resolutionActor ? ` · ${w.resolutionActor}` : ""}
+                    {w.requiredResolutionAction && stillBlocks
+                      ? ` · Required: ${w.requiredResolutionAction}`
+                      : ""}
+                  </div>
+                  {w.fieldKey && !immutable ? (
+                    <div className="qil-field-actions">
+                      <button
+                        type="button"
+                        className="qil-btn-ghost"
+                        onClick={() => {
+                          setFocusFieldKey(w.fieldKey!);
+                          document.getElementById(`qil-field-${w.fieldKey}`)?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "nearest"
+                          });
+                        }}
+                      >
+                        Go to field
+                      </button>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}
@@ -387,8 +459,21 @@ export default function ClassificationWorkspace({ caseItem, repo, actorLabel, on
                 fieldHumanReviewState: f.humanReviewState,
                 hasClassification: true
               });
+              const invalidEvidence = activeRun
+                ? fieldHasUnresolvedInvalidEvidence(activeRun, f.key)
+                : false;
+              const isFocused = focusFieldKey === f.key;
+              const latestCorrection = [...(activeRun?.corrections ?? [])]
+                .reverse()
+                .find((c: any) => c.fieldKey === f.key && c.action !== "confirm");
               return (
-                <article key={f.key} className="qil-field-card">
+                <article
+                  key={f.key}
+                  id={`qil-field-${f.key}`}
+                  className={`qil-field-card${invalidEvidence ? " has-invalid-evidence" : ""}${
+                    isFocused ? " is-focused" : ""
+                  }`}
+                >
                   <header>
                     <strong>{label}</strong>
                     <span className="qil-cell-meta">
@@ -398,24 +483,53 @@ export default function ClassificationWorkspace({ caseItem, repo, actorLabel, on
                     </span>
                   </header>
                   <p className="qil-field-value">{f.unknown || f.value == null ? "—" : String(f.value)}</p>
+                  {invalidEvidence ? (
+                    <p className="qil-evidence-fail" role="status">
+                      AI evidence failed validation. Confirm is disabled — Edit with a correction note or Mark
+                      unknown. Rejected AI evidence is not trusted.
+                    </p>
+                  ) : null}
                   {f.evidence ? (
                     <p className="qil-evidence">
                       <span className="qil-evidence-tag">{f.evidence.sourceType}</span>
-                      {f.evidence.excerpt}
+                      {f.evidence.humanCorrected
+                        ? `Human corrected: ${f.evidence.excerpt}`
+                        : f.evidence.excerpt}
                     </p>
                   ) : (
                     <p className="qil-cell-meta">No evidence (remains unknown).</p>
                   )}
+                  {latestCorrection ? (
+                    <p className="qil-cell-meta">
+                      Human corrected · note: {latestCorrection.note ?? "—"} · prior AI value not trusted
+                    </p>
+                  ) : null}
                   {!immutable ? (
                     <div className="qil-field-actions">
-                      <button type="button" className="qil-btn-ghost" disabled={busy} onClick={() => void applyField(f.key, "confirm")}>
+                      <button
+                        type="button"
+                        className="qil-btn-ghost"
+                        disabled={busy || invalidEvidence}
+                        title={
+                          invalidEvidence
+                            ? "Confirm disabled — AI evidence failed validation"
+                            : undefined
+                        }
+                        onClick={() => void applyField(f.key, "confirm")}
+                      >
                         Confirm
                       </button>
                       <button
                         type="button"
                         className="qil-btn-ghost"
                         disabled={busy}
-                        onClick={() => void applyField(f.key, "mark_unknown", null, "Marked unknown")}
+                        onClick={() => {
+                          const ok = window.confirm(
+                            `Mark “${label}” unknown? This confirms the AI evidence is not trusted.`
+                          );
+                          if (!ok) return;
+                          void applyField(f.key, "mark_unknown", null, "Marked unknown by estimator");
+                        }}
                       >
                         Mark unknown
                       </button>
@@ -423,33 +537,49 @@ export default function ClassificationWorkspace({ caseItem, repo, actorLabel, on
                         type="button"
                         className="qil-btn-ghost"
                         disabled={busy}
-                        onClick={() => void applyField(f.key, "clear", null, "Cleared")}
+                        onClick={() => {
+                          const ok = window.confirm(`Clear optional field “${label}”?`);
+                          if (!ok) return;
+                          void applyField(f.key, "clear", null, "Cleared by estimator");
+                        }}
                       >
                         Clear
                       </button>
-                      <label className="qil-inline-edit">
-                        <span className="visually-hidden">Edit {label}</span>
-                        <input
-                          value={editDrafts[f.key] ?? ""}
-                          placeholder="Corrected value"
-                          onChange={(e) => setEditDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
-                        />
+                      <div className="qil-inline-edit">
+                        <label className="qil-edit-fields">
+                          <span className="visually-hidden">Edit {label}</span>
+                          <input
+                            value={editDrafts[f.key] ?? ""}
+                            placeholder="Corrected value"
+                            onChange={(e) => setEditDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
+                          />
+                          <input
+                            value={editNotes[f.key] ?? ""}
+                            placeholder="Correction note (required)"
+                            onChange={(e) => setEditNotes((d) => ({ ...d, [f.key]: e.target.value }))}
+                          />
+                        </label>
                         <button
                           type="button"
                           className="qil-btn-ghost"
-                          disabled={busy || !(editDrafts[f.key] ?? "").trim()}
+                          disabled={
+                            busy ||
+                            !(editDrafts[f.key] ?? "").trim() ||
+                            !(editNotes[f.key] ?? "").trim()
+                          }
                           onClick={() => {
                             const v = (editDrafts[f.key] ?? "").trim();
+                            const note = (editNotes[f.key] ?? "").trim();
                             const coerced =
                               f.key === "sinkCutoutCount" || f.key === "statedSquareFootage"
                                 ? Number(v)
                                 : v;
-                            void applyField(f.key, "edit", coerced, "Estimator edit");
+                            void applyField(f.key, "edit", coerced, note);
                           }}
                         >
                           Save edit
                         </button>
-                      </label>
+                      </div>
                     </div>
                   ) : null}
                 </article>
@@ -562,11 +692,24 @@ export default function ClassificationWorkspace({ caseItem, repo, actorLabel, on
                     </span>
                     {histWarnings.length && r.id === activeRunId ? (
                       <ul className="qil-validation-list compact">
-                        {histWarnings.map((w, idx) => (
-                          <li key={`${r.id}-w-${idx}`} className={w.severity === "blocking" ? "is-blocking" : "is-info"}>
-                            <strong>{w.code}</strong> · {w.severity} · {w.explanation}
-                          </li>
-                        ))}
+                        {histWarnings.map((w) => {
+                          const resolved =
+                            w.resolutionState === "resolved_by_human_correction" ||
+                            w.resolutionState === "resolved_by_marked_unknown" ||
+                            w.resolutionState === "resolved_by_cleared";
+                          return (
+                            <li
+                              key={w.warningId}
+                              className={
+                                w.severity === "blocking" && !resolved ? "is-blocking" : "is-info"
+                              }
+                            >
+                              <strong className="qil-warning-code">{w.code}</strong>
+                              {w.fieldLabel ? ` · ${w.fieldLabel}` : ""} ·{" "}
+                              {resolved ? w.resolutionState : w.severity}
+                            </li>
+                          );
+                        })}
                       </ul>
                     ) : null}
                   </div>

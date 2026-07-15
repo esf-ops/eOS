@@ -291,8 +291,34 @@ describe("Phase 4B.4A fake staged takeoff pipeline", () => {
 
   it("LiveGeminiTakeoffAdapter direct path + independent concurrency gate", async () => {
     const adapter = new LiveGeminiTakeoffAdapter({
-      directPipeline: runLiveTakeoffPipeline,
-      directConfig: config
+      directConfig: config,
+      // Test-only: sanitize stays outside the browser adapter so Vite never bundles server/crypto.
+      directPipeline: async (args) => {
+        const request = sanitizeLiveTakeoffRequest(
+          {
+            caseId: args.caseId,
+            acceptedIntakeSnapshotId: args.acceptedIntakeSnapshotId,
+            attachmentId: args.attachmentId,
+            filename: args.filename,
+            mimeType: args.mimeType,
+            sizeBytes: args.sizeBytes,
+            contentHash: args.contentHash,
+            contentBase64: args.contentBase64,
+            liveTransmissionAcknowledged: true,
+            actorLabel: args.actorLabel,
+            requestedAt: args.requestedAt,
+            elite100Decision: args.elite100Decision,
+            classificationHints: args.classificationHints,
+            syntheticPlanAcknowledged: args.syntheticPlanAcknowledged
+          },
+          { maxAttachmentBytes: config.takeoff?.maxAttachmentBytes ?? 4_000_000 }
+        );
+        return runLiveTakeoffPipeline({
+          request,
+          config: args.config ?? config,
+          stagedProvider: args.stagedProvider
+        });
+      }
     });
     const result = await adapter.run({
       caseId: "qil-case-adapter-1",

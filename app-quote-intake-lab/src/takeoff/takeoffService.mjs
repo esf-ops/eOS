@@ -1,19 +1,29 @@
 import { buildTakeoffRequest } from "./buildTakeoffRequest.mjs";
+import { getLiveGeminiTakeoffAdapter } from "./liveGeminiTakeoffAdapter.mjs";
 import { getSimulatedTakeoffAdapter } from "./simulatedTakeoffAdapter.mjs";
-import { LAB_TAKEOFF_STATUS } from "./takeoffTypes.mjs";
+import { sha256Hex } from "./sha256.mjs";
+import { toUint8Array } from "./base64.mjs";
+import { assertApprovedForLiveTakeoff } from "./syntheticLiveAllowlist.mjs";
+import { LAB_TAKEOFF_STATUS, PROVIDER_MODE_LIVE } from "./takeoffTypes.mjs";
 import { validateLabTakeoffRun } from "./validateLabTakeoff.mjs";
 
 /**
  * Orchestrates lab takeoff: request → adapter → immutable persist → overlay → audit.
- * Adapter injected; defaults to SimulatedTakeoffAdapter.
+ * Simulated adapter by default; live Gemini adapter injected for Phase 4B.4B.
  */
 export class TakeoffService {
   /**
-   * @param {{ store: any, takeoffAdapter?: any, actorLabel?: string }} opts
+   * @param {{
+   *   store: any,
+   *   takeoffAdapter?: any,
+   *   liveTakeoffAdapter?: any,
+   *   actorLabel?: string
+   * }} opts
    */
   constructor(opts) {
     this._store = opts.store;
     this._adapter = opts.takeoffAdapter ?? getSimulatedTakeoffAdapter();
+    this._liveAdapter = opts.liveTakeoffAdapter ?? getLiveGeminiTakeoffAdapter();
     this._actorLabel = opts.actorLabel ?? "Lab Estimator";
   }
 
@@ -23,12 +33,17 @@ export class TakeoffService {
    *   selectedAttachmentId: string,
    *   actorLabel?: string,
    *   scenarioId?: string,
+   *   providerMode?: "simulated"|"live",
    *   transmissionAcknowledgmentPlaceholder?: boolean,
-   *   caseRow?: object
+   *   liveTransmissionAcknowledged?: boolean,
+   *   contentBytes?: Uint8Array|ArrayBuffer|ArrayBufferView|null,
+   *   caseRow?: object,
+   *   stagedProvider?: object
    * }} opts
    */
   async runTakeoff(caseId, opts = {}) {
     const actor = opts.actorLabel ?? this._actorLabel;
+    const providerMode = opts.providerMode === PROVIDER_MODE_LIVE || opts.providerMode === "live" ? "live" : "simulated";
     const caseRow = opts.caseRow ?? (await this._loadCase(caseId));
     const snapshot = await this._store.getLatestAcceptedSnapshot(caseId);
     if (!snapshot) {
@@ -56,7 +71,7 @@ export class TakeoffService {
       sizeBytes: a.sizeBytes,
       contentHash: a.contentHash,
       source: a.source ?? (caseRow.dataSource === "fixture" ? "synthetic_fixture" : "imported_eml")
-      // never pass bytes
+      // never pass bytes on the attachment metadata list
     }));
 
     const priorOverlay = (await this._store.getTakeoffOverlay?.(caseId)) ?? null;
@@ -81,6 +96,7 @@ export class TakeoffService {
     // Validate request before mutating overlays / calling adapter
     const request = buildTakeoffRequest(requestInput);
     const requestedAt = request.requestedAt;
+    const activeAdapter = providerMode === "live" ? this._liveAdapter : this._adapter;
 
     await this._audit({
       caseId,
@@ -88,11 +104,12 @@ export class TakeoffService {
       at: requestedAt,
       actorLabel: actor,
       eventType: "takeoff_requested",
-      summary: `Takeoff requested for attachment ${request.attachment.attachmentId}.`,
+      summary: `Takeoff requested for attachment ${request.attachment.attachmentId} (${providerMode}).`,
       meta: {
         attachmentId: request.attachment.attachmentId,
         attachmentContentHash: request.attachment.contentHash,
-        acceptedIntakeSnapshotId: request.acceptedIntakeSnapshotId
+        acceptedIntakeSnapshotId: request.acceptedIntakeSnapshotId,
+        providerMode
       },
       previousState: priorOverlay?.latestTakeoffState ?? LAB_TAKEOFF_STATUS.NOT_STARTED,
       newState: LAB_TAKEOFF_STATUS.SIMULATING
@@ -110,15 +127,29 @@ export class TakeoffService {
       at: new Date().toISOString(),
       actorLabel: actor,
       eventType: "takeoff_started",
-      summary: `Takeoff started (${this._adapter.name} ${this._adapter.mode}).`,
-      meta: { providerName: this._adapter.name, providerMode: this._adapter.mode },
+      summary: `Takeoff started (${activeAdapter.name} ${activeAdapter.mode}).`,
+      meta: { providerName: activeAdapter.name, providerMode: activeAdapter.mode },
       previousState: LAB_TAKEOFF_STATUS.SIMULATING,
       newState: LAB_TAKEOFF_STATUS.SIMULATING
     });
 
     let adapterOut;
     try {
-      adapterOut = await this._adapter.run(requestInput);
+      if (providerMode === "live") {
+        adapterOut = await this._runLiveAdapter({
+          opts,
+          request,
+          snapshot,
+          statedFromEmail,
+          actor,
+          requestedAt
+        });
+      } else {
+        if (opts.contentBytes != null) {
+          reject("ATTACHMENT_BYTES_FORBIDDEN", "Simulated takeoff must not receive attachment bytes.");
+        }
+        adapterOut = await this._adapter.run(requestInput);
+      }
     } catch (e) {
       return this._persistFailedRun({
         caseId,
@@ -126,7 +157,8 @@ export class TakeoffService {
         actor,
         statedFromEmail,
         priorOverlay,
-        error: e
+        error: e,
+        adapter: activeAdapter
       });
     }
 
@@ -244,7 +276,62 @@ export class TakeoffService {
     return this._store.listTakeoffAuditEvents(caseId);
   }
 
-  async _persistFailedRun({ caseId, request, actor, statedFromEmail, priorOverlay, error }) {
+  /**
+   * Live path: require ack + allowlisted hash + verified content bytes; call live adapter once.
+   */
+  async _runLiveAdapter({ opts, request, snapshot, statedFromEmail, actor, requestedAt }) {
+    if (!opts.liveTransmissionAcknowledged) {
+      reject(
+        "ACKNOWLEDGMENT_REQUIRED",
+        "Explicit live transmission acknowledgment is required before sending plan bytes to Gemini."
+      );
+    }
+    if (opts.contentBytes == null) {
+      reject("ATTACHMENT_BYTES_REQUIRED", "Live takeoff requires attachment bytes after acknowledgment.");
+    }
+
+    const bytes = toUint8Array(opts.contentBytes);
+
+    assertApprovedForLiveTakeoff(request.attachment.contentHash, {
+      sizeBytes: request.attachment.sizeBytes
+    });
+
+    const actualHash = await sha256Hex(bytes);
+    if (actualHash !== String(request.attachment.contentHash).toLowerCase()) {
+      reject("HASH_MISMATCH", "Computed SHA-256 does not match persisted attachment metadata.");
+    }
+    if (
+      Number.isFinite(request.attachment.sizeBytes) &&
+      bytes.length !== Number(request.attachment.sizeBytes)
+    ) {
+      reject("SIZE_MISMATCH", "Attachment byte length does not match persisted sizeBytes.");
+    }
+
+    return this._liveAdapter.run({
+      caseId: request.caseId,
+      acceptedIntakeSnapshotId: request.acceptedIntakeSnapshotId,
+      attachmentId: request.attachment.attachmentId,
+      filename: request.attachment.filename,
+      mimeType: request.attachment.contentType,
+      sizeBytes: bytes.length,
+      contentHash: actualHash,
+      contentBytes: bytes,
+      liveTransmissionAcknowledged: true,
+      actorLabel: actor,
+      requestedAt,
+      elite100Decision: "elite_100_candidate",
+      syntheticPlanAcknowledged: true,
+      stagedProvider: opts.stagedProvider,
+      classificationHints: {
+        statedSquareFootage: statedFromEmail,
+        sinkCutoutCount: fieldFromSnapshot(snapshot, "sinkCutoutCount"),
+        projectName: null
+      }
+    });
+  }
+
+  async _persistFailedRun({ caseId, request, actor, statedFromEmail, priorOverlay, error, adapter }) {
+    const active = adapter ?? this._adapter;
     const at = new Date().toISOString();
     const runId = `qil-toff-fail-${compactStamp(at)}-${Math.random().toString(16).slice(2, 8)}`;
     const failedRun = Object.freeze({
@@ -254,9 +341,9 @@ export class TakeoffService {
       attachmentId: request.attachment.attachmentId,
       attachmentContentHash: request.attachment.contentHash,
       provider: {
-        name: this._adapter.name ?? "TakeoffAdapter",
-        mode: this._adapter.mode ?? "simulated",
-        version: this._adapter.version ?? "unknown",
+        name: active.name ?? "TakeoffAdapter",
+        mode: active.mode ?? "simulated",
+        version: active.version ?? "unknown",
         note: "Failed takeoff run — safe failure metadata only."
       },
       startedAt: request.requestedAt,
@@ -269,18 +356,18 @@ export class TakeoffService {
       warnings: [],
       corrections: [],
       calculation: {
-        measuredCountertopSf: 0,
-        measuredBacksplashSf: 0,
-        measuredFhbSf: 0,
-        measuredCombinedSf: 0,
-        sinkCutoutCount: 0,
+        measuredCountertopSf: null,
+        measuredBacksplashSf: null,
+        measuredFhbSf: null,
+        measuredCombinedSf: null,
+        sinkCutoutCount: null,
         providerProposedCountertopSf: null,
         providerProposedBacksplashSf: null,
         providerProposedCombinedSf: null,
         countertopVarianceSf: null,
         backsplashVarianceSf: null,
         combinedVarianceSf: null,
-        authorityNote: "Failed run — no measured geometry."
+        authorityNote: "Failed run — no measured geometry produced."
       },
       confidence: null,
       failure: {

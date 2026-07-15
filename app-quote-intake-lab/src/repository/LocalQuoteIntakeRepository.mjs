@@ -2,6 +2,7 @@ import { ClassificationService } from "../classification/classificationService.m
 import { getSimulatedIntakeIntelligenceProvider } from "../classification/simulatedProvider.mjs";
 import { TakeoffService } from "../takeoff/takeoffService.mjs";
 import { TakeoffCorrectionService } from "../takeoff/takeoffCorrectionService.mjs";
+import { getLiveGeminiTakeoffAdapter } from "../takeoff/liveGeminiTakeoffAdapter.mjs";
 import { getSimulatedTakeoffAdapter } from "../takeoff/simulatedTakeoffAdapter.mjs";
 import { inboundEmailAdapter } from "../inbound/inboundEmailAdapter.mjs";
 import { caseFromInboundMessage } from "../inbound/caseFromInbound.mjs";
@@ -43,7 +44,8 @@ export class LocalQuoteIntakeRepository {
     });
     this._takeoff = new TakeoffService({
       store: this._store,
-      takeoffAdapter: opts.takeoffAdapter ?? getSimulatedTakeoffAdapter()
+      takeoffAdapter: opts.takeoffAdapter ?? getSimulatedTakeoffAdapter(),
+      liveTakeoffAdapter: opts.liveTakeoffAdapter ?? getLiveGeminiTakeoffAdapter()
     });
     this._corrections = new TakeoffCorrectionService({ store: this._store });
     this._ready = null;

@@ -155,16 +155,18 @@ export function evaluateTakeoffEligibility(input) {
 
 /**
  * Human-readable required action for a warning (UI only).
+ * Mode-agnostic informational copy — never hard-codes "simulated run".
  * @param {{ blocking?: boolean, estimatorActionRequired?: boolean, severity?: string }} w
+ * @param {{ takeoffMode?: "simulated"|"live"|string|null }} [_opts]
  */
-export function warningRequiredAction(w) {
+export function warningRequiredAction(w, _opts = {}) {
   if (w?.blocking || w?.severity === "approval_blocking") {
     return "Resolve before any future takeoff acceptance.";
   }
   if (w?.estimatorActionRequired || w?.severity === "estimator_review") {
     return "Estimator must review before proceeding.";
   }
-  return "Informational — no action required for this simulated run.";
+  return "Informational — no action required for this lab takeoff run.";
 }
 
 /**

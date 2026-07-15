@@ -1,6 +1,6 @@
 # Quote Intake Lab — Phase 3.1 notes
 
-**Date:** 2026-07-14  
+**Date:** 2026-07-14
 **Status:** Implemented (isolated live Gemini provider behind Phase 3 contract)
 
 ## Visualizer Gemini pathway discovered
@@ -109,8 +109,8 @@ Stored on each live result under `result.verification`.
 
 ## Two-pass verification
 
-1. Extraction → proposed JSON  
-2. Verification → compare to sources, strip unsupported claims  
+1. Extraction → proposed JSON
+2. Verification → compare to sources, strip unsupported claims
 3. Server-side schema + evidence validation (excerpt must exist in source)
 
 ## Security controls
@@ -160,7 +160,7 @@ npm run live-smoke
 
 ## Phase 3.1.1 — Provenance + validation-warning correction
 
-**Date:** 2026-07-14  
+**Date:** 2026-07-14
 **Status:** Implemented (presentation / persistence / acceptance guardrails only — no prompt, schema, or transport changes)
 
 ### Defects observed on first successful live run
@@ -198,13 +198,13 @@ Historical `npm run live-smoke` logged only the count (`validationWarnings=2`), 
 
 Reconstruction on the same smoke corpus (valid excerpts with invalid `charStart`/`charEnd`) produces exactly two **informational** validator warnings — the expected pattern when Gemini cites a correct excerpt but wrong character offsets:
 
-1. `Field statedSquareFootage: invalid character range — coerced from excerpt location.`  
-   - **Stage:** evidence_validation (post-verification normalize)  
-   - **Cause:** excerpt found in body; range coerced from excerpt location  
-   - **Expected:** yes (not a contract defect)  
+1. `Field statedSquareFootage: invalid character range — coerced from excerpt location.`
+   - **Stage:** evidence_validation (post-verification normalize)
+   - **Cause:** excerpt found in body; range coerced from excerpt location
+   - **Expected:** yes (not a contract defect)
    - **Blocking:** no
 
-2. `Field requestedColorText: invalid character range — coerced from excerpt location.`  
+2. `Field requestedColorText: invalid character range — coerced from excerpt location.`
    - Same stage/cause/expectation/blocking as above for a second field
 
 `server/smoke.mjs` now prints each warning string (truncated) so future smoked runs capture exact text without dumping provider payloads.
@@ -213,7 +213,7 @@ Reconstruction on the same smoke corpus (valid excerpts with invalid `charStart`
 
 | Severity | When | Acceptance |
 |----------|------|------------|
-| **Blocking** | Schema integrity problems, unsupported top-level pricing/takeoff keys, unresolved invalid evidence that still indicates an integrity problem | **Blocked** until a clean re-run (or equivalent resolution) |
+| **Blocking** | Schema integrity problems, unsupported top-level pricing/takeoff keys, **unresolved** invalid evidence | **Blocked** until field-level human resolution (edit / mark unknown) or a clean re-run for contract defects without `fieldKey` |
 | **Informational** | Evidence range coercion, enum/severity coercion, dropped unsupported field keys, stripped forbidden provider claims after sanitize, evidence cleared-to-unknown | Visible; acceptance may continue |
 
 UI shows code, safe explanation, field (when applicable), estimator-action flag, and stage. Warnings persist on the run (`validationWarnings` + `warnings`) and remain in run history after reload / after accept for informational cases.
@@ -225,3 +225,50 @@ UI shows code, safe explanation, field (when applicable), estimator-action flag,
 - Structured `validationWarnings.mjs` + prominent workspace + history panel
 - Accept guard for blocking warnings (`BLOCKING_VALIDATION_WARNINGS`)
 - Regression tests in `phase311Provenance.test.mjs`
+
+---
+
+## Phase 4B.4B.1 — Evidence-resolution correction (classification)
+
+**Date:** 2026-07-15
+**Status:** Implemented (no paid Gemini call; evidence validation not weakened)
+
+### Observed live symptom (synthetic fixture)
+
+Live classification surfaced:
+
+1. `EVIDENCE_INVALID` (blocking)
+2. `EVIDENCE_INVALID_CLEARED` (informational)
+3. `UNSUPPORTED_CLAIM_STRIPPED` (informational)
+
+Estimator field edits did not unblock acceptance.
+
+### Root cause
+
+Server evidence validation emits **two** strings per failed field:
+
+1. `Field <key>: evidence excerpt not found in <source>…` → structured as blocking `EVIDENCE_INVALID`
+2. `Field <key>: evidence invalid — value marked unknown…` → informational `EVIDENCE_INVALID_CLEARED` (value already sanitized to unknown; AI value **not** trusted)
+
+Acceptance (`acceptClassification`) previously treated **any** original blocking `validationWarnings` entry as permanently blocking. `applyCorrections` updated field values but never wrote a **reviewed resolution** overlay. Confirm remained available even when evidence failed. Warning cards lacked field / rejected-value / resolution affordances in the narrow panel.
+
+Exact affected field on a given live run is the `fieldKey` carried by each `EVIDENCE_INVALID` message (often one hallucination per run; common pattern is a non-matching excerpt such as a “combined / takeoff” SF claim that is not present in the email body). Rejected numeric/text values are cleared before display; claimed source is typically `body`. `UNSUPPORTED_CLAIM_STRIPPED` stays informational when the claim was stripped and no trusted field depends on it.
+
+### Field-level warning structure
+
+Every structured warning now includes: `warningId`, `code`, `severity`, `stage`, `fieldKey`, `fieldLabel`, safe rejected-value summary (when present), claimed source type, safe excerpt (when present), validation failure reason, `blockingState`, `resolutionState`, resolution method/actor/time, related correction ID. Blocking warnings without `fieldKey` are `contract_defect`.
+
+### Human resolution
+
+| Action | Effect |
+|--------|--------|
+| Edit (+ required note) | Human value authoritative (`manual_correction`); warning → `resolved_by_human_correction` |
+| Mark unknown (+ confirmation note) | Field unknown; warning → `resolved_by_marked_unknown`; missing-info rules recalculated |
+| Clear (+ confirmation note) | Optional clear; warning → `resolved_by_cleared` |
+| Confirm | **Forbidden** while unresolved `EVIDENCE_INVALID` on that field |
+
+Original AI warnings remain immutable on the run; resolutions live in `warningResolutions` (and correction fallback). Accepted snapshots store `warningResolutions` + `reviewedWarnings`.
+
+### Acceptance gate
+
+Uses `activeBlockingWarnings(run)` — historical `EVIDENCE_INVALID` may remain visible but stops blocking after audited human edit / mark-unknown / clear when missing-information policy is satisfied. Schema/top-level blockers without field resolution still require a clean re-run.

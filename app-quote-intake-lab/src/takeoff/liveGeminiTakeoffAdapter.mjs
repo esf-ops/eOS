@@ -1,6 +1,6 @@
 /**
- * LiveGeminiTakeoffAdapter — lab TakeoffAdapter that sends plan bytes only via
- * the isolated loopback lab server (POST /takeoff). Phase 4B.4A: no UI wiring.
+ * LiveGeminiTakeoffAdapter — browser/lab TakeoffAdapter that sends plan bytes only via
+ * the isolated loopback lab server (POST /takeoff).
  */
 
 import {
@@ -9,6 +9,9 @@ import {
   PROVIDER_NAME_LIVE,
   PROVIDER_VERSION_LIVE
 } from "./takeoffTypes.mjs";
+import { assertApprovedForLiveTakeoff } from "./syntheticLiveAllowlist.mjs";
+import { sha256Hex } from "./sha256.mjs";
+import { bytesToBase64, toUint8Array } from "./base64.mjs";
 
 export class LiveGeminiTakeoffAdapter {
   /**
@@ -21,9 +24,12 @@ export class LiveGeminiTakeoffAdapter {
    * }} [opts]
    */
   constructor(opts = {}) {
-    this._baseUrl = String(opts.baseUrl ?? "http://127.0.0.1:5197").replace(/\/$/, "");
-    this._labToken = String(opts.labToken ?? "");
-    this._fetch = opts.fetchImpl ?? globalThis.fetch;
+    const viteEnv = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
+    this._baseUrl = String(opts.baseUrl ?? viteEnv.VITE_QIL_LIVE_SERVER_URL ?? "http://127.0.0.1:5197")
+      .trim()
+      .replace(/\/+$/, "");
+    this._labToken = String(opts.labToken ?? viteEnv.VITE_QIL_LAB_REQUEST_TOKEN ?? "").trim();
+    this._fetch = opts.fetchImpl ?? globalThis.fetch?.bind(globalThis);
     this._directPipeline = opts.directPipeline ?? null;
     this._directConfig = opts.directConfig ?? null;
     /** @type {Map<string, import("./takeoffTypes.mjs").TakeoffRun>} */
@@ -43,6 +49,49 @@ export class LiveGeminiTakeoffAdapter {
   }
 
   /**
+   * Safe health for UI — never returns secrets.
+   */
+  async health() {
+    try {
+      const res = await this._fetch(`${this._baseUrl}/health`, { method: "GET" });
+      if (!res.ok) return { ok: false, status: "unavailable", code: "HEALTH_HTTP", httpStatus: res.status };
+      const json = await res.json();
+      const takeoff = json.takeoff ?? {};
+      if (!takeoff.liveEnabled) {
+        return {
+          ok: false,
+          status: "disabled",
+          code: "LIVE_TAKEOFF_DISABLED",
+          takeoff,
+          hasApiKey: Boolean(json.hasApiKey),
+          modelConfigured: Boolean(takeoff.modelConfigured)
+        };
+      }
+      if (!json.hasApiKey || !takeoff.modelConfigured) {
+        return {
+          ok: false,
+          status: "misconfigured",
+          code: "PROVIDER_CONFIG_MISSING",
+          takeoff,
+          hasApiKey: Boolean(json.hasApiKey),
+          modelConfigured: Boolean(takeoff.modelConfigured)
+        };
+      }
+      return {
+        ok: true,
+        status: "ready",
+        code: "READY",
+        takeoff,
+        hasApiKey: true,
+        modelConfigured: true,
+        provider: takeoff.provider ?? "gemini"
+      };
+    } catch {
+      return { ok: false, status: "unavailable", code: "SERVER_UNAVAILABLE" };
+    }
+  }
+
+  /**
    * @param {{
    *   caseId: string,
    *   acceptedIntakeSnapshotId: string,
@@ -51,7 +100,7 @@ export class LiveGeminiTakeoffAdapter {
    *   mimeType: string,
    *   sizeBytes: number,
    *   contentHash: string,
-   *   contentBytes: Buffer|Uint8Array,
+   *   contentBytes: Uint8Array|ArrayBuffer|ArrayBufferView,
    *   liveTransmissionAcknowledged: boolean,
    *   actorLabel: string,
    *   requestedAt?: string,
@@ -62,50 +111,68 @@ export class LiveGeminiTakeoffAdapter {
    * }} input
    */
   async run(input) {
-    const contentBytes = Buffer.isBuffer(input.contentBytes)
-      ? input.contentBytes
-      : Buffer.from(input.contentBytes ?? []);
+    const contentBytes = toUint8Array(input.contentBytes);
 
+    if (!input.liveTransmissionAcknowledged) {
+      const err = new Error("Explicit live transmission acknowledgment is required.");
+      err.code = "ACKNOWLEDGMENT_REQUIRED";
+      throw err;
+    }
+
+    assertApprovedForLiveTakeoff(input.contentHash, { sizeBytes: input.sizeBytes ?? contentBytes.length });
+    const actualHash = await sha256Hex(contentBytes);
+    if (actualHash !== String(input.contentHash).toLowerCase()) {
+      const err = new Error("Client-computed SHA-256 does not match attachment metadata.");
+      err.code = "HASH_MISMATCH";
+      throw err;
+    }
+
+    // Test-only in-process path — never static-import server modules (keeps Vite browser bundle clean).
     if (this._directPipeline) {
-      const { sanitizeLiveTakeoffRequest } = await import("../../server/takeoff/sanitizeTakeoffRequest.mjs");
-      const maxAttachmentBytes = this._directConfig?.takeoff?.maxAttachmentBytes ?? 4_000_000;
-      const request = sanitizeLiveTakeoffRequest(
-        {
+      let contentBase64 = bytesToBase64(contentBytes);
+      try {
+        const outcome = await this._directPipeline({
           caseId: input.caseId,
           acceptedIntakeSnapshotId: input.acceptedIntakeSnapshotId,
           attachmentId: input.attachmentId,
           filename: input.filename,
           mimeType: input.mimeType,
           sizeBytes: input.sizeBytes ?? contentBytes.length,
-          contentHash: input.contentHash,
-          contentBase64: contentBytes.toString("base64"),
-          liveTransmissionAcknowledged: input.liveTransmissionAcknowledged,
+          contentHash: actualHash,
+          contentBytes,
+          contentBase64,
+          liveTransmissionAcknowledged: true,
           actorLabel: input.actorLabel,
           requestedAt: input.requestedAt ?? new Date().toISOString(),
           elite100Decision: input.elite100Decision,
           classificationHints: input.classificationHints,
-          syntheticPlanAcknowledged: input.syntheticPlanAcknowledged
-        },
-        { maxAttachmentBytes }
-      );
-      const outcome = await this._directPipeline({
-        request,
-        config: this._directConfig,
-        stagedProvider: input.stagedProvider
-      });
-      const run = outcome.run;
-      this._runs.set(run.id, run);
-      return {
-        ok: run.labTakeoffStatus !== LAB_TAKEOFF_STATUS.FAILED,
-        runId: run.id,
-        status: run.labTakeoffStatus,
-        run
-      };
+          syntheticPlanAcknowledged: input.syntheticPlanAcknowledged,
+          config: this._directConfig,
+          stagedProvider: input.stagedProvider
+        });
+        const run = outcome.run;
+        this._runs.set(run.id, run);
+        return {
+          ok: run.labTakeoffStatus !== LAB_TAKEOFF_STATUS.FAILED,
+          runId: run.id,
+          status: run.labTakeoffStatus,
+          run
+        };
+      } finally {
+        contentBase64 = "";
+      }
     }
 
     if (!this._labToken) {
-      const err = new Error("Lab request token is required for live takeoff HTTP transport.");
-      err.code = "TOKEN_NOT_CONFIGURED";
+      const err = new Error(
+        "Lab request token is not configured (VITE_QIL_LAB_REQUEST_TOKEN). Live takeoff unavailable."
+      );
+      err.code = "LAB_TOKEN_MISSING";
+      throw err;
+    }
+    if (typeof this._fetch !== "function") {
+      const err = new Error("fetch is unavailable for live takeoff.");
+      err.code = "NO_FETCH";
       throw err;
     }
 
@@ -116,24 +183,36 @@ export class LiveGeminiTakeoffAdapter {
       filename: input.filename,
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes ?? contentBytes.length,
-      contentHash: input.contentHash,
-      contentBase64: contentBytes.toString("base64"),
-      liveTransmissionAcknowledged: Boolean(input.liveTransmissionAcknowledged),
+      contentHash: actualHash,
+      contentBase64: bytesToBase64(contentBytes),
+      liveTransmissionAcknowledged: true,
       actorLabel: input.actorLabel,
       requestedAt: input.requestedAt ?? new Date().toISOString(),
-      elite100Decision: input.elite100Decision,
-      classificationHints: input.classificationHints,
+      elite100Decision: input.elite100Decision ?? "elite_100_candidate",
+      classificationHints: input.classificationHints ?? null,
       syntheticPlanAcknowledged: input.syntheticPlanAcknowledged ?? true
     };
 
-    const res = await this._fetch(`${this._baseUrl}/takeoff`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-QIL-Lab-Token": this._labToken
-      },
-      body: JSON.stringify(body)
-    });
+    let res;
+    try {
+      res = await this._fetch(`${this._baseUrl}/takeoff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-QIL-Lab-Token": this._labToken
+        },
+        body: JSON.stringify(body)
+      });
+    } catch {
+      const err = new Error(
+        "Live takeoff server is unavailable. Start it with npm run live-server or switch to Simulated."
+      );
+      err.code = "SERVER_UNAVAILABLE";
+      throw err;
+    } finally {
+      // Drop local base64 as soon as the request body is constructed/sent.
+      body.contentBase64 = "";
+    }
 
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.ok) {
@@ -149,7 +228,8 @@ export class LiveGeminiTakeoffAdapter {
       ok: true,
       runId: run.id,
       status: run.labTakeoffStatus,
-      run
+      run,
+      meta: json.meta ?? null
     };
   }
 

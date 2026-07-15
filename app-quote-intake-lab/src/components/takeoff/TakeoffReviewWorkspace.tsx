@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { QuoteIntakeAttachment, QuoteIntakeCase, QuoteIntakeRepository } from "../../domain/types";
 import {
   DEFAULT_SIMULATED_SCENARIO_ID,
   listSimulatedScenarioOptions,
   scenarioLabel
 } from "../../takeoff/scenarioCatalog.mjs";
+import { getLiveGeminiTakeoffAdapter } from "../../takeoff/liveGeminiTakeoffAdapter.mjs";
+import { sha256Hex } from "../../takeoff/sha256.mjs";
+import {
+  SYNTHETIC_LIVE_GATE_MESSAGE,
+  isApprovedSyntheticLiveHash
+} from "../../takeoff/syntheticLiveAllowlist.mjs";
+import {
+  resolveTakeoffWorkspaceMode,
+  takeoffWorkspaceBannerCopy
+} from "../../takeoff/takeoffWorkspaceProvenance.mjs";
 import {
   evaluateTakeoffEligibility,
   groupWarningsBySeverity,
@@ -12,6 +22,7 @@ import {
 } from "../../takeoff/takeoffEligibility.mjs";
 import {
   TAKEOFF_PROVENANCE,
+  formatMeasuredTakeoffSf,
   formatTakeoffSf,
   labelTakeoffStatus,
   runProvenanceNote,
@@ -19,6 +30,15 @@ import {
 } from "../../takeoff/takeoffDisplay.mjs";
 import { caseTitle, formatReceived } from "../../utils/format";
 import TakeoffCorrectionPanel from "./TakeoffCorrectionPanel";
+
+const LIVE_PROGRESS_STAGES = [
+  "Uploading synthetic attachment",
+  "Inventory pass",
+  "Evidence pass",
+  "Geometry/verification pass",
+  "Deterministic calculation",
+  "Persisting run"
+] as const;
 
 type TakeoffRun = {
   id: string;
@@ -39,6 +59,12 @@ type TakeoffRun = {
   confidence?: string | null;
   failure?: { code?: string; message?: string } | null;
   humanReviewState?: string;
+  liveMeta?: {
+    inventoryPromptVersion?: string;
+    evidencePromptVersion?: string;
+    geometryPromptVersion?: string;
+    passes?: Record<string, unknown>;
+  };
 };
 
 type TakeoffRoom = {
@@ -95,6 +121,8 @@ type Props = {
   actorLabel: string;
   onBackToQueue: () => void;
   onCaseMutated: () => void;
+  /** Notifies app shell when workspace provenance mode changes (topbar / isolation banner). */
+  onWorkspaceModeChange?: (mode: "simulated" | "live") => void;
 };
 
 function ProvenanceChip({ children }: { children: string }) {
@@ -106,17 +134,27 @@ export default function TakeoffReviewWorkspace({
   repo,
   actorLabel,
   onBackToQueue,
-  onCaseMutated
+  onCaseMutated,
+  onWorkspaceModeChange
 }: Props) {
   const [snapshot, setSnapshot] = useState<unknown>(null);
   const [runs, setRuns] = useState<TakeoffRun[]>([]);
   const [inspectRunId, setInspectRunId] = useState<string | null>(null);
   const [selectedAttachmentId, setSelectedAttachmentId] = useState<string | null>(null);
   const [scenarioId, setScenarioId] = useState(DEFAULT_SIMULATED_SCENARIO_ID);
+  const [providerMode, setProviderMode] = useState<"simulated" | "live">("simulated");
+  const [liveAck, setLiveAck] = useState(false);
+  const [liveHealth, setLiveHealth] = useState<string>("idle");
+  const [liveHealthDetail, setLiveHealthDetail] = useState<string>("");
+  const [liveProgress, setLiveProgress] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRooms, setExpandedRooms] = useState<Record<string, boolean>>({});
   const [correctionMode, setCorrectionMode] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const bytesReadForRunRef = useRef(false);
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const scenarios = useMemo(() => listSimulatedScenarioOptions(), []);
 
@@ -131,6 +169,49 @@ export default function TakeoffReviewWorkspace({
   useEffect(() => {
     void load();
   }, [load, caseItem.latestTakeoffRunId, caseItem.acceptedSnapshotId]);
+
+  // Provider selection never carries silently between cases.
+  useEffect(() => {
+    setProviderMode("simulated");
+    setLiveAck(false);
+    setLiveHealth("idle");
+    setLiveHealthDetail("");
+    setLiveProgress(null);
+    setError(null);
+    setCorrectionMode(false);
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    bytesReadForRunRef.current = false;
+  }, [caseItem.id]);
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    };
+  }, []);
+
+  async function refreshLiveHealth() {
+    const h = await getLiveGeminiTakeoffAdapter().health();
+    if (!h.ok) {
+      setLiveHealth(h.status ?? "unavailable");
+      setLiveHealthDetail(String(h.code ?? ""));
+      return;
+    }
+    setLiveHealth("ready");
+    setLiveHealthDetail(
+      `provider=${h.provider ?? "gemini"} · modelConfigured=${h.modelConfigured ? "yes" : "no"}`
+    );
+  }
+
+  useEffect(() => {
+    if (providerMode === "live") void refreshLiveHealth();
+  }, [providerMode]);
 
   const gate = useMemo(
     () =>
@@ -157,21 +238,38 @@ export default function TakeoffReviewWorkspace({
   const latestId = caseItem.latestTakeoffRunId ?? runs[0]?.id ?? null;
   const inspectingHistorical = Boolean(inspectRun && latestId && inspectRun.id !== latestId);
 
+  const workspaceMode = useMemo(
+    () =>
+      resolveTakeoffWorkspaceMode({
+        providerSelection: providerMode,
+        selectedRun: inspectRun
+      }),
+    [providerMode, inspectRun]
+  );
+  const workspaceBanner = useMemo(() => takeoffWorkspaceBannerCopy(workspaceMode), [workspaceMode]);
+
+  useEffect(() => {
+    onWorkspaceModeChange?.(workspaceMode);
+  }, [workspaceMode, onWorkspaceModeChange]);
+
   const statedSf =
     caseItem.statedSquareFootage ?? caseItem.proposedSquareFootage ?? null;
   const calc = inspectRun?.calculation ?? null;
-  const measuredCt = calc?.measuredCountertopSf ?? null;
-  const measuredBs = calc?.measuredBacksplashSf ?? null;
-  const measuredFhb = calc?.measuredFhbSf ?? null;
-  const measuredCombined = calc?.measuredCombinedSf ?? null;
-  const providerProposed = calc?.providerProposedCombinedSf ?? null;
-  const sinkCount = calc?.sinkCutoutCount ?? null;
+  const runFailed =
+    inspectRun?.labTakeoffStatus === "qil_takeoff_failed" || Boolean(inspectRun?.failure);
+  const measuredCt = runFailed ? null : (calc?.measuredCountertopSf ?? null);
+  const measuredBs = runFailed ? null : (calc?.measuredBacksplashSf ?? null);
+  const measuredFhb = runFailed ? null : (calc?.measuredFhbSf ?? null);
+  const measuredCombined = runFailed ? null : (calc?.measuredCombinedSf ?? null);
+  const providerProposed = runFailed ? null : (calc?.providerProposedCombinedSf ?? null);
+  const sinkCount = runFailed ? null : (calc?.sinkCutoutCount ?? null);
   /** measured − stated and measured − provider (positive means measured larger). */
-  const measuredMinusStated = sfDifference(statedSf as number | null, measuredCombined as number | null);
-  const measuredMinusProvider = sfDifference(
-    providerProposed as number | null,
-    measuredCombined as number | null
-  );
+  const measuredMinusStated = runFailed
+    ? null
+    : sfDifference(statedSf as number | null, measuredCombined as number | null);
+  const measuredMinusProvider = runFailed
+    ? null
+    : sfDifference(providerProposed as number | null, measuredCombined as number | null);
 
   const warningGroups = useMemo(() => {
     const grouped = groupWarningsBySeverity(inspectRun?.warnings ?? []);
@@ -190,8 +288,37 @@ export default function TakeoffReviewWorkspace({
     return map;
   }, [inspectRun]);
 
-  async function onRun() {
-    if (!repo.runTakeoff || busy || !gate.canRun) return;
+  const selectedIsApprovedSynthetic = isApprovedSyntheticLiveHash(selectedAttachment?.contentHash);
+  const canRunSimulated = Boolean(repo.runTakeoff) && !busy && gate.canRun;
+  const canRunLive =
+    Boolean(repo.runTakeoff) &&
+    !busy &&
+    gate.canRun &&
+    providerMode === "live" &&
+    liveAck &&
+    selectedIsApprovedSynthetic &&
+    liveHealth === "ready";
+
+  function clearProgressTimer() {
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  }
+
+  function startApproxProgress() {
+    clearProgressTimer();
+    let idx = 0;
+    setLiveProgress(`${LIVE_PROGRESS_STAGES[0]} (approximate)`);
+    progressTimerRef.current = setInterval(() => {
+      idx = Math.min(idx + 1, LIVE_PROGRESS_STAGES.length - 1);
+      setLiveProgress(`${LIVE_PROGRESS_STAGES[idx]} (approximate)`);
+      if (idx >= LIVE_PROGRESS_STAGES.length - 1) clearProgressTimer();
+    }, 4500);
+  }
+
+  async function onRunSimulated() {
+    if (!repo.runTakeoff || !canRunSimulated) return;
     const attachmentId = selectedAttachmentId ?? gate.selectedAttachmentId;
     if (!attachmentId) {
       setError("Select exactly one supported plan attachment.");
@@ -204,6 +331,7 @@ export default function TakeoffReviewWorkspace({
         selectedAttachmentId: attachmentId,
         actorLabel,
         scenarioId,
+        providerMode: "simulated",
         transmissionAcknowledgmentPlaceholder: true
       })) as { runId?: string; ok?: boolean; status?: string; run?: TakeoffRun };
       await load();
@@ -223,9 +351,111 @@ export default function TakeoffReviewWorkspace({
     }
   }
 
+  async function onRunLive() {
+    if (!repo.runTakeoff || !canRunLive || !selectedAttachment) return;
+    if (!liveAck) {
+      setError("Acknowledge the live transmission warning before running live takeoff.");
+      return;
+    }
+    if (!selectedIsApprovedSynthetic) {
+      setError(SYNTHETIC_LIVE_GATE_MESSAGE);
+      return;
+    }
+    if (!repo.getAttachmentBytes) {
+      setError("Attachment byte access is unavailable in this repository.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    startApproxProgress();
+    let contentBytes: Uint8Array | null = null;
+    try {
+      contentBytes = await repo.getAttachmentBytes(caseItem.id, selectedAttachment.id);
+      bytesReadForRunRef.current = true;
+      if (!contentBytes?.byteLength) {
+        throw Object.assign(new Error("Selected attachment bytes were not found in local storage."), {
+          code: "ATTACHMENT_BYTES_MISSING"
+        });
+      }
+      const actualHash = await sha256Hex(contentBytes);
+      if (actualHash !== String(selectedAttachment.contentHash ?? "").toLowerCase()) {
+        throw Object.assign(new Error("Computed SHA-256 does not match persisted attachment metadata."), {
+          code: "HASH_MISMATCH"
+        });
+      }
+
+      const out = (await repo.runTakeoff(caseItem.id, {
+        selectedAttachmentId: selectedAttachment.id,
+        actorLabel,
+        providerMode: "live",
+        liveTransmissionAcknowledged: true,
+        contentBytes
+      })) as { runId?: string; ok?: boolean; status?: string; run?: TakeoffRun; code?: string };
+
+      contentBytes = null;
+      setLiveProgress("Persisting run");
+      await load();
+      if (out?.runId) setInspectRunId(out.runId);
+      if (out && out.ok === false) {
+        setError(
+          out.run?.failure?.message
+            ? `Live takeoff failed: ${out.run.failure.code ?? "ERROR"} — ${out.run.failure.message}`
+            : `Live takeoff ended in ${labelTakeoffStatus(out.status)} (${out.code ?? "error"}).`
+        );
+      }
+      onCaseMutated();
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      contentBytes = null;
+      clearProgressTimer();
+      setLiveProgress(null);
+      setBusy(false);
+    }
+  }
+
+  async function onPreviewSyntheticPlan() {
+    if (!selectedAttachment || !repo.getAttachmentBytes || previewBusy) return;
+    if (!isApprovedSyntheticLiveHash(selectedAttachment.contentHash)) {
+      setError(SYNTHETIC_LIVE_GATE_MESSAGE);
+      return;
+    }
+    setPreviewBusy(true);
+    setError(null);
+    try {
+      const bytes = await repo.getAttachmentBytes(caseItem.id, selectedAttachment.id);
+      if (!bytes?.byteLength) throw new Error("Local attachment bytes unavailable for preview.");
+      const hash = await sha256Hex(bytes);
+      if (hash !== String(selectedAttachment.contentHash).toLowerCase()) {
+        throw new Error("Preview hash mismatch — refusing to open local preview.");
+      }
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        const copy = new Uint8Array(bytes.byteLength);
+        copy.set(bytes);
+        const blob = new Blob([copy], { type: "application/pdf" });
+        return URL.createObjectURL(blob);
+      });
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  function closePreview() {
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }
+
   function toggleRoom(roomId: string) {
     setExpandedRooms((prev) => ({ ...prev, [roomId]: !(prev[roomId] ?? true) }));
   }
+
+  const inspectIsLive = inspectRun?.provider?.mode === "live";
 
   return (
     <div className="qil-toff-workspace" data-testid="takeoff-review-workspace">
@@ -253,11 +483,14 @@ export default function TakeoffReviewWorkspace({
         </button>
       </header>
 
-      <div className="qil-toff-sim-banner" role="status">
-        <strong>Simulated takeoff</strong>
-        <span>Attachment contents not read</span>
-        <span>No production connection</span>
-        <span>Evidence is lab fixture geometry — not live AI</span>
+      <div
+        className={`qil-toff-sim-banner${workspaceBanner.isLive ? " is-live" : ""}`}
+        role="status"
+      >
+        <strong>{workspaceBanner.title}</strong>
+        {workspaceBanner.lines.map((line) => (
+          <span key={line}>{line}</span>
+        ))}
       </div>
 
       {!gate.canOpenWorkspace ? (
@@ -277,9 +510,10 @@ export default function TakeoffReviewWorkspace({
           <aside className="qil-toff-pane qil-toff-pane-plan" aria-label="Plan attachment pane">
             <h2>Plan attachment</h2>
             <p className="qil-cell-meta">
-              Select exactly one supported attachment by metadata. Contents are never opened for takeoff in this
-              phase.
+              Select exactly one supported attachment by metadata. Simulated mode never reads bytes. Live mode reads
+              local IndexedDB bytes only after acknowledgment and Run.
             </p>
+            <p className="qil-cell-meta qil-toff-inline-warn">{SYNTHETIC_LIVE_GATE_MESSAGE}</p>
 
             <ul className="qil-toff-att-list">
               {supportedAttachments.map((att) => {
@@ -311,11 +545,14 @@ export default function TakeoffReviewWorkspace({
               <p className="qil-toff-inline-warn">Multiple attachments require selection.</p>
             ) : null}
 
-            <div className="qil-toff-plan-placeholder" aria-label="Plan preview unavailable">
-              <p className="qil-toff-plan-placeholder-title">Plan preview unavailable in simulated phase</p>
+            <div className="qil-toff-plan-placeholder" aria-label="Plan preview">
+              <p className="qil-toff-plan-placeholder-title">
+                {selectedIsApprovedSynthetic
+                  ? "Local synthetic plan preview"
+                  : "Plan preview limited to approved synthetic fixtures"}
+              </p>
               <p>
-                Future plan / evidence viewport boundary — Phase 4B.4 may render PDF or image here. This phase does
-                not open or claim to analyze the file.
+                Preview loads from local IndexedDB only — no network. Not synchronized with evidence overlays yet.
               </p>
               {selectedAttachment ? (
                 <dl className="qil-dl qil-toff-att-meta">
@@ -335,14 +572,44 @@ export default function TakeoffReviewWorkspace({
                     <dt>Hash</dt>
                     <dd className="qil-mono">{selectedAttachment.contentHash ?? "—"}</dd>
                   </div>
+                  <div>
+                    <dt>Live allowlist</dt>
+                    <dd>{selectedIsApprovedSynthetic ? "Approved synthetic" : "Blocked for live"}</dd>
+                  </div>
                 </dl>
+              ) : null}
+              <div className="qil-toff-run-actions">
+                <button
+                  type="button"
+                  className="qil-btn-secondary"
+                  disabled={!selectedIsApprovedSynthetic || previewBusy || busy}
+                  onClick={() => void onPreviewSyntheticPlan()}
+                >
+                  {previewBusy ? "Loading preview…" : "Preview synthetic plan"}
+                </button>
+                {previewUrl ? (
+                  <button type="button" className="qil-btn-secondary" onClick={closePreview}>
+                    Close preview
+                  </button>
+                ) : null}
+              </div>
+              {previewUrl ? (
+                <iframe
+                  title="Local synthetic plan preview"
+                  className="qil-toff-plan-preview"
+                  src={previewUrl}
+                />
               ) : null}
             </div>
 
             {inspectRun?.evidence?.length ? (
               <section className="qil-toff-evidence-list">
-                <h3>Simulated evidence references</h3>
-                <p className="qil-cell-meta">Fixture callouts — not extracted from the attachment.</p>
+                <h3>{inspectIsLive ? "Live evidence references" : "Simulated evidence references"}</h3>
+                <p className="qil-cell-meta">
+                  {inspectIsLive
+                    ? "Provider-extracted evidence — verify against the plan; not authoritative for SF."
+                    : "Fixture callouts — not extracted from the attachment."}
+                </p>
                 <ul>
                   {(inspectRun.evidence as TakeoffEvidence[]).map((ev) => (
                     <li key={ev.id}>
@@ -375,41 +642,144 @@ export default function TakeoffReviewWorkspace({
             <>
             <section className="qil-toff-block">
               <h2>Run controls</h2>
-              <label className="qil-toff-scenario">
-                <span>Simulated test scenario</span>
-                <select
-                  value={scenarioId}
-                  onChange={(e) => setScenarioId(e.target.value)}
-                  disabled={busy}
-                >
-                  {scenarios.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="qil-cell-meta">
-                The selected scenario does <strong>not</strong> inspect the attachment. Geometry comes from a
-                deterministic lab fixture. Never treat this as live AI takeoff evidence.
-              </p>
-              <div className="qil-toff-run-actions">
-                <button
-                  type="button"
-                  className="qil-btn-primary"
-                  disabled={busy || !gate.canRun}
-                  onClick={() => void onRun()}
-                >
-                  {busy ? "Running simulated takeoff…" : "Run simulated takeoff"}
-                </button>
-                {!gate.canRun ? (
-                  <span className="qil-cell-meta">
-                    {gate.reasons.find((r) => r.includes("selection") || r.includes("Selected")) ??
-                      "Complete eligibility requirements to run."}
-                  </span>
-                ) : null}
-              </div>
+              <fieldset className="qil-toff-provider-select" disabled={busy}>
+                <legend>Takeoff provider</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="toff-provider"
+                    checked={providerMode === "simulated"}
+                    onChange={() => {
+                      setProviderMode("simulated");
+                      setLiveAck(false);
+                      setLiveProgress(null);
+                    }}
+                  />
+                  Simulated takeoff (default)
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="toff-provider"
+                    checked={providerMode === "live"}
+                    onChange={() => setProviderMode("live")}
+                  />
+                  Live Gemini takeoff
+                </label>
+              </fieldset>
+
+              {providerMode === "simulated" ? (
+                <>
+                  <label className="qil-toff-scenario">
+                    <span>Simulated test scenario</span>
+                    <select
+                      value={scenarioId}
+                      onChange={(e) => setScenarioId(e.target.value)}
+                      disabled={busy}
+                    >
+                      {scenarios.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="qil-cell-meta">
+                    The selected scenario does <strong>not</strong> inspect the attachment. Geometry comes from a
+                    deterministic lab fixture. Never treat this as live AI takeoff evidence.
+                  </p>
+                  <div className="qil-toff-run-actions">
+                    <button
+                      type="button"
+                      className="qil-btn-primary"
+                      disabled={!canRunSimulated}
+                      onClick={() => void onRunSimulated()}
+                    >
+                      {busy ? "Running simulated takeoff…" : "Run simulated takeoff"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="qil-toff-live-health" role="status">
+                    <strong>Server / takeoff health:</strong>{" "}
+                    <span data-testid="live-takeoff-health">{liveHealth}</span>
+                    {liveHealthDetail ? <span className="qil-cell-meta"> · {liveHealthDetail}</span> : null}
+                    <button
+                      type="button"
+                      className="qil-btn-secondary"
+                      disabled={busy}
+                      onClick={() => void refreshLiveHealth()}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <p className="qil-cell-meta">{SYNTHETIC_LIVE_GATE_MESSAGE}</p>
+                  {!selectedIsApprovedSynthetic ? (
+                    <p className="qil-toff-inline-warn">
+                      Selected attachment is not an approved synthetic fixture hash — live run disabled.
+                    </p>
+                  ) : null}
+                  <div className="qil-toff-live-ack" data-testid="live-takeoff-ack">
+                    <h3>Live transmission acknowledgment</h3>
+                    <ul>
+                      <li>The selected attachment will be sent to Gemini via the isolated lab server.</li>
+                      <li>
+                        File: {selectedAttachment?.filename ?? "—"} · {selectedAttachment?.contentType ?? "—"} ·{" "}
+                        {selectedAttachment?.sizeBytes != null
+                          ? `${selectedAttachment.sizeBytes} bytes`
+                          : "—"}
+                      </li>
+                      <li className="qil-mono">
+                        SHA-256: {selectedAttachment?.contentHash ?? "—"}
+                      </li>
+                      <li>Only the selected attachment will be sent.</li>
+                      <li>
+                        Optional classification hints (stated SF / sink count) may be included; email body is not
+                        uploaded as plan bytes.
+                      </li>
+                      <li>No pricing or Quote Library data is sent.</li>
+                      <li>Results remain non-authoritative — estimator review and acceptance are required.</li>
+                    </ul>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={liveAck}
+                        disabled={busy || !selectedIsApprovedSynthetic}
+                        onChange={(e) => setLiveAck(e.target.checked)}
+                      />
+                      I acknowledge this synthetic attachment will be transmitted to Gemini through the lab
+                      loopback server.
+                    </label>
+                  </div>
+                  <div className="qil-toff-run-actions">
+                    <button
+                      type="button"
+                      className="qil-btn-primary"
+                      disabled={!canRunLive}
+                      onClick={() => void onRunLive()}
+                    >
+                      {busy ? "Running live takeoff…" : "Run live takeoff"}
+                    </button>
+                  </div>
+                  {liveProgress ? (
+                    <p className="qil-toff-live-progress" role="status" data-testid="live-takeoff-progress">
+                      {liveProgress}
+                    </p>
+                  ) : null}
+                </>
+              )}
+
+              {!gate.canRun ? (
+                <span className="qil-cell-meta">
+                  {gate.reasons.find((r) => r.includes("selection") || r.includes("Selected")) ??
+                    "Complete eligibility requirements to run."}
+                </span>
+              ) : null}
               {error ? <p className="qil-toff-error">{error}</p> : null}
+              <span className="visually-hidden" data-testid="bytes-read-flag">
+                {bytesReadForRunRef.current ? "bytes-read" : "bytes-unread"}
+              </span>
             </section>
 
             {inspectRun ? (
@@ -432,14 +802,15 @@ export default function TakeoffReviewWorkspace({
 
                 {inspectRun.labTakeoffStatus === "qil_takeoff_failed" ? (
                   <div className="qil-toff-failed" role="alert">
-                    <strong>Failed run</strong>
+                    <strong>Failed run — no measured result produced</strong>
                     <span>
                       {inspectRun.failure?.code ?? "TAKEOFF_FAILURE"}:{" "}
                       {inspectRun.failure?.message ?? "Safe failure metadata only."}
                     </span>
                     <span className="qil-cell-meta">
-                      Prior successful runs remain in history. Measured overlay values from earlier success are
-                      retained when present. You may run again.
+                      Measured CT / backsplash / combined SF / sink count are unavailable (shown as —), not zero.
+                      Prior successful runs and overlay values are retained when present. Retry creates a new
+                      immutable run.
                     </span>
                   </div>
                 ) : null}
@@ -455,10 +826,25 @@ export default function TakeoffReviewWorkspace({
                       Provider: {inspectRun.provider?.name} · {inspectRun.provider?.mode} ·{" "}
                       {inspectRun.provider?.version}
                     </span>
-                    <span>Scenario: {scenarioLabel(inspectRun.scenarioId)}</span>
+                    {inspectIsLive ? (
+                      <span>
+                        Live prompts: {inspectRun.liveMeta?.inventoryPromptVersion ?? "—"} /{" "}
+                        {inspectRun.liveMeta?.evidencePromptVersion ?? "—"} /{" "}
+                        {inspectRun.liveMeta?.geometryPromptVersion ?? "—"}
+                      </span>
+                    ) : (
+                      <span>Scenario: {scenarioLabel(inspectRun.scenarioId)}</span>
+                    )}
                     <span>Completed: {formatReceived(inspectRun.completedAt ?? inspectRun.startedAt ?? "")}</span>
+                    <span className="qil-mono">
+                      Attachment hash: {(inspectRun.attachmentContentHash ?? "").slice(0, 16)}…
+                    </span>
                     <ProvenanceChip>{TAKEOFF_PROVENANCE.UNREVIEWED}</ProvenanceChip>
-                    <ProvenanceChip>{TAKEOFF_PROVENANCE.SIMULATED_TAKEOFF}</ProvenanceChip>
+                    <ProvenanceChip>
+                      {inspectIsLive ? TAKEOFF_PROVENANCE.LIVE_GEMINI : TAKEOFF_PROVENANCE.SIMULATED_TAKEOFF}
+                    </ProvenanceChip>
+                    <ProvenanceChip>{TAKEOFF_PROVENANCE.DETERMINISTIC}</ProvenanceChip>
+                    <ProvenanceChip>{TAKEOFF_PROVENANCE.PROVIDER_TOTALS_NON_AUTHORITATIVE}</ProvenanceChip>
                   </p>
 
                   <div className="qil-toff-compare" aria-label="Stated versus measured comparison">
@@ -471,7 +857,9 @@ export default function TakeoffReviewWorkspace({
                     <article>
                       <h3>Provider-proposed SF</h3>
                       <p className="qil-toff-sf">{formatTakeoffSf(providerProposed as number | null)}</p>
-                      <ProvenanceChip>{TAKEOFF_PROVENANCE.SIMULATED_PROVIDER}</ProvenanceChip>
+                      <ProvenanceChip>
+                        {inspectIsLive ? TAKEOFF_PROVENANCE.LIVE_GEMINI : TAKEOFF_PROVENANCE.SIMULATED_PROVIDER}
+                      </ProvenanceChip>
                       <span className="qil-cell-meta">Non-authoritative audit only</span>
                     </article>
                     <article>
@@ -644,11 +1032,13 @@ export default function TakeoffReviewWorkspace({
                                 </div>
                                 <div>
                                   <dt>Required action</dt>
-                                  <dd>{warningRequiredAction(w)}</dd>
+                                  <dd>{warningRequiredAction(w, { takeoffMode: workspaceMode })}</dd>
                                 </div>
                                 <div>
                                   <dt>Source</dt>
-                                  <dd>Simulated takeoff provider</dd>
+                                  <dd>
+                                    {inspectIsLive ? "Live Gemini takeoff provider" : "Simulated takeoff provider"}
+                                  </dd>
                                 </div>
                                 <div>
                                   <dt>Blocks future approval</dt>
@@ -677,7 +1067,9 @@ export default function TakeoffReviewWorkspace({
             ) : (
               <section className="qil-toff-block">
                 <h2>Takeoff summary</h2>
-                <p className="qil-cell-meta">No simulated takeoff runs yet. Choose a scenario and run.</p>
+                <p className="qil-cell-meta">
+                  No takeoff runs yet. Choose Simulated or Live Gemini, then run.
+                </p>
               </section>
             )}
 
@@ -705,11 +1097,16 @@ export default function TakeoffReviewWorkspace({
                           </span>
                           <span className="qil-cell-meta">
                             {formatReceived(run.completedAt ?? run.startedAt ?? "")} ·{" "}
-                            {run.provider?.mode}/{run.provider?.version} · {scenarioLabel(run.scenarioId)} ·{" "}
-                            {labelTakeoffStatus(run.labTakeoffStatus)}
+                            <strong>{run.provider?.mode === "live" ? "Live Gemini" : "Simulated"}</strong> ·{" "}
+                            {run.provider?.mode}/{run.provider?.version}
+                            {run.provider?.mode === "live"
+                              ? ""
+                              : ` · ${scenarioLabel(run.scenarioId)}`}{" "}
+                            · {labelTakeoffStatus(run.labTakeoffStatus)}
                           </span>
                           <span className="qil-cell-meta">
-                            Measured {formatTakeoffSf(run.calculation?.measuredCombinedSf as number | null)} ·
+                            Measured{" "}
+                            {formatMeasuredTakeoffSf(run, run.calculation?.measuredCombinedSf as number | null)} ·
                             warnings {counts.total} (block {counts.approval_blocking}) · hash{" "}
                             {(run.attachmentContentHash ?? "").slice(0, 12)}… · {att?.filename ?? run.attachmentId}
                           </span>

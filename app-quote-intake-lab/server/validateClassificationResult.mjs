@@ -164,7 +164,9 @@ function normalizeField(raw, key, sourceMap, warnings) {
   if (!unknown) {
     evidence = validateEvidence(raw.evidence, sourceMap, warnings, key);
     if (!evidence) {
-      warnings.push(`Field ${key}: evidence invalid — value marked unknown.`);
+      const rejected = safeRejectedSummary(value);
+      const rejectedSuffix = rejected ? ` Rejected: ${rejected}.` : "";
+      warnings.push(`Field ${key}: evidence invalid — value marked unknown.${rejectedSuffix}`);
       return unknownField(key, String(raw.confidenceReason ?? ""));
     }
   }
@@ -186,8 +188,12 @@ function normalizeField(raw, key, sourceMap, warnings) {
 function validateEvidence(ev, sourceMap, warnings, fieldKey) {
   if (!ev || typeof ev !== "object") return null;
   const sourceType = String(ev.sourceType ?? "");
+  const safeExcerpt =
+    ev.excerpt != null && String(ev.excerpt).trim()
+      ? ` Excerpt: "${String(ev.excerpt).replace(/\s+/g, " ").trim().slice(0, 80)}".`
+      : "";
   if (!SOURCE_TYPES.has(sourceType) || sourceType === "manual_correction") {
-    warnings.push(`Field ${fieldKey}: unsupported evidence sourceType.`);
+    warnings.push(`Field ${fieldKey}: unsupported evidence sourceType.${safeExcerpt}`);
     return null;
   }
   if (sourceType === "attachment_filename") {
@@ -195,7 +201,7 @@ function validateEvidence(ev, sourceMap, warnings, fieldKey) {
     const excerpt = String(ev.excerpt ?? ev.sourceId ?? "");
     const hit = names.find((n) => n.toLowerCase() === excerpt.toLowerCase() || excerpt.includes(n));
     if (!hit && !names.some((n) => String(ev.sourceId ?? "").includes(n))) {
-      warnings.push(`Field ${fieldKey}: attachment evidence not in supplied filenames.`);
+      warnings.push(`Field ${fieldKey}: attachment evidence not in supplied filenames.${safeExcerpt}`);
       return null;
     }
     return {
@@ -213,7 +219,7 @@ function validateEvidence(ev, sourceMap, warnings, fieldKey) {
 
   const hay = sourceMap[sourceType];
   if (hay == null) {
-    warnings.push(`Field ${fieldKey}: source ${sourceType} not supplied.`);
+    warnings.push(`Field ${fieldKey}: source ${sourceType} not supplied.${safeExcerpt}`);
     return null;
   }
   const excerpt = String(ev.excerpt ?? "").trim();
@@ -223,7 +229,9 @@ function validateEvidence(ev, sourceMap, warnings, fieldKey) {
   }
   const idx = hay.toLowerCase().indexOf(excerpt.toLowerCase());
   if (idx < 0) {
-    warnings.push(`Field ${fieldKey}: evidence excerpt not found in ${sourceType}.`);
+    warnings.push(
+      `Field ${fieldKey}: evidence excerpt not found in ${sourceType}. Excerpt: "${excerpt.slice(0, 80)}".`
+    );
     return null;
   }
   let charStart = Number.isFinite(ev.charStart) ? Number(ev.charStart) : idx;
@@ -302,6 +310,15 @@ function clamp01(n, fallback = 0) {
   const x = Number(n);
   if (!Number.isFinite(x)) return fallback;
   return Math.max(0, Math.min(1, x));
+}
+
+/** Safe, truncated rejected-value summary for warning text (no raw email dump). */
+function safeRejectedSummary(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  const s = String(value).replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  return s.length > 48 ? `${s.slice(0, 45)}…` : s;
 }
 
 function flattenStrings(v) {

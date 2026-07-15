@@ -48,12 +48,18 @@ select {
   align-items: center;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  background: #fff6e8;
-  border: 1px solid rgba(180, 92, 12, 0.28);
-  color: #7a4a10;
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.02em;
+  background: #fff6e8;
+  border: 1px solid rgba(180, 92, 12, 0.28);
+  color: #7a4a10;
+}
+
+.qil-topbar-lab-chip.is-live {
+  background: #eef4fb;
+  color: #1f3f66;
+  border-color: #b7c9de;
 }
 
 .qil-isolation {
@@ -1342,7 +1348,93 @@ select {
 }
 
 .qil-validation-head {
-  margin-bottom: 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.35rem 0.55rem;
+  margin-bottom: 0.25rem;
+}
+
+.qil-warning-code {
+  display: block;
+  flex: 1 1 10rem;
+  min-width: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.qil-sev-pill {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.4rem;
+  border-radius: 0.25rem;
+  border: 1px solid transparent;
+}
+
+.qil-sev-pill.sev-block {
+  color: #8a2f22;
+  background: #fde8e3;
+  border-color: #e2a090;
+}
+
+.qil-sev-pill.sev-info {
+  color: #6a5520;
+  background: #f7efd6;
+  border-color: #dbc98a;
+}
+
+.qil-validation-meta,
+.qil-validation-body {
+  margin-top: 0.15rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.qil-validation-list li.is-resolved {
+  opacity: 0.92;
+  border-style: dashed;
+}
+
+.qil-validation-list li.is-contract-defect {
+  border-color: #a33;
+  border-width: 2px;
+}
+
+.qil-field-card.has-invalid-evidence {
+  border-color: #d09080;
+  background: #fff8f6;
+}
+
+.qil-field-card.is-focused {
+  outline: 2px solid #8aa4c8;
+  outline-offset: 1px;
+}
+
+.qil-evidence-fail {
+  margin: 0.35rem 0;
+  padding: 0.4rem 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: #7a2e22;
+  background: #fdece8;
+  border-radius: var(--r-sm);
+}
+
+.qil-edit-fields {
+  display: grid;
+  gap: 0.35rem;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.qil-edit-fields input {
+  width: 100%;
+  min-width: 0;
 }
 
 .qil-classify h4 {
@@ -1489,6 +1581,10 @@ select {
   background: #fff8f0;
 }
 
+.qil-isolation.is-takeoff-live {
+  background: #f2f7fc;
+}
+
 .qil-main-takeoff {
   display: flex;
   flex-direction: column;
@@ -1542,8 +1638,67 @@ select {
   color: #7a4a10;
 }
 
+.qil-toff-sim-banner.is-live {
+  border-bottom-color: rgba(14, 90, 120, 0.3);
+  background: #eef6f8;
+  color: #0f4a5c;
+}
+
 .qil-toff-sim-banner strong {
   font-weight: 700;
+}
+
+.qil-toff-provider-select {
+  border: 1px solid rgba(28, 41, 56, 0.12);
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.qil-toff-provider-select legend {
+  padding: 0 0.35rem;
+  font-weight: 600;
+}
+
+.qil-toff-live-health,
+.qil-toff-live-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin: 0.5rem 0 0.85rem;
+  font-size: 0.9rem;
+}
+
+.qil-toff-live-ack {
+  margin: 0.75rem 0 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(28, 41, 56, 0.14);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.qil-toff-live-ack ul {
+  margin: 0.4rem 0 0.75rem;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.88rem;
+}
+
+.qil-toff-live-ack label {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  font-size: 0.9rem;
+}
+
+.qil-toff-plan-preview {
+  width: 100%;
+  min-height: 28rem;
+  margin-top: 0.75rem;
+  border: 1px solid rgba(28, 41, 56, 0.16);
+  background: #fff;
 }
 
 .qil-toff-gate {

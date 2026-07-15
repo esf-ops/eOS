@@ -16,11 +16,32 @@ export function formatTakeoffSf(value, digits = 2) {
 }
 
 /**
+ * Measured totals for a failed run are unavailable — never present zeros as results.
+ * @param {object|null|undefined} run
+ * @param {number|null|undefined} value
+ */
+export function formatMeasuredTakeoffSf(run, value, digits = 2) {
+  if (run?.labTakeoffStatus === "qil_takeoff_failed" || run?.failure) return "—";
+  return formatTakeoffSf(value, digits);
+}
+
+/**
+ * @param {object|null|undefined} run
+ * @param {number|null|undefined} value
+ */
+export function formatMeasuredTakeoffCount(run, value) {
+  if (run?.labTakeoffStatus === "qil_takeoff_failed" || run?.failure) return "—";
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  return String(value);
+}
+
+/**
  * Provenance chip labels for displayed values.
  */
 export const TAKEOFF_PROVENANCE = Object.freeze({
   EMAIL_STATED: "Email-stated",
   SIMULATED_PROVIDER: "Simulated provider",
+  LIVE_GEMINI: "Live Gemini takeoff",
   DETERMINISTIC: "eliteOS deterministic calculation",
   ORIGINAL_DETERMINISTIC: "Original deterministic",
   HUMAN_CORRECTED: "Human corrected",
@@ -32,6 +53,7 @@ export const TAKEOFF_PROVENANCE = Object.freeze({
   ACCEPTED_SNAPSHOT: "Accepted snapshot",
   UNREVIEWED: "Unreviewed",
   SIMULATED_TAKEOFF: "Simulated takeoff",
+  PROVIDER_TOTALS_NON_AUTHORITATIVE: "Provider totals non-authoritative",
   AUDIT: "Persisted audit event",
   CLASSIFICATION: "Email classification"
 });

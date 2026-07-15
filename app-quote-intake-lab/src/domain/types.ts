@@ -193,7 +193,10 @@ export interface QuoteIntakeRepository {
       selectedAttachmentId: string;
       actorLabel?: string;
       scenarioId?: string;
+      providerMode?: "simulated" | "live";
       transmissionAcknowledgmentPlaceholder?: boolean;
+      liveTransmissionAcknowledged?: boolean;
+      contentBytes?: Uint8Array | null;
     }
   ) => Promise<unknown>;
   listTakeoffRuns?: (caseId: string) => Promise<unknown[]>;

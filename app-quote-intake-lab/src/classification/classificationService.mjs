@@ -2,11 +2,16 @@ import { buildClassificationRequest, fingerprintClassificationRequest } from "./
 import { evidenceFromManualCorrection } from "./evidence.mjs";
 import { getSimulatedIntakeIntelligenceProvider } from "./simulatedProvider.mjs";
 import { getLiveIntakeIntelligenceProvider } from "./liveIntakeIntelligenceProvider.mjs";
+import { evaluateMissingInformation, missingKeysForCase } from "./missingInformation.mjs";
 import { assertCanTransition, canStartClassification } from "./stateTransitions.mjs";
 import { FIELD_LABELS, PROVIDER_MODE_LIVE, PROVIDER_MODE_SIMULATED } from "./classificationTypes.mjs";
 import {
-  hasBlockingValidationWarnings,
-  structureValidationWarnings
+  activeBlockingWarnings,
+  fieldHasUnresolvedInvalidEvidence,
+  hasActiveBlockingValidationWarnings,
+  resolutionsForCorrection,
+  structureValidationWarnings,
+  warningsForRun
 } from "./validationWarnings.mjs";
 
 const SOFT_FAIL_CODES = new Set([
@@ -156,6 +161,7 @@ export class ClassificationService {
       failure: null,
       humanReviewState: "unreviewed",
       corrections: [],
+      warningResolutions: [],
       acceptedSnapshotId: null
     };
     await this._store.saveClassificationRun(run);
@@ -222,32 +228,58 @@ export class ClassificationService {
     const at = new Date().toISOString();
     const fields = structuredCloneFields(run.result.fields);
     const applied = [];
+    const newResolutions = [];
+    const immutableWarnings = structureValidationWarnings(run.validationWarnings ?? run.warnings ?? []);
 
     for (const c of corrections ?? []) {
       const field = fields.find((f) => f.key === c.fieldKey);
       if (!field) continue;
       const before = field.value;
+      const note = String(c.note ?? "").trim();
+
       if (c.action === "confirm") {
+        if (fieldHasUnresolvedInvalidEvidence(run, c.fieldKey)) {
+          const err = new Error(
+            `Cannot Confirm ${FIELD_LABELS[c.fieldKey] ?? c.fieldKey}: AI evidence failed validation. Edit with a note or Mark unknown.`
+          );
+          err.code = "CONFIRM_FORBIDDEN_INVALID_EVIDENCE";
+          throw err;
+        }
         field.humanReviewState = "confirmed";
         if (field.evidence) {
           field.evidence = { ...field.evidence, humanConfirmed: true };
         }
       } else if (c.action === "clear" || c.action === "mark_unknown") {
+        if (!note) {
+          const err = new Error(
+            `${c.action === "mark_unknown" ? "Mark unknown" : "Clear"} requires an explicit confirmation note.`
+          );
+          err.code = "CORRECTION_NOTE_REQUIRED";
+          throw err;
+        }
         field.value = null;
         field.unknown = true;
         field.confidence = null;
         field.confidenceReason = "Cleared by estimator.";
-        field.evidence = evidenceFromManualCorrection(c.note ?? "Cleared / unknown");
+        field.evidence = evidenceFromManualCorrection(note);
         field.humanReviewState = "corrected";
       } else if (c.action === "edit") {
+        if (!note) {
+          const err = new Error("Manual edit requires a correction note.");
+          err.code = "CORRECTION_NOTE_REQUIRED";
+          throw err;
+        }
         field.value = c.value ?? null;
         field.unknown = field.value == null || field.value === "";
         field.confidence = field.unknown ? null : 1;
         field.confidenceReason = "Estimator edit.";
-        field.evidence = evidenceFromManualCorrection(c.note ?? "Edited value");
+        field.evidence = evidenceFromManualCorrection(note);
         field.humanReviewState = "corrected";
+      } else {
+        continue;
       }
-      applied.push({
+
+      const correctionRow = {
         id: `corr-${runId}-${c.fieldKey}-${applied.length}`,
         at,
         actorLabel: actor,
@@ -255,14 +287,32 @@ export class ClassificationService {
         action: c.action,
         before,
         after: field.value,
-        note: c.note ?? null
-      });
+        note: note || null
+      };
+      applied.push(correctionRow);
+      newResolutions.push(...resolutionsForCorrection(immutableWarnings, correctionRow));
     }
 
+    const caseRow =
+      (await this._store.getCase?.(caseId)) ?? { id: caseId, attachments: [], senderEmail: "" };
+    const fieldsByKey = Object.fromEntries(fields.map((f) => [f.key, f]));
+    const missingInformation = evaluateMissingInformation({
+      fieldsByKey,
+      attachments: caseRow.attachments ?? [],
+      from: { email: caseRow.senderEmail ?? "" }
+    });
+    const missingKeys = missingKeysForCase(missingInformation);
+
     const patch = {
-      result: { ...run.result, fields },
+      result: {
+        ...run.result,
+        fields,
+        missingInformation,
+        missingKeys
+      },
       corrections: [...(run.corrections ?? []), ...applied],
-      humanReviewState: "corrected"
+      warningResolutions: [...(run.warningResolutions ?? []), ...newResolutions],
+      humanReviewState: applied.length ? "corrected" : run.humanReviewState
     };
     if (opts.humanEligibility != null) {
       patch.result = {
@@ -279,21 +329,32 @@ export class ClassificationService {
 
     await this._store.patchClassificationRun(runId, patch);
     await this._store.setCaseOverlay(caseId, {
-      classificationReviewState: "corrected",
+      classificationReviewState: applied.length ? "corrected" : run.humanReviewState,
+      missingInformation: missingKeys,
+      requestedColor: fieldValue(fields, "requestedColorText"),
+      proposedSquareFootage: fieldValue(fields, "statedSquareFootage"),
+      sinkCutoutCount: fieldValue(fields, "sinkCutoutCount"),
+      edgeProfile: fieldValue(fields, "edgeProfile"),
       updatedAt: at
     });
-    await this._store.appendAuditEvent({
-      id: `aud-${caseId}-${compactStamp(at)}-corr`,
-      caseId,
-      at,
-      actorType: "user",
-      actorLabel: actor,
-      eventType: "classification_corrected",
-      summary: `Estimator corrected ${applied.length} field(s) on ${runId}.`,
-      meta: { runId, fieldKeys: applied.map((a) => a.fieldKey) }
-    });
+    if (applied.length) {
+      await this._store.appendAuditEvent({
+        id: `aud-${caseId}-${compactStamp(at)}-corr`,
+        caseId,
+        at,
+        actorType: "user",
+        actorLabel: actor,
+        eventType: "classification_corrected",
+        summary: `Estimator corrected ${applied.length} field(s) on ${runId}.`,
+        meta: {
+          runId,
+          fieldKeys: applied.map((a) => a.fieldKey),
+          resolvedWarningIds: newResolutions.map((r) => r.warningId)
+        }
+      });
+    }
 
-    return { ok: true, runId, corrections: applied };
+    return { ok: true, runId, corrections: applied, warningResolutions: newResolutions };
   }
 
   /**
@@ -317,12 +378,10 @@ export class ClassificationService {
       return { ok: true, alreadyAccepted: true, snapshotId: run.acceptedSnapshotId, runId };
     }
 
-    const blocking = structureValidationWarnings(run.validationWarnings ?? run.warnings ?? []).filter(
-      (w) => w.severity === "blocking"
-    );
-    if (hasBlockingValidationWarnings(run.validationWarnings ?? run.warnings ?? [])) {
+    const blocking = activeBlockingWarnings(run);
+    if (hasActiveBlockingValidationWarnings(run)) {
       const err = new Error(
-        `Acceptance blocked: ${blocking.length} validation warning(s) require resolution (schema integrity, invalid evidence, or unsupported claims).`
+        `Acceptance blocked: ${blocking.length} validation warning(s) still require resolution (invalid evidence without human edit/mark-unknown, or schema integrity).`
       );
       err.code = "BLOCKING_VALIDATION_WARNINGS";
       err.warnings = blocking;
@@ -356,6 +415,7 @@ export class ClassificationService {
       }
     }
 
+    const reviewedWarnings = warningsForRun(run);
     const snapshot = Object.freeze({
       id: snapshotId,
       caseId,
@@ -370,6 +430,8 @@ export class ClassificationService {
       missingInformation: structuredCloneJson(run.result.missingInformation),
       missingKeys: [...(run.result.missingKeys ?? [])],
       corrections: structuredCloneJson(run.corrections ?? []),
+      warningResolutions: structuredCloneJson(run.warningResolutions ?? []),
+      reviewedWarnings: structuredCloneJson(reviewedWarnings),
       provider: structuredCloneJson(run.result.provider),
       note: "Frozen reviewed intake snapshot — does not create a quote or start takeoff."
     });
@@ -410,7 +472,13 @@ export class ClassificationService {
       actorLabel: actor,
       eventType: "classification_accepted",
       summary: `Accepted ${run.providerMode} classification snapshot ${snapshotId}.`,
-      meta: { runId, snapshotId, parkStatus, providerMode: run.providerMode }
+      meta: {
+        runId,
+        snapshotId,
+        parkStatus,
+        providerMode: run.providerMode,
+        warningResolutionCount: (run.warningResolutions ?? []).length
+      }
     });
 
     // Also tip case events for imported rows

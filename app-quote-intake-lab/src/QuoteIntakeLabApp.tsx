@@ -12,6 +12,7 @@ import TakeoffReviewWorkspace from "./components/takeoff/TakeoffReviewWorkspace"
 import type { QuoteIntakeAttachment, QuoteIntakeCase, QuoteIntakeFilter, QuoteIntakeStatusCounts } from "./domain/types";
 import { FIXTURE_IDENTITY, resolveLabIdentity, type LabIdentity } from "./lib/identity";
 import { getLocalQuoteIntakeRepository } from "./repository/LocalQuoteIntakeRepository.mjs";
+import { takeoffTopbarChipLabel } from "./takeoff/takeoffWorkspaceProvenance.mjs";
 
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
@@ -48,6 +49,7 @@ export default function QuoteIntakeLabApp() {
   const [reloadToken, setReloadToken] = useState(0);
   const [takeoffCaseId, setTakeoffCaseId] = useState<string | null>(null);
   const [takeoffCase, setTakeoffCase] = useState<QuoteIntakeCase | null>(null);
+  const [takeoffWorkspaceMode, setTakeoffWorkspaceMode] = useState<"simulated" | "live">("simulated");
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
 
@@ -169,6 +171,12 @@ export default function QuoteIntakeLabApp() {
 
   const detailOpen = Boolean(selectedId && selected && !takeoffCaseId);
   const takeoffOpen = Boolean(takeoffCaseId && takeoffCase);
+  const takeoffChip = takeoffTopbarChipLabel(takeoffWorkspaceMode);
+  const isolationVariant = !takeoffOpen
+    ? "default"
+    : takeoffWorkspaceMode === "live"
+      ? "takeoff-live"
+      : "takeoff-simulated";
 
   return (
     <div className="qil-app">
@@ -183,13 +191,13 @@ export default function QuoteIntakeLabApp() {
         initials={identity.initials}
         menuItems={menuItems}
         statusSlot={
-          <span className="qil-topbar-lab-chip">
-            {takeoffOpen ? "LAB · simulated takeoff" : "Fixture + local imports only"}
+          <span className={`qil-topbar-lab-chip${takeoffOpen && takeoffWorkspaceMode === "live" ? " is-live" : ""}`}>
+            {takeoffOpen ? takeoffChip : "Fixture + local imports only"}
           </span>
         }
       />
 
-      <IsolationBanner variant={takeoffOpen ? "takeoff" : "default"} />
+      <IsolationBanner variant={isolationVariant} />
 
       {takeoffOpen && takeoffCase ? (
         <main className="qil-main qil-main-takeoff">
@@ -199,9 +207,11 @@ export default function QuoteIntakeLabApp() {
             actorLabel={identity.displayName}
             onBackToQueue={() => {
               setTakeoffCaseId(null);
+              setTakeoffWorkspaceMode("simulated");
               refresh();
             }}
             onCaseMutated={refresh}
+            onWorkspaceModeChange={setTakeoffWorkspaceMode}
           />
         </main>
       ) : (
