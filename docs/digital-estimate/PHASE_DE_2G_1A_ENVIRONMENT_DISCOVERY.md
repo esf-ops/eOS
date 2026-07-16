@@ -1,9 +1,28 @@
 # Phase DE.2G.1A — Private Synthetic Deployment Environment Discovery and Migration Apply Plan
 
-**Date:** 2026-07-16  
-**Nature:** Read-only operational verification  
-**Status:** Complete — **no external state changed**  
+**Date:** 2026-07-16
+**Nature:** Read-only operational verification
+**Status:** Discovery extended (blocker resolution pass) — **no external state changed**
 **Do not begin DE.2G.1B from this document alone without Chris approval.**
+
+---
+
+## 0A. Blocker-resolution pass (read-only CLI + local evidence)
+
+| Source | Result |
+|--------|--------|
+| Vercel CLI | **Unavailable / unauthenticated** (`npx vercel whoami` → invalid token). No project list. |
+| Supabase CLI | **Not installed** |
+| Supabase MCP (`get_project_url`) | Project URL host ref **`wbxbzhxsdlkpqsviyzkt`** |
+| Local env (URL host only) | Same ref in `backend-core/.env` and all checked head `.env.local` files — **one** real project |
+| Public DNS (DoH) | NS = Cloudflare (`aida.ns.cloudflare.com`, `nikon.ns.cloudflare.com`) |
+| Public DNS | **`api.eliteosfab.com`** → Vercel DNS target; **`GET /api/health` → 200** |
+| Public DNS | `digital.eliteosfab.com` / `elite100.eliteosfab.com` → **NXDOMAIN** (not created yet) |
+| Health compare | `backend-core-six.vercel.app` and `api.eliteosfab.com` both `ok: true`, `app: eliteOS Brain API`, `environment: production` |
+| MCP `execute_sql` (SELECT) | No `quote_publication*` / `digital_estimate_*` tables yet (migrations unapplied) |
+| MCP `list_branches` | Failed (permissions); no evidence of a separate staging *project* from env |
+
+**Cookie / CORS gate update:** With Brain reachable at **`https://api.eliteosfab.com`**, public head on `digital.eliteosfab.com` using `VITE_BACKEND_URL=https://api.eliteosfab.com` is **same-site** under `eliteosfab.com` — `SameSite=Strict` host-only `de_cfg_session` is **viable**. Do not point the public head at `*.vercel.app` for credentialed config.
 
 ---
 
@@ -67,23 +86,22 @@ Branch was not modified in this phase beyond documentation files written for DE.
 |------|---------|
 | Code root | `backend-core/` |
 | Provider | **Vercel** (serverless) — `backend-core/vercel.json`, `backend-core/api/index.js` |
-| Documented live URL | `https://backend-core-six.vercel.app` (`docs/eliteos/SYSTEM_BLUEPRINT.md`) |
-| Future preferred API host | `api.eliteosfab.com` — **if/when** DNS + Vercel wiring exist (**not confirmed live from repo alone**) |
+| Documented live URL | `https://backend-core-six.vercel.app` (`SYSTEM_BLUEPRINT.md`, `CURRENT_SYSTEM_MAP.md`) |
+| Custom domain (live) | **`https://api.eliteosfab.com`** — CNAME → Vercel; `GET /api/health` **200** (same Brain as `backend-core-six`) |
+| Vercel project name | **`backend-core`** (repo root `backend-core/`; hostname `backend-core-six.vercel.app`). CLI could not confirm UI display name. |
+| Production branch | **Unknown** (Vercel CLI unauthenticated). Not required for DE.2G.1B SQL apply. |
 | Monolithic vs serverless | **Serverless** Express app exported as Vercel function (`api/index.js`); rewrite `/api/*` → `/api` |
 | Memory / duration | 1024 MB; `maxDuration` 300 |
 | Build/start | Local: `npm run eos:server` / `src/server.js`. Hosted: Vercel builds from `backend-core` package and serves `api/index.js` |
 | Env management | Vercel project environment variables (server-only). Names include `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, CORS origins (`EOS_ALLOWED_ORIGINS` / `ALLOWED_ORIGINS` / `CORS_ALLOWED_ORIGINS`), `HEAD_URL_*`, DE feature flags |
 | Process-local state | **Does not reliably survive** across serverless invocations. Process-local rate limiting is acceptable **only** for private synthetic pilot; distributed limiting remains a hard blocker for real-customer use |
-| Shared Brain for eliteosfab.com heads | **Yes** — staff heads call the same Brain URL pattern; CORS merges fixed eliteOS origins + env + `HEAD_URL_*` via `collectHeadEnvOriginsForCors()`; production may also trust `https://*.eliteosfab.com` when `EOS_TRUST_ELITEOSFAB_SUBDOMAIN_ORIGINS` defaults on under `VERCEL_ENV=production` |
+| Shared Brain for eliteosfab.com heads | **Yes** — staff heads call the same Brain; CORS merges fixed origins + env + `HEAD_URL_*`; production may trust `https://*.eliteosfab.com` |
 | Public session cookie support in code | Implemented: `de_cfg_session`, HttpOnly, Path `/api/public-digital-estimate/v2`, SameSite=**Strict**, Secure in production, **host-only** (no `Domain`) |
+| Health `environment` | **`production`** on both Brain hostnames |
 
-### Chris must retrieve from Vercel dashboard (not in repo)
+### Chris must retrieve from Vercel (only if needed later)
 
-1. Exact **production** Vercel project name for Brain (repo documents URL `backend-core-six.vercel.app`; confirm project ↔ URL mapping).
-2. Production **git branch** linked to that project.
-3. Whether a custom domain **`api.eliteosfab.com`** is already attached (critical for cookie gate — §9).
-4. Current env var **names** present for DE flags / `HEAD_URL_*` / CORS (values never printed).
-5. Preview vs production env separation.
+For deploy gates: Production Branch under project **backend-core** (Settings → Git). Domain `api.eliteosfab.com` is already proven live.
 
 **Do not deploy or alter the project in DE.2G.1A.**
 
@@ -91,31 +109,23 @@ Branch was not modified in this phase beyond documentation files written for DE.
 
 ## 4. Supabase target
 
-### Established from repository evidence
+### Established from local env + MCP (no secrets printed)
 
 | Item | Finding |
 |------|---------|
-| Pattern | eliteOS uses **one primary cloud Supabase** for Auth + Postgres that Brain already uses via `SUPABASE_URL` + service role (server only) |
-| Separate staging project | **Recommended** in docs / ops practice; **existence not confirmed** from committed config |
-| Project reference in repo | **No** non-sensitive committed project ref suitable as unambiguous identity for apply |
-| Where migrations are normally applied | SQL under `backend-core/supabase/` applied manually (or via operator process) against the **active** Brain Supabase project — not auto-applied by this preflight |
-| Synthetic pilot recommendation | **A** if staging exists and can hold eligible `quote_headers` safely; else **B** production with additive migrations + all flags off + backup/rollback per runbook; else **C** stop |
+| Project reference | **`wbxbzhxsdlkpqsviyzkt`** (`https://wbxbzhxsdlkpqsviyzkt.supabase.co`) |
+| Evidence | MCP `get_project_url`; same ref in `backend-core/.env` and every checked head `.env.local` |
+| Production vs staging | **Production** — Brain health reports `environment: production`; single shared project for Auth + Postgres |
+| Separate staging project | **Not found** in local eliteOS env files (only this ref + example placeholders). Docs recommend staging; none wired for day-to-day Brain/heads. |
+| Where migrations apply | Manual SQL under `backend-core/supabase/` against this project |
+| DE tables today | **Absent** (read-only catalog query via MCP) — migrations still unapplied |
+| Synthetic pilot path | **B** — production project, additive migrations, all DE flags off, backup/PITR verified before apply |
 
-### Recommendation for this phase
+### Exact remaining dashboard check (one item)
 
-**Target = UNKNOWN until Chris confirms** in the Supabase dashboard:
+Confirm **backup / PITR** for project **`wbxbzhxsdlkpqsviyzkt`**: Supabase Dashboard → Project Settings → Database → Backups.
 
-1. Project name / ref currently used by production Brain (`SUPABASE_URL` host identity — confirm visually; do not paste secrets).
-2. Whether a **staging** project exists and is operational.
-3. That a current backup (or PITR) is available for the chosen project.
-
-**Do not apply migrations until that confirmation is recorded.**
-
-Priority:
-
-- **A.** Staging Supabase (preferred).
-- **B.** Production Supabase, additive only, flags off, backup verified.
-- **C.** Stop if ambiguous.
+**Do not apply migrations until that backup check is recorded.**
 
 ---
 
@@ -307,24 +317,22 @@ Confirm RLS enabled on DE tables. Spot-check grants: anon/authenticated should n
 
 ### Planned combination
 
-| Surface | Proposed origin |
-|---------|-----------------|
-| Studio | `https://elite100.eliteosfab.com` |
-| Public DE | `https://digital.eliteosfab.com` |
-| Brain (documented today) | `https://backend-core-six.vercel.app` |
-| Brain (preferred for cookies) | `https://api.eliteosfab.com` (future / unconfirmed) |
+| Surface | Proposed / live origin |
+|---------|------------------------|
+| Studio | `https://elite100.eliteosfab.com` (**NXDOMAIN** today — not created) |
+| Public DE | `https://digital.eliteosfab.com` (**NXDOMAIN** today — not created) |
+| Brain (legacy hostname) | `https://backend-core-six.vercel.app` (**live**) |
+| Brain (same-site API) | `https://api.eliteosfab.com` (**live**, attached) |
 
 ### Verdict
 
 | Scenario | Cookie + credentialed CORS |
 |----------|----------------------------|
-| Public head on `digital.eliteosfab.com` → Brain on `backend-core-six.vercel.app` | **FAIL** — cross-site; `SameSite=Strict` host-only cookie set by Brain is not returned on subsequent credentialed XHR from the public head |
-| Public head on `digital.eliteosfab.com` → Brain on `api.eliteosfab.com` (same registrable domain) | **PASS** (expected) — same-site request to cookie host; CORS must allow exact Origin; do not use `*` |
-| Weaken SameSite / broaden cookie Domain to “make it work” on vercel.app | **Rejected** in this phase — do not weaken security to pass the gate |
+| Public head → Brain `api.eliteosfab.com` | **PASS (expected)** — same-site; Strict host-only cookie on API host can round-trip |
+| Public head → Brain `backend-core-six.vercel.app` only | **FAIL** — cross-site; do not use for credentialed public config |
+| Weaken SameSite to pass vercel.app | **Rejected** |
 
-**Readiness impact:** Public configuration session smoke (Gates 9–10) is **blocked** until Brain is reachable on an `*.eliteosfab.com` API host **or** a later authorized phase redesigns cookie topology without weakening Origin checks. Studio staff auth is a separate cookie model and is not the same blocker.
-
-CORS for origins: set `HEAD_URL_DIGITAL_ESTIMATE` and `HEAD_URL_ELITE100_ESTIMATE_STUDIO` on Brain; production subdomain trust may already allow `*.eliteosfab.com`. Still set explicit head URLs for Origin equality checks in DE public configuration.
+**Gate impact:** Cookie blocker for Gates 9–10 is **cleared** if public `VITE_BACKEND_URL` is `https://api.eliteosfab.com`. Still set `HEAD_URL_DIGITAL_ESTIMATE` for Origin equality.
 
 ---
 
@@ -332,12 +340,14 @@ CORS for origins: set `HEAD_URL_DIGITAL_ESTIMATE` and `HEAD_URL_ELITE100_ESTIMAT
 
 | Item | Finding |
 |------|---------|
-| Provider (repo) | **Cloudflare** for DNS / domain routing (`SYSTEM_BLUEPRINT.md`) |
-| GoDaddy | Not evidenced as active DNS authority; **do not log in to GoDaddy** for this work |
-| Proposed A/CNAME later | `elite100.eliteosfab.com` → Studio Vercel project; `digital.eliteosfab.com` → public DE Vercel project; optionally `api.eliteosfab.com` → Brain |
-| `estimate.eliteosfab.com` | **Must remain unchanged** |
+| Authority (live NS) | **Cloudflare** — `aida.ns.cloudflare.com`, `nikon.ns.cloudflare.com` |
+| Repo docs | Match (`SYSTEM_BLUEPRINT.md`, `domain-routing-plan.md`) |
+| Existing head pattern | Per-head Vercel project + Cloudflare CNAME to Vercel DNS target (e.g. `www`, `quote`, `quotes`, `internal`, `pricing`, `system`, `sales`, `takeoff`, **`api`**) |
+| `api.eliteosfab.com` | **Present** (CNAME → Vercel) |
+| `digital.eliteosfab.com` / `elite100.eliteosfab.com` | **Absent** (NXDOMAIN) |
+| `estimate.eliteosfab.com` | **Absent** (NXDOMAIN) at discovery time; `internal.eliteosfab.com` is live for IE — do not create digital on estimate |
 
-Chris must confirm Cloudflare zone access before any later DNS gate. **No DNS changes in DE.2G.1A.**
+**No DNS changes in DE.2G.1A.**
 
 ---
 
@@ -392,32 +402,26 @@ Chris must confirm Cloudflare zone access before any later DNS gate. **No DNS ch
 
 ---
 
-## 14. Information Chris must retrieve (dashboard)
+## 14. Remaining blocker (minimum)
 
-1. Supabase: staging exists? production project identity for Brain?
-2. Backup / PITR status for chosen project.
-3. Vercel: Brain project name, production branch, whether `api.eliteosfab.com` is attached.
-4. Cloudflare: zone access for `eliteosfab.com`.
-5. Confirm `estimate.eliteosfab.com` will not be edited.
+**One dashboard fact for DE.2G.1B:** Confirm backup / PITR for Supabase project **`wbxbzhxsdlkpqsviyzkt`** (Dashboard → Database → Backups).
+
+Not blockers for migration apply: Vercel production branch; Studio/public DNS (deploy gates only).
 
 ---
 
 ## 15. Recommendation
 
-**`BLOCKED_PENDING_ENVIRONMENT_INFORMATION`**
+**`BLOCKED_PENDING_ONE_OR_MORE_EXACT_FACTS`**
 
-Reasons:
+Resolved since first 1A pass: Brain project/host, `api.eliteosfab.com` attached, Supabase ref, production single-project posture, Cloudflare NS, cookie gate (when using `api.eliteosfab.com`).
 
-1. Supabase apply target (staging vs production) is **not unambiguous** from the repo.
-2. Brain custom domain `api.eliteosfab.com` **not confirmed**; without same-site API host, public `de_cfg_session` **fails** the cookie gate (§9).
-3. New Vercel projects for Studio / public DE not yet created (expected; blocks deploy gates, not migration review).
+Still blocked for Gate 3 / DE.2G.1B solely by unverified **backup/PITR** on that project.
 
-**Conditional upgrade:** If Chris confirms Brain will remain **only** on `*.vercel.app` for public config smoke with no same-site API host and no authorized redesign, treat public config rollout as **`BLOCKED_BY_SECURITY_OR_DEPLOYMENT_DEFECT`** (do not weaken SameSite).
-
-**Not** `READY_FOR_DE_2G_1B_MIGRATION_APPLY` until Supabase target + backup confirmation are recorded. Migration **code** itself is checksum-clean and ordered correctly.
+After Chris confirms backups: recommendation upgrades to **`READY_FOR_DE_2G_1B_MIGRATION_APPLY`** (flags remain off; no deploy in 1B unless separately authorized).
 
 ---
 
 ## 16. Stop
 
-DE.2G.1A ends here. **Do not begin DE.2G.1B** until Chris approves with environment answers above.
+DE.2G.1A ends here. **Do not begin DE.2G.1B** until the backup fact above is confirmed.
