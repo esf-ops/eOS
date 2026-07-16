@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import ConfigurationWorkspace from "./ConfigurationWorkspace";
+import ReviewWorkspace from "./ReviewWorkspace";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
 
@@ -83,6 +84,7 @@ export default function StudioApp() {
   const [oneTimeToken, setOneTimeToken] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [studioConfigOk, setStudioConfigOk] = useState<boolean | null>(null);
+  const [mainNav, setMainNav] = useState<"publications" | "reviews">("publications");
 
   useEffect(() => {
     if (!supabase) return;
@@ -339,6 +341,34 @@ export default function StudioApp() {
         ) : null}
         {actionError ? <div className="error-box">{actionError}</div> : null}
 
+        <nav className="studio-nav" aria-label="Studio sections">
+          <button
+            type="button"
+            className={mainNav === "publications" ? "active" : ""}
+            onClick={() => setMainNav("publications")}
+          >
+            Publications
+          </button>
+          <button
+            type="button"
+            className={mainNav === "reviews" ? "active" : ""}
+            onClick={() => setMainNav("reviews")}
+          >
+            Customer review requests
+          </button>
+        </nav>
+
+        {mainNav === "reviews" ? (
+          <ReviewWorkspace
+            token={sessionToken}
+            onAuthFailure={() => {
+              setSessionToken(null);
+              setActionError("Session ended or access denied");
+            }}
+          />
+        ) : null}
+
+        {mainNav === "publications" ? (
         <div className="studio-grid">
           <section className="panel">
             <h2>Find Elite 100 estimate</h2>
@@ -488,6 +518,7 @@ export default function StudioApp() {
             )}
           </section>
         </div>
+        ) : null}
       </main>
     </>
   );

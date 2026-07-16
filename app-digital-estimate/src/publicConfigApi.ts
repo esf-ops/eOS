@@ -22,6 +22,10 @@ export function configurationUiEnabled(): boolean {
   return String(import.meta.env.VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED ?? "").trim() === "true";
 }
 
+export function reviewUiEnabled(): boolean {
+  return String(import.meta.env.VITE_DIGITAL_ESTIMATE_REVIEW_UI_ENABLED ?? "").trim() === "true";
+}
+
 export function apiBaseUrl(): string {
   const configured = import.meta.env.VITE_BACKEND_URL?.trim();
   return configured ? configured.replace(/\/$/, "") : "";
@@ -183,6 +187,76 @@ export async function saveConfigurationSelections(payload: {
     session?: { rowVersion: number };
     calculation?: unknown;
   };
+}
+
+export type CustomerReviewRequest = {
+  requestReference: string;
+  status: string;
+  statusLabel: string;
+  requestedAt: string;
+  pricingValidThrough?: string | null;
+  baselineDisplayTotal?: number | null;
+  configuredDisplayTotal?: number | null;
+  displayDelta?: number | null;
+  selectedOptions?: Array<{ optionKey?: string; displayLabel?: string; quantity?: number }>;
+  customerNote?: string | null;
+  nonAcceptanceNotice?: string;
+  currentSelectionsDifferFromSubmitted?: boolean;
+  emailSent?: boolean;
+};
+
+export async function submitReviewRequest(payload: {
+  expectedRowVersion: number;
+  expectedSelectionHash?: string;
+  idempotencyKey: string;
+  customerNote?: string;
+}): Promise<{ ok: boolean; reused?: boolean; reviewRequest: CustomerReviewRequest; disclaimer?: string }> {
+  const base = apiBaseUrl();
+  const res = await fetch(`${base}/api/public-digital-estimate/v2/review-requests`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    let message = "Unable to send for review";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(message);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
+  return (await res.json()) as {
+    ok: boolean;
+    reused?: boolean;
+    reviewRequest: CustomerReviewRequest;
+    disclaimer?: string;
+  };
+}
+
+export async function fetchCurrentReviewRequest(): Promise<{
+  ok: boolean;
+  reviewRequest: CustomerReviewRequest | null;
+}> {
+  const base = apiBaseUrl();
+  const res = await fetch(`${base}/api/public-digital-estimate/v2/review-requests/current`, {
+    method: "GET",
+    credentials: "include",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    const err = new Error("Estimate unavailable");
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
+  return (await res.json()) as { ok: boolean; reviewRequest: CustomerReviewRequest | null };
 }
 
 export async function fetchLegacyPathEstimate(token: string): Promise<PublicEstimate> {

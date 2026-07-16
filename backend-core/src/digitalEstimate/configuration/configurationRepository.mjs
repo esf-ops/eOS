@@ -713,9 +713,23 @@ export function createInMemoryConfigurationRepository(opts = {}) {
     },
 
     async getLatestSelectionForSession(organizationId, sessionId) {
+      const session = sessions.get(String(sessionId));
+      if (session?.latest_calculation_id) {
+        const calc = calculations.get(String(session.latest_calculation_id));
+        if (calc?.selection_id) {
+          const byCalc = selections.get(String(calc.selection_id));
+          if (byCalc && byCalc.organization_id === organizationId) {
+            return structuredClone(byCalc);
+          }
+        }
+      }
       const rows = [...selections.values()]
         .filter((s) => s.organization_id === organizationId && s.session_id === sessionId)
-        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        .sort((a, b) => {
+          const t = String(b.created_at).localeCompare(String(a.created_at));
+          if (t !== 0) return t;
+          return String(b.id).localeCompare(String(a.id));
+        });
       return rows[0] ? structuredClone(rows[0]) : null;
     },
 
@@ -1066,6 +1080,42 @@ export function createInMemoryConfigurationRepository(opts = {}) {
         calculations: [...calculations.values()],
         events: [...events]
       };
+    },
+
+    async revokeSessionsForPublication(organizationId, publicationId) {
+      const now = new Date().toISOString();
+      let n = 0;
+      for (const s of sessions.values()) {
+        if (
+          s.organization_id === organizationId &&
+          s.publication_id === publicationId &&
+          ["active", "configuring", "saved"].includes(s.status)
+        ) {
+          s.status = "revoked";
+          s.updated_at = now;
+          n += 1;
+        }
+      }
+      return n;
+    },
+
+    /** Memory rollback helper for composed atomic flows (DE.2F). */
+    _restore(dump) {
+      if (!dump) return;
+      envelopes.clear();
+      for (const e of dump.envelopes || []) envelopes.set(e.id, structuredClone(e));
+      groups.clear();
+      for (const g of dump.groups || []) groups.set(g.id, structuredClone(g));
+      options.clear();
+      for (const o of dump.options || []) options.set(o.id, structuredClone(o));
+      sessions.clear();
+      for (const s of dump.sessions || []) sessions.set(s.id, structuredClone(s));
+      selections.clear();
+      for (const s of dump.selections || []) selections.set(s.id, structuredClone(s));
+      calculations.clear();
+      for (const c of dump.calculations || []) calculations.set(c.id, structuredClone(c));
+      events.length = 0;
+      events.push(...(dump.events || []).map((e) => structuredClone(e)));
     }
   };
 

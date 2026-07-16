@@ -1,7 +1,7 @@
 # Phase DE.2E — Public Interactive Elite 100 Digital Estimate Configuration
 
 **Date:** 2026-07-16
-**Status:** Implemented (flags off; SQL unapplied; no acceptance/sold/email/payment). **Do not begin DE.2F.**
+**Status:** Implemented (flags off; SQL unapplied; no acceptance/sold/email/payment). DE.2F review/amendment is implemented separately — see `PHASE_DE_2F_NOTES.md`. **Do not begin DE.2G.**
 **Depends on:** DE.2B–D (activated envelopes + DE.2C engine + Studio builder)
 
 ---
@@ -20,7 +20,7 @@
 | Public UI | `app-digital-estimate` ConfigurationView + fragment exchange |
 | Tests | `phaseDe2e.test.mjs`, `phaseDe2e.ui.test.mjs` |
 
-**Not shipped:** acceptance, sold, email, payment, DE.2F amendment UI, migration apply, flag enablement, real-customer deploy.
+**Not shipped:** acceptance, sold, email, payment, migration apply, flag enablement, real-customer deploy. (DE.2F amendment/review is a separate phase.)
 
 ---
 
@@ -138,13 +138,9 @@ Process-local per-IP buckets for exchange / resume / selection / recalc.
 
 ---
 
-## 11. Exact DE.2F scope (do not begin)
+## 11. Exact DE.2F scope (implemented — see PHASE_DE_2F_NOTES.md)
 
-1. Estimator amendment / revision comparison workflow
-2. Customer request → estimator review queue
-3. Diff original vs configured vs amended
-4. Re-publish / envelope supersession UX for staff
-5. Still no acceptance/sold/payment unless a later phase says so
+DE.2F added customer review requests, Studio comparison queue, amendment drafts, and atomic re-publication. **Do not begin DE.2G** without instruction.
 
 ---
 

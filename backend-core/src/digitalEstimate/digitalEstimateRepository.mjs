@@ -453,6 +453,19 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
         tokens: [...tokens.values()],
         events: [...events]
       };
+    },
+
+    /** Memory rollback helper for composed atomic flows (DE.2F). */
+    _restore(dump) {
+      if (!dump) return;
+      publications.clear();
+      for (const p of dump.publications || []) publications.set(p.id, structuredClone(p));
+      snapshots.clear();
+      for (const s of dump.snapshots || []) snapshots.set(s.id, structuredClone(s));
+      tokens.clear();
+      for (const t of dump.tokens || []) tokens.set(t.id, structuredClone(t));
+      events.length = 0;
+      events.push(...(dump.events || []).map((e) => structuredClone(e)));
     }
   };
 

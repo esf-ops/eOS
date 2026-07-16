@@ -296,3 +296,50 @@ button.linkish {
   font: inherit;
   text-align: left;
 }
+
+.studio-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  flex-wrap: wrap;
+}
+
+.studio-nav button {
+  border: 1px solid var(--eos-border);
+  background: var(--eos-surface);
+  color: var(--eos-ink);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+
+.studio-nav button.active {
+  background: var(--eos-accent-soft);
+  border-color: var(--eos-accent);
+  color: var(--eos-accent);
+  font-weight: 600;
+}
+
+.review-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.review-table th,
+.review-table td {
+  border-bottom: 1px solid var(--eos-border);
+  text-align: left;
+  padding: 0.45rem 0.35rem;
+  vertical-align: top;
+}
+
+.review-table tr.is-selected {
+  background: var(--eos-accent-soft);
+}
+
+.review-workspace textarea {
+  width: 100%;
+  margin: 0.35rem 0 0.75rem;
+  font: inherit;
+}

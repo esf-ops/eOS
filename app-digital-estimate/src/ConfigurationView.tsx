@@ -1,11 +1,15 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import {
   calcTotals,
   formatCurrency,
   formatDate,
+  fetchCurrentReviewRequest,
+  reviewUiEnabled,
   saveConfigurationSelections,
+  submitReviewRequest,
   type ConfigurationState,
   type ConfigOption,
+  type CustomerReviewRequest,
   type PublicEstimate,
 } from "./publicConfigApi";
 import { ReadOnlyEstimateView } from "./ReadOnlyEstimateView";
@@ -40,7 +44,27 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
+  const [customerNote, setCustomerNote] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewRequest, setReviewRequest] = useState<CustomerReviewRequest | null>(null);
+  const [reviewDisclaimer, setReviewDisclaimer] = useState<string | null>(null);
   const requestSeq = useMemo(() => ({ n: 0 }), []);
+
+  useEffect(() => {
+    if (!reviewUiEnabled()) return;
+    let alive = true;
+    void fetchCurrentReviewRequest()
+      .then((r) => {
+        if (alive && r.reviewRequest) setReviewRequest(r.reviewRequest);
+      })
+      .catch(() => {
+        /* ignore — optional panel */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   if (state.lifecycle !== "active" || !config || !estimate) {
     return (
@@ -63,6 +87,7 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
     null;
   const configured = totals.configured ?? baseline;
   const delta = totals.delta ?? (configured != null && baseline != null ? configured - baseline : null);
+  const canRequestReview = reviewUiEnabled() && saveState === "saved" && latestCalc != null;
 
   async function onSave() {
     setSaveState("saving");
@@ -71,7 +96,6 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
     const items = Object.entries(qty)
       .filter(([, q]) => Number(q) > 0)
       .map(([optionKey, quantity]) => ({ optionKey, quantity: Number(quantity) }));
-    // Always include selected material defaults at qty 1
     for (const room of config!.rooms || []) {
       const mats = materialOptions(config!.options || [], room.roomKey);
       const selected = mats.find((m) => (qty[m.optionKey] ?? m.defaultQty) > 0) || mats[0];
@@ -85,7 +109,7 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
         expectedRowVersion: rowVersion,
         idempotencyKey: `sel-${formId}-${Date.now()}-${seq}`,
       });
-      if (seq !== requestSeq.n) return; // stale
+      if (seq !== requestSeq.n) return;
       if (result.session?.rowVersion != null) setRowVersion(result.session.rowVersion);
       if (result.calculation) setLatestCalc(result.calculation as typeof latestCalc);
       setSaveState("saved");
@@ -111,6 +135,30 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
       }
       setSaveState("error");
       setSaveError(e instanceof Error ? e.message : "Unable to save");
+    }
+  }
+
+  async function onSendForReview() {
+    if (!canRequestReview || reviewBusy) return;
+    setReviewBusy(true);
+    setReviewError(null);
+    try {
+      const result = await submitReviewRequest({
+        expectedRowVersion: rowVersion,
+        idempotencyKey: `review-${formId}-${reviewRequest?.requestReference || "new"}`,
+        customerNote: customerNote.trim() || undefined,
+      });
+      setReviewRequest(result.reviewRequest);
+      setReviewDisclaimer(result.disclaimer || result.reviewRequest.nonAcceptanceNotice || null);
+    } catch (e) {
+      const status = (e as Error & { status?: number }).status;
+      if (status === 401 || status === 403 || status === 404) {
+        onFatal();
+        return;
+      }
+      setReviewError(e instanceof Error ? e.message : "Unable to send for review");
+    } finally {
+      setReviewBusy(false);
     }
   }
 
@@ -282,6 +330,83 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
             </span>
           </div>
         </aside>
+
+        {reviewUiEnabled() ? (
+          <section className="card review-panel no-print" aria-labelledby="review-heading">
+            <h3 id="review-heading" className="card__heading">
+              Request an updated estimate
+            </h3>
+            <p className="muted">
+              Send selections for review. This is not an order or acceptance. Pricing and availability remain
+              subject to estimator review. No email is sent automatically.
+            </p>
+            {reviewRequest ? (
+              <div className="review-confirmation" role="status">
+                <p>
+                  <strong>{reviewRequest.statusLabel}</strong>
+                </p>
+                <p>
+                  Selections sent · Reference {reviewRequest.requestReference} ·{" "}
+                  {formatDate(reviewRequest.requestedAt)}
+                </p>
+                <p className="muted">{reviewDisclaimer || reviewRequest.nonAcceptanceNotice}</p>
+                <dl className="summary-dl">
+                  <div>
+                    <dt>Submitted original</dt>
+                    <dd>{formatCurrency(reviewRequest.baselineDisplayTotal ?? null)}</dd>
+                  </div>
+                  <div>
+                    <dt>Submitted updated</dt>
+                    <dd>{formatCurrency(reviewRequest.configuredDisplayTotal ?? null)}</dd>
+                  </div>
+                  <div>
+                    <dt>Submitted difference</dt>
+                    <dd>{formatCurrency(reviewRequest.displayDelta ?? null)}</dd>
+                  </div>
+                </dl>
+                {reviewRequest.currentSelectionsDifferFromSubmitted ? (
+                  <p className="pill pill--warn" role="status">
+                    Current selections differ from the submitted request. Save again, then you may request a
+                    new review under estimator policy. The prior request is unchanged.
+                  </p>
+                ) : null}
+                <ul className="addon-list">
+                  {(reviewRequest.selectedOptions || []).map((o, i) => (
+                    <li key={`${o.optionKey || "opt"}-${i}`}>
+                      {o.displayLabel || o.optionKey} × {o.quantity ?? 1}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <label className="qty-label" htmlFor={`${formId}-note`}>
+              Optional note to your estimator
+              <textarea
+                id={`${formId}-note`}
+                maxLength={1000}
+                rows={3}
+                value={customerNote}
+                onChange={(e) => setCustomerNote(e.target.value)}
+                disabled={Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted}
+              />
+            </label>
+            <div className="actions">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={
+                  !canRequestReview ||
+                  reviewBusy ||
+                  (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
+                }
+                onClick={() => void onSendForReview()}
+              >
+                {reviewBusy ? "Sending…" : "Send selections for review"}
+              </button>
+              {reviewError ? <span className="save-status">{reviewError}</span> : null}
+            </div>
+          </section>
+        ) : null}
 
         <section className="print-only print-config" aria-hidden="true">
           <h2>Configured estimate</h2>

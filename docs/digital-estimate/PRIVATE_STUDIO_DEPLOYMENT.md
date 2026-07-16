@@ -29,6 +29,8 @@ DIGITAL_ESTIMATE_PUBLISH_ENABLED=0
 DIGITAL_ESTIMATE_PUBLIC_READ_ENABLED=0
 DIGITAL_ESTIMATE_CONFIGURATION_ENABLED=0
 DIGITAL_ESTIMATE_PUBLIC_CONFIGURATION_ENABLED=0
+DIGITAL_ESTIMATE_REVIEW_REQUESTS_ENABLED=0
+DIGITAL_ESTIMATE_AMENDMENTS_ENABLED=0
 HEAD_URL_DIGITAL_ESTIMATE=https://digital.eliteosfab.com
 ```
 
@@ -43,37 +45,36 @@ Never put pilot IDs/emails in `VITE_*`.
 ```bash
 VITE_ELITE100_ESTIMATE_STUDIO_UI_ENABLED=false
 VITE_ELITE100_ESTIMATE_STUDIO_CONFIGURATION_UI_ENABLED=false
+VITE_ELITE100_ESTIMATE_STUDIO_REVIEW_UI_ENABLED=false
 VITE_BACKEND_URL=...
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
 VITE_HEAD_URL_HOME=...
 ```
 
-Configuration UI visibility is separate from Studio shell visibility. Neither Vite flag grants Brain access.
+Configuration / review UI visibility is separate from Studio shell visibility. Vite flags never grant Brain access.
 
 **Public Digital Estimate**
 
 ```bash
 VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED=false
-VITE_BACKEND_URL=...
-```
-
-New Studio-generated customer links use fragment form `/e#<token>` (DE.2E). Legacy path tokens remain readable on the public head.
-
-**Public Digital Estimate**
-
-```bash
+VITE_DIGITAL_ESTIMATE_REVIEW_UI_ENABLED=false
 VITE_BACKEND_URL=...
 # no Supabase; token-only public head
 ```
+
+New Studio-generated customer links use fragment form `/e#<token>` (DE.2E). Amendment replacement links use the same form (DE.2F). Legacy path tokens remain readable on the public head.
 
 ---
 
 ## Migration dependency
 
-Apply **manually** when ready:
+Apply **manually** when ready (order matters; do not apply in DE.2F automation):
 
-`backend-core/supabase/eliteos_digital_estimate_v1.sql`
+1. `backend-core/supabase/eliteos_digital_estimate_v1.sql`
+2. `eliteos_digital_estimate_configuration_v1.sql`
+3. `eliteos_digital_estimate_public_configuration_v1.sql`
+4. `eliteos_digital_estimate_amendment_v1.sql`
 
 Not applied by DE.1 / DE.1.1 automation.
 
