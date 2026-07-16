@@ -1,20 +1,60 @@
-# Private Synthetic Deployment Runbook (DE.2G.0)
+# Private Synthetic Deployment Runbook
 
-**Do not execute gates in DE.2G.0 automation.** This document is the manual approval checklist for a later controlled rollout.
+**Sources:** DE.2G.0 readiness + **DE.2G.1A environment discovery** (`PHASE_DE_2G_1A_ENVIRONMENT_DISCOVERY.md`).
 
-Domains (proposed — **DNS not created in DE.2G.0**):
+**Do not execute gates from automation alone.** Manual approval required. DE.2G.1A changed **no** external state.
+
+Domains (proposed — **DNS not created in DE.2G.0 / 1A**):
 
 | Surface | Domain | App root |
 |---------|--------|----------|
 | Studio | `https://elite100.eliteosfab.com` | `app-elite100-estimate-studio` |
 | Public DE | `https://digital.eliteosfab.com` | `app-digital-estimate` |
 | Internal Estimate | `https://estimate.eliteosfab.com` | **unchanged** |
+| Brain (documented) | `https://backend-core-six.vercel.app` | `backend-core` |
+| Brain (preferred for public cookies) | `https://api.eliteosfab.com` | same project — **confirm if attached** |
+
+---
+
+## DE.2G.1A discovery summary (read-only)
+
+| Target | Found? | Notes |
+|--------|--------|-------|
+| Brain provider | **Yes** | Vercel serverless (`backend-core/vercel.json`, `api/index.js`) |
+| Brain public URL | **Documented** | `backend-core-six.vercel.app`; confirm dashboard mapping |
+| Supabase target | **Unknown** | One primary cloud project pattern; staging existence unconfirmed — Chris must identify before Gate 3 |
+| Staging Supabase | **Unknown** | Prefer A (staging) if operational |
+| DNS authority | **Likely Cloudflare** | Per `SYSTEM_BLUEPRINT.md`; confirm zone access; do not use GoDaddy for this |
+| Studio / public Vercel projects | **Not created** | Config files exist; no deploy in 1A |
+| Cookie / CORS gate | **Conditional fail** | Public head on `digital.eliteosfab.com` + Brain only on `*.vercel.app` = **cross-site**; `SameSite=Strict` host-only `de_cfg_session` will **not** round-trip. Require Brain on `*.eliteosfab.com` (e.g. `api.eliteosfab.com`) before Gates 9–10. **Do not weaken SameSite.** |
+| Process-local rate limit | Acceptable for synthetic pilot only | Does not survive reliably across Vercel invocations; distributed limiter still blocks real-customer |
+| 1A recommendation | `BLOCKED_PENDING_ENVIRONMENT_INFORMATION` | See discovery doc §15 |
+
+### Chris must retrieve before DE.2G.1B / deploys
+
+1. Supabase project used by production Brain (and whether staging exists) + backup/PITR status.
+2. Vercel Brain project name, production branch, whether `api.eliteosfab.com` is attached.
+3. Cloudflare access for `eliteosfab.com`.
+4. Confirmation `estimate.eliteosfab.com` stays untouched.
 
 ---
 
 ## Deployment architecture found
 
-Both customer/employee Vite heads follow the same pattern as `app-home` / other heads:
+### Brain (`backend-core`)
+
+| Item | Value |
+|------|-------|
+| Provider | Vercel serverless function |
+| Entry | `api/index.js` → Express `src/server.js` |
+| Documented URL | `https://backend-core-six.vercel.app` |
+| Env | Vercel project env: `SUPABASE_*` (server only), CORS / `HEAD_URL_*`, DE flags |
+| Shared Brain | Yes — eliteosfab.com heads call the same API |
+| Cookie for DE public config | Host-only on Brain host; Path `/api/public-digital-estimate/v2`; SameSite=Strict; Secure in prod |
+
+### Vite heads
+
+Both follow the same pattern as `app-home` / other heads:
 
 | Item | Studio | Public Digital Estimate |
 |------|--------|-------------------------|
@@ -27,7 +67,7 @@ Both customer/employee Vite heads follow the same pattern as `app-home` / other 
 | API | `VITE_BACKEND_URL` | `VITE_BACKEND_URL` |
 | Secrets in Vite | **none** (anon key only for Studio auth) | **none** |
 
-Fragment behavior: Studio emits `HEAD_URL_DIGITAL_ESTIMATE/e#<rawToken>`. Public SPA reads hash locally, exchanges via `Authorization: Bearer`, clears fragment. Cookie: `de_cfg_session` HttpOnly; Path `/api/public-digital-estimate/v2`; SameSite=Strict; Secure in production. CORS Origin must equal public head URL.
+Fragment behavior: Studio emits `HEAD_URL_DIGITAL_ESTIMATE/e#<rawToken>`. Public SPA reads hash locally, exchanges via `Authorization: Bearer`, clears fragment. Cookie: `de_cfg_session` HttpOnly; Path `/api/public-digital-estimate/v2`; SameSite=Strict; Secure in production. CORS Origin must equal public head URL. **Brain must be same-site under `*.eliteosfab.com` for this cookie model.**
 
 ---
 
@@ -123,13 +163,14 @@ Migration rollback is separate and discouraged once populated; prefer flag rollb
 - **Rollback:** Do not apply.
 - **Stop:** Checksum drift or destructive SQL.
 
-### Gate 3 — Migration apply authorization
+### Gate 3 — Migration apply authorization (DE.2G.1B)
 
-- **Action:** Apply SQL **only** after written approval, on staging first, in order 1→4.
-- **Expected:** Tables/RPCs exist; RLS/revokes intact.
+- **Action:** Apply SQL **only** after written approval, on staging first (or production only if staging unavailable and backup verified), in order 1→4. Re-verify checksums immediately before apply. Pre/post SELECT checks in `PHASE_DE_2G_1A_ENVIRONMENT_DISCOVERY.md` §6.
+- **Expected:** Tables/RPCs exist; RLS/revokes intact; no `quote_headers` DML.
 - **Evidence:** DB migration log (no secrets).
 - **Rollback:** Flag-off; do not drop populated tables casually.
-- **Stop:** Apply errors / grant leakage to anon.
+- **Stop:** Ambiguous project identity; checksum drift; apply errors; grant leakage to anon.
+- **Prerequisite from 1A:** Supabase target identified — **blocked until Chris confirms.**
 
 ### Gate 4 — Backend deploy authorization
 
@@ -173,11 +214,11 @@ Migration rollback is separate and discouraged once populated; prefer flag rollb
 
 ### Gate 9 — Public head deploy
 
-- **Action:** Deploy `app-digital-estimate`; configure CORS/`HEAD_URL_DIGITAL_ESTIMATE`; enable public read (+ config flags only if smoke needs them).
-- **Expected:** Non-allowlisted tokens 404; allowlisted fragment exchange works.
+- **Action:** Deploy `app-digital-estimate`; configure CORS/`HEAD_URL_DIGITAL_ESTIMATE`; enable public read (+ config flags only if smoke needs them). **Hard gate:** Brain `VITE_BACKEND_URL` / public Brain base must be same-site (`*.eliteosfab.com`, e.g. `api.eliteosfab.com`) so `de_cfg_session` (SameSite=Strict) is returned. Do not weaken cookie policy.
+- **Expected:** Non-allowlisted tokens 404; allowlisted fragment exchange works; credentialed config cookie set and returned.
 - **Evidence:** Smoke network log (redact tokens).
 - **Rollback:** Public flags 0; prior deploy.
-- **Stop:** Real publication reachable.
+- **Stop:** Real publication reachable; cross-site Brain host only (`*.vercel.app`) with Strict cookie.
 
 ### Gate 10 — Synthetic end-to-end smoke
 
