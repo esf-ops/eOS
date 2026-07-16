@@ -9,9 +9,10 @@
 
 | Area | Path / surface | Rule |
 |------|----------------|------|
-| Internal Estimate save/calculate | `app-internal-estimate/**`, `/api/internal-quotes/*` | Additive Publish UI only; do not change save modes, revision math, or PATCH policy |
-| Quote Library workflow | `app-quote-library/**`, `/api/quote-library/*` | Optional read-only activity; no status-model rewrite |
-| Public Consumer Quote | `app-quote/**`, `/api/public-quote/*` | Out of scope |
+| Internal Estimate save/calculate | `app-internal-estimate/**`, `/api/internal-quotes/*` | **No Digital Estimate employee UI** (DE.1.1). Do not change save modes, revision math, or PATCH policy |
+| Quote Library workflow | `app-quote-library/**`, `/api/quote-library/*` | **No DE timeline integration during stealth** (DE.1.1). No status-model rewrite |
+| Elite 100 Estimate Studio | `app-elite100-estimate-studio/**`, `/api/elite100-estimate-studio/*` | Private pilot only; do not grant via role defaults or VITE flags |
+| Public Digital Estimate | `app-digital-estimate/**` | Customer portal only — never register in employee launcher |
 | Partner Quote | `app-partner-quote/**`, `/api/partner-quote/*` | Out of scope |
 | Custom Quote | `app-custom-quote/**`, `/api/custom-quotes/*` | Out of scope |
 | Quote Pipeline | `/api/quotes/pipeline*` | Out of scope |

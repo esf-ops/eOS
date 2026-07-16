@@ -3,6 +3,8 @@ import express from "express";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 import { calculateQuote, computePublicConsumerEstimatesByGroup, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
 import { attachQuoteDeliveryRoutes } from "../quoteDelivery/quoteDeliveryApi.js";
+import { maybeAttachDigitalEstimateRoutes } from "../digitalEstimate/digitalEstimateRoutes.js";
+import { maybeAttachElite100EstimateStudioRoutes } from "../elite100EstimateStudio/elite100EstimateStudioRoutes.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
 import { attachCustomQuoteRoutes } from "./customQuotesApi.js";
 import { attachPartnerQuoteRoutes } from "./partnerQuotesApi.js";
@@ -278,10 +280,12 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
   attachCustomQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuoteLibraryRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuoteDeliveryRoutes(app, { requireAuth, getSupabase });
+  maybeAttachDigitalEstimateRoutes(app, { requireAuth, getSupabase });
+  maybeAttachElite100EstimateStudioRoutes(app, { requireAuth, getSupabase });
   attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachPricingAdminHeadApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
 
   console.log(
-    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, GET/POST /api/partner-quote/*, POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/custom-quotes/*, /api/quote-library/*, POST /api/quote-delivery/quotes/:quoteId/preview|send; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
+    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, GET/POST /api/partner-quote/*, POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/custom-quotes/*, /api/quote-library/*, POST /api/quote-delivery/quotes/:quoteId/preview|send; digital-estimate flag-gated; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
   );
 }

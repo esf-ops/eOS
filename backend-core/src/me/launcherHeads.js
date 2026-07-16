@@ -1,4 +1,8 @@
 import { DEALER_SAFE_HEAD_SLUG_SET, EOS_HEAD_SLUGS, isKnownHeadSlug } from "../auth/eosGovernanceConstants.js";
+import {
+  isElite100EstimateStudioEnabled,
+  isElite100EstimateStudioPilotUser
+} from "../elite100EstimateStudio/elite100EstimateStudioConfig.mjs";
 import { inferHeadDeploymentStatus, resolveHeadDeploymentUrl } from "./headDeploymentUrls.js";
 
 /**
@@ -151,6 +155,16 @@ export const HEAD_LAUNCHER_CATALOG = [
     href: "/quickbooks-intelligence",
     roleNote:
       "Requires quickbooks_intelligence head access. Roles: admin, super_admin, executive, finance, accounting. System Admin assigns access — it does not host this page. No raw_payload or customer/vendor PII in the UI."
+  },
+  {
+    slug: "elite100_estimate_studio",
+    label: "Elite 100 Estimate Studio",
+    description:
+      "Private pilot studio to publish immutable Elite 100 Digital Estimates from saved Internal Estimates.",
+    category: "Revenue",
+    href: "/elite100-estimate-studio",
+    roleNote:
+      "Private pilot only — requires elite100_estimate_studio head access plus server-side pilot allowlist. Not granted by role defaults. System Admin assigns head access; Brain env controls pilot IDs/emails. Public Digital Estimate is a separate customer head and does not appear here."
   },
   {
     slug: "reports",
@@ -571,11 +585,38 @@ export async function buildMeHeadsPayload(supabase, reqUser) {
 
   heads = appendPublicQuoteIfMissing(heads);
 
+  // Elite 100 Estimate Studio: stealth filter — never show unless Studio enabled + pilot.
+  // Admins otherwise receive full catalog; this slug must stay absent without pilot allowlist.
+  heads = await filterElite100EstimateStudioLauncherHeads(heads, ctx, reqUser);
+
   return {
     ok: true,
     user: profileUser,
     heads
   };
+}
+
+/**
+ * Hide Studio tile unless feature flag on AND authenticated user is on pilot allowlist.
+ * Head-access alone (including admin full catalog) is not enough for launcher visibility.
+ * @param {LauncherHeadDtoApi[]} heads
+ * @param {object} ctx
+ * @param {object} reqUser
+ */
+async function filterElite100EstimateStudioLauncherHeads(heads, ctx, reqUser) {
+  const studioOn = isElite100EstimateStudioEnabled(process.env);
+  const pilot = isElite100EstimateStudioPilotUser(
+    { id: ctx.id, email: ctx.email || reqUser?.email },
+    process.env
+  );
+  return heads.filter((h) => {
+    if (h.slug !== "elite100_estimate_studio") return true;
+    if (!studioOn || !pilot) return false;
+    if (!ctx.launcherFullCatalog && !ctx.actionableGrantSet.has("elite100_estimate_studio")) {
+      return false;
+    }
+    return true;
+  });
 }
 
 function pickStr(v) {

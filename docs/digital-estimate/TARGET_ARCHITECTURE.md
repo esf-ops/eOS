@@ -1,14 +1,18 @@
 # Phase DE.0 — Elite 100 Digital Estimate — Target Architecture
 
 **Date:** 2026-07-15
-**Status:** Architecture blueprint only — **no implementation**
+**Status:** Architecture blueprint — DE.1 implemented; **DE.1.1 adds private Elite 100 Estimate Studio** for employee publish controls.
 **Depends on:** [`CURRENT_STATE.md`](./CURRENT_STATE.md)
 
 ---
 
 ## 1. Product intent
 
-Connect Quote Intake → AI Takeoff → Internal Estimate → **Digital Estimate** into one Elite 100 estimating experience, while leaving non–Elite 100 and traditional PDF/email paths intact.
+Connect Quote Intake → AI Takeoff → Internal Estimate → **Elite 100 Estimate Studio (publish)** → **Digital Estimate (public)** while leaving non–Elite 100 and traditional PDF/email paths intact.
+
+**Employee surface (DE.1.1):** Private pilot head `elite100_estimate_studio` (`app-elite100-estimate-studio`, proposed `elite100.eliteosfab.com`). Internal Estimate and Quote Library remain unchanged for the wider team.
+
+**Customer surface:** `app-digital-estimate` (`digital.eliteosfab.com`) — tokenized read-only portal; not in the employee launcher.
 
 **Immediate objective (vertical slice):**
 Estimator publishes an **immutable, secure, read-only** digital estimate from a saved Elite 100 quote; customer opens/prints without an account; eliteOS records publish/view/revoke events. PDF remains available; it is no longer the only customer experience.

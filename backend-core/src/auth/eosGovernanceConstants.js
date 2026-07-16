@@ -28,7 +28,8 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "slab_inventory", // Slab Inventory Head v1 — read-only internal slab browser (SlabCloud cache)
   "custom_quote", // Custom Quote Tool — ESF-only off-program material quotes
   "visualizer", // Countertop Visualizer MVP — concept-only AI render (standalone head)
-  "quickbooks_intelligence" // QuickBooks Intelligence — AR/revenue/payment insights (read-only)
+  "quickbooks_intelligence", // QuickBooks Intelligence — AR/revenue/payment insights (read-only)
+  "elite100_estimate_studio" // Elite 100 Estimate Studio — private pilot Digital Estimate publish head
 ]);
 
 const _headSet = new Set(EOS_HEAD_SLUGS);

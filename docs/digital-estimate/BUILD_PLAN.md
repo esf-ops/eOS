@@ -32,7 +32,8 @@
 |-------|-------|------------|
 | **DE.0** | Current-state audit + architecture (this folder) | — |
 | **DE.1** | Read-only publish + public token view + events + flags | DE.0 |
-| **DE.2** | Quote Library activity UI + staff publication list polish | DE.1 |
+| **DE.1.1** | Private Elite 100 Estimate Studio head (employee publish UI); IE/QL unchanged | DE.1 closure |
+| **DE.2** | Broader staff polish / QL activity (when approved) | DE.1.1 |
 | **DE.3** | Configuration envelope model (data + admin, no customer UI) | DE.1 |
 | **DE.4** | Per-room Elite 100 group/color/option choices + Brain recalc | DE.3, Pricing Admin cutover awareness |
 | **DE.5** | Customer autosave drafts (non-authoritative) | DE.4 |

@@ -1,0 +1,376 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --border: #d8dee6;
+  --text: #1a2332;
+  --text-muted: #5c6778;
+  --accent: #1e4d8c;
+  --accent-hover: #163a6b;
+  --radius: 10px;
+  --shadow: 0 1px 3px rgba(26, 35, 50, 0.08), 0 4px 16px rgba(26, 35, 50, 0.06);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.topbar__inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0.875rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.topbar__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.btn-print {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-print:hover {
+  background: #eef3fa;
+  border-color: var(--accent);
+}
+
+.btn-print:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.shell {
+  flex: 1;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+}
+
+.shell--narrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status,
+.unavailable {
+  margin: 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.0625rem;
+}
+
+.unavailable {
+  padding: 2rem;
+}
+
+.hero {
+  margin-bottom: 1.25rem;
+}
+
+.hero__title {
+  margin: 0 0 1rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.75rem 1.25rem;
+  margin: 0;
+}
+
+.meta-grid dt {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.meta-grid dd {
+  margin: 0.125rem 0 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.25rem 1.375rem;
+  margin-bottom: 1rem;
+}
+
+.card__heading {
+  margin: 0 0 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.project-line {
+  margin: 0 0 0.375rem;
+  font-size: 1rem;
+}
+
+.project-line--muted {
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.room-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.room + .room {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.room__name {
+  margin: 0 0 0.5rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.room__detail {
+  margin: 0 0 0.375rem;
+  font-size: 0.9375rem;
+}
+
+.room__label {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-right: 0.375rem;
+}
+
+.room__summary {
+  margin: 0.5rem 0 0;
+  padding-left: 1.125rem;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.room__summary li + li {
+  margin-top: 0.25rem;
+}
+
+.line-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.line-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 0 0 0.625rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.line-table td {
+  padding: 0.625rem 0;
+  border-bottom: 1px solid #eef1f5;
+  vertical-align: top;
+}
+
+.line-table tr:last-child td {
+  border-bottom: none;
+}
+
+.line-table__amount {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.card--total {
+  background: linear-gradient(135deg, #f8fafc 0%, #eef3fa 100%);
+  border-color: #c5d4ea;
+}
+
+.total-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.total-row__label {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.total-row__value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+
+.notes-list {
+  margin: 0;
+  padding-left: 1.125rem;
+  font-size: 0.9375rem;
+  color: var(--text-muted);
+}
+
+.notes-list li + li {
+  margin-top: 0.375rem;
+}
+
+.disclosures {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  :root {
+    --bg: #fff;
+    --surface: #fff;
+    --border: #ccc;
+    --text: #000;
+    --text-muted: #444;
+    --accent: #000;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .shell {
+    max-width: none;
+    padding: 0;
+  }
+
+  .card {
+    box-shadow: none;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-header {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #000;
+  }
+
+  .print-header h1 {
+    margin: 0 0 0.75rem;
+    font-size: 1.5rem;
+  }
+
+  .print-meta {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem 1rem;
+    margin: 0;
+  }
+
+  .print-meta dt {
+    margin: 0;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #444;
+  }
+
+  .print-meta dd {
+    margin: 0.125rem 0 0;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+
+  .hero {
+    display: none;
+  }
+
+  .card--total .total-row__value {
+    color: #000;
+    font-size: 1.25rem;
+  }
+}
