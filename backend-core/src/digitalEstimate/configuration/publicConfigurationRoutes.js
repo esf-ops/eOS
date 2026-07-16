@@ -188,7 +188,10 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
       if (req.body?.token || req.body?.accessToken || req.query?.token) {
         return res.status(404).json(PUBLIC_UNAVAILABLE);
       }
-      const result = await service.exchangePublicationToken({ rawToken });
+      const result = await service.exchangePublicationToken({
+        rawToken,
+        body: req.body && typeof req.body === "object" ? req.body : {}
+      });
       setConfigurationSessionCookie(res, result.rawSecret, env);
       res.status(201).json({ ok: true, ...result.state });
     } catch (e) {

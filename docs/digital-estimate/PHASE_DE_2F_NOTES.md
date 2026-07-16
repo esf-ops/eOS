@@ -1,7 +1,7 @@
 # Phase DE.2F — Customer Review Request, Estimator Amendment, Comparison Queue, and Digital Re-publication
 
-**Date:** 2026-07-16  
-**Status:** Implemented (flags off; SQL unapplied; no acceptance/sold/email/payment). **Do not begin DE.2G.**  
+**Date:** 2026-07-16
+**Status:** Implemented (flags off; SQL unapplied; no acceptance/sold/email/payment). DE.2G.0 readiness follows — **do not begin DE.2G.1** without instruction.
 **Depends on:** DE.2E (public configuration + sessions + DE.2C calculations)
 
 ---
@@ -100,18 +100,18 @@ Draft edits allowed only before publish. Locked measurements are **not** editabl
 
 ## 7. Re-publication atomicity
 
-Memory: mutex + full restore of DE + configuration + amendment dumps on failure.  
+Memory: mutex + full restore of DE + configuration + amendment dumps on failure.
 Postgres: single `digital_estimate_publish_amendment_atomic` (service_role, fixed `search_path`).
 
 Atomically:
 
-1. validate amendment / calculation evidence  
-2. freeze amendment  
-3. supersede prior active publication + revoke tokens  
-4. revoke prior configuration sessions  
-5. create replacement publication + snapshot + hash-only token  
-6. mark review `updated_estimate_published`  
-7. append safe events  
+1. validate amendment / calculation evidence
+2. freeze amendment
+3. supersede prior active publication + revoke tokens
+4. revoke prior configuration sessions
+5. create replacement publication + snapshot + hash-only token
+6. mark review `updated_estimate_published`
+7. append safe events
 
 Does **not** write `quote_headers`. Source type: `digital_estimate_amendment` (not a new IE revision).
 
@@ -143,13 +143,13 @@ Server flags are authoritative. No real user grants in this phase.
 
 ## 10. Migration order (do not apply yet)
 
-1. `eliteos_digital_estimate_v1.sql`  
-2. `eliteos_digital_estimate_configuration_v1.sql`  
-3. `eliteos_digital_estimate_public_configuration_v1.sql`  
+1. `eliteos_digital_estimate_v1.sql`
+2. `eliteos_digital_estimate_configuration_v1.sql`
+3. `eliteos_digital_estimate_public_configuration_v1.sql`
 4. `eliteos_digital_estimate_amendment_v1.sql`
 
 ---
 
 ## 11. Exact next phase
 
-**DE.2G — Private synthetic deployment** (controlled Studio/public pilot wiring, still no real-customer production cutover unless separately approved). Do not start DE.2G until this phase is reviewed.
+**Exact next phase:** **DE.2G.0 readiness is complete.** Next is **DE.2G.1 — authorized synthetic deployment execution** only after Gates 1–12 approval. Do not start DE.2G.1 without instruction.

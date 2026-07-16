@@ -44,6 +44,7 @@ const QUOTE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 const ENV_ON = {
   DIGITAL_ESTIMATE_API_ENABLED: "1",
+  DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY: "0",
   DIGITAL_ESTIMATE_PUBLISH_ENABLED: "1",
   DIGITAL_ESTIMATE_PUBLIC_READ_ENABLED: "1",
   HEAD_URL_DIGITAL_ESTIMATE: "https://digital.eliteosfab.com",

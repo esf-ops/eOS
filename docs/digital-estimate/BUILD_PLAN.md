@@ -1,7 +1,7 @@
 # Phase DE.0 — Digital Estimate Build Plan
 
 **Date:** 2026-07-15
-**Status:** Controlled phase plan — DE.1–DE.2F complete in-repo (flags off; no acceptance)
+**Status:** Controlled phase plan — DE.1–DE.2F complete; DE.2G.0 readiness complete (no deploy)
 **Depends on:** all sibling docs in this folder
 
 ---
@@ -39,7 +39,8 @@
 | **DE.2D** | Studio envelope builder | DE.2C — **done (flags off; no public UI)** |
 | **DE.2E** | Public customer configuration UI (+ fragment token) | DE.2C–D — **done (flags off; no acceptance)** |
 | **DE.2F** | Review request + estimator amendment + re-publication | DE.2E — **done (flags off; no acceptance)** |
-| **DE.2G** | Private synthetic deployment | DE.2F — **not started** |
+| **DE.2G.0** | Private synthetic deployment readiness / guardrails | DE.2F — **done (docs+guards; no deploy)** |
+| **DE.2G.1** | Authorized synthetic deployment execution | DE.2G.0 — **not started** |
 | **DE.3+** | Acceptance / sold / handoff (renumbered from older DE.3–10 ideas) | later |
 
 Older labels DE.3–DE.10 in prior drafts mapped configuration UI earlier; **interactive configuration now starts at DE.2A** after Studio exists. Do not collapse DE.2C–E.

@@ -26,6 +26,10 @@ import {
   hashDigitalEstimateToken
 } from "../digitalEstimateToken.mjs";
 import { buildPublicDigitalEstimateDto, assertPublicDtoHasNoForbiddenContent } from "../digitalEstimatePublicSerializer.mjs";
+import {
+  assertSyntheticPublicationPublicAccess,
+  rejectSyntheticCallerAuthority
+} from "../syntheticPilotGuard.mjs";
 
 function unavailable(message = "Estimate unavailable") {
   const e = new Error(message);
@@ -153,6 +157,7 @@ export function createPublicConfigurationService(deps) {
     if (!publication || publication.status !== "active" || publication.revoked_at) {
       throw unavailable();
     }
+    assertSyntheticPublicationPublicAccess(publication.id, env);
     const now = Date.now();
     const expiresAt = new Date(publication.access_expires_at).getTime();
     if (Number.isFinite(expiresAt) && now > expiresAt) throw unavailable();
@@ -339,10 +344,11 @@ export function createPublicConfigurationService(deps) {
     /**
      * Exchange publication Bearer token → session cookie secret (returned to caller for Set-Cookie).
      */
-    async exchangePublicationToken({ rawToken, now = () => new Date() }) {
+    async exchangePublicationToken({ rawToken, body = null, now = () => new Date() }) {
       if (!isDigitalEstimatePublicConfigurationRuntimeEnabled(env)) {
         throw unavailable();
       }
+      rejectSyntheticCallerAuthority(body);
       const { tokenRow, publication, snap } = await resolvePublicationFromRawToken(rawToken);
       const organizationId = publication.organization_id;
 
@@ -422,6 +428,7 @@ export function createPublicConfigurationService(deps) {
         session.publication_id
       );
       if (!publication || publication.status !== "active") throw unavailable();
+      assertSyntheticPublicationPublicAccess(publication.id, env);
       const snap = await deRepository.getSnapshotByPublicationId(
         session.organization_id,
         session.publication_id
@@ -465,6 +472,7 @@ export function createPublicConfigurationService(deps) {
       if (!isDigitalEstimatePublicConfigurationRuntimeEnabled(env)) {
         throw unavailable();
       }
+      rejectSyntheticCallerAuthority(body);
       rejectPublicSelectionAuthority(body || {});
       const expectedRowVersion = body?.expectedRowVersion ?? body?.expected_row_version;
       const idempotencyKey = String(body?.idempotencyKey || body?.idempotency_key || "").trim();
@@ -492,6 +500,7 @@ export function createPublicConfigurationService(deps) {
         session.publication_id
       );
       if (!publication || publication.status !== "active") throw unavailable();
+      assertSyntheticPublicationPublicAccess(publication.id, env);
       if (isPricingExpired(publication.pricing_valid_through)) {
         throw configUnavailable("Pricing has expired");
       }

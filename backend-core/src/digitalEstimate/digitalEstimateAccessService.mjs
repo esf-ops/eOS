@@ -22,6 +22,7 @@ import {
   constantTimeEqualHex,
   hashDigitalEstimateToken
 } from "./digitalEstimateToken.mjs";
+import { assertSyntheticPublicationPublicAccess } from "./syntheticPilotGuard.mjs";
 
 function unavailable() {
   const err = new Error("Not found");
@@ -66,6 +67,9 @@ export async function resolvePublicDigitalEstimate(input) {
     tokenRow.publication_id
   );
   if (!publication) throw unavailable();
+
+  // DE.2G.0 — synthetic allowlist (generic 404 when not allowlisted)
+  assertSyntheticPublicationPublicAccess(publication.id, env);
 
   const now = (input.now ?? (() => new Date()))();
   const expiresAt = new Date(publication.access_expires_at).getTime();

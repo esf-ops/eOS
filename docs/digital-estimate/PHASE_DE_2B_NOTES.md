@@ -1,8 +1,8 @@
 # Phase DE.2B — Configuration + Pricing-Policy Persistence Foundation
 
-**Date:** 2026-07-16  
-**Status:** Implemented (unapplied SQL + repositories + tests). **Not deployed. SQL not applied. Flags off.**  
-**Branch context:** `elite-100-digital-estimate`  
+**Date:** 2026-07-16
+**Status:** Implemented (unapplied SQL + repositories + tests). **Not deployed. SQL not applied. Flags off.**
+**Branch context:** `elite-100-digital-estimate`
 **Does not begin:** DE.2C was next; **DE.2C engine now implemented** — see `PHASE_DE_2C_NOTES.md`. **DE.2D Studio builder now implemented** — see `PHASE_DE_2D_NOTES.md`. Do not begin DE.2E without instruction.
 
 ---

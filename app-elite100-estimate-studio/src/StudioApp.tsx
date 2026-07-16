@@ -82,6 +82,7 @@ export default function StudioApp() {
   const [busy, setBusy] = useState(false);
   const [oneTimeLink, setOneTimeLink] = useState<string | null>(null);
   const [oneTimeToken, setOneTimeToken] = useState<string | null>(null);
+  const [publishStaffNotice, setPublishStaffNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [studioConfigOk, setStudioConfigOk] = useState<boolean | null>(null);
   const [mainNav, setMainNav] = useState<"publications" | "reviews">("publications");
@@ -202,9 +203,20 @@ export default function StudioApp() {
       const body = (await apiPost("/api/elite100-estimate-studio/publications", sessionToken, {
         quoteId: selectedId,
         confirm: true
-      })) as { accessToken?: string; customerUrl?: string };
+      })) as {
+        accessToken?: string;
+        customerUrl?: string;
+        staffNotice?: string | null;
+        syntheticPilot?: { awaitingSyntheticAllowlist?: boolean };
+      };
       setOneTimeToken(body.accessToken || null);
       setOneTimeLink(body.customerUrl || null);
+      setPublishStaffNotice(
+        body.staffNotice ||
+          (body.syntheticPilot?.awaitingSyntheticAllowlist
+            ? "Replacement publication awaiting synthetic allowlist"
+            : null)
+      );
       await loadQuote(selectedId);
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : "Publish failed");
@@ -461,6 +473,11 @@ export default function StudioApp() {
                 {oneTimeLink ? (
                   <div className="token-once">
                     <strong>One-time link</strong> — copy now; raw token is not stored for later retrieval.
+                    {publishStaffNotice ? (
+                      <p className="muted" role="status">
+                        {publishStaffNotice}
+                      </p>
+                    ) : null}
                     <code>{oneTimeLink}</code>
                     {oneTimeToken ? <span className="muted">Token length: {oneTimeToken.length}</span> : null}
                     <div className="actions">

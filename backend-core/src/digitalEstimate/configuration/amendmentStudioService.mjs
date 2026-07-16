@@ -30,6 +30,7 @@ import {
   assertPublicDtoHasNoForbiddenContent,
   buildPublicDigitalEstimateDto
 } from "../digitalEstimatePublicSerializer.mjs";
+import { describeSyntheticPublicAccessibility } from "../syntheticPilotGuard.mjs";
 
 function deError(message, code, statusCode = 400) {
   const err = new Error(message);
@@ -752,6 +753,7 @@ export function createAmendmentStudioService(deps) {
 
       const base = readDigitalEstimatePublicBaseUrl(env);
       const customerUrl = `${base}/e#${rawToken}`;
+      const syntheticAccess = describeSyntheticPublicAccessibility(atomic.publicationId, env);
 
       return {
         ok: true,
@@ -766,7 +768,11 @@ export function createAmendmentStudioService(deps) {
         // Raw token ONE TIME — never log.
         accessToken: rawToken,
         customerUrl,
-        supersededCount: atomic.supersededCount ?? 0
+        supersededCount: atomic.supersededCount ?? 0,
+        syntheticPilot: syntheticAccess,
+        staffNotice: syntheticAccess.awaitingSyntheticAllowlist
+          ? "Replacement publication awaiting synthetic allowlist"
+          : null
       };
     },
 

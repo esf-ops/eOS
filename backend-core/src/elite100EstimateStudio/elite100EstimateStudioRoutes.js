@@ -18,6 +18,8 @@ import {
   isDigitalEstimatePublishEnabled,
   readSafeDigitalEstimateConfig
 } from "../digitalEstimate/digitalEstimateConfig.mjs";
+import { buildSafeDigitalEstimateDiagnostics } from "../digitalEstimate/deploymentState.mjs";
+import { readSafeSyntheticPilotConfig } from "../digitalEstimate/syntheticPilotGuard.mjs";
 import { assessElite100PublicationEligibility } from "../digitalEstimate/digitalEstimateEligibility.mjs";
 import {
   publishDigitalEstimate,
@@ -121,9 +123,24 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       config: {
         ...readSafeElite100EstimateStudioConfig(env),
         pilotAuthorized: pilot,
-        digitalEstimate: readSafeDigitalEstimateConfig(env)
+        digitalEstimate: readSafeDigitalEstimateConfig(env),
+        syntheticPilot: readSafeSyntheticPilotConfig(env)
       }
     });
+  });
+
+  /** DE.2G.0 — Safe deployment diagnostics (no secrets / no allowlist IDs). */
+  app.get("/api/elite100-estimate-studio/diagnostics", ...staffStack, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const pilot = isElite100EstimateStudioPilotUser(req.user, env);
+    res.json(
+      buildSafeDigitalEstimateDiagnostics(env, {
+        pilotAuthorized: pilot,
+        repositoryConfigured: Boolean(repository),
+        // Process-local limiter only until a later authorized shared limiter ships.
+        distributedLimiterReady: false
+      })
+    );
   });
 
   /** Search saved Elite 100 Internal Estimates (org-scoped read only). */

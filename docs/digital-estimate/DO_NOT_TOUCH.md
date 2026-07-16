@@ -18,7 +18,8 @@
 | DE.2C configuration delta engine | `elite100-config-delta-v1` | Pure engine over frozen inputs only. **Do not** call `calculateQuote()`. Confirmed: Remnant W **45** / D **50**, Watt’s Promo **40**, use tax **2%** after markup (bundled public), Spahn **+3%** after pre-rounded net, display **ceil $10**. |
 | DE.2D Studio envelope builder | `/api/digital-estimate/configuration/*` + Studio UI | Pilot chain + config flags required. UI Vite flag never grants access. |
 | DE.2E public configuration | `/api/public-digital-estimate/v2/*` + fragment links | **Do not** enable without Origin + distributed rate-limit deployment gates. **No** acceptance/sold/email/payment. Legacy path tokens stay read-only. |
-| DE.2F review + amendment | `eliteos_digital_estimate_amendment_v1.sql` + review/amendment routes | **Do not** treat review request as acceptance. **Do not** write `quote_headers`. SQL **unapplied**. Flags default off. **No** auto-email. Do not begin DE.2G without instruction. |
+| DE.2F review + amendment | `eliteos_digital_estimate_amendment_v1.sql` + review/amendment routes | **Do not** treat review request as acceptance. **Do not** write `quote_headers`. SQL **unapplied**. Flags default off. **No** auto-email. |
+| DE.2G.0 synthetic readiness | `syntheticPilotGuard.mjs` + runbook | **Do not** deploy/DNS/SQL/grants. Synthetic-only default ON; empty publication allowlist fail closed. **Do not** begin DE.2G.1 / real-customer without authorization. |
 | Partner Quote | `app-partner-quote/**`, `/api/partner-quote/*` | Out of scope |
 | Custom Quote | `app-custom-quote/**`, `/api/custom-quotes/*` | Out of scope |
 | Quote Pipeline | `/api/quotes/pipeline*` | Out of scope |

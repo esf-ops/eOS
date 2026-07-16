@@ -4,7 +4,7 @@
 **Status:** Architecture blueprint — DE.1–DE.2F implemented in-repo (flags off; SQL unapplied). **Review request + amendment re-publication is DE.2F; acceptance/sold remain later.**
 **Depends on:** [`CURRENT_STATE.md`](./CURRENT_STATE.md)
 
-See also: `PHASE_DE_2A_*`, `PHASE_DE_2B_NOTES.md`, `PHASE_DE_2C_NOTES.md`, `PHASE_DE_2D_NOTES.md`, `PHASE_DE_2E_NOTES.md`, `PHASE_DE_2F_NOTES.md`.
+See also: `PHASE_DE_2A_*`, `PHASE_DE_2B_NOTES.md`, `PHASE_DE_2C_NOTES.md`, `PHASE_DE_2D_NOTES.md`, `PHASE_DE_2E_NOTES.md`, `PHASE_DE_2F_NOTES.md`, `PHASE_DE_2G_0_READINESS.md`.
 
 ---
 

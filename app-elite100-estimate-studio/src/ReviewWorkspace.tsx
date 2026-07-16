@@ -44,6 +44,7 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [oneTimeLink, setOneTimeLink] = useState<string | null>(null);
   const [replacementPubId, setReplacementPubId] = useState<string | null>(null);
+  const [staffNotice, setStaffNotice] = useState<string | null>(null);
   const [customerExplanation, setCustomerExplanation] = useState("");
   const [internalNote, setInternalNote] = useState("");
   const [clarificationMsg, setClarificationMsg] = useState("");
@@ -209,6 +210,7 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
     }
     setBusy(true);
     setOneTimeLink(null);
+    setStaffNotice(null);
     try {
       const body = (await apiPost(
         `/api/digital-estimate/amendments/${String(latestAmd.id)}/publish`,
@@ -218,10 +220,17 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
         customerUrl?: string | null;
         publication?: { id?: string };
         accessToken?: string | null;
+        staffNotice?: string | null;
+        syntheticPilot?: { awaitingSyntheticAllowlist?: boolean };
       };
       setOneTimeLink(body.customerUrl || null);
       setReplacementPubId(body.publication?.id || null);
-      // Do not persist accessToken in component state beyond this response cycle if unused
+      setStaffNotice(
+        body.staffNotice ||
+          (body.syntheticPilot?.awaitingSyntheticAllowlist
+            ? "Replacement publication awaiting synthetic allowlist"
+            : null)
+      );
       void body.accessToken;
       await loadDetail(selectedId!);
       await loadQueue();
@@ -416,6 +425,11 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
                     <div className="token-once">
                       <strong>One-time replacement link</strong> — copy now; raw token is not stored for later
                       retrieval. No email is sent.
+                      {staffNotice ? (
+                        <p className="muted" role="status">
+                          {staffNotice}
+                        </p>
+                      ) : null}
                       <code>{oneTimeLink}</code>
                       <div className="actions">
                         <button type="button" onClick={() => void copyReplacementLink()}>

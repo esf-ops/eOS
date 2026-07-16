@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-07-16",
+  "phase": "DE.2G.0",
+  "note": "Checksums for reviewed unapplied migrations. Do not apply in DE.2G.0.",
+  "migrations": [
+    {
+      "path": "backend-core/supabase/eliteos_digital_estimate_v1.sql",
+      "sha256": "c02f46d1bc747c6fef3084f079a62f9ee541330e914c8896a5b5bd3bfd31d797",
+      "bytes": 23886
+    },
+    {
+      "path": "backend-core/supabase/eliteos_digital_estimate_configuration_v1.sql",
+      "sha256": "230ad2d6a7ee9fbc1355e87de8a347585b7842d9dd08d88a612264a3f47721eb",
+      "bytes": 46637
+    },
+    {
+      "path": "backend-core/supabase/eliteos_digital_estimate_public_configuration_v1.sql",
+      "sha256": "1c28e9c057c7d1107d937048bdefae09ae62ad241bc6a12b636422b1d62a2704",
+      "bytes": 8814
+    },
+    {
+      "path": "backend-core/supabase/eliteos_digital_estimate_amendment_v1.sql",
+      "sha256": "8168bd8453541c252c8945d6be3ecbd19baab6dcf2992a58eea204d0d2dbea0f",
+      "bytes": 17274
+    }
+  ]
+}

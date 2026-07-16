@@ -16,6 +16,7 @@ import { assessElite100PublicationEligibility } from "./digitalEstimateEligibili
 import { sanitizeDigitalEstimateEventMetadata } from "./digitalEstimateEvents.mjs";
 import { buildPublicationFreezePayloads } from "./digitalEstimateSnapshot.mjs";
 import { generateDigitalEstimateAccessToken } from "./digitalEstimateToken.mjs";
+import { describeSyntheticPublicAccessibility } from "./syntheticPilotGuard.mjs";
 
 function deError(message, code, statusCode = 400) {
   const err = new Error(message);
@@ -157,6 +158,7 @@ export async function publishDigitalEstimate(input) {
   const base = readDigitalEstimatePublicBaseUrl(env);
   // DE.2E: fragment-token links — raw token never in path/query. Legacy DE.1 path links remain readable.
   const customerUrl = `${base}/e#${rawToken}`;
+  const syntheticAccess = describeSyntheticPublicAccessibility(atomic.publication.id, env);
 
   return {
     ok: true,
@@ -165,7 +167,11 @@ export async function publishDigitalEstimate(input) {
     accessToken: rawToken,
     customerUrl,
     eligibility,
-    supersededCount: atomic.supersededCount ?? priorActive.length
+    supersededCount: atomic.supersededCount ?? priorActive.length,
+    syntheticPilot: syntheticAccess,
+    staffNotice: syntheticAccess.awaitingSyntheticAllowlist
+      ? "Replacement publication awaiting synthetic allowlist"
+      : null
   };
 }
 

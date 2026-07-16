@@ -1,6 +1,6 @@
 # Phase DE.2D — Private Studio Configuration Envelope Builder
 
-**Date:** 2026-07-16  
+**Date:** 2026-07-16
 **Status:** Implemented (pilot APIs + Studio UI + tests). **Flags off. SQL not applied.** Public customer configuration is DE.2E — see `PHASE_DE_2E_NOTES.md`.
 **Depends on:** DE.2B schema/repos, DE.2C `elite100-config-delta-v1` engine, DE.1.1 Studio pilot chain.
 
@@ -87,14 +87,14 @@ Fail closed / structural blockers when locked SF or baseline group missing — *
 
 After selecting an eligible publication (existing publish/history unchanged):
 
-A. Baseline summary (locked SF, rooms, mapping notice)  
-B. Envelope status / version history  
-C. Room material group defaults (Promo, A–F, Remnant)  
-D. Server-approved options (unresolved = unavailable / review_required)  
-E. Pilot material markup % + reason (internal only)  
-F. Dual preview: internal evidence vs customer-safe  
-G. Validation blockers  
-H. Activation with dual confirmation → lock → Clone to edit  
+A. Baseline summary (locked SF, rooms, mapping notice)
+B. Envelope status / version history
+C. Room material group defaults (Promo, A–F, Remnant)
+D. Server-approved options (unresolved = unavailable / review_required)
+E. Pilot material markup % + reason (internal only)
+F. Dual preview: internal evidence vs customer-safe
+G. Validation blockers
+H. Activation with dual confirmation → lock → Clone to edit
 
 Clears sensitive state on 401/403 and publication switch. No `localStorage` for internals. No rates in URLs.
 

@@ -65,6 +65,7 @@ export function readSafeDigitalEstimateConfig(env = process.env) {
     publicBaseUrl: readDigitalEstimatePublicBaseUrl(env),
     accessTtlDays: readDigitalEstimateAccessTtlDays(env),
     pricingValidDays: readDigitalEstimatePricingValidDays(env),
-    termsDisclosureVersion: DIGITAL_ESTIMATE_TERMS_VERSION
+    termsDisclosureVersion: DIGITAL_ESTIMATE_TERMS_VERSION,
+    syntheticPilotOnly: String(env.DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY ?? "1").trim() !== "0"
   };
 }

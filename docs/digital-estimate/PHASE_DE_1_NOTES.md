@@ -1,7 +1,7 @@
 # Phase DE.1 — Elite 100 Digital Estimate Read-Only Publish
 
-**Date:** 2026-07-16 (closure verification same day)  
-**Status:** Implemented + **closure-verified**; employee UI relocated in **DE.1.1** to Elite 100 Estimate Studio (see `PHASE_DE_1_1_NOTES.md`).  
+**Date:** 2026-07-16 (closure verification same day)
+**Status:** Implemented + **closure-verified**; employee UI relocated in **DE.1.1** to Elite 100 Estimate Studio (see `PHASE_DE_1_1_NOTES.md`).
 **Branch:** `elite-100-digital-estimate`
 
 > **DE.1.1 note:** Publish controls no longer live in Internal Estimate or Quote Library. Backend Digital Estimate + `app-digital-estimate` remain. Staff DE routes require Studio head + pilot allowlist.
@@ -24,7 +24,7 @@ Order inside the transaction:
 
 Partial unique index `uq_quote_publications_one_active_per_family` enforces one current active publication per org+family. Concurrent publishers serialize on the row locks; failure rolls back the entire transaction — prior working publication is never revoked without a completed replacement.
 
-**Supabase repository** calls the RPC only (no multi-statement app-simulated transaction).  
+**Supabase repository** calls the RPC only (no multi-statement app-simulated transaction).
 **Memory repository** mirrors the same all-or-nothing sequence under a family mutex with checkpoint rollback (tests).
 
 ### 2. Token replacement atomicity
@@ -141,11 +141,11 @@ Public GET reads **only** `customer_snapshot_json`. Tokens never point at live `
 
 ## Token lifecycle
 
-1. `crypto.randomBytes(32)` → base64url raw token  
-2. Store SHA-256 hex only (`token_hash`)  
-3. Return raw token once on publish/replace  
-4. Public verify: hash lookup + constant-time digest compare  
-5. Revoke / replace / access expiry / superseded → generic `{ ok:false, error:"Not found" }`  
+1. `crypto.randomBytes(32)` → base64url raw token
+2. Store SHA-256 hex only (`token_hash`)
+3. Return raw token once on publish/replace
+4. Public verify: hash lookup + constant-time digest compare
+5. Revoke / replace / access expiry / superseded → generic `{ ok:false, error:"Not found" }`
 6. Never log raw token (path redaction helper)
 
 ---

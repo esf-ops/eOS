@@ -12,6 +12,10 @@ import {
   constantTimeEqualSessionHash,
   hashConfigurationSessionSecret
 } from "./publicConfigurationSession.mjs";
+import {
+  assertSyntheticPublicationPublicAccess,
+  rejectSyntheticCallerAuthority
+} from "../syntheticPilotGuard.mjs";
 
 function unavailable(message = "Estimate unavailable") {
   const e = new Error(message);
@@ -155,6 +159,7 @@ export function createReviewRequestService(deps) {
       if (!isDigitalEstimateReviewRequestRuntimeEnabled(env)) {
         throw unavailable();
       }
+      rejectSyntheticCallerAuthority(body || {});
       rejectReviewRequestAuthority(body || {});
 
       const expectedRowVersion = body?.expectedRowVersion ?? body?.expected_row_version;
@@ -181,6 +186,7 @@ export function createReviewRequestService(deps) {
         session.publication_id
       );
       if (!publication || publication.status !== "active") throw unavailable();
+      assertSyntheticPublicationPublicAccess(publication.id, env);
       if (isPricingExpired(publication.pricing_valid_through)) {
         throw configUnavailable("Pricing has expired");
       }
@@ -326,6 +332,7 @@ export function createReviewRequestService(deps) {
         throw unavailable();
       }
       const session = await resolveSession(rawSecret);
+      assertSyntheticPublicationPublicAccess(session.publication_id, env);
       const request = await amendmentRepository.getCurrentReviewRequestForSession(
         session.organization_id,
         session.id
