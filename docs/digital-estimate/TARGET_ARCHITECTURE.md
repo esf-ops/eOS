@@ -1,10 +1,10 @@
 # Phase DE.0 — Elite 100 Digital Estimate — Target Architecture
 
 **Date:** 2026-07-15
-**Status:** Architecture blueprint — DE.1 / DE.1.1 implemented; **DE.2A** documents interactive configuration + pricing design (no implementation yet).
+**Status:** Architecture blueprint — DE.1 / DE.1.1 implemented; DE.2A design complete; **DE.2B** configuration + pricing-policy persistence foundation (SQL unapplied, flags off).
 **Depends on:** [`CURRENT_STATE.md`](./CURRENT_STATE.md)
 
-See also: `PHASE_DE_2A_PRICING_AUTHORITY_AUDIT.md`, `PHASE_DE_2A_PRICING_INVENTORY.md`, `PHASE_DE_2A_CONFIGURATION_MODEL.md`, `PHASE_DE_2A_DATA_MODEL.md`, `PHASE_DE_2A_API_AND_SECURITY.md`, `PHASE_DE_2A_IMPLEMENTATION_PLAN.md`.
+See also: `PHASE_DE_2A_PRICING_AUTHORITY_AUDIT.md`, `PHASE_DE_2A_PRICING_INVENTORY.md`, `PHASE_DE_2A_1_BUSINESS_PRICING_DECISIONS.md`, `PHASE_DE_2A_CONFIGURATION_MODEL.md`, `PHASE_DE_2A_DATA_MODEL.md`, `PHASE_DE_2A_API_AND_SECURITY.md`, `PHASE_DE_2A_IMPLEMENTATION_PLAN.md`, `PHASE_DE_2B_NOTES.md`.
 
 ---
 

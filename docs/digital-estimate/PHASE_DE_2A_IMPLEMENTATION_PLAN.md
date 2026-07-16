@@ -10,8 +10,8 @@
 
 | Phase | Focus | Deliverable | Stop |
 |-------|-------|-------------|------|
-| **DE.2A** | Audit / design | This folder’s DE.2A docs | ← **you are here** |
-| **DE.2B** | Additive schema + repository contracts | SQL (unapplied) + memory/supabase repos + contract tests; **no** customer UI | After schema/contracts green |
+| **DE.2A** | Audit / design | This folder’s DE.2A docs | complete |
+| **DE.2B** | Additive schema + repository contracts | SQL (unapplied) + memory/supabase repos + contract tests; **no** customer UI | ← **complete (unapplied)** — see `PHASE_DE_2B_NOTES.md` |
 | **DE.2C** | Deterministic pricing foundation | Versioned delta calculator + fixtures (baseline vs configured, rounding, account freeze) | After golden fixtures pass |
 | **DE.2D** | Studio envelope builder | Staff UI to author/validate/activate envelopes | After pilot-only Studio feature works |
 | **DE.2E** | Public customer configuration UI | Fragment-token auth + select/calculate UX | After public DTO + security tests |
@@ -74,6 +74,7 @@ Do not collapse DE.2C–E. Do not start acceptance/sold/payment/email/IE import.
 |-----|---------|
 | `PHASE_DE_2A_PRICING_AUTHORITY_AUDIT.md` | calculateQuote / Admin / reproducibility |
 | `PHASE_DE_2A_PRICING_INVENTORY.md` | Full Elite 100 pricing inventory, conflicts, order, matrices |
+| `PHASE_DE_2A_1_BUSINESS_PRICING_DECISIONS.md` | Business approval worksheet + DE.2B readiness gate |
 | `PHASE_DE_2A_CONFIGURATION_MODEL.md` | Envelope, lifecycle, visible vs internal price |
 | `PHASE_DE_2A_DATA_MODEL.md` | Proposed tables |
 | `PHASE_DE_2A_API_AND_SECURITY.md` | APIs + fragment token plan |

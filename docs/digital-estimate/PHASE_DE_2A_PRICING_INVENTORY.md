@@ -5,6 +5,8 @@
 **Scope:** Every pricing input that can affect an **Elite 100 Internal Estimate** (`quote_source=internal_quote`, Direct basis) and closely related sources that conflict or will feed interactive Digital Estimate configuration.
 **Companion:** [`PHASE_DE_2A_PRICING_AUTHORITY_AUDIT.md`](./PHASE_DE_2A_PRICING_AUTHORITY_AUDIT.md)
 
+**Companion decision sheet:** [`PHASE_DE_2A_1_BUSINESS_PRICING_DECISIONS.md`](./PHASE_DE_2A_1_BUSINESS_PRICING_DECISIONS.md) (business approvals; DE.2B readiness gate).
+
 ### How to read this inventory
 
 For each item:
@@ -48,7 +50,7 @@ For each item:
 | Group D | $/SF | **105** | **85** | 105 | 85 | Yes | production | | | Yes | Yes | | 2% | |
 | Group E | $/SF | **120** | **100** | 120 | 100 | Yes | production | | | Yes | Yes | | 2% | |
 | Group F | $/SF | **135** | **115** | 135 | 115 | Yes | production | | | Yes | Yes | | 2% | |
-| Remnant | $/SF | **50** | **50** | **missing** | **missing** | Yes | production (SW) / missing (Admin) | Remnant | Via material | Possibly | Yes | | 2% | **Conflict: Admin has no Remnant group** |
+| Remnant | $/SF | **50** | **50** (calculator) | **missing** | **missing** | Yes | production (SW) / missing (Admin) | Remnant | Via material | Possibly | Yes | | 2% | **Conflict:** Admin missing Remnant; **confirmed future Wholesale Remnant = 45** (DE.2B fixture; calculator unchanged) |
 
 **Source (software):** `backend-core/src/quotes/quoteCalculator.js` → `ESF_DIRECT_PRICE_PER_SQFT`, `PROTOTYPE_TIER_PRICE_PER_SQFT`
 **Source (Admin):** `quote_price_group_rates.rate_per_sqft` where `rate_type` ∈ {`direct`,`wholesale`}

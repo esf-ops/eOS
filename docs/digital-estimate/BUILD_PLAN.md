@@ -1,7 +1,7 @@
 # Phase DE.0 — Digital Estimate Build Plan
 
 **Date:** 2026-07-15
-**Status:** Controlled phase plan — DE.1 / DE.1.1 implemented; **DE.2A audit complete (docs only)**
+**Status:** Controlled phase plan — DE.1 / DE.1.1 implemented; DE.2A audit complete; **DE.2B schema/repos complete (SQL unapplied, flags off)**
 **Depends on:** all sibling docs in this folder
 
 ---
@@ -34,7 +34,7 @@
 | **DE.1** | Read-only publish + public token view + events + flags | DE.0 |
 | **DE.1.1** | Private Elite 100 Estimate Studio head (employee publish UI); IE/QL unchanged | DE.1 closure |
 | **DE.2A** | Interactive configuration + pricing **architecture audit** (docs only) | DE.1.1 |
-| **DE.2B** | Additive configuration schema + repository contracts | DE.2A |
+| **DE.2B** | Additive configuration schema + repository contracts | DE.2A — **done (unapplied)** |
 | **DE.2C** | Deterministic Elite 100 configuration delta pricing + fixtures | DE.2B |
 | **DE.2D** | Studio envelope builder | DE.2C |
 | **DE.2E** | Public customer configuration UI (+ fragment token) | DE.2C–D |
