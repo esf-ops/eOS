@@ -132,7 +132,13 @@ export function assertPublicConfigurationHasNoForbiddenContent(value, path = "$"
         "internal_evidence",
         "approverUserId",
         "rawToken",
-        "raw_token"
+        "raw_token",
+        "watts",
+        "spahn",
+        "spahnAndRose",
+        "materialUseTax",
+        "useTax",
+        "taxAmount"
       ];
       if (forbiddenKeys.includes(k)) {
         throw new Error(`forbidden public configuration key at ${path}.${k}`);

@@ -10,8 +10,8 @@
 
 | Phase | Focus | Deliverable | Stop |
 |-------|-------|-------------|------|
-| **DE.2A** | Audit / design | This folder’s DE.2A docs | complete |
-| **DE.2B** | Additive schema + repository contracts | SQL (unapplied) + memory/supabase repos + contract tests; **no** customer UI | ← **complete (unapplied)** — see `PHASE_DE_2B_NOTES.md` |
+| **DE.2B** | Additive schema + repository contracts | SQL (unapplied) + memory/supabase repos + contract tests; **no** customer UI | complete (unapplied) — see `PHASE_DE_2B_NOTES.md` |
+| **DE.2C** | Deterministic pricing foundation | Versioned delta calculator + fixtures (baseline vs configured, rounding, account freeze) | ← **complete (flags off)** — see `PHASE_DE_2C_NOTES.md` |
 | **DE.2C** | Deterministic pricing foundation | Versioned delta calculator + fixtures (baseline vs configured, rounding, account freeze) | After golden fixtures pass |
 | **DE.2D** | Studio envelope builder | Staff UI to author/validate/activate envelopes | After pilot-only Studio feature works |
 | **DE.2E** | Public customer configuration UI | Fragment-token auth + select/calculate UX | After public DTO + security tests |

@@ -26,12 +26,16 @@ export function isDigitalEstimateConfigurationRuntimeEnabled(env = process.env) 
 export const DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION_PLACEHOLDER =
   "elite100_config_delta_v1_placeholder";
 
+/** Production DE.2C engine id (also exported from elite100ConfigDeltaConstants). */
+export const DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION = "elite100-config-delta-v1";
+
 export function readSafeDigitalEstimateConfigurationConfig(env = process.env) {
   return {
     apiEnabled: isDigitalEstimateApiEnabled(env),
     configurationEnabled: isDigitalEstimateConfigurationEnabled(env),
     studioEnabled: isElite100EstimateStudioEnabled(env),
     runtimeEnabled: isDigitalEstimateConfigurationRuntimeEnabled(env),
-    engineVersionPlaceholder: DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION_PLACEHOLDER
+    engineVersionPlaceholder: DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION_PLACEHOLDER,
+    engineVersion: DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION
   };
 }

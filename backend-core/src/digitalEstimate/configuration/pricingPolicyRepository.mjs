@@ -97,7 +97,7 @@ export function resolveMaterialRateForAccount(args) {
       (o) =>
         o.organization_id === organizationId &&
         memberGroupIds.has(String(o.account_group_id)) &&
-        o.schedule_code === scheduleCode &&
+        (!o.schedule_code || o.schedule_code === scheduleCode) &&
         o.group_code === groupCode &&
         inEffect(o, at)
     )
@@ -317,10 +317,12 @@ export function createInMemoryPricingPolicyRepository() {
         organization_id: organizationId,
         policy_version_id: policyId,
         account_group_id: wattsId,
-        schedule_code: FIXTURE_WATTS_PROMO_OVERRIDE.scheduleCode,
+        schedule_code: null,
         group_code: FIXTURE_WATTS_PROMO_OVERRIDE.groupCode,
         rate_per_sqft: FIXTURE_WATTS_PROMO_OVERRIDE.ratePerSqft,
         priority: 200,
+        override_kind: FIXTURE_WATTS_PROMO_OVERRIDE.overrideKind,
+        account_group_code: FIXTURE_WATTS_PROMO_OVERRIDE.accountGroupCode,
         reason_internal: FIXTURE_WATTS_PROMO_OVERRIDE.reasonInternal,
         approval_evidence_json: { fixture: true },
         is_active: true,
@@ -351,6 +353,7 @@ export function createInMemoryPricingPolicyRepository() {
         adjustment_type: FIXTURE_SPAHN_AND_ROSE_ESTIMATE_ADJUSTMENT.adjustmentType,
         rate: FIXTURE_SPAHN_AND_ROSE_ESTIMATE_ADJUSTMENT.rate,
         basis_policy: FIXTURE_SPAHN_AND_ROSE_ESTIMATE_ADJUSTMENT.basisPolicy,
+        rate_bps: FIXTURE_SPAHN_AND_ROSE_ESTIMATE_ADJUSTMENT.bps,
         includes_categories: [
           "material",
           "products",

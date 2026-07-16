@@ -689,8 +689,8 @@ export function createInMemoryConfigurationRepository(opts = {}) {
     },
 
     /**
-     * Persist an immutable calculation placeholder (DE.2C fills real engine).
-     * Accepts only server-authored customer/internal payloads — rejects client totals.
+     * Persist an immutable calculation snapshot (DE.2C).
+     * Idempotent when calculationInputFingerprint (+ optional idempotencyKey) matches an existing row.
      */
     async insertCalculation(organizationId, {
       selectionId,
@@ -700,16 +700,15 @@ export function createInMemoryConfigurationRepository(opts = {}) {
       configuredTotal = null,
       pricingValidThrough = null,
       engineVersion = DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION_PLACEHOLDER,
-      calculationInputFingerprint
+      calculationInputFingerprint,
+      calculationFingerprint = null,
+      idempotencyKey = null
     }) {
       const selection = selections.get(String(selectionId));
       if (!selection || selection.organization_id !== organizationId) {
         throw err("not_found", "selection not found", 404);
       }
-      if (calculations.has(String(selectionId)) || [...calculations.values()].some((c) => c.selection_id === selectionId)) {
-        throw err("calc_exists", "calculation already exists for selection", 409);
-      }
-      const id = randomUUID();
+
       const fingerprint =
         calculationInputFingerprint ||
         hashCanonical({
@@ -717,6 +716,30 @@ export function createInMemoryConfigurationRepository(opts = {}) {
           engineVersion,
           internalEvidenceJson
         });
+
+      const existingByFp = [...calculations.values()].find(
+        (c) =>
+          c.organization_id === organizationId &&
+          c.calculation_input_fingerprint === fingerprint &&
+          (idempotencyKey == null ||
+            c.client_idempotency_key == null ||
+            c.client_idempotency_key === idempotencyKey)
+      );
+      if (existingByFp) {
+        return structuredClone(existingByFp);
+      }
+
+      // One calculation per selection unless fingerprint differs (new selection row recommended)
+      const priorForSelection = [...calculations.values()].find((c) => c.selection_id === selectionId);
+      if (priorForSelection && priorForSelection.calculation_input_fingerprint === fingerprint) {
+        return structuredClone(priorForSelection);
+      }
+      if (priorForSelection && priorForSelection.calculation_input_fingerprint !== fingerprint) {
+        // Materially different inputs require a new selection id — fail closed on overwrite
+        throw err("calc_exists", "selection already has a different immutable calculation", 409);
+      }
+
+      const id = randomUUID();
       const row = {
         id,
         organization_id: organizationId,
@@ -724,11 +747,13 @@ export function createInMemoryConfigurationRepository(opts = {}) {
         envelope_id: selection.envelope_id,
         engine_version: engineVersion,
         calculation_input_fingerprint: fingerprint,
+        calculation_fingerprint: calculationFingerprint,
         customer_result_json: customerResultJson,
         internal_evidence_json: internalEvidenceJson,
         baseline_total: baselineTotal,
         configured_total: configuredTotal,
         pricing_valid_through: pricingValidThrough,
+        client_idempotency_key: idempotencyKey,
         created_at: new Date().toISOString()
       };
       calculations.set(id, row);
@@ -741,6 +766,24 @@ export function createInMemoryConfigurationRepository(opts = {}) {
         metadata: { calculationId: id, fingerprint }
       });
       return structuredClone(row);
+    },
+
+    async getCalculation(organizationId, calculationId) {
+      const row = calculations.get(String(calculationId));
+      if (!row || row.organization_id !== organizationId) return null;
+      return structuredClone(row);
+    },
+
+    async getCalculationByInputFingerprint(organizationId, fingerprint, { idempotencyKey = null } = {}) {
+      const row = [...calculations.values()].find(
+        (c) =>
+          c.organization_id === organizationId &&
+          c.calculation_input_fingerprint === fingerprint &&
+          (idempotencyKey == null ||
+            !c.client_idempotency_key ||
+            c.client_idempotency_key === idempotencyKey)
+      );
+      return row ? structuredClone(row) : null;
     },
 
     async updateCalculation() {
@@ -810,6 +853,93 @@ export function createSupabaseConfigurationRepository({ db }) {
       });
       if (error) throw error;
       return data;
+    },
+
+    async getCalculation(organizationId, calculationId) {
+      const { data, error } = await db
+        .from("digital_estimate_configuration_calculations")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", calculationId)
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
+    async getCalculationByInputFingerprint(organizationId, fingerprint, { idempotencyKey = null } = {}) {
+      let q = db
+        .from("digital_estimate_configuration_calculations")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("calculation_input_fingerprint", fingerprint)
+        .limit(1);
+      const { data, error } = await q;
+      if (error) throw error;
+      const row = data?.[0] ?? null;
+      if (!row) return null;
+      if (
+        idempotencyKey != null &&
+        row.client_idempotency_key &&
+        row.client_idempotency_key !== idempotencyKey
+      ) {
+        return null;
+      }
+      return row;
+    },
+
+    async insertCalculation(organizationId, row) {
+      const existing = await this.getCalculationByInputFingerprint(
+        organizationId,
+        row.calculationInputFingerprint || row.calculation_input_fingerprint,
+        { idempotencyKey: row.idempotencyKey || row.client_idempotency_key || null }
+      );
+      if (existing) return existing;
+
+      const payload = {
+        organization_id: organizationId,
+        selection_id: row.selectionId || row.selection_id,
+        envelope_id: row.envelopeId || row.envelope_id,
+        engine_version: row.engineVersion || row.engine_version,
+        calculation_input_fingerprint:
+          row.calculationInputFingerprint || row.calculation_input_fingerprint,
+        customer_result_json: row.customerResultJson || row.customer_result_json,
+        internal_evidence_json: row.internalEvidenceJson || row.internal_evidence_json,
+        baseline_total: row.baselineTotal ?? row.baseline_total ?? null,
+        configured_total: row.configuredTotal ?? row.configured_total ?? null,
+        pricing_valid_through: row.pricingValidThrough ?? row.pricing_valid_through ?? null
+      };
+
+      const { data, error } = await db
+        .from("digital_estimate_configuration_calculations")
+        .insert(payload)
+        .select("*")
+        .limit(1);
+      if (error) {
+        // Unique conflict → fetch existing
+        if (String(error.code) === "23505" || /duplicate/i.test(String(error.message))) {
+          const again = await this.getCalculationByInputFingerprint(
+            organizationId,
+            payload.calculation_input_fingerprint
+          );
+          if (again) return again;
+        }
+        throw error;
+      }
+
+      const saved = data?.[0];
+      if (saved) {
+        await db.from("digital_estimate_configuration_events").insert({
+          organization_id: organizationId,
+          envelope_id: saved.envelope_id,
+          event_type: "calculated",
+          actor_type: "system",
+          metadata: {
+            calculationId: saved.id,
+            fingerprint: saved.calculation_input_fingerprint
+          }
+        });
+      }
+      return saved ?? null;
     }
   };
 }

@@ -531,7 +531,7 @@ async function buildMinimalActiveEnvelope(repo, organizationId = ORG) {
   assert.equal(a.length, 1);
   assert.equal(b.length, 1);
   assert.equal(a[0].rate, FIXTURE_SPAHN_AND_ROSE_ESTIMATE_ADJUSTMENT.rate);
-  assert.equal(a[0].basisPolicy, "entire_estimate");
+  assert.equal(a[0].basisPolicy, "entire_pre_rounded_estimate_including_material_use_tax");
   assert.ok(a[0].frozen.ruleId);
 
   const other = policy.resolveEstimateAdjustments(ORG, OTHER_ACCOUNT);

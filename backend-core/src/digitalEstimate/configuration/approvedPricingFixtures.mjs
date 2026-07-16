@@ -49,27 +49,31 @@ export const FIXTURE_GLOBAL_MATERIAL_USE_TAX = Object.freeze({
     "fabrication_addons",
     "entire_estimate"
   ]),
-  customerPresentation: "unresolved",
+  customerPresentation: "bundled_not_separate_line",
   note:
-    "Confirmed commercial rule. Presentation and order vs Spahn & Rose adjustment are DE.2C decisions."
+    "Confirmed commercial rule. Tax is bundled into customer total (not a separate public line). Spahn & Rose +3% applies after tax on the complete pre-rounded subtotal (DE.2C)."
 });
 
-/** Watt's account-group Promo override — $40/SF only for trusted members. */
+/** Watt's account-group Promo override — $40/SF only for trusted members (account-specific, not Direct/Wholesale labeled). */
 export const FIXTURE_WATTS_PROMO_OVERRIDE = Object.freeze({
   accountGroupCode: "watts",
-  scheduleCode: "direct",
+  overrideKind: "watts_promo",
   groupCode: "promo",
   ratePerSqft: 40,
   reasonInternal: "Confirmed Watt's Promo material rate override"
 });
 
-/** Spahn & Rose estimate-level +3% on entire estimate (order vs use tax = DE.2C). */
+/**
+ * Spahn & Rose estimate-level +3% on entire pre-rounded estimate (includes material use tax).
+ * Order (DE.2C confirmed): after material+markup+tax+products+addons+customs+credits, before display rounding.
+ */
 export const FIXTURE_SPAHN_AND_ROSE_ESTIMATE_ADJUSTMENT = Object.freeze({
   accountGroupCode: "spahn_and_rose",
   adjustmentCode: "spahn_and_rose_entire_estimate_pct",
   rate: 0.03,
+  bps: 300,
   adjustmentType: "percent",
-  basisPolicy: "entire_estimate",
+  basisPolicy: "entire_pre_rounded_estimate_including_material_use_tax",
   reasonInternal: "Confirmed Spahn & Rose entire-estimate adjustment"
 });
 

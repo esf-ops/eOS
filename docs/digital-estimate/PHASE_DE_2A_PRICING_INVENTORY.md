@@ -236,6 +236,7 @@ Plus per-sink upgrades (§5). Outside-program vanities: **$0** from program pric
 | OOC premium | 10% wholesale / 15% Direct of eligible material — **rooms engine currently charges $0 for internal** | — | Legacy path only | ambiguous / effectively unused for IE rooms |
 | Internal rounding | `round2` (cents) | — | Yes | production |
 | Customer-display rounding (IE) | **Ceil to next $5** per display row; credits exact | Admin public rule still says round_up_nearest_10 | UI yes; calc no | **conflict** public policy vs IE UI |
+| Digital Estimate configured total (DE.2C) | **Ceil to next $10** on exact configured total | Engine `elite100-config-delta-v1` | Yes (engine) | production (DE.2C engine; flags off) |
 | Public consumer rounding | `roundPublicEstimateToNearestTen` = ceil $10 | matches Admin public_rounding_rule | public only | production |
 | `customer_display_total` | Client sum of displayed rows; stored | — | Validated on save | production |
 | `finalRounded` | Must equal CDT | — | Validated | production |

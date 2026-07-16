@@ -380,8 +380,8 @@ Interactive price display when selectable (from configuration model): full price
 | B9 | Template fee | Not in calculator | Included / separate $____ / N/A | Resolve before customer copy | | Open | Optional fee option |
 | B10 | Delivery fee | Not in calculator | Included / separate $____ / N/A | Resolve before customer copy | | Open | Optional fee option |
 | B11 | Minimum job | Not enforced | None / $____ minimum | None until defined | | Open | Engine rule version |
-| B12 | 2% tax treatment | Confirmed **0.02** on material sell across schedules; IE still CT+BS with vanity exclusions | Keep / align exclusions / customer line | Keep 2%; resolve presentation + IE exclusion conflict in DE.2C | | Partial | Tax policy version on envelope |
-| B13 | Digital Estimate rounding | IE ceil $5; public ceil $10; vanity nearest $5; Admin seed round_up_nearest_10 | Ceil $5 / ceil $10 / nearest $10 / whole-dollar | **Ceil $5 per visible row** (Open) | | Open | Calc policy id |
+| B12 | 2% tax treatment | Confirmed **0.02** on material sell after markup; **bundled** public (not separate line); Spahn after pre-rounded net including tax | Keep | **Confirmed DE.2C** | | Confirmed | Engine + public DTO |
+| B13 | Digital Estimate rounding | Final customer total **ceil to $10** (DE.2C confirmed); IE CDT remains ceil-$5 for IE print | Ceil $5 / ceil $10 | **Ceil $10 for configured DE totals** | | Confirmed (DE display) | Engine display rounding |
 | B14 | Account markup authorization | Partner rules exist; IE Direct unused | Allow frozen account terms / forbid in pilot | Forbid live markup; optional freeze later | | Open | Envelope JSON shape (optional) |
 | B15 | Override / discount approval | No max discount in code | Caps + roles / pilot freeform | Caps before customer pilot | | Open | Validation rules |
 | B16 | Faucet & accessory sell prices | Catalog display-only, **0** price fields | Price book / exclude from DE.2 | Exclude until priced | | Open | Merchandising |
@@ -443,10 +443,11 @@ Only **schema-shaping** uncertainty belongs here. Price *amounts* that freeze as
 | Rule | Status |
 |------|--------|
 | Direct rates Promo→F + Remnant **50** | Confirmed business; DE.2B fixture |
-| Wholesale rates Promo→F + Remnant **45** | Confirmed business; DE.2B fixture (calculator still Remnant W **50**) |
-| Global material use tax **2%** on material sell across schedules | Confirmed; presentation/order vs Spahn deferred |
-| Watt’s Promo **$40/SF** for trusted account group only | Confirmed; membership via `partner_account_id` |
-| Spahn & Rose **+3%** entire-estimate adjustment | Confirmed; order vs use tax = DE.2C |
+| Wholesale rates Promo→F + Remnant **45** | Confirmed business; DE.2B fixture + DE.2C engine (calculator still Remnant W **50**) |
+| Global material use tax **2%** on material sell across schedules | Confirmed; **bundled** into customer total (DE.2C); not a separate public line |
+| Watt’s Promo **$40/SF** for trusted account group only | Confirmed; membership via `partner_account_id`; account-specific (not Direct/Wholesale label) |
+| Spahn & Rose **+3%** after complete pre-rounded subtotal (includes use tax) | Confirmed DE.2C order |
+| Final customer total ceiling to **$10** | Confirmed DE.2C |
 
 See [`PHASE_DE_2B_NOTES.md`](./PHASE_DE_2B_NOTES.md).
 

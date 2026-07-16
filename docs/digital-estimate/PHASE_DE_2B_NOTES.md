@@ -3,7 +3,7 @@
 **Date:** 2026-07-16  
 **Status:** Implemented (unapplied SQL + repositories + tests). **Not deployed. SQL not applied. Flags off.**  
 **Branch context:** `elite-100-digital-estimate`  
-**Does not begin:** DE.2C (deterministic configuration pricing engine)
+**Does not begin:** DE.2C was next; **DE.2C engine now implemented** — see `PHASE_DE_2C_NOTES.md`. Do not begin DE.2D without instruction.
 
 ---
 
@@ -32,8 +32,8 @@
 | Global material use tax **2%** on material sell | Yes | `digital_estimate_material_tax_policies` | Yes | **No** | Unchanged; IE still 2% on CT+BS with vanity-program exclusions — conflict noted for DE.2C |
 | Watt’s Promo **$40/SF** for trusted group only | Yes | account groups + membership + material overrides | Yes | **No** | Unchanged / not wired |
 | Spahn & Rose **+3%** entire estimate | Yes | account estimate adjustments | Yes | **No** | Unchanged / not wired |
-| Order of Spahn % vs 2% tax | **Deferred DE.2C** | `calculation_order_hint` nullable | Order left null | — | — |
-| Tax customer presentation | **Deferred** | `customer_presentation=unresolved` | — | — | — |
+| Order of Spahn % vs 2% tax | **Confirmed DE.2C:** Spahn after complete pre-rounded subtotal including tax | `calculation_order_hint` / engine order | Golden fixtures | — | — |
+| Tax customer presentation | **Confirmed DE.2C:** bundled into customer total; not a separate public line | `customer_presentation` | Engine public DTO | — | — |
 | Blanco 450 vs 495, waterfall, rounding, etc. | Unresolved | Option/pricing columns exist | Not seeded as authority | **No** | Unchanged |
 
 ---
