@@ -1,23 +1,24 @@
 # Phase DE.0 — Elite 100 Digital Estimate — Target Architecture
 
 **Date:** 2026-07-15
-**Status:** Architecture blueprint — DE.1 implemented; **DE.1.1 adds private Elite 100 Estimate Studio** for employee publish controls.
+**Status:** Architecture blueprint — DE.1 / DE.1.1 implemented; **DE.2A** documents interactive configuration + pricing design (no implementation yet).
 **Depends on:** [`CURRENT_STATE.md`](./CURRENT_STATE.md)
+
+See also: `PHASE_DE_2A_PRICING_AUTHORITY_AUDIT.md`, `PHASE_DE_2A_PRICING_INVENTORY.md`, `PHASE_DE_2A_CONFIGURATION_MODEL.md`, `PHASE_DE_2A_DATA_MODEL.md`, `PHASE_DE_2A_API_AND_SECURITY.md`, `PHASE_DE_2A_IMPLEMENTATION_PLAN.md`.
 
 ---
 
 ## 1. Product intent
 
-Connect Quote Intake → AI Takeoff → Internal Estimate → **Elite 100 Estimate Studio (publish)** → **Digital Estimate (public)** while leaving non–Elite 100 and traditional PDF/email paths intact.
+Connect Quote Intake → AI Takeoff → Internal Estimate → **Elite 100 Estimate Studio (publish + future envelopes)** → **Digital Estimate (public read-only today; future configuration)** while leaving non–Elite 100 and traditional PDF/email paths intact.
 
 **Employee surface (DE.1.1):** Private pilot head `elite100_estimate_studio` (`app-elite100-estimate-studio`, proposed `elite100.eliteosfab.com`). Internal Estimate and Quote Library remain unchanged for the wider team.
 
-**Customer surface:** `app-digital-estimate` (`digital.eliteosfab.com`) — tokenized read-only portal; not in the employee launcher.
+**Customer surface:** `app-digital-estimate` (`digital.eliteosfab.com`) — tokenized portal; not in the employee launcher.
 
-**Immediate objective (vertical slice):**
-Estimator publishes an **immutable, secure, read-only** digital estimate from a saved Elite 100 quote; customer opens/prints without an account; eliteOS records publish/view/revoke events. PDF remains available; it is no longer the only customer experience.
+**Immediate shipped slice:** immutable read-only publish. **Next design (DE.2A):** interactive configuration over an estimator allowlist without mutating publications or `quote_headers`.
 
-**Principle:** The **customer browser is never calculation authority**. Publication presents a frozen, server-authored, customer-safe snapshot.
+**Principle:** The **customer browser is never calculation authority**. Publication presents a frozen, server-authored, customer-safe snapshot. Future configuration totals are **Brain-authored immutable calculation revisions** layered on that baseline.
 
 ---
 
@@ -101,8 +102,9 @@ Publications **reference** a quote revision; they do not replace Quote Library s
 
 | Head | Path | Domain | Auth |
 |------|------|--------|------|
-| **Internal publication controls** | Extend `app-internal-estimate/` (primary); optional activity in `app-quote-library/` | existing | Staff JWT + head `quote` / `quote_library` |
-| **Public Digital Estimate** | **`app-digital-estimate/`** (new) | **`digital.eliteosfab.com`** (`HEAD_URL_DIGITAL_ESTIMATE`) — **not** `estimate.eliteosfab.com` (IE alias) | **Anonymous token** in URL; no account |
+| **Elite 100 Estimate Studio** | `app-elite100-estimate-studio/` | `elite100.eliteosfab.com` | Staff JWT + head `elite100_estimate_studio` + pilot allowlist |
+| **Public Digital Estimate** | **`app-digital-estimate/`** | **`digital.eliteosfab.com`** — **not** `estimate.eliteosfab.com` (IE alias) | **Anonymous token** (DE.1 path; DE.2 fragment+header) |
+| Internal Estimate / Quote Library | existing | unchanged | No DE employee controls (DE.1.1) |
 | Brain | `backend-core` only | API host | Service role server-side; **no** browser Supabase authority |
 
 Follows existing multi-head pattern (`app-visualizer`, `app-quote`, new Vite head + CORS origin + optional launcher entry for **staff tools only** — public head is not a launcher card).

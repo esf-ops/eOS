@@ -1,7 +1,7 @@
 # Phase DE.0 — Digital Estimate Build Plan
 
 **Date:** 2026-07-15
-**Status:** Controlled phase plan only — **DE.1 not started**
+**Status:** Controlled phase plan — DE.1 / DE.1.1 implemented; **DE.2A audit complete (docs only)**
 **Depends on:** all sibling docs in this folder
 
 ---
@@ -33,17 +33,16 @@
 | **DE.0** | Current-state audit + architecture (this folder) | — |
 | **DE.1** | Read-only publish + public token view + events + flags | DE.0 |
 | **DE.1.1** | Private Elite 100 Estimate Studio head (employee publish UI); IE/QL unchanged | DE.1 closure |
-| **DE.2** | Broader staff polish / QL activity (when approved) | DE.1.1 |
-| **DE.3** | Configuration envelope model (data + admin, no customer UI) | DE.1 |
-| **DE.4** | Per-room Elite 100 group/color/option choices + Brain recalc | DE.3, Pricing Admin cutover awareness |
-| **DE.5** | Customer autosave drafts (non-authoritative) | DE.4 |
-| **DE.6** | Structured amendments + immutable customer submissions | DE.4 |
-| **DE.7** | Elite exception review + revised publications | DE.6 |
-| **DE.8** | Final customer approval / acceptance state | DE.7 |
-| **DE.9** | Accepted — Awaiting Sold Review → staff Sold confirm | DE.8, QL sold |
-| **DE.10** | Structured handoff + notifications + analytics | DE.9 |
+| **DE.2A** | Interactive configuration + pricing **architecture audit** (docs only) | DE.1.1 |
+| **DE.2B** | Additive configuration schema + repository contracts | DE.2A |
+| **DE.2C** | Deterministic Elite 100 configuration delta pricing + fixtures | DE.2B |
+| **DE.2D** | Studio envelope builder | DE.2C |
+| **DE.2E** | Public customer configuration UI (+ fragment token) | DE.2C–D |
+| **DE.2F** | Revision comparison + estimator review | DE.2E |
+| **DE.2G** | Private synthetic deployment | DE.2F |
+| **DE.3+** | Acceptance / sold / handoff (renumbered from older DE.3–10 ideas) | later |
 
-Do not collapse DE.4–DE.8 into one phase.
+Older labels DE.3–DE.10 in prior drafts mapped configuration UI earlier; **interactive configuration now starts at DE.2A** after Studio exists. Do not collapse DE.2C–E.
 
 ---
 
