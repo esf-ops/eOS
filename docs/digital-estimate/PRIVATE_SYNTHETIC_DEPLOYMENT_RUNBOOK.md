@@ -1,8 +1,10 @@
 # Private Synthetic Deployment Runbook
 
-**Sources:** DE.2G.0 readiness + **DE.2G.1A environment discovery** (`PHASE_DE_2G_1A_ENVIRONMENT_DISCOVERY.md`).
+**Sources:** DE.2G.0 readiness + DE.2G.1A discovery + **DE.2G private synthetic pilot** (`PHASE_DE_2G_PRIVATE_SYNTHETIC_PILOT.md`).
 
-**Do not execute gates from automation alone.** Manual approval required. DE.2G.1A changed **no** external state.
+**Pilot status (2026-07-16):** Migrations applied; Brain + both Vercel heads deployed. **DNS CNAME targets documented** — Cloudflare records not yet created. Stages 8–14 pending operator (head grant, fixture, flags, E2E).
+
+**Do not execute gates from automation alone.** `APPROVE_PRIVATE_SYNTHETIC_DEPLOYMENT` authorizes bounded external changes when operator tooling permits.
 
 Domains (proposed — **DNS not created in DE.2G.0 / 1A**):
 

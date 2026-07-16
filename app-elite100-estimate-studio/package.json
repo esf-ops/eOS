@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node src/phaseDe11.ui.test.mjs"
+    "test": "node src/phaseDe11.ui.test.mjs && node src/phaseDe11.oneTimeLink.ui.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
