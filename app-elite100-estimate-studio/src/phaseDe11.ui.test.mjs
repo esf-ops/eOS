@@ -24,6 +24,9 @@ assert.equal(app.includes("service_role"), false);
 assert.equal(app.includes("VITE_ELITE100_ESTIMATE_STUDIO_PILOT"), false);
 assert.ok(pkg.includes("app-elite100-estimate-studio"));
 
+// DE.1.1 preserved; DE.2D configuration UI is opt-in via separate flag (tested in phaseDe2d.ui.test.mjs)
+assert.equal(envEx.includes("VITE_ELITE100_ESTIMATE_STUDIO_CONFIGURATION_UI_ENABLED=false"), true);
+
 console.log("\nphaseDe11.ui.test.mjs\n");
 console.log("ok: Studio UI flags, port, Brain-only APIs, Topbar");
 console.log("\nAll phase DE.1.1 UI tests passed.\n");

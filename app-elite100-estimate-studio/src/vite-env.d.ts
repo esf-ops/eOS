@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_HEAD_URL_HOME?: string;
   /** UI-only; never grants access. Exact "true" shows Studio shell. */
   readonly VITE_ELITE100_ESTIMATE_STUDIO_UI_ENABLED?: string;
+  /** UI-only configuration builder gate; never grants access. Exact "true" shows config panel. */
+  readonly VITE_ELITE100_ESTIMATE_STUDIO_CONFIGURATION_UI_ENABLED?: string;
   readonly VITE_HEAD_URL_DIGITAL_ESTIMATE?: string;
 }
 

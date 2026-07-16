@@ -13,9 +13,10 @@
 | Quote Library workflow | `app-quote-library/**`, `/api/quote-library/*` | **No DE timeline integration during stealth** (DE.1.1). No status-model rewrite |
 | Elite 100 Estimate Studio | `app-elite100-estimate-studio/**`, `/api/elite100-estimate-studio/*` | Private pilot only; do not grant via role defaults or VITE flags |
 | Public Digital Estimate | `app-digital-estimate/**` | Customer portal only — never register in employee launcher |
-| Interactive configuration (DE.2+) | `eliteos_digital_estimate_configuration_v1.sql` + `digitalEstimate/configuration/**` | **Do not** mutate `quote_headers`, publication snapshots, Takeoff, or live `calculateQuote()` semantics without an explicit phase. DE.2B SQL must remain **unapplied** until approved. Do not seed production Watt’s/Spahn/rates in DE.2B. |
+| Interactive configuration (DE.2+) | `eliteos_digital_estimate_configuration_v1.sql` + `digitalEstimate/configuration/**` | **Do not** mutate `quote_headers`, publication snapshots, Takeoff, or live `calculateQuote()` semantics without an explicit phase. SQL must remain **unapplied** until approved. Do not seed production Watt’s/Spahn/rates. DE.2D Studio builder is pilot-only; **do not** enable public customer configuration (DE.2E) without an explicit phase. |
 | Pricing Admin → `calculateQuote` cutover | `pricingConfigResolver.js` | **Forbidden** without parity tests + explicit approval (DE.2A) |
-| DE.2C configuration delta engine | `elite100-config-delta-v1` | Pure engine over frozen inputs only. **Do not** call `calculateQuote()`. **Do not** enable flags or ship customer UI in DE.2C. Confirmed: Remnant W **45** / D **50**, Watt’s Promo **40**, use tax **2%** after markup (bundled public), Spahn **+3%** after pre-rounded net, display **ceil $10**. |
+| DE.2C configuration delta engine | `elite100-config-delta-v1` | Pure engine over frozen inputs only. **Do not** call `calculateQuote()`. Confirmed: Remnant W **45** / D **50**, Watt’s Promo **40**, use tax **2%** after markup (bundled public), Spahn **+3%** after pre-rounded net, display **ceil $10**. |
+| DE.2D Studio envelope builder | `/api/digital-estimate/configuration/*` + Studio UI | Pilot chain + config flags required. UI Vite flag never grants access. **No** public customer configuration routes. |
 | Partner Quote | `app-partner-quote/**`, `/api/partner-quote/*` | Out of scope |
 | Custom Quote | `app-custom-quote/**`, `/api/custom-quotes/*` | Out of scope |
 | Quote Pipeline | `/api/quotes/pipeline*` | Out of scope |

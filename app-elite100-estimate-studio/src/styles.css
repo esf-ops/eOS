@@ -220,3 +220,79 @@ button:disabled {
   padding: 2rem;
   text-align: center;
 }
+
+.config-panel {
+  margin-top: 1.25rem;
+}
+
+.config-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(8rem, 12rem) 5rem;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.4rem 0;
+}
+
+.config-row input[type="number"],
+.config-row select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--eos-border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.warn-box {
+  margin: 0.5rem 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #e0c48a;
+  border-radius: 8px;
+  background: #fff8ea;
+  color: var(--eos-warn);
+  font-size: 0.9rem;
+}
+
+.preview-split {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 860px) {
+  .preview-split {
+    grid-template-columns: 1fr;
+  }
+  .config-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.internal-preview {
+  border: 1px dashed #c5a05a;
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: #fffdf8;
+}
+
+.customer-preview {
+  border: 1px solid var(--eos-border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: #f8fbf9;
+}
+
+.internal-preview h4,
+.customer-preview h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+button.linkish {
+  background: none;
+  border: none;
+  color: var(--eos-accent);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}

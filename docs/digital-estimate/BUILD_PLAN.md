@@ -1,7 +1,7 @@
 # Phase DE.0 — Digital Estimate Build Plan
 
 **Date:** 2026-07-15
-**Status:** Controlled phase plan — DE.1 / DE.1.1 / DE.2A / DE.2B complete; **DE.2C engine complete (flags off)**
+**Status:** Controlled phase plan — DE.1 / DE.1.1 / DE.2A / DE.2B / DE.2C complete; **DE.2D Studio envelope builder complete (flags off; no public config)**
 **Depends on:** all sibling docs in this folder
 
 ---
@@ -36,8 +36,8 @@
 | **DE.2A** | Interactive configuration + pricing **architecture audit** (docs only) | DE.1.1 |
 | **DE.2B** | Additive configuration schema + repository contracts | DE.2A — **done (unapplied)** |
 | **DE.2C** | Deterministic Elite 100 configuration delta pricing + fixtures | DE.2B — **done (flags off)** |
-| **DE.2D** | Studio envelope builder | DE.2C |
-| **DE.2E** | Public customer configuration UI (+ fragment token) | DE.2C–D |
+| **DE.2D** | Studio envelope builder | DE.2C — **done (flags off; no public UI)** |
+| **DE.2E** | Public customer configuration UI (+ fragment token) | DE.2C–D — **not started** |
 | **DE.2F** | Revision comparison + estimator review | DE.2E |
 | **DE.2G** | Private synthetic deployment | DE.2F |
 | **DE.3+** | Acceptance / sold / handoff (renumbered from older DE.3–10 ideas) | later |

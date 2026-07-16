@@ -1,10 +1,10 @@
 # Phase DE.0 — Elite 100 Digital Estimate — Target Architecture
 
 **Date:** 2026-07-15
-**Status:** Architecture blueprint — DE.1 / DE.1.1 / DE.2A / DE.2B complete; **DE.2C** `elite100-config-delta-v1` engine implemented (flags off, no UI).
+**Status:** Architecture blueprint — DE.1 / DE.1.1 / DE.2A / DE.2B / DE.2C complete; **DE.2D** private Studio envelope builder implemented (flags off; no public customer configuration).
 **Depends on:** [`CURRENT_STATE.md`](./CURRENT_STATE.md)
 
-See also: `PHASE_DE_2A_PRICING_AUTHORITY_AUDIT.md`, `PHASE_DE_2A_PRICING_INVENTORY.md`, `PHASE_DE_2A_1_BUSINESS_PRICING_DECISIONS.md`, `PHASE_DE_2A_CONFIGURATION_MODEL.md`, `PHASE_DE_2A_DATA_MODEL.md`, `PHASE_DE_2A_API_AND_SECURITY.md`, `PHASE_DE_2A_IMPLEMENTATION_PLAN.md`, `PHASE_DE_2B_NOTES.md`, `PHASE_DE_2C_NOTES.md`.
+See also: `PHASE_DE_2A_PRICING_AUTHORITY_AUDIT.md`, `PHASE_DE_2A_PRICING_INVENTORY.md`, `PHASE_DE_2A_1_BUSINESS_PRICING_DECISIONS.md`, `PHASE_DE_2A_CONFIGURATION_MODEL.md`, `PHASE_DE_2A_DATA_MODEL.md`, `PHASE_DE_2A_API_AND_SECURITY.md`, `PHASE_DE_2A_IMPLEMENTATION_PLAN.md`, `PHASE_DE_2B_NOTES.md`, `PHASE_DE_2C_NOTES.md`, `PHASE_DE_2D_NOTES.md`.
 
 ---
 
@@ -16,7 +16,7 @@ Connect Quote Intake → AI Takeoff → Internal Estimate → **Elite 100 Estima
 
 **Customer surface:** `app-digital-estimate` (`digital.eliteosfab.com`) — tokenized portal; not in the employee launcher.
 
-**Immediate shipped slice:** immutable read-only publish. **Next design (DE.2A):** interactive configuration over an estimator allowlist without mutating publications or `quote_headers`.
+**Immediate shipped slice:** immutable read-only publish + private Studio publish (DE.1.1) + private envelope builder (DE.2D, flags off). **Public configuration remains DE.2E.**
 
 **Principle:** The **customer browser is never calculation authority**. Publication presents a frozen, server-authored, customer-safe snapshot. Future configuration totals are **Brain-authored immutable calculation revisions** layered on that baseline.
 

@@ -3,7 +3,7 @@
 **Date:** 2026-07-16  
 **Status:** Implemented (engine + golden fixtures + persistence hooks). **Flags off. SQL not applied. No UI.**  
 **Engine:** `elite100-config-delta-v1`  
-**Does not begin:** DE.2D (Studio envelope builder)
+**Does not begin:** DE.2E (public customer configuration). DE.2D Studio envelope builder is implemented — see `PHASE_DE_2D_NOTES.md`.
 
 ---
 
@@ -19,7 +19,7 @@
 | Golden + security tests | `phaseDe2c.test.mjs` |
 | Persistence methods | `getCalculation`, `getCalculationByInputFingerprint`, idempotent `insertCalculation` (memory + Supabase) |
 
-**Not shipped:** customer UI, Studio envelope UI, SQL apply, production seeds, flag enablement, `calculateQuote()` changes, DE.2D.
+**Not shipped:** customer UI, SQL apply, production seeds, flag enablement, `calculateQuote()` changes. Studio envelope UI is DE.2D (separate notes).
 
 ---
 

@@ -27,6 +27,7 @@ HEAD_URL_ELITE100_ESTIMATE_STUDIO=https://elite100.eliteosfab.com
 DIGITAL_ESTIMATE_API_ENABLED=0
 DIGITAL_ESTIMATE_PUBLISH_ENABLED=0
 DIGITAL_ESTIMATE_PUBLIC_READ_ENABLED=0
+DIGITAL_ESTIMATE_CONFIGURATION_ENABLED=0
 HEAD_URL_DIGITAL_ESTIMATE=https://digital.eliteosfab.com
 ```
 
@@ -40,11 +41,14 @@ Never put pilot IDs/emails in `VITE_*`.
 
 ```bash
 VITE_ELITE100_ESTIMATE_STUDIO_UI_ENABLED=false
+VITE_ELITE100_ESTIMATE_STUDIO_CONFIGURATION_UI_ENABLED=false
 VITE_BACKEND_URL=...
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
 VITE_HEAD_URL_HOME=...
 ```
+
+Configuration UI visibility is separate from Studio shell visibility. Neither Vite flag grants Brain access.
 
 **Public Digital Estimate**
 

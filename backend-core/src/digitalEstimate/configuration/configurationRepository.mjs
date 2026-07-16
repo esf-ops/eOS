@@ -585,7 +585,7 @@ export function createInMemoryConfigurationRepository(opts = {}) {
       return api.getEnvelope(organizationId, draft.id);
     },
 
-    getEnvelopeGraph(organizationId, envelopeId) {
+    async getEnvelopeGraph(organizationId, envelopeId) {
       const env = envelopes.get(String(envelopeId));
       if (!env || env.organization_id !== organizationId) return null;
       const gs = listGroups(envelopeId);
@@ -739,33 +739,40 @@ export function createInMemoryConfigurationRepository(opts = {}) {
         throw err("calc_exists", "selection already has a different immutable calculation", 409);
       }
 
-      const id = randomUUID();
-      const row = {
-        id,
-        organization_id: organizationId,
-        selection_id: selectionId,
-        envelope_id: selection.envelope_id,
-        engine_version: engineVersion,
-        calculation_input_fingerprint: fingerprint,
-        calculation_fingerprint: calculationFingerprint,
-        customer_result_json: customerResultJson,
-        internal_evidence_json: internalEvidenceJson,
-        baseline_total: baselineTotal,
-        configured_total: configuredTotal,
-        pricing_valid_through: pricingValidThrough,
-        client_idempotency_key: idempotencyKey,
-        created_at: new Date().toISOString()
-      };
-      calculations.set(id, row);
-      await appendEvent({
-        organization_id: organizationId,
-        envelope_id: selection.envelope_id,
-        session_id: selection.session_id,
-        event_type: "calculated",
-        actor_type: "system",
-        metadata: { calculationId: id, fingerprint }
-      });
-      return structuredClone(row);
+      // Atomic insert + calculated event (memory transactional parity with SQL RPC)
+      const checkpoint = cloneState();
+      try {
+        const id = randomUUID();
+        const row = {
+          id,
+          organization_id: organizationId,
+          selection_id: selectionId,
+          envelope_id: selection.envelope_id,
+          engine_version: engineVersion,
+          calculation_input_fingerprint: fingerprint,
+          calculation_fingerprint: calculationFingerprint,
+          customer_result_json: customerResultJson,
+          internal_evidence_json: internalEvidenceJson,
+          baseline_total: baselineTotal,
+          configured_total: configuredTotal,
+          pricing_valid_through: pricingValidThrough,
+          client_idempotency_key: idempotencyKey,
+          created_at: new Date().toISOString()
+        };
+        calculations.set(id, row);
+        await appendEvent({
+          organization_id: organizationId,
+          envelope_id: selection.envelope_id,
+          session_id: selection.session_id,
+          event_type: "calculated",
+          actor_type: "system",
+          metadata: { calculationId: id, fingerprint }
+        });
+        return structuredClone(row);
+      } catch (e) {
+        restoreState(checkpoint);
+        throw e;
+      }
     },
 
     async getCalculation(organizationId, calculationId) {
@@ -888,58 +895,418 @@ export function createSupabaseConfigurationRepository({ db }) {
     },
 
     async insertCalculation(organizationId, row) {
-      const existing = await this.getCalculationByInputFingerprint(
-        organizationId,
-        row.calculationInputFingerprint || row.calculation_input_fingerprint,
-        { idempotencyKey: row.idempotencyKey || row.client_idempotency_key || null }
-      );
+      const fingerprint =
+        row.calculationInputFingerprint || row.calculation_input_fingerprint;
+      const existing = await this.getCalculationByInputFingerprint(organizationId, fingerprint, {
+        idempotencyKey: row.idempotencyKey || row.client_idempotency_key || null
+      });
       if (existing) return existing;
 
-      const payload = {
-        organization_id: organizationId,
-        selection_id: row.selectionId || row.selection_id,
-        envelope_id: row.envelopeId || row.envelope_id,
-        engine_version: row.engineVersion || row.engine_version,
-        calculation_input_fingerprint:
-          row.calculationInputFingerprint || row.calculation_input_fingerprint,
-        customer_result_json: row.customerResultJson || row.customer_result_json,
-        internal_evidence_json: row.internalEvidenceJson || row.internal_evidence_json,
-        baseline_total: row.baselineTotal ?? row.baseline_total ?? null,
-        configured_total: row.configuredTotal ?? row.configured_total ?? null,
-        pricing_valid_through: row.pricingValidThrough ?? row.pricing_valid_through ?? null
-      };
-
-      const { data, error } = await db
-        .from("digital_estimate_configuration_calculations")
-        .insert(payload)
-        .select("*")
-        .limit(1);
+      // Atomic RPC: insert calculation + append calculated event in one transaction
+      const { data, error } = await db.rpc("digital_estimate_insert_configuration_calculation", {
+        p_organization_id: organizationId,
+        p_selection_id: row.selectionId || row.selection_id,
+        p_engine_version: row.engineVersion || row.engine_version,
+        p_calculation_input_fingerprint: fingerprint,
+        p_customer_result_json: row.customerResultJson || row.customer_result_json,
+        p_internal_evidence_json: row.internalEvidenceJson || row.internal_evidence_json,
+        p_baseline_total: row.baselineTotal ?? row.baseline_total ?? null,
+        p_configured_total: row.configuredTotal ?? row.configured_total ?? null,
+        p_pricing_valid_through: row.pricingValidThrough ?? row.pricing_valid_through ?? null
+      });
       if (error) {
-        // Unique conflict → fetch existing
-        if (String(error.code) === "23505" || /duplicate/i.test(String(error.message))) {
-          const again = await this.getCalculationByInputFingerprint(
-            organizationId,
-            payload.calculation_input_fingerprint
-          );
+        if (String(error.code) === "23505" || /duplicate|already has/i.test(String(error.message))) {
+          const again = await this.getCalculationByInputFingerprint(organizationId, fingerprint);
           if (again) return again;
         }
         throw error;
       }
+      return data?.calculation ?? data ?? null;
+    },
 
-      const saved = data?.[0];
-      if (saved) {
+    async createDraftEnvelope(trusted) {
+      const { organizationId, publicationId, actorUserId, body = {} } = trusted;
+      if (body?.organizationId || body?.organization_id) {
+        const e = new Error("Caller must not supply organizationId");
+        e.code = "forbidden_caller_authority";
+        e.statusCode = 400;
+        throw e;
+      }
+      const { data: pub, error: pubErr } = await db
+        .from("quote_publications")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", publicationId)
+        .limit(1);
+      if (pubErr) throw pubErr;
+      const publication = pub?.[0];
+      if (!publication) {
+        const e = new Error("publication not found");
+        e.code = "not_found";
+        e.statusCode = 404;
+        throw e;
+      }
+      if (publication.status !== "active") {
+        const e = new Error("publication is not active");
+        e.code = "publication_not_active";
+        e.statusCode = 400;
+        throw e;
+      }
+      const { data: snaps, error: snapErr } = await db
+        .from("quote_publication_snapshots")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId)
+        .limit(1);
+      if (snapErr) throw snapErr;
+      const snap = snaps?.[0];
+      if (!snap) {
+        const e = new Error("publication snapshot missing");
+        e.code = "snapshot_missing";
+        e.statusCode = 400;
+        throw e;
+      }
+      const { data: existingVersions } = await db
+        .from("digital_estimate_configuration_envelopes")
+        .select("envelope_version")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId);
+      const nextVersion =
+        (existingVersions || []).reduce((m, e) => Math.max(m, Number(e.envelope_version) || 0), 0) + 1;
+      const payload = {
+        organization_id: organizationId,
+        publication_id: publicationId,
+        publication_snapshot_id: snap.id,
+        source_quote_id: publication.source_quote_id,
+        quote_family_root_id: publication.quote_family_root_id,
+        source_quote_revision_number: publication.revision_number ?? null,
+        source_calculation_evidence_fingerprint:
+          publication.source_quote_fingerprint || publication.pricing_evidence_hash,
+        envelope_version: nextVersion,
+        status: "draft",
+        baseline_customer_snapshot_hash:
+          snap.customer_snapshot_hash || publication.customer_snapshot_hash,
+        baseline_pricing_evidence_hash:
+          snap.pricing_evidence_hash || publication.pricing_evidence_hash,
+        pricing_valid_through: publication.pricing_valid_through ?? null,
+        created_by_user_id: actorUserId ?? null,
+        row_version: 1
+      };
+      const { data, error } = await db
+        .from("digital_estimate_configuration_envelopes")
+        .insert(payload)
+        .select("*")
+        .limit(1);
+      if (error) throw error;
+      const row = data?.[0];
+      if (row) {
         await db.from("digital_estimate_configuration_events").insert({
           organization_id: organizationId,
-          envelope_id: saved.envelope_id,
-          event_type: "calculated",
-          actor_type: "system",
-          metadata: {
-            calculationId: saved.id,
-            fingerprint: saved.calculation_input_fingerprint
-          }
+          envelope_id: row.id,
+          publication_id: publicationId,
+          event_type: "envelope_created",
+          actor_type: "user",
+          actor_user_id: actorUserId ?? null
         });
       }
-      return saved ?? null;
+      return row ?? null;
+    },
+
+    async listEnvelopesForPublication(organizationId, publicationId) {
+      const { data, error } = await db
+        .from("digital_estimate_configuration_envelopes")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId)
+        .order("envelope_version", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+
+    async getActiveEnvelope(organizationId, publicationId) {
+      const { data, error } = await db
+        .from("digital_estimate_configuration_envelopes")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId)
+        .eq("status", "active")
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
+    async updateDraftEnvelope(organizationId, envelopeId, patch, { expectedRowVersion, actorUserId } = {}) {
+      const env = await this.getEnvelope(organizationId, envelopeId);
+      if (!env) {
+        const e = new Error("envelope not found");
+        e.code = "not_found";
+        e.statusCode = 404;
+        throw e;
+      }
+      if (!["draft", "ready"].includes(env.status)) {
+        const e = new Error("Only draft/ready envelopes can be mutated; clone to edit");
+        e.code = "immutable";
+        e.statusCode = 403;
+        throw e;
+      }
+      if (expectedRowVersion != null && env.row_version !== expectedRowVersion) {
+        const e = new Error("envelope row_version conflict");
+        e.code = "row_version_conflict";
+        e.statusCode = 409;
+        throw e;
+      }
+      if (patch?.organizationId || patch?.organization_id) {
+        const e = new Error("organization_id is immutable");
+        e.code = "forbidden_caller_authority";
+        e.statusCode = 400;
+        throw e;
+      }
+      const updates = { row_version: Number(env.row_version) + 1, updated_at: new Date().toISOString() };
+      if (patch?.pricing_valid_through != null) updates.pricing_valid_through = patch.pricing_valid_through;
+      if (patch?.pricing_policy_version_id != null) {
+        updates.pricing_policy_version_id = patch.pricing_policy_version_id;
+      }
+      const { data, error } = await db
+        .from("digital_estimate_configuration_envelopes")
+        .update(updates)
+        .eq("organization_id", organizationId)
+        .eq("id", envelopeId)
+        .eq("row_version", env.row_version)
+        .select("*")
+        .limit(1);
+      if (error) throw error;
+      if (!data?.[0]) {
+        const e = new Error("envelope row_version conflict");
+        e.code = "row_version_conflict";
+        e.statusCode = 409;
+        throw e;
+      }
+      await db.from("digital_estimate_configuration_events").insert({
+        organization_id: organizationId,
+        envelope_id: envelopeId,
+        publication_id: env.publication_id,
+        event_type: "envelope_updated",
+        actor_type: "user",
+        actor_user_id: actorUserId ?? null
+      });
+      return data[0];
+    },
+
+    async upsertDraftGroup(organizationId, envelopeId, groupInput) {
+      const env = await this.getEnvelope(organizationId, envelopeId);
+      if (!env) {
+        const e = new Error("envelope not found");
+        e.code = "not_found";
+        e.statusCode = 404;
+        throw e;
+      }
+      if (!["draft", "ready"].includes(env.status)) {
+        const e = new Error("Only draft/ready envelopes can be mutated; clone to edit");
+        e.code = "immutable";
+        e.statusCode = 403;
+        throw e;
+      }
+      const groupKey = String(groupInput.group_key || groupInput.groupKey || "");
+      if (!groupKey) {
+        const e = new Error("group_key required");
+        e.code = "validation";
+        e.statusCode = 400;
+        throw e;
+      }
+      const payload = {
+        organization_id: organizationId,
+        envelope_id: envelopeId,
+        group_key: groupKey,
+        display_label: String(groupInput.display_label || groupInput.displayLabel || groupKey),
+        description_customer: groupInput.description_customer ?? groupInput.description ?? null,
+        selection_mode: groupInput.selection_mode || groupInput.selectionMode || "single",
+        required: Boolean(groupInput.required),
+        mutually_exclusive: groupInput.mutually_exclusive ?? groupInput.mutuallyExclusive ?? true,
+        sort_order: Number(groupInput.sort_order ?? groupInput.sortOrder ?? 0),
+        compatibility_json: groupInput.compatibility_json ?? groupInput.compatibilityJson ?? {},
+        notes_internal: groupInput.notes_internal ?? groupInput.notesInternal ?? null,
+        updated_at: new Date().toISOString()
+      };
+      const { data, error } = await db
+        .from("digital_estimate_configuration_groups")
+        .upsert(payload, { onConflict: "envelope_id,group_key" })
+        .select("*")
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
+    async upsertDraftOption(organizationId, envelopeId, optionInput) {
+      const env = await this.getEnvelope(organizationId, envelopeId);
+      if (!env) {
+        const e = new Error("envelope not found");
+        e.code = "not_found";
+        e.statusCode = 404;
+        throw e;
+      }
+      if (!["draft", "ready"].includes(env.status)) {
+        const e = new Error("Only draft/ready envelopes can be mutated; clone to edit");
+        e.code = "immutable";
+        e.statusCode = 403;
+        throw e;
+      }
+      const groupId = String(optionInput.group_id || optionInput.groupId || "");
+      const optionKey = String(optionInput.option_key || optionInput.optionKey || "");
+      if (!groupId || !optionKey) {
+        const e = new Error("group_id and option_key required");
+        e.code = "validation";
+        e.statusCode = 400;
+        throw e;
+      }
+      const payload = {
+        organization_id: organizationId,
+        envelope_id: envelopeId,
+        group_id: groupId,
+        option_key: optionKey,
+        display_label: String(optionInput.display_label || optionInput.displayLabel || optionKey),
+        description_customer: optionInput.description_customer ?? optionInput.description ?? null,
+        min_qty: Number(optionInput.min_qty ?? optionInput.minQty ?? 0),
+        max_qty: optionInput.max_qty ?? optionInput.maxQty ?? null,
+        default_qty: Number(optionInput.default_qty ?? optionInput.defaultQty ?? 0),
+        included_in_baseline: Boolean(
+          optionInput.included_in_baseline ?? optionInput.includedInBaseline
+        ),
+        required_selection: Boolean(
+          optionInput.required_selection ?? optionInput.requiredSelection
+        ),
+        availability_state: optionInput.availability_state || optionInput.availabilityState || "active",
+        customer_price_treatment:
+          optionInput.customer_price_treatment || optionInput.customerPriceTreatment || "absolute",
+        pricing_mode: optionInput.pricing_mode || optionInput.pricingMode || "fixed",
+        sell_price: optionInput.sell_price ?? optionInput.sellPrice ?? null,
+        compatibility_json: optionInput.compatibility_json ?? optionInput.compatibilityJson ?? {},
+        is_active_in_envelope:
+          optionInput.is_active_in_envelope ?? optionInput.isActiveInEnvelope ?? true,
+        sort_order: Number(optionInput.sort_order ?? optionInput.sortOrder ?? 0),
+        updated_at: new Date().toISOString()
+      };
+      const { data: existing } = await db
+        .from("digital_estimate_configuration_options")
+        .select("id")
+        .eq("envelope_id", envelopeId)
+        .eq("option_key", optionKey)
+        .limit(1);
+      let result;
+      if (existing?.[0]?.id) {
+        const { data, error } = await db
+          .from("digital_estimate_configuration_options")
+          .update(payload)
+          .eq("id", existing[0].id)
+          .eq("organization_id", organizationId)
+          .select("*")
+          .limit(1);
+        if (error) throw error;
+        result = data?.[0];
+      } else {
+        const { data, error } = await db
+          .from("digital_estimate_configuration_options")
+          .insert(payload)
+          .select("*")
+          .limit(1);
+        if (error) throw error;
+        result = data?.[0];
+      }
+      return result ?? null;
+    },
+
+    async getEnvelopeGraph(organizationId, envelopeId) {
+      const envelope = await this.getEnvelope(organizationId, envelopeId);
+      if (!envelope) return null;
+      const { data: groups, error: gErr } = await db
+        .from("digital_estimate_configuration_groups")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("envelope_id", envelopeId);
+      if (gErr) throw gErr;
+      const { data: options, error: oErr } = await db
+        .from("digital_estimate_configuration_options")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("envelope_id", envelopeId);
+      if (oErr) throw oErr;
+      return {
+        envelope,
+        groups: groups || [],
+        options: options || [],
+        publicOptions: (options || []).map((o) => ({
+          optionKey: o.option_key,
+          displayLabel: o.display_label,
+          availabilityState: o.availability_state,
+          customerPriceTreatment: o.customer_price_treatment,
+          minQty: o.min_qty,
+          maxQty: o.max_qty,
+          defaultQty: o.default_qty
+        }))
+      };
+    },
+
+    async cloneEnvelopeToDraft(organizationId, sourceEnvelopeId, { actorUserId = null } = {}) {
+      const source = await this.getEnvelope(organizationId, sourceEnvelopeId);
+      if (!source) {
+        const e = new Error("envelope not found");
+        e.code = "not_found";
+        e.statusCode = 404;
+        throw e;
+      }
+      const draft = await this.createDraftEnvelope({
+        organizationId,
+        publicationId: source.publication_id,
+        actorUserId,
+        body: {}
+      });
+      await db
+        .from("digital_estimate_configuration_envelopes")
+        .update({
+          cloned_from_envelope_id: sourceEnvelopeId,
+          baseline_customer_snapshot_hash: source.baseline_customer_snapshot_hash,
+          baseline_pricing_evidence_hash: source.baseline_pricing_evidence_hash,
+          source_calculation_evidence_fingerprint: source.source_calculation_evidence_fingerprint,
+          pricing_policy_version_id: source.pricing_policy_version_id,
+          pricing_valid_through: source.pricing_valid_through
+        })
+        .eq("id", draft.id)
+        .eq("organization_id", organizationId);
+
+      const graph = await this.getEnvelopeGraph(organizationId, sourceEnvelopeId);
+      const groupIdMap = new Map();
+      for (const g of graph?.groups || []) {
+        const ng = await this.upsertDraftGroup(organizationId, draft.id, g);
+        if (ng) groupIdMap.set(g.id, ng.id);
+      }
+      for (const o of graph?.options || []) {
+        const newGroupId = groupIdMap.get(o.group_id);
+        if (!newGroupId) continue;
+        await this.upsertDraftOption(organizationId, draft.id, {
+          ...o,
+          group_id: newGroupId
+        });
+      }
+      await db.from("digital_estimate_configuration_events").insert({
+        organization_id: organizationId,
+        envelope_id: draft.id,
+        publication_id: source.publication_id,
+        event_type: "envelope_cloned",
+        actor_type: "user",
+        actor_user_id: actorUserId,
+        metadata: { clonedFromEnvelopeId: sourceEnvelopeId }
+      });
+      return this.getEnvelope(organizationId, draft.id);
+    },
+
+    async listEvents(organizationId, envelopeId) {
+      const { data, error } = await db
+        .from("digital_estimate_configuration_events")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("envelope_id", envelopeId)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data || [];
     }
   };
 }

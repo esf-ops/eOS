@@ -265,7 +265,7 @@ async function buildMinimalActiveEnvelope(repo, organizationId = ORG) {
   const clone = await repo.cloneEnvelopeToDraft(ORG, activated.envelope.id, { actorUserId: "u1" });
   assert.equal(clone.status, "draft");
   assert.equal(clone.cloned_from_envelope_id, activated.envelope.id);
-  const graph = repo.getEnvelopeGraph(ORG, clone.id);
+  const graph = await repo.getEnvelopeGraph(ORG, clone.id);
   assert.ok(graph.options.length >= 1);
 
   await repo.activateEnvelope(ORG, clone.id, { actorUserId: "u1" });

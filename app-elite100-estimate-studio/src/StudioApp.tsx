@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
+import ConfigurationWorkspace from "./ConfigurationWorkspace";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
 
@@ -138,6 +139,11 @@ export default function StudioApp() {
   async function signOut() {
     await supabase?.auth.signOut();
     setSessionToken(null);
+    setDetail(null);
+    setPubDetail(null);
+    setOneTimeLink(null);
+    setOneTimeToken(null);
+    setActionError(null);
   }
 
   async function runSearch() {
@@ -463,6 +469,21 @@ export default function StudioApp() {
                     </ul>
                   </div>
                 ) : null}
+
+                <ConfigurationWorkspace
+                  token={sessionToken}
+                  publicationId={
+                    pubDetail?.publication?.status === "active"
+                      ? String(pubDetail.publication.id)
+                      : (detail.publications || []).find((p) => p.status === "active")?.id || null
+                  }
+                  onAuthFailure={() => {
+                    setSessionToken(null);
+                    setDetail(null);
+                    setPubDetail(null);
+                    setActionError("Session ended or access denied");
+                  }}
+                />
               </>
             )}
           </section>

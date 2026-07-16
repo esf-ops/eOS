@@ -4,6 +4,7 @@ import { resolveOrganizationContext } from "../organizations/organizationContext
 import { calculateQuote, computePublicConsumerEstimatesByGroup, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
 import { attachQuoteDeliveryRoutes } from "../quoteDelivery/quoteDeliveryApi.js";
 import { maybeAttachDigitalEstimateRoutes } from "../digitalEstimate/digitalEstimateRoutes.js";
+import { maybeAttachDigitalEstimateConfigurationRoutes } from "../digitalEstimate/configuration/configurationRoutes.js";
 import { maybeAttachElite100EstimateStudioRoutes } from "../elite100EstimateStudio/elite100EstimateStudioRoutes.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
 import { attachCustomQuoteRoutes } from "./customQuotesApi.js";
@@ -282,6 +283,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
   attachQuoteDeliveryRoutes(app, { requireAuth, getSupabase });
   maybeAttachDigitalEstimateRoutes(app, { requireAuth, getSupabase });
   maybeAttachElite100EstimateStudioRoutes(app, { requireAuth, getSupabase });
+  maybeAttachDigitalEstimateConfigurationRoutes(app, { requireAuth, getSupabase });
   attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachPricingAdminHeadApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
 

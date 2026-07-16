@@ -907,6 +907,158 @@ grant execute on function public.digital_estimate_activate_configuration_envelop
 ) to service_role;
 
 -- =============================================================================
+-- Atomic calculation insert + calculated event (DE.2D persistence closure)
+-- Idempotent on (organization_id, calculation_input_fingerprint) when row exists.
+-- =============================================================================
+
+create unique index if not exists uq_de_config_calc_input_fingerprint
+  on public.digital_estimate_configuration_calculations (organization_id, calculation_input_fingerprint);
+
+create or replace function public.digital_estimate_insert_configuration_calculation(
+  p_organization_id uuid,
+  p_selection_id uuid,
+  p_engine_version text,
+  p_calculation_input_fingerprint text,
+  p_customer_result_json jsonb,
+  p_internal_evidence_json jsonb,
+  p_baseline_total numeric default null,
+  p_configured_total numeric default null,
+  p_pricing_valid_through date default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_sel record;
+  v_existing record;
+  v_calc_id uuid;
+  v_now timestamptz := now();
+begin
+  if p_organization_id is null
+     or p_selection_id is null
+     or p_engine_version is null
+     or p_calculation_input_fingerprint is null
+     or p_customer_result_json is null
+     or p_internal_evidence_json is null then
+    raise exception 'required calculation arguments missing';
+  end if;
+
+  select * into v_sel
+  from public.digital_estimate_configuration_selections
+  where id = p_selection_id
+    and organization_id = p_organization_id
+  for update;
+
+  if not found then
+    raise exception 'configuration selection not found' using errcode = 'P0002';
+  end if;
+
+  -- Idempotent reuse by input fingerprint (org-scoped)
+  select * into v_existing
+  from public.digital_estimate_configuration_calculations
+  where organization_id = p_organization_id
+    and calculation_input_fingerprint = p_calculation_input_fingerprint
+  for share;
+
+  if found then
+    return jsonb_build_object(
+      'reused', true,
+      'calculation', to_jsonb(v_existing)
+    );
+  end if;
+
+  -- One calculation per selection (unique selection_id)
+  select * into v_existing
+  from public.digital_estimate_configuration_calculations
+  where selection_id = p_selection_id
+  for share;
+
+  if found then
+    if v_existing.calculation_input_fingerprint = p_calculation_input_fingerprint then
+      return jsonb_build_object(
+        'reused', true,
+        'calculation', to_jsonb(v_existing)
+      );
+    end if;
+    raise exception 'selection already has a different immutable calculation'
+      using errcode = '23505';
+  end if;
+
+  insert into public.digital_estimate_configuration_calculations (
+    organization_id,
+    selection_id,
+    envelope_id,
+    engine_version,
+    calculation_input_fingerprint,
+    customer_result_json,
+    internal_evidence_json,
+    baseline_total,
+    configured_total,
+    pricing_valid_through,
+    created_at
+  ) values (
+    p_organization_id,
+    p_selection_id,
+    v_sel.envelope_id,
+    p_engine_version,
+    p_calculation_input_fingerprint,
+    p_customer_result_json,
+    p_internal_evidence_json,
+    p_baseline_total,
+    p_configured_total,
+    p_pricing_valid_through,
+    v_now
+  )
+  returning id into v_calc_id;
+
+  insert into public.digital_estimate_configuration_events (
+    organization_id,
+    envelope_id,
+    publication_id,
+    session_id,
+    event_type,
+    actor_type,
+    metadata,
+    created_at
+  ) values (
+    p_organization_id,
+    v_sel.envelope_id,
+    (select publication_id from public.digital_estimate_configuration_envelopes
+      where id = v_sel.envelope_id and organization_id = p_organization_id),
+    v_sel.session_id,
+    'calculated',
+    'system',
+    jsonb_build_object(
+      'calculationId', v_calc_id,
+      'fingerprint', p_calculation_input_fingerprint
+    ),
+    v_now
+  );
+
+  select * into v_existing
+  from public.digital_estimate_configuration_calculations
+  where id = v_calc_id;
+
+  return jsonb_build_object(
+    'reused', false,
+    'calculation', to_jsonb(v_existing)
+  );
+end;
+$$;
+
+revoke all on function public.digital_estimate_insert_configuration_calculation(
+  uuid, uuid, text, text, jsonb, jsonb, numeric, numeric, date
+) from public;
+revoke all on function public.digital_estimate_insert_configuration_calculation(
+  uuid, uuid, text, text, jsonb, jsonb, numeric, numeric, date
+) from anon, authenticated;
+grant execute on function public.digital_estimate_insert_configuration_calculation(
+  uuid, uuid, text, text, jsonb, jsonb, numeric, numeric, date
+) to service_role;
+
+-- =============================================================================
 -- Privileges / RLS
 -- =============================================================================
 
