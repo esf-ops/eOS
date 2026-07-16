@@ -28,6 +28,7 @@ DIGITAL_ESTIMATE_API_ENABLED=0
 DIGITAL_ESTIMATE_PUBLISH_ENABLED=0
 DIGITAL_ESTIMATE_PUBLIC_READ_ENABLED=0
 DIGITAL_ESTIMATE_CONFIGURATION_ENABLED=0
+DIGITAL_ESTIMATE_PUBLIC_CONFIGURATION_ENABLED=0
 HEAD_URL_DIGITAL_ESTIMATE=https://digital.eliteosfab.com
 ```
 
@@ -49,6 +50,15 @@ VITE_HEAD_URL_HOME=...
 ```
 
 Configuration UI visibility is separate from Studio shell visibility. Neither Vite flag grants Brain access.
+
+**Public Digital Estimate**
+
+```bash
+VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED=false
+VITE_BACKEND_URL=...
+```
+
+New Studio-generated customer links use fragment form `/e#<token>` (DE.2E). Legacy path tokens remain readable on the public head.
 
 **Public Digital Estimate**
 

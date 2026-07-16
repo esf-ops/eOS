@@ -16,7 +16,8 @@
 | Interactive configuration (DE.2+) | `eliteos_digital_estimate_configuration_v1.sql` + `digitalEstimate/configuration/**` | **Do not** mutate `quote_headers`, publication snapshots, Takeoff, or live `calculateQuote()` semantics without an explicit phase. SQL must remain **unapplied** until approved. Do not seed production Watt’s/Spahn/rates. DE.2D Studio builder is pilot-only; **do not** enable public customer configuration (DE.2E) without an explicit phase. |
 | Pricing Admin → `calculateQuote` cutover | `pricingConfigResolver.js` | **Forbidden** without parity tests + explicit approval (DE.2A) |
 | DE.2C configuration delta engine | `elite100-config-delta-v1` | Pure engine over frozen inputs only. **Do not** call `calculateQuote()`. Confirmed: Remnant W **45** / D **50**, Watt’s Promo **40**, use tax **2%** after markup (bundled public), Spahn **+3%** after pre-rounded net, display **ceil $10**. |
-| DE.2D Studio envelope builder | `/api/digital-estimate/configuration/*` + Studio UI | Pilot chain + config flags required. UI Vite flag never grants access. **No** public customer configuration routes. |
+| DE.2D Studio envelope builder | `/api/digital-estimate/configuration/*` + Studio UI | Pilot chain + config flags required. UI Vite flag never grants access. |
+| DE.2E public configuration | `/api/public-digital-estimate/v2/*` + fragment links | **Do not** enable without Origin + distributed rate-limit deployment gates. **No** acceptance/sold/email/payment. Legacy path tokens stay read-only. |
 | Partner Quote | `app-partner-quote/**`, `/api/partner-quote/*` | Out of scope |
 | Custom Quote | `app-custom-quote/**`, `/api/custom-quotes/*` | Out of scope |
 | Quote Pipeline | `/api/quotes/pipeline*` | Out of scope |

@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_BACKEND_URL?: string;
+  /** UI-only; never grants access. Exact "true" enables public configuration experience. */
+  readonly VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED?: string;
 }
 
 interface ImportMeta {

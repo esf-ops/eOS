@@ -533,7 +533,7 @@ app.use(
     },
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization", "x-eos-cron-secret", "x-eliteos-cron-secret", "x-moraware-sync-secret", "x-organization-key"],
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
   })
 );
 

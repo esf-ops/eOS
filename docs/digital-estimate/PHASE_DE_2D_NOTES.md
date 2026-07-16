@@ -1,7 +1,7 @@
 # Phase DE.2D — Private Studio Configuration Envelope Builder
 
 **Date:** 2026-07-16  
-**Status:** Implemented (pilot APIs + Studio UI + tests). **Flags off. SQL not applied. No public customer configuration. No DE.2E.**  
+**Status:** Implemented (pilot APIs + Studio UI + tests). **Flags off. SQL not applied.** Public customer configuration is DE.2E — see `PHASE_DE_2E_NOTES.md`.
 **Depends on:** DE.2B schema/repos, DE.2C `elite100-config-delta-v1` engine, DE.1.1 Studio pilot chain.
 
 ---
@@ -170,13 +170,6 @@ npm run eos:test:quote-output-gate
 
 ---
 
-## 12. Exact next DE.2E scope (do not begin here)
+## 12. Follow-on
 
-1. Public customer configuration over activated envelopes only  
-2. Fragment-token / Authorization header access (move off path tokens as designed)  
-3. Customer session + selection mutations (server-authoritative)  
-4. Persist DE.2C calculations via atomic RPC on customer save/preview  
-5. Customer-safe preview only in `app-digital-estimate` (never internal evidence)  
-6. No acceptance / sold / email / payments yet (later phases)
-
-Stop after DE.2D until explicitly instructed to begin DE.2E.
+DE.2E public configuration is implemented separately (`PHASE_DE_2E_NOTES.md`). Do not begin DE.2F without instruction.

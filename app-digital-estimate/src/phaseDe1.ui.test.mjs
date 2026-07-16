@@ -49,13 +49,16 @@ assert.ok(
 );
 
 assert.ok(
-  appTsx.includes("/e/") && /\/e\/[^/?#]+/.test(appTsx),
-  "App.tsx must parse token from /e/:token path pattern",
+  appTsx.includes("/e/") || appTsx.includes("parseTokenFromPath") || appTsx.includes("parseTokenFromHash"),
+  "App.tsx must support path and/or fragment token parsing",
 );
 
 assert.ok(
-  appTsx.includes("/api/public-digital-estimate/v1/"),
-  "App.tsx must fetch public digital estimate API",
+  appTsx.includes("/api/public-digital-estimate/v1/") ||
+    readFileSync(join(srcRoot, "publicConfigApi.ts"), "utf8").includes(
+      "/api/public-digital-estimate/v1/",
+    ),
+  "must fetch public digital estimate API (legacy v1 retained)",
 );
 
 assert.ok(

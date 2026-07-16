@@ -182,8 +182,13 @@ console.log("\nphaseDe1.test.mjs\n");
     body: { quoteId: QUOTE_ID, confirm: true }
   });
   assert.ok(published.accessToken);
-  assert.ok(published.customerUrl.includes("/e/"));
+  assert.ok(published.customerUrl.includes("/e#") || published.customerUrl.includes("/e/"));
   assert.equal(published.customerUrl.includes(published.accessToken), true);
+  // New Studio links use fragment format (DE.2E); raw token not in path after #
+  if (published.customerUrl.includes("/e#")) {
+    const pathPart = published.customerUrl.split("#")[0];
+    assert.equal(pathPart.includes(published.accessToken), false);
+  }
 
   const dump = repo._dump();
   assert.equal(JSON.stringify(dump).includes(published.accessToken), false);

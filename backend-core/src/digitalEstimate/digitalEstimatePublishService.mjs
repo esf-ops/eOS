@@ -155,7 +155,8 @@ export async function publishDigitalEstimate(input) {
   });
 
   const base = readDigitalEstimatePublicBaseUrl(env);
-  const customerUrl = `${base}/e/${rawToken}`;
+  // DE.2E: fragment-token links — raw token never in path/query. Legacy DE.1 path links remain readable.
+  const customerUrl = `${base}/e#${rawToken}`;
 
   return {
     ok: true,
@@ -266,7 +267,7 @@ export async function replaceDigitalEstimateToken(input) {
   return {
     ok: true,
     accessToken: rawToken,
-    customerUrl: `${base}/e/${rawToken}`
+    customerUrl: `${base}/e#${rawToken}`
   };
 }
 

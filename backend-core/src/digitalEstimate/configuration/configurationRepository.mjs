@@ -605,7 +605,9 @@ export function createInMemoryConfigurationRepository(opts = {}) {
       publicationId,
       envelopeId,
       accessTokenId = null,
-      expiresAt = null
+      expiresAt = null,
+      sessionSecretHash = null,
+      status = "configuring"
     }) {
       const env = envelopes.get(String(envelopeId));
       if (!env || env.organization_id !== organizationId) throw err("not_found", "envelope not found", 404);
@@ -621,9 +623,11 @@ export function createInMemoryConfigurationRepository(opts = {}) {
         publication_id: publicationId,
         envelope_id: envelopeId,
         access_token_id: accessTokenId,
-        status: "configuring",
+        session_secret_hash: sessionSecretHash,
+        status,
         row_version: 1,
         last_client_idempotency_key: null,
+        latest_calculation_id: null,
         expires_at: expiresAt,
         created_at: now,
         updated_at: now
@@ -637,7 +641,247 @@ export function createInMemoryConfigurationRepository(opts = {}) {
         event_type: "session_started",
         actor_type: "public"
       });
+      await appendEvent({
+        organization_id: organizationId,
+        envelope_id: envelopeId,
+        publication_id: publicationId,
+        session_id: id,
+        event_type: "configuration_session_started",
+        actor_type: "public"
+      });
       return structuredClone(row);
+    },
+
+    /**
+     * DE.2E public session — may bind to active envelope or publication-only (read-only fallback).
+     */
+    async createPublicConfigurationSession({
+      organizationId,
+      publicationId,
+      envelopeId = null,
+      accessTokenId = null,
+      sessionSecretHash,
+      expiresAt = null,
+      status = "active",
+      allowMissingEnvelope = false
+    }) {
+      if (!sessionSecretHash) throw err("validation", "sessionSecretHash required", 400);
+      if (envelopeId) {
+        return api.createSession(organizationId, {
+          publicationId,
+          envelopeId,
+          accessTokenId,
+          expiresAt,
+          sessionSecretHash,
+          status
+        });
+      }
+      if (!allowMissingEnvelope) throw err("envelope_required", "active envelope required", 400);
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      const row = {
+        id,
+        organization_id: organizationId,
+        publication_id: publicationId,
+        envelope_id: null,
+        access_token_id: accessTokenId,
+        session_secret_hash: sessionSecretHash,
+        status,
+        row_version: 1,
+        last_client_idempotency_key: null,
+        latest_calculation_id: null,
+        expires_at: expiresAt,
+        created_at: now,
+        updated_at: now
+      };
+      sessions.set(id, row);
+      await appendEvent({
+        organization_id: organizationId,
+        envelope_id: null,
+        publication_id: publicationId,
+        session_id: id,
+        event_type: "configuration_session_started",
+        actor_type: "public",
+        metadata: { readOnlyBaseline: true }
+      });
+      return structuredClone(row);
+    },
+
+    async getSessionBySecretHash(secretHash) {
+      const row = [...sessions.values()].find((s) => s.session_secret_hash === secretHash);
+      return row ? structuredClone(row) : null;
+    },
+
+    async getLatestSelectionForSession(organizationId, sessionId) {
+      const rows = [...selections.values()]
+        .filter((s) => s.organization_id === organizationId && s.session_id === sessionId)
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return rows[0] ? structuredClone(rows[0]) : null;
+    },
+
+    async getCalculationBySelectionId(organizationId, selectionId) {
+      const row = [...calculations.values()].find(
+        (c) => c.organization_id === organizationId && c.selection_id === selectionId
+      );
+      return row ? structuredClone(row) : null;
+    },
+
+    async revokeSession(organizationId, sessionId) {
+      const session = sessions.get(String(sessionId));
+      if (!session || session.organization_id !== organizationId) return false;
+      session.status = "revoked";
+      session.updated_at = new Date().toISOString();
+      await appendEvent({
+        organization_id: organizationId,
+        envelope_id: session.envelope_id,
+        publication_id: session.publication_id,
+        session_id: sessionId,
+        event_type: "configuration_session_expired",
+        actor_type: "public",
+        metadata: { revoked: true }
+      });
+      return true;
+    },
+
+    /**
+     * Atomic selection + calculation persist (memory transactional parity with SQL RPC).
+     */
+    async saveSelectionAndCalculationAtomic({
+      organizationId,
+      sessionId,
+      expectedRowVersion,
+      idempotencyKey,
+      selectionPayload,
+      selectionHash,
+      customerResultJson,
+      internalEvidenceJson,
+      baselineTotal = null,
+      configuredTotal = null,
+      pricingValidThrough = null,
+      engineVersion,
+      calculationInputFingerprint,
+      calculationFingerprint = null
+    }) {
+      return pubLock(organizationId, `session:${sessionId}`).runExclusive(async () => {
+        const checkpoint = cloneState();
+        try {
+          const session = sessions.get(String(sessionId));
+          if (!session || session.organization_id !== organizationId) {
+            throw err("not_found", "session not found", 404);
+          }
+          if (Number(session.row_version) !== Number(expectedRowVersion)) {
+            throw err("row_version_conflict", "session row_version conflict", 409);
+          }
+          if (idempotencyKey && session.last_client_idempotency_key === idempotencyKey) {
+            const priorSel = [...selections.values()]
+              .filter(
+                (s) => s.session_id === sessionId && s.client_idempotency_key === idempotencyKey
+              )
+              .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+            if (priorSel) {
+              const priorCalc = [...calculations.values()].find((c) => c.selection_id === priorSel.id);
+              if (priorCalc) {
+                return {
+                  reused: true,
+                  session: structuredClone(session),
+                  selection: structuredClone(priorSel),
+                  calculation: structuredClone(priorCalc)
+                };
+              }
+            }
+          }
+
+          const selectionId = randomUUID();
+          const now = new Date().toISOString();
+          const selectionRow = {
+            id: selectionId,
+            organization_id: organizationId,
+            session_id: sessionId,
+            envelope_id: session.envelope_id,
+            selection_payload_json: selectionPayload,
+            selection_hash: selectionHash,
+            client_idempotency_key: idempotencyKey,
+            created_at: now
+          };
+          selections.set(selectionId, selectionRow);
+
+          const calcId = randomUUID();
+          const calcRow = {
+            id: calcId,
+            organization_id: organizationId,
+            selection_id: selectionId,
+            envelope_id: session.envelope_id,
+            engine_version: engineVersion,
+            calculation_input_fingerprint: calculationInputFingerprint,
+            calculation_fingerprint: calculationFingerprint,
+            customer_result_json: customerResultJson,
+            internal_evidence_json: internalEvidenceJson,
+            baseline_total: baselineTotal,
+            configured_total: configuredTotal,
+            pricing_valid_through: pricingValidThrough,
+            client_idempotency_key: idempotencyKey,
+            created_at: now
+          };
+          calculations.set(calcId, calcRow);
+
+          session.last_client_idempotency_key = idempotencyKey;
+          session.row_version = Number(session.row_version) + 1;
+          session.status = "saved";
+          session.latest_calculation_id = calcId;
+          session.updated_at = now;
+
+          await appendEvent({
+            organization_id: organizationId,
+            envelope_id: session.envelope_id,
+            publication_id: session.publication_id,
+            session_id: sessionId,
+            event_type: "selection_saved",
+            actor_type: "public",
+            metadata: { selectionHash }
+          });
+          await appendEvent({
+            organization_id: organizationId,
+            envelope_id: session.envelope_id,
+            publication_id: session.publication_id,
+            session_id: sessionId,
+            event_type: "selections_saved",
+            actor_type: "public",
+            metadata: { selectionHash }
+          });
+          await appendEvent({
+            organization_id: organizationId,
+            envelope_id: session.envelope_id,
+            publication_id: session.publication_id,
+            session_id: sessionId,
+            event_type: "calculated",
+            actor_type: "system",
+            metadata: { calculationId: calcId, fingerprint: calculationInputFingerprint }
+          });
+          await appendEvent({
+            organization_id: organizationId,
+            envelope_id: session.envelope_id,
+            publication_id: session.publication_id,
+            session_id: sessionId,
+            event_type: "configuration_calculated",
+            actor_type: "system",
+            metadata: { calculationId: calcId }
+          });
+
+          return {
+            reused: false,
+            session: structuredClone(session),
+            selection: structuredClone(selectionRow),
+            calculation: structuredClone(calcRow)
+          };
+        } catch (e) {
+          restoreState(checkpoint);
+          throw e;
+        }
+      });
+    },
+
+    async appendEvent(row) {
+      return appendEvent(row);
     },
 
     async saveSelection(organizationId, sessionId, rawSelection, {
@@ -1307,6 +1551,83 @@ export function createSupabaseConfigurationRepository({ db }) {
         .order("created_at", { ascending: true });
       if (error) throw error;
       return data || [];
+    },
+
+    async getSessionBySecretHash(secretHash) {
+      const { data, error } = await db
+        .from("digital_estimate_configuration_sessions")
+        .select("*")
+        .eq("session_secret_hash", secretHash)
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
+    async saveSelectionAndCalculationAtomic(args) {
+      const { data, error } = await db.rpc("digital_estimate_save_selection_and_calculation", {
+        p_organization_id: args.organizationId,
+        p_session_id: args.sessionId,
+        p_expected_row_version: args.expectedRowVersion,
+        p_idempotency_key: args.idempotencyKey,
+        p_selection_payload_json: args.selectionPayload,
+        p_selection_hash: args.selectionHash,
+        p_engine_version: args.engineVersion,
+        p_calculation_input_fingerprint: args.calculationInputFingerprint,
+        p_customer_result_json: args.customerResultJson,
+        p_internal_evidence_json: args.internalEvidenceJson,
+        p_baseline_total: args.baselineTotal ?? null,
+        p_configured_total: args.configuredTotal ?? null,
+        p_pricing_valid_through: args.pricingValidThrough ?? null
+      });
+      if (error) throw error;
+      return {
+        reused: Boolean(data?.reused),
+        session: data?.session,
+        selection: data?.selection,
+        calculation: data?.calculation
+      };
+    },
+
+    async createPublicConfigurationSession(args) {
+      const payload = {
+        organization_id: args.organizationId,
+        publication_id: args.publicationId,
+        envelope_id: args.envelopeId,
+        access_token_id: args.accessTokenId ?? null,
+        session_secret_hash: args.sessionSecretHash,
+        status: args.status || "active",
+        expires_at: args.expiresAt,
+        row_version: 1
+      };
+      const { data, error } = await db
+        .from("digital_estimate_configuration_sessions")
+        .insert(payload)
+        .select("*")
+        .limit(1);
+      if (error) throw error;
+      const row = data?.[0];
+      if (row) {
+        await db.from("digital_estimate_configuration_events").insert({
+          organization_id: args.organizationId,
+          envelope_id: args.envelopeId,
+          publication_id: args.publicationId,
+          session_id: row.id,
+          event_type: "configuration_session_started",
+          actor_type: "public",
+          metadata: {}
+        });
+      }
+      return row ?? null;
+    },
+
+    async revokeSession(organizationId, sessionId) {
+      const { error } = await db
+        .from("digital_estimate_configuration_sessions")
+        .update({ status: "revoked", updated_at: new Date().toISOString() })
+        .eq("organization_id", organizationId)
+        .eq("id", sessionId);
+      if (error) throw error;
+      return true;
     }
   };
 }

@@ -64,8 +64,11 @@ function canonicalize(value) {
  * @param {string} urlOrPath
  */
 export function redactDigitalEstimateTokenPath(urlOrPath) {
-  return String(urlOrPath ?? "").replace(
-    /(\/api\/public-digital-estimate\/v1\/)([^/?#]+)/gi,
-    "$1[redacted]"
-  ).replace(/(\/e\/)([^/?#]+)/gi, "$1[redacted]");
+  return String(urlOrPath ?? "")
+    .replace(
+      /(\/api\/public-digital-estimate\/v1\/)([^/?#]+)/gi,
+      "$1[redacted]"
+    )
+    .replace(/(\/e\/)([^/?#]+)/gi, "$1[redacted]")
+    .replace(/(\/e#)([^/?\s]+)/gi, "$1[redacted]");
 }
