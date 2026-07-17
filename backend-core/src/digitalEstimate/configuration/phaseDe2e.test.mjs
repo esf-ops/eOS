@@ -311,7 +311,7 @@ async function seedPublishedWithEnvelope() {
   console.log("ok: exchange/resume/selections/idempotency/spoof rejection");
 }
 
-// --- Superseded envelope blocks old session ---
+// --- Superseded envelope revokes old session (generic 404) ---
 {
   const { published, service, cfgRepo, publication } = await seedPublishedWithEnvelope();
   const exchanged = await service.exchangePublicationToken({ rawToken: published.accessToken });
@@ -333,16 +333,35 @@ async function seedPublishedWithEnvelope() {
       sellPrice: 0
     });
   }
-  await cfgRepo.activateEnvelope(ORG, clone.id, {
+  const activated = await cfgRepo.activateEnvelope(ORG, clone.id, {
     actorUserId: "u1",
     pricingPolicyFingerprint: "p2",
     catalogFingerprint: "c2"
   });
+  assert.ok(Number(activated.sessionsRevokedCount) >= 1);
 
-  const state = await service.resumeFromSessionSecret({ rawSecret: exchanged.rawSecret });
-  assert.equal(state.lifecycle, "superseded");
-  assert.ok(/updated/i.test(state.message || ""));
-  console.log("ok: superseded envelope blocks old session");
+  const sess = await cfgRepo.getSessionBySecretHash(
+    hashConfigurationSessionSecret(exchanged.rawSecret)
+  );
+  assert.equal(sess.status, "revoked");
+
+  await assert.rejects(
+    () => service.resumeFromSessionSecret({ rawSecret: exchanged.rawSecret }),
+    (e) => e.statusCode === 404 && e.code === "not_found"
+  );
+  await assert.rejects(
+    () =>
+      service.saveSelections({
+        rawSecret: exchanged.rawSecret,
+        body: {
+          expectedRowVersion: 1,
+          idempotencyKey: "after-supersede",
+          items: [{ optionKey: "material:kitchen:group_b", quantity: 1 }]
+        }
+      }),
+    (e) => e.statusCode === 404 && e.code === "not_found"
+  );
+  console.log("ok: superseded envelope revokes old session (generic 404)");
 }
 
 // --- Routes: Origin + Set-Cookie ---

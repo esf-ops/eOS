@@ -5,7 +5,7 @@
 import {
   calculateElite100ConfigDelta,
   ELITE100_CONFIG_DELTA_ENGINE_ID
-} from "./elite100ConfigDeltaEngine.mjs";
+} from "./currentConfigDeltaEngine.mjs";
 
 function err(code, message, statusCode = 400) {
   const e = new Error(message);

@@ -1,9 +1,33 @@
 /**
  * DE.2C engine identity + version constants.
+ *
+ * elite100-config-delta-v1 — historical absolute/full-reprice calculation identity.
+ * elite100-config-delta-v2 — frozen publication total as monetary anchor + authorized deltas.
+ *
+ * New calculations must persist CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID (v2).
+ * Historical v1 rows must never be silently recomputed or relabeled as v2.
  */
 
-export const ELITE100_CONFIG_DELTA_ENGINE_ID = "elite100-config-delta-v1";
-export const ELITE100_CONFIG_DELTA_SCHEMA_VERSION = 1;
+/** @deprecated Historical identity — do not use for new calculations. */
+export const ELITE100_CONFIG_DELTA_ENGINE_ID_V1 = "elite100-config-delta-v1";
+
+/** Frozen-baseline-anchor engine identity for new calculations. */
+export const ELITE100_CONFIG_DELTA_ENGINE_ID_V2 = "elite100-config-delta-v2";
+
+/**
+ * Legacy alias retained for v1 module compatibility only.
+ * Prefer ELITE100_CONFIG_DELTA_ENGINE_ID_V1 / _V2 / CURRENT explicitly.
+ */
+export const ELITE100_CONFIG_DELTA_ENGINE_ID = ELITE100_CONFIG_DELTA_ENGINE_ID_V1;
+
+/** Engine id persisted on every new calculation. */
+export const CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID = ELITE100_CONFIG_DELTA_ENGINE_ID_V2;
+
+export const ELITE100_CONFIG_DELTA_SCHEMA_VERSION_V1 = 1;
+export const ELITE100_CONFIG_DELTA_SCHEMA_VERSION_V2 = 2;
+
+/** @deprecated Prefer ELITE100_CONFIG_DELTA_SCHEMA_VERSION_V1 / _V2. */
+export const ELITE100_CONFIG_DELTA_SCHEMA_VERSION = ELITE100_CONFIG_DELTA_SCHEMA_VERSION_V1;
 
 /** Material use tax: 200 basis points = 2%. */
 export const MATERIAL_USE_TAX_BPS = 200;

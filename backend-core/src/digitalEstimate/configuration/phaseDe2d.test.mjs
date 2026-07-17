@@ -32,7 +32,7 @@ import {
 } from "./configurationTrustedContext.mjs";
 import { assertPublicConfigurationHasNoForbiddenContent } from "./configurationPublicSerializer.mjs";
 import { calculateAndPersistConfigurationDelta } from "./configurationCalculationService.mjs";
-import { ELITE100_CONFIG_DELTA_ENGINE_ID } from "./elite100ConfigDeltaConstants.mjs";
+import { ELITE100_CONFIG_DELTA_ENGINE_ID } from "./currentConfigDeltaEngine.mjs";
 import { ELITE100_ESTIMATE_STUDIO_HEAD_SLUG } from "../../elite100EstimateStudio/elite100EstimateStudioConfig.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -306,8 +306,10 @@ function createDualDeRepo() {
     },
     PILOT_ID
   );
-  assert.equal(preview.internalPreview.configuredExactTotal, 867);
+  assert.equal(preview.internalPreview.configuredExactTotal, 870);
   assert.equal(preview.internalPreview.configuredDisplayTotal, 870);
+  assert.equal(preview.internalPreview.exactDelta, 0);
+  assert.equal(preview.internalPreview.displayDelta, 0);
   assert.equal(preview.internalPreview.materialUseTax, 17);
   assertPublicConfigurationHasNoForbiddenContent(preview.customerSafePreview);
   assert.equal(
@@ -395,9 +397,11 @@ function createDualDeRepo() {
     { roomSelections: { kitchen: "promo" } },
     PILOT_ID
   );
-  // 10 SF * 40 = 400 + 2% tax 8 = 408 → display 410
+  // 10 SF * 40 = 400 + 2% tax 8 = 408 selected economics
+  // Frozen baseline display 870 + (408 − 867 Group B economics) = 411
   assert.equal(wattsPreview.internalPreview.materialSell, 400);
-  assert.equal(wattsPreview.internalPreview.configuredExactTotal, 408);
+  assert.equal(wattsPreview.internalPreview.configuredExactTotal, 411);
+  assert.equal(wattsPreview.internalPreview.exactDelta, -459);
   console.log("ok: Watt's trusted Promo $40 preview");
 }
 
@@ -422,10 +426,25 @@ function createDualDeRepo() {
     { roomSelections: { kitchen: "group_b" } },
     PILOT_ID
   );
-  // 867 * 1.03 = 893.01
-  assert.ok(Number(prev.internalPreview.spahnAdjustment) > 0);
-  assert.equal(prev.internalPreview.configuredExactTotal, 893.01);
-  console.log("ok: Spahn trusted +3% preview");
+  // No-op material keep: Spahn must not reprice the frozen baseline.
+  assert.equal(prev.internalPreview.exactDelta, 0);
+  assert.equal(prev.internalPreview.spahnAdjustment, 0);
+  assert.equal(prev.internalPreview.configuredExactTotal, 870);
+
+  const withOption = await svc.preview(
+    ORG,
+    draft.envelope.id,
+    {
+      roomSelections: { kitchen: "group_b" },
+      optionQuantities: { "qty-sink": 1 }
+    },
+    PILOT_ID
+  );
+  // Selection delta $200 + Spahn 3% on delta only → 206; configured = 870 + 206 = 1076
+  assert.equal(withOption.internalPreview.exactDelta, 206);
+  assert.equal(withOption.internalPreview.spahnAdjustment, 6);
+  assert.equal(withOption.internalPreview.configuredExactTotal, 1076);
+  console.log("ok: Spahn trusted +3% on selection delta only");
 }
 
 // --- Cross-org denial ---

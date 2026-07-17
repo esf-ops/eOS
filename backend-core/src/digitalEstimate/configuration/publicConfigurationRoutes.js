@@ -30,11 +30,44 @@ import {
   redactPublicConfigurationSecrets,
   setConfigurationSessionCookie
 } from "./publicConfigurationSession.mjs";
+import { readSafeSyntheticPilotConfig } from "../syntheticPilotGuard.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
-const PUBLIC_UNAVAILABLE = Object.freeze({ ok: false, error: "Estimate unavailable" });
-const CONFIG_UNAVAILABLE = Object.freeze({ ok: false, error: "Configuration unavailable" });
+const PUBLIC_UNAVAILABLE = Object.freeze({
+  ok: false,
+  error: "Estimate unavailable",
+  stage: "token_exchange",
+  code: "unavailable",
+  diagnosticCode: "DE-EXCHANGE-404"
+});
+
+const SAFE_PUBLIC_ERROR_CODES = new Set([
+  "unavailable",
+  "origin_rejected",
+  "origin_not_configured",
+  "row_version_conflict",
+  "idempotency_required",
+  "concurrency_required",
+  "forbidden_caller_authority",
+  "unknown_option",
+  "unresolved_product"
+]);
+
+const SAFE_DIAGNOSTIC_CODES = new Set([
+  "DE-EXCHANGE-NETWORK",
+  "DE-EXCHANGE-404",
+  "DE-COOKIE",
+  "DE-STATE",
+  "DE-RENDER",
+  "DE-ORIGIN"
+]);
+
+const CONFIG_UNAVAILABLE = Object.freeze({
+  ok: false,
+  error: "Configuration unavailable",
+  diagnosticCode: "DE-STATE"
+});
 
 function setPublicSecurityHeaders(res) {
   res.set("Cache-Control", "no-store, private");
@@ -50,7 +83,15 @@ function logPublicCfg(label, e, req) {
   const path = redactPublicConfigurationSecrets(
     redactDigitalEstimateTokenPath(req?.originalUrl || req?.url || "")
   );
-  console.error(`[digital-estimate-public-config] ${label}`, e?.code || "error", path);
+  const reason = e?.exchangeReason || e?.code || "error";
+  console.error(`[digital-estimate-public-config] ${label}`, reason, path);
+}
+
+function safeDiagnosticCode(e, status, safeCode) {
+  if (SAFE_DIAGNOSTIC_CODES.has(e?.diagnosticCode)) return e.diagnosticCode;
+  if (safeCode === "origin_rejected" || safeCode === "origin_not_configured") return "DE-ORIGIN";
+  if (status === 404 || status === 403) return "DE-EXCHANGE-404";
+  return "DE-STATE";
 }
 
 function publicError(res, e) {
@@ -72,7 +113,20 @@ function publicError(res, e) {
   } else if (status === 404 || status === 403) {
     message = e?.message && /unavailable|expired|updated/i.test(e.message) ? e.message : "Estimate unavailable";
   }
-  res.status(status >= 400 && status < 600 ? status : 404).json({ ok: false, error: message });
+  const safeCode = SAFE_PUBLIC_ERROR_CODES.has(code) ? code : "unavailable";
+  const stage =
+    safeCode === "origin_rejected" || safeCode === "origin_not_configured"
+      ? "origin"
+      : status === 429
+        ? "rate_limit"
+        : "token_exchange";
+  res.status(status >= 400 && status < 600 ? status : 404).json({
+    ok: false,
+    error: message,
+    stage,
+    code: safeCode,
+    diagnosticCode: safeDiagnosticCode(e, status, safeCode)
+  });
 }
 
 function extractBearerToken(req) {
@@ -163,12 +217,16 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
 
   app.get("/api/public-digital-estimate/v2/config", (req, res) => {
     setPublicSecurityHeaders(res);
-    // Safe, non-sensitive flag mirror for the public head (no secrets)
+    const synthetic = readSafeSyntheticPilotConfig(env);
+    // Safe, non-sensitive flag mirror for the public head (no secrets / no allowlist IDs)
     res.json({
       ok: true,
       config: {
         publicConfigurationEnabled: true,
-        publicOrigin: expectedOrigin
+        publicOrigin: expectedOrigin,
+        syntheticPilotOnly: synthetic.syntheticPilotOnly,
+        syntheticAllowlistConfigured: synthetic.syntheticAllowlistConfigured,
+        syntheticAllowlistCount: synthetic.syntheticAllowlistCount
       }
     });
   });

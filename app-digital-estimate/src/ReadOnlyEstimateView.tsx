@@ -6,17 +6,27 @@ type Props = {
 };
 
 export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
-  const { totals } = estimate;
+  const totals = estimate?.totals ?? { estimatedProjectTotal: null, currency: "USD", rounding: "integer_usd" };
+  const project = estimate?.project ?? {
+    customerName: null,
+    projectName: null,
+    projectAddress: null
+  };
+  const rooms = Array.isArray(estimate?.rooms) ? estimate.rooms : [];
+  const lineItems = Array.isArray(estimate?.lineItems) ? estimate.lineItems : [];
+  const notes = Array.isArray(estimate?.notes) ? estimate.notes : [];
+  const disclosures = estimate?.disclosures ?? { version: null, text: null };
   const revision =
-    estimate.revisionLabel ||
-    (estimate.revisionNumber != null ? `R${estimate.revisionNumber}` : null);
+    estimate?.revisionLabel ||
+    (estimate?.revisionNumber != null ? `R${estimate.revisionNumber}` : null);
+  const documentTitle = estimate?.documentTitle || "Digital Estimate";
 
   return (
     <>
       {!compact ? (
         <header className="topbar no-print">
           <div className="topbar__inner">
-            <h1 className="topbar__title">{estimate.documentTitle}</h1>
+            <h1 className="topbar__title">{documentTitle}</h1>
             <button type="button" className="btn-print" onClick={() => window.print()}>
               Print
             </button>
@@ -25,11 +35,11 @@ export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
       ) : null}
 
       <section className="print-header print-only" aria-hidden="true">
-        <h1>{estimate.documentTitle}</h1>
+        <h1>{documentTitle}</h1>
         <dl className="print-meta">
           <div>
             <dt>Quote #</dt>
-            <dd>{estimate.quoteNumber ?? "—"}</dd>
+            <dd>{estimate?.quoteNumber ?? "—"}</dd>
           </div>
           <div>
             <dt>Revision</dt>
@@ -37,11 +47,11 @@ export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
           </div>
           <div>
             <dt>Published</dt>
-            <dd>{formatDate(estimate.publishedAt)}</dd>
+            <dd>{formatDate(estimate?.publishedAt)}</dd>
           </div>
           <div>
             <dt>Pricing valid through</dt>
-            <dd>{formatDate(estimate.pricingValidThrough)}</dd>
+            <dd>{formatDate(estimate?.pricingValidThrough)}</dd>
           </div>
           <div>
             <dt>Total</dt>
@@ -51,9 +61,9 @@ export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
       </section>
 
       <section className="hero">
-        <h2 className="hero__title">{estimate.documentTitle}</h2>
+        <h2 className="hero__title">{documentTitle}</h2>
         <dl className="meta-grid">
-          {estimate.quoteNumber ? (
+          {estimate?.quoteNumber ? (
             <div>
               <dt>Quote #</dt>
               <dd>{estimate.quoteNumber}</dd>
@@ -65,13 +75,13 @@ export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
               <dd>{revision}</dd>
             </div>
           ) : null}
-          {estimate.publishedAt ? (
+          {estimate?.publishedAt ? (
             <div>
               <dt>Published</dt>
               <dd>{formatDate(estimate.publishedAt)}</dd>
             </div>
           ) : null}
-          {estimate.pricingValidThrough ? (
+          {estimate?.pricingValidThrough ? (
             <div>
               <dt>Pricing valid through</dt>
               <dd>{formatDate(estimate.pricingValidThrough)}</dd>
@@ -80,28 +90,26 @@ export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
         </dl>
       </section>
 
-      {(estimate.project.customerName ||
-        estimate.project.projectName ||
-        estimate.project.projectAddress) && (
+      {(project.customerName || project.projectName || project.projectAddress) && (
         <section className="card">
           <h3 className="card__heading">Project</h3>
-          {estimate.project.customerName ? (
-            <p className="project-line">{estimate.project.customerName}</p>
+          {project.customerName ? (
+            <p className="project-line">{project.customerName}</p>
           ) : null}
-          {estimate.project.projectName ? (
-            <p className="project-line">{estimate.project.projectName}</p>
+          {project.projectName ? (
+            <p className="project-line">{project.projectName}</p>
           ) : null}
-          {estimate.project.projectAddress ? (
-            <p className="project-line project-line--muted">{estimate.project.projectAddress}</p>
+          {project.projectAddress ? (
+            <p className="project-line project-line--muted">{project.projectAddress}</p>
           ) : null}
         </section>
       )}
 
-      {estimate.rooms.length > 0 ? (
+      {rooms.length > 0 ? (
         <section className="card">
           <h3 className="card__heading">Rooms</h3>
           <ul className="room-list">
-            {estimate.rooms.map((room, i) => (
+            {rooms.map((room, i) => (
               <li key={i} className="room">
                 {room.name ? <h4 className="room__name">{room.name}</h4> : null}
                 {room.materialLabel ? (
@@ -127,7 +135,7 @@ export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
         </section>
       ) : null}
 
-      {estimate.lineItems.length > 0 ? (
+      {lineItems.length > 0 ? (
         <section className="card">
           <h3 className="card__heading">Line items</h3>
           <table className="line-table">
@@ -140,7 +148,7 @@ export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
               </tr>
             </thead>
             <tbody>
-              {estimate.lineItems.map((item, i) => (
+              {lineItems.map((item, i) => (
                 <tr key={i}>
                   <td>{item.label ?? "—"}</td>
                   <td className="line-table__amount">
@@ -162,21 +170,21 @@ export function ReadOnlyEstimateView({ estimate, compact = false }: Props) {
         </div>
       </section>
 
-      {estimate.notes.length > 0 ? (
+      {notes.length > 0 ? (
         <section className="card">
           <h3 className="card__heading">Notes</h3>
           <ul className="notes-list">
-            {estimate.notes.map((note, i) => (
+            {notes.map((note, i) => (
               <li key={i}>{note}</li>
             ))}
           </ul>
         </section>
       ) : null}
 
-      {estimate.disclosures.text ? (
+      {disclosures.text ? (
         <section className="card card--disclosures">
           <h3 className="card__heading">Disclosures</h3>
-          <p className="disclosures">{estimate.disclosures.text}</p>
+          <p className="disclosures">{disclosures.text}</p>
         </section>
       ) : null}
     </>

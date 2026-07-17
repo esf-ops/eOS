@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { ConfigurationView } from "./ConfigurationView";
 import { ReadOnlyEstimateView } from "./ReadOnlyEstimateView";
 import {
+  EstimateRenderError,
+  normalizePublicEstimate,
+} from "./normalizePublicEstimate";
+import {
   clearFragmentFromUrl,
   configurationUiEnabled,
   exchangeFragmentToken,
@@ -17,16 +21,102 @@ const UNAVAILABLE_MESSAGE = "This estimate is unavailable.";
 
 export { parseTokenFromPath, parseTokenFromHash };
 
+function readBuildMarker(): string {
+  try {
+    const meta = document.querySelector('meta[name="eliteos-de-build"]');
+    const v = meta?.getAttribute("content")?.trim();
+    return v || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function UnavailableScreen({ diagnosticCode }: { diagnosticCode: string | null }) {
+  const build = readBuildMarker();
+  return (
+    <div className="page">
+      <main className="shell shell--narrow">
+        <p className="unavailable" role="alert">
+          {UNAVAILABLE_MESSAGE}
+        </p>
+        {diagnosticCode ? (
+          <p className="status" aria-label="diagnostic code">
+            {diagnosticCode}
+          </p>
+        ) : null}
+        <p className="status" aria-label="build marker">
+          build {build}
+        </p>
+      </main>
+    </div>
+  );
+}
+
 function clearAllState(
   setters: {
     setEstimate: (v: PublicEstimate | null) => void;
     setConfigState: (v: ConfigurationState | null) => void;
     setUnavailable: (v: boolean) => void;
+    setDiagnosticCode?: (v: string | null) => void;
   },
+  diagnosticCode: string | null = "DE-EXCHANGE-404",
 ) {
   setters.setEstimate(null);
   setters.setConfigState(null);
   setters.setUnavailable(true);
+  setters.setDiagnosticCode?.(diagnosticCode);
+}
+
+function normalizeConfigurationState(state: ConfigurationState): ConfigurationState {
+  if (state.estimate == null) return state;
+  const estimate = normalizePublicEstimate(state.estimate);
+  return { ...state, estimate };
+}
+
+function applyExchangeState(
+  state: ConfigurationState,
+  setters: {
+    setEstimate: (v: PublicEstimate | null) => void;
+    setConfigState: (v: ConfigurationState | null) => void;
+    setUnavailable: (v: boolean) => void;
+    setMode: (v: "legacy" | "configure" | "none") => void;
+    setDiagnosticCode?: (v: string | null) => void;
+  },
+) {
+  let normalized: ConfigurationState;
+  try {
+    normalized = normalizeConfigurationState(state);
+  } catch (e) {
+    const code =
+      e instanceof EstimateRenderError ? e.diagnosticCode : "DE-RENDER-BASELINE";
+    clearAllState(setters, code);
+    setters.setMode("none");
+    return;
+  }
+
+  const canConfigure =
+    configurationUiEnabled() &&
+    normalized.lifecycle === "active" &&
+    Boolean(normalized.configuration);
+
+  if (canConfigure) {
+    setters.setConfigState(normalized);
+    setters.setEstimate(normalized.estimate || null);
+    setters.setMode("configure");
+    setters.setDiagnosticCode?.(null);
+    return;
+  }
+
+  if (normalized.estimate) {
+    setters.setEstimate(normalized.estimate);
+    setters.setConfigState(normalized);
+    setters.setMode("legacy");
+    setters.setDiagnosticCode?.(null);
+    return;
+  }
+
+  clearAllState(setters, "DE-RENDER");
+  setters.setMode("none");
 }
 
 export function App() {
@@ -34,102 +124,76 @@ export function App() {
   const [configState, setConfigState] = useState<ConfigurationState | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
+  const [diagnosticCode, setDiagnosticCode] = useState<string | null>(null);
   const [mode, setMode] = useState<"legacy" | "configure" | "none">("none");
 
   useEffect(() => {
     let cancelled = false;
-    const setters = { setEstimate, setConfigState, setUnavailable };
+    const setters = { setEstimate, setConfigState, setUnavailable, setMode, setDiagnosticCode };
 
     (async () => {
       const fragmentToken = parseTokenFromHash(window.location.hash);
       const pathToken = parseTokenFromPath(window.location.pathname);
 
-      // Prefer fragment (DE.2E). Clear fragment after successful exchange.
-      if (fragmentToken && configurationUiEnabled()) {
+      // /e#token must always attempt secure v2 exchange. Vite UI flags must not gate this.
+      if (fragmentToken) {
+        let token: string | null = fragmentToken;
+        clearFragmentFromUrl();
         try {
-          const state = await exchangeFragmentToken(fragmentToken);
+          const state = await exchangeFragmentToken(token);
+          token = null;
           if (cancelled) return;
-          clearFragmentFromUrl();
-          if (state.lifecycle === "active" && state.configuration) {
-            setConfigState(state);
-            setEstimate(state.estimate || null);
-            setMode("configure");
-          } else if (state.estimate) {
-            // No active envelope — read-only baseline from session exchange
-            setEstimate(state.estimate);
-            setConfigState(state);
-            setMode("legacy");
-          } else {
-            clearAllState(setters);
-          }
-        } catch {
-          if (!cancelled) {
-            clearFragmentFromUrl();
-            clearAllState(setters);
-          }
+          applyExchangeState(state, setters);
+        } catch (e) {
+          token = null;
+          const code =
+            e && typeof e === "object" && "diagnosticCode" in e
+              ? String((e as { diagnosticCode?: string }).diagnosticCode || "DE-EXCHANGE-404")
+              : "DE-EXCHANGE-404";
+          if (!cancelled) clearAllState(setters, code);
         } finally {
+          token = null;
           if (!cancelled) setLoading(false);
         }
         return;
       }
 
-      // Try resume cookie session when on /e without token (refresh)
       if (
-        configurationUiEnabled() &&
-        !fragmentToken &&
         !pathToken &&
         (window.location.pathname === "/e" || window.location.pathname === "/e/")
       ) {
         try {
           const state = await resumeConfigurationSession();
           if (cancelled) return;
-          if (state.lifecycle === "active" && state.configuration) {
-            setConfigState(state);
-            setEstimate(state.estimate || null);
-            setMode("configure");
-          } else if (state.estimate) {
-            setEstimate(state.estimate);
-            setMode("legacy");
-          } else {
-            clearAllState(setters);
-          }
-        } catch {
-          if (!cancelled) clearAllState(setters);
+          applyExchangeState(state, setters);
+        } catch (e) {
+          const code = e instanceof EstimateRenderError ? e.diagnosticCode : "DE-COOKIE";
+          if (!cancelled) clearAllState(setters, code);
         } finally {
           if (!cancelled) setLoading(false);
         }
         return;
       }
 
-      // Legacy DE.1 path-token read-only
       if (pathToken) {
         try {
           const dto = await fetchLegacyPathEstimate(pathToken);
           if (cancelled) return;
-          setEstimate(dto);
+          setEstimate(normalizePublicEstimate(dto));
           setMode("legacy");
-        } catch {
-          if (!cancelled) clearAllState(setters);
+          setDiagnosticCode(null);
+        } catch (e) {
+          const code =
+            e instanceof EstimateRenderError ? e.diagnosticCode : "DE-EXCHANGE-404";
+          if (!cancelled) clearAllState(setters, code);
         } finally {
           if (!cancelled) setLoading(false);
-        }
-        return;
-      }
-
-      // Fragment present but config UI flag off → treat as unavailable for config; try not to use path
-      if (fragmentToken && !configurationUiEnabled()) {
-        // Fallback: use legacy API with bearer not supported on v1 — show unavailable
-        // (operators must enable public config UI flag for fragment links)
-        if (!cancelled) {
-          clearFragmentFromUrl();
-          clearAllState(setters);
-          setLoading(false);
         }
         return;
       }
 
       if (!cancelled) {
-        clearAllState(setters);
+        clearAllState(setters, "DE-STATE");
         setLoading(false);
       }
     })();
@@ -150,15 +214,7 @@ export function App() {
   }
 
   if (unavailable || (!estimate && !configState)) {
-    return (
-      <div className="page">
-        <main className="shell shell--narrow">
-          <p className="unavailable" role="alert">
-            {UNAVAILABLE_MESSAGE}
-          </p>
-        </main>
-      </div>
-    );
+    return <UnavailableScreen diagnosticCode={diagnosticCode} />;
   }
 
   if (mode === "configure" && configState) {
@@ -170,6 +226,7 @@ export function App() {
           setEstimate(null);
           setConfigState(null);
           setUnavailable(true);
+          setDiagnosticCode("DE-STATE");
           setMode("none");
         }}
       />
@@ -186,13 +243,5 @@ export function App() {
     );
   }
 
-  return (
-    <div className="page">
-      <main className="shell shell--narrow">
-        <p className="unavailable" role="alert">
-          {UNAVAILABLE_MESSAGE}
-        </p>
-      </main>
-    </div>
-  );
+  return <UnavailableScreen diagnosticCode={diagnosticCode || "DE-RENDER"} />;
 }

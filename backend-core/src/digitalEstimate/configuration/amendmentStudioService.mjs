@@ -8,7 +8,10 @@ import {
   isDigitalEstimateAmendmentStudioRuntimeEnabled,
   REVIEW_STATUS
 } from "./amendmentConfig.mjs";
-import { calculateElite100ConfigDelta, ELITE100_CONFIG_DELTA_ENGINE_ID } from "./elite100ConfigDeltaEngine.mjs";
+import {
+  calculateElite100ConfigDelta,
+  ELITE100_CONFIG_DELTA_ENGINE_ID
+} from "./currentConfigDeltaEngine.mjs";
 import {
   buildTrustedConfigurationContext,
   rejectClientAuthoritativeEconomics,
@@ -290,7 +293,12 @@ export function createAmendmentStudioService(deps) {
           cat?.customerPriceTreatment || envOpt?.customer_price_treatment || "absolute",
         minQty: cat?.minQty ?? envOpt?.min_qty ?? 0,
         maxQty: cat?.maxQty ?? envOpt?.max_qty ?? null,
-        availabilityState: "active"
+        availabilityState: "active",
+        includedInBaseline: Boolean(
+          envOpt?.included_in_baseline ?? envOpt?.includedInBaseline
+        ),
+        defaultQty: Number(envOpt?.default_qty ?? envOpt?.defaultQty ?? 0),
+        baselineQuantity: Number(envOpt?.default_qty ?? envOpt?.defaultQty ?? 0)
       });
     }
 

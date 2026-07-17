@@ -153,6 +153,21 @@ Brain production redeploy: `dpl_EVjyakQh2aahg2Je5bew12LRNcQT`
 
 ---
 
+## Stage 10.5 — DE.2G lifecycle + DE.2H material migrations ✅ (2026-07-16)
+
+| Check | Result |
+|-------|--------|
+| `material_catalog_contract` column | **Present** |
+| Activate RPC revokes sessions on supersede | **Present** (`sessions_revoked`) |
+| `service_role` EXECUTE on activate RPC | **Yes** |
+| `anon` / `authenticated` EXECUTE on activate RPC | **No** |
+| Lifecycle SQL checksum | Matches `MIGRATION_CHECKSUMS_DE_2G_SESSION_LIFECYCLE.json` |
+| Material catalog SQL checksum | Matches `MIGRATION_CHECKSUMS_DE_2H_MATERIAL_CATALOG.json` |
+
+**Follow-on:** Deploy Brain + Studio + public heads with color catalog; activate color-frozen envelope; synthetic browser smoke.
+
+---
+
 ## Stages 12–14 — Pending
 
 | Stage | Action |

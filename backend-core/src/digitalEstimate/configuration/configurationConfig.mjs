@@ -26,8 +26,11 @@ export function isDigitalEstimateConfigurationRuntimeEnabled(env = process.env) 
 export const DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION_PLACEHOLDER =
   "elite100_config_delta_v1_placeholder";
 
-/** Production DE.2C engine id (also exported from elite100ConfigDeltaConstants). */
-export const DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION = "elite100-config-delta-v1";
+/** Current production DE.2C engine id for new calculations (v2 frozen-baseline anchor). */
+export const DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION = "elite100-config-delta-v2";
+
+/** Historical engine id — immutable persisted rows only; never relabel as current. */
+export const DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION_V1 = "elite100-config-delta-v1";
 
 export function readSafeDigitalEstimateConfigurationConfig(env = process.env) {
   return {

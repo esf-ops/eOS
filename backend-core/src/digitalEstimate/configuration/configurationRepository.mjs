@@ -426,7 +426,8 @@ export function createInMemoryConfigurationRepository(opts = {}) {
       actorUserId = null,
       pricingPolicyFingerprint = null,
       catalogFingerprint = null,
-      expectedRowVersion = null
+      expectedRowVersion = null,
+      materialCatalogContract = null
     } = {}) {
       const env = envelopes.get(String(envelopeId));
       if (!env || env.organization_id !== organizationId) throw err("not_found", "envelope not found", 404);
@@ -460,6 +461,7 @@ export function createInMemoryConfigurationRepository(opts = {}) {
 
           const now = new Date().toISOString();
           let supersededCount = 0;
+          let sessionsRevokedCount = 0;
           for (const prior of [...envelopes.values()]) {
             if (
               prior.organization_id === organizationId &&
@@ -480,6 +482,35 @@ export function createInMemoryConfigurationRepository(opts = {}) {
                 metadata: { supersededByEnvelopeId: envelopeId }
               });
               supersededCount += 1;
+
+              let revokedForPrior = 0;
+              for (const session of [...sessions.values()]) {
+                if (
+                  session.organization_id === organizationId &&
+                  session.envelope_id === prior.id &&
+                  ["active", "configuring", "saved"].includes(session.status)
+                ) {
+                  session.status = "revoked";
+                  session.updated_at = now;
+                  revokedForPrior += 1;
+                  sessionsRevokedCount += 1;
+                }
+              }
+              if (revokedForPrior > 0) {
+                await appendEvent({
+                  organization_id: organizationId,
+                  envelope_id: prior.id,
+                  publication_id: prior.publication_id,
+                  event_type: "configuration_session_revoked",
+                  actor_type: "system",
+                  actor_user_id: actorUserId,
+                  metadata: {
+                    reason: "envelope_superseded",
+                    supersededByEnvelopeId: envelopeId,
+                    revokedSessionCount: revokedForPrior
+                  }
+                });
+              }
             }
           }
 
@@ -488,6 +519,9 @@ export function createInMemoryConfigurationRepository(opts = {}) {
           current.pricing_policy_fingerprint =
             pricingPolicyFingerprint || current.pricing_policy_fingerprint;
           current.catalog_fingerprint = catalogFingerprint || current.catalog_fingerprint;
+          if (materialCatalogContract) {
+            current.material_catalog_contract = materialCatalogContract;
+          }
           current.activated_at = now;
           current.activated_by_user_id = actorUserId;
           current.row_version = Number(current.row_version) + 1;
@@ -502,6 +536,7 @@ export function createInMemoryConfigurationRepository(opts = {}) {
             actor_user_id: actorUserId,
             metadata: {
               supersededCount,
+              sessionsRevokedCount,
               pricingPolicyFingerprint: current.pricing_policy_fingerprint,
               catalogFingerprint: current.catalog_fingerprint
             }
@@ -519,7 +554,8 @@ export function createInMemoryConfigurationRepository(opts = {}) {
 
           return {
             envelope: structuredClone(current),
-            supersededCount
+            supersededCount,
+            sessionsRevokedCount
           };
         } catch (e) {
           restoreState(checkpoint);
@@ -1153,7 +1189,12 @@ export function createSupabaseConfigurationRepository({ db }) {
         p_expected_row_version: opts.expectedRowVersion ?? null
       });
       if (error) throw error;
-      return data;
+      const envelope = await this.getEnvelope(organizationId, envelopeId);
+      return {
+        envelope,
+        supersededCount: Number(data?.superseded_count) || 0,
+        sessionsRevokedCount: Number(data?.sessions_revoked_count) || 0
+      };
     },
 
     async getCalculation(organizationId, calculationId) {

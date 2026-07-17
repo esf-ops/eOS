@@ -74,6 +74,9 @@ export type ConfigOption = {
   groupId: string;
   displayLabel: string;
   description?: string | null;
+  imageAssetRef?: string | null;
+  materialId?: string | null;
+  roomKey?: string | null;
   availabilityState: string;
   customerPriceTreatment: string;
   minQty: number;
@@ -81,6 +84,22 @@ export type ConfigOption = {
   defaultQty: number;
   selectable: boolean;
   includedInBaseline?: boolean;
+};
+
+export type CustomerMaterial = {
+  materialId: string;
+  displayName: string;
+  imageAssetPath?: string | null;
+  imageFullPath?: string | null;
+  collectionLabel?: string | null;
+  colorFamily?: string | null;
+  patternType?: string | null;
+  customerVisible?: boolean;
+  roomKey?: string | null;
+  optionKey?: string | null;
+  includedInBaseline?: boolean;
+  isDefault?: boolean;
+  selectable?: boolean;
 };
 
 export type ConfigurationState = {
@@ -91,11 +110,19 @@ export type ConfigurationState = {
   configuration?: {
     envelopeId: string;
     envelopeVersion: number;
+    materialCatalogContract?: string | null;
     pricingValidThrough?: string | null;
     lockedScopeNotice?: string;
-    rooms?: Array<{ roomKey: string; displayName: string; baselineMaterialLabel?: string; locked?: boolean }>;
+    rooms?: Array<{
+      roomKey: string;
+      displayName: string;
+      baselineMaterialLabel?: string;
+      baselineColorLabel?: string | null;
+      locked?: boolean;
+    }>;
     groups?: Array<{ id: string; groupKey: string; displayLabel: string; required?: boolean }>;
     options?: ConfigOption[];
+    materials?: CustomerMaterial[];
     currentSelections?: Record<string, number>;
     latestCalculation?: {
       baselineDisplayTotal?: number;
@@ -114,22 +141,69 @@ export type ConfigurationState = {
 
 export async function exchangeFragmentToken(token: string): Promise<ConfigurationState> {
   const base = apiBaseUrl();
-  const res = await fetch(`${base}/api/public-digital-estimate/v2/session`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({}),
-  });
-  if (!res.ok) {
-    const err = new Error("Estimate unavailable");
-    (err as Error & { status?: number }).status = res.status;
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/public-digital-estimate/v2/session`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({}),
+    });
+  } catch {
+    const err = new Error("Estimate unavailable") as Error & {
+      status?: number;
+      diagnosticCode?: string;
+    };
+    err.diagnosticCode = "DE-EXCHANGE-NETWORK";
     throw err;
   }
-  return (await res.json()) as ConfigurationState;
+  if (!res.ok) {
+    let diagnosticCode = "DE-EXCHANGE-404";
+    try {
+      const body = (await res.json()) as { diagnosticCode?: string; code?: string };
+      if (body?.diagnosticCode === "DE-ORIGIN") diagnosticCode = "DE-ORIGIN";
+      else if (body?.code === "origin_rejected" || body?.code === "origin_not_configured") {
+        diagnosticCode = "DE-ORIGIN";
+      } else if (res.status === 404 || res.status === 403) {
+        diagnosticCode = "DE-EXCHANGE-404";
+      } else {
+        diagnosticCode = "DE-STATE";
+      }
+    } catch {
+      /* ignore body parse */
+    }
+    const err = new Error("Estimate unavailable") as Error & {
+      status?: number;
+      diagnosticCode?: string;
+    };
+    err.status = res.status;
+    err.diagnosticCode = diagnosticCode;
+    throw err;
+  }
+  const setCookiePresent = typeof res.headers.getSetCookie === "function"
+    ? res.headers.getSetCookie().length > 0
+    : Boolean(res.headers.get("set-cookie"));
+  // Browsers hide Set-Cookie from JS; absence here is not conclusive. Prefer body shape.
+  const body = (await res.json()) as ConfigurationState & { ok?: boolean };
+  if (!body || (body.ok === false)) {
+    const err = new Error("Estimate unavailable") as Error & { diagnosticCode?: string };
+    err.diagnosticCode = "DE-STATE";
+    throw err;
+  }
+  if (!body.estimate && body.lifecycle !== "active") {
+    // Baseline-only sessions still carry estimate when publication-only.
+    // Missing both estimate and configuration is a state/render failure.
+    if (!body.configuration) {
+      const err = new Error("Estimate unavailable") as Error & { diagnosticCode?: string };
+      err.diagnosticCode = setCookiePresent ? "DE-STATE" : "DE-COOKIE";
+      throw err;
+    }
+  }
+  return body as ConfigurationState;
 }
 
 export async function resumeConfigurationSession(): Promise<ConfigurationState> {

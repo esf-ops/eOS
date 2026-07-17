@@ -3,7 +3,10 @@
  * Never returns internal pricing evidence. Never invokes the Internal Estimate calculator.
  */
 
-import { calculateElite100ConfigDelta, ELITE100_CONFIG_DELTA_ENGINE_ID } from "./elite100ConfigDeltaEngine.mjs";
+import {
+  calculateElite100ConfigDelta,
+  ELITE100_CONFIG_DELTA_ENGINE_ID
+} from "./currentConfigDeltaEngine.mjs";
 import { assertPublicConfigurationHasNoForbiddenContent } from "./configurationPublicSerializer.mjs";
 import {
   buildTrustedConfigurationContext,
@@ -30,11 +33,25 @@ import {
   assertSyntheticPublicationPublicAccess,
   rejectSyntheticCallerAuthority
 } from "../syntheticPilotGuard.mjs";
+import {
+  ELITE100_MATERIAL_CATALOG_CONTRACT,
+  getElite100CustomerMaterial,
+  resolveMaterialSelectionFromOption,
+  toCustomerSafeMaterialRecord
+} from "./elite100CustomerMaterialCatalog.mjs";
 
-function unavailable(message = "Estimate unavailable") {
+function unavailable(message = "Estimate unavailable", diagnosticCode = "DE-EXCHANGE-404") {
   const e = new Error(message);
   e.code = "not_found";
   e.statusCode = 404;
+  e.diagnosticCode = diagnosticCode;
+  return e;
+}
+
+/** Distinct lookup failures for sanitized server logs / pilot diagnostics (never expose IDs). */
+function exchangeUnavailable(reason) {
+  const e = unavailable("Estimate unavailable", "DE-EXCHANGE-404");
+  e.exchangeReason = reason;
   return e;
 }
 
@@ -89,7 +106,16 @@ export function rejectPublicSelectionAuthority(body) {
     "watts",
     "spahn",
     "Direct",
-    "Wholesale"
+    "Wholesale",
+    "materialGroup",
+    "pricingGroup",
+    "pricingGroupCode",
+    "rate",
+    "tax",
+    "markup",
+    "total",
+    "configuredTotal",
+    "baselineTotal"
   ];
   for (const f of forbidden) {
     if (Object.prototype.hasOwnProperty.call(body, f)) {
@@ -104,13 +130,18 @@ export function rejectPublicSelectionAuthority(body) {
 function toCustomerSafeOption(opt, group) {
   const availability = opt.availability_state || opt.availabilityState || "active";
   const treatment = opt.customer_price_treatment || opt.customerPriceTreatment || "absolute";
+  const resolved = resolveMaterialSelectionFromOption(opt);
+  const mat = resolved.materialId ? getElite100CustomerMaterial(resolved.materialId) : null;
   return {
     id: opt.id,
     optionKey: opt.option_key || opt.optionKey,
     groupId: opt.group_id || opt.groupId,
     groupKey: group?.group_key || group?.groupKey || null,
-    displayLabel: opt.display_label || opt.displayLabel,
+    displayLabel: mat?.displayName || opt.display_label || opt.displayLabel,
     description: opt.description_customer || opt.description || null,
+    imageAssetRef: mat?.imageThumbPath || opt.image_asset_ref || opt.imageAssetRef || null,
+    materialId: resolved.materialId || null,
+    roomKey: resolved.roomKey || null,
     availabilityState: availability,
     customerPriceTreatment: treatment,
     minQty: Number(opt.min_qty ?? opt.minQty ?? 0),
@@ -123,6 +154,29 @@ function toCustomerSafeOption(opt, group) {
       treatment !== "unavailable" &&
       treatment !== "review_required"
   };
+}
+
+function buildCustomerSafeMaterials(graphOptions) {
+  const materials = [];
+  for (const opt of graphOptions || []) {
+    const key = opt.option_key || opt.optionKey || "";
+    if (!String(key).startsWith("material:")) continue;
+    const resolved = resolveMaterialSelectionFromOption(opt);
+    if (!resolved.materialId) continue;
+    const mat = getElite100CustomerMaterial(resolved.materialId);
+    if (!mat) continue;
+    const availability = opt.availability_state || opt.availabilityState || "active";
+    materials.push(
+      toCustomerSafeMaterialRecord(mat, {
+        roomKey: resolved.roomKey,
+        optionKey: key,
+        includedInBaseline: Boolean(opt.included_in_baseline ?? opt.includedInBaseline),
+        isDefault: Number(opt.default_qty ?? opt.defaultQty ?? 0) > 0,
+        selectable: availability === "active"
+      })
+    );
+  }
+  return materials;
 }
 
 /**
@@ -143,30 +197,41 @@ export function createPublicConfigurationService(deps) {
 
   async function resolvePublicationFromRawToken(rawToken) {
     const token = String(rawToken ?? "").trim();
-    if (!token || token.length < 20 || token.length > 256) throw unavailable();
+    if (!token || token.length < 20 || token.length > 256) {
+      throw exchangeUnavailable("token_shape");
+    }
     const tokenHash = hashDigitalEstimateToken(token);
     const tokenRow = await deRepository.findAnyTokenByHash(tokenHash);
-    if (!tokenRow) throw unavailable();
-    if (!constantTimeEqualHex(String(tokenRow.token_hash), tokenHash)) throw unavailable();
-    if (tokenRow.revoked_at) throw unavailable();
+    if (!tokenRow) throw exchangeUnavailable("token_lookup_miss");
+    if (!constantTimeEqualHex(String(tokenRow.token_hash), tokenHash)) {
+      throw exchangeUnavailable("token_hash_mismatch");
+    }
+    if (tokenRow.revoked_at) throw exchangeUnavailable("token_revoked");
 
     const publication = await deRepository.getPublication(
       tokenRow.organization_id,
       tokenRow.publication_id
     );
     if (!publication || publication.status !== "active" || publication.revoked_at) {
-      throw unavailable();
+      throw exchangeUnavailable("publication_inactive");
     }
-    assertSyntheticPublicationPublicAccess(publication.id, env);
+    try {
+      assertSyntheticPublicationPublicAccess(publication.id, env);
+    } catch (e) {
+      if (e?.code === "not_found") throw exchangeUnavailable("allowlist_blocked");
+      throw e;
+    }
     const now = Date.now();
     const expiresAt = new Date(publication.access_expires_at).getTime();
-    if (Number.isFinite(expiresAt) && now > expiresAt) throw unavailable();
+    if (Number.isFinite(expiresAt) && now > expiresAt) {
+      throw exchangeUnavailable("publication_expired");
+    }
 
     const snap = await deRepository.getSnapshotByPublicationId(
       publication.organization_id,
       publication.id
     );
-    if (!snap?.customer_snapshot_json) throw unavailable();
+    if (!snap?.customer_snapshot_json) throw exchangeUnavailable("snapshot_missing");
 
     return { tokenRow, publication, snap };
   }
@@ -191,6 +256,14 @@ export function createPublicConfigurationService(deps) {
     return "active";
   }
 
+  function shouldIncludeBaselineOnNonActiveLifecycle(lifecycle, activeEnvelope, publication) {
+    if (!publication || publication.status !== "active" || publication.revoked_at) return false;
+    if (lifecycle === "expired") return true;
+    // Publication-only sessions (no active envelope) still expose frozen read-only baseline.
+    if (lifecycle === "blocked" && !activeEnvelope) return true;
+    return false;
+  }
+
   async function buildPublicState({ organizationId, publication, snap, session, activeEnvelope }) {
     await ensurePolicyFixtures(organizationId);
     if (typeof configurationRepository.seedPublication === "function") {
@@ -202,9 +275,23 @@ export function createPublicConfigurationService(deps) {
       accessExpiresAt: publication.access_expires_at
     });
     assertPublicDtoHasNoForbiddenContent(baselineDto);
+    // v2 session/configuration responses expose the inner estimate object only.
+    // buildPublicDigitalEstimateDto wraps { ok, estimate, access } for the v1 path.
+    const baselineEstimate =
+      baselineDto && typeof baselineDto === "object" && baselineDto.estimate
+        ? baselineDto.estimate
+        : null;
+    if (!baselineEstimate || typeof baselineEstimate !== "object") {
+      throw unavailable("Estimate unavailable");
+    }
 
     const lifecycle = publicLifecycleFromSession(session, { activeEnvelope, publication });
     if (lifecycle !== "active") {
+      const includeBaseline = shouldIncludeBaselineOnNonActiveLifecycle(
+        lifecycle,
+        activeEnvelope,
+        publication
+      );
       return {
         lifecycle,
         message:
@@ -212,9 +299,12 @@ export function createPublicConfigurationService(deps) {
             ? "Your estimate options were updated"
             : lifecycle === "expired"
               ? "Pricing has expired"
-              : "Configuration unavailable",
-        estimate: null,
+              : includeBaseline
+                ? null
+                : "Configuration unavailable",
+        estimate: includeBaseline ? baselineEstimate : null,
         configuration: null,
+        readMode: includeBaseline ? "baseline" : null,
         session: session
           ? {
               id: session.id,
@@ -236,7 +326,7 @@ export function createPublicConfigurationService(deps) {
       return {
         lifecycle: "blocked",
         message: "Configuration unavailable",
-        estimate: baselineDto,
+        estimate: baselineEstimate,
         configuration: null,
         session: {
           id: session.id,
@@ -251,7 +341,7 @@ export function createPublicConfigurationService(deps) {
       return {
         lifecycle: "expired",
         message: "Pricing has expired",
-        estimate: baselineDto,
+        estimate: baselineEstimate,
         configuration: null,
         session: {
           id: session.id,
@@ -279,6 +369,8 @@ export function createPublicConfigurationService(deps) {
         const g = (graph?.groups || []).find((x) => x.id === o.group_id);
         return toCustomerSafeOption(o, g);
       });
+    const materials = buildCustomerSafeMaterials(graph?.options || []);
+    assertPublicConfigurationHasNoForbiddenContent(materials);
 
     let latestSelection = null;
     let latestCalculation = null;
@@ -309,7 +401,7 @@ export function createPublicConfigurationService(deps) {
     const state = {
       lifecycle: "active",
       message: null,
-      estimate: baselineDto,
+      estimate: baselineEstimate,
       session: {
         id: session.id,
         status: "active",
@@ -319,6 +411,8 @@ export function createPublicConfigurationService(deps) {
       configuration: {
         envelopeId: activeEnvelope.id,
         envelopeVersion: activeEnvelope.envelope_version,
+        materialCatalogContract:
+          activeEnvelope.material_catalog_contract || ELITE100_MATERIAL_CATALOG_CONTRACT,
         pricingValidThrough: publication.pricing_valid_through || ctx.pricingValidThrough,
         lockedScopeNotice:
           "Professional measurements and fabrication scope are locked. Your finish and option choices may update the estimate total.",
@@ -326,11 +420,13 @@ export function createPublicConfigurationService(deps) {
           roomKey: r.roomKey,
           displayName: r.displayName,
           baselineMaterialLabel: r.baselineMaterialLabel,
+          baselineColorLabel: r.colorLabel || null,
           // SF intentionally omitted from public projection — locked, not customer-edited
           locked: true
         })),
         groups,
         options,
+        materials,
         currentSelections: latestSelection?.selection_payload_json || {},
         latestCalculation: customerCalc,
         baselineDisplayTotal: ctx.baselineDisplayTotal
@@ -440,6 +536,15 @@ export function createPublicConfigurationService(deps) {
         session.publication_id
       );
 
+      // Envelope-bound sessions must match the current active envelope. Superseded /
+      // revoked sessions fail closed with a generic 404 (no lifecycle leak).
+      if (session.envelope_id) {
+        if (!activeEnvelope || session.envelope_id !== activeEnvelope.id) {
+          throw unavailable();
+        }
+        if (activeEnvelope.status !== "active") throw unavailable();
+      }
+
       if (typeof configurationRepository.appendEvent === "function") {
         await configurationRepository.appendEvent({
           organization_id: session.organization_id,
@@ -489,7 +594,7 @@ export function createPublicConfigurationService(deps) {
         throw unavailable();
       }
       if (session.status !== "active" && session.status !== "configuring" && session.status !== "saved") {
-        throw configUnavailable();
+        throw unavailable();
       }
       if (Number(session.row_version) !== Number(expectedRowVersion)) {
         throw safeFail("row_version_conflict", "Please refresh and try again", 409);
@@ -509,13 +614,11 @@ export function createPublicConfigurationService(deps) {
         session.organization_id,
         session.publication_id
       );
-      if (!activeEnvelope) throw configUnavailable("Your estimate options were updated");
-      if (session.envelope_id && session.envelope_id !== activeEnvelope.id) {
-        throw configUnavailable("Your estimate options were updated");
+      if (!activeEnvelope) throw unavailable();
+      if (!session.envelope_id || session.envelope_id !== activeEnvelope.id) {
+        throw unavailable();
       }
-      if (!session.envelope_id) {
-        throw configUnavailable("Configuration unavailable");
-      }
+      if (activeEnvelope.status !== "active") throw unavailable();
 
       await ensurePolicyFixtures(session.organization_id);
       const snap = await deRepository.getSnapshotByPublicationId(
@@ -534,6 +637,20 @@ export function createPublicConfigurationService(deps) {
         pricingPolicyRepository
       });
       if (!ctx.canConfigure) throw configUnavailable();
+      if (ctx.baselineDisplayTotal == null || !Number.isFinite(Number(ctx.baselineDisplayTotal))) {
+        throw safeFail(
+          "unresolved_baseline_total",
+          "Configuration unavailable",
+          422
+        );
+      }
+      if ((ctx.blockers || []).some((b) => b.code === "unknown_baseline_group" || b.code === "missing_locked_measurement")) {
+        throw safeFail(
+          "unresolved_baseline_material",
+          "Configuration unavailable",
+          422
+        );
+      }
 
       const graph = await configurationRepository.getEnvelopeGraph(
         session.organization_id,
@@ -575,13 +692,22 @@ export function createPublicConfigurationService(deps) {
         }
       }
 
-      // Build DE.2C rooms from material: selections + baseline
+      // Build DE.2C rooms from material: selections + baseline (server resolves color → group)
       const rooms = (ctx.rooms || []).map((r) => {
         let selected = r.baselineMaterialGroup;
         for (const [key, qty] of Object.entries(normalized.selections)) {
           if (Number(qty) <= 0) continue;
           if (key.startsWith(`material:${r.roomKey}:`)) {
-            selected = key.split(":")[2] || selected;
+            const opt = options.find((o) => (o.option_key || o.optionKey) === key);
+            const resolved = resolveMaterialSelectionFromOption(opt || { optionKey: key });
+            if (!resolved.materialGroup) {
+              throw safeFail("unknown_material", "That selection is unavailable", 400);
+            }
+            // Reject forged color IDs not frozen into the envelope
+            if (!opt) {
+              throw safeFail("unknown_option", "That selection is unavailable", 400);
+            }
+            selected = resolved.materialGroup;
           } else {
             const opt = options.find((o) => (o.option_key || o.optionKey) === key);
             const compat = opt?.compatibility_json || opt?.compatibilityJson || {};
@@ -630,7 +756,12 @@ export function createPublicConfigurationService(deps) {
             cat?.customerPriceTreatment || envOpt?.customer_price_treatment || "absolute",
           minQty: cat?.minQty ?? envOpt?.min_qty ?? 0,
           maxQty: cat?.maxQty ?? envOpt?.max_qty ?? null,
-          availabilityState: "active"
+          availabilityState: "active",
+          includedInBaseline: Boolean(
+            envOpt?.included_in_baseline ?? envOpt?.includedInBaseline
+          ),
+          defaultQty: Number(envOpt?.default_qty ?? envOpt?.defaultQty ?? 0),
+          baselineQuantity: Number(envOpt?.default_qty ?? envOpt?.defaultQty ?? 0)
         });
       }
 

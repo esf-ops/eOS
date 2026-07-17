@@ -175,7 +175,7 @@ export function createReviewRequestService(deps) {
       const customerNote = sanitizeCustomerNote(body?.customerNote ?? body?.customer_note ?? null);
       const session = await resolveSession(rawSecret);
       if (!["active", "configuring", "saved"].includes(session.status)) {
-        throw configUnavailable();
+        throw unavailable();
       }
       if (Number(session.row_version) !== Number(expectedRowVersion)) {
         throw safeFail("row_version_conflict", "Please refresh and try again", 409);
@@ -195,9 +195,9 @@ export function createReviewRequestService(deps) {
         session.organization_id,
         session.publication_id
       );
-      if (!activeEnvelope) throw configUnavailable("Your estimate options were updated");
-      if (session.envelope_id && session.envelope_id !== activeEnvelope.id) {
-        throw configUnavailable("Your estimate options were updated");
+      if (!activeEnvelope) throw unavailable();
+      if (!session.envelope_id || session.envelope_id !== activeEnvelope.id) {
+        throw unavailable();
       }
 
       const selection = await configurationRepository.getLatestSelectionForSession(

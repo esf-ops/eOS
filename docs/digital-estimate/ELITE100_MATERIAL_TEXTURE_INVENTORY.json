@@ -1,0 +1,98 @@
+{
+  "contract": "elite100-customer-materials-v1",
+  "source": "hub-spoke-hub-76031284-main/public/material-textures/elite100",
+  "destination": "app-digital-estimate/public/materials/elite100/{full,thumb}/",
+  "alsoCopiedTo": "app-elite100-estimate-studio/public/materials/elite100/{full,thumb}/",
+  "reconciled": [
+    {
+      "assetKey": "antique-gray",
+      "files": ["full/antique-gray.jpg", "thumb/antique-gray.jpg"],
+      "materialId": "e100-antique-gray",
+      "displayName": "Antique Gray",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name"
+    },
+    {
+      "assetKey": "bayshore-sand",
+      "files": ["full/bayshore-sand.jpg", "thumb/bayshore-sand.jpg"],
+      "materialId": "e100-bayshore-sand",
+      "displayName": "Bayshore Sand",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name"
+    },
+    {
+      "assetKey": "bianco-carrara",
+      "files": ["full/bianco-carrara.jpg", "thumb/bianco-carrara.jpg"],
+      "materialId": "e100-bianco-carrara",
+      "displayName": "Bianco Carrara",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name"
+    },
+    {
+      "assetKey": "carrara-classic",
+      "files": ["full/carrara-classic.jpg", "thumb/carrara-classic.jpg"],
+      "materialId": "e100-carrara-classic",
+      "displayName": "Carrara Classic",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name"
+    },
+    {
+      "assetKey": "carrara-royale",
+      "files": ["full/carrara-royale.jpg", "thumb/carrara-royale.jpg"],
+      "materialId": "e100-carrara-royale",
+      "displayName": "Carrara Royale",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name"
+    },
+    {
+      "assetKey": "classic-gray",
+      "files": ["full/classic-gray.jpg", "thumb/classic-gray.jpg"],
+      "materialId": "e100-classic-grey",
+      "displayName": "Classic Grey",
+      "pricingGroupCode": "promo",
+      "matchBasis": "approved_gray_grey_alias"
+    },
+    {
+      "assetKey": "india-black-pearl-polished",
+      "files": ["full/india-black-pearl-polished.jpg", "thumb/india-black-pearl-polished.jpg"],
+      "materialId": "e100-india-black-pearl",
+      "displayName": "India Black Pearl",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name_plus_finish_suffix_on_asset"
+    },
+    {
+      "assetKey": "sicilia",
+      "files": ["full/sicilia.jpg", "thumb/sicilia.jpg"],
+      "materialId": "e100-sicilia",
+      "displayName": "Sicilia",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name"
+    },
+    {
+      "assetKey": "silver-pearl-polished",
+      "files": ["full/silver-pearl-polished.jpg", "thumb/silver-pearl-polished.jpg"],
+      "materialId": "e100-silver-pearl",
+      "displayName": "Silver Pearl",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name_plus_finish_suffix_on_asset"
+    },
+    {
+      "assetKey": "suede-brown-polished",
+      "files": ["full/suede-brown-polished.jpg", "thumb/suede-brown-polished.jpg"],
+      "materialId": "e100-suede-brown",
+      "displayName": "Suede Brown",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name_plus_finish_suffix_on_asset"
+    },
+    {
+      "assetKey": "white-dove",
+      "files": ["full/white-dove.jpg", "thumb/white-dove.jpg"],
+      "materialId": "e100-white-dove",
+      "displayName": "White Dove",
+      "pricingGroupCode": "promo",
+      "matchBasis": "exact_color_name"
+    }
+  ],
+  "ambiguousUnused": [],
+  "notes": "Authority is the server catalog module elite100CustomerMaterialCatalog.mjs, not filename guessing at runtime. Fuzzy matching was not used as authority."
+}

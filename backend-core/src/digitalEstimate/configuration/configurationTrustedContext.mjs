@@ -10,7 +10,7 @@ import {
   GROUP_CODE_DISPLAY_NAMES,
   buildFixtureMaterialGroupRates
 } from "./approvedPricingFixtures.mjs";
-import { ELITE100_CONFIG_DELTA_ENGINE_ID } from "./elite100ConfigDeltaConstants.mjs";
+import { CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID } from "./elite100ConfigDeltaConstants.mjs";
 import { sha256CanonicalJson } from "../digitalEstimateToken.mjs";
 
 function fail(code, message, statusCode = 422) {
@@ -362,7 +362,7 @@ export async function buildTrustedConfigurationContext(args) {
   }));
 
   const pricingPolicyFingerprint = sha256CanonicalJson({
-    engine: ELITE100_CONFIG_DELTA_ENGINE_ID,
+    engine: CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID,
     rates: frozenBaseRates,
     tax: FIXTURE_GLOBAL_MATERIAL_USE_TAX.rate
   });
@@ -433,7 +433,7 @@ export async function buildTrustedConfigurationContext(args) {
       taxableBasis: "material_sell_amount",
       customerPresentation: "bundled_not_separate_line"
     },
-    engineVersion: ELITE100_CONFIG_DELTA_ENGINE_ID,
+    engineVersion: CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID,
     pricingPolicyFingerprint,
     catalogFingerprint,
     blockers,
@@ -459,6 +459,12 @@ export function rejectClientAuthoritativeEconomics(body) {
     "accountGroup",
     "accountGroupId",
     "accountGroupCode",
+    "materialGroup",
+    "pricingGroup",
+    "pricingGroupCode",
+    "markup",
+    "markupBps",
+    "total",
     "watts",
     "spahn",
     "configuredTotal",

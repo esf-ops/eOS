@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-07-16",
+  "phase": "DE.2G session lifecycle",
+  "note": "Additive migration for already-deployed production. Do not rewrite prior DE.2G.0 migration files or their checksums.",
+  "migrations": [
+    {
+      "path": "backend-core/supabase/eliteos_digital_estimate_session_lifecycle_v1.sql",
+      "sha256": "f4d08b71c257a3f13c5d50e8bb5ae5d81064b4b78da23afc38c4019ef339a430",
+      "bytes": 9201
+    }
+  ]
+}

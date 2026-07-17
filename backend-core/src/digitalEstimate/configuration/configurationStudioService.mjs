@@ -2,7 +2,10 @@
  * DE.2D — Studio configuration envelope operations (server-authoritative).
  */
 
-import { calculateElite100ConfigDelta, ELITE100_CONFIG_DELTA_ENGINE_ID } from "./elite100ConfigDeltaEngine.mjs";
+import {
+  calculateElite100ConfigDelta,
+  ELITE100_CONFIG_DELTA_ENGINE_ID
+} from "./currentConfigDeltaEngine.mjs";
 import {
   buildTrustedConfigurationContext,
   rejectClientAuthoritativeEconomics,
@@ -10,6 +13,16 @@ import {
 } from "./configurationTrustedContext.mjs";
 import { assertPublicConfigurationHasNoForbiddenContent } from "./configurationPublicSerializer.mjs";
 import { validateEnvelopeStructure } from "./configurationValidation.mjs";
+import {
+  ELITE100_MATERIAL_CATALOG_CONTRACT,
+  getElite100CustomerMaterial,
+  isKnownMaterialOrLegacyGroupToken,
+  listElite100CustomerMaterials,
+  parseMaterialOptionKey,
+  pickDefaultMaterialForGroup,
+  resolveMaterialSelectionFromOption,
+  toStudioMaterialRecord
+} from "./elite100CustomerMaterialCatalog.mjs";
 
 function fail(code, message, statusCode = 400) {
   const e = new Error(message);
@@ -74,7 +87,8 @@ export function createConfigurationStudioService(deps) {
       return {
         context: {
           ...ctx,
-          // Strip internal option prices from staff context response's nested catalogInternal? Keep for staff.
+          materialCatalogContract: ELITE100_MATERIAL_CATALOG_CONTRACT,
+          materialCatalog: listElite100CustomerMaterials(true).map(toStudioMaterialRecord)
         },
         envelopes: envelopes.map((e) => ({
           id: e.id,
@@ -83,7 +97,8 @@ export function createConfigurationStudioService(deps) {
           rowVersion: e.row_version,
           activatedAt: e.activated_at,
           updatedAt: e.updated_at,
-          clonedFromEnvelopeId: e.cloned_from_envelope_id
+          clonedFromEnvelopeId: e.cloned_from_envelope_id,
+          materialCatalogContract: e.material_catalog_contract || null
         })),
         activeEnvelopeId: active?.id || null
       };
@@ -123,25 +138,54 @@ export function createConfigurationStudioService(deps) {
       });
       for (const room of ctx.rooms) {
         const code = room.baselineMaterialGroup || "group_b";
-        await configurationRepository.upsertDraftOption(organizationId, draft.id, {
-          groupId: matGroup.id,
-          optionKey: `material:${room.roomKey}:${code}`,
-          displayLabel: `${room.displayName} — ${room.baselineMaterialLabel || code}`,
-          description: `Default material for ${room.displayName}`,
-          includedInBaseline: true,
-          defaultQty: 1,
-          minQty: 0,
-          maxQty: 1,
-          requiredSelection: true,
-          customerPriceTreatment: "delta",
-          pricingMode: "replacement",
-          sellPrice: 0,
-          compatibilityJson: {
-            roomKey: room.roomKey,
-            materialGroup: code,
-            role: "material_selection"
-          }
-        });
+        const defaultMat = pickDefaultMaterialForGroup(code);
+        if (defaultMat) {
+          await configurationRepository.upsertDraftOption(organizationId, draft.id, {
+            groupId: matGroup.id,
+            optionKey: `material:${room.roomKey}:${defaultMat.materialId}`,
+            displayLabel: defaultMat.displayName,
+            description: `Default finish for ${room.displayName}`,
+            includedInBaseline: true,
+            defaultQty: 1,
+            minQty: 0,
+            maxQty: 1,
+            requiredSelection: true,
+            customerPriceTreatment: "delta",
+            pricingMode: "replacement",
+            sellPrice: 0,
+            imageAssetRef: defaultMat.imageThumbPath,
+            compatibilityJson: {
+              roomKey: room.roomKey,
+              materialColorId: defaultMat.materialId,
+              materialGroup: defaultMat.pricingGroupCode,
+              role: "material_selection",
+              isDefault: true,
+              catalogContract: ELITE100_MATERIAL_CATALOG_CONTRACT,
+              imageAssetRef: defaultMat.imageThumbPath
+            }
+          });
+        } else {
+          // Legacy fallback when no catalog color exists for the baseline group
+          await configurationRepository.upsertDraftOption(organizationId, draft.id, {
+            groupId: matGroup.id,
+            optionKey: `material:${room.roomKey}:${code}`,
+            displayLabel: `${room.displayName} — ${room.baselineMaterialLabel || code}`,
+            description: `Default material for ${room.displayName}`,
+            includedInBaseline: true,
+            defaultQty: 1,
+            minQty: 0,
+            maxQty: 1,
+            requiredSelection: true,
+            customerPriceTreatment: "delta",
+            pricingMode: "replacement",
+            sellPrice: 0,
+            compatibilityJson: {
+              roomKey: room.roomKey,
+              materialGroup: code,
+              role: "material_selection"
+            }
+          });
+        }
       }
       return await configurationRepository.getEnvelopeGraph(organizationId, draft.id);
     },
@@ -180,17 +224,60 @@ export function createConfigurationStudioService(deps) {
       const options = Array.isArray(body.options) ? body.options : [];
       const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
       const out = [];
-      for (const raw of options) {
-        rejectClientAuthoritativeEconomics(raw);
-        const optionKey = String(raw.optionKey || raw.option_key || "");
-        // Material selections use material:room:group keys — allowed
+      for (const incoming of options) {
+        rejectClientAuthoritativeEconomics(incoming);
+        let optionPayload = { ...incoming };
+        const optionKey = String(optionPayload.optionKey || optionPayload.option_key || "");
+        // Material selections use material:room:{materialId|group} — group resolved server-side from catalog
         const isMaterial = optionKey.startsWith("material:");
         const cat = catalog.get(optionKey);
         if (!isMaterial && !cat) {
           throw fail("unknown_option", `Option not in server-approved catalog: ${optionKey}`, 400);
         }
+        let compatibilityJson = optionPayload.compatibilityJson || optionPayload.compatibility_json || {};
+        if (isMaterial) {
+          const parsed = parseMaterialOptionKey(optionKey);
+          if (!parsed || !isKnownMaterialOrLegacyGroupToken(parsed.token)) {
+            throw fail("unknown_material", `Unknown material selection: ${optionKey}`, 400);
+          }
+          const resolved = resolveMaterialSelectionFromOption({
+            optionKey,
+            compatibilityJson
+          });
+          if (!resolved.materialGroup) {
+            throw fail("unknown_material", `Unable to resolve pricing group for ${optionKey}`, 400);
+          }
+          // Never trust browser-supplied group / rates — overwrite from catalog when color id present
+          if (resolved.materialId) {
+            const mat = getElite100CustomerMaterial(resolved.materialId);
+            if (!mat || !mat.customerVisible) {
+              throw fail("unknown_material", `Material not customer-visible: ${resolved.materialId}`, 400);
+            }
+            compatibilityJson = {
+              ...compatibilityJson,
+              roomKey: compatibilityJson.roomKey || parsed.roomKey,
+              materialColorId: mat.materialId,
+              materialGroup: mat.pricingGroupCode,
+              role: "material_selection",
+              catalogContract: ELITE100_MATERIAL_CATALOG_CONTRACT,
+              imageAssetRef: mat.imageThumbPath
+            };
+            optionPayload = {
+              ...optionPayload,
+              displayLabel: optionPayload.displayLabel || mat.displayName,
+              imageAssetRef: optionPayload.imageAssetRef || mat.imageThumbPath
+            };
+          } else {
+            compatibilityJson = {
+              ...compatibilityJson,
+              roomKey: compatibilityJson.roomKey || parsed.roomKey,
+              materialGroup: resolved.materialGroup,
+              role: "material_selection"
+            };
+          }
+        }
         if (cat && (cat.availabilityState === "unavailable" || cat.availabilityState === "review_required")) {
-          if (Number(raw.defaultQty ?? raw.quantity ?? 0) > 0) {
+          if (Number(optionPayload.defaultQty ?? optionPayload.quantity ?? 0) > 0) {
             throw fail(
               "unresolved_product",
               `Option ${optionKey} is ${cat.availabilityState}: ${cat.unresolvedReason || ""}`,
@@ -208,15 +295,16 @@ export function createConfigurationStudioService(deps) {
         }
         out.push(
           await configurationRepository.upsertDraftOption(organizationId, envelopeId, {
-            ...raw,
+            ...optionPayload,
             optionKey,
+            compatibilityJson,
             sellPrice: sellPrice ?? 0,
-            availabilityState: cat?.availabilityState || raw.availabilityState || "active",
+            availabilityState: cat?.availabilityState || optionPayload.availabilityState || "active",
             customerPriceTreatment:
-              cat?.customerPriceTreatment || raw.customerPriceTreatment || "absolute",
-            pricingMode: cat?.pricingMode || raw.pricingMode || "fixed",
-            minQty: cat?.minQty ?? raw.minQty ?? 0,
-            maxQty: cat?.maxQty ?? raw.maxQty ?? null
+              cat?.customerPriceTreatment || optionPayload.customerPriceTreatment || "absolute",
+            pricingMode: cat?.pricingMode || optionPayload.pricingMode || "fixed",
+            minQty: cat?.minQty ?? optionPayload.minQty ?? 0,
+            maxQty: cat?.maxQty ?? optionPayload.maxQty ?? null
           })
         );
       }
@@ -276,6 +364,24 @@ export function createConfigurationStudioService(deps) {
       if (!ctx.canConfigure) {
         throw fail("configuration_blocked", ctx.blockers.map((b) => b.message).join("; "), 422);
       }
+      if (ctx.baselineDisplayTotal == null || !Number.isFinite(Number(ctx.baselineDisplayTotal))) {
+        throw fail(
+          "unresolved_baseline_total",
+          "Frozen publication total is required before configuration recalculation",
+          422
+        );
+      }
+      if (
+        (ctx.blockers || []).some(
+          (b) => b.code === "unknown_baseline_group" || b.code === "missing_locked_measurement"
+        )
+      ) {
+        throw fail(
+          "unresolved_baseline_material",
+          "Frozen publication lacks reliable baseline material evidence",
+          422
+        );
+      }
 
       // Room material selections from envelope options or body.roomSelections (group codes only)
       const roomSelections = body.roomSelections && typeof body.roomSelections === "object"
@@ -285,16 +391,20 @@ export function createConfigurationStudioService(deps) {
 
       const rooms = ctx.rooms.map((r) => {
         let selected = roomSelections[r.roomKey];
+        if (selected && String(selected).startsWith("e100-")) {
+          const mat = getElite100CustomerMaterial(selected);
+          selected = mat?.pricingGroupCode || null;
+        }
         if (!selected) {
-          const opt = graph.options.find(
+          const roomOpts = graph.options.filter(
             (o) =>
               o.compatibility_json?.roomKey === r.roomKey ||
               String(o.option_key).startsWith(`material:${r.roomKey}:`)
           );
-          selected =
-            opt?.compatibility_json?.materialGroup ||
-            String(opt?.option_key || "").split(":")[2] ||
-            r.baselineMaterialGroup;
+          const defaultOpt =
+            roomOpts.find((o) => Number(o.default_qty || o.defaultQty || 0) > 0) || roomOpts[0];
+          const resolved = resolveMaterialSelectionFromOption(defaultOpt || {});
+          selected = resolved.materialGroup || r.baselineMaterialGroup;
         }
         return {
           roomKey: r.roomKey,
@@ -357,6 +467,9 @@ export function createConfigurationStudioService(deps) {
         if (cat.availabilityState !== "active") {
           throw fail("unresolved_product", `Option ${key} is ${cat.availabilityState}`, 422);
         }
+        const envOpt = (graph.options || []).find(
+          (o) => (o.option_key || o.optionKey) === key
+        );
         options.push({
           optionKey: key,
           displayLabel: cat.displayLabel,
@@ -366,7 +479,12 @@ export function createConfigurationStudioService(deps) {
           customerPriceTreatment: cat.customerPriceTreatment,
           minQty: cat.minQty,
           maxQty: cat.maxQty,
-          availabilityState: cat.availabilityState
+          availabilityState: cat.availabilityState,
+          includedInBaseline: Boolean(
+            envOpt?.included_in_baseline ?? envOpt?.includedInBaseline
+          ),
+          defaultQty: Number(envOpt?.default_qty ?? envOpt?.defaultQty ?? 0),
+          baselineQuantity: Number(envOpt?.default_qty ?? envOpt?.defaultQty ?? 0)
         });
       }
 
@@ -443,6 +561,10 @@ export function createConfigurationStudioService(deps) {
             materialSellCents: r.materialSellCents,
             materialUseTaxCents: r.materialUseTaxCents
           })),
+          materialDeltaCents: result.internal.materialDeltaCents,
+          selectionDeltaSubtotalCents: result.internal.selectionDeltaSubtotalCents,
+          frozenBaselineAnchor: result.internal.frozenBaselineAnchor,
+          displayRoundingAdjustmentCents: result.internal.displayRoundingAdjustmentCents,
           warnings: result.internal.warnings,
           moneyModel: result.internal.moneyModel
         }
@@ -472,11 +594,30 @@ export function createConfigurationStudioService(deps) {
         deRepository,
         pricingPolicyRepository
       });
+      if (ctx.baselineDisplayTotal == null || !Number.isFinite(Number(ctx.baselineDisplayTotal))) {
+        throw fail(
+          "unresolved_baseline_total",
+          "Frozen publication total is required before envelope activation",
+          422
+        );
+      }
+      if (
+        (ctx.blockers || []).some(
+          (b) => b.code === "unknown_baseline_group" || b.code === "missing_locked_measurement"
+        )
+      ) {
+        throw fail(
+          "unresolved_baseline_material",
+          "Frozen publication lacks reliable baseline material evidence",
+          422
+        );
+      }
       return configurationRepository.activateEnvelope(organizationId, envelopeId, {
         actorUserId,
         pricingPolicyFingerprint: ctx.pricingPolicyFingerprint,
         catalogFingerprint: ctx.catalogFingerprint,
-        expectedRowVersion: body.expectedRowVersion ?? null
+        expectedRowVersion: body.expectedRowVersion ?? null,
+        materialCatalogContract: ELITE100_MATERIAL_CATALOG_CONTRACT
       });
     },
 

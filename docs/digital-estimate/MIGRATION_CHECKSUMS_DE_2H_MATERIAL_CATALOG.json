@@ -1,0 +1,12 @@
+{
+  "generatedAt": "2026-07-16",
+  "phase": "DE.2H material catalog contract",
+  "note": "Additive migration. Do not rewrite prior DE.2G checksums.",
+  "migrations": [
+    {
+      "path": "backend-core/supabase/eliteos_digital_estimate_material_catalog_v1.sql",
+      "sha256": "0ff9c5f7367889282ad6f14cc7918d7cd3460a8c9d455a97fe20610c5c9515b3",
+      "bytes": 1083
+    }
+  ]
+}

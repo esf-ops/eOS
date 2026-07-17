@@ -31,6 +31,16 @@ type ConfigContext = {
   accountMappingNotice?: string | null;
   partnerAccountId?: string | null;
   allowedMaterialGroups?: Array<{ groupCode: string; displayName: string }>;
+  materialCatalog?: Array<{
+    materialId: string;
+    displayName: string;
+    pricingGroupCode: string;
+    imageThumbPath?: string | null;
+    customerVisible?: boolean;
+    hasImagery?: boolean;
+    colorFamily?: string | null;
+  }>;
+  materialCatalogContract?: string | null;
   optionCatalog?: Array<{
     optionKey: string;
     displayLabel: string;
@@ -62,6 +72,7 @@ type Props = {
 };
 
 const MATERIAL_CODES = ["promo", "group_a", "group_b", "group_c", "group_d", "group_e", "group_f", "remnant"];
+void MATERIAL_CODES;
 
 function clearSensitive() {
   return {
@@ -79,6 +90,8 @@ function clearSensitive() {
 export default function ConfigurationWorkspace({ token, publicationId, onAuthFailure }: Props) {
   const [state, setState] = useState(clearSensitive);
   const [roomGroups, setRoomGroups] = useState<Record<string, string>>({});
+  const [roomAllowedColors, setRoomAllowedColors] = useState<Record<string, string[]>>({});
+  const [roomDefaultColor, setRoomDefaultColor] = useState<Record<string, string>>({});
   const [optionQty, setOptionQty] = useState<Record<string, number>>({});
   const [markupPct, setMarkupPct] = useState("0");
   const [markupReason, setMarkupReason] = useState("");
@@ -102,6 +115,8 @@ export default function ConfigurationWorkspace({ token, publicationId, onAuthFai
   useEffect(() => {
     setState(clearSensitive());
     setRoomGroups({});
+    setRoomAllowedColors({});
+    setRoomDefaultColor({});
     setOptionQty({});
     setMarkupPct("0");
     setMarkupReason("");
@@ -127,10 +142,21 @@ export default function ConfigurationWorkspace({ token, publicationId, onAuthFai
         const ctx = body.context || null;
         const rooms = ctx?.rooms || [];
         const initial: Record<string, string> = {};
+        const allowed: Record<string, string[]> = {};
+        const defaults: Record<string, string> = {};
+        const catalog = ctx?.materialCatalog || [];
         for (const r of rooms) {
-          initial[r.roomKey] = r.baselineMaterialGroup || "group_b";
+          const group = r.baselineMaterialGroup || "group_b";
+          initial[r.roomKey] = group;
+          const inGroup = catalog.filter((m) => m.pricingGroupCode === group).map((m) => m.materialId);
+          const preferred =
+            inGroup.find((id) => catalog.find((m) => m.materialId === id)?.hasImagery) || inGroup[0] || "";
+          allowed[r.roomKey] = preferred ? [preferred] : [];
+          defaults[r.roomKey] = preferred;
         }
         setRoomGroups(initial);
+        setRoomAllowedColors(allowed);
+        setRoomDefaultColor(defaults);
         const activeId =
           body.activeEnvelopeId ||
           body.envelopes?.find((e) => e.status === "draft" || e.status === "ready")?.id ||
@@ -219,22 +245,56 @@ export default function ConfigurationWorkspace({ token, publicationId, onAuthFai
         (g) => g.group_key === "material_by_room"
       );
       if (!matGroup) throw new Error("Material group missing — recreate draft");
-      const options = ctx.rooms.map((r) => ({
-        groupId: matGroup.id,
-        optionKey: `material:${r.roomKey}:${roomGroups[r.roomKey] || r.baselineMaterialGroup}`,
-        displayLabel: `${r.displayName} — ${roomGroups[r.roomKey]}`,
-        description: `Allowed material for ${r.displayName}`,
-        includedInBaseline: roomGroups[r.roomKey] === r.baselineMaterialGroup,
-        defaultQty: 1,
-        minQty: 0,
-        maxQty: 1,
-        requiredSelection: true,
-        compatibilityJson: {
-          roomKey: r.roomKey,
-          materialGroup: roomGroups[r.roomKey],
-          role: "material_selection"
+      const catalog = ctx.materialCatalog || [];
+      const options: Array<Record<string, unknown>> = [];
+      for (const r of ctx.rooms) {
+        const allowed = roomAllowedColors[r.roomKey] || [];
+        const defaultId = roomDefaultColor[r.roomKey] || allowed[0];
+        if (!allowed.length) {
+          // Legacy group-only fallback
+          options.push({
+            groupId: matGroup.id,
+            optionKey: `material:${r.roomKey}:${roomGroups[r.roomKey] || r.baselineMaterialGroup}`,
+            displayLabel: `${r.displayName} — ${roomGroups[r.roomKey]}`,
+            description: `Allowed material for ${r.displayName}`,
+            includedInBaseline: roomGroups[r.roomKey] === r.baselineMaterialGroup,
+            defaultQty: 1,
+            minQty: 0,
+            maxQty: 1,
+            requiredSelection: true,
+            compatibilityJson: {
+              roomKey: r.roomKey,
+              materialGroup: roomGroups[r.roomKey],
+              role: "material_selection"
+            }
+          });
+          continue;
         }
-      }));
+        for (const materialId of allowed) {
+          const mat = catalog.find((m) => m.materialId === materialId);
+          const isDefault = materialId === defaultId;
+          options.push({
+            groupId: matGroup.id,
+            optionKey: `material:${r.roomKey}:${materialId}`,
+            displayLabel: mat?.displayName || materialId,
+            description: `Approved finish for ${r.displayName}`,
+            includedInBaseline: isDefault && mat?.pricingGroupCode === r.baselineMaterialGroup,
+            defaultQty: isDefault ? 1 : 0,
+            minQty: 0,
+            maxQty: 1,
+            requiredSelection: isDefault,
+            imageAssetRef: mat?.imageThumbPath || null,
+            compatibilityJson: {
+              roomKey: r.roomKey,
+              materialColorId: materialId,
+              materialGroup: mat?.pricingGroupCode,
+              role: "material_selection",
+              isDefault,
+              imageAssetRef: mat?.imageThumbPath || null
+            }
+          });
+        }
+      }
       await apiPut(`/api/digital-estimate/configuration/envelopes/${state.envelopeId}/options`, token, {
         options
       });
@@ -544,32 +604,89 @@ export default function ConfigurationWorkspace({ token, publicationId, onAuthFai
       {state.envelopeId && ctx?.rooms?.length ? (
         <div className="preview-block">
           <h3>Room / material configuration</h3>
-          <p className="muted">Chargeable SF is locked. Select allowed material groups only.</p>
-          {ctx.rooms.map((r) => (
-            <div key={r.roomKey} className="config-row">
-              <label htmlFor={`mat-${r.roomKey}`}>
-                {r.displayName} ({r.chargeableCounterSf} SF)
-              </label>
-              <select
-                id={`mat-${r.roomKey}`}
-                disabled={busy || !isDraft}
-                value={roomGroups[r.roomKey] || r.baselineMaterialGroup || "group_b"}
-                onChange={(e) => setRoomGroups((m) => ({ ...m, [r.roomKey]: e.target.value }))}
-              >
-                {MATERIAL_CODES.map((code) => (
-                  <option key={code} value={code}>
-                    {(ctx.allowedMaterialGroups || []).find((g) => g.groupCode === code)?.displayName ||
-                      code}
-                  </option>
-                ))}
-              </select>
-              <input type="number" disabled readOnly value={r.chargeableCounterSf} aria-label="Locked SF" />
-            </div>
-          ))}
+          <p className="muted">
+            Chargeable SF is locked. Choose which Elite 100 colors customers may select per room, and set
+            the default. Pricing groups are resolved server-side from the catalog — never enter rates here.
+          </p>
+          {ctx.rooms.map((r) => {
+            const catalog = ctx.materialCatalog || [];
+            const allowed = new Set(roomAllowedColors[r.roomKey] || []);
+            return (
+              <div key={r.roomKey} className="config-row" style={{ display: "block" }}>
+                <div style={{ display: "flex", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+                  <strong>
+                    {r.displayName} ({r.chargeableCounterSf} SF)
+                  </strong>
+                  <span className="muted">Baseline group: {r.baselineMaterialGroup}</span>
+                  <input
+                    type="number"
+                    disabled
+                    readOnly
+                    value={r.chargeableCounterSf}
+                    aria-label="Locked SF"
+                  />
+                </div>
+                <label htmlFor={`default-${r.roomKey}`}>Default color</label>
+                <select
+                  id={`default-${r.roomKey}`}
+                  disabled={busy || !isDraft}
+                  value={roomDefaultColor[r.roomKey] || ""}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setRoomDefaultColor((d) => ({ ...d, [r.roomKey]: id }));
+                    setRoomAllowedColors((a) => {
+                      const cur = new Set(a[r.roomKey] || []);
+                      if (id) cur.add(id);
+                      return { ...a, [r.roomKey]: [...cur] };
+                    });
+                  }}
+                >
+                  <option value="">Select default…</option>
+                  {catalog.map((m) => (
+                    <option key={m.materialId} value={m.materialId}>
+                      {m.displayName} ({m.pricingGroupCode}
+                      {m.hasImagery ? "" : ", no image"})
+                    </option>
+                  ))}
+                </select>
+                <fieldset disabled={busy || !isDraft} style={{ marginTop: "0.75rem" }}>
+                  <legend>Allowed colors for customer</legend>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(12rem, 1fr))",
+                      gap: "0.35rem"
+                    }}
+                  >
+                    {catalog.map((m) => (
+                      <label key={m.materialId} style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={allowed.has(m.materialId)}
+                          onChange={(e) => {
+                            setRoomAllowedColors((prev) => {
+                              const next = new Set(prev[r.roomKey] || []);
+                              if (e.target.checked) next.add(m.materialId);
+                              else next.delete(m.materialId);
+                              return { ...prev, [r.roomKey]: [...next] };
+                            });
+                          }}
+                        />
+                        <span>
+                          {m.displayName}
+                          <span className="muted"> · {m.pricingGroupCode}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+            );
+          })}
           {isDraft ? (
             <div className="actions">
               <button type="button" disabled={busy} onClick={() => void saveRoomMaterials()}>
-                Save material defaults
+                Save allowed colors &amp; defaults
               </button>
             </div>
           ) : null}
