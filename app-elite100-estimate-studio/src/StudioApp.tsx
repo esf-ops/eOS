@@ -3,6 +3,8 @@ import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import ConfigurationWorkspace from "./ConfigurationWorkspace";
 import ReviewWorkspace from "./ReviewWorkspace";
+import EstimateQueuePage from "./estimateQueue/EstimateQueuePage";
+import EstimateWorkspacePlaceholder from "./estimateQueue/EstimateWorkspacePlaceholder";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
 
@@ -92,7 +94,11 @@ export default function StudioApp() {
   const [publishStaffNotice, setPublishStaffNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [studioConfigOk, setStudioConfigOk] = useState<boolean | null>(null);
-  const [mainNav, setMainNav] = useState<"publications" | "reviews">("publications");
+  const [mainNav, setMainNav] = useState<
+    "publications" | "reviews" | "estimate-queue" | "estimate-workspace"
+  >("publications");
+  const [intakeCaseId, setIntakeCaseId] = useState<string | null>(null);
+  const [estimateWorkspaceCaseId, setEstimateWorkspaceCaseId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -376,7 +382,13 @@ export default function StudioApp() {
         onSignOut={() => void signOut()}
         statusSlot={<span>Private pilot</span>}
       />
-      <main className="studio-shell">
+      <main
+        className={
+          mainNav === "estimate-queue" || mainNav === "estimate-workspace"
+            ? "studio-shell studio-shell--wide"
+            : "studio-shell"
+        }
+      >
         <div className="pilot-banner">
           Private Elite 100 Estimate Studio — publishes frozen Digital Estimates only. Does not recalculate or
           modify the source Internal Estimate.
@@ -387,6 +399,16 @@ export default function StudioApp() {
         {actionError ? <div className="error-box">{actionError}</div> : null}
 
         <nav className="studio-nav" aria-label="Studio sections">
+          <button
+            type="button"
+            className={mainNav === "estimate-queue" || mainNav === "estimate-workspace" ? "active" : ""}
+            onClick={() => {
+              setMainNav("estimate-queue");
+              setEstimateWorkspaceCaseId(null);
+            }}
+          >
+            Estimate Queue
+          </button>
           <button
             type="button"
             className={mainNav === "publications" ? "active" : ""}
@@ -402,6 +424,29 @@ export default function StudioApp() {
             Customer review requests
           </button>
         </nav>
+
+        {mainNav === "estimate-queue" ? (
+          <EstimateQueuePage
+            authToken={sessionToken}
+            selectedCaseId={intakeCaseId}
+            onSelectCase={setIntakeCaseId}
+            onOpenEstimate={(caseId) => {
+              setEstimateWorkspaceCaseId(caseId);
+              setIntakeCaseId(caseId);
+              setMainNav("estimate-workspace");
+            }}
+          />
+        ) : null}
+
+        {mainNav === "estimate-workspace" && estimateWorkspaceCaseId ? (
+          <EstimateWorkspacePlaceholder
+            caseId={estimateWorkspaceCaseId}
+            onBackToQueue={() => {
+              setMainNav("estimate-queue");
+              setEstimateWorkspaceCaseId(null);
+            }}
+          />
+        ) : null}
 
         {mainNav === "reviews" ? (
           <ReviewWorkspace
