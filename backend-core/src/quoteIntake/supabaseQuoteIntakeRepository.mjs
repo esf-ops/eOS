@@ -18,6 +18,7 @@ import {
   isQuoteIntakeCaseStatus
 } from "./quoteIntakeTypes.mjs";
 import { sanitizeQuoteIntakeAuditMetadata } from "./quoteIntakeAuditSanitize.mjs";
+import { normalizeAttachmentInputs } from "./quoteIntakeAttachmentMeta.mjs";
 
 function normOrg(organizationId) {
   const id = String(organizationId ?? "").trim();
@@ -71,11 +72,16 @@ function mapCaseRow(row, attachments = []) {
     },
     attachments: attachments.map((a) => ({
       id: a.id,
-      sha256: a.sha256,
+      sha256: a.sha256 || null,
       mimeType: a.mime_type || undefined,
       sizeBytes: a.size_bytes == null ? undefined : Number(a.size_bytes),
       safeFilename: a.safe_filename || undefined,
-      sourceAttachmentId: a.source_attachment_id || undefined
+      sourceAttachmentId: a.source_attachment_id || undefined,
+      providerMessageId: a.provider_message_id || undefined,
+      isInline: Boolean(a.is_inline),
+      kind: a.attachment_kind || undefined,
+      support: a.support_classification || undefined,
+      retrievalState: a.retrieval_state || undefined
     })),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -178,10 +184,11 @@ export class SupabaseQuoteIntakeRepository {
     const { data, error } = await this.db()
       .from("quote_intake_attachments")
       .select(
-        "id,sha256,mime_type,size_bytes,safe_filename,source_attachment_id,intake_case_id,organization_id"
+        "id,sha256,mime_type,size_bytes,safe_filename,source_attachment_id,provider_message_id,is_inline,attachment_kind,support_classification,retrieval_state,intake_case_id,organization_id,created_at"
       )
       .eq("organization_id", organizationId)
-      .eq("intake_case_id", caseId);
+      .eq("intake_case_id", caseId)
+      .order("created_at", { ascending: true });
     if (error) throw toRepoError(error, "loadAttachments");
     return data ?? [];
   }
@@ -345,28 +352,7 @@ export class SupabaseQuoteIntakeRepository {
       ? String(input.sourceType)
       : "api";
 
-    /** @type {Map<string, object>} */
-    const attachmentBySha = new Map();
-    for (const a of input.attachments ?? []) {
-      const sha256 = normSha(a.sha256);
-      if (!/^[a-f0-9]{64}$/.test(sha256)) {
-        const err = new Error("attachment.sha256 must be 64-char hex");
-        err.code = "invalid_attachment";
-        err.statusCode = 400;
-        throw err;
-      }
-      if (!attachmentBySha.has(sha256)) {
-        attachmentBySha.set(sha256, {
-          sha256,
-          mime_type: a.mimeType ? String(a.mimeType).slice(0, 128) : null,
-          size_bytes: Number.isFinite(Number(a.sizeBytes)) ? Number(a.sizeBytes) : null,
-          safe_filename: a.safeFilename ? String(a.safeFilename).slice(0, 200) : null,
-          source_attachment_id: a.sourceAttachmentId
-            ? String(a.sourceAttachmentId).slice(0, 512)
-            : null
-        });
-      }
-    }
+    const normalizedAttachments = normalizeAttachmentInputs(input.attachments);
 
     const insertRow = {
       organization_id: organizationId,
@@ -408,10 +394,20 @@ export class SupabaseQuoteIntakeRepository {
       throw toRepoError(caseError, "createCase");
     }
 
-    const attachmentRows = [...attachmentBySha.values()].map((a) => ({
+    const attachmentRows = normalizedAttachments.map((a) => ({
       organization_id: organizationId,
       intake_case_id: caseRow.id,
-      ...a
+      sha256: a.sha256 ?? null,
+      mime_type: a.mimeType ?? null,
+      size_bytes: a.sizeBytes ?? null,
+      safe_filename: a.safeFilename ?? null,
+      source_attachment_id: a.sourceAttachmentId ?? null,
+      provider_message_id:
+        a.providerMessageId ?? sourceMessage.graphImmutableMessageId ?? null,
+      is_inline: Boolean(a.isInline),
+      attachment_kind: a.kind ?? null,
+      support_classification: a.support ?? null,
+      retrieval_state: a.retrievalState ?? "pending"
     }));
 
     if (attachmentRows.length) {
@@ -472,6 +468,34 @@ export class SupabaseQuoteIntakeRepository {
     if (!data) return null;
     const attachments = await this.#loadAttachments(org, id);
     return mapCaseRow(data, attachments);
+  }
+
+  /**
+   * Record byte-retrieval outcome for a single attachment (best-effort).
+   * @param {string} organizationId
+   * @param {string} caseId
+   * @param {string} attachmentId
+   * @param {{ sha256?: string|null, retrievalState?: string }} patch
+   */
+  async updateAttachmentRetrieval(organizationId, caseId, attachmentId, patch = {}) {
+    const org = normOrg(organizationId);
+    const id = String(attachmentId ?? "").trim();
+    if (!id) return null;
+    const update = {};
+    if (patch.sha256 != null) {
+      const sha = normSha(patch.sha256);
+      if (/^[a-f0-9]{64}$/.test(sha)) update.sha256 = sha;
+    }
+    if (patch.retrievalState) update.retrieval_state = String(patch.retrievalState);
+    if (Object.keys(update).length === 0) return null;
+    const { error } = await this.db()
+      .from("quote_intake_attachments")
+      .update(update)
+      .eq("organization_id", org)
+      .eq("intake_case_id", String(caseId ?? "").trim())
+      .eq("id", id);
+    if (error) throw toRepoError(error, "updateAttachmentRetrieval");
+    return { id, ...update };
   }
 
   async recordAutomationDecision(input) {
@@ -579,7 +603,42 @@ export class SupabaseQuoteIntakeRepository {
       .eq("idempotency_key", idempotencyKey)
       .maybeSingle();
     if (findError) throw toRepoError(findError, "createTakeoffLink.lookup");
-    if (existing) return mapLinkRow(existing);
+    if (existing) {
+      if (!existing.takeoff_job_id && input.takeoffJobId) {
+        const patch = {
+          takeoff_job_id: String(input.takeoffJobId),
+          relationship_status:
+            input.relationshipStatus ||
+            existing.relationship_status ||
+            TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED
+        };
+        const { data: updated, error: updErr } = await this.db()
+          .from("quote_intake_takeoff_links")
+          .update(patch)
+          .eq("id", existing.id)
+          .eq("organization_id", organizationId)
+          .select("*")
+          .single();
+        if (updErr) throw toRepoError(updErr, "createTakeoffLink.attachJob");
+        await this.#appendAudit({
+          organizationId,
+          intakeCaseId,
+          eventType: "takeoff_link_job_attached",
+          actorType:
+            input.actorType === AUDIT_ACTOR_TYPE.SYSTEM
+              ? AUDIT_ACTOR_TYPE.SYSTEM
+              : AUDIT_ACTOR_TYPE.USER,
+          actorUserId: input.createdBy ? String(input.createdBy) : null,
+          metadata: {
+            linkId: updated.id,
+            hasTakeoffJobId: true,
+            relationshipStatus: updated.relationship_status
+          }
+        });
+        return mapLinkRow(updated);
+      }
+      return mapLinkRow(existing);
+    }
 
     const actorType =
       input.actorType === AUDIT_ACTOR_TYPE.SYSTEM ? AUDIT_ACTOR_TYPE.SYSTEM : AUDIT_ACTOR_TYPE.USER;

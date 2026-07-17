@@ -11,18 +11,94 @@ export const DEFAULT_QUOTE_INTAKE_GRAPH_MAILBOX = "quotes@elitestonefabrication.
 export const DEFAULT_GRAPH_TIMEOUT_MS = 30_000;
 export const DEFAULT_GRAPH_PREVIEW_LIMIT = 25;
 export const DEFAULT_GRAPH_IMPORT_LIMIT = 10;
-/** Align with Takeoff ~50 MiB ceiling. */
-export const DEFAULT_GRAPH_MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
-export const DEFAULT_GRAPH_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Authoritative max for a single plan PDF on the Quote Intake → Open Estimate path.
+ * Default 50 MiB supports normal multi-page cabinet-plan PDFs. Hard ceiling 100 MiB.
+ * Env: QUOTE_INTAKE_MAX_PDF_BYTES (preferred) or legacy QUOTE_INTAKE_GRAPH_MAX_ATTACHMENT_BYTES.
+ */
+export const DEFAULT_MAX_PDF_BYTES = 50 * 1024 * 1024;
+export const HARD_MAX_PDF_BYTES = 100 * 1024 * 1024;
+/** @deprecated Use DEFAULT_MAX_PDF_BYTES — kept for callers that still name the Graph limit. */
+export const DEFAULT_GRAPH_MAX_ATTACHMENT_BYTES = DEFAULT_MAX_PDF_BYTES;
+export const DEFAULT_GRAPH_MAX_TOTAL_BYTES = DEFAULT_MAX_PDF_BYTES;
 
 function envFlagOn(env, name) {
   return String(env?.[name] ?? "").trim() === "1";
 }
 
+/**
+ * Parse a positive integer env var. Empty / missing / non-numeric → fallback.
+ * (Previously treated missing as 0 and clamped to `min`, silently overriding
+ * multi-megabyte PDF defaults to 1024 bytes.)
+ */
 function envInt(env, name, fallback, { min = 1, max = 10_000 } = {}) {
-  const n = Number(String(env?.[name] ?? "").trim());
+  const raw = String(env?.[name] ?? "").trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+/**
+ * Human-readable MiB for estimator-facing errors (one decimal under 10 MB).
+ * @param {number} bytes
+ */
+export function formatPdfSizeMb(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return "0";
+  const mb = n / (1024 * 1024);
+  if (mb >= 10) return String(Math.round(mb));
+  if (mb >= 1) return mb.toFixed(1).replace(/\.0$/, "");
+  if (mb >= 0.1) return mb.toFixed(1);
+  return mb < 0.01 ? "<0.01" : mb.toFixed(2);
+}
+
+/**
+ * Authoritative single-PDF byte limit (server env only — never from the browser).
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+export function readQuoteIntakeMaxPdfBytes(env = process.env) {
+  // Prefer the product-facing name; fall back to the legacy Graph-named vars.
+  const preferred = String(env?.QUOTE_INTAKE_MAX_PDF_BYTES ?? "").trim();
+  const legacy = String(env?.QUOTE_INTAKE_GRAPH_MAX_ATTACHMENT_BYTES ?? "").trim();
+  const raw = preferred || legacy;
+  if (!raw) return DEFAULT_MAX_PDF_BYTES;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_PDF_BYTES;
+  return Math.min(HARD_MAX_PDF_BYTES, Math.max(1024, Math.floor(n)));
+}
+
+/**
+ * Build a safe human-readable size rejection (no env var names or internal paths).
+ * @param {number} actualBytes
+ * @param {number} limitBytes
+ */
+export function pdfTooLargeError(actualBytes, limitBytes) {
+  const actual = formatPdfSizeMb(actualBytes);
+  const limit = formatPdfSizeMb(limitBytes);
+  const err = new Error(`This PDF is ${actual} MB. The current limit is ${limit} MB.`);
+  err.code = "attachment_too_large";
+  err.statusCode = 413;
+  err.actualBytes = Number(actualBytes);
+  err.limitBytes = Number(limitBytes);
+  err.actualMb = actual;
+  err.limitMb = limit;
+  return err;
+}
+
+/**
+ * Reject from metadata before downloading bytes when Graph declares an oversized size.
+ * Does not trust metadata alone for acceptance — callers must still check downloaded length.
+ * @param {number|null|undefined} declaredSizeBytes
+ * @param {number} limitBytes
+ */
+export function assertPdfMetadataWithinLimit(declaredSizeBytes, limitBytes) {
+  const size = Number(declaredSizeBytes);
+  if (!Number.isFinite(size) || size <= 0) return;
+  if (size > limitBytes) {
+    throw pdfTooLargeError(size, limitBytes);
+  }
 }
 
 /**
@@ -93,6 +169,7 @@ export function readQuoteIntakeGraphCredentials(env = process.env) {
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function readQuoteIntakeGraphLimits(env = process.env) {
+  const maxPdfBytes = readQuoteIntakeMaxPdfBytes(env);
   return Object.freeze({
     timeoutMs: envInt(env, "QUOTE_INTAKE_GRAPH_TIMEOUT_MS", DEFAULT_GRAPH_TIMEOUT_MS, {
       min: 1000,
@@ -106,18 +183,13 @@ export function readQuoteIntakeGraphLimits(env = process.env) {
       min: 1,
       max: 25
     }),
-    maxAttachmentBytes: envInt(
-      env,
-      "QUOTE_INTAKE_GRAPH_MAX_ATTACHMENT_BYTES",
-      DEFAULT_GRAPH_MAX_ATTACHMENT_BYTES,
-      { min: 1024, max: 100 * 1024 * 1024 }
-    ),
-    maxTotalBytes: envInt(
-      env,
-      "QUOTE_INTAKE_GRAPH_MAX_TOTAL_BYTES",
-      DEFAULT_GRAPH_MAX_TOTAL_BYTES,
-      { min: 1024, max: 100 * 1024 * 1024 }
-    )
+    /** Authoritative single-PDF ceiling (QUOTE_INTAKE_MAX_PDF_BYTES). */
+    maxAttachmentBytes: maxPdfBytes,
+    maxPdfBytes,
+    maxTotalBytes: envInt(env, "QUOTE_INTAKE_GRAPH_MAX_TOTAL_BYTES", maxPdfBytes, {
+      min: 1024,
+      max: HARD_MAX_PDF_BYTES
+    })
   });
 }
 
@@ -140,6 +212,9 @@ export function readSafeQuoteIntakeGraphConfig(env = process.env) {
     graphConfigured: configured,
     previewLimit: limits.previewLimit,
     importLimit: limits.importLimit,
+    /** Safe display of the authoritative PDF ceiling (MB string). */
+    maxPdfMb: formatPdfSizeMb(limits.maxPdfBytes),
+    maxPdfBytes: limits.maxPdfBytes,
     /** Fixed mailbox display — known pilot address only when Graph sync is enabled. */
     mailboxDisplay:
       isQuoteIntakeGraphEnabled(env) && isQuoteIntakeGraphManualSyncEnabled(env)

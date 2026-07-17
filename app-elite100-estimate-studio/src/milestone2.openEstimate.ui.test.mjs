@@ -1,0 +1,57 @@
+/**
+ * Milestone 2 — Open Estimate → linked Takeoff workspace wiring.
+ */
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { deriveEstimateTakeoffDisplayStatus } from "./lib/estimateTakeoffStatus.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, "..");
+
+const app = readFileSync(join(root, "src/StudioApp.tsx"), "utf8");
+const workspace = readFileSync(
+  join(root, "src/estimateQueue/EstimateTakeoffWorkspace.tsx"),
+  "utf8"
+);
+const api = readFileSync(join(root, "src/lib/quoteIntakeApi.mjs"), "utf8");
+const queue = readFileSync(join(root, "src/estimateQueue/EstimateQueuePage.tsx"), "utf8");
+
+assert.ok(app.includes("EstimateTakeoffWorkspace"));
+assert.equal(app.includes("EstimateWorkspacePlaceholder"), false);
+assert.ok(workspace.includes("openEstimate"));
+assert.ok(workspace.includes("eq-takeoff-iframe"));
+assert.ok(workspace.includes("takeoffJobId"));
+assert.ok(workspace.includes("Back to Estimate Queue"));
+assert.ok(api.includes("/open-estimate"));
+assert.ok(api.includes("async openEstimate"));
+assert.ok(queue.includes("deriveEstimateTakeoffDisplayStatus"));
+assert.ok(app.includes("Keep intakeCaseId") || app.includes("intakeCaseId"));
+
+// Back to queue preserves selected case: workspace clear must not clear intakeCaseId.
+assert.ok(app.includes("setEstimateWorkspaceCaseId(null)"));
+assert.ok(app.includes("selectedCaseId={intakeCaseId}"));
+
+assert.equal(deriveEstimateTakeoffDisplayStatus({}), "Not started");
+assert.equal(
+  deriveEstimateTakeoffDisplayStatus({ takeoffJobId: "job-1", linkStatus: "queued" }),
+  "Takeoff created"
+);
+assert.equal(
+  deriveEstimateTakeoffDisplayStatus({ jobStatus: "processing" }),
+  "AI processing"
+);
+assert.equal(
+  deriveEstimateTakeoffDisplayStatus({ jobStatus: "completed", reviewStatus: "needs_review" }),
+  "Needs review"
+);
+assert.equal(
+  deriveEstimateTakeoffDisplayStatus({ reviewStatus: "approved" }),
+  "Approved"
+);
+assert.equal(deriveEstimateTakeoffDisplayStatus({ jobStatus: "failed" }), "Failed");
+
+console.log("\nmilestone2.openEstimate.ui.test.mjs\n");
+console.log("ok: Studio opens returned takeoff job; Back preserves case; status labels");
+console.log("\nAll Milestone 2 Open Estimate UI tests passed.\n");

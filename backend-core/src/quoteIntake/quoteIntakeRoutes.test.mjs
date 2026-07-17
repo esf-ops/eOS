@@ -136,6 +136,7 @@ function baseReq(overrides = {}) {
   assert.ok(routes.has(`POST ${QUOTE_INTAKE_API_PREFIX}/cases/:id/automation-decisions`));
   assert.ok(routes.has(`GET ${QUOTE_INTAKE_API_PREFIX}/cases/:id/audit-events`));
   assert.ok(routes.has(`GET ${QUOTE_INTAKE_API_PREFIX}/cases/:id/takeoff-links`));
+  assert.ok(routes.has(`POST ${QUOTE_INTAKE_API_PREFIX}/cases/:id/open-estimate`));
   assert.ok(![...routes.keys()].some((k) => k.includes("import-from-takeoff")));
   assert.ok(![...routes.keys()].some((k) => k.includes("/api/takeoff")));
   assert.ok(![...routes.keys()].some((k) => k.includes("graph")));
@@ -453,6 +454,90 @@ function baseReq(overrides = {}) {
   console.log(
     "ok: org/actor/pilot identity from auth only — cannot create or read cross-org via body/query/headers"
   );
+}
+
+{
+  /** @type {Map<string, Function[]>} */
+  const routes = new Map();
+  const app = {
+    get(path, ...handlers) {
+      routes.set(`GET ${path}`, handlers);
+    },
+    post(path, ...handlers) {
+      routes.set(`POST ${path}`, handlers);
+    }
+  };
+  const repo = new InMemoryQuoteIntakeRepository();
+  let openCalls = 0;
+  attachQuoteIntakeRoutes(app, {
+    requireAuth: () => (req, _res, next) => {
+      req.user = { id: "user-1", email: "pilot@example.com" };
+      next();
+    },
+    headAccess: (_r, _s, n) => n(),
+    repository: repo,
+    resolveOrganizationId: async () => ORG_A,
+    jsonParser: (_req, _res, next) => next(),
+    env: { QUOTE_INTAKE_API_ENABLED: "1" },
+    openEstimate: async ({ organizationId, intakeCaseId, body }) => {
+      assert.equal(organizationId, ORG_A);
+      // Route must pass the raw body through; service rejects spoof fields.
+      if (body && (body.takeoffJobId || body.organizationId || body.attachmentUrl)) {
+        const err = new Error("Caller-controlled identity or file fields are not accepted");
+        err.statusCode = 400;
+        err.code = "graph_forbidden";
+        throw err;
+      }
+      openCalls += 1;
+      return {
+        ok: true,
+        intakeCaseId,
+        takeoffJobId: "job-from-open",
+        linkStatus: "queued",
+        created: openCalls === 1,
+        reused: openCalls > 1,
+        attachmentName: "plan.pdf",
+        repositoryMode: "memory",
+        persistenceWarning: "memory"
+      };
+    }
+  });
+
+  const created = await dispatch(
+    routes.get(`POST ${QUOTE_INTAKE_API_PREFIX}/cases`),
+    baseReq({
+      body: {
+        sourceMessage: { contentHash: "open-est-1" },
+        attachments: [{ sha256: SHA, mimeType: "application/pdf", safeFilename: "plan.pdf" }]
+      }
+    })
+  );
+  const caseId = created.body.case.id;
+
+  const spoof = await dispatch(
+    routes.get(`POST ${QUOTE_INTAKE_API_PREFIX}/cases/:id/open-estimate`),
+    baseReq({
+      params: { id: caseId },
+      body: { takeoffJobId: "spoof", organizationId: ORG_B, attachmentUrl: "https://evil" }
+    })
+  );
+  assert.equal(spoof.statusCode, 400);
+  assert.equal(spoof.body.code, "graph_forbidden");
+
+  const out1 = await dispatch(
+    routes.get(`POST ${QUOTE_INTAKE_API_PREFIX}/cases/:id/open-estimate`),
+    baseReq({ params: { id: caseId }, body: {} })
+  );
+  assert.equal(out1.statusCode, 200);
+  assert.equal(out1.body.takeoffJobId, "job-from-open");
+  assert.equal(out1.body.created, true);
+
+  const out2 = await dispatch(
+    routes.get(`POST ${QUOTE_INTAKE_API_PREFIX}/cases/:id/open-estimate`),
+    baseReq({ params: { id: caseId }, body: {} })
+  );
+  assert.equal(out2.body.reused, true);
+  console.log("ok: open-estimate route rejects spoof fields and returns safe job linkage");
 }
 
 console.log("\nAll quoteIntakeRoutes tests passed.\n");

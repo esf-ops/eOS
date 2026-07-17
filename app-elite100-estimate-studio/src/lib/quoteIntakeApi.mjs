@@ -171,6 +171,18 @@ export function createQuoteIntakeApiClient(deps = {}) {
       });
       throwIfNotOk(res, "Unable to import mailbox messages");
       return /** @type {Record<string, unknown>} */ (res.json) ?? {};
+    },
+
+    /**
+     * Idempotent Open Estimate — empty body only (no caller-controlled IDs/URLs).
+     * @param {string} token
+     * @param {string} caseId
+     */
+    async openEstimate(token, caseId) {
+      const id = encodeURIComponent(String(caseId ?? "").trim());
+      const res = await post(`${QUOTE_INTAKE_API_PREFIX}/cases/${id}/open-estimate`, token, {});
+      throwIfNotOk(res, "Unable to open estimate");
+      return /** @type {Record<string, unknown>} */ (res.json) ?? {};
     }
   };
 }

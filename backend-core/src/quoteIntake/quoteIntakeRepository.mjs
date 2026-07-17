@@ -18,14 +18,21 @@ import {
   isQuoteIntakeCaseStatus
 } from "./quoteIntakeTypes.mjs";
 import { sanitizeQuoteIntakeAuditMetadata } from "./quoteIntakeAuditSanitize.mjs";
+import { normalizeAttachmentInputs } from "./quoteIntakeAttachmentMeta.mjs";
 
 /**
  * @typedef {Object} QuoteIntakeAttachmentMeta
  * @property {string} id
- * @property {string} sha256
+ * @property {string|null} [sha256]
  * @property {string} [mimeType]
  * @property {number} [sizeBytes]
  * @property {string} [safeFilename]
+ * @property {string} [sourceAttachmentId]
+ * @property {string} [providerMessageId]
+ * @property {boolean} [isInline]
+ * @property {string} [kind]
+ * @property {string} [support]
+ * @property {string} [retrievalState]
  */
 
 /**
@@ -267,30 +274,7 @@ export class InMemoryQuoteIntakeRepository {
       ? String(input.sourceType)
       : "api";
 
-    /** @type {Map<string, QuoteIntakeAttachmentMeta>} */
-    const bySha = new Map();
-    for (const a of input.attachments ?? []) {
-      const sha256 = normSha(a.sha256);
-      if (!/^[a-f0-9]{64}$/.test(sha256)) {
-        const err = new Error("attachment.sha256 must be 64-char hex");
-        err.code = "invalid_attachment";
-        err.statusCode = 400;
-        throw err;
-      }
-      if (!bySha.has(sha256)) {
-        bySha.set(sha256, {
-          id: randomUUID(),
-          sha256,
-          mimeType: a.mimeType ? String(a.mimeType).slice(0, 128) : undefined,
-          sizeBytes: Number.isFinite(Number(a.sizeBytes)) ? Number(a.sizeBytes) : undefined,
-          safeFilename: a.safeFilename ? String(a.safeFilename).slice(0, 200) : undefined,
-          sourceAttachmentId: a.sourceAttachmentId
-            ? String(a.sourceAttachmentId).slice(0, 512)
-            : undefined
-        });
-      }
-    }
-    const attachments = [...bySha.values()];
+    const attachments = normalizeAttachmentInputs(input.attachments);
 
     const ts = nowIso();
     /** @type {QuoteIntakeCase} */
@@ -362,6 +346,28 @@ export class InMemoryQuoteIntakeRepository {
     const row = this.cases.get(String(caseId ?? "").trim());
     if (!row || row.organizationId !== org) return null;
     return structuredClone(row);
+  }
+
+  /**
+   * Record byte-retrieval outcome for a single attachment (best-effort).
+   * @param {string} organizationId
+   * @param {string} caseId
+   * @param {string} attachmentId
+   * @param {{ sha256?: string|null, retrievalState?: string }} patch
+   */
+  updateAttachmentRetrieval(organizationId, caseId, attachmentId, patch = {}) {
+    const org = normOrg(organizationId);
+    const row = this.cases.get(String(caseId ?? "").trim());
+    if (!row || row.organizationId !== org) return null;
+    const att = (row.attachments ?? []).find((a) => a.id === String(attachmentId ?? "").trim());
+    if (!att) return null;
+    if (patch.sha256 != null) {
+      const sha = normSha(patch.sha256);
+      if (/^[a-f0-9]{64}$/.test(sha)) att.sha256 = sha;
+    }
+    if (patch.retrievalState) att.retrievalState = String(patch.retrievalState);
+    row.updatedAt = nowIso();
+    return structuredClone(att);
   }
 
   /**
@@ -487,6 +493,28 @@ export class InMemoryQuoteIntakeRepository {
 
     for (const link of this.links.values()) {
       if (link.organizationId === organizationId && link.idempotencyKey === idempotencyKey) {
+        // Complete a prior stub that recorded the intent before a job id existed.
+        if (!link.takeoffJobId && input.takeoffJobId) {
+          link.takeoffJobId = String(input.takeoffJobId);
+          if (input.relationshipStatus) {
+            link.relationshipStatus = String(input.relationshipStatus);
+          }
+          this.#appendAudit({
+            organizationId,
+            intakeCaseId,
+            eventType: "takeoff_link_job_attached",
+            actorType:
+              input.actorType === AUDIT_ACTOR_TYPE.SYSTEM
+                ? AUDIT_ACTOR_TYPE.SYSTEM
+                : AUDIT_ACTOR_TYPE.USER,
+            actorUserId: input.createdBy ? String(input.createdBy) : null,
+            metadata: {
+              linkId: link.id,
+              hasTakeoffJobId: true,
+              relationshipStatus: link.relationshipStatus
+            }
+          });
+        }
         return structuredClone(link);
       }
     }

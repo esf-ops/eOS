@@ -23,11 +23,13 @@ import {
   labelQuoteIntakeStatus,
   QUOTE_INTAKE_STATUS_OPTIONS
 } from "../lib/quoteIntakeStatusLabels.mjs";
+import { deriveEstimateTakeoffDisplayStatus } from "../lib/estimateTakeoffStatus.mjs";
 import type {
   QuoteIntakeAuditEventDto,
   QuoteIntakeCaseDto,
   QuoteIntakeQueueFilter,
-  QuoteIntakeSafeConfig
+  QuoteIntakeSafeConfig,
+  QuoteIntakeTakeoffLinkDto
 } from "../lib/quoteIntakeTypes";
 import { EMPTY_QUEUE_FILTER } from "../lib/quoteIntakeTypes";
 import EstimateQueueCaseDetail from "./EstimateQueueCaseDetail";
@@ -88,6 +90,9 @@ export default function EstimateQueuePage({
 
   const [detailCase, setDetailCase] = useState<QuoteIntakeCaseDto | null>(null);
   const [auditEvents, setAuditEvents] = useState<QuoteIntakeAuditEventDto[]>([]);
+  const [takeoffLinksByCase, setTakeoffLinksByCase] = useState<
+    Record<string, QuoteIntakeTakeoffLinkDto[]>
+  >({});
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
@@ -100,6 +105,7 @@ export default function EstimateQueuePage({
   const loadQueue = useCallback(async () => {
     if (!authToken) {
       clearAuthorizedCaseData();
+      setTakeoffLinksByCase({});
       setLoadState({
         kind: "unauthorized",
         message: "Sign in to view the Estimate Queue.",
@@ -113,6 +119,7 @@ export default function EstimateQueuePage({
       const config = (await client.getConfig(authToken)) as QuoteIntakeSafeConfig;
       if (config.quoteIntakeApiEnabled === false) {
         clearAuthorizedCaseData();
+        setTakeoffLinksByCase({});
         setLoadState({
           kind: "api_disabled",
           message: "Quote Intake API is not enabled on the server.",
@@ -121,10 +128,22 @@ export default function EstimateQueuePage({
         return;
       }
       const cases = (await client.listCases(authToken)) as QuoteIntakeCaseDto[];
+      const linkEntries = await Promise.all(
+        cases.slice(0, 50).map(async (c) => {
+          try {
+            const links = (await client.listTakeoffLinks(authToken, c.id)) as QuoteIntakeTakeoffLinkDto[];
+            return [c.id, links] as const;
+          } catch {
+            return [c.id, [] as QuoteIntakeTakeoffLinkDto[]] as const;
+          }
+        })
+      );
+      setTakeoffLinksByCase(Object.fromEntries(linkEntries));
       setLoadState({ kind: "ready", cases, config });
     } catch (err) {
       const classified = classifyQuoteIntakeError(err);
       clearAuthorizedCaseData();
+      setTakeoffLinksByCase({});
       if (classified.kind === "unauthorized") {
         setLoadState({ kind: "unauthorized", message: classified.message, cases: [] });
         return;
@@ -374,6 +393,7 @@ export default function EstimateQueuePage({
                       <th scope="col">Attachments</th>
                       <th scope="col">PDF</th>
                       <th scope="col">Status</th>
+                      <th scope="col">Takeoff</th>
                       <th scope="col">Missing info</th>
                     </tr>
                   </thead>
@@ -382,6 +402,14 @@ export default function EstimateQueuePage({
                       const selected = c.id === selectedCaseId;
                       const received = caseReceivedAt(c);
                       const reasons = caseReasonSnippets(c);
+                      const links = takeoffLinksByCase[c.id] ?? [];
+                      const activeLink =
+                        links.find((l) => l.takeoffJobId) || links[0] || null;
+                      const takeoffDisplay = deriveEstimateTakeoffDisplayStatus({
+                        takeoffJobId: activeLink?.takeoffJobId,
+                        linkStatus: activeLink?.relationshipStatus,
+                        caseStatus: c.status
+                      });
                       return (
                         <tr
                           key={c.id}
@@ -410,6 +438,9 @@ export default function EstimateQueuePage({
                           <td>
                             <span className="eq-pill">{caseStatusLabel(c)}</span>
                             <span className="eq-sr-only">{c.status}</span>
+                          </td>
+                          <td>
+                            <span className="eq-pill eq-pill--takeoff">{takeoffDisplay}</span>
                           </td>
                           <td>
                             {reasons.length ? (

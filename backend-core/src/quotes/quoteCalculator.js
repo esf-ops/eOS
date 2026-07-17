@@ -64,7 +64,9 @@ export const PROTOTYPE_TIER_PRICE_PER_SQFT = Object.freeze({
   "Group D": 85,
   "Group E": 100,
   "Group F": 115,
-  // Remnant wholesale fallback = $50 (same as Direct; prevents silent Group Promo fallback in wholesale mode).
+  // Remnant wholesale = $50 (same as Direct).
+  // DECISION: product brief listed Wholesale Remnant $45, but that equals Group Promo wholesale and
+  // would silently shadow Remnant → Promo. Calculator + pricingAuthority.contract tests lock $50.
   "Remnant": 50
 });
 
@@ -118,11 +120,18 @@ const MITER_RATES_V2 = { "2-3in": 65, "4in": 70, "5in": 75, "6in": 80 };
 /** v2 build-up rate per SF. */
 const BUILDUP_RATE_PER_SQFT_V2 = 20;
 
-/** v2 upgraded edge $/LF - wholesale. */
-const UPGRADED_EDGE_RATE_WHOLESALE_V2 = 15;
+/**
+ * v2 upgraded edge (W-edge / specialty profiles) $/LF — wholesale.
+ * Authority: quoteCalculator (not a universal $15 across bases).
+ * Product brief "W edge $15/LF" maps to wholesale; Direct uses $25/LF below.
+ */
+export const UPGRADED_EDGE_RATE_WHOLESALE_V2 = 15;
 
-/** v2 upgraded edge $/LF - direct/retail. */
-const UPGRADED_EDGE_RATE_DIRECT_V2 = 25;
+/**
+ * v2 upgraded edge (W-edge / specialty profiles) $/LF — direct/retail.
+ * Explicit Direct premium vs wholesale — not unexplained; mirrors prototypeQuoteMath.
+ */
+export const UPGRADED_EDGE_RATE_DIRECT_V2 = 25;
 
 /**
  * Resolve the specialty edge $/LF rate from pricing rules, falling back to the constant.

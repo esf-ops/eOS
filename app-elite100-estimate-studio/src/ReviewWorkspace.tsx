@@ -1,9 +1,10 @@
 /**
- * DE.2F — Private Studio customer review queue + amendment workspace.
- * Never shows sold/accept/payment. Never auto-emails. Raw replacement token is one-time UI state only.
+ * Customer review-request workspace — Studio resolve / revise / republish loop.
+ * Reuses Brain review-request records; never shows sold/accept/payment.
+ * Raw replacement token is one-time UI state only.
  */
 import React, { useEffect, useState } from "react";
-import { apiGet, apiPatch, apiPost, ApiError } from "./lib/api";
+import { apiGet, apiPost, ApiError } from "./lib/api";
 
 export function reviewUiEnabled(): boolean {
   return (
@@ -14,20 +15,27 @@ export function reviewUiEnabled(): boolean {
 type QueueRow = {
   id: string;
   status: string;
+  operatorStatus?: string;
   publicationId: string;
   quoteNumber?: string | null;
+  customerName?: string | null;
+  projectName?: string | null;
   requestedAt: string;
   baselineDisplayTotal?: number | null;
   requestedDisplayTotal?: number | null;
   displayDelta?: number | null;
   changedSelectionCount?: number;
-  pricingValidThrough?: string | null;
-  clarificationRequired?: boolean;
+  intakeCaseId?: string | null;
+  studioEstimateId?: string | null;
+  revisedEstimateId?: string | null;
+  linkedEstimateRevision?: number | null;
+  resolutionState?: string;
 };
 
 type Props = {
   token: string;
   onAuthFailure: () => void;
+  onOpenEstimate?: (intakeCaseId: string) => void;
 };
 
 function money(n: number | null | undefined): string {
@@ -35,7 +43,20 @@ function money(n: number | null | undefined): string {
   return `$${Math.round(Number(n)).toLocaleString("en-US")}`;
 }
 
-export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
+function operatorLabel(s: string | undefined | null): string {
+  const v = String(s || "");
+  const map: Record<string, string> = {
+    new: "New",
+    in_review: "In review",
+    revision_required: "Revision required",
+    resolved_no_change: "Resolved — no change",
+    resolved_republished: "Resolved — republished",
+    rejected: "Rejected"
+  };
+  return map[v] || v || "—";
+}
+
+export default function ReviewWorkspace({ token, onAuthFailure, onOpenEstimate }: Props) {
   const [rows, setRows] = useState<QueueRow[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -43,11 +64,9 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [oneTimeLink, setOneTimeLink] = useState<string | null>(null);
-  const [replacementPubId, setReplacementPubId] = useState<string | null>(null);
   const [staffNotice, setStaffNotice] = useState<string | null>(null);
-  const [customerExplanation, setCustomerExplanation] = useState("");
-  const [internalNote, setInternalNote] = useState("");
-  const [clarificationMsg, setClarificationMsg] = useState("");
+  const [resolutionNote, setResolutionNote] = useState("");
+  const [applySelections, setApplySelections] = useState(false);
 
   if (!reviewUiEnabled()) {
     return null;
@@ -57,9 +76,10 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
     setError(null);
     try {
       const q = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : "";
-      const body = (await apiGet(`/api/digital-estimate/review-requests${q}`, token)) as {
-        reviewRequests?: QueueRow[];
-      };
+      const body = (await apiGet(
+        `/api/elite100-estimate-studio/review-requests${q}`,
+        token
+      )) as { reviewRequests?: QueueRow[] };
       setRows(body.reviewRequests || []);
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
@@ -74,11 +94,12 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
     setBusy(true);
     setError(null);
     setOneTimeLink(null);
+    setStaffNotice(null);
     try {
-      const body = (await apiGet(`/api/digital-estimate/review-requests/${id}`, token)) as Record<
-        string,
-        unknown
-      >;
+      const body = (await apiGet(
+        `/api/elite100-estimate-studio/review-requests/${id}`,
+        token
+      )) as Record<string, unknown>;
       setSelectedId(id);
       setDetail(body);
     } catch (e) {
@@ -98,171 +119,85 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
   }, [token, statusFilter]);
 
   const reviewRequest = (detail?.reviewRequest || null) as Record<string, unknown> | null;
+  const linkage = (detail?.linkage || null) as Record<string, unknown> | null;
+  const pricingComparison = (detail?.pricingComparison || null) as Record<string, unknown> | null;
+  const blockers = (detail?.blockers || null) as {
+    unsupportedSelections?: Array<{ message?: string }>;
+    unresolvedCommercial?: Array<{ message?: string }>;
+    canRepublish?: boolean;
+  } | null;
   const comparison = (detail?.comparison || null) as {
     rows?: Array<Record<string, unknown>>;
-    internalTotals?: Record<string, unknown>;
     customerSafeTotals?: Record<string, unknown>;
   } | null;
-  const amendments = (detail?.amendments || []) as Array<Record<string, unknown>>;
-  const latestAmd = amendments[0] || null;
+  const timeline = (detail?.timeline || []) as Array<Record<string, unknown>>;
 
-  async function startReview() {
+  const operatorStatus = String(reviewRequest?.operatorStatus || "");
+  const open =
+    operatorStatus === "new" ||
+    operatorStatus === "in_review" ||
+    operatorStatus === "revision_required";
+
+  async function runAction(
+    path: string,
+    body: Record<string, unknown>,
+    opts?: { expectLink?: boolean }
+  ) {
     if (!selectedId) return;
     setBusy(true);
-    try {
-      await apiPost(`/api/digital-estimate/review-requests/${selectedId}/start`, token, {});
-      await loadDetail(selectedId);
-      await loadQueue();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Unable to start review");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function requestClarification() {
-    if (!selectedId) return;
-    setBusy(true);
-    try {
-      await apiPost(`/api/digital-estimate/review-requests/${selectedId}/clarification`, token, {
-        message: clarificationMsg,
-      });
-      await loadDetail(selectedId);
-      await loadQueue();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Unable to set clarification");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function closeWithoutAmendment() {
-    if (!selectedId) return;
-    if (!window.confirm("Close this review request without publishing an updated estimate?")) return;
-    setBusy(true);
-    try {
-      await apiPost(`/api/digital-estimate/review-requests/${selectedId}/close`, token, {
-        reason: "closed_without_amendment",
-      });
-      await loadDetail(selectedId);
-      await loadQueue();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Unable to close");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function createAmendment() {
-    if (!selectedId) return;
-    setBusy(true);
-    try {
-      await apiPost(`/api/digital-estimate/review-requests/${selectedId}/amendments`, token, {});
-      await loadDetail(selectedId);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Unable to create amendment");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveAmendmentNotes() {
-    if (!latestAmd?.id) return;
-    setBusy(true);
-    try {
-      await apiPatch(`/api/digital-estimate/amendments/${String(latestAmd.id)}`, token, {
-        expectedRowVersion: latestAmd.rowVersion,
-        customerSafeExplanation: customerExplanation,
-        internalNote: internalNote || undefined,
-      });
-      setInternalNote("");
-      await loadDetail(selectedId!);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Unable to update amendment");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function validateAmendment() {
-    if (!latestAmd?.id) return;
-    setBusy(true);
-    try {
-      await apiPost(`/api/digital-estimate/amendments/${String(latestAmd.id)}/validate`, token, {
-        expectedRowVersion: latestAmd.rowVersion,
-      });
-      await loadDetail(selectedId!);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Unable to validate amendment");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function publishAmendment() {
-    if (!latestAmd?.id) return;
-    if (
-      !window.confirm(
-        "Publish a replacement Digital Estimate? The prior customer link will stop working. No email is sent automatically."
-      )
-    ) {
-      return;
-    }
-    setBusy(true);
-    setOneTimeLink(null);
+    setError(null);
     setStaffNotice(null);
     try {
-      const body = (await apiPost(
-        `/api/digital-estimate/amendments/${String(latestAmd.id)}/publish`,
+      const result = (await apiPost(
+        `/api/elite100-estimate-studio/review-requests/${selectedId}/${path}`,
         token,
-        { confirm: true, expectedRowVersion: latestAmd.rowVersion }
+        body
       )) as {
         customerUrl?: string | null;
-        publication?: { id?: string };
-        accessToken?: string | null;
         staffNotice?: string | null;
-        syntheticPilot?: { awaitingSyntheticAllowlist?: boolean };
+        notice?: string | null;
+        revisedEstimate?: { intakeCaseId?: string };
       };
-      setOneTimeLink(body.customerUrl || null);
-      setReplacementPubId(body.publication?.id || null);
-      setStaffNotice(
-        body.staffNotice ||
-          (body.syntheticPilot?.awaitingSyntheticAllowlist
-            ? "Replacement publication awaiting synthetic allowlist"
-            : null)
-      );
-      void body.accessToken;
-      await loadDetail(selectedId!);
+      if (opts?.expectLink && result.customerUrl) {
+        setOneTimeLink(result.customerUrl);
+      }
+      setStaffNotice(result.staffNotice || result.notice || null);
+      await loadDetail(selectedId);
       await loadQueue();
+      return result;
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Unable to publish amendment");
+      setError(e instanceof ApiError ? e.message : "Action failed");
+      // Reload so failed republish still shows revision_required
+      if (selectedId) await loadDetail(selectedId);
+      return null;
     } finally {
       setBusy(false);
     }
   }
 
-  async function copyReplacementLink() {
-    if (!oneTimeLink || !replacementPubId) return;
+  async function copyNewLink() {
+    if (!oneTimeLink) return;
     try {
       await navigator.clipboard.writeText(oneTimeLink);
-      await apiPost(
-        `/api/digital-estimate/publications/${replacementPubId}/replacement-link-copied`,
-        token,
-        {}
-      );
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Copy failed");
+      setStaffNotice("Replacement customer link copied.");
+    } catch {
+      setError("Unable to copy link");
     }
   }
 
   return (
-    <section className="panel review-workspace">
+    <section className="panel review-workspace" data-testid="studio-review-workspace">
       <h2>Customer review requests</h2>
       <p className="muted">
-        Nonbinding configuration reviews only — not acceptance, sold, payment, or delivery. Prior
-        publication links are superseded on amendment publish; staff copy the replacement link manually.
+        Nonbinding configuration reviews only — not acceptance, sold, payment, or ordering. Revising
+        opens a new Studio estimate revision; republish supersedes the prior Digital Estimate link.
       </p>
       {error ? <div className="error-box">{error}</div> : null}
+      {staffNotice ? (
+        <div className="warn-box" role="status">
+          {staffNotice}
+        </div>
+      ) : null}
 
       <div className="search-row">
         <select
@@ -271,12 +206,11 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
           aria-label="Filter by status"
         >
           <option value="">All statuses</option>
-          <option value="review_requested">review_requested</option>
-          <option value="estimator_reviewing">estimator_reviewing</option>
-          <option value="clarification_required">clarification_required</option>
-          <option value="amendment_prepared">amendment_prepared</option>
-          <option value="updated_estimate_published">updated_estimate_published</option>
-          <option value="review_closed">review_closed</option>
+          <option value="review_requested">new (review_requested)</option>
+          <option value="estimator_reviewing">in_review</option>
+          <option value="amendment_prepared">revision_required</option>
+          <option value="updated_estimate_published">resolved_republished</option>
+          <option value="review_closed">resolved / rejected</option>
         </select>
         <button type="button" disabled={busy} onClick={() => void loadQueue()}>
           Refresh
@@ -288,13 +222,12 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
           <table className="review-table">
             <thead>
               <tr>
-                <th>Estimate</th>
+                <th>Customer / project</th>
                 <th>Status</th>
-                <th>Requested</th>
-                <th>Original</th>
-                <th>Requested total</th>
-                <th>Δ</th>
-                <th>Changes</th>
+                <th>Submitted</th>
+                <th>Publication</th>
+                <th>Requested / Δ</th>
+                <th>Estimate rev</th>
               </tr>
             </thead>
             <tbody>
@@ -302,15 +235,17 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
                 <tr key={r.id} className={selectedId === r.id ? "is-selected" : undefined}>
                   <td>
                     <button type="button" onClick={() => void loadDetail(r.id)}>
-                      {r.quoteNumber || r.id.slice(0, 8)}
+                      {r.customerName || r.quoteNumber || r.id.slice(0, 8)}
+                      {r.projectName ? ` · ${r.projectName}` : ""}
                     </button>
                   </td>
-                  <td>{r.status}</td>
+                  <td>{operatorLabel(r.operatorStatus || r.resolutionState)}</td>
                   <td>{r.requestedAt ? new Date(r.requestedAt).toLocaleString() : "—"}</td>
-                  <td>{money(r.baselineDisplayTotal)}</td>
-                  <td>{money(r.requestedDisplayTotal)}</td>
-                  <td>{money(r.displayDelta)}</td>
-                  <td>{r.changedSelectionCount ?? "—"}</td>
+                  <td className="muted">{r.publicationId?.slice(0, 8) || "—"}</td>
+                  <td>
+                    {money(r.requestedDisplayTotal)} / {money(r.displayDelta)}
+                  </td>
+                  <td>{r.linkedEstimateRevision ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -324,14 +259,31 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
           ) : (
             <>
               <h3>Request detail</h3>
-              <p>
-                <strong>{String(reviewRequest.status)}</strong> · immutable snapshot ·{" "}
-                {String((reviewRequest.estimateIdentity as { quoteNumber?: string })?.quoteNumber || "")}
+              <p data-testid="review-operator-status">
+                <strong>{operatorLabel(String(reviewRequest.operatorStatus))}</strong> ·{" "}
+                {String(
+                  (reviewRequest.estimateIdentity as { customerName?: string })?.customerName || ""
+                )}{" "}
+                ·{" "}
+                {String(
+                  (reviewRequest.estimateIdentity as { projectName?: string })?.projectName || ""
+                )}
               </p>
               <p className="muted">
-                Requested {String(reviewRequest.requestedAt)} · Pricing valid through{" "}
-                {String(reviewRequest.pricingValidThrough || "—")}
+                Submitted {String(reviewRequest.requestedAt)} · Publication{" "}
+                {String(reviewRequest.publicationId).slice(0, 8)} ({String(reviewRequest.publicationStatus)})
+                · Source rev {String(linkage?.sourceEstimateRevision ?? "—")}
               </p>
+              {linkage?.intakeCaseId ? (
+                <p className="muted">
+                  Intake case {String(linkage.intakeCaseId).slice(0, 8)} · Studio estimate{" "}
+                  {String(linkage.studioEstimateId || "").slice(0, 8) || "—"}
+                  {linkage.revisedEstimateId
+                    ? ` · Revised ${String(linkage.revisedEstimateId).slice(0, 8)} (R${String(linkage.revisedEstimateRevision ?? "")})`
+                    : ""}
+                </p>
+              ) : null}
+
               {reviewRequest.customerNote ? (
                 <div className="preview-block">
                   <h4>Customer note</h4>
@@ -339,8 +291,24 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
                 </div>
               ) : null}
 
+              {reviewRequest.resolutionNote ? (
+                <div className="preview-block">
+                  <h4>Estimator resolution note</h4>
+                  <p>{String(reviewRequest.resolutionNote)}</p>
+                </div>
+              ) : null}
+
               <div className="preview-block">
-                <h4>Structured comparison</h4>
+                <h4>Pricing comparison (server)</h4>
+                <p>
+                  Published {money(pricingComparison?.currentPublishedTotal as number)} → requested{" "}
+                  {money(pricingComparison?.requestedConfiguredTotal as number)} (Δ{" "}
+                  {money(pricingComparison?.delta as number)})
+                </p>
+              </div>
+
+              <div className="preview-block">
+                <h4>Customer selection summary</h4>
                 <ul className="event-list">
                   {(comparison?.rows || []).map((row, i) => (
                     <li key={`${String(row.optionKey)}-${i}`}>
@@ -350,97 +318,157 @@ export default function ReviewWorkspace({ token, onAuthFailure }: Props) {
                     </li>
                   ))}
                 </ul>
-                <p>
-                  Customer-safe: original {money(comparison?.customerSafeTotals?.baselineDisplay as number)} →
-                  requested {money(comparison?.customerSafeTotals?.requestedDisplay as number)} (Δ{" "}
-                  {money(comparison?.customerSafeTotals?.displayDelta as number)})
-                </p>
-                <p className="muted">
-                  Internal totals available to estimators only (not shown on public Digital Estimate).
-                  Exact baseline {money(comparison?.internalTotals?.baselineExact as number)} / requested{" "}
-                  {money(comparison?.internalTotals?.requestedExact as number)}.
-                </p>
+                {!comparison?.rows?.length ? <p className="muted">No selection changes recorded.</p> : null}
               </div>
+
+              {(blockers?.unsupportedSelections?.length || blockers?.unresolvedCommercial?.length) ? (
+                <div className="error-box" data-testid="review-blockers">
+                  <strong>Blockers</strong>
+                  <ul>
+                    {(blockers?.unsupportedSelections || []).map((b, i) => (
+                      <li key={`u-${i}`}>{b.message}</li>
+                    ))}
+                    {(blockers?.unresolvedCommercial || []).map((b, i) => (
+                      <li key={`c-${i}`}>{b.message}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {open ? (
+                <label className="muted" style={{ display: "block", marginBottom: "0.5rem" }}>
+                  Estimator note (required for no-change / reject)
+                  <textarea
+                    value={resolutionNote}
+                    onChange={(e) => setResolutionNote(e.target.value)}
+                    rows={2}
+                    data-testid="review-resolution-note"
+                  />
+                </label>
+              ) : null}
 
               <div className="actions">
-                <button type="button" disabled={busy} onClick={() => void startReview()}>
-                  Start review
+                <button
+                  type="button"
+                  disabled={busy || !open}
+                  data-testid="review-start"
+                  onClick={() => void runAction("start", {})}
+                >
+                  Start Review
                 </button>
-                <button type="button" disabled={busy} onClick={() => void createAmendment()}>
-                  Approve selections into amendment draft
+                <button
+                  type="button"
+                  disabled={busy || !open}
+                  data-testid="review-no-change"
+                  onClick={() =>
+                    void runAction("resolve-no-change", { note: resolutionNote })
+                  }
+                >
+                  No Revision Needed
                 </button>
-                <button type="button" className="secondary" disabled={busy} onClick={() => void closeWithoutAmendment()}>
-                  Close without amendment
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy || !open}
+                  data-testid="review-reject"
+                  onClick={() => void runAction("reject", { note: resolutionNote })}
+                >
+                  Reject Request
                 </button>
               </div>
 
-              <div className="preview-block">
-                <h4>Clarification required</h4>
-                <textarea
-                  rows={2}
-                  value={clarificationMsg}
-                  onChange={(e) => setClarificationMsg(e.target.value)}
-                  placeholder="Customer-safe clarification message"
-                />
-                <button type="button" disabled={busy} onClick={() => void requestClarification()}>
-                  Mark clarification required
+              <div className="actions" style={{ marginTop: "0.5rem" }}>
+                <label className="muted">
+                  <input
+                    type="checkbox"
+                    checked={applySelections}
+                    onChange={(e) => setApplySelections(e.target.checked)}
+                  />{" "}
+                  Apply customer selections to new revision (server-validated)
+                </label>
+                <button
+                  type="button"
+                  disabled={busy || !open}
+                  data-testid="review-revise"
+                  onClick={() =>
+                    void runAction("revise-estimate", {
+                      applyCustomerSelections: applySelections
+                    })
+                  }
+                >
+                  Revise Estimate
                 </button>
+                {linkage?.intakeCaseId && onOpenEstimate ? (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy}
+                    data-testid="review-open-revised"
+                    onClick={() => onOpenEstimate(String(linkage.intakeCaseId))}
+                  >
+                    Open Revised Estimate
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={
+                    busy ||
+                    operatorStatus !== "revision_required" ||
+                    !blockers?.canRepublish
+                  }
+                  data-testid="review-republish"
+                  onClick={() =>
+                    void runAction(
+                      "republish",
+                      { confirm: true, note: resolutionNote || undefined },
+                      { expectLink: true }
+                    )
+                  }
+                >
+                  Republish
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy || !oneTimeLink}
+                  data-testid="review-copy-new-link"
+                  onClick={() => void copyNewLink()}
+                >
+                  Copy New Customer Link
+                </button>
+                {oneTimeLink ? (
+                  <a
+                    className="btn secondary"
+                    href={oneTimeLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-testid="review-open-preview"
+                  >
+                    Open Customer Preview
+                  </a>
+                ) : null}
               </div>
 
-              {latestAmd ? (
-                <div className="preview-block">
-                  <h4>Amendment draft</h4>
+              {oneTimeLink ? (
+                <div className="token-once" role="status" aria-live="polite">
+                  <h4>One-time replacement link</h4>
                   <p>
-                    v{String(latestAmd.amendmentVersion)} · {String(latestAmd.status)} · row{" "}
-                    {String(latestAmd.rowVersion)}
+                    Copy now — the plaintext token is not stored and cannot be recovered after refresh.
+                    Use Replace Link on the estimate if lost.
                   </p>
-                  <p className="muted">
-                    Locked measurements cannot be edited here. Scope corrections require a separate
-                    professional estimating workflow.
-                  </p>
-                  <label>
-                    Customer-safe explanation
-                    <textarea
-                      rows={2}
-                      value={customerExplanation}
-                      onChange={(e) => setCustomerExplanation(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Internal note (private)
-                    <textarea rows={2} value={internalNote} onChange={(e) => setInternalNote(e.target.value)} />
-                  </label>
-                  <div className="actions">
-                    <button type="button" disabled={busy} onClick={() => void saveAmendmentNotes()}>
-                      Save amendment notes
-                    </button>
-                    <button type="button" disabled={busy} onClick={() => void validateAmendment()}>
-                      Validate via DE.2C
-                    </button>
-                    <button type="button" disabled={busy} onClick={() => void publishAmendment()}>
-                      Publish replacement Digital Estimate
-                    </button>
-                  </div>
-                  {oneTimeLink ? (
-                    <div className="token-once">
-                      <strong>One-time replacement link</strong> — copy now; raw token is not stored for later
-                      retrieval. No email is sent.
-                      {staffNotice ? (
-                        <p className="muted" role="status">
-                          {staffNotice}
-                        </p>
-                      ) : null}
-                      <code>{oneTimeLink}</code>
-                      <div className="actions">
-                        <button type="button" onClick={() => void copyReplacementLink()}>
-                          Copy replacement link
-                        </button>
-                        <a className="btn secondary" href={oneTimeLink} target="_blank" rel="noreferrer">
-                          Open replacement estimate
-                        </a>
-                      </div>
-                    </div>
-                  ) : null}
+                </div>
+              ) : null}
+
+              {timeline.length ? (
+                <div className="preview-block">
+                  <h4>Timeline</h4>
+                  <ul className="event-list">
+                    {timeline.map((ev) => (
+                      <li key={String(ev.id)}>
+                        {String(ev.eventType)} · {String(ev.createdAt)}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               ) : null}
             </>

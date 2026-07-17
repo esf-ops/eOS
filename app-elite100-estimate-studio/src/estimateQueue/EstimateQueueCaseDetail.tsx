@@ -4,6 +4,9 @@ import type {
   QuoteIntakeCaseDto
 } from "../lib/quoteIntakeTypes";
 import {
+  attachmentIsSupportedPdf,
+  attachmentRetrievalLabel,
+  attachmentSupportLabel,
   caseAttachmentStatusLabel,
   caseCustomerProjectLabel,
   caseReceivedAt,
@@ -132,20 +135,37 @@ export default function EstimateQueueCaseDetail({
         {(caseRow.attachments ?? []).length === 0 ? (
           <p className="eq-muted">No attachment metadata.</p>
         ) : (
-          <ul className="eq-list">
-            {(caseRow.attachments ?? []).map((a) => (
-              <li key={a.id}>
-                <strong>{safeText(a.safeFilename, "Unnamed file")}</strong>
-                <span className="eq-muted">
-                  {" "}
-                  · {safeText(a.mimeType)} · {formatBytes(a.sizeBytes)} · sha256{" "}
-                  {String(a.sha256 || "").slice(0, 12)}…
-                </span>
-              </li>
-            ))}
+          <ul className="eq-list eq-attachment-list" data-testid="eq-attachment-list">
+            {(caseRow.attachments ?? []).map((a) => {
+              const supported = attachmentIsSupportedPdf(a);
+              return (
+                <li key={a.id} className="eq-attachment-row">
+                  <div>
+                    <strong>{safeText(a.safeFilename, "Unnamed file")}</strong>
+                    <span className="eq-muted">
+                      {" "}
+                      · {safeText(a.mimeType, "unknown type")} · {formatBytes(a.sizeBytes)}
+                    </span>
+                  </div>
+                  <div className="eq-attachment-meta">
+                    <span
+                      className={
+                        supported ? "eq-badge eq-badge--ok" : "eq-badge eq-badge--warn"
+                      }
+                    >
+                      {attachmentSupportLabel(a)}
+                    </span>
+                    <span className="eq-muted"> · {attachmentRetrievalLabel(a)}</span>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
-        <p className="eq-footnote">Metadata only — download is not available in this milestone.</p>
+        <p className="eq-footnote">
+          Provider identifiers are never shown. Plan bytes are retrieved and validated by the Brain
+          when you open the estimate.
+        </p>
       </section>
 
       {missing.length || manual.length ? (

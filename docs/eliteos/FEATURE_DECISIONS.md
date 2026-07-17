@@ -1457,3 +1457,77 @@
 | **Manual setup** | Set `HEAD_URL_QUICKBOOKS_INTELLIGENCE` on Brain; deploy app with `VITE_*` env; grant `user_head_access` where role defaults do not apply. **Do not** apply DB migrations for this head. |
 | **Impacted files/docs** | `app-quickbooks-intelligence/`, `app-system-admin/` (QB tab removed), `quickBooksIntelligenceApi.js`, `eosGovernanceConstants.js`, `launcherHeads.js`, `headDeploymentUrls.js`, `QUICKBOOKS_INGESTION_PLAN.md`, `eliteOS-master-head-map.md`, `SYSTEM_BLUEPRINT.md`, this entry. |
 | **Revisit trigger** | Dedicated sync-health Admin surface; AI narrative layer; rename API path off `/api/admin/quickbooks/*` if product wants non-admin URL branding. |
+
+### 100. Elite 100 Studio estimates — durable persistence + pricing authority lock (2026-07-16)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-16 |
+| **Decision** | Studio estimates persist in **`studio_estimates`** (Supabase default; memory for tests only). Scope edits after approval **supersede** the approved row (preserving calculation/approval snapshot) and open a new active revision. **Wholesale Remnant = $50/SF** (calculator authority; product brief $45 rejected because it equals Group Promo wholesale and would shadow Remnant). **W edge** = wholesale **$15/LF** / direct **$25/LF** (quoteCalculator v2 upgraded edge — not a universal $15). Internal Estimate **2% material use tax** is applied **once** into `totals.wholesale` for `internal_quote` (contract test 714 = 700 × 1.02). |
+| **Why** | Approved Studio estimates must survive Brain restarts before Digital Estimate publish. Pricing ambiguity must be explicit so future DE publication has a single authority. |
+| **SQL** | Manual apply: `backend-core/supabase/eliteos_studio_estimates_v1.sql` (does not touch Digital Estimate tables). |
+| **Impacted files/docs** | `backend-core/src/elite100EstimateStudio/*`, `quoteCalculator.js` (exported edge rates + Remnant comment), `pricingAuthority.contract.test.mjs`, `app-elite100-estimate-studio` Estimate Scope panel, this entry. |
+| **Revisit trigger** | Finance formally sets Remnant wholesale ≠ $50; Pricing Admin wires Remnant/edge catalog into `calculateQuote`; Digital Estimate publish consumes approved Studio estimate snapshots. |
+
+### 101. Quote Intake mailbox PDF → Open Estimate handoff — persist attachment records, defer byte retrieval (2026-07-16)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-16 |
+| **Decision** | Mailbox import now persists a **metadata-only record for every classified attachment** (`quote_intake_attachments`) instead of only writing a row when a PDF's bytes were fetched and validated at import time. `sha256` is **nullable at import** and computed later. Byte retrieval, PDF magic validation, and SHA-256 happen **once at Open Estimate** using server-stored provider identifiers (`provider_message_id` + `source_attachment_id`). Supported-PDF detection is **classification-based** (`support_classification = direct_pdf`, `is_inline`, `attachment_kind`), not sha-gated. Open Estimate builds a fixed-mailbox Graph client from Brain env when none is injected (server.js previously injected none, so real re-fetch always failed with `attachment_bytes_unavailable`). |
+| **Why (root cause)** | The real forwarded-PDF case produced `no_supported_pdf` because import's single silent `try/catch` dropped the attachment entirely whenever classification found zero direct candidates (inline/itemAttachment/referenceAttachment) or the byte fetch/decode threw — leaving `attachments: []`. Detection then had no record to reason about. A second latent bug: no Graph client wired into Open Estimate byte retrieval. |
+| **Supported-PDF rules** | `@odata.type = fileAttachment`, not inline, not item/reference, filename `.pdf` and/or `application/pdf`; final downloaded bytes must pass `%PDF` magic; SHA-256 computed server-side; size within existing Graph limits. Inline signatures/logos ignored. Client may submit only a Quote Intake attachment **record UUID** (`attachmentId`) for multi-PDF selection — never a Graph id/URL/mailbox/token. |
+| **Multiple / none behavior** | Multiple supported PDFs → `409 multi_pdf_ambiguous` with `selectionRequired` + safe `options` (record id + filename + size); server re-authorizes the chosen record. Zero supported → `422 no_supported_pdf` with a precise `reason` (`no_attachments`, `only_inline_images`, `pdf_nested_in_forwarded_item`, `unsupported_attachment_type`). |
+| **Persistence** | Quote Intake Supabase repository already exists. **Migration required (manual apply):** `backend-core/supabase/eliteos_quote_intake_attachment_retrieval_v1.sql` (additive: nullable `sha256`, `is_inline`, `attachment_kind`, `support_classification`, `retrieval_state`, `provider_message_id`, dedupe index on `(intake_case_id, source_attachment_id)`). Fails closed when Supabase mode selected but table/columns unavailable. Does not touch Digital Estimate migrations. |
+| **Impacted files/docs** | `quoteIntakeAttachmentMeta.mjs` (new shared classifier), `quoteIntakeMailboxService.mjs`, `quoteIntakeGraphClient.mjs`, `quoteIntakeRepository.mjs`, `supabaseQuoteIntakeRepository.mjs`, `intakeOpenEstimateService.mjs`, `quoteIntakeRoutes.js`, `app-elite100-estimate-studio` case detail (safe attachment rows), `phase6p4.test.mjs` (updated to metadata-only), `openEstimatePart1.test.mjs` (new), this entry. |
+| **Revisit trigger** | Retrieve PDFs nested inside forwarded `itemAttachment` without broad Graph scope expansion; estimator attachment picker UI for multi-PDF; automatic mailbox polling. |
+
+### 102. Quote Intake preview attachment discovery — invalid `$select=contentId` (2026-07-16)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-16 |
+| **Decision** | Attachment metadata `$select` uses **only base** `microsoft.graph.attachment` fields: `id,name,contentType,size,isInline`. Never include `contentId` (fileAttachment-only) without an OData type cast. Preview **must not** catch attachment-list failures into an empty list; surface `attachmentDiscovery` (`ok` / `failed` / `empty_mismatch`) instead. |
+| **Why** | Live Sync inbox showed `Attachments: none` for real direct PDFs because `$select` included `contentId`, Graph returned HTTP 400 (`Could not find a property named 'contentId' on type 'microsoft.graph.attachment'`), and preview swallowed the error into `attachments: []`. |
+| **Graph request shape** | Prefer `IdType="ImmutableId"` on message list and `/messages/{id}/attachments`. Message `$select` includes `hasAttachments`. Attachment list uses ImmutableId from Prefer-consistent message `id`. |
+| **Impacted files** | `quoteIntakeGraphClient.mjs`, `quoteIntakeMailboxService.mjs`, `MailboxSyncModal.tsx`, `previewAttachmentDiscovery.test.mjs`, live smoke script. |
+| **Revisit trigger** | Need `contentId` for CID inline matching — use `microsoft.graph.fileAttachment/contentId` cast. |
+
+### 103. Quote Intake PDF size limit — envInt empty→1024 bug (2026-07-16)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-16 |
+| **Decision** | Authoritative single-PDF ceiling is **`QUOTE_INTAKE_MAX_PDF_BYTES`** (default **50 MiB**, hard max **100 MiB**). Legacy `QUOTE_INTAKE_GRAPH_MAX_ATTACHMENT_BYTES` is a fallback alias only. `envInt` must treat empty/missing env as **fallback**, never as `0` clamped to `min`. |
+| **Why** | Live Open Estimate failed with `attachment_too_large` for a ~0.1 MB cabinet PDF because unset `QUOTE_INTAKE_GRAPH_MAX_ATTACHMENT_BYTES` was parsed as `0` and clamped to **1024 bytes**. |
+| **Throwing layer** | `decodeAndValidatePdfBytes` / Open Estimate byte validation using `limits.maxAttachmentBytes` (= 1024). |
+| **Old limit** | Effective **1024 bytes** (bug). Intended default was 50 MiB. |
+| **New limit** | **52,428,800 bytes (50 MiB)** default via `QUOTE_INTAKE_MAX_PDF_BYTES`. |
+| **Enforcement** | Metadata pre-check before Graph download; downloaded byte length re-checked; PDF magic + SHA-256 unchanged; human-readable error: `This PDF is X MB. The current limit is Y MB.` |
+| **Impacted** | `quoteIntakeGraphConfig.mjs`, `quoteIntakeGraphNormalize.mjs`, `intakeOpenEstimateService.mjs`, `quoteIntakeMailboxService.mjs`, `quoteIntakeRoutes.js`, `ingestQuoteFileFromBytes.mjs`, Studio mailbox UI, `pdfSizeLimit.test.mjs`. |
+
+### 104. Studio estimate → Digital Estimate publication (Part 2) (2026-07-16)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-16 |
+| **Decision** | An **approved, durable Studio estimate** is the source of truth for Elite 100 Digital Estimate publication from Estimate Queue. Publish adapts the estimate into the existing `quote_headers`-shaped freeze path (`assessElite100PublicationEligibility` + `buildPublicationFreezePayloads` + `publishAtomic`) — **no second publication, token, pricing, session, or review-request system**. Family root = **intake case id** so a newly approved estimate revision supersedes the prior active publication. Memory-only Studio estimates cannot publish (except `ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH=1` for tests). |
+| **Why** | Estimators complete Takeoff → Studio approve → publish customer Digital Estimate without Internal Estimate quote_headers; customer config + review requests stay on existing DE.2* surfaces. |
+| **Frozen** | Studio estimate id/revision, intake case id, takeoff job id, approved calculation fingerprint, customer/project fields, room/scope summary, baseline customer display total, material/options envelope, pricing engine/version, pricing-valid-through. |
+| **Excluded from customer snapshot** | Internal markup, estimator-only notes, wholesale/rates, trusted-account rule IDs, actor IDs, raw Takeoff evidence, Graph/attachment hashes, storage paths. Public serializer + forbidden-content checks remain final authority. |
+| **SQL** | None new. Requires prior `eliteos_studio_estimates_v1.sql` + existing Digital Estimate / configuration migrations. |
+| **Impacted** | `studioEstimatePublicationAdapter.mjs`, `studioEstimateDigitalEstimateService.mjs`, `elite100EstimateStudioRoutes.js`, `digitalEstimatePublishService.mjs` (optional `pricingValidThrough` + `publishMetadata`), `EstimateDigitalEstimatePanel.tsx`, Part 2 tests. |
+| **Out of scope** | Acceptance, mark sold, Moraware, QuickBooks, payments, automatic republish. |
+
+### 105. Studio review-request resolve / revise / republish (Part 3) (2026-07-17)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-17 |
+| **Decision** | Estimator review of customer Digital Estimate requests reuses existing **`REVIEW_STATUS`** authority with operator-facing labels (`new`, `in_review`, `revision_required`, `resolved_no_change`, `resolved_republished`, `rejected`). **Revise** opens a new Studio estimate revision via `createRevisionFrom` (prior approval snapshot preserved). **Republish** uses Studio Digital Estimate publish (idempotent + supersession). Request is marked `updated_estimate_published` **only after** successful republish. No-change / reject require an estimator note and create no publication. |
+| **Why** | Close the customer→estimator loop without a second review/revision/publication system and without auto-acceptance or downstream integrations. |
+| **SQL** | None new. Resolution kind/note stored in mutable `closed_reason`; Studio linkage in amendment `internal_evidence_json.studioReview`. |
+| **Impacted** | `studioReviewRequestService.mjs`, Studio review routes, `ReviewWorkspace.tsx`, `EstimateDigitalEstimatePanel.tsx`, Part 3 tests. |
+| **Out of scope** | Acceptance, mark sold, Moraware, QuickBooks, payments, automatic email/republish. |
+
+

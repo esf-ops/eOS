@@ -79,6 +79,11 @@ function injectedPricingContext({ structure, rules }) {
   };
 }
 
+/** Internal Estimate folds 2% material use tax into totals.wholesale exactly once. */
+function withInternalMaterialUseTax(materialSubtotal) {
+  return Math.round(Number(materialSubtotal) * 1.02 * 100) / 100;
+}
+
 // ── A. internal_quote never applies public/partner markup ─────────────────────
 
 {
@@ -127,7 +132,13 @@ function injectedPricingContext({ structure, rules }) {
   );
 
   const expectedMaterial = 10 * expectedRate;
-  assert.equal(calc.totals.wholesale, expectedMaterial, "internal Direct: uses ESF Direct $/sf, ignores wholesale rule price");
+  // 714 vs prior stale expectation of 700: internal_quote applies 2% material use tax once into
+  // totals.wholesale (700 × 1.02 = 714). Tax is not double-layered; the old assertion ignored it.
+  assert.equal(
+    calc.totals.wholesale,
+    withInternalMaterialUseTax(expectedMaterial),
+    "internal Direct: uses ESF Direct $/sf + single 2% use tax; ignores wholesale rule price"
+  );
   console.log("ok: internal Direct basis uses ESF Direct constants");
 }
 
@@ -142,7 +153,11 @@ function injectedPricingContext({ structure, rules }) {
       rules: [materialGroupRule("Group Promo", rulePrice)]
     })
   );
-  assert.equal(calcWithRules.totals.wholesale, 10 * rulePrice, "internal Wholesale: material from provided quote_pricing_rules");
+  assert.equal(
+    calcWithRules.totals.wholesale,
+    withInternalMaterialUseTax(10 * rulePrice),
+    "internal Wholesale: material from provided quote_pricing_rules + single 2% use tax"
+  );
 
   const prototypeRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
   const calcFallback = await calculateQuote(
@@ -154,8 +169,8 @@ function injectedPricingContext({ structure, rules }) {
   );
   assert.equal(
     calcFallback.totals.wholesale,
-    10 * prototypeRate,
-    "internal Wholesale: empty rules fall back to PROTOTYPE_TIER_PRICE_PER_SQFT constants"
+    withInternalMaterialUseTax(10 * prototypeRate),
+    "internal Wholesale: empty rules fall back to PROTOTYPE_TIER_PRICE_PER_SQFT constants + use tax"
   );
   console.log("ok: internal Wholesale uses rules path with explicit prototype fallback");
 }
@@ -285,14 +300,15 @@ function injectedPricingContext({ structure, rules }) {
     "Remnant: ESF_DIRECT_PRICE_PER_SQFT['Remnant'] = $50/sf"
   );
 
-  // Wholesale fallback must also be defined (prevents silent Group Promo $45 in wholesale mode).
+  // Wholesale Remnant = $50 (same as Direct). Product brief $45 would equal Group Promo wholesale
+  // and silently shadow Remnant → Promo; calculator authority + this contract lock $50.
   assert.equal(
     PROTOTYPE_TIER_PRICE_PER_SQFT["Remnant"],
     50,
-    "Remnant: PROTOTYPE_TIER_PRICE_PER_SQFT['Remnant'] = $50/sf (explicit fallback prevents Group Promo shadow)"
+    "Remnant: PROTOTYPE_TIER_PRICE_PER_SQFT['Remnant'] = $50/sf (explicit; not product-brief $45)"
   );
 
-  // Direct/Retail Internal Estimate: 10 sf Remnant → $500 material, no markup applied.
+  // Direct/Retail Internal Estimate: 10 sf Remnant → $500 material + 2% use tax once.
   const calc = await calculateQuote(
     internalLegacyInput({
       materialGroup: "Remnant",
@@ -304,11 +320,15 @@ function injectedPricingContext({ structure, rules }) {
       rules: [materialGroupRule("Group Promo", 999)] // Remnant not in rules; must use Direct constant, not fallback
     })
   );
-  assert.equal(calc.totals.wholesale, 500, "Remnant Direct: 10 sf × $50 = $500 material");
-  assert.equal(calc.totals.retail, 500,    "Remnant Direct: no markup on internal_quote (retail = wholesale)");
-  assert.equal(calc.totals.profit, 0,      "Remnant Direct: zero profit on internal_quote");
+  assert.equal(
+    calc.totals.wholesale,
+    withInternalMaterialUseTax(500),
+    "Remnant Direct: 10 sf × $50 + 2% use tax once"
+  );
+  assert.equal(calc.totals.retail, calc.totals.wholesale, "Remnant Direct: no markup on internal_quote (retail = wholesale)");
+  assert.equal(calc.totals.profit, 0, "Remnant Direct: zero profit on internal_quote");
 
-  // Existing groups Promo–F unchanged: spot-check Group F Direct still $135/sf.
+  // Existing groups Promo–F unchanged: spot-check Group F Direct still $135/sf (+ use tax).
   const calcF = await calculateQuote(
     internalLegacyInput({ materialGroup: "Group F", areas: { countertopSqft: 10, backsplashSqft: 0 }, internalMaterialBasis: "direct" }),
     injectedPricingContext({
@@ -316,7 +336,11 @@ function injectedPricingContext({ structure, rules }) {
       rules: []
     })
   );
-  assert.equal(calcF.totals.wholesale, 1350, "Group F Direct unchanged: 10 sf × $135 = $1,350");
+  assert.equal(
+    calcF.totals.wholesale,
+    withInternalMaterialUseTax(1350),
+    "Group F Direct unchanged: 10 sf × $135 + 2% use tax"
+  );
 
   console.log("ok: Remnant Direct $50/sf with no internal markup; existing groups unchanged");
 }

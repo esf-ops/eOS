@@ -9,10 +9,15 @@ export type QuoteIntakeSourceMessageDto = {
 
 export type QuoteIntakeAttachmentDto = {
   id: string;
-  sha256: string;
+  sha256?: string | null;
   mimeType?: string;
   sizeBytes?: number;
   safeFilename?: string;
+  sourceAttachmentId?: string;
+  isInline?: boolean;
+  kind?: string;
+  support?: string;
+  retrievalState?: string;
 };
 
 export type QuoteIntakeCaseDto = {

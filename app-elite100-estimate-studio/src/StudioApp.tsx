@@ -4,7 +4,7 @@ import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopba
 import ConfigurationWorkspace from "./ConfigurationWorkspace";
 import ReviewWorkspace from "./ReviewWorkspace";
 import EstimateQueuePage from "./estimateQueue/EstimateQueuePage";
-import EstimateWorkspacePlaceholder from "./estimateQueue/EstimateWorkspacePlaceholder";
+import EstimateTakeoffWorkspace from "./estimateQueue/EstimateTakeoffWorkspace";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
 
@@ -439,11 +439,13 @@ export default function StudioApp() {
         ) : null}
 
         {mainNav === "estimate-workspace" && estimateWorkspaceCaseId ? (
-          <EstimateWorkspacePlaceholder
+          <EstimateTakeoffWorkspace
+            authToken={sessionToken}
             caseId={estimateWorkspaceCaseId}
             onBackToQueue={() => {
               setMainNav("estimate-queue");
               setEstimateWorkspaceCaseId(null);
+              // Keep intakeCaseId so the queue restores the selected case.
             }}
           />
         ) : null}
@@ -454,6 +456,11 @@ export default function StudioApp() {
             onAuthFailure={() => {
               setSessionToken(null);
               setActionError("Session ended or access denied");
+            }}
+            onOpenEstimate={(caseId) => {
+              setEstimateWorkspaceCaseId(caseId);
+              setIntakeCaseId(caseId);
+              setMainNav("estimate-workspace");
             }}
           />
         ) : null}

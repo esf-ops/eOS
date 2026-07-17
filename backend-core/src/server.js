@@ -34,6 +34,7 @@ import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
 import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
 import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoutes.js";
 import { maybeAttachQuoteIntakeRoutes } from "./quoteIntake/quoteIntakeRoutes.js";
+import { openEstimateForIntakeCase } from "./takeoff/intakeOpenEstimateService.mjs";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -1219,7 +1220,8 @@ attachTakeoffWorkspaceRoutes(app, {
 maybeAttachQuoteIntakeRoutes(app, {
   requireAuth,
   headAccess: headAccessAiTakeoff,
-  getSupabase: supabaseServerClient
+  getSupabase: supabaseServerClient,
+  openEstimate: openEstimateForIntakeCase
 });
 
 attachVisualizerRoutes(app, {

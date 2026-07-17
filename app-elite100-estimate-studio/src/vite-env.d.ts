@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   /** UI-only review queue gate; never grants access. Exact "true" shows review requests. */
   readonly VITE_ELITE100_ESTIMATE_STUDIO_REVIEW_UI_ENABLED?: string;
   readonly VITE_HEAD_URL_DIGITAL_ESTIMATE?: string;
+  readonly VITE_HEAD_URL_AI_TAKEOFF?: string;
 }
 
 interface ImportMeta {

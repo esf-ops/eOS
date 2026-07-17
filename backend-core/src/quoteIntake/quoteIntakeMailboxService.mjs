@@ -8,7 +8,8 @@ import {
   isQuoteIntakeGraphManualSyncEnabled,
   readQuoteIntakeGraphCredentials,
   readQuoteIntakeGraphLimits,
-  readQuoteIntakeGraphMailbox
+  readQuoteIntakeGraphMailbox,
+  formatPdfSizeMb
 } from "./quoteIntakeGraphConfig.mjs";
 import { createQuoteIntakeGraphClient } from "./quoteIntakeGraphClient.mjs";
 import {
@@ -16,9 +17,9 @@ import {
   boundedSubject,
   classifyAttachmentMeta,
   computeFallbackContentHash,
-  decodeAndValidatePdfBytes,
   normalizeGraphMessageCore
 } from "./quoteIntakeGraphNormalize.mjs";
+import { describeMissingPdfReason } from "./quoteIntakeAttachmentMeta.mjs";
 import { QUOTE_INTAKE_CASE_STATUS } from "./quoteIntakeTypes.mjs";
 
 function graphGate(env) {
@@ -148,19 +149,88 @@ export async function previewQuoteIntakeMailbox(input) {
     const core = normalizeGraphMessageCore(raw);
     if (!core.graphMessageId) continue;
 
+    /** @type {ReturnType<typeof classifyAttachmentMeta>[]} */
     let attachmentMeta = [];
+    /** @type {{
+     *   status: string,
+     *   hasAttachmentsFlag: boolean,
+     *   graphAttachmentCount: number|null,
+     *   kinds: string[],
+     *   code?: string,
+     *   note?: string
+     * }} */
+    let attachmentDiscovery = {
+      status: "skipped_no_flag",
+      hasAttachmentsFlag: core.hasAttachments,
+      graphAttachmentCount: null,
+      kinds: []
+    };
+
     if (core.hasAttachments) {
       try {
         const atts = await client.listAttachmentMetadata(core.graphMessageId);
-        attachmentMeta = atts.map(classifyAttachmentMeta);
-      } catch {
+        const rawCount = Array.isArray(atts) ? atts.length : 0;
+        attachmentMeta = (Array.isArray(atts) ? atts : []).map(classifyAttachmentMeta);
+        attachmentDiscovery = {
+          status: rawCount === 0 ? "empty_mismatch" : "ok",
+          hasAttachmentsFlag: true,
+          graphAttachmentCount: rawCount,
+          kinds: attachmentMeta.map((a) => a.kind || a.support || "unknown"),
+          note:
+            rawCount === 0
+              ? "Message reports hasAttachments=true but Graph returned zero attachment rows"
+              : undefined
+        };
+        // Safe local diagnostic — no tokens, URLs, provider IDs, body, or bytes.
+        if (rawCount === 0) {
+          console.info("[quote-intake] attachment discovery empty_mismatch", {
+            hasAttachments: true,
+            graphAttachmentCount: 0,
+            safeFilenames: [],
+            contentTypes: [],
+            inlineFlags: [],
+            sizes: []
+          });
+        } else {
+          console.info("[quote-intake] attachment discovery ok", {
+            hasAttachments: true,
+            graphAttachmentCount: rawCount,
+            kinds: attachmentDiscovery.kinds,
+            safeFilenames: attachmentMeta.map((a) => a.name || null),
+            contentTypes: attachmentMeta.map((a) => a.mimeType || null),
+            inlineFlags: attachmentMeta.map((a) => Boolean(a.isInline)),
+            sizes: attachmentMeta.map((a) => a.sizeBytes)
+          });
+        }
+      } catch (e) {
+        const code = String(e?.code ?? "graph_unavailable");
+        attachmentDiscovery = {
+          status: "failed",
+          hasAttachmentsFlag: true,
+          graphAttachmentCount: null,
+          kinds: [],
+          code,
+          note: "Graph attachment list request failed — not treated as empty"
+        };
+        console.info("[quote-intake] attachment discovery failed", {
+          hasAttachments: true,
+          code,
+          graphAttachmentCount: null
+        });
+        // Do not collapse into Attachments: none — surface the failure on the row.
         attachmentMeta = [];
       }
     }
 
     const pdfCandidates = attachmentMeta.filter((a) => a.support === "direct_pdf");
+    const oversizedPdfs = pdfCandidates.filter(
+      (a) =>
+        Number.isFinite(Number(a.sizeBytes)) && Number(a.sizeBytes) > limits.maxPdfBytes
+    );
     const hasUnsupportedItem = attachmentMeta.some((a) => a.support === "unsupported_item");
     const multiPdf = pdfCandidates.length > 1;
+    const discoveryFailed = attachmentDiscovery.status === "failed";
+    const discoveryEmptyMismatch = attachmentDiscovery.status === "empty_mismatch";
 
     const existing = await findExistingCase(input.repository, input.organizationId, {
       internetMessageId: core.internetMessageId,
@@ -169,7 +239,11 @@ export async function previewQuoteIntakeMailbox(input) {
 
     let eligibilityHint = "importable";
     if (existing) eligibilityHint = "already_imported";
-    else if (hasUnsupportedItem && pdfCandidates.length === 0) eligibilityHint = "manual_review";
+    else if (discoveryFailed) eligibilityHint = "attachment_list_failed";
+    else if (discoveryEmptyMismatch) eligibilityHint = "attachment_list_empty";
+    else if (oversizedPdfs.length && pdfCandidates.length === oversizedPdfs.length) {
+      eligibilityHint = "attachment_too_large";
+    } else if (hasUnsupportedItem && pdfCandidates.length === 0) eligibilityHint = "manual_review";
     else if (multiPdf) eligibilityHint = "manual_review_multi_pdf";
     else if (pdfCandidates.length === 0 && core.hasAttachments) eligibilityHint = "manual_review";
     else if (!core.hasAttachments) eligibilityHint = "importable_no_pdf";
@@ -197,15 +271,26 @@ export async function previewQuoteIntakeMailbox(input) {
         ccCount: core.recipientSummary.cc.count
       },
       hasAttachments: core.hasAttachments,
-      attachments: attachmentMeta.map((a) => ({
-        sourceAttachmentId: a.sourceAttachmentId,
-        name: a.name,
-        mimeType: a.mimeType,
-        sizeBytes: a.sizeBytes,
-        isInline: a.isInline,
-        kind: a.kind,
-        support: a.support
-      })),
+      attachments: attachmentMeta.map((a) => {
+        const tooLarge =
+          a.support === "direct_pdf" &&
+          Number.isFinite(Number(a.sizeBytes)) &&
+          Number(a.sizeBytes) > limits.maxPdfBytes;
+        return {
+          sourceAttachmentId: a.sourceAttachmentId,
+          name: a.name,
+          mimeType: a.mimeType,
+          sizeBytes: a.sizeBytes,
+          isInline: a.isInline,
+          kind: a.kind,
+          support: tooLarge ? "too_large" : a.support,
+          sizeExceeded: tooLarge || undefined,
+          actualMb: tooLarge ? formatPdfSizeMb(a.sizeBytes) : undefined,
+          limitMb: tooLarge ? formatPdfSizeMb(limits.maxPdfBytes) : undefined
+        };
+      }),
+      attachmentDiscovery,
+      maxPdfMb: formatPdfSizeMb(limits.maxPdfBytes),
       alreadyImported: Boolean(existing),
       existingCaseId: existing?.id ?? null,
       dedupeState: existing
@@ -214,7 +299,11 @@ export async function previewQuoteIntakeMailbox(input) {
           : "graph_message_id"
         : "new",
       eligibilityHint,
-      importable: !existing && eligibilityHint.startsWith("importable")
+      importable:
+        !existing &&
+        !discoveryFailed &&
+        !discoveryEmptyMismatch &&
+        eligibilityHint.startsWith("importable")
     });
   }
 
@@ -337,55 +426,50 @@ export async function importQuoteIntakeMailboxMessages(input) {
       const hasUnsupportedItem = classified.some((a) => a.support === "unsupported_item");
       const multiPdf = pdfCandidates.length > 1;
 
-      /** @type {Array<{ sha256: string, mimeType?: string, sizeBytes?: number, safeFilename?: string, sourceAttachmentId?: string }>} */
-      const attachmentsForCase = [];
-      let totalBytes = 0;
+      // Persist a metadata-only record for EVERY classified attachment. Bytes are
+      // retrieved, magic-validated, and SHA-256'd later at Open Estimate time using
+      // server-stored provider identifiers. This is the fix for the real-PDF handoff:
+      // import no longer silently drops the attachment when a byte fetch fails or a
+      // PDF is not the sole direct candidate.
+      const attachmentsForCase = classified.map((c) => ({
+        sourceAttachmentId: c.sourceAttachmentId || undefined,
+        safeFilename: c.name || undefined,
+        mimeType: c.mimeType || undefined,
+        sizeBytes: c.sizeBytes ?? undefined,
+        isInline: c.isInline,
+        kind: c.kind,
+        support: c.support,
+        providerMessageId: core.graphMessageId,
+        retrievalState: c.support === "direct_pdf" ? "pending" : "not_applicable",
+        sha256: null
+      }));
+
       let manualReview = multiPdf || hasUnsupportedItem;
       const reasonCodes = [];
 
       if (multiPdf) reasonCodes.push("multi_pdf_ambiguous");
-      if (hasUnsupportedItem) reasonCodes.push("attachment_invalid");
+      if (hasUnsupportedItem) reasonCodes.push("pdf_nested_in_forwarded_item");
 
-      // Import PDF bytes only when exactly one direct PDF candidate.
-      if (pdfCandidates.length === 1 && !multiPdf) {
-        const cand = pdfCandidates[0];
-        const att = await client.getAttachment(core.graphMessageId, cand.sourceAttachmentId);
-        const contentBytes = att?.contentBytes;
-        try {
-          const validated = decodeAndValidatePdfBytes(contentBytes, {
-            maxBytes: limits.maxAttachmentBytes
-          });
-          totalBytes += validated.sizeBytes;
-          if (totalBytes > limits.maxTotalBytes) {
-            const err = new Error("Attachment total too large");
-            err.code = "attachment_too_large";
-            err.statusCode = 413;
-            throw err;
-          }
-          attachmentsForCase.push({
-            sha256: validated.sha256,
-            mimeType: "application/pdf",
-            sizeBytes: validated.sizeBytes,
-            safeFilename: cand.name || "plan.pdf",
-            sourceAttachmentId: cand.sourceAttachmentId || undefined
-          });
-          // Discard bytes — validated.bytes intentionally not retained.
-          validated.bytes.fill?.(0);
-        } catch (e) {
-          manualReview = true;
-          reasonCodes.push(e?.code || "attachment_hash_failed");
-        }
-      } else if (pdfCandidates.length === 0) {
-        // Persist metadata-only rows (no sha from bytes) — repository requires sha256.
-        // Store metadata without bytes via placeholder: skip attachment insert; mark review.
-        if (classified.length) {
-          manualReview = true;
-          reasonCodes.push("no_supported_pdf");
-        }
+      // Attachments present but none are a supported direct PDF → manual review.
+      if (classified.length && pdfCandidates.length === 0) {
+        manualReview = true;
+        reasonCodes.push("no_supported_pdf");
+        reasonCodes.push(describeMissingPdfReason(attachmentsForCase));
       }
 
-      // Metadata-only for non-PDF / unsupported — include sha of empty marker? Skip insert.
-      // Store unsupported attachment descriptors in audit metadata instead.
+      // Enforce declared size limits at import (bytes not fetched yet).
+      // Same authoritative ceiling as Open Estimate (QUOTE_INTAKE_MAX_PDF_BYTES).
+      for (const cand of pdfCandidates) {
+        if (
+          Number.isFinite(Number(cand.sizeBytes)) &&
+          Number(cand.sizeBytes) > limits.maxPdfBytes
+        ) {
+          manualReview = true;
+          if (!reasonCodes.includes("attachment_too_large")) {
+            reasonCodes.push("attachment_too_large");
+          }
+        }
+      }
 
       const contentHash = core.internetMessageId
         ? undefined
@@ -393,7 +477,9 @@ export async function importQuoteIntakeMailboxMessages(input) {
             fromAddressHash: core.sender.fromAddressHash,
             receivedAt: core.receivedDateTime,
             subjectHash: core.subjectHash,
-            attachmentSha256s: attachmentsForCase.map((a) => a.sha256)
+            attachmentSha256s: attachmentsForCase
+              .map((a) => a.sourceAttachmentId)
+              .filter(Boolean)
           });
 
       try {

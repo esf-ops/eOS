@@ -347,6 +347,13 @@ export function createQuoteIntakeGraphClient(deps) {
      */
     async listAttachmentMetadata(messageId) {
       const id = encodeGraphOpaqueId(messageId);
+      // Select ONLY base microsoft.graph.attachment properties.
+      // Do NOT include fileAttachment-only fields (e.g. contentId): Graph validates
+      // $select against the polymorphic base type and returns HTTP 400
+      // "Could not find a property named 'contentId' on type 'microsoft.graph.attachment'".
+      // @odata.type is still returned by Graph as the type discriminator even when
+      // omitted from $select — classification depends on it.
+      // Prefer: IdType="ImmutableId" is applied by graphGet (same as message list).
       const select = "id,name,contentType,size,isInline";
       const json = await graphGet(`/messages/${id}/attachments?$select=${select}`);
       return Array.isArray(json?.value) ? json.value : [];

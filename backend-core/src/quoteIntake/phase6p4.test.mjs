@@ -364,7 +364,12 @@ console.log("\nphase6p4.test.mjs\n");
   assert.equal(created.sourceMessage.internetMessageId, "<sample-1@example.com>");
   assert.equal(created.sourceMessage.graphImmutableMessageId, "graph-msg-1");
   assert.equal(created.attachments.length, 1);
-  assert.ok(created.attachments[0].sha256);
+  // Import persists a metadata-only classified record. Bytes + SHA-256 are
+  // resolved later at Open Estimate, so sha256 is null at import time.
+  assert.equal(created.attachments[0].sha256, null);
+  assert.equal(created.attachments[0].support, "direct_pdf");
+  assert.equal(created.attachments[0].retrievalState, "pending");
+  assert.equal(created.attachments[0].sourceAttachmentId, "att-pdf-1");
   assert.equal(created.attachments[0].bytes, undefined);
 
   // Duplicate re-import

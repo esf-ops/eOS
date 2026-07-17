@@ -19,9 +19,22 @@ export type MailboxPreviewMessage = {
     name?: string | null;
     mimeType?: string | null;
     sizeBytes?: number | null;
+    isInline?: boolean;
     support?: string;
     kind?: string;
+    sizeExceeded?: boolean;
+    actualMb?: string;
+    limitMb?: string;
   }>;
+  maxPdfMb?: string;
+  attachmentDiscovery?: {
+    status?: string;
+    hasAttachmentsFlag?: boolean;
+    graphAttachmentCount?: number | null;
+    kinds?: string[];
+    code?: string;
+    note?: string;
+  };
   alreadyImported?: boolean;
   existingCaseId?: string | null;
   dedupeState?: string;
@@ -216,10 +229,54 @@ export default function MailboxSyncModal({
                             ) : null}
                             <div className="eq-cell-meta">
                               Attachments:{" "}
-                              {(m.attachments ?? [])
-                                .map((a) => `${a.name || "file"} (${a.support || a.kind || "unknown"})`)
-                                .join(", ") || "none"}
+                              {(m.attachments ?? []).length
+                                ? (m.attachments ?? [])
+                                    .map((a) => {
+                                      const sizeLabel =
+                                        a.sizeBytes != null && Number.isFinite(a.sizeBytes)
+                                          ? a.sizeBytes >= 1024 * 1024
+                                            ? `${(a.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+                                            : a.sizeBytes >= 1024
+                                              ? `${Math.round(a.sizeBytes / 1024)} KB`
+                                              : `${a.sizeBytes} B`
+                                          : null;
+                                      if (a.support === "too_large" || a.sizeExceeded) {
+                                        return `${a.name || "file"} (too large${
+                                          sizeLabel ? ` · ${sizeLabel}` : ""
+                                        })`;
+                                      }
+                                      return `${a.name || "file"} (${a.support || a.kind || "unknown"}${
+                                        a.mimeType ? ` · ${a.mimeType}` : ""
+                                      }${sizeLabel ? ` · ${sizeLabel}` : ""})`;
+                                    })
+                                    .join(", ")
+                                : m.attachmentDiscovery?.status === "failed"
+                                  ? `discovery failed (${m.attachmentDiscovery.code || "error"}) — not empty`
+                                  : m.attachmentDiscovery?.status === "empty_mismatch"
+                                    ? "hasAttachments=true but Graph returned zero rows"
+                                    : m.hasAttachments
+                                      ? "flagged, listing pending/unavailable"
+                                      : "none"}
                             </div>
+                            {(m.attachments ?? [])
+                              .filter((a) => a.support === "too_large" || a.sizeExceeded)
+                              .map((a) => (
+                                <p
+                                  key={`${a.name}-too-large`}
+                                  className="eq-error eq-pre--compact"
+                                  role="status"
+                                >
+                                  This PDF is {a.actualMb || "?"} MB. The current limit is{" "}
+                                  {a.limitMb || m.maxPdfMb || "?"} MB.
+                                </p>
+                              ))}
+                            {m.attachmentDiscovery?.status === "failed" ||
+                            m.attachmentDiscovery?.status === "empty_mismatch" ? (
+                              <p className="eq-error eq-pre--compact" role="status">
+                                {m.attachmentDiscovery.note ||
+                                  "Attachment discovery problem — refresh preview after Brain fix."}
+                              </p>
+                            ) : null}
                           </div>
                         </label>
                       </li>

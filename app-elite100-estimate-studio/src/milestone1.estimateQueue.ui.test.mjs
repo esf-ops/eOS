@@ -20,15 +20,11 @@ const app = readFileSync(join(root, "src/StudioApp.tsx"), "utf8");
 const queue = readFileSync(join(root, "src/estimateQueue/EstimateQueuePage.tsx"), "utf8");
 const detail = readFileSync(join(root, "src/estimateQueue/EstimateQueueCaseDetail.tsx"), "utf8");
 const mailbox = readFileSync(join(root, "src/estimateQueue/MailboxSyncModal.tsx"), "utf8");
-const placeholder = readFileSync(
-  join(root, "src/estimateQueue/EstimateWorkspacePlaceholder.tsx"),
-  "utf8"
-);
 const api = readFileSync(join(root, "src/lib/quoteIntakeApi.mjs"), "utf8");
 
 assert.ok(app.includes("Estimate Queue"));
 assert.ok(app.includes("EstimateQueuePage"));
-assert.ok(app.includes("EstimateWorkspacePlaceholder"));
+assert.ok(app.includes("EstimateTakeoffWorkspace") || app.includes("estimate-workspace"));
 assert.ok(queue.includes("Sync inbox"));
 assert.ok(queue.includes("mailbox/preview") === false); // path lives in api client
 assert.ok(api.includes("QUOTE_INTAKE_API_PREFIX"));
@@ -44,7 +40,6 @@ assert.equal(mailbox.includes("tenantId"), false);
 assert.equal(mailbox.includes("graphUrl"), false);
 assert.ok(detail.includes("Open Estimate"));
 assert.ok(detail.includes("onOpenEstimate"));
-assert.ok(placeholder.includes("estimate-workspace-placeholder"));
 assert.ok(queue.includes("eq-memory-fallback"));
 assert.equal(queue.includes("calculateQuote"), false);
 assert.equal(app.includes("service_role"), false);
@@ -71,5 +66,5 @@ assert.equal(
 );
 
 console.log("\nmilestone1.estimateQueue.ui.test.mjs\n");
-console.log("ok: Estimate Queue wired to Quote Intake APIs; Open Estimate placeholder");
+console.log("ok: Estimate Queue wired to Quote Intake APIs; Open Estimate action present");
 console.log("\nAll Milestone 1 Estimate Queue UI tests passed.\n");

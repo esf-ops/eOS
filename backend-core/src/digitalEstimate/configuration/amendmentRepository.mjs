@@ -354,7 +354,10 @@ export function createInMemoryAmendmentRepository(opts = {}) {
         "configured_display_total",
         "display_delta",
         "pricing_valid_through",
-        "status"
+        "status",
+        "replacement_publication_id",
+        "published_at",
+        "published_by_user_id"
       ];
       for (const k of allowed) {
         if (patch[k] !== undefined) row[k] = patch[k];

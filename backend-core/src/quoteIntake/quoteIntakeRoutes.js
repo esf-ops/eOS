@@ -51,6 +51,7 @@ export function attachQuoteIntakeRoutes(app, deps) {
     getSupabase,
     resolveOrganizationId,
     takeoffAdapter = createFakeProductionTakeoffAdapter(),
+    openEstimate = null,
     jsonParser = defaultJsonParser,
     env = process.env,
     graphClient = null,
@@ -306,6 +307,71 @@ export function attachQuoteIntakeRoutes(app, deps) {
       });
     }
   });
+
+  app.post(
+    `${QUOTE_INTAKE_API_PREFIX}/cases/:id/open-estimate`,
+    ...stack,
+    jsonParser,
+    async (req, res) => {
+      jsonNoStore(res);
+      try {
+        if (typeof openEstimate !== "function") {
+          res.status(503).json({
+            ok: false,
+            error: "Open Estimate is unavailable on this Brain instance",
+            code: "takeoff_unavailable"
+          });
+          return;
+        }
+        const organizationId = await orgIdFor(req);
+        const result = await openEstimate({
+          repository,
+          organizationId,
+          intakeCaseId: req.params.id,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {},
+          env,
+          getSupabase,
+          graphClient,
+          repositoryMode
+        });
+        res.status(200).json(result);
+      } catch (e) {
+        const code = String(e?.code ?? "");
+        const status = Number(e?.statusCode) || 500;
+        const messages = {
+          case_not_found: "Case not found",
+          no_supported_pdf: "No supported PDF attachment is available for this case",
+          multi_pdf_ambiguous: "Multiple PDF attachments are available — select one to open",
+          attachment_selection_invalid: "Selected attachment is not a supported PDF on this case",
+          attachment_bytes_unavailable: "Plan PDF bytes are not available for Takeoff",
+          attachment_hash_mismatch: "Attachment content does not match stored hash",
+          attachment_unsupported: "Attachment type is not supported",
+          attachment_too_large: "Attachment exceeds size limits",
+          takeoff_unavailable: "Takeoff workspace services are unavailable",
+          graph_forbidden: "Caller-controlled fields are not accepted"
+        };
+        if (status >= 500) {
+          console.error("[quote-intake] open-estimate failed", code || "error");
+        }
+        // Prefer the server-built human-readable message for size (includes actual vs limit MB).
+        const errorMessage =
+          code === "attachment_too_large" && e?.message
+            ? String(e.message)
+            : messages[code] || e?.message || "Unable to open estimate";
+        res.status(status >= 400 && status < 600 ? status : 500).json({
+          ok: false,
+          error: errorMessage,
+          code: code || undefined,
+          reason: e?.reason || undefined,
+          selectionRequired: e?.selectionRequired || undefined,
+          options: Array.isArray(e?.options) ? e.options : undefined,
+          actualMb: e?.actualMb || undefined,
+          limitMb: e?.limitMb || undefined
+        });
+      }
+    }
+  );
 
   function graphErrorStatus(e) {
     const code = String(e?.code ?? "");

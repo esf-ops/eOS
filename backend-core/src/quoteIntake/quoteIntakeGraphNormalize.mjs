@@ -4,6 +4,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { pdfTooLargeError } from "./quoteIntakeGraphConfig.mjs";
 
 export const PDF_MAGIC = Buffer.from("%PDF");
 
@@ -145,10 +146,7 @@ export function decodeAndValidatePdfBytes(contentBytesBase64, limits) {
     throw err;
   }
   if (buf.length > limits.maxBytes) {
-    const err = new Error("Attachment too large");
-    err.code = "attachment_too_large";
-    err.statusCode = 413;
-    throw err;
+    throw pdfTooLargeError(buf.length, limits.maxBytes);
   }
   if (buf.length < 4 || !buf.subarray(0, 4).equals(PDF_MAGIC)) {
     const err = new Error("Attachment is not a valid PDF");

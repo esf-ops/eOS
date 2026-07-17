@@ -38,12 +38,39 @@ import {
 import { redactDigitalEstimateTokenPath } from "../digitalEstimate/digitalEstimateToken.mjs";
 import { requireHeadAccess } from "../auth/headAccessMiddleware.js";
 import express from "express";
+import { createStudioEstimateService } from "./studioEstimateService.mjs";
+import { createStudioEstimateDigitalEstimateService } from "./studioEstimateDigitalEstimateService.mjs";
+import { createStudioReviewRequestService } from "./studioReviewRequestService.mjs";
+import { searchStudioPartnerAccounts, loadStudioPartnerAccount } from "./studioPartnerAccountSearch.mjs";
+import { createDigitalEstimateConfigurationStack } from "../digitalEstimate/configuration/configurationFactory.mjs";
+import { createConfigurationStudioService } from "../digitalEstimate/configuration/configurationStudioService.mjs";
+import { isDigitalEstimateConfigurationEnabled } from "../digitalEstimate/configuration/configurationConfig.mjs";
+import {
+  createSupabaseAmendmentRepository
+} from "../digitalEstimate/configuration/amendmentRepository.mjs";
+import { isDigitalEstimateReviewRequestsEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
 function logStudio(label, e, req) {
   const path = redactDigitalEstimateTokenPath(req?.originalUrl || req?.url || "");
   console.error(`[elite100-estimate-studio] ${label}`, e?.code || "error", path);
+}
+
+/** Structured audit for estimate create/update/calculate/approve (no secrets). */
+function auditStudioEstimate(action, req, detail = {}) {
+  console.info(
+    "[elite100-estimate-studio][audit]",
+    JSON.stringify({
+      action,
+      userId: req.user?.id ?? null,
+      estimateId: detail.estimateId ?? null,
+      intakeCaseId: detail.intakeCaseId ?? null,
+      status: detail.status ?? null,
+      revision: detail.revision ?? null,
+      at: new Date().toISOString()
+    })
+  );
 }
 
 /**
@@ -424,6 +451,553 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.status(Number(e?.statusCode) || 500).json({
           ok: false,
           error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to record event",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  // ── Studio estimate (scope → calculate → approve) + Digital Estimate publish ──
+  const studioEstimateService =
+    deps.studioEstimateService || createStudioEstimateService({ env, getSupabase });
+
+  let configurationStudioService = deps.configurationStudioService || null;
+  let configurationRepository = deps.configurationRepository || null;
+  if (!configurationStudioService && isDigitalEstimateConfigurationEnabled(env)) {
+    try {
+      const stack = createDigitalEstimateConfigurationStack({
+        env,
+        mode: deps.configurationStackMode || undefined,
+        db: getSupabase(),
+        requireRuntimeFlags: true
+      });
+      if (stack) {
+        configurationRepository = configurationRepository || stack.configuration;
+        configurationStudioService = createConfigurationStudioService({
+          configurationRepository: stack.configuration,
+          pricingPolicyRepository: stack.pricingPolicy,
+          deRepository: repository,
+          env
+        });
+      }
+    } catch (e) {
+      console.warn(
+        "[elite100-estimate-studio] configuration stack unavailable for Studio publish:",
+        e?.code || e?.message
+      );
+    }
+  }
+
+  let amendmentRepository = deps.amendmentRepository || null;
+  if (!amendmentRepository && isDigitalEstimateReviewRequestsEnabled(env)) {
+    try {
+      amendmentRepository = createSupabaseAmendmentRepository({ db: getSupabase() });
+    } catch {
+      amendmentRepository = null;
+    }
+  }
+
+  const studioDigitalEstimateService =
+    deps.studioDigitalEstimateService ||
+    createStudioEstimateDigitalEstimateService({
+      env,
+      studioEstimateService,
+      digitalEstimateRepository: repository,
+      configurationStudioService,
+      amendmentRepository,
+      getSupabase,
+      loadTakeoffWorkspace: deps.loadTakeoffWorkspace
+    });
+
+  const studioReviewRequestService =
+    deps.studioReviewRequestService ||
+    (amendmentRepository
+      ? createStudioReviewRequestService({
+          env,
+          amendmentRepository,
+          deRepository: repository,
+          configurationRepository,
+          studioEstimateService,
+          studioDigitalEstimateService
+        })
+      : null);
+  app.get(
+    "/api/elite100-estimate-studio/partner-accounts",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await searchStudioPartnerAccounts({
+          db: getSupabase(),
+          organizationId,
+          q: String(req.query?.q ?? req.query?.search ?? ""),
+          limit: Number(req.query?.limit) || 20
+        });
+        res.json({ ok: true, ...result });
+      } catch (e) {
+        logStudio("partner account search failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to search accounts",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/partner-accounts/:partnerAccountId",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const account = await loadStudioPartnerAccount({
+          db: getSupabase(),
+          organizationId,
+          partnerAccountId: req.params.partnerAccountId
+        });
+        if (!account) {
+          res.status(404).json({ ok: false, error: "Partner account not found", code: "account_not_found" });
+          return;
+        }
+        res.json({ ok: true, account });
+      } catch (e) {
+        logStudio("partner account load failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load account",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/intake-cases/:caseId/estimate",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const takeoffJobId = String(req.query?.takeoffJobId ?? "").trim() || null;
+        const estimate = await studioEstimateService.getOrCreateForCase({
+          organizationId,
+          intakeCaseId: req.params.caseId,
+          takeoffJobId,
+          actorUserId: req.user?.id ?? null
+        });
+        let partnerAccount = null;
+        if (estimate?.scope?.partnerAccountId) {
+          partnerAccount = await loadStudioPartnerAccount({
+            db: getSupabase(),
+            organizationId,
+            partnerAccountId: estimate.scope.partnerAccountId
+          });
+        }
+        auditStudioEstimate("estimate.get_or_create", req, {
+          estimateId: estimate?.id,
+          intakeCaseId: req.params.caseId,
+          status: estimate?.status,
+          revision: estimate?.revision
+        });
+        res.json({ ok: true, estimate, partnerAccount });
+      } catch (e) {
+        logStudio("get estimate failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load estimate",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/elite100-estimate-studio/estimates/:estimateId",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const estimate = await studioEstimateService.updateScope({
+          organizationId,
+          estimateId: req.params.estimateId,
+          body: req.body && typeof req.body === "object" ? req.body : {},
+          actorUserId: req.user?.id ?? null
+        });
+        auditStudioEstimate("estimate.update_scope", req, {
+          estimateId: estimate?.id,
+          status: estimate?.status,
+          revision: estimate?.revision
+        });
+        res.json({ ok: true, estimate });
+      } catch (e) {
+        logStudio("patch estimate failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to update estimate",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/calculate",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const estimate = await studioEstimateService.calculate({
+          organizationId,
+          estimateId: req.params.estimateId,
+          body: req.body && typeof req.body === "object" ? req.body : {},
+          actorUserId: req.user?.id ?? null
+        });
+        auditStudioEstimate("estimate.calculate", req, {
+          estimateId: estimate?.id,
+          status: estimate?.status,
+          revision: estimate?.revision
+        });
+        res.json({ ok: true, estimate });
+      } catch (e) {
+        logStudio("calculate estimate failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to calculate estimate",
+          code: e?.code,
+          details: e?.details
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/approve",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const estimate = await studioEstimateService.approve({
+          organizationId,
+          estimateId: req.params.estimateId,
+          body: req.body && typeof req.body === "object" ? req.body : {},
+          actorUserId: req.user?.id ?? null
+        });
+        auditStudioEstimate("estimate.approve", req, {
+          estimateId: estimate?.id,
+          status: estimate?.status,
+          revision: estimate?.revision
+        });
+        res.json({ ok: true, estimate });
+      } catch (e) {
+        logStudio("approve estimate failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to approve estimate",
+          code: e?.code,
+          details: e?.details
+        });
+      }
+    }
+  );
+
+  // ── Studio estimate → Digital Estimate (readiness / publish / history / review) ──
+  app.get(
+    "/api/elite100-estimate-studio/estimates/:estimateId/digital-estimate",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioDigitalEstimateService.assessReadiness(
+          organizationId,
+          req.params.estimateId
+        );
+        res.json(result);
+      } catch (e) {
+        logStudio("digital-estimate readiness failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load Digital Estimate readiness",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/estimates/:estimateId/publications",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioDigitalEstimateService.listPublications(
+          organizationId,
+          req.params.estimateId
+        );
+        res.json(result);
+      } catch (e) {
+        logStudio("list studio publications failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to list publications",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/digital-estimate/publish",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        if (!isDigitalEstimateApiEnabled(env) || !isDigitalEstimatePublishEnabled(env)) {
+          return res.status(404).json({
+            ok: false,
+            error: "Not found",
+            code: "digital_estimate_disabled"
+          });
+        }
+        const organizationId = await orgIdFor(req);
+        const result = await studioDigitalEstimateService.publish({
+          organizationId,
+          estimateId: req.params.estimateId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        auditStudioEstimate("estimate.digital_estimate_publish", req, {
+          estimateId: req.params.estimateId,
+          status: result?.publication?.status,
+          revision: result?.publication?.revisionNumber
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("studio digital-estimate publish failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to publish Digital Estimate",
+          code: e?.code,
+          blockers: e?.blockers
+        });
+      }
+    }
+  );
+
+  // Existing revoke / replace-token / link-copied routes already cover Studio-backed pubs by id.
+
+  function reviewServiceOr503(res) {
+    if (!studioReviewRequestService) {
+      res.status(503).json({
+        ok: false,
+        error: "Review request service unavailable",
+        code: "review_service_unavailable"
+      });
+      return null;
+    }
+    return studioReviewRequestService;
+  }
+
+  app.get(
+    "/api/elite100-estimate-studio/review-requests",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const svc = reviewServiceOr503(res);
+        if (!svc) return;
+        const organizationId = await orgIdFor(req);
+        const result = await svc.list(organizationId, req.query || {});
+        res.json(result);
+      } catch (e) {
+        logStudio("list studio review requests failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to list review requests",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/review-requests/:requestId",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const svc = reviewServiceOr503(res);
+        if (!svc) return;
+        const organizationId = await orgIdFor(req);
+        const result = await svc.getDetail(organizationId, req.params.requestId);
+        res.json(result);
+      } catch (e) {
+        logStudio("get studio review request failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load review request",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/review-requests/:requestId/start",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const svc = reviewServiceOr503(res);
+        if (!svc) return;
+        const organizationId = await orgIdFor(req);
+        const result = await svc.startReview(
+          organizationId,
+          req.params.requestId,
+          req.user?.id ?? null
+        );
+        auditStudioEstimate("review.start", req, { status: result.status });
+        res.json(result);
+      } catch (e) {
+        logStudio("start review failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to start review",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/review-requests/:requestId/resolve-no-change",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const svc = reviewServiceOr503(res);
+        if (!svc) return;
+        const organizationId = await orgIdFor(req);
+        const result = await svc.resolveNoChange(
+          organizationId,
+          req.params.requestId,
+          req.body && typeof req.body === "object" ? req.body : {},
+          req.user?.id ?? null
+        );
+        auditStudioEstimate("review.resolve_no_change", req, { status: result.status });
+        res.json(result);
+      } catch (e) {
+        logStudio("resolve-no-change failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to resolve request",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/review-requests/:requestId/reject",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const svc = reviewServiceOr503(res);
+        if (!svc) return;
+        const organizationId = await orgIdFor(req);
+        const result = await svc.reject(
+          organizationId,
+          req.params.requestId,
+          req.body && typeof req.body === "object" ? req.body : {},
+          req.user?.id ?? null
+        );
+        auditStudioEstimate("review.reject", req, { status: result.status });
+        res.json(result);
+      } catch (e) {
+        logStudio("reject review failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to reject request",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/review-requests/:requestId/revise-estimate",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const svc = reviewServiceOr503(res);
+        if (!svc) return;
+        const organizationId = await orgIdFor(req);
+        const result = await svc.reviseEstimate(
+          organizationId,
+          req.params.requestId,
+          req.body && typeof req.body === "object" ? req.body : {},
+          req.user?.id ?? null
+        );
+        auditStudioEstimate("review.revise_estimate", req, {
+          estimateId: result?.revisedEstimate?.id,
+          revision: result?.revisedEstimate?.revision,
+          status: result.status
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("revise estimate from review failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to revise estimate",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/review-requests/:requestId/republish",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const svc = reviewServiceOr503(res);
+        if (!svc) return;
+        const organizationId = await orgIdFor(req);
+        const result = await svc.republish(
+          organizationId,
+          req.params.requestId,
+          req.body && typeof req.body === "object" ? req.body : {},
+          req.user?.id ?? null
+        );
+        auditStudioEstimate("review.republish", req, {
+          estimateId: result?.revisedEstimateId,
+          status: result.status
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("republish from review failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to republish",
           code: e?.code
         });
       }

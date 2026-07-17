@@ -124,8 +124,55 @@ export function caseSupportedPdfLabel(c) {
   if (reasons.includes("no_supported_pdf")) return "No";
   const atts = Array.isArray(c?.attachments) ? c.attachments : [];
   if (!atts.length) return "—";
-  if (atts.some(attachmentLooksLikePdf)) return "Yes";
+  if (atts.some(attachmentIsSupportedPdf)) return "Yes";
   return "No";
+}
+
+const ATTACHMENT_REASON_LABELS = {
+  no_attachments: "No attachments",
+  only_inline_images: "Only inline images / signatures",
+  pdf_nested_in_forwarded_item: "PDF nested in a forwarded email",
+  unsupported_attachment_type: "Unsupported attachment type"
+};
+
+const ATTACHMENT_RETRIEVAL_LABELS = {
+  pending: "Ready to open",
+  not_applicable: "—",
+  retrieved: "Retrieved",
+  failed: "Retrieval failed",
+  unavailable: "Bytes unavailable"
+};
+
+/** Is a stored attachment record a supported direct PDF (mirrors server rules)? */
+export function attachmentIsSupportedPdf(a) {
+  if (!a) return false;
+  if (a.support === "direct_pdf") return true;
+  if (a.support && a.support !== "direct_pdf") return false;
+  if (a.isInline) return false;
+  if (String(a.kind) === "item") return false;
+  return attachmentLooksLikePdf(a);
+}
+
+/** Customer-safe support label for an attachment row. */
+export function attachmentSupportLabel(a) {
+  if (attachmentIsSupportedPdf(a)) return "Supported PDF";
+  if (a?.isInline || a?.support === "inline_ignored") return "Inline (ignored)";
+  if (a?.support === "unsupported_item" || String(a?.kind) === "item") {
+    return "Forwarded email item";
+  }
+  return "Unsupported";
+}
+
+export function attachmentReasonLabel(reason) {
+  const r = String(reason ?? "").trim();
+  if (!r) return "";
+  return ATTACHMENT_REASON_LABELS[r] || r.replace(/_/g, " ");
+}
+
+export function attachmentRetrievalLabel(a) {
+  const s = String(a?.retrievalState ?? "").trim();
+  if (!s) return attachmentIsSupportedPdf(a) ? "Ready to open" : "—";
+  return ATTACHMENT_RETRIEVAL_LABELS[s] || s.replace(/_/g, " ");
 }
 
 export function caseMissingInfoLabel(c) {

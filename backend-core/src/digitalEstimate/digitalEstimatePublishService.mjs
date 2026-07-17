@@ -110,7 +110,14 @@ export async function publishDigitalEstimate(input) {
   const now = nowFn();
   const publishedAt = now.toISOString();
   const accessExpiresAt = addDaysIso(readDigitalEstimateAccessTtlDays(env), now);
-  const pricingValidThrough = addDaysDateOnly(readDigitalEstimatePricingValidDays(env), now);
+  let pricingValidThrough = addDaysDateOnly(readDigitalEstimatePricingValidDays(env), now);
+  if (body.pricingValidThrough != null && String(body.pricingValidThrough).trim() !== "") {
+    const requested = String(body.pricingValidThrough).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(requested)) {
+      throw deError("pricingValidThrough must be YYYY-MM-DD", "invalid_pricing_valid_through", 400);
+    }
+    pricingValidThrough = requested;
+  }
 
   const freeze = buildPublicationFreezePayloads({
     header,
@@ -127,6 +134,9 @@ export async function publishDigitalEstimate(input) {
   );
 
   const { rawToken, tokenHash } = generateDigitalEstimateAccessToken();
+
+  const publishMetadata =
+    body.publishMetadata && typeof body.publishMetadata === "object" ? body.publishMetadata : {};
 
   const atomic = await input.repository.publishAtomic({
     organizationId: input.organizationId,
@@ -151,7 +161,8 @@ export async function publishDigitalEstimate(input) {
     publishedEventMetadata: sanitizeDigitalEstimateEventMetadata({
       revisionNumber: Number(header.revision_number) || 1,
       quoteNumber: String(header.quote_number),
-      supersededPriorCount: priorActive.length
+      supersededPriorCount: priorActive.length,
+      ...publishMetadata
     })
   });
 
