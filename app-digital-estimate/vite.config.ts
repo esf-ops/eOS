@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
@@ -78,7 +79,7 @@ function digitalEstimateHtmlPlugin(mode: string) {
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), digitalEstimateHtmlPlugin(mode)],
+  plugins: [tailwindcss(), react(), digitalEstimateHtmlPlugin(mode)],
   server: {
     port: 5195,
     proxy: {

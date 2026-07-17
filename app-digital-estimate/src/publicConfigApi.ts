@@ -221,6 +221,21 @@ export async function resumeConfigurationSession(): Promise<ConfigurationState> 
   return (await res.json()) as ConfigurationState;
 }
 
+export async function fetchConfiguration(): Promise<ConfigurationState> {
+  const base = apiBaseUrl();
+  const res = await fetch(`${base}/api/public-digital-estimate/v2/configuration`, {
+    method: "GET",
+    credentials: "include",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    const err = new Error("Estimate unavailable");
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
+  return (await res.json()) as ConfigurationState;
+}
+
 export async function saveConfigurationSelections(payload: {
   items: Array<{ optionKey: string; quantity: number }>;
   expectedRowVersion: number;
@@ -261,6 +276,36 @@ export async function saveConfigurationSelections(payload: {
     session?: { rowVersion: number };
     calculation?: unknown;
   };
+}
+
+export async function recalculateConfiguration(payload: {
+  items: Array<{ optionKey: string; quantity: number }>;
+  expectedRowVersion: number;
+  idempotencyKey: string;
+}): ReturnType<typeof saveConfigurationSelections> {
+  const base = apiBaseUrl();
+  const res = await fetch(`${base}/api/public-digital-estimate/v2/recalculate`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    let message = "Unable to update estimate";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      /* ignore */
+    }
+    const err = new Error(message);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
+  return (await res.json()) as Awaited<ReturnType<typeof saveConfigurationSelections>>;
 }
 
 export type CustomerReviewRequest = {

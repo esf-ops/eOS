@@ -1,19 +1,23 @@
+/**
+ * Lovable customer quote UI — adapted from hub-spoke-hub q.$token.tsx.
+ * Pricing / accept / Supabase / client totals removed. Brain APIs only.
+ */
 import { useEffect, useId, useMemo, useState } from "react";
 import {
-  calcTotals,
-  formatCurrency,
-  formatDate,
+  buildSelectionItems,
+  mapEliteOsToLovableViewModel,
+  type LovableColor,
+  type LovableRoom,
+} from "./lovableViewModel";
+import {
   fetchCurrentReviewRequest,
+  formatDate,
   reviewUiEnabled,
   saveConfigurationSelections,
   submitReviewRequest,
   type ConfigurationState,
-  type ConfigOption,
-  type CustomerMaterial,
   type CustomerReviewRequest,
-  type PublicEstimate,
 } from "./publicConfigApi";
-import { ReadOnlyEstimateView } from "./ReadOnlyEstimateView";
 
 type Props = {
   state: ConfigurationState;
@@ -21,44 +25,319 @@ type Props = {
   onFatal: () => void;
 };
 
-type JourneyStep = "review" | "customize" | "request";
-
-function materialOptions(options: ConfigOption[], roomKey: string): ConfigOption[] {
-  return options.filter(
-    (o) =>
-      o.optionKey.startsWith(`material:${roomKey}:`) ||
-      (o.optionKey.startsWith("material:") && o.optionKey.includes(`:${roomKey}:`)),
+function Row({
+  label,
+  value,
+  muted,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between ${muted ? "text-muted-foreground" : "text-foreground"}`}
+    >
+      <span>{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </div>
   );
 }
 
-function addonOptions(options: ConfigOption[]): ConfigOption[] {
-  return options.filter((o) => !o.optionKey.startsWith("material:"));
+function GroupChip({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1 text-xs transition ${
+        active
+          ? "border-foreground bg-foreground text-background"
+          : "border-border bg-background text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
+  );
 }
 
-function materialsForRoom(materials: CustomerMaterial[] | undefined, roomKey: string): CustomerMaterial[] {
-  return (materials || []).filter((m) => m.roomKey === roomKey);
+function ColorPickerModal({
+  room,
+  onSelect,
+  onClose,
+}: {
+  room: LovableRoom;
+  onSelect: (color: LovableColor) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return room.colors.filter((c) =>
+      query ? (c.name + " " + c.collectionLabel).toLowerCase().includes(query) : true,
+    );
+  }, [q, room.colors]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-6"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="flex h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl bg-background shadow-2xl sm:h-[85vh] sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label={`Pick a color for ${room.name}`}
+      >
+        <div className="border-b border-border px-6 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                {room.name} · pick a color
+              </div>
+              <div className="mt-0.5 text-lg font-semibold text-foreground">Elite 100 collection</div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Close ✕
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search color"
+              className="w-56 rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+            <GroupChip active label={`${filtered.length} available`} onClick={() => undefined} />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {filtered.map((c) => {
+              const selected = c.id === room.selectedColorId;
+              return (
+                <button
+                  key={c.optionKey}
+                  type="button"
+                  disabled={!c.selectable}
+                  onClick={() => onSelect(c)}
+                  className={`group overflow-hidden rounded-xl border text-left transition ${
+                    selected
+                      ? "border-foreground shadow-sm ring-2 ring-foreground/10"
+                      : "border-border hover:border-foreground/40 hover:shadow-sm"
+                  } disabled:opacity-50`}
+                >
+                  <div
+                    className="h-24 w-full border-b border-border/60 bg-cover bg-center"
+                    style={{
+                      background: c.imageFull
+                        ? `url(${c.imageFull}) center/cover`
+                        : c.imageThumb
+                          ? `url(${c.imageThumb}) center/cover`
+                          : "linear-gradient(135deg,#ebe8e0,#d5d2c8)",
+                    }}
+                  />
+                  <div className="px-3 py-2">
+                    <div className="truncate text-xs font-medium text-foreground">{c.name}</div>
+                    <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                      {c.collectionLabel}
+                      {c.includedInBaseline ? " · Included" : ""}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {!filtered.length ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              No colors match &quot;{q}&quot;.
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReviewRequestModal({
+  rooms,
+  onSubmit,
+  onClose,
+  busy,
+}: {
+  rooms: LovableRoom[];
+  onSubmit: (message: string) => void;
+  onClose: () => void;
+  busy: boolean;
+}) {
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-md rounded-2xl bg-background p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-labelledby="review-modal-title"
+      >
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">Request a review</div>
+        <div id="review-modal-title" className="mt-1 text-lg font-semibold text-foreground">
+          Send your selections to your estimator
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          This is not an order or acceptance. Pricing and availability remain subject to estimator review.
+        </p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Rooms: {rooms.map((r) => r.name).join(", ")}
+        </p>
+        <label className="mt-4 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Optional note
+        </label>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          rows={4}
+          maxLength={1000}
+          placeholder="Anything your estimator should know…"
+          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+        />
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-border px-3 py-1.5 text-xs"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onSubmit(message.trim())}
+            className="rounded-md bg-foreground px-3 py-1.5 text-xs font-semibold text-background disabled:opacity-40"
+          >
+            {busy ? "Sending…" : "Send for review"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomerRoomCard({
+  room,
+  onPickColor,
+}: {
+  room: LovableRoom;
+  onPickColor: () => void;
+}) {
+  const color = room.colors.find((c) => c.id === room.selectedColorId) || room.colors[0];
+  const thumb = color?.imageThumb || color?.imageFull || null;
+
+  return (
+    <div className="rounded-2xl border border-border bg-background p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">
+            Measurements locked
+          </div>
+          <div className="mt-0.5 text-lg font-semibold text-foreground">{room.name}</div>
+          {room.baselineLabel ? (
+            <div className="mt-1 text-xs text-muted-foreground">Original finish · {room.baselineLabel}</div>
+          ) : null}
+        </div>
+        <div
+          className="h-14 w-14 rounded-lg border border-border bg-cover bg-center shadow-inner"
+          style={{
+            background: thumb
+              ? `url(${thumb}) center/cover`
+              : "linear-gradient(135deg,#ebe8e0,#d5d2c8)",
+          }}
+        />
+      </div>
+
+      <div className="mt-5">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Color
+        </div>
+        <button
+          type="button"
+          onClick={onPickColor}
+          className="flex w-full items-center justify-between rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-foreground/40"
+        >
+          <span className="flex items-center gap-3">
+            <span
+              className="h-10 w-10 rounded-md border border-border/60 bg-cover bg-center"
+              style={{
+                background: thumb
+                  ? `url(${thumb}) center/cover`
+                  : "linear-gradient(135deg,#ebe8e0,#d5d2c8)",
+              }}
+            />
+            <span>
+              <span className="block text-sm font-medium text-foreground">
+                {color?.name || "Choose a color"}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {color?.collectionLabel || "Elite 100"}
+                {color?.includedInBaseline ? " · Included" : ""}
+              </span>
+            </span>
+          </span>
+          <span className="text-xs font-medium text-muted-foreground">Change →</span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function ConfigurationView({ state, onState, onFatal }: Props) {
-  const estimate = state.estimate as PublicEstimate | null | undefined;
-  const config = state.configuration;
   const formId = useId();
-
-  const [step, setStep] = useState<JourneyStep>("review");
-  const [activeRoomKey, setActiveRoomKey] = useState<string | null>(null);
-  const [colorQuery, setColorQuery] = useState("");
+  const config = state.configuration;
   const [qty, setQty] = useState<Record<string, number>>(() => ({
     ...(config?.currentSelections || {}),
   }));
+  const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
+  const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
-  const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
-  const [customerNote, setCustomerNote] = useState("");
+  const [pickerRoomId, setPickerRoomId] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewRequest, setReviewRequest] = useState<CustomerReviewRequest | null>(null);
-  const [reviewDisclaimer, setReviewDisclaimer] = useState<string | null>(null);
   const requestSeq = useMemo(() => ({ n: 0 }), []);
 
   useEffect(() => {
@@ -68,89 +347,68 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
       .then((r) => {
         if (alive && r.reviewRequest) setReviewRequest(r.reviewRequest);
       })
-      .catch(() => {
-        /* ignore — optional panel */
-      });
+      .catch(() => undefined);
     return () => {
       alive = false;
     };
   }, []);
 
-  useEffect(() => {
-    const first = config?.rooms?.[0]?.roomKey || null;
-    setActiveRoomKey((prev) => prev || first);
-  }, [config?.rooms]);
-
-  if (state.lifecycle !== "active" || !config || !estimate) {
+  if (state.lifecycle !== "active" || !config || !state.estimate) {
     return (
-      <div className="page">
-        <main className="shell shell--narrow">
-          <p className="unavailable" role="alert">
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="max-w-md rounded-2xl border border-border bg-card p-6 text-center">
+          <div className="text-lg font-semibold">This estimate isn&apos;t available</div>
+          <p className="mt-2 text-sm text-muted-foreground">
             {state.message || "Configuration unavailable"}
           </p>
-          {estimate ? <ReadOnlyEstimateView estimate={estimate} compact /> : null}
-        </main>
+        </div>
       </div>
     );
   }
 
-  const totals = calcTotals(latestCalc);
-  const baseline =
-    totals.baseline ??
-    config.baselineDisplayTotal ??
-    estimate?.totals?.estimatedProjectTotal ??
-    null;
-  const configured = totals.configured ?? baseline;
-  const delta = totals.delta ?? (configured != null && baseline != null ? configured - baseline : null);
-  const canRequestReview = reviewUiEnabled() && saveState === "saved" && latestCalc != null;
-  const rooms = config.rooms || [];
-  const activeRoom = rooms.find((r) => r.roomKey === activeRoomKey) || rooms[0];
+  const vm = mapEliteOsToLovableViewModel(state, qty, latestCalc);
+  if (!vm) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Loading your estimate…
+      </div>
+    );
+  }
 
-  function selectMaterial(roomKey: string, optionKey: string) {
-    const mats = materialOptions(config!.options || [], roomKey);
+  const pickerRoom = vm.rooms.find((r) => r.id === pickerRoomId) ?? null;
+
+  function selectColor(roomId: string, color: LovableColor) {
     setQty((prev) => {
       const next = { ...prev };
-      for (const m of mats) next[m.optionKey] = 0;
-      next[optionKey] = 1;
+      const room = vm!.rooms.find((r) => r.id === roomId);
+      for (const c of room?.colors || []) next[c.optionKey] = 0;
+      next[color.optionKey] = 1;
       return next;
     });
     setSaveState("idle");
+    setPickerRoomId(null);
   }
 
-  function selectedMaterialOption(roomKey: string): ConfigOption | null {
-    const mats = materialOptions(config!.options || [], roomKey);
-    const selected = mats.find((m) => (qty[m.optionKey] ?? 0) > 0);
-    if (selected) return selected;
-    return mats.find((m) => m.includedInBaseline || m.defaultQty > 0) || mats[0] || null;
-  }
-
-  async function onSave() {
+  async function onSave(): Promise<number | null> {
     setSaveState("saving");
     setSaveError(null);
     const seq = ++requestSeq.n;
-    const items = Object.entries(qty)
-      .filter(([, q]) => Number(q) > 0)
-      .map(([optionKey, quantity]) => ({ optionKey, quantity: Number(quantity) }));
-    for (const room of config!.rooms || []) {
-      const selected = selectedMaterialOption(room.roomKey);
-      if (selected && !items.some((i) => i.optionKey === selected.optionKey)) {
-        items.push({ optionKey: selected.optionKey, quantity: 1 });
-      }
-    }
+    const items = buildSelectionItems(qty, vm!.rooms);
     try {
       const result = await saveConfigurationSelections({
         items,
         expectedRowVersion: rowVersion,
         idempotencyKey: `sel-${formId}-${Date.now()}-${seq}`,
       });
-      if (seq !== requestSeq.n) return;
+      if (seq !== requestSeq.n) return null;
+      const nextRowVersion = result.session?.rowVersion ?? rowVersion;
       if (result.session?.rowVersion != null) setRowVersion(result.session.rowVersion);
       if (result.calculation) setLatestCalc(result.calculation as typeof latestCalc);
       setSaveState("saved");
       onState({
         ...state,
         session: state.session
-          ? { ...state.session, rowVersion: result.session?.rowVersion ?? rowVersion }
+          ? { ...state.session, rowVersion: nextRowVersion }
           : state.session,
         configuration: state.configuration
           ? {
@@ -160,30 +418,34 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
             }
           : state.configuration,
       });
+      return nextRowVersion;
     } catch (e) {
-      if (seq !== requestSeq.n) return;
+      if (seq !== requestSeq.n) return null;
       const status = (e as Error & { status?: number }).status;
       if (status === 401 || status === 403 || status === 404) {
         onFatal();
-        return;
+        return null;
       }
       setSaveState("error");
       setSaveError(e instanceof Error ? e.message : "Unable to save");
+      return null;
     }
   }
 
-  async function onSendForReview() {
-    if (!canRequestReview || reviewBusy) return;
+  async function onSendReview(note: string) {
+    if (!reviewUiEnabled()) return;
     setReviewBusy(true);
     setReviewError(null);
     try {
+      const reviewRowVersion = saveState === "saved" ? rowVersion : await onSave();
+      if (reviewRowVersion == null) return;
       const result = await submitReviewRequest({
-        expectedRowVersion: rowVersion,
+        expectedRowVersion: reviewRowVersion,
         idempotencyKey: `review-${formId}-${reviewRequest?.requestReference || "new"}`,
-        customerNote: customerNote.trim() || undefined,
+        customerNote: note || undefined,
       });
       setReviewRequest(result.reviewRequest);
-      setReviewDisclaimer(result.disclaimer || result.reviewRequest.nonAcceptanceNotice || null);
+      setReviewOpen(false);
     } catch (e) {
       const status = (e as Error & { status?: number }).status;
       if (status === 401 || status === 403 || status === 404) {
@@ -196,513 +458,203 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
     }
   }
 
-  const summaryAside = (
-    <aside className="sticky-summary no-print" aria-live="polite">
-      <p className="section-kicker">Your estimate</p>
-      <h3>Selections summary</h3>
-      <dl className="summary-dl summary-dl--totals">
-        <div>
-          <dt>Original estimate</dt>
-          <dd>{formatCurrency(baseline)}</dd>
+  const summaryCard = (
+    <div className="rounded-2xl border border-border bg-background p-5 shadow-sm">
+      <div className="text-xs uppercase tracking-widest text-muted-foreground">Your estimate</div>
+      <div className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
+        {vm.updatedTotalLabel}
+      </div>
+      <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm">
+        <Row label="Original estimate" value={vm.originalTotalLabel} muted />
+        <Row label="Change from original" value={vm.changeFromOriginalLabel} />
+        <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold">
+          <span>Updated estimate</span>
+          <span>{vm.updatedTotalLabel}</span>
         </div>
-        <div className="summary-dl__primary">
-          <dt>Updated estimate</dt>
-          <dd>{formatCurrency(configured)}</dd>
-        </div>
-        <div className="summary-dl__delta">
-          <dt>Change from original</dt>
-          <dd>{formatCurrency(delta)}</dd>
-        </div>
-      </dl>
-      <p className="muted small">
-        Pricing valid through {formatDate(config.pricingValidThrough || estimate.pricingValidThrough)}.
-        Estimate configuration — not final acceptance.
+      </div>
+      <p className="mt-3 text-[11px] text-muted-foreground">
+        Pricing valid through {formatDate(vm.pricingValidThrough)}. Totals calculated by your estimator
+        system — not final acceptance.
       </p>
-      {step === "customize" ? (
-        <div className="actions">
+      <div className="mt-5 space-y-2">
+        <button
+          type="button"
+          onClick={() => void onSave()}
+          disabled={saveState === "saving"}
+          className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90 disabled:opacity-60"
+        >
+          {saveState === "saving" ? "Saving…" : "Save selections"}
+        </button>
+        <span className="block text-center text-xs text-muted-foreground" role="status">
+          {saveState === "saved" ? "Selection saved" : null}
+          {saveState === "error" ? saveError || "Unable to save" : null}
+        </span>
+        {reviewUiEnabled() ? (
           <button
             type="button"
-            className="btn-primary btn-primary--wide"
-            disabled={saveState === "saving"}
-            onClick={() => void onSave()}
+            onClick={() => setReviewOpen(true)}
+            disabled={Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted}
+            className="w-full rounded-lg border border-border bg-background py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
-            {saveState === "saving" ? "Saving…" : "Save selections"}
+            {reviewRequest ? "Request already sent" : "Request estimator review"}
           </button>
-          <span className="save-status" role="status">
-            {saveState === "saved" ? "Selection saved" : null}
-            {saveState === "error" ? saveError || "Unable to save" : null}
-          </span>
+        ) : null}
+        {reviewError ? <p className="text-center text-xs text-destructive">{reviewError}</p> : null}
+      </div>
+      {reviewRequest ? (
+        <div className="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+          <div className="font-medium text-foreground">{reviewRequest.statusLabel}</div>
+          <div className="mt-1 text-muted-foreground">
+            Ref {reviewRequest.requestReference} · {formatDate(reviewRequest.requestedAt)}
+          </div>
+          <p className="mt-2 text-muted-foreground">
+            {reviewRequest.nonAcceptanceNotice ||
+              "Submitted for review — not an order or acceptance."}
+          </p>
         </div>
       ) : null}
-    </aside>
+    </div>
   );
 
   return (
-    <div className="page page--configuration">
-      <header className="topbar no-print">
-        <div className="topbar__inner">
-          <div className="brand-lockup">
-            <span className="brand-lockup__mark" aria-hidden="true">
-              ESF
-            </span>
-            <span>
-              <span className="brand-lockup__name">Elite Stone Fabrication</span>
-              <span className="brand-lockup__product">Elite 100 Digital Estimate</span>
-            </span>
+    <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-28 lg:pb-10">
+      <header className="border-b border-border bg-background">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+          <div className="text-sm font-semibold tracking-tight text-foreground">
+            Elite Surfaces &amp; Fabrication
           </div>
-          <button type="button" className="btn-print" onClick={() => window.print()}>
-            Print
-          </button>
+          <span className="text-xs text-muted-foreground">Elite 100 Digital Estimate</span>
         </div>
       </header>
 
-      <main className="shell shell--configuration">
-        <section className="hero">
-          <nav className="journey-steps no-print" aria-label="Estimate configuration steps">
-            {(
-              [
-                ["review", "Review"],
-                ["customize", "Customize"],
-                ["request", "Request review"],
-              ] as const
-            ).map(([key, label], i) => {
-              const order = { review: 0, customize: 1, request: 2 } as const;
-              const current = order[step];
-              const idx = order[key];
-              const cls =
-                idx < current ? "journey-step is-complete" : idx === current ? "journey-step is-current" : "journey-step";
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  className={cls}
-                  aria-current={idx === current ? "step" : undefined}
-                  onClick={() => setStep(key)}
-                >
-                  <span aria-hidden="true">{i + 1}</span> {label}
-                </button>
-              );
-            })}
-          </nav>
-          <p className="eyebrow">Prepared for you</p>
-          <h2 className="hero__title">{estimate.documentTitle}</h2>
-          <p className="lede">
-            Review your original estimate, choose approved finishes room by room, then send your
-            configuration for estimator review. This is not an order or acceptance.
-          </p>
-          <dl className="meta-grid">
-            {estimate.quoteNumber ? (
-              <div>
-                <dt>Estimate #</dt>
-                <dd>{estimate.quoteNumber}</dd>
-              </div>
-            ) : null}
-            {config.pricingValidThrough || estimate.pricingValidThrough ? (
-              <div>
-                <dt>Pricing valid through</dt>
-                <dd>{formatDate(config.pricingValidThrough || estimate.pricingValidThrough)}</dd>
-              </div>
-            ) : null}
-          </dl>
-        </section>
-
-        {step === "review" ? (
-          <>
-            <section className="card card--baseline">
-              <div className="section-heading">
-                <div>
-                  <p className="section-kicker">Your starting point</p>
-                  <h3 className="card__heading">Original estimate</h3>
-                </div>
-                <span className="locked-badge">Scope locked</span>
-              </div>
-              <p className="total-row__value">{formatCurrency(baseline)}</p>
-              <p className="muted">{config.lockedScopeNotice}</p>
-              <div className="change-rules">
-                <p>
-                  <strong>You can change:</strong> estimator-approved finishes and add-on quantities.
-                </p>
-                <p>
-                  <strong>You cannot change:</strong> measurements, fabrication scope, pricing groups, or
-                  totals directly.
-                </p>
-              </div>
-            </section>
-
-            <section className="card">
-              <p className="section-kicker">Project</p>
-              <h3 className="card__heading">Project information</h3>
-              {estimate.project?.customerName ? (
-                <p className="project-line">{estimate.project.customerName}</p>
-              ) : null}
-              {estimate.project?.projectName ? (
-                <p className="project-line">{estimate.project.projectName}</p>
-              ) : null}
-              {estimate.project?.projectAddress ? (
-                <p className="project-line project-line--muted">{estimate.project.projectAddress}</p>
-              ) : null}
-            </section>
-
-            <section className="card">
-              <p className="section-kicker">Rooms</p>
-              <h3 className="card__heading">Locked professional scope</h3>
-              <ul className="room-list">
-                {rooms.map((r) => (
-                  <li key={r.roomKey} className="room">
-                    <h4 className="room__name">{r.displayName}</h4>
-                    <p className="room__detail">
-                      <span className="room__label">Baseline finish</span>{" "}
-                      {r.baselineColorLabel || r.baselineMaterialLabel || "—"}
-                    </p>
-                    <p className="room__detail">
-                      <span className="locked-badge">Measurements locked</span>
-                    </p>
-                  </li>
-                ))}
-              </ul>
-              {(estimate.lineItems || []).length ? (
-                <>
-                  <h4 className="card__heading" style={{ marginTop: "1.25rem" }}>
-                    Included items
-                  </h4>
-                  <ul className="addon-list">
-                    {estimate.lineItems.map((li, i) => (
-                      <li key={`${li.label || "line"}-${i}`}>
-                        {li.label || "Included item"}
-                        {li.amount != null ? ` — ${formatCurrency(li.amount)}` : ""}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : null}
-            </section>
-
-            <div className="actions no-print">
-              <button type="button" className="btn-primary" onClick={() => setStep("customize")}>
-                Continue to customize
-              </button>
-            </div>
-          </>
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">Estimate for</div>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">{vm.customerName}</h1>
+        {vm.projectName ? (
+          <p className="mt-1 text-sm text-muted-foreground">{vm.projectName}</p>
+        ) : null}
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          Pick an approved Elite 100 color for each room and adjust estimator-approved options. Your
+          updated estimate is calculated by eliteOS — measurements and fabrication scope stay locked.
+        </p>
+        {vm.lockedScopeNotice ? (
+          <p className="mt-2 max-w-2xl text-xs text-muted-foreground">{vm.lockedScopeNotice}</p>
         ) : null}
 
-        {step === "customize" ? (
-          <>
-            <nav className="room-tabs no-print" aria-label="Rooms">
-              {rooms.map((r) => (
-                <button
-                  key={r.roomKey}
-                  type="button"
-                  className={`room-tab${activeRoom?.roomKey === r.roomKey ? " is-selected" : ""}`}
-                  onClick={() => {
-                    setActiveRoomKey(r.roomKey);
-                    setColorQuery("");
-                  }}
-                >
-                  {r.displayName}
-                </button>
-              ))}
-            </nav>
+        <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_320px]">
+          <div className="space-y-4">
+            {vm.rooms.map((room) => (
+              <CustomerRoomCard
+                key={room.id}
+                room={room}
+                onPickColor={() => setPickerRoomId(room.id)}
+              />
+            ))}
 
-            {activeRoom ? (
-              <section className="card card--room">
-                <div className="section-heading">
-                  <div>
-                    <p className="section-kicker">Choose a finish</p>
-                    <h3 className="card__heading">{activeRoom.displayName}</h3>
-                  </div>
-                  <span className="locked-badge">Measurements locked</span>
-                </div>
-                <p className="muted">
-                  Select one estimator-approved Elite 100 color. Pricing group details stay with your
-                  estimator.
-                </p>
-                <label className="color-search" htmlFor={`${formId}-color-search`}>
-                  <span className="sr-only">Search finishes</span>
-                  <input
-                    id={`${formId}-color-search`}
-                    type="search"
-                    placeholder="Search colors"
-                    value={colorQuery}
-                    onChange={(e) => setColorQuery(e.target.value)}
-                  />
-                </label>
-                {(() => {
-                  const mats = materialsForRoom(config.materials, activeRoom.roomKey);
-                  const opts = materialOptions(config.options || [], activeRoom.roomKey);
-                  const cards =
-                    mats.length > 0
-                      ? mats
-                      : opts.map((o) => ({
-                          materialId: o.materialId || o.optionKey,
-                          displayName: o.displayLabel,
-                          imageAssetPath: o.imageAssetRef || null,
-                          imageFullPath: null,
-                          collectionLabel: "Elite 100",
-                          colorFamily: null,
-                          patternType: null,
-                          customerVisible: true,
-                          roomKey: activeRoom.roomKey,
-                          optionKey: o.optionKey,
-                          includedInBaseline: Boolean(o.includedInBaseline),
-                          isDefault: o.defaultQty > 0,
-                          selectable: o.selectable,
-                        }));
-                  const q = colorQuery.trim().toLowerCase();
-                  const filtered = q
-                    ? cards.filter((c) => c.displayName.toLowerCase().includes(q))
-                    : cards;
-                  const selected = selectedMaterialOption(activeRoom.roomKey);
-                  return (
-                    <div className="material-grid" role="radiogroup" aria-label={`${activeRoom.displayName} finish`}>
-                      {filtered.map((mat) => {
-                        const optionKey = mat.optionKey || `material:${activeRoom.roomKey}:${mat.materialId}`;
-                        const isSelected = selected?.optionKey === optionKey;
-                        return (
-                          <button
-                            key={optionKey}
-                            type="button"
-                            className={`material-card${isSelected ? " is-selected" : ""}`}
-                            disabled={mat.selectable === false}
-                            aria-pressed={isSelected}
-                            onClick={() => selectMaterial(activeRoom.roomKey, optionKey)}
-                          >
-                            <span className="material-card__swatch">
-                              {mat.imageAssetPath ? (
-                                <img src={mat.imageAssetPath} alt="" loading="lazy" />
-                              ) : (
-                                <span className="material-card__placeholder" aria-hidden="true" />
-                              )}
-                            </span>
-                            <span className="material-card__body">
-                              <strong>{mat.displayName}</strong>
-                              <span className="muted">{mat.collectionLabel || "Elite 100"}</span>
-                              {mat.includedInBaseline || mat.isDefault ? (
-                                <span className="pill">Included</span>
-                              ) : null}
-                              {isSelected ? <span className="pill pill--selected">Selected</span> : null}
-                            </span>
-                          </button>
-                        );
-                      })}
-                      {!filtered.length ? (
-                        <p className="muted">No finishes match your search for this room.</p>
-                      ) : null}
-                    </div>
-                  );
-                })()}
-              </section>
-            ) : null}
-
-            {addonOptions(config.options || []).length ? (
-              <section className="card card--options">
-                <p className="section-kicker">Personalize your project</p>
-                <h3 className="card__heading">Available options</h3>
-                <ul className="addon-list">
-                  {addonOptions(config.options || []).map((opt) => {
+            {vm.addons.length ? (
+              <div className="rounded-2xl border border-border bg-background p-6">
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">Options</div>
+                <div className="mt-1 text-lg font-semibold text-foreground">Approved add-ons</div>
+                <ul className="mt-4 space-y-3">
+                  {vm.addons.map((opt) => {
                     const unresolved =
                       !opt.selectable ||
                       opt.availabilityState === "unavailable" ||
                       opt.availabilityState === "review_required";
                     return (
-                      <li key={opt.id} className="addon-row">
+                      <li
+                        key={opt.optionKey}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3"
+                      >
                         <div>
-                          <strong>{opt.displayLabel}</strong>
-                          {unresolved ? (
-                            <span className="pill pill--warn">Requires estimator review</span>
-                          ) : opt.includedInBaseline ? (
-                            <span className="pill">Included</span>
+                          <div className="text-sm font-medium text-foreground">{opt.displayLabel}</div>
+                          {opt.includedInBaseline ? (
+                            <div className="text-[11px] text-muted-foreground">Included</div>
                           ) : null}
-                          {opt.description ? <p className="muted">{opt.description}</p> : null}
+                          {unresolved ? (
+                            <div className="text-[11px] text-muted-foreground">
+                              Requires estimator review
+                            </div>
+                          ) : null}
                         </div>
                         {unresolved ? (
-                          <span className="muted">Unavailable</span>
+                          <span className="text-xs text-muted-foreground">Unavailable</span>
                         ) : (
-                          <label className="qty-label">
-                            <span className="sr-only">Quantity for {opt.displayLabel}</span>
-                            <input
-                              type="number"
-                              min={opt.minQty}
-                              max={opt.maxQty ?? 99}
-                              value={qty[opt.optionKey] ?? opt.defaultQty ?? 0}
-                              onChange={(e) => {
-                                const n = Number(e.target.value) || 0;
-                                setQty((q) => ({ ...q, [opt.optionKey]: n }));
-                                setSaveState("idle");
-                              }}
-                            />
-                          </label>
+                          <input
+                            type="number"
+                            className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                            min={opt.minQty}
+                            max={opt.maxQty}
+                            value={qty[opt.optionKey] ?? opt.quantity}
+                            onChange={(e) => {
+                              setQty((q) => ({
+                                ...q,
+                                [opt.optionKey]: Number(e.target.value) || 0,
+                              }));
+                              setSaveState("idle");
+                            }}
+                            aria-label={`Quantity for ${opt.displayLabel}`}
+                          />
                         )}
                       </li>
                     );
                   })}
                 </ul>
-              </section>
+              </div>
             ) : null}
 
-            {summaryAside}
-
-            <div className="actions no-print journey-nav">
-              <button type="button" className="btn-secondary" onClick={() => setStep("review")}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={() => {
-                  void (async () => {
-                    if (saveState !== "saved") await onSave();
-                    setStep("request");
-                  })();
-                }}
-              >
-                Continue to request review
-              </button>
-            </div>
-          </>
-        ) : null}
-
-        {step === "request" ? (
-          <>
-            <section className="card">
-              <p className="section-kicker">Final check</p>
-              <h3 className="card__heading">Configuration summary</h3>
-              <dl className="summary-dl summary-dl--totals">
-                <div>
-                  <dt>Original estimate</dt>
-                  <dd>{formatCurrency(baseline)}</dd>
-                </div>
-                <div className="summary-dl__primary">
-                  <dt>Updated estimate</dt>
-                  <dd>{formatCurrency(configured)}</dd>
-                </div>
-                <div className="summary-dl__delta">
-                  <dt>Change from original</dt>
-                  <dd>{formatCurrency(delta)}</dd>
-                </div>
-              </dl>
-              <ul className="room-list">
-                {rooms.map((room) => {
-                  const selected = selectedMaterialOption(room.roomKey);
-                  return (
-                    <li key={room.roomKey} className="room">
-                      <h4 className="room__name">{room.displayName}</h4>
-                      <p className="room__detail">
-                        <span className="room__label">Selected finish</span>{" "}
-                        {selected?.displayLabel || "—"}
-                      </p>
+            {vm.lineItems.length ? (
+              <div className="rounded-2xl border border-border bg-background p-6">
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">Included</div>
+                <ul className="mt-3 space-y-2 text-sm">
+                  {vm.lineItems.map((li, i) => (
+                    <li key={`${li.label}-${i}`} className="flex justify-between gap-3">
+                      <span>{li.label}</span>
+                      <span className="tabular-nums text-muted-foreground">{li.amountLabel}</span>
                     </li>
-                  );
-                })}
-              </ul>
-              <p className="muted">
-                Submitting sends your selections for estimator review. This is not an order or acceptance.
-                Pricing and availability remain subject to review.
-              </p>
-            </section>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
 
-            {summaryAside}
+          <aside className="hidden lg:sticky lg:top-6 lg:block lg:self-start">{summaryCard}</aside>
+        </div>
+      </div>
 
-            {reviewUiEnabled() ? (
-              <section className="card review-panel no-print" aria-labelledby="review-heading">
-                <h3 id="review-heading" className="card__heading">
-                  Request an updated estimate
-                </h3>
-                {reviewRequest ? (
-                  <div className="review-confirmation" role="status">
-                    <p>
-                      <strong>{reviewRequest.statusLabel}</strong>
-                    </p>
-                    <p>
-                      Selections sent · Reference {reviewRequest.requestReference} ·{" "}
-                      {formatDate(reviewRequest.requestedAt)}
-                    </p>
-                    <p className="muted">{reviewDisclaimer || reviewRequest.nonAcceptanceNotice}</p>
-                    <dl className="summary-dl">
-                      <div>
-                        <dt>Submitted original</dt>
-                        <dd>{formatCurrency(reviewRequest.baselineDisplayTotal ?? null)}</dd>
-                      </div>
-                      <div>
-                        <dt>Submitted updated</dt>
-                        <dd>{formatCurrency(reviewRequest.configuredDisplayTotal ?? null)}</dd>
-                      </div>
-                      <div>
-                        <dt>Submitted difference</dt>
-                        <dd>{formatCurrency(reviewRequest.displayDelta ?? null)}</dd>
-                      </div>
-                    </dl>
-                    {reviewRequest.currentSelectionsDifferFromSubmitted ? (
-                      <p className="pill pill--warn" role="status">
-                        Current selections differ from the submitted request. Save again, then you may
-                        request a new review under estimator policy. The prior request is unchanged.
-                      </p>
-                    ) : null}
-                    <ul className="addon-list">
-                      {(reviewRequest.selectedOptions || []).map((o, i) => (
-                        <li key={`${o.optionKey || "opt"}-${i}`}>
-                          {o.displayLabel || o.optionKey} × {o.quantity ?? 1}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                <label className="qty-label" htmlFor={`${formId}-note`}>
-                  Optional note to your estimator
-                  <textarea
-                    id={`${formId}-note`}
-                    maxLength={1000}
-                    rows={3}
-                    value={customerNote}
-                    onChange={(e) => setCustomerNote(e.target.value)}
-                    disabled={Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted}
-                  />
-                </label>
-                <div className="actions">
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => setStep("customize")}
-                  >
-                    Back to customize
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={
-                      !canRequestReview ||
-                      reviewBusy ||
-                      (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
-                    }
-                    onClick={() => void onSendForReview()}
-                  >
-                    {reviewBusy ? "Sending…" : "Send selections for review"}
-                  </button>
-                  {reviewError ? <span className="save-status">{reviewError}</span> : null}
-                  {saveState !== "saved" ? (
-                    <button type="button" className="btn-secondary" onClick={() => void onSave()}>
-                      Save selections first
-                    </button>
-                  ) : null}
-                </div>
-              </section>
-            ) : (
-              <p className="muted">Review requests are not enabled for this pilot session.</p>
-            )}
-          </>
-        ) : null}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background p-4 shadow-[0_-8px_28px_rgba(0,0,0,0.08)] lg:hidden">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Updated</div>
+            <div className="text-lg font-semibold tabular-nums">{vm.updatedTotalLabel}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void onSave()}
+            disabled={saveState === "saving"}
+            className="rounded-lg bg-foreground px-4 py-2.5 text-sm font-semibold text-background disabled:opacity-60"
+          >
+            {saveState === "saving" ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
 
-        <section className="print-only print-config" aria-hidden="true">
-          <h2>Configured estimate</h2>
-          <p>Original: {formatCurrency(baseline)}</p>
-          <p>Updated: {formatCurrency(configured)}</p>
-          <p>Difference: {formatCurrency(delta)}</p>
-          <p>
-            Pricing valid through:{" "}
-            {formatDate(config.pricingValidThrough || estimate.pricingValidThrough)}
-          </p>
-          <p>This printout is estimate configuration — not final acceptance.</p>
-        </section>
-      </main>
+      {pickerRoom ? (
+        <ColorPickerModal
+          room={pickerRoom}
+          onSelect={(c) => selectColor(pickerRoom.id, c)}
+          onClose={() => setPickerRoomId(null)}
+        />
+      ) : null}
+
+      {reviewOpen ? (
+        <ReviewRequestModal
+          rooms={vm.rooms}
+          busy={reviewBusy}
+          onClose={() => setReviewOpen(false)}
+          onSubmit={(note) => void onSendReview(note)}
+        />
+      ) : null}
     </div>
   );
 }

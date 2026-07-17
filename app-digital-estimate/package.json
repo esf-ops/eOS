@@ -10,9 +10,11 @@
     "test:ui": "node src/phaseDe1.ui.test.mjs && node src/phaseDe2e.ui.test.mjs && node src/phaseDe2h.materialUi.test.mjs && node --experimental-strip-types src/phaseDe2g.baselineDtoShape.test.mjs && node src/phaseDe2g.productionBuild.test.mjs && node src/phaseDe2g.fragmentBootstrap.browser.test.mjs && node src/phaseDe2g.baselineRender.browser.test.mjs"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.2.1",
     "@vitejs/plugin-react": "^4.7.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "tailwindcss": "^4.2.1",
     "vite": "^7.1.4"
   },
   "devDependencies": {
