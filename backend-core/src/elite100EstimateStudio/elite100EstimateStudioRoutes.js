@@ -748,6 +748,72 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
     }
   );
 
+  function configurationFromStudioQuery(query) {
+    if (!query || typeof query !== "object") return null;
+    const pricingValidThrough = String(query.pricingValidThrough ?? "").trim();
+    const allowedRaw = String(query.allowedOptionKeys ?? "").trim();
+    const allowedOptionKeys = allowedRaw
+      ? allowedRaw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean)
+      : undefined;
+    const hasAny =
+      pricingValidThrough ||
+      (allowedOptionKeys && allowedOptionKeys.length) ||
+      query.roomLocked != null ||
+      String(query.estimatorNotes ?? "").trim();
+    if (!hasAny) return null;
+    const roomLocked =
+      query.roomLocked === "0" || query.roomLocked === "false" ? false : true;
+    return {
+      ...(pricingValidThrough ? { pricingValidThrough } : {}),
+      ...(allowedOptionKeys ? { allowedOptionKeys } : {}),
+      ...(String(query.estimatorNotes ?? "").trim()
+        ? { estimatorNotes: String(query.estimatorNotes).trim().slice(0, 2000) }
+        : {}),
+      roomLocks: [{ roomKey: "*", locked: roomLocked }]
+    };
+  }
+
+  function studioPublishErrorPayload(e, fallbackMessage) {
+    const status = Number(e?.statusCode) || 500;
+    const code = e?.code || "publish_failed";
+    const blockers = e?.blockingReasons || e?.blockers || undefined;
+    const readinessBlockerCodes = Array.isArray(blockers)
+      ? blockers.map((b) => b?.code).filter(Boolean)
+      : undefined;
+    // Surface known structured messages even for 503 persistence codes; generic only when unstructured.
+    const structured =
+      Boolean(e?.code) &&
+      (status < 500 ||
+        [
+          "publication_storage_unavailable",
+          "publication_source_missing",
+          "publication_source_conflict",
+          "public_dto_leak",
+          "atomic_publish_unavailable",
+          "estimate_repo_unavailable"
+        ].includes(String(e.code)));
+    const message = structured && e?.message ? e.message : fallbackMessage;
+    return {
+      status,
+      body: {
+        ok: false,
+        error: message,
+        code,
+        field: e?.field || null,
+        allowedRange: e?.allowedRange || null,
+        blockers,
+        blockingReasons: blockers,
+        diagnostic: {
+          status,
+          code,
+          message,
+          field: e?.field || null,
+          readinessBlockerCodes: readinessBlockerCodes || []
+        }
+      }
+    };
+  }
+
   // ── Studio estimate → Digital Estimate (readiness / publish / history / review) ──
   app.get(
     "/api/elite100-estimate-studio/estimates/:estimateId/digital-estimate",
@@ -756,18 +822,20 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       res.set("Cache-Control", "no-store");
       try {
         const organizationId = await orgIdFor(req);
+        const configuration = configurationFromStudioQuery(req.query);
         const result = await studioDigitalEstimateService.assessReadiness(
           organizationId,
-          req.params.estimateId
+          req.params.estimateId,
+          configuration
         );
         res.json(result);
       } catch (e) {
         logStudio("digital-estimate readiness failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load Digital Estimate readiness",
-          code: e?.code
-        });
+        const { status, body } = studioPublishErrorPayload(
+          e,
+          "Unable to load Digital Estimate readiness"
+        );
+        res.status(status).json(body);
       }
     }
   );
@@ -824,12 +892,11 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json(result);
       } catch (e) {
         logStudio("studio digital-estimate publish failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to publish Digital Estimate",
-          code: e?.code,
-          blockers: e?.blockers
-        });
+        const { status, body } = studioPublishErrorPayload(
+          e,
+          "Unable to publish Digital Estimate"
+        );
+        res.status(status).json(body);
       }
     }
   );

@@ -26,6 +26,10 @@ import {
   studioEstimatePublicationFamilyRoot
 } from "./studioEstimatePublicationAdapter.mjs";
 import {
+  ensureStudioEstimatePublicationSource,
+  mapStudioPublicationPersistenceError
+} from "./studioEstimatePublicationSource.mjs";
+import {
   listElite100CustomerMaterials,
   getElite100CustomerMaterial
 } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
@@ -100,24 +104,40 @@ function addDaysDateOnly(days, now = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
-function validatePricingValidThrough(raw, env, now = new Date()) {
-  if (raw == null || String(raw).trim() === "") {
-    return addDaysDateOnly(readDigitalEstimatePricingValidDays(env), now);
-  }
-  const s = String(raw).trim().slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    throw deError("pricingValidThrough must be YYYY-MM-DD", "invalid_pricing_valid_through", 400);
-  }
-  const max = addDaysDateOnly(readDigitalEstimatePricingValidDays(env) + 30, now);
-  if (s < now.toISOString().slice(0, 10) || s > max) {
-    throw deError("pricingValidThrough is outside allowed server policy", "invalid_pricing_valid_through", 400);
-  }
-  return s;
-}
-
 function wrapRepositoryWithStudioHeader(deRepository, syntheticHeader) {
+  // Explicit forwards — do not rely on object spread for prototype methods.
   return {
-    ...deRepository,
+    mode: deRepository?.mode,
+    seedQuote: typeof deRepository?.seedQuote === "function" ? deRepository.seedQuote.bind(deRepository) : undefined,
+    getQuote: typeof deRepository?.getQuote === "function" ? deRepository.getQuote.bind(deRepository) : undefined,
+    listPublicationsForQuote:
+      typeof deRepository?.listPublicationsForQuote === "function"
+        ? deRepository.listPublicationsForQuote.bind(deRepository)
+        : undefined,
+    listActivePublicationsForFamily:
+      typeof deRepository?.listActivePublicationsForFamily === "function"
+        ? deRepository.listActivePublicationsForFamily.bind(deRepository)
+        : undefined,
+    listEventsForPublication:
+      typeof deRepository?.listEventsForPublication === "function"
+        ? deRepository.listEventsForPublication.bind(deRepository)
+        : undefined,
+    getPublication:
+      typeof deRepository?.getPublication === "function"
+        ? deRepository.getPublication.bind(deRepository)
+        : undefined,
+    getSnapshotByPublicationId:
+      typeof deRepository?.getSnapshotByPublicationId === "function"
+        ? deRepository.getSnapshotByPublicationId.bind(deRepository)
+        : undefined,
+    publishAtomic:
+      typeof deRepository?.publishAtomic === "function"
+        ? deRepository.publishAtomic.bind(deRepository)
+        : undefined,
+    replaceTokenAtomic:
+      typeof deRepository?.replaceTokenAtomic === "function"
+        ? deRepository.replaceTokenAtomic.bind(deRepository)
+        : undefined,
     async getQuoteHeader(organizationId, quoteId) {
       if (String(quoteId) === String(syntheticHeader.id)) {
         if (
@@ -134,6 +154,20 @@ function wrapRepositoryWithStudioHeader(deRepository, syntheticHeader) {
       return null;
     }
   };
+}
+
+function readinessFailureError(readiness) {
+  const first = readiness?.blockingReasons?.[0] || readiness?.blockers?.[0];
+  const err = deError(
+    readiness?.message || first?.message || "Not eligible to publish",
+    readiness?.code || first?.code || "not_eligible",
+    400
+  );
+  err.blockers = readiness?.blockers || [];
+  err.blockingReasons = readiness?.blockingReasons || readiness?.blockers || [];
+  err.field = readiness?.field || first?.field || null;
+  err.allowedRange = readiness?.allowedRange || first?.allowedRange || null;
+  return err;
 }
 
 function staffPublicationView(pub) {
@@ -487,17 +521,17 @@ export function createStudioEstimateDigitalEstimateService(deps) {
 
       const configuration =
         body?.configuration && typeof body.configuration === "object" ? body.configuration : {};
+      // Same validation function as readiness GET (including configuration envelope fields).
       const readiness = await assessReadiness(organizationId, estimateId, configuration);
       if (!readiness.readiness.eligible) {
-        throw deError(readiness.readiness.message, readiness.readiness.code, 400);
+        throw readinessFailureError(readiness.readiness);
       }
 
       const estimate = await loadEstimateRow(organizationId, estimateId);
       const synthetic = buildSyntheticQuoteHeaderFromStudioEstimate(estimate, { organizationId });
-      const pricingValidThrough = validatePricingValidThrough(
-        configuration.pricingValidThrough || body.pricingValidThrough,
-        env
-      );
+      const pricingValidThrough =
+        readiness.readiness.details?.pricingValidThrough ||
+        addDaysDateOnly(readDigitalEstimatePricingValidDays(env));
       const envelopeFingerprint = hashConfigurationEnvelope(configuration);
       const idempotencyKey = strOrNull(body.idempotencyKey);
 
@@ -506,9 +540,18 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         publishedAt: new Date().toISOString(),
         pricingValidThrough
       });
-      assertPublicDtoHasNoForbiddenContent(
-        buildPublicDigitalEstimateDto(freezeProbe.customerSnapshot, { accessExpiresAt: null })
-      );
+      try {
+        assertPublicDtoHasNoForbiddenContent(
+          buildPublicDigitalEstimateDto(freezeProbe.customerSnapshot, { accessExpiresAt: null })
+        );
+      } catch (e) {
+        const err = deError(
+          e?.message || "Customer snapshot failed public safety checks",
+          e?.code || "public_dto_leak",
+          500
+        );
+        throw err;
+      }
 
       const existing = await findIdempotentReuse({
         organizationId,
@@ -530,27 +573,46 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         };
       }
 
+      // Hosted FK: quote_publications.source_quote_id → quote_headers.id
+      try {
+        await ensureStudioEstimatePublicationSource({
+          db: deps.getSupabase?.() || null,
+          deRepository,
+          organizationId,
+          estimate,
+          syntheticHeader: synthetic
+        });
+      } catch (e) {
+        throw mapStudioPublicationPersistenceError(e);
+      }
+
       const wrapped = wrapRepositoryWithStudioHeader(deRepository, synthetic);
-      const result = await publishDigitalEstimate({
-        env,
-        organizationId,
-        actorUserId,
-        repository: wrapped,
-        body: {
-          confirm: true,
-          quoteId: estimate.id,
-          pricingValidThrough,
-          publishMetadata: {
-            idempotencyKey,
-            envelopeFingerprint,
-            studioEstimateId: estimate.id,
-            intakeCaseId: estimate.intakeCaseId || null,
-            takeoffJobId: estimate.takeoffJobId || null,
-            calculationFingerprint: estimate.approval?.calculationFingerprint || null,
-            studioEstimateRevision: Number(estimate.revision) || 1
+      let result;
+      try {
+        result = await publishDigitalEstimate({
+          env,
+          organizationId,
+          actorUserId,
+          repository: wrapped,
+          body: {
+            confirm: true,
+            quoteId: estimate.id,
+            pricingValidThrough,
+            publishMetadata: {
+              idempotencyKey,
+              envelopeFingerprint,
+              studioEstimateId: estimate.id,
+              intakeCaseId: estimate.intakeCaseId || null,
+              takeoffJobId: estimate.takeoffJobId || null,
+              calculationFingerprint: estimate.approval?.calculationFingerprint || null,
+              studioEstimateRevision: Number(estimate.revision) || 1
+            }
           }
-        }
-      });
+        });
+      } catch (e) {
+        if (e?.statusCode && e.statusCode < 500) throw e;
+        throw mapStudioPublicationPersistenceError(e);
+      }
 
       let envelope = { configured: false };
       try {

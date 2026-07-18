@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost, ApiError } from "../lib/api";
 
-type ReadinessBlocker = { code?: string; message?: string };
+type ReadinessBlocker = {
+  code?: string;
+  message?: string;
+  field?: string | null;
+  allowedRange?: { min?: string; max?: string } | null;
+};
 type PublicationRow = {
   id: string;
   status: string;
@@ -22,12 +27,66 @@ type ReviewRequestRow = {
   studioEstimateId?: string | null;
 };
 
+type PublishDiagnostic = {
+  status?: number;
+  code?: string | null;
+  message?: string | null;
+  field?: string | null;
+  readinessBlockerCodes?: string[];
+};
+
 type Props = {
   authToken: string;
   estimateId: string;
   estimateRevision?: number | null;
   estimateApproved: boolean;
 };
+
+function formatStructuredPublishError(e: ApiError): {
+  message: string;
+  diagnostic: PublishDiagnostic;
+} {
+  const body =
+    e.body && typeof e.body === "object" && e.body !== null
+      ? (e.body as Record<string, unknown>)
+      : {};
+  const diagnostic =
+    body.diagnostic && typeof body.diagnostic === "object" && body.diagnostic !== null
+      ? (body.diagnostic as PublishDiagnostic)
+      : {
+          status: e.status,
+          code: typeof body.code === "string" ? body.code : null,
+          message: e.message,
+          field: typeof body.field === "string" ? body.field : null,
+          readinessBlockerCodes: Array.isArray(body.blockers)
+            ? (body.blockers as ReadinessBlocker[]).map((b) => String(b?.code || "")).filter(Boolean)
+            : []
+        };
+  const allowedRange =
+    body.allowedRange && typeof body.allowedRange === "object" && body.allowedRange !== null
+      ? (body.allowedRange as { min?: string; max?: string })
+      : null;
+  const field = typeof body.field === "string" ? body.field : diagnostic.field;
+  const parts = [
+    e.message,
+    field ? `Field: ${field}` : null,
+    allowedRange?.min && allowedRange?.max
+      ? `Allowed range: ${allowedRange.min} – ${allowedRange.max}`
+      : null,
+    typeof body.code === "string" ? `Code: ${body.code}` : null,
+    `HTTP ${e.status}`
+  ].filter(Boolean);
+  return {
+    message: parts.join(" · "),
+    diagnostic: {
+      status: diagnostic.status ?? e.status,
+      code: diagnostic.code ?? (typeof body.code === "string" ? body.code : null),
+      message: diagnostic.message ?? e.message,
+      field: field || null,
+      readinessBlockerCodes: diagnostic.readinessBlockerCodes || []
+    }
+  };
+}
 
 /**
  * Digital Estimate section — after Studio estimate approval.
@@ -43,6 +102,7 @@ export default function EstimateDigitalEstimatePanel({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [publishDiagnostic, setPublishDiagnostic] = useState<PublishDiagnostic | null>(null);
   const [eligible, setEligible] = useState(false);
   const [blockers, setBlockers] = useState<ReadinessBlocker[]>([]);
   const [activePublication, setActivePublication] = useState<PublicationRow | null>(null);
@@ -60,36 +120,6 @@ export default function EstimateDigitalEstimatePanel({
   const [estimatorNotes, setEstimatorNotes] = useState("");
   const [roomLocked, setRoomLocked] = useState(true);
 
-  const load = useCallback(async () => {
-    if (!estimateApproved || !estimateId) return;
-    setLoadError(null);
-    try {
-      const body = (await apiGet(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/digital-estimate`,
-        authToken
-      )) as {
-        readiness?: { eligible?: boolean; blockers?: ReadinessBlocker[]; message?: string };
-        activePublication?: PublicationRow | null;
-        publications?: PublicationRow[];
-        reviewRequests?: ReviewRequestRow[];
-      };
-      setEligible(Boolean(body.readiness?.eligible));
-      setBlockers(Array.isArray(body.readiness?.blockers) ? body.readiness!.blockers! : []);
-      setActivePublication(body.activePublication || null);
-      setPublications(Array.isArray(body.publications) ? body.publications : []);
-      setReviewRequests(Array.isArray(body.reviewRequests) ? body.reviewRequests : []);
-      if (body.activePublication?.pricingValidThrough && !pricingValidThrough) {
-        setPricingValidThrough(String(body.activePublication.pricingValidThrough).slice(0, 10));
-      }
-    } catch (e) {
-      setLoadError(e instanceof ApiError ? e.message : "Unable to load Digital Estimate readiness");
-    }
-  }, [authToken, estimateApproved, estimateId, pricingValidThrough]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
   const configuration = useMemo(
     () => ({
       pricingValidThrough: pricingValidThrough || undefined,
@@ -103,10 +133,68 @@ export default function EstimateDigitalEstimatePanel({
     [pricingValidThrough, allowedOptionKeys, estimatorNotes, roomLocked]
   );
 
+  const readinessQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (pricingValidThrough) params.set("pricingValidThrough", pricingValidThrough);
+    if (configuration.allowedOptionKeys?.length) {
+      params.set("allowedOptionKeys", configuration.allowedOptionKeys.join(","));
+    }
+    params.set("roomLocked", roomLocked ? "1" : "0");
+    if (estimatorNotes) params.set("estimatorNotes", estimatorNotes.slice(0, 500));
+    const q = params.toString();
+    return q ? `?${q}` : "";
+  }, [pricingValidThrough, configuration.allowedOptionKeys, roomLocked, estimatorNotes]);
+
+  const load = useCallback(async () => {
+    if (!estimateApproved || !estimateId) return;
+    setLoadError(null);
+    try {
+      const body = (await apiGet(
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/digital-estimate${readinessQuery}`,
+        authToken
+      )) as {
+        readiness?: {
+          eligible?: boolean;
+          blockers?: ReadinessBlocker[];
+          blockingReasons?: ReadinessBlocker[];
+          message?: string;
+        };
+        activePublication?: PublicationRow | null;
+        publications?: PublicationRow[];
+        reviewRequests?: ReviewRequestRow[];
+      };
+      setEligible(Boolean(body.readiness?.eligible));
+      const nextBlockers = Array.isArray(body.readiness?.blockingReasons)
+        ? body.readiness!.blockingReasons!
+        : Array.isArray(body.readiness?.blockers)
+          ? body.readiness!.blockers!
+          : [];
+      setBlockers(nextBlockers);
+      setActivePublication(body.activePublication || null);
+      setPublications(Array.isArray(body.publications) ? body.publications : []);
+      setReviewRequests(Array.isArray(body.reviewRequests) ? body.reviewRequests : []);
+      if (body.activePublication?.pricingValidThrough && !pricingValidThrough) {
+        setPricingValidThrough(String(body.activePublication.pricingValidThrough).slice(0, 10));
+      }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        const formatted = formatStructuredPublishError(e);
+        setLoadError(formatted.message);
+      } else {
+        setLoadError("Unable to load Digital Estimate readiness");
+      }
+    }
+  }, [authToken, estimateApproved, estimateId, pricingValidThrough, readinessQuery]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   async function publish() {
     setBusy(true);
     setActionError(null);
     setActionNotice(null);
+    setPublishDiagnostic(null);
     try {
       const body = (await apiPost(
         `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/digital-estimate/publish`,
@@ -141,7 +229,20 @@ export default function EstimateDigitalEstimatePanel({
       }
       await load();
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : "Unable to publish Digital Estimate");
+      if (e instanceof ApiError) {
+        const formatted = formatStructuredPublishError(e);
+        setActionError(formatted.message);
+        setPublishDiagnostic(formatted.diagnostic);
+      } else {
+        setActionError("Unable to publish Digital Estimate");
+        setPublishDiagnostic({
+          status: undefined,
+          code: "unknown",
+          message: "Unable to publish Digital Estimate",
+          field: null,
+          readinessBlockerCodes: []
+        });
+      }
     } finally {
       setBusy(false);
     }
@@ -233,7 +334,10 @@ export default function EstimateDigitalEstimatePanel({
       {blockers.length ? (
         <ul className="eq-de-blockers" data-testid="eq-de-blockers">
           {blockers.map((b, i) => (
-            <li key={`${b.code || "b"}-${i}`}>{b.message || b.code}</li>
+            <li key={`${b.code || "b"}-${i}`}>
+              {b.message || b.code}
+              {b.field ? ` (${b.field})` : ""}
+            </li>
           ))}
         </ul>
       ) : null}
@@ -321,8 +425,27 @@ export default function EstimateDigitalEstimatePanel({
       </p>
 
       {actionError ? (
-        <div className="eq-state eq-state--error" role="alert">
+        <div className="eq-state eq-state--error" role="alert" data-testid="eq-de-publish-error">
           {actionError}
+        </div>
+      ) : null}
+      {publishDiagnostic ? (
+        <div
+          className="eq-de-pilot-diagnostic"
+          data-testid="eq-de-pilot-diagnostic"
+          role="status"
+        >
+          <strong>Pilot diagnostic</strong>
+          <ul>
+            <li>status: {publishDiagnostic.status ?? "—"}</li>
+            <li>code: {publishDiagnostic.code || "—"}</li>
+            <li>message: {publishDiagnostic.message || "—"}</li>
+            <li>field: {publishDiagnostic.field || "—"}</li>
+            <li>
+              readiness blocker codes:{" "}
+              {(publishDiagnostic.readinessBlockerCodes || []).join(", ") || "—"}
+            </li>
+          </ul>
         </div>
       ) : null}
       {actionNotice ? (

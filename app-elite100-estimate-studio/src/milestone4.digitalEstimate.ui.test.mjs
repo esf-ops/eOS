@@ -26,7 +26,15 @@ assert.ok(dePanel.includes("eq-digital-estimate"));
 assert.ok(dePanel.includes("eq-de-review-requests") || dePanel.includes("eq-de-review-empty"));
 assert.equal(dePanel.includes("accessToken"), false);
 assert.ok(dePanel.includes("not shown as a raw token") || dePanel.includes("raw token"));
+assert.ok(dePanel.includes("formatStructuredPublishError"));
+assert.ok(dePanel.includes("eq-de-pilot-diagnostic"));
+assert.ok(dePanel.includes("readinessQuery"));
+assert.ok(
+  dePanel.includes('e instanceof ApiError') &&
+    dePanel.includes("Unable to publish Digital Estimate")
+);
 
 console.log("\nmilestone4.digitalEstimate.ui.test.mjs\n");
 console.log("ok: Studio Digital Estimate panel wires publish / link / revoke / review status");
+console.log("ok: structured publish errors + pilot diagnostic wired");
 console.log("\nAll Milestone 4 Digital Estimate UI tests passed.\n");

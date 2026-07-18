@@ -10,6 +10,8 @@ import { createHash } from "node:crypto";
 import { STUDIO_ESTIMATE_STATUSES, STUDIO_UNRESOLVED_ADDON_KEYS } from "./studioEstimateTypes.mjs";
 import { collectUnresolvedItems } from "./studioEstimatePricing.mjs";
 import { assessElite100PublicationEligibility } from "../digitalEstimate/digitalEstimateEligibility.mjs";
+import { readDigitalEstimatePricingValidDays } from "../digitalEstimate/digitalEstimateConfig.mjs";
+import { serverApprovedOptionCatalog } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
 
 function str(v) {
   if (v == null) return "";
@@ -18,6 +20,70 @@ function str(v) {
 
 function roundMoney(n) {
   return Math.round(Number(n));
+}
+
+function addDaysDateOnly(days, now = new Date()) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function formatUtcDateLong(isoDate) {
+  const s = String(isoDate || "").slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return s;
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return dt.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+/**
+ * Resolve / validate pricingValidThrough for Studio Digital Estimate publication.
+ * Empty input → server default (pricingValidDays from today UTC).
+ *
+ * @param {unknown} raw
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {Date} [now]
+ * @returns {{ ok: true, value: string } | { ok: false, blocker: object }}
+ */
+export function resolveStudioPricingValidThrough(raw, env = process.env, now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
+  const defaultDays = readDigitalEstimatePricingValidDays(env);
+  const max = addDaysDateOnly(defaultDays + 30, now);
+  const allowedRange = { min: today, max };
+
+  if (raw == null || String(raw).trim() === "") {
+    return { ok: true, value: addDaysDateOnly(defaultDays, now), allowedRange };
+  }
+
+  const s = String(raw).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return {
+      ok: false,
+      blocker: {
+        code: "invalid_pricing_valid_through",
+        field: "pricingValidThrough",
+        message: "Pricing valid through must be a date in YYYY-MM-DD format.",
+        allowedRange
+      }
+    };
+  }
+  if (s < today || s > max) {
+    return {
+      ok: false,
+      blocker: {
+        code: "invalid_pricing_valid_through",
+        field: "pricingValidThrough",
+        message: `Pricing must be valid through a date between ${formatUtcDateLong(today)} and ${formatUtcDateLong(max)}.`,
+        allowedRange
+      }
+    };
+  }
+  return { ok: true, value: s, allowedRange };
 }
 
 /**
@@ -300,7 +366,7 @@ export function assessStudioEstimatePublicationReadiness(input) {
   if (!approvalFp || !calcFp || approvalFp !== calcFp) {
     blockers.push({
       code: "calculation_fingerprint_mismatch",
-      message: "Approved calculation fingerprint does not match the current calculation snapshot"
+      message: "The approved estimate changed and must be recalculated."
     });
   }
 
@@ -338,10 +404,18 @@ export function assessStudioEstimatePublicationReadiness(input) {
   }
 
   const scope = estimate.scope && typeof estimate.scope === "object" ? estimate.scope : {};
-  if (!str(scope.customerName) || !str(scope.projectName)) {
+  if (!str(scope.customerName)) {
     blockers.push({
-      code: "project_fields_required",
-      message: "Customer name and project name are required before publishing"
+      code: "customer_name_required",
+      field: "customerName",
+      message: "Customer name is required before publishing."
+    });
+  }
+  if (!str(scope.projectName)) {
+    blockers.push({
+      code: "project_name_required",
+      field: "projectName",
+      message: "Project name is required before publishing."
     });
   }
 
@@ -356,18 +430,42 @@ export function assessStudioEstimatePublicationReadiness(input) {
     }
   }
 
-  // Unsupported / unpriced options must not be offered as customer-selectable.
+  // Configuration envelope (same rules for readiness GET and publish POST).
   const cfg = input.configuration && typeof input.configuration === "object" ? input.configuration : {};
   const allowedOptions = Array.isArray(cfg.allowedOptionKeys)
     ? cfg.allowedOptionKeys.map(str).filter(Boolean)
     : [];
+  const catalogKeys = new Set(serverApprovedOptionCatalog().map((o) => o.optionKey));
   for (const key of allowedOptions) {
-    if (STUDIO_UNRESOLVED_ADDON_KEYS.includes(key) || key === "qty-blanco" || key.includes("faucet") || key.includes("accessory")) {
+    if (!catalogKeys.has(key)) {
+      blockers.push({
+        code: "unknown_catalog_option",
+        field: "allowedOptionKeys",
+        message: `Option "${key}" is not a valid catalog option key.`
+      });
+      continue;
+    }
+    if (
+      STUDIO_UNRESOLVED_ADDON_KEYS.includes(key) ||
+      key === "qty-blanco" ||
+      key.includes("faucet") ||
+      key.includes("accessory")
+    ) {
       blockers.push({
         code: "unsupported_customer_option",
-        message: `Option "${key}" is not supported for customer selection by pricing authority`
+        field: "allowedOptionKeys",
+        message: `Option "${key}" is not supported for customer selection by pricing authority.`
       });
     }
+  }
+
+  const now = input.now instanceof Date ? input.now : new Date();
+  const pricingResolved = resolveStudioPricingValidThrough(cfg.pricingValidThrough, env, now);
+  let pricingValidThrough = null;
+  if (!pricingResolved.ok) {
+    blockers.push(pricingResolved.blocker);
+  } else {
+    pricingValidThrough = pricingResolved.value;
   }
 
   const rooms = buildStudioEstimateRoomsForPublication(estimate);
@@ -401,13 +499,23 @@ export function assessStudioEstimatePublicationReadiness(input) {
   }
 
   const eligible = blockers.length === 0;
+  const blockingReasons = blockers.map((b) => ({
+    code: b.code,
+    field: b.field || null,
+    message: b.message,
+    ...(b.allowedRange ? { allowedRange: b.allowedRange } : {}),
+    ...(b.detail ? { detail: b.detail } : {})
+  }));
   return {
     eligible,
     code: eligible ? "eligible" : blockers[0].code,
     message: eligible
       ? "Approved Studio estimate is ready for Digital Estimate publication"
       : blockers[0].message,
+    field: eligible ? null : blockers[0].field || null,
+    allowedRange: eligible ? null : blockers[0].allowedRange || null,
     blockers,
+    blockingReasons,
     eliteEligibility,
     details: {
       studioEstimateId: estimate.id,
@@ -416,7 +524,8 @@ export function assessStudioEstimatePublicationReadiness(input) {
       revision: Number(estimate.revision) || 1,
       calculationFingerprint: calcFp || null,
       repositoryMode: input.repositoryMode || null,
-      envelopeFingerprint: hashConfigurationEnvelope(cfg)
+      envelopeFingerprint: hashConfigurationEnvelope(cfg),
+      pricingValidThrough
     }
   };
 }

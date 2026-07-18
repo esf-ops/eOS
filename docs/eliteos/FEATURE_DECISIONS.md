@@ -1542,4 +1542,16 @@
 | **Impacted** | `studioEstimateQueueWorkflow.mjs`, `studioEstimateQueueService.mjs`, Studio `EstimateQueuePage`, open-target routing into Takeoff / Scope / Digital / Review. |
 | **Out of scope** | Acceptance, sold confirmation, Moraware, QuickBooks, payments, new AI behavior. |
 
+### 107. Studio Digital Estimate publish — quote_headers bridge + consistent readiness (2026-07-18)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-18 |
+| **Decision** | Hosted Studio → Digital Estimate publish must **upsert a minimal `quote_headers` bridge row** (`quote_source = elite100_studio_bridge`, archived) with `id = studio_estimates.id` before `digital_estimate_publish_atomic`, because `quote_publications.source_quote_id` FK references `quote_headers`. Eligibility / freeze still use the **in-memory synthetic** `internal_quote` header (not the archived bridge). Readiness GET and publish POST share **one** validation function (customer/project fields, catalog option keys, pricing-valid-through range, fingerprint, takeoff, Elite 100 eligibility). Studio surfaces structured `{ status, code, message, field, allowedRange, blockers }` and a temporary pilot diagnostic panel — generic “Unable to publish Digital Estimate” only for unstructured failures. |
+| **Why** | Readiness reported eligible while publish failed with Postgres FK `23503` / route 500 collapse; configuration fields were not re-validated on readiness GET. |
+| **Throwing layer (hosted)** | `digital_estimate_publish_atomic` insert into `quote_publications` → `quote_publications_source_quote_id_fkey`. |
+| **SQL** | None new (uses existing `quote_headers`). |
+| **Impacted** | `studioEstimatePublicationSource.mjs`, `studioEstimatePublicationAdapter.mjs`, `studioEstimateDigitalEstimateService.mjs`, `elite100EstimateStudioRoutes.js`, `EstimateDigitalEstimatePanel.tsx`. |
+| **Out of scope** | Acceptance, sold, Moraware, QuickBooks, payments; dropping the FK; redesign of Digital Estimate customer UI. |
+
 
