@@ -4530,3 +4530,15 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-issues--block { color: var(--eos-danger); }
 .ctr-issues--warn { color: var(--eos-warn); }
 .ctr-approve-msg { margin: 0; font-size: 0.85rem; flex: 1 1 100%; }
+.ctr-approve-msg--error { color: var(--eos-danger); }
+.ctr-approve-diag {
+  flex: 1 1 100%;
+  font-size: 0.75rem;
+  color: var(--eos-ink-muted);
+  background: var(--eos-bg-soft);
+  border: 1px solid var(--eos-line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.ctr-approve-diag-title { font-weight: 600; margin-bottom: 4px; color: var(--eos-ink); }
+.ctr-approve-diag ul { margin: 0; padding-left: 16px; }
