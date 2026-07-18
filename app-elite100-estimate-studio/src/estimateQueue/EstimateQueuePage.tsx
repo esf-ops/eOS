@@ -1,477 +1,568 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  classifyQuoteIntakeError,
-  createQuoteIntakeApiClient
-} from "../lib/quoteIntakeApi.mjs";
+  fetchEstimateQueue,
+  fetchEstimateQueuePreview,
+  recordEstimateQueueOpened
+} from "../lib/estimateQueueApi.mjs";
+import { createQuoteIntakeApiClient } from "../lib/quoteIntakeApi.mjs";
+import { ApiError } from "../lib/api";
 import {
-  caseReasonSnippets,
-  computeQueueSummaryCounts,
-  filterQuoteIntakeCases
-} from "../lib/quoteIntakeFilter.mjs";
-import {
-  caseAttachmentStatusLabel,
-  caseCustomerProjectLabel,
-  caseMissingInfoLabel,
-  caseReceivedAt,
-  caseSenderLabel,
-  caseStatusLabel,
-  caseSupportedPdfLabel,
   formatAge,
-  formatReceivedAt
+  formatReceivedAt,
+  safeText
 } from "../lib/quoteIntakeFormat.mjs";
-import {
-  labelQuoteIntakeStatus,
-  QUOTE_INTAKE_STATUS_OPTIONS
-} from "../lib/quoteIntakeStatusLabels.mjs";
-import { deriveEstimateTakeoffDisplayStatus } from "../lib/estimateTakeoffStatus.mjs";
-import type {
-  QuoteIntakeAuditEventDto,
-  QuoteIntakeCaseDto,
-  QuoteIntakeQueueFilter,
-  QuoteIntakeSafeConfig,
-  QuoteIntakeTakeoffLinkDto
-} from "../lib/quoteIntakeTypes";
-import { EMPTY_QUEUE_FILTER } from "../lib/quoteIntakeTypes";
-import EstimateQueueCaseDetail from "./EstimateQueueCaseDetail";
 import MailboxSyncModal from "./MailboxSyncModal";
-
-type QuoteIntakeApiClient = ReturnType<typeof createQuoteIntakeApiClient>;
 
 export type EstimateQueuePageProps = {
   authToken: string | null;
   selectedCaseId: string | null;
   onSelectCase: (caseId: string | null) => void;
-  onOpenEstimate: (caseId: string) => void;
-  apiClient?: QuoteIntakeApiClient;
+  onOpenEstimate: (caseId: string, options?: { openTarget?: string }) => void;
 };
 
-type LoadState =
-  | { kind: "idle" | "loading" }
-  | { kind: "ready"; cases: QuoteIntakeCaseDto[]; config: QuoteIntakeSafeConfig }
-  | {
-      kind: "unauthorized" | "forbidden" | "api_disabled" | "error";
-      message: string;
-      cases: [];
-    };
+type QueueRow = {
+  id: string;
+  customerName?: string;
+  projectName?: string;
+  senderLabel?: string;
+  salespersonLabel?: string | null;
+  receivedAt?: string | null;
+  attachmentStatus?: string;
+  aiTakeoffStatus?: string;
+  estimateStatus?: string;
+  digitalEstimateStatus?: string;
+  customerReviewStatus?: string;
+  workflowStatus?: string;
+  needsAttention?: boolean;
+  lastActivityAt?: string | null;
+  assignedEstimatorLabel?: string;
+  openTarget?: string;
+  indicators?: Record<string, boolean>;
+};
 
-const SUMMARY_TILES: Array<{
-  key: keyof ReturnType<typeof computeQueueSummaryCounts>;
-  label: string;
-  bucket: string;
-}> = [
-  { key: "new", label: "New", bucket: "new" },
-  { key: "processing", label: "Processing", bucket: "processing" },
-  { key: "manual_review", label: "Manual review", bucket: "manual_review" },
-  { key: "ready_for_takeoff", label: "Ready", bucket: "ready_for_takeoff" },
-  { key: "takeoff", label: "In progress", bucket: "takeoff" },
-  { key: "failed", label: "Failed", bucket: "failed" }
+type PreviewState =
+  | { kind: "closed" }
+  | { kind: "loading"; caseId: string }
+  | { kind: "ready"; caseId: string; preview: Record<string, unknown>; row: QueueRow }
+  | { kind: "error"; caseId: string; message: string };
+
+const FILTERS: Array<{ key: string; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "needs_attention", label: "Needs attention" },
+  { key: "new", label: "New" },
+  { key: "takeoff", label: "Takeoff" },
+  { key: "estimating", label: "Estimating" },
+  { key: "sent", label: "Sent" },
+  { key: "customer_changes", label: "Customer changes" },
+  { key: "failed", label: "Failed" }
 ];
 
+const SORTS: Array<{ key: string; label: string }> = [
+  { key: "newest_received", label: "Newest received" },
+  { key: "oldest_received", label: "Oldest received" },
+  { key: "recent_activity", label: "Recent activity" },
+  { key: "status", label: "Status" },
+  { key: "customer", label: "Customer / project" }
+];
+
+function statusTone(status?: string): string {
+  const s = String(status || "").toLowerCase();
+  if (s.includes("fail") || s.includes("attention") || s.includes("change")) return "danger";
+  if (s.includes("approved") || s.includes("sent") || s.includes("accepted")) return "success";
+  if (s.includes("processing") || s.includes("review") || s.includes("progress")) return "warn";
+  return "neutral";
+}
+
 /**
- * Private Studio Estimate Queue — uses existing `/api/quote-intake/*` only.
- * Explicit Refresh / Sync inbox; no polling; no Takeoff automation.
+ * Central Elite 100 Estimate Queue dashboard.
  */
 export default function EstimateQueuePage({
   authToken,
   selectedCaseId,
   onSelectCase,
-  onOpenEstimate,
-  apiClient: injectedClient
+  onOpenEstimate
 }: EstimateQueuePageProps) {
-  const client = useMemo(
-    () => injectedClient ?? createQuoteIntakeApiClient(),
-    [injectedClient]
-  );
-
-  const [loadState, setLoadState] = useState<LoadState>({ kind: "idle" });
-  const [filter, setFilter] = useState<QuoteIntakeQueueFilter>(EMPTY_QUEUE_FILTER);
+  const intakeClient = useMemo(() => createQuoteIntakeApiClient(), []);
+  const [rows, setRows] = useState<QueueRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [attentionCount, setAttentionCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [sort, setSort] = useState("newest_received");
+  const [offset, setOffset] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
   const [mailboxSyncOpen, setMailboxSyncOpen] = useState(false);
+  const [preview, setPreview] = useState<PreviewState>({ kind: "closed" });
+  const limit = 50;
 
-  const [detailCase, setDetailCase] = useState<QuoteIntakeCaseDto | null>(null);
-  const [auditEvents, setAuditEvents] = useState<QuoteIntakeAuditEventDto[]>([]);
-  const [takeoffLinksByCase, setTakeoffLinksByCase] = useState<
-    Record<string, QuoteIntakeTakeoffLinkDto[]>
-  >({});
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 280);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
-  const clearAuthorizedCaseData = useCallback(() => {
-    setDetailCase(null);
-    setAuditEvents([]);
-    setDetailError(null);
-  }, []);
-
-  const loadQueue = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!authToken) {
-      clearAuthorizedCaseData();
-      setTakeoffLinksByCase({});
-      setLoadState({
-        kind: "unauthorized",
-        message: "Sign in to view the Estimate Queue.",
-        cases: []
-      });
+      setRows([]);
+      setError("Sign in to view the Estimate Queue.");
       return;
     }
-    clearAuthorizedCaseData();
-    setLoadState({ kind: "loading" });
+    setLoading(true);
+    setError(null);
     try {
-      const config = (await client.getConfig(authToken)) as QuoteIntakeSafeConfig;
-      if (config.quoteIntakeApiEnabled === false) {
-        clearAuthorizedCaseData();
-        setTakeoffLinksByCase({});
-        setLoadState({
-          kind: "api_disabled",
-          message: "Quote Intake API is not enabled on the server.",
-          cases: []
-        });
-        return;
-      }
-      const cases = (await client.listCases(authToken)) as QuoteIntakeCaseDto[];
-      const linkEntries = await Promise.all(
-        cases.slice(0, 50).map(async (c) => {
-          try {
-            const links = (await client.listTakeoffLinks(authToken, c.id)) as QuoteIntakeTakeoffLinkDto[];
-            return [c.id, links] as const;
-          } catch {
-            return [c.id, [] as QuoteIntakeTakeoffLinkDto[]] as const;
-          }
-        })
-      );
-      setTakeoffLinksByCase(Object.fromEntries(linkEntries));
-      setLoadState({ kind: "ready", cases, config });
-    } catch (err) {
-      const classified = classifyQuoteIntakeError(err);
-      clearAuthorizedCaseData();
-      setTakeoffLinksByCase({});
-      if (classified.kind === "unauthorized") {
-        setLoadState({ kind: "unauthorized", message: classified.message, cases: [] });
-        return;
-      }
-      if (classified.kind === "forbidden") {
-        setLoadState({ kind: "forbidden", message: classified.message, cases: [] });
-        return;
-      }
-      if (classified.kind === "not_found") {
-        setLoadState({
-          kind: "api_disabled",
-          message: "Quote Intake API is unavailable or disabled.",
-          cases: []
-        });
-        return;
-      }
-      setLoadState({
+      const body = (await fetchEstimateQueue(authToken, {
+        search: debouncedSearch,
+        filter,
+        sort,
+        limit,
+        offset
+      })) as {
+        cases?: QueueRow[];
+        total?: number;
+        attentionCount?: number;
+      };
+      setRows(Array.isArray(body.cases) ? body.cases : []);
+      setTotal(Number(body.total) || 0);
+      setAttentionCount(Number(body.attentionCount) || 0);
+    } catch (e) {
+      setRows([]);
+      setError(e instanceof ApiError ? e.message : "Unable to load Estimate Queue");
+    } finally {
+      setLoading(false);
+    }
+  }, [authToken, debouncedSearch, filter, sort, offset, refreshTick]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [debouncedSearch, filter, sort]);
+
+  const rangeLabel = useMemo(() => {
+    if (!total) return "No matching cases";
+    const start = offset + 1;
+    const end = Math.min(offset + rows.length, total);
+    return `Showing ${start}–${end} of ${total}`;
+  }, [offset, rows.length, total]);
+
+  async function openPreview(row: QueueRow) {
+    if (!authToken) return;
+    onSelectCase(row.id);
+    setPreview({ kind: "loading", caseId: row.id });
+    try {
+      void recordEstimateQueueOpened(authToken, row.id).catch(() => {});
+      const body = (await fetchEstimateQueuePreview(authToken, row.id)) as {
+        preview?: Record<string, unknown>;
+        case?: QueueRow;
+      };
+      setPreview({
+        kind: "ready",
+        caseId: row.id,
+        preview: body.preview || {},
+        row: body.case || row
+      });
+    } catch (e) {
+      setPreview({
         kind: "error",
-        message: classified.message,
-        cases: []
+        caseId: row.id,
+        message: e instanceof ApiError ? e.message : "Unable to load preview"
       });
     }
-  }, [authToken, client, clearAuthorizedCaseData]);
+  }
 
-  useEffect(() => {
-    void loadQueue();
-  }, [loadQueue, refreshTick]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadDetail() {
-      if (!selectedCaseId || !authToken) {
-        setDetailCase(null);
-        setAuditEvents([]);
-        setDetailError(null);
-        setLoadingDetail(false);
-        return;
-      }
-      setLoadingDetail(true);
-      setDetailError(null);
-      setDetailCase(null);
-      setAuditEvents([]);
-      try {
-        const [row, events] = await Promise.all([
-          client.getCase(authToken, selectedCaseId),
-          client.listAuditEvents(authToken, selectedCaseId)
-        ]);
-        if (cancelled) return;
-        setDetailCase(row as QuoteIntakeCaseDto);
-        setAuditEvents(events as QuoteIntakeAuditEventDto[]);
-      } catch (err) {
-        if (cancelled) return;
-        const classified = classifyQuoteIntakeError(err);
-        setDetailCase(null);
-        setAuditEvents([]);
-        setDetailError(classified.message);
-      } finally {
-        if (!cancelled) setLoadingDetail(false);
-      }
+  async function openStudio(caseId: string, openTarget?: string) {
+    if (authToken) {
+      void recordEstimateQueueOpened(authToken, caseId).catch(() => {});
     }
-    void loadDetail();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedCaseId, authToken, client, refreshTick]);
+    setPreview({ kind: "closed" });
+    onOpenEstimate(caseId, { openTarget });
+  }
 
-  const readyCases = loadState.kind === "ready" ? loadState.cases : [];
-  const config = loadState.kind === "ready" ? loadState.config : null;
-  const summary = useMemo(() => computeQueueSummaryCounts(readyCases), [readyCases]);
-  const visible = useMemo(
-    () => filterQuoteIntakeCases(readyCases, filter),
-    [readyCases, filter]
-  );
-
-  const patchFilter = (partial: Partial<QuoteIntakeQueueFilter>) => {
-    setFilter((prev) => ({ ...prev, ...partial }));
-  };
-
-  const repoMode = String(config?.repositoryMode ?? "").toLowerCase();
-  const memoryFallback = repoMode === "memory";
+  async function assignToMe(caseId: string) {
+    if (!authToken) return;
+    try {
+      // Soft self-assign via opened endpoint (assigns when unassigned).
+      await recordEstimateQueueOpened(authToken, caseId);
+      setRefreshTick((n) => n + 1);
+    } catch {
+      /* ignore */
+    }
+  }
 
   return (
-    <div className="eq-root" data-testid="estimate-queue">
-      <header className="eq-header">
+    <div className="eq-dashboard" data-testid="estimate-queue-dashboard">
+      <header className="eq-dash-header">
         <div>
           <h1 className="eq-title">Estimate Queue</h1>
           <p className="eq-subtitle">
-            Private Studio inbox for quote intake cases · uses eliteOS Brain Quote Intake APIs
+            Elite 100 intake → Takeoff → estimate → Digital Estimate → customer review.
           </p>
         </div>
         <div className="eq-header-actions">
-          {config?.mailboxSyncEnabled ? (
-            <button
-              type="button"
-              className="eq-btn-secondary"
-              onClick={() => setMailboxSyncOpen(true)}
-              disabled={!authToken}
-            >
-              Sync inbox
-            </button>
-          ) : null}
           <button
             type="button"
-            className="eq-btn-primary"
+            className="eq-btn-secondary"
             onClick={() => setRefreshTick((n) => n + 1)}
-            disabled={loadState.kind === "loading"}
+            disabled={loading}
           >
             Refresh
+          </button>
+          <button type="button" className="eq-btn-primary" onClick={() => setMailboxSyncOpen(true)}>
+            Sync inbox
           </button>
         </div>
       </header>
 
-      {loadState.kind === "ready" && memoryFallback ? (
-        <div className="eq-state eq-state--warn" role="status" data-testid="eq-memory-fallback">
-          <strong>In-memory intake store.</strong> Cases are not persisted to Supabase on this Brain
-          instance — the queue works against the repository fallback and will reset when the API
-          process restarts.
+      <div className="eq-dash-metrics" role="list">
+        <div className="eq-metric" role="listitem">
+          <div className="eq-metric-label">In queue</div>
+          <div className="eq-metric-value">{total}</div>
         </div>
-      ) : null}
+        <button
+          type="button"
+          className={`eq-metric eq-metric--btn ${filter === "needs_attention" ? "is-active" : ""}`}
+          onClick={() => setFilter("needs_attention")}
+        >
+          <div className="eq-metric-label">Needs attention</div>
+          <div className="eq-metric-value">{attentionCount}</div>
+        </button>
+      </div>
 
-      {mailboxSyncOpen && authToken ? (
-        <MailboxSyncModal
-          open={mailboxSyncOpen}
-          authToken={authToken}
-          apiClient={client}
-          mailboxDisplay={config?.mailboxDisplay ?? null}
-          onClose={() => setMailboxSyncOpen(false)}
-          onImported={() => setRefreshTick((n) => n + 1)}
-        />
-      ) : null}
-
-      {loadState.kind === "loading" || loadState.kind === "idle" ? (
-        <div className="eq-state" role="status">
-          Loading queue…
-        </div>
-      ) : null}
-
-      {loadState.kind === "unauthorized" ? (
-        <div className="eq-state eq-state--warn" role="alert">
-          <strong>Sign in required.</strong> {loadState.message}
-        </div>
-      ) : null}
-
-      {loadState.kind === "forbidden" ? (
-        <div className="eq-state eq-state--warn" role="alert" data-testid="eq-permission-denied">
-          <strong>Permission denied.</strong> {loadState.message}
-          <p className="eq-muted">
-            Quote Intake requires AI Takeoff head access on the Brain. No case data is shown.
-          </p>
-        </div>
-      ) : null}
-
-      {loadState.kind === "api_disabled" ? (
-        <div className="eq-state eq-state--warn" role="status" data-testid="eq-api-disabled">
-          <strong>Quote Intake API unavailable.</strong> {loadState.message}
-        </div>
-      ) : null}
-
-      {loadState.kind === "error" ? (
-        <div className="eq-state eq-state--error" role="alert">
-          <strong>Could not load queue.</strong> {loadState.message}
-          <div>
-            <button type="button" className="eq-btn-secondary" onClick={() => setRefreshTick((n) => n + 1)}>
-              Retry
+      <section className="eq-dash-filters" aria-label="Queue filters">
+        <label className="eq-search">
+          <span className="eq-muted">Search</span>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Customer, project, sender, status, filename…"
+            data-testid="eq-queue-search"
+          />
+        </label>
+        <div className="eq-filter-chips" role="tablist" aria-label="Status filters">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              role="tab"
+              aria-selected={filter === f.key}
+              className={`eq-chip ${filter === f.key ? "is-active" : ""}`}
+              onClick={() => setFilter(f.key)}
+            >
+              {f.label}
             </button>
-          </div>
+          ))}
+        </div>
+        <label>
+          <span className="eq-muted">Sort</span>
+          <select value={sort} onChange={(e) => setSort(e.target.value)} data-testid="eq-queue-sort">
+            {SORTS.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="eq-muted eq-range">{rangeLabel}</div>
+      </section>
+
+      {error ? (
+        <div className="eq-state eq-state--error" role="alert">
+          {error}
         </div>
       ) : null}
 
-      {loadState.kind === "ready" ? (
-        <>
-          <section className="eq-summary" aria-label="Queue summary">
-            <div className="eq-summary-meta">{summary.total} cases</div>
-            <div className="eq-summary-grid">
-              {SUMMARY_TILES.map((tile) => {
-                const active = filter.summaryBucket === tile.bucket;
-                return (
-                  <button
-                    key={tile.bucket}
-                    type="button"
-                    className={`eq-summary-tile${active ? " is-active" : ""}`}
-                    aria-pressed={active}
-                    onClick={() => patchFilter({ summaryBucket: active ? "" : tile.bucket })}
-                  >
-                    <span className="eq-summary-value">{summary[tile.key]}</span>
-                    <span className="eq-summary-label">{tile.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
+      <div className="eq-table-wrap">
+        <table className="eq-table" data-testid="eq-queue-table">
+          <thead>
+            <tr>
+              <th>Customer / project</th>
+              <th className="hide-sm">Sender</th>
+              <th>Received</th>
+              <th className="hide-md">Attachments</th>
+              <th className="hide-md">AI Takeoff</th>
+              <th className="hide-md">Estimate</th>
+              <th className="hide-sm">Digital Estimate</th>
+              <th>Workflow</th>
+              <th className="hide-sm">Activity</th>
+              <th className="hide-md">Assignee</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && !rows.length ? (
+              <tr>
+                <td colSpan={10} className="eq-muted">
+                  Loading queue…
+                </td>
+              </tr>
+            ) : null}
+            {!loading && !rows.length ? (
+              <tr>
+                <td colSpan={10} className="eq-muted">
+                  No cases match these filters.
+                </td>
+              </tr>
+            ) : null}
+            {rows.map((row) => {
+              const selected = selectedCaseId === row.id;
+              return (
+                <tr
+                  key={row.id}
+                  className={[
+                    selected ? "is-selected" : "",
+                    row.needsAttention ? "needs-attention" : "",
+                    row.indicators?.unread ? "is-unread" : ""
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  data-testid={`eq-queue-row-${row.id}`}
+                  onClick={() => void openPreview(row)}
+                >
+                  <td>
+                    <div className="eq-cell-primary">
+                      {row.needsAttention ? <span className="eq-attn-dot" title="Needs attention" /> : null}
+                      {safeText(row.customerName)} · {safeText(row.projectName)}
+                    </div>
+                    <div className="eq-cell-meta">{row.id.slice(0, 8)}…</div>
+                  </td>
+                  <td className="hide-sm">{safeText(row.senderLabel)}</td>
+                  <td>
+                    <div>{formatReceivedAt(row.receivedAt || null)}</div>
+                    <div className="eq-cell-meta">{formatAge(row.receivedAt || null)}</div>
+                  </td>
+                  <td className="hide-md">{safeText(row.attachmentStatus, "—")}</td>
+                  <td className="hide-md">
+                    <span className={`eq-pill eq-pill--${statusTone(row.aiTakeoffStatus)}`}>
+                      {safeText(row.aiTakeoffStatus, "—")}
+                    </span>
+                  </td>
+                  <td className="hide-md">
+                    <span className={`eq-pill eq-pill--${statusTone(row.estimateStatus)}`}>
+                      {safeText(row.estimateStatus, "—")}
+                    </span>
+                  </td>
+                  <td className="hide-sm">
+                    <span className={`eq-pill eq-pill--${statusTone(row.digitalEstimateStatus)}`}>
+                      {safeText(row.digitalEstimateStatus, "—")}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`eq-pill eq-pill--${statusTone(row.workflowStatus)}`}>
+                      {safeText(row.workflowStatus, "—")}
+                    </span>
+                    {row.indicators?.customerRequestedReview ? (
+                      <div className="eq-cell-meta">Customer review</div>
+                    ) : null}
+                  </td>
+                  <td className="hide-sm">
+                    <div>{formatReceivedAt(row.lastActivityAt || null)}</div>
+                    <div className="eq-cell-meta">{formatAge(row.lastActivityAt || null)}</div>
+                  </td>
+                  <td className="hide-md">{safeText(row.assignedEstimatorLabel, "Unassigned")}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
-          <section className="eq-filters" aria-label="Queue filters">
-            <label className="eq-field eq-field--grow">
-              <span>Search</span>
-              <input
-                type="search"
-                value={filter.search}
-                placeholder="Customer, project, sender, status…"
-                onChange={(e) => patchFilter({ search: e.target.value })}
+      <div className="eq-pager">
+        <button
+          type="button"
+          className="eq-btn-secondary"
+          disabled={offset <= 0 || loading}
+          onClick={() => setOffset((o) => Math.max(0, o - limit))}
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          className="eq-btn-secondary"
+          disabled={offset + limit >= total || loading}
+          onClick={() => setOffset((o) => o + limit)}
+        >
+          Next
+        </button>
+      </div>
+
+      {preview.kind !== "closed" ? (
+        <div className="eq-drawer-backdrop" role="presentation" onClick={() => setPreview({ kind: "closed" })}>
+          <aside
+            className="eq-drawer"
+            role="dialog"
+            aria-label="Case preview"
+            data-testid="eq-queue-preview"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="eq-drawer-header">
+              <h2>Case preview</h2>
+              <button type="button" className="eq-btn-secondary" onClick={() => setPreview({ kind: "closed" })}>
+                Close
+              </button>
+            </header>
+            {preview.kind === "loading" ? <p className="eq-muted">Loading preview…</p> : null}
+            {preview.kind === "error" ? (
+              <p className="eq-state eq-state--error" role="alert">
+                {preview.message}
+              </p>
+            ) : null}
+            {preview.kind === "ready" ? (
+              <QueuePreviewBody
+                preview={preview.preview}
+                row={preview.row}
+                onOpenStudio={() =>
+                  void openStudio(
+                    preview.caseId,
+                    String(preview.preview.openTarget || preview.row.openTarget || "takeoff")
+                  )
+                }
+                onReviewTakeoff={() => void openStudio(preview.caseId, "takeoff")}
+                onOpenDigital={() => void openStudio(preview.caseId, "digital")}
+                onOpenReview={() => void openStudio(preview.caseId, "review")}
+                onAssign={() => void assignToMe(preview.caseId)}
               />
-            </label>
-            <label className="eq-field">
-              <span>Status</span>
-              <select value={filter.status} onChange={(e) => patchFilter({ status: e.target.value })}>
-                <option value="">All statuses</option>
-                {QUOTE_INTAKE_STATUS_OPTIONS.map((s) => (
-                  <option key={s} value={s}>
-                    {labelQuoteIntakeStatus(s)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="eq-field">
-              <span>Priority</span>
-              <select
-                value={filter.priority}
-                onChange={(e) => patchFilter({ priority: e.target.value })}
-              >
-                <option value="">All priorities</option>
-                <option value="low">Low</option>
-                <option value="normal">Normal</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </label>
-          </section>
-
-          <div className="eq-layout">
-            <div className="eq-table-wrap">
-              {visible.length === 0 ? (
-                <div className="eq-empty" data-testid="eq-empty">
-                  <h2>No cases match</h2>
-                  <p>
-                    {readyCases.length === 0
-                      ? "Sync the inbox or wait for new intake, then refresh."
-                      : "Adjust filters or refresh after new intake arrives."}
-                  </p>
-                </div>
-              ) : (
-                <table className="eq-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Customer / project</th>
-                      <th scope="col">Sender</th>
-                      <th scope="col">Received</th>
-                      <th scope="col">Attachments</th>
-                      <th scope="col">PDF</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Takeoff</th>
-                      <th scope="col">Missing info</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visible.map((c) => {
-                      const selected = c.id === selectedCaseId;
-                      const received = caseReceivedAt(c);
-                      const reasons = caseReasonSnippets(c);
-                      const links = takeoffLinksByCase[c.id] ?? [];
-                      const activeLink =
-                        links.find((l) => l.takeoffJobId) || links[0] || null;
-                      const takeoffDisplay = deriveEstimateTakeoffDisplayStatus({
-                        takeoffJobId: activeLink?.takeoffJobId,
-                        linkStatus: activeLink?.relationshipStatus,
-                        caseStatus: c.status
-                      });
-                      return (
-                        <tr
-                          key={c.id}
-                          className={selected ? "is-selected" : undefined}
-                          tabIndex={0}
-                          aria-selected={selected}
-                          onClick={() => onSelectCase(c.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              onSelectCase(c.id);
-                            }
-                          }}
-                        >
-                          <td>
-                            <div className="eq-cell-primary">{caseCustomerProjectLabel(c)}</div>
-                            <div className="eq-cell-meta">{c.id}</div>
-                          </td>
-                          <td>{caseSenderLabel(c)}</td>
-                          <td>
-                            <div className="eq-cell-primary">{formatReceivedAt(received)}</div>
-                            <div className="eq-cell-meta">{formatAge(received)}</div>
-                          </td>
-                          <td>{caseAttachmentStatusLabel(c)}</td>
-                          <td>{caseSupportedPdfLabel(c)}</td>
-                          <td>
-                            <span className="eq-pill">{caseStatusLabel(c)}</span>
-                            <span className="eq-sr-only">{c.status}</span>
-                          </td>
-                          <td>
-                            <span className="eq-pill eq-pill--takeoff">{takeoffDisplay}</span>
-                          </td>
-                          <td>
-                            {reasons.length ? (
-                              <span className="eq-cell-clip" title={caseMissingInfoLabel(c)}>
-                                {caseMissingInfoLabel(c) === "—"
-                                  ? reasons.join(", ")
-                                  : caseMissingInfoLabel(c)}
-                              </span>
-                            ) : (
-                              <span className="eq-muted">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            <EstimateQueueCaseDetail
-              caseRow={detailCase}
-              auditEvents={auditEvents}
-              loadingDetail={loadingDetail}
-              detailError={detailError}
-              onClose={() => onSelectCase(null)}
-              onOpenEstimate={onOpenEstimate}
-            />
-          </div>
-        </>
+            ) : null}
+          </aside>
+        </div>
       ) : null}
+
+      <MailboxSyncModal
+        open={mailboxSyncOpen}
+        authToken={authToken || ""}
+        apiClient={intakeClient}
+        onClose={() => setMailboxSyncOpen(false)}
+        onImported={() => setRefreshTick((n) => n + 1)}
+      />
+    </div>
+  );
+}
+
+function QueuePreviewBody({
+  preview,
+  row,
+  onOpenStudio,
+  onReviewTakeoff,
+  onOpenDigital,
+  onOpenReview,
+  onAssign
+}: {
+  preview: Record<string, unknown>;
+  row: QueueRow;
+  onOpenStudio: () => void;
+  onReviewTakeoff: () => void;
+  onOpenDigital: () => void;
+  onOpenReview: () => void;
+  onAssign: () => void;
+}) {
+  const ai = (preview.aiTakeoff || {}) as Record<string, unknown>;
+  const cutouts = (ai.cutouts || {}) as Record<string, number>;
+  const attachments = Array.isArray(preview.attachments) ? preview.attachments : [];
+  const timeline = Array.isArray(preview.timeline) ? preview.timeline : [];
+  const activity = (preview.activity || {}) as Record<string, unknown>;
+
+  return (
+    <div className="eq-preview-body">
+      <dl className="eq-status-dl">
+        <div>
+          <dt>Customer</dt>
+          <dd>{safeText(preview.customerName as string)}</dd>
+        </div>
+        <div>
+          <dt>Project</dt>
+          <dd>{safeText(preview.projectName as string)}</dd>
+        </div>
+        <div>
+          <dt>Sender</dt>
+          <dd>{safeText(preview.senderLabel as string)}</dd>
+        </div>
+        <div>
+          <dt>Received</dt>
+          <dd>{formatReceivedAt((preview.receivedAt as string) || null)}</dd>
+        </div>
+        <div>
+          <dt>Workflow</dt>
+          <dd>{safeText(preview.workflowStatus as string)}</dd>
+        </div>
+        <div>
+          <dt>AI Takeoff</dt>
+          <dd>{safeText(String(ai.status || row.aiTakeoffStatus))}</dd>
+        </div>
+        <div>
+          <dt>Estimate</dt>
+          <dd>{safeText(preview.estimateStatus as string)}</dd>
+        </div>
+        <div>
+          <dt>Digital Estimate</dt>
+          <dd>{safeText(preview.digitalEstimateStatus as string)}</dd>
+        </div>
+        <div>
+          <dt>Customer review</dt>
+          <dd>{safeText(preview.customerReviewStatus as string)}</dd>
+        </div>
+      </dl>
+
+      <section>
+        <h3>Attachments</h3>
+        <ul className="eq-preview-list">
+          {attachments.length ? (
+            attachments.map((a: any) => (
+              <li key={a.id}>
+                {safeText(a.filename)} · {safeText(a.support, "unknown")}
+              </li>
+            ))
+          ) : (
+            <li className="eq-muted">No attachments</li>
+          )}
+        </ul>
+        <p className="eq-muted">PDF support: {safeText(preview.pdfSupportState as string, "none")}</p>
+      </section>
+
+      <section>
+        <h3>AI Takeoff summary</h3>
+        <p>
+          Rooms {String(ai.rooms ?? "—")} · Pieces {String(ai.pieces ?? "—")} · CT{" "}
+          {Number(ai.countertopSf ?? 0).toFixed(2)} SF · BS {Number(ai.backsplashSf ?? 0).toFixed(2)} SF
+        </p>
+        <p className="eq-muted">
+          Cutouts — kitchen {cutouts.kitchenSink ?? 0}, vanity/bar {cutouts.vanityBarSink ?? 0}, cooktop{" "}
+          {cutouts.cooktop ?? 0}, outlet {cutouts.outlet ?? 0}
+        </p>
+      </section>
+
+      <section>
+        <h3>Activity</h3>
+        <ul className="eq-preview-list">
+          {timeline.map((t: any, i: number) => (
+            <li key={`${t.at}-${i}`}>
+              {formatReceivedAt(t.at)} — {safeText(t.label)}
+            </li>
+          ))}
+          <li className="eq-muted">
+            Assignee: {safeText(activity.assignedEstimatorLabel as string, "Unassigned")}
+          </li>
+        </ul>
+      </section>
+
+      <div className="eq-drawer-actions">
+        <button type="button" className="eq-btn-primary" data-testid="eq-preview-open-studio" onClick={onOpenStudio}>
+          Open in Estimate Studio
+        </button>
+        <button type="button" className="eq-btn-secondary" onClick={onReviewTakeoff}>
+          Review AI Takeoff
+        </button>
+        <button type="button" className="eq-btn-secondary" onClick={onOpenDigital}>
+          Open Digital Estimate
+        </button>
+        <button type="button" className="eq-btn-secondary" onClick={onOpenReview}>
+          View customer review
+        </button>
+        <button type="button" className="eq-btn-secondary" onClick={onAssign}>
+          Assign to me
+        </button>
+      </div>
     </div>
   );
 }

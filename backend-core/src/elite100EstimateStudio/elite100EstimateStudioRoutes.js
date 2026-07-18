@@ -39,6 +39,7 @@ import { redactDigitalEstimateTokenPath } from "../digitalEstimate/digitalEstima
 import { requireHeadAccess } from "../auth/headAccessMiddleware.js";
 import express from "express";
 import { createStudioEstimateService } from "./studioEstimateService.mjs";
+import { createStudioEstimateQueueService } from "./studioEstimateQueueService.mjs";
 import { createStudioEstimateDigitalEstimateService } from "./studioEstimateDigitalEstimateService.mjs";
 import { createStudioReviewRequestService } from "./studioReviewRequestService.mjs";
 import { searchStudioPartnerAccounts, loadStudioPartnerAccount } from "./studioPartnerAccountSearch.mjs";
@@ -461,6 +462,10 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
   const studioEstimateService =
     deps.studioEstimateService || createStudioEstimateService({ env, getSupabase });
 
+  const studioEstimateQueueService =
+    deps.studioEstimateQueueService ||
+    createStudioEstimateQueueService({ env, getSupabase });
+
   let configurationStudioService = deps.configurationStudioService || null;
   let configurationRepository = deps.configurationRepository || null;
   if (!configurationStudioService && isDigitalEstimateConfigurationEnabled(env)) {
@@ -842,6 +847,109 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
     }
     return studioReviewRequestService;
   }
+
+  app.get(
+    "/api/elite100-estimate-studio/queue",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioEstimateQueueService.listQueue({
+          organizationId,
+          query: req.query || {}
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("queue list failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load estimate queue",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/queue/:caseId/preview",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioEstimateQueueService.getPreview({
+          organizationId,
+          caseId: req.params.caseId
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("queue preview failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load queue preview",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/queue/:caseId/opened",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioEstimateQueueService.recordOpened({
+          organizationId,
+          caseId: req.params.caseId,
+          actorUserId: req.user?.id ?? null
+        });
+        auditStudioEstimate("queue.opened", req, { caseId: req.params.caseId });
+        res.json(result);
+      } catch (e) {
+        logStudio("queue opened failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to record open",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/queue/:caseId/assign",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await studioEstimateQueueService.assignEstimator({
+          organizationId,
+          caseId: req.params.caseId,
+          assignedEstimatorUserId: body.assignedEstimatorUserId ?? null,
+          actorUserId: req.user?.id ?? null
+        });
+        auditStudioEstimate("queue.assign", req, {
+          caseId: req.params.caseId,
+          assignedEstimatorUserId: result.assignedEstimatorUserId
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("queue assign failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to assign estimator",
+          code: e?.code
+        });
+      }
+    }
+  );
 
   app.get(
     "/api/elite100-estimate-studio/review-requests",

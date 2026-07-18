@@ -16,6 +16,7 @@ import EstimateScopePanel from "./EstimateScopePanel";
 type Props = {
   authToken: string;
   caseId: string;
+  initialFocus?: "takeoff" | "scope" | "digital" | "review" | null;
   onBackToQueue: () => void;
 };
 
@@ -46,7 +47,12 @@ function aiTakeoffHeadUrl(): string {
  * Linked Takeoff workspace — resolves/creates intake→takeoff link, then embeds
  * the existing production AI Takeoff review UI for that job id.
  */
-export default function EstimateTakeoffWorkspace({ authToken, caseId, onBackToQueue }: Props) {
+export default function EstimateTakeoffWorkspace({
+  authToken,
+  caseId,
+  initialFocus = "takeoff",
+  onBackToQueue
+}: Props) {
   const client = useMemo(() => createQuoteIntakeApiClient(), []);
   const [state, setState] = useState<OpenState>({ kind: "resolving" });
 
@@ -124,6 +130,26 @@ export default function EstimateTakeoffWorkspace({ authToken, caseId, onBackToQu
       cancelled = true;
     };
   }, [authToken, caseId, client]);
+
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    const focus = initialFocus || "takeoff";
+    window.setTimeout(() => {
+      if (focus === "scope" || focus === "digital") {
+        document
+          .querySelector('[data-testid="estimate-scope-panel"]')
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (focus === "review") {
+        document
+          .querySelector('[data-testid="estimate-digital-estimate-panel"], [data-testid="estimate-scope-panel"]')
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        document
+          .querySelector('[data-testid="eq-takeoff-iframe"]')
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 120);
+  }, [state.kind, initialFocus]);
 
   const takeoffSrc =
     state.kind === "ready"

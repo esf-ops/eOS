@@ -26,6 +26,7 @@ assert.ok(app.includes("Estimate Queue"));
 assert.ok(app.includes("EstimateQueuePage"));
 assert.ok(app.includes("EstimateTakeoffWorkspace") || app.includes("estimate-workspace"));
 assert.ok(queue.includes("Sync inbox"));
+assert.ok(queue.includes("estimate-queue-dashboard"));
 assert.ok(queue.includes("mailbox/preview") === false); // path lives in api client
 assert.ok(api.includes("QUOTE_INTAKE_API_PREFIX"));
 assert.ok(api.includes("/mailbox/preview"));
@@ -40,7 +41,7 @@ assert.equal(mailbox.includes("tenantId"), false);
 assert.equal(mailbox.includes("graphUrl"), false);
 assert.ok(detail.includes("Open Estimate"));
 assert.ok(detail.includes("onOpenEstimate"));
-assert.ok(queue.includes("eq-memory-fallback"));
+assert.ok(queue.includes("Open in Estimate Studio"));
 assert.equal(queue.includes("calculateQuote"), false);
 assert.equal(app.includes("service_role"), false);
 

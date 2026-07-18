@@ -99,6 +99,9 @@ export default function StudioApp() {
   >("publications");
   const [intakeCaseId, setIntakeCaseId] = useState<string | null>(null);
   const [estimateWorkspaceCaseId, setEstimateWorkspaceCaseId] = useState<string | null>(null);
+  const [workspaceFocus, setWorkspaceFocus] = useState<
+    "takeoff" | "scope" | "digital" | "review" | null
+  >(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -430,9 +433,15 @@ export default function StudioApp() {
             authToken={sessionToken}
             selectedCaseId={intakeCaseId}
             onSelectCase={setIntakeCaseId}
-            onOpenEstimate={(caseId) => {
+            onOpenEstimate={(caseId, options) => {
               setEstimateWorkspaceCaseId(caseId);
               setIntakeCaseId(caseId);
+              const target = String(options?.openTarget || "takeoff");
+              setWorkspaceFocus(
+                target === "scope" || target === "digital" || target === "review" || target === "takeoff"
+                  ? target
+                  : "takeoff"
+              );
               setMainNav("estimate-workspace");
             }}
           />
@@ -442,9 +451,11 @@ export default function StudioApp() {
           <EstimateTakeoffWorkspace
             authToken={sessionToken}
             caseId={estimateWorkspaceCaseId}
+            initialFocus={workspaceFocus || "takeoff"}
             onBackToQueue={() => {
               setMainNav("estimate-queue");
               setEstimateWorkspaceCaseId(null);
+              setWorkspaceFocus(null);
               // Keep intakeCaseId so the queue restores the selected case.
             }}
           />

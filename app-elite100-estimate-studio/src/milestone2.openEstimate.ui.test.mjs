@@ -29,7 +29,9 @@ assert.ok(workspace.includes("Back to Estimate Queue"));
 assert.equal(workspace.includes("Approve the Takeoff in the review workspace above"), false);
 assert.ok(api.includes("/open-estimate"));
 assert.ok(api.includes("async openEstimate"));
-assert.ok(queue.includes("deriveEstimateTakeoffDisplayStatus"));
+assert.ok(workspace.includes("deriveEstimateTakeoffDisplayStatus"));
+assert.ok(queue.includes("Open in Estimate Studio") || queue.includes("onOpenEstimate"));
+assert.ok(queue.includes("openTarget") || app.includes("openTarget"));
 assert.ok(app.includes("Keep intakeCaseId") || app.includes("intakeCaseId"));
 
 // Back to queue preserves selected case: workspace clear must not clear intakeCaseId.

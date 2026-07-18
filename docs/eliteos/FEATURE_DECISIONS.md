@@ -1530,4 +1530,16 @@
 | **Impacted** | `studioReviewRequestService.mjs`, Studio review routes, `ReviewWorkspace.tsx`, `EstimateDigitalEstimatePanel.tsx`, Part 3 tests. |
 | **Out of scope** | Acceptance, mark sold, Moraware, QuickBooks, payments, automatic email/republish. |
 
+### 106. Estimate Queue lifecycle dashboard (2026-07-18)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-18 |
+| **Decision** | Estimate Queue is the estimator’s operational dashboard for Elite 100 quote lifecycle (intake → Takeoff → Studio estimate → Digital Estimate → customer review). **One derived `workflowStatus`** is computed server-side from existing intake / Takeoff / Studio estimate / publication / review-request rows — **no competing workflow-status table**. List API returns summaries only; preview loads detail on demand. Additive open/activity columns on `quote_intake_cases` (`first_opened_at`, `last_opened_at`, `last_activity_at`, `last_estimator_action`) plus assignee via existing `assigned_to`. `Accepted` / `Sold` are display-compatible placeholders only until those product slices exist. |
+| **Why** | Estimators need Quote Library–style visibility without duplicating systems or loading full Takeoff/publication payloads per row. |
+| **SQL** | `eliteos_studio_estimate_queue_v1.sql` (manual apply). |
+| **APIs** | `GET /api/elite100-estimate-studio/queue`, `GET .../queue/:caseId/preview`, `POST .../opened`, `POST .../assign`. |
+| **Impacted** | `studioEstimateQueueWorkflow.mjs`, `studioEstimateQueueService.mjs`, Studio `EstimateQueuePage`, open-target routing into Takeoff / Scope / Digital / Review. |
+| **Out of scope** | Acceptance, sold confirmation, Moraware, QuickBooks, payments, new AI behavior. |
+
 
