@@ -42,11 +42,15 @@ import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
 import {
   buildConsolidatedTakeoffSummary,
   deriveConsolidatedDisplayStatus,
-  evaluateConsolidatedApprovalGate
+  evaluateConsolidatedApprovalGate,
+  resolveConfirmAdvisories,
+  rewriteConsolidatedAdvisoryMessage
 } from "./takeoffConsolidatedApproval.mjs";
 import { buildTakeoffImportPayload } from "./takeoffImportPayload.mjs";
 import { loadReviewStateFromRaw, normalizeReviewState } from "./takeoffReviewStatus.mjs";
 import { ESTIMATOR_DECISION_CODES, HARD_BLOCKER_CODES } from "./takeoffWorkflowState.mjs";
+
+export { resolveConfirmAdvisories, rewriteConsolidatedAdvisoryMessage };
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
@@ -1071,6 +1075,7 @@ export async function approveTakeoffJob({
   dimensionEvidence = null,
   approvalMode = "legacy",
   acceptAdvisoryWarnings = false,
+  confirmAdvisories = undefined,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -1087,6 +1092,11 @@ export async function approveTakeoffJob({
   if (takeoffResult != null && !Array.isArray(takeoffResult.rooms)) {
     throw workspaceError("takeoffResult.rooms must be an array");
   }
+
+  const advisoriesConfirmed = resolveConfirmAdvisories({
+    confirmAdvisories,
+    acceptAdvisoryWarnings
+  });
 
   const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
   if (!jobRow) {
@@ -1194,9 +1204,9 @@ export async function approveTakeoffJob({
       };
       throw err;
     }
-    if (consolidatedGate.advisory.length > 0 && !acceptAdvisoryWarnings) {
+    if (consolidatedGate.advisory.length > 0 && !advisoriesConfirmed) {
       const err = workspaceError(
-        `Confirm ${consolidatedGate.advisory.length} advisory warning(s) before approval`,
+        `Confirm ${consolidatedGate.advisory.length} advisory warning(s) before approval. You may approve with these advisory warnings.`,
         422
       );
       err.approvalBlockers = {
@@ -1396,6 +1406,14 @@ export async function approveTakeoffJob({
     approvalGate,
     summary,
     importPayload: approvedSnapshot.importPayload,
+    ...(useConsolidated
+      ? {
+          advisory: consolidatedGate?.advisory ?? [],
+          advisoryCount: (consolidatedGate?.advisory ?? []).length,
+          blocking: [],
+          estimateScopeRefreshRequired: true
+        }
+      : {})
   };
 }
 
@@ -1414,6 +1432,7 @@ export async function approveTakeoffJob({
  *   reviewState?: object|null,
  *   dimensionEvidence?: object|null,
  *   acceptAdvisoryWarnings?: boolean,
+ *   confirmAdvisories?: boolean,
  *   correctionNotes?: string|null
  * }} params
  */
@@ -1426,6 +1445,7 @@ export async function approveAndBuildEstimate({
   reviewState = null,
   dimensionEvidence = null,
   acceptAdvisoryWarnings = false,
+  confirmAdvisories = undefined,
   correctionNotes = null
 }) {
   if (!isUuid(organizationId)) {
@@ -1434,6 +1454,11 @@ export async function approveAndBuildEstimate({
   if (!isUuid(takeoffJobId)) {
     throw workspaceError("takeoffJobId must be a valid UUID");
   }
+
+  const advisoriesConfirmed = resolveConfirmAdvisories({
+    confirmAdvisories,
+    acceptAdvisoryWarnings
+  });
 
   const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
   if (!jobRow) {
@@ -1520,7 +1545,7 @@ export async function approveAndBuildEstimate({
     jobStatus: String(jobRow.status ?? "")
   });
 
-  if (preflight.blocking.length > 0) {
+  if (preflight.blocking.length > 0 && !preflight.alreadyApproved) {
     const err = workspaceError(
       preflight.blocking.map((b) => b.message).join("; ") ||
         "Approval blockers must be resolved before approval",
@@ -1536,9 +1561,13 @@ export async function approveAndBuildEstimate({
     throw err;
   }
 
-  if (preflight.advisory.length > 0 && !acceptAdvisoryWarnings) {
+  if (
+    preflight.advisory.length > 0 &&
+    !advisoriesConfirmed &&
+    !preflight.alreadyApproved
+  ) {
     const err = workspaceError(
-      `Confirm ${preflight.advisory.length} advisory warning(s) before approval`,
+      `Confirm ${preflight.advisory.length} advisory warning(s) before approval. You may approve with these advisory warnings.`,
       422
     );
     err.approvalBlockers = {
@@ -1568,20 +1597,36 @@ export async function approveAndBuildEstimate({
     reviewState: preflight.reviewState,
     dimensionEvidence: dimEvidence,
     approvalMode: "consolidated",
+    confirmAdvisories: true,
     acceptAdvisoryWarnings: true
   });
 
+  const approvedResultId =
+    approved?.summary?.latestResultId ||
+    approved?.importPayload?.takeoffResultId ||
+    latestRow?.id ||
+    null;
+
   return {
     ...approved,
+    ok: true,
+    takeoffJobId,
+    reviewStatus: "approved",
     displayStatus: deriveConsolidatedDisplayStatus({
       jobStatus: "completed",
       reviewStatus: "approved",
       hasResult: true
     }),
+    approvedResultId,
     consolidatedSummary: summaryView,
     advisory: approved.advisory ?? preflight.advisory,
+    advisoryCount:
+      approved.advisoryCount ??
+      (approved.advisory ?? preflight.advisory)?.length ??
+      0,
     blocking: [],
     seededEstimateScope: true,
+    estimateScopeRefreshRequired: true,
     idempotent: Boolean(approved.idempotent)
   };
 }

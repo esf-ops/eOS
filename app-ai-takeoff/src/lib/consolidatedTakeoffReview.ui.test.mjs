@@ -26,5 +26,16 @@ assert.ok(component.includes("eliteos-takeoff-approved"));
 assert.ok(api.includes("approve-and-build-estimate"));
 assert.ok(component.includes("Add piece"));
 
-console.log("  ✓ consolidated review UI wiring");
+// Confirmation contract
+assert.ok(component.includes("confirmAdvisories"));
+assert.ok(component.includes("confirmAdvisoriesRef"));
+assert.ok(component.includes("confirm_advisory"));
+assert.ok(component.includes("ctr-approve-advisory"));
+assert.ok(api.includes("confirmAdvisories"));
+assert.ok(component.includes("You may approve with these"));
+
+// Must not keep legacy blocking language in confirm UX
+assert.ok(!component.includes("must be resolved before approval"));
+
+console.log("  ✓ consolidated review UI wiring + confirmAdvisories contract");
 console.log("\nconsolidatedTakeoffReview.ui.test.mjs — passed\n");

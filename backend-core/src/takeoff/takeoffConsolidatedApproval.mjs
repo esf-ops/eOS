@@ -81,6 +81,82 @@ const GENERIC_LEGACY_MESSAGE_RE =
   /validation error|structure has issues|do not use this takeoff|evidence\/run reconciliation/i;
 
 /**
+ * Resolve advisory-confirmation flag from request body / service args.
+ * Primary contract: confirmAdvisories. Aliases accepted for compatibility.
+ * @param {object} input
+ */
+export function resolveConfirmAdvisories(input = {}) {
+  const v =
+    input.confirmAdvisories ??
+    input.acceptAdvisoryWarnings ??
+    input.acknowledgeAdvisories ??
+    input.allowAdvisoryApproval ??
+    input.confirm;
+  return v === true || v === "1" || v === 1 || v === "true";
+}
+
+/**
+ * Rewrite legacy blocking-flavored advisory copy for consolidated mode.
+ * @param {{ code?: string, message?: string, path?: string|null, category?: string }} issue
+ */
+export function rewriteConsolidatedAdvisoryMessage(issue) {
+  const code = String(issue?.code ?? "").trim();
+  const raw = String(issue?.message ?? "").trim();
+  let message = raw;
+
+  if (
+    code === "VALIDATION_ERRORS" ||
+    /validation error/i.test(raw) ||
+    /structure has issues/i.test(raw)
+  ) {
+    message =
+      "AI validation found a possible issue; estimator review is recommended.";
+  } else if (
+    code === "QA_GATE_BLOCKED" ||
+    /do not use this takeoff/i.test(raw)
+  ) {
+    message = "AI quality checks flagged possible inconsistencies; review recommended.";
+  } else if (
+    code === "EVIDENCE_RECONCILIATION" ||
+    code.startsWith("EVIDENCE_") ||
+    code === "RUN_LENGTH_NOT_SUPPORTED_BY_EVIDENCE" ||
+    code === "RUN_DEPTH_NOT_SUPPORTED_BY_EVIDENCE" ||
+    code === "CONFLICTING_DIMENSIONS_USED_SILENTLY" ||
+    code === "DRAFT_ASSEMBLY_REVIEW_REQUIRED" ||
+    /evidence\/run reconciliation/i.test(raw)
+  ) {
+    message = "The source evidence contains inconsistencies.";
+  } else if (
+    code.startsWith("REFERENCE_TOTAL_") ||
+    code.startsWith("TOTAL_MISMATCH_") ||
+    code.startsWith("MATH_CONSISTENCY_")
+  ) {
+    message = "Review this item if it affects the estimate.";
+  } else if (
+    code === "BACKSPLASH_NEEDS_REVIEW" ||
+    code.startsWith("BACKSPLASH_") ||
+    code === "ROOM_INCOMPLETE" ||
+    code === "UNKNOWN_ROOM" ||
+    code === "INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED" ||
+    code === "NONSTANDARD_DEPTH_UNSUPPORTED" ||
+    code === "EMPTY_AREA"
+  ) {
+    message = "Review this item if it affects the estimate.";
+  } else if (/must be resolved before approval/i.test(raw)) {
+    message =
+      "AI validation found a possible issue; estimator review is recommended.";
+  }
+
+  return {
+    ...issue,
+    code: code || issue?.code,
+    message,
+    path: issue?.path ?? null,
+    category: issue?.category ?? "advisory"
+  };
+}
+
+/**
  * Mark every included room complete so ROOM_INCOMPLETE never fires.
  * @param {object} takeoffResult
  * @param {object|null} reviewState
@@ -523,6 +599,7 @@ export function evaluateConsolidatedApprovalGate(params) {
 
   const hardKeys = new Set(blocking.map((b) => `${b.code}::${b.path ?? ""}::${b.message}`));
   const advisory = [];
+  const seenAdvisory = new Set();
   for (const b of gate.blockers ?? []) {
     const code = String(b.code ?? "");
     // Never re-promote legacy codes that we intentionally demoted.
@@ -543,13 +620,11 @@ export function evaluateConsolidatedApprovalGate(params) {
         continue;
       }
     }
-    if (classifyConsolidatedSeverity(b) === "blocking") {
-      // Safety: anything that still classifies as blocking but wasn't collected
-      // from the worksheet becomes advisory (prevents legacy promotion).
-      advisory.push(b);
-      continue;
-    }
-    advisory.push(b);
+    const rewritten = rewriteConsolidatedAdvisoryMessage(b);
+    const dedupeKey = `${rewritten.code}::${rewritten.path ?? ""}::${rewritten.message}`;
+    if (seenAdvisory.has(dedupeKey)) continue;
+    seenAdvisory.add(dedupeKey);
+    advisory.push(rewritten);
   }
 
   const reviewStatus = String(params.reviewStatus ?? "needs_review").toLowerCase();

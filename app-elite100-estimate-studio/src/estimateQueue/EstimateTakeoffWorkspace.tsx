@@ -31,6 +31,7 @@ type ReadyState = {
   caseRow: QuoteIntakeCaseDto | null;
   displayStatus: string;
   scopeRefreshKey: number;
+  handoffNotice: string | null;
 };
 
 type OpenState =
@@ -41,6 +42,25 @@ type OpenState =
 function aiTakeoffHeadUrl(): string {
   const raw = String(import.meta.env.VITE_HEAD_URL_AI_TAKEOFF ?? "").trim();
   return raw.replace(/\/+$/, "") || "http://localhost:5186";
+}
+
+function isAllowedTakeoffMessageOrigin(origin: string): boolean {
+  try {
+    const allowed = new URL(aiTakeoffHeadUrl()).origin;
+    if (origin === allowed) return true;
+    // Local Vite / preview fallbacks when env points at hosted Takeoff.
+    if (
+      origin === "http://localhost:5186" ||
+      origin === "http://127.0.0.1:5186" ||
+      origin.endsWith(".eliteosfab.com") ||
+      origin.endsWith(".vercel.app")
+    ) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
 }
 
 /**
@@ -109,7 +129,8 @@ export default function EstimateTakeoffWorkspace({
             jobStatus,
             reviewStatus
           }),
-          scopeRefreshKey: 0
+          scopeRefreshKey: 0,
+          handoffNotice: null
         });
       } catch (err) {
         if (cancelled) return;
@@ -159,6 +180,7 @@ export default function EstimateTakeoffWorkspace({
   useEffect(() => {
     if (state.kind !== "ready") return;
     function onMessage(event: MessageEvent) {
+      if (!isAllowedTakeoffMessageOrigin(String(event.origin || ""))) return;
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.type !== "eliteos-takeoff-approved") return;
@@ -168,7 +190,8 @@ export default function EstimateTakeoffWorkspace({
         return {
           ...prev,
           displayStatus: "Approved",
-          scopeRefreshKey: prev.scopeRefreshKey + 1
+          scopeRefreshKey: prev.scopeRefreshKey + 1,
+          handoffNotice: "Takeoff approved — Estimate Scope refreshed."
         };
       });
       window.setTimeout(() => {
@@ -179,7 +202,51 @@ export default function EstimateTakeoffWorkspace({
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [state]);
+  }, [state.kind === "ready" ? state.takeoffJobId : null]);
+
+  // Fallback: if postMessage is missed, poll Takeoff review status and refresh scope.
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    if (state.displayStatus === "Approved") return;
+    let cancelled = false;
+    const takeoffJobId = state.takeoffJobId;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const job = (await apiGet(
+            `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
+            authToken
+          )) as { reviewStatus?: string; status?: string };
+          if (cancelled) return;
+          if (String(job.reviewStatus ?? "").toLowerCase() !== "approved") return;
+          setState((prev) => {
+            if (prev.kind !== "ready" || prev.displayStatus === "Approved") return prev;
+            return {
+              ...prev,
+              displayStatus: "Approved",
+              scopeRefreshKey: prev.scopeRefreshKey + 1,
+              handoffNotice: "Takeoff approved — Estimate Scope refreshed."
+            };
+          });
+          window.setTimeout(() => {
+            document
+              .querySelector('[data-testid="estimate-scope-panel"]')
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 50);
+        } catch {
+          /* non-fatal */
+        }
+      })();
+    }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    authToken,
+    state.kind === "ready" ? state.takeoffJobId : null,
+    state.kind === "ready" ? state.displayStatus : null
+  ]);
 
   return (
     <div className="eq-workspace" data-testid="estimate-takeoff-workspace">
@@ -220,6 +287,11 @@ export default function EstimateTakeoffWorkspace({
           {state.persistenceWarning ? (
             <div className="eq-state eq-state--warn" role="status">
               {state.persistenceWarning}
+            </div>
+          ) : null}
+          {state.handoffNotice ? (
+            <div className="eq-state" role="status" data-testid="eq-takeoff-handoff-notice">
+              {state.handoffNotice}
             </div>
           ) : null}
           <section className="eq-case-context" aria-label="Case context">

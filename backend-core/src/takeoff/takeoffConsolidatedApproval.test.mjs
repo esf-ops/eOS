@@ -10,6 +10,8 @@ import {
   countIncludedMeasurablePieces,
   deriveConsolidatedDisplayStatus,
   evaluateConsolidatedApprovalGate,
+  resolveConfirmAdvisories,
+  rewriteConsolidatedAdvisoryMessage,
   splitConsolidatedIssues
 } from "./takeoffConsolidatedApproval.mjs";
 import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
@@ -335,6 +337,13 @@ function evaluate(result, reviewState = {}, opts = {}) {
     computed.countertopExactSf > 72 && computed.countertopExactSf < 73,
     `expected ~72.33 SF, got ${computed.countertopExactSf}`
   );
+
+  for (const a of gate.advisory) {
+    assert.ok(!/must be resolved before approval/i.test(a.message), a.message);
+    assert.ok(!/do not use this takeoff/i.test(a.message), a.message);
+    assert.ok(!/structure has issues that must be resolved/i.test(a.message), a.message);
+  }
+
   console.log(
     `  ✓ T9 hosted regression: blocking=0 advisory=${gate.advisory.length} CT=${computed.countertopExactSf}`
   );
@@ -427,6 +436,28 @@ function evaluate(result, reviewState = {}, opts = {}) {
   assert.equal(legacy.canApprove, false);
   assert.ok(legacy.blockers.some((b) => b.code === "VALIDATION_ERRORS"));
   console.log("  ✓ T14 legacy gate still blocks on VALIDATION_ERRORS");
+}
+
+// 15. Advisory copy rewrite + confirmAdvisories resolver
+{
+  assert.equal(resolveConfirmAdvisories({ confirmAdvisories: true }), true);
+  assert.equal(resolveConfirmAdvisories({ acceptAdvisoryWarnings: true }), true);
+  assert.equal(resolveConfirmAdvisories({ acknowledgeAdvisories: true }), true);
+  assert.equal(resolveConfirmAdvisories({}), false);
+
+  const rewritten = rewriteConsolidatedAdvisoryMessage({
+    code: "VALIDATION_ERRORS",
+    message: "2 validation error(s) must be resolved before approval."
+  });
+  assert.match(rewritten.message, /estimator review is recommended/i);
+  assert.ok(!/must be resolved before approval/i.test(rewritten.message));
+
+  const qa = rewriteConsolidatedAdvisoryMessage({
+    code: "QA_GATE_BLOCKED",
+    message: "Do not use this takeoff — likely missing or conflicting data"
+  });
+  assert.ok(!/do not use this takeoff/i.test(qa.message));
+  console.log("  ✓ T15 confirmAdvisories resolver + advisory copy rewrite");
 }
 
 console.log("\ntakeoffConsolidatedApproval — all passed\n");

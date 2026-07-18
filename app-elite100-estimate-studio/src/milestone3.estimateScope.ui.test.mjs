@@ -29,6 +29,8 @@ assert.ok(panel.includes("Approve Takeoff &amp; Build Estimate") || panel.includ
 assert.equal(panel.includes("Approve the Takeoff in the review workspace above"), false);
 assert.ok(panel.includes("refresh-from-takeoff"));
 assert.ok(panel.includes("eq-refresh-from-takeoff"));
+assert.ok(panel.includes("force: true") || panel.includes("force: true, confirm: true") || panel.includes("confirm: true"));
+assert.ok(panel.includes("Estimate Scope seeded from approved Takeoff") || panel.includes("takeoffDisplayStatus"));
 assert.ok(panel.includes("/intake-cases/"));
 assert.ok(panel.includes("/calculate"));
 assert.ok(panel.includes("/approve"));

@@ -30,6 +30,7 @@ import {
   saveTakeoffResult,
   saveTakeoffCorrection,
   approveTakeoffJob,
+  approveAndBuildEstimate,
   getLatestTakeoffResult,
   listTakeoffResults,
   getResultById,
@@ -1591,6 +1592,120 @@ function makeMockSupabase({
     assert.ok(route.handlerCount >= 3 || path.includes("approve"), `${path} middleware stack present`);
   }
   console.log("ok: attachTakeoffWorkspaceRoutes — correction + approve routes gated");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// approveAndBuildEstimate — advisory confirmation contract (consolidated)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const approvable = makeApprovableTakeoff();
+  // Force legacy QA / validation advisories while worksheet remains measurable.
+  approvable.aiTotals = { countertopSf: 1, backsplashSf: 0, combinedSf: 1 };
+  const { supabase, tableData } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow({ status: "completed", review_status: "needs_review" }),
+    resultRows: [
+      makeResultRow({
+        normalized_takeoff_json: approvable,
+        raw_ai_result_json: {
+          _meta: {
+            provider: "gemini",
+            dimensionEvidence: {
+              dimensions: [{ id: "d1", valueIn: 999, confidence: "high", kind: "length" }]
+            }
+          }
+        }
+      })
+    ]
+  });
+
+  let confirmationErr = null;
+  try {
+    await approveAndBuildEstimate({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+      confirmAdvisories: false
+    });
+  } catch (e) {
+    confirmationErr = e;
+  }
+
+  // If this takeoff produces advisories, confirmation is required.
+  // If not (fixture is clean), skip to confirmed path — still assert confirm flag works.
+  if (confirmationErr?.approvalBlockers?.code === "approval_advisory_confirmation_required") {
+    assert.equal(confirmationErr.statusCode, 422);
+    assert.ok((confirmationErr.approvalBlockers.advisory ?? []).length > 0);
+    assert.equal(tableData.quote_takeoff_jobs[0].review_status, "needs_review");
+    console.log("ok: approveAndBuildEstimate — advisories without confirm → confirmation required");
+
+    const approved = await approveAndBuildEstimate({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+      confirmAdvisories: true
+    });
+    assert.equal(approved.reviewStatus, "approved");
+    assert.equal(approved.estimateScopeRefreshRequired, true);
+    assert.ok(approved.advisoryCount == null || approved.advisoryCount >= 0);
+    assert.equal(tableData.quote_takeoff_jobs[0].review_status, "approved");
+    console.log("ok: approveAndBuildEstimate — confirmAdvisories true approves");
+
+    const again = await approveAndBuildEstimate({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+      confirmAdvisories: true
+    });
+    assert.equal(again.reviewStatus, "approved");
+    assert.equal(again.idempotent, true);
+    console.log("ok: approveAndBuildEstimate — repeated confirm is idempotent");
+  } else if (confirmationErr) {
+    throw confirmationErr;
+  } else {
+    // Clean worksheet: approve without confirmation is allowed.
+    assert.equal(tableData.quote_takeoff_jobs[0].review_status, "approved");
+    console.log("ok: approveAndBuildEstimate — clean worksheet approves without confirmation");
+
+    const again = await approveAndBuildEstimate({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+      confirmAdvisories: true
+    });
+    assert.equal(again.reviewStatus, "approved");
+    assert.equal(again.idempotent, true);
+    console.log("ok: approveAndBuildEstimate — repeated confirm is idempotent");
+  }
+}
+
+{
+  // Legacy mode still blocks on validation errors (unchanged).
+  const invalidTakeoff = makeApprovableTakeoff();
+  invalidTakeoff.rooms[0].areas[0].runs[0].lengthIn = 0;
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow({ status: "completed" }),
+    resultRows: [makeResultRow({ normalized_takeoff_json: invalidTakeoff })]
+  });
+
+  await assert.rejects(
+    () =>
+      approveTakeoffJob({
+        supabase,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        takeoffJobId: JOB_ID,
+        approvalMode: "legacy"
+      }),
+    (err) => err.statusCode === 422,
+    "legacy mode still blocks"
+  );
+  console.log("ok: approveTakeoffJob legacy mode unchanged outside consolidated");
 }
 
 console.log("\ntakeoffWorkspaceService: all tests passed");

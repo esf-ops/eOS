@@ -365,8 +365,13 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         const takeoffResult = body.takeoffResult ?? null;
         const reviewState = body.reviewState ?? null;
         const dimensionEvidence = body.dimensionEvidence ?? null;
-        const acceptAdvisoryWarnings =
-          body.acceptAdvisoryWarnings === true || body.acceptAdvisoryWarnings === "1";
+        const confirmAdvisories =
+          body.confirmAdvisories === true ||
+          body.confirmAdvisories === "1" ||
+          body.acceptAdvisoryWarnings === true ||
+          body.acceptAdvisoryWarnings === "1" ||
+          body.acknowledgeAdvisories === true ||
+          body.allowAdvisoryApproval === true;
 
         const result = await approveAndBuildEstimate({
           supabase,
@@ -376,7 +381,8 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
           takeoffResult,
           reviewState,
           dimensionEvidence,
-          acceptAdvisoryWarnings,
+          confirmAdvisories,
+          acceptAdvisoryWarnings: confirmAdvisories,
           correctionNotes:
             typeof body.correctionNotes === "string" ? body.correctionNotes : null
         });

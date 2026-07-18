@@ -251,6 +251,9 @@ export async function approveAndBuildEstimate(
     takeoffResult?: unknown;
     reviewState?: unknown;
     dimensionEvidence?: unknown;
+    /** Primary advisory-confirmation contract for consolidated approval. */
+    confirmAdvisories?: boolean;
+    /** Compatibility alias — same meaning as confirmAdvisories. */
     acceptAdvisoryWarnings?: boolean;
     correctionNotes?: string | null;
   }
@@ -259,8 +262,11 @@ export async function approveAndBuildEstimate(
     displayStatus?: string;
     consolidatedSummary?: Record<string, unknown>;
     advisory?: ApprovalBlockerItem[];
+    advisoryCount?: number;
     blocking?: ApprovalBlockerItem[];
     seededEstimateScope?: boolean;
+    estimateScopeRefreshRequired?: boolean;
+    approvedResultId?: string | null;
     idempotent?: boolean;
     importPayload?: unknown;
   }
@@ -274,8 +280,11 @@ export async function approveAndBuildEstimate(
       displayStatus?: string;
       consolidatedSummary?: Record<string, unknown>;
       advisory?: ApprovalBlockerItem[];
+      advisoryCount?: number;
       blocking?: ApprovalBlockerItem[];
       seededEstimateScope?: boolean;
+      estimateScopeRefreshRequired?: boolean;
+      approvedResultId?: string | null;
       idempotent?: boolean;
       importPayload?: unknown;
     }
