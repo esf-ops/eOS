@@ -28,6 +28,7 @@ assert.ok(workspace.includes("eliteos-takeoff-approved"));
 assert.ok(workspace.includes("isAllowedTakeoffMessageOrigin"));
 assert.ok(workspace.includes("eq-takeoff-handoff-notice") || workspace.includes("handoffNotice"));
 assert.ok(workspace.includes("scopeRefreshKey"));
+assert.ok(workspace.includes("2000") || workspace.includes("setInterval"));
 assert.ok(workspace.includes("Back to Estimate Queue"));
 assert.equal(workspace.includes("Approve the Takeoff in the review workspace above"), false);
 assert.ok(api.includes("/open-estimate"));

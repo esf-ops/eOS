@@ -11,13 +11,27 @@ import {
   saveTakeoffCorrection,
   type ApprovalBlockerItem
 } from "../lib/api";
+import {
+  approveButtonLabel,
+  runConsolidatedApproveClick
+} from "../lib/consolidatedApproveClick.mjs";
 import { getSupabase } from "../lib/supabase";
 import TakeoffPlanPreviewPanel, {
   type PlanPreviewFileMeta
 } from "./TakeoffPlanPreviewPanel";
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
-type ApproveStatus = "idle" | "approving" | "approved" | "error" | "confirm_advisory";
+type ApproveStatus = "idle" | "approving" | "approved" | "error";
+
+type ApprovalDiagnostic = {
+  confirmAdvisories: boolean;
+  httpStatus: number | null;
+  reviewStatus: string | null;
+  errorCode: string | null;
+  message: string | null;
+  blockingCount: number;
+  advisoryCount: number;
+};
 
 type PieceRow = {
   key: string;
@@ -223,11 +237,10 @@ export default function ConsolidatedTakeoffReview() {
   const [blocking, setBlocking] = useState<ApprovalBlockerItem[]>([]);
   const [advisory, setAdvisory] = useState<ApprovalBlockerItem[]>([]);
   const [summary, setSummary] = useState<Record<string, unknown> | null>(null);
+  const [approvalDiag, setApprovalDiag] = useState<ApprovalDiagnostic | null>(null);
   const saveTimer = useRef<number | null>(null);
   const draftRef = useRef(draft);
   const excludedRef = useRef(excludedRunIds);
-  /** Sticky confirm intent — survives re-renders while the confirm request is in flight. */
-  const confirmAdvisoriesRef = useRef(false);
   draftRef.current = draft;
   excludedRef.current = excludedRunIds;
 
@@ -277,11 +290,11 @@ export default function ConsolidatedTakeoffReview() {
     setDraft(result);
     const rs = latest?.reviewState || {};
     setExcludedRunIds(new Set(rs.excludedRunIds ?? []));
-    confirmAdvisoriesRef.current = false;
     setApproveStatus("idle");
     setApproveMsg(null);
     setBlocking([]);
     setAdvisory([]);
+    setApprovalDiag(null);
     const review = String(job?.reviewStatus ?? latest?.reviewStatus ?? "").toLowerCase();
     const status = String(job?.status ?? "").toLowerCase();
     if (status === "failed" || status === "error") setDisplayStatus("Failed");
@@ -382,74 +395,87 @@ export default function ConsolidatedTakeoffReview() {
     };
   }, [rows, blocking, advisory]);
 
-  const handleApprove = useCallback(
-    async (confirmAdvisories: boolean) => {
-      if (!authToken || !takeoffJobId || !draft) return;
-      if (saveTimer.current) {
-        window.clearTimeout(saveTimer.current);
-        await persistDraft();
-      }
-      const confirm = Boolean(confirmAdvisories || confirmAdvisoriesRef.current);
-      confirmAdvisoriesRef.current = confirm;
-      setApproveStatus("approving");
-      setApproveMsg(confirm ? "Approving with advisory warnings…" : null);
-      setBlocking([]);
-      try {
-        const res = await approveAndBuildEstimate(authToken, takeoffJobId, {
-          takeoffResult: draftRef.current,
-          reviewState: buildReviewState(),
-          confirmAdvisories: confirm,
-          // Compatibility alias for older Brain builds.
-          acceptAdvisoryWarnings: confirm
+  const handleApproveClick = useCallback(async () => {
+    if (!authToken || !takeoffJobId || !draft) return;
+    if (approveStatus === "approving" || approveStatus === "approved") return;
+    if (blocking.length > 0) return;
+
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      await persistDraft();
+    }
+
+    const result = await runConsolidatedApproveClick({
+      blockingCount: blocking.length,
+      advisoryCount: advisory.length,
+      takeoffResult: draftRef.current,
+      reviewState: buildReviewState(),
+      confirmFn: (message) => window.confirm(message),
+      approveFn: async (body) => {
+        // Only enter Approving… after the user confirms (or when no dialog is needed).
+        setApproveStatus("approving");
+        setApproveMsg("Approving…");
+        return approveAndBuildEstimate(authToken, takeoffJobId, {
+          takeoffResult: body.takeoffResult,
+          reviewState: body.reviewState,
+          confirmAdvisories: true,
+          acceptAdvisoryWarnings: true
         });
-        confirmAdvisoriesRef.current = false;
-        setApproveStatus("approved");
-        setDisplayStatus("Approved");
-        setSummary((res.consolidatedSummary as Record<string, unknown>) || null);
-        setAdvisory(res.advisory ?? []);
-        setApproveMsg(
-          res.idempotent
-            ? "Takeoff already approved — Estimate Scope ready."
-            : "Takeoff approved — continuing to Estimate Scope."
-        );
-        notifyParentApproved(takeoffJobId, res);
-      } catch (e) {
-        if (e instanceof LabApiError && e.status === 422) {
-          const body = e.body as any;
-          const adv = (body?.advisory ?? []) as ApprovalBlockerItem[];
-          const hard = (body?.hardBlockers ?? []) as ApprovalBlockerItem[];
-          setAdvisory(adv);
-          setBlocking(hard);
-          if (
-            body?.code === "approval_advisory_confirmation_required" &&
-            hard.length === 0
-          ) {
-            if (confirm) {
-              setApproveStatus("error");
-              setApproveMsg(
-                "Server still requested advisory confirmation after acknowledge. Retry once; if it continues, refresh the page."
-              );
-              return;
-            }
-            confirmAdvisoriesRef.current = true;
-            setApproveStatus("confirm_advisory");
-            setApproveMsg(
-              `You may approve with these ${adv.length} advisory warning${adv.length === 1 ? "" : "s"}.`
-            );
-            return;
-          }
-          confirmAdvisoriesRef.current = false;
-          setApproveStatus("error");
-          setApproveMsg(body?.error || e.message);
-          return;
-        }
-        confirmAdvisoriesRef.current = false;
-        setApproveStatus("error");
-        setApproveMsg(e instanceof LabApiError ? e.message : "Approval failed");
       }
-    },
-    [authToken, takeoffJobId, draft, persistDraft, buildReviewState]
-  );
+    });
+
+    setApprovalDiag(result.diagnostic as ApprovalDiagnostic);
+
+    if (result.cancelled || result.skipped) {
+      setApproveStatus("idle");
+      setApproveMsg(result.cancelled ? "Approval cancelled." : result.diagnostic.message);
+      return;
+    }
+
+    if (!result.ok) {
+      const body = (result.response || {}) as Record<string, unknown>;
+      const hard = (body.hardBlockers as ApprovalBlockerItem[]) || [];
+      const adv = (body.advisory as ApprovalBlockerItem[]) || [];
+      setBlocking(hard);
+      setAdvisory(adv);
+      setApproveStatus("error");
+      setApproveMsg(
+        [
+          `HTTP ${result.diagnostic.httpStatus ?? "—"}`,
+          result.diagnostic.errorCode ? `code: ${result.diagnostic.errorCode}` : null,
+          result.diagnostic.message,
+          `blocking: ${result.diagnostic.blockingCount}`,
+          `advisory: ${result.diagnostic.advisoryCount}`
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      );
+      return;
+    }
+
+    const res = result.response as Record<string, unknown>;
+    setApproveStatus("approved");
+    setDisplayStatus("Approved");
+    setSummary((res.consolidatedSummary as Record<string, unknown>) || null);
+    setAdvisory((res.advisory as ApprovalBlockerItem[]) || []);
+    setBlocking([]);
+    setApproveMsg(
+      res.idempotent
+        ? "Takeoff already approved — Estimate Scope ready."
+        : "Takeoff approved — continuing to Estimate Scope."
+    );
+    // Notify parent from the successful promise (not only postMessage side-effects).
+    notifyParentApproved(takeoffJobId, res);
+  }, [
+    authToken,
+    takeoffJobId,
+    draft,
+    approveStatus,
+    blocking.length,
+    advisory.length,
+    persistDraft,
+    buildReviewState
+  ]);
 
   const signIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -767,16 +793,36 @@ export default function ConsolidatedTakeoffReview() {
                 </ul>
               ) : null}
 
-              {approveMsg ? <p className="ctr-approve-msg">{approveMsg}</p> : null}
+              {approveMsg ? (
+                <p
+                  className={
+                    approveStatus === "error" ? "ctr-approve-msg ctr-approve-msg--error" : "ctr-approve-msg"
+                  }
+                  data-testid="ctr-approve-msg"
+                >
+                  {approveMsg}
+                </p>
+              ) : null}
+
+              {approvalDiag ? (
+                <div className="ctr-approve-diag" data-testid="ctr-approve-diag">
+                  <div className="ctr-approve-diag-title">Last approval request</div>
+                  <ul>
+                    <li>confirmAdvisories: {String(approvalDiag.confirmAdvisories)}</li>
+                    <li>HTTP status: {approvalDiag.httpStatus ?? "—"}</li>
+                    <li>returned reviewStatus: {approvalDiag.reviewStatus ?? "—"}</li>
+                    <li>returned error code: {approvalDiag.errorCode ?? "—"}</li>
+                    <li>
+                      blocking: {approvalDiag.blockingCount} · advisory: {approvalDiag.advisoryCount}
+                    </li>
+                  </ul>
+                </div>
+              ) : null}
 
               <button
                 type="button"
                 className="ctr-btn-primary"
-                data-testid={
-                  approveStatus === "confirm_advisory"
-                    ? "ctr-approve-advisory"
-                    : "ctr-approve-build"
-                }
+                data-testid="ctr-approve-build"
                 disabled={
                   approveStatus === "approving" ||
                   approveStatus === "approved" ||
@@ -784,21 +830,15 @@ export default function ConsolidatedTakeoffReview() {
                   displayStatus === "Failed" ||
                   Boolean(blocking.length)
                 }
-                onClick={() => {
-                  // Prefer sticky confirm ref so mid-click re-renders cannot drop confirmAdvisories.
-                  void handleApprove(
-                    confirmAdvisoriesRef.current || approveStatus === "confirm_advisory"
-                  );
-                }}
+                onClick={() => void handleApproveClick()}
               >
-                {approveStatus === "approving"
-                  ? "Approving…"
-                  : approveStatus === "approved"
-                    ? "Approved"
-                    : approveStatus === "confirm_advisory"
-                      ? `Approve with ${advisory.length} advisory warning${advisory.length === 1 ? "" : "s"}`
-                      : "Approve Takeoff & Build Estimate"}
-              </button>            </div>
+                {approveButtonLabel({
+                  approveStatus,
+                  advisoryCount: advisory.length,
+                  blockingCount: blocking.length
+                })}
+              </button>
+            </div>
             {summary ? (
               <p className="ctr-muted" data-testid="ctr-server-summary">
                 Server: {String(summary.includedPieces ?? "")} pieces ·{" "}

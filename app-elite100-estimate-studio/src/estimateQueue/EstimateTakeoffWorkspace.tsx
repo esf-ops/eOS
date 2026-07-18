@@ -237,7 +237,7 @@ export default function EstimateTakeoffWorkspace({
           /* non-fatal */
         }
       })();
-    }, 4000);
+    }, 2000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
