@@ -1478,8 +1478,9 @@ export async function approveAndBuildEstimate({
   }
 
   let computed;
+  let validation;
   try {
-    ({ computed } = recomputeTakeoffBundle(resolvedResult));
+    ({ computed, validation } = recomputeTakeoffBundle(resolvedResult));
   } catch (e) {
     const err = workspaceError(
       `Takeoff computation failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -1493,22 +1494,63 @@ export async function approveAndBuildEstimate({
     typeof latestRow?.raw_ai_result_json === "object" && latestRow.raw_ai_result_json !== null
       ? latestRow.raw_ai_result_json
       : {};
+  const qaGate = computeQaGateForResult(resolvedResult, computed, validation, rawJson);
   const rs =
     reviewState != null
       ? normalizeReviewState(reviewState)
       : loadReviewStateFromRaw(rawJson);
+  const dimEvidence =
+    dimensionEvidence ??
+    (typeof rawJson?._meta?.dimensionEvidence === "object"
+      ? rawJson._meta.dimensionEvidence
+      : null);
 
+  // Preflight with the same validation/QA inputs approveTakeoffJob will use so
+  // advisory confirmation is accurate and legacy codes are demoted once.
   const preflight = evaluateConsolidatedApprovalGate({
     takeoffResult: resolvedResult,
     computed,
-    validation: null,
-    qaGate: { status: "ready_for_review", topIssues: [] },
+    validation,
+    qaGate,
+    dimensionEvidence: dimEvidence,
     reviewState: rs,
     hasSavedResult: true,
     hasUnsavedEdits: false,
     reviewStatus: jobRow.review_status ?? "needs_review",
     jobStatus: String(jobRow.status ?? "")
   });
+
+  if (preflight.blocking.length > 0) {
+    const err = workspaceError(
+      preflight.blocking.map((b) => b.message).join("; ") ||
+        "Approval blockers must be resolved before approval",
+      422
+    );
+    err.approvalBlockers = {
+      ok: false,
+      code: "approval_hard_blockers",
+      hardBlockers: preflight.blocking,
+      estimatorDecisionsRequired: [],
+      advisory: preflight.advisory
+    };
+    throw err;
+  }
+
+  if (preflight.advisory.length > 0 && !acceptAdvisoryWarnings) {
+    const err = workspaceError(
+      `Confirm ${preflight.advisory.length} advisory warning(s) before approval`,
+      422
+    );
+    err.approvalBlockers = {
+      ok: false,
+      code: "approval_advisory_confirmation_required",
+      hardBlockers: [],
+      estimatorDecisionsRequired: [],
+      advisory: preflight.advisory,
+      advisoryCount: preflight.advisory.length
+    };
+    throw err;
+  }
 
   const summaryView = buildConsolidatedTakeoffSummary(
     resolvedResult,
@@ -1524,10 +1566,9 @@ export async function approveAndBuildEstimate({
     takeoffJobId,
     takeoffResult: resolvedResult,
     reviewState: preflight.reviewState,
-    dimensionEvidence,
+    dimensionEvidence: dimEvidence,
     approvalMode: "consolidated",
-    acceptAdvisoryWarnings:
-      acceptAdvisoryWarnings || preflight.advisory.length === 0
+    acceptAdvisoryWarnings: true
   });
 
   return {
