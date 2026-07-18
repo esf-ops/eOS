@@ -40,7 +40,9 @@ import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
 import { pickSafeExayardJobMetadata } from "./exayardClient.mjs";
 import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
 import {
+  autoCompleteRoomReviewState,
   buildConsolidatedTakeoffSummary,
+  collectConsolidatedHardBlockers,
   deriveConsolidatedDisplayStatus,
   evaluateConsolidatedApprovalGate,
   resolveConfirmAdvisories,
@@ -51,6 +53,37 @@ import { loadReviewStateFromRaw, normalizeReviewState } from "./takeoffReviewSta
 import { ESTIMATOR_DECISION_CODES, HARD_BLOCKER_CODES } from "./takeoffWorkflowState.mjs";
 
 export { resolveConfirmAdvisories, rewriteConsolidatedAdvisoryMessage };
+
+/** Pilot marker — proves hosted Brain is serving the consolidated-v3 approval policy. */
+export const CONSOLIDATED_APPROVAL_POLICY_VERSION = "consolidated-v3";
+
+/**
+ * Safe pilot diagnostics (no tokens, org/user ids, or full takeoff payload).
+ * @param {object} input
+ */
+export function buildApprovalDiagnostics(input = {}) {
+  const legacyCodes = (input.legacyValidationCodes ?? []).map((c) => String(c)).slice(0, 20);
+  const hard = (input.hardBlockers ?? []).map((b) => ({
+    code: b?.code ?? null,
+    message: String(b?.message ?? "").slice(0, 160)
+  }));
+  const advisory = (input.advisory ?? []).map((b) => ({
+    code: b?.code ?? null,
+    message: String(b?.message ?? "").slice(0, 160)
+  }));
+  return {
+    approvalMode: input.approvalMode ?? null,
+    confirmAdvisories: Boolean(input.confirmAdvisories),
+    skipLegacyValidationGate: Boolean(input.skipLegacyValidationGate),
+    hardBlockerCount: hard.length,
+    hardBlockers: hard.slice(0, 12),
+    advisoryCount: advisory.length,
+    advisorySample: advisory.slice(0, 12),
+    legacyValidationCodes: legacyCodes,
+    branch: input.branch ?? null,
+    approvalPolicyVersion: CONSOLIDATED_APPROVAL_POLICY_VERSION
+  };
+}
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
@@ -1076,6 +1109,12 @@ export async function approveTakeoffJob({
   approvalMode = "legacy",
   acceptAdvisoryWarnings = false,
   confirmAdvisories = undefined,
+  /**
+   * Consolidated approve-and-build only. When true, worksheet hard blockers are
+   * the sole approval criteria — legacy evaluateTakeoffApprovalGate / VALIDATION_ERRORS
+   * / QA do_not_import cannot re-block after consolidated preflight.
+   */
+  skipLegacyValidationGate = false,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -1097,6 +1136,8 @@ export async function approveTakeoffJob({
     confirmAdvisories,
     acceptAdvisoryWarnings
   });
+  const useConsolidated = String(approvalMode ?? "legacy") === "consolidated";
+  const skipLegacy = useConsolidated && skipLegacyValidationGate === true;
 
   const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
   if (!jobRow) {
@@ -1149,23 +1190,47 @@ export async function approveTakeoffJob({
       ? rawJson._meta.dimensionEvidence
       : null);
 
-  const useConsolidated = String(approvalMode ?? "legacy") === "consolidated";
   let approvalGate;
   let consolidatedGate = null;
+  let consolidatedAdvisory = [];
+  const reviewStatusLower = String(jobRow.review_status ?? "needs_review").toLowerCase();
+  const alreadyApproved = reviewStatusLower === "approved";
+
   if (useConsolidated) {
+    const effectiveRs = autoCompleteRoomReviewState(resolvedResult, rs);
+    // Worksheet-only hard blockers — never promote legacy VALIDATION_ERRORS / QA.
+    const hardBlockers = collectConsolidatedHardBlockers(
+      resolvedResult,
+      effectiveRs,
+      computed
+    );
+
+    // Advisory surface only (legacy codes demoted). Not used for hard blocking.
     consolidatedGate = evaluateConsolidatedApprovalGate({
       takeoffResult: resolvedResult,
       computed,
       validation,
       qaGate,
       dimensionEvidence: dimEvidence,
-      reviewState: rs,
+      reviewState: effectiveRs,
       hasSavedResult: true,
       hasUnsavedEdits: false,
       reviewStatus: jobRow.review_status ?? "needs_review",
       jobStatus: String(jobRow.status ?? "")
     });
-    if (consolidatedGate.alreadyApproved) {
+    consolidatedAdvisory = consolidatedGate.advisory ?? [];
+    const blockingIssues = hardBlockers;
+
+    const legacyValidationCodes = [
+      ...(validation?.hasErrors ? ["VALIDATION_ERRORS"] : []),
+      ...((validation?.diagnostics ?? [])
+        .filter((d) => String(d.level ?? "").toLowerCase() === "error")
+        .map((d) => d.code)
+        .filter(Boolean))
+    ];
+    if (qaGate?.status === "do_not_import") legacyValidationCodes.push("QA_GATE_BLOCKED");
+
+    if (alreadyApproved) {
       return {
         ok: true,
         takeoffJobId,
@@ -1185,28 +1250,52 @@ export async function approveTakeoffJob({
         summary: buildResultSummary(resolvedResult, computed, validation, importPlan),
         importPayload: null,
         idempotent: true,
-        advisory: consolidatedGate.advisory,
-        blocking: []
+        advisory: consolidatedAdvisory,
+        advisoryCount: consolidatedAdvisory.length,
+        blocking: [],
+        estimateScopeRefreshRequired: true,
+        approvalPolicyVersion: CONSOLIDATED_APPROVAL_POLICY_VERSION,
+        approvalDiagnostics: buildApprovalDiagnostics({
+          approvalMode: "consolidated",
+          confirmAdvisories: advisoriesConfirmed,
+          skipLegacyValidationGate: skipLegacy,
+          hardBlockers: [],
+          advisory: consolidatedAdvisory,
+          legacyValidationCodes,
+          branch: "consolidated_already_approved"
+        })
       };
     }
-    if (consolidatedGate.blocking.length > 0) {
+
+    if (blockingIssues.length > 0) {
       const err = workspaceError(
-        consolidatedGate.blocking.map((b) => b.message).join("; ") ||
+        blockingIssues.map((b) => b.message).join("; ") ||
           "Approval blockers must be resolved before approval",
         422
       );
       err.approvalBlockers = {
         ok: false,
         code: "approval_hard_blockers",
-        hardBlockers: consolidatedGate.blocking,
+        hardBlockers: blockingIssues,
         estimatorDecisionsRequired: [],
-        advisory: consolidatedGate.advisory
+        advisory: consolidatedAdvisory,
+        approvalDiagnostics: buildApprovalDiagnostics({
+          approvalMode: "consolidated",
+          confirmAdvisories: advisoriesConfirmed,
+          skipLegacyValidationGate: skipLegacy,
+          hardBlockers: blockingIssues,
+          advisory: consolidatedAdvisory,
+          legacyValidationCodes,
+          branch: "consolidated_hard_blockers"
+        })
       };
       throw err;
     }
-    if (consolidatedGate.advisory.length > 0 && !advisoriesConfirmed) {
+
+    // skipLegacyValidationGate (approve-and-build): advisories confirmed upstream — do not re-block.
+    if (consolidatedAdvisory.length > 0 && !advisoriesConfirmed && !skipLegacy) {
       const err = workspaceError(
-        `Confirm ${consolidatedGate.advisory.length} advisory warning(s) before approval. You may approve with these advisory warnings.`,
+        `Confirm ${consolidatedAdvisory.length} advisory warning(s) before approval. You may approve with these advisory warnings.`,
         422
       );
       err.approvalBlockers = {
@@ -1214,17 +1303,33 @@ export async function approveTakeoffJob({
         code: "approval_advisory_confirmation_required",
         hardBlockers: [],
         estimatorDecisionsRequired: [],
-        advisory: consolidatedGate.advisory,
-        advisoryCount: consolidatedGate.advisory.length
+        advisory: consolidatedAdvisory,
+        advisoryCount: consolidatedAdvisory.length,
+        approvalDiagnostics: buildApprovalDiagnostics({
+          approvalMode: "consolidated",
+          confirmAdvisories: false,
+          skipLegacyValidationGate: skipLegacy,
+          hardBlockers: [],
+          advisory: consolidatedAdvisory,
+          legacyValidationCodes,
+          branch: "consolidated_advisory_confirmation_required"
+        })
       };
       throw err;
     }
+
     approvalGate = {
       canApprove: true,
       canImport: false,
       blockers: [],
       blockerCount: 0,
-      workflowStatus: consolidatedGate.workflowStatus
+      workflowStatus: "approved_for_import"
+    };
+    consolidatedGate = {
+      ...consolidatedGate,
+      reviewState: effectiveRs,
+      blocking: [],
+      advisory: consolidatedAdvisory
     };
   } else {
     approvalGate = evaluateTakeoffApprovalGate({
@@ -1276,6 +1381,7 @@ export async function approveTakeoffJob({
     ? consolidatedGate.reviewState
     : rs;
   const now = new Date().toISOString();
+
   const schemaVersion = resolvedResult.schemaVersion ?? TAKEOFF_SCHEMA_VERSION;
   const summary = buildResultSummary(resolvedResult, computed, validation, importPlan);
   const approvedSnapshot = {
@@ -1304,6 +1410,10 @@ export async function approveTakeoffJob({
       createdBy: userId ?? null,
       reviewStatus: "approved",
       requireApproved: false,
+      // Critical: without this, buildTakeoffImportPayload re-runs the legacy
+      // evaluateTakeoffApprovalGate and re-throws VALIDATION_ERRORS after
+      // consolidated worksheet hard blockers already passed.
+      ignoreApprovalGateBlockers: useConsolidated === true,
     }),
   };
 
@@ -1408,10 +1518,25 @@ export async function approveTakeoffJob({
     importPayload: approvedSnapshot.importPayload,
     ...(useConsolidated
       ? {
-          advisory: consolidatedGate?.advisory ?? [],
-          advisoryCount: (consolidatedGate?.advisory ?? []).length,
+          advisory: consolidatedGate?.advisory ?? consolidatedAdvisory ?? [],
+          advisoryCount: (consolidatedGate?.advisory ?? consolidatedAdvisory ?? []).length,
           blocking: [],
-          estimateScopeRefreshRequired: true
+          estimateScopeRefreshRequired: true,
+          approvalPolicyVersion: CONSOLIDATED_APPROVAL_POLICY_VERSION,
+          approvalDiagnostics: buildApprovalDiagnostics({
+            approvalMode: "consolidated",
+            confirmAdvisories: advisoriesConfirmed,
+            skipLegacyValidationGate: skipLegacy,
+            hardBlockers: [],
+            advisory: consolidatedGate?.advisory ?? consolidatedAdvisory ?? [],
+            legacyValidationCodes: [
+              ...(validation?.hasErrors ? ["VALIDATION_ERRORS"] : []),
+              ...(qaGate?.status === "do_not_import" ? ["QA_GATE_BLOCKED"] : [])
+            ],
+            branch: skipLegacy
+              ? "consolidated_skip_legacy_approved"
+              : "consolidated_approved"
+          })
         }
       : {})
   };
@@ -1486,16 +1611,48 @@ export async function approveAndBuildEstimate({
   }
 
   if (takeoffResult != null) {
-    await saveTakeoffCorrection({
-      supabase,
-      organizationId,
-      userId,
-      takeoffJobId,
-      takeoffResult: resolvedResult,
-      correctionNotes: correctionNotes ?? "Consolidated worksheet save before approve-and-build",
-      reviewState,
-      baseResultId: latestRow?.id ?? null
-    });
+    try {
+      await saveTakeoffCorrection({
+        supabase,
+        organizationId,
+        userId,
+        takeoffJobId,
+        takeoffResult: resolvedResult,
+        correctionNotes: correctionNotes ?? "Consolidated worksheet save before approve-and-build",
+        reviewState,
+        baseResultId: latestRow?.id ?? null
+      });
+    } catch (e) {
+      const err = workspaceError(
+        `Failed to persist reviewed Takeoff edits: ${e instanceof Error ? e.message : String(e)}`,
+        e?.statusCode && e.statusCode >= 400 ? e.statusCode : 503
+      );
+      err.code = "PERSISTENCE_FAILED";
+      err.approvalBlockers = {
+        ok: false,
+        code: "approval_hard_blockers",
+        hardBlockers: [
+          {
+            code: "PERSISTENCE_FAILED",
+            message: "Server cannot persist the reviewed edits or approved result.",
+            path: null,
+            category: "persist"
+          }
+        ],
+        estimatorDecisionsRequired: [],
+        advisory: [],
+        approvalDiagnostics: buildApprovalDiagnostics({
+          approvalMode: "consolidated",
+          confirmAdvisories: advisoriesConfirmed,
+          skipLegacyValidationGate: true,
+          hardBlockers: [{ code: "PERSISTENCE_FAILED", message: "persist failed" }],
+          advisory: [],
+          legacyValidationCodes: [],
+          branch: "approve_and_build_persist_failed"
+        })
+      };
+      throw err;
+    }
     latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
     if (latestRow?.normalized_takeoff_json) {
       resolvedResult = latestRow.normalized_takeoff_json;
@@ -1530,44 +1687,71 @@ export async function approveAndBuildEstimate({
       ? rawJson._meta.dimensionEvidence
       : null);
 
-  // Preflight with the same validation/QA inputs approveTakeoffJob will use so
-  // advisory confirmation is accurate and legacy codes are demoted once.
+  const effectiveRs = autoCompleteRoomReviewState(resolvedResult, rs);
+
+  // Authoritative consolidated hard blockers — worksheet only.
+  // Legacy VALIDATION_ERRORS / QA do_not_import are never hard blockers here.
+  const hardBlockers = collectConsolidatedHardBlockers(
+    resolvedResult,
+    effectiveRs,
+    computed
+  );
+
   const preflight = evaluateConsolidatedApprovalGate({
     takeoffResult: resolvedResult,
     computed,
     validation,
     qaGate,
     dimensionEvidence: dimEvidence,
-    reviewState: rs,
+    reviewState: effectiveRs,
     hasSavedResult: true,
     hasUnsavedEdits: false,
     reviewStatus: jobRow.review_status ?? "needs_review",
     jobStatus: String(jobRow.status ?? "")
   });
+  const advisoryIssues = preflight.advisory ?? [];
 
-  if (preflight.blocking.length > 0 && !preflight.alreadyApproved) {
+  const legacyValidationCodes = [
+    ...(validation?.hasErrors ? ["VALIDATION_ERRORS"] : []),
+    ...((validation?.diagnostics ?? [])
+      .filter((d) => String(d.level ?? "").toLowerCase() === "error")
+      .map((d) => d.code)
+      .filter(Boolean))
+  ];
+  if (qaGate?.status === "do_not_import") legacyValidationCodes.push("QA_GATE_BLOCKED");
+
+  const diagnosticsBase = {
+    approvalMode: "consolidated",
+    confirmAdvisories: advisoriesConfirmed,
+    skipLegacyValidationGate: true,
+    hardBlockers,
+    advisory: advisoryIssues,
+    legacyValidationCodes
+  };
+
+  if (hardBlockers.length > 0 && !preflight.alreadyApproved) {
     const err = workspaceError(
-      preflight.blocking.map((b) => b.message).join("; ") ||
+      hardBlockers.map((b) => b.message).join("; ") ||
         "Approval blockers must be resolved before approval",
       422
     );
     err.approvalBlockers = {
       ok: false,
       code: "approval_hard_blockers",
-      hardBlockers: preflight.blocking,
+      hardBlockers,
       estimatorDecisionsRequired: [],
-      advisory: preflight.advisory
+      advisory: advisoryIssues,
+      approvalDiagnostics: buildApprovalDiagnostics({
+        ...diagnosticsBase,
+        branch: "approve_and_build_hard_blockers"
+      })
     };
     throw err;
   }
 
-  if (
-    preflight.advisory.length > 0 &&
-    !advisoriesConfirmed &&
-    !preflight.alreadyApproved
-  ) {
+  if (advisoryIssues.length > 0 && !advisoriesConfirmed && !preflight.alreadyApproved) {
     const err = workspaceError(
-      `Confirm ${preflight.advisory.length} advisory warning(s) before approval. You may approve with these advisory warnings.`,
+      `Confirm ${advisoryIssues.length} advisory warning(s) before approval. You may approve with these advisory warnings.`,
       422
     );
     err.approvalBlockers = {
@@ -1575,33 +1759,55 @@ export async function approveAndBuildEstimate({
       code: "approval_advisory_confirmation_required",
       hardBlockers: [],
       estimatorDecisionsRequired: [],
-      advisory: preflight.advisory,
-      advisoryCount: preflight.advisory.length
+      advisory: advisoryIssues,
+      advisoryCount: advisoryIssues.length,
+      approvalDiagnostics: buildApprovalDiagnostics({
+        ...diagnosticsBase,
+        branch: "approve_and_build_advisory_confirmation_required"
+      })
     };
     throw err;
   }
 
   const summaryView = buildConsolidatedTakeoffSummary(
     resolvedResult,
-    preflight.reviewState,
+    effectiveRs,
     computed,
-    { blocking: preflight.blocking, advisory: preflight.advisory }
+    { blocking: [], advisory: advisoryIssues }
   );
 
-  const approved = await approveTakeoffJob({
-    supabase,
-    organizationId,
-    userId,
-    takeoffJobId,
-    takeoffResult: resolvedResult,
-    reviewState: preflight.reviewState,
-    dimensionEvidence: dimEvidence,
-    approvalMode: "consolidated",
-    confirmAdvisories: true,
-    acceptAdvisoryWarnings: true
-  });
+  // Persist + mark approved. skipLegacyValidationGate prevents any later
+  // evaluateTakeoffApprovalGate / VALIDATION_ERRORS re-block.
+  let approved;
+  try {
+    approved = await approveTakeoffJob({
+      supabase,
+      organizationId,
+      userId,
+      takeoffJobId,
+      takeoffResult: resolvedResult,
+      reviewState: effectiveRs,
+      dimensionEvidence: dimEvidence,
+      approvalMode: "consolidated",
+      confirmAdvisories: true,
+      acceptAdvisoryWarnings: true,
+      skipLegacyValidationGate: true
+    });
+  } catch (e) {
+    if (e?.approvalBlockers) {
+      e.approvalBlockers.approvalDiagnostics = buildApprovalDiagnostics({
+        ...diagnosticsBase,
+        hardBlockers: e.approvalBlockers.hardBlockers ?? [],
+        advisory: e.approvalBlockers.advisory ?? advisoryIssues,
+        branch: "approve_and_build_persist_or_recheck_failed"
+      });
+    }
+    // Persistence failures (503) stay as-is.
+    throw e;
+  }
 
   const approvedResultId =
+    approved?.approvedResultId ||
     approved?.summary?.latestResultId ||
     approved?.importPayload?.takeoffResultId ||
     latestRow?.id ||
@@ -1612,22 +1818,28 @@ export async function approveAndBuildEstimate({
     ok: true,
     takeoffJobId,
     reviewStatus: "approved",
+    approvedResultId,
     displayStatus: deriveConsolidatedDisplayStatus({
       jobStatus: "completed",
       reviewStatus: "approved",
       hasResult: true
     }),
-    approvedResultId,
     consolidatedSummary: summaryView,
-    advisory: approved.advisory ?? preflight.advisory,
+    advisory: approved.advisory ?? advisoryIssues,
     advisoryCount:
       approved.advisoryCount ??
-      (approved.advisory ?? preflight.advisory)?.length ??
+      (approved.advisory ?? advisoryIssues)?.length ??
       0,
     blocking: [],
     seededEstimateScope: true,
     estimateScopeRefreshRequired: true,
-    idempotent: Boolean(approved.idempotent)
+    idempotent: Boolean(approved.idempotent),
+    approvalPolicyVersion: CONSOLIDATED_APPROVAL_POLICY_VERSION,
+    approvalDiagnostics: buildApprovalDiagnostics({
+      ...diagnosticsBase,
+      hardBlockers: [],
+      branch: "approve_and_build_approved"
+    })
   };
 }
 

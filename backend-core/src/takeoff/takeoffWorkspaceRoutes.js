@@ -410,10 +410,17 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
             estimatorDecisionsRequired: e.approvalBlockers.estimatorDecisionsRequired ?? [],
             advisory: e.approvalBlockers.advisory ?? [],
             advisoryCount:
-              e.approvalBlockers.advisoryCount ?? (e.approvalBlockers.advisory ?? []).length
+              e.approvalBlockers.advisoryCount ?? (e.approvalBlockers.advisory ?? []).length,
+            approvalPolicyVersion: "consolidated-v3",
+            approvalDiagnostics: e.approvalBlockers.approvalDiagnostics ?? null
           });
         }
-        return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+        return res.status(status).json({
+          ok: false,
+          error: String(e?.message ?? e),
+          code,
+          approvalPolicyVersion: "consolidated-v3"
+        });
       }
     }
   );

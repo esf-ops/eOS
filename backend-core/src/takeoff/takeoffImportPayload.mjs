@@ -140,6 +140,12 @@ export function buildTakeoffImportPayload(params) {
     createdBy = null,
     requireApproved = true,
     reviewStatus = "approved",
+    /**
+     * Consolidated approve-and-build only. When true, legacy gate blockers
+     * (VALIDATION_ERRORS, QA do_not_import, evidence, etc.) do not throw —
+     * the worksheet hard-blocker gate already authorized approval.
+     */
+    ignoreApprovalGateBlockers = false,
   } = params;
 
   const rs = reviewState ? normalizeReviewState(reviewState) : emptyReviewState();
@@ -158,7 +164,7 @@ export function buildTakeoffImportPayload(params) {
   if (requireApproved && reviewStatus !== "approved") {
     throw new Error("Takeoff must be approved before building import payload.");
   }
-  if (gate.blockers.length > 0) {
+  if (gate.blockers.length > 0 && !ignoreApprovalGateBlockers) {
     const first = gate.blockers[0];
     throw new Error(first.message ?? "Approval blockers prevent import payload.");
   }
