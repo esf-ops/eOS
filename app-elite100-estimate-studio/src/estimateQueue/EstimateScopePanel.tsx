@@ -147,6 +147,35 @@ export default function EstimateScopePanel({
     void load();
   }, [load, refreshKey]);
 
+  // After Takeoff approval handoff, ensure scope leaves needs_takeoff_approval
+  // without requiring a manual Refresh click / confirm dialog.
+  useEffect(() => {
+    if (!estimate?.id) return;
+    if (String(takeoffDisplayStatus).toLowerCase() !== "approved") return;
+    if (estimate.status !== "needs_takeoff_approval") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = (await apiPost(
+          `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimate.id)}/refresh-from-takeoff`,
+          authToken,
+          { force: true, confirm: true }
+        )) as { estimate?: StudioEstimate };
+        if (cancelled) return;
+        if (body.estimate) {
+          setEstimate(body.estimate);
+          setActionNotice("Estimate Scope seeded from approved Takeoff.");
+        }
+      } catch {
+        // Non-fatal — getOrCreate reload via refreshKey usually seeds empty rooms.
+        void load();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, estimate?.id, estimate?.status, takeoffDisplayStatus, load]);
+
   useEffect(() => {
     if (!authToken) return;
     if (estimate?.status === "needs_takeoff_approval") return;
