@@ -383,14 +383,31 @@ export function createStudioEstimateService(deps = {}) {
       resultId &&
       String(row.sourceTakeoffResultId) !== String(resultId);
 
-    if (takeoffChanged && row.status === STUDIO_ESTIMATE_STATUSES.APPROVED) {
-      return revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
-        status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
-        scope,
-        sourceTakeoffResultId: resultId,
-        takeoffJobId: row.takeoffJobId,
-        staleReason: "Approved Takeoff snapshot changed — reapprove estimate"
-      });
+    // Never silently overwrite commercial scope when Takeoff changes after seed.
+    if (takeoffChanged && !needsSeed) {
+      const staleMsg =
+        "Takeoff measurements changed — refresh Estimate Scope to update rooms/pieces";
+      if (row.status === STUDIO_ESTIMATE_STATUSES.APPROVED) {
+        return revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
+          status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+          sourceTakeoffResultId: resultId,
+          takeoffJobId: row.takeoffJobId,
+          staleReason: staleMsg
+        });
+      }
+      return repository.update(
+        organizationId,
+        row.id,
+        {
+          sourceTakeoffResultId: resultId,
+          staleReason: staleMsg,
+          status:
+            row.status === STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL
+              ? STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE
+              : row.status
+        },
+        actorUserId
+      );
     }
 
     /** @type {Record<string, unknown>} */
@@ -403,9 +420,85 @@ export function createStudioEstimateService(deps = {}) {
       row.status === STUDIO_ESTIMATE_STATUSES.DRAFT
     ) {
       patch.status = STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE;
+      if (needsSeed) patch.staleReason = null;
     }
 
     return repository.update(organizationId, row.id, patch, actorUserId);
+  }
+
+  async function refreshScopeFromTakeoff(row, organizationId, actorUserId, { force = false } = {}) {
+    assertTakeoffApproved(
+      await loadWorkspace({ organizationId, takeoffJobId: row.takeoffJobId })
+    );
+    const workspace = await loadWorkspace({
+      organizationId,
+      takeoffJobId: row.takeoffJobId
+    });
+    const latest = await loadLatestResult({
+      organizationId,
+      takeoffJobId: row.takeoffJobId
+    });
+    const resultId = workspace?.latestResult?.id || latest?.id || null;
+    if (!latest?.normalizedTakeoffJson) {
+      const err = new Error("Approved Takeoff result unavailable");
+      err.statusCode = 409;
+      err.code = "takeoff_result_missing";
+      throw err;
+    }
+    const payload = buildTakeoffImportPayload({
+      takeoffJobId: row.takeoffJobId,
+      takeoffResultId: resultId,
+      takeoffResult: latest.normalizedTakeoffJson,
+      reviewState: latest.reviewState || null,
+      computed: latest.computedMeasurementsJson || null,
+      validation: latest.validationDiagnosticsJson || null,
+      requireApproved: true,
+      reviewStatus: "approved",
+      approvedAt: workspace.approvedAt || null,
+      approvedBy: workspace.approvedByUserId || null
+    });
+    const nextScope = seedScopeFromTakeoffPayload(payload, {
+      customerName: row.scope?.customerName,
+      projectName: row.scope?.projectName,
+      partnerAccountId: row.scope?.partnerAccountId,
+      materialGroupId: row.scope?.materialGroupId,
+      colorId: row.scope?.colorId,
+      markupPercent: row.scope?.markupPercent
+    });
+    const preview = {
+      previousRoomCount: Array.isArray(row.scope?.rooms) ? row.scope.rooms.length : 0,
+      nextRoomCount: nextScope.rooms?.length ?? 0,
+      previousCountertopSf: (row.scope?.rooms ?? []).reduce(
+        (s, r) => s + (Number(r.countertopSqft) || 0),
+        0
+      ),
+      nextCountertopSf: (nextScope.rooms ?? []).reduce(
+        (s, r) => s + (Number(r.countertopSqft) || 0),
+        0
+      )
+    };
+    if (!force) {
+      return { preview, estimate: safeEstimateView(row) };
+    }
+    const updated = await repository.update(
+      organizationId,
+      row.id,
+      {
+        scope: nextScope,
+        sourceTakeoffResultId: resultId,
+        staleReason: null,
+        status:
+          row.status === STUDIO_ESTIMATE_STATUSES.APPROVED
+            ? STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE
+            : row.status === STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL
+              ? STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE
+              : row.status,
+        calculation: null,
+        approval: null
+      },
+      actorUserId
+    );
+    return { preview, estimate: safeEstimateView(updated) };
   }
 
   return {
@@ -430,6 +523,17 @@ export function createStudioEstimateService(deps = {}) {
         throw e;
       }
       return safeEstimateView(row);
+    },
+
+    async refreshScopeFromTakeoff({ organizationId, estimateId, actorUserId, force = false }) {
+      const row = await repository.getById(organizationId, estimateId);
+      if (!row) {
+        const err = new Error("Estimate not found");
+        err.statusCode = 404;
+        err.code = "estimate_not_found";
+        throw err;
+      }
+      return refreshScopeFromTakeoff(row, organizationId, actorUserId, { force });
     },
 
     async updateScope({ organizationId, estimateId, body, actorUserId }) {

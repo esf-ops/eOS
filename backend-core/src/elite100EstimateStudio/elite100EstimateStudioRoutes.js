@@ -646,6 +646,40 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
   );
 
   app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/refresh-from-takeoff",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const force = body.force === true || body.confirm === true;
+        const result = await studioEstimateService.refreshScopeFromTakeoff({
+          organizationId,
+          estimateId: req.params.estimateId,
+          actorUserId: req.user?.id ?? null,
+          force
+        });
+        auditStudioEstimate("estimate.refresh_from_takeoff", req, {
+          estimateId: req.params.estimateId,
+          force,
+          preview: result?.preview
+        });
+        res.json({ ok: true, ...result });
+      } catch (e) {
+        logStudio("refresh from takeoff failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error:
+            e?.statusCode && e.statusCode < 500 ? e.message : "Unable to refresh from Takeoff",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
     "/api/elite100-estimate-studio/estimates/:estimateId/calculate",
     ...staffStack,
     jsonParser,

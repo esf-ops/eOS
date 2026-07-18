@@ -243,6 +243,45 @@ export async function approveTakeoffJob(
   ) as Promise<ApproveTakeoffJobResponse>;
 }
 
+/** Consolidated worksheet: save edits + approve Takeoff for Studio Estimate Scope. */
+export async function approveAndBuildEstimate(
+  token: string,
+  takeoffJobId: string,
+  body?: {
+    takeoffResult?: unknown;
+    reviewState?: unknown;
+    dimensionEvidence?: unknown;
+    acceptAdvisoryWarnings?: boolean;
+    correctionNotes?: string | null;
+  }
+): Promise<
+  ApproveTakeoffJobResponse & {
+    displayStatus?: string;
+    consolidatedSummary?: Record<string, unknown>;
+    advisory?: ApprovalBlockerItem[];
+    blocking?: ApprovalBlockerItem[];
+    seededEstimateScope?: boolean;
+    idempotent?: boolean;
+    importPayload?: unknown;
+  }
+> {
+  return labApiPost(
+    `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/approve-and-build-estimate`,
+    token,
+    body ?? {}
+  ) as Promise<
+    ApproveTakeoffJobResponse & {
+      displayStatus?: string;
+      consolidatedSummary?: Record<string, unknown>;
+      advisory?: ApprovalBlockerItem[];
+      blocking?: ApprovalBlockerItem[];
+      seededEstimateScope?: boolean;
+      idempotent?: boolean;
+      importPayload?: unknown;
+    }
+  >;
+}
+
 /** Create Internal Estimate draft from approved takeoff. */
 export async function importInternalEstimateFromTakeoff(
   token: string,

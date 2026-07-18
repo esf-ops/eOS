@@ -9,6 +9,7 @@
  *   POST /api/takeoff-jobs/:id/results             — save reviewed TakeoffResult (server recomputes)
  *   POST /api/takeoff-jobs/:id/corrections         — save estimator corrections + audit metadata
  *   POST /api/takeoff-jobs/:id/approve             — approve latest reviewed takeoff (validated)
+ *   POST /api/takeoff-jobs/:id/approve-and-build-estimate — consolidated save+approve for Studio
  *   GET  /api/takeoff-jobs/:id/results/latest      — load latest saved result
  *   POST /api/takeoff-jobs/:id/process              — start async processing (Phase E)
  *   POST /api/takeoff-jobs/:id/generate-ai-draft   — generate AI draft from uploaded plan (v5)
@@ -39,6 +40,7 @@ import {
   saveTakeoffResult,
   saveTakeoffCorrection,
   approveTakeoffJob,
+  approveAndBuildEstimate,
   getLatestTakeoffResult,
   listTakeoffResults,
   getResultById,
@@ -329,11 +331,86 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
           code: e.approvalBlockers.code ?? code,
           hardBlockers: e.approvalBlockers.hardBlockers ?? [],
           estimatorDecisionsRequired: e.approvalBlockers.estimatorDecisionsRequired ?? [],
+          advisory: e.approvalBlockers.advisory ?? [],
+          advisoryCount: e.approvalBlockers.advisoryCount ?? (e.approvalBlockers.advisory ?? []).length
         });
       }
       return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
     }
   });
+
+  // ── POST /api/takeoff-jobs/:id/approve-and-build-estimate ─────────────────
+  //
+  // Consolidated worksheet path: save pending edits, classify blocking vs advisory,
+  // approve Takeoff, return summary for Studio Estimate Scope seed. Does not import
+  // to Internal Estimate. Does not create quotes.
+  //
+  app.post(
+    "/api/takeoff-jobs/:id/approve-and-build-estimate",
+    requireAuth(),
+    guardHead,
+    jsonParser,
+    async (req, res) => {
+      try {
+        const supabase = getSupabase();
+        const user = req.user;
+
+        const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+        if (!orgCtx.organizationId) {
+          return res.status(503).json({ ok: false, error: "Organization context not available" });
+        }
+
+        const takeoffJobId = String(req.params.id ?? "").trim();
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const takeoffResult = body.takeoffResult ?? null;
+        const reviewState = body.reviewState ?? null;
+        const dimensionEvidence = body.dimensionEvidence ?? null;
+        const acceptAdvisoryWarnings =
+          body.acceptAdvisoryWarnings === true || body.acceptAdvisoryWarnings === "1";
+
+        const result = await approveAndBuildEstimate({
+          supabase,
+          organizationId: orgCtx.organizationId,
+          userId: user?.id ?? null,
+          takeoffJobId,
+          takeoffResult,
+          reviewState,
+          dimensionEvidence,
+          acceptAdvisoryWarnings,
+          correctionNotes:
+            typeof body.correctionNotes === "string" ? body.correctionNotes : null
+        });
+
+        await recordTakeoffBetaMetric({
+          db: supabase,
+          organizationId: orgCtx.organizationId,
+          takeoffJobId,
+          eventType: "ai_takeoff_approved_for_import",
+          userId: user?.id ?? null,
+          userEmail: String(user?.email || user?.id || "unknown"),
+          req
+        }).catch(() => {});
+
+        return res.json(result);
+      } catch (e) {
+        const status = e.statusCode ?? 500;
+        const code = e.code || (status < 500 ? "validation_error" : "server_error");
+        if (e.approvalBlockers) {
+          return res.status(status).json({
+            ok: false,
+            error: String(e?.message ?? e),
+            code: e.approvalBlockers.code ?? code,
+            hardBlockers: e.approvalBlockers.hardBlockers ?? [],
+            estimatorDecisionsRequired: e.approvalBlockers.estimatorDecisionsRequired ?? [],
+            advisory: e.approvalBlockers.advisory ?? [],
+            advisoryCount:
+              e.approvalBlockers.advisoryCount ?? (e.approvalBlockers.advisory ?? []).length
+          });
+        }
+        return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+      }
+    }
+  );
 
   // ── GET /api/takeoff-jobs/:id/results/latest ──────────────────────────────
   //

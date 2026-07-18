@@ -74,6 +74,7 @@ type Props = {
   caseId: string;
   takeoffJobId: string;
   takeoffDisplayStatus: string;
+  refreshKey?: number;
   customerHint?: string;
   projectHint?: string;
 };
@@ -97,6 +98,7 @@ export default function EstimateScopePanel({
   caseId,
   takeoffJobId,
   takeoffDisplayStatus,
+  refreshKey = 0,
   customerHint = "",
   projectHint = ""
 }: Props) {
@@ -143,7 +145,7 @@ export default function EstimateScopePanel({
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   useEffect(() => {
     if (!authToken) return;
@@ -224,6 +226,42 @@ export default function EstimateScopePanel({
       setActionNotice("Draft scope saved.");
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshFromTakeoff() {
+    if (!estimate?.id) return;
+    setBusy(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const previewBody = (await apiPost(
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimate.id)}/refresh-from-takeoff`,
+        authToken,
+        {}
+      )) as { preview?: { previousRoomCount?: number; nextRoomCount?: number; previousCountertopSf?: number; nextCountertopSf?: number } };
+      const p = previewBody.preview;
+      const ok = window.confirm(
+        p
+          ? `Refresh Estimate Scope from approved Takeoff?\n\nRooms: ${p.previousRoomCount} → ${p.nextRoomCount}\nCountertop SF: ${Number(p.previousCountertopSf ?? 0).toFixed(2)} → ${Number(p.nextCountertopSf ?? 0).toFixed(2)}\n\nCommercial fields (account, material, markup) are preserved where possible.`
+          : "Refresh Estimate Scope from approved Takeoff? Measured rooms/pieces will be replaced."
+      );
+      if (!ok) {
+        setBusy(false);
+        return;
+      }
+      const body = (await apiPost(
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimate.id)}/refresh-from-takeoff`,
+        authToken,
+        { force: true, confirm: true }
+      )) as { estimate?: StudioEstimate };
+      if (body.estimate) setEstimate(body.estimate);
+      setDirty(false);
+      setActionNotice("Estimate Scope refreshed from Takeoff.");
+    } catch (e) {
+      setActionError(e instanceof ApiError ? e.message : "Refresh from Takeoff failed");
     } finally {
       setBusy(false);
     }
@@ -350,11 +388,25 @@ export default function EstimateScopePanel({
         </dl>
         {blocked ? (
           <div className="eq-state eq-state--warn" data-testid="eq-estimate-blocked">
-            Approve the Takeoff in the review workspace above before calculating this estimate.
+            Finish the Takeoff worksheet above, then click Approve Takeoff &amp; Build Estimate.
+            Scope unlocks automatically after approval.
           </div>
         ) : (
-          <p className="eq-muted">Takeoff approved — scope and pricing are available.</p>
+          <p className="eq-muted">Takeoff approved — add commercial scope and calculate below.</p>
         )}
+        {estimate.staleReason ? (
+          <div className="eq-action-row" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              data-testid="eq-refresh-from-takeoff"
+              disabled={busy}
+              onClick={() => void refreshFromTakeoff()}
+            >
+              Refresh from Takeoff
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="eq-estimate-section" aria-label="Estimate scope">

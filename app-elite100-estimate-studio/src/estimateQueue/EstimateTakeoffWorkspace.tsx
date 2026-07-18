@@ -19,19 +19,22 @@ type Props = {
   onBackToQueue: () => void;
 };
 
+type ReadyState = {
+  kind: "ready";
+  takeoffJobId: string;
+  linkStatus: string;
+  created: boolean;
+  reused: boolean;
+  attachmentName: string;
+  persistenceWarning: string | null;
+  caseRow: QuoteIntakeCaseDto | null;
+  displayStatus: string;
+  scopeRefreshKey: number;
+};
+
 type OpenState =
   | { kind: "resolving" }
-  | {
-      kind: "ready";
-      takeoffJobId: string;
-      linkStatus: string;
-      created: boolean;
-      reused: boolean;
-      attachmentName: string;
-      persistenceWarning: string | null;
-      caseRow: QuoteIntakeCaseDto | null;
-      displayStatus: string;
-    }
+  | ReadyState
   | { kind: "error"; message: string; code?: string };
 
 function aiTakeoffHeadUrl(): string {
@@ -99,7 +102,8 @@ export default function EstimateTakeoffWorkspace({ authToken, caseId, onBackToQu
             linkStatus: opened.linkStatus,
             jobStatus,
             reviewStatus
-          })
+          }),
+          scopeRefreshKey: 0
         });
       } catch (err) {
         if (cancelled) return;
@@ -123,8 +127,33 @@ export default function EstimateTakeoffWorkspace({ authToken, caseId, onBackToQu
 
   const takeoffSrc =
     state.kind === "ready"
-      ? `${aiTakeoffHeadUrl()}/?takeoffJobId=${encodeURIComponent(state.takeoffJobId)}`
+      ? `${aiTakeoffHeadUrl()}/?takeoffJobId=${encodeURIComponent(state.takeoffJobId)}&consolidated=1`
       : null;
+
+  useEffect(() => {
+    if (state.kind !== "ready") return;
+    function onMessage(event: MessageEvent) {
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+      if (data.type !== "eliteos-takeoff-approved") return;
+      if (String(data.takeoffJobId ?? "") !== state.takeoffJobId) return;
+      setState((prev) => {
+        if (prev.kind !== "ready") return prev;
+        return {
+          ...prev,
+          displayStatus: "Approved",
+          scopeRefreshKey: prev.scopeRefreshKey + 1
+        };
+      });
+      window.setTimeout(() => {
+        document
+          .querySelector('[data-testid="estimate-scope-panel"]')
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [state]);
 
   return (
     <div className="eq-workspace" data-testid="estimate-takeoff-workspace">
@@ -208,8 +237,8 @@ export default function EstimateTakeoffWorkspace({ authToken, caseId, onBackToQu
             />
           </div>
           <p className="eq-footnote">
-            Review plan pages, pieces, dimensions, rooms, and warnings in the embedded AI Takeoff
-            workspace. Approve Takeoff there, then define commercial scope and calculate below.
+            Review the plan and edit the Takeoff worksheet above. Click{" "}
+            <strong>Approve Takeoff &amp; Build Estimate</strong> to seed Estimate Scope below.
           </p>
 
           <EstimateScopePanel
@@ -217,6 +246,7 @@ export default function EstimateTakeoffWorkspace({ authToken, caseId, onBackToQu
             caseId={caseId}
             takeoffJobId={state.takeoffJobId}
             takeoffDisplayStatus={state.displayStatus}
+            refreshKey={state.scopeRefreshKey}
             customerHint={
               state.caseRow
                 ? String(state.caseRow.customerName || state.caseRow.customer || "")

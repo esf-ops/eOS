@@ -39,6 +39,11 @@ import { buildProcessingStatus } from "./takeoffProcessOrchestrator.mjs";
 import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
 import { pickSafeExayardJobMetadata } from "./exayardClient.mjs";
 import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
+import {
+  buildConsolidatedTakeoffSummary,
+  deriveConsolidatedDisplayStatus,
+  evaluateConsolidatedApprovalGate
+} from "./takeoffConsolidatedApproval.mjs";
 import { buildTakeoffImportPayload } from "./takeoffImportPayload.mjs";
 import { loadReviewStateFromRaw, normalizeReviewState } from "./takeoffReviewStatus.mjs";
 import { ESTIMATOR_DECISION_CODES, HARD_BLOCKER_CODES } from "./takeoffWorkflowState.mjs";
@@ -1064,6 +1069,8 @@ export async function approveTakeoffJob({
   takeoffResult = null,
   reviewState = null,
   dimensionEvidence = null,
+  approvalMode = "legacy",
+  acceptAdvisoryWarnings = false,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -1132,50 +1139,132 @@ export async function approveTakeoffJob({
       ? rawJson._meta.dimensionEvidence
       : null);
 
-  const approvalGate = evaluateTakeoffApprovalGate({
-    takeoffResult: resolvedResult,
-    computed,
-    validation,
-    qaGate,
-    dimensionEvidence: dimEvidence,
-    reviewState: rs,
-    hasSavedResult: true,
-    hasUnsavedEdits: false,
-    reviewStatus: jobRow.review_status ?? "needs_review",
-  });
-
-  if (!approvalGate.canApprove) {
-    // Classify blockers so the frontend can render actionable decision cards rather
-    // than just displaying a raw error string.
-    const hardBlockers = approvalGate.blockers.filter(
-      (b) => !ESTIMATOR_DECISION_CODES.has(b.code) && !HARD_BLOCKER_CODES.has(b.code)
-        ? true  // unknown codes are hard blockers by default
-        : HARD_BLOCKER_CODES.has(b.code)
-    );
-    const estimatorDecisionsRequired = approvalGate.blockers
-      .filter((b) => ESTIMATOR_DECISION_CODES.has(b.code))
-      .map((b) => ({
-        code: b.code,
-        message: b.message,
-        path: b.path ?? null,
-        category: b.category ?? "review",
-      }));
-    const allMessages = approvalGate.blockers.map((b) => b.message).join("; ");
-    const err = workspaceError(
-      allMessages || "Approval blockers must be resolved before approval",
-      422
-    );
-    err.approvalBlockers = {
-      ok: false,
-      code: estimatorDecisionsRequired.length > 0 && hardBlockers.length === 0
-        ? "approval_decisions_required"
-        : "approval_hard_blockers",
-      hardBlockers,
-      estimatorDecisionsRequired,
+  const useConsolidated = String(approvalMode ?? "legacy") === "consolidated";
+  let approvalGate;
+  let consolidatedGate = null;
+  if (useConsolidated) {
+    consolidatedGate = evaluateConsolidatedApprovalGate({
+      takeoffResult: resolvedResult,
+      computed,
+      validation,
+      qaGate,
+      dimensionEvidence: dimEvidence,
+      reviewState: rs,
+      hasSavedResult: true,
+      hasUnsavedEdits: false,
+      reviewStatus: jobRow.review_status ?? "needs_review",
+      jobStatus: String(jobRow.status ?? "")
+    });
+    if (consolidatedGate.alreadyApproved) {
+      return {
+        ok: true,
+        takeoffJobId,
+        approvedAt: jobRow.result_summary?.approvedAt ?? null,
+        approvedByUserId: jobRow.result_summary?.approvedByUserId ?? null,
+        reviewStatus: "approved",
+        approvalStatus: "approved_for_import",
+        workflowStatus: "approved_for_import",
+        canApprove: false,
+        canImport: true,
+        qaGate,
+        approvalGate: {
+          canApprove: false,
+          blockers: [],
+          blockerCount: 0
+        },
+        summary: buildResultSummary(resolvedResult, computed, validation, importPlan),
+        importPayload: null,
+        idempotent: true,
+        advisory: consolidatedGate.advisory,
+        blocking: []
+      };
+    }
+    if (consolidatedGate.blocking.length > 0) {
+      const err = workspaceError(
+        consolidatedGate.blocking.map((b) => b.message).join("; ") ||
+          "Approval blockers must be resolved before approval",
+        422
+      );
+      err.approvalBlockers = {
+        ok: false,
+        code: "approval_hard_blockers",
+        hardBlockers: consolidatedGate.blocking,
+        estimatorDecisionsRequired: [],
+        advisory: consolidatedGate.advisory
+      };
+      throw err;
+    }
+    if (consolidatedGate.advisory.length > 0 && !acceptAdvisoryWarnings) {
+      const err = workspaceError(
+        `Confirm ${consolidatedGate.advisory.length} advisory warning(s) before approval`,
+        422
+      );
+      err.approvalBlockers = {
+        ok: false,
+        code: "approval_advisory_confirmation_required",
+        hardBlockers: [],
+        estimatorDecisionsRequired: [],
+        advisory: consolidatedGate.advisory,
+        advisoryCount: consolidatedGate.advisory.length
+      };
+      throw err;
+    }
+    approvalGate = {
+      canApprove: true,
+      canImport: false,
+      blockers: [],
+      blockerCount: 0,
+      workflowStatus: consolidatedGate.workflowStatus
     };
-    throw err;
+  } else {
+    approvalGate = evaluateTakeoffApprovalGate({
+      takeoffResult: resolvedResult,
+      computed,
+      validation,
+      qaGate,
+      dimensionEvidence: dimEvidence,
+      reviewState: rs,
+      hasSavedResult: true,
+      hasUnsavedEdits: false,
+      reviewStatus: jobRow.review_status ?? "needs_review",
+    });
+
+    if (!approvalGate.canApprove) {
+      // Classify blockers so the frontend can render actionable decision cards rather
+      // than just displaying a raw error string.
+      const hardBlockers = approvalGate.blockers.filter(
+        (b) => !ESTIMATOR_DECISION_CODES.has(b.code) && !HARD_BLOCKER_CODES.has(b.code)
+          ? true  // unknown codes are hard blockers by default
+          : HARD_BLOCKER_CODES.has(b.code)
+      );
+      const estimatorDecisionsRequired = approvalGate.blockers
+        .filter((b) => ESTIMATOR_DECISION_CODES.has(b.code))
+        .map((b) => ({
+          code: b.code,
+          message: b.message,
+          path: b.path ?? null,
+          category: b.category ?? "review",
+        }));
+      const allMessages = approvalGate.blockers.map((b) => b.message).join("; ");
+      const err = workspaceError(
+        allMessages || "Approval blockers must be resolved before approval",
+        422
+      );
+      err.approvalBlockers = {
+        ok: false,
+        code: estimatorDecisionsRequired.length > 0 && hardBlockers.length === 0
+          ? "approval_decisions_required"
+          : "approval_hard_blockers",
+        hardBlockers,
+        estimatorDecisionsRequired,
+      };
+      throw err;
+    }
   }
 
+  const effectiveReviewState = useConsolidated
+    ? consolidatedGate.reviewState
+    : rs;
   const now = new Date().toISOString();
   const schemaVersion = resolvedResult.schemaVersion ?? TAKEOFF_SCHEMA_VERSION;
   const summary = buildResultSummary(resolvedResult, computed, validation, importPlan);
@@ -1188,13 +1277,13 @@ export async function approveTakeoffJob({
     computedMeasurementsJson: computed,
     validationDiagnosticsJson: validation,
     importPlanJson: importPlan,
-    reviewState: rs,
+    reviewState: effectiveReviewState,
     approvalGate,
     importPayload: buildTakeoffImportPayload({
       takeoffJobId,
       takeoffResultId: latestRow?.id ?? null,
       takeoffResult: resolvedResult,
-      reviewState: rs,
+      reviewState: effectiveReviewState,
       computed,
       validation,
       qaGate,
@@ -1307,6 +1396,152 @@ export async function approveTakeoffJob({
     approvalGate,
     summary,
     importPayload: approvedSnapshot.importPayload,
+  };
+}
+
+/**
+ * Consolidated path: save pending edits (if any), validate blocking vs advisory,
+ * approve Takeoff, and return payload for Studio Estimate Scope seed/refresh.
+ *
+ * Idempotent when already approved for the same reviewed result.
+ *
+ * @param {{
+ *   supabase: object,
+ *   organizationId: string,
+ *   userId: string|null,
+ *   takeoffJobId: string,
+ *   takeoffResult?: object|null,
+ *   reviewState?: object|null,
+ *   dimensionEvidence?: object|null,
+ *   acceptAdvisoryWarnings?: boolean,
+ *   correctionNotes?: string|null
+ * }} params
+ */
+export async function approveAndBuildEstimate({
+  supabase,
+  organizationId,
+  userId,
+  takeoffJobId,
+  takeoffResult = null,
+  reviewState = null,
+  dimensionEvidence = null,
+  acceptAdvisoryWarnings = false,
+  correctionNotes = null
+}) {
+  if (!isUuid(organizationId)) {
+    throw workspaceError("organizationId must be a valid UUID");
+  }
+  if (!isUuid(takeoffJobId)) {
+    throw workspaceError("takeoffJobId must be a valid UUID");
+  }
+
+  const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  if (!jobRow) {
+    throw workspaceError("Takeoff job not found", 404);
+  }
+
+  if (String(jobRow.status ?? "") === "processing") {
+    throw workspaceError("Takeoff is still processing — wait for completion before approval", 422);
+  }
+
+  let latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+  let resolvedResult = takeoffResult;
+  if (!resolvedResult) {
+    if (latestRow?.normalized_takeoff_json) {
+      resolvedResult = latestRow.normalized_takeoff_json;
+    } else {
+      const rsSummary = jobRow.result_summary;
+      if (rsSummary && typeof rsSummary === "object" && rsSummary.normalizedTakeoffJson) {
+        resolvedResult = rsSummary.normalizedTakeoffJson;
+      }
+    }
+  }
+  if (!resolvedResult) {
+    throw workspaceError("No saved result found for this takeoff workspace", 404);
+  }
+
+  if (takeoffResult != null) {
+    await saveTakeoffCorrection({
+      supabase,
+      organizationId,
+      userId,
+      takeoffJobId,
+      takeoffResult: resolvedResult,
+      correctionNotes: correctionNotes ?? "Consolidated worksheet save before approve-and-build",
+      reviewState,
+      baseResultId: latestRow?.id ?? null
+    });
+    latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+    if (latestRow?.normalized_takeoff_json) {
+      resolvedResult = latestRow.normalized_takeoff_json;
+    }
+  }
+
+  let computed;
+  try {
+    ({ computed } = recomputeTakeoffBundle(resolvedResult));
+  } catch (e) {
+    const err = workspaceError(
+      `Takeoff computation failed: ${e instanceof Error ? e.message : String(e)}`,
+      422
+    );
+    err.code = "CALCULATION_FAILED";
+    throw err;
+  }
+
+  const rawJson =
+    typeof latestRow?.raw_ai_result_json === "object" && latestRow.raw_ai_result_json !== null
+      ? latestRow.raw_ai_result_json
+      : {};
+  const rs =
+    reviewState != null
+      ? normalizeReviewState(reviewState)
+      : loadReviewStateFromRaw(rawJson);
+
+  const preflight = evaluateConsolidatedApprovalGate({
+    takeoffResult: resolvedResult,
+    computed,
+    validation: null,
+    qaGate: { status: "ready_for_review", topIssues: [] },
+    reviewState: rs,
+    hasSavedResult: true,
+    hasUnsavedEdits: false,
+    reviewStatus: jobRow.review_status ?? "needs_review",
+    jobStatus: String(jobRow.status ?? "")
+  });
+
+  const summaryView = buildConsolidatedTakeoffSummary(
+    resolvedResult,
+    preflight.reviewState,
+    computed,
+    { blocking: preflight.blocking, advisory: preflight.advisory }
+  );
+
+  const approved = await approveTakeoffJob({
+    supabase,
+    organizationId,
+    userId,
+    takeoffJobId,
+    takeoffResult: resolvedResult,
+    reviewState: preflight.reviewState,
+    dimensionEvidence,
+    approvalMode: "consolidated",
+    acceptAdvisoryWarnings:
+      acceptAdvisoryWarnings || preflight.advisory.length === 0
+  });
+
+  return {
+    ...approved,
+    displayStatus: deriveConsolidatedDisplayStatus({
+      jobStatus: "completed",
+      reviewStatus: "approved",
+      hasResult: true
+    }),
+    consolidatedSummary: summaryView,
+    advisory: approved.advisory ?? preflight.advisory,
+    blocking: [],
+    seededEstimateScope: true,
+    idempotent: Boolean(approved.idempotent)
   };
 }
 
