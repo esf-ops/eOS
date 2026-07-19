@@ -41,7 +41,10 @@ import { pickSafeExayardJobMetadata } from "./exayardClient.mjs";
 import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
 import {
   buildEstimatorConfirmedMeta,
-  selectAuthoritativeTakeoffResult
+  findPendingAiTakeoffResult,
+  readAiHandlingMeta,
+  selectAuthoritativeTakeoffResult,
+  summarizeAiFindingsPreview
 } from "./takeoffAuthoritativeResult.mjs";
 import {
   autoCompleteRoomReviewState,
@@ -957,6 +960,7 @@ export async function saveTakeoffCorrection({
   correctionNotes = null,
   baseResultId = null,
   reviewState = null,
+  aiHandling = null,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -1029,6 +1033,25 @@ export async function saveTakeoffCorrection({
   const existingCorrections = Array.isArray(existingRaw._corrections)
     ? existingRaw._corrections
     : [];
+  const priorHandling = readAiHandlingMeta(latestRow, jobRow.result_summary);
+  const aiHandlingPatch = {};
+  if (aiHandling && typeof aiHandling === "object") {
+    if (aiHandling.lastMergedAiResultId) {
+      aiHandlingPatch.lastMergedAiResultId = String(aiHandling.lastMergedAiResultId);
+    }
+    if (aiHandling.sourceResultId) {
+      aiHandlingPatch.sourceResultId = String(aiHandling.sourceResultId);
+    }
+    if (aiHandling.dismissAiResultId) {
+      const dismissed = new Set(priorHandling.dismissedAiResultIds);
+      dismissed.add(String(aiHandling.dismissAiResultId));
+      aiHandlingPatch.dismissedAiResultIds = [...dismissed];
+    } else if (Array.isArray(aiHandling.dismissedAiResultIds)) {
+      aiHandlingPatch.dismissedAiResultIds = [
+        ...new Set(aiHandling.dismissedAiResultIds.map(String).filter(Boolean))
+      ];
+    }
+  }
   const rawPayload = {
     ...existingRaw,
     _corrections: [...existingCorrections, correctionEntry],
@@ -1037,6 +1060,13 @@ export async function saveTakeoffCorrection({
       lastCorrectionAt: now,
       lastCorrectedByUserId: userId ?? null,
       estimatorConfirmed,
+      ...aiHandlingPatch,
+      ...(priorHandling.lastMergedAiResultId && !aiHandlingPatch.lastMergedAiResultId
+        ? { lastMergedAiResultId: priorHandling.lastMergedAiResultId }
+        : {}),
+      ...(priorHandling.dismissedAiResultIds.length && !aiHandlingPatch.dismissedAiResultIds
+        ? { dismissedAiResultIds: priorHandling.dismissedAiResultIds }
+        : {}),
       ...(normalizedReviewState != null ? { reviewState: normalizedReviewState } : {}),
     },
   };
@@ -1095,6 +1125,12 @@ export async function saveTakeoffCorrection({
         lastCorrectionId: correctionEntry.id,
         estimatorConfirmed,
         ...(normalizedReviewState != null ? { reviewState: normalizedReviewState } : {}),
+        ...(rawPayload._meta?.lastMergedAiResultId
+          ? { lastMergedAiResultId: rawPayload._meta.lastMergedAiResultId }
+          : {}),
+        ...(Array.isArray(rawPayload._meta?.dismissedAiResultIds)
+          ? { dismissedAiResultIds: rawPayload._meta.dismissedAiResultIds }
+          : {}),
         normalizedTakeoffJson: takeoffResult,
         computedMeasurementsJson: computed,
         validationDiagnosticsJson: validation,
@@ -1999,22 +2035,35 @@ export async function getLatestTakeoffResult({
       ? rawJson._meta.dimensionEvidence
       : null;
 
+  const handling = readAiHandlingMeta(savedResult, jobRow.result_summary);
+  const pending = findPendingAiTakeoffResult(resultRows || [], savedResult, handling);
+  const pendingAiPreview = pending.pendingAiAvailable
+    ? summarizeAiFindingsPreview(pending.pendingAiDraft)
+    : { rooms: [] };
+
   return {
     takeoffJobId,
     savedAt: savedResult.created_at,
     schemaVersion: savedResult.schema_version,
     reviewStatus: savedResult.review_status ?? "needs_review",
+    // Authoritative estimator draft for editing — never silently replaced by raw AI.
+    resultId: savedResult.id ?? null,
     normalizedTakeoffJson: savedResult.normalized_takeoff_json,
     computedMeasurementsJson: freshComputed,
     validationDiagnosticsJson: savedResult.validation_diagnostics_json,
     importPlanJson: savedResult.import_plan_json,
     reviewState: loadReviewStateFromRaw(rawJson),
     importPayload: rawJson?._meta?.approvedSnapshot?.importPayload ?? null,
-    // Returned so the frontend can evaluate the same approval gate as the server.
-    // Without dimensionEvidence, EVIDENCE_RECONCILIATION blockers are invisible to
-    // the local gate, causing canApprove=true on the client while the server returns false.
     dimensionEvidence,
     file: fileRow ? safeFileSummary(fileRow) : null,
+    // Separate pending AI payload — does not become authoritative until Save & merge.
+    pendingAiAvailable: Boolean(pending.pendingAiAvailable),
+    pendingAiResultId: pending.pendingAiResultId,
+    pendingAiDraft: pending.pendingAiDraft,
+    pendingAiSavedAt: pending.pendingAiSavedAt,
+    pendingAiPreview,
+    lastMergedAiResultId: pending.lastMergedAiResultId,
+    dismissedAiResultIds: pending.dismissedAiResultIds,
   };
 }
 

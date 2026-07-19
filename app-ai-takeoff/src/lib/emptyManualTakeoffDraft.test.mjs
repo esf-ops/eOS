@@ -244,12 +244,21 @@ console.log("\nemptyManualTakeoffDraft.test.mjs\n");
     "Takeoff queued"
   );
   assert.equal(
+    deriveConsolidatedWorksheetStatus({
+      jobStatus: "completed",
+      hasUsableGeometry: true,
+      pendingAiAvailable: true
+    }),
+    "Takeoff draft ready · AI findings pending review"
+  );
+  assert.equal(
     deriveQueueWorkflowStatus({
       takeoffJobStatus: "completed",
       takeoffReviewStatus: "needs_review",
-      pieceCount: 1
+      pieceCount: 1,
+      pendingAiAvailable: true
     }),
-    "Takeoff draft ready"
+    "Takeoff draft ready · AI findings pending review"
   );
   assert.equal(
     deriveQueueWorkflowStatus({

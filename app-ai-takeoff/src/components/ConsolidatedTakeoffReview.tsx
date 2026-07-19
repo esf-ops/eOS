@@ -30,7 +30,8 @@ import {
   hasEstimatorOwnedGeometry,
   removePieceFromTakeoff,
   removeRoomFromTakeoff,
-  saveMergeTakeoffDrafts
+  saveMergeTakeoffDrafts,
+  summarizeAiFindingsPreview
 } from "@takeoff-core/takeoffAuthoritativeResult.mjs";
 import { getSupabase } from "../lib/supabase";
 import TakeoffPlanPreviewPanel, {
@@ -243,9 +244,26 @@ export default function ConsolidatedTakeoffReview() {
   const [summary, setSummary] = useState<Record<string, unknown> | null>(null);
   const [approvalDiag, setApprovalDiag] = useState<ApprovalDiagnostic | null>(null);
   const [pendingAiMerge, setPendingAiMerge] = useState(false);
+  const [pendingAiPreview, setPendingAiPreview] = useState<{
+    rooms: Array<{
+      id: string;
+      name: string;
+      pieces: Array<{
+        id: string;
+        name: string;
+        lengthIn: number;
+        depthIn: number;
+        quantity: number;
+        sf: number;
+      }>;
+    }>;
+  }>({ rooms: [] });
+  const [pendingAiResultId, setPendingAiResultId] = useState<string | null>(null);
+  const [showAiFindingsPreview, setShowAiFindingsPreview] = useState(true);
   const [retryBusy, setRetryBusy] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const pendingServerTakeoffRef = useRef<any | null>(null);
+  const pendingAiResultIdRef = useRef<string | null>(null);
   const saveTimer = useRef<number | null>(null);
   const draftRef = useRef(draft);
   const excludedRef = useRef(excludedRunIds);
@@ -309,6 +327,34 @@ export default function ConsolidatedTakeoffReview() {
     };
   }, []);
 
+  const clearPendingAi = useCallback(() => {
+    setPendingAiMerge(false);
+    setPendingAiPreview({ rooms: [] });
+    setPendingAiResultId(null);
+    pendingServerTakeoffRef.current = null;
+    pendingAiResultIdRef.current = null;
+  }, []);
+
+  const applyPendingAiFromLatest = useCallback((latest: any) => {
+    if (latest?.pendingAiAvailable && latest?.pendingAiDraft) {
+      pendingServerTakeoffRef.current = latest.pendingAiDraft;
+      pendingAiResultIdRef.current = latest.pendingAiResultId
+        ? String(latest.pendingAiResultId)
+        : null;
+      setPendingAiResultId(pendingAiResultIdRef.current);
+      setPendingAiMerge(true);
+      setPendingAiPreview(
+        latest.pendingAiPreview?.rooms
+          ? latest.pendingAiPreview
+          : summarizeAiFindingsPreview(latest.pendingAiDraft)
+      );
+      setShowAiFindingsPreview(true);
+      return true;
+    }
+    clearPendingAi();
+    return false;
+  }, [clearPendingAi]);
+
   const loadWorkspace = useCallback(async (
     token: string,
     jobId: string,
@@ -323,6 +369,7 @@ export default function ConsolidatedTakeoffReview() {
       `/api/takeoff-jobs/${encodeURIComponent(jobId)}/results/latest`,
       token
     ).catch(() => null)) as any;
+    // Authoritative estimator draft only — never treat pending AI as this payload.
     const result =
       latest?.normalizedTakeoffJson ||
       job?.latestResult?.normalizedTakeoffJson ||
@@ -332,6 +379,7 @@ export default function ConsolidatedTakeoffReview() {
     const jobStatus = String(job?.status ?? "").toLowerCase();
     const reviewStatus = String(job?.reviewStatus ?? latest?.reviewStatus ?? "").toLowerCase();
     const usableServer = hasUsableTakeoffGeometry(result);
+    const pendingAiAvailable = Boolean(latest?.pendingAiAvailable && latest?.pendingAiDraft);
 
     if (jobStatus === "failed" || jobStatus === "error") setAiPhase("failed");
     else if (jobStatus === "processing" || jobStatus === "pending" || jobStatus === "queued") {
@@ -349,7 +397,7 @@ export default function ConsolidatedTakeoffReview() {
       hasEstimatorOwnedGeometry(activeDraft) || hasUsableTakeoffGeometry(activeDraft);
 
     if (opts?.discardLocal && result) {
-      // Explicit Discard & load AI — replace local draft but keep server tombstones.
+      // Legacy replace path — load authoritative server draft (not pending AI).
       const rs = latest?.reviewState || {};
       hydrateReviewMeta(rs);
       const cleaned = applyDeletionTombstones(result, {
@@ -358,53 +406,49 @@ export default function ConsolidatedTakeoffReview() {
       });
       activeDraft = cleaned;
       setDraft(cleaned);
-      setPendingAiMerge(false);
-      pendingServerTakeoffRef.current = null;
+      applyPendingAiFromLatest(latest);
     } else if (result && usableServer && dirty && !opts?.forceServer && localOwned) {
-      // AI ready while estimator has unsaved geometry — hold server payload for Save & merge.
-      pendingServerTakeoffRef.current = result;
-      setPendingAiMerge(true);
+      // Keep unsaved local estimator draft; still surface pending AI from server.
       unionLocalTombstones(latest?.reviewState || {});
-    } else if (result && localOwned && !opts?.discardLocal) {
-      // Soft refresh / post-merge poll: never let raw AI displace estimator-owned draft.
+      applyPendingAiFromLatest(latest);
+      if (!pendingAiAvailable) {
+        // Fallback: dirty + no pending payload metadata (older servers).
+        setPendingAiMerge(false);
+      }
+    } else if (result && localOwned && dirty && !opts?.forceServer) {
       unionLocalTombstones(latest?.reviewState || {});
-      const tombstones = {
-        deletedRoomIds: [
-          ...deletedRoomIdsRef.current,
-          ...((latest?.reviewState?.deletedRoomIds as string[]) || [])
-        ],
-        deletedRunIds: [
-          ...deletedRunIdsRef.current,
-          ...((latest?.reviewState?.deletedRunIds as string[]) || [])
-        ]
-      };
-      const { merged } = saveMergeTakeoffDrafts(activeDraft, result, tombstones);
-      activeDraft = merged;
-      draftRef.current = merged;
-      setDraft(merged);
-      setPendingAiMerge(false);
-      pendingServerTakeoffRef.current = null;
+      applyPendingAiFromLatest(latest);
     } else if (result) {
       const rs = latest?.reviewState || {};
       hydrateReviewMeta(rs);
       const cleaned = applyDeletionTombstones(result, {
-        deletedRoomIds: rs.deletedRoomIds ?? [],
-        deletedRunIds: rs.deletedRunIds ?? []
+        deletedRoomIds: [
+          ...deletedRoomIdsRef.current,
+          ...((rs.deletedRoomIds as string[]) || [])
+        ],
+        deletedRunIds: [
+          ...deletedRunIdsRef.current,
+          ...((rs.deletedRunIds as string[]) || [])
+        ]
       });
       activeDraft = cleaned;
+      draftRef.current = cleaned;
       setDraft(cleaned);
-      setPendingAiMerge(false);
-      pendingServerTakeoffRef.current = null;
+      applyPendingAiFromLatest(latest);
     } else if (!hasUsableTakeoffGeometry(activeDraft)) {
       activeDraft = createEmptyManualTakeoffDraft();
       setDraft(activeDraft);
+      applyPendingAiFromLatest(latest);
+    } else {
+      applyPendingAiFromLatest(latest);
     }
 
     setDisplayStatus(
       deriveConsolidatedWorksheetStatus({
         jobStatus,
         reviewStatus,
-        hasUsableGeometry: hasUsableTakeoffGeometry(activeDraft) || usableServer
+        hasUsableGeometry: hasUsableTakeoffGeometry(activeDraft) || usableServer,
+        pendingAiAvailable
       })
     );
 
@@ -417,10 +461,20 @@ export default function ConsolidatedTakeoffReview() {
         status: String(file.status ?? "ready")
       });
     }
-  }, [hydrateReviewMeta, unionLocalTombstones]);
+  }, [hydrateReviewMeta, unionLocalTombstones, applyPendingAiFromLatest]);
 
   const persistDraftWithResult = useCallback(
-    async (takeoffResult: any) => {
+    async (
+      takeoffResult: any,
+      opts?: {
+        aiHandling?: {
+          lastMergedAiResultId?: string | null;
+          dismissAiResultId?: string | null;
+          sourceResultId?: string | null;
+        } | null;
+        correctionNotes?: string;
+      }
+    ) => {
       if (!authToken || !takeoffJobId || !takeoffResult) return;
       draftRef.current = takeoffResult;
       setDraft(takeoffResult);
@@ -434,7 +488,7 @@ export default function ConsolidatedTakeoffReview() {
         }
         await saveTakeoffCorrection(authToken, takeoffJobId, {
           takeoffResult,
-          correctionNotes: "Consolidated worksheet autosave",
+          correctionNotes: opts?.correctionNotes ?? "Consolidated worksheet autosave",
           reviewState: {
             excludedRunIds: [...excludedRef.current],
             excludedRoomIds: [],
@@ -446,7 +500,8 @@ export default function ConsolidatedTakeoffReview() {
             evidenceAcks: {},
             manualRoomIds: ownership.manualRoomIds,
             manualRunIds: ownership.manualRunIds
-          }
+          },
+          aiHandling: opts?.aiHandling ?? null
         });
         setSaveStatus("saved");
         window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
@@ -463,19 +518,33 @@ export default function ConsolidatedTakeoffReview() {
     if (!authToken || !takeoffJobId) return;
     const local = draftRef.current || createEmptyManualTakeoffDraft();
     let serverAi = pendingServerTakeoffRef.current;
+    let pendingId = pendingAiResultIdRef.current;
     if (!serverAi) {
       const latest = (await labApiGet(
         `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
         authToken
       ).catch(() => null)) as any;
-      serverAi = latest?.normalizedTakeoffJson ?? null;
+      if (latest?.pendingAiAvailable && latest?.pendingAiDraft) {
+        serverAi = latest.pendingAiDraft;
+        pendingId = latest.pendingAiResultId ? String(latest.pendingAiResultId) : null;
+      }
       if (latest?.reviewState) unionLocalTombstones(latest.reviewState);
     }
+    if (!serverAi) {
+      setLoadError("No pending AI findings to merge.");
+      return;
+    }
     const { merged } = saveMergeTakeoffDrafts(local, serverAi, mergeTombstones());
-    await persistDraftWithResult(merged);
-    setPendingAiMerge(false);
-    pendingServerTakeoffRef.current = null;
-    // Soft reload merges again — never force AI-only overwrite.
+    await persistDraftWithResult(merged, {
+      correctionNotes: "Save & merge AI findings",
+      aiHandling: pendingId
+        ? {
+            lastMergedAiResultId: pendingId,
+            sourceResultId: pendingId
+          }
+        : null
+    });
+    clearPendingAi();
     await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
   }, [
     authToken,
@@ -483,8 +552,29 @@ export default function ConsolidatedTakeoffReview() {
     persistDraftWithResult,
     loadWorkspace,
     mergeTombstones,
-    unionLocalTombstones
+    unionLocalTombstones,
+    clearPendingAi
   ]);
+
+  const handleDiscardAiFindings = useCallback(async () => {
+    if (!authToken || !takeoffJobId) return;
+    const local = draftRef.current || createEmptyManualTakeoffDraft();
+    let pendingId = pendingAiResultIdRef.current;
+    if (!pendingId) {
+      const latest = (await labApiGet(
+        `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
+        authToken
+      ).catch(() => null)) as any;
+      pendingId = latest?.pendingAiResultId ? String(latest.pendingAiResultId) : null;
+    }
+    await persistDraftWithResult(local, {
+      correctionNotes: "Dismissed pending AI findings",
+      aiHandling: pendingId ? { dismissAiResultId: pendingId } : null
+    });
+    clearPendingAi();
+    setSaveStatus("idle");
+    await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
+  }, [authToken, takeoffJobId, persistDraftWithResult, clearPendingAi, loadWorkspace]);
 
   useEffect(() => {
     if (!authToken || !takeoffJobId) return;
@@ -493,15 +583,16 @@ export default function ConsolidatedTakeoffReview() {
     });
   }, [authToken, takeoffJobId, loadWorkspace]);
 
-  // Poll while AI is queued/processing so findings appear without leaving the worksheet.
+  // Keep polling after draft is ready so a later AI completion surfaces as pending.
   useEffect(() => {
     if (!authToken || !takeoffJobId) return;
-    if (aiPhase !== "queued" && aiPhase !== "processing" && aiPhase !== "unknown") return;
+    if (approveStatus === "approved") return;
+    if (aiPhase === "failed") return;
     const timer = window.setInterval(() => {
       void loadWorkspace(authToken, takeoffJobId).catch(() => {});
     }, 2500);
     return () => window.clearInterval(timer);
-  }, [authToken, takeoffJobId, aiPhase, loadWorkspace]);
+  }, [authToken, takeoffJobId, aiPhase, approveStatus, loadWorkspace]);
   const buildReviewState = useCallback(() => {
     const roomCompleteness: Record<string, boolean> = {};
     for (const room of draftRef.current?.rooms ?? []) {
@@ -828,7 +919,7 @@ export default function ConsolidatedTakeoffReview() {
       ) : null}
       {pendingAiMerge ? (
         <div className="ctr-state ctr-warn" role="status" data-testid="ctr-pending-ai-merge">
-          AI findings are ready. Save or discard your current edits before merging.
+          AI findings are ready. Review and merge them into your saved takeoff.
           <div className="ctr-actions" style={{ marginTop: 8 }}>
             <button
               type="button"
@@ -845,22 +936,65 @@ export default function ConsolidatedTakeoffReview() {
             <button
               type="button"
               className="ctr-btn-secondary"
+              data-testid="ctr-preview-ai-findings"
+              aria-expanded={showAiFindingsPreview}
+              onClick={() => setShowAiFindingsPreview((v) => !v)}
+            >
+              {showAiFindingsPreview ? "Hide AI findings" : "Preview AI findings"}
+            </button>
+            <button
+              type="button"
+              className="ctr-btn-secondary"
               data-testid="ctr-discard-merge-ai"
               onClick={() => {
-                setPendingAiMerge(false);
-                setSaveStatus("idle");
-                pendingServerTakeoffRef.current = null;
-                if (authToken && takeoffJobId) {
-                  void loadWorkspace(authToken, takeoffJobId, {
-                    forceServer: true,
-                    discardLocal: true
-                  });
-                }
+                void handleDiscardAiFindings().catch((e) =>
+                  setLoadError(e instanceof LabApiError ? e.message : "Discard AI failed")
+                );
               }}
             >
-              Discard &amp; load AI
+              Discard AI findings
             </button>
           </div>
+          {showAiFindingsPreview ? (
+            <div className="ctr-ai-findings" data-testid="ctr-ai-findings-preview">
+              <div className="ctr-ai-findings-title">AI findings</div>
+              <p className="ctr-muted" style={{ margin: "4px 0 8px" }}>
+                Read-only preview. Your saved takeoff is unchanged until you Save &amp; merge.
+              </p>
+              {(pendingAiPreview.rooms ?? []).length === 0 ? (
+                <p className="ctr-muted">No rooms in the pending AI draft.</p>
+              ) : (
+                <ul className="ctr-ai-findings-list">
+                  {(pendingAiPreview.rooms ?? []).map((room) => (
+                    <li key={room.id || room.name} className="ctr-ai-findings-room">
+                      <strong>{room.name}</strong>
+                      {(room.pieces ?? []).length === 0 ? (
+                        <span className="ctr-muted"> — no pieces</span>
+                      ) : (
+                        <ul>
+                          {(room.pieces ?? []).map((piece) => (
+                            <li key={piece.id || `${room.id}-${piece.name}`}>
+                              {piece.name}
+                              {piece.lengthIn || piece.depthIn
+                                ? ` · ${piece.lengthIn || "—"}×${piece.depthIn || "—"} in`
+                                : ""}
+                              {piece.quantity && piece.quantity !== 1 ? ` · qty ${piece.quantity}` : ""}
+                              {piece.sf ? ` · ${piece.sf.toFixed(2)} SF` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {pendingAiResultId ? (
+                <p className="ctr-muted" style={{ marginTop: 8, fontSize: "0.75rem" }}>
+                  Pending AI result id: {pendingAiResultId.slice(0, 8)}…
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

@@ -191,6 +191,7 @@ export function deriveConsolidatedWorksheetStatus(input = {}) {
   const job = String(input.jobStatus ?? "").toLowerCase();
   const review = String(input.reviewStatus ?? "").toLowerCase();
   const usable = Boolean(input.hasUsableGeometry);
+  const pendingAi = Boolean(input.pendingAiAvailable);
   if (job === "failed" || job === "error") return "Takeoff failed";
   if (review === "approved") return "Approved";
   if (job === "processing" || job === "pending" || job === "queued") {
@@ -198,6 +199,7 @@ export function deriveConsolidatedWorksheetStatus(input = {}) {
       ? "Takeoff processing · manual draft in progress"
       : "Takeoff processing";
   }
+  if (usable && pendingAi) return "Takeoff draft ready · AI findings pending review";
   if (usable) return "Takeoff draft ready";
   if (input.aiEnabled === false) return "AI unavailable — build takeoff manually";
   return "Takeoff queued";

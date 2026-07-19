@@ -11,7 +11,10 @@ import {
   removeRoomFromTakeoff,
   applyDeletionTombstones,
   saveMergeTakeoffDrafts,
-  selectAuthoritativeTakeoffResult
+  selectAuthoritativeTakeoffResult,
+  findPendingAiTakeoffResult,
+  summarizeAiFindingsPreview,
+  readAiHandlingMeta
 } from "./takeoffAuthoritativeResult.mjs";
 
 console.log("\ntakeoffAuthoritativeResult.test.mjs\n");
@@ -321,6 +324,89 @@ function aiDraft() {
   assert.equal(hardRemoved.takeoff.rooms[0].areas[0].runs.length, 0);
   assert.ok(hardRemoved.takeoff.rooms[0], "room remains after last piece removed");
   console.log("  ✓ remove leaves empty room; include/exclude remains separate concept");
+}
+
+{
+  const estimatorRow = {
+    id: "res-manual",
+    created_at: "2026-07-19T12:00:00.000Z",
+    review_status: "needs_review",
+    normalized_takeoff_json: manualDraft(),
+    raw_ai_result_json: {
+      _corrections: [{ id: "c1" }],
+      _meta: {
+        estimatorConfirmed: {
+          confirmedAt: "2026-07-19T12:00:00.000Z",
+          source: "estimator_save"
+        }
+      }
+    }
+  };
+  const newerAi = {
+    id: "res-ai-later",
+    created_at: "2026-07-19T12:05:00.000Z",
+    review_status: "needs_review",
+    normalized_takeoff_json: aiDraft(),
+    raw_ai_result_json: {
+      _meta: { promptVersion: "v1", modelUsed: "gpt-test", aiExtraction: true }
+    }
+  };
+
+  const auth = selectAuthoritativeTakeoffResult([newerAi, estimatorRow]);
+  assert.equal(auth.source, "estimator_draft");
+  assert.equal(auth.row.id, "res-manual", "manual draft remains authoritative");
+
+  const pending = findPendingAiTakeoffResult([newerAi, estimatorRow], auth.row, {});
+  assert.equal(pending.pendingAiAvailable, true);
+  assert.equal(pending.pendingAiResultId, "res-ai-later");
+  assert.equal(pending.pendingAiDraft.rooms[0].name, "AI Kitchen");
+
+  const preview = summarizeAiFindingsPreview(pending.pendingAiDraft);
+  assert.ok(preview.rooms.some((r) => r.name === "AI Kitchen"));
+  assert.ok(preview.rooms[0].pieces.some((p) => p.name === "Sink run"));
+
+  const afterMerge = findPendingAiTakeoffResult([newerAi, estimatorRow], auth.row, {
+    lastMergedAiResultId: "res-ai-later"
+  });
+  assert.equal(afterMerge.pendingAiAvailable, false, "lastMerged prevents repeat prompt");
+
+  const afterDismiss = findPendingAiTakeoffResult([newerAi, estimatorRow], auth.row, {
+    dismissedAiResultIds: ["res-ai-later"]
+  });
+  assert.equal(afterDismiss.pendingAiAvailable, false, "dismissed AI does not prompt");
+
+  const newerRun = {
+    ...newerAi,
+    id: "res-ai-even-later",
+    created_at: "2026-07-19T12:10:00.000Z"
+  };
+  const again = findPendingAiTakeoffResult(
+    [newerRun, newerAi, estimatorRow],
+    auth.row,
+    { dismissedAiResultIds: ["res-ai-later"] }
+  );
+  assert.equal(again.pendingAiAvailable, true);
+  assert.equal(again.pendingAiResultId, "res-ai-even-later");
+
+  const merged = saveMergeTakeoffDrafts(
+    auth.row.normalized_takeoff_json,
+    pending.pendingAiDraft
+  ).merged;
+  assert.ok(merged.rooms.some((r) => r.id === "room-manual-1"));
+  assert.ok(merged.rooms.some((r) => r.id === "room-ai-kitchen"));
+  assert.equal(
+    merged.rooms.find((r) => r.id === "room-manual-1").areas[0].runs[0].lengthIn,
+    120
+  );
+
+  const handling = readAiHandlingMeta({
+    raw_ai_result_json: {
+      _meta: { lastMergedAiResultId: "res-ai-later", dismissedAiResultIds: ["x"] }
+    }
+  });
+  assert.equal(handling.lastMergedAiResultId, "res-ai-later");
+  assert.deepEqual(handling.dismissedAiResultIds, ["x"]);
+  console.log("  ✓ pending AI separate from authoritative; merge/dismiss tracking");
 }
 
 console.log("\ntakeoffAuthoritativeResult.test.mjs — passed\n");
