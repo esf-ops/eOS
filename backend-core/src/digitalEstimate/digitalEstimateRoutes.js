@@ -312,17 +312,24 @@ export function attachDigitalEstimateRoutes(app, deps) {
         return res.status(429).json({ ok: false, error: "Too many requests" });
       }
 
+      let rawToken = String(req.params.token || "");
+      try {
+        rawToken = decodeURIComponent(rawToken);
+      } catch {
+        /* keep Express-decoded param */
+      }
       const dto = await resolvePublicDigitalEstimate({
         env,
         repository,
-        rawToken: req.params.token,
+        rawToken,
         clientIp: ip,
         userAgent: req.headers?.["user-agent"]
       });
       res.status(200).json(dto);
-    } catch {
-      // Indistinguishable unavailable for missing / revoked / expired / superseded / disabled.
-      res.status(404).json(PUBLIC_UNAVAILABLE);
+    } catch (e) {
+      // Safe unavailable: invalid → 404; revoked/replaced/access-expired → 410.
+      const status = Number(e?.statusCode) === 410 ? 410 : 404;
+      res.status(status).json(PUBLIC_UNAVAILABLE);
     }
   }
 

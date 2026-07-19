@@ -42,7 +42,11 @@ export const PUBLIC_TOTALS_KEYS = Object.freeze([
 
 /**
  * @param {Record<string, unknown>} customerSnapshot frozen customer_snapshot_json
- * @param {{ accessExpiresAt?: string|null }} [access]
+ * @param {{
+ *   accessExpiresAt?: string|null,
+ *   accessStatus?: "active"|"pricing_expired"|null,
+ *   pricingValidThrough?: string|null
+ * }} [access]
  */
 export function buildPublicDigitalEstimateDto(customerSnapshot, access = {}) {
   const snap = customerSnapshot && typeof customerSnapshot === "object" ? customerSnapshot : {};
@@ -96,10 +100,21 @@ export function buildPublicDigitalEstimateDto(customerSnapshot, access = {}) {
 
   assertAllowlistedObject(estimate, PUBLIC_ESTIMATE_DTO_KEYS);
 
+  const pricingValidThrough =
+    access.pricingValidThrough != null
+      ? str(access.pricingValidThrough)
+      : estimate.pricingValidThrough;
+  const accessStatus =
+    access.accessStatus === "pricing_expired" || access.accessStatus === "active"
+      ? access.accessStatus
+      : "active";
+
   return {
     ok: true,
     estimate,
     access: {
+      status: accessStatus,
+      pricingValidThrough,
       expiresAt: access.accessExpiresAt ? String(access.accessExpiresAt) : null
     }
   };

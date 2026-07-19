@@ -64,13 +64,18 @@ assert.equal(
   "Vite UI flag must not gate token exchange"
 );
 assert.ok(
-  effectBlock[0].includes("clearFragmentFromUrl") &&
-    effectBlock[0].includes("exchangeFragmentToken"),
-  "legacy fragment clear + exchange remain available"
+  effectBlock[0].includes("clearFragmentFromUrl"),
+  "legacy fragment clear remains available"
 );
 assert.ok(
-  effectBlock[0].includes("pathToken") && effectBlock[0].includes("exchangeFragmentToken"),
-  "stable path tokens exchange via the same session API"
+  effectBlock[0].includes("fetchPublicEstimateByToken") &&
+    api.includes("/api/public-digital-estimate/v1/"),
+  "stable path/hash tokens use shared public v1 GET contract"
+);
+assert.ok(
+  effectBlock[0].includes("configurationUiEnabled()") &&
+    effectBlock[0].includes("exchangeFragmentToken"),
+  "v2 session exchange remains optional when configuration UI is enabled"
 );
 assert.ok(app.includes("state.estimate"), "read-only baseline path when estimate present");
 assert.ok(app.includes("configurationUiEnabled()"), "UI flag may still gate interactive configure mode");

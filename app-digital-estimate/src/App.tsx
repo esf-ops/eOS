@@ -9,7 +9,7 @@ import {
   clearFragmentFromUrl,
   configurationUiEnabled,
   exchangeFragmentToken,
-  fetchLegacyPathEstimate,
+  fetchPublicEstimateByToken,
   parseTokenFromHash,
   parseTokenFromPath,
   resumeConfigurationSession,
@@ -135,40 +135,34 @@ export function App() {
       const fragmentToken = parseTokenFromHash(window.location.hash);
       const pathToken = parseTokenFromPath(window.location.pathname);
 
-      // Stable reusable path token: /e/<token> — exchange every visit; do not consume/delete.
-      // Legacy fragment /e#token still works (cleared from bar after capture for hygiene).
+      // Stable reusable link: /e/<token> (path) or legacy /e#<token> (fragment).
+      // Shared public contract is GET /api/public-digital-estimate/v1/:token (not consumed).
       const accessToken = pathToken || fragmentToken;
       if (accessToken) {
         if (fragmentToken && !pathToken) {
           clearFragmentFromUrl();
         }
         try {
-          const state = await exchangeFragmentToken(accessToken);
+          const publicBody = await fetchPublicEstimateByToken(accessToken);
           if (cancelled) return;
-          applyExchangeState(state, setters);
-        } catch (e) {
-          // Path tokens: fall back to legacy v1 read-only if v2 exchange is unavailable.
-          if (pathToken) {
+          setEstimate(normalizePublicEstimate(publicBody.estimate));
+          setMode("legacy");
+          setDiagnosticCode(null);
+          // Optional configure mode when UI flag + v2 session exchange succeed.
+          if (configurationUiEnabled()) {
             try {
-              const dto = await fetchLegacyPathEstimate(pathToken);
-              if (cancelled) return;
-              setEstimate(normalizePublicEstimate(dto));
-              setMode("legacy");
-              setDiagnosticCode(null);
+              const state = await exchangeFragmentToken(accessToken);
+              if (!cancelled) applyExchangeState(state, setters);
             } catch {
-              const code =
-                e && typeof e === "object" && "diagnosticCode" in e
-                  ? String((e as { diagnosticCode?: string }).diagnosticCode || "DE-EXCHANGE-404")
-                  : "DE-EXCHANGE-404";
-              if (!cancelled) clearAllState(setters, code);
+              /* keep read-only baseline from v1 */
             }
-          } else {
-            const code =
-              e && typeof e === "object" && "diagnosticCode" in e
-                ? String((e as { diagnosticCode?: string }).diagnosticCode || "DE-EXCHANGE-404")
-                : "DE-EXCHANGE-404";
-            if (!cancelled) clearAllState(setters, code);
           }
+        } catch (e) {
+          const code =
+            e && typeof e === "object" && "diagnosticCode" in e
+              ? String((e as { diagnosticCode?: string }).diagnosticCode || "DE-PUBLIC-404")
+              : "DE-PUBLIC-404";
+          if (!cancelled) clearAllState(setters, code);
         } finally {
           if (!cancelled) setLoading(false);
         }

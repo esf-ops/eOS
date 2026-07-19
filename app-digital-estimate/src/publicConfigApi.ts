@@ -378,15 +378,53 @@ export async function fetchCurrentReviewRequest(): Promise<{
   return (await res.json()) as { ok: boolean; reviewRequest: CustomerReviewRequest | null };
 }
 
-export async function fetchLegacyPathEstimate(token: string): Promise<PublicEstimate> {
+export type PublicEstimateAccess = {
+  status: "active" | "pricing_expired" | string;
+  pricingValidThrough?: string | null;
+  expiresAt?: string | null;
+};
+
+export type PublicEstimateResponse = {
+  ok: true;
+  estimate: PublicEstimate;
+  access: PublicEstimateAccess;
+};
+
+/**
+ * Shared public access contract for reusable customer links.
+ * GET /api/public-digital-estimate/v1/:token — does not consume the token.
+ */
+export async function fetchPublicEstimateByToken(token: string): Promise<PublicEstimateResponse> {
   const base = apiBaseUrl();
   const res = await fetch(
     `${base}/api/public-digital-estimate/v1/${encodeURIComponent(token)}`,
     { method: "GET", headers: { Accept: "application/json" } },
   );
-  if (!res.ok) throw new Error("unavailable");
-  const body = (await res.json()) as { ok?: boolean; estimate?: PublicEstimate };
+  if (!res.ok) {
+    const err = new Error("unavailable") as Error & { status?: number; diagnosticCode?: string };
+    err.status = res.status;
+    err.diagnosticCode = res.status === 410 ? "DE-ACCESS-GONE" : "DE-PUBLIC-404";
+    throw err;
+  }
+  const body = (await res.json()) as {
+    ok?: boolean;
+    estimate?: PublicEstimate;
+    access?: PublicEstimateAccess;
+  };
   if (!body.ok || !body.estimate) throw new Error("unavailable");
+  return {
+    ok: true,
+    estimate: body.estimate,
+    access: body.access || {
+      status: "active",
+      pricingValidThrough: body.estimate.pricingValidThrough ?? null,
+    },
+  };
+}
+
+/** @deprecated Prefer fetchPublicEstimateByToken — kept for older call sites. */
+export async function fetchLegacyPathEstimate(token: string): Promise<PublicEstimate> {
+  const body = await fetchPublicEstimateByToken(token);
   return body.estimate;
 }
 

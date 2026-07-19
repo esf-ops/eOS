@@ -265,7 +265,7 @@ console.log("\nphaseDe1.test.mjs\n");
         repository: repo,
         rawToken: p1.accessToken
       }),
-    (e) => e.statusCode === 404
+    (e) => e.statusCode === 404 || e.statusCode === 410
   );
 
   const ok2 = await resolvePublicDigitalEstimate({
@@ -291,7 +291,7 @@ console.log("\nphaseDe1.test.mjs\n");
         repository: repo,
         rawToken: p2.accessToken
       }),
-    (e) => e.statusCode === 404 && e.message === "Not found"
+    (e) => (e.statusCode === 404 || e.statusCode === 410) && e.message === "Not found"
   );
 
   await assert.rejects(
@@ -303,7 +303,7 @@ console.log("\nphaseDe1.test.mjs\n");
       }),
     (e) => e.statusCode === 404 && e.message === "Not found"
   );
-  console.log("ok: supersede/revoke/missing return indistinguishable 404");
+  console.log("ok: supersede/revoke/missing return safe unavailable (404/410)");
 }
 
 // Cross-org administration denied

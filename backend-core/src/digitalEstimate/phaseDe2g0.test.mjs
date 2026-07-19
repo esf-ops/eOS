@@ -118,19 +118,18 @@ async function publishOne(envExtra = {}) {
   console.log("ok: allowlist UUID normalize; wildcard rejected");
 }
 
-// --- Empty allowlist blocks public ---
+// --- v1 public resolve is token-authorized (synthetic allowlist does not gate v1) ---
 {
   const { env, repo, published } = await publishOne();
-  await assert.rejects(
-    () =>
-      resolvePublicDigitalEstimate({
-        env,
-        repository: repo,
-        rawToken: published.accessToken
-      }),
-    (e) => e.statusCode === 404
-  );
-  console.log("ok: empty allowlist blocks public publication");
+  const dto = await resolvePublicDigitalEstimate({
+    env,
+    repository: repo,
+    rawToken: published.accessToken
+  });
+  assert.equal(dto.ok, true);
+  assert.ok(dto.estimate);
+  assert.ok(dto.access?.status === "active" || dto.access?.status === "pricing_expired");
+  console.log("ok: empty allowlist does not block v1 public token resolve");
 }
 
 // --- Explicit allowlist passes ---
@@ -146,23 +145,20 @@ async function publishOne(envExtra = {}) {
   });
   assert.equal(dto.ok, true);
   assert.ok(dto.estimate?.documentTitle || dto.estimate?.totals?.estimatedProjectTotal != null);
-  console.log("ok: explicitly allowlisted publication passes guard");
+  console.log("ok: explicitly allowlisted publication passes v1 resolve");
 }
 
-// --- Non-allowlisted fails generically ---
+// --- Non-allowlisted still resolves on v1 (allowlist gates v2 only) ---
 {
   const { env, repo, published } = await publishOne();
   env.DIGITAL_ESTIMATE_SYNTHETIC_PUBLICATION_IDS = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-  await assert.rejects(
-    () =>
-      resolvePublicDigitalEstimate({
-        env,
-        repository: repo,
-        rawToken: published.accessToken
-      }),
-    (e) => e.statusCode === 404 && e.message === "Not found"
-  );
-  console.log("ok: non-allowlisted publication fails generically");
+  const dto = await resolvePublicDigitalEstimate({
+    env,
+    repository: repo,
+    rawToken: published.accessToken
+  });
+  assert.equal(dto.ok, true);
+  console.log("ok: non-allowlisted publication still resolves on v1 public GET");
 }
 
 // --- Browser synthetic claim rejected ---
