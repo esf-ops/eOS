@@ -223,6 +223,7 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
       ok: true,
       config: {
         publicConfigurationEnabled: true,
+        liveCustomerConfigureReady: !synthetic.syntheticPilotOnly,
         publicOrigin: expectedOrigin,
         syntheticPilotOnly: synthetic.syntheticPilotOnly,
         syntheticAllowlistConfigured: synthetic.syntheticAllowlistConfigured,
@@ -341,6 +342,13 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
   console.log(
     "[digital-estimate-public-config] mounted /api/public-digital-estimate/v2/* (flags on)"
   );
+  const synthetic = readSafeSyntheticPilotConfig(env);
+  if (synthetic.syntheticPilotOnly) {
+    console.warn(
+      "[digital-estimate-public-config] DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY is on — POST /api/public-digital-estimate/v2/session only succeeds for allowlisted publication UUIDs. Set DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY=0 for live customer ConfigurationView. allowlistCount=",
+      synthetic.syntheticAllowlistCount
+    );
+  }
   return { mounted: true, config: readSafeDigitalEstimatePublicConfigurationConfig(env) };
 }
 

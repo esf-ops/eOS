@@ -809,9 +809,7 @@ export function createAmendmentStudioService(deps) {
         linkStatus: "active",
         supersededCount: atomic.supersededCount ?? 0,
         syntheticPilot: syntheticAccess,
-        staffNotice: syntheticAccess.awaitingSyntheticAllowlist
-          ? "Replacement publication awaiting synthetic allowlist"
-          : null
+        staffNotice: syntheticAccess.staffNotice || null
       };
     },
 

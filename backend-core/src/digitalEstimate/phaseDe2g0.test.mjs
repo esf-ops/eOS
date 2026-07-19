@@ -240,7 +240,10 @@ async function publishOne(envExtra = {}) {
   const { env, published, publicationId } = await publishOne();
   const desc = describeSyntheticPublicAccessibility(publicationId, env);
   assert.equal(desc.awaitingSyntheticAllowlist, true);
-  assert.equal(desc.staffNotice, "Replacement publication awaiting synthetic allowlist");
+  assert.match(
+    String(desc.staffNotice || ""),
+    /DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY/
+  );
   assert.match(JSON.stringify(published.syntheticPilot || desc), /awaitingSyntheticAllowlist|publiclyAccessible/);
   // After allowlist
   env.DIGITAL_ESTIMATE_SYNTHETIC_PUBLICATION_IDS = publicationId;

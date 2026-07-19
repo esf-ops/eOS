@@ -105,6 +105,10 @@ export function assertSyntheticPublicationPublicAccess(publicationId, env = proc
   const e = new Error("Not found");
   e.code = "not_found";
   e.statusCode = 404;
+  // Server/ops logs only — never returned to the browser on public routes.
+  e.exchangeReason = isDigitalEstimateSyntheticPilotOnly(env)
+    ? "synthetic_not_allowlisted"
+    : "publication_not_publicly_accessible";
   throw e;
 }
 
@@ -130,7 +134,7 @@ export function describeSyntheticPublicAccessibility(publicationId, env = proces
     awaitingSyntheticAllowlist: !ok,
     staffNotice: ok
       ? null
-      : "Replacement publication awaiting synthetic allowlist"
+      : "Customer configuration is blocked while DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY is on. Set DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY=0 for live customer Digital Estimates, or add this publication UUID to DIGITAL_ESTIMATE_SYNTHETIC_PUBLICATION_IDS."
   };
 }
 
