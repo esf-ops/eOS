@@ -4518,7 +4518,11 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-table th, .ctr-table td { border-bottom: 1px solid var(--eos-line); padding: 6px; vertical-align: top; }
 .ctr-table th { text-align: left; background: var(--eos-bg-soft); position: sticky; top: 0; }
 .ctr-table input, .ctr-table select { width: 100%; min-width: 0; padding: 4px 6px; font: inherit; }
-.ctr-room-rename { margin-top: 4px; }
+.ctr-room-rename { margin-top: 0; max-width: 14rem; }
+.ctr-room td { background: var(--eos-bg-soft); font-weight: 600; }
+.ctr-room--selected td { outline: 1px solid var(--eos-accent, #2a6f97); outline-offset: -1px; }
+.ctr-room-header { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.ctr-room-add-piece { font-size: 0.75rem; padding: 2px 8px; }
 .ctr-sf { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctr-row--excluded { opacity: 0.45; }
 .ctr-row--low { background: var(--eos-warn-soft); }

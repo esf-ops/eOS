@@ -26,6 +26,10 @@ import {
   TAKEOFF_INITIATION_MODE,
   TAKEOFF_LINK_RELATIONSHIP_STATUS
 } from "../quoteIntake/quoteIntakeTypes.mjs";
+import {
+  deriveIntakeLinkStatusFromJob,
+  syncIntakeTakeoffLinkFromJob
+} from "./intakeTakeoffLinkStatus.mjs";
 import { decodeAndValidatePdfBytes } from "../quoteIntake/quoteIntakeGraphNormalize.mjs";
 import { createHash } from "node:crypto";
 
@@ -361,6 +365,27 @@ export async function openEstimateForIntakeCase(deps) {
   const lockKey = `${org}:${idempotencyKey}`;
 
   return withIdempotencyLock(lockKey, async () => {
+    async function resolveLinkStatusForJob(takeoffJobId, fallbackStatus) {
+      if (typeof getSupabase !== "function") {
+        return String(fallbackStatus || TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED);
+      }
+      try {
+        const supabase = getSupabase();
+        const { data: job } = await supabase
+          .from("quote_takeoff_jobs")
+          .select("id,organization_id,status,review_status,metadata")
+          .eq("id", takeoffJobId)
+          .eq("organization_id", org)
+          .maybeSingle();
+        if (!job) return String(fallbackStatus || TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED);
+        await syncIntakeTakeoffLinkFromJob(supabase, job);
+        const proc = job.metadata?.processing || {};
+        return deriveIntakeLinkStatusFromJob(job.status, job.review_status, proc.phase);
+      } catch {
+        return String(fallbackStatus || TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED);
+      }
+    }
+
     const existingLinks = await repository.listTakeoffLinks(org, caseId);
     const active = findActiveLinkedJob(existingLinks);
     if (active?.takeoffJobId) {
@@ -380,11 +405,15 @@ export async function openEstimateForIntakeCase(deps) {
       } catch {
         // optional
       }
+      const linkStatus = await resolveLinkStatusForJob(
+        active.takeoffJobId,
+        active.relationshipStatus
+      );
       return {
         ok: true,
         intakeCaseId: caseId,
         takeoffJobId: String(active.takeoffJobId),
-        linkStatus: String(active.relationshipStatus || TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED),
+        linkStatus,
         created: false,
         reused: true,
         attachmentName: attachment.safeFilename || "plan.pdf",
@@ -398,11 +427,12 @@ export async function openEstimateForIntakeCase(deps) {
 
     const byKey = existingLinks.find((l) => l.idempotencyKey === idempotencyKey && l.takeoffJobId);
     if (byKey?.takeoffJobId) {
+      const linkStatus = await resolveLinkStatusForJob(byKey.takeoffJobId, byKey.relationshipStatus);
       return {
         ok: true,
         intakeCaseId: caseId,
         takeoffJobId: String(byKey.takeoffJobId),
-        linkStatus: String(byKey.relationshipStatus || TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED),
+        linkStatus,
         created: false,
         reused: true,
         attachmentName: attachment.safeFilename || "plan.pdf",

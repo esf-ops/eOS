@@ -44,6 +44,7 @@ import {
   hasEstimatorSavedEdits,
   mergeAiDraftPreservingConfirmed
 } from "./takeoffAuthoritativeResult.mjs";
+import { syncIntakeTakeoffLinkFromJob } from "./intakeTakeoffLinkStatus.mjs";
 import { evaluateTakeoffQaGate }       from "./takeoffQaGate.mjs";
 import { getExtractionProvider, getInventoryProvider, getEvidenceProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
 import { QUOTE_FILE_BUCKET }           from "../files/quoteFileStoragePath.mjs";
@@ -577,9 +578,21 @@ export async function runAiTakeoffExtraction({
       validationDiagnosticsJson:  persistValidation,
       importPlanJson:             persistImportPlan,
       resultRowId:                resultRowId ?? null,
+      roomCount:                  Array.isArray(persistNormalized?.rooms)
+        ? persistNormalized.rooms.length
+        : 0,
+      pieceCount:                 Number(summary?.runCount ?? summary?.pieceCount ?? 0) || 0,
     },
   });
 
+  // Keep Estimate Queue link status accurate (hosted links were stuck at "queued").
+  await syncIntakeTakeoffLinkFromJob(supabase, {
+    id: takeoffJobId,
+    organization_id: organizationId,
+    status: "completed",
+    review_status: keepApproved ? "approved" : "needs_review",
+    metadata: { processing: { phase: "done", mode: "ai_generate" } }
+  });
   // 15. Return result (storage_path never included).
   return {
     ok:                        true,

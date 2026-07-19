@@ -52,7 +52,15 @@ export function deriveQueueWorkflowStatus(input = {}) {
   const estimateStatus = String(input.estimateStatus ?? "").toLowerCase();
   const publicationStatus = String(input.publicationStatus ?? "").toLowerCase();
   const reviewOperatorStatus = String(input.reviewOperatorStatus ?? "").toLowerCase();
-  const linkStatus = String(input.linkStatus ?? input.relationshipStatus ?? "").toLowerCase();
+  const linkStatusRaw = String(input.linkStatus ?? input.relationshipStatus ?? "").toLowerCase();
+  // Stale intake links often remain "queued" after the job completes — prefer job status.
+  const linkStatus =
+    takeoffJobStatus === "completed" ||
+    takeoffJobStatus === "failed" ||
+    takeoffJobStatus === "error" ||
+    takeoffJobStatus === "processing"
+      ? ""
+      : linkStatusRaw;
   const firstOpenedAt = input.firstOpenedAt ? String(input.firstOpenedAt) : null;
   const customerViewed = Boolean(input.customerViewed);
   const customerSelectionsSaved = Boolean(input.customerSelectionsSaved);
