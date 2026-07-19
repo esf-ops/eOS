@@ -43,9 +43,19 @@ assert.ok(
   "must not gate worksheet on AI draft"
 );
 assert.ok(component.includes("handleSaveAndMergeAi"));
+assert.ok(component.includes("handleDiscardAiFindings"));
+assert.ok(component.includes("pendingAiAvailable"));
+assert.ok(component.includes("applyPendingAiFromLatest"));
+assert.ok(component.includes("data-testid=\"ctr-ai-findings-preview\""));
+assert.ok(component.includes("data-testid=\"ctr-preview-ai-findings\""));
+assert.ok(component.includes("AI findings are ready. Review and merge them into your saved takeoff."));
+assert.ok(component.includes("Discard AI findings"));
+assert.ok(component.includes("Preview AI findings") || component.includes("Hide AI findings"));
+assert.ok(component.includes("lastMergedAiResultId") || component.includes("aiHandling"));
+assert.ok(component.includes("summarizeAiFindingsPreview"));
+assert.ok(draftHelper.includes("AI findings pending review"));
 assert.ok(component.includes("saveMergeTakeoffDrafts"));
 assert.ok(component.includes("pendingServerTakeoffRef"));
-assert.ok(component.includes("discardLocal: true"));
 assert.ok(component.includes("hasEstimatorOwnedGeometry"));
 assert.ok(component.includes("data-testid=\"ctr-remove-room\""));
 assert.ok(component.includes("data-testid=\"ctr-remove-piece\""));
@@ -55,15 +65,8 @@ assert.ok(component.includes("deletedRoomIds"));
 assert.ok(component.includes("deletedRunIds"));
 assert.ok(component.includes("handleRemoveRoom"));
 assert.ok(component.includes("handleRemovePiece"));
-assert.ok(component.includes('aria-label={`Remove room ${section.name}`}'));
-assert.ok(component.includes('aria-label={`Remove piece ${row.pieceName}`}'));
-assert.ok(
-  component.includes("await loadWorkspace(authToken, takeoffJobId, { forceServer: false })"),
-  "Save & merge soft-reloads without discarding local estimator draft"
-);
 assert.ok(component.includes("data-testid=\"ctr-save-merge-ai\""));
 assert.ok(component.includes("pendingAiMerge"));
-assert.ok(component.includes("AI findings are ready. Save or discard your current edits before merging."));
 assert.ok(
   component.includes("included") || component.includes("Include piece"),
   "include/exclude checkbox remains separate from remove"

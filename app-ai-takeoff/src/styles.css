@@ -4524,6 +4524,18 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-room-header { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .ctr-room-add-piece { font-size: 0.75rem; padding: 2px 8px; }
 .ctr-remove { font-size: 0.75rem; padding: 2px 8px; text-decoration: underline; }
+.ctr-ai-findings {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--eos-line);
+  border-radius: 6px;
+  background: var(--eos-bg, #fff);
+  text-align: left;
+}
+.ctr-ai-findings-title { font-weight: 700; font-size: 0.85rem; }
+.ctr-ai-findings-list { margin: 0; padding-left: 1.1rem; font-size: 0.8rem; }
+.ctr-ai-findings-room { margin: 0.35rem 0; }
+.ctr-ai-findings-room ul { margin: 0.2rem 0 0; padding-left: 1rem; }
 .ctr-sf { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctr-row--excluded { opacity: 0.45; }
 .ctr-row--low { background: var(--eos-warn-soft); }

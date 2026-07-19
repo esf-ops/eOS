@@ -171,6 +171,148 @@ export function selectAuthoritativeTakeoffResult(rows, opts = {}) {
 }
 
 /**
+ * Read AI handling markers from a result row or job summary meta.
+ * @param {object|null|undefined} row
+ * @param {object|null|undefined} [jobResultSummary]
+ */
+export function readAiHandlingMeta(row, jobResultSummary = null) {
+  const meta =
+    row?.raw_ai_result_json &&
+    typeof row.raw_ai_result_json === "object" &&
+    row.raw_ai_result_json._meta &&
+    typeof row.raw_ai_result_json._meta === "object"
+      ? row.raw_ai_result_json._meta
+      : {};
+  const summaryMeta =
+    jobResultSummary && typeof jobResultSummary === "object" ? jobResultSummary : {};
+  const lastMergedAiResultId = String(
+    meta.lastMergedAiResultId ?? summaryMeta.lastMergedAiResultId ?? ""
+  ).trim() || null;
+  const dismissedRaw = meta.dismissedAiResultIds ?? summaryMeta.dismissedAiResultIds ?? [];
+  const dismissedAiResultIds = Array.isArray(dismissedRaw)
+    ? [...new Set(dismissedRaw.map(String).filter(Boolean))]
+    : [];
+  return { lastMergedAiResultId, dismissedAiResultIds };
+}
+
+/**
+ * True when a result row looks like AI-origin output (not a pure estimator correction).
+ * @param {object|null|undefined} row
+ */
+export function isAiOriginTakeoffResult(row) {
+  if (!row?.normalized_takeoff_json) return false;
+  const meta =
+    row.raw_ai_result_json &&
+    typeof row.raw_ai_result_json === "object" &&
+    row.raw_ai_result_json._meta &&
+    typeof row.raw_ai_result_json._meta === "object"
+      ? row.raw_ai_result_json._meta
+      : {};
+  if (meta.promptVersion || meta.modelUsed || meta.aiExtraction === true) return true;
+  if (meta.unconfirmedAiFindings) return true;
+  if (meta.aiDraftOnly === true) return true;
+  // Pure AI rows lack estimatorConfirmed and lack _corrections.
+  if (!hasEstimatorSavedEdits(row)) return true;
+  return false;
+}
+
+function resultCreatedMs(row) {
+  const ms = Date.parse(String(row?.created_at ?? ""));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Find a newer raw AI result that is still pending review against the authoritative draft.
+ * Authoritative draft remains for editing; AI is returned separately.
+ *
+ * @param {object[]} rows newest-first
+ * @param {object|null} authoritativeRow
+ * @param {{ lastMergedAiResultId?: string|null, dismissedAiResultIds?: string[] }} [handling]
+ */
+export function findPendingAiTakeoffResult(rows, authoritativeRow, handling = {}) {
+  const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  const authId = authoritativeRow?.id != null ? String(authoritativeRow.id) : null;
+  const authMs = resultCreatedMs(authoritativeRow);
+  const lastMerged = String(handling.lastMergedAiResultId ?? "").trim();
+  const dismissed = new Set((handling.dismissedAiResultIds ?? []).map(String));
+
+  for (const row of list) {
+    const id = row?.id != null ? String(row.id) : "";
+    if (!id) continue;
+    if (authId && id === authId) continue;
+    if (lastMerged && id === lastMerged) continue;
+    if (dismissed.has(id)) continue;
+    if (!isAiOriginTakeoffResult(row)) continue;
+    if (!row.normalized_takeoff_json) continue;
+    // Prefer AI rows that are newer than the authoritative estimator draft.
+    if (authMs && resultCreatedMs(row) < authMs) continue;
+    // If authoritative itself is pure AI, nothing is "pending" separately.
+    if (
+      authoritativeRow &&
+      !hasEstimatorSavedEdits(authoritativeRow) &&
+      isAiOriginTakeoffResult(authoritativeRow)
+    ) {
+      return null;
+    }
+    return {
+      pendingAiAvailable: true,
+      pendingAiResultId: id,
+      pendingAiDraft: row.normalized_takeoff_json,
+      pendingAiSavedAt: row.created_at ?? null,
+      lastMergedAiResultId: lastMerged || null,
+      dismissedAiResultIds: [...dismissed]
+    };
+  }
+  return {
+    pendingAiAvailable: false,
+    pendingAiResultId: null,
+    pendingAiDraft: null,
+    pendingAiSavedAt: null,
+    lastMergedAiResultId: lastMerged || null,
+    dismissedAiResultIds: [...dismissed]
+  };
+}
+
+/**
+ * Compact read-only summary of AI findings for the pending banner list.
+ * @param {object|null|undefined} takeoff
+ */
+export function summarizeAiFindingsPreview(takeoff) {
+  const rooms = [];
+  for (const room of Array.isArray(takeoff?.rooms) ? takeoff.rooms : []) {
+    const pieces = [];
+    const pushPiece = (run) => {
+      const lengthIn = Number(run?.lengthIn) || 0;
+      const depthIn = Number(run?.depthIn) || 0;
+      const quantity = Number(run?.quantity) || 1;
+      const sf =
+        lengthIn > 0 && depthIn > 0
+          ? Math.round(((lengthIn * depthIn) / 144) * quantity * 100) / 100
+          : 0;
+      pieces.push({
+        id: String(run?.id ?? ""),
+        name: String(run?.label ?? run?.name ?? "Piece"),
+        lengthIn,
+        depthIn,
+        quantity,
+        sf
+      });
+    };
+    for (const run of Array.isArray(room?.runs) ? room.runs : []) pushPiece(run);
+    for (const piece of Array.isArray(room?.pieces) ? room.pieces : []) pushPiece(piece);
+    for (const area of Array.isArray(room?.areas) ? room.areas : []) {
+      for (const run of Array.isArray(area?.runs) ? area.runs : []) pushPiece(run);
+    }
+    rooms.push({
+      id: String(room?.id ?? ""),
+      name: String(room?.name ?? "Room"),
+      pieces
+    });
+  }
+  return { rooms };
+}
+
+/**
  * Build estimatorConfirmed metadata (additive, no migration).
  * @param {{ userId?: string|null, source?: string, now?: string }} opts
  */

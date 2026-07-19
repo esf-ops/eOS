@@ -217,6 +217,12 @@ export async function saveTakeoffCorrection(
     correctionNotes?: string | null;
     baseResultId?: string | null;
     reviewState?: unknown;
+    aiHandling?: {
+      lastMergedAiResultId?: string | null;
+      dismissAiResultId?: string | null;
+      dismissedAiResultIds?: string[];
+      sourceResultId?: string | null;
+    } | null;
   }
 ): Promise<SaveTakeoffCorrectionResponse> {
   return labApiPost(

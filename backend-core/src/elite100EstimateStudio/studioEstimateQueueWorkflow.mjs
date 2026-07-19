@@ -5,7 +5,7 @@
  * @module studioEstimateQueueWorkflow
  */
 
-/** @typedef {'New'|'Takeoff queued'|'Takeoff processing'|'Takeoff draft ready'|'Needs estimator review'|'Scope in progress'|'Ready for approval'|'Published'|'Customer reviewing'|'Customer submitted'|'Sold'|'Closed'|'Takeoff failed'} QueueWorkflowStatus */
+/** @typedef {'New'|'Takeoff queued'|'Takeoff processing'|'Takeoff draft ready'|'Takeoff draft ready · AI findings pending review'|'Needs estimator review'|'Scope in progress'|'Ready for approval'|'Published'|'Customer reviewing'|'Customer submitted'|'Sold'|'Closed'|'Takeoff failed'} QueueWorkflowStatus */
 
 export const QUEUE_WORKFLOW_STATUSES = Object.freeze([
   "New",
@@ -13,6 +13,7 @@ export const QUEUE_WORKFLOW_STATUSES = Object.freeze([
   "Takeoff processing",
   "Takeoff processing · manual draft in progress",
   "Takeoff draft ready",
+  "Takeoff draft ready · AI findings pending review",
   "Needs estimator review",
   "Scope in progress",
   "Ready for approval",
@@ -144,7 +145,11 @@ export function deriveQueueWorkflowStatus(input = {}) {
     linkStatus === "ready" ||
     linkStatus === "manual_review"
   ) {
-    if (usableGeometry) return "Takeoff draft ready";
+    if (usableGeometry) {
+      return input.pendingAiAvailable
+        ? "Takeoff draft ready · AI findings pending review"
+        : "Takeoff draft ready";
+    }
     // Empty/placeholder result must never read as draft ready.
     return estimatorDraft
       ? "Takeoff processing · manual draft in progress"
@@ -196,6 +201,7 @@ export function deriveNeedsAttention(input = {}, workflowStatus = null) {
   if (status === "Takeoff failed") reasons.push("failed");
   if (
     status === "Takeoff draft ready" ||
+    status === "Takeoff draft ready · AI findings pending review" ||
     status === "Needs estimator review"
   ) {
     reasons.push("takeoff_needs_review");
@@ -261,6 +267,7 @@ export function workflowStatusesForFilter(filterKey) {
         "Takeoff processing",
         "Takeoff processing · manual draft in progress",
         "Takeoff draft ready",
+        "Takeoff draft ready · AI findings pending review",
         "Needs estimator review",
         "Takeoff failed"
       ]);
