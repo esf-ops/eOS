@@ -23,6 +23,9 @@ assert.ok(adapter.includes("mapEliteOsToLovableViewModel"));
 assert.ok(adapter.includes("buildSelectionItems"));
 assert.equal(/priceOrder|GROUP_PRICING|customer-supplied total/.test(configView + adapter), false);
 assert.equal(/https?:\/\//.test(adapter.match(/imageAssetPath[\s\S]{0,80}/)?.[0] || ""), false);
+assert.ok(configView.includes("de-color-modal") || configView.includes("ColorPickerModal"));
+assert.ok(configView.includes("groupColorsByPricingGroup") || configView.includes("pricingGroupLabel"));
+assert.ok(configView.includes("de-customer-info") || configView.includes("Customer information"));
 
 const fullDir = join(appRoot, "public", "materials", "elite100", "full");
 const thumbDir = join(appRoot, "public", "materials", "elite100", "thumb");

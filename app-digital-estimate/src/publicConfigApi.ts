@@ -94,6 +94,7 @@ export type CustomerMaterial = {
   collectionLabel?: string | null;
   colorFamily?: string | null;
   patternType?: string | null;
+  pricingGroupLabel?: string | null;
   customerVisible?: boolean;
   roomKey?: string | null;
   optionKey?: string | null;
@@ -113,11 +114,30 @@ export type ConfigurationState = {
     materialCatalogContract?: string | null;
     pricingValidThrough?: string | null;
     lockedScopeNotice?: string;
+    sourceProject?: {
+      customerName?: string | null;
+      projectName?: string | null;
+      projectAddress?: string | null;
+      phone?: string | null;
+      email?: string | null;
+    };
+    customerInfoDraft?: {
+      customerName?: string;
+      projectName?: string;
+      phone?: string;
+      email?: string;
+      projectAddress?: string;
+    } | null;
+    roomLabelDrafts?: Record<string, string>;
     rooms?: Array<{
       roomKey: string;
       displayName: string;
+      sourceDisplayName?: string;
       baselineMaterialLabel?: string;
       baselineColorLabel?: string | null;
+      countertopSf?: number;
+      backsplashSf?: number;
+      customerMayEditLabel?: boolean;
       locked?: boolean;
     }>;
     groups?: Array<{ id: string; groupKey: string; displayLabel: string; required?: boolean }>;
@@ -128,6 +148,12 @@ export type ConfigurationState = {
       baselineDisplayTotal?: number;
       configuredDisplayTotal?: number;
       displayDelta?: number;
+      rooms?: Array<{
+        roomKey?: string;
+        displayName?: string;
+        selectedMaterialLabel?: string;
+        chargeableCounterSf?: number;
+      }>;
       totals?: {
         baselineDisplayTotal?: number;
         configuredDisplayTotal?: number;
@@ -240,6 +266,14 @@ export async function saveConfigurationSelections(payload: {
   items: Array<{ optionKey: string; quantity: number }>;
   expectedRowVersion: number;
   idempotencyKey: string;
+  customerInfoDraft?: {
+    customerName?: string;
+    projectName?: string;
+    phone?: string;
+    email?: string;
+    projectAddress?: string;
+  } | null;
+  roomLabelDrafts?: Record<string, string> | null;
 }): Promise<{
   ok: boolean;
   session?: { rowVersion: number };
@@ -248,6 +282,8 @@ export async function saveConfigurationSelections(payload: {
       ? L
       : unknown
     : unknown;
+  customerInfoDraft?: unknown;
+  roomLabelDrafts?: Record<string, string>;
 }> {
   const base = apiBaseUrl();
   const res = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {

@@ -19,17 +19,25 @@ export type LovableColor = {
   imageThumb: string | null;
   imageFull: string | null;
   collectionLabel: string;
+  pricingGroupLabel: string;
   includedInBaseline: boolean;
   selectable: boolean;
+  /** Optional upgrade amount from latest calculation, dollars */
+  upgradeAmount: number | null;
 };
 
 export type LovableRoom = {
   id: string;
   name: string;
+  sourceName: string;
+  customerMayEditLabel: boolean;
   locked: boolean;
+  countertopSf: number | null;
+  backsplashSf: number | null;
   baselineLabel: string | null;
   selectedColorId: string | null;
   selectedOptionKey: string | null;
+  selectedColorName: string | null;
   colors: LovableColor[];
 };
 
@@ -46,13 +54,32 @@ export type LovableAddon = {
   availabilityState: string;
 };
 
+export type CustomerInfoDraft = {
+  customerName: string;
+  projectName: string;
+  phone: string;
+  email: string;
+  projectAddress: string;
+};
+
+export type SourceProject = {
+  customerName: string | null;
+  projectName: string | null;
+  projectAddress: string | null;
+  phone: string | null;
+  email: string | null;
+};
+
 export type LovableEstimateViewModel = {
   customerName: string;
   projectName: string | null;
+  projectAddress: string | null;
   documentTitle: string;
   quoteNumber: string | null;
   pricingValidThrough: string | null;
   lockedScopeNotice: string | null;
+  sourceProject: SourceProject;
+  customerInfoDraft: CustomerInfoDraft;
   rooms: LovableRoom[];
   addons: LovableAddon[];
   originalTotalLabel: string;
@@ -62,6 +89,7 @@ export type LovableEstimateViewModel = {
   updatedTotal: number | null;
   changeFromOriginal: number | null;
   lineItems: Array<{ label: string; amountLabel: string }>;
+  materialUpgradeLabel: string | null;
 };
 
 function materialOptionsForRoom(options: ConfigOption[], roomKey: string): ConfigOption[] {
@@ -86,8 +114,10 @@ function colorsForRoom(
       imageThumb: m.imageAssetPath || null,
       imageFull: m.imageFullPath || m.imageAssetPath || null,
       collectionLabel: m.collectionLabel || "Elite 100",
+      pricingGroupLabel: m.pricingGroupLabel || m.collectionLabel || "Elite 100",
       includedInBaseline: Boolean(m.includedInBaseline),
       selectable: m.selectable !== false,
+      upgradeAmount: null,
     }));
   }
   return materialOptionsForRoom(options, roomKey).map((o) => ({
@@ -97,9 +127,21 @@ function colorsForRoom(
     imageThumb: o.imageAssetRef || null,
     imageFull: o.imageAssetRef || null,
     collectionLabel: "Elite 100",
+    pricingGroupLabel: "Elite 100",
     includedInBaseline: Boolean(o.includedInBaseline),
     selectable: o.selectable,
+    upgradeAmount: null,
   }));
+}
+
+function emptyDraft(source: SourceProject): CustomerInfoDraft {
+  return {
+    customerName: source.customerName || "",
+    projectName: source.projectName || "",
+    phone: source.phone || "",
+    email: source.email || "",
+    projectAddress: source.projectAddress || "",
+  };
 }
 
 export function mapEliteOsToLovableViewModel(
@@ -110,6 +152,8 @@ export function mapEliteOsToLovableViewModel(
       ? L
       : null
     : null,
+  customerInfoDraft?: Partial<CustomerInfoDraft> | null,
+  roomLabelDrafts?: Record<string, string> | null,
 ): LovableEstimateViewModel | null {
   const estimate = state.estimate as PublicEstimate | null | undefined;
   const config = state.configuration;
@@ -121,6 +165,26 @@ export function mapEliteOsToLovableViewModel(
   const configured = totals.configured ?? baseline;
   const delta =
     totals.delta ?? (configured != null && baseline != null ? configured - baseline : null);
+
+  const sourceProject: SourceProject = {
+    customerName:
+      config.sourceProject?.customerName ?? estimate.project?.customerName ?? null,
+    projectName: config.sourceProject?.projectName ?? estimate.project?.projectName ?? null,
+    projectAddress:
+      config.sourceProject?.projectAddress ?? estimate.project?.projectAddress ?? null,
+    phone: config.sourceProject?.phone ?? null,
+    email: config.sourceProject?.email ?? null,
+  };
+
+  const draft: CustomerInfoDraft = {
+    ...emptyDraft(sourceProject),
+    ...(config.customerInfoDraft || {}),
+    ...(customerInfoDraft || {}),
+  };
+
+  const calcRooms = Array.isArray((latestCalc as { rooms?: unknown[] } | null | undefined)?.rooms)
+    ? ((latestCalc as { rooms: Array<Record<string, unknown>> }).rooms || [])
+    : [];
 
   const options = config.options || [];
   const rooms: LovableRoom[] = (config.rooms || []).map((r) => {
@@ -136,13 +200,29 @@ export function mapEliteOsToLovableViewModel(
       colors.find((c) => c.includedInBaseline) ||
       colors[0] ||
       null;
+    const calcRoom = calcRooms.find((cr) => String(cr.roomKey) === r.roomKey);
+    const labelDraft = roomLabelDrafts?.[r.roomKey] ?? config.roomLabelDrafts?.[r.roomKey];
     return {
       id: r.roomKey,
-      name: r.displayName,
+      name: labelDraft || r.displayName,
+      sourceName: r.sourceDisplayName || r.displayName,
+      customerMayEditLabel: r.customerMayEditLabel !== false,
       locked: true,
+      countertopSf:
+        typeof r.countertopSf === "number"
+          ? r.countertopSf
+          : calcRoom && typeof calcRoom.chargeableCounterSf === "number"
+            ? Number(calcRoom.chargeableCounterSf)
+            : null,
+      backsplashSf: typeof r.backsplashSf === "number" ? r.backsplashSf : null,
       baselineLabel: r.baselineColorLabel || r.baselineMaterialLabel || null,
       selectedColorId: selectedColor?.id ?? null,
       selectedOptionKey: selectedColor?.optionKey ?? selectedOpt?.optionKey ?? null,
+      selectedColorName:
+        selectedColor?.name ||
+        (calcRoom?.selectedMaterialLabel != null
+          ? String(calcRoom.selectedMaterialLabel)
+          : null),
       colors,
     };
   });
@@ -160,13 +240,21 @@ export function mapEliteOsToLovableViewModel(
     availabilityState: o.availabilityState,
   }));
 
+  const materialUpgrade =
+    delta != null && Math.abs(delta) >= 0.005
+      ? formatCurrency(delta)
+      : null;
+
   return {
-    customerName: estimate.project?.customerName || estimate.documentTitle || "Your estimate",
-    projectName: estimate.project?.projectName || null,
+    customerName: draft.customerName || sourceProject.customerName || estimate.documentTitle || "Your estimate",
+    projectName: draft.projectName || sourceProject.projectName,
+    projectAddress: draft.projectAddress || sourceProject.projectAddress,
     documentTitle: estimate.documentTitle,
     quoteNumber: estimate.quoteNumber,
     pricingValidThrough: config.pricingValidThrough || estimate.pricingValidThrough,
     lockedScopeNotice: config.lockedScopeNotice || null,
+    sourceProject,
+    customerInfoDraft: draft,
     rooms,
     addons,
     originalTotal: baseline,
@@ -175,6 +263,7 @@ export function mapEliteOsToLovableViewModel(
     originalTotalLabel: formatCurrency(baseline),
     updatedTotalLabel: formatCurrency(configured),
     changeFromOriginalLabel: formatCurrency(delta),
+    materialUpgradeLabel: materialUpgrade,
     lineItems: (estimate.lineItems || []).map((li) => ({
       label: li.label || "Included item",
       amountLabel: formatCurrency(li.amount),
@@ -187,7 +276,7 @@ export function buildSelectionItems(
   rooms: LovableRoom[],
 ): Array<{ optionKey: string; quantity: number }> {
   const items = Object.entries(qty)
-    .filter(([, q]) => Number(q) > 0)
+    .filter(([key, q]) => !key.startsWith("__") && Number(q) > 0)
     .map(([optionKey, quantity]) => ({ optionKey, quantity: Number(quantity) }));
   for (const room of rooms) {
     const key = room.selectedOptionKey;
@@ -196,4 +285,40 @@ export function buildSelectionItems(
     }
   }
   return items;
+}
+
+/** Group colors for modal tabs — preferred order. */
+export const PRICING_GROUP_TAB_ORDER = [
+  "Group Promo",
+  "Group A",
+  "Group B",
+  "Group C",
+  "Group D",
+  "Group E",
+  "Group F",
+  "Remnant",
+  "Elite 100",
+];
+
+export function groupColorsByPricingGroup(colors: LovableColor[]): Array<{
+  label: string;
+  colors: LovableColor[];
+}> {
+  const map = new Map<string, LovableColor[]>();
+  for (const c of colors) {
+    const label = c.pricingGroupLabel || "Elite 100";
+    if (!map.has(label)) map.set(label, []);
+    map.get(label)!.push(c);
+  }
+  const ordered: Array<{ label: string; colors: LovableColor[] }> = [];
+  for (const label of PRICING_GROUP_TAB_ORDER) {
+    if (map.has(label)) {
+      ordered.push({ label, colors: map.get(label)! });
+      map.delete(label);
+    }
+  }
+  for (const [label, list] of map) {
+    ordered.push({ label, colors: list });
+  }
+  return ordered;
 }

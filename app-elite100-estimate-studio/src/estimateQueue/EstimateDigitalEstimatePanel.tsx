@@ -46,6 +46,21 @@ type ReviewRequestRow = {
   customerNote?: string | null;
   intakeCaseId?: string | null;
   studioEstimateId?: string | null;
+  sourceProject?: {
+    customerName?: string | null;
+    projectName?: string | null;
+    projectAddress?: string | null;
+  } | null;
+  customerInfoDraft?: {
+    customerName?: string;
+    projectName?: string;
+    phone?: string;
+    email?: string;
+    projectAddress?: string;
+  } | null;
+  roomLabelDrafts?: Record<string, string> | null;
+  selectedOptions?: Array<{ optionKey?: string; displayLabel?: string; quantity?: number }>;
+  configuredDisplayTotal?: number | null;
 };
 
 type PublishDiagnostic = {
@@ -444,7 +459,7 @@ export default function EstimateDigitalEstimatePanel({
           <strong>Active customer review request</strong>
           <ul className="eq-de-review-list">
             {reviewRequests.map((r) => (
-              <li key={r.id}>
+              <li key={r.id} data-testid="eq-de-review-item">
                 {r.status} · {r.requestedAt || "—"}
                 {r.customerNote ? ` — ${r.customerNote}` : ""}
                 <span className="eq-muted">
@@ -452,6 +467,51 @@ export default function EstimateDigitalEstimatePanel({
                   (case {r.intakeCaseId?.slice(0, 8) || "—"} · estimate{" "}
                   {r.studioEstimateId?.slice(0, 8) || "—"} · pub {r.publicationId?.slice(0, 8) || "—"})
                 </span>
+                {r.customerInfoDraft ? (
+                  <div className="eq-footnote" data-testid="eq-de-review-customer-draft">
+                    Customer info suggestions:{" "}
+                    {[
+                      r.customerInfoDraft.customerName,
+                      r.customerInfoDraft.projectName,
+                      r.customerInfoDraft.phone,
+                      r.customerInfoDraft.email,
+                      r.customerInfoDraft.projectAddress
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
+                    {r.sourceProject?.customerName || r.sourceProject?.projectName ? (
+                      <>
+                        {" "}
+                        (source: {[r.sourceProject.customerName, r.sourceProject.projectName]
+                          .filter(Boolean)
+                          .join(" · ")}
+                        )
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+                {r.roomLabelDrafts && Object.keys(r.roomLabelDrafts).length ? (
+                  <div className="eq-footnote" data-testid="eq-de-review-room-labels">
+                    Room label suggestions:{" "}
+                    {Object.entries(r.roomLabelDrafts)
+                      .map(([k, v]) => `${k}→${v}`)
+                      .join(", ")}
+                  </div>
+                ) : null}
+                {r.selectedOptions?.length ? (
+                  <div className="eq-footnote" data-testid="eq-de-review-materials">
+                    Selected options:{" "}
+                    {r.selectedOptions
+                      .map((o) => o.displayLabel || o.optionKey)
+                      .filter(Boolean)
+                      .join(", ")}
+                  </div>
+                ) : null}
+                {r.configuredDisplayTotal != null ? (
+                  <div className="eq-footnote">
+                    Submitted total: ${Number(r.configuredDisplayTotal).toFixed(2)}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
