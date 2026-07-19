@@ -14,7 +14,8 @@ import {
   buildProcessingStatus,
   mergeProcessingMeta,
 } from "./takeoffProcessOrchestrator.mjs";
-import { isStaleAiGenerationJob, readTakeoffWorkerStaleMs } from "./takeoffGenerationWorker.mjs";
+import { syncIntakeTakeoffLinkFromJob } from "./intakeTakeoffLinkStatus.mjs";
+import { isClaimableAiGenerationJob, readTakeoffWorkerStaleMs } from "./takeoffGenerationWorker.mjs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_STATUS_PROCESSING = "processing";
@@ -185,7 +186,7 @@ async function validateGenerationPreconditions(supabase, organizationId, takeoff
     const proc = buildProcessingStatus(job);
     if (proc.runId && proc.mode === "ai_generate") {
       const staleMs = readTakeoffWorkerStaleMs(process.env);
-      if (isStaleAiGenerationJob(job, { staleMs })) {
+      if (isClaimableAiGenerationJob(job, { staleMs })) {
         // Allow reclaim / restart after waitUntil or worker death.
         return { job, config, reclaimStale: true };
       }
@@ -267,6 +268,7 @@ export async function startAiTakeoffGeneration({
 
   job.metadata = queuedMeta;
   job.status = JOB_STATUS_PROCESSING;
+  await syncIntakeTakeoffLinkFromJob(supabase, job);
 
   const work = async () => {
     try {

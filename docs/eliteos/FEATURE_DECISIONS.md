@@ -1547,10 +1547,10 @@
 | Field | Value |
 |-------|--------|
 | **Date** | 2026-07-19 |
-| **Decision** | While AI Takeoff is queued/processing/failed/disabled, the consolidated Takeoff worksheet remains **editable** with Add Room / Add Piece / Save draft (empty estimator draft; no AI result required). Manual geometry is estimator-owned (`_estimatorOwned` / reviewState manual ids + `_meta.estimatorConfirmed`). AI findings merge later without overwriting confirmed work; unsaved local edits require explicit Save/Discard before merge. Queue status **Takeoff draft ready** requires usable geometry (pieces). Hosted AI completion uses **waitUntil best-effort** plus durable cron **`GET\|POST /api/internal/takeoff/process-queued`** that claims stale `processing` AI jobs and runs extraction. |
-| **Why** | Estimators could not build geometry before AI finished; Vercel 202 + waitUntil can leave jobs stuck in `processing` when the invocation ends. |
-| **SQL** | None. |
-| **Out of scope** | Slice 2, Estimate Scope geometry editing, pricing unlock without takeoff approval. |
+| **Decision** | While AI Takeoff is queued/processing/failed/disabled, the consolidated Takeoff worksheet remains **editable** with Add Room / Add Piece / Save draft (empty estimator draft; no AI result required). **Empty rooms render immediately** in the worksheet (room header row even with zero pieces). Manual geometry is estimator-owned (`_estimatorOwned` / reviewState manual ids + `_meta.estimatorConfirmed`). AI findings merge later without overwriting confirmed work; unsaved local edits require explicit Save/Discard before merge. Queue status **Takeoff draft ready** requires usable geometry (pieces **or** roomCount). Stale intake `relationship_status=queued` is ignored when the takeoff job is completed/failed/processing. Hosted AI completion uses **waitUntil best-effort** plus durable cron **`GET\|POST /api/internal/takeoff/process-queued`** (Vercel Bearer `CRON_SECRET`) that **claims phase=queued immediately** and reclaim stale in-flight extraction; worker/extraction/open-estimate **sync intake link status** from the job. |
+| **Why** | Estimators could not see Add Room (UI only rendered piece rows); Vercel 202 + waitUntil can leave jobs unclaimed; intake links stayed `queued` after job completion, so Studio queue mislabeled cases. |
+| **SQL** | None (link rows updated in place by sync helper). |
+| **Out of scope** | Slice 2, Estimate Scope geometry editing, pricing unlock without takeoff approval; manual backfill of pre-existing stuck link rows (open-estimate / next worker tick / deploy sync heals on read). |
 
 ### 109. Elite 100 Slice 1 — automatic AI Takeoff after intake; confirmed estimator work wins (2026-07-18)
 

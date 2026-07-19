@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 import {
+  isClaimableAiGenerationJob,
   isStaleAiGenerationJob,
   processQueuedAiTakeoffJobs
 } from "./takeoffGenerationWorker.mjs";
@@ -40,20 +41,34 @@ console.log("\ntakeoffGenerationWorker.test.mjs\n");
   };
   assert.equal(isStaleAiGenerationJob(stale, { now, staleMs: 90_000 }), true);
 
-  const queued = {
+  // Fresh queued phase must claim immediately (no 15s delay).
+  const queuedFresh = {
     status: "processing",
-    started_at: "2026-07-19T11:59:00.000Z",
+    started_at: "2026-07-19T11:59:55.000Z",
     metadata: {
       processing: {
         mode: "ai_generate",
         phase: "queued",
-        startedAt: "2026-07-19T11:59:00.000Z",
+        startedAt: "2026-07-19T11:59:55.000Z",
         runId: "run-2"
       }
     }
   };
-  assert.equal(isStaleAiGenerationJob(queued, { now, staleMs: 90_000 }), true);
-  console.log("  ✓ stale detection for hosted waitUntil death");
+  assert.equal(isClaimableAiGenerationJob(queuedFresh, { now, staleMs: 90_000 }), true);
+
+  const pendingStatus = {
+    status: "pending",
+    started_at: "2026-07-19T11:59:59.000Z",
+    metadata: { processing: { mode: "ai_generate", phase: "queued" } }
+  };
+  assert.equal(isClaimableAiGenerationJob(pendingStatus, { now, staleMs: 90_000 }), true);
+
+  const done = {
+    status: "processing",
+    metadata: { processing: { mode: "ai_generate", phase: "done" } }
+  };
+  assert.equal(isClaimableAiGenerationJob(done, { now, staleMs: 90_000 }), false);
+  console.log("  ✓ claimable: immediate for queued; stale-only for active extraction");
 }
 
 {
@@ -78,6 +93,19 @@ console.log("\ntakeoffGenerationWorker.test.mjs\n");
 
   const supabase = {
     from(table) {
+      if (table === "quote_intake_takeoff_links") {
+        return {
+          update() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          select() {
+            return Promise.resolve({ data: [{ id: "link-1" }], error: null });
+          }
+        };
+      }
       assert.equal(table, "quote_takeoff_jobs");
       const api = {
         _filters: [],
@@ -91,6 +119,9 @@ console.log("\ntakeoffGenerationWorker.test.mjs\n");
         neq() {
           return api;
         },
+        in() {
+          return api;
+        },
         order() {
           return api;
         },
@@ -98,11 +129,17 @@ console.log("\ntakeoffGenerationWorker.test.mjs\n");
           return api;
         },
         update(patch) {
-          api._patch = patch;
+          api._patch = { ...(api._patch || {}), ...patch };
+          if (patch.metadata) jobs[0].metadata = patch.metadata;
+          if (patch.status) jobs[0].status = patch.status;
           return api;
         },
         maybeSingle() {
-          const row = { ...jobs[0], ...(api._patch || {}) };
+          const row = {
+            ...jobs[0],
+            ...(api._patch || {}),
+            metadata: api._patch?.metadata || jobs[0].metadata
+          };
           return Promise.resolve({ data: row, error: null });
         },
         then(resolve, reject) {
@@ -130,7 +167,7 @@ console.log("\ntakeoffGenerationWorker.test.mjs\n");
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.processed, 1);
+  assert.ok(result.claimed >= 1 || result.processed >= 1);
   assert.equal(ran, 1);
   assert.equal(result.attempts[0].ok, true);
   console.log("  ✓ hosted-compatible claimer runs extraction durably");

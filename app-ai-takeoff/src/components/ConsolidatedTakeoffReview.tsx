@@ -235,6 +235,7 @@ export default function ConsolidatedTakeoffReview() {
   const [approvalDiag, setApprovalDiag] = useState<ApprovalDiagnostic | null>(null);
   const [pendingAiMerge, setPendingAiMerge] = useState(false);
   const [retryBusy, setRetryBusy] = useState(false);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const saveTimer = useRef<number | null>(null);
   const draftRef = useRef(draft);
   const excludedRef = useRef(excludedRunIds);
@@ -417,17 +418,37 @@ export default function ConsolidatedTakeoffReview() {
     [draft]
   );
 
+  /** Rooms including empty ones — Add Room must be visible immediately. */
+  const roomSections = useMemo(() => {
+    const rooms = Array.isArray(draft?.rooms) ? draft.rooms : [];
+    return rooms.map((room: any) => ({
+      id: String(room.id),
+      name: String(room.name || "Room"),
+      pieces: rows.filter((r) => r.roomId === room.id)
+    }));
+  }, [draft, rows]);
+
+  useEffect(() => {
+    if (!roomOptions.length) {
+      setSelectedRoomId(null);
+      return;
+    }
+    if (!selectedRoomId || !roomOptions.some((r: { id: string }) => r.id === selectedRoomId)) {
+      setSelectedRoomId(roomOptions[0].id);
+    }
+  }, [roomOptions, selectedRoomId]);
+
   const localSummary = useMemo(() => {
     const included = rows.filter((r) => r.included);
     return {
-      rooms: new Set(included.map((r) => r.roomId)).size,
+      rooms: roomOptions.length,
       includedPieces: included.length,
       countertopSf: included.reduce((s, r) => s + r.countertopSf, 0),
       backsplashSf: 0,
       blockingCount: blocking.length,
       advisoryCount: advisory.length
     };
-  }, [rows, blocking, advisory]);
+  }, [rows, roomOptions.length, blocking, advisory]);
 
   const handleApproveClick = useCallback(async () => {
     if (!authToken || !takeoffJobId || !draft) return;
@@ -672,14 +693,69 @@ export default function ConsolidatedTakeoffReview() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 ? (
+                  {roomSections.length === 0 ? (
                     <tr data-testid="ctr-empty-worksheet">
                       <td colSpan={10} className="ctr-muted">
-                        No pieces yet. Add a room, then add a piece to start measuring.
+                        No rooms yet. Add a room, then add a piece to start measuring.
                       </td>
                     </tr>
                   ) : null}
-                  {rows.map((row) => (
+                  {roomSections.map((section) => (
+                    <React.Fragment key={section.id}>
+                      <tr
+                        className={
+                          selectedRoomId === section.id
+                            ? "ctr-room ctr-room--selected"
+                            : "ctr-room"
+                        }
+                        data-testid="ctr-room"
+                        data-room-id={section.id}
+                        onClick={() => setSelectedRoomId(section.id)}
+                      >
+                        <td colSpan={10}>
+                          <div className="ctr-room-header">
+                            <input
+                              className="ctr-room-rename"
+                              aria-label="Room name"
+                              data-testid="ctr-room-name"
+                              value={section.name}
+                              onChange={(e) =>
+                                updateDraft(renameRoom(draft, section.id, e.target.value))
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <span className="ctr-muted">
+                              {section.pieces.length === 0
+                                ? "No pieces yet"
+                                : `${section.pieces.length} piece${
+                                    section.pieces.length === 1 ? "" : "s"
+                                  }`}
+                            </span>
+                            <button
+                              type="button"
+                              className="ctr-btn-secondary ctr-room-add-piece"
+                              data-testid="ctr-room-add-piece"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedRoomId(section.id);
+                                updateDraft(
+                                  addPiece(draft || createEmptyManualTakeoffDraft(), section.id)
+                                );
+                              }}
+                            >
+                              Add piece
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {section.pieces.length === 0 ? (
+                        <tr data-testid="ctr-room-empty" data-room-id={section.id}>
+                          <td colSpan={10} className="ctr-muted">
+                            No pieces in this room yet.
+                          </td>
+                        </tr>
+                      ) : null}
+                      {section.pieces.map((row) => (
                     <tr
                       key={row.key}
                       className={[
@@ -698,26 +774,12 @@ export default function ConsolidatedTakeoffReview() {
                             updateDraft(reassignRun(draft, row.roomId, row.runId, to));
                           }}
                         >
-                          {roomOptions.map((r) => (
+                          {roomOptions.map((r: { id: string; name: string }) => (
                             <option key={r.id} value={r.id}>
                               {r.name}
                             </option>
                           ))}
                         </select>
-                        <input
-                          className="ctr-room-rename"
-                          aria-label="Room name"
-                          value={row.roomName}
-                          onChange={(e) =>
-                            updateDraft(
-                              markRunEstimatorOwned(
-                                renameRoom(draft, row.roomId, e.target.value),
-                                row.roomId,
-                                row.runId
-                              )
-                            )
-                          }
-                        />
                       </td>
                       <td>
                         <input
@@ -865,6 +927,8 @@ export default function ConsolidatedTakeoffReview() {
                         />
                       </td>
                     </tr>
+                      ))}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -875,7 +939,12 @@ export default function ConsolidatedTakeoffReview() {
                 type="button"
                 className="ctr-btn-secondary"
                 data-testid="ctr-add-room"
-                onClick={() => updateDraft(addRoom(draft || createEmptyManualTakeoffDraft()))}
+                onClick={() => {
+                  const next = addRoom(draft || createEmptyManualTakeoffDraft());
+                  const newId = next.rooms?.[next.rooms.length - 1]?.id;
+                  if (newId) setSelectedRoomId(String(newId));
+                  updateDraft(next);
+                }}
               >
                 Add room
               </button>
@@ -883,9 +952,9 @@ export default function ConsolidatedTakeoffReview() {
                 type="button"
                 className="ctr-btn-secondary"
                 data-testid="ctr-add-piece"
-                disabled={!roomOptions[0]?.id}
+                disabled={!selectedRoomId && !roomOptions[0]?.id}
                 onClick={() => {
-                  const roomId = roomOptions[0]?.id;
+                  const roomId = selectedRoomId || roomOptions[0]?.id;
                   if (!roomId) return;
                   updateDraft(addPiece(draft || createEmptyManualTakeoffDraft(), roomId));
                 }}

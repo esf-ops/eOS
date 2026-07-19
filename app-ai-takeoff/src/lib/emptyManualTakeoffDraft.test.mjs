@@ -31,6 +31,17 @@ console.log("\nemptyManualTakeoffDraft.test.mjs\n");
 
 {
   let draft = createEmptyManualTakeoffDraft();
+  draft = addManualRoom(draft, { name: "Visible Empty Room" });
+  assert.equal(draft.rooms.length, 1);
+  assert.equal(draft.rooms[0].areas[0].runs.length, 0);
+  assert.equal(hasUsableTakeoffGeometry(draft), false);
+  assert.ok(draft.rooms[0].id);
+  assert.equal(draft.rooms[0].name, "Visible Empty Room");
+  console.log("  ✓ empty room persists in draft immediately (visible Add Room)");
+}
+
+{
+  let draft = createEmptyManualTakeoffDraft();
   draft = addManualRoom(draft, { name: "Manual Test Kitchen", roomType: "Kitchen" });
   assert.equal(draft.rooms.length, 1);
   assert.equal(draft.rooms[0].name, "Manual Test Kitchen");
@@ -49,6 +60,7 @@ console.log("\nemptyManualTakeoffDraft.test.mjs\n");
   assert.ok(owned.manualRunIds.includes(draft.rooms[0].areas[0].runs[0].id));
   console.log("  ✓ add room + piece before AI result");
 }
+
 
 {
   let draft = createEmptyManualTakeoffDraft();
@@ -141,7 +153,26 @@ console.log("\nemptyManualTakeoffDraft.test.mjs\n");
     }),
     "Takeoff draft ready"
   );
-  console.log("  ✓ status consistency (no idle / no fake draft ready)");
+  assert.equal(
+    deriveQueueWorkflowStatus({
+      takeoffJobStatus: "completed",
+      takeoffReviewStatus: "needs_review",
+      linkStatus: "queued",
+      pieceCount: 2
+    }),
+    "Takeoff draft ready",
+    "stale link queued must not override completed job with geometry"
+  );
+  assert.equal(
+    deriveQueueWorkflowStatus({
+      takeoffJobStatus: "completed",
+      takeoffReviewStatus: "needs_review",
+      roomCount: 1
+    }),
+    "Takeoff draft ready",
+    "roomCount alone counts as usable geometry for queue status"
+  );
+  console.log("  ✓ status consistency (no idle / no fake draft ready / stale link ignored)");
 }
 
 console.log("\nemptyManualTakeoffDraft.test.mjs — passed\n");
