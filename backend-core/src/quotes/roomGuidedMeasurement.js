@@ -1,7 +1,6 @@
-/**
- * Guided-shape room measurement — mirrors app-quote measurementEngine + guidedShapeGroups
- * for backend rooms-engine parity with Internal Estimate.
- */
+import { ceilBillableSquareFeet } from "./billableSquareFeet.mjs";
+
+export { ceilBillableSquareFeet };
 
 export const STANDARD_COUNTER_DEPTH_IN = 25.5;
 export const STANDARD_BACKSPLASH_HEIGHT_IN = 4;
@@ -43,22 +42,14 @@ export function guidedCornerOverlapCountForMode(overlapMode, shapeType) {
   return guidedCornerOverlapCountForShapeType(shapeType);
 }
 
-/** Elite internal estimate: ceil final exact countertop SF (not per piece). */
+/** Elite internal estimate: ceiling billable SF per priced section (shared helper). */
 export function chargeableCounterSqftFromExact(exactSf) {
-  const ex = round2(exactSf);
-  if (ex <= 0) return 0;
-  const whole = Math.round(ex);
-  if (Math.abs(ex - whole) < 0.005) return whole;
-  return Math.ceil(ex);
+  return ceilBillableSquareFeet(exactSf);
 }
 
-/** Elite internal estimate: ceil final exact backsplash/FHB SF (not per piece). */
+/** Elite internal estimate: ceiling billable splash/FHB SF per priced section. */
 export function chargeableSplashSqftFromExact(exactSf) {
-  const ex = round2(exactSf);
-  if (ex <= 0) return 0;
-  const whole = Math.round(ex);
-  if (Math.abs(ex - whole) < 0.005) return whole;
-  return Math.ceil(ex);
+  return ceilBillableSquareFeet(exactSf);
 }
 
 export function guidedCornerOverlapDeductionSfForPieces(shapeType, pieces, overlapMode) {
