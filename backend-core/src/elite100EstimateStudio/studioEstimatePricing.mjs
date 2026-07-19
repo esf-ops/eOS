@@ -25,6 +25,10 @@ import {
   WATTS_PROMO_RATE_PER_SF
 } from "./studioEstimateTrustedAccounts.mjs";
 import { chargeableBacksplashForPricing } from "./studioRoomBacksplash.mjs";
+import {
+  billableBacksplashFromRoom,
+  billableCountertopFromRoom
+} from "../quotes/billableSquareFeet.mjs";
 
 /** D-edge / Dupont-style specialty — product brief $25/LF (matches Direct upgraded edge). */
 export const STUDIO_D_EDGE_RATE_PER_LF = UPGRADED_EDGE_RATE_DIRECT_V2;
@@ -113,30 +117,40 @@ export function scopeToCalculatorRooms(scope) {
       const pieces = Array.isArray(r.pieces)
         ? r.pieces.filter((p) => p && p.included !== false)
         : [];
-      let countertopSqft = Number(r.countertopSqft);
-      let backsplashSqft = Number(r.backsplashSqft);
-      if (!Number.isFinite(countertopSqft) || countertopSqft < 0) {
-        countertopSqft = pieces
-          .filter((p) => String(p.pieceType ?? "").toLowerCase() !== "backsplash")
-          .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
-      }
-      if (!Number.isFinite(backsplashSqft) || backsplashSqft < 0) {
-        backsplashSqft = pieces
+      // Preserve raw measured geometry on pieces; billable SF uses section ceiling.
+      const counterBilled = billableCountertopFromRoom({
+        countertopSqft: r.countertopSqft,
+        pieces: pieces.filter(
+          (p) => String(p.pieceType ?? "").toLowerCase() !== "backsplash"
+        )
+      });
+      let backsplashRaw = Number(r.backsplashSqft);
+      if (!Number.isFinite(backsplashRaw) || backsplashRaw < 0) {
+        backsplashRaw = pieces
           .filter((p) => String(p.pieceType ?? "").toLowerCase().includes("backsplash"))
           .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
       }
-      const splash = chargeableBacksplashForPricing({
+      const splashPolicy = chargeableBacksplashForPricing({
         ...r,
-        backsplashSqft
+        backsplashSqft: backsplashRaw
       });
+      const splashBilled = billableBacksplashFromRoom({
+        includeBacksplash: splashPolicy.backsplashSqft > 0,
+        backsplashSqft: splashPolicy.backsplashSqft,
+        backsplashSections: r.backsplashSections
+      });
+      const countertopSqft = counterBilled.billableSf;
+      const backsplashSqft = splashBilled.billableSf;
       return {
         id: r.id || `room-${idx}`,
         name: r.name || `Room ${idx + 1}`,
         roomType: r.roomType || "Kitchen",
         calcMode: "Direct SF",
         countertopSqft,
-        backsplashSqft: splash.backsplashSqft,
-        backsplashHeightIn: splash.backsplashHeightIn,
+        backsplashSqft,
+        rawCountertopSqft: counterBilled.rawSf,
+        rawBacksplashSqft: splashBilled.rawSf,
+        backsplashHeightIn: splashPolicy.backsplashHeightIn,
         materialGroup: scope.materialGroup || "Group Promo",
         notes: r.notes || "",
         addons: {},
@@ -147,11 +161,18 @@ export function scopeToCalculatorRooms(scope) {
           lengthIn: p.lengthIn,
           depthIn: p.depthIn,
           sqft: p.sqft,
+          billableSqft: ceilPiece(p),
           included: p.included !== false,
           notes: p.notes || ""
         }))
       };
     });
+}
+
+function ceilPiece(p) {
+  return billableCountertopFromRoom({
+    pieces: [{ ...p, included: true }]
+  }).billableSf;
 }
 
 /**
