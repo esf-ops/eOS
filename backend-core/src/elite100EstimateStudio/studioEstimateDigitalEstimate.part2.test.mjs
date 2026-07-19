@@ -500,4 +500,73 @@ console.log("\nstudioEstimateDigitalEstimate.part2.test.mjs\n");
   console.log("ok: adapter freezes customer-safe fields and Elite 100 eligibility source");
 }
 
+// 16: materialColor group seeds full Elite 100 pricing-group catalog on publish
+{
+  const { createPublicConfigurationService } = await import(
+    "../digitalEstimate/configuration/publicConfigurationService.mjs"
+  );
+  const { listElite100CustomerMaterials } = await import(
+    "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs"
+  );
+  const { studioRepo, svc, deRepo, cfgRepo } = harness();
+  const pricing = createInMemoryPricingPolicyRepository();
+  const row = approvedEstimateRow({
+    id: "est-mat-color-1",
+    scope: {
+      ...approvedEstimateRow().scope,
+      materialGroup: "Group Promo"
+    }
+  });
+  await studioRepo.create({ ...row, createdByUserId: ACTOR });
+  await studioRepo.update(
+    ORG,
+    row.id,
+    {
+      status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+      calculationSnapshot: row.calculationSnapshot,
+      approval: row.approval,
+      pricingEngine: "quoteCalculator",
+      pricingVersion: 2,
+      scope: row.scope
+    },
+    ACTOR
+  );
+
+  const publishedOk = await svc.publish({
+    organizationId: ORG,
+    estimateId: row.id,
+    actorUserId: ACTOR,
+    body: {
+      confirm: true,
+      idempotencyKey: "idem-mat-color",
+      configuration: {
+        customerChoiceGroups: ["materialColor", "sink", "edge"],
+        allowedOptionKeys: ["qty-sink"]
+      }
+    }
+  });
+  assert.equal(publishedOk.ok, true);
+  assert.equal(publishedOk.envelope?.configured, true);
+
+  const publicSvc = createPublicConfigurationService({
+    env: ENV_ON,
+    deRepository: deRepo,
+    configurationRepository: cfgRepo,
+    pricingPolicyRepository: pricing
+  });
+  const exchanged = await publicSvc.exchangePublicationToken({
+    rawToken: publishedOk.accessToken
+  });
+  assert.equal(exchanged.state.lifecycle, "active");
+  assert.ok(exchanged.state.configuration, "eligible publish must expose configuration");
+  const mats = exchanged.state.configuration.materials || [];
+  const promoCount = listElite100CustomerMaterials(true).filter(
+    (m) => m.pricingGroupCode === "promo"
+  ).length;
+  assert.ok(mats.length >= promoCount, "materialColor seeds full group catalog");
+  assert.equal(JSON.stringify(exchanged.state).toLowerCase().includes("wholesale"), false);
+  assert.equal(JSON.stringify(exchanged.state).includes("pricingGroupCode"), false);
+  console.log("ok: 16 materialColor publish seeds group catalog + active configure session");
+}
+
 console.log("\nAll Part 2 Studio → Digital Estimate tests passed.\n");

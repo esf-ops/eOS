@@ -18,8 +18,14 @@ export function parseTokenFromHash(hash: string): string | null {
   return cleaned;
 }
 
+/**
+ * UI kill-switch for ConfigurationView.
+ * Exact "false" forces the read-only summary. Unset or any other value allows
+ * configure mode when the public session returns an active configuration envelope.
+ * Never grants access by itself — server flags + active envelope still required.
+ */
 export function configurationUiEnabled(): boolean {
-  return String(import.meta.env.VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED ?? "").trim() === "true";
+  return String(import.meta.env.VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED ?? "").trim() !== "false";
 }
 
 export function reviewUiEnabled(): boolean {

@@ -1613,3 +1613,15 @@
 | **SQL** | None (meta keys in existing `selection_payload_json`). |
 | **Out of scope** | Sink/cooktop/edge/backsplash customer controls polish, final submit freeze UX overhaul beyond existing review-request path, Moraware/QB, sold. |
 
+
+### 113. Digital Estimate configure-mode routing on stable `/e/<token>` (2026-07-19)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-19 |
+| **Decision** | Public Digital Estimate bootstrap **always** exchanges `POST /api/public-digital-estimate/v2/session` after a successful v1 token read. `ConfigurationView` opens when the session returns `lifecycle=active` **and** a configuration envelope. `VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED` is a **kill-switch only** (exact `false` forces legacy read-only); unset/`true` allows configure. Dev builds surface an explicit `configuration fallback:` reason. Studio publish with `customerChoiceGroups` including `materialColor` seeds all customer-visible Elite 100 colors in the estimate’s pricing group onto the activated envelope (not merely the single createDraft default). |
+| **Why** | Production was stuck on the legacy frozen summary because (1) configure exchange was gated behind exact Vite `true` and (2) silent exchange failure kept read-only baseline. New publishes already create envelopes; the UI never entered configure mode. |
+| **SQL** | None. |
+| **Ops** | Ensure Brain `DIGITAL_ESTIMATE_PUBLIC_CONFIGURATION_ENABLED=1` (+ configuration/API/public-read runtime). On `app-digital-estimate`, set `VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED=true` or remove a baked `false`. Republish (or replace+republish) estimates that were published before materialColor group seeding if the color modal shows only one finish. |
+| **Out of scope** | Hidden query params, second customer URL, sold-job, sink/cooktop/edge/backsplash customer polish. |
+

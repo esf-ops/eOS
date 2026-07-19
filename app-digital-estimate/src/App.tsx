@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { ConfigurationView } from "./ConfigurationView";
+import {
+  decideConfigurationView,
+  isDevDiagnosticsEnabled,
+  type FallbackReason,
+} from "./configurationBootstrap";
 import { ReadOnlyEstimateView } from "./ReadOnlyEstimateView";
 import {
   EstimateRenderError,
@@ -58,13 +63,16 @@ function clearAllState(
     setConfigState: (v: ConfigurationState | null) => void;
     setUnavailable: (v: boolean) => void;
     setDiagnosticCode?: (v: string | null) => void;
+    setFallbackReason?: (v: FallbackReason) => void;
   },
   diagnosticCode: string | null = "DE-EXCHANGE-404",
+  fallbackReason: FallbackReason = "estimate_missing",
 ) {
   setters.setEstimate(null);
   setters.setConfigState(null);
   setters.setUnavailable(true);
   setters.setDiagnosticCode?.(diagnosticCode);
+  setters.setFallbackReason?.(fallbackReason);
 }
 
 function normalizeConfigurationState(state: ConfigurationState): ConfigurationState {
@@ -81,6 +89,7 @@ function applyExchangeState(
     setUnavailable: (v: boolean) => void;
     setMode: (v: "legacy" | "configure" | "none") => void;
     setDiagnosticCode?: (v: string | null) => void;
+    setFallbackReason?: (v: FallbackReason) => void;
   },
 ) {
   let normalized: ConfigurationState;
@@ -89,33 +98,37 @@ function applyExchangeState(
   } catch (e) {
     const code =
       e instanceof EstimateRenderError ? e.diagnosticCode : "DE-RENDER-BASELINE";
-    clearAllState(setters, code);
+    clearAllState(setters, code, "render_error");
     setters.setMode("none");
     return;
   }
 
-  const canConfigure =
-    configurationUiEnabled() &&
-    normalized.lifecycle === "active" &&
-    Boolean(normalized.configuration);
+  const decision = decideConfigurationView({
+    uiEnabled: configurationUiEnabled(),
+    lifecycle: normalized.lifecycle,
+    hasConfiguration: Boolean(normalized.configuration),
+    hasEstimate: Boolean(normalized.estimate),
+  });
 
-  if (canConfigure) {
+  if (decision.mode === "configure") {
     setters.setConfigState(normalized);
     setters.setEstimate(normalized.estimate || null);
     setters.setMode("configure");
     setters.setDiagnosticCode?.(null);
+    setters.setFallbackReason?.(null);
     return;
   }
 
-  if (normalized.estimate) {
+  if (decision.mode === "legacy" && normalized.estimate) {
     setters.setEstimate(normalized.estimate);
     setters.setConfigState(normalized);
     setters.setMode("legacy");
     setters.setDiagnosticCode?.(null);
+    setters.setFallbackReason?.(decision.fallbackReason);
     return;
   }
 
-  clearAllState(setters, "DE-RENDER");
+  clearAllState(setters, "DE-RENDER", decision.fallbackReason || "estimate_missing");
   setters.setMode("none");
 }
 
@@ -125,18 +138,28 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [diagnosticCode, setDiagnosticCode] = useState<string | null>(null);
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason>(null);
   const [mode, setMode] = useState<"legacy" | "configure" | "none">("none");
 
   useEffect(() => {
     let cancelled = false;
-    const setters = { setEstimate, setConfigState, setUnavailable, setMode, setDiagnosticCode };
+    const setters = {
+      setEstimate,
+      setConfigState,
+      setUnavailable,
+      setMode,
+      setDiagnosticCode,
+      setFallbackReason,
+    };
 
     (async () => {
       const fragmentToken = parseTokenFromHash(window.location.hash);
       const pathToken = parseTokenFromPath(window.location.pathname);
 
       // Stable reusable link: /e/<token> (path) or legacy /e#<token> (fragment).
-      // Shared public contract is GET /api/public-digital-estimate/v1/:token (not consumed).
+      // Shared public contract is GET /api/public-digital-estimate/v1/:token (baseline).
+      // Configure mode upgrades via POST /api/public-digital-estimate/v2/session when the
+      // server returns an active configuration envelope.
       const accessToken = pathToken || fragmentToken;
       if (accessToken) {
         if (fragmentToken && !pathToken) {
@@ -148,14 +171,20 @@ export function App() {
           setEstimate(normalizePublicEstimate(publicBody.estimate));
           setMode("legacy");
           setDiagnosticCode(null);
-          // Optional configure mode when UI flag + v2 session exchange succeed.
-          if (configurationUiEnabled()) {
-            try {
-              const state = await exchangeFragmentToken(accessToken);
-              if (!cancelled) applyExchangeState(state, setters);
-            } catch {
-              /* keep read-only baseline from v1 */
+          setFallbackReason("configuration_absent");
+
+          // Always attempt v2 session exchange for path/fragment tokens.
+          // Vite flag must not gate exchange — only ConfigurationView entry.
+          try {
+            const state = await exchangeFragmentToken(accessToken);
+            if (!cancelled) applyExchangeState(state, setters);
+          } catch {
+            if (!cancelled) {
+              setFallbackReason(
+                configurationUiEnabled() ? "exchange_failed" : "ui_flag_disabled"
+              );
             }
+            /* keep read-only baseline from v1 */
           }
         } catch (e) {
           const code =
@@ -176,7 +205,7 @@ export function App() {
           applyExchangeState(state, setters);
         } catch (e) {
           const code = e instanceof EstimateRenderError ? e.diagnosticCode : "DE-COOKIE";
-          if (!cancelled) clearAllState(setters, code);
+          if (!cancelled) clearAllState(setters, code, "exchange_failed");
         } finally {
           if (!cancelled) setLoading(false);
         }
@@ -218,6 +247,7 @@ export function App() {
           setConfigState(null);
           setUnavailable(true);
           setDiagnosticCode("DE-STATE");
+          setFallbackReason("estimate_missing");
           setMode("none");
         }}
       />
@@ -236,12 +266,23 @@ export function App() {
                 ? "A newer estimate is available. Contact your estimator."
                 : "This estimate is unavailable.")
         : null;
+    const showDevFallback =
+      isDevDiagnosticsEnabled() && Boolean(fallbackReason) && mode === "legacy";
     return (
       <div className="page">
         <main className="shell">
           {lifecycleNotice ? (
             <p className="unavailable" role="status" data-testid="de-lifecycle-notice">
               {lifecycleNotice}
+            </p>
+          ) : null}
+          {showDevFallback ? (
+            <p
+              className="status no-print"
+              data-testid="de-fallback-reason"
+              aria-label="configuration fallback reason"
+            >
+              configuration fallback: {fallbackReason}
             </p>
           ) : null}
           <ReadOnlyEstimateView estimate={estimate} />
