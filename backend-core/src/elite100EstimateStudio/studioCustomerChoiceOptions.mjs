@@ -104,7 +104,9 @@ export function inferFriendlyChoiceFlags(input = {}) {
     }
     if (def.catalogKeys.length === 0) {
       // Material/edge/backsplash default on for new publishes unless explicitly off.
-      flags[def.id] = groups.size === 0 ? def.id === "materialColor" || def.id === "edge" : false;
+      flags[def.id] = groups.size === 0
+        ? def.id === "materialColor" || def.id === "edge" || def.id === "backsplash" || def.id === "sink"
+        : false;
       continue;
     }
     flags[def.id] = def.catalogKeys.some((k) => knownSet.has(k));

@@ -141,8 +141,11 @@ export type ConfigurationState = {
       sourceDisplayName?: string;
       baselineMaterialLabel?: string;
       baselineColorLabel?: string | null;
-      countertopSf?: number;
-      backsplashSf?: number;
+      measurementsLocked?: boolean;
+      measurementStatus?: string | null;
+      countertopIncluded?: boolean;
+      backsplashIncluded?: boolean;
+      backsplashHeightMode?: string | null;
       customerMayEditLabel?: boolean;
       locked?: boolean;
     }>;
@@ -150,6 +153,8 @@ export type ConfigurationState = {
     options?: ConfigOption[];
     materials?: CustomerMaterial[];
     currentSelections?: Record<string, number>;
+    roomNotes?: Record<string, string>;
+    projectNote?: string | null;
     latestCalculation?: {
       baselineDisplayTotal?: number;
       configuredDisplayTotal?: number;
@@ -280,6 +285,8 @@ export async function saveConfigurationSelections(payload: {
     projectAddress?: string;
   } | null;
   roomLabelDrafts?: Record<string, string> | null;
+  roomNotes?: Record<string, string> | null;
+  projectNote?: string | null;
 }): Promise<{
   ok: boolean;
   session?: { rowVersion: number };
@@ -290,6 +297,8 @@ export async function saveConfigurationSelections(payload: {
     : unknown;
   customerInfoDraft?: unknown;
   roomLabelDrafts?: Record<string, string>;
+  roomNotes?: Record<string, string>;
+  projectNote?: string | null;
 }> {
   const base = apiBaseUrl();
   const res = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {

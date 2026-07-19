@@ -17,7 +17,9 @@ import { normalizeSelectionPayload } from "./configurationValidation.mjs";
 import {
   mergeSelectionPayloadMeta,
   sanitizeCustomerInfoDraft,
+  sanitizeProjectNoteDraft,
   sanitizeRoomLabelDrafts,
+  sanitizeRoomNotesDraft,
   splitSelectionPayloadMeta
 } from "./customerConfigurationDraft.mjs";
 import {
@@ -446,6 +448,8 @@ export function createPublicConfigurationService(deps) {
         sourceProject,
         customerInfoDraft: selectionMeta.customerInfoDraft,
         roomLabelDrafts: selectionMeta.roomLabelDrafts,
+        roomNotes: selectionMeta.roomNotes || {},
+        projectNote: selectionMeta.projectNote || null,
         rooms: (ctx.rooms || []).map((r) => ({
           roomKey: r.roomKey,
           displayName:
@@ -453,9 +457,12 @@ export function createPublicConfigurationService(deps) {
           sourceDisplayName: r.displayName,
           baselineMaterialLabel: r.baselineMaterialLabel,
           baselineColorLabel: r.colorLabel || null,
-          countertopSf: Number(r.chargeableCounterSf) || 0,
-          backsplashSf: Number(r.backsplashSf) || 0,
-          // Customer-facing label drafts only — measurements remain locked server-side.
+          // Measurements verified — numeric SF never projected publicly.
+          measurementsLocked: true,
+          measurementStatus: "Measurements verified by estimator",
+          countertopIncluded: Number(r.chargeableCounterSf) > 0,
+          backsplashIncluded: Number(r.backsplashSf) > 0,
+          backsplashHeightMode: r.backsplashHeightMode || null,
           customerMayEditLabel: true,
           locked: true
         })),
@@ -722,9 +729,16 @@ export function createPublicConfigurationService(deps) {
       const roomLabelDrafts = sanitizeRoomLabelDrafts(
         body.roomLabelDrafts || body.room_label_drafts || {}
       );
+      const roomNotes = sanitizeRoomNotesDraft(body.roomNotes || body.room_notes || {});
+      const projectNote = sanitizeProjectNoteDraft(body.projectNote ?? body.project_note ?? "");
 
       // Preserve prior drafts when caller omits them (material-only saves).
-      let priorMeta = { customerInfoDraft: null, roomLabelDrafts: {} };
+      let priorMeta = {
+        customerInfoDraft: null,
+        roomLabelDrafts: {},
+        roomNotes: {},
+        projectNote: null
+      };
       if (typeof configurationRepository.getLatestSelectionForSession === "function") {
         const prior = await configurationRepository.getLatestSelectionForSession(
           session.organization_id,
@@ -740,6 +754,14 @@ export function createPublicConfigurationService(deps) {
         body.roomLabelDrafts != null || body.room_label_drafts != null
           ? roomLabelDrafts
           : priorMeta.roomLabelDrafts;
+      const mergedRoomNotes =
+        body.roomNotes != null || body.room_notes != null
+          ? roomNotes
+          : priorMeta.roomNotes || {};
+      const mergedProjectNote =
+        body.projectNote != null || body.project_note != null
+          ? projectNote || null
+          : priorMeta.projectNote;
 
       const normalized = normalizeSelectionPayload({ selections: selectionMap }, options);
 
@@ -756,6 +778,8 @@ export function createPublicConfigurationService(deps) {
       // Build DE.2C rooms from material: selections + baseline (server resolves color → group)
       const rooms = (ctx.rooms || []).map((r) => {
         let selected = r.baselineMaterialGroup;
+        let chargeableBacksplashSf = Number(r.backsplashSf) || 0;
+        let edgeMode = "eased";
         for (const [key, qty] of Object.entries(normalized.selections)) {
           if (Number(qty) <= 0) continue;
           if (key.startsWith(`material:${r.roomKey}:`)) {
@@ -764,11 +788,18 @@ export function createPublicConfigurationService(deps) {
             if (!resolved.materialGroup) {
               throw safeFail("unknown_material", "That selection is unavailable", 400);
             }
-            // Reject forged color IDs not frozen into the envelope
             if (!opt) {
               throw safeFail("unknown_option", "That selection is unavailable", 400);
             }
             selected = resolved.materialGroup;
+          } else if (key.startsWith(`backsplash:${r.roomKey}:`)) {
+            const mode = key.split(":")[2];
+            if (mode === "none") chargeableBacksplashSf = 0;
+            else if (mode === "standard_4in" || mode === "full_height") {
+              chargeableBacksplashSf = Number(r.backsplashSf) || 0;
+            }
+          } else if (key.startsWith(`edge:${r.roomKey}:`)) {
+            edgeMode = key.split(":")[2] || "eased";
           } else {
             const opt = options.find((o) => (o.option_key || o.optionKey) === key);
             const compat = opt?.compatibility_json || opt?.compatibilityJson || {};
@@ -781,17 +812,86 @@ export function createPublicConfigurationService(deps) {
           roomKey: r.roomKey,
           displayName: r.displayName,
           chargeableCounterSf: r.chargeableCounterSf,
+          chargeableBacksplashSf,
+          edgeLinearFeet: Number(r.edgeLinearFeet) || 0,
+          edgeMode,
           selectedMaterialGroup: selected,
           baselineMaterialGroup: r.baselineMaterialGroup
         };
       });
 
+      const edgeLfTotal = rooms.reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0);
+
       const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
       const calcOptions = [];
       for (const [key, qtyRaw] of Object.entries(normalized.selections)) {
         if (key.startsWith("material:")) continue;
+        if (key.startsWith("backsplash:")) continue; // handled via chargeableBacksplashSf
         const qty = Number(qtyRaw) || 0;
         if (qty <= 0) continue;
+
+        // Sink modes → server catalog cutout/product charges
+        if (key.startsWith("sink:")) {
+          const [, roomKey, mode] = key.split(":");
+          if (mode === "none") continue;
+          const sinkCutout = catalog.get("qty-sink");
+          if (sinkCutout?.sellPrice != null) {
+            calcOptions.push({
+              optionKey: `qty-sink:${roomKey}`,
+              displayLabel: sinkCutout.displayLabel,
+              quantity: 1,
+              sellPrice: sinkCutout.sellPrice,
+              pricingMode: "per_each",
+              customerPriceTreatment: "absolute",
+              availabilityState: "active",
+              includedInBaseline: false,
+              defaultQty: 0,
+              baselineQuantity: 0
+            });
+          }
+          if (mode === "stock") {
+            const stock = catalog.get("qty-ss");
+            if (stock?.sellPrice != null) {
+              calcOptions.push({
+                optionKey: `qty-ss:${roomKey}`,
+                displayLabel: stock.displayLabel,
+                quantity: 1,
+                sellPrice: stock.sellPrice,
+                pricingMode: "per_each",
+                customerPriceTreatment: "absolute",
+                availabilityState: "active",
+                includedInBaseline: false,
+                defaultQty: 0,
+                baselineQuantity: 0
+              });
+            }
+          }
+          continue;
+        }
+
+        if (key.startsWith("edge:")) {
+          const [, roomKey, mode] = key.split(":");
+          if (mode === "eased") continue;
+          const roomRow = rooms.find((r) => r.roomKey === roomKey);
+          const lf = Number(roomRow?.edgeLinearFeet) || Number(edgeLfTotal) || 0;
+          const rate = mode === "d_edge" ? 25 : 15;
+          if (lf > 0) {
+            calcOptions.push({
+              optionKey: key,
+              displayLabel: mode === "d_edge" ? "D edge" : "W edge",
+              quantity: lf,
+              sellPrice: rate,
+              pricingMode: "per_lf",
+              customerPriceTreatment: "absolute",
+              availabilityState: "active",
+              includedInBaseline: false,
+              defaultQty: 0,
+              baselineQuantity: 0
+            });
+          }
+          continue;
+        }
+
         const cat = catalog.get(key);
         const envOpt = options.find((o) => (o.option_key || o.optionKey) === key);
         if (!cat && !envOpt) {
@@ -863,6 +963,7 @@ export function createPublicConfigurationService(deps) {
         materialRateOverrides: ctx.materialRateOverrides,
         estimateAdjustments: ctx.estimateAdjustments,
         rooms,
+        lockedScope: { edgeLinearFeetTotal: edgeLfTotal },
         frozenBaseRates: ctx.frozenBaseRates,
         authorizedMaterialMarkup: { bps: markupBps },
         materialTaxPolicy: { bps: 200 },
@@ -889,7 +990,9 @@ export function createPublicConfigurationService(deps) {
         idempotencyKey,
         selectionPayload: mergeSelectionPayloadMeta(normalized.selections, {
           customerInfoDraft: mergedInfo,
-          roomLabelDrafts: mergedLabels
+          roomLabelDrafts: mergedLabels,
+          roomNotes: mergedRoomNotes,
+          projectNote: mergedProjectNote
         }),
         selectionHash: normalized.selectionHash,
         customerResultJson: result.public,

@@ -306,7 +306,9 @@ export function createReviewRequestService(deps) {
         customerFacingNote: customerNote,
         sourceProject,
         customerInfoDraft: draftMeta.customerInfoDraft,
-        roomLabelDrafts: draftMeta.roomLabelDrafts
+        roomLabelDrafts: draftMeta.roomLabelDrafts,
+        roomNotes: draftMeta.roomNotes || {},
+        projectNote: draftMeta.projectNote || null
       };
 
       const created = await amendmentRepository.createReviewRequest({

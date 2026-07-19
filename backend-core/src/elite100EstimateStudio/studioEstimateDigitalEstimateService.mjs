@@ -465,6 +465,8 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             sourceProject: snap.sourceProject || null,
             customerInfoDraft: snap.customerInfoDraft || null,
             roomLabelDrafts: snap.roomLabelDrafts || null,
+            roomNotes: snap.roomNotes || null,
+            projectNote: snap.projectNote || null,
             selectedOptions: Array.isArray(snap.selectedOptions) ? snap.selectedOptions : []
           };
         });
@@ -587,31 +589,48 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       cutoutGroup = created?.groups?.[0] || null;
     }
 
-    // createDraft already seeds a single baseline material option. Expand to the
-    // estimator/customer-allowed Elite 100 colors for the estimate's pricing group
-    // when material/color choice is enabled (Studio customerChoiceGroups) or when
-    // allowedMaterialIds is explicitly provided.
-    const groupCode = scopeMaterialGroupToCode(estimate.scope?.materialGroup) || "promo";
-    const materials = listElite100CustomerMaterials(true).filter(
-      (m) => m.pricingGroupCode === groupCode
+    // createDraft seeds one baseline material. Expand to estimator-allowed Elite 100
+    // colors across allowed pricing groups (not only the originally published group).
+    const baselineGroupCode = scopeMaterialGroupToCode(estimate.scope?.materialGroup) || "promo";
+    const choiceGroups = new Set(
+      (Array.isArray(cfg.customerChoiceGroups) ? cfg.customerChoiceGroups : []).map(String)
     );
     const allowedIds = Array.isArray(cfg.allowedMaterialIds)
       ? cfg.allowedMaterialIds.map(String).filter(Boolean)
       : [];
-    const choiceGroups = new Set(
-      (Array.isArray(cfg.customerChoiceGroups) ? cfg.customerChoiceGroups : []).map(String)
+    const allowedGroupCodesRaw = Array.isArray(cfg.allowedMaterialGroupCodes)
+      ? cfg.allowedMaterialGroupCodes.map(String)
+      : Array.isArray(cfg.allowedMaterialGroups)
+        ? cfg.allowedMaterialGroups.map(String)
+        : [];
+    const allowedGroupCodes = new Set(
+      allowedGroupCodesRaw
+        .map((g) => scopeMaterialGroupToCode(g) || String(g).toLowerCase())
+        .filter(Boolean)
     );
     const materialColorEnabled =
-      choiceGroups.has("materialColor") || allowedIds.length > 0;
-    const defaultMat = pickDefaultMaterialForGroup(groupCode);
+      choiceGroups.has("materialColor") || allowedIds.length > 0 || allowedGroupCodes.size > 0;
+    // Default: all customer groups except Remnant unless Remnant is explicitly allowed.
+    if (materialColorEnabled && allowedGroupCodes.size === 0 && allowedIds.length === 0) {
+      for (const code of ["promo", "group_a", "group_b", "group_c", "group_d", "group_e", "group_f"]) {
+        allowedGroupCodes.add(code);
+      }
+      allowedGroupCodes.add(baselineGroupCode);
+    }
+    const catalogMaterials = listElite100CustomerMaterials(true).filter((m) => {
+      if (allowedIds.length) return allowedIds.includes(m.materialId);
+      return allowedGroupCodes.has(m.pricingGroupCode);
+    });
+    const defaultMat =
+      pickDefaultMaterialForGroup(baselineGroupCode) ||
+      catalogMaterials[0] ||
+      null;
     const includedId =
       strOrNull(cfg.includedMaterialId || cfg.defaultMaterialId) ||
       defaultMat?.materialId ||
       null;
     const materialIdsToPublish = materialColorEnabled
-      ? allowedIds.length
-        ? allowedIds
-        : materials.map((m) => m.materialId)
+      ? catalogMaterials.map((m) => m.materialId)
       : [];
     const rooms = Array.isArray(estimate.scope?.rooms)
       ? estimate.scope.rooms.filter((r) => r && r.included !== false)
@@ -633,12 +652,12 @@ export function createStudioEstimateDigitalEstimateService(deps) {
               400
             );
           }
-          if (mat.pricingGroupCode !== groupCode) {
-            throw deError(
-              `Material ${materialId} is not in baseline group ${GROUP_CODE_DISPLAY_NAMES[groupCode] || groupCode}`,
-              "material_group_mismatch",
-              400
-            );
+          if (
+            allowedGroupCodes.size &&
+            !allowedGroupCodes.has(mat.pricingGroupCode) &&
+            !allowedIds.includes(materialId)
+          ) {
+            continue;
           }
           const isDefault = Boolean(includedId && materialId === includedId);
           options.push({
@@ -663,8 +682,118 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           });
         }
       }
-    } else if (!materials.length) {
-      // No catalog colors for this group — createDraft defaults already applied.
+    }
+
+    // Room-scoped fabrication / sink / backsplash / edge options when estimator enabled them.
+    let roomChoicesGroup = groups.find(
+      (g) => String(g.group_key || g.groupKey) === "room_choices"
+    );
+    if (
+      !roomChoicesGroup &&
+      (choiceGroups.has("backsplash") ||
+        choiceGroups.has("sink") ||
+        choiceGroups.has("edge") ||
+        choiceGroups.has("cooktop"))
+    ) {
+      const created = await configurationStudioService.putGroups(organizationId, envelopeId, {
+        groups: [
+          {
+            groupKey: "room_choices",
+            displayLabel: "Room options",
+            required: false,
+            selectionMode: "multi",
+            mutuallyExclusive: false
+          }
+        ]
+      });
+      roomChoicesGroup = created?.groups?.find(
+        (g) => String(g.group_key || g.groupKey) === "room_choices"
+      ) || created?.groups?.[0] || null;
+    }
+
+    for (const room of rooms) {
+      const roomKey = String(room.id || room.name);
+      if (choiceGroups.has("backsplash") && roomChoicesGroup?.id) {
+        const heightMode = String(room.backsplashHeightMode || "").toLowerCase();
+        const fullAllowed =
+          heightMode === "full_height" ||
+          heightMode === "custom" ||
+          Number(room.backsplashHeightIn) > 4;
+        const splashOpts = [
+          { key: "none", label: "No backsplash", included: room.includeBacksplash === false },
+          {
+            key: "standard_4in",
+            label: "4-inch backsplash",
+            included: room.includeBacksplash !== false && !fullAllowed
+          }
+        ];
+        if (fullAllowed) {
+          splashOpts.push({
+            key: "full_height",
+            label: "Full-height backsplash",
+            included: heightMode === "full_height" || Number(room.backsplashHeightIn) > 4
+          });
+        }
+        for (const so of splashOpts) {
+          options.push({
+            groupId: roomChoicesGroup.id,
+            optionKey: `backsplash:${roomKey}:${so.key}`,
+            displayLabel: so.label,
+            includedInBaseline: so.included,
+            defaultQty: so.included ? 1 : 0,
+            minQty: 0,
+            maxQty: 1,
+            requiredSelection: false,
+            customerPriceTreatment: "delta",
+            pricingMode: "replacement",
+            compatibilityJson: {
+              roomKey,
+              role: "backsplash_selection",
+              backsplashMode: so.key
+            }
+          });
+        }
+      }
+      if (choiceGroups.has("sink") && roomChoicesGroup?.id) {
+        for (const so of [
+          { key: "stock", label: "Elite stock sink", included: Number(estimate.scope?.addOns?.["qty-sink"] || 0) > 0 },
+          { key: "customer", label: "Customer-supplied sink", included: false },
+          { key: "none", label: "No sink", included: Number(estimate.scope?.addOns?.["qty-sink"] || 0) <= 0 }
+        ]) {
+          options.push({
+            groupId: roomChoicesGroup.id,
+            optionKey: `sink:${roomKey}:${so.key}`,
+            displayLabel: so.label,
+            includedInBaseline: so.included,
+            defaultQty: so.included ? 1 : 0,
+            minQty: 0,
+            maxQty: 1,
+            customerPriceTreatment: "delta",
+            pricingMode: "replacement",
+            compatibilityJson: { roomKey, role: "sink_selection", sinkMode: so.key }
+          });
+        }
+      }
+      if (choiceGroups.has("edge") && roomChoicesGroup?.id) {
+        for (const so of [
+          { key: "eased", label: "Eased edge", included: true },
+          { key: "w_edge", label: "W edge", included: false },
+          { key: "d_edge", label: "D edge", included: false }
+        ]) {
+          options.push({
+            groupId: roomChoicesGroup.id,
+            optionKey: `edge:${roomKey}:${so.key}`,
+            displayLabel: so.label,
+            includedInBaseline: so.included,
+            defaultQty: so.included ? 1 : 0,
+            minQty: 0,
+            maxQty: 1,
+            customerPriceTreatment: "delta",
+            pricingMode: "per_lf",
+            compatibilityJson: { roomKey, role: "edge_selection", edgeMode: so.key }
+          });
+        }
+      }
     }
 
     const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));

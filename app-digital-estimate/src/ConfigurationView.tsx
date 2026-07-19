@@ -301,10 +301,14 @@ function CustomerRoomCard({
   room,
   onPickColor,
   onRename,
+  onSelectChoice,
+  onRoomNote,
 }: {
   room: LovableRoom;
   onPickColor: () => void;
   onRename: (name: string) => void;
+  onSelectChoice?: (optionKey: string, role: string, roomId: string) => void;
+  onRoomNote?: (note: string) => void;
 }) {
   const color = room.colors.find((c) => c.id === room.selectedColorId) || room.colors[0];
   const thumb = color?.imageThumb || color?.imageFull || null;
@@ -342,28 +346,27 @@ function CustomerRoomCard({
         />
       </div>
 
-      <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+      <dl className="mt-5 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
         <div className="rounded-xl bg-muted/40 px-3 py-2">
           <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Countertop
+            Countertops
           </dt>
-          <dd className="mt-0.5 font-medium tabular-nums text-foreground" data-testid="de-room-counter-sf">
-            {room.countertopSf != null ? `${room.countertopSf.toFixed(2)} SF` : "—"}
+          <dd className="mt-0.5 font-medium text-foreground" data-testid="de-room-counter-status">
+            {room.countertopIncluded === false ? "Not included" : "Included"}
           </dd>
         </div>
         <div className="rounded-xl bg-muted/40 px-3 py-2">
           <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
             Backsplash
           </dt>
-          <dd className="mt-0.5 font-medium tabular-nums text-foreground" data-testid="de-room-backsplash-sf">
-            {room.backsplashSf != null && room.backsplashSf > 0
-              ? `${room.backsplashSf.toFixed(2)} SF`
-              : "Not included"}
+          <dd className="mt-0.5 font-medium text-foreground" data-testid="de-room-backsplash-status">
+            {room.backsplashSummary ||
+              (room.backsplashIncluded ? "Included" : "Not included")}
           </dd>
         </div>
       </dl>
       <p className="mt-2 text-[11px] text-muted-foreground">
-        Measurements are locked and cannot be edited here.
+        {room.measurementStatus || "Measurements verified by estimator — locked for this estimate."}
       </p>
 
       <div className="mt-5">
@@ -404,6 +407,56 @@ function CustomerRoomCard({
           </div>
         ) : null}
       </div>
+
+      {(["backsplash", "sink", "edge"] as const).map((role) => {
+        const opts = (room.choiceOptions || []).filter((c) => c.role === role);
+        if (!opts.length) return null;
+        const title =
+          role === "backsplash" ? "Backsplash" : role === "sink" ? "Sink" : "Edge profile";
+        return (
+          <div key={role} className="mt-5" data-testid={`de-room-${role}`}>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              {title}
+            </div>
+            <div className="flex flex-col gap-2">
+              {opts.map((opt) => (
+                <label
+                  key={opt.optionKey}
+                  className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
+                    opt.selected ? "border-foreground bg-muted/30" : "border-border bg-background"
+                  }`}
+                >
+                  <span>
+                    <span className="font-medium text-foreground">{opt.displayLabel}</span>
+                    {opt.includedInBaseline ? (
+                      <span className="ml-2 text-xs text-muted-foreground">Included</span>
+                    ) : null}
+                  </span>
+                  <input
+                    type="radio"
+                    name={`${role}-${room.id}`}
+                    checked={opt.selected}
+                    onChange={() => onSelectChoice?.(opt.optionKey, role, room.id)}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="mt-5">
+        <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Questions or notes for your estimator
+        </label>
+        <textarea
+          className="min-h-[72px] w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+          value={room.roomNote || ""}
+          maxLength={2000}
+          data-testid="de-room-note"
+          onChange={(e) => onRoomNote?.(e.target.value)}
+        />
+      </div>
     </div>
   );
 }
@@ -428,6 +481,10 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
   const [roomLabels, setRoomLabels] = useState<Record<string, string>>(
     () => ({ ...(config?.roomLabelDrafts || {}) }),
   );
+  const [roomNotes, setRoomNotes] = useState<Record<string, string>>(
+    () => ({ ...(config?.roomNotes || {}) }),
+  );
+  const [projectNote, setProjectNote] = useState(config?.projectNote || "");
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
   const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -499,6 +556,18 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
     void onSave({ qtyOverride: nextQty });
   }
 
+  function selectChoice(optionKey: string, role: string, roomId: string) {
+    const nextQty = { ...qty };
+    const prefix = `${role}:${roomId}:`;
+    for (const key of Object.keys(nextQty)) {
+      if (key.startsWith(prefix)) nextQty[key] = 0;
+    }
+    nextQty[optionKey] = 1;
+    setQty(nextQty);
+    setSaveState("idle");
+    void onSave({ qtyOverride: nextQty });
+  }
+
   async function onSave(opts?: {
     qtyOverride?: Record<string, number>;
   }): Promise<number | null> {
@@ -521,6 +590,8 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
         idempotencyKey: `sel-${formId}-${Date.now()}-${seq}`,
         customerInfoDraft: infoDraft,
         roomLabelDrafts: roomLabels,
+        roomNotes,
+        projectNote,
       });
       if (seq !== requestSeq.n) return null;
       const nextRowVersion = result.session?.rowVersion ?? rowVersion;
@@ -535,10 +606,12 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
         configuration: state.configuration
           ? {
               ...state.configuration,
-              latestCalculation: (result.calculation as typeof latestCalc) || latestCalc,
               currentSelections: effectiveQty,
               customerInfoDraft: infoDraft,
               roomLabelDrafts: roomLabels,
+              roomNotes,
+              projectNote,
+              latestCalculation: (result.calculation as typeof latestCalc) || latestCalc,
             }
           : state.configuration,
       });
@@ -727,14 +800,39 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
             {vm.rooms.map((room) => (
               <CustomerRoomCard
                 key={room.id}
-                room={room}
+                room={{ ...room, roomNote: roomNotes[room.id] || room.roomNote || "" }}
                 onPickColor={() => setPickerRoomId(room.id)}
                 onRename={(name) => {
                   setRoomLabels((prev) => ({ ...prev, [room.id]: name }));
                   setSaveState("idle");
                 }}
+                onSelectChoice={selectChoice}
+                onRoomNote={(note) => {
+                  setRoomNotes((prev) => ({ ...prev, [room.id]: note }));
+                  setSaveState("idle");
+                }}
               />
             ))}
+
+            <div className="rounded-2xl border border-border bg-background p-6">
+              <label className="text-xs uppercase tracking-widest text-muted-foreground">
+                Project note
+              </label>
+              <div className="mt-1 text-lg font-semibold text-foreground">
+                Anything else we should know about your project?
+              </div>
+              <textarea
+                className="mt-4 min-h-[88px] w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+                value={projectNote}
+                maxLength={2000}
+                data-testid="de-project-note"
+                onChange={(e) => {
+                  setProjectNote(e.target.value);
+                  setSaveState("idle");
+                }}
+                onBlur={() => void onSave()}
+              />
+            </div>
 
             {vm.addons.length ? (
               <div className="rounded-2xl border border-border bg-background p-6">
