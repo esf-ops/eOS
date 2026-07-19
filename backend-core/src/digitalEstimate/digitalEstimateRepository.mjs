@@ -7,6 +7,34 @@
 
 import { randomUUID } from "node:crypto";
 
+/** Deployed replace-RPC contract marker (safe; no secrets). */
+export const REUSABLE_LINK_RPC_VERSION = "v2-5-arg";
+export const REUSABLE_LINK_BUILD_VERSION = "reusable-link-v2";
+export const REPLACE_TOKEN_ATOMIC_RPC = "digital_estimate_replace_token_atomic";
+export const REPLACE_TOKEN_ATOMIC_PARAM_KEYS = Object.freeze([
+  "p_organization_id",
+  "p_publication_id",
+  "p_new_token_hash",
+  "p_actor_user_id",
+  "p_token_wrapped"
+]);
+
+/**
+ * Safe PostgREST/Supabase RPC failure diagnostics — never includes param values,
+ * token hash, token_wrapped, plaintext, service-role key, or customer URL.
+ * @param {object|null|undefined} error
+ */
+export function buildSafeReplaceTokenRpcDiagnostics(error) {
+  return {
+    message: error?.message != null ? String(error.message) : null,
+    details: error?.details != null ? String(error.details) : null,
+    hint: error?.hint != null ? String(error.hint) : null,
+    rpc: REPLACE_TOKEN_ATOMIC_RPC,
+    parameterKeys: [...REPLACE_TOKEN_ATOMIC_PARAM_KEYS],
+    buildVersion: REUSABLE_LINK_BUILD_VERSION
+  };
+}
+
 /**
  * Simple async mutex for in-memory concurrency tests.
  * @returns {{ runExclusive: <T>(fn: () => Promise<T>) => Promise<T> }}
@@ -77,6 +105,7 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
 
   const api = {
     mode: "memory",
+    reusableLinkRpcVersion: REUSABLE_LINK_RPC_VERSION,
     seedQuote(row) {
       quotes.set(String(row.id), structuredClone(row));
     },
@@ -559,6 +588,7 @@ export function createSupabaseDigitalEstimateRepository(deps) {
   const db = deps.db;
   return {
     mode: "supabase",
+    reusableLinkRpcVersion: REUSABLE_LINK_RPC_VERSION,
     async getQuoteHeader(organizationId, quoteId) {
       let q = db.from("quote_headers").select("*").eq("id", quoteId).limit(1);
       if (organizationId) q = q.eq("organization_id", organizationId);
@@ -897,40 +927,43 @@ export function createSupabaseDigitalEstimateRepository(deps) {
         err.statusCode = 503;
         throw err;
       }
-      const { data, error } = await db.rpc("digital_estimate_replace_token_atomic", {
+      const rpcArgs = {
         p_organization_id: payload.organizationId,
         p_publication_id: payload.publicationId,
         p_new_token_hash: payload.newTokenHash,
         p_actor_user_id: payload.actorUserId ?? null,
         p_token_wrapped: tokenWrapped
-      });
+      };
+      // Keys only — never log/return values (hash / wrap / ids).
+      const parameterKeys = Object.keys(rpcArgs);
+      const { data, error } = await db.rpc(REPLACE_TOKEN_ATOMIC_RPC, rpcArgs);
       if (error) {
         const msg = String(error.message || error);
+        const safeDiagnostics = {
+          ...buildSafeReplaceTokenRpcDiagnostics(error),
+          // Prefer Object.keys of the args object actually sent (names only).
+          parameterKeys
+        };
         if (/publication not found/i.test(msg)) {
           const err = new Error("Publication not found");
           err.code = "publication_not_found";
           err.statusCode = 404;
+          err.diagnostics = safeDiagnostics;
           throw err;
         }
         if (/not active/i.test(msg)) {
           const err = new Error("Publication is not active");
           err.code = "publication_not_active";
           err.statusCode = 400;
+          err.diagnostics = safeDiagnostics;
           throw err;
         }
-        if (
-          /could not find the function|function.*does not exist|token_wrapped required/i.test(msg) ||
-          error.code === "PGRST202" ||
-          error.code === "42883"
-        ) {
-          const err = new Error(
-            "Atomic recoverable-link replace is unavailable — apply eliteos_digital_estimate_reusable_links_v2_atomic_wrap.sql and redeploy Brain."
-          );
-          err.code = "token_wrap_atomic_unavailable";
-          err.statusCode = 503;
-          throw err;
-        }
-        throw error;
+        // Preserve PostgREST identity (PGRST202, hint, details). Do not rewrite away the hint.
+        const err = new Error("Unable to replace token");
+        err.code = error.code != null ? String(error.code) : "rpc_failed";
+        err.statusCode = 503;
+        err.diagnostics = safeDiagnostics;
+        throw err;
       }
       return {
         tokenId: data?.token_id,

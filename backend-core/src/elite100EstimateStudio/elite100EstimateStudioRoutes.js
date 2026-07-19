@@ -262,7 +262,9 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         pilotAuthorized: pilot,
         repositoryConfigured: Boolean(repository),
         // Process-local limiter only until a later authorized shared limiter ships.
-        distributedLimiterReady: false
+        distributedLimiterReady: false,
+        reusableLinkRpcVersion: repository?.reusableLinkRpcVersion ?? null,
+        repositoryMode: repository?.mode ?? null
       })
     );
   });
@@ -533,6 +535,28 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         logStudio("replace-token failed", e, req);
         const status = Number(e?.statusCode) || 500;
         const code = e?.code || "replace_failed";
+        const rpcDiagnostics =
+          e?.diagnostics &&
+          e.diagnostics.rpc === "digital_estimate_replace_token_atomic" &&
+          Array.isArray(e.diagnostics.parameterKeys)
+            ? {
+                message: e.diagnostics.message ?? null,
+                details: e.diagnostics.details ?? null,
+                hint: e.diagnostics.hint ?? null,
+                rpc: e.diagnostics.rpc,
+                parameterKeys: e.diagnostics.parameterKeys,
+                buildVersion: e.diagnostics.buildVersion ?? "reusable-link-v2"
+              }
+            : null;
+        // Temporary: surface complete safe PostgREST RPC failure fields (no param values).
+        if (rpcDiagnostics) {
+          return res.status(status).json({
+            ok: false,
+            error: "Unable to replace token",
+            code,
+            diagnostics: rpcDiagnostics
+          });
+        }
         const structured =
           Boolean(e?.code) &&
           (status < 500 ||
@@ -547,11 +571,11 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
               "active_token_missing",
               "atomic_replace_unavailable"
             ].includes(String(e.code)));
-        // Pass through service result shape — do not strip linkDiagnostics.
         res.status(status).json({
           ok: false,
           error: structured && e?.message ? e.message : "Unable to replace token",
           code,
+          diagnostics: e?.diagnostics || null,
           linkDiagnostics: e?.diagnostics || null,
           diagnostic: {
             status,
@@ -1361,7 +1385,11 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
   );
 
   console.log(
-    "[elite100-estimate-studio] mounted /api/elite100-estimate-studio/* (pilot + head gated)"
+    "[elite100-estimate-studio] mounted /api/elite100-estimate-studio/* (pilot + head gated)",
+    {
+      reusableLinkRpcVersion: repository?.reusableLinkRpcVersion ?? null,
+      repositoryMode: repository?.mode ?? null
+    }
   );
   return { mounted: true };
 }

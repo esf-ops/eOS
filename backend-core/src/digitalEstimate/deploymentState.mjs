@@ -60,7 +60,13 @@ export function resolveDigitalEstimateDeploymentState(env = process.env) {
 /**
  * Safe diagnostics for authenticated Studio pilots — no secrets / no allowlist IDs.
  * @param {NodeJS.ProcessEnv} [env]
- * @param {{ pilotAuthorized?: boolean, repositoryConfigured?: boolean, distributedLimiterReady?: boolean }} [opts]
+ * @param {{
+ *   pilotAuthorized?: boolean,
+ *   repositoryConfigured?: boolean,
+ *   distributedLimiterReady?: boolean,
+ *   reusableLinkRpcVersion?: string|null,
+ *   repositoryMode?: string|null
+ * }} [opts]
  */
 export function buildSafeDigitalEstimateDiagnostics(env = process.env, opts = {}) {
   const synthetic = readSafeSyntheticPilotConfig(env);
@@ -68,6 +74,8 @@ export function buildSafeDigitalEstimateDiagnostics(env = process.env, opts = {}
   return {
     ok: true,
     deploymentState: state,
+    reusableLinkRpcVersion: opts.reusableLinkRpcVersion ?? null,
+    repositoryMode: opts.repositoryMode ?? null,
     realCustomerPilotAuthorized: false,
     realCustomerPilotBlockedReason:
       state === DE_DEPLOYMENT_STATE.REAL_CUSTOMER_PILOT_BLOCKED

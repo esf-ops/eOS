@@ -423,15 +423,18 @@ export async function replaceDigitalEstimateToken(input) {
     });
   } catch (e) {
     // Atomic failure rolls back — prior active token remains. Never claim success.
-    if (!e.diagnostics) {
-      e.diagnostics = buildReplaceLinkDiagnostics({
-        wrapKeyPresent: true,
-        tokenWrappedGenerated: true,
-        tokenWrappedPersisted: false,
-        persistedRowReadBack: false,
-        decryptVerified: false,
-        customerUrlPresent: false
-      });
+    // Preserve PostgREST rpc diagnostics (message/details/hint) when present.
+    if (!e.diagnostics || e.diagnostics.rpc !== "digital_estimate_replace_token_atomic") {
+      if (!e.diagnostics) {
+        e.diagnostics = buildReplaceLinkDiagnostics({
+          wrapKeyPresent: true,
+          tokenWrappedGenerated: true,
+          tokenWrappedPersisted: false,
+          persistedRowReadBack: false,
+          decryptVerified: false,
+          customerUrlPresent: false
+        });
+      }
     }
     throw e;
   }
