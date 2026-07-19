@@ -1625,3 +1625,14 @@
 | **Ops** | Ensure Brain `DIGITAL_ESTIMATE_PUBLIC_CONFIGURATION_ENABLED=1` (+ configuration/API/public-read runtime). On `app-digital-estimate`, set `VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED=true` or remove a baked `false`. Republish (or replace+republish) estimates that were published before materialColor group seeding if the color modal shows only one finish. |
 | **Out of scope** | Hidden query params, second customer URL, sold-job, sink/cooktop/edge/backsplash customer polish. |
 
+
+### 114. Live Digital Estimate configure requires SYNTHETIC_PILOT_ONLY=0 (2026-07-19)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-19 |
+| **Decision** | Production `POST /api/public-digital-estimate/v2/session` **is mounted** at that exact path via `quoteRoutes` → `maybeAttachDigitalEstimatePublicConfigurationRoutes` → Vercel `api/index.js` → `server.js`. Live browser 404 on that call for newly published Studio estimates was **not** a missing route: `DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY` remains on with a 1-ID allowlist, so v2 exchange fails closed (`DE-EXCHANGE-404`) while **v1 public read does not apply the synthetic allowlist** and still renders the frozen summary. For live customer ConfigurationView: set **`DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY=0`** on Brain Production (and redeploy/restart so env is live). Keep `DIGITAL_ESTIMATE_PUBLIC_CONFIGURATION_ENABLED=1`. Staff publish responses surface an explicit notice when synthetic-only would block customer configure. Mount logs warn when synthetic-only is on. |
+| **Why** | Customer-experience and configure-mode routing shipped while the DE.2G synthetic rail still blocked all but one publication on v2. |
+| **SQL** | None. |
+| **Out of scope** | Auto-allowlisting every new publication; changing v1 to also enforce the synthetic allowlist. |
+

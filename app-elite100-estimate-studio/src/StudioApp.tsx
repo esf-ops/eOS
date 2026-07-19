@@ -260,7 +260,7 @@ export default function StudioApp() {
       setPublishStaffNotice(
         body.staffNotice ||
           (body.syntheticPilot?.awaitingSyntheticAllowlist
-            ? "Replacement publication awaiting synthetic allowlist"
+            ? "Customer configuration is blocked while DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY is on. Set it to 0 for live customer Digital Estimates."
             : null)
       );
       await loadQuote(selectedId, { preserveCustomerLink: true });

@@ -285,9 +285,7 @@ export async function publishDigitalEstimate(input) {
     eligibility,
     supersededCount: atomic.supersededCount ?? priorActive.length,
     syntheticPilot: syntheticAccess,
-    staffNotice: syntheticAccess.awaitingSyntheticAllowlist
-      ? "Replacement publication awaiting synthetic allowlist"
-      : null
+    staffNotice: syntheticAccess.staffNotice || null
   };
 }
 

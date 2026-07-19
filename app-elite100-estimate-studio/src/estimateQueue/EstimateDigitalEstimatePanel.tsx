@@ -272,7 +272,10 @@ export default function EstimateDigitalEstimatePanel({
             "Publication already exists for this revision. Customer URL is unchanged."
         );
       } else {
-        setActionNotice("Digital Estimate published. Customer link is stable and reusable.");
+        setActionNotice(
+          body.staffNotice ||
+            "Digital Estimate published. Customer link is stable and reusable."
+        );
       }
       if (body.envelope && body.envelope.configured === false && body.envelope.message) {
         setActionNotice((prev) =>
