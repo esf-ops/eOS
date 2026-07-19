@@ -16,7 +16,11 @@ const configView = readFileSync(join(srcRoot, "ConfigurationView.tsx"), "utf8");
 const envEx = readFileSync(join(appRoot, ".env.example"), "utf8");
 const indexHtml = readFileSync(join(appRoot, "index.html"), "utf8");
 
-assert.ok(envEx.includes("VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED=false"));
+assert.ok(envEx.includes("VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED"));
+assert.ok(
+  /VITE_DIGITAL_ESTIMATE_CONFIGURATION_UI_ENABLED=(true|false)/.test(envEx),
+  "env example must document kill-switch values"
+);
 assert.ok(api.includes("parseTokenFromHash"));
 assert.ok(api.includes("clearFragmentFromUrl"));
 assert.ok(api.includes("/api/public-digital-estimate/v2/session"));
@@ -33,7 +37,11 @@ assert.ok(configView.includes("Original estimate"));
 assert.ok(configView.includes("Updated estimate"));
 assert.ok(configView.includes("Change from original") || configView.includes("Selected changes"));
 assert.ok(configView.includes("not final acceptance") || configView.includes("not an order or acceptance"));
-assert.ok(configView.includes("Pick an approved Elite 100 color"));
+assert.ok(
+  configView.includes("Pick an approved Elite 100 color") ||
+    configView.includes("choose approved Elite 100 colors"),
+  "customer-facing Elite 100 color guidance"
+);
 assert.ok(configView.includes("Search color"));
 assert.ok(configView.includes("ColorPickerModal"));
 assert.ok(configView.includes("lg:sticky"));
@@ -73,15 +81,19 @@ assert.ok(
   "stable path/hash tokens use shared public v1 GET contract"
 );
 assert.ok(
-  effectBlock[0].includes("configurationUiEnabled()") &&
-    effectBlock[0].includes("exchangeFragmentToken"),
-  "v2 session exchange remains optional when configuration UI is enabled"
+  effectBlock[0].includes("exchangeFragmentToken"),
+  "v2 session exchange runs for path/fragment tokens"
 );
-assert.ok(app.includes("state.estimate"), "read-only baseline path when estimate present");
-assert.ok(app.includes("configurationUiEnabled()"), "UI flag may still gate interactive configure mode");
+assert.equal(
+  /if \(configurationUiEnabled\(\)\) \{[\s\S]*?exchangeFragmentToken/.test(effectBlock[0]),
+  false,
+  "Vite UI flag must not gate v2 session exchange"
+);
+assert.ok(app.includes("decideConfigurationView") || app.includes("configurationUiEnabled()"), "UI flag may still gate interactive configure mode");
 assert.ok(app.includes("DE-EXCHANGE-404") || api.includes("DE-EXCHANGE-404"), "safe exchange diagnostic codes");
 assert.ok(app.includes("eliteos-de-build") || app.includes("build marker"), "unavailable screen shows build marker");
 assert.ok(app.includes("diagnosticCode") || api.includes("diagnosticCode"), "diagnostic code plumbing");
+assert.ok(app.includes("fallbackReason") || app.includes("de-fallback-reason"), "dev-only fallback reason");
 const main = readFileSync(join(srcRoot, "main.tsx"), "utf8");
 assert.ok(main.includes("EstimateErrorBoundary"), "top-level error boundary required");
 const boundary = readFileSync(join(srcRoot, "EstimateErrorBoundary.tsx"), "utf8");

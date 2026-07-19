@@ -36,7 +36,8 @@ import {
 } from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
 import {
   listElite100CustomerMaterials,
-  getElite100CustomerMaterial
+  getElite100CustomerMaterial,
+  pickDefaultMaterialForGroup
 } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
 import { GROUP_CODE_DISPLAY_NAMES } from "../digitalEstimate/configuration/approvedPricingFixtures.mjs";
 import { serverApprovedOptionCatalog } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
@@ -586,8 +587,10 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       cutoutGroup = created?.groups?.[0] || null;
     }
 
-    // createDraft already seeds baseline material options. Add estimator-allowed
-    // colors / options when explicitly configured; otherwise activate defaults.
+    // createDraft already seeds a single baseline material option. Expand to the
+    // estimator/customer-allowed Elite 100 colors for the estimate's pricing group
+    // when material/color choice is enabled (Studio customerChoiceGroups) or when
+    // allowedMaterialIds is explicitly provided.
     const groupCode = scopeMaterialGroupToCode(estimate.scope?.materialGroup) || "promo";
     const materials = listElite100CustomerMaterials(true).filter(
       (m) => m.pricingGroupCode === groupCode
@@ -595,7 +598,21 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     const allowedIds = Array.isArray(cfg.allowedMaterialIds)
       ? cfg.allowedMaterialIds.map(String).filter(Boolean)
       : [];
-    const includedId = strOrNull(cfg.includedMaterialId || cfg.defaultMaterialId);
+    const choiceGroups = new Set(
+      (Array.isArray(cfg.customerChoiceGroups) ? cfg.customerChoiceGroups : []).map(String)
+    );
+    const materialColorEnabled =
+      choiceGroups.has("materialColor") || allowedIds.length > 0;
+    const defaultMat = pickDefaultMaterialForGroup(groupCode);
+    const includedId =
+      strOrNull(cfg.includedMaterialId || cfg.defaultMaterialId) ||
+      defaultMat?.materialId ||
+      null;
+    const materialIdsToPublish = materialColorEnabled
+      ? allowedIds.length
+        ? allowedIds
+        : materials.map((m) => m.materialId)
+      : [];
     const rooms = Array.isArray(estimate.scope?.rooms)
       ? estimate.scope.rooms.filter((r) => r && r.included !== false)
       : [];
@@ -604,10 +621,10 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     );
     const options = [];
 
-    if (allowedIds.length && rooms.length && materialGroupRow?.id) {
+    if (materialIdsToPublish.length && rooms.length && materialGroupRow?.id) {
       for (const room of rooms) {
         const roomKey = String(room.id || room.name);
-        for (const materialId of allowedIds) {
+        for (const materialId of materialIdsToPublish) {
           const mat = getElite100CustomerMaterial(materialId);
           if (!mat || !mat.customerVisible) {
             throw deError(
@@ -623,15 +640,16 @@ export function createStudioEstimateDigitalEstimateService(deps) {
               400
             );
           }
+          const isDefault = Boolean(includedId && materialId === includedId);
           options.push({
             groupId: materialGroupRow.id,
             optionKey: `material:${roomKey}:${materialId}`,
             displayLabel: mat.displayName,
-            includedInBaseline: includedId ? materialId === includedId : false,
-            defaultQty: includedId && materialId === includedId ? 1 : 0,
+            includedInBaseline: isDefault,
+            defaultQty: isDefault ? 1 : 0,
             minQty: 0,
             maxQty: 1,
-            requiredSelection: Boolean(includedId && materialId === includedId),
+            requiredSelection: isDefault,
             customerPriceTreatment: "delta",
             pricingMode: "replacement",
             imageAssetRef: mat.imageThumbPath,
@@ -640,7 +658,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
               materialColorId: materialId,
               materialGroup: mat.pricingGroupCode,
               role: "material_selection",
-              isDefault: Boolean(includedId && materialId === includedId)
+              isDefault
             }
           });
         }
