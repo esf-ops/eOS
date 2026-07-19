@@ -105,6 +105,8 @@ export function emptyReviewState() {
   return {
     excludedRunIds: [],
     excludedRoomIds: [],
+    deletedRunIds: [],
+    deletedRoomIds: [],
     manualRunIds: [],
     manualRoomIds: [],
     flagResolutions: {},
@@ -128,6 +130,12 @@ export function normalizeReviewState(rs) {
       : [],
     excludedRoomIds: Array.isArray(r.excludedRoomIds)
       ? r.excludedRoomIds.map(String)
+      : [],
+    deletedRunIds: Array.isArray(r.deletedRunIds)
+      ? [...new Set(r.deletedRunIds.map(String).filter(Boolean))]
+      : [],
+    deletedRoomIds: Array.isArray(r.deletedRoomIds)
+      ? [...new Set(r.deletedRoomIds.map(String).filter(Boolean))]
       : [],
     manualRunIds: Array.isArray(r.manualRunIds)
       ? r.manualRunIds.map(String)
@@ -176,10 +184,12 @@ export function normalizeReviewState(rs) {
 
 /**
  * @typedef {Object} TakeoffReviewState
- * @property {string[]} excludedRunIds
- * @property {string[]} excludedRoomIds
- * @property {string[]} manualRunIds — estimator-added pieces (hard remove, not exclude)
- * @property {string[]} manualRoomIds — estimator-added rooms (hard remove when safe)
+ * @property {string[]} excludedRunIds — piece remains in worksheet, excluded from approval SF
+ * @property {string[]} excludedRoomIds — room excluded from approval (include/exclude, not remove)
+ * @property {string[]} deletedRunIds — hard-removed pieces; must not reappear from AI merge
+ * @property {string[]} deletedRoomIds — hard-removed rooms; must not reappear from AI merge
+ * @property {string[]} manualRunIds — estimator-added pieces
+ * @property {string[]} manualRoomIds — estimator-added rooms
  * @property {Record<string, FlagResolution>} flagResolutions
  * @property {Record<string, boolean>} roomCompleteness
  * @property {Record<string, boolean>} referenceTotalAcks

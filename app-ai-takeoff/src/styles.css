@@ -4523,6 +4523,7 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-room--selected td { outline: 1px solid var(--eos-accent, #2a6f97); outline-offset: -1px; }
 .ctr-room-header { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .ctr-room-add-piece { font-size: 0.75rem; padding: 2px 8px; }
+.ctr-remove { font-size: 0.75rem; padding: 2px 8px; text-decoration: underline; }
 .ctr-sf { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctr-row--excluded { opacity: 0.45; }
 .ctr-row--low { background: var(--eos-warn-soft); }

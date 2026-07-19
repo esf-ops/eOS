@@ -25,6 +25,13 @@ import {
   hasUsableTakeoffGeometry,
   markRunEstimatorOwned
 } from "../lib/emptyManualTakeoffDraft.mjs";
+import {
+  applyDeletionTombstones,
+  hasEstimatorOwnedGeometry,
+  removePieceFromTakeoff,
+  removeRoomFromTakeoff,
+  saveMergeTakeoffDrafts
+} from "@takeoff-core/takeoffAuthoritativeResult.mjs";
 import { getSupabase } from "../lib/supabase";
 import TakeoffPlanPreviewPanel, {
   type PlanPreviewFileMeta
@@ -221,6 +228,8 @@ export default function ConsolidatedTakeoffReview() {
 
   const [draft, setDraft] = useState<any | null>(() => createEmptyManualTakeoffDraft());
   const [excludedRunIds, setExcludedRunIds] = useState<Set<string>>(new Set());
+  const [deletedRoomIds, setDeletedRoomIds] = useState<Set<string>>(new Set());
+  const [deletedRunIds, setDeletedRunIds] = useState<Set<string>>(new Set());
   const [planFile, setPlanFile] = useState<PlanPreviewFileMeta | null>(null);
   const [displayStatus, setDisplayStatus] = useState("Takeoff processing");
   const [aiPhase, setAiPhase] = useState<AiPhase>("unknown");
@@ -236,13 +245,48 @@ export default function ConsolidatedTakeoffReview() {
   const [pendingAiMerge, setPendingAiMerge] = useState(false);
   const [retryBusy, setRetryBusy] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const pendingServerTakeoffRef = useRef<any | null>(null);
   const saveTimer = useRef<number | null>(null);
   const draftRef = useRef(draft);
   const excludedRef = useRef(excludedRunIds);
+  const deletedRoomIdsRef = useRef(deletedRoomIds);
+  const deletedRunIdsRef = useRef(deletedRunIds);
   const saveStatusRef = useRef(saveStatus);
   draftRef.current = draft;
   excludedRef.current = excludedRunIds;
+  deletedRoomIdsRef.current = deletedRoomIds;
+  deletedRunIdsRef.current = deletedRunIds;
   saveStatusRef.current = saveStatus;
+
+  const mergeTombstones = useCallback(
+    () => ({
+      deletedRoomIds: [...deletedRoomIdsRef.current],
+      deletedRunIds: [...deletedRunIdsRef.current]
+    }),
+    []
+  );
+
+  const hydrateReviewMeta = useCallback((rs: any) => {
+    setExcludedRunIds(new Set(rs?.excludedRunIds ?? []));
+    setDeletedRoomIds(new Set(rs?.deletedRoomIds ?? []));
+    setDeletedRunIds(new Set(rs?.deletedRunIds ?? []));
+  }, []);
+
+  const unionLocalTombstones = useCallback((rs: any) => {
+    setDeletedRoomIds((prev) => {
+      const next = new Set(prev);
+      for (const id of rs?.deletedRoomIds ?? []) next.add(String(id));
+      return next;
+    });
+    setDeletedRunIds((prev) => {
+      const next = new Set(prev);
+      for (const id of rs?.deletedRunIds ?? []) next.add(String(id));
+      return next;
+    });
+    if (Array.isArray(rs?.excludedRunIds)) {
+      setExcludedRunIds(new Set(rs.excludedRunIds));
+    }
+  }, []);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -265,7 +309,11 @@ export default function ConsolidatedTakeoffReview() {
     };
   }, []);
 
-  const loadWorkspace = useCallback(async (token: string, jobId: string, opts?: { forceServer?: boolean }) => {
+  const loadWorkspace = useCallback(async (
+    token: string,
+    jobId: string,
+    opts?: { forceServer?: boolean; discardLocal?: boolean }
+  ) => {
     setLoadError(null);
     const job = (await labApiGet(
       `/api/takeoff-jobs/${encodeURIComponent(jobId)}`,
@@ -297,21 +345,56 @@ export default function ConsolidatedTakeoffReview() {
     const dirty =
       saveStatusRef.current === "dirty" || saveStatusRef.current === "saving";
     let activeDraft = draftRef.current || createEmptyManualTakeoffDraft();
-    if (result && usableServer && dirty && !opts?.forceServer) {
-      // AI (or another tab) has geometry while local edits are unsaved — do not overwrite.
-      if (hasUsableTakeoffGeometry(activeDraft)) {
-        setPendingAiMerge(true);
-      } else {
-        activeDraft = result;
-        setDraft(result);
-        setPendingAiMerge(false);
-      }
-    } else if (result) {
-      activeDraft = result;
-      setDraft(result);
-      setPendingAiMerge(false);
+    const localOwned =
+      hasEstimatorOwnedGeometry(activeDraft) || hasUsableTakeoffGeometry(activeDraft);
+
+    if (opts?.discardLocal && result) {
+      // Explicit Discard & load AI — replace local draft but keep server tombstones.
       const rs = latest?.reviewState || {};
-      setExcludedRunIds(new Set(rs.excludedRunIds ?? []));
+      hydrateReviewMeta(rs);
+      const cleaned = applyDeletionTombstones(result, {
+        deletedRoomIds: rs.deletedRoomIds ?? [],
+        deletedRunIds: rs.deletedRunIds ?? []
+      });
+      activeDraft = cleaned;
+      setDraft(cleaned);
+      setPendingAiMerge(false);
+      pendingServerTakeoffRef.current = null;
+    } else if (result && usableServer && dirty && !opts?.forceServer && localOwned) {
+      // AI ready while estimator has unsaved geometry — hold server payload for Save & merge.
+      pendingServerTakeoffRef.current = result;
+      setPendingAiMerge(true);
+      unionLocalTombstones(latest?.reviewState || {});
+    } else if (result && localOwned && !opts?.discardLocal) {
+      // Soft refresh / post-merge poll: never let raw AI displace estimator-owned draft.
+      unionLocalTombstones(latest?.reviewState || {});
+      const tombstones = {
+        deletedRoomIds: [
+          ...deletedRoomIdsRef.current,
+          ...((latest?.reviewState?.deletedRoomIds as string[]) || [])
+        ],
+        deletedRunIds: [
+          ...deletedRunIdsRef.current,
+          ...((latest?.reviewState?.deletedRunIds as string[]) || [])
+        ]
+      };
+      const { merged } = saveMergeTakeoffDrafts(activeDraft, result, tombstones);
+      activeDraft = merged;
+      draftRef.current = merged;
+      setDraft(merged);
+      setPendingAiMerge(false);
+      pendingServerTakeoffRef.current = null;
+    } else if (result) {
+      const rs = latest?.reviewState || {};
+      hydrateReviewMeta(rs);
+      const cleaned = applyDeletionTombstones(result, {
+        deletedRoomIds: rs.deletedRoomIds ?? [],
+        deletedRunIds: rs.deletedRunIds ?? []
+      });
+      activeDraft = cleaned;
+      setDraft(cleaned);
+      setPendingAiMerge(false);
+      pendingServerTakeoffRef.current = null;
     } else if (!hasUsableTakeoffGeometry(activeDraft)) {
       activeDraft = createEmptyManualTakeoffDraft();
       setDraft(activeDraft);
@@ -334,7 +417,74 @@ export default function ConsolidatedTakeoffReview() {
         status: String(file.status ?? "ready")
       });
     }
-  }, []);
+  }, [hydrateReviewMeta, unionLocalTombstones]);
+
+  const persistDraftWithResult = useCallback(
+    async (takeoffResult: any) => {
+      if (!authToken || !takeoffJobId || !takeoffResult) return;
+      draftRef.current = takeoffResult;
+      setDraft(takeoffResult);
+      setSaveStatus("saving");
+      setSaveError(null);
+      try {
+        const ownership = collectManualOwnershipIds(takeoffResult);
+        const roomCompleteness: Record<string, boolean> = {};
+        for (const room of takeoffResult?.rooms ?? []) {
+          if (room?.id) roomCompleteness[room.id] = true;
+        }
+        await saveTakeoffCorrection(authToken, takeoffJobId, {
+          takeoffResult,
+          correctionNotes: "Consolidated worksheet autosave",
+          reviewState: {
+            excludedRunIds: [...excludedRef.current],
+            excludedRoomIds: [],
+            deletedRoomIds: [...deletedRoomIdsRef.current],
+            deletedRunIds: [...deletedRunIdsRef.current],
+            roomCompleteness,
+            flagResolutions: {},
+            referenceTotalAcks: {},
+            evidenceAcks: {},
+            manualRoomIds: ownership.manualRoomIds,
+            manualRunIds: ownership.manualRunIds
+          }
+        });
+        setSaveStatus("saved");
+        window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
+      } catch (e) {
+        setSaveStatus("error");
+        setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+        throw e;
+      }
+    },
+    [authToken, takeoffJobId]
+  );
+
+  const handleSaveAndMergeAi = useCallback(async () => {
+    if (!authToken || !takeoffJobId) return;
+    const local = draftRef.current || createEmptyManualTakeoffDraft();
+    let serverAi = pendingServerTakeoffRef.current;
+    if (!serverAi) {
+      const latest = (await labApiGet(
+        `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
+        authToken
+      ).catch(() => null)) as any;
+      serverAi = latest?.normalizedTakeoffJson ?? null;
+      if (latest?.reviewState) unionLocalTombstones(latest.reviewState);
+    }
+    const { merged } = saveMergeTakeoffDrafts(local, serverAi, mergeTombstones());
+    await persistDraftWithResult(merged);
+    setPendingAiMerge(false);
+    pendingServerTakeoffRef.current = null;
+    // Soft reload merges again — never force AI-only overwrite.
+    await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
+  }, [
+    authToken,
+    takeoffJobId,
+    persistDraftWithResult,
+    loadWorkspace,
+    mergeTombstones,
+    unionLocalTombstones
+  ]);
 
   useEffect(() => {
     if (!authToken || !takeoffJobId) return;
@@ -361,6 +511,8 @@ export default function ConsolidatedTakeoffReview() {
     return {
       excludedRunIds: [...excludedRef.current],
       excludedRoomIds: [],
+      deletedRoomIds: [...deletedRoomIdsRef.current],
+      deletedRunIds: [...deletedRunIdsRef.current],
       roomCompleteness,
       flagResolutions: {},
       referenceTotalAcks: {},
@@ -402,6 +554,59 @@ export default function ConsolidatedTakeoffReview() {
       scheduleSave();
     },
     [scheduleSave]
+  );
+
+  const handleRemoveRoom = useCallback(
+    (roomId: string, roomName: string, pieceCount: number) => {
+      if (pieceCount > 0) {
+        const ok = window.confirm(
+          `Remove room "${roomName}" and its ${pieceCount} piece${
+            pieceCount === 1 ? "" : "s"
+          }? This cannot be undone by AI refresh.`
+        );
+        if (!ok) return;
+      }
+      const pack = removeRoomFromTakeoff(draftRef.current || createEmptyManualTakeoffDraft(), roomId);
+      setDeletedRoomIds((prev) => {
+        const next = new Set(prev);
+        for (const id of pack.deletedRoomIds) next.add(id);
+        return next;
+      });
+      setDeletedRunIds((prev) => {
+        const next = new Set(prev);
+        for (const id of pack.deletedRunIds) next.add(id);
+        return next;
+      });
+      setExcludedRunIds((prev) => {
+        const next = new Set(prev);
+        for (const id of pack.deletedRunIds) next.delete(id);
+        return next;
+      });
+      updateDraft(pack.takeoff);
+    },
+    [updateDraft]
+  );
+
+  const handleRemovePiece = useCallback(
+    (roomId: string, runId: string) => {
+      const pack = removePieceFromTakeoff(
+        draftRef.current || createEmptyManualTakeoffDraft(),
+        roomId,
+        runId
+      );
+      setDeletedRunIds((prev) => {
+        const next = new Set(prev);
+        for (const id of pack.deletedRunIds) next.add(id);
+        return next;
+      });
+      setExcludedRunIds((prev) => {
+        const next = new Set(prev);
+        next.delete(runId);
+        return next;
+      });
+      updateDraft(pack.takeoff);
+    },
+    [updateDraft]
   );
 
   const rows = useMemo(
@@ -630,12 +835,9 @@ export default function ConsolidatedTakeoffReview() {
               className="ctr-btn-secondary"
               data-testid="ctr-save-merge-ai"
               onClick={() => {
-                void (async () => {
-                  await persistDraft();
-                  if (authToken && takeoffJobId) {
-                    await loadWorkspace(authToken, takeoffJobId, { forceServer: true });
-                  }
-                })();
+                void handleSaveAndMergeAi().catch((e) =>
+                  setLoadError(e instanceof LabApiError ? e.message : "Save & merge failed")
+                );
               }}
             >
               Save &amp; merge
@@ -647,8 +849,12 @@ export default function ConsolidatedTakeoffReview() {
               onClick={() => {
                 setPendingAiMerge(false);
                 setSaveStatus("idle");
+                pendingServerTakeoffRef.current = null;
                 if (authToken && takeoffJobId) {
-                  void loadWorkspace(authToken, takeoffJobId, { forceServer: true });
+                  void loadWorkspace(authToken, takeoffJobId, {
+                    forceServer: true,
+                    discardLocal: true
+                  });
                 }
               }}
             >
@@ -690,12 +896,13 @@ export default function ConsolidatedTakeoffReview() {
                     <th>Incl</th>
                     <th>Cutouts</th>
                     <th>Note</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {roomSections.length === 0 ? (
                     <tr data-testid="ctr-empty-worksheet">
-                      <td colSpan={10} className="ctr-muted">
+                      <td colSpan={11} className="ctr-muted">
                         No rooms yet. Add a room, then add a piece to start measuring.
                       </td>
                     </tr>
@@ -712,7 +919,7 @@ export default function ConsolidatedTakeoffReview() {
                         data-room-id={section.id}
                         onClick={() => setSelectedRoomId(section.id)}
                       >
-                        <td colSpan={10}>
+                        <td colSpan={11}>
                           <div className="ctr-room-header">
                             <input
                               className="ctr-room-rename"
@@ -745,12 +952,24 @@ export default function ConsolidatedTakeoffReview() {
                             >
                               Add piece
                             </button>
+                            <button
+                              type="button"
+                              className="ctr-btn-secondary ctr-remove"
+                              data-testid="ctr-remove-room"
+                              aria-label={`Remove room ${section.name}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveRoom(section.id, section.name, section.pieces.length);
+                              }}
+                            >
+                              Remove room
+                            </button>
                           </div>
                         </td>
                       </tr>
                       {section.pieces.length === 0 ? (
                         <tr data-testid="ctr-room-empty" data-room-id={section.id}>
-                          <td colSpan={10} className="ctr-muted">
+                          <td colSpan={11} className="ctr-muted">
                             No pieces in this room yet.
                           </td>
                         </tr>
@@ -925,6 +1144,17 @@ export default function ConsolidatedTakeoffReview() {
                             )
                           }
                         />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="ctr-btn-secondary ctr-remove"
+                          data-testid="ctr-remove-piece"
+                          aria-label={`Remove piece ${row.pieceName}`}
+                          onClick={() => handleRemovePiece(row.roomId, row.runId)}
+                        >
+                          Remove piece
+                        </button>
                       </td>
                     </tr>
                       ))}
