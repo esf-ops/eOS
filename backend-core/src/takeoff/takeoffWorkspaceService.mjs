@@ -210,8 +210,17 @@ const RESULT_DETAIL_SELECT_COLS =
   "computed_measurements_json,validation_diagnostics_json,import_plan_json," +
   "raw_ai_result_json,reviewed_by_user_id,reviewed_at";
 
-/** @returns {Promise<Record<string, unknown> | null>} */
-async function loadLatestResultRow(supabase, organizationId, takeoffJobId) {
+/**
+ * Authoritative latest result — estimator-confirmed / owned geometry outranks newer AI.
+ * Pass job.result_summary so correction fallback wins when result-row insert was blocked.
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+async function loadLatestResultRow(
+  supabase,
+  organizationId,
+  takeoffJobId,
+  jobResultSummary = null
+) {
   const { data: rows, error } = await supabase
     .from("quote_takeoff_results")
     .select(RESULT_DETAIL_SELECT_COLS)
@@ -225,7 +234,9 @@ async function loadLatestResultRow(supabase, organizationId, takeoffJobId) {
       statusCode: 503,
     });
   }
-  return selectAuthoritativeTakeoffResult(rows || []).row;
+  return selectAuthoritativeTakeoffResult(rows || [], {
+    jobResultSummary
+  }).row;
 }
 
 function recomputeTakeoffBundle(takeoffResult) {
@@ -532,7 +543,12 @@ export async function getTakeoffWorkspace({
   const hasJobSummary = jobHasResultSummary(jobRow);
   const hasSavedResult = Boolean(resultCount > 0 || hasJobSummary);
 
-  const latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+  const latestRow = await loadLatestResultRow(
+    supabase,
+    organizationId,
+    takeoffJobId,
+    jobRow.result_summary
+  );
   const latestResult = latestRow ? buildLatestResultMeta(latestRow) : null;
 
   let canApprove = false;
@@ -972,10 +988,22 @@ export async function saveTakeoffCorrection({
     );
   }
 
-  const latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+  const latestRow = await loadLatestResultRow(
+    supabase,
+    organizationId,
+    takeoffJobId,
+    jobRow.result_summary
+  );
   const now = new Date().toISOString();
   const schemaVersion = takeoffResult.schemaVersion ?? TAKEOFF_SCHEMA_VERSION;
   const summary = buildResultSummary(takeoffResult, computed, validation, importPlan);
+  const estimatorConfirmed = buildEstimatorConfirmedMeta({
+    userId,
+    source: "estimator_save",
+    now
+  });
+  const normalizedReviewState =
+    reviewState != null ? normalizeReviewState(reviewState) : null;
 
   const correctionEntry = {
     id: randomUUID(),
@@ -1008,14 +1036,8 @@ export async function saveTakeoffCorrection({
       ...(existingRaw._meta ?? {}),
       lastCorrectionAt: now,
       lastCorrectedByUserId: userId ?? null,
-      estimatorConfirmed: buildEstimatorConfirmedMeta({
-        userId,
-        source: "estimator_save",
-        now
-      }),
-      ...(reviewState != null
-        ? { reviewState: normalizeReviewState(reviewState) }
-        : {}),
+      estimatorConfirmed,
+      ...(normalizedReviewState != null ? { reviewState: normalizedReviewState } : {}),
     },
   };
 
@@ -1071,6 +1093,8 @@ export async function saveTakeoffCorrection({
         approvedAt: null,
         approvedByUserId: null,
         lastCorrectionId: correctionEntry.id,
+        estimatorConfirmed,
+        ...(normalizedReviewState != null ? { reviewState: normalizedReviewState } : {}),
         normalizedTakeoffJson: takeoffResult,
         computedMeasurementsJson: computed,
         validationDiagnosticsJson: validation,
@@ -1157,7 +1181,12 @@ export async function approveTakeoffJob({
     throw workspaceError("Takeoff is still processing — wait for completion before approval", 422);
   }
 
-  const latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+  const latestRow = await loadLatestResultRow(
+    supabase,
+    organizationId,
+    takeoffJobId,
+    jobRow.result_summary
+  );
   let resolvedResult = takeoffResult;
   if (!resolvedResult) {
     if (latestRow?.normalized_takeoff_json) {
@@ -1604,7 +1633,12 @@ export async function approveAndBuildEstimate({
     throw workspaceError("Takeoff is still processing — wait for completion before approval", 422);
   }
 
-  let latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+  let latestRow = await loadLatestResultRow(
+    supabase,
+    organizationId,
+    takeoffJobId,
+    jobRow.result_summary
+  );
   let resolvedResult = takeoffResult;
   if (!resolvedResult) {
     if (latestRow?.normalized_takeoff_json) {
@@ -1663,7 +1697,24 @@ export async function approveAndBuildEstimate({
       };
       throw err;
     }
-    latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+    latestRow = await loadLatestResultRow(
+      supabase,
+      organizationId,
+      takeoffJobId,
+      {
+        ...(jobRow.result_summary && typeof jobRow.result_summary === "object"
+          ? jobRow.result_summary
+          : {}),
+        normalizedTakeoffJson: resolvedResult,
+        lastCorrectionId: "post_save",
+        savedAt: new Date().toISOString(),
+        estimatorConfirmed: buildEstimatorConfirmedMeta({
+          userId,
+          source: "estimator_save"
+        }),
+        reviewState: reviewState ?? jobRow.result_summary?.reviewState ?? null
+      }
+    );
     if (latestRow?.normalized_takeoff_json) {
       resolvedResult = latestRow.normalized_takeoff_json;
     }
@@ -1893,9 +1944,11 @@ export async function getLatestTakeoffResult({
     .order("created_at", { ascending: false })
     .limit(40);
 
-  let savedResult = selectAuthoritativeTakeoffResult(resultRows || []).row;
+  let savedResult = selectAuthoritativeTakeoffResult(resultRows || [], {
+    jobResultSummary: jobRow.result_summary
+  }).row;
 
-  // Fall back to job.result_summary if no result row (quote_id NOT NULL fallback path).
+  // Fall back to job.result_summary if selector returned empty (no rows / no summary JSON).
   if (!savedResult) {
     const rs = jobRow.result_summary;
     if (rs && typeof rs === "object" && rs.normalizedTakeoffJson) {
@@ -1907,6 +1960,12 @@ export async function getLatestTakeoffResult({
         import_plan_json: rs.importPlanJson,
         review_status: rs.reviewStatus ?? "needs_review",
         created_at: rs.savedAt ?? null,
+        raw_ai_result_json: {
+          _meta: {
+            ...(rs.estimatorConfirmed ? { estimatorConfirmed: rs.estimatorConfirmed } : {}),
+            ...(rs.reviewState ? { reviewState: rs.reviewState } : {})
+          }
+        }
       };
     }
   }

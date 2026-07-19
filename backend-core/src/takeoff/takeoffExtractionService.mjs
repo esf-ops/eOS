@@ -450,7 +450,9 @@ export async function runAiTakeoffExtraction({
     priorRows = [];
   }
 
-  const prior = selectAuthoritativeTakeoffResult(priorRows);
+  const prior = selectAuthoritativeTakeoffResult(priorRows, {
+    jobResultSummary: job?.result_summary ?? null
+  });
   let unconfirmedAiFindings = null;
   let persistNormalized = normalized;
   let persistComputed = computed;
@@ -465,7 +467,9 @@ export async function runAiTakeoffExtraction({
     );
     persistNormalized = mergedPack.merged;
     unconfirmedAiFindings = mergedPack.unconfirmedAiFindings;
-    preserveEstimatorMeta = prior.row.raw_ai_result_json?._meta?.estimatorConfirmed ?? null;
+    preserveEstimatorMeta =
+      prior.row.raw_ai_result_json?._meta?.estimatorConfirmed ??
+      (job?.result_summary?.estimatorConfirmed ?? null);
     try {
       persistComputed = computeTakeoffMeasurements(persistNormalized);
       persistValidation = validateTakeoffResult(persistNormalized, persistComputed);
@@ -492,7 +496,17 @@ export async function runAiTakeoffExtraction({
     exayardRawCaptured: Boolean(exayardRawCaptured),
     aiDraftOnly: Boolean(prior.row && isApprovedTakeoffResult(prior.row)),
     ...(unconfirmedAiFindings ? { unconfirmedAiFindings } : {}),
-    ...(preserveEstimatorMeta ? { estimatorConfirmed: preserveEstimatorMeta } : {}),
+    ...(preserveEstimatorMeta
+      ? { estimatorConfirmed: preserveEstimatorMeta }
+      : prior.row && hasEstimatorSavedEdits(prior.row)
+        ? {
+            estimatorConfirmed: {
+              confirmedAt: now,
+              confirmedByUserId: null,
+              source: "ai_merge_preserve"
+            }
+          }
+        : {}),
     ...(prior.row?.raw_ai_result_json?._meta?.reviewState
       ? { reviewState: prior.row.raw_ai_result_json._meta.reviewState }
       : {}),

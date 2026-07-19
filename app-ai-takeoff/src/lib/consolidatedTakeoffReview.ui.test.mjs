@@ -42,6 +42,17 @@ assert.ok(
   !component.includes("this worksheet appears when the draft is ready"),
   "must not gate worksheet on AI draft"
 );
+assert.ok(component.includes("handleSaveAndMergeAi"));
+assert.ok(component.includes("saveMergeTakeoffDrafts"));
+assert.ok(component.includes("pendingServerTakeoffRef"));
+assert.ok(component.includes("discardLocal: true"));
+assert.ok(component.includes("hasEstimatorOwnedGeometry"));
+assert.ok(
+  component.includes("await loadWorkspace(authToken, takeoffJobId, { forceServer: false })"),
+  "Save & merge soft-reloads without discarding local estimator draft"
+);
+assert.ok(!component.includes("await persistDraft();\n                  if (authToken && takeoffJobId) {\n                    await loadWorkspace(authToken, takeoffJobId, { forceServer: true })"));
+assert.ok(component.includes("data-testid=\"ctr-save-merge-ai\""));
 assert.ok(component.includes("pendingAiMerge"));
 assert.ok(component.includes("AI findings are ready. Save or discard your current edits before merging."));
 assert.ok(!component.includes("Mark") || !component.includes("verified"));
