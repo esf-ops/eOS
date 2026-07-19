@@ -35,6 +35,7 @@ import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
 import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoutes.js";
 import { maybeAttachQuoteIntakeRoutes } from "./quoteIntake/quoteIntakeRoutes.js";
 import { openEstimateForIntakeCase } from "./takeoff/intakeOpenEstimateService.mjs";
+import { createStudioEstimateService } from "./elite100EstimateStudio/studioEstimateService.mjs";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -1217,11 +1218,22 @@ attachTakeoffWorkspaceRoutes(app, {
 });
 
 // Quote Intake (Phase 6P.1/6P.2): flag-gated; default repository=memory
+const studioEstimateServiceForIntake = createStudioEstimateService({
+  env: process.env,
+  getSupabase: supabaseServerClient
+});
 maybeAttachQuoteIntakeRoutes(app, {
   requireAuth,
   headAccess: headAccessAiTakeoff,
   getSupabase: supabaseServerClient,
-  openEstimate: openEstimateForIntakeCase
+  openEstimate: openEstimateForIntakeCase,
+  ensureStudioEstimate: async ({ organizationId, intakeCaseId, takeoffJobId, actorUserId }) =>
+    studioEstimateServiceForIntake.getOrCreateForCase({
+      organizationId,
+      intakeCaseId,
+      takeoffJobId,
+      actorUserId
+    })
 });
 
 attachVisualizerRoutes(app, {

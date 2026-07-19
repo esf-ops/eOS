@@ -566,9 +566,43 @@ export async function importQuoteIntakeMailboxMessages(input) {
     }
   }
 
+  // Slice 1: auto open-estimate + async AI queue for newly created single-PDF cases.
+  // Never fails the import; estimator can always open manually.
+  let takeoffInvocation = { attempted: false, enabled: false, attempts: [] };
+  const bootstrapCaseIds = results
+    .filter((r) => r.status === "created" && r.caseId)
+    .map((r) => r.caseId);
+  // Idempotent re-bootstrap for duplicates that already exist (safe no-op when linked).
+  for (const r of results) {
+    if (r.status === "duplicate" && r.caseId) bootstrapCaseIds.push(r.caseId);
+  }
+  if (bootstrapCaseIds.length > 0 && typeof input.bootstrapIntakeCases === "function") {
+    try {
+      takeoffInvocation = await input.bootstrapIntakeCases({
+        repository: input.repository,
+        organizationId: input.organizationId,
+        actorUserId: input.actorUserId ?? null,
+        caseIds: bootstrapCaseIds,
+        env: input.env ?? process.env,
+        getSupabase: input.getSupabase,
+        graphClient: input.graphClient ?? null,
+        ensureStudioEstimate: input.ensureStudioEstimate ?? null,
+        scheduleFn: input.scheduleFn
+      });
+    } catch {
+      takeoffInvocation = {
+        attempted: true,
+        enabled: true,
+        attempts: [],
+        code: "bootstrap_failed",
+        message: "Automatic takeoff bootstrap failed; cases remain available."
+      };
+    }
+  }
+
   return {
     mailboxDisplay: mailbox,
-    takeoffInvocation: { attempted: false, enabled: false },
+    takeoffInvocation,
     storageUpload: { attempted: false, enabled: false },
     results,
     audit: {

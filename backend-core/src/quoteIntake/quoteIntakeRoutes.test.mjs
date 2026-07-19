@@ -75,7 +75,8 @@ function baseReq(overrides = {}) {
   assert.equal(isQuoteIntakeApiEnabled({ QUOTE_INTAKE_API_ENABLED: "1" }), true);
   const cfg = readSafeQuoteIntakeConfig({ QUOTE_INTAKE_API_ENABLED: "1" });
   assert.equal(cfg.quoteIntakeApiEnabled, true);
-  assert.equal(cfg.takeoffInvocationEnabled, false);
+  assert.equal(cfg.takeoffInvocationEnabled, true);
+  assert.equal(cfg.automaticTakeoffEnabled, true);
   assert.equal(cfg.graphEnabled, false);
   assert.equal(cfg.ieImportEnabled, false);
   assert.equal("apiKey" in cfg, false);
@@ -145,7 +146,8 @@ function baseReq(overrides = {}) {
   {
     const out = await dispatch(routes.get(`GET ${QUOTE_INTAKE_API_PREFIX}/config`), baseReq());
     assert.equal(out.statusCode, 200);
-    assert.equal(out.body.config.takeoffInvocationEnabled, false);
+    assert.equal(out.body.config.takeoffInvocationEnabled, true);
+    assert.equal(out.body.config.automaticTakeoffEnabled, true);
   }
 
   let caseId;
@@ -513,6 +515,9 @@ function baseReq(overrides = {}) {
     })
   );
   const caseId = created.body.case.id;
+  // Slice 1: create with single PDF auto-bootstraps open-estimate.
+  assert.equal(created.body.takeoffBootstrap?.openEstimate?.takeoffJobId, "job-from-open");
+  assert.equal(openCalls, 1);
 
   const spoof = await dispatch(
     routes.get(`POST ${QUOTE_INTAKE_API_PREFIX}/cases/:id/open-estimate`),
@@ -530,7 +535,7 @@ function baseReq(overrides = {}) {
   );
   assert.equal(out1.statusCode, 200);
   assert.equal(out1.body.takeoffJobId, "job-from-open");
-  assert.equal(out1.body.created, true);
+  assert.equal(out1.body.reused, true);
 
   const out2 = await dispatch(
     routes.get(`POST ${QUOTE_INTAKE_API_PREFIX}/cases/:id/open-estimate`),

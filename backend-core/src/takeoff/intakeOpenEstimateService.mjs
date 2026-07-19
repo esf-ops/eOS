@@ -314,7 +314,8 @@ async function resolveValidatedPdfBytes(deps) {
  *   fetchAttachmentBytes?: Function|null,
  *   ingestFile?: typeof ingestQuoteFileFromBytes,
  *   createWorkspace?: typeof createTakeoffWorkspace,
- *   repositoryMode?: string
+ *   repositoryMode?: string,
+ *   initiationMode?: string
  * }} deps
  */
 export async function openEstimateForIntakeCase(deps) {
@@ -330,8 +331,13 @@ export async function openEstimateForIntakeCase(deps) {
     fetchAttachmentBytes = null,
     ingestFile = ingestQuoteFileFromBytes,
     createWorkspace = createTakeoffWorkspace,
-    repositoryMode = "unknown"
+    repositoryMode = "unknown",
+    initiationMode = TAKEOFF_INITIATION_MODE.MANUAL
   } = deps;
+  const resolvedInitiationMode =
+    String(initiationMode || "").trim() === TAKEOFF_INITIATION_MODE.AUTOMATIC
+      ? TAKEOFF_INITIATION_MODE.AUTOMATIC
+      : TAKEOFF_INITIATION_MODE.MANUAL;
 
   rejectCallerOpenEstimateHints(body);
 
@@ -499,7 +505,7 @@ export async function openEstimateForIntakeCase(deps) {
       sourceAttachmentId: attachment.id || attachment.sourceAttachmentId,
       attachmentSha256: validated.sha256 || attachment.sha256,
       relationshipStatus: TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED,
-      initiationMode: TAKEOFF_INITIATION_MODE.MANUAL,
+      initiationMode: resolvedInitiationMode,
       idempotencyKey,
       actorType: "user",
       createdBy: actorUserId

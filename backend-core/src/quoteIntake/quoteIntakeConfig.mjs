@@ -10,11 +10,27 @@ import { readSafeQuoteIntakeGraphConfig } from "./quoteIntakeGraphConfig.mjs";
 export const QUOTE_INTAKE_API_ENABLED_ENV = "QUOTE_INTAKE_API_ENABLED";
 
 /**
+ * Auto open-estimate + queue AI after supported PDF intake.
+ * Default ON when unset; set "0" to disable.
+ */
+export const QUOTE_INTAKE_AUTOMATIC_TAKEOFF_ENV = "QUOTE_INTAKE_AUTOMATIC_TAKEOFF";
+
+/**
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {boolean}
  */
 export function isQuoteIntakeApiEnabled(env = process.env) {
   return String(env[QUOTE_INTAKE_API_ENABLED_ENV] ?? "").trim() === "1";
+}
+
+/**
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function isQuoteIntakeAutomaticTakeoffEnabled(env = process.env) {
+  if (!isQuoteIntakeApiEnabled(env)) return false;
+  const raw = String(env[QUOTE_INTAKE_AUTOMATIC_TAKEOFF_ENV] ?? "1").trim().toLowerCase();
+  return raw !== "0" && raw !== "false" && raw !== "off";
 }
 
 /**
@@ -54,8 +70,8 @@ export function readSafeQuoteIntakeConfig(env = process.env) {
     graphPreviewLimit: graph.previewLimit,
     graphImportLimit: graph.importLimit,
     mailboxDisplay: graph.mailboxDisplay,
-    automaticTakeoffEnabled: false,
-    takeoffInvocationEnabled: false,
+    automaticTakeoffEnabled: isQuoteIntakeAutomaticTakeoffEnabled(env),
+    takeoffInvocationEnabled: isQuoteIntakeAutomaticTakeoffEnabled(env),
     realPlanTransmissionEnabled: false,
     ieImportEnabled: false,
     quoteLibraryPromotionEnabled: false,

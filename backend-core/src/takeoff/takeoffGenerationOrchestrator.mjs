@@ -172,13 +172,35 @@ async function validateGenerationPreconditions(supabase, organizationId, takeoff
     );
   }
 
+  if (String(job.review_status ?? "").toLowerCase() === "approved") {
+    throw generationError(
+      "This takeoff is already approved. Confirmed geometry cannot be replaced by AI.",
+      409,
+      { code: "takeoff_already_approved" }
+    );
+  }
+
   if (String(job.status) === JOB_STATUS_PROCESSING) {
     const proc = buildProcessingStatus(job);
     if (proc.runId && proc.mode === "ai_generate") {
-      throw generationError("This takeoff is already generating.", 409, {
+      // Idempotent: treat in-flight generation as success for retries / auto-bootstrap.
+      const err = generationError("This takeoff is already generating.", 409, {
         code: "already_processing",
         processing: proc,
       });
+      err.idempotentReuse = {
+        ok: true,
+        accepted: true,
+        reused: true,
+        takeoffJobId,
+        runId: proc.runId,
+        status: JOB_STATUS_PROCESSING,
+        reviewStatus: job.review_status ?? "needs_review",
+        processing: proc,
+        mode: "ai_generate",
+        message: "AI Takeoff is already processing. You may continue building the estimate.",
+      };
+      throw err;
     }
   }
 
@@ -203,7 +225,15 @@ export async function startAiTakeoffGeneration({
   takeoffJobId,
   scheduleFn = scheduleBackgroundWork,
 }) {
-  const { job } = await validateGenerationPreconditions(supabase, organizationId, takeoffJobId);
+  let job;
+  try {
+    ({ job } = await validateGenerationPreconditions(supabase, organizationId, takeoffJobId));
+  } catch (e) {
+    if (e?.code === "already_processing" && e.idempotentReuse) {
+      return e.idempotentReuse;
+    }
+    throw e;
+  }
 
   const runId = randomUUID();
   const now = new Date().toISOString();

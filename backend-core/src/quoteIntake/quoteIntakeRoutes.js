@@ -24,6 +24,10 @@ import {
   importQuoteIntakeMailboxMessages,
   previewQuoteIntakeMailbox
 } from "./quoteIntakeMailboxService.mjs";
+import {
+  bootstrapIntakeCaseTakeoff,
+  bootstrapIntakeCasesAfterImport
+} from "./intakeAutoBootstrapService.mjs";
 
 export { QUOTE_INTAKE_API_PREFIX };
 export { isQuoteIntakeApiEnabled, readSafeQuoteIntakeConfig } from "./quoteIntakeConfig.mjs";
@@ -52,10 +56,12 @@ export function attachQuoteIntakeRoutes(app, deps) {
     resolveOrganizationId,
     takeoffAdapter = createFakeProductionTakeoffAdapter(),
     openEstimate = null,
+    ensureStudioEstimate = null,
     jsonParser = defaultJsonParser,
     env = process.env,
     graphClient = null,
-    graphFetchImpl = null
+    graphFetchImpl = null,
+    scheduleFn = undefined
   } = deps;
 
   if (!isQuoteIntakeApiEnabled(env)) {
@@ -162,7 +168,23 @@ export function attachQuoteIntakeRoutes(app, deps) {
         attachments: body.attachments
         // intentionally omit body.organizationId / body.createdByUserId / body.userId
       });
-      res.status(201).json({ ok: true, case: created });
+      let takeoffBootstrap = null;
+      if (typeof openEstimate === "function") {
+        takeoffBootstrap = await bootstrapIntakeCaseTakeoff({
+          repository,
+          organizationId,
+          intakeCaseId: created.id,
+          actorUserId: req.user?.id ?? null,
+          env,
+          getSupabase,
+          graphClient,
+          openEstimate,
+          ensureStudioEstimate,
+          scheduleFn,
+          repositoryMode
+        });
+      }
+      res.status(201).json({ ok: true, case: created, takeoffBootstrap });
     } catch (e) {
       const status = Number(e?.statusCode) || 500;
       if (status >= 500) {
@@ -446,7 +468,19 @@ export function attachQuoteIntakeRoutes(app, deps) {
           repository,
           graphClient,
           fetchImpl: graphFetchImpl,
-          body: req.body
+          body: req.body,
+          getSupabase,
+          ensureStudioEstimate,
+          scheduleFn,
+          bootstrapIntakeCases:
+            typeof openEstimate === "function"
+              ? (args) =>
+                  bootstrapIntakeCasesAfterImport({
+                    ...args,
+                    openEstimate,
+                    repositoryMode
+                  })
+              : null
         });
         res.status(200).json({ ok: true, ...imported });
       } catch (e) {

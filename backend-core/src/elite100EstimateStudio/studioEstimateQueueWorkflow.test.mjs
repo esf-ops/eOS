@@ -18,30 +18,34 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
   assert.equal(deriveQueueWorkflowStatus({}), "New");
   assert.equal(
     deriveQueueWorkflowStatus({ takeoffJobStatus: "processing" }),
-    "AI Takeoff processing"
+    "Takeoff processing"
+  );
+  assert.equal(
+    deriveQueueWorkflowStatus({ takeoffJobStatus: "queued" }),
+    "Takeoff queued"
   );
   assert.equal(
     deriveQueueWorkflowStatus({ takeoffReviewStatus: "needs_review", firstOpenedAt: "2026-01-01" }),
-    "Takeoff ready"
+    "Takeoff draft ready"
   );
   assert.equal(
     deriveQueueWorkflowStatus({
       takeoffReviewStatus: "approved",
       estimateStatus: "needs_takeoff_approval"
     }),
-    "Estimator review"
+    "Needs estimator review"
   );
   assert.equal(
     deriveQueueWorkflowStatus({ estimateStatus: "ready_to_price", firstOpenedAt: "x" }),
-    "Estimate in progress"
+    "Scope in progress"
   );
   assert.equal(
     deriveQueueWorkflowStatus({ estimateStatus: "approved" }),
-    "Estimate approved"
+    "Ready for approval"
   );
   assert.equal(
     deriveQueueWorkflowStatus({ publicationStatus: "active" }),
-    "Sent to customer"
+    "Published"
   );
   assert.equal(
     deriveQueueWorkflowStatus({ publicationStatus: "active", customerViewed: true }),
@@ -49,14 +53,10 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
   );
   assert.equal(
     deriveQueueWorkflowStatus({ reviewOperatorStatus: "new" }),
-    "Changes requested"
+    "Customer submitted"
   );
-  assert.equal(
-    deriveQueueWorkflowStatus({ revisionInProgress: true }),
-    "Revision in progress"
-  );
-  assert.equal(deriveQueueWorkflowStatus({ takeoffJobStatus: "failed" }), "Failed");
-  assert.equal(deriveQueueWorkflowStatus({ accepted: true }), "Accepted");
+  assert.equal(deriveQueueWorkflowStatus({ takeoffJobStatus: "failed" }), "Takeoff failed");
+  assert.equal(deriveQueueWorkflowStatus({ accepted: true }), "Customer submitted");
   assert.equal(deriveQueueWorkflowStatus({ sold: true }), "Sold");
   console.log("  ✓ T1 workflow status derivation");
 }
@@ -65,13 +65,13 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
 {
   const waiting = deriveNeedsAttention(
     { publicationStatus: "active", firstOpenedAt: "x" },
-    "Sent to customer"
+    "Published"
   );
   assert.equal(waiting.needsAttention, false);
 
   const ready = deriveNeedsAttention(
     { takeoffReviewStatus: "needs_review", firstOpenedAt: "x" },
-    "Takeoff ready"
+    "Takeoff draft ready"
   );
   assert.equal(ready.needsAttention, true);
   assert.ok(ready.reasons.includes("takeoff_needs_review"));
@@ -82,7 +82,7 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
 
   const approvedNotPub = deriveNeedsAttention(
     { estimateStatus: "approved", firstOpenedAt: "x" },
-    "Estimate approved"
+    "Ready for approval"
   );
   assert.equal(approvedNotPub.needsAttention, true);
   console.log("  ✓ T2 needs-attention vs waiting-on-customer");
@@ -178,9 +178,29 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
     query: { filter: "takeoff", limit: 50 }
   });
   assert.ok(takeoffFilter.cases.some((c) => c.id === "c2"));
-  assert.ok(takeoffFilter.cases.every((c) =>
-    ["AI Takeoff processing", "Takeoff ready", "Estimator review"].includes(c.workflowStatus)
-  ));
+  assert.ok(
+    takeoffFilter.cases.every((c) =>
+      [
+        "Takeoff queued",
+        "Takeoff processing",
+        "Takeoff draft ready",
+        "Needs estimator review",
+        "Takeoff failed"
+      ].includes(c.workflowStatus)
+    )
+  );
+
+  // List + detail share the same mapper
+  const c2 = takeoffFilter.cases.find((c) => c.id === "c2");
+  assert.equal(
+    c2.workflowStatus,
+    deriveQueueWorkflowStatus({
+      takeoffJobStatus: "completed",
+      takeoffReviewStatus: "needs_review",
+      firstOpenedAt: "2026-07-02T11:00:00Z",
+      takeoffJobId: "tj1"
+    })
+  );
 
   const attention = await svc.listQueue({
     organizationId: ORG,
@@ -247,7 +267,7 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
             scope_json: {
               customerName: "Acme Homes",
               projectName: "Oak St Kitchen",
-              rooms: [{ id: "r1", name: "Kitchen", countertopSqft: 40, pieces: [{ id: "p1", sqft: 40, included: true }] }]
+              rooms: [{ id: "r1", name: "Kitchen", countertopSqft: 40, pieces: [{ id: "p1", sqft: 40, verified: true }] }]
             }
           }
         ]
@@ -260,6 +280,10 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
   assert.equal(preview.preview.customerName, "Acme Homes");
   assert.ok(preview.preview.attachments[0].filename);
   assert.equal(JSON.stringify(preview).includes("sha256"), false);
+  assert.equal(preview.preview.workflowStatus, deriveQueueWorkflowStatus({
+    estimateStatus: "approved",
+    firstOpenedAt: "2026-07-03T10:30:00Z"
+  }));
 
   // 9. Open target routing
   assert.equal(deriveQueueOpenTarget({ takeoffReviewStatus: "needs_review" }), "takeoff");
@@ -270,7 +294,7 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
   assert.equal(deriveQueueOpenTarget({ estimateStatus: "approved" }), "digital");
   assert.equal(deriveQueueOpenTarget({ reviewOperatorStatus: "new" }), "review");
 
-  assert.ok(workflowStatusesForFilter("sent").has("Sent to customer"));
+  assert.ok(workflowStatusesForFilter("sent").has("Published"));
 
   console.log("  ✓ T3–T9 search/filter/org/partial/preview/routing/forbidden");
 }

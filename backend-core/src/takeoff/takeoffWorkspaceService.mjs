@@ -40,6 +40,10 @@ import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
 import { pickSafeExayardJobMetadata } from "./exayardClient.mjs";
 import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
 import {
+  buildEstimatorConfirmedMeta,
+  selectAuthoritativeTakeoffResult
+} from "./takeoffAuthoritativeResult.mjs";
+import {
   autoCompleteRoomReviewState,
   buildConsolidatedTakeoffSummary,
   collectConsolidatedHardBlockers,
@@ -214,14 +218,14 @@ async function loadLatestResultRow(supabase, organizationId, takeoffJobId) {
     .eq("takeoff_job_id", takeoffJobId)
     .eq("organization_id", organizationId)
     .order("created_at", { ascending: false })
-    .limit(1);
+    .limit(40);
 
   if (error) {
     throw Object.assign(new Error(`DB error loading takeoff result: ${error.message}`), {
       statusCode: 503,
     });
   }
-  return rows?.[0] ?? null;
+  return selectAuthoritativeTakeoffResult(rows || []).row;
 }
 
 function recomputeTakeoffBundle(takeoffResult) {
@@ -1004,6 +1008,11 @@ export async function saveTakeoffCorrection({
       ...(existingRaw._meta ?? {}),
       lastCorrectionAt: now,
       lastCorrectedByUserId: userId ?? null,
+      estimatorConfirmed: buildEstimatorConfirmedMeta({
+        userId,
+        source: "estimator_save",
+        now
+      }),
       ...(reviewState != null
         ? { reviewState: normalizeReviewState(reviewState) }
         : {}),
@@ -1505,6 +1514,7 @@ export async function approveTakeoffJob({
   return {
     ok: true,
     takeoffJobId,
+    approvedResultId: latestRow?.id ?? approvedSnapshot.importPayload?.takeoffResultId ?? null,
     approvedAt: now,
     approvedByUserId: userId ?? null,
     reviewStatus: "approved",
@@ -1871,7 +1881,7 @@ export async function getLatestTakeoffResult({
     return await _legacyV4GetLatestResult(supabase, organizationId, takeoffJobId);
   }
 
-  // Try quote_takeoff_results (real normalized table).
+  // Try quote_takeoff_results — confirmed estimator work wins over newer AI drafts.
   const { data: resultRows } = await supabase
     .from("quote_takeoff_results")
     .select(
@@ -1881,9 +1891,9 @@ export async function getLatestTakeoffResult({
     )
     .eq("takeoff_job_id", takeoffJobId)
     .order("created_at", { ascending: false })
-    .limit(1);
+    .limit(40);
 
-  let savedResult = resultRows?.[0] ?? null;
+  let savedResult = selectAuthoritativeTakeoffResult(resultRows || []).row;
 
   // Fall back to job.result_summary if no result row (quote_id NOT NULL fallback path).
   if (!savedResult) {

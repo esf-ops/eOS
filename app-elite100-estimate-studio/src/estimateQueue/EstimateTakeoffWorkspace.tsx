@@ -189,7 +189,7 @@ export default function EstimateTakeoffWorkspace({
         if (prev.kind !== "ready") return prev;
         return {
           ...prev,
-          displayStatus: "Approved",
+          displayStatus: "Needs estimator review",
           scopeRefreshKey: prev.scopeRefreshKey + 1,
           handoffNotice: "Takeoff approved — Estimate Scope refreshed."
         };
@@ -207,7 +207,9 @@ export default function EstimateTakeoffWorkspace({
   // Fallback: if postMessage is missed, poll Takeoff review status and refresh scope.
   useEffect(() => {
     if (state.kind !== "ready") return;
-    if (state.displayStatus === "Approved") return;
+    if (state.displayStatus === "Needs estimator review" || state.displayStatus === "Scope in progress") {
+      return;
+    }
     let cancelled = false;
     const takeoffJobId = state.takeoffJobId;
     const timer = window.setInterval(() => {
@@ -218,12 +220,25 @@ export default function EstimateTakeoffWorkspace({
             authToken
           )) as { reviewStatus?: string; status?: string };
           if (cancelled) return;
-          if (String(job.reviewStatus ?? "").toLowerCase() !== "approved") return;
+          if (String(job.reviewStatus ?? "").toLowerCase() !== "approved") {
+            // Keep display status in sync while AI runs — workspace stays usable.
+            const next = deriveEstimateTakeoffDisplayStatus({
+              takeoffJobId,
+              linkStatus: state.linkStatus,
+              jobStatus: job.status,
+              reviewStatus: job.reviewStatus
+            });
+            setState((prev) => {
+              if (prev.kind !== "ready" || prev.displayStatus === next) return prev;
+              return { ...prev, displayStatus: next };
+            });
+            return;
+          }
           setState((prev) => {
-            if (prev.kind !== "ready" || prev.displayStatus === "Approved") return prev;
+            if (prev.kind !== "ready" || prev.displayStatus === "Needs estimator review") return prev;
             return {
               ...prev,
-              displayStatus: "Approved",
+              displayStatus: "Needs estimator review",
               scopeRefreshKey: prev.scopeRefreshKey + 1,
               handoffNotice: "Takeoff approved — Estimate Scope refreshed."
             };
@@ -245,7 +260,8 @@ export default function EstimateTakeoffWorkspace({
   }, [
     authToken,
     state.kind === "ready" ? state.takeoffJobId : null,
-    state.kind === "ready" ? state.displayStatus : null
+    state.kind === "ready" ? state.displayStatus : null,
+    state.kind === "ready" ? state.linkStatus : null
   ]);
 
   return (
@@ -292,6 +308,17 @@ export default function EstimateTakeoffWorkspace({
           {state.handoffNotice ? (
             <div className="eq-state" role="status" data-testid="eq-takeoff-handoff-notice">
               {state.handoffNotice}
+            </div>
+          ) : null}
+          {state.displayStatus === "Takeoff queued" ||
+          state.displayStatus === "Takeoff processing" ? (
+            <div className="eq-state" role="status" data-testid="eq-ai-takeoff-processing-banner">
+              AI Takeoff is processing. You may continue building the estimate.
+            </div>
+          ) : null}
+          {state.displayStatus === "Takeoff failed" ? (
+            <div className="eq-state eq-state--warn" role="status" data-testid="eq-ai-takeoff-failed-banner">
+              AI Takeoff failed. Retry AI Takeoff or continue manually.
             </div>
           ) : null}
           <section className="eq-case-context" aria-label="Case context">

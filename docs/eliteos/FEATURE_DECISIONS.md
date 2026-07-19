@@ -1542,6 +1542,19 @@
 | **Impacted** | `studioEstimateQueueWorkflow.mjs`, `studioEstimateQueueService.mjs`, Studio `EstimateQueuePage`, open-target routing into Takeoff / Scope / Digital / Review. |
 | **Out of scope** | Acceptance, sold confirmation, Moraware, QuickBooks, payments, new AI behavior. |
 
+### 109. Elite 100 Slice 1 — automatic AI Takeoff after intake; confirmed estimator work wins (2026-07-18)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-18 |
+| **Decision** | **Supported intake PDFs automatically start AI Takeoff.** When Quote Intake creates/imports a case with exactly one supported PDF, the Brain idempotently runs Open Estimate (Studio estimate + takeoff job) and queues the existing async AI generation flow. **AI Takeoff is asynchronous and never blocks estimator work** — import/open returns before extraction completes; estimators may open the case while queued/processing and build rooms/pieces manually. **AI Takeoff creates draft geometry only.** **Confirmed estimator changes always win over later AI output** (approved snapshot and `raw_ai_result_json._meta.estimatorConfirmed` / saved corrections / manual room ids); AI reruns may append unconfirmed findings but must not delete or silently overwrite confirmed geometry. **AI failures do not block manual estimating** (case + Studio estimate preserved; staff-safe retry message). **The Estimate Queue uses one operational status vocabulary** via `deriveQueueWorkflowStatus` (New → Takeoff queued/processing/draft ready → Needs estimator review → Scope in progress → Ready for approval → Published → Customer reviewing/submitted → Sold/Closed → Takeoff failed). **The Studio lifecycle is canonical for Elite 100 estimating** (intake → takeoff draft → studio_estimates → DE publication). |
+| **Why** | Estimators should never wait on AI; automatic bootstrap removes a manual Open Estimate step for the common single-PDF path without a second AI pipeline. |
+| **Trigger** | Mailbox import (`bootstrapIntakeCasesAfterImport`) and `POST /cases` when `openEstimate` is wired; gated by `QUOTE_INTAKE_AUTOMATIC_TAKEOFF` (default ON when API enabled) + existing `TAKEOFF_AI_*` flags. |
+| **Idempotency** | Reuse existing intake→takeoff link / takeoff job; `startAiTakeoffGeneration` returns in-flight run on `already_processing`; approved jobs reject AI (`takeoff_already_approved`). |
+| **Authoritative geometry** | `selectAuthoritativeTakeoffResult` + `mergeAiDraftPreservingConfirmed` in `takeoffAuthoritativeResult.mjs`. |
+| **SQL** | None. Confirmed marker is additive metadata on existing `raw_ai_result_json._meta`. |
+| **Out of scope** | Sold-job behavior, Digital Estimate publication changes, pricing changes, Slice 2 catalog/Scope Builder simplification. |
+
 ### 108. Digital Estimate customer links are stable and reusable (2026-07-18)
 
 | Field | Value |

@@ -4,6 +4,7 @@
  * Run: node backend-core/src/takeoff/approveAndBuildEstimate.consolidatedV3.test.mjs
  */
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   approveAndBuildEstimate,
   approveTakeoffJob,
@@ -125,7 +126,12 @@ function makeMockSupabase({ jobRow, resultRows }) {
         };
       },
       insert(payload) {
-        const row = Array.isArray(payload) ? payload[0] : payload;
+        const row = Array.isArray(payload) ? payload[0] : { ...payload };
+        // Mirror Postgres default uuid generation so authoritative selection
+        // (estimator-confirmed draft) still has a durable result id.
+        if (!row.id) {
+          row.id = randomUUID();
+        }
         rows().push(row);
         return {
           select() {

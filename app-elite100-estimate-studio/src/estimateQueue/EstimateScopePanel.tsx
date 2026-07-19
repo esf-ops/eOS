@@ -151,7 +151,9 @@ export default function EstimateScopePanel({
   // without requiring a manual Refresh click / confirm dialog.
   useEffect(() => {
     if (!estimate?.id) return;
-    if (String(takeoffDisplayStatus).toLowerCase() !== "approved") return;
+    const takeoffStatus = String(takeoffDisplayStatus || "").toLowerCase();
+    // Queue vocabulary uses "Needs estimator review" after takeoff approval.
+    if (takeoffStatus !== "approved" && takeoffStatus !== "needs estimator review") return;
     if (estimate.status !== "needs_takeoff_approval") return;
     let cancelled = false;
     void (async () => {

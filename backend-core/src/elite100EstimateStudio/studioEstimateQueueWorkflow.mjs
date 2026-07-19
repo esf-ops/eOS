@@ -1,28 +1,26 @@
 /**
- * Studio Estimate Queue — derived workflow status + needs-attention.
- * Pure functions; no I/O. Prefer existing authoritative subsystem fields.
+ * Studio Estimate Queue — one operational status vocabulary.
+ * Pure functions; no I/O. Maps intake/takeoff/estimate/publication fields.
  *
  * @module studioEstimateQueueWorkflow
  */
 
-/** @typedef {'New'|'AI Takeoff processing'|'Takeoff ready'|'Estimator review'|'Estimate in progress'|'Estimate approved'|'Sent to customer'|'Customer reviewing'|'Changes requested'|'Revision in progress'|'Republished'|'Accepted'|'Sold'|'Needs attention'|'Failed'} QueueWorkflowStatus */
+/** @typedef {'New'|'Takeoff queued'|'Takeoff processing'|'Takeoff draft ready'|'Needs estimator review'|'Scope in progress'|'Ready for approval'|'Published'|'Customer reviewing'|'Customer submitted'|'Sold'|'Closed'|'Takeoff failed'} QueueWorkflowStatus */
 
 export const QUEUE_WORKFLOW_STATUSES = Object.freeze([
   "New",
-  "AI Takeoff processing",
-  "Takeoff ready",
-  "Estimator review",
-  "Estimate in progress",
-  "Estimate approved",
-  "Sent to customer",
+  "Takeoff queued",
+  "Takeoff processing",
+  "Takeoff draft ready",
+  "Needs estimator review",
+  "Scope in progress",
+  "Ready for approval",
+  "Published",
   "Customer reviewing",
-  "Changes requested",
-  "Revision in progress",
-  "Republished",
-  "Accepted",
+  "Customer submitted",
   "Sold",
-  "Needs attention",
-  "Failed"
+  "Closed",
+  "Takeoff failed"
 ]);
 
 const FAILED_CASE = new Set([
@@ -33,7 +31,16 @@ const FAILED_CASE = new Set([
   "error"
 ]);
 
+const CLOSED_CASE = new Set([
+  "qil_not_quote",
+  "qil_not_elite_100",
+  "closed",
+  "cancelled",
+  "canceled"
+]);
+
 /**
+ * Authoritative queue status mapper (list + detail must use this).
  * @param {object} input
  * @returns {QueueWorkflowStatus}
  */
@@ -44,75 +51,93 @@ export function deriveQueueWorkflowStatus(input = {}) {
   const estimateStatus = String(input.estimateStatus ?? "").toLowerCase();
   const publicationStatus = String(input.publicationStatus ?? "").toLowerCase();
   const reviewOperatorStatus = String(input.reviewOperatorStatus ?? "").toLowerCase();
+  const linkStatus = String(input.linkStatus ?? input.relationshipStatus ?? "").toLowerCase();
   const firstOpenedAt = input.firstOpenedAt ? String(input.firstOpenedAt) : null;
   const customerViewed = Boolean(input.customerViewed);
   const customerSelectionsSaved = Boolean(input.customerSelectionsSaved);
   const accepted = Boolean(input.accepted);
   const sold = Boolean(input.sold);
-  const republished = Boolean(input.republished);
-  const revisionInProgress = Boolean(input.revisionInProgress);
   const attachmentBlocked = Boolean(input.attachmentBlocked);
 
   if (sold) return "Sold";
-  if (accepted) return "Accepted";
+  if (CLOSED_CASE.has(caseStatus)) return "Closed";
 
   if (
     FAILED_CASE.has(caseStatus) ||
     takeoffJobStatus === "failed" ||
     takeoffJobStatus === "error" ||
+    caseStatus === "qil_takeoff_failed" ||
+    linkStatus === "failed" ||
     attachmentBlocked
   ) {
-    return "Failed";
+    return "Takeoff failed";
   }
 
   if (
     reviewOperatorStatus === "new" ||
     reviewOperatorStatus === "in_review" ||
-    reviewOperatorStatus === "revision_required"
+    reviewOperatorStatus === "revision_required" ||
+    accepted
   ) {
-    return "Changes requested";
+    return "Customer submitted";
   }
-
-  if (revisionInProgress) return "Revision in progress";
-  if (republished) return "Republished";
 
   if (publicationStatus === "active") {
     if (customerViewed || customerSelectionsSaved) return "Customer reviewing";
-    return "Sent to customer";
+    return "Published";
   }
 
-  if (estimateStatus === "approved") return "Estimate approved";
+  if (estimateStatus === "approved") return "Ready for approval";
 
   if (
     estimateStatus === "ready_to_price" ||
     estimateStatus === "priced" ||
     estimateStatus === "draft"
   ) {
-    return "Estimate in progress";
+    return "Scope in progress";
   }
 
   if (takeoffReviewStatus === "approved") {
-    if (estimateStatus === "needs_takeoff_approval" || !estimateStatus) {
-      return "Estimator review";
-    }
+    return "Needs estimator review";
   }
 
   if (
     takeoffReviewStatus === "needs_review" ||
+    takeoffReviewStatus === "in_review" ||
+    takeoffJobStatus === "completed" ||
     caseStatus === "qil_takeoff_ready_for_review" ||
-    caseStatus === "qil_takeoff_manual_review"
+    caseStatus === "qil_takeoff_manual_review" ||
+    linkStatus === "ready" ||
+    linkStatus === "manual_review"
   ) {
-    return "Takeoff ready";
+    return "Takeoff draft ready";
   }
 
   if (
     takeoffJobStatus === "processing" ||
+    caseStatus === "qil_takeoff_processing" ||
+    linkStatus === "processing"
+  ) {
+    return "Takeoff processing";
+  }
+
+  if (
     takeoffJobStatus === "pending" ||
     takeoffJobStatus === "queued" ||
-    caseStatus === "qil_takeoff_processing" ||
-    caseStatus === "qil_takeoff_queued"
+    caseStatus === "qil_takeoff_queued" ||
+    linkStatus === "queued" ||
+    linkStatus === "requested" ||
+    Boolean(input.takeoffJobId)
   ) {
-    return "AI Takeoff processing";
+    // Job exists but not yet processing/complete
+    if (takeoffJobStatus === "processing") return "Takeoff processing";
+    if (
+      takeoffJobStatus === "completed" ||
+      takeoffReviewStatus === "needs_review"
+    ) {
+      return "Takeoff draft ready";
+    }
+    return "Takeoff queued";
   }
 
   if (!firstOpenedAt) return "New";
@@ -121,10 +146,9 @@ export function deriveQueueWorkflowStatus(input = {}) {
     caseStatus === "qil_manual_review" ||
     caseStatus === "qil_ready_for_takeoff" ||
     Boolean(input.staleReason) ||
-    Boolean(input.estimateNotCalculated) ||
-    (estimateStatus === "approved" && !publicationStatus)
+    Boolean(input.estimateNotCalculated)
   ) {
-    return "Needs attention";
+    return "Needs estimator review";
   }
 
   return "New";
@@ -138,10 +162,10 @@ export function deriveQueueWorkflowStatus(input = {}) {
 export function deriveNeedsAttention(input = {}, workflowStatus = null) {
   const status = workflowStatus || deriveQueueWorkflowStatus(input);
   if (
-    status === "Sent to customer" ||
+    status === "Published" ||
     status === "Customer reviewing" ||
-    status === "Accepted" ||
-    status === "Sold"
+    status === "Sold" ||
+    status === "Closed"
   ) {
     return {
       needsAttention: false,
@@ -152,8 +176,11 @@ export function deriveNeedsAttention(input = {}, workflowStatus = null) {
   const reasons = [];
   if (!input.firstOpenedAt) reasons.push("new_unread");
   if (input.attachmentBlocked) reasons.push("attachment_blocked");
-  if (status === "Failed") reasons.push("failed");
-  if (status === "Takeoff ready" || status === "Estimator review") {
+  if (status === "Takeoff failed") reasons.push("failed");
+  if (
+    status === "Takeoff draft ready" ||
+    status === "Needs estimator review"
+  ) {
     reasons.push("takeoff_needs_review");
   }
   if (input.staleReason) reasons.push("estimate_stale");
@@ -163,8 +190,8 @@ export function deriveNeedsAttention(input = {}, workflowStatus = null) {
   if (String(input.estimateStatus ?? "") === "approved" && !input.publicationStatus) {
     reasons.push("approved_not_published");
   }
-  if (status === "Changes requested") reasons.push("customer_requested_changes");
-  if (status === "Revision in progress") reasons.push("revision_awaiting_approval");
+  if (status === "Customer submitted") reasons.push("customer_requested_changes");
+
   if (
     String(input.publicationStatus ?? "").toLowerCase() === "revoked" ||
     String(input.publicationStatus ?? "").toLowerCase() === "expired"
@@ -172,7 +199,6 @@ export function deriveNeedsAttention(input = {}, workflowStatus = null) {
     reasons.push("publication_inactive");
   }
 
-  // Deduplicate while preserving order
   const unique = [...new Set(reasons)];
   return {
     needsAttention: unique.length > 0,
@@ -186,13 +212,17 @@ export function deriveNeedsAttention(input = {}, workflowStatus = null) {
  */
 export function deriveQueueOpenTarget(input = {}) {
   const workflow = deriveQueueWorkflowStatus(input);
-  if (workflow === "Changes requested" || workflow === "Revision in progress") return "review";
-  if (workflow === "Estimate approved" || workflow === "Sent to customer" || workflow === "Customer reviewing") {
+  if (workflow === "Customer submitted") return "review";
+  if (
+    workflow === "Ready for approval" ||
+    workflow === "Published" ||
+    workflow === "Customer reviewing"
+  ) {
     return "digital";
   }
   if (
-    workflow === "Estimate in progress" ||
-    workflow === "Estimator review" ||
+    workflow === "Scope in progress" ||
+    workflow === "Needs estimator review" ||
     String(input.takeoffReviewStatus ?? "").toLowerCase() === "approved"
   ) {
     return "scope";
@@ -209,21 +239,27 @@ export function workflowStatusesForFilter(filterKey) {
     case "new":
       return new Set(["New"]);
     case "takeoff":
-      return new Set(["AI Takeoff processing", "Takeoff ready", "Estimator review"]);
+      return new Set([
+        "Takeoff queued",
+        "Takeoff processing",
+        "Takeoff draft ready",
+        "Needs estimator review",
+        "Takeoff failed"
+      ]);
     case "estimating":
-      return new Set(["Estimate in progress", "Estimate approved", "Needs attention"]);
+      return new Set(["Scope in progress", "Ready for approval", "Needs estimator review"]);
     case "sent":
-      return new Set(["Sent to customer", "Customer reviewing"]);
+      return new Set(["Published", "Customer reviewing"]);
     case "customer_changes":
-      return new Set(["Changes requested", "Revision in progress", "Republished"]);
+      return new Set(["Customer submitted"]);
     case "accepted":
-      return new Set(["Accepted"]);
+      return new Set(["Customer submitted"]);
     case "sold":
       return new Set(["Sold"]);
     case "failed":
-      return new Set(["Failed"]);
+      return new Set(["Takeoff failed"]);
     case "needs_attention":
-      return null; // special: use needsAttention flag
+      return null;
     case "all":
     default:
       return null;
@@ -242,8 +278,15 @@ export function buildQueueIndicators(input = {}, workflowStatus, attention) {
     unread: !input.firstOpenedAt,
     opened: Boolean(input.firstOpenedAt),
     takeoffProcessing:
-      takeoffJob === "processing" || takeoffJob === "pending" || takeoffJob === "queued",
-    takeoffNeedsReview: takeoffReview === "needs_review" || workflowStatus === "Takeoff ready",
+      workflowStatus === "Takeoff processing" ||
+      workflowStatus === "Takeoff queued" ||
+      takeoffJob === "processing" ||
+      takeoffJob === "pending" ||
+      takeoffJob === "queued",
+    takeoffNeedsReview:
+      takeoffReview === "needs_review" ||
+      workflowStatus === "Takeoff draft ready" ||
+      workflowStatus === "Needs estimator review",
     takeoffApproved: takeoffReview === "approved",
     estimateDraft: estimate === "draft" || estimate === "ready_to_price",
     estimateCalculated: estimate === "priced",
@@ -251,11 +294,11 @@ export function buildQueueIndicators(input = {}, workflowStatus, attention) {
     digitalPublished: pub === "active",
     customerViewed: Boolean(input.customerViewed),
     customerSelectionsSaved: Boolean(input.customerSelectionsSaved),
-    customerRequestedReview: workflowStatus === "Changes requested",
-    revisionInProgress: workflowStatus === "Revision in progress",
-    republished: workflowStatus === "Republished",
-    accepted: workflowStatus === "Accepted",
-    failed: workflowStatus === "Failed",
+    customerRequestedReview: workflowStatus === "Customer submitted",
+    revisionInProgress: false,
+    republished: false,
+    accepted: workflowStatus === "Customer submitted",
+    failed: workflowStatus === "Takeoff failed",
     needsAttention: Boolean(attention?.needsAttention)
   };
 }

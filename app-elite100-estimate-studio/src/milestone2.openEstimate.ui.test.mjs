@@ -42,24 +42,24 @@ assert.ok(app.includes("Keep intakeCaseId") || app.includes("intakeCaseId"));
 assert.ok(app.includes("setEstimateWorkspaceCaseId(null)"));
 assert.ok(app.includes("selectedCaseId={intakeCaseId}"));
 
-assert.equal(deriveEstimateTakeoffDisplayStatus({}), "Not started");
+assert.equal(deriveEstimateTakeoffDisplayStatus({}), "New");
 assert.equal(
   deriveEstimateTakeoffDisplayStatus({ takeoffJobId: "job-1", linkStatus: "queued" }),
-  "Takeoff created"
+  "Takeoff queued"
 );
 assert.equal(
   deriveEstimateTakeoffDisplayStatus({ jobStatus: "processing" }),
-  "AI processing"
+  "Takeoff processing"
 );
 assert.equal(
   deriveEstimateTakeoffDisplayStatus({ jobStatus: "completed", reviewStatus: "needs_review" }),
-  "Needs review"
+  "Takeoff draft ready"
 );
 assert.equal(
   deriveEstimateTakeoffDisplayStatus({ reviewStatus: "approved" }),
-  "Approved"
+  "Needs estimator review"
 );
-assert.equal(deriveEstimateTakeoffDisplayStatus({ jobStatus: "failed" }), "Failed");
+assert.equal(deriveEstimateTakeoffDisplayStatus({ jobStatus: "failed" }), "Takeoff failed");
 
 console.log("\nmilestone2.openEstimate.ui.test.mjs\n");
 console.log("ok: Studio opens returned takeoff job; Back preserves case; status labels");

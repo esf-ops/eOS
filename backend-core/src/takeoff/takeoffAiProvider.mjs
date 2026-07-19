@@ -132,24 +132,24 @@ export function getEvidenceProvider(providerName) {
  *   apiKey:       string|null,
  * }}
  */
-export function readExtractionConfig() {
-  const providerName = String(process.env.TAKEOFF_AI_PROVIDER ?? "openai").trim() || "openai";
+export function readExtractionConfig(env = process.env) {
+  const providerName = String(env.TAKEOFF_AI_PROVIDER ?? "openai").trim() || "openai";
 
   let modelName, apiKey;
   if (providerName === "gemini") {
-    modelName = String(process.env.GEMINI_TAKEOFF_MODEL ?? "gemini-2.5-pro").trim() || "gemini-2.5-pro";
-    apiKey    = String(process.env.GEMINI_API_KEY ?? "").trim() || null;
+    modelName = String(env.GEMINI_TAKEOFF_MODEL ?? "gemini-2.5-pro").trim() || "gemini-2.5-pro";
+    apiKey    = String(env.GEMINI_API_KEY ?? "").trim() || null;
   } else if (providerName === "exayard") {
     modelName = "platform";
-    apiKey    = String(process.env.EXAYARD_API_KEY ?? "").trim() || null;
+    apiKey    = String(env.EXAYARD_API_KEY ?? "").trim() || null;
   } else {
     // openai (and any unknown provider — getExtractionProvider will reject unknown at call time)
-    modelName = String(process.env.TAKEOFF_AI_MODEL ?? "gpt-4o").trim() || "gpt-4o";
-    apiKey    = String(process.env.OPENAI_API_KEY ?? "").trim() || null;
+    modelName = String(env.TAKEOFF_AI_MODEL ?? "gpt-4o").trim() || "gpt-4o";
+    apiKey    = String(env.OPENAI_API_KEY ?? "").trim() || null;
   }
 
   return {
-    enabled: String(process.env.TAKEOFF_AI_ENABLED ?? "").trim() === "1",
+    enabled: String(env.TAKEOFF_AI_ENABLED ?? "").trim() === "1",
     providerName,
     modelName,
     apiKey,

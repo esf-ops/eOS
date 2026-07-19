@@ -38,6 +38,12 @@ import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult }       from "./takeoffValidator.mjs";
 import { planTakeoffImport }           from "./takeoffImportPlanner.mjs";
 import { TAKEOFF_SCHEMA_VERSION }      from "./takeoffContract.mjs";
+import {
+  selectAuthoritativeTakeoffResult,
+  isApprovedTakeoffResult,
+  hasEstimatorSavedEdits,
+  mergeAiDraftPreservingConfirmed
+} from "./takeoffAuthoritativeResult.mjs";
 import { evaluateTakeoffQaGate }       from "./takeoffQaGate.mjs";
 import { getExtractionProvider, getInventoryProvider, getEvidenceProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
 import { QUOTE_FILE_BUCKET }           from "../files/quoteFileStoragePath.mjs";
@@ -420,13 +426,56 @@ export async function runAiTakeoffExtraction({
 
   // 11. Insert quote_takeoff_results row.
   //     review_status is ALWAYS 'needs_review' — AI never auto-approved.
-  //     raw_ai_result_json stores the model's original output plus a _meta envelope
-  //     containing promptVersion, modelUsed, and savedAt for run-history queries.
+  //     Confirmed estimator geometry always wins: merge AI-only findings.
   if (onPhase) await onPhase("persist");
   let rawAiJson = null;
   if (rawText) {
     try { rawAiJson = JSON.parse(rawText); } catch { rawAiJson = { _raw: rawText.slice(0, 5000) }; }
   }
+
+  let priorRows = [];
+  try {
+    const { data } = await supabase
+      .from("quote_takeoff_results")
+      .select(
+        "id,review_status,normalized_takeoff_json,raw_ai_result_json,created_at,computed_measurements_json,validation_diagnostics_json,import_plan_json"
+      )
+      .eq("takeoff_job_id", takeoffJobId)
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: false })
+      .limit(40);
+    priorRows = data || [];
+  } catch {
+    priorRows = [];
+  }
+
+  const prior = selectAuthoritativeTakeoffResult(priorRows);
+  let unconfirmedAiFindings = null;
+  let persistNormalized = normalized;
+  let persistComputed = computed;
+  let persistValidation = validation;
+  let persistImportPlan = importPlan;
+  let preserveEstimatorMeta = null;
+
+  if (prior.row && (isApprovedTakeoffResult(prior.row) || hasEstimatorSavedEdits(prior.row))) {
+    const mergedPack = mergeAiDraftPreservingConfirmed(
+      prior.row.normalized_takeoff_json,
+      normalized
+    );
+    persistNormalized = mergedPack.merged;
+    unconfirmedAiFindings = mergedPack.unconfirmedAiFindings;
+    preserveEstimatorMeta = prior.row.raw_ai_result_json?._meta?.estimatorConfirmed ?? null;
+    try {
+      persistComputed = computeTakeoffMeasurements(persistNormalized);
+      persistValidation = validateTakeoffResult(persistNormalized, persistComputed);
+      persistImportPlan = planTakeoffImport(persistNormalized, persistComputed);
+    } catch {
+      persistComputed = prior.row.computed_measurements_json ?? computed;
+      persistValidation = prior.row.validation_diagnostics_json ?? validation;
+      persistImportPlan = prior.row.import_plan_json ?? importPlan;
+    }
+  }
+
   // Inject eliteOS run metadata as a reserved _meta key so listTakeoffResults
   // can surface promptVersion/modelUsed/pageInventory without a separate DB column.
   const metaEnvelope = {
@@ -440,20 +489,29 @@ export async function runAiTakeoffExtraction({
     exayardWorkflow:  exayardWorkflow  ?? null,
     exayardRaw:       exayardRaw       ?? null,
     exayardRawCaptured: Boolean(exayardRawCaptured),
+    aiDraftOnly: Boolean(prior.row && isApprovedTakeoffResult(prior.row)),
+    ...(unconfirmedAiFindings ? { unconfirmedAiFindings } : {}),
+    ...(preserveEstimatorMeta ? { estimatorConfirmed: preserveEstimatorMeta } : {}),
+    ...(prior.row?.raw_ai_result_json?._meta?.reviewState
+      ? { reviewState: prior.row.raw_ai_result_json._meta.reviewState }
+      : {}),
   };
   const augmentedRawAiJson = rawAiJson != null
     ? { ...rawAiJson, _meta: metaEnvelope }
     : { _meta: metaEnvelope };
 
+  // If takeoff was already approved, keep review_status approved on the authoritative
+  // selection path by marking this insert as needs_review but preserving estimatorConfirmed
+  // / approved row still wins via selectAuthoritativeTakeoffResult.
   const resultPayload = {
     organization_id:              organizationId,
     takeoff_job_id:               takeoffJobId,
     schema_version:               schemaVersion,
     raw_ai_result_json:           augmentedRawAiJson,
-    normalized_takeoff_json:      normalized,
-    computed_measurements_json:   computed,
-    validation_diagnostics_json:  validation,
-    import_plan_json:             importPlan,
+    normalized_takeoff_json:      persistNormalized,
+    computed_measurements_json:   persistComputed,
+    validation_diagnostics_json:  persistValidation,
+    import_plan_json:             persistImportPlan,
     review_status:                "needs_review",
     needs_review:                 true,
     reviewed_by_user_id:          null,
@@ -487,10 +545,12 @@ export async function runAiTakeoffExtraction({
   }
 
   // 12. Update quote_takeoff_jobs: status = 'completed', result_summary with full result.
+  // Do not demote an already-approved job when a side AI draft is stored.
+  const keepApproved = prior.row && isApprovedTakeoffResult(prior.row);
   const exayardMeta = exayardWorkflow && typeof exayardWorkflow === "object" ? exayardWorkflow : null;
   await setJobStatus(supabase, takeoffJobId, organizationId, {
     status:       "completed",
-    review_status: "needs_review",
+    review_status: keepApproved ? "approved" : "needs_review",
     metadata: exayardMeta?.projectId ? {
       ...(job.metadata && typeof job.metadata === "object" ? job.metadata : {}),
       exayard: {
@@ -505,17 +565,17 @@ export async function runAiTakeoffExtraction({
       ...summary,
       savedAt:                    now,
       schemaVersion,
-      reviewStatus:               "needs_review",
+      reviewStatus:               keepApproved ? "approved" : "needs_review",
       modelUsed,
       promptVersion:              PROMPT_VERSION,
       usage,
       aiExtraction:               true,
       exayardRawCaptured:         Boolean(exayardRawCaptured),
       exayardWorkflow:            exayardWorkflow ?? null,
-      normalizedTakeoffJson:      normalized,
-      computedMeasurementsJson:   computed,
-      validationDiagnosticsJson:  validation,
-      importPlanJson:             importPlan,
+      normalizedTakeoffJson:      persistNormalized,
+      computedMeasurementsJson:   persistComputed,
+      validationDiagnosticsJson:  persistValidation,
+      importPlanJson:             persistImportPlan,
       resultRowId:                resultRowId ?? null,
     },
   });
