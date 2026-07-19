@@ -11,6 +11,7 @@ export const QUEUE_WORKFLOW_STATUSES = Object.freeze([
   "New",
   "Takeoff queued",
   "Takeoff processing",
+  "Takeoff processing · manual draft in progress",
   "Takeoff draft ready",
   "Needs estimator review",
   "Scope in progress",
@@ -42,7 +43,7 @@ const CLOSED_CASE = new Set([
 /**
  * Authoritative queue status mapper (list + detail must use this).
  * @param {object} input
- * @returns {QueueWorkflowStatus}
+ * @returns {QueueWorkflowStatus|string}
  */
 export function deriveQueueWorkflowStatus(input = {}) {
   const caseStatus = String(input.caseStatus ?? "").toLowerCase();
@@ -58,6 +59,24 @@ export function deriveQueueWorkflowStatus(input = {}) {
   const accepted = Boolean(input.accepted);
   const sold = Boolean(input.sold);
   const attachmentBlocked = Boolean(input.attachmentBlocked);
+
+  const usableGeometry =
+    input.usableGeometryPresent === true ||
+    Number(input.pieceCount) > 0 ||
+    Number(input.roomCount) > 0 ||
+    Number(input.takeoffPieceCount) > 0 ||
+    Number(input.takeoffRoomCount) > 0;
+  const estimatorDraft = Boolean(input.estimatorDraftPresent) || usableGeometry;
+  const processing =
+    takeoffJobStatus === "processing" ||
+    caseStatus === "qil_takeoff_processing" ||
+    linkStatus === "processing";
+  const queued =
+    takeoffJobStatus === "pending" ||
+    takeoffJobStatus === "queued" ||
+    caseStatus === "qil_takeoff_queued" ||
+    linkStatus === "queued" ||
+    linkStatus === "requested";
 
   if (sold) return "Sold";
   if (CLOSED_CASE.has(caseStatus)) return "Closed";
@@ -101,6 +120,13 @@ export function deriveQueueWorkflowStatus(input = {}) {
     return "Needs estimator review";
   }
 
+  // Processing / queued with or without a manual draft — never call empty placeholder "draft ready".
+  if (processing) {
+    return estimatorDraft
+      ? "Takeoff processing · manual draft in progress"
+      : "Takeoff processing";
+  }
+
   if (
     takeoffReviewStatus === "needs_review" ||
     takeoffReviewStatus === "in_review" ||
@@ -110,34 +136,17 @@ export function deriveQueueWorkflowStatus(input = {}) {
     linkStatus === "ready" ||
     linkStatus === "manual_review"
   ) {
-    return "Takeoff draft ready";
+    if (usableGeometry) return "Takeoff draft ready";
+    // Empty/placeholder result must never read as draft ready.
+    return estimatorDraft
+      ? "Takeoff processing · manual draft in progress"
+      : "Takeoff queued";
   }
 
-  if (
-    takeoffJobStatus === "processing" ||
-    caseStatus === "qil_takeoff_processing" ||
-    linkStatus === "processing"
-  ) {
-    return "Takeoff processing";
-  }
-
-  if (
-    takeoffJobStatus === "pending" ||
-    takeoffJobStatus === "queued" ||
-    caseStatus === "qil_takeoff_queued" ||
-    linkStatus === "queued" ||
-    linkStatus === "requested" ||
-    Boolean(input.takeoffJobId)
-  ) {
-    // Job exists but not yet processing/complete
-    if (takeoffJobStatus === "processing") return "Takeoff processing";
-    if (
-      takeoffJobStatus === "completed" ||
-      takeoffReviewStatus === "needs_review"
-    ) {
-      return "Takeoff draft ready";
-    }
-    return "Takeoff queued";
+  if (queued || Boolean(input.takeoffJobId)) {
+    return estimatorDraft
+      ? "Takeoff processing · manual draft in progress"
+      : "Takeoff queued";
   }
 
   if (!firstOpenedAt) return "New";
@@ -242,6 +251,7 @@ export function workflowStatusesForFilter(filterKey) {
       return new Set([
         "Takeoff queued",
         "Takeoff processing",
+        "Takeoff processing · manual draft in progress",
         "Takeoff draft ready",
         "Needs estimator review",
         "Takeoff failed"
@@ -279,6 +289,7 @@ export function buildQueueIndicators(input = {}, workflowStatus, attention) {
     opened: Boolean(input.firstOpenedAt),
     takeoffProcessing:
       workflowStatus === "Takeoff processing" ||
+      workflowStatus === "Takeoff processing · manual draft in progress" ||
       workflowStatus === "Takeoff queued" ||
       takeoffJob === "processing" ||
       takeoffJob === "pending" ||

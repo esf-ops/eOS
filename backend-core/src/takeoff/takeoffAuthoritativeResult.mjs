@@ -87,11 +87,50 @@ function collectRunIds(takeoff) {
       const id = String(run?.id ?? "").trim();
       if (id) out.add(id);
     }
-    // pieces alias used by some schemas
     for (const piece of Array.isArray(room?.pieces) ? room.pieces : []) {
       const id = String(piece?.id ?? "").trim();
       if (id) out.add(id);
     }
+    for (const area of Array.isArray(room?.areas) ? room.areas : []) {
+      for (const run of Array.isArray(area?.runs) ? area.runs : []) {
+        const id = String(run?.id ?? "").trim();
+        if (id) out.add(id);
+      }
+    }
+  }
+  return out;
+}
+
+function listRoomRuns(room) {
+  if (Array.isArray(room?.runs) && room.runs.length) return { key: "runs", container: room, runs: room.runs };
+  if (Array.isArray(room?.pieces) && room.pieces.length) {
+    return { key: "pieces", container: room, runs: room.pieces };
+  }
+  if (Array.isArray(room?.areas) && room.areas.length) {
+    const area = room.areas[0];
+    if (!Array.isArray(area.runs)) area.runs = [];
+    return { key: "runs", container: area, runs: area.runs, viaArea: true };
+  }
+  // Prefer consolidated areas shape for empty rooms.
+  if (!Array.isArray(room.areas)) room.areas = [];
+  if (!room.areas.length) {
+    room.areas.push({
+      id: `${room.id || "room"}-a1`,
+      label: "Main",
+      backsplashScope: "stone",
+      runs: []
+    });
+  }
+  if (!Array.isArray(room.areas[0].runs)) room.areas[0].runs = [];
+  return { key: "runs", container: room.areas[0], runs: room.areas[0].runs, viaArea: true };
+}
+
+function listAiRoomRuns(aiRoom) {
+  if (Array.isArray(aiRoom?.runs)) return aiRoom.runs;
+  if (Array.isArray(aiRoom?.pieces)) return aiRoom.pieces;
+  const out = [];
+  for (const area of Array.isArray(aiRoom?.areas) ? aiRoom.areas : []) {
+    for (const run of Array.isArray(area?.runs) ? area.runs : []) out.push(run);
   }
   return out;
 }
@@ -125,22 +164,15 @@ export function mergeAiDraftPreservingConfirmed(confirmedTakeoff, aiTakeoff) {
     const roomId = String(aiRoom?.id ?? "").trim();
     const roomName = String(aiRoom?.name ?? "").trim().toLowerCase();
     if (roomId && confirmedRoomIds.has(roomId)) {
-      // Same room id — only append runs not already confirmed.
       const target = base.rooms.find((r) => String(r?.id ?? "") === roomId);
       if (!target) continue;
-      const runKey = Array.isArray(target.runs) ? "runs" : Array.isArray(target.pieces) ? "pieces" : "runs";
-      if (!Array.isArray(target[runKey])) target[runKey] = [];
-      const aiRuns = Array.isArray(aiRoom.runs)
-        ? aiRoom.runs
-        : Array.isArray(aiRoom.pieces)
-          ? aiRoom.pieces
-          : [];
-      for (const run of aiRuns) {
+      const slot = listRoomRuns(target);
+      for (const run of listAiRoomRuns(aiRoom)) {
         const rid = String(run?.id ?? "").trim();
         if (rid && confirmedRunIds.has(rid)) continue;
         if (rid) confirmedRunIds.add(rid);
         const draftRun = { ...run, _aiUnconfirmed: true };
-        target[runKey].push(draftRun);
+        slot.container[slot.key].push(draftRun);
         unconfirmedRuns.push({ roomId, runId: rid || null });
       }
       continue;
@@ -149,7 +181,6 @@ export function mergeAiDraftPreservingConfirmed(confirmedTakeoff, aiTakeoff) {
       // Name match without id match — do not replace room; skip wholesale replace.
       continue;
     }
-    // Brand-new AI room
     const draftRoom = { ...structuredClone(aiRoom), _aiUnconfirmed: true };
     base.rooms.push(draftRoom);
     if (roomId) confirmedRoomIds.add(roomId);

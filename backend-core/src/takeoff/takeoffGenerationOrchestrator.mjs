@@ -14,6 +14,7 @@ import {
   buildProcessingStatus,
   mergeProcessingMeta,
 } from "./takeoffProcessOrchestrator.mjs";
+import { isStaleAiGenerationJob, readTakeoffWorkerStaleMs } from "./takeoffGenerationWorker.mjs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_STATUS_PROCESSING = "processing";
@@ -183,6 +184,11 @@ async function validateGenerationPreconditions(supabase, organizationId, takeoff
   if (String(job.status) === JOB_STATUS_PROCESSING) {
     const proc = buildProcessingStatus(job);
     if (proc.runId && proc.mode === "ai_generate") {
+      const staleMs = readTakeoffWorkerStaleMs(process.env);
+      if (isStaleAiGenerationJob(job, { staleMs })) {
+        // Allow reclaim / restart after waitUntil or worker death.
+        return { job, config, reclaimStale: true };
+      }
       // Idempotent: treat in-flight generation as success for retries / auto-bootstrap.
       const err = generationError("This takeoff is already generating.", 409, {
         code: "already_processing",
@@ -255,7 +261,7 @@ export async function startAiTakeoffGeneration({
   await updateJob(supabase, takeoffJobId, organizationId, {
     status: JOB_STATUS_PROCESSING,
     error_message: null,
-    started_at: job.started_at ?? now,
+    started_at: now,
     metadata: queuedMeta,
   });
 

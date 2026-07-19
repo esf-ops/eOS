@@ -1,0 +1,147 @@
+/**
+ * Manual takeoff draft helpers + durable worker stale rules.
+ * Run:
+ *   node app-ai-takeoff/src/lib/emptyManualTakeoffDraft.test.mjs
+ *   node backend-core/src/takeoff/takeoffGenerationWorker.test.mjs
+ */
+import assert from "node:assert/strict";
+import {
+  addManualPiece,
+  addManualRoom,
+  collectManualOwnershipIds,
+  createEmptyManualTakeoffDraft,
+  deriveConsolidatedWorksheetStatus,
+  hasUsableTakeoffGeometry,
+  markRunEstimatorOwned
+} from "./emptyManualTakeoffDraft.mjs";
+import {
+  mergeAiDraftPreservingConfirmed,
+  selectAuthoritativeTakeoffResult
+} from "../../../backend-core/src/takeoff/takeoffAuthoritativeResult.mjs";
+import { deriveQueueWorkflowStatus } from "../../../backend-core/src/elite100EstimateStudio/studioEstimateQueueWorkflow.mjs";
+
+console.log("\nemptyManualTakeoffDraft.test.mjs\n");
+
+{
+  const empty = createEmptyManualTakeoffDraft();
+  assert.equal(hasUsableTakeoffGeometry(empty), false);
+  assert.equal(hasUsableTakeoffGeometry(null), false);
+  console.log("  ✓ empty draft has no usable geometry");
+}
+
+{
+  let draft = createEmptyManualTakeoffDraft();
+  draft = addManualRoom(draft, { name: "Manual Test Kitchen", roomType: "Kitchen" });
+  assert.equal(draft.rooms.length, 1);
+  assert.equal(draft.rooms[0].name, "Manual Test Kitchen");
+  assert.equal(draft.rooms[0]._estimatorOwned, true);
+  assert.equal(hasUsableTakeoffGeometry(draft), false, "room alone is not usable geometry");
+
+  draft = addManualPiece(draft, draft.rooms[0].id, {
+    label: "Sink run",
+    lengthIn: 100,
+    depthIn: 25.5
+  });
+  assert.equal(hasUsableTakeoffGeometry(draft), true);
+  assert.equal(draft.rooms[0].areas[0].runs[0]._manual, true);
+  const owned = collectManualOwnershipIds(draft);
+  assert.ok(owned.manualRoomIds.includes(draft.rooms[0].id));
+  assert.ok(owned.manualRunIds.includes(draft.rooms[0].areas[0].runs[0].id));
+  console.log("  ✓ add room + piece before AI result");
+}
+
+{
+  let draft = createEmptyManualTakeoffDraft();
+  draft = addManualRoom(draft, { name: "Kitchen" });
+  draft = addManualPiece(draft, draft.rooms[0].id, { lengthIn: 120, depthIn: 25.5 });
+  const runId = draft.rooms[0].areas[0].runs[0].id;
+  draft = markRunEstimatorOwned(
+    {
+      ...draft,
+      rooms: draft.rooms.map((r) => ({
+        ...r,
+        areas: r.areas.map((a) => ({
+          ...a,
+          runs: a.runs.map((run) =>
+            run.id === runId ? { ...run, lengthIn: 111 } : run
+          )
+        }))
+      }))
+    },
+    draft.rooms[0].id,
+    runId
+  );
+
+  const ai = {
+    rooms: [
+      {
+        id: draft.rooms[0].id,
+        name: "AI Renamed",
+        areas: [
+          {
+            id: "a1",
+            runs: [{ id: runId, label: "Sink", lengthIn: 50, depthIn: 20 }]
+          }
+        ]
+      },
+      {
+        id: "room-ai-only",
+        name: "AI Pantry",
+        areas: [{ id: "a2", runs: [{ id: "run-ai", lengthIn: 40, depthIn: 24 }] }]
+      }
+    ]
+  };
+  const { merged, unconfirmedAiFindings } = mergeAiDraftPreservingConfirmed(draft, ai);
+  const kitchen = merged.rooms.find((r) => r.id === draft.rooms[0].id);
+  const keptRun = kitchen.areas[0].runs.find((r) => r.id === runId);
+  assert.equal(keptRun.lengthIn, 111, "manual measurement survives AI");
+  assert.ok(merged.rooms.some((r) => r.id === "room-ai-only"));
+  assert.ok(unconfirmedAiFindings.rooms.some((r) => r.roomId === "room-ai-only"));
+  console.log("  ✓ AI merge preserves manual rooms/measurements and appends unconfirmed");
+}
+
+{
+  const approved = {
+    id: "r1",
+    review_status: "approved",
+    created_at: "2026-01-01",
+    normalized_takeoff_json: { rooms: [{ id: "m1", areas: [{ runs: [{ id: "p1" }] }] }] }
+  };
+  const later = {
+    id: "r2",
+    review_status: "needs_review",
+    created_at: "2026-01-02",
+    normalized_takeoff_json: { rooms: [] }
+  };
+  assert.equal(selectAuthoritativeTakeoffResult([later, approved]).source, "approved");
+  console.log("  ✓ approved takeoff never displaced");
+}
+
+{
+  assert.equal(
+    deriveConsolidatedWorksheetStatus({ jobStatus: "processing", hasUsableGeometry: false }),
+    "Takeoff processing"
+  );
+  assert.equal(
+    deriveConsolidatedWorksheetStatus({ jobStatus: "processing", hasUsableGeometry: true }),
+    "Takeoff processing · manual draft in progress"
+  );
+  assert.equal(
+    deriveQueueWorkflowStatus({
+      takeoffJobStatus: "completed",
+      takeoffReviewStatus: "needs_review"
+    }),
+    "Takeoff queued"
+  );
+  assert.equal(
+    deriveQueueWorkflowStatus({
+      takeoffJobStatus: "completed",
+      takeoffReviewStatus: "needs_review",
+      pieceCount: 1
+    }),
+    "Takeoff draft ready"
+  );
+  console.log("  ✓ status consistency (no idle / no fake draft ready)");
+}
+
+console.log("\nemptyManualTakeoffDraft.test.mjs — passed\n");

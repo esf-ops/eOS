@@ -313,7 +313,7 @@ export default function EstimateTakeoffWorkspace({
           {state.displayStatus === "Takeoff queued" ||
           state.displayStatus === "Takeoff processing" ? (
             <div className="eq-state" role="status" data-testid="eq-ai-takeoff-processing-banner">
-              AI Takeoff is processing. You may continue building the estimate.
+              AI Takeoff is processing. You may build or edit the takeoff now. AI findings will be added when ready.
             </div>
           ) : null}
           {state.displayStatus === "Takeoff failed" ? (

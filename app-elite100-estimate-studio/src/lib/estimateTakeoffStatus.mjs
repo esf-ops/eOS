@@ -23,6 +23,10 @@ export function deriveEstimateTakeoffDisplayStatus(input = {}) {
     takeoffJobId: input.takeoffJobId,
     firstOpenedAt: input.firstOpenedAt ?? "opened",
     estimateStatus: input.estimateStatus,
-    publicationStatus: input.publicationStatus
+    publicationStatus: input.publicationStatus,
+    usableGeometryPresent: input.usableGeometryPresent,
+    estimatorDraftPresent: input.estimatorDraftPresent,
+    pieceCount: input.pieceCount,
+    roomCount: input.roomCount
   });
 }

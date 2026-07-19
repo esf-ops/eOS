@@ -25,8 +25,29 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
     "Takeoff queued"
   );
   assert.equal(
-    deriveQueueWorkflowStatus({ takeoffReviewStatus: "needs_review", firstOpenedAt: "2026-01-01" }),
+    deriveQueueWorkflowStatus({
+      takeoffReviewStatus: "needs_review",
+      firstOpenedAt: "2026-01-01",
+      pieceCount: 2
+    }),
     "Takeoff draft ready"
+  );
+  assert.equal(
+    deriveQueueWorkflowStatus({
+      takeoffJobStatus: "completed",
+      takeoffReviewStatus: "needs_review",
+      firstOpenedAt: "2026-01-01"
+    }),
+    "Takeoff queued",
+    "empty/placeholder result must not map to draft ready"
+  );
+  assert.equal(
+    deriveQueueWorkflowStatus({
+      takeoffJobStatus: "processing",
+      pieceCount: 1,
+      estimatorDraftPresent: true
+    }),
+    "Takeoff processing · manual draft in progress"
   );
   assert.equal(
     deriveQueueWorkflowStatus({
@@ -145,7 +166,17 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
         ["c2", { intake_case_id: "c2", takeoff_job_id: "tj1", relationship_status: "linked" }]
       ]),
     listTakeoffJobsByIds: async () =>
-      new Map([["tj1", { id: "tj1", status: "completed", review_status: "needs_review" }]]),
+      new Map([
+        [
+          "tj1",
+          {
+            id: "tj1",
+            status: "completed",
+            review_status: "needs_review",
+            result_summary: { roomCount: 1, pieceCount: 3, countertopExactSf: 40 }
+          }
+        ]
+      ]),
     listStudioEstimatesByCaseIds: async () =>
       new Map([
         [
@@ -183,6 +214,7 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
       [
         "Takeoff queued",
         "Takeoff processing",
+        "Takeoff processing · manual draft in progress",
         "Takeoff draft ready",
         "Needs estimator review",
         "Takeoff failed"
@@ -198,7 +230,9 @@ console.log("\nstudioEstimateQueueWorkflow.test.mjs\n");
       takeoffJobStatus: "completed",
       takeoffReviewStatus: "needs_review",
       firstOpenedAt: "2026-07-02T11:00:00Z",
-      takeoffJobId: "tj1"
+      takeoffJobId: "tj1",
+      pieceCount: 3,
+      roomCount: 1
     })
   );
 

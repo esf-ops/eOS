@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   approveAndBuildEstimate,
+  generateAiTakeoffDraft,
   labApiGet,
   LabApiError,
   saveTakeoffCorrection,
@@ -15,6 +16,15 @@ import {
   approveButtonLabel,
   runConsolidatedApproveClick
 } from "../lib/consolidatedApproveClick.mjs";
+import {
+  addManualPiece,
+  addManualRoom,
+  collectManualOwnershipIds,
+  createEmptyManualTakeoffDraft,
+  deriveConsolidatedWorksheetStatus,
+  hasUsableTakeoffGeometry,
+  markRunEstimatorOwned
+} from "../lib/emptyManualTakeoffDraft.mjs";
 import { getSupabase } from "../lib/supabase";
 import TakeoffPlanPreviewPanel, {
   type PlanPreviewFileMeta
@@ -22,6 +32,7 @@ import TakeoffPlanPreviewPanel, {
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 type ApproveStatus = "idle" | "approving" | "approved" | "error";
+type AiPhase = "unknown" | "queued" | "processing" | "ready" | "failed" | "disabled";
 
 type ApprovalDiagnostic = {
   confirmAdvisories: boolean;
@@ -162,31 +173,14 @@ function reassignRun(result: any, fromRoomId: string, runId: string, toRoomId: s
 }
 
 function addPiece(result: any, roomId: string): any {
-  const id = `run-${crypto.randomUUID?.() ?? String(Date.now())}`;
-  return {
-    ...result,
-    rooms: (result.rooms ?? []).map((room: any) => {
-      if (room.id !== roomId) return room;
-      const areas = room.areas?.length
-        ? room.areas
-        : [{ id: `${room.id}-a1`, label: "Main", runs: [], backsplashScope: "stone" }];
-      const first = {
-        ...areas[0],
-        runs: [
-          ...(areas[0].runs ?? []),
-          {
-            id,
-            label: "New piece",
-            lengthIn: 0,
-            depthIn: 25.5,
-            pieceType: "counter",
-            quantity: 1
-          }
-        ]
-      };
-      return { ...room, areas: [first, ...areas.slice(1)] };
-    })
-  };
+  return addManualPiece(result, roomId);
+}
+
+function addRoom(result: any): any {
+  return addManualRoom(result || createEmptyManualTakeoffDraft(), {
+    name: "New room",
+    roomType: "Kitchen"
+  });
 }
 
 function notifyParentApproved(takeoffJobId: string, payload: unknown) {
@@ -225,10 +219,11 @@ export default function ConsolidatedTakeoffReview() {
     }
   }, []);
 
-  const [draft, setDraft] = useState<any | null>(null);
+  const [draft, setDraft] = useState<any | null>(() => createEmptyManualTakeoffDraft());
   const [excludedRunIds, setExcludedRunIds] = useState<Set<string>>(new Set());
   const [planFile, setPlanFile] = useState<PlanPreviewFileMeta | null>(null);
-  const [displayStatus, setDisplayStatus] = useState("Processing");
+  const [displayStatus, setDisplayStatus] = useState("Takeoff processing");
+  const [aiPhase, setAiPhase] = useState<AiPhase>("unknown");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -238,11 +233,15 @@ export default function ConsolidatedTakeoffReview() {
   const [advisory, setAdvisory] = useState<ApprovalBlockerItem[]>([]);
   const [summary, setSummary] = useState<Record<string, unknown> | null>(null);
   const [approvalDiag, setApprovalDiag] = useState<ApprovalDiagnostic | null>(null);
+  const [pendingAiMerge, setPendingAiMerge] = useState(false);
+  const [retryBusy, setRetryBusy] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const draftRef = useRef(draft);
   const excludedRef = useRef(excludedRunIds);
+  const saveStatusRef = useRef(saveStatus);
   draftRef.current = draft;
   excludedRef.current = excludedRunIds;
+  saveStatusRef.current = saveStatus;
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -265,7 +264,7 @@ export default function ConsolidatedTakeoffReview() {
     };
   }, []);
 
-  const loadWorkspace = useCallback(async (token: string, jobId: string) => {
+  const loadWorkspace = useCallback(async (token: string, jobId: string, opts?: { forceServer?: boolean }) => {
     setLoadError(null);
     const job = (await labApiGet(
       `/api/takeoff-jobs/${encodeURIComponent(jobId)}`,
@@ -280,27 +279,50 @@ export default function ConsolidatedTakeoffReview() {
       job?.latestResult?.normalizedTakeoffJson ||
       job?.resultSummary?.normalizedTakeoffJson ||
       null;
-    if (!result) {
-      setDraft(null);
-      setDisplayStatus(
-        String(job?.status ?? "").toLowerCase() === "failed" ? "Failed" : "Processing"
-      );
-      return;
+
+    const jobStatus = String(job?.status ?? "").toLowerCase();
+    const reviewStatus = String(job?.reviewStatus ?? latest?.reviewStatus ?? "").toLowerCase();
+    const usableServer = hasUsableTakeoffGeometry(result);
+
+    if (jobStatus === "failed" || jobStatus === "error") setAiPhase("failed");
+    else if (jobStatus === "processing" || jobStatus === "pending" || jobStatus === "queued") {
+      setAiPhase(jobStatus === "queued" || jobStatus === "pending" ? "queued" : "processing");
+    } else if (usableServer || reviewStatus === "needs_review" || reviewStatus === "approved") {
+      setAiPhase("ready");
+    } else {
+      setAiPhase("queued");
     }
-    setDraft(result);
-    const rs = latest?.reviewState || {};
-    setExcludedRunIds(new Set(rs.excludedRunIds ?? []));
-    setApproveStatus("idle");
-    setApproveMsg(null);
-    setBlocking([]);
-    setAdvisory([]);
-    setApprovalDiag(null);
-    const review = String(job?.reviewStatus ?? latest?.reviewStatus ?? "").toLowerCase();
-    const status = String(job?.status ?? "").toLowerCase();
-    if (status === "failed" || status === "error") setDisplayStatus("Failed");
-    else if (review === "approved") setDisplayStatus("Approved");
-    else if (status === "processing" || status === "pending") setDisplayStatus("Processing");
-    else setDisplayStatus("Needs review");
+
+    const dirty =
+      saveStatusRef.current === "dirty" || saveStatusRef.current === "saving";
+    let activeDraft = draftRef.current || createEmptyManualTakeoffDraft();
+    if (result && usableServer && dirty && !opts?.forceServer) {
+      // AI (or another tab) has geometry while local edits are unsaved — do not overwrite.
+      if (hasUsableTakeoffGeometry(activeDraft)) {
+        setPendingAiMerge(true);
+      } else {
+        activeDraft = result;
+        setDraft(result);
+        setPendingAiMerge(false);
+      }
+    } else if (result) {
+      activeDraft = result;
+      setDraft(result);
+      setPendingAiMerge(false);
+      const rs = latest?.reviewState || {};
+      setExcludedRunIds(new Set(rs.excludedRunIds ?? []));
+    } else if (!hasUsableTakeoffGeometry(activeDraft)) {
+      activeDraft = createEmptyManualTakeoffDraft();
+      setDraft(activeDraft);
+    }
+
+    setDisplayStatus(
+      deriveConsolidatedWorksheetStatus({
+        jobStatus,
+        reviewStatus,
+        hasUsableGeometry: hasUsableTakeoffGeometry(activeDraft) || usableServer
+      })
+    );
 
     const file = job?.file || latest?.file;
     if (file?.quoteFileId || file?.id) {
@@ -320,18 +342,30 @@ export default function ConsolidatedTakeoffReview() {
     });
   }, [authToken, takeoffJobId, loadWorkspace]);
 
+  // Poll while AI is queued/processing so findings appear without leaving the worksheet.
+  useEffect(() => {
+    if (!authToken || !takeoffJobId) return;
+    if (aiPhase !== "queued" && aiPhase !== "processing" && aiPhase !== "unknown") return;
+    const timer = window.setInterval(() => {
+      void loadWorkspace(authToken, takeoffJobId).catch(() => {});
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [authToken, takeoffJobId, aiPhase, loadWorkspace]);
   const buildReviewState = useCallback(() => {
     const roomCompleteness: Record<string, boolean> = {};
     for (const room of draftRef.current?.rooms ?? []) {
       if (room?.id) roomCompleteness[room.id] = true;
     }
+    const ownership = collectManualOwnershipIds(draftRef.current);
     return {
       excludedRunIds: [...excludedRef.current],
       excludedRoomIds: [],
       roomCompleteness,
       flagResolutions: {},
       referenceTotalAcks: {},
-      evidenceAcks: {}
+      evidenceAcks: {},
+      manualRoomIds: ownership.manualRoomIds,
+      manualRunIds: ownership.manualRunIds
     };
   }, []);
 
@@ -538,8 +572,12 @@ export default function ConsolidatedTakeoffReview() {
           <h1>Takeoff review</h1>
           <p className="ctr-muted">
             Status: <strong data-testid="ctr-status">{displayStatus}</strong>
-            {" · "}
-            <span data-testid="ctr-save-status">{saveStatus}</span>
+            {saveStatus !== "idle" ? (
+              <>
+                {" · "}
+                <span data-testid="ctr-save-status">{saveStatus}</span>
+              </>
+            ) : null}
             {saveError ? <span className="ctr-error"> — {saveError}</span> : null}
           </p>
         </div>
@@ -551,14 +589,55 @@ export default function ConsolidatedTakeoffReview() {
         </div>
       ) : null}
 
-      {!draft ? (
-        <div className="ctr-state" role="status" data-testid="ctr-processing">
-          {displayStatus === "Failed"
-            ? "Takeoff processing failed."
-            : "Gemini Takeoff is processing — this worksheet appears when the draft is ready."}
+      {aiPhase === "queued" || aiPhase === "processing" || aiPhase === "unknown" ? (
+        <div className="ctr-state" role="status" data-testid="ctr-ai-banner">
+          AI Takeoff is processing. You may build or edit the takeoff now. AI findings will be
+          added when ready.
         </div>
-      ) : (
-        <div className="ctr-layout">
+      ) : null}
+      {aiPhase === "failed" ? (
+        <div className="ctr-state ctr-warn" role="status" data-testid="ctr-ai-failed-banner">
+          AI Takeoff failed. Retry AI Takeoff or continue building the takeoff manually.
+        </div>
+      ) : null}
+      {pendingAiMerge ? (
+        <div className="ctr-state ctr-warn" role="status" data-testid="ctr-pending-ai-merge">
+          AI findings are ready. Save or discard your current edits before merging.
+          <div className="ctr-actions" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="ctr-btn-secondary"
+              data-testid="ctr-save-merge-ai"
+              onClick={() => {
+                void (async () => {
+                  await persistDraft();
+                  if (authToken && takeoffJobId) {
+                    await loadWorkspace(authToken, takeoffJobId, { forceServer: true });
+                  }
+                })();
+              }}
+            >
+              Save &amp; merge
+            </button>
+            <button
+              type="button"
+              className="ctr-btn-secondary"
+              data-testid="ctr-discard-merge-ai"
+              onClick={() => {
+                setPendingAiMerge(false);
+                setSaveStatus("idle");
+                if (authToken && takeoffJobId) {
+                  void loadWorkspace(authToken, takeoffJobId, { forceServer: true });
+                }
+              }}
+            >
+              Discard &amp; load AI
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="ctr-layout">
           <aside className="ctr-plan">
             <TakeoffPlanPreviewPanel token={authToken} file={planFile} refreshKey={takeoffJobId} />
           </aside>
@@ -593,6 +672,13 @@ export default function ConsolidatedTakeoffReview() {
                   </tr>
                 </thead>
                 <tbody>
+                  {rows.length === 0 ? (
+                    <tr data-testid="ctr-empty-worksheet">
+                      <td colSpan={10} className="ctr-muted">
+                        No pieces yet. Add a room, then add a piece to start measuring.
+                      </td>
+                    </tr>
+                  ) : null}
                   {rows.map((row) => (
                     <tr
                       key={row.key}
@@ -620,9 +706,17 @@ export default function ConsolidatedTakeoffReview() {
                         </select>
                         <input
                           className="ctr-room-rename"
-                          aria-label="Rename room"
+                          aria-label="Room name"
                           value={row.roomName}
-                          onChange={(e) => updateDraft(renameRoom(draft, row.roomId, e.target.value))}
+                          onChange={(e) =>
+                            updateDraft(
+                              markRunEstimatorOwned(
+                                renameRoom(draft, row.roomId, e.target.value),
+                                row.roomId,
+                                row.runId
+                              )
+                            )
+                          }
                         />
                       </td>
                       <td>
@@ -631,7 +725,11 @@ export default function ConsolidatedTakeoffReview() {
                           aria-label="Piece name"
                           onChange={(e) =>
                             updateDraft(
-                              patchRun(draft, row.roomId, row.runId, { label: e.target.value })
+                              markRunEstimatorOwned(
+                                patchRun(draft, row.roomId, row.runId, { label: e.target.value }),
+                                row.roomId,
+                                row.runId
+                              )
                             )
                           }
                         />
@@ -645,10 +743,14 @@ export default function ConsolidatedTakeoffReview() {
                           onChange={(e) => {
                             const lengthIn = Number(e.target.value) || 0;
                             updateDraft(
-                              patchRun(draft, row.roomId, row.runId, {
-                                lengthIn,
-                                sf: sfFrom(lengthIn, row.depthIn)
-                              })
+                              markRunEstimatorOwned(
+                                patchRun(draft, row.roomId, row.runId, {
+                                  lengthIn,
+                                  sf: sfFrom(lengthIn, row.depthIn)
+                                }),
+                                row.roomId,
+                                row.runId
+                              )
                             );
                           }}
                         />
@@ -662,10 +764,14 @@ export default function ConsolidatedTakeoffReview() {
                           onChange={(e) => {
                             const depthIn = Number(e.target.value) || 0;
                             updateDraft(
-                              patchRun(draft, row.roomId, row.runId, {
-                                depthIn,
-                                sf: sfFrom(row.lengthIn, depthIn)
-                              })
+                              markRunEstimatorOwned(
+                                patchRun(draft, row.roomId, row.runId, {
+                                  depthIn,
+                                  sf: sfFrom(row.lengthIn, depthIn)
+                                }),
+                                row.roomId,
+                                row.runId
+                              )
                             );
                           }}
                         />
@@ -768,15 +874,52 @@ export default function ConsolidatedTakeoffReview() {
               <button
                 type="button"
                 className="ctr-btn-secondary"
+                data-testid="ctr-add-room"
+                onClick={() => updateDraft(addRoom(draft || createEmptyManualTakeoffDraft()))}
+              >
+                Add room
+              </button>
+              <button
+                type="button"
+                className="ctr-btn-secondary"
                 data-testid="ctr-add-piece"
+                disabled={!roomOptions[0]?.id}
                 onClick={() => {
                   const roomId = roomOptions[0]?.id;
-                  if (!roomId || !draft) return;
-                  updateDraft(addPiece(draft, roomId));
+                  if (!roomId) return;
+                  updateDraft(addPiece(draft || createEmptyManualTakeoffDraft(), roomId));
                 }}
               >
                 Add piece
               </button>
+              <button
+                type="button"
+                className="ctr-btn-secondary"
+                data-testid="ctr-save-draft"
+                onClick={() => void persistDraft()}
+              >
+                Save draft
+              </button>
+              {aiPhase === "failed" ? (
+                <button
+                  type="button"
+                  className="ctr-btn-secondary"
+                  data-testid="ctr-retry-ai"
+                  disabled={retryBusy || !authToken || !takeoffJobId}
+                  onClick={() => {
+                    if (!authToken || !takeoffJobId) return;
+                    setRetryBusy(true);
+                    void generateAiTakeoffDraft(authToken, takeoffJobId)
+                      .then(() => loadWorkspace(authToken, takeoffJobId))
+                      .catch((e) =>
+                        setLoadError(e instanceof LabApiError ? e.message : "Retry AI failed")
+                      )
+                      .finally(() => setRetryBusy(false));
+                  }}
+                >
+                  {retryBusy ? "Retrying…" : "Retry AI Takeoff"}
+                </button>
+              ) : null}
 
               {blocking.length ? (
                 <ul className="ctr-issues ctr-issues--block" data-testid="ctr-blocking">
@@ -826,8 +969,8 @@ export default function ConsolidatedTakeoffReview() {
                 disabled={
                   approveStatus === "approving" ||
                   approveStatus === "approved" ||
-                  displayStatus === "Processing" ||
-                  displayStatus === "Failed" ||
+                  displayStatus === "Takeoff failed" ||
+                  !hasUsableTakeoffGeometry(draft) ||
                   Boolean(blocking.length)
                 }
                 onClick={() => void handleApproveClick()}
@@ -847,7 +990,6 @@ export default function ConsolidatedTakeoffReview() {
             ) : null}
           </main>
         </div>
-      )}
     </div>
   );
 }

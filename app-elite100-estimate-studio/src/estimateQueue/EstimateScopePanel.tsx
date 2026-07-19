@@ -564,7 +564,10 @@ export default function EstimateScopePanel({
 
         <h3>Rooms / measured scope</h3>
         {(scope.rooms || []).length === 0 ? (
-          <p className="eq-muted">No rooms seeded yet. Approve Takeoff to seed measured scope.</p>
+          <p className="eq-muted">
+            No approved measured scope yet. Build or review the Takeoff above, then approve it to
+            seed pricing scope.
+          </p>
         ) : (
           <ul className="eq-room-list">
             {(scope.rooms || []).map((room) => (

@@ -359,9 +359,25 @@ export function createStudioEstimateQueueService(deps = {}) {
     const estimateNotCalculated =
       estimateStatus === "ready_to_price" && !estimate?.calculation_fingerprint;
 
+    const resultSummary =
+      takeoffJob?.result_summary && typeof takeoffJob.result_summary === "object"
+        ? takeoffJob.result_summary
+        : {};
+    const takeoffRoomCount =
+      Number(resultSummary.roomCount ?? 0) || roomStats.rooms || 0;
+    const takeoffPieceCount =
+      Number(resultSummary.pieceCount ?? resultSummary.runCount ?? 0) ||
+      roomStats.pieces ||
+      0;
+    const usableGeometryPresent = takeoffPieceCount > 0 || takeoffRoomCount > 0;
+    const estimatorDraftPresent =
+      usableGeometryPresent ||
+      String(resultSummary.reviewStatus ?? "").toLowerCase() === "needs_review";
+
     const derivationInput = {
       caseStatus: caseRow.status,
       firstOpenedAt: caseRow.first_opened_at || caseRow.firstOpenedAt || null,
+      takeoffJobId: takeoffJob?.id || link?.takeoff_job_id || link?.takeoffJobId || null,
       takeoffJobStatus,
       takeoffReviewStatus,
       estimateStatus,
@@ -377,7 +393,12 @@ export function createStudioEstimateQueueService(deps = {}) {
       republished: reviewOperatorStatus === "resolved_republished",
       revisionInProgress:
         reviewOperatorStatus === "revision_required" ||
-        (Number(estimate?.revision) > 1 && estimateStatus === "ready_to_price")
+        (Number(estimate?.revision) > 1 && estimateStatus === "ready_to_price"),
+      usableGeometryPresent,
+      estimatorDraftPresent,
+      roomCount: takeoffRoomCount,
+      pieceCount: takeoffPieceCount,
+      linkStatus: link?.relationship_status || link?.relationshipStatus || null
     };
 
     const workflowStatus = deriveQueueWorkflowStatus(derivationInput);
@@ -385,18 +406,14 @@ export function createStudioEstimateQueueService(deps = {}) {
     const openTarget = deriveQueueOpenTarget(derivationInput);
     const indicators = buildQueueIndicators(derivationInput, workflowStatus, attention);
 
-    const takeoffDisplay =
-      takeoffReviewStatus === "approved"
+    // Keep AI column aligned with authoritative workflow vocabulary (no "idle").
+    const takeoffDisplay = workflowStatus.startsWith("Takeoff")
+      ? workflowStatus
+      : takeoffReviewStatus === "approved"
         ? "Approved"
         : takeoffJobStatus === "failed" || takeoffJobStatus === "error"
-          ? "Failed"
-          : takeoffJobStatus === "processing" || takeoffJobStatus === "pending"
-            ? "AI processing"
-            : takeoffReviewStatus === "needs_review"
-              ? "Needs review"
-              : link?.takeoff_job_id || link?.takeoffJobId
-                ? "Takeoff created"
-                : "Not started";
+          ? "Takeoff failed"
+          : "Not started";
 
     const lastActivityAt =
       caseRow.last_activity_at ||

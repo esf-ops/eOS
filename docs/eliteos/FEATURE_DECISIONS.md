@@ -1542,6 +1542,16 @@
 | **Impacted** | `studioEstimateQueueWorkflow.mjs`, `studioEstimateQueueService.mjs`, Studio `EstimateQueuePage`, open-target routing into Takeoff / Scope / Digital / Review. |
 | **Out of scope** | Acceptance, sold confirmation, Moraware, QuickBooks, payments, new AI behavior. |
 
+### 110. Slice 1 hosted fix — editable manual Takeoff during AI + durable generation worker (2026-07-19)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-19 |
+| **Decision** | While AI Takeoff is queued/processing/failed/disabled, the consolidated Takeoff worksheet remains **editable** with Add Room / Add Piece / Save draft (empty estimator draft; no AI result required). Manual geometry is estimator-owned (`_estimatorOwned` / reviewState manual ids + `_meta.estimatorConfirmed`). AI findings merge later without overwriting confirmed work; unsaved local edits require explicit Save/Discard before merge. Queue status **Takeoff draft ready** requires usable geometry (pieces). Hosted AI completion uses **waitUntil best-effort** plus durable cron **`GET\|POST /api/internal/takeoff/process-queued`** that claims stale `processing` AI jobs and runs extraction. |
+| **Why** | Estimators could not build geometry before AI finished; Vercel 202 + waitUntil can leave jobs stuck in `processing` when the invocation ends. |
+| **SQL** | None. |
+| **Out of scope** | Slice 2, Estimate Scope geometry editing, pricing unlock without takeoff approval. |
+
 ### 109. Elite 100 Slice 1 — automatic AI Takeoff after intake; confirmed estimator work wins (2026-07-18)
 
 | Field | Value |
