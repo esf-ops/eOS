@@ -2,6 +2,18 @@ import React, { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPatch, apiPost, ApiError } from "../lib/api";
 
 import EstimateDigitalEstimatePanel from "./EstimateDigitalEstimatePanel";
+import { applyRoomBacksplashPatch } from "../../../backend-core/src/elite100EstimateStudio/studioRoomBacksplash.mjs";
+
+type CustomLineItem = {
+  id?: string;
+  name: string;
+  description?: string;
+  category?: string;
+  quantity?: number;
+  unit?: string;
+  unitPrice?: number;
+  customerFacing?: boolean;
+};
 
 type StudioEstimate = {
   id: string;
@@ -29,11 +41,16 @@ type StudioEstimate = {
       included?: boolean;
       countertopSqft?: number;
       backsplashSqft?: number;
-      backsplashHeightIn?: number;
+      backsplashHeightIn?: number | null;
+      includeBacksplash?: boolean;
+      backsplashMeasuredLengthIn?: number | null;
+      backsplashHeightMode?: string;
+      backsplashSource?: string | null;
       pieces?: Array<{ id: string; name: string; included?: boolean; sqft?: number }>;
       notes?: string;
     }>;
     addOns?: Record<string, number>;
+    customLineItems?: CustomLineItem[];
     edgeMode?: string;
     edgeLinearFeet?: number;
     miterHeightKey?: string | null;
@@ -226,9 +243,59 @@ export default function EstimateScopePanel({
         ...prev,
         scope: {
           ...prev.scope,
-          rooms: prev.scope.rooms.map((r) => (r.id === roomId ? { ...r, ...partial } : r))
+          rooms: prev.scope.rooms.map((r) => {
+            if (r.id !== roomId) return r;
+            const touchesBacksplash = Object.keys(partial).some((k) =>
+              k === "includeBacksplash" ||
+              k.startsWith("backsplash")
+            );
+            return touchesBacksplash
+              ? applyRoomBacksplashPatch(r, partial)
+              : { ...r, ...partial };
+          })
         }
       };
+    });
+    setDirty(true);
+  }
+
+  function patchCustomLine(index: number, partial: Partial<CustomLineItem>) {
+    setEstimate((prev) => {
+      if (!prev) return prev;
+      const lines = [...(prev.scope?.customLineItems || [])];
+      lines[index] = { ...lines[index], ...partial };
+      return { ...prev, scope: { ...(prev.scope || {}), customLineItems: lines } };
+    });
+    setDirty(true);
+  }
+
+  function addCustomLine() {
+    setEstimate((prev) => {
+      if (!prev) return prev;
+      const lines = [
+        ...(prev.scope?.customLineItems || []),
+        {
+          id: `cli-${Date.now()}`,
+          name: "",
+          description: "",
+          category: "Other",
+          quantity: 1,
+          unit: "ea",
+          unitPrice: 0,
+          customerFacing: true
+        }
+      ];
+      return { ...prev, scope: { ...(prev.scope || {}), customLineItems: lines } };
+    });
+    setDirty(true);
+  }
+
+  function removeCustomLine(index: number) {
+    setEstimate((prev) => {
+      if (!prev) return prev;
+      const lines = [...(prev.scope?.customLineItems || [])];
+      lines.splice(index, 1);
+      return { ...prev, scope: { ...(prev.scope || {}), customLineItems: lines } };
     });
     setDirty(true);
   }
@@ -521,12 +588,13 @@ export default function EstimateScopePanel({
           <label>
             Pricing basis
             <select
-              value={scope.pricingBasis || "direct"}
+              value={scope.pricingBasis || "wholesale"}
               disabled={blocked}
               onChange={(e) => patchScope({ pricingBasis: e.target.value })}
+              data-testid="eq-pricing-basis"
             >
-              <option value="direct">Direct / Retail</option>
               <option value="wholesale">Wholesale</option>
+              <option value="direct">Direct / Retail</option>
             </select>
           </label>
           <label>
@@ -583,7 +651,7 @@ export default function EstimateScopePanel({
                 </label>
                 <div className="eq-room-fields">
                   <label>
-                    Counter SF
+                    Countertop square feet
                     <input
                       type="number"
                       min={0}
@@ -593,29 +661,109 @@ export default function EstimateScopePanel({
                       onChange={(e) => patchRoom(room.id, { countertopSqft: Number(e.target.value) })}
                     />
                   </label>
-                  <label>
-                    Backsplash SF
+                </div>
+                <div
+                  className="eq-room-backsplash"
+                  data-testid="eq-room-backsplash"
+                  data-room-id={room.id}
+                >
+                  <label className="eq-check">
                     <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={room.backsplashSqft ?? 0}
-                      disabled={blocked || room.included === false}
-                      onChange={(e) => patchRoom(room.id, { backsplashSqft: Number(e.target.value) })}
-                    />
-                  </label>
-                  <label>
-                    Splash height (in)
-                    <input
-                      type="number"
-                      min={0}
-                      value={room.backsplashHeightIn ?? 4}
+                      type="checkbox"
+                      checked={Boolean(room.includeBacksplash)}
                       disabled={blocked || room.included === false}
                       onChange={(e) =>
-                        patchRoom(room.id, { backsplashHeightIn: Number(e.target.value) })
+                        patchRoom(room.id, { includeBacksplash: e.target.checked })
                       }
+                      data-testid="eq-include-backsplash"
                     />
+                    Include backsplash
                   </label>
+                  <div className="eq-room-fields">
+                    <label>
+                      Backsplash height mode
+                      <select
+                        value={room.backsplashHeightMode || (room.includeBacksplash ? "standard" : "none")}
+                        disabled={blocked || room.included === false || !room.includeBacksplash}
+                        onChange={(e) => {
+                          const mode = e.target.value;
+                          patchRoom(room.id, {
+                            backsplashHeightMode: mode,
+                            ...(mode === "standard" && !room.backsplashHeightIn
+                              ? { backsplashHeightIn: 4 }
+                              : {})
+                          });
+                        }}
+                        data-testid="eq-backsplash-height-mode"
+                      >
+                        <option value="none">None</option>
+                        <option value="standard">Standard (4 in)</option>
+                        <option value="custom">Custom height</option>
+                        <option value="full_height">Full-height / tall</option>
+                      </select>
+                    </label>
+                    <label>
+                      Backsplash height (in)
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        value={room.backsplashHeightIn ?? ""}
+                        disabled={blocked || room.included === false || !room.includeBacksplash}
+                        onChange={(e) =>
+                          patchRoom(room.id, {
+                            backsplashHeightIn: Number(e.target.value) || 0,
+                            backsplashHeightMode:
+                              Number(e.target.value) >= 48
+                                ? "full_height"
+                                : Number(e.target.value) > 4.5
+                                  ? "custom"
+                                  : "standard"
+                          })
+                        }
+                        data-testid="eq-backsplash-height"
+                      />
+                    </label>
+                    <label>
+                      Measured backsplash length (in)
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={room.backsplashMeasuredLengthIn ?? ""}
+                        disabled={blocked || room.included === false || !room.includeBacksplash}
+                        onChange={(e) =>
+                          patchRoom(room.id, {
+                            backsplashMeasuredLengthIn: Number(e.target.value) || 0
+                          })
+                        }
+                        data-testid="eq-backsplash-length"
+                      />
+                    </label>
+                    <label>
+                      Backsplash square feet
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={room.backsplashSqft ?? 0}
+                        disabled={blocked || room.included === false || !room.includeBacksplash}
+                        onChange={(e) =>
+                          patchRoom(room.id, { backsplashSqft: Number(e.target.value) })
+                        }
+                        data-testid="eq-backsplash-sqft"
+                      />
+                    </label>
+                  </div>
+                  <p className="eq-footnote">
+                    Countertop SF: {Number(room.countertopSqft ?? 0).toFixed(2)} · Backsplash SF:{" "}
+                    {room.includeBacksplash ? Number(room.backsplashSqft ?? 0).toFixed(2) : "0.00"} ·
+                    Height:{" "}
+                    {room.includeBacksplash
+                      ? `${room.backsplashHeightIn ?? "—"} in (${room.backsplashHeightMode || "standard"})`
+                      : "not included"}
+                    {room.backsplashSource ? ` · Source: ${room.backsplashSource}` : ""}
+                  </p>
                 </div>
                 {(room.pieces || []).length ? (
                   <div className="eq-piece-list">
@@ -670,6 +818,118 @@ export default function EstimateScopePanel({
           ))}
         </div>
 
+        <h3>Custom line items</h3>
+        <p className="eq-muted">
+          Server-calculated extras. Internal-only lines never appear on the customer Digital Estimate.
+        </p>
+        <div className="eq-custom-lines" data-testid="eq-custom-lines">
+          {(scope.customLineItems || []).length === 0 ? (
+            <p className="eq-muted">No custom lines yet.</p>
+          ) : (
+            <ul className="eq-custom-line-list">
+              {(scope.customLineItems || []).map((line, index) => (
+                <li key={line.id || `cli-${index}`} data-testid="eq-custom-line-row">
+                  <label>
+                    Description
+                    <input
+                      value={line.name || ""}
+                      disabled={blocked}
+                      onChange={(e) => patchCustomLine(index, { name: e.target.value })}
+                      data-testid="eq-custom-line-name"
+                    />
+                  </label>
+                  <label>
+                    Category
+                    <select
+                      value={line.category || "Other"}
+                      disabled={blocked}
+                      onChange={(e) => patchCustomLine(index, { category: e.target.value })}
+                    >
+                      {[
+                        "Sink",
+                        "Faucet",
+                        "Plumbing fixture",
+                        "Accessory",
+                        "Labor",
+                        "Fee",
+                        "Discount/Credit",
+                        "Other"
+                      ].map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Qty
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={line.quantity ?? 1}
+                      disabled={blocked}
+                      onChange={(e) =>
+                        patchCustomLine(index, { quantity: Number(e.target.value) || 0 })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Unit
+                    <input
+                      value={line.unit || "ea"}
+                      disabled={blocked}
+                      onChange={(e) => patchCustomLine(index, { unit: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    Unit price
+                    <input
+                      type="number"
+                      step={0.01}
+                      value={line.unitPrice ?? 0}
+                      disabled={blocked}
+                      onChange={(e) =>
+                        patchCustomLine(index, { unitPrice: Number(e.target.value) || 0 })
+                      }
+                    />
+                  </label>
+                  <label className="eq-check">
+                    <input
+                      type="checkbox"
+                      checked={line.customerFacing !== false}
+                      disabled={blocked}
+                      onChange={(e) =>
+                        patchCustomLine(index, { customerFacing: e.target.checked })
+                      }
+                      data-testid="eq-custom-line-customer-visible"
+                    />
+                    Customer-visible
+                  </label>
+                  <button
+                    type="button"
+                    className="eq-btn-ghost"
+                    disabled={blocked}
+                    onClick={() => removeCustomLine(index)}
+                    data-testid="eq-custom-line-remove"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            type="button"
+            className="eq-btn-secondary"
+            disabled={blocked}
+            onClick={() => addCustomLine()}
+            data-testid="eq-custom-line-add"
+          >
+            Add custom line
+          </button>
+        </div>
+
         <div className="eq-scope-grid">
           <label>
             Edge
@@ -678,7 +938,7 @@ export default function EstimateScopePanel({
               disabled={blocked}
               onChange={(e) => patchScope({ edgeMode: e.target.value })}
             >
-              <option value="included">Included edges</option>
+              <option value="included">Included edges (eased)</option>
               <option value="w_edge">W edge</option>
               <option value="d_edge">D edge</option>
             </select>

@@ -249,7 +249,7 @@ console.log("\nemptyManualTakeoffDraft.test.mjs\n");
       hasUsableGeometry: true,
       pendingAiAvailable: true
     }),
-    "Takeoff draft ready · AI findings pending review"
+    "Takeoff draft ready · AI findings appending"
   );
   assert.equal(
     deriveQueueWorkflowStatus({
@@ -258,7 +258,7 @@ console.log("\nemptyManualTakeoffDraft.test.mjs\n");
       pieceCount: 1,
       pendingAiAvailable: true
     }),
-    "Takeoff draft ready · AI findings pending review"
+    "Takeoff draft ready · AI findings appending"
   );
   assert.equal(
     deriveQueueWorkflowStatus({

@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const component = readFileSync(join(root, "components/ConsolidatedTakeoffReview.tsx"), "utf8");
+const styles = readFileSync(join(root, "styles.css"), "utf8");
 const main = readFileSync(join(root, "main.tsx"), "utf8");
 const api = readFileSync(join(root, "lib/api.ts"), "utf8");
 const clickHelper = readFileSync(join(root, "lib/consolidatedApproveClick.mjs"), "utf8");
@@ -42,18 +43,18 @@ assert.ok(
   !component.includes("this worksheet appears when the draft is ready"),
   "must not gate worksheet on AI draft"
 );
-assert.ok(component.includes("handleSaveAndMergeAi"));
-assert.ok(component.includes("handleDiscardAiFindings"));
+assert.ok(component.includes("handleAutoAppendAi"));
 assert.ok(component.includes("pendingAiAvailable"));
 assert.ok(component.includes("applyPendingAiFromLatest"));
 assert.ok(component.includes("data-testid=\"ctr-ai-findings-preview\""));
-assert.ok(component.includes("data-testid=\"ctr-preview-ai-findings\""));
-assert.ok(component.includes("AI findings are ready. Review and merge them into your saved takeoff."));
-assert.ok(component.includes("Discard AI findings"));
-assert.ok(component.includes("Preview AI findings") || component.includes("Hide AI findings"));
+assert.ok(component.includes("data-testid=\"ctr-pending-ai-append\""));
+assert.ok(component.includes("data-testid=\"ctr-ai-append-notice\""));
+assert.ok(!component.includes("data-testid=\"ctr-save-merge-ai\""));
+assert.ok(!component.includes("Save &amp; merge") && !component.includes("Save & merge"));
+assert.ok(component.includes("Auto-append AI findings"));
 assert.ok(component.includes("lastMergedAiResultId") || component.includes("aiHandling"));
 assert.ok(component.includes("summarizeAiFindingsPreview"));
-assert.ok(draftHelper.includes("AI findings pending review"));
+assert.ok(draftHelper.includes("AI findings appending"));
 assert.ok(component.includes("saveMergeTakeoffDrafts"));
 assert.ok(component.includes("pendingServerTakeoffRef"));
 assert.ok(component.includes("hasEstimatorOwnedGeometry"));
@@ -65,7 +66,6 @@ assert.ok(component.includes("deletedRoomIds"));
 assert.ok(component.includes("deletedRunIds"));
 assert.ok(component.includes("handleRemoveRoom"));
 assert.ok(component.includes("handleRemovePiece"));
-assert.ok(component.includes("data-testid=\"ctr-save-merge-ai\""));
 assert.ok(component.includes("pendingAiMerge"));
 assert.ok(
   component.includes("included") || component.includes("Include piece"),
@@ -81,12 +81,28 @@ assert.ok(component.includes("Add room"));
 assert.ok(draftHelper.includes("export function addManualRoom"));
 assert.ok(draftHelper.includes("_estimatorOwned"));
 
+// Legibility: full labels, no cryptic abbreviations as primary headers, no clipping classes.
+assert.ok(component.includes("Length (in)"));
+assert.ok(component.includes("Depth (in)"));
+assert.ok(component.includes("Square feet"));
+assert.ok(component.includes("Backsplash height (in)"));
+assert.ok(component.includes("data-testid=\"ctr-room-name\""));
+assert.ok(component.includes("data-testid=\"ctr-piece-name\""));
+assert.ok(component.includes("data-testid=\"ctr-toggle-plan\""));
+assert.ok(styles.includes("ctr-col-piece"));
+assert.ok(styles.includes("min-width: 12rem"));
+assert.ok(!styles.includes("text-overflow: ellipsis") || styles.includes("text-overflow: unset"));
+assert.ok(styles.includes("overflow: visible"));
+
 // Save status must not publish "idle" as business status in the header when idle.
 assert.ok(component.includes("saveStatus !== \"idle\""));
 
 assert.ok(scopePanel.includes("No approved measured scope yet."));
 assert.ok(scopePanel.includes("Build or review the Takeoff above"));
 assert.ok(scopePanel.includes("seed pricing scope"));
+assert.ok(scopePanel.includes("eq-custom-lines"));
+assert.ok(scopePanel.includes("eq-include-backsplash"));
+assert.ok(scopePanel.includes('value={scope.pricingBasis || "wholesale"}'));
 
 // Single deterministic click path — no two-step confirmation mode
 assert.ok(component.includes("runConsolidatedApproveClick"));
@@ -104,5 +120,5 @@ assert.ok(!component.includes("You may approve with these"));
 assert.ok(clickHelper.includes("buildConfirmedApproveBody"));
 assert.ok(clickHelper.includes("confirmAdvisories: true"));
 
-console.log("  ✓ worksheet always editable; Add Room/Piece; merge guard; scope copy");
+console.log("  ✓ worksheet legibility; auto AI append; scope backsplash/custom lines wiring");
 console.log("\nconsolidatedTakeoffReview.ui.test.mjs — passed\n");

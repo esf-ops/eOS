@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost, ApiError } from "../lib/api";
+@import { apiGet, apiPost, ApiError } from "../lib/api";
+import {
+  FRIENDLY_CUSTOMER_CHOICES,
+  buildCustomerChoiceConfiguration,
+  inferFriendlyChoiceFlags
+} from "../../../backend-core/src/elite100EstimateStudio/studioCustomerChoiceOptions.mjs";
 
 type ReadinessBlocker = {
   code?: string;
@@ -135,21 +140,27 @@ export default function EstimateDigitalEstimatePanel({
   );
 
   const [pricingValidThrough, setPricingValidThrough] = useState("");
-  const [allowedOptionKeys, setAllowedOptionKeys] = useState<string>("qty-sink");
+  const [choiceFlags, setChoiceFlags] = useState<Record<string, boolean>>(() =>
+    inferFriendlyChoiceFlags({ allowedOptionKeys: ["qty-sink"], customerChoiceGroups: ["materialColor", "sink", "edge"] })
+  );
+  const [legacyUnknownKeys, setLegacyUnknownKeys] = useState<string[]>([]);
   const [estimatorNotes, setEstimatorNotes] = useState("");
   const [roomLocked, setRoomLocked] = useState(true);
+
+  const choiceConfig = useMemo(
+    () => buildCustomerChoiceConfiguration(choiceFlags, legacyUnknownKeys),
+    [choiceFlags, legacyUnknownKeys]
+  );
 
   const configuration = useMemo(
     () => ({
       pricingValidThrough: pricingValidThrough || undefined,
-      allowedOptionKeys: allowedOptionKeys
-        .split(/[,\s]+/)
-        .map((s) => s.trim())
-        .filter(Boolean),
+      allowedOptionKeys: choiceConfig.allowedOptionKeys,
+      customerChoiceGroups: choiceConfig.customerChoiceGroups,
       estimatorNotes: estimatorNotes || undefined,
       roomLocks: [{ roomKey: "*", locked: roomLocked }]
     }),
-    [pricingValidThrough, allowedOptionKeys, estimatorNotes, roomLocked]
+    [pricingValidThrough, choiceConfig, estimatorNotes, roomLocked]
   );
 
   const readinessQuery = useMemo(() => {
@@ -474,16 +485,35 @@ export default function EstimateDigitalEstimatePanel({
             data-testid="eq-de-pricing-valid"
           />
         </label>
-        <label>
-          Allowed options (catalog keys)
-          <input
-            type="text"
-            value={allowedOptionKeys}
-            onChange={(e) => setAllowedOptionKeys(e.target.value)}
-            placeholder="qty-sink, qty-bar"
-            data-testid="eq-de-allowed-options"
-          />
-        </label>
+        <fieldset className="eq-de-customer-choices" data-testid="eq-de-customer-choices">
+          <legend>Customer may choose</legend>
+          <p className="eq-muted">
+            Allowed customer options. Catalog keys are generated automatically for publish.
+          </p>
+          {FRIENDLY_CUSTOMER_CHOICES.map((def) => (
+            <label key={def.id} className="eq-check">
+              <input
+                type="checkbox"
+                checked={Boolean(choiceFlags[def.id])}
+                onChange={(e) =>
+                  setChoiceFlags((prev) => ({ ...prev, [def.id]: e.target.checked }))
+                }
+                data-testid={`eq-de-choice-${def.id}`}
+              />
+              <span>
+                <strong>{def.label}</strong>
+                <span className="eq-muted"> — {def.help}</span>
+              </span>
+            </label>
+          ))}
+          {legacyUnknownKeys.length ? (
+            <p className="eq-footnote" data-testid="eq-de-legacy-keys-note">
+              Preserving {legacyUnknownKeys.length} legacy option key
+              {legacyUnknownKeys.length === 1 ? "" : "s"} from the prior publication (not shown as
+              editable text).
+            </p>
+          ) : null}
+        </fieldset>
         <label>
           Estimator-only notes
           <textarea

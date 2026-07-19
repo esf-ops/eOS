@@ -1591,3 +1591,14 @@
 | **Out of scope** | Acceptance, sold, Moraware, QuickBooks, payments; dropping the FK; redesign of Digital Estimate customer UI. |
 
 
+
+### 111. Elite 100 Slice 2 foundation — estimator experience (2026-07-19)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-19 |
+| **Decision** | Slice 2 foundation (estimator side): (1) Takeoff Review worksheet is measurement-first (full room/piece names, clear dimension columns, room grouping, collapsible plan). (2) Pending AI findings **auto-append** non-destructively (deletion tombstones + estimator-owned geometry win); Save & merge UI removed. (3) **New Studio estimates default to Wholesale**; saved Direct/Retail scopes are never silently rewritten. (4) Custom line items on Estimate Scope use `quoteCalculator.normalizeCustomLineItems` + Studio calculation snapshot (internal-only lines excluded from customer display total). (5) Digital Estimate publish replaces raw catalog-key text with friendly “Customer may choose” controls that generate allowed option keys; legacy unknown keys preserved. (6) Room backsplash is explicit include/height/length/SF with source indicator; 4″ defaults only when splash is included and no height exists. |
+| **Why** | Pilot pipeline works end-to-end; estimators need legible geometry review and commercial clarity before the full Digital Estimate customer UX pass. |
+| **SQL** | None (scope JSON additive fields on existing `studio_estimates`). |
+| **Out of scope** | Full Lovable DE customer UX, Elite 100 color modal polish, customer info/submit polish, sold-job, Moraware, QuickBooks. |
+

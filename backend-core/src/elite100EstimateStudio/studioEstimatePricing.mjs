@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import {
   calculateQuote,
+  normalizeCustomLineItems,
   PROTOTYPE_ADDON_UNIT_PRICES,
   UPGRADED_EDGE_RATE_DIRECT_V2,
   UPGRADED_EDGE_RATE_WHOLESALE_V2
@@ -23,6 +24,7 @@ import {
   SPAHN_ESTIMATE_ADJUSTMENT_PERCENT,
   WATTS_PROMO_RATE_PER_SF
 } from "./studioEstimateTrustedAccounts.mjs";
+import { chargeableBacksplashForPricing } from "./studioRoomBacksplash.mjs";
 
 /** D-edge / Dupont-style specialty — product brief $25/LF (matches Direct upgraded edge). */
 export const STUDIO_D_EDGE_RATE_PER_LF = UPGRADED_EDGE_RATE_DIRECT_V2;
@@ -123,14 +125,18 @@ export function scopeToCalculatorRooms(scope) {
           .filter((p) => String(p.pieceType ?? "").toLowerCase().includes("backsplash"))
           .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
       }
+      const splash = chargeableBacksplashForPricing({
+        ...r,
+        backsplashSqft
+      });
       return {
         id: r.id || `room-${idx}`,
         name: r.name || `Room ${idx + 1}`,
         roomType: r.roomType || "Kitchen",
         calcMode: "Direct SF",
         countertopSqft,
-        backsplashSqft,
-        backsplashHeightIn: Number(r.backsplashHeightIn) || 4,
+        backsplashSqft: splash.backsplashSqft,
+        backsplashHeightIn: splash.backsplashHeightIn,
         materialGroup: scope.materialGroup || "Group Promo",
         notes: r.notes || "",
         addons: {},
@@ -194,6 +200,17 @@ export async function calculateStudioEstimate(params) {
     env
   });
 
+  const customLineItems = normalizeCustomLineItems(scope).map((row) => ({
+    ...row,
+    unit: (() => {
+      const raw = Array.isArray(scope.customLineItems) ? scope.customLineItems : [];
+      const match = raw.find(
+        (r) => r && String(r.name ?? r.item_name ?? "").trim() === row.name
+      );
+      return match?.unit != null ? String(match.unit) : "ea";
+    })()
+  }));
+
   const calcImpl = params.calculateQuoteImpl || calculateQuote;
   const quoteResult = await calcImpl(
     {
@@ -204,6 +221,7 @@ export async function calculateStudioEstimate(params) {
       internalMaterialBasis: pricingBasis === "wholesale" ? "wholesale" : "direct",
       rooms,
       addOns,
+      customLineItems,
       partnerAccountId: null,
       useTaxPercent: 0
     },
@@ -253,6 +271,20 @@ export async function calculateStudioEstimate(params) {
     fabricationSubtotal = round2(fabricationSubtotal + buildup * 20);
   }
 
+  let customLineItemsCustomerVisibleTotal = 0;
+  let customLineItemsInternalOnlyTotal = 0;
+  for (const row of customLineItems) {
+    const lineTotal = round2((Number(row.quantity) || 0) * (Number(row.unitPrice) || 0));
+    if (row.customerFacing) customLineItemsCustomerVisibleTotal = round2(
+      customLineItemsCustomerVisibleTotal + lineTotal
+    );
+    else customLineItemsInternalOnlyTotal = round2(customLineItemsInternalOnlyTotal + lineTotal);
+  }
+  const customLineItemsTotal = round2(
+    customLineItemsCustomerVisibleTotal + customLineItemsInternalOnlyTotal
+  );
+  fabricationSubtotal = round2(fabricationSubtotal + customLineItemsTotal);
+
   const cfg = readTrustedPartnerAccountConfig(env);
   const spahn = isSpahnTrustedPartner(scope.partnerAccountId, cfg);
   const preAdjustment = round2(materialSubtotal + materialUseTax + fabricationSubtotal);
@@ -264,7 +296,8 @@ export async function calculateStudioEstimate(params) {
   const markupPercent = Number(scope.internalMarkupPercent ?? 0) || 0;
   const internalMarkupAmount = markupPercent > 0 ? round2(materialSubtotal * (markupPercent / 100)) : 0;
   const exactInternalTotal = round2(afterAccount + internalMarkupAmount);
-  const customerDisplayTotal = round2(afterAccount); // markup never customer-facing
+  // Markup + internal-only custom lines never customer-facing.
+  const customerDisplayTotal = round2(afterAccount - customLineItemsInternalOnlyTotal);
 
   const fingerprint = createHash("sha256")
     .update(
@@ -275,6 +308,13 @@ export async function calculateStudioEstimate(params) {
         materialSf,
         materialRate: materialRate.rate,
         addOns,
+        customLineItems: customLineItems.map((r) => ({
+          name: r.name,
+          quantity: r.quantity,
+          unitPrice: r.unitPrice,
+          customerFacing: r.customerFacing,
+          category: r.category
+        })),
         edgeMode,
         edgeLf,
         miterKey,
@@ -284,7 +324,9 @@ export async function calculateStudioEstimate(params) {
         rooms: rooms.map((r) => ({
           id: r.id,
           countertopSqft: r.countertopSqft,
-          backsplashSqft: r.backsplashSqft
+          backsplashSqft: r.backsplashSqft,
+          includeBacksplash: r.includeBacksplash,
+          backsplashHeightIn: r.backsplashHeightIn
         }))
       })
     )
@@ -312,7 +354,11 @@ export async function calculateStudioEstimate(params) {
     },
     fabrication: {
       subtotal: fabricationSubtotal,
-      addOns
+      addOns,
+      customLineItems,
+      customLineItemsTotal,
+      customLineItemsCustomerVisibleTotal,
+      customLineItemsInternalOnlyTotal
     },
     account: {
       partnerAccountId: scope.partnerAccountId || null,
