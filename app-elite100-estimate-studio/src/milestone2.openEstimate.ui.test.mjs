@@ -52,8 +52,12 @@ assert.equal(
   "Takeoff processing"
 );
 assert.equal(
-  deriveEstimateTakeoffDisplayStatus({ jobStatus: "completed", reviewStatus: "needs_review" }),
+  deriveEstimateTakeoffDisplayStatus({ jobStatus: "completed", reviewStatus: "needs_review", pieceCount: 1 }),
   "Takeoff draft ready"
+);
+assert.equal(
+  deriveEstimateTakeoffDisplayStatus({ jobStatus: "completed", reviewStatus: "needs_review" }),
+  "Takeoff queued"
 );
 assert.equal(
   deriveEstimateTakeoffDisplayStatus({ reviewStatus: "approved" }),

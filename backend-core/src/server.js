@@ -24,6 +24,7 @@ import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
 import { attachInstallDashboardRoutes } from "./install/installDashboardApi.js";
 import { attachHrWorkforceRoutes } from "./hr/hrWorkforceApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
+import { attachTakeoffInternalRoutes } from "./takeoff/takeoffInternalRoutes.js";
 import { attachSlabsmithIngestRoutes } from "./slabsmith/slabsmithIngestApi.js";
 import { attachSlabsmithImageUploadRoutes } from "./slabsmith/slabsmithImageUploadApi.js";
 import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
@@ -1264,6 +1265,10 @@ attachHrWorkforceRoutes(app, {
 });
 
 attachSlabCloudHourlySyncRoutes(app, {
+  getSupabase: supabaseServerClient
+});
+
+attachTakeoffInternalRoutes(app, {
   getSupabase: supabaseServerClient
 });
 
