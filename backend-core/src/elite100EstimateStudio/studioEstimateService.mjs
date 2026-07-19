@@ -16,6 +16,7 @@ import {
   collectUnresolvedItems,
   scopeFingerprint
 } from "./studioEstimatePricing.mjs";
+import { deriveRoomBacksplashFromImportRoom } from "./studioRoomBacksplash.mjs";
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
 import { loadStudioPartnerAccount } from "./studioPartnerAccountSearch.mjs";
 
@@ -70,6 +71,9 @@ function assertTakeoffApproved(workspace) {
  */
 export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
   const drafts = takeoffImportPayloadToRoomDrafts(importPayload);
+  const importRoomsByName = new Map(
+    (importPayload?.rooms ?? []).map((r) => [String(r.name || ""), r])
+  );
   const rooms = drafts.map((d) => {
     const pieces = [];
     for (const g of d.guidedShapeGroups ?? []) {
@@ -92,17 +96,25 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
     const countertopSqft = pieces
       .filter((p) => !String(p.pieceType).toLowerCase().includes("backsplash"))
       .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
-    const backsplashSqft = pieces
-      .filter((p) => String(p.pieceType).toLowerCase().includes("backsplash"))
-      .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
+    const fromImport = deriveRoomBacksplashFromImportRoom(
+      importRoomsByName.get(String(d.name || "")) || {
+        name: d.name,
+        pieces: pieces.map((p) => ({
+          name: p.name,
+          pieceType: p.pieceType,
+          lengthIn: p.lengthIn,
+          depthIn: p.depthIn,
+          sqft: p.sqft
+        }))
+      }
+    );
     return {
       id: d.id,
       name: d.name,
       roomType: d.roomType || "Kitchen",
       included: true,
       countertopSqft,
-      backsplashSqft,
-      backsplashHeightIn: 4,
+      ...fromImport,
       pieces,
       notes: ""
     };
@@ -111,6 +123,7 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
   return {
     ...emptyStudioEstimateScope(),
     ...(baseScope || {}),
+    // New empty scope is Wholesale; preserved baseScope.pricingBasis wins when provided.
     rooms: rooms.length ? rooms : baseScope?.rooms || []
   };
 }
@@ -365,8 +378,36 @@ export function createStudioEstimateService(deps = {}) {
               roomType: room.roomType || "Kitchen",
               included: true,
               countertopSqft: pieces.reduce((s, p) => s + p.sqft, 0),
-              backsplashSqft: 0,
-              backsplashHeightIn: 4,
+              ...deriveRoomBacksplashFromImportRoom({
+                name: room.name,
+                pieces: (room.areas ?? []).flatMap((area) => {
+                  const linear = Number(area.backsplashLinearIn) || 0;
+                  const h = Number(area.backsplashHeightIn ?? area.backsplashHeight ?? 0);
+                  if (linear <= 0) return [];
+                  const heightIn = h > 0 ? h : 4;
+                  const sqft = Math.round(((linear * heightIn) / 144) * 100) / 100;
+                  return [
+                    {
+                      name: `${area.label || "Area"} splash`,
+                      pieceType: "backsplash",
+                      lengthIn: linear,
+                      depthIn: heightIn,
+                      sqft,
+                      backsplash: {
+                        type:
+                          heightIn >= 48
+                            ? "full_height"
+                            : heightIn > 4.5
+                              ? "high"
+                              : "standard",
+                        heightIn,
+                        linearIn: linear,
+                        sqft
+                      }
+                    }
+                  ];
+                })
+              }),
               pieces,
               notes: ""
             });

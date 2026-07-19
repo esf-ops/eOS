@@ -199,7 +199,7 @@ export function deriveConsolidatedWorksheetStatus(input = {}) {
       ? "Takeoff processing · manual draft in progress"
       : "Takeoff processing";
   }
-  if (usable && pendingAi) return "Takeoff draft ready · AI findings pending review";
+  if (usable && pendingAi) return "Takeoff draft ready · AI findings appending";
   if (usable) return "Takeoff draft ready";
   if (input.aiEnabled === false) return "AI unavailable — build takeoff manually";
   return "Takeoff queued";

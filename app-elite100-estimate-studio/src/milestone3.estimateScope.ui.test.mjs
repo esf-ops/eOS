@@ -39,6 +39,20 @@ assert.ok(panel.includes("needs_takeoff_approval"));
 assert.ok(panel.includes("EstimateDigitalEstimatePanel"));
 assert.ok(panel.includes("Publish Digital Estimate") || panel.includes("EstimateDigitalEstimatePanel"));
 assert.ok(api.includes("apiPatch"));
+assert.ok(panel.includes("eq-custom-lines"));
+assert.ok(panel.includes("eq-include-backsplash"));
+assert.ok(panel.includes("pricingBasis || \"wholesale\""));
+assert.ok(panel.includes("Included edges (eased)"));
+
+const dePanel = readFileSync(
+  join(root, "src/estimateQueue/EstimateDigitalEstimatePanel.tsx"),
+  "utf8"
+);
+assert.ok(dePanel.includes("eq-de-customer-choices"));
+assert.ok(!dePanel.includes("Allowed options (catalog keys)"));
+assert.ok(!dePanel.includes('data-testid="eq-de-allowed-options"'));
+assert.ok(dePanel.includes("eq-de-choice-${def.id}") || dePanel.includes("eq-de-choice-"));
+assert.ok(dePanel.includes("FRIENDLY_CUSTOMER_CHOICES"));
 
 console.log("\nmilestone3.estimateScope.ui.test.mjs\n");
 console.log("ok: Studio renders scope, summary, approval, and Digital Estimate panel hook");

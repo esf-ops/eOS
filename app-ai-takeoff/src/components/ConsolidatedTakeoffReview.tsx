@@ -259,11 +259,13 @@ export default function ConsolidatedTakeoffReview() {
     }>;
   }>({ rooms: [] });
   const [pendingAiResultId, setPendingAiResultId] = useState<string | null>(null);
-  const [showAiFindingsPreview, setShowAiFindingsPreview] = useState(true);
   const [retryBusy, setRetryBusy] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [planCollapsed, setPlanCollapsed] = useState(false);
+  const [aiAppendNotice, setAiAppendNotice] = useState<string | null>(null);
   const pendingServerTakeoffRef = useRef<any | null>(null);
   const pendingAiResultIdRef = useRef<string | null>(null);
+  const autoMergeInFlightRef = useRef(false);
   const saveTimer = useRef<number | null>(null);
   const draftRef = useRef(draft);
   const excludedRef = useRef(excludedRunIds);
@@ -327,14 +329,6 @@ export default function ConsolidatedTakeoffReview() {
     };
   }, []);
 
-  const clearPendingAi = useCallback(() => {
-    setPendingAiMerge(false);
-    setPendingAiPreview({ rooms: [] });
-    setPendingAiResultId(null);
-    pendingServerTakeoffRef.current = null;
-    pendingAiResultIdRef.current = null;
-  }, []);
-
   const applyPendingAiFromLatest = useCallback((latest: any) => {
     if (latest?.pendingAiAvailable && latest?.pendingAiDraft) {
       pendingServerTakeoffRef.current = latest.pendingAiDraft;
@@ -348,12 +342,14 @@ export default function ConsolidatedTakeoffReview() {
           ? latest.pendingAiPreview
           : summarizeAiFindingsPreview(latest.pendingAiDraft)
       );
-      setShowAiFindingsPreview(true);
       return true;
     }
-    clearPendingAi();
+    setPendingAiMerge(false);
+    pendingServerTakeoffRef.current = null;
+    pendingAiResultIdRef.current = null;
+    setPendingAiResultId(null);
     return false;
-  }, [clearPendingAi]);
+  }, []);
 
   const loadWorkspace = useCallback(async (
     token: string,
@@ -514,7 +510,7 @@ export default function ConsolidatedTakeoffReview() {
     [authToken, takeoffJobId]
   );
 
-  const handleSaveAndMergeAi = useCallback(async () => {
+  const handleAutoAppendAi = useCallback(async () => {
     if (!authToken || !takeoffJobId) return;
     const local = draftRef.current || createEmptyManualTakeoffDraft();
     let serverAi = pendingServerTakeoffRef.current;
@@ -531,12 +527,16 @@ export default function ConsolidatedTakeoffReview() {
       if (latest?.reviewState) unionLocalTombstones(latest.reviewState);
     }
     if (!serverAi) {
-      setLoadError("No pending AI findings to merge.");
+      setPendingAiMerge(false);
+      pendingServerTakeoffRef.current = null;
+      pendingAiResultIdRef.current = null;
+      setPendingAiResultId(null);
       return;
     }
+    const preview = summarizeAiFindingsPreview(serverAi);
     const { merged } = saveMergeTakeoffDrafts(local, serverAi, mergeTombstones());
     await persistDraftWithResult(merged, {
-      correctionNotes: "Save & merge AI findings",
+      correctionNotes: "Auto-append AI findings (non-destructive)",
       aiHandling: pendingId
         ? {
             lastMergedAiResultId: pendingId,
@@ -544,7 +544,14 @@ export default function ConsolidatedTakeoffReview() {
           }
         : null
     });
-    clearPendingAi();
+    pendingServerTakeoffRef.current = null;
+    pendingAiResultIdRef.current = null;
+    setPendingAiResultId(null);
+    setPendingAiMerge(false);
+    setPendingAiPreview(preview);
+    setAiAppendNotice(
+      "AI findings were added. Estimator-owned geometry and removals were preserved."
+    );
     await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
   }, [
     authToken,
@@ -552,29 +559,23 @@ export default function ConsolidatedTakeoffReview() {
     persistDraftWithResult,
     loadWorkspace,
     mergeTombstones,
-    unionLocalTombstones,
-    clearPendingAi
+    unionLocalTombstones
   ]);
 
-  const handleDiscardAiFindings = useCallback(async () => {
-    if (!authToken || !takeoffJobId) return;
-    const local = draftRef.current || createEmptyManualTakeoffDraft();
-    let pendingId = pendingAiResultIdRef.current;
-    if (!pendingId) {
-      const latest = (await labApiGet(
-        `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
-        authToken
-      ).catch(() => null)) as any;
-      pendingId = latest?.pendingAiResultId ? String(latest.pendingAiResultId) : null;
-    }
-    await persistDraftWithResult(local, {
-      correctionNotes: "Dismissed pending AI findings",
-      aiHandling: pendingId ? { dismissAiResultId: pendingId } : null
-    });
-    clearPendingAi();
-    setSaveStatus("idle");
-    await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
-  }, [authToken, takeoffJobId, persistDraftWithResult, clearPendingAi, loadWorkspace]);
+  // Automatic non-destructive AI append — no manual merge step for estimators.
+  useEffect(() => {
+    if (!pendingAiMerge || !authToken || !takeoffJobId) return;
+    if (autoMergeInFlightRef.current) return;
+    if (saveStatusRef.current === "saving") return;
+    autoMergeInFlightRef.current = true;
+    void handleAutoAppendAi()
+      .catch((e) =>
+        setLoadError(e instanceof LabApiError ? e.message : "AI append failed")
+      )
+      .finally(() => {
+        autoMergeInFlightRef.current = false;
+      });
+  }, [pendingAiMerge, authToken, takeoffJobId, handleAutoAppendAi]);
 
   useEffect(() => {
     if (!authToken || !takeoffJobId) return;
@@ -740,7 +741,12 @@ export default function ConsolidatedTakeoffReview() {
       rooms: roomOptions.length,
       includedPieces: included.length,
       countertopSf: included.reduce((s, r) => s + r.countertopSf, 0),
-      backsplashSf: 0,
+      backsplashSf: included.reduce((s, r) => {
+        const h = Number(r.backsplashHeightIn) || 0;
+        const l = Number(r.lengthIn) || 0;
+        if (h <= 0 || l <= 0) return s;
+        return s + (l * h) / 144;
+      }, 0),
       blockingCount: blocking.length,
       advisoryCount: advisory.length
     };
@@ -918,88 +924,57 @@ export default function ConsolidatedTakeoffReview() {
         </div>
       ) : null}
       {pendingAiMerge ? (
-        <div className="ctr-state ctr-warn" role="status" data-testid="ctr-pending-ai-merge">
-          AI findings are ready. Review and merge them into your saved takeoff.
-          <div className="ctr-actions" style={{ marginTop: 8 }}>
-            <button
-              type="button"
-              className="ctr-btn-secondary"
-              data-testid="ctr-save-merge-ai"
-              onClick={() => {
-                void handleSaveAndMergeAi().catch((e) =>
-                  setLoadError(e instanceof LabApiError ? e.message : "Save & merge failed")
-                );
-              }}
-            >
-              Save &amp; merge
-            </button>
-            <button
-              type="button"
-              className="ctr-btn-secondary"
-              data-testid="ctr-preview-ai-findings"
-              aria-expanded={showAiFindingsPreview}
-              onClick={() => setShowAiFindingsPreview((v) => !v)}
-            >
-              {showAiFindingsPreview ? "Hide AI findings" : "Preview AI findings"}
-            </button>
-            <button
-              type="button"
-              className="ctr-btn-secondary"
-              data-testid="ctr-discard-merge-ai"
-              onClick={() => {
-                void handleDiscardAiFindings().catch((e) =>
-                  setLoadError(e instanceof LabApiError ? e.message : "Discard AI failed")
-                );
-              }}
-            >
-              Discard AI findings
-            </button>
-          </div>
-          {showAiFindingsPreview ? (
+        <div className="ctr-state" role="status" data-testid="ctr-pending-ai-append">
+          AI findings are ready and are being added automatically. Estimator-owned geometry and
+          removals stay authoritative.
+        </div>
+      ) : null}
+      {aiAppendNotice ? (
+        <div className="ctr-state" role="status" data-testid="ctr-ai-append-notice">
+          {aiAppendNotice}
+          {(pendingAiPreview.rooms ?? []).length ? (
             <div className="ctr-ai-findings" data-testid="ctr-ai-findings-preview">
-              <div className="ctr-ai-findings-title">AI findings</div>
-              <p className="ctr-muted" style={{ margin: "4px 0 8px" }}>
-                Read-only preview. Your saved takeoff is unchanged until you Save &amp; merge.
-              </p>
-              {(pendingAiPreview.rooms ?? []).length === 0 ? (
-                <p className="ctr-muted">No rooms in the pending AI draft.</p>
-              ) : (
-                <ul className="ctr-ai-findings-list">
-                  {(pendingAiPreview.rooms ?? []).map((room) => (
-                    <li key={room.id || room.name} className="ctr-ai-findings-room">
-                      <strong>{room.name}</strong>
-                      {(room.pieces ?? []).length === 0 ? (
-                        <span className="ctr-muted"> — no pieces</span>
-                      ) : (
-                        <ul>
-                          {(room.pieces ?? []).map((piece) => (
-                            <li key={piece.id || `${room.id}-${piece.name}`}>
-                              {piece.name}
-                              {piece.lengthIn || piece.depthIn
-                                ? ` · ${piece.lengthIn || "—"}×${piece.depthIn || "—"} in`
-                                : ""}
-                              {piece.quantity && piece.quantity !== 1 ? ` · qty ${piece.quantity}` : ""}
-                              {piece.sf ? ` · ${piece.sf.toFixed(2)} SF` : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {pendingAiResultId ? (
-                <p className="ctr-muted" style={{ marginTop: 8, fontSize: "0.75rem" }}>
-                  Pending AI result id: {pendingAiResultId.slice(0, 8)}…
-                </p>
-              ) : null}
+              <div className="ctr-ai-findings-title">Recently appended AI findings</div>
+              <ul className="ctr-ai-findings-list">
+                {(pendingAiPreview.rooms ?? []).map((room) => (
+                  <li key={room.id || room.name} className="ctr-ai-findings-room">
+                    <strong>{room.name}</strong>
+                    {(room.pieces ?? []).length === 0 ? (
+                      <span className="ctr-muted"> — no pieces</span>
+                    ) : (
+                      <ul>
+                        {(room.pieces ?? []).map((piece) => (
+                          <li key={piece.id || `${room.id}-${piece.name}`}>
+                            {piece.name}
+                            {piece.lengthIn || piece.depthIn
+                              ? ` · ${piece.lengthIn || "—"}×${piece.depthIn || "—"} in`
+                              : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
         </div>
       ) : null}
 
-      <div className="ctr-layout">
-          <aside className="ctr-plan">
+      <div className="ctr-plan-toolbar">
+        <button
+          type="button"
+          className="ctr-btn-secondary"
+          data-testid="ctr-toggle-plan"
+          aria-pressed={planCollapsed}
+          onClick={() => setPlanCollapsed((v) => !v)}
+        >
+          {planCollapsed ? "Show plan preview" : "Hide plan preview"}
+        </button>
+      </div>
+
+      <div className={planCollapsed ? "ctr-layout ctr-layout--plan-collapsed" : "ctr-layout"}>
+          <aside className="ctr-plan" data-testid="ctr-plan-preview">
             <TakeoffPlanPreviewPanel token={authToken} file={planFile} refreshKey={takeoffJobId} />
           </aside>
 
@@ -1007,7 +982,8 @@ export default function ConsolidatedTakeoffReview() {
             <div className="ctr-summary" data-testid="ctr-summary">
               <span>{localSummary.rooms} rooms</span>
               <span>{localSummary.includedPieces} pieces</span>
-              <span>{localSummary.countertopSf.toFixed(2)} SF CT</span>
+              <span>{localSummary.countertopSf.toFixed(2)} SF countertop</span>
+              <span>{localSummary.backsplashSf.toFixed(2)} SF backsplash</span>
               {blocking.length ? (
                 <span className="ctr-badge ctr-badge--block">{blocking.length} blocking</span>
               ) : null}
@@ -1020,17 +996,17 @@ export default function ConsolidatedTakeoffReview() {
               <table className="ctr-table" data-testid="ctr-worksheet">
                 <thead>
                   <tr>
-                    <th>Room</th>
-                    <th>Piece</th>
-                    <th>L (in)</th>
-                    <th>D (in)</th>
-                    <th>Qty</th>
-                    <th>SF</th>
-                    <th>BS H</th>
-                    <th>Incl</th>
-                    <th>Cutouts</th>
-                    <th>Note</th>
-                    <th>Actions</th>
+                    <th className="ctr-col-room">Room</th>
+                    <th className="ctr-col-piece">Piece</th>
+                    <th className="ctr-col-dim">Length (in)</th>
+                    <th className="ctr-col-dim">Depth (in)</th>
+                    <th className="ctr-col-qty">Quantity</th>
+                    <th className="ctr-col-sf">Square feet</th>
+                    <th className="ctr-col-dim">Backsplash height (in)</th>
+                    <th className="ctr-col-incl">Included</th>
+                    <th className="ctr-col-cutouts">Cutouts</th>
+                    <th className="ctr-col-notes">Notes</th>
+                    <th className="ctr-col-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1067,7 +1043,7 @@ export default function ConsolidatedTakeoffReview() {
                             />
                             <span className="ctr-muted">
                               {section.pieces.length === 0
-                                ? "No pieces yet"
+                                ? "Empty room — add a piece to measure"
                                 : `${section.pieces.length} piece${
                                     section.pieces.length === 1 ? "" : "s"
                                   }`}
@@ -1102,7 +1078,11 @@ export default function ConsolidatedTakeoffReview() {
                         </td>
                       </tr>
                       {section.pieces.length === 0 ? (
-                        <tr data-testid="ctr-room-empty" data-room-id={section.id}>
+                        <tr
+                          className="ctr-room-empty"
+                          data-testid="ctr-room-empty"
+                          data-room-id={section.id}
+                        >
                           <td colSpan={11} className="ctr-muted">
                             No pieces in this room yet.
                           </td>
@@ -1118,7 +1098,7 @@ export default function ConsolidatedTakeoffReview() {
                         .filter(Boolean)
                         .join(" ")}
                     >
-                      <td>
+                      <td className="ctr-col-room">
                         <select
                           aria-label="Room"
                           value={row.roomId}
@@ -1134,10 +1114,12 @@ export default function ConsolidatedTakeoffReview() {
                           ))}
                         </select>
                       </td>
-                      <td>
+                      <td className="ctr-col-piece">
                         <input
+                          className="ctr-piece-name"
                           value={row.pieceName}
                           aria-label="Piece name"
+                          data-testid="ctr-piece-name"
                           onChange={(e) =>
                             updateDraft(
                               markRunEstimatorOwned(
@@ -1149,12 +1131,14 @@ export default function ConsolidatedTakeoffReview() {
                           }
                         />
                       </td>
-                      <td>
+                      <td className="ctr-col-dim">
                         <input
+                          className="ctr-dim-input"
                           type="number"
                           step="0.1"
                           value={row.lengthIn || ""}
                           aria-label="Length inches"
+                          data-testid="ctr-length"
                           onChange={(e) => {
                             const lengthIn = Number(e.target.value) || 0;
                             updateDraft(
@@ -1170,12 +1154,14 @@ export default function ConsolidatedTakeoffReview() {
                           }}
                         />
                       </td>
-                      <td>
+                      <td className="ctr-col-dim">
                         <input
+                          className="ctr-dim-input"
                           type="number"
                           step="0.1"
                           value={row.depthIn || ""}
                           aria-label="Depth inches"
+                          data-testid="ctr-depth"
                           onChange={(e) => {
                             const depthIn = Number(e.target.value) || 0;
                             updateDraft(
@@ -1191,12 +1177,14 @@ export default function ConsolidatedTakeoffReview() {
                           }}
                         />
                       </td>
-                      <td>
+                      <td className="ctr-col-qty">
                         <input
+                          className="ctr-dim-input"
                           type="number"
                           min={1}
                           value={row.quantity}
                           aria-label="Quantity"
+                          data-testid="ctr-quantity"
                           onChange={(e) =>
                             updateDraft(
                               patchRun(draft, row.roomId, row.runId, {
@@ -1206,13 +1194,17 @@ export default function ConsolidatedTakeoffReview() {
                           }
                         />
                       </td>
-                      <td className="ctr-sf">{row.countertopSf.toFixed(2)}</td>
-                      <td>
+                      <td className="ctr-col-sf ctr-sf" data-testid="ctr-sqft">
+                        {row.countertopSf.toFixed(2)}
+                      </td>
+                      <td className="ctr-col-dim">
                         <input
+                          className="ctr-dim-input"
                           type="number"
                           step="0.5"
                           value={row.backsplashHeightIn || ""}
-                          aria-label="Backsplash height"
+                          aria-label="Backsplash height inches"
+                          data-testid="ctr-backsplash-height"
                           onChange={(e) => {
                             const h = Number(e.target.value) || 0;
                             setDraft((prev: any) => ({
@@ -1234,7 +1226,7 @@ export default function ConsolidatedTakeoffReview() {
                           }}
                         />
                       </td>
-                      <td>
+                      <td className="ctr-col-incl">
                         <input
                           type="checkbox"
                           checked={row.included}
@@ -1250,8 +1242,9 @@ export default function ConsolidatedTakeoffReview() {
                           }}
                         />
                       </td>
-                      <td>
+                      <td className="ctr-col-cutouts">
                         <input
+                          className="ctr-cutouts-input"
                           value={row.cutoutsLabel}
                           aria-label="Cutouts"
                           placeholder="sink:1"
@@ -1266,10 +1259,12 @@ export default function ConsolidatedTakeoffReview() {
                           }}
                         />
                       </td>
-                      <td>
+                      <td className="ctr-col-notes">
                         <input
+                          className="ctr-note-input"
                           value={row.note}
-                          aria-label="Note"
+                          aria-label="Notes"
+                          data-testid="ctr-notes"
                           onChange={(e) =>
                             updateDraft(
                               patchRun(draft, row.roomId, row.runId, {
@@ -1279,7 +1274,7 @@ export default function ConsolidatedTakeoffReview() {
                           }
                         />
                       </td>
-                      <td>
+                      <td className="ctr-col-actions">
                         <button
                           type="button"
                           className="ctr-btn-secondary ctr-remove"
