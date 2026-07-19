@@ -46,6 +46,7 @@ const ENV_ON = {
   DIGITAL_ESTIMATE_API_ENABLED: "1",
   DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY: "0",
   DIGITAL_ESTIMATE_PUBLISH_ENABLED: "1",
+  DIGITAL_ESTIMATE_ALLOW_DEV_LINK_WRAP: "1",
   DIGITAL_ESTIMATE_PUBLIC_READ_ENABLED: "1",
   HEAD_URL_DIGITAL_ESTIMATE: "https://digital.eliteosfab.com",
   DIGITAL_ESTIMATE_VIEW_THROTTLE_SECONDS: "0",
@@ -710,16 +711,15 @@ console.log("\nphaseDe1.test.mjs\n");
   await assert.rejects(() =>
     resolvePublicDigitalEstimate({ env: ENV_ON, repository: repo, rawToken: oldTok })
   );
-  let winners = 0;
-  for (const tok of [a.accessToken, b.accessToken]) {
-    try {
-      await resolvePublicDigitalEstimate({ env: ENV_ON, repository: repo, rawToken: tok });
-      winners += 1;
-    } catch {
-      /* loser */
-    }
-  }
-  assert.equal(winners, 1);
+  // Both callers return the persisted active token after readback (race-safe).
+  assert.equal(a.accessToken, b.accessToken);
+  assert.equal(a.customerUrl, b.customerUrl);
+  const resolved = await resolvePublicDigitalEstimate({
+    env: ENV_ON,
+    repository: repo,
+    rawToken: a.accessToken
+  });
+  assert.equal(resolved.ok, true);
   console.log("ok: concurrent token replace → exactly one active token");
 }
 

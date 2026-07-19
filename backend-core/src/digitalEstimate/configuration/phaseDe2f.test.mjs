@@ -47,6 +47,7 @@ const ENV_ON = {
   DIGITAL_ESTIMATE_API_ENABLED: "1",
   DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY: "0",
   DIGITAL_ESTIMATE_PUBLISH_ENABLED: "1",
+  DIGITAL_ESTIMATE_ALLOW_DEV_LINK_WRAP: "1",
   DIGITAL_ESTIMATE_PUBLIC_READ_ENABLED: "1",
   DIGITAL_ESTIMATE_CONFIGURATION_ENABLED: "1",
   DIGITAL_ESTIMATE_PUBLIC_CONFIGURATION_ENABLED: "1",
@@ -521,7 +522,8 @@ async function openConfiguredSession(stack) {
   );
   assert.equal(published.ok, true);
   assert.ok(published.accessToken);
-  assert.ok(published.customerUrl.includes("/e#"));
+  assert.ok(published.customerUrl.includes("/e/"));
+  assert.equal(published.customerUrl.includes("#"), false);
   assert.ok(published.customerUrl.includes(published.accessToken));
   assert.equal(published.publication.sourceType, "digital_estimate_amendment");
 

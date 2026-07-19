@@ -16,20 +16,96 @@ import { sanitizeDigitalEstimateEventMetadata } from "./digitalEstimateEvents.mj
 import { buildPublicationFreezePayloads } from "./digitalEstimateSnapshot.mjs";
 import { generateDigitalEstimateAccessToken } from "./digitalEstimateToken.mjs";
 import {
+  assertDigitalEstimateLinkWrapConfigured,
   buildDigitalEstimateCustomerUrl,
+  buildLinkRecoveryDiagnostics,
+  unwrapDigitalEstimateAccessTokenDetailed,
   wrapDigitalEstimateAccessToken
 } from "./digitalEstimateTokenWrap.mjs";
 import { describeSyntheticPublicAccessibility } from "./syntheticPilotGuard.mjs";
 
-async function persistWrappedAccessToken(repository, organizationId, publicationId, rawToken, env) {
-  const wrapped = wrapDigitalEstimateAccessToken(rawToken, env);
-  if (!wrapped || typeof repository?.setActiveTokenWrapped !== "function") return wrapped;
-  try {
-    await repository.setActiveTokenWrapped(organizationId, publicationId, wrapped);
-  } catch {
-    // Column may be absent until migration; publish still succeeds with one-shot response URL.
+async function persistAndVerifyWrappedAccessToken(
+  repository,
+  organizationId,
+  publicationId,
+  rawToken,
+  env
+) {
+  if (typeof repository?.setActiveTokenWrapped !== "function") {
+    const err = new Error("Customer link recovery storage is unavailable on this Brain.");
+    err.code = "token_wrap_persist_failed";
+    err.statusCode = 503;
+    err.diagnostics = buildLinkRecoveryDiagnostics(env, null, {
+      code: "token_wrap_persist_failed",
+      decryptSucceeded: false
+    });
+    throw err;
   }
-  return wrapped;
+
+  // Memory atomic insert may already include token_wrapped.
+  if (typeof repository.getActiveTokenForPublication === "function") {
+    const existing = await repository.getActiveTokenForPublication(organizationId, publicationId);
+    if (existing?.token_wrapped) {
+      const early = unwrapDigitalEstimateAccessTokenDetailed(existing.token_wrapped, env, {
+        tokenRow: existing
+      });
+      if (early.ok && early.rawToken === rawToken) {
+        return { wrapped: existing.token_wrapped, diagnostics: early.diagnostics };
+      }
+    }
+  }
+
+  const wrapped = wrapDigitalEstimateAccessToken(rawToken, env);
+  let persisted;
+  try {
+    persisted = await repository.setActiveTokenWrapped(organizationId, publicationId, wrapped);
+  } catch (e) {
+    if (e?.code === "active_token_missing" && typeof repository.getPublication === "function") {
+      const pub = await repository.getPublication(organizationId, publicationId);
+      if (pub && pub.status !== "active") {
+        // Concurrent family publish superseded this publication before wrap persist.
+        return {
+          wrapped: null,
+          diagnostics: buildLinkRecoveryDiagnostics(env, null, {
+            code: "publication_superseded_during_persist",
+            decryptSucceeded: false
+          })
+        };
+      }
+    }
+    if (!e.diagnostics) {
+      e.diagnostics = buildLinkRecoveryDiagnostics(env, null, {
+        code: e.code || "token_wrap_persist_failed",
+        decryptSucceeded: false
+      });
+    }
+    throw e;
+  }
+  const verify = unwrapDigitalEstimateAccessTokenDetailed(persisted?.token_wrapped, env, {
+    tokenRow: persisted
+  });
+  if (!verify.ok || verify.rawToken !== rawToken) {
+    const err = new Error(
+      "Customer link was stored but could not be recovered with the current wrap key. Check DIGITAL_ESTIMATE_LINK_WRAP_KEY."
+    );
+    err.code = verify.code || "link_unwrap_failed";
+    err.statusCode = 503;
+    err.diagnostics = verify.diagnostics;
+    throw err;
+  }
+  return { wrapped, diagnostics: verify.diagnostics };
+}
+
+async function assertReplaceWrapReady(repository, organizationId, publicationId, env) {
+  assertDigitalEstimateLinkWrapConfigured(env);
+  // Prove wrap works before invalidating the current token.
+  wrapDigitalEstimateAccessToken("preflight-token-aaaaaaaaaaaaaaaaaa", env);
+  if (typeof repository?.probeTokenWrappedColumn === "function") {
+    await repository.probeTokenWrappedColumn();
+  }
+  if (typeof repository?.assertActiveTokenWrappedWritable === "function") {
+    await repository.assertActiveTokenWrappedWritable(organizationId, publicationId);
+  }
 }
 
 function deError(message, code, statusCode = 400) {
@@ -147,6 +223,11 @@ export async function publishDigitalEstimate(input) {
     familyRoot
   );
 
+  assertDigitalEstimateLinkWrapConfigured(env);
+  if (typeof input.repository?.probeTokenWrappedColumn === "function") {
+    await input.repository.probeTokenWrappedColumn();
+  }
+
   const { rawToken, tokenHash } = generateDigitalEstimateAccessToken();
   const tokenWrapped = wrapDigitalEstimateAccessToken(rawToken, env);
 
@@ -182,8 +263,8 @@ export async function publishDigitalEstimate(input) {
     })
   });
 
-  // Supabase RPC does not accept wrapped ciphertext — persist after atomic insert.
-  await persistWrappedAccessToken(
+  // Supabase RPC does not accept wrapped ciphertext — persist + verify after atomic insert.
+  const wrapPersist = await persistAndVerifyWrappedAccessToken(
     input.repository,
     input.organizationId,
     atomic.publication.id,
@@ -191,7 +272,6 @@ export async function publishDigitalEstimate(input) {
     env
   );
 
-  // Stable reusable path URL (fragment form still accepted by public head for legacy links).
   const customerUrl = buildDigitalEstimateCustomerUrl(rawToken, env);
   const syntheticAccess = describeSyntheticPublicAccessibility(atomic.publication.id, env);
 
@@ -201,6 +281,7 @@ export async function publishDigitalEstimate(input) {
     accessToken: rawToken,
     customerUrl,
     linkStatus: "active",
+    linkDiagnostics: wrapPersist.diagnostics,
     eligibility,
     supersededCount: atomic.supersededCount ?? priorActive.length,
     syntheticPilot: syntheticAccess,
@@ -270,6 +351,17 @@ export async function revokeDigitalEstimatePublication(input) {
  *   now?: () => Date
  * }} input
  */
+function buildReplaceLinkDiagnostics(flags) {
+  return {
+    wrapKeyPresent: Boolean(flags.wrapKeyPresent),
+    tokenWrappedGenerated: Boolean(flags.tokenWrappedGenerated),
+    tokenWrappedPersisted: Boolean(flags.tokenWrappedPersisted),
+    persistedRowReadBack: Boolean(flags.persistedRowReadBack),
+    decryptVerified: Boolean(flags.decryptVerified),
+    customerUrlPresent: Boolean(flags.customerUrlPresent)
+  };
+}
+
 export async function replaceDigitalEstimateToken(input) {
   const env = input.env ?? process.env;
   if (!isDigitalEstimateApiEnabled(env) || !isDigitalEstimatePublishEnabled(env)) {
@@ -293,33 +385,121 @@ export async function replaceDigitalEstimateToken(input) {
     throw deError("Publication is not active", "publication_not_active", 400);
   }
 
+  // Fail closed BEFORE invalidating the current token (old link stays valid until atomic commit).
+  await assertReplaceWrapReady(input.repository, input.organizationId, pub.id, env);
+
   const now = (input.now ?? (() => new Date()))().toISOString();
   const { rawToken, tokenHash } = generateDigitalEstimateAccessToken();
   const tokenWrapped = wrapDigitalEstimateAccessToken(rawToken, env);
+  const localUnwrap = unwrapDigitalEstimateAccessTokenDetailed(tokenWrapped, env, {
+    tokenRow: { token_wrapped: tokenWrapped, revoked_at: null }
+  });
+  if (!localUnwrap.ok || localUnwrap.rawToken !== rawToken) {
+    const err = deError(
+      "Unable to protect the customer link for recovery.",
+      localUnwrap.code || "link_wrap_failed",
+      503
+    );
+    err.diagnostics = buildReplaceLinkDiagnostics({
+      wrapKeyPresent: true,
+      tokenWrappedGenerated: Boolean(tokenWrapped),
+      tokenWrappedPersisted: false,
+      persistedRowReadBack: false,
+      decryptVerified: false,
+      customerUrlPresent: false
+    });
+    throw err;
+  }
 
-  await input.repository.replaceTokenAtomic({
-    organizationId: input.organizationId,
-    publicationId: pub.id,
-    newTokenHash: tokenHash,
-    tokenWrapped,
-    actorUserId: input.actorUserId ?? null,
-    replacedAt: now
+  let atomic;
+  try {
+    atomic = await input.repository.replaceTokenAtomic({
+      organizationId: input.organizationId,
+      publicationId: pub.id,
+      newTokenHash: tokenHash,
+      tokenWrapped,
+      actorUserId: input.actorUserId ?? null,
+      replacedAt: now
+    });
+  } catch (e) {
+    // Atomic failure rolls back — prior active token remains. Never claim success.
+    if (!e.diagnostics) {
+      e.diagnostics = buildReplaceLinkDiagnostics({
+        wrapKeyPresent: true,
+        tokenWrappedGenerated: true,
+        tokenWrappedPersisted: false,
+        persistedRowReadBack: false,
+        decryptVerified: false,
+        customerUrlPresent: false
+      });
+    }
+    throw e;
+  }
+
+  // Prove the persisted row is recoverable before claiming replace success.
+  if (typeof input.repository.getActiveTokenForPublication !== "function") {
+    const err = deError(
+      "Unable to verify customer link recovery after replace.",
+      "token_wrap_persist_failed",
+      503
+    );
+    err.diagnostics = buildReplaceLinkDiagnostics({
+      wrapKeyPresent: true,
+      tokenWrappedGenerated: true,
+      tokenWrappedPersisted: Boolean(atomic?.tokenWrappedPersisted),
+      persistedRowReadBack: false,
+      decryptVerified: false,
+      customerUrlPresent: false
+    });
+    throw err;
+  }
+
+  const persistedRow = await input.repository.getActiveTokenForPublication(
+    input.organizationId,
+    pub.id
+  );
+  const readBackOk = Boolean(persistedRow?.id && !persistedRow.revoked_at);
+  const wrappedOnRow = String(persistedRow?.token_wrapped || "").trim();
+  const verify = unwrapDigitalEstimateAccessTokenDetailed(wrappedOnRow, env, {
+    tokenRow: persistedRow
+  });
+  // Prefer the persisted active token (handles concurrent replace races).
+  const recoveredToken = verify.ok ? verify.rawToken : null;
+  const customerUrl = recoveredToken
+    ? buildDigitalEstimateCustomerUrl(recoveredToken, env)
+    : null;
+  const decryptVerified = Boolean(verify.ok && recoveredToken);
+  const diagnostics = buildReplaceLinkDiagnostics({
+    wrapKeyPresent: true,
+    tokenWrappedGenerated: Boolean(tokenWrapped),
+    tokenWrappedPersisted: Boolean(wrappedOnRow) || atomic?.tokenWrappedPersisted === true,
+    persistedRowReadBack: readBackOk,
+    decryptVerified,
+    customerUrlPresent: Boolean(customerUrl)
   });
 
-  await persistWrappedAccessToken(
-    input.repository,
-    input.organizationId,
-    pub.id,
-    rawToken,
-    env
-  );
+  if (!readBackOk || !wrappedOnRow || !decryptVerified || !customerUrl || !recoveredToken) {
+    const err = deError(
+      "Customer link was replaced but could not be recovered from storage. Apply reusable-links v2 SQL, verify DIGITAL_ESTIMATE_LINK_WRAP_KEY, and Replace Link again.",
+      verify.code || "link_unwrap_failed",
+      503
+    );
+    err.diagnostics = diagnostics;
+    throw err;
+  }
 
   return {
     ok: true,
-    accessToken: rawToken,
-    customerUrl: buildDigitalEstimateCustomerUrl(rawToken, env),
+    accessToken: recoveredToken,
+    customerUrl,
     linkStatus: "active",
-    publication: staffPublicationView(pub)
+    linkDiagnostics: diagnostics,
+    publication: {
+      ...staffPublicationView(pub),
+      customerUrl,
+      linkStatus: "active",
+      linkDiagnostics: diagnostics
+    }
   };
 }
 

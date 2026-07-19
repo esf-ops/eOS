@@ -161,23 +161,69 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
       );
     },
     async getActiveTokenForPublication(organizationId, publicationId) {
-      const row = [...tokens.values()].find(
-        (t) =>
-          t.organization_id === organizationId &&
-          t.publication_id === publicationId &&
-          !t.revoked_at
+      const rows = [...tokens.values()]
+        .filter(
+          (t) =>
+            t.organization_id === organizationId &&
+            t.publication_id === publicationId &&
+            !t.revoked_at
+        )
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return rows[0] ? structuredClone(rows[0]) : null;
+    },
+    async countTokensForPublication(organizationId, publicationId) {
+      const all = [...tokens.values()].filter(
+        (t) => t.organization_id === organizationId && t.publication_id === publicationId
       );
-      return row ? structuredClone(row) : null;
+      return {
+        activeTokenRows: all.filter((t) => !t.revoked_at).length,
+        totalTokenRows: all.length
+      };
+    },
+    async probeTokenWrappedColumn() {
+      return { ok: true };
+    },
+    async assertActiveTokenWrappedWritable(organizationId, publicationId) {
+      const rows = [...tokens.values()]
+        .filter(
+          (t) =>
+            t.organization_id === organizationId &&
+            t.publication_id === publicationId &&
+            !t.revoked_at
+        )
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      const row = rows[0];
+      if (!row) {
+        const err = new Error("No active customer link token for this publication");
+        err.code = "active_token_missing";
+        err.statusCode = 409;
+        throw err;
+      }
+      return { ok: true, tokenId: row.id };
     },
     async setActiveTokenWrapped(organizationId, publicationId, tokenWrapped) {
-      const row = [...tokens.values()].find(
-        (t) =>
-          t.organization_id === organizationId &&
-          t.publication_id === publicationId &&
-          !t.revoked_at
-      );
-      if (!row) return null;
-      row.token_wrapped = tokenWrapped || null;
+      const rows = [...tokens.values()]
+        .filter(
+          (t) =>
+            t.organization_id === organizationId &&
+            t.publication_id === publicationId &&
+            !t.revoked_at
+        )
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      const row = rows[0];
+      if (!row) {
+        const err = new Error("No active customer link token for this publication");
+        err.code = "active_token_missing";
+        err.statusCode = 409;
+        throw err;
+      }
+      if (!tokenWrapped) {
+        const err = new Error("Customer link recovery payload missing");
+        err.code = "token_wrap_persist_failed";
+        err.statusCode = 503;
+        throw err;
+      }
+      row.token_wrapped = tokenWrapped;
       return structuredClone(row);
     },
     async getPublication(organizationId, publicationId) {
@@ -408,6 +454,13 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
      */
     async replaceTokenAtomic(payload) {
       const { organizationId, publicationId, newTokenHash, actorUserId, replacedAt } = payload;
+      const tokenWrapped = String(payload.tokenWrapped || "").trim();
+      if (!tokenWrapped) {
+        const err = new Error("token_wrapped required for recoverable customer links");
+        err.code = "token_wrapped_required";
+        err.statusCode = 503;
+        throw err;
+      }
       return publicationLock(organizationId, publicationId).runExclusive(async () => {
         const checkpoint = cloneState();
         try {
@@ -436,7 +489,7 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
             organization_id: organizationId,
             publication_id: publicationId,
             token_hash: newTokenHash,
-            token_wrapped: payload.tokenWrapped || null,
+            token_wrapped: tokenWrapped,
             created_at: now,
             created_by_user_id: actorUserId ?? null,
             access_count: 0,
@@ -459,7 +512,11 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
           if (activeTokens.length !== 1) {
             throw new Error("token replace left invalid active token count");
           }
-          return { tokenId, publicationId };
+          return {
+            tokenId,
+            publicationId,
+            tokenWrappedPersisted: true
+          };
         } catch (e) {
           restoreState(checkpoint);
           throw e;
@@ -614,7 +671,84 @@ export function createSupabaseDigitalEstimateRepository(deps) {
       if (error) throw error;
       return data?.[0] ?? null;
     },
+    async countTokensForPublication(organizationId, publicationId) {
+      const { data, error } = await db
+        .from("quote_publication_access_tokens")
+        .select("id,revoked_at")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId);
+      if (error) throw error;
+      const rows = data || [];
+      return {
+        activeTokenRows: rows.filter((t) => !t.revoked_at).length,
+        totalTokenRows: rows.length
+      };
+    },
+    async probeTokenWrappedColumn() {
+      const { error } = await db
+        .from("quote_publication_access_tokens")
+        .select("token_wrapped")
+        .limit(1);
+      if (error) {
+        const msg = String(error.message || "").toLowerCase();
+        if (msg.includes("token_wrapped") || error.code === "42703" || error.code === "PGRST204") {
+          const err = new Error(
+            "Customer link storage is unavailable — apply eliteos_digital_estimate_reusable_links_v1.sql and refresh the API schema."
+          );
+          err.code = "token_wrapped_column_unavailable";
+          err.statusCode = 503;
+          throw err;
+        }
+        throw error;
+      }
+      return { ok: true };
+    },
+    async assertActiveTokenWrappedWritable(organizationId, publicationId) {
+      await this.probeTokenWrappedColumn();
+      const active = await this.getActiveTokenForPublication(organizationId, publicationId);
+      if (!active?.id) {
+        const err = new Error("No active customer link token for this publication");
+        err.code = "active_token_missing";
+        err.statusCode = 409;
+        throw err;
+      }
+      // No-op write validates PostgREST accepts token_wrapped before we revoke the current token.
+      const { data, error } = await db
+        .from("quote_publication_access_tokens")
+        .update({ token_wrapped: active.token_wrapped ?? null })
+        .eq("id", active.id)
+        .eq("organization_id", organizationId)
+        .select("id,token_wrapped")
+        .limit(1);
+      if (error) {
+        const msg = String(error.message || "").toLowerCase();
+        const err = new Error(
+          msg.includes("token_wrapped") || error.code === "42703" || error.code === "PGRST204"
+            ? "Customer link storage is unavailable — apply eliteos_digital_estimate_reusable_links_v1.sql and refresh the API schema."
+            : "Unable to verify customer link recovery storage."
+        );
+        err.code =
+          msg.includes("token_wrapped") || error.code === "42703" || error.code === "PGRST204"
+            ? "token_wrapped_column_unavailable"
+            : "token_wrap_persist_failed";
+        err.statusCode = 503;
+        throw err;
+      }
+      if (!data?.[0]?.id) {
+        const err = new Error("Unable to verify customer link recovery storage.");
+        err.code = "token_wrap_persist_failed";
+        err.statusCode = 503;
+        throw err;
+      }
+      return { ok: true, tokenId: active.id };
+    },
     async setActiveTokenWrapped(organizationId, publicationId, tokenWrapped) {
+      if (!tokenWrapped) {
+        const err = new Error("Customer link recovery payload missing");
+        err.code = "token_wrap_persist_failed";
+        err.statusCode = 503;
+        throw err;
+      }
       const { data: activeRows, error: findErr } = await db
         .from("quote_publication_access_tokens")
         .select("id")
@@ -625,23 +759,40 @@ export function createSupabaseDigitalEstimateRepository(deps) {
         .limit(1);
       if (findErr) throw findErr;
       const activeId = activeRows?.[0]?.id;
-      if (!activeId) return null;
+      if (!activeId) {
+        const err = new Error("No active customer link token for this publication");
+        err.code = "active_token_missing";
+        err.statusCode = 409;
+        throw err;
+      }
       const { data, error } = await db
         .from("quote_publication_access_tokens")
-        .update({ token_wrapped: tokenWrapped || null })
+        .update({ token_wrapped: tokenWrapped })
         .eq("id", activeId)
         .eq("organization_id", organizationId)
         .select("*")
         .limit(1);
       if (error) {
-        // Column missing until eliteos_digital_estimate_reusable_links_v1.sql is applied.
         const msg = String(error.message || "").toLowerCase();
-        if (msg.includes("token_wrapped") || error.code === "42703" || error.code === "PGRST204") {
-          return null;
-        }
-        throw error;
+        const err = new Error(
+          msg.includes("token_wrapped") || error.code === "42703" || error.code === "PGRST204"
+            ? "Customer link storage is unavailable — apply eliteos_digital_estimate_reusable_links_v1.sql and refresh the API schema."
+            : "Unable to store recoverable customer link."
+        );
+        err.code =
+          msg.includes("token_wrapped") || error.code === "42703" || error.code === "PGRST204"
+            ? "token_wrapped_column_unavailable"
+            : "token_wrap_persist_failed";
+        err.statusCode = 503;
+        throw err;
       }
-      return data?.[0] ?? null;
+      if (!data?.[0]?.token_wrapped) {
+        const err = new Error("Unable to store recoverable customer link.");
+        err.code = "token_wrap_persist_failed";
+        err.statusCode = 503;
+        throw err;
+      }
+      return data[0];
     },
     async getPublication(organizationId, publicationId) {
       const { data, error } = await db
@@ -739,11 +890,19 @@ export function createSupabaseDigitalEstimateRepository(deps) {
     },
 
     async replaceTokenAtomic(payload) {
+      const tokenWrapped = String(payload.tokenWrapped || "").trim();
+      if (!tokenWrapped) {
+        const err = new Error("token_wrapped required for recoverable customer links");
+        err.code = "token_wrapped_required";
+        err.statusCode = 503;
+        throw err;
+      }
       const { data, error } = await db.rpc("digital_estimate_replace_token_atomic", {
         p_organization_id: payload.organizationId,
         p_publication_id: payload.publicationId,
         p_new_token_hash: payload.newTokenHash,
-        p_actor_user_id: payload.actorUserId ?? null
+        p_actor_user_id: payload.actorUserId ?? null,
+        p_token_wrapped: tokenWrapped
       });
       if (error) {
         const msg = String(error.message || error);
@@ -759,11 +918,24 @@ export function createSupabaseDigitalEstimateRepository(deps) {
           err.statusCode = 400;
           throw err;
         }
+        if (
+          /could not find the function|function.*does not exist|token_wrapped required/i.test(msg) ||
+          error.code === "PGRST202" ||
+          error.code === "42883"
+        ) {
+          const err = new Error(
+            "Atomic recoverable-link replace is unavailable — apply eliteos_digital_estimate_reusable_links_v2_atomic_wrap.sql and redeploy Brain."
+          );
+          err.code = "token_wrap_atomic_unavailable";
+          err.statusCode = 503;
+          throw err;
+        }
         throw error;
       }
       return {
         tokenId: data?.token_id,
-        publicationId: payload.publicationId
+        publicationId: payload.publicationId,
+        tokenWrappedPersisted: data?.token_wrapped_persisted === true
       };
     }
   };

@@ -29,6 +29,12 @@ assert.ok(dePanel.includes("customerUrl"));
 assert.ok(dePanel.includes("eq-de-stable-link") || dePanel.includes("stable and reusable"));
 assert.ok(dePanel.includes("eq-copy-customer-link"));
 assert.ok(dePanel.includes("eq-open-customer-preview"));
+assert.ok(
+  dePanel.includes("linkReady") &&
+    dePanel.includes("activePublication?.customerUrl") &&
+    dePanel.includes("disabled={busy || !linkReady}"),
+  "Copy/Open stay enabled when readiness returns customerUrl after refresh"
+);
 assert.ok(!dePanel.includes("cannot be recovered after refresh"));
 assert.ok(dePanel.includes("formatStructuredPublishError"));
 assert.ok(dePanel.includes("eq-de-pilot-diagnostic"));

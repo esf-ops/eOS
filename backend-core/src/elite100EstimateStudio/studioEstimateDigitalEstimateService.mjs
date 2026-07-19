@@ -31,7 +31,8 @@ import {
 } from "./studioEstimatePublicationSource.mjs";
 import {
   buildDigitalEstimateCustomerUrl,
-  unwrapDigitalEstimateAccessToken
+  buildLinkRecoveryDiagnostics,
+  unwrapDigitalEstimateAccessTokenDetailed
 } from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
 import {
   listElite100CustomerMaterials,
@@ -138,6 +139,18 @@ function wrapRepositoryWithStudioHeader(deRepository, syntheticHeader) {
       typeof deRepository?.getActiveTokenForPublication === "function"
         ? deRepository.getActiveTokenForPublication.bind(deRepository)
         : undefined,
+    countTokensForPublication:
+      typeof deRepository?.countTokensForPublication === "function"
+        ? deRepository.countTokensForPublication.bind(deRepository)
+        : undefined,
+    probeTokenWrappedColumn:
+      typeof deRepository?.probeTokenWrappedColumn === "function"
+        ? deRepository.probeTokenWrappedColumn.bind(deRepository)
+        : undefined,
+    assertActiveTokenWrappedWritable:
+      typeof deRepository?.assertActiveTokenWrappedWritable === "function"
+        ? deRepository.assertActiveTokenWrappedWritable.bind(deRepository)
+        : undefined,
     setActiveTokenWrapped:
       typeof deRepository?.setActiveTokenWrapped === "function"
         ? deRepository.setActiveTokenWrapped.bind(deRepository)
@@ -198,11 +211,23 @@ function staffPublicationView(pub, linkMeta = null) {
     revokedAt: pub.revoked_at ?? null,
     supersededAt: pub.superseded_at ?? null
   };
+  // Always serialize recoverable-link contract fields when meta is supplied so
+  // route JSON cannot omit customerUrl/linkStatus by sparse object construction.
   if (!linkMeta) return base;
   return {
     ...base,
-    customerUrl: linkMeta.customerUrl ?? null,
-    linkStatus: linkMeta.linkStatus ?? null
+    customerUrl: Object.prototype.hasOwnProperty.call(linkMeta, "customerUrl")
+      ? linkMeta.customerUrl
+      : null,
+    linkStatus: Object.prototype.hasOwnProperty.call(linkMeta, "linkStatus")
+      ? linkMeta.linkStatus
+      : null,
+    linkDiagnostics: Object.prototype.hasOwnProperty.call(linkMeta, "linkDiagnostics")
+      ? linkMeta.linkDiagnostics
+      : null,
+    linkError: Object.prototype.hasOwnProperty.call(linkMeta, "linkError")
+      ? linkMeta.linkError
+      : null
   };
 }
 
@@ -257,34 +282,115 @@ export function createStudioEstimateDigitalEstimateService(deps) {
    * @param {object} pub
    */
   async function linkMetaForPublication(organizationId, pub) {
-    if (!pub?.id) return { customerUrl: null, linkStatus: null };
+    if (!pub?.id) {
+      return {
+        customerUrl: null,
+        linkStatus: null,
+        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, { code: null })
+      };
+    }
     if (pub.status === "revoked" || pub.revoked_at) {
-      return { customerUrl: null, linkStatus: "revoked" };
+      return {
+        customerUrl: null,
+        linkStatus: "revoked",
+        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
+          code: "publication_revoked",
+          decryptSucceeded: false
+        })
+      };
     }
     if (pub.status === "superseded" || pub.superseded_at) {
-      return { customerUrl: null, linkStatus: "superseded" };
+      return {
+        customerUrl: null,
+        linkStatus: "superseded",
+        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
+          code: "publication_superseded",
+          decryptSucceeded: false
+        })
+      };
     }
     if (pub.status !== "active") {
-      return { customerUrl: null, linkStatus: String(pub.status || "invalid") };
+      return {
+        customerUrl: null,
+        linkStatus: String(pub.status || "invalid"),
+        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
+          code: "publication_inactive",
+          decryptSucceeded: false
+        })
+      };
     }
     if (typeof deRepository.getActiveTokenForPublication !== "function") {
-      return { customerUrl: null, linkStatus: "needs_replace" };
+      return {
+        customerUrl: null,
+        linkStatus: "recovery_error",
+        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
+          code: "active_token_lookup_unavailable",
+          decryptSucceeded: false
+        }),
+        linkError: {
+          code: "active_token_lookup_unavailable",
+          message: "Customer link recovery is unavailable on this Brain."
+        }
+      };
     }
     try {
+      const counts =
+        typeof deRepository.countTokensForPublication === "function"
+          ? await deRepository.countTokensForPublication(organizationId, pub.id)
+          : { activeTokenRows: null };
       const tokenRow = await deRepository.getActiveTokenForPublication(organizationId, pub.id);
       if (!tokenRow || tokenRow.revoked_at) {
-        return { customerUrl: null, linkStatus: "needs_replace" };
+        return {
+          customerUrl: null,
+          linkStatus: "needs_replace",
+          linkDiagnostics: buildLinkRecoveryDiagnostics(env, tokenRow, {
+            activeTokenRows: counts.activeTokenRows,
+            decryptSucceeded: false,
+            code: "active_token_missing"
+          }),
+          linkError: {
+            code: "active_token_missing",
+            message: "No active customer link token. Use Replace Link to create one."
+          }
+        };
       }
-      const raw = unwrapDigitalEstimateAccessToken(tokenRow.token_wrapped, env);
-      if (!raw) {
-        return { customerUrl: null, linkStatus: "needs_replace" };
+      const unwrapped = unwrapDigitalEstimateAccessTokenDetailed(tokenRow.token_wrapped, env, {
+        tokenRow,
+        activeTokenRows: counts.activeTokenRows
+      });
+      if (!unwrapped.ok) {
+        // Never silently map decrypt/key failures to needs_replace.
+        const message =
+          unwrapped.code === "link_wrap_key_missing"
+            ? "Customer link recovery key is missing on Brain. Set DIGITAL_ESTIMATE_LINK_WRAP_KEY and redeploy."
+            : unwrapped.code === "token_wrapped_missing"
+              ? "Customer link is not recoverable yet. Use Replace Link once (requires DIGITAL_ESTIMATE_LINK_WRAP_KEY)."
+              : "Customer link could not be decrypted with the current wrap key. Verify DIGITAL_ESTIMATE_LINK_WRAP_KEY and Replace Link.";
+        return {
+          customerUrl: null,
+          linkStatus: "recovery_error",
+          linkDiagnostics: unwrapped.diagnostics,
+          linkError: { code: unwrapped.code, message }
+        };
       }
       return {
-        customerUrl: buildDigitalEstimateCustomerUrl(raw, env),
-        linkStatus: "active"
+        customerUrl: buildDigitalEstimateCustomerUrl(unwrapped.rawToken, env),
+        linkStatus: "active",
+        linkDiagnostics: unwrapped.diagnostics
       };
-    } catch {
-      return { customerUrl: null, linkStatus: "needs_replace" };
+    } catch (e) {
+      return {
+        customerUrl: null,
+        linkStatus: "recovery_error",
+        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
+          code: e?.code || "link_recovery_failed",
+          decryptSucceeded: false
+        }),
+        linkError: {
+          code: e?.code || "link_recovery_failed",
+          message: e?.message || "Unable to recover customer link."
+        }
+      };
     }
   }
 
@@ -357,11 +463,22 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     }
 
     const publicationViews = await staffPublicationViews(organizationId, publications);
-    const activeView = familyActive[0]
-      ? staffPublicationView(
-          familyActive[0],
-          await linkMetaForPublication(organizationId, familyActive[0])
-        )
+    const activeRaw =
+      familyActive[0] ||
+      publications.find((p) => p.status === "active" && !p.revoked_at && !p.superseded_at) ||
+      null;
+    const activeView = activeRaw
+      ? staffPublicationView(activeRaw, await linkMetaForPublication(organizationId, activeRaw))
+      : null;
+
+    // Contract: authorized Studio readiness always exposes link fields on activePublication.
+    const activePublication = activeView
+      ? {
+          ...activeView,
+          customerUrl: activeView.customerUrl ?? null,
+          linkStatus: activeView.linkStatus ?? "needs_replace",
+          linkDiagnostics: activeView.linkDiagnostics ?? null
+        }
       : null;
 
     return {
@@ -370,7 +487,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       estimate: studioEstimateService.safeEstimateView(estimate),
       preview,
       publications: publicationViews,
-      activePublication: activeView,
+      activePublication,
       reviewRequests,
       links: {
         intakeCaseId: estimate.intakeCaseId || null,

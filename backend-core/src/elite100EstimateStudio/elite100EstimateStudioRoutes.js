@@ -52,13 +52,20 @@ import {
 import { isDigitalEstimateReviewRequestsEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
 import {
   buildDigitalEstimateCustomerUrl,
-  unwrapDigitalEstimateAccessToken
+  buildLinkRecoveryDiagnostics,
+  unwrapDigitalEstimateAccessTokenDetailed
 } from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
 async function staffLinkMetaForPublication(repository, organizationId, pub, env) {
-  if (!pub?.id) return { customerUrl: null, linkStatus: null };
+  if (!pub?.id) {
+    return {
+      customerUrl: null,
+      linkStatus: null,
+      linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, { code: null })
+    };
+  }
   if (pub.status === "revoked" || pub.revoked_at) {
     return { customerUrl: null, linkStatus: "revoked" };
   }
@@ -69,21 +76,76 @@ async function staffLinkMetaForPublication(repository, organizationId, pub, env)
     return { customerUrl: null, linkStatus: String(pub.status || "invalid") };
   }
   if (typeof repository.getActiveTokenForPublication !== "function") {
-    return { customerUrl: null, linkStatus: "needs_replace" };
+    return {
+      customerUrl: null,
+      linkStatus: "recovery_error",
+      linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
+        code: "active_token_lookup_unavailable",
+        decryptSucceeded: false
+      }),
+      linkError: {
+        code: "active_token_lookup_unavailable",
+        message: "Customer link recovery is unavailable on this Brain."
+      }
+    };
   }
   try {
+    const counts =
+      typeof repository.countTokensForPublication === "function"
+        ? await repository.countTokensForPublication(organizationId, pub.id)
+        : { activeTokenRows: null };
     const tokenRow = await repository.getActiveTokenForPublication(organizationId, pub.id);
     if (!tokenRow || tokenRow.revoked_at) {
-      return { customerUrl: null, linkStatus: "needs_replace" };
+      return {
+        customerUrl: null,
+        linkStatus: "needs_replace",
+        linkDiagnostics: buildLinkRecoveryDiagnostics(env, tokenRow, {
+          activeTokenRows: counts.activeTokenRows,
+          decryptSucceeded: false,
+          code: "active_token_missing"
+        }),
+        linkError: {
+          code: "active_token_missing",
+          message: "No active customer link token. Use Replace Link to create one."
+        }
+      };
     }
-    const raw = unwrapDigitalEstimateAccessToken(tokenRow.token_wrapped, env);
-    if (!raw) return { customerUrl: null, linkStatus: "needs_replace" };
+    const unwrapped = unwrapDigitalEstimateAccessTokenDetailed(tokenRow.token_wrapped, env, {
+      tokenRow,
+      activeTokenRows: counts.activeTokenRows
+    });
+    if (!unwrapped.ok) {
+      const message =
+        unwrapped.code === "link_wrap_key_missing"
+          ? "Customer link recovery key is missing on Brain. Set DIGITAL_ESTIMATE_LINK_WRAP_KEY and redeploy."
+          : unwrapped.code === "token_wrapped_missing"
+            ? "Customer link is not recoverable yet. Use Replace Link once (requires DIGITAL_ESTIMATE_LINK_WRAP_KEY)."
+            : "Customer link could not be decrypted with the current wrap key. Verify DIGITAL_ESTIMATE_LINK_WRAP_KEY and Replace Link.";
+      return {
+        customerUrl: null,
+        linkStatus: "recovery_error",
+        linkDiagnostics: unwrapped.diagnostics,
+        linkError: { code: unwrapped.code, message }
+      };
+    }
     return {
-      customerUrl: buildDigitalEstimateCustomerUrl(raw, env),
-      linkStatus: "active"
+      customerUrl: buildDigitalEstimateCustomerUrl(unwrapped.rawToken, env),
+      linkStatus: "active",
+      linkDiagnostics: unwrapped.diagnostics
     };
-  } catch {
-    return { customerUrl: null, linkStatus: "needs_replace" };
+  } catch (e) {
+    return {
+      customerUrl: null,
+      linkStatus: "recovery_error",
+      linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
+        code: e?.code || "link_recovery_failed",
+        decryptSucceeded: false
+      }),
+      linkError: {
+        code: e?.code || "link_recovery_failed",
+        message: e?.message || "Unable to recover customer link."
+      }
+    };
   }
 }
 
@@ -317,7 +379,9 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
               revisionNumber: p.revision_number,
               revisionLabel: p.revision_label,
               customerUrl: link.customerUrl,
-              linkStatus: link.linkStatus
+              linkStatus: link.linkStatus,
+              linkDiagnostics: link.linkDiagnostics || null,
+              linkError: link.linkError || null
             };
           })
         )
@@ -363,7 +427,9 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
             revokedAt: pub.revoked_at ?? null,
             supersededAt: pub.superseded_at ?? null,
             customerUrl: link.customerUrl,
-            linkStatus: link.linkStatus
+            linkStatus: link.linkStatus,
+            linkDiagnostics: link.linkDiagnostics || null,
+            linkError: link.linkError || null
           },
           preview,
           events: events.map((ev) => ({
@@ -465,10 +531,34 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json(result);
       } catch (e) {
         logStudio("replace-token failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
+        const status = Number(e?.statusCode) || 500;
+        const code = e?.code || "replace_failed";
+        const structured =
+          Boolean(e?.code) &&
+          (status < 500 ||
+            [
+              "link_wrap_key_missing",
+              "link_wrap_failed",
+              "link_unwrap_failed",
+              "token_wrap_persist_failed",
+              "token_wrapped_column_unavailable",
+              "token_wrapped_required",
+              "token_wrap_atomic_unavailable",
+              "active_token_missing",
+              "atomic_replace_unavailable"
+            ].includes(String(e.code)));
+        // Pass through service result shape — do not strip linkDiagnostics.
+        res.status(status).json({
           ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to replace token",
-          code: e?.code
+          error: structured && e?.message ? e.message : "Unable to replace token",
+          code,
+          linkDiagnostics: e?.diagnostics || null,
+          diagnostic: {
+            status,
+            code,
+            message: structured && e?.message ? e.message : "Unable to replace token",
+            linkDiagnostics: e?.diagnostics || null
+          }
         });
       }
     }
@@ -836,9 +926,17 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           "publication_source_conflict",
           "public_dto_leak",
           "atomic_publish_unavailable",
-          "estimate_repo_unavailable"
+          "estimate_repo_unavailable",
+          "link_wrap_key_missing",
+          "link_wrap_failed",
+          "link_unwrap_failed",
+          "token_wrap_persist_failed",
+          "token_wrapped_column_unavailable",
+          "token_wrapped_missing",
+          "active_token_missing"
         ].includes(String(e.code)));
     const message = structured && e?.message ? e.message : fallbackMessage;
+    const linkDiagnostics = e?.diagnostics || null;
     return {
       status,
       body: {
@@ -849,12 +947,14 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         allowedRange: e?.allowedRange || null,
         blockers,
         blockingReasons: blockers,
+        linkDiagnostics,
         diagnostic: {
           status,
           code,
           message,
           field: e?.field || null,
-          readinessBlockerCodes: readinessBlockerCodes || []
+          readinessBlockerCodes: readinessBlockerCodes || [],
+          linkDiagnostics
         }
       }
     };
@@ -874,6 +974,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           req.params.estimateId,
           configuration
         );
+        // Serialize the full service result — never strip customerUrl/linkStatus.
         res.json(result);
       } catch (e) {
         logStudio("digital-estimate readiness failed", e, req);

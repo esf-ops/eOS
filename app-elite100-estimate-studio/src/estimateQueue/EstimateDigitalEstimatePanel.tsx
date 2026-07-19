@@ -7,6 +7,17 @@ type ReadinessBlocker = {
   field?: string | null;
   allowedRange?: { min?: string; max?: string } | null;
 };
+type LinkDiagnostics = {
+  wrapKeyPresent?: boolean;
+  wrapKeyLength?: number;
+  tokenWrappedPresent?: boolean;
+  tokenWrappedLength?: number;
+  activeTokenRows?: number | null;
+  selectedTokenStatus?: string | null;
+  decryptSucceeded?: boolean | null;
+  code?: string | null;
+};
+
 type PublicationRow = {
   id: string;
   publicationId?: string;
@@ -19,6 +30,8 @@ type PublicationRow = {
   supersededAt?: string | null;
   customerUrl?: string | null;
   linkStatus?: string | null;
+  linkDiagnostics?: LinkDiagnostics | null;
+  linkError?: { code?: string; message?: string } | null;
 };
 type ReviewRequestRow = {
   id: string;
@@ -113,6 +126,8 @@ export default function EstimateDigitalEstimatePanel({
   const [reviewRequests, setReviewRequests] = useState<ReviewRequestRow[]>([]);
   const [customerUrl, setCustomerUrl] = useState<string | null>(null);
   const [linkStatus, setLinkStatus] = useState<string | null>(null);
+  const [linkDiagnostics, setLinkDiagnostics] = useState<LinkDiagnostics | null>(null);
+  const [linkError, setLinkError] = useState<{ code?: string; message?: string } | null>(null);
   const [idempotencyKey] = useState(() =>
     typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
@@ -180,6 +195,8 @@ export default function EstimateDigitalEstimatePanel({
       const url = body.activePublication?.customerUrl || null;
       setCustomerUrl(url);
       setLinkStatus(body.activePublication?.linkStatus || (url ? "active" : null));
+      setLinkDiagnostics(body.activePublication?.linkDiagnostics || null);
+      setLinkError(body.activePublication?.linkError || null);
       if (body.activePublication?.pricingValidThrough && !pricingValidThrough) {
         setPricingValidThrough(String(body.activePublication.pricingValidThrough).slice(0, 10));
       }
@@ -266,15 +283,31 @@ export default function EstimateDigitalEstimatePanel({
         `/api/elite100-estimate-studio/publications/${encodeURIComponent(activePublication.id)}/replace-token`,
         authToken,
         { confirm: true }
-      )) as { customerUrl?: string; linkStatus?: string };
-      if (body.customerUrl) {
+      )) as { customerUrl?: string; linkStatus?: string; linkDiagnostics?: LinkDiagnostics };
+      if (body.customerUrl && body.linkStatus === "active") {
         setCustomerUrl(body.customerUrl);
-        setLinkStatus(body.linkStatus || "active");
+        setLinkStatus("active");
+        setLinkDiagnostics(body.linkDiagnostics || null);
+        setLinkError(null);
         setActionNotice("Customer link replaced. Previous link is no longer valid.");
+      } else {
+        setActionError(
+          "Replace Link did not return a recoverable customer URL. Check Brain DIGITAL_ESTIMATE_LINK_WRAP_KEY."
+        );
       }
       await load();
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : "Unable to replace link");
+      if (e instanceof ApiError) {
+        const formatted = formatStructuredPublishError(e);
+        setActionError(formatted.message);
+        const body =
+          e.body && typeof e.body === "object" && e.body !== null
+            ? (e.body as { linkDiagnostics?: LinkDiagnostics })
+            : {};
+        if (body.linkDiagnostics) setLinkDiagnostics(body.linkDiagnostics);
+      } else {
+        setActionError("Unable to replace link");
+      }
     } finally {
       setBusy(false);
     }
@@ -365,16 +398,33 @@ export default function EstimateDigitalEstimatePanel({
           <p className="eq-muted">Pricing valid through {activePublication.pricingValidThrough}</p>
         ) : null}
         <p data-testid="eq-de-link-status">
-          Customer link: <strong>{linkStatus || (activePublication ? "needs_replace" : "none")}</strong>
+          Customer link: <strong>{linkStatus || (activePublication ? "none" : "none")}</strong>
         </p>
         {customerUrl ? (
           <p className="eq-muted" data-testid="eq-de-customer-url">
             {customerUrl}
           </p>
-        ) : activePublication?.status === "active" ? (
-          <p className="eq-muted" data-testid="eq-de-link-needs-replace">
-            No recoverable customer URL for this publication yet — use Replace Link once.
+        ) : null}
+        {linkError?.message ? (
+          <p className="eq-state eq-state--error" role="alert" data-testid="eq-de-link-error">
+            {linkError.message}
+            {linkError.code ? ` (${linkError.code})` : ""}
           </p>
+        ) : null}
+        {linkDiagnostics ? (
+          <div className="eq-de-pilot-diagnostic" data-testid="eq-de-link-diagnostics" role="status">
+            <strong>Link recovery diagnostic</strong>
+            <ul>
+              <li>wrapKeyPresent: {String(linkDiagnostics.wrapKeyPresent)}</li>
+              <li>wrapKeyLength: {linkDiagnostics.wrapKeyLength ?? "—"}</li>
+              <li>tokenWrappedPresent: {String(linkDiagnostics.tokenWrappedPresent)}</li>
+              <li>tokenWrappedLength: {linkDiagnostics.tokenWrappedLength ?? "—"}</li>
+              <li>activeTokenRows: {linkDiagnostics.activeTokenRows ?? "—"}</li>
+              <li>selectedTokenStatus: {linkDiagnostics.selectedTokenStatus || "—"}</li>
+              <li>decryptSucceeded: {String(linkDiagnostics.decryptSucceeded)}</li>
+              <li>code: {linkDiagnostics.code || "—"}</li>
+            </ul>
+          </div>
         ) : null}
       </div>
 
