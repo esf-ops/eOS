@@ -8,6 +8,7 @@ import {
   REVIEW_STATUS
 } from "./amendmentConfig.mjs";
 import { rejectClientAuthoritativeEconomics } from "./configurationTrustedContext.mjs";
+import { splitSelectionPayloadMeta } from "./customerConfigurationDraft.mjs";
 import {
   constantTimeEqualSessionHash,
   hashConfigurationSessionSecret
@@ -254,14 +255,15 @@ export function createReviewRequestService(deps) {
             }))
           : [];
       const fromSelection = Object.entries(
-        selection.selection_payload_json || selection.selections || {}
+        splitSelectionPayloadMeta(selection.selection_payload_json || selection.selections || {})
+          .quantities
       ).map(([optionKey, quantity]) => ({
         optionKey,
         displayLabel: optionKey,
         quantity: Number(quantity) || 0
       }));
       const selectedOptions = (fromCalc.length ? fromCalc : fromSelection).filter(
-        (o) => Number(o.quantity) > 0
+        (o) => Number(o.quantity) > 0 && !String(o.optionKey || "").startsWith("__")
       );
 
       // Completeness: at least one positive selection
@@ -273,6 +275,14 @@ export function createReviewRequestService(deps) {
         session.organization_id,
         session.publication_id
       );
+      const draftMeta = splitSelectionPayloadMeta(
+        selection.selection_payload_json || selection.selections || {}
+      );
+      const sourceProject = {
+        customerName: snap?.customer_snapshot_json?.project?.customerName ?? null,
+        projectName: snap?.customer_snapshot_json?.project?.projectName ?? null,
+        projectAddress: snap?.customer_snapshot_json?.project?.projectAddress ?? null
+      };
 
       const requestSnapshotJson = {
         version: 1,
@@ -293,7 +303,10 @@ export function createReviewRequestService(deps) {
           quoteNumber: publication.quote_number,
           revisionLabel: publication.revision_label
         },
-        customerFacingNote: customerNote
+        customerFacingNote: customerNote,
+        sourceProject,
+        customerInfoDraft: draftMeta.customerInfoDraft,
+        roomLabelDrafts: draftMeta.roomLabelDrafts
       };
 
       const created = await amendmentRepository.createReviewRequest({

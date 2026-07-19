@@ -449,17 +449,24 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       const all = await amendmentRepository.listReviewRequests(organizationId, { limit: 80 });
       reviewRequests = (all || [])
         .filter((r) => activeIds.has(String(r.publication_id)))
-        .map((r) => ({
-          id: r.id,
-          status: r.status,
-          publicationId: r.publication_id,
-          requestedAt: r.created_at,
-          customerNote: r.customer_note || null,
-          configuredDisplayTotal: r.configured_display_total ?? null,
-          baselineDisplayTotal: r.baseline_display_total ?? null,
-          intakeCaseId: estimate.intakeCaseId,
-          studioEstimateId: estimate.id
-        }));
+        .map((r) => {
+          const snap = r.request_snapshot_json || {};
+          return {
+            id: r.id,
+            status: r.status,
+            publicationId: r.publication_id,
+            requestedAt: r.created_at,
+            customerNote: r.customer_note || null,
+            configuredDisplayTotal: r.configured_display_total ?? null,
+            baselineDisplayTotal: r.baseline_display_total ?? null,
+            intakeCaseId: estimate.intakeCaseId,
+            studioEstimateId: estimate.id,
+            sourceProject: snap.sourceProject || null,
+            customerInfoDraft: snap.customerInfoDraft || null,
+            roomLabelDrafts: snap.roomLabelDrafts || null,
+            selectedOptions: Array.isArray(snap.selectedOptions) ? snap.selectedOptions : []
+          };
+        });
     }
 
     const publicationViews = await staffPublicationViews(organizationId, publications);

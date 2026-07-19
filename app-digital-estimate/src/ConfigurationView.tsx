@@ -5,7 +5,9 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import {
   buildSelectionItems,
+  groupColorsByPricingGroup,
   mapEliteOsToLovableViewModel,
+  type CustomerInfoDraft,
   type LovableColor,
   type LovableRoom,
 } from "./lovableViewModel";
@@ -78,6 +80,8 @@ function ColorPickerModal({
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
+  const groups = useMemo(() => groupColorsByPricingGroup(room.colors), [room.colors]);
+  const [activeGroup, setActiveGroup] = useState(() => groups[0]?.label || "All");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -89,23 +93,39 @@ function ColorPickerModal({
     };
   }, [onClose]);
 
+  useEffect(() => {
+    if (!groups.some((g) => g.label === activeGroup) && groups[0]) {
+      setActiveGroup(groups[0].label);
+    }
+  }, [groups, activeGroup]);
+
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
-    return room.colors.filter((c) =>
-      query ? (c.name + " " + c.collectionLabel).toLowerCase().includes(query) : true,
+    const pool =
+      activeGroup === "All"
+        ? room.colors
+        : groups.find((g) => g.label === activeGroup)?.colors || room.colors;
+    return pool.filter((c) =>
+      query
+        ? (c.name + " " + c.collectionLabel + " " + c.pricingGroupLabel)
+            .toLowerCase()
+            .includes(query)
+        : true,
     );
-  }, [q, room.colors]);
+  }, [q, room.colors, groups, activeGroup]);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-6"
       onClick={onClose}
       role="presentation"
+      data-testid="de-color-modal"
     >
       <div
         className="flex h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl bg-background shadow-2xl sm:h-[85vh] sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label={`Pick a color for ${room.name}`}
       >
         <div className="border-b border-border px-6 py-4">
@@ -121,7 +141,7 @@ function ColorPickerModal({
               onClick={onClose}
               className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
             >
-              Close ✕
+              Close
             </button>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -129,9 +149,22 @@ function ColorPickerModal({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search color"
+              data-testid="de-color-search"
               className="w-56 rounded-md border border-border bg-background px-3 py-2 text-sm"
             />
-            <GroupChip active label={`${filtered.length} available`} onClick={() => undefined} />
+            <GroupChip
+              active={activeGroup === "All"}
+              label={`All (${room.colors.length})`}
+              onClick={() => setActiveGroup("All")}
+            />
+            {groups.map((g) => (
+              <GroupChip
+                key={g.label}
+                active={activeGroup === g.label}
+                label={`${g.label} (${g.colors.length})`}
+                onClick={() => setActiveGroup(g.label)}
+              />
+            ))}
           </div>
         </div>
 
@@ -145,27 +178,35 @@ function ColorPickerModal({
                   type="button"
                   disabled={!c.selectable}
                   onClick={() => onSelect(c)}
+                  data-testid="de-color-card"
+                  data-group={c.pricingGroupLabel}
                   className={`group overflow-hidden rounded-xl border text-left transition ${
                     selected
-                      ? "border-foreground shadow-sm ring-2 ring-foreground/10"
+                      ? "border-foreground shadow-sm ring-2 ring-foreground/20"
                       : "border-border hover:border-foreground/40 hover:shadow-sm"
                   } disabled:opacity-50`}
                 >
                   <div
-                    className="h-24 w-full border-b border-border/60 bg-cover bg-center"
+                    className="h-28 w-full border-b border-border/60 bg-cover bg-center"
                     style={{
-                      background: c.imageFull
-                        ? `url(${c.imageFull}) center/cover`
+                      backgroundImage: c.imageFull
+                        ? `url(${c.imageFull})`
                         : c.imageThumb
-                          ? `url(${c.imageThumb}) center/cover`
-                          : "linear-gradient(135deg,#ebe8e0,#d5d2c8)",
+                          ? `url(${c.imageThumb})`
+                          : undefined,
+                      background:
+                        !c.imageFull && !c.imageThumb
+                          ? "linear-gradient(135deg,#ebe8e0,#d5d2c8)"
+                          : undefined,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
                     }}
                   />
                   <div className="px-3 py-2">
                     <div className="truncate text-xs font-medium text-foreground">{c.name}</div>
                     <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                      {c.collectionLabel}
-                      {c.includedInBaseline ? " · Included" : ""}
+                      {c.pricingGroupLabel}
+                      {c.includedInBaseline ? " · Included" : " · Upgrade may apply"}
                     </div>
                   </div>
                 </button>
@@ -174,7 +215,7 @@ function ColorPickerModal({
           </div>
           {!filtered.length ? (
             <div className="py-12 text-center text-sm text-muted-foreground">
-              No colors match &quot;{q}&quot;.
+              No colors match &quot;{q || activeGroup}&quot;.
             </div>
           ) : null}
         </div>
@@ -259,65 +300,109 @@ function ReviewRequestModal({
 function CustomerRoomCard({
   room,
   onPickColor,
+  onRename,
 }: {
   room: LovableRoom;
   onPickColor: () => void;
+  onRename: (name: string) => void;
 }) {
   const color = room.colors.find((c) => c.id === room.selectedColorId) || room.colors[0];
   const thumb = color?.imageThumb || color?.imageFull || null;
 
   return (
-    <div className="rounded-2xl border border-border bg-background p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">
-            Measurements locked
-          </div>
-          <div className="mt-0.5 text-lg font-semibold text-foreground">{room.name}</div>
-          {room.baselineLabel ? (
-            <div className="mt-1 text-xs text-muted-foreground">Original finish · {room.baselineLabel}</div>
+    <div className="rounded-2xl border border-border bg-background p-6 shadow-sm" data-testid="de-room-card">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">Room</div>
+          {room.customerMayEditLabel ? (
+            <input
+              className="mt-0.5 w-full rounded-md border border-transparent bg-transparent text-lg font-semibold text-foreground outline-none hover:border-border focus:border-border focus:bg-background focus:px-2"
+              value={room.name}
+              aria-label="Room name"
+              data-testid="de-room-label"
+              onChange={(e) => onRename(e.target.value)}
+            />
+          ) : (
+            <div className="mt-0.5 text-lg font-semibold text-foreground">{room.name}</div>
+          )}
+          {room.sourceName && room.sourceName !== room.name ? (
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              From estimate: {room.sourceName}
+            </div>
           ) : null}
         </div>
         <div
-          className="h-14 w-14 rounded-lg border border-border bg-cover bg-center shadow-inner"
+          className="h-16 w-16 shrink-0 rounded-lg border border-border bg-cover bg-center shadow-inner"
           style={{
-            background: thumb
-              ? `url(${thumb}) center/cover`
-              : "linear-gradient(135deg,#ebe8e0,#d5d2c8)",
+            backgroundImage: thumb ? `url(${thumb})` : undefined,
+            background: !thumb ? "linear-gradient(135deg,#ebe8e0,#d5d2c8)" : undefined,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
           }}
         />
       </div>
 
+      <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+        <div className="rounded-xl bg-muted/40 px-3 py-2">
+          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Countertop
+          </dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-foreground" data-testid="de-room-counter-sf">
+            {room.countertopSf != null ? `${room.countertopSf.toFixed(2)} SF` : "—"}
+          </dd>
+        </div>
+        <div className="rounded-xl bg-muted/40 px-3 py-2">
+          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            Backsplash
+          </dt>
+          <dd className="mt-0.5 font-medium tabular-nums text-foreground" data-testid="de-room-backsplash-sf">
+            {room.backsplashSf != null && room.backsplashSf > 0
+              ? `${room.backsplashSf.toFixed(2)} SF`
+              : "Not included"}
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        Measurements are locked and cannot be edited here.
+      </p>
+
       <div className="mt-5">
         <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Color
+          Material / color
         </div>
         <button
           type="button"
           onClick={onPickColor}
+          data-testid="de-open-color-modal"
           className="flex w-full items-center justify-between rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-foreground/40"
         >
           <span className="flex items-center gap-3">
             <span
               className="h-10 w-10 rounded-md border border-border/60 bg-cover bg-center"
               style={{
-                background: thumb
-                  ? `url(${thumb}) center/cover`
-                  : "linear-gradient(135deg,#ebe8e0,#d5d2c8)",
+                backgroundImage: thumb ? `url(${thumb})` : undefined,
+                background: !thumb ? "linear-gradient(135deg,#ebe8e0,#d5d2c8)" : undefined,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
               }}
             />
             <span>
               <span className="block text-sm font-medium text-foreground">
-                {color?.name || "Choose a color"}
+                {color?.name || room.selectedColorName || "Choose a color"}
               </span>
               <span className="block text-xs text-muted-foreground">
-                {color?.collectionLabel || "Elite 100"}
-                {color?.includedInBaseline ? " · Included" : ""}
+                {color?.pricingGroupLabel || "Elite 100"}
+                {color?.includedInBaseline ? " · Included" : " · Upgrade may apply"}
               </span>
             </span>
           </span>
-          <span className="text-xs font-medium text-muted-foreground">Change →</span>
+          <span className="text-xs font-medium text-muted-foreground">Change</span>
         </button>
+        {room.baselineLabel ? (
+          <div className="mt-2 text-xs text-muted-foreground">
+            Original finish · {room.baselineLabel}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -329,6 +414,20 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
   const [qty, setQty] = useState<Record<string, number>>(() => ({
     ...(config?.currentSelections || {}),
   }));
+  const [infoDraft, setInfoDraft] = useState<CustomerInfoDraft>(() => ({
+    customerName: config?.customerInfoDraft?.customerName || config?.sourceProject?.customerName || state.estimate?.project?.customerName || "",
+    projectName: config?.customerInfoDraft?.projectName || config?.sourceProject?.projectName || state.estimate?.project?.projectName || "",
+    phone: config?.customerInfoDraft?.phone || "",
+    email: config?.customerInfoDraft?.email || "",
+    projectAddress:
+      config?.customerInfoDraft?.projectAddress ||
+      config?.sourceProject?.projectAddress ||
+      state.estimate?.project?.projectAddress ||
+      "",
+  }));
+  const [roomLabels, setRoomLabels] = useState<Record<string, string>>(
+    () => ({ ...(config?.roomLabelDrafts || {}) }),
+  );
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
   const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -378,7 +477,7 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
     );
   }
 
-  const vm = mapEliteOsToLovableViewModel(state, qty, latestCalc);
+  const vm = mapEliteOsToLovableViewModel(state, qty, latestCalc, infoDraft, roomLabels);
   if (!vm) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
@@ -390,27 +489,38 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
   const pickerRoom = vm.rooms.find((r) => r.id === pickerRoomId) ?? null;
 
   function selectColor(roomId: string, color: LovableColor) {
-    setQty((prev) => {
-      const next = { ...prev };
-      const room = vm!.rooms.find((r) => r.id === roomId);
-      for (const c of room?.colors || []) next[c.optionKey] = 0;
-      next[color.optionKey] = 1;
-      return next;
-    });
+    const nextQty = { ...qty };
+    const room = vm!.rooms.find((r) => r.id === roomId);
+    for (const c of room?.colors || []) nextQty[c.optionKey] = 0;
+    nextQty[color.optionKey] = 1;
+    setQty(nextQty);
     setSaveState("idle");
     setPickerRoomId(null);
+    void onSave({ qtyOverride: nextQty });
   }
 
-  async function onSave(): Promise<number | null> {
+  async function onSave(opts?: {
+    qtyOverride?: Record<string, number>;
+  }): Promise<number | null> {
     setSaveState("saving");
     setSaveError(null);
     const seq = ++requestSeq.n;
-    const items = buildSelectionItems(qty, vm!.rooms);
+    const effectiveQty = opts?.qtyOverride || qty;
+    const roomsForItems = mapEliteOsToLovableViewModel(
+      state,
+      effectiveQty,
+      latestCalc,
+      infoDraft,
+      roomLabels,
+    )?.rooms || vm!.rooms;
+    const items = buildSelectionItems(effectiveQty, roomsForItems);
     try {
       const result = await saveConfigurationSelections({
         items,
         expectedRowVersion: rowVersion,
         idempotencyKey: `sel-${formId}-${Date.now()}-${seq}`,
+        customerInfoDraft: infoDraft,
+        roomLabelDrafts: roomLabels,
       });
       if (seq !== requestSeq.n) return null;
       const nextRowVersion = result.session?.rowVersion ?? rowVersion;
@@ -426,7 +536,9 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
           ? {
               ...state.configuration,
               latestCalculation: (result.calculation as typeof latestCalc) || latestCalc,
-              currentSelections: qty,
+              currentSelections: effectiveQty,
+              customerInfoDraft: infoDraft,
+              roomLabelDrafts: roomLabels,
             }
           : state.configuration,
       });
@@ -478,10 +590,14 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
       </div>
       <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm">
         <Row label="Original estimate" value={vm.originalTotalLabel} muted />
-        <Row label="Change from original" value={vm.changeFromOriginalLabel} />
+        {vm.materialUpgradeLabel ? (
+          <Row label="Material / option changes" value={vm.materialUpgradeLabel} />
+        ) : (
+          <Row label="Change from original" value={vm.changeFromOriginalLabel} />
+        )}
         <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold">
           <span>Updated estimate</span>
-          <span>{vm.updatedTotalLabel}</span>
+          <span data-testid="de-updated-total">{vm.updatedTotalLabel}</span>
         </div>
       </div>
       <p className="mt-3 text-[11px] text-muted-foreground">
@@ -540,18 +656,71 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
       </header>
 
       <div className="mx-auto max-w-5xl px-6 py-10">
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">Estimate for</div>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">{vm.customerName}</h1>
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">Your project</div>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
+          {vm.customerName}
+        </h1>
         {vm.projectName ? (
           <p className="mt-1 text-sm text-muted-foreground">{vm.projectName}</p>
         ) : null}
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          Pick an approved Elite 100 color for each room and adjust estimator-approved options. Your
-          updated estimate is calculated by eliteOS — measurements and fabrication scope stay locked.
+          Confirm your project details and choose approved Elite 100 colors for each room. Totals
+          update from eliteOS when you save — measurements stay locked.
         </p>
         {vm.lockedScopeNotice ? (
           <p className="mt-2 max-w-2xl text-xs text-muted-foreground">{vm.lockedScopeNotice}</p>
         ) : null}
+
+        <section
+          className="mt-8 rounded-2xl border border-border bg-background p-6 shadow-sm"
+          data-testid="de-customer-info"
+          aria-label="Customer and project information"
+        >
+          <div className="text-xs uppercase tracking-widest text-muted-foreground">
+            Customer information
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Started from your estimator&apos;s records. Suggested corrections are saved with your
+            selections for review — they do not change source accounts directly.
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {(
+              [
+                ["customerName", "Customer name"],
+                ["projectName", "Project / job name"],
+                ["phone", "Phone"],
+                ["email", "Email"],
+                ["projectAddress", "Project address"],
+              ] as const
+            ).map(([field, label]) => {
+              const sourceVal = String(vm.sourceProject[field] || "");
+              const draftVal = infoDraft[field] || "";
+              const changed = Boolean(draftVal) && draftVal !== sourceVal;
+              return (
+                <label
+                  key={field}
+                  className={field === "projectAddress" ? "sm:col-span-2 grid gap-1 text-sm" : "grid gap-1 text-sm"}
+                >
+                  <span className="text-xs font-medium text-muted-foreground">{label}</span>
+                  <input
+                    className="rounded-md border border-border bg-background px-3 py-2"
+                    value={draftVal}
+                    data-testid={`de-info-${field}`}
+                    onChange={(e) => {
+                      setInfoDraft((prev) => ({ ...prev, [field]: e.target.value }));
+                      setSaveState("idle");
+                    }}
+                  />
+                  {sourceVal ? (
+                    <span className="text-[11px] text-muted-foreground">
+                      {changed ? `Suggested change · estimator value: ${sourceVal}` : "Matches estimate"}
+                    </span>
+                  ) : null}
+                </label>
+              );
+            })}
+          </div>
+        </section>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_320px]">
           <div className="space-y-4">
@@ -560,6 +729,10 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
                 key={room.id}
                 room={room}
                 onPickColor={() => setPickerRoomId(room.id)}
+                onRename={(name) => {
+                  setRoomLabels((prev) => ({ ...prev, [room.id]: name }));
+                  setSaveState("idle");
+                }}
               />
             ))}
 

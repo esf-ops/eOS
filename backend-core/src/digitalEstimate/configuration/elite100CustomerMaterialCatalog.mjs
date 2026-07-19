@@ -19,6 +19,8 @@
  * Ambiguous / unused: none from the Lovable Elite 100 texture set (11 unique colors).
  */
 
+import { GROUP_CODE_DISPLAY_NAMES } from "./approvedPricingFixtures.mjs";
+
 export const ELITE100_MATERIAL_CATALOG_CONTRACT = "elite100-customer-materials-v1";
 
 /** @typedef {{
@@ -289,6 +291,9 @@ export function toStudioMaterialRecord(m) {
  * @param {{ roomKey?: string, optionKey?: string, includedInBaseline?: boolean, isDefault?: boolean, selectable?: boolean }} [ctx]
  */
 export function toCustomerSafeMaterialRecord(m, ctx = {}) {
+  const groupLabel =
+    GROUP_CODE_DISPLAY_NAMES[m.pricingGroupCode] ||
+    (m.pricingGroupCode ? String(m.pricingGroupCode) : null);
   return {
     materialId: m.materialId,
     displayName: m.displayName,
@@ -297,12 +302,13 @@ export function toCustomerSafeMaterialRecord(m, ctx = {}) {
     collectionLabel: m.collectionLabel,
     colorFamily: m.colorFamily,
     patternType: m.patternType,
+    pricingGroupLabel: groupLabel,
     customerVisible: m.customerVisible,
     roomKey: ctx.roomKey ?? null,
     optionKey: ctx.optionKey ?? null,
     includedInBaseline: Boolean(ctx.includedInBaseline),
     isDefault: Boolean(ctx.isDefault),
-    selectable: ctx.selectable !== false,
+    selectable: ctx.selectable !== false
   };
 }
 

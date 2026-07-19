@@ -1602,3 +1602,14 @@
 | **SQL** | None (scope JSON additive fields on existing `studio_estimates`). |
 | **Out of scope** | Full Lovable DE customer UX, Elite 100 color modal polish, customer info/submit polish, sold-job, Moraware, QuickBooks. |
 
+
+### 112. Digital Estimate customer experience foundation — info, rooms, Elite 100 color modal (2026-07-19)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-19 |
+| **Decision** | First customer-experience PR for Digital Estimate configures the existing `/e/<token>` + v2 session stack toward the Lovable direction: (1) polished customer/project information with **proposed corrections** stored as session selection meta (`__customerInfoDraft`, `__roomLabelDrafts`) — never CRM/source mutation; (2) room cards with locked countertop/backsplash SF + material selection; (3) Elite 100 color modal with **pricing group tabs** using customer-safe `pricingGroupLabel` (e.g. Group Promo) — never `pricingGroupCode`, Wholesale, or Direct; (4) material pick saves via existing `PUT /v2/selections` and updates totals from server calculation only. Texture assets remain same-origin `/materials/elite100/{thumb,full}`. Studio readiness review list surfaces customer info drafts, room label drafts, selected materials, and submitted total. |
+| **Why** | Functional public configuration existed; customers needed a clearer room/material journey and estimator needed correction visibility without new pricing engines or sold-job behavior. |
+| **SQL** | None (meta keys in existing `selection_payload_json`). |
+| **Out of scope** | Sink/cooktop/edge/backsplash customer controls polish, final submit freeze UX overhaul beyond existing review-request path, Moraware/QB, sold. |
+

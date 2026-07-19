@@ -15,6 +15,12 @@ import {
 } from "./configurationTrustedContext.mjs";
 import { normalizeSelectionPayload } from "./configurationValidation.mjs";
 import {
+  mergeSelectionPayloadMeta,
+  sanitizeCustomerInfoDraft,
+  sanitizeRoomLabelDrafts,
+  splitSelectionPayloadMeta
+} from "./customerConfigurationDraft.mjs";
+import {
   isDigitalEstimatePublicConfigurationRuntimeEnabled,
   readDigitalEstimatePublicConfigurationOrigin,
   readDigitalEstimateSessionTtlHours
@@ -410,6 +416,15 @@ export function createPublicConfigurationService(deps) {
     const customerCalc = latestCalculation?.customer_result_json || null;
     if (customerCalc) assertPublicConfigurationHasNoForbiddenContent(customerCalc);
 
+    const selectionMeta = splitSelectionPayloadMeta(latestSelection?.selection_payload_json);
+    const sourceProject = {
+      customerName: baselineEstimate.project?.customerName || null,
+      projectName: baselineEstimate.project?.projectName || null,
+      projectAddress: baselineEstimate.project?.projectAddress || null,
+      phone: null,
+      email: null
+    };
+
     const state = {
       lifecycle: "active",
       message: null,
@@ -428,18 +443,26 @@ export function createPublicConfigurationService(deps) {
         pricingValidThrough: publication.pricing_valid_through || ctx.pricingValidThrough,
         lockedScopeNotice:
           "Professional measurements and fabrication scope are locked. Your finish and option choices may update the estimate total.",
+        sourceProject,
+        customerInfoDraft: selectionMeta.customerInfoDraft,
+        roomLabelDrafts: selectionMeta.roomLabelDrafts,
         rooms: (ctx.rooms || []).map((r) => ({
           roomKey: r.roomKey,
-          displayName: r.displayName,
+          displayName:
+            selectionMeta.roomLabelDrafts[r.roomKey] || r.displayName,
+          sourceDisplayName: r.displayName,
           baselineMaterialLabel: r.baselineMaterialLabel,
           baselineColorLabel: r.colorLabel || null,
-          // SF intentionally omitted from public projection — locked, not customer-edited
+          countertopSf: Number(r.chargeableCounterSf) || 0,
+          backsplashSf: Number(r.backsplashSf) || 0,
+          // Customer-facing label drafts only — measurements remain locked server-side.
+          customerMayEditLabel: true,
           locked: true
         })),
         groups,
         options,
         materials,
-        currentSelections: latestSelection?.selection_payload_json || {},
+        currentSelections: selectionMeta.quantities,
         latestCalculation: customerCalc,
         baselineDisplayTotal: ctx.baselineDisplayTotal
       }
@@ -688,9 +711,35 @@ export function createPublicConfigurationService(deps) {
           selectionMap[opt.option_key || opt.optionKey] = Number(item.quantity ?? item.qty ?? 0);
         }
       } else {
-        selectionMap =
+        const rawMap =
           body.selections && typeof body.selections === "object" ? body.selections : {};
+        selectionMap = splitSelectionPayloadMeta(rawMap).quantities;
       }
+
+      const customerInfoDraft =
+        sanitizeCustomerInfoDraft(body.customerInfoDraft) ||
+        sanitizeCustomerInfoDraft(body.customer_info_draft);
+      const roomLabelDrafts = sanitizeRoomLabelDrafts(
+        body.roomLabelDrafts || body.room_label_drafts || {}
+      );
+
+      // Preserve prior drafts when caller omits them (material-only saves).
+      let priorMeta = { customerInfoDraft: null, roomLabelDrafts: {} };
+      if (typeof configurationRepository.getLatestSelectionForSession === "function") {
+        const prior = await configurationRepository.getLatestSelectionForSession(
+          session.organization_id,
+          session.id
+        );
+        priorMeta = splitSelectionPayloadMeta(prior?.selection_payload_json);
+      }
+      const mergedInfo =
+        body.customerInfoDraft != null || body.customer_info_draft != null
+          ? customerInfoDraft
+          : priorMeta.customerInfoDraft;
+      const mergedLabels =
+        body.roomLabelDrafts != null || body.room_label_drafts != null
+          ? roomLabelDrafts
+          : priorMeta.roomLabelDrafts;
 
       const normalized = normalizeSelectionPayload({ selections: selectionMap }, options);
 
@@ -838,7 +887,10 @@ export function createPublicConfigurationService(deps) {
         sessionId: session.id,
         expectedRowVersion: Number(expectedRowVersion),
         idempotencyKey,
-        selectionPayload: normalized.selections,
+        selectionPayload: mergeSelectionPayloadMeta(normalized.selections, {
+          customerInfoDraft: mergedInfo,
+          roomLabelDrafts: mergedLabels
+        }),
         selectionHash: normalized.selectionHash,
         customerResultJson: result.public,
         internalEvidenceJson: result.internal,
@@ -858,7 +910,9 @@ export function createPublicConfigurationService(deps) {
           status: persisted.session.status
         },
         calculation: persisted.calculation.customer_result_json,
-        selectionHash: normalized.selectionHash
+        selectionHash: normalized.selectionHash,
+        customerInfoDraft: mergedInfo,
+        roomLabelDrafts: mergedLabels
       };
     },
 
