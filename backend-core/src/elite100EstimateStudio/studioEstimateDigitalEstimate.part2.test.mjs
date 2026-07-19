@@ -560,13 +560,14 @@ console.log("\nstudioEstimateDigitalEstimate.part2.test.mjs\n");
   assert.equal(exchanged.state.lifecycle, "active");
   assert.ok(exchanged.state.configuration, "eligible publish must expose configuration");
   const mats = exchanged.state.configuration.materials || [];
-  const promoCount = listElite100CustomerMaterials(true).filter(
-    (m) => m.pricingGroupCode === "promo"
+  const allVisible = listElite100CustomerMaterials(true).filter(
+    (m) => m.pricingGroupCode !== "remnant"
   ).length;
-  assert.ok(mats.length >= promoCount, "materialColor seeds full group catalog");
+  assert.ok(mats.length >= allVisible, "materialColor seeds all allowed group catalogs");
   assert.equal(JSON.stringify(exchanged.state).toLowerCase().includes("wholesale"), false);
   assert.equal(JSON.stringify(exchanged.state).includes("pricingGroupCode"), false);
-  console.log("ok: 16 materialColor publish seeds group catalog + active configure session");
+  assert.equal(JSON.stringify(exchanged.state.configuration.rooms || []).includes("countertopSf"), false);
+  console.log("ok: 16 materialColor publish seeds multi-group catalog + active configure session");
 }
 
 console.log("\nAll Part 2 Studio → Digital Estimate tests passed.\n");

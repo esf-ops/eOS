@@ -1636,3 +1636,15 @@
 | **SQL** | None. |
 | **Out of scope** | Auto-allowlisting every new publication; changing v1 to also enforce the synthetic allowlist. |
 
+
+### 115. Digital Estimate complete customer options + section billable SF (2026-07-19)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-19 |
+| **Decision** | Complete customer-safe Digital Estimate configuration on the existing envelope/session/Brain stack: (1) shared `ceilBillableSquareFeet` — each independently priced SF section ceilings before rate×SF (pieces, counter, splash, waterfall); (2) public DTOs/UI never expose numeric SF; (3) multi-group Elite 100 colors when `materialColor` is allowed; (4) room-scoped backsplash/sink/edge choice keys; (5) room notes + project note as selection meta; (6) DE.2C material pricing uses billable counter + splash SF. No second catalog/engine; unresolved Blanco/waterfall/popup remain blocked. |
+| **Why** | Configurable page was live but limited to baseline group + SF leakage + incomplete sink/backsplash/edge controls. |
+| **SQL** | None. |
+| **Ops** | Republish estimates to refresh envelopes with multi-group materials and room choices. Keep `DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY=0` for live customer configure. |
+| **Out of scope** | Sold-job, Moraware/QB, full Product Catalog DB bridge beyond approved option fixtures, free-form waterfall/miter dimensions. |
+

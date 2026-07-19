@@ -12,6 +12,10 @@ import {
 } from "./approvedPricingFixtures.mjs";
 import { CURRENT_ELITE100_CONFIG_DELTA_ENGINE_ID } from "./elite100ConfigDeltaConstants.mjs";
 import { sha256CanonicalJson } from "../digitalEstimateToken.mjs";
+import {
+  billableBacksplashFromRoom,
+  billableCountertopFromRoom
+} from "../../quotes/billableSquareFeet.mjs";
 
 function fail(code, message, statusCode = 422) {
   const e = new Error(message);
@@ -68,8 +72,17 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
     for (let i = 0; i < estimateRooms.length; i++) {
       const r = estimateRooms[i];
       const roomKey = String(r.id || r.roomKey || r.name || `room_${i + 1}`);
-      const ct = Number(r.countertopSqft ?? r.countertop_sqft ?? r.chargeableCounterSf);
-      const bs = Number(r.backsplashSqft ?? r.backsplash_sqft ?? 0);
+      const counterBilled = billableCountertopFromRoom({
+        countertopSqft: r.countertopSqft ?? r.countertop_sqft ?? r.chargeableCounterSf,
+        pieces: Array.isArray(r.pieces) ? r.pieces : []
+      });
+      const splashBilled = billableBacksplashFromRoom({
+        includeBacksplash: r.includeBacksplash !== false,
+        backsplashSqft: r.backsplashSqft ?? r.backsplash_sqft ?? 0,
+        backsplashSections: r.backsplashSections
+      });
+      const ct = counterBilled.billableSf;
+      const bs = splashBilled.billableSf;
       if (!Number.isFinite(ct) || ct < 0) {
         blockers.push({
           code: "missing_locked_measurement",
@@ -85,14 +98,21 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
           message: `Room ${roomKey} has unknown baseline material group`
         });
       }
+      // Internal locked measurements — never project numeric SF to public DTOs.
       rooms.push({
         roomKey,
         displayName: String(r.name || r.room_name || roomKey),
         chargeableCounterSf: ct,
+        rawCountertopSf: counterBilled.rawSf,
         backsplashSf: Number.isFinite(bs) ? bs : 0,
+        rawBacksplashSf: splashBilled.rawSf,
+        backsplashHeightMode: r.backsplashHeightMode || null,
+        backsplashMeasuredLengthIn: r.backsplashMeasuredLengthIn ?? null,
+        edgeLinearFeet: Number(r.edgeLinearFeet ?? r.edge_linear_feet) || 0,
         baselineMaterialGroup: groupCode,
         baselineMaterialLabel: GROUP_CODE_DISPLAY_NAMES[groupCode] || String(groupRaw || ""),
-        colorLabel: r.colorName || r.color_name || r.colorLabel || null
+        colorLabel: r.colorName || r.color_name || r.colorLabel || null,
+        measurementsLocked: true
       });
     }
   } else if (Array.isArray(customerSnapshot?.rooms) && customerSnapshot.rooms.length) {

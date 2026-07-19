@@ -230,8 +230,12 @@ export function createConfigurationStudioService(deps) {
         const optionKey = String(optionPayload.optionKey || optionPayload.option_key || "");
         // Material selections use material:room:{materialId|group} — group resolved server-side from catalog
         const isMaterial = optionKey.startsWith("material:");
+        const isRoomChoice =
+          optionKey.startsWith("backsplash:") ||
+          optionKey.startsWith("sink:") ||
+          optionKey.startsWith("edge:");
         const cat = catalog.get(optionKey);
-        if (!isMaterial && !cat) {
+        if (!isMaterial && !isRoomChoice && !cat) {
           throw fail("unknown_option", `Option not in server-approved catalog: ${optionKey}`, 400);
         }
         let compatibilityJson = optionPayload.compatibilityJson || optionPayload.compatibility_json || {};

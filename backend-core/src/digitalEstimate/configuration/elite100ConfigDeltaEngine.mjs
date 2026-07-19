@@ -518,7 +518,10 @@ export function calculateElite100ConfigDelta(rawInput) {
     const baselineGroup = room.baselineMaterialGroup
       ? normalizeGroupCode(room.baselineMaterialGroup)
       : selectedGroup;
-    const milli = sfToMilli(Number(room.chargeableCounterSf));
+    const milliCounter = sfToMilli(Number(room.chargeableCounterSf));
+    const milliSplash = sfToMilli(Number(room.chargeableBacksplashSf || 0));
+    // Sections already use whole-SF ceiling; sum billable SF then convert to milli.
+    const milli = milliCounter + milliSplash;
 
     const resolved = resolveMaterialRateCents({
       organizationId: input.organizationId,

@@ -32,13 +32,23 @@ export type LovableRoom = {
   sourceName: string;
   customerMayEditLabel: boolean;
   locked: boolean;
-  countertopSf: number | null;
-  backsplashSf: number | null;
+  countertopIncluded: boolean;
+  backsplashIncluded: boolean;
+  backsplashSummary: string | null;
+  measurementStatus: string | null;
   baselineLabel: string | null;
   selectedColorId: string | null;
   selectedOptionKey: string | null;
   selectedColorName: string | null;
   colors: LovableColor[];
+  choiceOptions: Array<{
+    optionKey: string;
+    displayLabel: string;
+    role: string;
+    selected: boolean;
+    includedInBaseline: boolean;
+  }>;
+  roomNote: string;
 };
 
 export type LovableAddon = {
@@ -202,19 +212,37 @@ export function mapEliteOsToLovableViewModel(
       null;
     const calcRoom = calcRooms.find((cr) => String(cr.roomKey) === r.roomKey);
     const labelDraft = roomLabelDrafts?.[r.roomKey] ?? config.roomLabelDrafts?.[r.roomKey];
+    const choiceOptions = options
+      .filter((o) => {
+        const key = o.optionKey || "";
+        return (
+          key.startsWith(`backsplash:${r.roomKey}:`) ||
+          key.startsWith(`sink:${r.roomKey}:`) ||
+          key.startsWith(`edge:${r.roomKey}:`)
+        );
+      })
+      .map((o) => {
+        const parts = o.optionKey.split(":");
+        const role = parts[0] || "choice";
+        return {
+          optionKey: o.optionKey,
+          displayLabel: o.displayLabel,
+          role,
+          selected: (qty[o.optionKey] ?? o.defaultQty ?? 0) > 0,
+          includedInBaseline: Boolean(o.includedInBaseline),
+        };
+      });
+    const splashSelected = choiceOptions.find((c) => c.role === "backsplash" && c.selected);
     return {
       id: r.roomKey,
       name: labelDraft || r.displayName,
       sourceName: r.sourceDisplayName || r.displayName,
       customerMayEditLabel: r.customerMayEditLabel !== false,
       locked: true,
-      countertopSf:
-        typeof r.countertopSf === "number"
-          ? r.countertopSf
-          : calcRoom && typeof calcRoom.chargeableCounterSf === "number"
-            ? Number(calcRoom.chargeableCounterSf)
-            : null,
-      backsplashSf: typeof r.backsplashSf === "number" ? r.backsplashSf : null,
+      countertopIncluded: r.countertopIncluded !== false,
+      backsplashIncluded: Boolean(r.backsplashIncluded),
+      backsplashSummary: splashSelected?.displayLabel || null,
+      measurementStatus: r.measurementStatus || "Measurements verified by estimator",
       baselineLabel: r.baselineColorLabel || r.baselineMaterialLabel || null,
       selectedColorId: selectedColor?.id ?? null,
       selectedOptionKey: selectedColor?.optionKey ?? selectedOpt?.optionKey ?? null,
@@ -224,6 +252,8 @@ export function mapEliteOsToLovableViewModel(
           ? String(calcRoom.selectedMaterialLabel)
           : null),
       colors,
+      choiceOptions,
+      roomNote: String((config.roomNotes && config.roomNotes[r.roomKey]) || ""),
     };
   });
 

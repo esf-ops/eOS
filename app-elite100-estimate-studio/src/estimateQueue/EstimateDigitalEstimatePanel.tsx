@@ -59,8 +59,11 @@ type ReviewRequestRow = {
     projectAddress?: string;
   } | null;
   roomLabelDrafts?: Record<string, string> | null;
+  roomNotes?: Record<string, string> | null;
+  projectNote?: string | null;
   selectedOptions?: Array<{ optionKey?: string; displayLabel?: string; quantity?: number }>;
   configuredDisplayTotal?: number | null;
+  baselineDisplayTotal?: number | null;
 };
 
 type PublishDiagnostic = {
@@ -501,6 +504,19 @@ export default function EstimateDigitalEstimatePanel({
                       .join(", ")}
                   </div>
                 ) : null}
+                {r.roomNotes && Object.keys(r.roomNotes).length ? (
+                  <div className="eq-footnote" data-testid="eq-de-review-room-notes">
+                    Room notes:{" "}
+                    {Object.entries(r.roomNotes)
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join(" · ")}
+                  </div>
+                ) : null}
+                {r.projectNote ? (
+                  <div className="eq-footnote" data-testid="eq-de-review-project-note">
+                    Project note: {r.projectNote}
+                  </div>
+                ) : null}
                 {r.selectedOptions?.length ? (
                   <div className="eq-footnote" data-testid="eq-de-review-materials">
                     Selected options:{" "}
@@ -510,9 +526,14 @@ export default function EstimateDigitalEstimatePanel({
                       .join(", ")}
                   </div>
                 ) : null}
-                {r.configuredDisplayTotal != null ? (
+                {r.baselineDisplayTotal != null || r.configuredDisplayTotal != null ? (
                   <div className="eq-footnote">
-                    Submitted total: ${Number(r.configuredDisplayTotal).toFixed(2)}
+                    {r.baselineDisplayTotal != null
+                      ? `Original: $${Number(r.baselineDisplayTotal).toFixed(2)} · `
+                      : null}
+                    {r.configuredDisplayTotal != null
+                      ? `Requested: $${Number(r.configuredDisplayTotal).toFixed(2)}`
+                      : null}
                   </div>
                 ) : null}
               </li>
