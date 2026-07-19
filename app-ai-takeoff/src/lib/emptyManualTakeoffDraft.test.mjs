@@ -16,6 +16,7 @@ import {
 } from "./emptyManualTakeoffDraft.mjs";
 import {
   mergeAiDraftPreservingConfirmed,
+  saveMergeTakeoffDrafts,
   selectAuthoritativeTakeoffResult
 } from "../../../backend-core/src/takeoff/takeoffAuthoritativeResult.mjs";
 import { deriveQueueWorkflowStatus } from "../../../backend-core/src/elite100EstimateStudio/studioEstimateQueueWorkflow.mjs";
@@ -59,6 +60,47 @@ console.log("\nemptyManualTakeoffDraft.test.mjs\n");
   assert.ok(owned.manualRoomIds.includes(draft.rooms[0].id));
   assert.ok(owned.manualRunIds.includes(draft.rooms[0].areas[0].runs[0].id));
   console.log("  ✓ add room + piece before AI result");
+}
+
+{
+  // Client Save & merge path: local estimator draft + pending AI server payload.
+  let local = createEmptyManualTakeoffDraft();
+  local = addManualRoom(local, { name: "Manual Test Room" });
+  const emptyId = local.rooms[0].id;
+  local = addManualRoom(local, { name: "Spare empty" });
+  local = addManualPiece(local, emptyId, {
+    label: "Manual piece",
+    lengthIn: 120,
+    depthIn: 25.5
+  });
+  const pieceId = local.rooms.find((r) => r.id === emptyId).areas[0].runs[0].id;
+
+  const serverAi = {
+    rooms: [
+      {
+        id: "ai-kitchen",
+        name: "AI Kitchen",
+        areas: [{ id: "a1", runs: [{ id: "ai-run", lengthIn: 80, depthIn: 25.5 }] }]
+      }
+    ]
+  };
+
+  const { merged } = saveMergeTakeoffDrafts(local, serverAi);
+  assert.ok(merged.rooms.some((r) => r.id === emptyId), "manual room id stable");
+  assert.ok(merged.rooms.some((r) => r.name === "Spare empty"), "empty manual room survives");
+  assert.equal(
+    merged.rooms.find((r) => r.id === emptyId).areas[0].runs[0].lengthIn,
+    120,
+    "manual dimensions survive Save & merge"
+  );
+  assert.equal(merged.rooms.find((r) => r.id === emptyId).areas[0].runs[0].id, pieceId);
+  assert.ok(merged.rooms.some((r) => r.id === "ai-kitchen"), "AI appends");
+
+  // Simulated post-merge poll returning AI-only must not displace when re-merged.
+  const afterPoll = saveMergeTakeoffDrafts(merged, serverAi).merged;
+  assert.ok(afterPoll.rooms.some((r) => r.id === emptyId));
+  assert.equal(afterPoll.rooms.find((r) => r.id === emptyId).areas[0].runs[0].lengthIn, 120);
+  console.log("  ✓ client Save & merge + post-merge refresh keep estimator geometry");
 }
 
 

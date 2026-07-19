@@ -25,6 +25,10 @@ import {
   hasUsableTakeoffGeometry,
   markRunEstimatorOwned
 } from "../lib/emptyManualTakeoffDraft.mjs";
+import {
+  hasEstimatorOwnedGeometry,
+  saveMergeTakeoffDrafts
+} from "@takeoff-core/takeoffAuthoritativeResult.mjs";
 import { getSupabase } from "../lib/supabase";
 import TakeoffPlanPreviewPanel, {
   type PlanPreviewFileMeta
@@ -236,6 +240,7 @@ export default function ConsolidatedTakeoffReview() {
   const [pendingAiMerge, setPendingAiMerge] = useState(false);
   const [retryBusy, setRetryBusy] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const pendingServerTakeoffRef = useRef<any | null>(null);
   const saveTimer = useRef<number | null>(null);
   const draftRef = useRef(draft);
   const excludedRef = useRef(excludedRunIds);
@@ -265,7 +270,11 @@ export default function ConsolidatedTakeoffReview() {
     };
   }, []);
 
-  const loadWorkspace = useCallback(async (token: string, jobId: string, opts?: { forceServer?: boolean }) => {
+  const loadWorkspace = useCallback(async (
+    token: string,
+    jobId: string,
+    opts?: { forceServer?: boolean; discardLocal?: boolean }
+  ) => {
     setLoadError(null);
     const job = (await labApiGet(
       `/api/takeoff-jobs/${encodeURIComponent(jobId)}`,
@@ -297,19 +306,34 @@ export default function ConsolidatedTakeoffReview() {
     const dirty =
       saveStatusRef.current === "dirty" || saveStatusRef.current === "saving";
     let activeDraft = draftRef.current || createEmptyManualTakeoffDraft();
-    if (result && usableServer && dirty && !opts?.forceServer) {
-      // AI (or another tab) has geometry while local edits are unsaved — do not overwrite.
-      if (hasUsableTakeoffGeometry(activeDraft)) {
-        setPendingAiMerge(true);
-      } else {
-        activeDraft = result;
-        setDraft(result);
-        setPendingAiMerge(false);
-      }
+    const localOwned =
+      hasEstimatorOwnedGeometry(activeDraft) || hasUsableTakeoffGeometry(activeDraft);
+
+    if (opts?.discardLocal && result) {
+      // Explicit Discard & load AI — replace local draft.
+      activeDraft = result;
+      setDraft(result);
+      setPendingAiMerge(false);
+      pendingServerTakeoffRef.current = null;
+      const rs = latest?.reviewState || {};
+      setExcludedRunIds(new Set(rs.excludedRunIds ?? []));
+    } else if (result && usableServer && dirty && !opts?.forceServer && localOwned) {
+      // AI ready while estimator has unsaved geometry — hold server payload for Save & merge.
+      pendingServerTakeoffRef.current = result;
+      setPendingAiMerge(true);
+    } else if (result && localOwned && !opts?.discardLocal) {
+      // Soft refresh / post-merge poll: never let raw AI displace estimator-owned draft.
+      const { merged } = saveMergeTakeoffDrafts(activeDraft, result);
+      activeDraft = merged;
+      draftRef.current = merged;
+      setDraft(merged);
+      setPendingAiMerge(false);
+      pendingServerTakeoffRef.current = null;
     } else if (result) {
       activeDraft = result;
       setDraft(result);
       setPendingAiMerge(false);
+      pendingServerTakeoffRef.current = null;
       const rs = latest?.reviewState || {};
       setExcludedRunIds(new Set(rs.excludedRunIds ?? []));
     } else if (!hasUsableTakeoffGeometry(activeDraft)) {
@@ -335,6 +359,63 @@ export default function ConsolidatedTakeoffReview() {
       });
     }
   }, []);
+
+  const persistDraftWithResult = useCallback(
+    async (takeoffResult: any) => {
+      if (!authToken || !takeoffJobId || !takeoffResult) return;
+      draftRef.current = takeoffResult;
+      setDraft(takeoffResult);
+      setSaveStatus("saving");
+      setSaveError(null);
+      try {
+        const ownership = collectManualOwnershipIds(takeoffResult);
+        const roomCompleteness: Record<string, boolean> = {};
+        for (const room of takeoffResult?.rooms ?? []) {
+          if (room?.id) roomCompleteness[room.id] = true;
+        }
+        await saveTakeoffCorrection(authToken, takeoffJobId, {
+          takeoffResult,
+          correctionNotes: "Consolidated worksheet autosave",
+          reviewState: {
+            excludedRunIds: [...excludedRef.current],
+            excludedRoomIds: [],
+            roomCompleteness,
+            flagResolutions: {},
+            referenceTotalAcks: {},
+            evidenceAcks: {},
+            manualRoomIds: ownership.manualRoomIds,
+            manualRunIds: ownership.manualRunIds
+          }
+        });
+        setSaveStatus("saved");
+        window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
+      } catch (e) {
+        setSaveStatus("error");
+        setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+        throw e;
+      }
+    },
+    [authToken, takeoffJobId]
+  );
+
+  const handleSaveAndMergeAi = useCallback(async () => {
+    if (!authToken || !takeoffJobId) return;
+    const local = draftRef.current || createEmptyManualTakeoffDraft();
+    let serverAi = pendingServerTakeoffRef.current;
+    if (!serverAi) {
+      const latest = (await labApiGet(
+        `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
+        authToken
+      ).catch(() => null)) as any;
+      serverAi = latest?.normalizedTakeoffJson ?? null;
+    }
+    const { merged } = saveMergeTakeoffDrafts(local, serverAi);
+    await persistDraftWithResult(merged);
+    setPendingAiMerge(false);
+    pendingServerTakeoffRef.current = null;
+    // Soft reload merges again — never force AI-only overwrite.
+    await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
+  }, [authToken, takeoffJobId, persistDraftWithResult, loadWorkspace]);
 
   useEffect(() => {
     if (!authToken || !takeoffJobId) return;
@@ -630,12 +711,9 @@ export default function ConsolidatedTakeoffReview() {
               className="ctr-btn-secondary"
               data-testid="ctr-save-merge-ai"
               onClick={() => {
-                void (async () => {
-                  await persistDraft();
-                  if (authToken && takeoffJobId) {
-                    await loadWorkspace(authToken, takeoffJobId, { forceServer: true });
-                  }
-                })();
+                void handleSaveAndMergeAi().catch((e) =>
+                  setLoadError(e instanceof LabApiError ? e.message : "Save & merge failed")
+                );
               }}
             >
               Save &amp; merge
@@ -647,8 +725,12 @@ export default function ConsolidatedTakeoffReview() {
               onClick={() => {
                 setPendingAiMerge(false);
                 setSaveStatus("idle");
+                pendingServerTakeoffRef.current = null;
                 if (authToken && takeoffJobId) {
-                  void loadWorkspace(authToken, takeoffJobId, { forceServer: true });
+                  void loadWorkspace(authToken, takeoffJobId, {
+                    forceServer: true,
+                    discardLocal: true
+                  });
                 }
               }}
             >
