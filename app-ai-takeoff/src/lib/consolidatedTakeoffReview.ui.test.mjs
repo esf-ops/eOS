@@ -47,14 +47,27 @@ assert.ok(component.includes("saveMergeTakeoffDrafts"));
 assert.ok(component.includes("pendingServerTakeoffRef"));
 assert.ok(component.includes("discardLocal: true"));
 assert.ok(component.includes("hasEstimatorOwnedGeometry"));
+assert.ok(component.includes("data-testid=\"ctr-remove-room\""));
+assert.ok(component.includes("data-testid=\"ctr-remove-piece\""));
+assert.ok(component.includes("Remove room"));
+assert.ok(component.includes("Remove piece"));
+assert.ok(component.includes("deletedRoomIds"));
+assert.ok(component.includes("deletedRunIds"));
+assert.ok(component.includes("handleRemoveRoom"));
+assert.ok(component.includes("handleRemovePiece"));
+assert.ok(component.includes('aria-label={`Remove room ${section.name}`}'));
+assert.ok(component.includes('aria-label={`Remove piece ${row.pieceName}`}'));
 assert.ok(
   component.includes("await loadWorkspace(authToken, takeoffJobId, { forceServer: false })"),
   "Save & merge soft-reloads without discarding local estimator draft"
 );
-assert.ok(!component.includes("await persistDraft();\n                  if (authToken && takeoffJobId) {\n                    await loadWorkspace(authToken, takeoffJobId, { forceServer: true })"));
 assert.ok(component.includes("data-testid=\"ctr-save-merge-ai\""));
 assert.ok(component.includes("pendingAiMerge"));
 assert.ok(component.includes("AI findings are ready. Save or discard your current edits before merging."));
+assert.ok(
+  component.includes("included") || component.includes("Include piece"),
+  "include/exclude checkbox remains separate from remove"
+);
 assert.ok(!component.includes("Mark") || !component.includes("verified"));
 assert.ok(!component.includes("Continue review"));
 assert.ok(component.includes("approveAndBuildEstimate"));

@@ -63,6 +63,8 @@ export function hasEstimatorSavedEdits(row) {
     if (rs && typeof rs === "object") {
       if (Array.isArray(rs.manualRunIds) && rs.manualRunIds.length > 0) return true;
       if (Array.isArray(rs.manualRoomIds) && rs.manualRoomIds.length > 0) return true;
+      if (Array.isArray(rs.deletedRunIds) && rs.deletedRunIds.length > 0) return true;
+      if (Array.isArray(rs.deletedRoomIds) && rs.deletedRoomIds.length > 0) return true;
     }
   }
   // Geometry markers survive even when result-row insert failed and only JSON remains.
@@ -85,6 +87,8 @@ export function resultSummaryLooksEstimatorOwned(summary) {
   if (rs && typeof rs === "object") {
     if (Array.isArray(rs.manualRoomIds) && rs.manualRoomIds.length > 0) return true;
     if (Array.isArray(rs.manualRunIds) && rs.manualRunIds.length > 0) return true;
+    if (Array.isArray(rs.deletedRoomIds) && rs.deletedRoomIds.length > 0) return true;
+    if (Array.isArray(rs.deletedRunIds) && rs.deletedRunIds.length > 0) return true;
   }
   return false;
 }
@@ -239,19 +243,153 @@ function listAiRoomRuns(aiRoom) {
 }
 
 /**
+ * Collect run ids under a room (areas[].runs / runs / pieces).
+ * @param {object|null|undefined} room
+ */
+export function collectRunIdsFromRoom(room) {
+  const out = [];
+  for (const run of Array.isArray(room?.runs) ? room.runs : []) {
+    const id = String(run?.id ?? "").trim();
+    if (id) out.push(id);
+  }
+  for (const piece of Array.isArray(room?.pieces) ? room.pieces : []) {
+    const id = String(piece?.id ?? "").trim();
+    if (id) out.push(id);
+  }
+  for (const area of Array.isArray(room?.areas) ? room.areas : []) {
+    for (const run of Array.isArray(area?.runs) ? area.runs : []) {
+      const id = String(run?.id ?? "").trim();
+      if (id) out.push(id);
+    }
+  }
+  return out;
+}
+
+/**
+ * Strip hard-deleted rooms/runs from a takeoff draft (durable tombstones).
+ * @param {object|null|undefined} takeoff
+ * @param {{ deletedRoomIds?: Iterable<string>, deletedRunIds?: Iterable<string> }} tombstones
+ */
+export function applyDeletionTombstones(takeoff, tombstones = {}) {
+  const deletedRooms = new Set(
+    [...(tombstones.deletedRoomIds ?? [])].map(String).filter(Boolean)
+  );
+  const deletedRuns = new Set(
+    [...(tombstones.deletedRunIds ?? [])].map(String).filter(Boolean)
+  );
+  if (!takeoff || typeof takeoff !== "object") {
+    return { schemaVersion: "1.0", status: "draft", rooms: [] };
+  }
+  const base = structuredClone(takeoff);
+  if (!Array.isArray(base.rooms)) base.rooms = [];
+  if (deletedRooms.size === 0 && deletedRuns.size === 0) return base;
+
+  base.rooms = base.rooms
+    .filter((room) => {
+      const id = String(room?.id ?? "").trim();
+      return !id || !deletedRooms.has(id);
+    })
+    .map((room) => {
+      const next = { ...room };
+      if (Array.isArray(next.runs)) {
+        next.runs = next.runs.filter((r) => !deletedRuns.has(String(r?.id ?? "")));
+      }
+      if (Array.isArray(next.pieces)) {
+        next.pieces = next.pieces.filter((r) => !deletedRuns.has(String(r?.id ?? "")));
+      }
+      if (Array.isArray(next.areas)) {
+        next.areas = next.areas.map((area) => ({
+          ...area,
+          runs: (area.runs ?? []).filter((r) => !deletedRuns.has(String(r?.id ?? "")))
+        }));
+      }
+      return next;
+    });
+  return base;
+}
+
+/**
+ * Remove a room and all child pieces from the draft.
+ * @param {object} takeoff
+ * @param {string} roomId
+ */
+export function removeRoomFromTakeoff(takeoff, roomId) {
+  const id = String(roomId ?? "").trim();
+  const base =
+    takeoff && typeof takeoff === "object"
+      ? structuredClone(takeoff)
+      : { schemaVersion: "1.0", status: "draft", rooms: [] };
+  if (!Array.isArray(base.rooms)) base.rooms = [];
+  const room = base.rooms.find((r) => String(r?.id ?? "") === id);
+  const deletedRunIds = room ? collectRunIdsFromRoom(room) : [];
+  base.rooms = base.rooms.filter((r) => String(r?.id ?? "") !== id);
+  return {
+    takeoff: base,
+    deletedRoomIds: id ? [id] : [],
+    deletedRunIds
+  };
+}
+
+/**
+ * Remove a single piece/run; leave the room even if empty.
+ * @param {object} takeoff
+ * @param {string} roomId
+ * @param {string} runId
+ */
+export function removePieceFromTakeoff(takeoff, roomId, runId) {
+  const rid = String(runId ?? "").trim();
+  const roomKey = String(roomId ?? "").trim();
+  const base =
+    takeoff && typeof takeoff === "object"
+      ? structuredClone(takeoff)
+      : { schemaVersion: "1.0", status: "draft", rooms: [] };
+  if (!Array.isArray(base.rooms)) base.rooms = [];
+  base.rooms = base.rooms.map((room) => {
+    if (String(room?.id ?? "") !== roomKey) return room;
+    return {
+      ...room,
+      runs: Array.isArray(room.runs)
+        ? room.runs.filter((r) => String(r?.id ?? "") !== rid)
+        : room.runs,
+      pieces: Array.isArray(room.pieces)
+        ? room.pieces.filter((r) => String(r?.id ?? "") !== rid)
+        : room.pieces,
+      areas: (room.areas ?? []).map((area) => ({
+        ...area,
+        runs: (area.runs ?? []).filter((r) => String(r?.id ?? "") !== rid)
+      }))
+    };
+  });
+  return {
+    takeoff: base,
+    deletedRoomIds: [],
+    deletedRunIds: rid ? [rid] : []
+  };
+}
+
+/**
  * Merge a new AI draft into confirmed estimator geometry.
- * Confirmed rooms/runs win (including empty estimator rooms); AI-only rooms/runs
- * are appended as unconfirmed findings. Manual ids stay stable.
+ * Precedence: deletion tombstones → estimator-owned → AI append → empty.
  *
  * @param {object} confirmedTakeoff normalized_takeoff_json
  * @param {object} aiTakeoff normalized_takeoff_json
+ * @param {{ deletedRoomIds?: Iterable<string>, deletedRunIds?: Iterable<string> }} [opts]
  * @returns {{ merged: object, unconfirmedAiFindings: object }}
  */
-export function mergeAiDraftPreservingConfirmed(confirmedTakeoff, aiTakeoff) {
-  const base =
+export function mergeAiDraftPreservingConfirmed(confirmedTakeoff, aiTakeoff, opts = {}) {
+  const deletedRoomIds = new Set(
+    [...(opts.deletedRoomIds ?? [])].map(String).filter(Boolean)
+  );
+  const deletedRunIds = new Set(
+    [...(opts.deletedRunIds ?? [])].map(String).filter(Boolean)
+  );
+
+  const base = applyDeletionTombstones(
     confirmedTakeoff && typeof confirmedTakeoff === "object"
-      ? structuredClone(confirmedTakeoff)
-      : { rooms: [] };
+      ? confirmedTakeoff
+      : { rooms: [] },
+    { deletedRoomIds, deletedRunIds }
+  );
   const ai = aiTakeoff && typeof aiTakeoff === "object" ? aiTakeoff : { rooms: [] };
   if (!Array.isArray(base.rooms)) base.rooms = [];
 
@@ -267,12 +405,16 @@ export function mergeAiDraftPreservingConfirmed(confirmedTakeoff, aiTakeoff) {
   for (const aiRoom of Array.isArray(ai.rooms) ? ai.rooms : []) {
     const roomId = String(aiRoom?.id ?? "").trim();
     const roomName = String(aiRoom?.name ?? "").trim().toLowerCase();
+    // Estimator deleted this room — never re-append.
+    if (roomId && deletedRoomIds.has(roomId)) continue;
+
     if (roomId && confirmedRoomIds.has(roomId)) {
       const target = base.rooms.find((r) => String(r?.id ?? "") === roomId);
       if (!target) continue;
       const slot = listRoomRuns(target);
       for (const run of listAiRoomRuns(aiRoom)) {
         const rid = String(run?.id ?? "").trim();
+        if (rid && deletedRunIds.has(rid)) continue;
         if (rid && confirmedRunIds.has(rid)) continue;
         if (rid) confirmedRunIds.add(rid);
         const draftRun = { ...run, _aiUnconfirmed: true };
@@ -285,7 +427,20 @@ export function mergeAiDraftPreservingConfirmed(confirmedTakeoff, aiTakeoff) {
       // Name match without id match — do not replace confirmed room.
       continue;
     }
+    // Filter deleted runs inside a new AI room before append.
     const draftRoom = { ...structuredClone(aiRoom), _aiUnconfirmed: true };
+    if (Array.isArray(draftRoom.runs)) {
+      draftRoom.runs = draftRoom.runs.filter((r) => !deletedRunIds.has(String(r?.id ?? "")));
+    }
+    if (Array.isArray(draftRoom.pieces)) {
+      draftRoom.pieces = draftRoom.pieces.filter((r) => !deletedRunIds.has(String(r?.id ?? "")));
+    }
+    if (Array.isArray(draftRoom.areas)) {
+      draftRoom.areas = draftRoom.areas.map((area) => ({
+        ...area,
+        runs: (area.runs ?? []).filter((r) => !deletedRunIds.has(String(r?.id ?? "")))
+      }));
+    }
     base.rooms.push(draftRoom);
     if (roomId) confirmedRoomIds.add(roomId);
     unconfirmedRooms.push({ roomId: roomId || null, name: aiRoom?.name ?? null });
@@ -302,20 +457,21 @@ export function mergeAiDraftPreservingConfirmed(confirmedTakeoff, aiTakeoff) {
 }
 
 /**
- * Client Save & merge: keep estimator draft, append AI-only findings, stable ids.
+ * Client Save & merge: keep estimator draft, honor tombstones, append AI-only findings.
  * @param {object} localDraft
  * @param {object|null|undefined} serverAiTakeoff
+ * @param {{ deletedRoomIds?: Iterable<string>, deletedRunIds?: Iterable<string> }} [opts]
  */
-export function saveMergeTakeoffDrafts(localDraft, serverAiTakeoff) {
+export function saveMergeTakeoffDrafts(localDraft, serverAiTakeoff, opts = {}) {
   const local =
     localDraft && typeof localDraft === "object"
       ? localDraft
       : { schemaVersion: "1.0", status: "draft", rooms: [] };
   if (!serverAiTakeoff || typeof serverAiTakeoff !== "object") {
     return {
-      merged: structuredClone(local),
+      merged: applyDeletionTombstones(local, opts),
       unconfirmedAiFindings: { rooms: [], runs: [], addedAt: new Date().toISOString() }
     };
   }
-  return mergeAiDraftPreservingConfirmed(local, serverAiTakeoff);
+  return mergeAiDraftPreservingConfirmed(local, serverAiTakeoff, opts);
 }

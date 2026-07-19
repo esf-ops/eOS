@@ -54,17 +54,28 @@ function sfFromRun(lengthIn, depthIn) {
 export function applyReviewFiltersToTakeoffResult(takeoffResult, reviewState) {
   const excludedRuns = new Set(reviewState?.excludedRunIds ?? []);
   const excludedRooms = new Set(reviewState?.excludedRoomIds ?? []);
-  if (excludedRuns.size === 0 && excludedRooms.size === 0) return takeoffResult;
+  const deletedRuns = new Set(reviewState?.deletedRunIds ?? []);
+  const deletedRooms = new Set(reviewState?.deletedRoomIds ?? []);
+  if (
+    excludedRuns.size === 0 &&
+    excludedRooms.size === 0 &&
+    deletedRuns.size === 0 &&
+    deletedRooms.size === 0
+  ) {
+    return takeoffResult;
+  }
 
   return {
     ...takeoffResult,
     rooms: (takeoffResult.rooms ?? [])
-      .filter((room) => !excludedRooms.has(room.id))
+      .filter((room) => !excludedRooms.has(room.id) && !deletedRooms.has(room.id))
       .map((room) => ({
         ...room,
         areas: (room.areas ?? []).map((area) => ({
           ...area,
-          runs: (area.runs ?? []).filter((r) => !excludedRuns.has(r.id)),
+          runs: (area.runs ?? []).filter(
+            (r) => !excludedRuns.has(r.id) && !deletedRuns.has(r.id)
+          ),
         })),
       })),
   };

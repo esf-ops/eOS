@@ -103,6 +103,62 @@ console.log("\nemptyManualTakeoffDraft.test.mjs\n");
   console.log("  ✓ client Save & merge + post-merge refresh keep estimator geometry");
 }
 
+{
+  const {
+    removePieceFromTakeoff,
+    removeRoomFromTakeoff,
+    mergeAiDraftPreservingConfirmed
+  } = await import("../../../backend-core/src/takeoff/takeoffAuthoritativeResult.mjs");
+
+  let draft = createEmptyManualTakeoffDraft();
+  draft = addManualRoom(draft, { name: "Keep Room" });
+  draft = addManualRoom(draft, { name: "Drop Room" });
+  const keepId = draft.rooms[0].id;
+  const dropId = draft.rooms[1].id;
+  draft = addManualPiece(draft, keepId, { label: "A", lengthIn: 144, depthIn: 18 });
+  draft = addManualPiece(draft, keepId, { label: "B", lengthIn: 72, depthIn: 18 });
+  const runA = draft.rooms[0].areas[0].runs[0].id;
+  const runB = draft.rooms[0].areas[0].runs[1].id;
+
+  const sf = (t) =>
+    t.rooms
+      .flatMap((r) => r.areas.flatMap((a) => a.runs))
+      .reduce((s, r) => s + (Number(r.lengthIn) * Number(r.depthIn)) / 144, 0);
+
+  const before = sf(draft);
+  const afterPiece = removePieceFromTakeoff(draft, keepId, runB);
+  assert.ok(sf(afterPiece.takeoff) < before, "remove piece updates SF totals");
+  assert.equal(afterPiece.takeoff.rooms.find((r) => r.id === keepId).areas[0].runs.length, 1);
+  assert.ok(afterPiece.takeoff.rooms.find((r) => r.id === keepId));
+
+  const afterLast = removePieceFromTakeoff(afterPiece.takeoff, keepId, runA);
+  assert.equal(afterLast.takeoff.rooms.find((r) => r.id === keepId).areas[0].runs.length, 0);
+  assert.ok(afterLast.takeoff.rooms.find((r) => r.id === keepId), "empty room remains");
+
+  const afterRoom = removeRoomFromTakeoff(afterLast.takeoff, dropId);
+  assert.equal(afterRoom.takeoff.rooms.some((r) => r.id === dropId), false);
+  assert.equal(afterRoom.takeoff.rooms.length, 1);
+
+  const resurrectAttempt = mergeAiDraftPreservingConfirmed(
+    afterRoom.takeoff,
+    {
+      rooms: [
+        {
+          id: dropId,
+          name: "Drop Room",
+          areas: [{ runs: [{ id: "x", lengthIn: 10, depthIn: 10 }] }]
+        }
+      ]
+    },
+    {
+      deletedRoomIds: afterRoom.deletedRoomIds,
+      deletedRunIds: [...afterPiece.deletedRunIds, ...afterLast.deletedRunIds]
+    }
+  ).merged;
+  assert.equal(resurrectAttempt.rooms.some((r) => r.id === dropId), false);
+  console.log("  ✓ remove updates totals; empty room stays; tombstones block resurrection");
+}
+
 
 {
   let draft = createEmptyManualTakeoffDraft();

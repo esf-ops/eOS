@@ -7,6 +7,9 @@ import {
   hasEstimatorOwnedGeometry,
   hasEstimatorSavedEdits,
   mergeAiDraftPreservingConfirmed,
+  removePieceFromTakeoff,
+  removeRoomFromTakeoff,
+  applyDeletionTombstones,
   saveMergeTakeoffDrafts,
   selectAuthoritativeTakeoffResult
 } from "./takeoffAuthoritativeResult.mjs";
@@ -203,6 +206,121 @@ function aiDraft() {
   ]);
   assert.equal(picked.row.id, "res-geo");
   console.log("  ✓ geometry markers alone mark estimator-saved edits");
+}
+
+{
+  const draft = {
+    rooms: [
+      {
+        id: "room-keep",
+        name: "Keep",
+        _estimatorOwned: true,
+        areas: [
+          {
+            id: "a1",
+            runs: [
+              { id: "run-keep", lengthIn: 100, depthIn: 25.5, _manual: true },
+              { id: "run-ai-gone", lengthIn: 50, depthIn: 25.5 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "room-ai-delete",
+        name: "AI Gone Room",
+        areas: [{ id: "a2", runs: [{ id: "run-in-gone-room", lengthIn: 40, depthIn: 24 }] }]
+      },
+      {
+        id: "room-empty",
+        name: "Empty Stay",
+        _estimatorOwned: true,
+        areas: [{ id: "a3", runs: [] }]
+      }
+    ]
+  };
+
+  const removedPiece = removePieceFromTakeoff(draft, "room-keep", "run-ai-gone");
+  assert.equal(removedPiece.takeoff.rooms.find((r) => r.id === "room-keep").areas[0].runs.length, 1);
+  assert.ok(removedPiece.takeoff.rooms.find((r) => r.id === "room-keep"));
+  assert.deepEqual(removedPiece.deletedRunIds, ["run-ai-gone"]);
+
+  const sfBefore = removedPiece.takeoff.rooms
+    .flatMap((r) => r.areas.flatMap((a) => a.runs))
+    .reduce((s, r) => s + ((r.lengthIn * r.depthIn) / 144), 0);
+  assert.ok(sfBefore > 0);
+
+  const removedRoom = removeRoomFromTakeoff(removedPiece.takeoff, "room-empty");
+  assert.equal(removedRoom.takeoff.rooms.some((r) => r.id === "room-empty"), false);
+  assert.ok(removedRoom.takeoff.rooms.some((r) => r.id === "room-keep"));
+  assert.deepEqual(removedRoom.deletedRoomIds, ["room-empty"]);
+
+  const tombstones = {
+    deletedRoomIds: [...removedRoom.deletedRoomIds, "room-ai-delete"],
+    deletedRunIds: [...removedPiece.deletedRunIds]
+  };
+
+  const aiAgain = {
+    rooms: [
+      {
+        id: "room-ai-delete",
+        name: "AI Gone Room",
+        areas: [{ id: "a2", runs: [{ id: "run-in-gone-room", lengthIn: 40, depthIn: 24 }] }]
+      },
+      {
+        id: "room-keep",
+        name: "Keep",
+        areas: [
+          {
+            id: "a1",
+            runs: [
+              { id: "run-keep", lengthIn: 1, depthIn: 1 },
+              { id: "run-ai-gone", lengthIn: 99, depthIn: 25.5 },
+              { id: "run-ai-new", lengthIn: 30, depthIn: 25.5 }
+            ]
+          }
+        ]
+      },
+      {
+        id: "room-ai-new",
+        name: "Brand New AI",
+        areas: [{ id: "a9", runs: [{ id: "run-brand", lengthIn: 20, depthIn: 25.5 }] }]
+      }
+    ]
+  };
+
+  const { merged } = mergeAiDraftPreservingConfirmed(
+    removedRoom.takeoff,
+    aiAgain,
+    tombstones
+  );
+  assert.equal(merged.rooms.some((r) => r.id === "room-ai-delete"), false, "deleted AI room stays gone");
+  assert.equal(merged.rooms.some((r) => r.id === "room-empty"), false, "deleted empty room stays gone");
+  const keep = merged.rooms.find((r) => r.id === "room-keep");
+  assert.ok(keep);
+  assert.equal(keep.areas[0].runs.some((r) => r.id === "run-ai-gone"), false, "deleted AI piece stays gone");
+  assert.equal(keep.areas[0].runs.find((r) => r.id === "run-keep").lengthIn, 100, "manual dims win");
+  assert.ok(keep.areas[0].runs.some((r) => r.id === "run-ai-new"), "new AI piece may append");
+  assert.ok(merged.rooms.some((r) => r.id === "room-ai-new"), "unrelated AI room appends");
+
+  const normalized = applyDeletionTombstones(
+    { rooms: [...merged.rooms, { id: "room-ai-delete", areas: [{ runs: [] }] }] },
+    tombstones
+  );
+  assert.equal(normalized.rooms.some((r) => r.id === "room-ai-delete"), false);
+  console.log("  ✓ remove room/piece + tombstones block AI reappearance after merge/poll");
+}
+
+{
+  // Include/exclude is separate from remove — excluded runs stay in draft.
+  const draft = manualDraft();
+  const runId = draft.rooms[0].areas[0].runs[0].id;
+  assert.ok(draft.rooms[0].areas[0].runs.some((r) => r.id === runId));
+  const stillThere = applyDeletionTombstones(draft, { deletedRunIds: [] });
+  assert.ok(stillThere.rooms[0].areas[0].runs.some((r) => r.id === runId));
+  const hardRemoved = removePieceFromTakeoff(draft, draft.rooms[0].id, runId);
+  assert.equal(hardRemoved.takeoff.rooms[0].areas[0].runs.length, 0);
+  assert.ok(hardRemoved.takeoff.rooms[0], "room remains after last piece removed");
+  console.log("  ✓ remove leaves empty room; include/exclude remains separate concept");
 }
 
 console.log("\ntakeoffAuthoritativeResult.test.mjs — passed\n");

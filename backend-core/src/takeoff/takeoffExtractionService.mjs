@@ -461,9 +461,20 @@ export async function runAiTakeoffExtraction({
   let preserveEstimatorMeta = null;
 
   if (prior.row && (isApprovedTakeoffResult(prior.row) || hasEstimatorSavedEdits(prior.row))) {
+    const priorRs =
+      prior.row.raw_ai_result_json?._meta?.reviewState &&
+      typeof prior.row.raw_ai_result_json._meta.reviewState === "object"
+        ? prior.row.raw_ai_result_json._meta.reviewState
+        : job?.result_summary?.reviewState && typeof job.result_summary.reviewState === "object"
+          ? job.result_summary.reviewState
+          : {};
     const mergedPack = mergeAiDraftPreservingConfirmed(
       prior.row.normalized_takeoff_json,
-      normalized
+      normalized,
+      {
+        deletedRoomIds: priorRs.deletedRoomIds ?? [],
+        deletedRunIds: priorRs.deletedRunIds ?? []
+      }
     );
     persistNormalized = mergedPack.merged;
     unconfirmedAiFindings = mergedPack.unconfirmedAiFindings;
