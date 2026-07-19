@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-@import { apiGet, apiPost, ApiError } from "../lib/api";
+import { apiGet, apiPost, ApiError } from "../lib/api";
 import {
   FRIENDLY_CUSTOMER_CHOICES,
   buildCustomerChoiceConfiguration,
