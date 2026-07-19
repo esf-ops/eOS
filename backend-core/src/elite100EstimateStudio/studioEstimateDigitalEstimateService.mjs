@@ -30,6 +30,10 @@ import {
   mapStudioPublicationPersistenceError
 } from "./studioEstimatePublicationSource.mjs";
 import {
+  buildDigitalEstimateCustomerUrl,
+  unwrapDigitalEstimateAccessToken
+} from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
+import {
   listElite100CustomerMaterials,
   getElite100CustomerMaterial
 } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
@@ -130,6 +134,14 @@ function wrapRepositoryWithStudioHeader(deRepository, syntheticHeader) {
       typeof deRepository?.getSnapshotByPublicationId === "function"
         ? deRepository.getSnapshotByPublicationId.bind(deRepository)
         : undefined,
+    getActiveTokenForPublication:
+      typeof deRepository?.getActiveTokenForPublication === "function"
+        ? deRepository.getActiveTokenForPublication.bind(deRepository)
+        : undefined,
+    setActiveTokenWrapped:
+      typeof deRepository?.setActiveTokenWrapped === "function"
+        ? deRepository.setActiveTokenWrapped.bind(deRepository)
+        : undefined,
     publishAtomic:
       typeof deRepository?.publishAtomic === "function"
         ? deRepository.publishAtomic.bind(deRepository)
@@ -170,9 +182,10 @@ function readinessFailureError(readiness) {
   return err;
 }
 
-function staffPublicationView(pub) {
-  return {
+function staffPublicationView(pub, linkMeta = null) {
+  const base = {
     id: pub.id,
+    publicationId: pub.id,
     sourceQuoteId: pub.source_quote_id,
     quoteNumber: pub.quote_number,
     revisionNumber: pub.revision_number,
@@ -184,6 +197,12 @@ function staffPublicationView(pub) {
     termsDisclosureVersion: pub.terms_disclosure_version,
     revokedAt: pub.revoked_at ?? null,
     supersededAt: pub.superseded_at ?? null
+  };
+  if (!linkMeta) return base;
+  return {
+    ...base,
+    customerUrl: linkMeta.customerUrl ?? null,
+    linkStatus: linkMeta.linkStatus ?? null
   };
 }
 
@@ -230,6 +249,52 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Recover stable customer URL for authorized Studio callers (never public).
+   * @param {string} organizationId
+   * @param {object} pub
+   */
+  async function linkMetaForPublication(organizationId, pub) {
+    if (!pub?.id) return { customerUrl: null, linkStatus: null };
+    if (pub.status === "revoked" || pub.revoked_at) {
+      return { customerUrl: null, linkStatus: "revoked" };
+    }
+    if (pub.status === "superseded" || pub.superseded_at) {
+      return { customerUrl: null, linkStatus: "superseded" };
+    }
+    if (pub.status !== "active") {
+      return { customerUrl: null, linkStatus: String(pub.status || "invalid") };
+    }
+    if (typeof deRepository.getActiveTokenForPublication !== "function") {
+      return { customerUrl: null, linkStatus: "needs_replace" };
+    }
+    try {
+      const tokenRow = await deRepository.getActiveTokenForPublication(organizationId, pub.id);
+      if (!tokenRow || tokenRow.revoked_at) {
+        return { customerUrl: null, linkStatus: "needs_replace" };
+      }
+      const raw = unwrapDigitalEstimateAccessToken(tokenRow.token_wrapped, env);
+      if (!raw) {
+        return { customerUrl: null, linkStatus: "needs_replace" };
+      }
+      return {
+        customerUrl: buildDigitalEstimateCustomerUrl(raw, env),
+        linkStatus: "active"
+      };
+    } catch {
+      return { customerUrl: null, linkStatus: "needs_replace" };
+    }
+  }
+
+  async function staffPublicationViews(organizationId, pubs) {
+    const out = [];
+    for (const pub of pubs) {
+      const linkMeta = await linkMetaForPublication(organizationId, pub);
+      out.push(staffPublicationView(pub, linkMeta));
+    }
+    return out;
   }
 
   async function assessReadiness(organizationId, estimateId, configuration = null) {
@@ -291,13 +356,21 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         }));
     }
 
+    const publicationViews = await staffPublicationViews(organizationId, publications);
+    const activeView = familyActive[0]
+      ? staffPublicationView(
+          familyActive[0],
+          await linkMetaForPublication(organizationId, familyActive[0])
+        )
+      : null;
+
     return {
       ok: true,
       readiness,
       estimate: studioEstimateService.safeEstimateView(estimate),
       preview,
-      publications: publications.map(staffPublicationView),
-      activePublication: familyActive[0] ? staffPublicationView(familyActive[0]) : null,
+      publications: publicationViews,
+      activePublication: activeView,
       reviewRequests,
       links: {
         intakeCaseId: estimate.intakeCaseId || null,
@@ -561,15 +634,19 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         sourceQuoteFingerprint: freezeProbe.sourceQuoteFingerprint
       });
       if (existing) {
+        const linkMeta = await linkMetaForPublication(organizationId, existing);
         return {
           ok: true,
           reused: true,
-          publication: staffPublicationView(existing),
+          publication: staffPublicationView(existing, linkMeta),
           accessToken: null,
-          customerUrl: null,
+          customerUrl: linkMeta.customerUrl,
+          linkStatus: linkMeta.linkStatus,
           readiness: readiness.readiness,
           staffNotice:
-            "Publication already exists for this approved estimate revision and configuration. Use Replace Link for a new customer token."
+            linkMeta.customerUrl
+              ? "Publication already exists for this approved estimate revision and configuration. Customer URL is unchanged."
+              : "Publication already exists for this revision. Use Replace Link to create a recoverable customer URL."
         };
       }
 
@@ -658,10 +735,18 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       const map = new Map();
       for (const p of [...byEstimate, ...byFamily]) map.set(p.id, p);
       // Also include superseded family history via quote list if repository supports family listing
+      const all = [...map.values()];
+      const views = await staffPublicationViews(organizationId, all);
+      const activeRaw = byFamily[0] || null;
       return {
         ok: true,
-        publications: [...map.values()].map(staffPublicationView),
-        activePublication: byFamily[0] ? staffPublicationView(byFamily[0]) : null
+        publications: views,
+        activePublication: activeRaw
+          ? staffPublicationView(
+              activeRaw,
+              await linkMetaForPublication(organizationId, activeRaw)
+            )
+          : null
       };
     },
 
@@ -677,7 +762,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     },
 
     async replaceLink({ organizationId, publicationId, actorUserId, body }) {
-      return replaceDigitalEstimateToken({
+      const result = await replaceDigitalEstimateToken({
         env,
         organizationId,
         actorUserId,
@@ -685,6 +770,10 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         publicationId,
         body
       });
+      return {
+        ...result,
+        linkStatus: "active"
+      };
     },
 
     async recordLinkCopied({ organizationId, publicationId, actorUserId }) {

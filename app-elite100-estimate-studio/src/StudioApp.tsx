@@ -41,11 +41,13 @@ type QuoteDetail = {
     accessExpiresAt?: string;
     revisionNumber?: number;
     revisionLabel?: string;
+    customerUrl?: string | null;
+    linkStatus?: string | null;
   }>;
 };
 
 type LoadQuoteOptions = {
-  preserveOneTimeLink?: boolean;
+  preserveCustomerLink?: boolean;
 };
 
 function uiEnabled(): boolean {
@@ -90,7 +92,7 @@ export default function StudioApp() {
   const [busy, setBusy] = useState(false);
   const [publishInFlight, setPublishInFlight] = useState(false);
   const [replaceInFlight, setReplaceInFlight] = useState(false);
-  const [oneTimeLink, setOneTimeLink] = useState<string | null>(null);
+  const [customerLink, setCustomerLink] = useState<string | null>(null);
   const [publishStaffNotice, setPublishStaffNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [studioConfigOk, setStudioConfigOk] = useState<boolean | null>(null);
@@ -160,7 +162,7 @@ export default function StudioApp() {
     setSessionToken(null);
     setDetail(null);
     setPubDetail(null);
-    setOneTimeLink(null);
+    setCustomerLink(null);
     setPublishStaffNotice(null);
     setPublishInFlight(false);
     setReplaceInFlight(false);
@@ -190,11 +192,9 @@ export default function StudioApp() {
     const switchingQuote = id !== selectedId;
     setSelectedId(id);
     setActionError(null);
-    if (!options.preserveOneTimeLink || switchingQuote) {
-      setOneTimeLink(null);
-      setPublishStaffNotice(null);
-    }
     if (switchingQuote) {
+      setCustomerLink(null);
+      setPublishStaffNotice(null);
       setPubDetail(null);
     }
     setBusy(true);
@@ -208,8 +208,18 @@ export default function StudioApp() {
           sessionToken
         )) as typeof pubDetail;
         setPubDetail(pd);
+        const recovered =
+          (typeof active.customerUrl === "string" && active.customerUrl) ||
+          (pd &&
+          typeof (pd as { publication?: { customerUrl?: string } }).publication?.customerUrl ===
+            "string"
+            ? (pd as { publication?: { customerUrl?: string } }).publication!.customerUrl!
+            : null);
+        if (recovered) setCustomerLink(recovered);
+        else if (!options.preserveCustomerLink) setCustomerLink(null);
       } else {
         setPubDetail(null);
+        if (!options.preserveCustomerLink) setCustomerLink(null);
       }
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : "Unable to load quote");
@@ -246,14 +256,14 @@ export default function StudioApp() {
         syntheticPilot?: { awaitingSyntheticAllowlist?: boolean };
       };
       const link = body.customerUrl || body.oneTimeUrl || body.shareUrl || null;
-      setOneTimeLink(link);
+      setCustomerLink(link);
       setPublishStaffNotice(
         body.staffNotice ||
           (body.syntheticPilot?.awaitingSyntheticAllowlist
             ? "Replacement publication awaiting synthetic allowlist"
             : null)
       );
-      await loadQuote(selectedId, { preserveOneTimeLink: true });
+      await loadQuote(selectedId, { preserveCustomerLink: true });
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : "Publish failed");
     } finally {
@@ -262,14 +272,14 @@ export default function StudioApp() {
   }
 
   async function copyLink() {
-    if (!oneTimeLink || !sessionToken) return;
+    if (!customerLink || !sessionToken) return;
     const publicationId =
       pubDetail?.publication?.id ||
       detail?.publications?.find((p) => p.status === "active")?.id ||
       null;
     if (!publicationId) return;
     try {
-      await navigator.clipboard.writeText(oneTimeLink);
+      await navigator.clipboard.writeText(customerLink);
       await apiPost(
         `/api/elite100-estimate-studio/publications/${String(publicationId)}/events/link-copied`,
         sessionToken,
@@ -292,8 +302,8 @@ export default function StudioApp() {
         { confirm: true }
       )) as { customerUrl?: string; oneTimeUrl?: string; shareUrl?: string };
       const link = body.customerUrl || body.oneTimeUrl || body.shareUrl || null;
-      setOneTimeLink(link);
-      await loadQuote(selectedId!, { preserveOneTimeLink: true });
+      setCustomerLink(link);
+      await loadQuote(selectedId!, { preserveCustomerLink: true });
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : "Replace failed");
     } finally {
@@ -311,7 +321,7 @@ export default function StudioApp() {
         sessionToken,
         { confirm: true }
       );
-      setOneTimeLink(null);
+      setCustomerLink(null);
       setPublishStaffNotice(null);
       await loadQuote(selectedId!);
     } catch (e) {
@@ -550,9 +560,8 @@ export default function StudioApp() {
                     <strong>Active publication exists</strong>
                     {activeSameRevision ? (
                       <p className="muted">
-                        This saved revision already has an active Digital Estimate. The customer link is not stored
-                        after publish — use <strong>Replace token</strong> if the one-time link was lost. Do not publish
-                        again only to recover a link.
+                        This saved revision already has an active Digital Estimate. The customer link stays available
+                        after refresh. Use <strong>Replace link</strong> only when you need a new URL.
                       </p>
                     ) : (
                       <p className="muted">
@@ -579,7 +588,7 @@ export default function StudioApp() {
                         disabled={busy || replaceInFlight}
                         onClick={() => void replaceToken()}
                       >
-                        {replaceInFlight ? "Replacing…" : "Replace token"}
+                        {replaceInFlight ? "Replacing…" : "Replace link"}
                       </button>
                       <button type="button" className="secondary" disabled={busy} onClick={() => void revoke()}>
                         Revoke
@@ -588,23 +597,25 @@ export default function StudioApp() {
                   ) : null}
                 </div>
 
-                {oneTimeLink ? (
-                  <div className="token-once" role="status" aria-live="polite">
-                    <h3>One-time customer link created</h3>
-                    <p>This link will not be shown again after you leave or refresh this page.</p>
-                    <p>
-                      If the link is lost, use <strong>Replace token</strong> to create a new customer link.
-                    </p>
+                {customerLink ? (
+                  <div className="token-once" role="status" aria-live="polite" data-testid="studio-stable-customer-link">
+                    <h3>Customer link</h3>
+                    <p>Stable reusable link for this active publication. Available after refresh until replaced, revoked, or superseded.</p>
                     {publishStaffNotice ? <p className="muted">{publishStaffNotice}</p> : null}
+                    <p className="muted">{customerLink}</p>
                     <div className="actions">
                       <button type="button" onClick={() => void copyLink()}>
                         Copy link
                       </button>
-                      <a className="btn secondary" href={oneTimeLink} target="_blank" rel="noreferrer">
+                      <a className="btn secondary" href={customerLink} target="_blank" rel="noreferrer">
                         Open customer view
                       </a>
                     </div>
                   </div>
+                ) : activePublication ? (
+                  <p className="muted">
+                    No recoverable customer URL yet — use <strong>Replace link</strong> once to create one.
+                  </p>
                 ) : null}
 
                 <div className="preview-block">

@@ -24,11 +24,15 @@ import {
   DIGITAL_ESTIMATE_TERMS_VERSION,
   isDigitalEstimatePublishEnabled,
   readDigitalEstimateAccessTtlDays,
-  readDigitalEstimatePricingValidDays,
-  readDigitalEstimatePublicBaseUrl
+  readDigitalEstimatePricingValidDays
 } from "../digitalEstimateConfig.mjs";
 import { sanitizeDigitalEstimateEventMetadata } from "../digitalEstimateEvents.mjs";
 import { generateDigitalEstimateAccessToken, sha256CanonicalJson } from "../digitalEstimateToken.mjs";
+import {
+  buildDigitalEstimateCustomerUrl,
+  unwrapDigitalEstimateAccessToken,
+  wrapDigitalEstimateAccessToken
+} from "../digitalEstimateTokenWrap.mjs";
 import {
   assertPublicDtoHasNoForbiddenContent,
   buildPublicDigitalEstimateDto
@@ -749,18 +753,45 @@ export function createAmendmentStudioService(deps) {
       });
 
       if (atomic.reused) {
+        let reusedUrl = null;
+        if (typeof deRepository?.getActiveTokenForPublication === "function") {
+          try {
+            const tok = await deRepository.getActiveTokenForPublication(
+              organizationId,
+              atomic.publicationId
+            );
+            const raw = unwrapDigitalEstimateAccessToken(tok?.token_wrapped, env);
+            reusedUrl = raw ? buildDigitalEstimateCustomerUrl(raw, env) : null;
+          } catch {
+            reusedUrl = null;
+          }
+        }
         return {
           ok: true,
           reused: true,
           publication: { id: atomic.publicationId },
           accessToken: null,
-          customerUrl: null,
-          notice: "Amendment already published; raw token is not re-issued."
+          customerUrl: reusedUrl,
+          linkStatus: reusedUrl ? "active" : "needs_replace",
+          notice: reusedUrl
+            ? "Amendment already published; customer URL is unchanged."
+            : "Amendment already published; use Replace Link if the customer URL is unavailable."
         };
       }
 
-      const base = readDigitalEstimatePublicBaseUrl(env);
-      const customerUrl = `${base}/e#${rawToken}`;
+      const customerUrl = buildDigitalEstimateCustomerUrl(rawToken, env);
+      const wrapped = wrapDigitalEstimateAccessToken(rawToken, env);
+      if (wrapped && typeof deRepository?.setActiveTokenWrapped === "function") {
+        try {
+          await deRepository.setActiveTokenWrapped(
+            organizationId,
+            atomic.publicationId,
+            wrapped
+          );
+        } catch {
+          /* migration may be pending */
+        }
+      }
       const syntheticAccess = describeSyntheticPublicAccessibility(atomic.publicationId, env);
 
       return {
@@ -773,9 +804,9 @@ export function createAmendmentStudioService(deps) {
           sourceType: "digital_estimate_amendment",
           priorPublicationId: amd.source_publication_id
         },
-        // Raw token ONE TIME — never log.
         accessToken: rawToken,
         customerUrl,
+        linkStatus: "active",
         supersededCount: atomic.supersededCount ?? 0,
         syntheticPilot: syntheticAccess,
         staffNotice: syntheticAccess.awaitingSyntheticAllowlist

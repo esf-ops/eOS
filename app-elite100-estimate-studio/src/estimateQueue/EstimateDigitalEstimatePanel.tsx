@@ -9,6 +9,7 @@ type ReadinessBlocker = {
 };
 type PublicationRow = {
   id: string;
+  publicationId?: string;
   status: string;
   publishedAt?: string | null;
   pricingValidThrough?: string | null;
@@ -16,6 +17,8 @@ type PublicationRow = {
   revisionLabel?: string | null;
   revokedAt?: string | null;
   supersededAt?: string | null;
+  customerUrl?: string | null;
+  linkStatus?: string | null;
 };
 type ReviewRequestRow = {
   id: string;
@@ -90,7 +93,7 @@ function formatStructuredPublishError(e: ApiError): {
 
 /**
  * Digital Estimate section — after Studio estimate approval.
- * Reuses Brain publish / revoke / replace-token lifecycle (no raw token display).
+ * Stable reusable customer URL for the active publication (recoverable after refresh).
  */
 export default function EstimateDigitalEstimatePanel({
   authToken,
@@ -108,7 +111,8 @@ export default function EstimateDigitalEstimatePanel({
   const [activePublication, setActivePublication] = useState<PublicationRow | null>(null);
   const [publications, setPublications] = useState<PublicationRow[]>([]);
   const [reviewRequests, setReviewRequests] = useState<ReviewRequestRow[]>([]);
-  const [oneTimeLink, setOneTimeLink] = useState<string | null>(null);
+  const [customerUrl, setCustomerUrl] = useState<string | null>(null);
+  const [linkStatus, setLinkStatus] = useState<string | null>(null);
   const [idempotencyKey] = useState(() =>
     typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
@@ -173,6 +177,9 @@ export default function EstimateDigitalEstimatePanel({
       setActivePublication(body.activePublication || null);
       setPublications(Array.isArray(body.publications) ? body.publications : []);
       setReviewRequests(Array.isArray(body.reviewRequests) ? body.reviewRequests : []);
+      const url = body.activePublication?.customerUrl || null;
+      setCustomerUrl(url);
+      setLinkStatus(body.activePublication?.linkStatus || (url ? "active" : null));
       if (body.activePublication?.pricingValidThrough && !pricingValidThrough) {
         setPricingValidThrough(String(body.activePublication.pricingValidThrough).slice(0, 10));
       }
@@ -206,21 +213,23 @@ export default function EstimateDigitalEstimatePanel({
         }
       )) as {
         customerUrl?: string | null;
+        linkStatus?: string | null;
         reused?: boolean;
         staffNotice?: string | null;
         publication?: PublicationRow;
         envelope?: { configured?: boolean; reason?: string; message?: string };
       };
       if (body.customerUrl) {
-        setOneTimeLink(body.customerUrl);
-        setActionNotice("Digital Estimate published. Copy the customer link now — it will not be shown again after refresh.");
-      } else if (body.reused) {
+        setCustomerUrl(body.customerUrl);
+        setLinkStatus(body.linkStatus || "active");
+      }
+      if (body.reused) {
         setActionNotice(
           body.staffNotice ||
-            "Publication already exists for this revision. Use Replace Link for a new customer token."
+            "Publication already exists for this revision. Customer URL is unchanged."
         );
       } else {
-        setActionNotice("Published.");
+        setActionNotice("Digital Estimate published. Customer link is stable and reusable.");
       }
       if (body.envelope && body.envelope.configured === false && body.envelope.message) {
         setActionNotice((prev) =>
@@ -257,10 +266,11 @@ export default function EstimateDigitalEstimatePanel({
         `/api/elite100-estimate-studio/publications/${encodeURIComponent(activePublication.id)}/replace-token`,
         authToken,
         { confirm: true }
-      )) as { customerUrl?: string };
+      )) as { customerUrl?: string; linkStatus?: string };
       if (body.customerUrl) {
-        setOneTimeLink(body.customerUrl);
-        setActionNotice("Replacement customer link created. Copy it now — it will not be recoverable after refresh.");
+        setCustomerUrl(body.customerUrl);
+        setLinkStatus(body.linkStatus || "active");
+        setActionNotice("Customer link replaced. Previous link is no longer valid.");
       }
       await load();
     } catch (e) {
@@ -280,8 +290,9 @@ export default function EstimateDigitalEstimatePanel({
         authToken,
         { confirm: true }
       );
-      setOneTimeLink(null);
-      setActionNotice("Publication revoked.");
+      setCustomerUrl(null);
+      setLinkStatus("revoked");
+      setActionNotice("Publication revoked. Customer link is no longer valid.");
       await load();
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : "Unable to revoke publication");
@@ -291,9 +302,9 @@ export default function EstimateDigitalEstimatePanel({
   }
 
   async function copyLink() {
-    if (!oneTimeLink) return;
+    if (!customerUrl) return;
     try {
-      await navigator.clipboard.writeText(oneTimeLink);
+      await navigator.clipboard.writeText(customerUrl);
       if (activePublication?.id) {
         await apiPost(
           `/api/elite100-estimate-studio/publications/${encodeURIComponent(activePublication.id)}/events/link-copied`,
@@ -310,6 +321,8 @@ export default function EstimateDigitalEstimatePanel({
   if (!estimateApproved) {
     return null;
   }
+
+  const linkReady = Boolean(customerUrl) && linkStatus === "active";
 
   return (
     <section className="eq-estimate-section" aria-label="Digital Estimate" data-testid="eq-digital-estimate">
@@ -350,6 +363,18 @@ export default function EstimateDigitalEstimatePanel({
         </p>
         {activePublication?.pricingValidThrough ? (
           <p className="eq-muted">Pricing valid through {activePublication.pricingValidThrough}</p>
+        ) : null}
+        <p data-testid="eq-de-link-status">
+          Customer link: <strong>{linkStatus || (activePublication ? "needs_replace" : "none")}</strong>
+        </p>
+        {customerUrl ? (
+          <p className="eq-muted" data-testid="eq-de-customer-url">
+            {customerUrl}
+          </p>
+        ) : activePublication?.status === "active" ? (
+          <p className="eq-muted" data-testid="eq-de-link-needs-replace">
+            No recoverable customer URL for this publication yet — use Replace Link once.
+          </p>
         ) : null}
       </div>
 
@@ -467,16 +492,16 @@ export default function EstimateDigitalEstimatePanel({
         <button
           type="button"
           className="eq-btn-secondary"
-          disabled={busy || !oneTimeLink}
+          disabled={busy || !linkReady}
           data-testid="eq-copy-customer-link"
           onClick={() => void copyLink()}
         >
           Copy Customer Link
         </button>
-        {oneTimeLink ? (
+        {linkReady ? (
           <a
             className="eq-btn-secondary"
-            href={oneTimeLink}
+            href={customerUrl!}
             target="_blank"
             rel="noreferrer"
             data-testid="eq-open-customer-preview"
@@ -507,11 +532,11 @@ export default function EstimateDigitalEstimatePanel({
         </button>
       </div>
 
-      {oneTimeLink ? (
-        <div className="eq-de-onetime" role="status" aria-live="polite" data-testid="eq-de-onetime-link">
+      {linkReady ? (
+        <div className="eq-de-stable-link" role="status" data-testid="eq-de-stable-link">
           <p>
-            One-time customer link is ready. It is not shown as a raw token and cannot be recovered after
-            refresh — use Replace Link if lost.
+            Customer link is stable and reusable for this active publication. It remains available
+            after refresh until replaced, revoked, or superseded.
           </p>
         </div>
       ) : null}

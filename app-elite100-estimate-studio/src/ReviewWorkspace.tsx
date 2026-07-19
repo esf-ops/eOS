@@ -1,7 +1,7 @@
 /**
  * Customer review-request workspace — Studio resolve / revise / republish loop.
  * Reuses Brain review-request records; never shows sold/accept/payment.
- * Raw replacement token is one-time UI state only.
+ * Replacement customer URL is recovered from publication link metadata when available.
  */
 import React, { useEffect, useState } from "react";
 import { apiGet, apiPost, ApiError } from "./lib/api";
@@ -453,7 +453,7 @@ export default function ReviewWorkspace({ token, onAuthFailure, onOpenEstimate }
                 <div className="token-once" role="status" aria-live="polite">
                   <h4>One-time replacement link</h4>
                   <p>
-                    Copy now — the plaintext token is not stored and cannot be recovered after refresh.
+                    Stable reusable customer link for the replacement publication.
                     Use Replace Link on the estimate if lost.
                   </p>
                 </div>

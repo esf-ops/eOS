@@ -298,10 +298,17 @@ export function createPublicConfigurationService(deps) {
           lifecycle === "superseded"
             ? "Your estimate options were updated"
             : lifecycle === "expired"
-              ? "Pricing has expired"
-              : includeBaseline
-                ? null
-                : "Configuration unavailable",
+              ? (() => {
+                  const d = String(publication.pricing_valid_through || "").slice(0, 10);
+                  return d
+                    ? `Pricing expired on ${d}. Contact your estimator for updated pricing.`
+                    : "Pricing expired. Contact your estimator for updated pricing.";
+                })()
+              : lifecycle === "revoked"
+                ? "This estimate link has been revoked."
+                : includeBaseline
+                  ? null
+                  : "This estimate is unavailable.",
         estimate: includeBaseline ? baselineEstimate : null,
         configuration: null,
         readMode: includeBaseline ? "baseline" : null,
@@ -337,12 +344,17 @@ export function createPublicConfigurationService(deps) {
       };
     }
 
-    if (isPricingExpired(publication.pricing_valid_through || ctx.pricingValidThrough)) {
+    const pricingThrough = publication.pricing_valid_through || ctx.pricingValidThrough;
+    if (isPricingExpired(pricingThrough)) {
+      const expiredOn = String(pricingThrough || "").slice(0, 10);
       return {
         lifecycle: "expired",
-        message: "Pricing has expired",
+        message: expiredOn
+          ? `Pricing expired on ${expiredOn}. Contact your estimator for updated pricing.`
+          : "Pricing expired. Contact your estimator for updated pricing.",
         estimate: baselineEstimate,
         configuration: null,
+        pricingValidThrough: expiredOn || null,
         session: {
           id: session.id,
           status: "expired",

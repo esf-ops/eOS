@@ -54,8 +54,9 @@ assert.ok(viteCfg.includes("digital-estimate-html-csp"), "vite must inject produ
 const effectBlock = app.match(/useEffect\(\(\) => \{[\s\S]*?\}, \[\]\);/);
 assert.ok(effectBlock, "App useEffect bootstrap required");
 assert.ok(
-  /if \(fragmentToken\) \{/.test(effectBlock[0]),
-  "fragment bootstrap must not require configurationUiEnabled()"
+  /const accessToken = pathToken \|\| fragmentToken/.test(effectBlock[0]) ||
+    /if \(accessToken\) \{/.test(effectBlock[0]),
+  "path/fragment bootstrap must not require configurationUiEnabled()"
 );
 assert.equal(
   /fragmentToken && configurationUiEnabled\(\)/.test(effectBlock[0]),
@@ -63,8 +64,13 @@ assert.equal(
   "Vite UI flag must not gate token exchange"
 );
 assert.ok(
-  effectBlock[0].indexOf("clearFragmentFromUrl") < effectBlock[0].indexOf("exchangeFragmentToken"),
-  "fragment must be cleared after capture and before exchange"
+  effectBlock[0].includes("clearFragmentFromUrl") &&
+    effectBlock[0].includes("exchangeFragmentToken"),
+  "legacy fragment clear + exchange remain available"
+);
+assert.ok(
+  effectBlock[0].includes("pathToken") && effectBlock[0].includes("exchangeFragmentToken"),
+  "stable path tokens exchange via the same session API"
 );
 assert.ok(app.includes("state.estimate"), "read-only baseline path when estimate present");
 assert.ok(app.includes("configurationUiEnabled()"), "UI flag may still gate interactive configure mode");

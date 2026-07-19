@@ -50,8 +50,42 @@ import {
   createSupabaseAmendmentRepository
 } from "../digitalEstimate/configuration/amendmentRepository.mjs";
 import { isDigitalEstimateReviewRequestsEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
+import {
+  buildDigitalEstimateCustomerUrl,
+  unwrapDigitalEstimateAccessToken
+} from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
+
+async function staffLinkMetaForPublication(repository, organizationId, pub, env) {
+  if (!pub?.id) return { customerUrl: null, linkStatus: null };
+  if (pub.status === "revoked" || pub.revoked_at) {
+    return { customerUrl: null, linkStatus: "revoked" };
+  }
+  if (pub.status === "superseded" || pub.superseded_at) {
+    return { customerUrl: null, linkStatus: "superseded" };
+  }
+  if (pub.status !== "active") {
+    return { customerUrl: null, linkStatus: String(pub.status || "invalid") };
+  }
+  if (typeof repository.getActiveTokenForPublication !== "function") {
+    return { customerUrl: null, linkStatus: "needs_replace" };
+  }
+  try {
+    const tokenRow = await repository.getActiveTokenForPublication(organizationId, pub.id);
+    if (!tokenRow || tokenRow.revoked_at) {
+      return { customerUrl: null, linkStatus: "needs_replace" };
+    }
+    const raw = unwrapDigitalEstimateAccessToken(tokenRow.token_wrapped, env);
+    if (!raw) return { customerUrl: null, linkStatus: "needs_replace" };
+    return {
+      customerUrl: buildDigitalEstimateCustomerUrl(raw, env),
+      linkStatus: "active"
+    };
+  } catch {
+    return { customerUrl: null, linkStatus: "needs_replace" };
+  }
+}
 
 function logStudio(label, e, req) {
   const path = redactDigitalEstimateTokenPath(req?.originalUrl || req?.url || "");
@@ -268,17 +302,25 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         },
         eligibility,
         preview,
-        publications: publications.map((p) => ({
-          id: p.id,
-          status: p.status,
-          publishedAt: p.published_at,
-          accessExpiresAt: p.access_expires_at,
-          pricingValidThrough: p.pricing_valid_through,
-          revokedAt: p.revoked_at ?? null,
-          supersededAt: p.superseded_at ?? null,
-          revisionNumber: p.revision_number,
-          revisionLabel: p.revision_label
-        }))
+        publications: await Promise.all(
+          publications.map(async (p) => {
+            const link = await staffLinkMetaForPublication(repository, organizationId, p, env);
+            return {
+              id: p.id,
+              publicationId: p.id,
+              status: p.status,
+              publishedAt: p.published_at,
+              accessExpiresAt: p.access_expires_at,
+              pricingValidThrough: p.pricing_valid_through,
+              revokedAt: p.revoked_at ?? null,
+              supersededAt: p.superseded_at ?? null,
+              revisionNumber: p.revision_number,
+              revisionLabel: p.revision_label,
+              customerUrl: link.customerUrl,
+              linkStatus: link.linkStatus
+            };
+          })
+        )
       });
     } catch (e) {
       logStudio("quote detail failed", e, req);
@@ -304,10 +346,12 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           });
           assertPublicDtoHasNoForbiddenContent(preview);
         }
+        const link = await staffLinkMetaForPublication(repository, organizationId, pub, env);
         res.json({
           ok: true,
           publication: {
             id: pub.id,
+            publicationId: pub.id,
             sourceQuoteId: pub.source_quote_id,
             quoteNumber: pub.quote_number,
             revisionNumber: pub.revision_number,
@@ -317,7 +361,9 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
             accessExpiresAt: pub.access_expires_at,
             pricingValidThrough: pub.pricing_valid_through,
             revokedAt: pub.revoked_at ?? null,
-            supersededAt: pub.superseded_at ?? null
+            supersededAt: pub.superseded_at ?? null,
+            customerUrl: link.customerUrl,
+            linkStatus: link.linkStatus
           },
           preview,
           events: events.map((ev) => ({

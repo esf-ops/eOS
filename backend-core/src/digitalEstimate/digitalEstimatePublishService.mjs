@@ -9,14 +9,28 @@ import {
   isDigitalEstimateApiEnabled,
   isDigitalEstimatePublishEnabled,
   readDigitalEstimateAccessTtlDays,
-  readDigitalEstimatePricingValidDays,
-  readDigitalEstimatePublicBaseUrl
+  readDigitalEstimatePricingValidDays
 } from "./digitalEstimateConfig.mjs";
 import { assessElite100PublicationEligibility } from "./digitalEstimateEligibility.mjs";
 import { sanitizeDigitalEstimateEventMetadata } from "./digitalEstimateEvents.mjs";
 import { buildPublicationFreezePayloads } from "./digitalEstimateSnapshot.mjs";
 import { generateDigitalEstimateAccessToken } from "./digitalEstimateToken.mjs";
+import {
+  buildDigitalEstimateCustomerUrl,
+  wrapDigitalEstimateAccessToken
+} from "./digitalEstimateTokenWrap.mjs";
 import { describeSyntheticPublicAccessibility } from "./syntheticPilotGuard.mjs";
+
+async function persistWrappedAccessToken(repository, organizationId, publicationId, rawToken, env) {
+  const wrapped = wrapDigitalEstimateAccessToken(rawToken, env);
+  if (!wrapped || typeof repository?.setActiveTokenWrapped !== "function") return wrapped;
+  try {
+    await repository.setActiveTokenWrapped(organizationId, publicationId, wrapped);
+  } catch {
+    // Column may be absent until migration; publish still succeeds with one-shot response URL.
+  }
+  return wrapped;
+}
 
 function deError(message, code, statusCode = 400) {
   const err = new Error(message);
@@ -134,6 +148,7 @@ export async function publishDigitalEstimate(input) {
   );
 
   const { rawToken, tokenHash } = generateDigitalEstimateAccessToken();
+  const tokenWrapped = wrapDigitalEstimateAccessToken(rawToken, env);
 
   const publishMetadata =
     body.publishMetadata && typeof body.publishMetadata === "object" ? body.publishMetadata : {};
@@ -157,6 +172,7 @@ export async function publishDigitalEstimate(input) {
     customerSnapshotJson: freeze.customerSnapshot,
     pricingEvidenceJson: freeze.pricingEvidence,
     tokenHash,
+    tokenWrapped,
     publishedAt,
     publishedEventMetadata: sanitizeDigitalEstimateEventMetadata({
       revisionNumber: Number(header.revision_number) || 1,
@@ -166,17 +182,25 @@ export async function publishDigitalEstimate(input) {
     })
   });
 
-  const base = readDigitalEstimatePublicBaseUrl(env);
-  // DE.2E: fragment-token links — raw token never in path/query. Legacy DE.1 path links remain readable.
-  const customerUrl = `${base}/e#${rawToken}`;
+  // Supabase RPC does not accept wrapped ciphertext — persist after atomic insert.
+  await persistWrappedAccessToken(
+    input.repository,
+    input.organizationId,
+    atomic.publication.id,
+    rawToken,
+    env
+  );
+
+  // Stable reusable path URL (fragment form still accepted by public head for legacy links).
+  const customerUrl = buildDigitalEstimateCustomerUrl(rawToken, env);
   const syntheticAccess = describeSyntheticPublicAccessibility(atomic.publication.id, env);
 
   return {
     ok: true,
     publication: staffPublicationView(atomic.publication),
-    // Raw token returned ONCE — never logged by callers.
     accessToken: rawToken,
     customerUrl,
+    linkStatus: "active",
     eligibility,
     supersededCount: atomic.supersededCount ?? priorActive.length,
     syntheticPilot: syntheticAccess,
@@ -271,20 +295,31 @@ export async function replaceDigitalEstimateToken(input) {
 
   const now = (input.now ?? (() => new Date()))().toISOString();
   const { rawToken, tokenHash } = generateDigitalEstimateAccessToken();
+  const tokenWrapped = wrapDigitalEstimateAccessToken(rawToken, env);
 
   await input.repository.replaceTokenAtomic({
     organizationId: input.organizationId,
     publicationId: pub.id,
     newTokenHash: tokenHash,
+    tokenWrapped,
     actorUserId: input.actorUserId ?? null,
     replacedAt: now
   });
 
-  const base = readDigitalEstimatePublicBaseUrl(env);
+  await persistWrappedAccessToken(
+    input.repository,
+    input.organizationId,
+    pub.id,
+    rawToken,
+    env
+  );
+
   return {
     ok: true,
     accessToken: rawToken,
-    customerUrl: `${base}/e#${rawToken}`
+    customerUrl: buildDigitalEstimateCustomerUrl(rawToken, env),
+    linkStatus: "active",
+    publication: staffPublicationView(pub)
   };
 }
 

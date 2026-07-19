@@ -160,6 +160,26 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
         (t) => t.organization_id === organizationId && t.publication_id === publicationId
       );
     },
+    async getActiveTokenForPublication(organizationId, publicationId) {
+      const row = [...tokens.values()].find(
+        (t) =>
+          t.organization_id === organizationId &&
+          t.publication_id === publicationId &&
+          !t.revoked_at
+      );
+      return row ? structuredClone(row) : null;
+    },
+    async setActiveTokenWrapped(organizationId, publicationId, tokenWrapped) {
+      const row = [...tokens.values()].find(
+        (t) =>
+          t.organization_id === organizationId &&
+          t.publication_id === publicationId &&
+          !t.revoked_at
+      );
+      if (!row) return null;
+      row.token_wrapped = tokenWrapped || null;
+      return structuredClone(row);
+    },
     async getPublication(organizationId, publicationId) {
       const row = publications.get(String(publicationId));
       if (!row || row.organization_id !== organizationId) return null;
@@ -333,6 +353,7 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
             organization_id: organizationId,
             publication_id: pubId,
             token_hash: tokenHash,
+            token_wrapped: payload.tokenWrapped || null,
             created_at: now,
             created_by_user_id: publishedByUserId ?? null,
             access_count: 0,
@@ -415,6 +436,7 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
             organization_id: organizationId,
             publication_id: publicationId,
             token_hash: newTokenHash,
+            token_wrapped: payload.tokenWrapped || null,
             created_at: now,
             created_by_user_id: actorUserId ?? null,
             access_count: 0,
@@ -579,6 +601,47 @@ export function createSupabaseDigitalEstimateRepository(deps) {
         .eq("publication_id", publicationId);
       if (error) throw error;
       return data || [];
+    },
+    async getActiveTokenForPublication(organizationId, publicationId) {
+      const { data, error } = await db
+        .from("quote_publication_access_tokens")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId)
+        .is("revoked_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+    async setActiveTokenWrapped(organizationId, publicationId, tokenWrapped) {
+      const { data: activeRows, error: findErr } = await db
+        .from("quote_publication_access_tokens")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId)
+        .is("revoked_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (findErr) throw findErr;
+      const activeId = activeRows?.[0]?.id;
+      if (!activeId) return null;
+      const { data, error } = await db
+        .from("quote_publication_access_tokens")
+        .update({ token_wrapped: tokenWrapped || null })
+        .eq("id", activeId)
+        .eq("organization_id", organizationId)
+        .select("*")
+        .limit(1);
+      if (error) {
+        // Column missing until eliteos_digital_estimate_reusable_links_v1.sql is applied.
+        const msg = String(error.message || "").toLowerCase();
+        if (msg.includes("token_wrapped") || error.code === "42703" || error.code === "PGRST204") {
+          return null;
+        }
+        throw error;
+      }
+      return data?.[0] ?? null;
     },
     async getPublication(organizationId, publicationId) {
       const { data, error } = await db

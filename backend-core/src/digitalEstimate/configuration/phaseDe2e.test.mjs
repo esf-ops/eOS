@@ -219,8 +219,9 @@ async function seedPublishedWithEnvelope() {
 // --- Token exchange + resume + selections ---
 {
   const { published, service, cfgRepo, publication } = await seedPublishedWithEnvelope();
-  assert.ok(published.customerUrl.includes("/e#"));
-  assert.equal(published.customerUrl.split("#")[0].includes(published.accessToken), false);
+  assert.ok(published.customerUrl.includes("/e/"));
+  assert.equal(published.customerUrl.includes("#"), false);
+  assert.equal(published.customerUrl.endsWith(published.accessToken), true);
 
   const exchanged = await service.exchangePublicationToken({ rawToken: published.accessToken });
   assert.ok(exchanged.rawSecret);
@@ -450,8 +451,8 @@ async function seedPublishedWithEnvelope() {
     join(__dirname, "../digitalEstimatePublishService.mjs"),
     "utf8"
   );
-  assert.ok(publishSrc.includes("/e#"));
-  console.log("ok: additive SQL RPC present; no calculateQuote; Studio fragment links");
+  assert.ok(publishSrc.includes("buildDigitalEstimateCustomerUrl") || publishSrc.includes("/e/"));
+  console.log("ok: additive SQL RPC present; no calculateQuote; stable path customer URLs");
 }
 
 // Token hash stored, not raw

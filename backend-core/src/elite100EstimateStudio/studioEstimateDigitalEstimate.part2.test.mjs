@@ -41,6 +41,7 @@ const ENV_ON = {
   DIGITAL_ESTIMATE_REVIEW_REQUEST_RUNTIME_ENABLED: "1",
   DIGITAL_ESTIMATE_ALLOW_LOCALHOST_PUBLIC_ORIGIN: "1",
   DIGITAL_ESTIMATE_ALLOW_INSECURE_SESSION_COOKIE: "1",
+  DIGITAL_ESTIMATE_ALLOW_DEV_LINK_WRAP: "1",
   ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1",
   HEAD_URL_DIGITAL_ESTIMATE: "http://localhost:5190",
   NODE_ENV: "development"
@@ -256,7 +257,8 @@ console.log("\nstudioEstimateDigitalEstimate.part2.test.mjs\n");
   });
   assert.equal(publishedOk.ok, true);
   assert.ok(publishedOk.accessToken);
-  assert.ok(publishedOk.customerUrl?.includes("#"));
+  assert.ok(publishedOk.customerUrl?.includes("/e/"));
+  assert.equal(publishedOk.customerUrl?.includes("#"), false);
   assert.equal(publishedOk.publication.status, "active");
   assert.equal(publishedOk.envelope?.configured, true);
   console.log("ok: 5 approved durable estimate publishes successfully");
@@ -394,9 +396,12 @@ console.log("\nstudioEstimateDigitalEstimate.part2.test.mjs\n");
       configuration: { allowedOptionKeys: ["qty-sink"] }
     }
   });
-  assert.ok(published.customerUrl.startsWith("http://localhost:5190/e#"));
+  assert.ok(published.customerUrl.startsWith("http://localhost:5190/e/"));
   assert.ok(published.accessToken);
-  console.log("ok: 11 customer link opens existing Digital Estimate UI path (/e#token)");
+  const readinessReload = await svc.assessReadiness(ORG, row.id);
+  assert.equal(readinessReload.activePublication?.customerUrl, published.customerUrl);
+  assert.equal(readinessReload.activePublication?.linkStatus, "active");
+  console.log("ok: 11 customer link is stable path URL and survives Studio readiness reload");
 
   // Simulate a customer review request row linked to this publication (reuse amendment repo).
   await amendmentRepo.createReviewRequest({

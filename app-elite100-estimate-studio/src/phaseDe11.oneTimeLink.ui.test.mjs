@@ -1,5 +1,5 @@
 /**
- * Phase DE.2G — Studio one-time customer link UI contract (static).
+ * Phase DE.2G — Studio stable reusable customer link UI contract (static).
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -9,16 +9,14 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = readFileSync(join(__dirname, "StudioApp.tsx"), "utf8");
 
-assert.ok(app.includes("preserveOneTimeLink"), "loadQuote must preserve one-time link after publish/replace");
-assert.ok(app.includes("One-time customer link created"), "prominent one-time panel title");
+assert.ok(app.includes("preserveCustomerLink"), "loadQuote recovers/preserves customer link");
+assert.ok(app.includes("Customer link"), "stable customer link panel title");
 assert.ok(app.includes("Copy link"), "copy control");
 assert.ok(app.includes("Open customer view"), "open customer view control");
-assert.ok(
-  app.includes("will not be shown again after you leave or refresh"),
-  "one-time retention warning"
-);
-assert.ok(app.includes("Replace token"), "lost-link recovery guidance");
+assert.ok(app.includes("Stable reusable link") || app.includes("stable reusable"), "reusable retention copy");
+assert.ok(app.includes("Replace link"), "replace recovery control");
 assert.equal(app.includes("oneTimeToken"), false, "raw token must not be stored in dedicated state");
+assert.equal(app.includes("will not be shown again after you leave or refresh"), false);
 assert.equal(app.includes("localStorage"), false, "no localStorage persistence");
 assert.equal(app.includes("sessionStorage"), false, "no sessionStorage persistence");
 assert.equal(app.includes("indexedDB"), false, "no IndexedDB persistence");
@@ -30,5 +28,5 @@ assert.ok(app.includes("Active publication exists"), "active publication banner"
 assert.equal(app.includes("Token length"), false, "must not display raw token metadata");
 
 console.log("\nphaseDe11.oneTimeLink.ui.test.mjs\n");
-console.log("ok: Studio one-time link UI contract");
-console.log("\nAll one-time link UI tests passed.\n");
+console.log("ok: Studio stable reusable customer link UI contract");
+console.log("\nAll Studio customer-link UI tests passed.\n");

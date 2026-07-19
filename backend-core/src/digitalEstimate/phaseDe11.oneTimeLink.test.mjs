@@ -1,5 +1,6 @@
 /**
- * Phase DE.2G — One-time link response contract (publish/replace vs GET).
+ * Legacy filename — Digital Estimate customer links are now stable/reusable.
+ * Delegates to phaseDe11.reusableLink.test.mjs contract checks.
  */
 import assert from "node:assert/strict";
 import { createInMemoryDigitalEstimateRepository } from "./digitalEstimateRepository.mjs";
@@ -8,7 +9,7 @@ import {
   replaceDigitalEstimateToken
 } from "./digitalEstimatePublishService.mjs";
 import { sanitizeDigitalEstimateEventMetadata } from "./digitalEstimateEvents.mjs";
-import { buildPublicDigitalEstimateDto } from "./digitalEstimatePublicSerializer.mjs";
+import { unwrapDigitalEstimateAccessToken } from "./digitalEstimateTokenWrap.mjs";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const QUOTE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -18,7 +19,9 @@ const ENV = {
   DIGITAL_ESTIMATE_PUBLISH_ENABLED: "1",
   DIGITAL_ESTIMATE_PUBLIC_READ_ENABLED: "1",
   DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY: "0",
-  HEAD_URL_DIGITAL_ESTIMATE: "https://digital.eliteosfab.com"
+  DIGITAL_ESTIMATE_ALLOW_DEV_LINK_WRAP: "1",
+  HEAD_URL_DIGITAL_ESTIMATE: "https://digital.eliteosfab.com",
+  NODE_ENV: "test"
 };
 
 function eliteHeader() {
@@ -46,7 +49,7 @@ function eliteHeader() {
   };
 }
 
-console.log("\nphaseDe11.oneTimeLink.test.mjs\n");
+console.log("\nphaseDe11.oneTimeLink.test.mjs (reusable-link contract)\n");
 
 {
   const repo = createInMemoryDigitalEstimateRepository();
@@ -58,10 +61,15 @@ console.log("\nphaseDe11.oneTimeLink.test.mjs\n");
     repository: repo,
     body: { quoteId: QUOTE_ID, confirm: true }
   });
-  assert.ok(published.customerUrl);
-  assert.ok(published.accessToken);
-  assert.ok(published.customerUrl.includes("/e#"));
-  assert.equal(published.customerUrl.endsWith(published.accessToken), true);
+  assert.ok(published.customerUrl.includes("/e/"));
+  assert.equal(published.customerUrl.includes("#"), false);
+
+  const tokenRow = await repo.getActiveTokenForPublication(ORG, published.publication.id);
+  assert.equal(unwrapDigitalEstimateAccessToken(tokenRow.token_wrapped, ENV), published.accessToken);
+
+  // Dump must not contain raw token plaintext outside ciphertext
+  const dump = JSON.stringify(repo._dump());
+  assert.equal(dump.includes(published.accessToken), false);
 
   const replaced = await replaceDigitalEstimateToken({
     env: ENV,
@@ -71,30 +79,15 @@ console.log("\nphaseDe11.oneTimeLink.test.mjs\n");
     publicationId: published.publication.id,
     body: { confirm: true }
   });
-  assert.ok(replaced.customerUrl);
   assert.notEqual(replaced.accessToken, published.accessToken);
-
-  const dump = JSON.stringify(repo._dump());
-  assert.equal(dump.includes(published.accessToken), false);
-  assert.equal(dump.includes(replaced.accessToken), false);
-  assert.ok(repo._dump().tokens.every((t) => t.token_hash && !String(t.token_hash).includes(replaced.accessToken)));
-
-  const pubView = published.publication;
-  assert.equal("customerUrl" in pubView, false);
-  assert.equal("accessToken" in pubView, false);
+  assert.ok(replaced.customerUrl.includes("/e/"));
 
   assert.throws(
     () => sanitizeDigitalEstimateEventMetadata({ accessToken: "secret" }),
     /Prohibited/
   );
 
-  const snap = repo._dump().snapshots[0];
-  const publicDto = buildPublicDigitalEstimateDto(snap.customer_snapshot_json, {
-    accessExpiresAt: null
-  });
-  assert.equal(JSON.stringify(publicDto).includes(replaced.accessToken), false);
-
-  console.log("ok: one-time link only on publish/replace; hash-only persistence");
+  console.log("ok: reusable links — path URL + wrapped recovery; events never store raw tokens");
 }
 
-console.log("\nAll one-time link backend tests passed.\n");
+console.log("\nAll phaseDe11 link contract tests passed.\n");

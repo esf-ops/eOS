@@ -1542,6 +1542,18 @@
 | **Impacted** | `studioEstimateQueueWorkflow.mjs`, `studioEstimateQueueService.mjs`, Studio `EstimateQueuePage`, open-target routing into Takeoff / Scope / Digital / Review. |
 | **Out of scope** | Acceptance, sold confirmation, Moraware, QuickBooks, payments, new AI behavior. |
 
+### 108. Digital Estimate customer links are stable and reusable (2026-07-18)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-18 |
+| **Decision** | **Digital Estimate customer links are stable, reusable links for the active publication. They remain available to authorized estimators until replaced, revoked, expired by policy, or superseded. The system does not use one-time links for normal customer estimate access.** URL shape is `https://digital.eliteosfab.com/e/<opaque-token>`. Public validation remains hash-only; Studio recovers `customerUrl` via AES-GCM `token_wrapped` (Brain-only). Pricing expiry still loads the estimate with an explicit expired message; it does not hide the link. |
+| **Why** | One-time / non-recoverable Studio links created operational friction (lost after refresh; Preview/Copy unreliable). Backend tokens were already reusable — only staff recovery was missing. |
+| **Migration** | `eliteos_digital_estimate_reusable_links_v1.sql` adds nullable `quote_publication_access_tokens.token_wrapped`. **Required** because SHA-256 hashes cannot rebuild the customer URL after refresh; event metadata explicitly forbids storing raw tokens. |
+| **Env** | `DIGITAL_ESTIMATE_LINK_WRAP_KEY` (production). Dev/test may use `DIGITAL_ESTIMATE_ALLOW_DEV_LINK_WRAP=1`. |
+| **Impacted** | `digitalEstimateTokenWrap.mjs`, publish/replace services, DE repository, Studio readiness/publish panel, Digital Estimate app path bootstrap, FEATURE_DECISIONS. |
+| **Out of scope** | Acceptance, sold, Moraware, QuickBooks, payments. |
+
 ### 107. Studio Digital Estimate publish — quote_headers bridge + consistent readiness (2026-07-18)
 
 | Field | Value |

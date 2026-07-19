@@ -135,56 +135,53 @@ export function App() {
       const fragmentToken = parseTokenFromHash(window.location.hash);
       const pathToken = parseTokenFromPath(window.location.pathname);
 
-      // /e#token must always attempt secure v2 exchange. Vite UI flags must not gate this.
-      if (fragmentToken) {
-        let token: string | null = fragmentToken;
-        clearFragmentFromUrl();
+      // Stable reusable path token: /e/<token> — exchange every visit; do not consume/delete.
+      // Legacy fragment /e#token still works (cleared from bar after capture for hygiene).
+      const accessToken = pathToken || fragmentToken;
+      if (accessToken) {
+        if (fragmentToken && !pathToken) {
+          clearFragmentFromUrl();
+        }
         try {
-          const state = await exchangeFragmentToken(token);
-          token = null;
+          const state = await exchangeFragmentToken(accessToken);
           if (cancelled) return;
           applyExchangeState(state, setters);
         } catch (e) {
-          token = null;
-          const code =
-            e && typeof e === "object" && "diagnosticCode" in e
-              ? String((e as { diagnosticCode?: string }).diagnosticCode || "DE-EXCHANGE-404")
-              : "DE-EXCHANGE-404";
-          if (!cancelled) clearAllState(setters, code);
+          // Path tokens: fall back to legacy v1 read-only if v2 exchange is unavailable.
+          if (pathToken) {
+            try {
+              const dto = await fetchLegacyPathEstimate(pathToken);
+              if (cancelled) return;
+              setEstimate(normalizePublicEstimate(dto));
+              setMode("legacy");
+              setDiagnosticCode(null);
+            } catch {
+              const code =
+                e && typeof e === "object" && "diagnosticCode" in e
+                  ? String((e as { diagnosticCode?: string }).diagnosticCode || "DE-EXCHANGE-404")
+                  : "DE-EXCHANGE-404";
+              if (!cancelled) clearAllState(setters, code);
+            }
+          } else {
+            const code =
+              e && typeof e === "object" && "diagnosticCode" in e
+                ? String((e as { diagnosticCode?: string }).diagnosticCode || "DE-EXCHANGE-404")
+                : "DE-EXCHANGE-404";
+            if (!cancelled) clearAllState(setters, code);
+          }
         } finally {
-          token = null;
           if (!cancelled) setLoading(false);
         }
         return;
       }
 
-      if (
-        !pathToken &&
-        (window.location.pathname === "/e" || window.location.pathname === "/e/")
-      ) {
+      if (window.location.pathname === "/e" || window.location.pathname === "/e/") {
         try {
           const state = await resumeConfigurationSession();
           if (cancelled) return;
           applyExchangeState(state, setters);
         } catch (e) {
           const code = e instanceof EstimateRenderError ? e.diagnosticCode : "DE-COOKIE";
-          if (!cancelled) clearAllState(setters, code);
-        } finally {
-          if (!cancelled) setLoading(false);
-        }
-        return;
-      }
-
-      if (pathToken) {
-        try {
-          const dto = await fetchLegacyPathEstimate(pathToken);
-          if (cancelled) return;
-          setEstimate(normalizePublicEstimate(dto));
-          setMode("legacy");
-          setDiagnosticCode(null);
-        } catch (e) {
-          const code =
-            e instanceof EstimateRenderError ? e.diagnosticCode : "DE-EXCHANGE-404";
           if (!cancelled) clearAllState(setters, code);
         } finally {
           if (!cancelled) setLoading(false);
@@ -234,9 +231,25 @@ export function App() {
   }
 
   if (estimate) {
+    const lifecycleNotice =
+      configState?.lifecycle && configState.lifecycle !== "active"
+        ? configState.message ||
+          (configState.lifecycle === "expired"
+            ? "Pricing expired. Contact your estimator for updated pricing."
+            : configState.lifecycle === "revoked"
+              ? "This estimate link has been revoked."
+              : configState.lifecycle === "superseded"
+                ? "A newer estimate is available. Contact your estimator."
+                : "This estimate is unavailable.")
+        : null;
     return (
       <div className="page">
         <main className="shell">
+          {lifecycleNotice ? (
+            <p className="unavailable" role="status" data-testid="de-lifecycle-notice">
+              {lifecycleNotice}
+            </p>
+          ) : null}
           <ReadOnlyEstimateView estimate={estimate} />
         </main>
       </div>

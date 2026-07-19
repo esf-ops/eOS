@@ -354,12 +354,24 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
   }, []);
 
   if (state.lifecycle !== "active" || !config || !state.estimate) {
+    const title =
+      state.lifecycle === "expired"
+        ? "Pricing expired"
+        : state.lifecycle === "revoked"
+          ? "Link revoked"
+          : state.lifecycle === "superseded"
+            ? "Estimate updated"
+            : "This estimate isn’t available";
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="max-w-md rounded-2xl border border-border bg-card p-6 text-center">
-          <div className="text-lg font-semibold">This estimate isn&apos;t available</div>
+        <div
+          className="max-w-md rounded-2xl border border-border bg-card p-6 text-center"
+          data-testid="de-lifecycle-state"
+          data-lifecycle={state.lifecycle || "invalid"}
+        >
+          <div className="text-lg font-semibold">{title}</div>
           <p className="mt-2 text-sm text-muted-foreground">
-            {state.message || "Configuration unavailable"}
+            {state.message || "This estimate is unavailable."}
           </p>
         </div>
       </div>
