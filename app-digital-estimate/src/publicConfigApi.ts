@@ -90,6 +90,86 @@ export type ConfigOption = {
   defaultQty: number;
   selectable: boolean;
   includedInBaseline?: boolean;
+  /** Optional role from API (backsplash, sink, faucet, …); else derived from optionKey prefix. */
+  role?: string | null;
+  availabilityText?: string | null;
+  productId?: string | null;
+  variantId?: string | null;
+  pieceKey?: string | null;
+  sourceKind?: string | null;
+};
+
+export type ConfigProductVariant = {
+  variantId: string;
+  sku?: string | null;
+  displayName?: string | null;
+  finish?: string | null;
+  color?: string | null;
+  availability?: string | null;
+  availabilityText?: string | null;
+  optionKey?: string | null;
+  imageUrl?: string | null;
+};
+
+/** Customer-safe catalog product from configuration envelope / API — never invent client-side. */
+export type ConfigProduct = {
+  productId: string;
+  category: string;
+  subcategory?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  displayName: string;
+  description?: string | null;
+  finish?: string | null;
+  color?: string | null;
+  imageUrl?: string | null;
+  availability?: string | null;
+  availabilityText?: string | null;
+  customerVisible?: boolean;
+  active?: boolean;
+  roomEligibility?: string[];
+  optionKey?: string | null;
+  variants?: ConfigProductVariant[];
+  pricingTreatment?: string | null;
+};
+
+export type ProductDraft = {
+  source: "none" | "customer_provided" | "esf" | string;
+  optionKey?: string | null;
+  productId?: string | null;
+  variantId?: string | null;
+  variantSku?: string | null;
+  manufacturer?: string;
+  model?: string;
+  finish?: string;
+  notes?: string;
+  displayLabel?: string | null;
+  availability?: string | null;
+};
+
+export type RoomProductDrafts = {
+  sink?: ProductDraft | null;
+  faucet?: ProductDraft | null;
+  accessories?: ProductDraft[];
+};
+
+export type BacksplashDraft = {
+  mode: "none" | "standard_4in" | "full_height" | "custom_height" | string;
+  optionKey?: string | null;
+  /** Preferred API field */
+  requestedHeightInches?: number | null;
+  /** @deprecated alias — prefer requestedHeightInches */
+  customHeightIn?: number | null;
+  note?: string;
+};
+
+export type MissingInformationRequirement = {
+  code: string;
+  roomKey?: string;
+  message: string;
+  customerCopy: string;
+  severity?: "info" | "review";
+  blocksSave?: boolean;
 };
 
 export type CustomerMaterial = {
@@ -97,6 +177,7 @@ export type CustomerMaterial = {
   displayName: string;
   imageAssetPath?: string | null;
   imageFullPath?: string | null;
+  textureFallbackStatus?: string | null;
   collectionLabel?: string | null;
   colorFamily?: string | null;
   patternType?: string | null;
@@ -152,6 +233,14 @@ export type ConfigurationState = {
     groups?: Array<{ id: string; groupKey: string; displayLabel: string; required?: boolean }>;
     options?: ConfigOption[];
     materials?: CustomerMaterial[];
+    /** Optional customer-safe catalog products from API (sinks/faucets/etc.). Never invent client-side. */
+    products?: ConfigProduct[];
+    /** Persisted plumbing drafts (manufacturer/model/variant) — server key customerProductDrafts */
+    customerProductDrafts?: Record<string, RoomProductDrafts>;
+    /** @deprecated prefer customerProductDrafts */
+    productDrafts?: Record<string, RoomProductDrafts>;
+    backsplashDrafts?: Record<string, BacksplashDraft>;
+    missingInformationRequirements?: MissingInformationRequirement[];
     currentSelections?: Record<string, number>;
     roomNotes?: Record<string, string>;
     projectNote?: string | null;
@@ -416,6 +505,10 @@ export async function saveConfigurationSelections(payload: {
   roomLabelDrafts?: Record<string, string> | null;
   roomNotes?: Record<string, string> | null;
   projectNote?: string | null;
+  customerProductDrafts?: Record<string, RoomProductDrafts> | null;
+  /** @deprecated prefer customerProductDrafts */
+  productDrafts?: Record<string, RoomProductDrafts> | null;
+  backsplashDrafts?: Record<string, BacksplashDraft> | null;
 }): Promise<{
   ok: boolean;
   session?: { rowVersion: number };
@@ -428,6 +521,10 @@ export async function saveConfigurationSelections(payload: {
   roomLabelDrafts?: Record<string, string>;
   roomNotes?: Record<string, string>;
   projectNote?: string | null;
+  customerProductDrafts?: Record<string, RoomProductDrafts>;
+  productDrafts?: Record<string, RoomProductDrafts>;
+  backsplashDrafts?: Record<string, BacksplashDraft>;
+  missingInformationRequirements?: MissingInformationRequirement[];
 }> {
   const base = apiBaseUrl();
   let res: Response;

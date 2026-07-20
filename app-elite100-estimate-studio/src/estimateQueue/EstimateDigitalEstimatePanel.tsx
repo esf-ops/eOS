@@ -64,6 +64,53 @@ type ReviewRequestRow = {
   selectedOptions?: Array<{ optionKey?: string; displayLabel?: string; quantity?: number }>;
   configuredDisplayTotal?: number | null;
   baselineDisplayTotal?: number | null;
+  /** Optional richer customer selection summary when review payload includes it. */
+  customerConfigurationSummary?: {
+    rooms?: Array<{
+      roomKey?: string;
+      displayName?: string;
+      material?: { materialToken?: string | null; optionKey?: string | null } | null;
+      materialLabel?: string | null;
+      backsplashMode?: string | null;
+      backsplashLabel?: string | null;
+      sink?: {
+        source?: string | null;
+        displayName?: string | null;
+        manufacturer?: string | null;
+        model?: string | null;
+      } | null;
+      sinkSummary?: string | null;
+      faucet?: {
+        source?: string | null;
+        displayName?: string | null;
+        manufacturer?: string | null;
+        model?: string | null;
+      } | null;
+      faucetSummary?: string | null;
+    }>;
+    missingInformationRequirements?: Array<{ code?: string; message?: string; customerCopy?: string }>;
+    totals?: {
+      configuredDisplayTotal?: number | null;
+      baselineDisplayTotal?: number | null;
+    };
+  } | null;
+  customerSelectionSummary?: {
+    rooms?: Array<{
+      roomKey?: string;
+      displayName?: string;
+      materialLabel?: string | null;
+      backsplashLabel?: string | null;
+      sinkSummary?: string | null;
+      faucetSummary?: string | null;
+    }>;
+    missingInformationCount?: number | null;
+  } | null;
+  missingInformationRequirements?: Array<{
+    code?: string;
+    roomKey?: string;
+    message?: string;
+    customerCopy?: string;
+  }> | null;
 };
 
 type PublishDiagnostic = {
@@ -520,22 +567,108 @@ export default function EstimateDigitalEstimatePanel({
                     Project note: {r.projectNote}
                   </div>
                 ) : null}
-                {r.selectedOptions?.length ? (
-                  <div className="eq-footnote" data-testid="eq-de-review-materials">
-                    Selected options:{" "}
-                    {r.selectedOptions
-                      .map((o) => o.displayLabel || o.optionKey)
+                {(() => {
+                  const summary =
+                    r.customerConfigurationSummary ||
+                    (r.customerSelectionSummary
+                      ? {
+                          rooms: r.customerSelectionSummary.rooms,
+                          missingInformationRequirements: Array.from({
+                            length: Number(r.customerSelectionSummary.missingInformationCount || 0)
+                          }).map(() => ({})),
+                          totals: undefined
+                        }
+                      : null);
+                  if (summary?.rooms?.length) {
+                    return (
+                      <div className="eq-footnote" data-testid="eq-de-review-selection-summary">
+                        {summary.rooms.map((room) => {
+                          const sink =
+                            room.sinkSummary ||
+                            (room.sink
+                              ? [
+                                  room.sink.source,
+                                  room.sink.displayName ||
+                                    [room.sink.manufacturer, room.sink.model].filter(Boolean).join(" ")
+                                ]
+                                  .filter(Boolean)
+                                  .join(": ")
+                              : null);
+                          const faucet =
+                            room.faucetSummary ||
+                            (room.faucet
+                              ? [
+                                  room.faucet.source,
+                                  room.faucet.displayName ||
+                                    [room.faucet.manufacturer, room.faucet.model]
+                                      .filter(Boolean)
+                                      .join(" ")
+                                ]
+                                  .filter(Boolean)
+                                  .join(": ")
+                              : null);
+                          const material =
+                            room.materialLabel ||
+                            room.material?.materialToken ||
+                            null;
+                          const backsplash =
+                            room.backsplashLabel || room.backsplashMode || null;
+                          return (
+                            <div key={room.roomKey || room.displayName || "room"}>
+                              <strong>{room.displayName || room.roomKey || "Room"}</strong>
+                              {": "}
+                              {[
+                                material ? `Material: ${material}` : null,
+                                backsplash ? `Backsplash: ${backsplash}` : null,
+                                sink ? `Sink: ${sink}` : null,
+                                faucet ? `Faucet: ${faucet}` : null
+                              ]
+                                .filter(Boolean)
+                                .join(" · ") || "—"}
+                            </div>
+                          );
+                        })}
+                        {(summary.missingInformationRequirements?.length ||
+                          r.missingInformationRequirements?.length) ? (
+                          <div>
+                            Missing info items:{" "}
+                            {summary.missingInformationRequirements?.length ||
+                              r.missingInformationRequirements?.length}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  }
+                  if (r.selectedOptions?.length) {
+                    return (
+                      <div className="eq-footnote" data-testid="eq-de-review-materials">
+                        Selected options:{" "}
+                        {r.selectedOptions
+                          .map((o) => o.displayLabel || o.optionKey)
+                          .filter(Boolean)
+                          .join(", ")}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+                {Array.isArray(r.missingInformationRequirements) &&
+                r.missingInformationRequirements.length ? (
+                  <div className="eq-footnote" data-testid="eq-de-review-missing-info">
+                    Missing info ({r.missingInformationRequirements.length}):{" "}
+                    {r.missingInformationRequirements
+                      .map((m) => m.customerCopy || m.message || m.code)
                       .filter(Boolean)
-                      .join(", ")}
+                      .join(" · ")}
                   </div>
                 ) : null}
                 {r.baselineDisplayTotal != null || r.configuredDisplayTotal != null ? (
-                  <div className="eq-footnote">
+                  <div className="eq-footnote" data-testid="eq-de-review-totals">
                     {r.baselineDisplayTotal != null
                       ? `Original: $${Number(r.baselineDisplayTotal).toFixed(2)} · `
                       : null}
                     {r.configuredDisplayTotal != null
-                      ? `Requested: $${Number(r.configuredDisplayTotal).toFixed(2)}`
+                      ? `Configured total: $${Number(r.configuredDisplayTotal).toFixed(2)}`
                       : null}
                   </div>
                 ) : null}

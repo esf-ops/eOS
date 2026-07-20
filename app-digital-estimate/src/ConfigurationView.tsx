@@ -1,13 +1,17 @@
 /**
  * Lovable customer quote UI — adapted from hub-spoke-hub q.$token.tsx.
  * Pricing / accept / Supabase / client totals removed. Brain APIs only.
+ * Room options consume envelope options / config.products — never hard-coded catalogs.
  */
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import {
   buildSelectionItems,
   groupColorsByPricingGroup,
   mapEliteOsToLovableViewModel,
+  normalizeBacksplashLabel,
+  resolveProductOptionKey,
   type CustomerInfoDraft,
+  type LovableChoiceOption,
   type LovableColor,
   type LovableRoom,
 } from "./lovableViewModel";
@@ -18,9 +22,13 @@ import {
   reviewUiEnabled,
   saveConfigurationSelections,
   submitReviewRequest,
+  type BacksplashDraft,
   type ConfigurationSaveError,
   type ConfigurationState,
+  type ConfigProduct,
   type CustomerReviewRequest,
+  type ProductDraft,
+  type RoomProductDrafts,
 } from "./publicConfigApi";
 
 type Props = {
@@ -30,6 +38,19 @@ type Props = {
   /** Stable publication token for session recovery after cookie loss. */
   accessToken?: string | null;
 };
+
+type ModalKind =
+  | "color"
+  | "backsplash"
+  | "sink"
+  | "faucet"
+  | "accessories"
+  | "cooktop"
+  | "edge"
+  | "specialty"
+  | "sidesplash"
+  | "notes"
+  | null;
 
 function Row({
   label,
@@ -74,6 +95,112 @@ function GroupChip({
   );
 }
 
+function MaterialThumb({
+  src,
+  alt,
+  className,
+  size = "md",
+}: {
+  src: string | null | undefined;
+  alt: string;
+  className?: string;
+  size?: "sm" | "md" | "lg";
+}) {
+  const [broken, setBroken] = useState(false);
+  const dim = size === "sm" ? "h-10 w-10" : size === "lg" ? "h-28 w-full" : "h-16 w-16";
+  const showImg = Boolean(src) && !broken;
+  return (
+    <span
+      className={`relative inline-flex shrink-0 overflow-hidden rounded-md border border-border/60 ${dim} ${className || ""}`}
+      data-testid="de-material-thumb"
+      data-has-image={showImg ? "true" : "false"}
+    >
+      {showImg ? (
+        <img
+          src={src!}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover"
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <span
+          className="flex h-full w-full items-center justify-center bg-[linear-gradient(145deg,#ebe8e0_0%,#d8d4c8_48%,#cfcabf_100%)] text-[10px] font-medium uppercase tracking-wider text-[#6b6560]"
+          aria-hidden
+          data-testid="de-material-placeholder"
+        >
+          <span className="px-1 text-center leading-tight">{alt.slice(0, 18) || "No image"}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+function ModalShell({
+  title,
+  eyebrow,
+  onClose,
+  children,
+  wide,
+  testId,
+}: {
+  title: string;
+  eyebrow?: string;
+  onClose: () => void;
+  children: ReactNode;
+  wide?: boolean;
+  testId?: string;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-6"
+      onClick={onClose}
+      role="presentation"
+      data-testid={testId}
+    >
+      <div
+        className={`flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-background shadow-2xl sm:max-h-[85vh] sm:rounded-2xl ${
+          wide ? "max-w-5xl" : "max-w-lg"
+        }`}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="border-b border-border px-6 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              {eyebrow ? (
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">{eyebrow}</div>
+              ) : null}
+              <div className="mt-0.5 text-lg font-semibold text-foreground">{title}</div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function ColorPickerModal({
   room,
   onSelect,
@@ -86,6 +213,7 @@ function ColorPickerModal({
   const [q, setQ] = useState("");
   const groups = useMemo(() => groupColorsByPricingGroup(room.colors), [room.colors]);
   const [activeGroup, setActiveGroup] = useState(() => groups[0]?.label || "All");
+  const [previewId, setPreviewId] = useState(room.selectedColorId);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -117,6 +245,13 @@ function ColorPickerModal({
         : true,
     );
   }, [q, room.colors, groups, activeGroup]);
+
+  const preview =
+    filtered.find((c) => c.id === previewId) ||
+    room.colors.find((c) => c.id === previewId) ||
+    filtered[0] ||
+    room.colors[0] ||
+    null;
 
   return (
     <div
@@ -172,59 +307,476 @@ function ColorPickerModal({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {filtered.map((c) => {
-              const selected = c.id === room.selectedColorId;
-              return (
-                <button
-                  key={c.optionKey}
-                  type="button"
-                  disabled={!c.selectable}
-                  onClick={() => onSelect(c)}
-                  data-testid="de-color-card"
-                  data-group={c.pricingGroupLabel}
-                  className={`group overflow-hidden rounded-xl border text-left transition ${
-                    selected
-                      ? "border-foreground shadow-sm ring-2 ring-foreground/20"
-                      : "border-border hover:border-foreground/40 hover:shadow-sm"
-                  } disabled:opacity-50`}
-                >
-                  <div
-                    className="h-28 w-full border-b border-border/60 bg-cover bg-center"
-                    style={{
-                      backgroundImage: c.imageFull
-                        ? `url(${c.imageFull})`
-                        : c.imageThumb
-                          ? `url(${c.imageThumb})`
-                          : undefined,
-                      background:
-                        !c.imageFull && !c.imageThumb
-                          ? "linear-gradient(135deg,#ebe8e0,#d5d2c8)"
-                          : undefined,
-                      backgroundSize: "cover",
-                      backgroundPosition: "center",
-                    }}
-                  />
-                  <div className="px-3 py-2">
-                    <div className="truncate text-xs font-medium text-foreground">{c.name}</div>
-                    <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                      {c.pricingGroupLabel}
-                      {c.includedInBaseline ? " · Included" : " · Upgrade may apply"}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-5 lg:flex-row">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {filtered.map((c) => {
+                const selected = c.id === room.selectedColorId;
+                const previewing = c.id === preview?.id;
+                return (
+                  <button
+                    key={c.optionKey}
+                    type="button"
+                    disabled={!c.selectable}
+                    onClick={() => onSelect(c)}
+                    onMouseEnter={() => setPreviewId(c.id)}
+                    onFocus={() => setPreviewId(c.id)}
+                    data-testid="de-color-card"
+                    data-group={c.pricingGroupLabel}
+                    className={`group overflow-hidden rounded-xl border text-left transition ${
+                      selected
+                        ? "border-foreground shadow-sm ring-2 ring-foreground/20"
+                        : previewing
+                          ? "border-foreground/50"
+                          : "border-border hover:border-foreground/40 hover:shadow-sm"
+                    } disabled:opacity-50`}
+                  >
+                    <MaterialThumb src={c.imageThumb} alt={c.name} size="lg" className="rounded-none border-0 border-b border-border/60" />
+                    <div className="px-3 py-2">
+                      <div className="truncate text-xs font-medium text-foreground">{c.name}</div>
+                      <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                        {c.pricingGroupLabel}
+                        {c.includedInBaseline ? " · Included" : " · Upgrade may apply"}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          {!filtered.length ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">
-              No colors match &quot;{q || activeGroup}&quot;.
+                  </button>
+                );
+              })}
             </div>
+            {!filtered.length ? (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                No colors match &quot;{q || activeGroup}&quot;.
+              </div>
+            ) : null}
+          </div>
+
+          {preview ? (
+            <aside
+              className="hidden w-56 shrink-0 flex-col rounded-xl border border-border bg-muted/20 p-3 lg:flex"
+              data-testid="de-color-preview"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Preview</div>
+              <div className="mt-2 overflow-hidden rounded-lg border border-border bg-background">
+                {preview.imageFull || preview.imageThumb ? (
+                  <img
+                    src={preview.imageFull || preview.imageThumb || undefined}
+                    alt={preview.name}
+                    className="aspect-square w-full object-cover"
+                    data-testid="de-color-preview-full"
+                  />
+                ) : (
+                  <MaterialThumb src={null} alt={preview.name} size="lg" className="aspect-square h-auto min-h-[10rem] w-full rounded-none border-0" />
+                )}
+              </div>
+              <div className="mt-3 text-sm font-medium text-foreground">{preview.name}</div>
+              <div className="text-xs text-muted-foreground">{preview.pricingGroupLabel}</div>
+            </aside>
           ) : null}
         </div>
       </div>
     </div>
+  );
+}
+
+function ChoiceRadio({
+  options,
+  name,
+  onSelect,
+}: {
+  options: LovableChoiceOption[];
+  name: string;
+  onSelect: (optionKey: string) => void;
+}) {
+  if (!options.length) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      {options.map((opt) => (
+        <label
+          key={opt.optionKey}
+          className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
+            opt.selected ? "border-foreground bg-muted/30" : "border-border bg-background"
+          }`}
+        >
+          <span>
+            <span className="font-medium text-foreground">{opt.displayLabel}</span>
+            {opt.includedInBaseline ? (
+              <span className="ml-2 text-xs text-muted-foreground">Included</span>
+            ) : null}
+            {opt.availabilityText ? (
+              <span className="ml-2 text-xs text-muted-foreground">{opt.availabilityText}</span>
+            ) : null}
+          </span>
+          <input
+            type="radio"
+            name={name}
+            checked={opt.selected}
+            disabled={opt.selectable === false}
+            onChange={() => onSelect(opt.optionKey)}
+          />
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function ProductCards({
+  products,
+  selectedOptionKey,
+  onPick,
+  role,
+}: {
+  products: ConfigProduct[];
+  selectedOptionKey: string | null;
+  onPick: (product: ConfigProduct, variantId?: string | null) => void;
+  role: "sink" | "faucet";
+}) {
+  const [openFamily, setOpenFamily] = useState<string | null>(null);
+  if (!products.length) {
+    return (
+      <p className="text-sm text-muted-foreground" data-testid={`de-${role}-esf-empty`}>
+        No ESF {role} options are available for this room yet. Your estimator can add them.
+      </p>
+    );
+  }
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" data-testid={`de-${role}-product-grid`}>
+      {products.map((p) => {
+        const variants = Array.isArray(p.variants) ? p.variants : [];
+        const hasVariants = variants.length > 0;
+        const familyOpen = openFamily === p.productId;
+        const selected =
+          selectedOptionKey &&
+          (selectedOptionKey === p.optionKey ||
+            variants.some((v) => v.optionKey === selectedOptionKey));
+        return (
+          <div
+            key={p.productId}
+            className={`rounded-xl border p-3 ${selected ? "border-foreground ring-1 ring-foreground/20" : "border-border"}`}
+            data-testid={`de-${role}-product-card`}
+          >
+            <div className="flex gap-3">
+              <MaterialThumb src={p.imageUrl} alt={p.displayName} size="md" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-foreground">{p.displayName}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {[p.manufacturer, p.model].filter(Boolean).join(" · ") || p.category}
+                </div>
+                {p.availabilityText ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">{p.availabilityText}</div>
+                ) : null}
+              </div>
+            </div>
+            {hasVariants ? (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  className="text-xs font-medium text-foreground underline-offset-2 hover:underline"
+                  onClick={() => setOpenFamily(familyOpen ? null : p.productId)}
+                >
+                  {familyOpen ? "Hide finishes" : "Choose finish"}
+                </button>
+                {familyOpen ? (
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    {variants.map((v) => (
+                      <button
+                        key={v.variantId}
+                        type="button"
+                        className={`rounded-lg border px-3 py-2 text-left text-xs ${
+                          v.optionKey && v.optionKey === selectedOptionKey
+                            ? "border-foreground bg-muted/40"
+                            : "border-border"
+                        }`}
+                        onClick={() => onPick(p, v.variantId)}
+                      >
+                        <span className="font-medium text-foreground">
+                          {v.finish || v.color || v.displayName || v.sku || "Finish"}
+                        </span>
+                        {v.availabilityText ? (
+                          <span className="ml-2 text-muted-foreground">{v.availabilityText}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="mt-3 w-full rounded-lg border border-border py-2 text-xs font-medium hover:border-foreground/40"
+                onClick={() => onPick(p, null)}
+              >
+                Select
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function findOptionBySource(
+  options: LovableChoiceOption[],
+  role: string,
+  kind: "none" | "customer_provided" | "esf",
+): LovableChoiceOption | undefined {
+  const pool = options.filter((o) => o.role === role);
+  if (kind === "none") return pool.find((o) => o.sourceKind === "none");
+  if (kind === "customer_provided") return pool.find((o) => o.sourceKind === "customer_provided");
+  return pool.find((o) => o.sourceKind === "esf" || o.sourceKind === "stock" || o.sourceKind === "other");
+}
+
+function optionsToProducts(options: LovableChoiceOption[], catalog: ConfigProduct[]): ConfigProduct[] {
+  if (catalog.length) {
+    // Prefer API products, but keep optionKey linkage from envelope options when present.
+    return catalog.map((p) => {
+      const match = options.find(
+        (o) => o.productId === p.productId || o.optionKey === p.optionKey,
+      );
+      return {
+        ...p,
+        optionKey: p.optionKey || match?.optionKey || null,
+      };
+    });
+  }
+  return options
+    .filter((o) => o.sourceKind === "esf" || o.sourceKind === "stock" || o.sourceKind === "other")
+    .map((o) => ({
+      productId: o.productId || o.optionKey,
+      category: String(o.role),
+      displayName: o.displayLabel,
+      description: o.description,
+      imageUrl: o.imageAssetRef,
+      availabilityText: o.availabilityText,
+      optionKey: o.optionKey,
+      variants: [],
+    }));
+}
+
+function PlumbingSourceModal({
+  room,
+  role,
+  draft,
+  products,
+  onClose,
+  onSelectSource,
+  onSelectProduct,
+  onDraftChange,
+}: {
+  room: LovableRoom;
+  role: "sink" | "faucet";
+  draft: ProductDraft;
+  products: ConfigProduct[];
+  onClose: () => void;
+  onSelectSource: (kind: "none" | "customer_provided" | "esf", optionKey?: string | null) => void;
+  onSelectProduct: (product: ConfigProduct, variantId?: string | null) => void;
+  onDraftChange: (next: ProductDraft) => void;
+}) {
+  const options = room.choiceOptions.filter((c) => c.role === role);
+  const esfOptions = options.filter(
+    (o) => o.sourceKind === "esf" || o.sourceKind === "stock" || o.sourceKind === "other",
+  );
+  const productCards = optionsToProducts(esfOptions, products);
+  const title = role === "sink" ? "Sink" : "Faucet";
+  const noneLabel = role === "sink" ? "No sink" : "No faucet";
+  const customerLabel =
+    role === "sink" ? "Customer-provided sink" : "Customer-provided faucet";
+  const esfLabel = role === "sink" ? "Select an ESF sink" : "Select an ESF faucet";
+  const source = draft.source === "customer_provided" || draft.source === "none" || draft.source === "esf"
+    ? draft.source
+    : draft.source === "stock"
+      ? "esf"
+      : "none";
+
+  return (
+    <ModalShell
+      title={title}
+      eyebrow={room.name}
+      onClose={onClose}
+      wide={source === "esf"}
+      testId={`de-${role}-modal`}
+    >
+      <div className="flex flex-col gap-2" data-testid={`de-${role}-source-choices`}>
+        {(
+          [
+            ["none", noneLabel],
+            ["customer_provided", customerLabel],
+            ["esf", esfLabel],
+          ] as const
+        ).map(([kind, label]) => {
+          const opt = findOptionBySource(options, role, kind);
+          const active = source === kind;
+          return (
+            <button
+              key={kind}
+              type="button"
+              data-testid={`de-${role}-source-${kind}`}
+              className={`rounded-xl border px-4 py-3 text-left text-sm font-medium ${
+                active ? "border-foreground bg-muted/30" : "border-border"
+              }`}
+              onClick={() => onSelectSource(kind, opt?.optionKey)}
+            >
+              {opt?.displayLabel || label}
+            </button>
+          );
+        })}
+      </div>
+
+      {source === "customer_provided" ? (
+        <div className="mt-5 space-y-3" data-testid={`de-${role}-customer-fields`}>
+          <p className="text-xs text-muted-foreground">
+            You can provide this later. We will need the {role} model before fabrication.
+          </p>
+          {(
+            [
+              ["manufacturer", "Manufacturer"],
+              ["model", "Model"],
+              ["finish", "Finish"],
+              ["notes", "Notes"],
+            ] as const
+          ).map(([field, label]) => (
+            <label key={field} className="grid gap-1 text-sm">
+              <span className="text-xs font-medium text-muted-foreground">{label} (optional)</span>
+              {field === "notes" ? (
+                <textarea
+                  className="min-h-[64px] rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  value={draft.notes || ""}
+                  onChange={(e) => onDraftChange({ ...draft, notes: e.target.value })}
+                />
+              ) : (
+                <input
+                  className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  value={(draft[field] as string) || ""}
+                  onChange={(e) => onDraftChange({ ...draft, [field]: e.target.value })}
+                />
+              )}
+            </label>
+          ))}
+        </div>
+      ) : null}
+
+      {source === "esf" ? (
+        <div className="mt-5 space-y-4">
+          <ProductCards
+            products={productCards}
+            selectedOptionKey={draft.optionKey || null}
+            onPick={onSelectProduct}
+            role={role}
+          />
+        </div>
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function BacksplashModal({
+  room,
+  draft,
+  onClose,
+  onSelectOption,
+  onDraftChange,
+}: {
+  room: LovableRoom;
+  draft: BacksplashDraft;
+  onClose: () => void;
+  onSelectOption: (optionKey: string) => void;
+  onDraftChange: (next: BacksplashDraft) => void;
+}) {
+  const options = room.choiceOptions
+    .filter((c) => c.role === "backsplash")
+    .map((o) => ({ ...o, displayLabel: normalizeBacksplashLabel(o.displayLabel) }));
+  const customOpt = options.find((o) => /custom/i.test(o.optionKey) || /custom/i.test(o.displayLabel));
+  const isCustom = draft.mode === "custom_height" || Boolean(customOpt?.selected);
+
+  return (
+    <ModalShell title="Backsplash" eyebrow={room.name} onClose={onClose} testId="de-backsplash-modal">
+      <ChoiceRadio
+        options={options.filter((o) => !/custom/i.test(o.optionKey))}
+        name={`backsplash-${room.id}`}
+        onSelect={onSelectOption}
+      />
+      {customOpt || true ? (
+        <div className="mt-3">
+          <button
+            type="button"
+            data-testid="de-backsplash-custom"
+            className={`w-full rounded-xl border px-4 py-3 text-left text-sm font-medium ${
+              isCustom ? "border-foreground bg-muted/30" : "border-border"
+            }`}
+            onClick={() => {
+              if (customOpt) onSelectOption(customOpt.optionKey);
+              onDraftChange({
+                ...draft,
+                mode: "custom_height",
+                optionKey: customOpt?.optionKey || draft.optionKey,
+              });
+            }}
+          >
+            {customOpt ? normalizeBacksplashLabel(customOpt.displayLabel) : "Custom-height backsplash"}
+          </button>
+          {isCustom ? (
+            <div className="mt-3 space-y-3 rounded-xl border border-border bg-muted/20 p-4" data-testid="de-backsplash-custom-fields">
+              <label className="grid gap-1 text-sm">
+                <span className="text-xs font-medium text-muted-foreground">Height (inches)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={96}
+                  className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  value={draft.requestedHeightInches ?? draft.customHeightIn ?? ""}
+                  onChange={(e) =>
+                    onDraftChange({
+                      ...draft,
+                      mode: "custom_height",
+                      requestedHeightInches: e.target.value === "" ? null : Number(e.target.value),
+                      customHeightIn: e.target.value === "" ? null : Number(e.target.value),
+                    })
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="text-xs font-medium text-muted-foreground">Note (optional)</span>
+                <textarea
+                  className="min-h-[64px] rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  value={draft.note || ""}
+                  onChange={(e) => onDraftChange({ ...draft, note: e.target.value })}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground" data-testid="de-backsplash-custom-copy">
+                Final measurements and pricing require estimator review.
+              </p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+  onClick,
+  testId,
+}: {
+  label: string;
+  value: string;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className="flex w-full items-center justify-between rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-foreground/40"
+    >
+      <span>
+        <span className="block text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+        <span className="mt-0.5 block text-sm font-medium text-foreground">{value}</span>
+      </span>
+      <span className="text-xs font-medium text-muted-foreground">Change</span>
+    </button>
   );
 }
 
@@ -303,19 +855,16 @@ function ReviewRequestModal({
 
 function CustomerRoomCard({
   room,
-  onPickColor,
+  onOpenModal,
   onRename,
-  onSelectChoice,
-  onRoomNote,
 }: {
   room: LovableRoom;
-  onPickColor: () => void;
+  onOpenModal: (kind: Exclude<ModalKind, null>) => void;
   onRename: (name: string) => void;
-  onSelectChoice?: (optionKey: string, role: string, roomId: string) => void;
-  onRoomNote?: (note: string) => void;
 }) {
   const color = room.colors.find((c) => c.id === room.selectedColorId) || room.colors[0];
-  const thumb = color?.imageThumb || color?.imageFull || null;
+  const has = (role: string) => room.choiceOptions.some((c) => c.role === role);
+  const hasSideSplash = room.sideSplashPieces.length > 0;
 
   return (
     <div className="rounded-2xl border border-border bg-background p-6 shadow-sm" data-testid="de-room-card">
@@ -339,15 +888,7 @@ function CustomerRoomCard({
             </div>
           ) : null}
         </div>
-        <div
-          className="h-16 w-16 shrink-0 rounded-lg border border-border bg-cover bg-center shadow-inner"
-          style={{
-            backgroundImage: thumb ? `url(${thumb})` : undefined,
-            background: !thumb ? "linear-gradient(135deg,#ebe8e0,#d5d2c8)" : undefined,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          }}
-        />
+        <MaterialThumb src={color?.imageThumb || color?.imageFull} alt={color?.name || "Color"} size="md" />
       </div>
 
       <dl className="mt-5 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
@@ -373,27 +914,23 @@ function CustomerRoomCard({
         {room.measurementStatus || "Measurements verified by estimator — locked for this estimate."}
       </p>
 
-      <div className="mt-5">
-        <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Material / color
+      <div className="mt-5 space-y-2">
+        <div className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          Selections
         </div>
+
         <button
           type="button"
-          onClick={onPickColor}
+          onClick={() => onOpenModal("color")}
           data-testid="de-open-color-modal"
           className="flex w-full items-center justify-between rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-foreground/40"
         >
           <span className="flex items-center gap-3">
-            <span
-              className="h-10 w-10 rounded-md border border-border/60 bg-cover bg-center"
-              style={{
-                backgroundImage: thumb ? `url(${thumb})` : undefined,
-                background: !thumb ? "linear-gradient(135deg,#ebe8e0,#d5d2c8)" : undefined,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }}
-            />
+            <MaterialThumb src={color?.imageThumb || color?.imageFull} alt={color?.name || "Color"} size="sm" />
             <span>
+              <span className="block text-[10px] uppercase tracking-wider text-muted-foreground">
+                Material / color
+              </span>
               <span className="block text-sm font-medium text-foreground">
                 {color?.name || room.selectedColorName || "Choose a color"}
               </span>
@@ -406,59 +943,89 @@ function CustomerRoomCard({
           <span className="text-xs font-medium text-muted-foreground">Change</span>
         </button>
         {room.baselineLabel ? (
-          <div className="mt-2 text-xs text-muted-foreground">
-            Original finish · {room.baselineLabel}
-          </div>
+          <div className="text-xs text-muted-foreground">Original finish · {room.baselineLabel}</div>
         ) : null}
-      </div>
 
-      {(["backsplash", "sink", "edge"] as const).map((role) => {
-        const opts = (room.choiceOptions || []).filter((c) => c.role === role);
-        if (!opts.length) return null;
-        const title =
-          role === "backsplash" ? "Backsplash" : role === "sink" ? "Sink" : "Edge profile";
-        return (
-          <div key={role} className="mt-5" data-testid={`de-room-${role}`}>
-            <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {title}
-            </div>
-            <div className="flex flex-col gap-2">
-              {opts.map((opt) => (
-                <label
-                  key={opt.optionKey}
-                  className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
-                    opt.selected ? "border-foreground bg-muted/30" : "border-border bg-background"
-                  }`}
-                >
-                  <span>
-                    <span className="font-medium text-foreground">{opt.displayLabel}</span>
-                    {opt.includedInBaseline ? (
-                      <span className="ml-2 text-xs text-muted-foreground">Included</span>
-                    ) : null}
-                  </span>
-                  <input
-                    type="radio"
-                    name={`${role}-${room.id}`}
-                    checked={opt.selected}
-                    onChange={() => onSelectChoice?.(opt.optionKey, role, room.id)}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+        {has("backsplash") ? (
+          <SummaryRow
+            label="Backsplash"
+            value={room.backsplashSummary || "Choose backsplash"}
+            onClick={() => onOpenModal("backsplash")}
+            testId="de-open-backsplash-modal"
+          />
+        ) : null}
 
-      <div className="mt-5">
-        <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Questions or notes for your estimator
-        </label>
-        <textarea
-          className="min-h-[72px] w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
-          value={room.roomNote || ""}
-          maxLength={2000}
-          data-testid="de-room-note"
-          onChange={(e) => onRoomNote?.(e.target.value)}
+        {hasSideSplash ? (
+          <SummaryRow
+            label="Side splash"
+            value={
+              room.sideSplashPieces.map((p) => `${p.pieceLabel}: ${p.summary || "None"}`).join(" · ") ||
+              "Choose side splash"
+            }
+            onClick={() => onOpenModal("sidesplash")}
+            testId="de-open-sidesplash-modal"
+          />
+        ) : null}
+
+        {has("sink") ? (
+          <SummaryRow
+            label="Sink"
+            value={room.sinkSummary || "Choose sink"}
+            onClick={() => onOpenModal("sink")}
+            testId="de-open-sink-modal"
+          />
+        ) : null}
+
+        {has("faucet") ? (
+          <SummaryRow
+            label="Faucet"
+            value={room.faucetSummary || "Choose faucet"}
+            onClick={() => onOpenModal("faucet")}
+            testId="de-open-faucet-modal"
+          />
+        ) : null}
+
+        {has("accessory") || room.accessoryProducts.length ? (
+          <SummaryRow
+            label="Accessories"
+            value={room.accessoriesSummary || "None selected"}
+            onClick={() => onOpenModal("accessories")}
+            testId="de-open-accessories-modal"
+          />
+        ) : null}
+
+        {has("cooktop") ? (
+          <SummaryRow
+            label="Cooktop / cutouts"
+            value={room.cooktopSummary || "Choose cooktop option"}
+            onClick={() => onOpenModal("cooktop")}
+            testId="de-open-cooktop-modal"
+          />
+        ) : null}
+
+        {has("edge") ? (
+          <SummaryRow
+            label="Edge"
+            value={room.edgeSummary || "Choose edge"}
+            onClick={() => onOpenModal("edge")}
+            testId="de-open-edge-modal"
+          />
+        ) : null}
+
+        {has("specialty") || room.specialtyProducts.length ? (
+          <SummaryRow
+            label="Specialty"
+            value={room.specialtySummary || "None selected"}
+            onClick={() => onOpenModal("specialty")}
+            testId="de-open-specialty-modal"
+          />
+        ) : null}
+
+        <SummaryRow
+          label="Notes"
+          value={room.roomNote?.trim() ? room.roomNote.trim().slice(0, 80) : "Add a note"}
+          onClick={() => onOpenModal("notes")}
+          testId="de-open-notes-modal"
         />
       </div>
     </div>
@@ -488,6 +1055,12 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
   const [roomNotes, setRoomNotes] = useState<Record<string, string>>(
     () => ({ ...(config?.roomNotes || {}) }),
   );
+  const [productDrafts, setProductDrafts] = useState<Record<string, RoomProductDrafts>>(
+    () => ({ ...(config?.customerProductDrafts || config?.productDrafts || {}) }),
+  );
+  const [backsplashDrafts, setBacksplashDrafts] = useState<Record<string, BacksplashDraft>>(
+    () => ({ ...(config?.backsplashDrafts || {}) }),
+  );
   const [projectNote, setProjectNote] = useState(config?.projectNote || "");
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
   const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
@@ -495,7 +1068,9 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
     "idle",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [pickerRoomId, setPickerRoomId] = useState<string | null>(null);
+  const [activeModal, setActiveModal] = useState<{ roomId: string; kind: Exclude<ModalKind, null> } | null>(
+    null,
+  );
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
@@ -540,7 +1115,15 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
     );
   }
 
-  const vm = mapEliteOsToLovableViewModel(state, qty, latestCalc, infoDraft, roomLabels);
+  const vm = mapEliteOsToLovableViewModel(
+    state,
+    qty,
+    latestCalc,
+    infoDraft,
+    roomLabels,
+    productDrafts,
+    backsplashDrafts,
+  );
   if (!vm) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
@@ -549,7 +1132,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
     );
   }
 
-  const pickerRoom = vm.rooms.find((r) => r.id === pickerRoomId) ?? null;
+  const modalRoom = vm.rooms.find((r) => r.id === activeModal?.roomId) ?? null;
 
   function selectColor(roomId: string, color: LovableColor) {
     const nextQty = { ...qty };
@@ -559,7 +1142,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
     setQty(nextQty);
     setSaveState("unsaved");
     setSaveError(null);
-    setPickerRoomId(null);
+    setActiveModal(null);
     void onSave({ qtyOverride: nextQty });
   }
 
@@ -567,7 +1150,18 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
     const nextQty = { ...qty };
     const prefix = `${role}:${roomId}:`;
     for (const key of Object.keys(nextQty)) {
-      if (key.startsWith(prefix)) nextQty[key] = 0;
+      if (key.startsWith(prefix)) {
+        // For sidesplash, clear only the same piece prefix when possible
+        if (role === "sidesplash") {
+          const pieceParts = optionKey.split(":");
+          const selPiece = pieceParts.slice(2, -1).join(":");
+          const keyPiece = key.split(":").slice(2, -1).join(":");
+          if (selPiece && keyPiece && selPiece !== keyPiece) continue;
+        }
+        // Accessories / specialty are multi-select — handled separately
+        if (role === "accessory" || role === "specialty") continue;
+        nextQty[key] = 0;
+      }
     }
     nextQty[optionKey] = 1;
     setQty(nextQty);
@@ -576,20 +1170,52 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
     void onSave({ qtyOverride: nextQty });
   }
 
+  function toggleMultiChoice(optionKey: string, role: string, roomId: string) {
+    const nextQty = { ...qty };
+    const prefix = `${role}:${roomId}:`;
+    if (!optionKey.startsWith(prefix) && role) {
+      /* still toggle by key */
+    }
+    nextQty[optionKey] = (nextQty[optionKey] ?? 0) > 0 ? 0 : 1;
+    setQty(nextQty);
+    setSaveState("unsaved");
+    setSaveError(null);
+    void onSave({ qtyOverride: nextQty });
+  }
+
+  function updateProductDraft(roomId: string, role: "sink" | "faucet", next: ProductDraft) {
+    setProductDrafts((prev) => ({
+      ...prev,
+      [roomId]: { ...prev[roomId], [role]: next },
+    }));
+    setSaveState("unsaved");
+  }
+
+  function updateBacksplashDraft(roomId: string, next: BacksplashDraft) {
+    setBacksplashDrafts((prev) => ({ ...prev, [roomId]: next }));
+    setSaveState("unsaved");
+  }
+
   async function onSave(opts?: {
     qtyOverride?: Record<string, number>;
     allowSessionRecover?: boolean;
+    productDraftsOverride?: Record<string, RoomProductDrafts>;
+    backsplashDraftsOverride?: Record<string, BacksplashDraft>;
   }): Promise<number | null> {
     setSaveState("saving");
     setSaveError(null);
     const seq = ++requestSeq.n;
     const effectiveQty = opts?.qtyOverride || qty;
+    const effectiveProductDrafts = opts?.productDraftsOverride || productDrafts;
+    const effectiveBacksplashDrafts = opts?.backsplashDraftsOverride || backsplashDrafts;
     const roomsForItems = mapEliteOsToLovableViewModel(
       state,
       effectiveQty,
       latestCalc,
       infoDraft,
       roomLabels,
+      effectiveProductDrafts,
+      effectiveBacksplashDrafts,
     )?.rooms || vm!.rooms;
     const items = buildSelectionItems(effectiveQty, roomsForItems);
     try {
@@ -600,12 +1226,18 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
         customerInfoDraft: infoDraft,
         roomLabelDrafts: roomLabels,
         roomNotes,
-        projectNote,
+        productNote,
+        customerProductDrafts: effectiveProductDrafts,
+        backsplashDrafts: effectiveBacksplashDrafts,
       });
       if (seq !== requestSeq.n) return null;
       const nextRowVersion = result.session?.rowVersion ?? rowVersion;
       if (result.session?.rowVersion != null) setRowVersion(result.session.rowVersion);
       if (result.calculation) setLatestCalc(result.calculation as typeof latestCalc);
+      if (result.customerProductDrafts || result.productDrafts) {
+        setProductDrafts(result.customerProductDrafts || result.productDrafts || effectiveProductDrafts);
+      }
+      if (result.backsplashDrafts) setBacksplashDrafts(result.backsplashDrafts);
       setSaveState("saved");
       setSaveError(null);
       onState({
@@ -621,6 +1253,11 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
               roomLabelDrafts: roomLabels,
               roomNotes,
               projectNote,
+              customerProductDrafts: result.customerProductDrafts || result.productDrafts || effectiveProductDrafts,
+              backsplashDrafts: result.backsplashDrafts || effectiveBacksplashDrafts,
+              missingInformationRequirements:
+                result.missingInformationRequirements ||
+                state.configuration.missingInformationRequirements,
               latestCalculation: (result.calculation as typeof latestCalc) || latestCalc,
             }
           : state.configuration,
@@ -645,7 +1282,12 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
             onState(recovered);
             const recoveredVersion = recovered.session?.rowVersion;
             if (recoveredVersion != null) setRowVersion(recoveredVersion);
-            return onSave({ qtyOverride: effectiveQty, allowSessionRecover: false });
+            return onSave({
+              qtyOverride: effectiveQty,
+              allowSessionRecover: false,
+              productDraftsOverride: effectiveProductDrafts,
+              backsplashDraftsOverride: effectiveBacksplashDrafts,
+            });
           }
           if (
             recovered.lifecycle === "revoked" ||
@@ -663,7 +1305,6 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
         onFatal();
         return null;
       }
-      // Keep the customer's unsaved visual choice; do not claim saved / do not revert qty.
       setSaveState("error");
       setSaveError(
         err.code === "invalid_selection" || err.code === "unknown_option"
@@ -696,10 +1337,93 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
         onFatal();
         return;
       }
-      // Do not treat generic 404 save/review failures as full estimate unavailability.
       setReviewError(e instanceof Error ? e.message : "Unable to send for review");
     } finally {
       setReviewBusy(false);
+    }
+  }
+
+  function applyPlumbingSource(
+    roomId: string,
+    role: "sink" | "faucet",
+    kind: "none" | "customer_provided" | "esf",
+    optionKey?: string | null,
+  ) {
+    const room = vm!.rooms.find((r) => r.id === roomId);
+    const opt =
+      (optionKey && room?.choiceOptions.find((c) => c.optionKey === optionKey)) ||
+      findOptionBySource(room?.choiceOptions || [], role, kind);
+    const nextDraft: ProductDraft = {
+      ...((role === "sink" ? room?.sinkDraft : room?.faucetDraft) || {
+        source: kind,
+        manufacturer: "",
+        model: "",
+        finish: "",
+        notes: "",
+      }),
+      source: kind,
+      optionKey: kind === "esf" ? null : opt?.optionKey || null,
+      displayLabel: kind === "esf" ? null : opt?.displayLabel || null,
+      productId: kind === "esf" ? null : null,
+      variantId: null,
+      variantSku: null,
+    };
+    if (kind === "customer_provided" || kind === "none") {
+      nextDraft.manufacturer = kind === "customer_provided" ? nextDraft.manufacturer || "" : "";
+      nextDraft.model = kind === "customer_provided" ? nextDraft.model || "" : "";
+      nextDraft.finish = kind === "customer_provided" ? nextDraft.finish || "" : "";
+    }
+    updateProductDraft(roomId, role, nextDraft);
+    if (kind !== "esf" && opt?.optionKey) {
+      selectChoice(opt.optionKey, role, roomId);
+    } else if (kind === "esf") {
+      // Clear none/customer qty; wait for product card selection.
+      const nextQty = { ...qty };
+      const prefix = `${role}:${roomId}:`;
+      for (const key of Object.keys(nextQty)) {
+        if (!key.startsWith(prefix)) continue;
+        const token = key.slice(prefix.length);
+        if (token === "none" || token.startsWith("customer")) nextQty[key] = 0;
+      }
+      setQty(nextQty);
+      setSaveState("unsaved");
+      void onSave({ qtyOverride: nextQty });
+    } else {
+      setSaveState("unsaved");
+      void onSave();
+    }
+  }
+
+  function applyEsfProduct(
+    roomId: string,
+    role: "sink" | "faucet",
+    product: ConfigProduct,
+    variantId?: string | null,
+  ) {
+    const optionKey = resolveProductOptionKey(product, variantId) || product.optionKey;
+    const variant = product.variants?.find((v) => v.variantId === variantId || v.sku === variantId);
+    const nextDraft: ProductDraft = {
+      source: "esf",
+      optionKey: optionKey || null,
+      productId: product.productId,
+      variantId: variantId || null,
+      variantSku: variant?.sku || variantId || null,
+      manufacturer: product.manufacturer || "",
+      model: product.model || "",
+      finish: variant?.finish || variant?.color || product.finish || "",
+      notes: "",
+      displayLabel:
+        variant?.displayName ||
+        [product.displayName, variant?.finish || variant?.color].filter(Boolean).join(" · ") ||
+        product.displayName,
+      availability: variant?.availability || product.availability || null,
+    };
+    updateProductDraft(roomId, role, nextDraft);
+    if (optionKey) {
+      selectChoice(optionKey, role, roomId);
+    } else {
+      setSaveState("unsaved");
+      void onSave();
     }
   }
 
@@ -801,6 +1525,28 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
           <p className="mt-2 max-w-2xl text-xs text-muted-foreground">{vm.lockedScopeNotice}</p>
         ) : null}
 
+        {vm.missingInformationRequirements.length ? (
+          <div
+            className="mt-6 rounded-2xl border border-border bg-muted/30 px-4 py-3"
+            data-testid="de-missing-info-banner"
+            role="status"
+          >
+            <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Items for later ({vm.missingInformationRequirements.length})
+            </div>
+            <ul className="mt-2 space-y-1.5 text-sm text-foreground">
+              {vm.missingInformationRequirements.map((req, i) => (
+                <li key={`${req.code}-${req.roomKey || ""}-${i}`}>
+                  {req.customerCopy || req.message}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              These notes do not block saving your selections.
+            </p>
+          </div>
+        ) : null}
+
         <section
           className="mt-8 rounded-2xl border border-border bg-background p-6 shadow-sm"
           data-testid="de-customer-info"
@@ -858,14 +1604,9 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
               <CustomerRoomCard
                 key={room.id}
                 room={{ ...room, roomNote: roomNotes[room.id] || room.roomNote || "" }}
-                onPickColor={() => setPickerRoomId(room.id)}
+                onOpenModal={(kind) => setActiveModal({ roomId: room.id, kind })}
                 onRename={(name) => {
                   setRoomLabels((prev) => ({ ...prev, [room.id]: name }));
-                  setSaveState("idle");
-                }}
-                onSelectChoice={selectChoice}
-                onRoomNote={(note) => {
-                  setRoomNotes((prev) => ({ ...prev, [room.id]: note }));
                   setSaveState("idle");
                 }}
               />
@@ -979,12 +1720,179 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
         </div>
       </div>
 
-      {pickerRoom ? (
+      {modalRoom && activeModal?.kind === "color" ? (
         <ColorPickerModal
-          room={pickerRoom}
-          onSelect={(c) => selectColor(pickerRoom.id, c)}
-          onClose={() => setPickerRoomId(null)}
+          room={modalRoom}
+          onSelect={(c) => selectColor(modalRoom.id, c)}
+          onClose={() => setActiveModal(null)}
         />
+      ) : null}
+
+      {modalRoom && activeModal?.kind === "backsplash" ? (
+        <BacksplashModal
+          room={modalRoom}
+          draft={backsplashDrafts[modalRoom.id] || modalRoom.backsplashDraft || { mode: "none" }}
+          onClose={() => {
+            void onSave();
+            setActiveModal(null);
+          }}
+          onSelectOption={(optionKey) => {
+            const token = optionKey.split(":").slice(2).join(":").toLowerCase();
+            let mode: BacksplashDraft["mode"] = "none";
+            if (token.includes("custom")) mode = "custom_height";
+            else if (token.includes("full")) mode = "full_height";
+            else if (token.includes("4") || token.includes("standard")) mode = "standard_4in";
+            else if (token === "none") mode = "none";
+            else mode = token;
+            updateBacksplashDraft(modalRoom.id, {
+              ...(backsplashDrafts[modalRoom.id] || modalRoom.backsplashDraft || { mode }),
+              mode,
+              optionKey,
+            });
+            selectChoice(optionKey, "backsplash", modalRoom.id);
+          }}
+          onDraftChange={(next) => {
+            updateBacksplashDraft(modalRoom.id, next);
+          }}
+        />
+      ) : null}
+
+      {modalRoom && (activeModal?.kind === "sink" || activeModal?.kind === "faucet") ? (
+        <PlumbingSourceModal
+          room={modalRoom}
+          role={activeModal.kind}
+          draft={
+            (activeModal.kind === "sink"
+              ? productDrafts[modalRoom.id]?.sink || modalRoom.sinkDraft
+              : productDrafts[modalRoom.id]?.faucet || modalRoom.faucetDraft) || {
+              source: "none",
+            }
+          }
+          products={activeModal.kind === "sink" ? modalRoom.sinkProducts : modalRoom.faucetProducts}
+          onClose={() => {
+            void onSave();
+            setActiveModal(null);
+          }}
+          onSelectSource={(kind, optionKey) =>
+            applyPlumbingSource(modalRoom.id, activeModal.kind as "sink" | "faucet", kind, optionKey)
+          }
+          onSelectProduct={(product, variantId) =>
+            applyEsfProduct(modalRoom.id, activeModal.kind as "sink" | "faucet", product, variantId)
+          }
+          onDraftChange={(next) =>
+            updateProductDraft(modalRoom.id, activeModal.kind as "sink" | "faucet", next)
+          }
+        />
+      ) : null}
+
+      {modalRoom && activeModal?.kind === "sidesplash" ? (
+        <ModalShell
+          title="Side splash"
+          eyebrow={modalRoom.name}
+          onClose={() => setActiveModal(null)}
+          testId="de-sidesplash-modal"
+        >
+          <div className="space-y-5">
+            {modalRoom.sideSplashPieces.map((piece) => (
+              <div key={piece.pieceKey} data-testid="de-sidesplash-piece">
+                <div className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {piece.pieceLabel}
+                </div>
+                <ChoiceRadio
+                  options={piece.options}
+                  name={`sidesplash-${modalRoom.id}-${piece.pieceKey}`}
+                  onSelect={(optionKey) => selectChoice(optionKey, "sidesplash", modalRoom.id)}
+                />
+              </div>
+            ))}
+          </div>
+        </ModalShell>
+      ) : null}
+
+      {modalRoom && activeModal?.kind === "edge" ? (
+        <ModalShell title="Edge" eyebrow={modalRoom.name} onClose={() => setActiveModal(null)} testId="de-edge-modal">
+          <ChoiceRadio
+            options={modalRoom.choiceOptions.filter((c) => c.role === "edge")}
+            name={`edge-${modalRoom.id}`}
+            onSelect={(optionKey) => selectChoice(optionKey, "edge", modalRoom.id)}
+          />
+        </ModalShell>
+      ) : null}
+
+      {modalRoom && activeModal?.kind === "cooktop" ? (
+        <ModalShell
+          title="Cooktop / cutouts"
+          eyebrow={modalRoom.name}
+          onClose={() => setActiveModal(null)}
+          testId="de-cooktop-modal"
+        >
+          <ChoiceRadio
+            options={modalRoom.choiceOptions.filter((c) => c.role === "cooktop")}
+            name={`cooktop-${modalRoom.id}`}
+            onSelect={(optionKey) => selectChoice(optionKey, "cooktop", modalRoom.id)}
+          />
+        </ModalShell>
+      ) : null}
+
+      {modalRoom && (activeModal?.kind === "accessories" || activeModal?.kind === "specialty") ? (
+        <ModalShell
+          title={activeModal.kind === "accessories" ? "Accessories" : "Specialty"}
+          eyebrow={modalRoom.name}
+          onClose={() => setActiveModal(null)}
+          testId={`de-${activeModal.kind}-modal`}
+        >
+          <div className="flex flex-col gap-2">
+            {modalRoom.choiceOptions
+              .filter((c) => c.role === (activeModal.kind === "accessories" ? "accessory" : "specialty"))
+              .map((opt) => (
+                <label
+                  key={opt.optionKey}
+                  className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
+                    opt.selected ? "border-foreground bg-muted/30" : "border-border"
+                  }`}
+                >
+                  <span className="font-medium text-foreground">{opt.displayLabel}</span>
+                  <input
+                    type="checkbox"
+                    checked={opt.selected}
+                    onChange={() =>
+                      toggleMultiChoice(
+                        opt.optionKey,
+                        activeModal.kind === "accessories" ? "accessory" : "specialty",
+                        modalRoom.id,
+                      )
+                    }
+                  />
+                </label>
+              ))}
+          </div>
+        </ModalShell>
+      ) : null}
+
+      {modalRoom && activeModal?.kind === "notes" ? (
+        <ModalShell
+          title="Notes"
+          eyebrow={modalRoom.name}
+          onClose={() => {
+            void onSave();
+            setActiveModal(null);
+          }}
+          testId="de-notes-modal"
+        >
+          <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Questions or notes for your estimator
+          </label>
+          <textarea
+            className="mt-2 min-h-[120px] w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            value={roomNotes[modalRoom.id] || modalRoom.roomNote || ""}
+            maxLength={2000}
+            data-testid="de-room-note"
+            onChange={(e) => {
+              setRoomNotes((prev) => ({ ...prev, [modalRoom.id]: e.target.value }));
+              setSaveState("idle");
+            }}
+          />
+        </ModalShell>
       ) : null}
 
       {reviewOpen ? (
