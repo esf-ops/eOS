@@ -23,6 +23,7 @@ import {
 import { enrichProductImageUrl } from "./productCatalogImages";
 import {
   exchangeFragmentToken,
+  fetchConfiguration,
   fetchCurrentReviewRequest,
   formatDate,
   reviewUiEnabled,
@@ -1447,6 +1448,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   );
   const [projectNote, setProjectNote] = useState(config?.projectNote || "");
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
+  /** Last server-confirmed calculation — authoritative Updated total source. */
+  const [savedCalc, setSavedCalc] = useState(config?.latestCalculation ?? null);
   const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
   const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saving" | "saved" | "error">(
     "idle",
@@ -1464,6 +1467,42 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const requestSeq = useMemo(() => ({ n: 0 }), []);
   const saveFnRef = useRef<() => Promise<number | null> | number | null | void>(() => null);
   const hydrateReadyRef = useRef(false);
+  const saveInFlightRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+  const conflictRetryRef = useRef(false);
+  const rowVersionRef = useRef(rowVersion);
+  const qtyRef = useRef(qty);
+  const productDraftsRef = useRef(productDrafts);
+  const backsplashDraftsRef = useRef(backsplashDrafts);
+  const infoDraftRef = useRef(infoDraft);
+  const roomLabelsRef = useRef(roomLabels);
+  const roomNotesRef = useRef(roomNotes);
+  const projectNoteRef = useRef(projectNote);
+
+  useEffect(() => {
+    rowVersionRef.current = rowVersion;
+  }, [rowVersion]);
+  useEffect(() => {
+    qtyRef.current = qty;
+  }, [qty]);
+  useEffect(() => {
+    productDraftsRef.current = productDrafts;
+  }, [productDrafts]);
+  useEffect(() => {
+    backsplashDraftsRef.current = backsplashDrafts;
+  }, [backsplashDrafts]);
+  useEffect(() => {
+    infoDraftRef.current = infoDraft;
+  }, [infoDraft]);
+  useEffect(() => {
+    roomLabelsRef.current = roomLabels;
+  }, [roomLabels]);
+  useEffect(() => {
+    roomNotesRef.current = roomNotes;
+  }, [roomNotes]);
+  useEffect(() => {
+    projectNoteRef.current = projectNote;
+  }, [projectNote]);
 
   useEffect(() => {
     hydrateReadyRef.current = true;
@@ -1545,7 +1584,6 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     setSaveState("unsaved");
     setSaveError(null);
     setActiveModal(null);
-    void onSave({ qtyOverride: nextQty });
   }
 
   function selectChoice(optionKey: string, role: string, roomId: string) {
@@ -1572,20 +1610,14 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     setQty(nextQty);
     setSaveState("unsaved");
     setSaveError(null);
-    void onSave({ qtyOverride: nextQty });
   }
 
   function toggleMultiChoice(optionKey: string, role: string, roomId: string) {
     const nextQty = { ...qty };
-    const prefix = `${role}:${roomId}:`;
-    if (!optionKey.startsWith(prefix) && role) {
-      /* still toggle by key */
-    }
     nextQty[optionKey] = (nextQty[optionKey] ?? 0) > 0 ? 0 : 1;
     setQty(nextQty);
     setSaveState("unsaved");
     setSaveError(null);
-    void onSave({ qtyOverride: nextQty });
   }
 
   function updateProductDraft(roomId: string, role: "sink" | "faucet", next: ProductDraft) {
@@ -1601,49 +1633,93 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     setSaveState("unsaved");
   }
 
+  function isConcurrencyConflict(err: ConfigurationSaveError): boolean {
+    return (
+      err.code === "row_version_conflict" ||
+      err.code === "stale_configuration" ||
+      err.diagnosticCode === "DE-CONFIGURATION-STALE" ||
+      err.status === 409
+    );
+  }
+
   async function onSave(opts?: {
     qtyOverride?: Record<string, number>;
     allowSessionRecover?: boolean;
     productDraftsOverride?: Record<string, RoomProductDrafts>;
     backsplashDraftsOverride?: Record<string, BacksplashDraft>;
+    /** Internal: already consumed one conflict retry. */
+    conflictRetried?: boolean;
   }): Promise<number | null> {
+    if (saveInFlightRef.current) {
+      pendingSaveRef.current = true;
+      return null;
+    }
+    saveInFlightRef.current = true;
     setSaveState("saving");
     setSaveError(null);
     const seq = ++requestSeq.n;
-    const effectiveQty = opts?.qtyOverride || qty;
-    const effectiveProductDrafts = opts?.productDraftsOverride || productDrafts;
-    const effectiveBacksplashDrafts = opts?.backsplashDraftsOverride || backsplashDrafts;
-    const roomsForItems = mapEliteOsToLovableViewModel(
-      state,
-      effectiveQty,
-      latestCalc,
-      infoDraft,
-      roomLabels,
-      effectiveProductDrafts,
-      effectiveBacksplashDrafts,
-    )?.rooms || vm!.rooms;
+    const effectiveQty = opts?.qtyOverride || qtyRef.current;
+    const effectiveProductDrafts = opts?.productDraftsOverride || productDraftsRef.current;
+    const effectiveBacksplashDrafts = opts?.backsplashDraftsOverride || backsplashDraftsRef.current;
+    const effectiveInfo = infoDraftRef.current;
+    const effectiveLabels = roomLabelsRef.current;
+    const effectiveRoomNotes = roomNotesRef.current;
+    const effectiveProjectNote = projectNoteRef.current;
+    const roomsForItems =
+      mapEliteOsToLovableViewModel(
+        state,
+        effectiveQty,
+        savedCalc,
+        effectiveInfo,
+        effectiveLabels,
+        effectiveProductDrafts,
+        effectiveBacksplashDrafts,
+      )?.rooms || vm!.rooms;
     const items = buildSelectionItems(effectiveQty, roomsForItems);
+
+    const finishFlight = () => {
+      saveInFlightRef.current = false;
+      if (pendingSaveRef.current) {
+        pendingSaveRef.current = false;
+        setSaveState("unsaved");
+        queueMicrotask(() => {
+          void saveFnRef.current();
+        });
+      }
+    };
+
     try {
       const result = await saveConfigurationSelections({
         items,
-        expectedRowVersion: rowVersion,
+        expectedRowVersion: rowVersionRef.current,
         idempotencyKey: `sel-${formId}-${Date.now()}-${seq}`,
-        customerInfoDraft: infoDraft,
-        roomLabelDrafts: roomLabels,
-        roomNotes,
-        projectNote,
+        customerInfoDraft: effectiveInfo,
+        roomLabelDrafts: effectiveLabels,
+        roomNotes: effectiveRoomNotes,
+        projectNote: effectiveProjectNote,
         customerProductDrafts: effectiveProductDrafts,
         backsplashDrafts: effectiveBacksplashDrafts,
       });
-      if (seq !== requestSeq.n) return null;
-      const nextRowVersion = result.session?.rowVersion ?? rowVersion;
-      if (result.session?.rowVersion != null) setRowVersion(result.session.rowVersion);
-      if (result.calculation) setLatestCalc(result.calculation as typeof latestCalc);
+      if (seq !== requestSeq.n) {
+        finishFlight();
+        return null;
+      }
+      const nextRowVersion = result.session?.rowVersion ?? rowVersionRef.current;
+      if (result.session?.rowVersion != null) {
+        setRowVersion(result.session.rowVersion);
+        rowVersionRef.current = result.session.rowVersion;
+      }
+      const nextCalc = (result.calculation as typeof latestCalc) || savedCalc;
+      if (result.calculation) {
+        setLatestCalc(result.calculation as typeof latestCalc);
+        setSavedCalc(result.calculation as typeof latestCalc);
+      }
       if (result.customerProductDrafts || result.productDrafts) {
         setProductDrafts(result.customerProductDrafts || result.productDrafts || effectiveProductDrafts);
       }
       if (result.backsplashDrafts) setBacksplashDrafts(result.backsplashDrafts);
-      setSaveState("saved");
+      const stillPending = pendingSaveRef.current;
+      setSaveState(stillPending ? "unsaved" : "saved");
       setSaveError(null);
       onState({
         ...state,
@@ -1654,22 +1730,27 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           ? {
               ...state.configuration,
               currentSelections: effectiveQty,
-              customerInfoDraft: infoDraft,
-              roomLabelDrafts: roomLabels,
-              roomNotes,
-              projectNote,
-              customerProductDrafts: result.customerProductDrafts || result.productDrafts || effectiveProductDrafts,
+              customerInfoDraft: effectiveInfo,
+              roomLabelDrafts: effectiveLabels,
+              roomNotes: effectiveRoomNotes,
+              projectNote: effectiveProjectNote,
+              customerProductDrafts:
+                result.customerProductDrafts || result.productDrafts || effectiveProductDrafts,
               backsplashDrafts: result.backsplashDrafts || effectiveBacksplashDrafts,
               missingInformationRequirements:
                 result.missingInformationRequirements ||
                 state.configuration.missingInformationRequirements,
-              latestCalculation: (result.calculation as typeof latestCalc) || latestCalc,
+              latestCalculation: nextCalc,
             }
           : state.configuration,
       });
+      finishFlight();
       return nextRowVersion;
     } catch (e) {
-      if (seq !== requestSeq.n) return null;
+      if (seq !== requestSeq.n) {
+        finishFlight();
+        return null;
+      }
       const err = e as ConfigurationSaveError;
       const allowRecover = opts?.allowSessionRecover !== false;
       if (
@@ -1686,7 +1767,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           if (recovered.lifecycle === "active" && recovered.configuration) {
             onState(recovered);
             const recoveredVersion = recovered.session?.rowVersion;
-            if (recoveredVersion != null) setRowVersion(recoveredVersion);
+            if (recoveredVersion != null) {
+              setRowVersion(recoveredVersion);
+              rowVersionRef.current = recoveredVersion;
+            }
+            saveInFlightRef.current = false;
             return onSave({
               qtyOverride: effectiveQty,
               allowSessionRecover: false,
@@ -1700,24 +1785,74 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             recovered.lifecycle === "superseded"
           ) {
             onFatal();
+            finishFlight();
             return null;
           }
         } catch {
           /* fall through to inline error */
         }
       }
+      if (isConcurrencyConflict(err) && !opts?.conflictRetried && !conflictRetryRef.current) {
+        conflictRetryRef.current = true;
+        try {
+          const fresh = await fetchConfiguration();
+          if (fresh.lifecycle === "active" && fresh.configuration) {
+            const freshVersion = fresh.session?.rowVersion;
+            if (freshVersion != null) {
+              setRowVersion(freshVersion);
+              rowVersionRef.current = freshVersion;
+            }
+            if (fresh.configuration.latestCalculation) {
+              setSavedCalc(fresh.configuration.latestCalculation as typeof latestCalc);
+              setLatestCalc(fresh.configuration.latestCalculation as typeof latestCalc);
+            }
+            onState({
+              ...state,
+              ...fresh,
+              configuration: {
+                ...fresh.configuration,
+                currentSelections: effectiveQty,
+                customerInfoDraft: effectiveInfo,
+                roomLabelDrafts: effectiveLabels,
+                roomNotes: effectiveRoomNotes,
+                projectNote: effectiveProjectNote,
+                customerProductDrafts: effectiveProductDrafts,
+                backsplashDrafts: effectiveBacksplashDrafts,
+              },
+            });
+            saveInFlightRef.current = false;
+            conflictRetryRef.current = false;
+            return onSave({
+              qtyOverride: effectiveQty,
+              allowSessionRecover: false,
+              productDraftsOverride: effectiveProductDrafts,
+              backsplashDraftsOverride: effectiveBacksplashDrafts,
+              conflictRetried: true,
+            });
+          }
+        } catch {
+          /* fall through */
+        } finally {
+          conflictRetryRef.current = false;
+        }
+      }
       if (err.lifecycleFatal) {
         onFatal();
+        finishFlight();
         return null;
       }
+      setLatestCalc(savedCalc);
       setSaveState("error");
       setSaveError(
-        err.code === "invalid_selection" || err.code === "unknown_option"
+        err.code === "invalid_selection" ||
+          err.code === "unknown_option" ||
+          err.code === "option_not_allowed"
           ? err.message || "That selection is unavailable. Please choose another option."
           : err instanceof Error
             ? err.message
             : "Unable to save",
       );
+      finishFlight();
       return null;
     }
   }
@@ -1738,7 +1873,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       setReviewOpen(false);
     } catch (e) {
       const err = e as ConfigurationSaveError;
-      if (err.lifecycleFatal || (err.status === 410)) {
+      if (err.lifecycleFatal || err.status === 410) {
         onFatal();
         return;
       }
@@ -1782,7 +1917,6 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     if (kind !== "esf" && opt?.optionKey) {
       selectChoice(opt.optionKey, role, roomId);
     } else if (kind === "esf") {
-      // Clear none/customer qty; wait for product card selection.
       const nextQty = { ...qty };
       const prefix = `${role}:${roomId}:`;
       for (const key of Object.keys(nextQty)) {
@@ -1792,10 +1926,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       }
       setQty(nextQty);
       setSaveState("unsaved");
-      void onSave({ qtyOverride: nextQty });
     } else {
       setSaveState("unsaved");
-      void onSave();
     }
   }
 
@@ -1806,10 +1938,15 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     variantId?: string | null,
   ) {
     const optionKey = resolveProductOptionKey(product, variantId) || product.optionKey;
+    if (!optionKey) {
+      setSaveState("error");
+      setSaveError("That product is unavailable. Please choose another option.");
+      return;
+    }
     const variant = product.variants?.find((v) => v.variantId === variantId || v.sku === variantId);
     const nextDraft: ProductDraft = {
       source: "esf",
-      optionKey: optionKey || null,
+      optionKey,
       productId: product.productId,
       variantId: variantId || null,
       variantSku: variant?.sku || variantId || null,
@@ -1824,19 +1961,34 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       availability: variant?.availability || product.availability || null,
     };
     updateProductDraft(roomId, role, nextDraft);
-    if (optionKey) {
-      selectChoice(optionKey, role, roomId);
-    } else {
-      setSaveState("unsaved");
-      void onSave();
-    }
+    selectChoice(optionKey, role, roomId);
   }
 
   saveFnRef.current = () => onSave();
 
+  const displayCalc =
+    saveState === "unsaved" || saveState === "saving" || saveState === "error" ? savedCalc : latestCalc;
+  const totalPending =
+    saveState === "unsaved" || saveState === "saving" || saveState === "error";
+  const vmForTotals = mapEliteOsToLovableViewModel(
+    state,
+    qty,
+    displayCalc,
+    infoDraft,
+    roomLabels,
+    productDrafts,
+    backsplashDrafts,
+  );
+  const authoritativeUpdatedLabel = vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel;
+  const authoritativeDiffLabel =
+    vmForTotals?.materialUpgradeLabel ||
+    vmForTotals?.changeFromOriginalLabel ||
+    vm.materialUpgradeLabel ||
+    vm.changeFromOriginalLabel;
+
   const originalBreakdown = buildOriginalBreakdown(state.estimate);
   const updatedBreakdown = buildUpdatedBreakdown({
-    calculation: latestCalc,
+    calculation: displayCalc,
     rooms: vm.rooms.map((r) => ({
       id: r.id,
       name: r.name,
@@ -1851,6 +2003,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       newLabel: string;
       delta: number | null;
       reviewRequired?: boolean;
+      pending?: boolean;
     }> = [];
     const roles: Array<{ role: string; category: string; summary: string | null }> = [
       { role: "backsplash", category: "Backsplash", summary: room.backsplashSummary },
@@ -1879,6 +2032,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         reviewRequired:
           selected.priceEffectLabel === "Requires estimator review" ||
           selected.availabilityState === "review_required",
+        pending: totalPending,
       });
     }
     const color = room.colors.find((c) => c.id === room.selectedColorId);
@@ -1890,13 +2044,15 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         originalLabel: baselineColor.name,
         newLabel: color.name,
         delta: null,
+        pending: totalPending,
       });
     }
     return lines;
   });
   const changesBreakdown = buildChangesBreakdown({
     changeLines,
-    displayTotalDelta: latestCalc?.displayTotalDelta ?? null,
+    displayTotalDelta:
+      (displayCalc as { displayTotalDelta?: number } | null)?.displayTotalDelta ?? null,
   });
   const activeBreakdown =
     estimateTab === "original"
@@ -1935,8 +2091,20 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       </div>
       <div className="mt-4 space-y-2 text-sm">
         <Row label="Original total" value={vm.originalTotalLabel} muted />
-        <Row label="Current configured total" value={vm.updatedTotalLabel} />
-        <Row label="Difference" value={vm.materialUpgradeLabel || vm.changeFromOriginalLabel} />
+        <Row
+          label={totalPending ? "Configured total (saved)" : "Current configured total"}
+          value={authoritativeUpdatedLabel}
+        />
+        {totalPending ? (
+          <div
+            className="flex items-center justify-between text-xs text-muted-foreground"
+            data-testid="de-pending-total"
+          >
+            <span>Pending changes</span>
+            <span>Not saved yet</span>
+          </div>
+        ) : null}
+        <Row label="Difference" value={authoritativeDiffLabel} />
         <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold">
           <span>{activeBreakdown.title}</span>
           <span data-testid="de-updated-total">{activeBreakdown.totalLabel}</span>
@@ -1981,24 +2149,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         Pricing valid through {formatDate(vm.pricingValidThrough)}. Totals calculated by your estimator
         system — not final acceptance.
       </p>
-      <div className="mt-5 space-y-2">
-        <button
-          type="button"
-          onClick={() => void onSave()}
-          disabled={saveState === "saving" || saveState === "saved"}
-          className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90 disabled:opacity-60"
-          data-testid="de-save-button"
-        >
-          {saveState === "saving"
-            ? "Saving…"
-            : saveState === "error"
-              ? "Couldn't save — Retry"
-              : saveState === "saved"
-                ? "All changes saved"
-                : saveState === "unsaved"
-                  ? "Saving…"
-                  : "All changes saved"}
-        </button>
+      <div className="mt-5 space-y-2" data-testid="de-autosave-status-system">
         <span
           className={`block text-center text-xs ${
             saveState === "error" ? "text-destructive" : "text-muted-foreground"
@@ -2007,11 +2158,21 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           data-testid="de-save-status"
           data-save-state={saveState}
         >
+          {saveState === "idle" || saveState === "saved" ? "All changes saved" : null}
           {saveState === "unsaved" ? "Saving your changes…" : null}
           {saveState === "saving" ? "Saving…" : null}
-          {saveState === "saved" ? "All changes saved" : null}
           {saveState === "error" ? saveError || "We couldn’t save that change. Please try again." : null}
         </span>
+        {saveState === "error" ? (
+          <button
+            type="button"
+            onClick={() => void onSave()}
+            className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90"
+            data-testid="de-save-button"
+          >
+            Couldn’t save — Retry
+          </button>
+        ) : null}
         {reviewUiEnabled() ? (
           <button
             type="button"
@@ -2045,7 +2206,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   );
 
   return (
-    <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-28 lg:pb-10">
+    <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-10">
       <header className="border-b border-border bg-background">
         <div className="mx-auto flex w-[min(100%,1650px)] max-w-[1650px] items-center justify-between px-4 sm:px-6 py-4">
           <div className="text-sm font-semibold tracking-tight text-foreground">
@@ -2175,7 +2336,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                   setProjectNote(e.target.value);
                   setSaveState("unsaved");
                 }}
-                onBlur={() => void onSave()}
+                onBlur={() => { /* debounced autosave */ }}
               />
             </div>
 
@@ -2246,24 +2407,9 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             ) : null}
           </div>
 
-          <aside className="hidden lg:sticky lg:top-6 lg:block lg:self-start" data-testid="de-estimate-workspace">{summaryCard}</aside>
-        </div>
-      </div>
-
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background p-4 shadow-[0_-8px_28px_rgba(0,0,0,0.08)] lg:hidden">
-        <div className="mx-auto flex w-[min(100%,1650px)] items-center justify-between gap-3">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Updated</div>
-            <div className="text-lg font-semibold tabular-nums">{vm.updatedTotalLabel}</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => void onSave()}
-            disabled={saveState === "saving"}
-            className="rounded-lg bg-foreground px-4 py-2.5 text-sm font-semibold text-background disabled:opacity-60"
-          >
-            {saveState === "saving" ? "Saving…" : "Save"}
-          </button>
+          <aside className="lg:sticky lg:top-6 lg:self-start" data-testid="de-estimate-workspace">
+            {summaryCard}
+          </aside>
         </div>
       </div>
 
@@ -2280,7 +2426,6 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           room={modalRoom}
           draft={backsplashDrafts[modalRoom.id] || modalRoom.backsplashDraft || { mode: "none" }}
           onClose={() => {
-            void onSave();
             setActiveModal(null);
           }}
           onSelectOption={(optionKey) => {
@@ -2317,7 +2462,6 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           }
           products={activeModal.kind === "sink" ? modalRoom.sinkProducts : modalRoom.faucetProducts}
           onClose={() => {
-            void onSave();
             setActiveModal(null);
           }}
           onSelectSource={(kind, optionKey) =>
@@ -2385,7 +2529,6 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           title="Notes"
           eyebrow={modalRoom.name}
           onClose={() => {
-            void onSave();
             setActiveModal(null);
           }}
           testId="de-notes-modal"

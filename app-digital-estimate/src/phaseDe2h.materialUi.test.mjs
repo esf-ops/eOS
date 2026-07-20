@@ -17,7 +17,11 @@ assert.ok(configView.includes("ColorPickerModal"));
 assert.ok(configView.includes("Search color"));
 assert.ok(configView.includes("CustomerRoomCard"));
 assert.ok(configView.includes("lg:sticky"));
-assert.ok(configView.includes("fixed inset-x-0 bottom-0"));
+assert.ok(
+  !configView.includes("fixed inset-x-0 bottom-0"),
+  "legacy mobile Save bar removed — single autosave status system",
+);
+assert.ok(configView.includes("de-autosave-status-system") || configView.includes("de-save-status"));
 assert.ok(api.includes("CustomerMaterial"));
 assert.ok(api.includes("materials?"));
 assert.ok(adapter.includes("mapEliteOsToLovableViewModel"));

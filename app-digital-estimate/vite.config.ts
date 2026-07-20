@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
+import { buildDigitalEstimateHtmlCsp, supabaseOriginFromUrl } from "./src/htmlCsp.mjs";
 
 function readBackendConnectOrigin(mode: string): string {
   const env = loadEnv(mode, process.cwd(), "");
@@ -38,22 +39,19 @@ function resolveBuildMarker(): string {
  * Production stylesheet is a same-origin <link> asset → style-src must include 'self'.
  * 'unsafe-inline' is intentionally omitted in production (no proven inline styles).
  * Vite dev injects <style> tags for HMR, so development keeps 'unsafe-inline'.
+ * img-src allows configured Supabase Storage for Elite 100 thumbs/previews only.
  */
 function digitalEstimateHtmlPlugin(mode: string) {
   const backendOrigin = readBackendConnectOrigin(mode);
+  const env = loadEnv(mode, process.cwd(), "");
+  const supabaseOrigin = supabaseOriginFromUrl(env.VITE_SUPABASE_URL);
   const buildMarker = resolveBuildMarker();
   const isProd = mode === "production";
-  const styleSrc = isProd ? "'self'" : "'self' 'unsafe-inline'";
-  const connectSrc = `'self' ${backendOrigin} http://127.0.0.1:3001 http://localhost:3001`;
-  const csp = [
-    "default-src 'none'",
-    `style-src ${styleSrc}`,
-    "img-src 'self' data:",
-    `connect-src ${connectSrc}`,
-    "script-src 'self'",
-    "font-src 'none'",
-    "frame-ancestors 'none'"
-  ].join("; ");
+  const csp = buildDigitalEstimateHtmlCsp({
+    isProd,
+    backendOrigin,
+    supabaseOrigin,
+  });
 
   return {
     name: "digital-estimate-html-csp",

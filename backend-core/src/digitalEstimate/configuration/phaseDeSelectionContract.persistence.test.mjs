@@ -218,9 +218,10 @@ async function seed() {
         }
       }),
     (e) =>
-      e.code === "invalid_selection" &&
+      (e.code === "invalid_selection" || e.code === "option_not_allowed") &&
       e.statusCode === 422 &&
-      e.selectionKey === "e100-india-black-pearl"
+      e.selectionKey === "e100-india-black-pearl" &&
+      (e.diagnosticCode === "DE-OPTION-NOT-ALLOWED" || !e.diagnosticCode)
   );
 
   await assert.rejects(
@@ -235,7 +236,8 @@ async function seed() {
       }),
     (e) =>
       (e.code === "row_version_conflict" || e.code === "stale_configuration") &&
-      e.statusCode === 409
+      e.statusCode === 409 &&
+      (e.diagnosticCode === "DE-CONFIGURATION-STALE" || !e.diagnosticCode)
   );
 
   void cfgRepo;

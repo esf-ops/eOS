@@ -368,18 +368,34 @@ function productMatchesRoom(product: ConfigProduct, roomKey: string, roomDisplay
   });
 }
 
+function productHasSavableOptionKey(
+  product: ConfigProduct,
+  envelopeOptionKeys: Set<string>,
+): boolean {
+  if (product.optionKey && envelopeOptionKeys.has(product.optionKey)) return true;
+  if (Array.isArray(product.variants)) {
+    for (const v of product.variants) {
+      if (v?.optionKey && envelopeOptionKeys.has(v.optionKey)) return true;
+    }
+  }
+  return false;
+}
+
 function productsForRole(
   products: ConfigProduct[] | undefined,
   category: string,
   roomKey: string,
   roomDisplayName: string,
+  envelopeOptionKeys: Set<string>,
 ): ConfigProduct[] {
   return (products || []).filter((p) => {
     const cat = String(p.category || "").toLowerCase();
     if (cat !== category && !cat.includes(category)) return false;
     if (p.customerVisible === false) return false;
     if (p.active === false) return false;
-    return productMatchesRoom(p, roomKey, roomDisplayName);
+    if (!productMatchesRoom(p, roomKey, roomDisplayName)) return false;
+    // Never render a product card the server cannot persist.
+    return productHasSavableOptionKey(p, envelopeOptionKeys);
   });
 }
 
@@ -758,10 +774,34 @@ export function mapEliteOsToLovableViewModel(
       sinkDraft,
       faucetDraft,
       backsplashDraft,
-      sinkProducts: productsForRole(products, "sink", r.roomKey, r.displayName),
-      faucetProducts: productsForRole(products, "faucet", r.roomKey, r.displayName),
-      accessoryProducts: productsForRole(products, "accessory", r.roomKey, r.displayName),
-      specialtyProducts: productsForRole(products, "specialty", r.roomKey, r.displayName),
+      sinkProducts: productsForRole(
+        products,
+        "sink",
+        r.roomKey,
+        r.displayName,
+        new Set(choiceOptions.filter((c) => c.role === "sink").map((c) => c.optionKey)),
+      ),
+      faucetProducts: productsForRole(
+        products,
+        "faucet",
+        r.roomKey,
+        r.displayName,
+        new Set(choiceOptions.filter((c) => c.role === "faucet").map((c) => c.optionKey)),
+      ),
+      accessoryProducts: productsForRole(
+        products,
+        "accessory",
+        r.roomKey,
+        r.displayName,
+        new Set(choiceOptions.filter((c) => c.role === "accessory").map((c) => c.optionKey)),
+      ),
+      specialtyProducts: productsForRole(
+        products,
+        "specialty",
+        r.roomKey,
+        r.displayName,
+        new Set(choiceOptions.filter((c) => c.role === "specialty").map((c) => c.optionKey)),
+      ),
     };
   });
 

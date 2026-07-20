@@ -198,6 +198,7 @@ export function buildChangesBreakdown(args: {
     newLabel: string;
     delta: number | null;
     reviewRequired?: boolean;
+    pending?: boolean;
   }>;
   displayTotalDelta?: number | null;
 }): EstimateBreakdownView {
@@ -206,6 +207,9 @@ export function buildChangesBreakdown(args: {
     if (c.reviewRequired) amountLabel = "Requires estimator review";
     else if (c.delta != null && Number.isFinite(c.delta) && Math.abs(c.delta) >= 0.005) {
       amountLabel = c.delta < 0 ? `−${formatMoney(Math.abs(c.delta))}` : `+${formatMoney(c.delta)}`;
+    }
+    if (c.pending) {
+      amountLabel = amountLabel === "No change" ? "Pending (not saved)" : `${amountLabel} · pending`;
     }
     return {
       key: `chg-${i}`,
