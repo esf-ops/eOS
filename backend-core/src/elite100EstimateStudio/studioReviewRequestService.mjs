@@ -16,8 +16,14 @@ import {
   getElite100CustomerMaterial
 } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
 import { serverApprovedOptionCatalog } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
+import {
+  isRoomProductOptionKey,
+  parseProductOptionKey,
+  resolveCatalogProductSelection
+} from "../digitalEstimate/catalog/digitalEstimateProductOptions.mjs";
 import { collectUnresolvedItems } from "./studioEstimatePricing.mjs";
 import { STUDIO_ESTIMATE_STATUSES, STUDIO_UNRESOLVED_ADDON_KEYS } from "./studioEstimateTypes.mjs";
+import { buildCustomerConfigurationSummary } from "../digitalEstimate/catalog/customerConfigurationSummary.mjs";
 
 /** Operator-facing labels mapped onto existing REVIEW_STATUS authority. */
 export const STUDIO_REVIEW_OPERATOR_STATUS = Object.freeze({
@@ -192,7 +198,34 @@ export function detectUnsupportedSelections(request) {
       }
       continue;
     }
-    if (STUDIO_UNRESOLVED_ADDON_KEYS.includes(key) || key.includes("faucet") || key.includes("accessory")) {
+    if (isRoomProductOptionKey(key)) {
+      const parsed = parseProductOptionKey(key);
+      if (
+        parsed &&
+        parsed.mode === "esf" &&
+        parsed.productId &&
+        ["sink", "faucet", "accessory", "specialty"].includes(parsed.kind)
+      ) {
+        try {
+          const resolved = resolveCatalogProductSelection(parsed.productId);
+          if (!resolved?.product) {
+            blockers.push({
+              optionKey: key,
+              code: "unknown_option",
+              message: `Catalog product not found: ${parsed.productId}`
+            });
+          }
+        } catch {
+          blockers.push({
+            optionKey: key,
+            code: "invalid_selection",
+            message: `Invalid catalog product selection: ${key}`
+          });
+        }
+      }
+      continue;
+    }
+    if (STUDIO_UNRESOLVED_ADDON_KEYS.includes(key)) {
       blockers.push({
         optionKey: key,
         code: "unsupported_customer_option",
@@ -334,7 +367,28 @@ export function createStudioReviewRequestService(deps) {
       displayDelta: request.display_delta,
       selectedOptions: Array.isArray(request.request_snapshot_json?.selectedOptions)
         ? request.request_snapshot_json.selectedOptions
-        : []
+        : [],
+      customerConfigurationSummary:
+        request.request_snapshot_json?.customerConfigurationSummary ||
+        buildCustomerConfigurationSummary({
+          selectionPayload: {
+            ...(Object.fromEntries(
+              (request.request_snapshot_json?.selectedOptions || []).map((o) => [
+                o.optionKey,
+                o.quantity
+              ])
+            )),
+            __customerProductDrafts: request.request_snapshot_json?.customerProductDrafts,
+            __backsplashDrafts: request.request_snapshot_json?.backsplashDrafts,
+            __roomNotes: request.request_snapshot_json?.roomNotes,
+            __projectNote: request.request_snapshot_json?.projectNote
+          },
+          missingInformationRequirements:
+            request.request_snapshot_json?.missingInformationRequirements || [],
+          baselineDisplayTotal: request.baseline_display_total,
+          configuredDisplayTotal: request.configured_display_total,
+          displayDelta: request.display_delta
+        })
     };
 
     const amendments = await amendmentRepository.listAmendmentsForRequest(

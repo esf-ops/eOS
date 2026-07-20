@@ -13,8 +13,26 @@ export const FRIENDLY_CUSTOMER_CHOICES = Object.freeze([
   {
     id: "sink",
     label: "Sink option",
-    help: "Elite stock sink, customer-supplied sink, or no sink (with quantity).",
+    help: "ESF catalog sink, customer-supplied sink, or no sink.",
     catalogKeys: ["qty-sink", "qty-ss"]
+  },
+  {
+    id: "faucet",
+    label: "Faucet option",
+    help: "ESF catalog faucet, customer-supplied faucet, or no faucet.",
+    catalogKeys: []
+  },
+  {
+    id: "accessories",
+    label: "Accessories",
+    help: "Optional ESF sink accessories (grids, soap dispensers, etc.).",
+    catalogKeys: []
+  },
+  {
+    id: "specialty",
+    label: "Specialty items",
+    help: "Pop-up outlets and other specialty items (some require estimator review).",
+    catalogKeys: []
   },
   {
     id: "cooktop",
@@ -32,6 +50,12 @@ export const FRIENDLY_CUSTOMER_CHOICES = Object.freeze([
     id: "backsplash",
     label: "Backsplash option",
     help: "Customer may choose among estimator-approved backsplash options only.",
+    catalogKeys: []
+  },
+  {
+    id: "sideSplash",
+    label: "Side splash",
+    help: "Optional side splash per vanity/counter piece (length from piece depth).",
     catalogKeys: []
   }
 ]);

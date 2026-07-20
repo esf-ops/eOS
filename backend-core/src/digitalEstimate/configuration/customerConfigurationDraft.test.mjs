@@ -42,6 +42,28 @@ console.log("\ncustomerConfigurationDraft.test.mjs\n");
 }
 
 {
+  const merged = mergeSelectionPayloadMeta(
+    { "sink:kitchen:customer_provided": 1, "backsplash:kitchen:custom_height": 1 },
+    {
+      customerProductDrafts: {
+        kitchen: {
+          sink: { source: "customer_provided", manufacturer: "Kohler", model: "" },
+          faucet: { source: "none" }
+        }
+      },
+      backsplashDrafts: {
+        kitchen: { mode: "custom_height", requestedHeightInches: 9.5, note: "Tile to hood" }
+      }
+    }
+  );
+  const split = splitSelectionPayloadMeta(merged);
+  assert.equal(split.customerProductDrafts.kitchen.sink.manufacturer, "Kohler");
+  assert.equal(split.backsplashDrafts.kitchen.requestedHeightInches, 9.5);
+  assert.equal(split.quantities["sink:kitchen:customer_provided"], 1);
+  console.log("ok: product + backsplash drafts sanitize and split cleanly");
+}
+
+{
   const safe = toCustomerSafeMaterialRecord({
     materialId: "e100-carrara-classic",
     displayName: "Carrara Classic",

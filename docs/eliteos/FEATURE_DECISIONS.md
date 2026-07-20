@@ -1702,3 +1702,14 @@
 | **Ops** | Deploy Brain + digital-estimate. Retest: save India Black Pearl → refresh → exchange 201 → GET/configure shows India + updated total without re-selecting. |
 | **Out of scope** | Merging draft into the new session row at exchange time; cross-device identity beyond shared stable link. |
 
+### 121. Digital Estimate full catalog options — Elite 100 + plumbing/specialty (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Customer Digital Estimate options expand to (1) the full **Elite 100** customer-visible material catalog (`elite100-customer-materials-v2`, 100 colors from `elite100-2026.json`; Remnant only when explicitly permitted); (2) Brain-normalized **ESF plumbing/specialty** workbook products (`esf-plumbing-specialty-catalog-v1`) with server sell/installed prices — Kansas sinks, Blanco family+finish variants, faucets/add-ons, specialty (priced vs review-only). Envelope seeds family-level ESF products (not every Blanco color SKU as a top-level card). Selection keys: `sink|faucet|accessory|specialty|backsplash|sidesplash:…`. Customer-provided sink/faucet omit product price (sink still charges cutout); missing models create structured `missingInformationRequirements` without blocking save/review. Backsplash includes **4-inch** / full-height / custom-height (custom → review, no invented SF). Side splashes are piece-scoped (left/right/both); length from piece depth × 4″ with independent billable SF ceiling when geometry exists. Public DTOs never expose cost, margin, Wholesale/Direct, SF, or internal rates. Quote Library projection contract is prepared on save (`Customer configuring`); sold-job task automation is deferred. |
+| **Why** | Autosave/restore works; customers need the full Elite 100 color set and estimator-approved plumbing/specialty choices with Brain-authoritative pricing. |
+| **SQL** | None for this phase (catalog seed is code/module; no new tables). |
+| **Ops** | Deploy Brain + digital-estimate + Estimate Studio. Rebuild plumbing seed via `node scripts/build-digital-estimate-plumbing-catalog.mjs` when the workbook changes. Workbook source: `_local/catalog-source/esf-plumbing-specialty-program-2026-07-10.xlsx`. |
+| **Out of scope** | Sold-job task automation; vendor image scraping; inventing prices for Glowback/InvisaCook; golden-math audit of all commercial rules; Quote Library dashboard redesign. |
+

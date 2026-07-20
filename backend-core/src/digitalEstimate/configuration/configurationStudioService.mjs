@@ -23,6 +23,12 @@ import {
   resolveMaterialSelectionFromOption,
   toStudioMaterialRecord
 } from "./elite100CustomerMaterialCatalog.mjs";
+import {
+  buildDefaultRoomProductOptions,
+  isRoomProductOptionKey,
+  resolveOptionSellPriceFromCatalog
+} from "../catalog/digitalEstimateProductOptions.mjs";
+import { inferFriendlyChoiceFlags } from "../../elite100EstimateStudio/studioCustomerChoiceOptions.mjs";
 
 function fail(code, message, statusCode = 400) {
   const e = new Error(message);
@@ -128,7 +134,8 @@ export function createConfigurationStudioService(deps) {
         actorUserId,
         body: {}
       });
-      // Seed default material group
+      // Seed material group with the full customer-visible Elite 100 catalog so
+      // public ColorPicker options match selectable envelope keys (save succeeds).
       const matGroup = await configurationRepository.upsertDraftGroup(organizationId, draft.id, {
         groupKey: "material_by_room",
         displayLabel: "Material by room",
@@ -136,34 +143,42 @@ export function createConfigurationStudioService(deps) {
         selectionMode: "single",
         mutuallyExclusive: true
       });
+      const catalogMaterials = listElite100CustomerMaterials(true);
       for (const room of ctx.rooms) {
         const code = room.baselineMaterialGroup || "group_b";
         const defaultMat = pickDefaultMaterialForGroup(code);
-        if (defaultMat) {
-          await configurationRepository.upsertDraftOption(organizationId, draft.id, {
-            groupId: matGroup.id,
-            optionKey: `material:${room.roomKey}:${defaultMat.materialId}`,
-            displayLabel: defaultMat.displayName,
-            description: `Default finish for ${room.displayName}`,
-            includedInBaseline: true,
-            defaultQty: 1,
-            minQty: 0,
-            maxQty: 1,
-            requiredSelection: true,
-            customerPriceTreatment: "delta",
-            pricingMode: "replacement",
-            sellPrice: 0,
-            imageAssetRef: defaultMat.imageThumbPath,
-            compatibilityJson: {
-              roomKey: room.roomKey,
-              materialColorId: defaultMat.materialId,
-              materialGroup: defaultMat.pricingGroupCode,
-              role: "material_selection",
-              isDefault: true,
-              catalogContract: ELITE100_MATERIAL_CATALOG_CONTRACT,
-              imageAssetRef: defaultMat.imageThumbPath
-            }
-          });
+        if (defaultMat && catalogMaterials.length) {
+          for (const mat of catalogMaterials) {
+            const isDefault = mat.materialId === defaultMat.materialId;
+            await configurationRepository.upsertDraftOption(organizationId, draft.id, {
+              groupId: matGroup.id,
+              optionKey: `material:${room.roomKey}:${mat.materialId}`,
+              displayLabel: mat.displayName,
+              description: isDefault
+                ? `Default finish for ${room.displayName}`
+                : `${mat.displayName} for ${room.displayName}`,
+              includedInBaseline: isDefault,
+              defaultQty: isDefault ? 1 : 0,
+              minQty: 0,
+              maxQty: 1,
+              // One material required per room; do not pin requiredSelection to the
+              // baseline color ID (that blocked saving alternate envelope option IDs).
+              requiredSelection: false,
+              customerPriceTreatment: "delta",
+              pricingMode: "replacement",
+              sellPrice: 0,
+              imageAssetRef: mat.imageThumbPath,
+              compatibilityJson: {
+                roomKey: room.roomKey,
+                materialColorId: mat.materialId,
+                materialGroup: mat.pricingGroupCode,
+                role: "material_selection",
+                isDefault,
+                catalogContract: ELITE100_MATERIAL_CATALOG_CONTRACT,
+                imageAssetRef: mat.imageThumbPath
+              }
+            });
+          }
         } else {
           // Legacy fallback when no catalog color exists for the baseline group
           await configurationRepository.upsertDraftOption(organizationId, draft.id, {
@@ -187,6 +202,72 @@ export function createConfigurationStudioService(deps) {
           });
         }
       }
+
+      // Seed richer room product options only when caller explicitly enables choices
+      // (avoid inferFriendlyChoiceFlags defaults — those would seed sinks on every draft).
+      const explicitGroups = Array.isArray(body.customerChoiceGroups)
+        ? body.customerChoiceGroups.map(String)
+        : Array.isArray(body.configuration?.customerChoiceGroups)
+          ? body.configuration.customerChoiceGroups.map(String)
+          : Array.isArray(body.customerChoices)
+            ? body.customerChoices.map(String)
+            : null;
+      if (explicitGroups && explicitGroups.length && ctx.rooms.length) {
+        const choiceFlags = inferFriendlyChoiceFlags({
+          customerChoiceGroups: explicitGroups,
+          allowedOptionKeys: Array.isArray(body.allowedOptionKeys)
+            ? body.allowedOptionKeys
+            : Array.isArray(body.configuration?.allowedOptionKeys)
+              ? body.configuration.allowedOptionKeys
+              : []
+        });
+        const enabledGroups = Object.entries(choiceFlags)
+          .filter(([, on]) => on)
+          .map(([id]) => id);
+        const needsRoomChoices = enabledGroups.some((id) =>
+          [
+            "backsplash",
+            "sink",
+            "faucet",
+            "accessories",
+            "specialty",
+            "edge",
+            "sideSplash"
+          ].includes(id)
+        );
+        if (needsRoomChoices) {
+          const roomChoicesGroup = await configurationRepository.upsertDraftGroup(
+            organizationId,
+            draft.id,
+            {
+              groupKey: "room_choices",
+              displayLabel: "Room options",
+              required: false,
+              selectionMode: "multi",
+              mutuallyExclusive: false
+            }
+          );
+          const seeded = buildDefaultRoomProductOptions({
+            rooms: ctx.rooms,
+            choiceGroups: enabledGroups,
+            groupId: roomChoicesGroup.id,
+            estimateAddOns:
+              body.estimateAddOns || body.configuration?.estimateAddOns || {}
+          });
+          for (const opt of seeded) {
+            const priced = resolveOptionSellPriceFromCatalog(
+              opt.optionKey,
+              opt.compatibilityJson || {}
+            );
+            await configurationRepository.upsertDraftOption(organizationId, draft.id, {
+              ...opt,
+              sellPrice: priced.sellPrice ?? opt.sellPrice ?? 0,
+              availabilityState: priced.availabilityState || opt.availabilityState || "active"
+            });
+          }
+        }
+      }
+
       return await configurationRepository.getEnvelopeGraph(organizationId, draft.id);
     },
 
@@ -230,10 +311,7 @@ export function createConfigurationStudioService(deps) {
         const optionKey = String(optionPayload.optionKey || optionPayload.option_key || "");
         // Material selections use material:room:{materialId|group} — group resolved server-side from catalog
         const isMaterial = optionKey.startsWith("material:");
-        const isRoomChoice =
-          optionKey.startsWith("backsplash:") ||
-          optionKey.startsWith("sink:") ||
-          optionKey.startsWith("edge:");
+        const isRoomChoice = isRoomProductOptionKey(optionKey);
         const cat = catalog.get(optionKey);
         if (!isMaterial && !isRoomChoice && !cat) {
           throw fail("unknown_option", `Option not in server-approved catalog: ${optionKey}`, 400);
@@ -289,12 +367,20 @@ export function createConfigurationStudioService(deps) {
             );
           }
         }
+        const catalogPrice = isRoomChoice
+          ? resolveOptionSellPriceFromCatalog(optionKey, compatibilityJson)
+          : null;
+        if (isRoomChoice && catalogPrice?.sellPrice == null && catalogPrice?.availabilityState === "unavailable") {
+          throw fail("unknown_option", `Unknown catalog product for ${optionKey}`, 400);
+        }
         const sellPrice = isMaterial
           ? 0
-          : cat?.sellPrice != null
-            ? cat.sellPrice
-            : null;
-        if (!isMaterial && sellPrice == null && cat?.availabilityState === "active") {
+          : isRoomChoice
+            ? catalogPrice?.sellPrice ?? optionPayload.sellPrice ?? 0
+            : cat?.sellPrice != null
+              ? cat.sellPrice
+              : null;
+        if (!isMaterial && !isRoomChoice && sellPrice == null && cat?.availabilityState === "active") {
           throw fail("missing_option_price", `No server price for ${optionKey}`, 422);
         }
         out.push(
@@ -303,7 +389,11 @@ export function createConfigurationStudioService(deps) {
             optionKey,
             compatibilityJson,
             sellPrice: sellPrice ?? 0,
-            availabilityState: cat?.availabilityState || optionPayload.availabilityState || "active",
+            availabilityState:
+              catalogPrice?.availabilityState ||
+              cat?.availabilityState ||
+              optionPayload.availabilityState ||
+              "active",
             customerPriceTreatment:
               cat?.customerPriceTreatment || optionPayload.customerPriceTreatment || "absolute",
             pricingMode: cat?.pricingMode || optionPayload.pricingMode || "fixed",

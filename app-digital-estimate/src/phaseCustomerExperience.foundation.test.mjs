@@ -53,8 +53,10 @@ assert.ok(view.includes("Measurements verified by estimator") || view.includes("
 assert.ok(view.includes("de-room-counter-status"));
 assert.ok(view.includes("de-room-label"));
 assert.ok(view.includes("Suggested change"));
-assert.ok(view.includes("de-room-note"));
+assert.ok(view.includes("de-room-note") || view.includes("de-open-notes-modal"));
 assert.ok(view.includes("de-project-note"));
+assert.ok(view.includes("de-open-backsplash-modal") || adapter.includes("backsplashSummary"));
+assert.ok(adapter.includes("sinkSummary") || view.includes("de-open-sink-modal"));
 assert.ok(!/\bWholesale\b/.test(view));
 assert.ok(!/Direct\/Retail/.test(view));
 assert.ok(!view.includes("pricingGroupCode"));

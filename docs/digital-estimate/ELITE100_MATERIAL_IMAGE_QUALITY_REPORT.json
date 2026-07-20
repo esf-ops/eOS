@@ -1,0 +1,402 @@
+{
+  "contract": "elite100-customer-materials-v2",
+  "generatedFrom": "backend-core/src/slabInventory/fixtures/elite100-2026.json",
+  "catalogSize": 100,
+  "countsByGroup": {
+    "promo": 15,
+    "group_a": 18,
+    "group_b": 18,
+    "group_c": 17,
+    "group_d": 16,
+    "group_e": 5,
+    "group_f": 11
+  },
+  "imageReadyCount": 11,
+  "imageMissingCount": 89,
+  "missingImagesByGroup": {
+    "promo": [
+      {
+        "materialId": "e100-moonflakes",
+        "displayName": "Moonflakes"
+      },
+      {
+        "materialId": "e100-super-white",
+        "displayName": "Super White"
+      },
+      {
+        "materialId": "e100-warm-fuzzy",
+        "displayName": "Warm & Fuzzy"
+      },
+      {
+        "materialId": "e100-white-blizzard",
+        "displayName": "White Blizzard"
+      }
+    ],
+    "group_a": [
+      {
+        "materialId": "e100-axbridge",
+        "displayName": "Axbridge"
+      },
+      {
+        "materialId": "e100-bear-hug",
+        "displayName": "Bear Hug"
+      },
+      {
+        "materialId": "e100-bianco-olympus",
+        "displayName": "Bianco Olympus"
+      },
+      {
+        "materialId": "e100-calacatta-lucent",
+        "displayName": "Calacatta Lucent"
+      },
+      {
+        "materialId": "e100-calacatta-miracle",
+        "displayName": "Calacatta Miracle"
+      },
+      {
+        "materialId": "e100-calacatta-rusta",
+        "displayName": "Calacatta Rusta"
+      },
+      {
+        "materialId": "e100-calacatta-solana",
+        "displayName": "Calacatta Solana"
+      },
+      {
+        "materialId": "e100-heart-of-gold",
+        "displayName": "Heart of Gold"
+      },
+      {
+        "materialId": "e100-mackinaw",
+        "displayName": "Mackinaw"
+      },
+      {
+        "materialId": "e100-omega-white",
+        "displayName": "Omega White"
+      },
+      {
+        "materialId": "e100-ridgegate",
+        "displayName": "Ridgegate"
+      },
+      {
+        "materialId": "e100-seacourt",
+        "displayName": "Seacourt"
+      },
+      {
+        "materialId": "e100-shiprock",
+        "displayName": "Shiprock"
+      },
+      {
+        "materialId": "e100-skys-the-limit",
+        "displayName": "Sky's the Limit"
+      },
+      {
+        "materialId": "e100-statuario-fiona",
+        "displayName": "Statuario Fiona"
+      },
+      {
+        "materialId": "e100-warwick",
+        "displayName": "Warwick"
+      },
+      {
+        "materialId": "e100-whitenedale",
+        "displayName": "Whitenedale"
+      },
+      {
+        "materialId": "e100-wiscon-white",
+        "displayName": "Wiscon White"
+      }
+    ],
+    "group_b": [
+      {
+        "materialId": "e100-alabaster",
+        "displayName": "Alabaster"
+      },
+      {
+        "materialId": "e100-belezza",
+        "displayName": "Belezza"
+      },
+      {
+        "materialId": "e100-calacatta-gold",
+        "displayName": "Calacatta Gold"
+      },
+      {
+        "materialId": "e100-calacatta-jade",
+        "displayName": "Calacatta Jade"
+      },
+      {
+        "materialId": "e100-calacatta-riviera",
+        "displayName": "Calacatta Riviera"
+      },
+      {
+        "materialId": "e100-calacatta-plazo-light",
+        "displayName": "Calacatta Plazo Light"
+      },
+      {
+        "materialId": "e100-canterbury",
+        "displayName": "Canterbury"
+      },
+      {
+        "materialId": "e100-carrick",
+        "displayName": "Carrick"
+      },
+      {
+        "materialId": "e100-castello",
+        "displayName": "Castello"
+      },
+      {
+        "materialId": "e100-charlestown",
+        "displayName": "Charlestown"
+      },
+      {
+        "materialId": "e100-cirrus",
+        "displayName": "Cirrus"
+      },
+      {
+        "materialId": "e100-cirrus-oro",
+        "displayName": "Cirrus Oro"
+      },
+      {
+        "materialId": "e100-coastal-tide",
+        "displayName": "Coastal Tide"
+      },
+      {
+        "materialId": "e100-lenox-oro",
+        "displayName": "Lenox Oro"
+      },
+      {
+        "materialId": "e100-lusso-dior",
+        "displayName": "Lusso Dior"
+      },
+      {
+        "materialId": "e100-nova-taj",
+        "displayName": "Nova Taj"
+      },
+      {
+        "materialId": "e100-regal-doro",
+        "displayName": "Regal D'Oro"
+      },
+      {
+        "materialId": "e100-statuario-mocha",
+        "displayName": "Statuario Mocha"
+      }
+    ],
+    "group_c": [
+      {
+        "materialId": "e100-aurataj",
+        "displayName": "Aurataj"
+      },
+      {
+        "materialId": "e100-aureate",
+        "displayName": "Aureate"
+      },
+      {
+        "materialId": "e100-belfast-gray",
+        "displayName": "Belfast Gray"
+      },
+      {
+        "materialId": "e100-bellini-honed",
+        "displayName": "Bellini Honed"
+      },
+      {
+        "materialId": "e100-calacatta-fioressa",
+        "displayName": "Calacatta Fioressa"
+      },
+      {
+        "materialId": "e100-empyrean",
+        "displayName": "Empyrean"
+      },
+      {
+        "materialId": "e100-haydon",
+        "displayName": "Haydon"
+      },
+      {
+        "materialId": "e100-honeydew",
+        "displayName": "Honeydew"
+      },
+      {
+        "materialId": "e100-macavella",
+        "displayName": "Macavella"
+      },
+      {
+        "materialId": "e100-michelangelo",
+        "displayName": "Michelangelo"
+      },
+      {
+        "materialId": "e100-newport-polished",
+        "displayName": "Newport Polished"
+      },
+      {
+        "materialId": "e100-regal-calacatta-zeal",
+        "displayName": "Regal Calacatta Zeal"
+      },
+      {
+        "materialId": "e100-regal-soapstone",
+        "displayName": "Regal Soapstone"
+      },
+      {
+        "materialId": "e100-taj-sienna",
+        "displayName": "Taj Sienna"
+      },
+      {
+        "materialId": "e100-utopia",
+        "displayName": "Utopia"
+      },
+      {
+        "materialId": "e100-winterfresh",
+        "displayName": "Winterfresh"
+      },
+      {
+        "materialId": "e100-zenith",
+        "displayName": "Zenith"
+      }
+    ],
+    "group_d": [
+      {
+        "materialId": "e100-athena",
+        "displayName": "Athena"
+      },
+      {
+        "materialId": "e100-bellingham",
+        "displayName": "Bellingham"
+      },
+      {
+        "materialId": "e100-berwyn",
+        "displayName": "Berwyn"
+      },
+      {
+        "materialId": "e100-blackbrook",
+        "displayName": "Blackbrook"
+      },
+      {
+        "materialId": "e100-colton",
+        "displayName": "Colton"
+      },
+      {
+        "materialId": "e100-french-vanilla",
+        "displayName": "French Vanilla"
+      },
+      {
+        "materialId": "e100-hawksmoore",
+        "displayName": "Hawksmoore"
+      },
+      {
+        "materialId": "e100-hermitage",
+        "displayName": "Hermitage"
+      },
+      {
+        "materialId": "e100-larvic",
+        "displayName": "Larvic"
+      },
+      {
+        "materialId": "e100-macbeth",
+        "displayName": "Macbeth"
+      },
+      {
+        "materialId": "e100-regal-arabescato-gold",
+        "displayName": "Regal Arabescato Gold"
+      },
+      {
+        "materialId": "e100-smithfield",
+        "displayName": "Smithfield"
+      },
+      {
+        "materialId": "e100-solitaj",
+        "displayName": "Solitaj"
+      },
+      {
+        "materialId": "e100-st-soubirous",
+        "displayName": "St. Soubirous"
+      },
+      {
+        "materialId": "e100-torquay",
+        "displayName": "Torquay"
+      },
+      {
+        "materialId": "e100-travella",
+        "displayName": "Travella"
+      }
+    ],
+    "group_e": [
+      {
+        "materialId": "e100-granada-beige",
+        "displayName": "Granada Beige"
+      },
+      {
+        "materialId": "e100-mammoth-cave",
+        "displayName": "Mammoth Cave"
+      },
+      {
+        "materialId": "e100-st-isley",
+        "displayName": "St. Isley"
+      },
+      {
+        "materialId": "e100-summerhill",
+        "displayName": "Summerhill"
+      },
+      {
+        "materialId": "e100-taj-valmont",
+        "displayName": "Taj Valmont"
+      }
+    ],
+    "group_f": [
+      {
+        "materialId": "e100-calacatta-viol",
+        "displayName": "Calacatta Viol"
+      },
+      {
+        "materialId": "e100-delgatie-satin",
+        "displayName": "Delgatie Satin"
+      },
+      {
+        "materialId": "e100-everleigh",
+        "displayName": "Everleigh"
+      },
+      {
+        "materialId": "e100-everleigh-warm",
+        "displayName": "Everleigh Warm"
+      },
+      {
+        "materialId": "e100-harlow",
+        "displayName": "Harlow"
+      },
+      {
+        "materialId": "e100-inverness-everleigh",
+        "displayName": "Inverness Everleigh"
+      },
+      {
+        "materialId": "e100-inverness-stonestreet",
+        "displayName": "Inverness Stonestreet"
+      },
+      {
+        "materialId": "e100-kenwood",
+        "displayName": "Kenwood"
+      },
+      {
+        "materialId": "e100-lakedale",
+        "displayName": "Lakedale"
+      },
+      {
+        "materialId": "e100-portrush",
+        "displayName": "Portrush"
+      },
+      {
+        "materialId": "e100-skara-brae",
+        "displayName": "Skara Brae"
+      }
+    ]
+  },
+  "reconciledAssetKeys": [
+    "antique-gray",
+    "bayshore-sand",
+    "bianco-carrara",
+    "carrara-classic",
+    "carrara-royale",
+    "classic-gray",
+    "india-black-pearl-polished",
+    "sicilia",
+    "silver-pearl-polished",
+    "suede-brown-polished",
+    "white-dove"
+  ],
+  "notes": "Materials with textureFallbackStatus \"missing\" render as name-only cards until textures are reconciled. Remnant is excluded from the default catalog."
+}
