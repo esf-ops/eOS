@@ -1648,3 +1648,14 @@
 | **Ops** | Republish estimates to refresh envelopes with multi-group materials and room choices. Keep `DIGITAL_ESTIMATE_SYNTHETIC_PILOT_ONLY=0` for live customer configure. |
 | **Out of scope** | Sold-job, Moraware/QB, full Product Catalog DB bridge beyond approved option fixtures, free-form waterfall/miter dimensions. |
 
+### 116. Digital Estimate v2 selections save — session vs lifecycle errors (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Canonical save remains **`PUT /api/public-digital-estimate/v2/selections`** (POST alias same handler). Missing session cookie returns **401 `session_required` / DE-COOKIE**, not a generic estimate-unavailable 404. Customer UI treats save/network/validation/conflict failures as **inline retryable errors** and only uses the unavailable page for true lifecycle fatals (`lifecycleFatal`). Studio publish defaults now include **backsplash** in `customerChoiceGroups`. |
+| **Why** | Live configure loaded (POST session OK) but material save 404s were mapped to full unavailable; Promo-only / missing backsplash on new pubs were frozen-envelope + Studio default gaps. |
+| **SQL** | None. |
+| **Ops** | Deploy Brain + digital-estimate head together. Republish after deploy for multi-group + backsplash envelope. |
+| **Out of scope** | Weakening SameSite cookie policy; second pricing engine. |
+

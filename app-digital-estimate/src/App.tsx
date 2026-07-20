@@ -140,6 +140,7 @@ export function App() {
   const [diagnosticCode, setDiagnosticCode] = useState<string | null>(null);
   const [fallbackReason, setFallbackReason] = useState<FallbackReason>(null);
   const [mode, setMode] = useState<"legacy" | "configure" | "none">("none");
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -166,6 +167,7 @@ export function App() {
           clearFragmentFromUrl();
         }
         try {
+          setAccessToken(accessToken);
           const publicBody = await fetchPublicEstimateByToken(accessToken);
           if (cancelled) return;
           setEstimate(normalizePublicEstimate(publicBody.estimate));
@@ -242,6 +244,7 @@ export function App() {
       <ConfigurationView
         state={configState}
         onState={setConfigState}
+        accessToken={accessToken}
         onFatal={() => {
           setEstimate(null);
           setConfigState(null);

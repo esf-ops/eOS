@@ -12,11 +12,13 @@ import {
   type LovableRoom,
 } from "./lovableViewModel";
 import {
+  exchangeFragmentToken,
   fetchCurrentReviewRequest,
   formatDate,
   reviewUiEnabled,
   saveConfigurationSelections,
   submitReviewRequest,
+  type ConfigurationSaveError,
   type ConfigurationState,
   type CustomerReviewRequest,
 } from "./publicConfigApi";
@@ -25,6 +27,8 @@ type Props = {
   state: ConfigurationState;
   onState: (next: ConfigurationState) => void;
   onFatal: () => void;
+  /** Stable publication token for session recovery after cookie loss. */
+  accessToken?: string | null;
 };
 
 function Row({
@@ -461,7 +465,7 @@ function CustomerRoomCard({
   );
 }
 
-export function ConfigurationView({ state, onState, onFatal }: Props) {
+export function ConfigurationView({ state, onState, onFatal, accessToken }: Props) {
   const formId = useId();
   const config = state.configuration;
   const [qty, setQty] = useState<Record<string, number>>(() => ({
@@ -570,6 +574,7 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
 
   async function onSave(opts?: {
     qtyOverride?: Record<string, number>;
+    allowSessionRecover?: boolean;
   }): Promise<number | null> {
     setSaveState("saving");
     setSaveError(null);
@@ -618,13 +623,31 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
       return nextRowVersion;
     } catch (e) {
       if (seq !== requestSeq.n) return null;
-      const status = (e as Error & { status?: number }).status;
-      if (status === 401 || status === 403 || status === 404) {
+      const err = e as ConfigurationSaveError;
+      const allowRecover = opts?.allowSessionRecover !== false;
+      if (
+        allowRecover &&
+        accessToken &&
+        (err.code === "session_required" || err.diagnosticCode === "DE-COOKIE" || err.status === 401)
+      ) {
+        try {
+          const recovered = await exchangeFragmentToken(accessToken);
+          if (recovered.lifecycle === "active" && recovered.configuration) {
+            onState(recovered);
+            const recoveredVersion = recovered.session?.rowVersion;
+            if (recoveredVersion != null) setRowVersion(recoveredVersion);
+            return onSave({ qtyOverride: effectiveQty, allowSessionRecover: false });
+          }
+        } catch {
+          /* fall through to inline error */
+        }
+      }
+      if (err.lifecycleFatal) {
         onFatal();
         return null;
       }
       setSaveState("error");
-      setSaveError(e instanceof Error ? e.message : "Unable to save");
+      setSaveError(err instanceof Error ? err.message : "Unable to save");
       return null;
     }
   }
@@ -644,11 +667,12 @@ export function ConfigurationView({ state, onState, onFatal }: Props) {
       setReviewRequest(result.reviewRequest);
       setReviewOpen(false);
     } catch (e) {
-      const status = (e as Error & { status?: number }).status;
-      if (status === 401 || status === 403 || status === 404) {
+      const err = e as ConfigurationSaveError;
+      if (err.lifecycleFatal || (err.status === 410)) {
         onFatal();
         return;
       }
+      // Do not treat generic 404 save/review failures as full estimate unavailability.
       setReviewError(e instanceof Error ? e.message : "Unable to send for review");
     } finally {
       setReviewBusy(false);

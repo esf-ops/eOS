@@ -159,7 +159,10 @@ export default function EstimateDigitalEstimatePanel({
 
   const [pricingValidThrough, setPricingValidThrough] = useState("");
   const [choiceFlags, setChoiceFlags] = useState<Record<string, boolean>>(() =>
-    inferFriendlyChoiceFlags({ allowedOptionKeys: ["qty-sink"], customerChoiceGroups: ["materialColor", "sink", "edge"] })
+    inferFriendlyChoiceFlags({
+      allowedOptionKeys: ["qty-sink"],
+      customerChoiceGroups: ["materialColor", "sink", "edge", "backsplash"]
+    })
   );
   const [legacyUnknownKeys, setLegacyUnknownKeys] = useState<string[]>([]);
   const [estimatorNotes, setEstimatorNotes] = useState("");

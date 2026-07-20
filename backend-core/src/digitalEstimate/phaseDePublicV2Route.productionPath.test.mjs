@@ -174,10 +174,12 @@ console.log("\nphaseDePublicV2Route.productionPath.test.mjs\n");
   const serverSrc = readFileSync(join(__dirname, "../server.js"), "utf8");
   assert.ok(routesSrc.includes('"/api/public-digital-estimate/v2/session"'));
   assert.ok(routesSrc.includes("app.post(\"/api/public-digital-estimate/v2/session\""));
+  assert.ok(routesSrc.includes('"/api/public-digital-estimate/v2/selections"'));
+  assert.ok(routesSrc.includes("app.put(\"/api/public-digital-estimate/v2/selections\""));
   assert.ok(quoteSrc.includes("maybeAttachDigitalEstimatePublicConfigurationRoutes"));
   assert.ok(serverSrc.includes("attachQuoteRoutes"));
   assert.ok(vercelEntry.includes("../src/server.js"));
-  console.log("ok: route registered at /api/public-digital-estimate/v2/session via quoteRoutes + Vercel entry");
+  console.log("ok: route registered at /api/public-digital-estimate/v2/session + /v2/selections via quoteRoutes + Vercel entry");
 }
 
 {
@@ -335,6 +337,172 @@ console.log("\nphaseDePublicV2Route.productionPath.test.mjs\n");
 
   await new Promise((r) => server.close(r));
   console.log("ok: revoked publication remains blocked on v1 and v2");
+}
+
+{
+  resetDigitalEstimatePublicRateLimitsForTests();
+  const { deRepo, cfgRepo, pricing, published } = await seedPublishedWithEnvelope(ENV_LIVE);
+  const app = express();
+  mountPublicSurface(app, { env: ENV_LIVE, deRepo, cfgRepo, pricing });
+  const { server, base } = await listen(app);
+  const origin = "http://localhost:5190";
+
+  const noCookie = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
+    method: "PUT",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      items: [{ optionKey: "material:kitchen:group_b", quantity: 1 }],
+      expectedRowVersion: 1,
+      idempotencyKey: "no-cookie"
+    })
+  });
+  assert.equal(noCookie.status, 401);
+  const noCookieBody = await noCookie.json();
+  assert.equal(noCookieBody.code, "session_required");
+  assert.equal(noCookieBody.diagnosticCode, "DE-COOKIE");
+
+  const exchanged = await fetch(`${base}/api/public-digital-estimate/v2/session`, {
+    method: "POST",
+    headers: {
+      Origin: origin,
+      Authorization: `Bearer ${published.accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: "{}"
+  });
+  assert.equal(exchanged.status, 201);
+  const setCookie = exchanged.headers.getSetCookie?.() || [];
+  const cookieHeader = setCookie.join(";") || exchanged.headers.get("set-cookie") || "";
+  const cookieMatch = /de_cfg_session=([^;]+)/i.exec(cookieHeader);
+  assert.ok(cookieMatch, "exchange must Set-Cookie de_cfg_session");
+  const cookie = `de_cfg_session=${cookieMatch[1]}`;
+  const exchangedBody = await exchanged.json();
+  const rowVersion = exchangedBody.session?.rowVersion;
+  assert.ok(rowVersion != null);
+
+  const saved = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
+    method: "PUT",
+    headers: {
+      Origin: origin,
+      "Content-Type": "application/json",
+      Cookie: cookie
+    },
+    body: JSON.stringify({
+      items: [{ optionKey: "material:kitchen:group_b", quantity: 1 }],
+      expectedRowVersion: rowVersion,
+      idempotencyKey: "sel-ok-1"
+    })
+  });
+  assert.equal(saved.status, 200, "PUT /v2/selections must be mounted and accept valid session save");
+  const savedBody = await saved.json();
+  assert.equal(savedBody.ok, true);
+  assert.ok(savedBody.calculation);
+  assert.ok(savedBody.session?.rowVersion != null);
+  assert.equal(JSON.stringify(savedBody).toLowerCase().includes("wholesale"), false);
+  assert.equal(JSON.stringify(savedBody).toLowerCase().includes("margin"), false);
+  assert.equal(JSON.stringify(savedBody).includes("materialUseTax"), false);
+
+  const badMaterial = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
+    method: "PUT",
+    headers: {
+      Origin: origin,
+      "Content-Type": "application/json",
+      Cookie: cookie
+    },
+    body: JSON.stringify({
+      items: [{ optionKey: "material:kitchen:not-allowed-zzzz", quantity: 1 }],
+      expectedRowVersion: savedBody.session.rowVersion,
+      idempotencyKey: "sel-bad-1"
+    })
+  });
+  assert.equal(badMaterial.status, 400);
+  const badBody = await badMaterial.json();
+  assert.equal(badBody.code, "unknown_option");
+  assert.equal(badBody.stage, "selection");
+
+  const stale = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
+    method: "PUT",
+    headers: {
+      Origin: origin,
+      "Content-Type": "application/json",
+      Cookie: cookie
+    },
+    body: JSON.stringify({
+      items: [{ optionKey: "material:kitchen:group_b", quantity: 1 }],
+      expectedRowVersion: rowVersion,
+      idempotencyKey: "sel-stale-1"
+    })
+  });
+  assert.equal(stale.status, 409);
+  const staleBody = await stale.json();
+  assert.equal(staleBody.code, "row_version_conflict");
+
+  const resumed = await fetch(`${base}/api/public-digital-estimate/v2/session`, {
+    method: "GET",
+    headers: { Origin: origin, Cookie: cookie }
+  });
+  assert.equal(resumed.status, 200);
+  const resumedBody = await resumed.json();
+  assert.equal(resumedBody.lifecycle, "active");
+  assert.ok(
+    resumedBody.configuration?.currentSelections ||
+      resumedBody.configuration?.latestCalculation ||
+      savedBody.calculation
+  );
+
+  await new Promise((r) => server.close(r));
+  console.log("ok: PUT /v2/selections save, reject unknown option, conflict, resume");
+}
+
+{
+  resetDigitalEstimatePublicRateLimitsForTests();
+  const { deRepo, cfgRepo, pricing, published, publication } =
+    await seedPublishedWithEnvelope(ENV_LIVE);
+  const app = express();
+  mountPublicSurface(app, { env: ENV_LIVE, deRepo, cfgRepo, pricing });
+  const { server, base } = await listen(app);
+  const origin = "http://localhost:5190";
+
+  const exchanged = await fetch(`${base}/api/public-digital-estimate/v2/session`, {
+    method: "POST",
+    headers: {
+      Origin: origin,
+      Authorization: `Bearer ${published.accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: "{}"
+  });
+  const setCookie = exchanged.headers.getSetCookie?.() || [];
+  const cookieHeader = setCookie.join(";") || exchanged.headers.get("set-cookie") || "";
+  const cookieMatch = /de_cfg_session=([^;]+)/i.exec(cookieHeader);
+  const cookie = `de_cfg_session=${cookieMatch[1]}`;
+  const exchangedBody = await exchanged.json();
+
+  const row = deRepo._dump().publications.find((p) => p.id === publication.id);
+  if (row) {
+    row.status = "revoked";
+    row.revoked_at = new Date().toISOString();
+  }
+
+  const revokedSave = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
+    method: "PUT",
+    headers: {
+      Origin: origin,
+      "Content-Type": "application/json",
+      Cookie: cookie
+    },
+    body: JSON.stringify({
+      items: [{ optionKey: "material:kitchen:group_b", quantity: 1 }],
+      expectedRowVersion: exchangedBody.session.rowVersion,
+      idempotencyKey: "sel-revoked"
+    })
+  });
+  assert.ok(revokedSave.status === 404 || revokedSave.status === 410);
+  const revokedBody = await revokedSave.json();
+  assert.equal(revokedBody.ok, false);
+
+  await new Promise((r) => server.close(r));
+  console.log("ok: revoked session cannot save selections");
 }
 
 console.log("\nAll public v2 route production-path tests passed.\n");

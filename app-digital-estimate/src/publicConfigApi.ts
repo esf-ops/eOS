@@ -273,6 +273,103 @@ export async function fetchConfiguration(): Promise<ConfigurationState> {
   return (await res.json()) as ConfigurationState;
 }
 
+export type ConfigurationSaveError = Error & {
+  status?: number;
+  code?: string;
+  stage?: string;
+  diagnosticCode?: string;
+  /** True when the estimate link/session is gone (revoked/expired/unavailable). */
+  lifecycleFatal?: boolean;
+};
+
+/**
+ * Classify a failed selections/review response.
+ * Save/network failures must not be treated as full estimate unavailability.
+ */
+export function classifyConfigurationMutationError(
+  status: number,
+  body: { error?: string; code?: string; stage?: string; diagnosticCode?: string } | null,
+): Pick<ConfigurationSaveError, "code" | "stage" | "diagnosticCode" | "lifecycleFatal"> & {
+  message: string;
+} {
+  const code = String(body?.code || "").trim();
+  const stage = String(body?.stage || "").trim();
+  const diagnosticCode = String(body?.diagnosticCode || "").trim();
+  const message = String(body?.error || "").trim() || "Unable to save";
+
+  if (code === "session_required" || diagnosticCode === "DE-COOKIE" || status === 401) {
+    return {
+      message: message === "Estimate unavailable" ? "Please refresh and try again" : message,
+      code: code || "session_required",
+      stage: stage || "session",
+      diagnosticCode: diagnosticCode || "DE-COOKIE",
+      lifecycleFatal: false,
+    };
+  }
+  if (
+    code === "unknown_option" ||
+    code === "unresolved_product" ||
+    code === "forbidden_caller_authority" ||
+    code === "idempotency_required" ||
+    code === "concurrency_required"
+  ) {
+    return {
+      message: message || "That selection is unavailable",
+      code,
+      stage: stage || "selection",
+      diagnosticCode: diagnosticCode || "DE-SAVE",
+      lifecycleFatal: false,
+    };
+  }
+  if (code === "row_version_conflict" || status === 409) {
+    return {
+      message: message || "Please refresh and try again",
+      code: "row_version_conflict",
+      stage: stage || "selection",
+      diagnosticCode: diagnosticCode || "DE-SAVE",
+      lifecycleFatal: false,
+    };
+  }
+  if (status === 410) {
+    return {
+      message: message || "This estimate is unavailable.",
+      code: code || "unavailable",
+      stage: stage || "lifecycle",
+      diagnosticCode: diagnosticCode || "DE-EXCHANGE-404",
+      lifecycleFatal: true,
+    };
+  }
+  // Application JSON lifecycle revoke/expire (cookie present, session dead).
+  if (
+    status === 404 &&
+    body &&
+    (code === "unavailable" || diagnosticCode === "DE-EXCHANGE-404") &&
+    (stage === "token_exchange" ||
+      stage === "session" ||
+      stage === "lifecycle" ||
+      /revoked|expired|unavailable/i.test(message))
+  ) {
+    return {
+      message: message || "This estimate is unavailable.",
+      code: code || "unavailable",
+      stage: stage || "lifecycle",
+      diagnosticCode: diagnosticCode || "DE-EXCHANGE-404",
+      lifecycleFatal: true,
+    };
+  }
+  // Missing route / HTML 404 / 5xx / opaque network — keep configure UI alive.
+  return {
+    message:
+      status === 404 && !body
+        ? "Unable to save right now. Please try again."
+        : message || "Unable to save right now. Please try again.",
+    code: code || (status === 404 ? "save_route_or_server" : "save_failed"),
+    stage: stage || "selection",
+    diagnosticCode: diagnosticCode || "DE-SAVE",
+    lifecycleFatal: false,
+  };
+}
+
 export async function saveConfigurationSelections(payload: {
   items: Array<{ optionKey: string; quantity: number }>;
   expectedRowVersion: number;
@@ -301,25 +398,46 @@ export async function saveConfigurationSelections(payload: {
   projectNote?: string | null;
 }> {
   const base = apiBaseUrl();
-  const res = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
-    method: "PUT",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    const err = new Error("Unable to save right now. Please try again.") as ConfigurationSaveError;
+    err.status = 0;
+    err.code = "network_failure";
+    err.stage = "selection";
+    err.diagnosticCode = "DE-EXCHANGE-NETWORK";
+    err.lifecycleFatal = false;
+    throw err;
+  }
   if (!res.ok) {
-    let message = "Unable to save";
+    let body: { error?: string; code?: string; stage?: string; diagnosticCode?: string } | null =
+      null;
     try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) message = body.error;
+      body = (await res.json()) as {
+        error?: string;
+        code?: string;
+        stage?: string;
+        diagnosticCode?: string;
+      };
     } catch {
-      /* ignore */
+      body = null;
     }
-    const err = new Error(message);
-    (err as Error & { status?: number }).status = res.status;
+    const classified = classifyConfigurationMutationError(res.status, body);
+    const err = new Error(classified.message) as ConfigurationSaveError;
+    err.status = res.status;
+    err.code = classified.code;
+    err.stage = classified.stage;
+    err.diagnosticCode = classified.diagnosticCode;
+    err.lifecycleFatal = classified.lifecycleFatal;
     throw err;
   }
   return (await res.json()) as {
@@ -335,25 +453,44 @@ export async function recalculateConfiguration(payload: {
   idempotencyKey: string;
 }): ReturnType<typeof saveConfigurationSelections> {
   const base = apiBaseUrl();
-  const res = await fetch(`${base}/api/public-digital-estimate/v2/recalculate`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/public-digital-estimate/v2/recalculate`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    const err = new Error("Unable to update estimate") as ConfigurationSaveError;
+    err.status = 0;
+    err.code = "network_failure";
+    err.lifecycleFatal = false;
+    throw err;
+  }
   if (!res.ok) {
-    let message = "Unable to update estimate";
+    let body: { error?: string; code?: string; stage?: string; diagnosticCode?: string } | null =
+      null;
     try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) message = body.error;
+      body = (await res.json()) as {
+        error?: string;
+        code?: string;
+        stage?: string;
+        diagnosticCode?: string;
+      };
     } catch {
-      /* ignore */
+      body = null;
     }
-    const err = new Error(message);
-    (err as Error & { status?: number }).status = res.status;
+    const classified = classifyConfigurationMutationError(res.status, body);
+    const err = new Error(classified.message || "Unable to update estimate") as ConfigurationSaveError;
+    err.status = res.status;
+    err.code = classified.code;
+    err.stage = classified.stage;
+    err.diagnosticCode = classified.diagnosticCode;
+    err.lifecycleFatal = classified.lifecycleFatal;
     throw err;
   }
   return (await res.json()) as Awaited<ReturnType<typeof saveConfigurationSelections>>;
@@ -382,25 +519,44 @@ export async function submitReviewRequest(payload: {
   customerNote?: string;
 }): Promise<{ ok: boolean; reused?: boolean; reviewRequest: CustomerReviewRequest; disclaimer?: string }> {
   const base = apiBaseUrl();
-  const res = await fetch(`${base}/api/public-digital-estimate/v2/review-requests`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/public-digital-estimate/v2/review-requests`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    const err = new Error("Unable to send for review") as ConfigurationSaveError;
+    err.status = 0;
+    err.code = "network_failure";
+    err.lifecycleFatal = false;
+    throw err;
+  }
   if (!res.ok) {
-    let message = "Unable to send for review";
+    let body: { error?: string; code?: string; stage?: string; diagnosticCode?: string } | null =
+      null;
     try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) message = body.error;
+      body = (await res.json()) as {
+        error?: string;
+        code?: string;
+        stage?: string;
+        diagnosticCode?: string;
+      };
     } catch {
-      /* ignore */
+      body = null;
     }
-    const err = new Error(message);
-    (err as Error & { status?: number }).status = res.status;
+    const classified = classifyConfigurationMutationError(res.status, body);
+    const err = new Error(classified.message || "Unable to send for review") as ConfigurationSaveError;
+    err.status = res.status;
+    err.code = classified.code;
+    err.stage = classified.stage;
+    err.diagnosticCode = classified.diagnosticCode;
+    err.lifecycleFatal = classified.lifecycleFatal;
     throw err;
   }
   return (await res.json()) as {
