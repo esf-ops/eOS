@@ -1757,3 +1757,14 @@
 | **Ops** | Apply SQL, redeploy **backend-core** + **app-hr**. Assign department groups under HR Head → Department Access. Historical week rows are not auto-rewritten. |
 | **Out of scope** | Auto-migration of historical Monday-bucketed rows; new head/app; AI narrative. |
 
+### 126. Digital Estimate breakdowns, controls, assets & layout (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Customer Digital Estimate uses a full-width responsive shell (~95vw, max ~1650px) with sticky Original/Updated/Changes estimate workspace. Edge profile is a compact dropdown (estimator-approved options only). Backsplash/edge/material price-effect labels use **Original selection / No change / +$ / −$ / Requires estimator review** (not bare “Included”). Customer information and other draft fields share one debounced dirty→autosave pipeline. Sink first-level choices are **No sink / Customer-provided / ESF Stock Sinks / Special-Order Sinks**; stock lists discrete Kansas stock products; special-order covers Blanco family→finish. Product Catalog heroes are copied into `app-digital-estimate/public/product-catalog` with exact SKU/id image maps. Elite 100 imagery remains 11 ready / 89 missing after repo-wide audit. Published snapshot line items + Brain calculation options/custom lines power original/updated breakdowns; Changes shows selection deltas only. Persistence, publish, and server-authoritative pricing unchanged. |
+| **Why** | Hosted DE felt like a narrow form; edge was a modal; totals lacked Internal Estimate-style breakdowns; customer info did not autosave without a material change; sinks collapsed stock under a single ESF path; images lived only on slab-inventory origin. |
+| **SQL** | None. |
+| **Ops** | Deploy **Brain** + **app-digital-estimate** (static asset bundle larger by ~19MB product thumbs). Republish not required for layout/copy; new stock/special-order UI uses existing envelope options. |
+| **Out of scope** | Sourcing the remaining 89 Elite 100 photos; CDN migration; Studio per-room option override UI; inventing ungovered backsplash credits; sold-job. |
+

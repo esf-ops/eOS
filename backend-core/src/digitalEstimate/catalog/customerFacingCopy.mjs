@@ -175,13 +175,17 @@ export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
     treatment === "review_required" ||
     String(opt?.availabilityState || "") === "review_required"
   ) {
-    return "Requires review";
+    return "Requires estimator review";
   }
   if (treatment === "unavailable" || String(opt?.availabilityState || "") === "unavailable") {
     return "Special order";
   }
-  if (opt?.includedInBaseline || treatment === "included" || treatment === "no_change") {
-    return "Included";
+  // Baseline / current: customer-facing relationship labels (not bare "Included").
+  if (opt?.includedInBaseline || treatment === "included") {
+    return "Original selection";
+  }
+  if (treatment === "no_change") {
+    return "No change";
   }
   const delta =
     opt?.visibleDelta != null
@@ -193,8 +197,8 @@ export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
     if (String(opt?.availabilityState || "") === "special_order") return "Special order";
     return null;
   }
-  if (Math.abs(delta) < 0.005) return "Included";
-  if (delta < 0) return `${formatMoney(Math.abs(delta))} credit`;
+  if (Math.abs(delta) < 0.005) return "No change";
+  if (delta < 0) return `−${formatMoney(Math.abs(delta))}`;
   return `+${formatMoney(delta)}`;
 }
 

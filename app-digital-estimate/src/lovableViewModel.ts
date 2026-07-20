@@ -78,6 +78,9 @@ export type LovableChoiceOption = {
   compatibleFamilyIds: string[];
   visibleSellPrice: number | null;
   visibleDelta: number | null;
+  catalogAvailability: string | null;
+  manufacturer: string | null;
+  model: string | null;
 };
 
 export type SideSplashPieceSummary = {
@@ -334,10 +337,13 @@ function formatPriceEffect(opt: {
   if (opt.priceEffectLabel) return opt.priceEffectLabel;
   const treatment = String(opt.customerPriceTreatment || "");
   if (treatment === "review_required" || opt.availabilityState === "review_required") {
-    return "Requires review";
+    return "Requires estimator review";
   }
-  if (opt.includedInBaseline || treatment === "included" || treatment === "no_change") {
-    return "Included";
+  if (opt.includedInBaseline || treatment === "included") {
+    return "Original selection";
+  }
+  if (treatment === "no_change") {
+    return "No change";
   }
   const delta =
     opt.visibleDelta != null
@@ -346,8 +352,8 @@ function formatPriceEffect(opt: {
         ? Number(opt.visibleSellPrice)
         : null;
   if (delta == null || !Number.isFinite(delta)) return null;
-  if (Math.abs(delta) < 0.005) return "Included";
-  if (delta < 0) return `${formatCurrency(Math.abs(delta))} credit`;
+  if (Math.abs(delta) < 0.005) return "No change";
+  if (delta < 0) return `−${formatCurrency(Math.abs(delta))}`;
   return `+${formatCurrency(delta)}`;
 }
 
@@ -645,6 +651,9 @@ export function mapEliteOsToLovableViewModel(
             : [],
           visibleSellPrice: o.visibleSellPrice ?? null,
           visibleDelta: o.visibleDelta ?? null,
+          catalogAvailability: o.catalogAvailability ?? null,
+          manufacturer: o.manufacturer ?? null,
+          model: o.model ?? null,
         };
       });
 

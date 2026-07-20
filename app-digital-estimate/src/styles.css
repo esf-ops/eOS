@@ -115,6 +115,17 @@ body {
   font-size: 1.0625rem;
 }
 
+.lifecycle-notice {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--muted, #f4f4f5) 60%, transparent);
+}
+
 .unavailable {
   padding: 2rem;
 }

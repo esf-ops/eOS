@@ -37,6 +37,7 @@ import {
   sideSplashBillableSf,
   sideSplashQtyFromMode
 } from "../catalog/digitalEstimateProductOptions.mjs";
+import { customerPriceEffectLabel } from "../catalog/customerFacingCopy.mjs";
 import {
   buildQuoteLibraryCustomerConfigProjection
 } from "../catalog/quoteLibraryCustomerConfigProjection.mjs";
@@ -208,17 +209,44 @@ function toCustomerSafeOption(opt, group) {
   const treatment = opt.customer_price_treatment || opt.customerPriceTreatment || "absolute";
   const resolved = resolveMaterialSelectionFromOption(opt);
   const mat = resolved.materialId ? getElite100CustomerMaterial(resolved.materialId) : null;
-  return {
+  const compat =
+    opt.compatibility_json && typeof opt.compatibility_json === "object"
+      ? opt.compatibility_json
+      : opt.compatibilityJson && typeof opt.compatibilityJson === "object"
+        ? opt.compatibilityJson
+        : {};
+  const customerSafe =
+    compat.customerSafe && typeof compat.customerSafe === "object" ? compat.customerSafe : {};
+  const productId =
+    resolved.materialId ||
+    customerSafe.productId ||
+    compat.productId ||
+    null;
+  const catalogAvailability = customerSafe.availability || compat.catalogAvailability || null;
+  const sell = opt.sell_price ?? opt.sellPrice ?? null;
+  const publicOpt = {
     id: opt.id,
     optionKey: opt.option_key || opt.optionKey,
     groupId: opt.group_id || opt.groupId,
     groupKey: group?.group_key || group?.groupKey || null,
     displayLabel: mat?.displayName || opt.display_label || opt.displayLabel,
-    description: opt.description_customer || opt.description || null,
-    imageAssetRef: mat?.imageThumbPath || opt.image_asset_ref || opt.imageAssetRef || null,
+    description:
+      opt.description_customer ||
+      opt.description ||
+      customerSafe.description ||
+      null,
+    imageAssetRef:
+      mat?.imageThumbPath ||
+      opt.image_asset_ref ||
+      opt.imageAssetRef ||
+      customerSafe.imageUrl ||
+      null,
     materialId: resolved.materialId || null,
-    roomKey: resolved.roomKey || null,
+    roomKey: resolved.roomKey || compat.roomKey || null,
+    productId,
     availabilityState: availability,
+    catalogAvailability,
+    availabilityText: customerSafe.availabilityText || null,
     customerPriceTreatment: treatment,
     minQty: Number(opt.min_qty ?? opt.minQty ?? 0),
     maxQty: opt.max_qty ?? opt.maxQty ?? null,
@@ -228,8 +256,30 @@ function toCustomerSafeOption(opt, group) {
     selectable:
       availability === "active" &&
       treatment !== "unavailable" &&
-      treatment !== "review_required"
+      treatment !== "review_required",
+    accessoryKind: compat.accessoryKind || customerSafe.accessoryKind || null,
+    compatibleFamilyIds: Array.isArray(compat.compatibleFamilyIds)
+      ? compat.compatibleFamilyIds
+      : Array.isArray(customerSafe.compatibleFamilyIds)
+        ? customerSafe.compatibleFamilyIds
+        : [],
+    manufacturer: customerSafe.manufacturer || null,
+    model: customerSafe.model || null,
+    finish: customerSafe.finish || null,
+    variants: Array.isArray(customerSafe.variants) ? customerSafe.variants : undefined,
+    visibleSellPrice:
+      treatment === "absolute" && sell != null ? Number(sell) : null,
+    visibleDelta: treatment === "delta" && sell != null ? Number(sell) : null
   };
+  publicOpt.priceEffectLabel = customerPriceEffectLabel({
+    includedInBaseline: publicOpt.includedInBaseline,
+    customerPriceTreatment: treatment,
+    availabilityState: availability,
+    visibleSellPrice: publicOpt.visibleSellPrice,
+    visibleDelta: publicOpt.visibleDelta,
+    reviewRequired: treatment === "review_required" || Boolean(compat.estimatorReviewRequired)
+  });
+  return publicOpt;
 }
 
 function buildCustomerSafeMaterials(graphOptions) {

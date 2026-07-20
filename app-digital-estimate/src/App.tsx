@@ -276,7 +276,7 @@ export function App() {
       <div className="page">
         <main className="shell">
           {lifecycleNotice ? (
-            <p className="unavailable" role="status" data-testid="de-lifecycle-notice">
+            <p className="lifecycle-notice" role="status" data-testid="de-lifecycle-notice">
               {lifecycleNotice}
             </p>
           ) : null}

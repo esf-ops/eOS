@@ -103,6 +103,12 @@ export type ConfigOption = {
   priceEffectLabel?: string | null;
   accessoryKind?: string | null;
   compatibleFamilyIds?: string[];
+  /** stock | special_order from Product Catalog (customer-safe). */
+  catalogAvailability?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  finish?: string | null;
+  variants?: ConfigProductVariant[];
 };
 
 export type ConfigProductVariant = {
