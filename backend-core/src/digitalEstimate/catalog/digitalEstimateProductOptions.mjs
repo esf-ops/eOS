@@ -19,6 +19,13 @@ import {
   sideSplashModeLabel
 } from "./customerFacingCopy.mjs";
 import {
+  inferRoomEligibilityType,
+  productMatchesRoomType,
+  cutoutDisplayLabelForRoom
+} from "./roomEligibility.mjs";
+
+export { inferRoomEligibilityType, productMatchesRoomType, cutoutDisplayLabelForRoom };
+import {
   buildAuthoritativeEdgeOptionDefinitions,
   defaultApprovedEdgeProfileTokens,
   normalizeEdgeProfileToken,
@@ -50,31 +57,6 @@ export function isNonSinkPlumbingRow(product) {
   const name = String(product?.displayName || "").toLowerCase();
   if (/strainer|flange|\bgrid\b/.test(id) || /strainer|flange|\bgrid\b/.test(name)) return true;
   return false;
-}
-
-/**
- * @param {{ roomKey?: string, displayName?: string, name?: string, roomType?: string, type?: string }} room
- * @returns {'kitchen' | 'bar_prep' | 'vanity' | 'non_plumbing'}
- */
-export function inferRoomEligibilityType(room) {
-  const explicit = String(room?.roomType || room?.type || "").toLowerCase().trim();
-  if (explicit === "kitchen" || explicit === "bar_prep" || explicit === "vanity") return explicit;
-  if (explicit === "non_plumbing" || explicit === "none" || explicit === "no_plumbing") {
-    return "non_plumbing";
-  }
-  if (explicit === "bar" || explicit === "prep" || explicit === "entertainment") return "bar_prep";
-  if (explicit === "bath" || explicit === "bathroom") return "vanity";
-
-  const label = `${room?.displayName || ""} ${room?.name || ""} ${room?.roomKey || ""}`.toLowerCase();
-  if (/\bvanity\b|\bbath(room)?\b|\bpowder\b/.test(label)) return "vanity";
-  if (/\bcoffee\b|\bbar\b|\bprep\b|\bentertainment\b/.test(label)) return "bar_prep";
-  // Reception / office counters usually do not need a kitchen sink catalog.
-  if (
-    /\breception\b|\bfront\s*desk\b|\boffice\b|\blobby\b|\bconference\b|\bhostess\b/.test(label)
-  ) {
-    return "non_plumbing";
-  }
-  return "kitchen";
 }
 
 /**
@@ -210,6 +192,7 @@ export function toCustomerSafeOptionFields(product) {
     model: safe.model || null,
     finish: safe.finish || null,
     color: safe.color || null,
+    sku: safe.sku || null,
     imageUrl: safe.imageUrl || null,
     availability: safe.availability || null,
     availabilityText: safe.availabilityText || null,
@@ -436,11 +419,13 @@ export function buildFaucetOptionDefinitions(args) {
 
   if (args.includeEsfProducts !== false) {
     const faucetCategories =
-      roomType === "vanity"
+      roomType === "vanity" || roomType === "vanity_bath"
         ? ["bathroom_faucet"]
         : roomType === "bar_prep"
           ? ["bar_prep_faucet", "beverage_faucet", "kitchen_faucet"]
-          : ["kitchen_faucet", "bar_prep_faucet", "beverage_faucet"];
+          : roomType === "laundry_utility"
+            ? ["kitchen_faucet", "bar_prep_faucet"]
+            : ["kitchen_faucet", "bar_prep_faucet", "beverage_faucet"];
     const seen = new Set();
     for (const category of faucetCategories) {
       for (const product of listProducts({

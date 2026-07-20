@@ -20,7 +20,7 @@ import {
   buildOriginalBreakdown,
   buildUpdatedBreakdown,
 } from "./customerEstimateBreakdown";
-import { enrichProductImageUrl } from "./productCatalogImages";
+import { enrichProductImageUrl, resolveProductImageFields } from "./productCatalogImages";
 import {
   exchangeFragmentToken,
   fetchConfiguration,
@@ -737,6 +737,7 @@ function optionsToProducts(options: LovableChoiceOption[], catalog: ConfigProduc
         displayName: o.displayLabel || fromCatalog?.displayName || "Option",
         description: o.description ?? fromCatalog?.description ?? null,
         imageUrl: null,
+        sku: fromCatalog?.sku || o.sku || null,
         manufacturer: fromCatalog?.manufacturer || o.manufacturer || null,
         model: fromCatalog?.model || o.model || null,
         availability,
@@ -746,8 +747,12 @@ function optionsToProducts(options: LovableChoiceOption[], catalog: ConfigProduc
         visibleSellPrice: o.visibleSellPrice ?? null,
         visibleDelta: o.visibleDelta ?? null,
       };
-      product.imageUrl =
-        enrichProductImageUrl(product) || fromCatalog?.imageUrl || o.imageAssetRef || null;
+      const images = resolveProductImageFields(product);
+      product.imageUrl = images.thumbnailUrl || fromCatalog?.imageUrl || o.imageAssetRef || null;
+      product.thumbnailUrl = images.thumbnailUrl;
+      product.previewUrl = images.previewUrl;
+      product.imageStatus = images.imageStatus;
+      product.imageMatchType = images.imageMatchType;
       return product;
     });
 }
@@ -757,9 +762,9 @@ function clearIncompatibleAccessoriesForRoom(
   roomId: string,
   sinkOptionKey: string,
   rooms: LovableRoom[],
-) {
+): string[] {
   const room = rooms.find((r) => r.id === roomId);
-  if (!room) return;
+  if (!room) return [];
   const sinkToken = sinkOptionKey.split(":").slice(2).join(":").toLowerCase();
   const sinkMode = sinkToken.startsWith("esf:")
     ? "esf"
@@ -769,9 +774,11 @@ function clearIncompatibleAccessoriesForRoom(
         ? "none"
         : "other";
   const sinkProductId = sinkMode === "esf" ? sinkToken.replace(/^esf:/, "") : null;
+  const removed: string[] = [];
   for (const opt of room.choiceOptions.filter((c) => c.role === "accessory")) {
     const kind = opt.accessoryKind || "other";
     if (kind !== "sink_accessory") continue;
+    if ((nextQty[opt.optionKey] ?? 0) <= 0 && !opt.selected) continue;
     let keep = false;
     if (sinkMode === "esf" && sinkProductId) {
       const families = opt.compatibleFamilyIds || [];
@@ -786,8 +793,12 @@ function clearIncompatibleAccessoriesForRoom(
         );
       }
     }
-    if (!keep) nextQty[opt.optionKey] = 0;
+    if (!keep && (nextQty[opt.optionKey] ?? (opt.selected ? 1 : 0)) > 0) {
+      nextQty[opt.optionKey] = 0;
+      removed.push(opt.displayLabel);
+    }
   }
+  return removed;
 }
 
 function AccessoriesOrSpecialtyModal({
@@ -1541,6 +1552,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     "idle",
   );
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [accessoryNotice, setAccessoryNotice] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<{ roomId: string; kind: Exclude<ModalKind, null> } | null>(
     null,
   );
@@ -1691,7 +1703,19 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     }
     nextQty[optionKey] = 1;
     if (role === "sink") {
-      clearIncompatibleAccessoriesForRoom(nextQty, roomId, optionKey, vm?.rooms || []);
+      const removed = clearIncompatibleAccessoriesForRoom(
+        nextQty,
+        roomId,
+        optionKey,
+        vm?.rooms || [],
+      );
+      if (removed.length) {
+        setAccessoryNotice(
+          removed.length === 1
+            ? `Removed incompatible accessory: ${removed[0]}`
+            : `Removed ${removed.length} incompatible sink accessories for this selection.`,
+        );
+      }
     }
     setQty(nextQty);
     setSaveState("unsaved");
@@ -2010,6 +2034,21 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         const token = key.slice(prefix.length);
         if (token === "none" || token.startsWith("customer")) nextQty[key] = 0;
       }
+      if (role === "sink") {
+        const removed = clearIncompatibleAccessoriesForRoom(
+          nextQty,
+          roomId,
+          `sink:${roomId}:none`,
+          vm?.rooms || [],
+        );
+        if (removed.length) {
+          setAccessoryNotice(
+            removed.length === 1
+              ? `Removed incompatible accessory: ${removed[0]}`
+              : `Removed ${removed.length} incompatible sink accessories for this selection.`,
+          );
+        }
+      }
       setQty(nextQty);
       setSaveState("unsaved");
     } else {
@@ -2236,6 +2275,22 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         system — not final acceptance.
       </p>
       <div className="mt-5 space-y-2" data-testid="de-autosave-status-system">
+        {accessoryNotice ? (
+          <p
+            className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-center text-xs text-foreground"
+            role="status"
+            data-testid="de-accessory-compat-notice"
+          >
+            {accessoryNotice}
+            <button
+              type="button"
+              className="ml-2 underline underline-offset-2"
+              onClick={() => setAccessoryNotice(null)}
+            >
+              Dismiss
+            </button>
+          </p>
+        ) : null}
         <span
           className={`block text-center text-xs ${
             saveState === "error" ? "text-destructive" : "text-muted-foreground"

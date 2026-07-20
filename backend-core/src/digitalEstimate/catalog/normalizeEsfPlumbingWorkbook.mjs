@@ -105,7 +105,7 @@ export function inferRoomEligibility(text) {
   const rooms = new Set();
   if (/\bvanity\b|\bchina\b|\bbathroom\b|\bbath\b/.test(t)) rooms.add("vanity");
   if (/\bbar\b|\bprep\b|\bentertainment\b/.test(t)) rooms.add("bar_prep");
-  if (/\blaundry\b/.test(t)) rooms.add("kitchen");
+  if (/\blaundry\b|\butility\b/.test(t)) rooms.add("laundry_utility");
   if (/\bkitchen\b|\bworkstation\b|\bapron\b|\bdiamond\b|\bprecis\b|\bikon\b|\binteos\b/.test(t)) {
     rooms.add("kitchen");
   }
@@ -134,7 +134,10 @@ export function relatedCutoutTypeForRooms(rooms, requiresCutout) {
   if (rooms.includes("bar_prep") && !rooms.includes("kitchen") && !rooms.includes("vanity")) {
     return "bar_cutout";
   }
-  if (rooms.includes("kitchen")) return "sink_cutout";
+  if (rooms.includes("laundry_utility") && !rooms.includes("kitchen") && !rooms.includes("bar_prep")) {
+    return "sink_cutout";
+  }
+  if (rooms.includes("kitchen") || rooms.includes("laundry_utility")) return "sink_cutout";
   if (rooms.includes("vanity")) return "vanity_cutout";
   if (rooms.includes("bar_prep")) return "bar_cutout";
   return "sink_cutout";

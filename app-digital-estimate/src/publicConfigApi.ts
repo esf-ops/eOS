@@ -108,6 +108,11 @@ export type ConfigOption = {
   manufacturer?: string | null;
   model?: string | null;
   finish?: string | null;
+  sku?: string | null;
+  thumbnailUrl?: string | null;
+  previewUrl?: string | null;
+  imageStatus?: string | null;
+  imageMatchType?: string | null;
   variants?: ConfigProductVariant[];
 };
 
@@ -130,11 +135,16 @@ export type ConfigProduct = {
   subcategory?: string | null;
   manufacturer?: string | null;
   model?: string | null;
+  sku?: string | null;
   displayName: string;
   description?: string | null;
   finish?: string | null;
   color?: string | null;
   imageUrl?: string | null;
+  thumbnailUrl?: string | null;
+  previewUrl?: string | null;
+  imageStatus?: string | null;
+  imageMatchType?: string | null;
   availability?: string | null;
   availabilityText?: string | null;
   customerVisible?: boolean;

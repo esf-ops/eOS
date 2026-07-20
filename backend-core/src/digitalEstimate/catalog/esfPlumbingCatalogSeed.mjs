@@ -10,7 +10,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
   "contract": "esf-plumbing-specialty-catalog-v1",
   "sourceVersion": "2026-07-10",
   "sourceLabel": "esf-plumbing-specialty-program-2026-07-10.xlsx",
-  "generatedAt": "2026-07-20T20:54:41.767Z",
+  "generatedAt": "2026-07-20T21:13:19.062Z",
   "products": [
     {
       "productId": "kansas:1512UM18",
@@ -3288,7 +3288,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "customerVisible": true,
       "active": true,
       "roomEligibility": [
-        "kitchen"
+        "laundry_utility"
       ],
       "pricingTreatment": "priced",
       "requiresCutout": true,

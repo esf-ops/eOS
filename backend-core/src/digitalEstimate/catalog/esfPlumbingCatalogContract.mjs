@@ -7,7 +7,7 @@
 export const ESF_PLUMBING_CATALOG_CONTRACT_ID = "esf-plumbing-specialty-catalog-v1";
 
 /**
- * @typedef {'kitchen' | 'bar_prep' | 'vanity'} RoomEligibility
+ * @typedef {'kitchen' | 'bar_prep' | 'vanity' | 'laundry_utility'} RoomEligibility
  */
 
 /**
