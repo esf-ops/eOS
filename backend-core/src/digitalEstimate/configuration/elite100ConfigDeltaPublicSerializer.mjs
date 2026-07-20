@@ -15,7 +15,10 @@ export const PUBLIC_CALCULATION_DTO_KEYS = Object.freeze([
   "options",
   "customFacingLines",
   "reviewRequiredMessages",
-  "disclaimers"
+  "disclaimers",
+  "missingInformationRequirements",
+  "customerConfigurationSummary",
+  "quoteLibraryCustomerConfig"
 ]);
 
 /**
@@ -50,12 +53,19 @@ export function toPublicConfigurationCalculationDto(args) {
       roomKey: r.roomKey,
       displayName: r.displayName,
       selectedMaterialLabel: r.selectedMaterialLabel,
-      chargeableCounterSf: r.chargeableCounterSf
+      // Numeric SF stays internal — public rooms expose inclusion only via configuration state.
+      countertopIncluded:
+        r.countertopIncluded != null
+          ? Boolean(r.countertopIncluded)
+          : Number(r.chargeableCounterSf) > 0
     })),
     options: args.options || [],
     customFacingLines: args.customFacingLines || [],
     reviewRequiredMessages: args.reviewRequiredMessages || [],
-    disclaimers: args.disclaimers || []
+    disclaimers: args.disclaimers || [],
+    missingInformationRequirements: args.missingInformationRequirements || [],
+    customerConfigurationSummary: args.customerConfigurationSummary || null,
+    quoteLibraryCustomerConfig: args.quoteLibraryCustomerConfig || null
   };
 
   // Strip any accidental keys

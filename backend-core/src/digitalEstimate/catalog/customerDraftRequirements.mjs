@@ -4,8 +4,13 @@
  */
 
 import {
-  CUSTOMER_INFO_DRAFT_KEY
+  CUSTOMER_INFO_DRAFT_KEY,
+  CUSTOMER_PRODUCT_DRAFTS_KEY,
+  BACKSPLASH_DRAFTS_KEY,
+  buildPlumbingRoomsFromSelectionMeta,
+  splitSelectionPayloadMeta
 } from "../configuration/customerConfigurationDraft.mjs";
+import { getProductById } from "./esfPlumbingCatalog.mjs";
 
 /** @typedef {import('./esfPlumbingCatalogContract.mjs').MissingInfoRequirementCode} MissingInfoRequirementCode */
 
@@ -140,6 +145,23 @@ export function buildMissingInformationRequirements(selectionPayload) {
     rooms = /** @type {any[]} */ (/** @type {any} */ (plumbing).rooms);
   } else if (Array.isArray(payload.rooms)) {
     rooms = /** @type {any[]} */ (payload.rooms);
+  } else if (
+    payload[CUSTOMER_PRODUCT_DRAFTS_KEY] ||
+    payload[BACKSPLASH_DRAFTS_KEY] ||
+    Object.keys(payload).some(
+      (k) =>
+        k.startsWith("sink:") ||
+        k.startsWith("faucet:") ||
+        k.startsWith("backsplash:") ||
+        k.startsWith("specialty:")
+    )
+  ) {
+    const split = splitSelectionPayloadMeta(payload);
+    rooms = buildPlumbingRoomsFromSelectionMeta({
+      quantities: split.quantities,
+      customerProductDrafts: split.customerProductDrafts,
+      backsplashDrafts: split.backsplashDrafts
+    });
   } else {
     // Synthetic single-room from top-level sink/faucet/backsplash
     rooms = [
@@ -165,7 +187,7 @@ export function buildMissingInformationRequirements(selectionPayload) {
     if (sink && typeof sink === "object") {
       const source = String(sink.source || sink.mode || "").toLowerCase();
       if (source === "customer_provided" || source === "customer-provided" || source === "customer") {
-        if (isBlank(sink.model) && isBlank(sink.sinkModel) && isBlank(sink.manufacturer)) {
+        if (isBlank(sink.model) && isBlank(sink.sinkModel)) {
           push(req(MISSING_INFO_REQUIREMENT_CODES.customer_sink_model_required, { roomKey }));
         }
       }
@@ -185,7 +207,7 @@ export function buildMissingInformationRequirements(selectionPayload) {
     if (faucet && typeof faucet === "object") {
       const source = String(faucet.source || faucet.mode || "").toLowerCase();
       if (source === "customer_provided" || source === "customer-provided" || source === "customer") {
-        if (isBlank(faucet.model) && isBlank(faucet.faucetModel) && isBlank(faucet.manufacturer)) {
+        if (isBlank(faucet.model) && isBlank(faucet.faucetModel)) {
           push(req(MISSING_INFO_REQUIREMENT_CODES.customer_faucet_model_required, { roomKey }));
         }
       }
@@ -228,15 +250,37 @@ export function buildMissingInformationRequirements(selectionPayload) {
         : [];
     for (const item of list) {
       if (!item || typeof item !== "object") continue;
+      const catalogProduct = item.productId ? getProductById(String(item.productId)) : null;
+      const pricingTreatment =
+        item.pricingTreatment || catalogProduct?.pricingTreatment || null;
       if (
-        item.pricingTreatment === "review_only" ||
+        pricingTreatment === "review_only" ||
         item.estimatorReviewRequired === true ||
+        catalogProduct?.estimatorReviewRequired === true ||
         item.requiresQuote === true
       ) {
         push(
           req(MISSING_INFO_REQUIREMENT_CODES.specialty_item_quote_required, {
             roomKey,
             message: `Specialty item requires a custom quote (${item.productId || item.displayName || "item"})`
+          })
+        );
+      }
+    }
+
+    // ESF special-order sink/faucet availability confirmation
+    for (const side of ["sink", "faucet"]) {
+      const sel = room[side];
+      if (!sel || typeof sel !== "object") continue;
+      if (String(sel.source || "").toLowerCase() !== "esf") continue;
+      const product = sel.productId ? getProductById(String(sel.productId)) : null;
+      const availability = String(
+        sel.availability || product?.availability || ""
+      ).toLowerCase();
+      if (availability === "special_order") {
+        push(
+          req(MISSING_INFO_REQUIREMENT_CODES.product_availability_confirmation_required, {
+            roomKey
           })
         );
       }

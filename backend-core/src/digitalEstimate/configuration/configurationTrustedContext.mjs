@@ -112,7 +112,16 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
         baselineMaterialGroup: groupCode,
         baselineMaterialLabel: GROUP_CODE_DISPLAY_NAMES[groupCode] || String(groupRaw || ""),
         colorLabel: r.colorName || r.color_name || r.colorLabel || null,
-        measurementsLocked: true
+        measurementsLocked: true,
+        pieces: Array.isArray(r.pieces)
+          ? r.pieces.map((p, idx) => ({
+              id: String(p.id || p.key || p.name || `piece_${idx + 1}`),
+              name: p.name || p.label || null,
+              pieceType: p.pieceType || p.type || null,
+              depthIn: Number(p.depthIn ?? p.depth) || null,
+              included: p.included !== false
+            }))
+          : []
       });
     }
   } else if (Array.isArray(customerSnapshot?.rooms) && customerSnapshot.rooms.length) {

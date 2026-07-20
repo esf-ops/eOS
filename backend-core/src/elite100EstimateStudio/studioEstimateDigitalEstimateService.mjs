@@ -41,6 +41,11 @@ import {
 } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
 import { GROUP_CODE_DISPLAY_NAMES } from "../digitalEstimate/configuration/approvedPricingFixtures.mjs";
 import { serverApprovedOptionCatalog } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
+import {
+  buildDefaultRoomProductOptions,
+  inferRoomEligibilityType,
+  resolveOptionSellPriceFromCatalog
+} from "../digitalEstimate/catalog/digitalEstimateProductOptions.mjs";
 
 function scopeMaterialGroupToCode(raw) {
   const s = String(raw || "").trim().toLowerCase();
@@ -467,7 +472,11 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             roomLabelDrafts: snap.roomLabelDrafts || null,
             roomNotes: snap.roomNotes || null,
             projectNote: snap.projectNote || null,
-            selectedOptions: Array.isArray(snap.selectedOptions) ? snap.selectedOptions : []
+            selectedOptions: Array.isArray(snap.selectedOptions) ? snap.selectedOptions : [],
+            customerConfigurationSummary: snap.customerConfigurationSummary || null,
+            missingInformationRequirements: Array.isArray(snap.missingInformationRequirements)
+              ? snap.missingInformationRequirements
+              : []
           };
         });
     }
@@ -686,7 +695,9 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       }
     }
 
-    // Room-scoped fabrication / sink / backsplash / edge options when estimator enabled them.
+    // Room-scoped fabrication / sink / faucet / backsplash / edge / specialty options
+    // when estimator enabled them. ESF catalog products are seeded as family/SKU options
+    // (Blanco color variants stay nested — not hundreds of top-level keys).
     let roomChoicesGroup = groups.find(
       (g) => String(g.group_key || g.groupKey) === "room_choices"
     );
@@ -694,7 +705,11 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       !roomChoicesGroup &&
       (choiceGroups.has("backsplash") ||
         choiceGroups.has("sink") ||
+        choiceGroups.has("faucet") ||
+        choiceGroups.has("accessories") ||
+        choiceGroups.has("specialty") ||
         choiceGroups.has("edge") ||
+        choiceGroups.has("sideSplash") ||
         choiceGroups.has("cooktop"))
     ) {
       const created = await configurationStudioService.putGroups(organizationId, envelopeId, {
@@ -713,88 +728,35 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       ) || created?.groups?.[0] || null;
     }
 
-    for (const room of rooms) {
-      const roomKey = String(room.id || room.name);
-      if (choiceGroups.has("backsplash") && roomChoicesGroup?.id) {
-        const heightMode = String(room.backsplashHeightMode || "").toLowerCase();
-        const fullAllowed =
-          heightMode === "full_height" ||
-          heightMode === "custom" ||
-          Number(room.backsplashHeightIn) > 4;
-        const splashOpts = [
-          { key: "none", label: "No backsplash", included: room.includeBacksplash === false },
-          {
-            key: "standard_4in",
-            label: "4-inch backsplash",
-            included: room.includeBacksplash !== false && !fullAllowed
-          }
-        ];
-        if (fullAllowed) {
-          splashOpts.push({
-            key: "full_height",
-            label: "Full-height backsplash",
-            included: heightMode === "full_height" || Number(room.backsplashHeightIn) > 4
-          });
-        }
-        for (const so of splashOpts) {
-          options.push({
-            groupId: roomChoicesGroup.id,
-            optionKey: `backsplash:${roomKey}:${so.key}`,
-            displayLabel: so.label,
-            includedInBaseline: so.included,
-            defaultQty: so.included ? 1 : 0,
-            minQty: 0,
-            maxQty: 1,
-            requiredSelection: false,
-            customerPriceTreatment: "delta",
-            pricingMode: "replacement",
-            compatibilityJson: {
-              roomKey,
-              role: "backsplash_selection",
-              backsplashMode: so.key
-            }
-          });
-        }
-      }
-      if (choiceGroups.has("sink") && roomChoicesGroup?.id) {
-        for (const so of [
-          { key: "stock", label: "Elite stock sink", included: Number(estimate.scope?.addOns?.["qty-sink"] || 0) > 0 },
-          { key: "customer", label: "Customer-supplied sink", included: false },
-          { key: "none", label: "No sink", included: Number(estimate.scope?.addOns?.["qty-sink"] || 0) <= 0 }
-        ]) {
-          options.push({
-            groupId: roomChoicesGroup.id,
-            optionKey: `sink:${roomKey}:${so.key}`,
-            displayLabel: so.label,
-            includedInBaseline: so.included,
-            defaultQty: so.included ? 1 : 0,
-            minQty: 0,
-            maxQty: 1,
-            customerPriceTreatment: "delta",
-            pricingMode: "replacement",
-            compatibilityJson: { roomKey, role: "sink_selection", sinkMode: so.key }
-          });
-        }
-      }
-      if (choiceGroups.has("edge") && roomChoicesGroup?.id) {
-        for (const so of [
-          { key: "eased", label: "Eased edge", included: true },
-          { key: "w_edge", label: "W edge", included: false },
-          { key: "d_edge", label: "D edge", included: false }
-        ]) {
-          options.push({
-            groupId: roomChoicesGroup.id,
-            optionKey: `edge:${roomKey}:${so.key}`,
-            displayLabel: so.label,
-            includedInBaseline: so.included,
-            defaultQty: so.included ? 1 : 0,
-            minQty: 0,
-            maxQty: 1,
-            customerPriceTreatment: "delta",
-            pricingMode: "per_lf",
-            compatibilityJson: { roomKey, role: "edge_selection", edgeMode: so.key }
-          });
-        }
+    if (roomChoicesGroup?.id && rooms.length) {
+      const roomRows = rooms.map((room) => {
+        const roomKey = String(room.id || room.name);
+        return {
+          roomKey,
+          displayName: room.name || roomKey,
+          roomType: inferRoomEligibilityType(room),
+          includeBacksplash: room.includeBacksplash,
+          backsplashHeightMode: room.backsplashHeightMode,
+          backsplashHeightIn: room.backsplashHeightIn,
+          pieces: Array.isArray(room.pieces) ? room.pieces : []
+        };
+      });
+      const seeded = buildDefaultRoomProductOptions({
+        rooms: roomRows,
+        choiceGroups,
+        groupId: roomChoicesGroup.id,
+        estimateAddOns: estimate.scope?.addOns || {}
+      });
+      for (const opt of seeded) {
+        const priced = resolveOptionSellPriceFromCatalog(
+          opt.optionKey,
+          opt.compatibilityJson || {}
+        );
+        options.push({
+          ...opt,
+          sellPrice: priced.sellPrice ?? opt.sellPrice ?? 0,
+          availabilityState: priced.availabilityState || opt.availabilityState || "active"
+        });
       }
     }
 

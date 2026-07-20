@@ -9,6 +9,8 @@ import {
 } from "./amendmentConfig.mjs";
 import { rejectClientAuthoritativeEconomics } from "./configurationTrustedContext.mjs";
 import { splitSelectionPayloadMeta } from "./customerConfigurationDraft.mjs";
+import { buildCustomerConfigurationSummary } from "../catalog/customerConfigurationSummary.mjs";
+import { buildMissingInformationRequirements } from "../catalog/customerDraftRequirements.mjs";
 import {
   constantTimeEqualSessionHash,
   hashConfigurationSessionSecret
@@ -123,6 +125,10 @@ function customerSafeRequestView(request, { currentSelectionHash = null } = {}) 
     configuredDisplayTotal: request.configured_display_total,
     displayDelta: request.display_delta,
     selectedOptions: Array.isArray(snap.selectedOptions) ? snap.selectedOptions : [],
+    customerConfigurationSummary: snap.customerConfigurationSummary || null,
+    missingInformationRequirements: Array.isArray(snap.missingInformationRequirements)
+      ? snap.missingInformationRequirements
+      : [],
     customerNote: request.customer_note,
     nonAcceptanceNotice:
       "This is not an order or acceptance. Pricing and availability remain subject to estimator review.",
@@ -284,6 +290,29 @@ export function createReviewRequestService(deps) {
         projectAddress: snap?.customer_snapshot_json?.project?.projectAddress ?? null
       };
 
+      const missingInformationRequirements =
+        Array.isArray(customerResult.missingInformationRequirements)
+          ? customerResult.missingInformationRequirements
+          : buildMissingInformationRequirements(
+              selection.selection_payload_json || selection.selections || {}
+            ).map((r) => ({
+              code: r.code,
+              roomKey: r.roomKey || null,
+              customerCopy: r.customerCopy,
+              severity: r.severity,
+              blocksSave: false
+            }));
+
+      const customerConfigurationSummary =
+        customerResult.customerConfigurationSummary ||
+        buildCustomerConfigurationSummary({
+          selectionPayload: selection.selection_payload_json || selection.selections || {},
+          missingInformationRequirements,
+          baselineDisplayTotal: totals.baselineDisplayTotal,
+          configuredDisplayTotal: totals.configuredDisplayTotal,
+          displayDelta: totals.displayDelta
+        });
+
       const requestSnapshotJson = {
         version: 1,
         nonAcceptance: true,
@@ -295,6 +324,8 @@ export function createReviewRequestService(deps) {
         selectionHash: selection.selection_hash,
         calculationInputFingerprint: calculation.calculation_input_fingerprint,
         selectedOptions: selectedOptions.filter((o) => Number(o.quantity) > 0),
+        customerConfigurationSummary,
+        missingInformationRequirements,
         baselineDisplayTotal: totals.baselineDisplayTotal,
         configuredDisplayTotal: totals.configuredDisplayTotal,
         displayDelta: totals.displayDelta,
@@ -308,7 +339,9 @@ export function createReviewRequestService(deps) {
         customerInfoDraft: draftMeta.customerInfoDraft,
         roomLabelDrafts: draftMeta.roomLabelDrafts,
         roomNotes: draftMeta.roomNotes || {},
-        projectNote: draftMeta.projectNote || null
+        projectNote: draftMeta.projectNote || null,
+        customerProductDrafts: draftMeta.customerProductDrafts || {},
+        backsplashDrafts: draftMeta.backsplashDrafts || {}
       };
 
       const created = await amendmentRepository.createReviewRequest({

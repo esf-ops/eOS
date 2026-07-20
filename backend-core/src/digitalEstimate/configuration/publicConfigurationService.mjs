@@ -16,12 +16,31 @@ import {
 import { normalizeSelectionPayload } from "./configurationValidation.mjs";
 import {
   mergeSelectionPayloadMeta,
+  sanitizeBacksplashDrafts,
   sanitizeCustomerInfoDraft,
+  sanitizeCustomerProductDrafts,
   sanitizeProjectNoteDraft,
   sanitizeRoomLabelDrafts,
   sanitizeRoomNotesDraft,
+  sanitizeSideSplashDrafts,
   splitSelectionPayloadMeta
 } from "./customerConfigurationDraft.mjs";
+import {
+  buildMissingInformationRequirements
+} from "../catalog/customerDraftRequirements.mjs";
+import {
+  cutoutKeyForSinkSelection,
+  inferRoomEligibilityType,
+  isRoomProductOptionKey,
+  parseProductOptionKey,
+  resolveCatalogProductSelection,
+  sideSplashBillableSf,
+  sideSplashQtyFromMode
+} from "../catalog/digitalEstimateProductOptions.mjs";
+import {
+  buildQuoteLibraryCustomerConfigProjection
+} from "../catalog/quoteLibraryCustomerConfigProjection.mjs";
+import { buildCustomerConfigurationSummary } from "../catalog/customerConfigurationSummary.mjs";
 import {
   isDigitalEstimatePublicConfigurationRuntimeEnabled,
   readDigitalEstimatePublicConfigurationOrigin,
@@ -513,6 +532,8 @@ export function createPublicConfigurationService(deps) {
         roomLabelDrafts: selectionMeta.roomLabelDrafts,
         roomNotes: selectionMeta.roomNotes || {},
         projectNote: selectionMeta.projectNote || null,
+        customerProductDrafts: selectionMeta.customerProductDrafts || {},
+        backsplashDrafts: selectionMeta.backsplashDrafts || {},
         rooms: (ctx.rooms || []).map((r) => ({
           roomKey: r.roomKey,
           displayName:
@@ -534,6 +555,11 @@ export function createPublicConfigurationService(deps) {
         materials,
         currentSelections: selectionMeta.quantities,
         latestCalculation: customerCalc,
+        missingInformationRequirements: Array.isArray(
+          customerCalc?.missingInformationRequirements
+        )
+          ? customerCalc.missingInformationRequirements
+          : [],
         baselineDisplayTotal: ctx.baselineDisplayTotal
       }
     };
@@ -842,13 +868,25 @@ export function createPublicConfigurationService(deps) {
       );
       const roomNotes = sanitizeRoomNotesDraft(body.roomNotes || body.room_notes || {});
       const projectNote = sanitizeProjectNoteDraft(body.projectNote ?? body.project_note ?? "");
+      const customerProductDrafts = sanitizeCustomerProductDrafts(
+        body.customerProductDrafts || body.customer_product_drafts || {}
+      );
+      const backsplashDrafts = sanitizeBacksplashDrafts(
+        body.backsplashDrafts || body.backsplash_drafts || {}
+      );
+      const sideSplashDrafts = sanitizeSideSplashDrafts(
+        body.sideSplashDrafts || body.side_splash_drafts || {}
+      );
 
       // Preserve prior drafts when caller omits them (material-only saves).
       let priorMeta = {
         customerInfoDraft: null,
         roomLabelDrafts: {},
         roomNotes: {},
-        projectNote: null
+        projectNote: null,
+        customerProductDrafts: {},
+        backsplashDrafts: {},
+        sideSplashDrafts: {}
       };
       if (typeof configurationRepository.getLatestSelectionForSession === "function") {
         const prior = await configurationRepository.getLatestSelectionForSession(
@@ -873,6 +911,18 @@ export function createPublicConfigurationService(deps) {
         body.projectNote != null || body.project_note != null
           ? projectNote || null
           : priorMeta.projectNote;
+      const mergedProductDrafts =
+        body.customerProductDrafts != null || body.customer_product_drafts != null
+          ? customerProductDrafts
+          : priorMeta.customerProductDrafts || {};
+      const mergedBacksplashDrafts =
+        body.backsplashDrafts != null || body.backsplash_drafts != null
+          ? backsplashDrafts
+          : priorMeta.backsplashDrafts || {};
+      const mergedSideSplashDrafts =
+        body.sideSplashDrafts != null || body.side_splash_drafts != null
+          ? sideSplashDrafts
+          : priorMeta.sideSplashDrafts || {};
 
       const normalized = normalizeSelectionPayload({ selections: selectionMap }, options);
 
@@ -886,11 +936,15 @@ export function createPublicConfigurationService(deps) {
         }
       }
 
+      /** @type {string[]} */
+      const reviewFlags = [];
+
       // Build DE.2C rooms from material: selections + baseline (server resolves color → group)
       const rooms = (ctx.rooms || []).map((r) => {
         let selected = r.baselineMaterialGroup;
         let chargeableBacksplashSf = Number(r.backsplashSf) || 0;
         let edgeMode = "eased";
+        const roomType = inferRoomEligibilityType(r);
         for (const [key, qty] of Object.entries(normalized.selections)) {
           if (Number(qty) <= 0) continue;
           if (key.startsWith(`material:${r.roomKey}:`)) {
@@ -911,6 +965,13 @@ export function createPublicConfigurationService(deps) {
             if (mode === "none") chargeableBacksplashSf = 0;
             else if (mode === "standard_4in" || mode === "full_height") {
               chargeableBacksplashSf = Number(r.backsplashSf) || 0;
+              if (mode === "full_height") {
+                reviewFlags.push(`full_height_backsplash:${r.roomKey}`);
+              }
+            } else if (mode === "custom_height") {
+              // Do not invent chargeable SF for custom height — review required.
+              chargeableBacksplashSf = 0;
+              reviewFlags.push(`custom_height_backsplash:${r.roomKey}`);
             }
           } else if (key.startsWith(`edge:${r.roomKey}:`)) {
             edgeMode = key.split(":")[2] || "eased";
@@ -930,11 +991,18 @@ export function createPublicConfigurationService(deps) {
           edgeLinearFeet: Number(r.edgeLinearFeet) || 0,
           edgeMode,
           selectedMaterialGroup: selected,
-          baselineMaterialGroup: r.baselineMaterialGroup
+          baselineMaterialGroup: r.baselineMaterialGroup,
+          roomType,
+          pieces: Array.isArray(r.pieces) ? r.pieces : []
         };
       });
 
       const edgeLfTotal = rooms.reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0);
+      const pricingBasis = ctx.pricingBasis || "direct";
+      const rateTable =
+        (ctx.frozenBaseRates && ctx.frozenBaseRates[pricingBasis]) ||
+        ctx.frozenBaseRates?.direct ||
+        {};
 
       const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
       const calcOptions = [];
@@ -944,26 +1012,54 @@ export function createPublicConfigurationService(deps) {
         const qty = Number(qtyRaw) || 0;
         if (qty <= 0) continue;
 
-        // Sink modes → server catalog cutout/product charges
-        if (key.startsWith("sink:")) {
-          const [, roomKey, mode] = key.split(":");
-          if (mode === "none") continue;
-          const sinkCutout = catalog.get("qty-sink");
-          if (sinkCutout?.sellPrice != null) {
-            calcOptions.push({
-              optionKey: `qty-sink:${roomKey}`,
-              displayLabel: sinkCutout.displayLabel,
-              quantity: 1,
-              sellPrice: sinkCutout.sellPrice,
-              pricingMode: "per_each",
-              customerPriceTreatment: "absolute",
-              availabilityState: "active",
-              includedInBaseline: false,
-              defaultQty: 0,
-              baselineQuantity: 0
-            });
+        const parsed = parseProductOptionKey(key);
+
+        // Sink modes → product sellPrice + cutout (server catalog); browser prices ignored
+        if (parsed?.kind === "sink") {
+          const roomKey = parsed.roomKey;
+          const roomRow = rooms.find((r) => r.roomKey === roomKey);
+          const roomType = roomRow?.roomType || "kitchen";
+          const draft = mergedProductDrafts[roomKey]?.sink || null;
+
+          if (parsed.mode === "none") continue;
+
+          if (parsed.mode === "customer_provided" || parsed.mode === "customer") {
+            const cutoutKey = cutoutKeyForSinkSelection(roomType, null);
+            const sinkCutout = catalog.get(cutoutKey);
+            if (sinkCutout?.sellPrice != null) {
+              calcOptions.push({
+                optionKey: `${cutoutKey}:${roomKey}`,
+                displayLabel: sinkCutout.displayLabel,
+                quantity: 1,
+                sellPrice: sinkCutout.sellPrice,
+                pricingMode: "per_each",
+                customerPriceTreatment: "absolute",
+                availabilityState: "active",
+                includedInBaseline: false,
+                defaultQty: 0,
+                baselineQuantity: 0
+              });
+            }
+            continue;
           }
-          if (mode === "stock") {
+
+          if (parsed.mode === "stock") {
+            // Legacy Elite stock sink
+            const sinkCutout = catalog.get("qty-sink");
+            if (sinkCutout?.sellPrice != null) {
+              calcOptions.push({
+                optionKey: `qty-sink:${roomKey}`,
+                displayLabel: sinkCutout.displayLabel,
+                quantity: 1,
+                sellPrice: sinkCutout.sellPrice,
+                pricingMode: "per_each",
+                customerPriceTreatment: "absolute",
+                availabilityState: "active",
+                includedInBaseline: false,
+                defaultQty: 0,
+                baselineQuantity: 0
+              });
+            }
             const stock = catalog.get("qty-ss");
             if (stock?.sellPrice != null) {
               calcOptions.push({
@@ -979,6 +1075,219 @@ export function createPublicConfigurationService(deps) {
                 baselineQuantity: 0
               });
             }
+            continue;
+          }
+
+          if (parsed.mode === "esf" && parsed.productId) {
+            let resolved;
+            try {
+              resolved = resolveCatalogProductSelection(parsed.productId, draft);
+            } catch (e) {
+              if (e?.code === "invalid_blanco_variant") {
+                throw safeFail("invalid_selection", "That sink finish is unavailable", 422, {
+                  selectionKey: String(key).slice(0, 160),
+                  diagnosticCode: "DE-SAVE"
+                });
+              }
+              throw e;
+            }
+            if (!resolved?.product) {
+              throw safeFail("invalid_selection", "That selection is unavailable", 422, {
+                selectionKey: String(key).slice(0, 160),
+                diagnosticCode: "DE-SAVE"
+              });
+            }
+            const roomsOk = Array.isArray(resolved.product.roomEligibility)
+              ? resolved.product.roomEligibility
+              : [];
+            if (roomsOk.length && !roomsOk.includes(roomType)) {
+              throw safeFail("invalid_selection", "That sink is not available for this room", 422, {
+                selectionKey: String(key).slice(0, 160),
+                diagnosticCode: "DE-SAVE"
+              });
+            }
+            if (resolved.sellPrice != null) {
+              calcOptions.push({
+                optionKey: key,
+                displayLabel: resolved.product.displayName,
+                quantity: 1,
+                sellPrice: resolved.sellPrice,
+                pricingMode: "per_each",
+                customerPriceTreatment: "absolute",
+                availabilityState: "active",
+                includedInBaseline: false,
+                defaultQty: 0,
+                baselineQuantity: 0
+              });
+            }
+            const cutoutKey = cutoutKeyForSinkSelection(roomType, resolved.product);
+            const sinkCutout = cutoutKey ? catalog.get(cutoutKey) : null;
+            if (sinkCutout?.sellPrice != null && resolved.product.requiresCutout) {
+              calcOptions.push({
+                optionKey: `${cutoutKey}:${roomKey}`,
+                displayLabel: sinkCutout.displayLabel,
+                quantity: 1,
+                sellPrice: sinkCutout.sellPrice,
+                pricingMode: "per_each",
+                customerPriceTreatment: "absolute",
+                availabilityState: "active",
+                includedInBaseline: false,
+                defaultQty: 0,
+                baselineQuantity: 0
+              });
+            }
+            continue;
+          }
+          continue;
+        }
+
+        // Faucet — sellPrice only (no auto drilling / hole cutouts)
+        if (parsed?.kind === "faucet") {
+          if (parsed.mode === "none" || parsed.mode === "customer_provided") continue;
+          if (parsed.mode === "esf" && parsed.productId) {
+            const roomKey = parsed.roomKey;
+            const roomRow = rooms.find((r) => r.roomKey === roomKey);
+            const roomType = roomRow?.roomType || "kitchen";
+            const draft = mergedProductDrafts[roomKey]?.faucet || null;
+            let resolved;
+            try {
+              resolved = resolveCatalogProductSelection(parsed.productId, draft);
+            } catch (e) {
+              if (e?.code === "invalid_blanco_variant") {
+                throw safeFail("invalid_selection", "That faucet finish is unavailable", 422);
+              }
+              throw e;
+            }
+            if (!resolved?.product) {
+              throw safeFail("invalid_selection", "That selection is unavailable", 422);
+            }
+            const roomsOk = Array.isArray(resolved.product.roomEligibility)
+              ? resolved.product.roomEligibility
+              : [];
+            if (roomsOk.length && !roomsOk.includes(roomType)) {
+              throw safeFail("invalid_selection", "That faucet is not available for this room", 422);
+            }
+            if (resolved.sellPrice != null) {
+              calcOptions.push({
+                optionKey: key,
+                displayLabel: resolved.product.displayName,
+                quantity: qty,
+                sellPrice: resolved.sellPrice,
+                pricingMode: "per_each",
+                customerPriceTreatment: "absolute",
+                availabilityState: "active",
+                includedInBaseline: false,
+                defaultQty: 0,
+                baselineQuantity: 0
+              });
+            }
+          }
+          continue;
+        }
+
+        // Accessories — bounded qty, sellPrice only
+        if (parsed?.kind === "accessory" && parsed.mode === "esf" && parsed.productId) {
+          const resolved = resolveCatalogProductSelection(parsed.productId);
+          if (!resolved?.product) {
+            throw safeFail("invalid_selection", "That selection is unavailable", 422);
+          }
+          const envOpt = options.find((o) => (o.option_key || o.optionKey) === key);
+          const maxQty = Number(envOpt?.max_qty ?? envOpt?.maxQty ?? 5) || 5;
+          if (qty > maxQty) {
+            throw safeFail("invalid_selection", "That accessory quantity is unavailable", 422);
+          }
+          calcOptions.push({
+            optionKey: key,
+            displayLabel: resolved.product.displayName,
+            quantity: qty,
+            sellPrice: resolved.sellPrice ?? 0,
+            pricingMode: "per_each",
+            customerPriceTreatment: "absolute",
+            availabilityState: "active",
+            includedInBaseline: false,
+            defaultQty: 0,
+            baselineQuantity: 0,
+            maxQty
+          });
+          continue;
+        }
+
+        // Specialty — priced → installed price; review_only → $0 + flag
+        if (parsed?.kind === "specialty" && parsed.mode === "esf" && parsed.productId) {
+          const resolved = resolveCatalogProductSelection(parsed.productId);
+          if (!resolved?.product) {
+            throw safeFail("invalid_selection", "That selection is unavailable", 422);
+          }
+          if (resolved.product.pricingTreatment === "review_only") {
+            reviewFlags.push(`specialty_review:${parsed.roomKey}:${parsed.productId}`);
+            calcOptions.push({
+              optionKey: key,
+              displayLabel: resolved.product.displayName,
+              quantity: qty,
+              sellPrice: 0,
+              pricingMode: "per_each",
+              customerPriceTreatment: "included",
+              availabilityState: "active",
+              includedInBaseline: false,
+              defaultQty: 0,
+              baselineQuantity: 0
+            });
+          } else {
+            const price =
+              resolved.product.installedPrice != null
+                ? Number(resolved.product.installedPrice)
+                : resolved.sellPrice ?? 0;
+            calcOptions.push({
+              optionKey: key,
+              displayLabel: resolved.product.displayName,
+              quantity: qty,
+              sellPrice: price,
+              pricingMode: "per_each",
+              customerPriceTreatment: "absolute",
+              availabilityState: "active",
+              includedInBaseline: false,
+              defaultQty: 0,
+              baselineQuantity: 0
+            });
+          }
+          continue;
+        }
+
+        // Side splash — independent ceiling per piece from trusted depth; else review-only
+        if (parsed?.kind === "sidesplash") {
+          const mode = parsed.sideMode || parsed.mode;
+          const splashQty = sideSplashQtyFromMode(mode);
+          if (splashQty <= 0) continue;
+          const roomRow = rooms.find((r) => r.roomKey === parsed.roomKey);
+          const piece = (roomRow?.pieces || []).find(
+            (p) => String(p.id || p.key) === String(parsed.pieceKey)
+          );
+          const depth = Number(piece?.depthIn ?? piece?.depth);
+          const billableSf = sideSplashBillableSf(depth);
+          if (billableSf == null || billableSf <= 0) {
+            reviewFlags.push(
+              `sidesplash_review:${parsed.roomKey}:${parsed.pieceKey}`
+            );
+            continue;
+          }
+          const rate = Number(rateTable[roomRow?.selectedMaterialGroup] || 0);
+          if (rate > 0) {
+            calcOptions.push({
+              optionKey: key,
+              displayLabel: "Side splash",
+              quantity: 1,
+              sellPrice: Math.round(billableSf * splashQty * rate * 100) / 100,
+              pricingMode: "fixed",
+              customerPriceTreatment: "absolute",
+              availabilityState: "active",
+              includedInBaseline: false,
+              defaultQty: 0,
+              baselineQuantity: 0
+            });
+          } else {
+            reviewFlags.push(
+              `sidesplash_review:${parsed.roomKey}:${parsed.pieceKey}`
+            );
           }
           continue;
         }
@@ -995,7 +1304,7 @@ export function createPublicConfigurationService(deps) {
               displayLabel: mode === "d_edge" ? "D edge" : "W edge",
               quantity: lf,
               sellPrice: rate,
-              pricingMode: "per_lf",
+              pricingMode: "per_each",
               customerPriceTreatment: "absolute",
               availabilityState: "active",
               includedInBaseline: false,
@@ -1003,6 +1312,11 @@ export function createPublicConfigurationService(deps) {
               baselineQuantity: 0
             });
           }
+          continue;
+        }
+
+        if (isRoomProductOptionKey(key)) {
+          // Unrecognized room-product mode — ignore rather than invent pricing
           continue;
         }
 
@@ -1108,6 +1422,86 @@ export function createPublicConfigurationService(deps) {
 
       assertPublicConfigurationHasNoForbiddenContent(result.public);
 
+      const selectionPayloadForMeta = mergeSelectionPayloadMeta(normalized.selections, {
+        customerInfoDraft: mergedInfo,
+        roomLabelDrafts: mergedLabels,
+        roomNotes: mergedRoomNotes,
+        projectNote: mergedProjectNote,
+        customerProductDrafts: mergedProductDrafts,
+        backsplashDrafts: mergedBacksplashDrafts,
+        sideSplashDrafts: mergedSideSplashDrafts
+      });
+
+      const missingInformationRequirements = buildMissingInformationRequirements(
+        selectionPayloadForMeta
+      ).map((r) => ({
+        code: r.code,
+        roomKey: r.roomKey || null,
+        customerCopy: r.customerCopy,
+        severity: r.severity,
+        blocksSave: false
+      }));
+
+      const customerConfigurationSummary = buildCustomerConfigurationSummary({
+        selectionPayload: selectionPayloadForMeta,
+        missingInformationRequirements,
+        baselineDisplayTotal: result.public?.baselineDisplayTotal ?? null,
+        configuredDisplayTotal: result.public?.configuredDisplayTotal ?? null,
+        displayDelta: result.public?.displayTotalDelta ?? result.public?.displayDelta ?? null,
+        rooms: (ctx.rooms || []).map((r) => ({
+          roomKey: r.roomKey,
+          displayName: r.displayName
+        }))
+      });
+
+      const quoteLibraryProjection = buildQuoteLibraryCustomerConfigProjection({
+        configuredTotal: result.totals?.configuredDisplayTotal ?? result.public?.configuredDisplayTotal,
+        baselineTotal: result.totals?.baselineDisplayTotal ?? result.public?.baselineDisplayTotal,
+        deltaFromPublished:
+          result.totals?.displayDelta ?? result.public?.displayTotalDelta ?? null,
+        selectionQuantities: normalized.selections,
+        roomMaterialGroups: Object.fromEntries(
+          rooms.map((r) => [r.roomKey, r.selectedMaterialGroup])
+        ),
+        selectedMaterialGroup: rooms[0]?.selectedMaterialGroup || null,
+        missingInformationRequirements,
+        now: new Date()
+      });
+
+      const customerResultJson = {
+        ...result.public,
+        missingInformationRequirements,
+        reviewRequiredMessages: [
+          ...(result.public?.reviewRequiredMessages || []),
+          ...reviewFlags.map((f) => {
+            if (f.startsWith("custom_height_backsplash:")) {
+              return "Custom backsplash height requires estimator review.";
+            }
+            if (f.startsWith("full_height_backsplash:")) {
+              return "Full-height backsplash measurements will be confirmed by your estimator.";
+            }
+            if (f.startsWith("specialty_review:")) {
+              return "A specialty item requires estimator review and custom quoting.";
+            }
+            if (f.startsWith("sidesplash_review:")) {
+              return "Side splash pricing requires estimator review (piece depth unavailable).";
+            }
+            return "Estimator review required for one or more selections.";
+          })
+        ],
+        customerConfigurationSummary,
+        quoteLibraryCustomerConfig: quoteLibraryProjection
+      };
+      assertPublicConfigurationHasNoForbiddenContent(customerResultJson);
+
+      const internalEvidenceJson = {
+        ...result.internal,
+        missingInformationRequirements,
+        reviewFlags,
+        quoteLibraryCustomerConfig: quoteLibraryProjection,
+        customerConfigurationSummary
+      };
+
       let persisted;
       try {
         persisted = await configurationRepository.saveSelectionAndCalculationAtomic({
@@ -1115,15 +1509,10 @@ export function createPublicConfigurationService(deps) {
         sessionId: session.id,
         expectedRowVersion: Number(expectedRowVersion),
         idempotencyKey,
-        selectionPayload: mergeSelectionPayloadMeta(normalized.selections, {
-          customerInfoDraft: mergedInfo,
-          roomLabelDrafts: mergedLabels,
-          roomNotes: mergedRoomNotes,
-          projectNote: mergedProjectNote
-        }),
+        selectionPayload: selectionPayloadForMeta,
         selectionHash: normalized.selectionHash,
-        customerResultJson: result.public,
-        internalEvidenceJson: result.internal,
+        customerResultJson,
+        internalEvidenceJson,
         baselineTotal: result.totals.baselineExactTotal,
         configuredTotal: result.totals.configuredExactTotal,
         pricingValidThrough: ctx.pricingValidThrough,
@@ -1141,6 +1530,18 @@ export function createPublicConfigurationService(deps) {
         throw mapPersistenceError(e);
       }
 
+      if (typeof configurationRepository.appendEvent === "function") {
+        await configurationRepository.appendEvent({
+          organization_id: session.organization_id,
+          envelope_id: activeEnvelope.id,
+          publication_id: session.publication_id,
+          session_id: session.id,
+          event_type: "quote_library_customer_config",
+          actor_type: "public",
+          metadata: quoteLibraryProjection
+        });
+      }
+
       return {
         ok: true,
         session: {
@@ -1151,7 +1552,8 @@ export function createPublicConfigurationService(deps) {
         calculation: persisted.calculation.customer_result_json,
         selectionHash: normalized.selectionHash,
         customerInfoDraft: mergedInfo,
-        roomLabelDrafts: mergedLabels
+        roomLabelDrafts: mergedLabels,
+        missingInformationRequirements
       };
     },
 
