@@ -99,14 +99,14 @@ assert.ok(vanity);
 assert.ok(vanity.roomEligibility.includes("vanity"));
 assert.equal(vanity.relatedCutoutType, "vanity_cutout");
 
-// --- Stock / Non Stock → customer availability text ---
-assert.equal(customerAvailabilityText("stock"), "In stock");
-assert.equal(customerAvailabilityText("special_order"), "Special order");
+// --- Stock / Non Stock — do not expose sourcing labels to customers ---
+assert.equal(customerAvailabilityText("stock"), null);
+assert.equal(customerAvailabilityText("special_order"), null);
 const stockSafe = toCustomerSafeProduct(kansasSink);
-assert.equal(stockSafe.availabilityText, "In stock");
+assert.equal(stockSafe.availabilityText, null);
 const nonStock = kansas.find((p) => p.availability === "special_order");
 assert.ok(nonStock);
-assert.equal(toCustomerSafeProduct(nonStock).availabilityText, "Special order");
+assert.equal(toCustomerSafeProduct(nonStock).availabilityText, null);
 
 // --- Blanco family + variants ---
 const blanco = products.filter((p) => p.sourceSheet === SHEET_BLANCO);
@@ -187,7 +187,7 @@ for (const key of CUSTOMER_UNSAFE_PRODUCT_KEYS) {
   assert.equal(Object.prototype.hasOwnProperty.call(safe, key), false, `leaked ${key}`);
 }
 assert.equal(safe.sellPrice, kansasSink.sellPrice);
-assert.equal(safe.availabilityText, "In stock");
+assert.equal(safe.availabilityText, null);
 
 // --- Seed catalog accessors (after build; seed may be empty placeholder) ---
 // Inject by re-reading if seed was built; otherwise exercise resolve on in-memory family.

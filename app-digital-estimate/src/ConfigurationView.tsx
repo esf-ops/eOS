@@ -503,6 +503,34 @@ function ProductCards({
   role: "sink" | "faucet";
 }) {
   const [openFamily, setOpenFamily] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("All");
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of products) {
+      const cat = customerFacingFaucetCategory(p.category) || null;
+      if (cat) set.add(cat);
+    }
+    return ["All", ...Array.from(set).sort()];
+  }, [products]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return products.filter((p) => {
+      if (categoryFilter !== "All") {
+        const cat = customerFacingFaucetCategory(p.category);
+        if (cat !== categoryFilter) return false;
+      }
+      if (!q) return true;
+      const hay = [p.displayName, p.manufacturer, p.model, p.finish, p.description, p.category]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [products, query, categoryFilter]);
+
   if (!products.length) {
     return (
       <p className="text-sm text-muted-foreground" data-testid={`de-${role}-esf-empty`}>
@@ -511,91 +539,164 @@ function ProductCards({
     );
   }
   return (
-    <div
-      className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-      data-testid={`de-${role}-product-grid`}
-    >
-      {products.map((p) => {
-        const variants = Array.isArray(p.variants) ? p.variants : [];
-        const hasVariants = variants.length > 0;
-        const familyOpen = openFamily === p.productId;
-        const selected =
-          selectedOptionKey &&
-          (selectedOptionKey === p.optionKey ||
-            variants.some((v) => v.optionKey === selectedOptionKey));
-        const imageUrl = enrichProductImageUrl(p) || p.imageUrl;
-        const stockLabel =
-          String(p.availability || "").toLowerCase() === "stock"
-            ? "Stock"
-            : String(p.availability || "").toLowerCase() === "special_order"
-              ? "Special order"
-              : p.availabilityText || null;
-        return (
-          <div
-            key={p.productId}
-            className={`rounded-xl border p-3 ${selected ? "border-foreground ring-1 ring-foreground/20" : "border-border"}`}
-            data-testid={`de-${role}-product-card`}
-            data-availability={p.availability || ""}
-          >
-            <div className="flex gap-3">
-              <MaterialThumb src={imageUrl} alt={p.displayName} size="md" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-foreground">{p.displayName}</div>
-                <div className="truncate text-xs text-muted-foreground">
-                  {[p.manufacturer, p.model || p.finish].filter(Boolean).join(" · ") || p.category}
-                </div>
-                {stockLabel ? (
-                  <div className="mt-1 text-[11px] text-muted-foreground">{stockLabel}</div>
-                ) : null}
-              </div>
-            </div>
-            {hasVariants ? (
-              <div className="mt-3">
-                <button
-                  type="button"
-                  className="text-xs font-medium text-foreground underline-offset-2 hover:underline"
-                  onClick={() => setOpenFamily(familyOpen ? null : p.productId)}
-                >
-                  {familyOpen ? "Hide finishes" : "Choose finish"}
-                </button>
-                {familyOpen ? (
-                  <div className="mt-2 flex flex-col gap-1.5">
-                    {variants.map((v) => (
-                      <button
-                        key={v.variantId}
-                        type="button"
-                        className={`rounded-lg border px-3 py-2 text-left text-xs ${
-                          v.optionKey && v.optionKey === selectedOptionKey
-                            ? "border-foreground bg-muted/40"
-                            : "border-border"
-                        }`}
-                        onClick={() => onPick(p, v.variantId)}
-                      >
-                        <span className="font-medium text-foreground">
-                          {v.finish || v.color || v.displayName || v.sku || "Finish"}
-                        </span>
-                        {v.availabilityText ? (
-                          <span className="ml-2 text-muted-foreground">{v.availabilityText}</span>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
+    <div className="space-y-4" data-testid={`de-${role}-product-catalog`}>
+      <div className="sticky top-0 z-10 -mx-1 space-y-2 bg-background/95 px-1 py-2 backdrop-blur">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={`Search ${role === "sink" ? "sinks" : "faucets"}…`}
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          data-testid={`de-${role}-catalog-search`}
+          aria-label={`Search ${role}s`}
+        />
+        {role === "faucet" && categories.length > 2 ? (
+          <div className="flex flex-wrap gap-1.5" data-testid="de-faucet-category-filters">
+            {categories.map((c) => (
               <button
+                key={c}
                 type="button"
-                className="mt-3 w-full rounded-lg border border-border py-2 text-xs font-medium hover:border-foreground/40"
-                onClick={() => onPick(p, null)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                  categoryFilter === c
+                    ? "bg-foreground text-background"
+                    : "border border-border text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setCategoryFilter(c)}
               >
-                Select
+                {c}
               </button>
-            )}
+            ))}
           </div>
-        );
-      })}
+        ) : null}
+      </div>
+      {!filtered.length ? (
+        <p className="text-sm text-muted-foreground">No products match your search.</p>
+      ) : (
+        <div
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          data-testid={`de-${role}-product-grid`}
+        >
+          {filtered.map((p) => {
+            const variants = Array.isArray(p.variants) ? p.variants : [];
+            const hasVariants = variants.length > 0;
+            const familyOpen = openFamily === p.productId;
+            const selected =
+              selectedOptionKey &&
+              (selectedOptionKey === p.optionKey ||
+                variants.some((v) => v.optionKey === selectedOptionKey));
+            const imageUrl = enrichProductImageUrl(p) || p.imageUrl;
+            const faucetCat = customerFacingFaucetCategory(p.category);
+            const metaBits = [
+              p.manufacturer,
+              p.model,
+              role === "faucet" ? faucetCat : null,
+              role === "sink" ? sinkBowlLabel(p) : null,
+              role === "sink" ? sinkDimensionLabel(p) : null,
+            ].filter(Boolean);
+            const priceLabel =
+              p.visibleDelta != null && Number.isFinite(Number(p.visibleDelta))
+                ? Number(p.visibleDelta) >= 0
+                  ? `+$${Math.round(Number(p.visibleDelta)).toLocaleString("en-US")}`
+                  : `−$${Math.round(Math.abs(Number(p.visibleDelta))).toLocaleString("en-US")}`
+                : p.visibleSellPrice != null && Number.isFinite(Number(p.visibleSellPrice))
+                  ? `+$${Math.round(Number(p.visibleSellPrice)).toLocaleString("en-US")}`
+                  : null;
+            return (
+              <div
+                key={p.productId}
+                className={`rounded-xl border p-3 ${selected ? "border-foreground ring-1 ring-foreground/20" : "border-border"}`}
+                data-testid={`de-${role}-product-card`}
+                data-product-id={p.productId}
+              >
+                <div className="flex gap-3">
+                  <MaterialThumb src={imageUrl} alt={p.displayName} size="md" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium leading-snug text-foreground" title={p.displayName}>
+                      {p.displayName}
+                    </div>
+                    {metaBits.length ? (
+                      <div className="mt-0.5 text-xs text-muted-foreground">{metaBits.join(" · ")}</div>
+                    ) : null}
+                    {priceLabel ? (
+                      <div className="mt-1 text-[11px] font-medium text-foreground" data-testid="de-product-price-effect">
+                        {priceLabel}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                {hasVariants ? (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-foreground underline-offset-2 hover:underline"
+                      onClick={() => setOpenFamily(familyOpen ? null : p.productId)}
+                    >
+                      {familyOpen ? "Hide finishes" : "Choose finish"}
+                    </button>
+                    {familyOpen ? (
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        {variants.map((v) => (
+                          <button
+                            key={v.variantId}
+                            type="button"
+                            className={`rounded-lg border px-3 py-2 text-left text-xs ${
+                              v.optionKey && v.optionKey === selectedOptionKey
+                                ? "border-foreground bg-muted/40"
+                                : "border-border"
+                            }`}
+                            onClick={() => onPick(p, v.variantId)}
+                          >
+                            <span className="font-medium text-foreground">
+                              {v.finish || v.color || v.displayName || v.sku || "Finish"}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="mt-3 w-full rounded-lg border border-border py-2 text-xs font-medium hover:border-foreground/40"
+                    onClick={() => onPick(p, null)}
+                  >
+                    Select
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+function customerFacingFaucetCategory(category: string | null | undefined): string | null {
+  const c = String(category || "").toLowerCase();
+  if (!c) return null;
+  if (c.includes("kitchen_faucet") || c === "kitchen faucet") return "Kitchen faucet";
+  if (c.includes("bar_prep") || c.includes("bar/prep")) return "Bar/prep faucet";
+  if (c.includes("bathroom") || c.includes("vanity")) return "Bathroom faucet";
+  if (c.includes("beverage")) return "Beverage faucet";
+  return null;
+}
+
+function sinkBowlLabel(p: ConfigProduct): string | null {
+  const raw = String((p as { bowlConfiguration?: string }).bowlConfiguration || p.description || "");
+  const m = raw.match(/\b(\d[\d/]*\s*(?:bowl|station)|single|double|50\/50|60\/40|70\/30|workstation)\b/i);
+  return m ? m[0] : null;
+}
+
+function sinkDimensionLabel(p: ConfigProduct): string | null {
+  const raw = String(
+    (p as { dimensionsLabel?: string; overallSize?: string }).dimensionsLabel ||
+      (p as { overallSize?: string }).overallSize ||
+      p.model ||
+      "",
+  );
+  const m = raw.match(/\b\d{2,}\s*[x×]\s*\d{2,}(?:\s*[x×]\s*\d{1,})?\b/i);
+  return m ? m[0].replace(/×/g, "x") : null;
 }
 
 function findOptionBySource(
@@ -639,12 +740,11 @@ function optionsToProducts(options: LovableChoiceOption[], catalog: ConfigProduc
         manufacturer: fromCatalog?.manufacturer || o.manufacturer || null,
         model: fromCatalog?.model || o.model || null,
         availability,
-        availabilityText:
-          o.availabilityText ||
-          fromCatalog?.availabilityText ||
-          (availability === "stock" ? "Stock" : availability === "special_order" ? "Special order" : null),
+        availabilityText: null,
         optionKey: o.optionKey,
         variants: fromCatalog?.variants || [],
+        visibleSellPrice: o.visibleSellPrice ?? null,
+        visibleDelta: o.visibleDelta ?? null,
       };
       product.imageUrl =
         enrichProductImageUrl(product) || fromCatalog?.imageUrl || o.imageAssetRef || null;
@@ -804,7 +904,7 @@ function AccessoriesOrSpecialtyModal({
         </section>
         <section>
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            Plumbing add-ons
+            Faucet and plumbing add-ons
           </h3>
           {plumbingAddons.length ? (
             <div className="flex flex-col gap-2">
@@ -830,7 +930,7 @@ function AccessoriesOrSpecialtyModal({
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">No plumbing add-ons available for this room.</p>
+            <p className="text-sm text-muted-foreground">No faucet and plumbing add-ons available for this room.</p>
           )}
         </section>
       </div>
@@ -862,24 +962,19 @@ function PlumbingSourceModal({
     (o) => o.sourceKind === "esf" || o.sourceKind === "stock" || o.sourceKind === "other",
   );
   const productCards = optionsToProducts(esfOptions, products);
-  const stockProducts = productCards.filter(
-    (p) => String(p.availability || "").toLowerCase() === "stock",
-  );
-  const specialOrderProducts = productCards.filter(
-    (p) => String(p.availability || "").toLowerCase() !== "stock",
-  );
   const title = role === "sink" ? "Sink" : "Faucet";
   const noneLabel = role === "sink" ? "No sink" : "No faucet";
   const customerLabel =
     role === "sink" ? "Customer-provided sink" : "Customer-provided faucet";
+  const esfLabel = role === "sink" ? "ESF Sinks" : "ESF Faucets";
   const source =
     draft.source === "customer_provided" || draft.source === "none" || draft.source === "esf"
       ? draft.source
       : draft.source === "stock"
         ? "esf"
         : "none";
-  const [esfPane, setEsfPane] = useState<"menu" | "stock" | "special_order">("menu");
-  const showingCatalog = esfPane === "stock" || esfPane === "special_order";
+  const [esfPane, setEsfPane] = useState<"menu" | "catalog">("menu");
+  const showingCatalog = esfPane === "catalog";
 
   return (
     <ModalShell
@@ -899,8 +994,8 @@ function PlumbingSourceModal({
           >
             ← Back to {role} options
           </button>
-          <div className="text-xs text-muted-foreground">
-            {esfPane === "stock" ? "ESF Stock Sinks" : role === "sink" ? "Special-Order Sinks" : "ESF faucets"}
+          <div className="text-xs text-muted-foreground" data-testid={`de-${role}-catalog-title`}>
+            {esfLabel}
           </div>
         </div>
       ) : null}
@@ -932,59 +1027,41 @@ function PlumbingSourceModal({
               </button>
             );
           })}
-          {role === "sink" ? (
-            <>
-              <button
-                type="button"
-                data-testid="de-sink-source-stock"
-                className="rounded-xl border border-border px-4 py-3 text-left text-sm font-medium"
-                onClick={() => setEsfPane("stock")}
-              >
-                ESF Stock Sinks
-                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                  {stockProducts.length} in-stock options for this room
-                </span>
-              </button>
-              <button
-                type="button"
-                data-testid="de-sink-source-special-order"
-                className="rounded-xl border border-border px-4 py-3 text-left text-sm font-medium"
-                onClick={() => setEsfPane("special_order")}
-              >
-                Special-Order Sinks
-                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                  Blanco and other special-order programs
-                </span>
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              data-testid="de-faucet-source-esf"
-              className={`rounded-xl border px-4 py-3 text-left text-sm font-medium ${
-                source === "esf" ? "border-foreground bg-muted/30" : "border-border"
-              }`}
-              onClick={() => {
-                onSelectSource("esf", null);
-                setEsfPane("special_order");
-              }}
-            >
-              Select an ESF faucet
-            </button>
-          )}
+          <button
+            type="button"
+            data-testid={`de-${role}-source-esf`}
+            className={`rounded-xl border px-4 py-3 text-left text-sm font-medium ${
+              source === "esf" ? "border-foreground bg-muted/30" : "border-border"
+            }`}
+            onClick={() => {
+              onSelectSource("esf", null);
+              setEsfPane("catalog");
+            }}
+          >
+            {esfLabel}
+            <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+              {productCards.length} approved {role === "sink" ? "sink" : "faucet"}
+              {productCards.length === 1 ? "" : "s"} for this room
+            </span>
+          </button>
         </div>
       ) : null}
 
-      {source === "customer_provided" ? (
+      {source === "customer_provided" && !showingCatalog ? (
         <div className="mt-5 space-y-3" data-testid={`de-${role}-customer-fields`}>
           <p className="text-xs text-muted-foreground">
-            You can provide this later. We will need the {role} model before fabrication.
+            {role === "sink"
+              ? "You can provide the model later. We will need it before fabrication."
+              : "You can provide the faucet details later. We will need the model and hole requirements before fabrication."}
           </p>
           {(
             [
               ["manufacturer", "Manufacturer"],
               ["model", "Model"],
-              ["finish", "Finish"],
+              ["finish", "Finish / color"],
+              ...(role === "faucet"
+                ? ([["holeCount", "Required hole count"]] as const)
+                : ([] as const)),
               ["notes", "Notes"],
             ] as const
           ).map(([field, label]) => (
@@ -996,10 +1073,25 @@ function PlumbingSourceModal({
                   value={draft.notes || ""}
                   onChange={(e) => onDraftChange({ ...draft, notes: e.target.value })}
                 />
+              ) : field === "holeCount" ? (
+                <input
+                  type="number"
+                  min={0}
+                  max={8}
+                  className="rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  value={(draft as ProductDraft & { holeCount?: string | number }).holeCount ?? ""}
+                  onChange={(e) =>
+                    onDraftChange({
+                      ...draft,
+                      holeCount: e.target.value,
+                    } as ProductDraft)
+                  }
+                  data-testid="de-faucet-hole-count"
+                />
               ) : (
                 <input
                   className="rounded-md border border-border bg-background px-3 py-2 text-sm"
-                  value={(draft[field] as string) || ""}
+                  value={(draft[field as keyof ProductDraft] as string) || ""}
                   onChange={(e) => onDraftChange({ ...draft, [field]: e.target.value })}
                 />
               )}
@@ -1009,15 +1101,9 @@ function PlumbingSourceModal({
       ) : null}
 
       {showingCatalog ? (
-        <div className="mt-2 space-y-4" data-testid={`de-${role}-catalog-${esfPane}`}>
+        <div className="mt-2 space-y-4" data-testid={`de-${role}-catalog`}>
           <ProductCards
-            products={
-              role === "sink" && esfPane === "stock"
-                ? stockProducts
-                : role === "sink"
-                  ? specialOrderProducts
-                  : productCards
-            }
+            products={productCards}
             selectedOptionKey={draft.optionKey || null}
             onPick={onSelectProduct}
             role={role}
@@ -2343,7 +2429,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             {vm.addons.length ? (
               <div className="rounded-2xl border border-border bg-background p-6">
                 <div className="text-xs uppercase tracking-widest text-muted-foreground">Options</div>
-                <div className="mt-1 text-lg font-semibold text-foreground">Approved add-ons</div>
+                <div className="mt-1 text-lg font-semibold text-foreground">Project add-ons</div>
                 <ul className="mt-4 space-y-3">
                   {vm.addons.map((opt) => {
                     const unresolved =

@@ -178,7 +178,7 @@ export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
     return "Requires estimator review";
   }
   if (treatment === "unavailable" || String(opt?.availabilityState || "") === "unavailable") {
-    return "Special order";
+    return "Unavailable";
   }
   // Baseline / current: customer-facing relationship labels (not bare "Included").
   if (opt?.includedInBaseline || treatment === "included") {
@@ -194,7 +194,6 @@ export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
         ? Number(opt.visibleSellPrice)
         : null;
   if (delta == null || !Number.isFinite(delta)) {
-    if (String(opt?.availabilityState || "") === "special_order") return "Special order";
     return null;
   }
   if (Math.abs(delta) < 0.005) return "No change";

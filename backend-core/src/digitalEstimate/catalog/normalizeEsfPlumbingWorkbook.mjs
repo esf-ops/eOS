@@ -187,14 +187,17 @@ function faucetRoomEligibility(category) {
 
 /**
  * @param {string} familyHeader
+ * @param {{ isAccessory?: boolean }} [opts]
  */
-function blancoFamilyProductId(familyHeader) {
+function blancoFamilyProductId(familyHeader, opts = {}) {
   const base = String(familyHeader || "")
     .replace(/^Blanco\s+/i, "")
     .replace(/\s+Accessories\s*$/i, "")
     .replace(/\s+Sinks?\s*$/i, "")
     .trim();
-  return `blanco:${slugify(base || familyHeader)}`;
+  const id = `blanco:${slugify(base || familyHeader)}`;
+  // Accessory families must not collide with sink family IDs (same workbook header stem).
+  return opts.isAccessory ? `${id}:accessories` : id;
 }
 
 /**
@@ -430,7 +433,7 @@ function normalizeBlanco(workbook, excludedRows, sourceVersion) {
       }
       flush();
       const isAccessory = /accessor/i.test(desc);
-      const productId = blancoFamilyProductId(desc);
+      const productId = blancoFamilyProductId(desc, { isAccessory });
       if (!isAccessory) {
         familyIdByHeaderKey.set(slugify(desc.replace(/^Blanco\s+/i, "").replace(/\s+Sinks?\s*$/i, "")), productId);
       }

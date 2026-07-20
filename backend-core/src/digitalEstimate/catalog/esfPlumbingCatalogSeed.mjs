@@ -10,7 +10,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
   "contract": "esf-plumbing-specialty-catalog-v1",
   "sourceVersion": "2026-07-10",
   "sourceLabel": "esf-plumbing-specialty-program-2026-07-10.xlsx",
-  "generatedAt": "2026-07-20T17:36:01.437Z",
+  "generatedAt": "2026-07-20T20:54:41.767Z",
   "products": [
     {
       "productId": "kansas:1512UM18",
@@ -1292,7 +1292,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:diamond-50-50",
+      "productId": "blanco:diamond-50-50:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -1315,7 +1315,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:diamond-50-50:sku:221008",
+          "variantId": "blanco:diamond-50-50:accessories:sku:221008",
           "sku": "221008",
           "displayName": "221008 Diamond Grid For 50/50 Left Side",
           "model": "50/50",
@@ -1324,7 +1324,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:diamond-50-50:sku:221009",
+          "variantId": "blanco:diamond-50-50:accessories:sku:221009",
           "sku": "221009",
           "displayName": "221009 Diamond Grid For 50/50 Right Side",
           "model": "50/50",
@@ -1638,7 +1638,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:diamond-60-40",
+      "productId": "blanco:diamond-60-40:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -1661,7 +1661,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:diamond-60-40:sku:220998",
+          "variantId": "blanco:diamond-60-40:accessories:sku:220998",
           "sku": "220998",
           "displayName": "220998 Diamond Grid For 60/40 Large Bowl",
           "model": "60/40",
@@ -1670,7 +1670,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:diamond-60-40:sku:231342",
+          "variantId": "blanco:diamond-60-40:accessories:sku:231342",
           "sku": "231342",
           "displayName": "231342 Diamond Grid For 60/40 Small Bowl",
           "model": "60/40",
@@ -1679,7 +1679,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:diamond-60-40:sku:231343",
+          "variantId": "blanco:diamond-60-40:accessories:sku:231343",
           "sku": "231343",
           "displayName": "231343 Diamond 60/40 Reverse Grid",
           "model": "60/40",
@@ -1688,7 +1688,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:diamond-60-40:sku:236431",
+          "variantId": "blanco:diamond-60-40:accessories:sku:236431",
           "sku": "236431",
           "displayName": "236431 Diamond Dish Rack for 60/40",
           "model": "60/40",
@@ -1697,7 +1697,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:diamond-60-40:sku:440231",
+          "variantId": "blanco:diamond-60-40:accessories:sku:440231",
           "sku": "440231",
           "displayName": "440231 Diamond Wood Cutting Board 60/40",
           "model": "60/40",
@@ -1879,7 +1879,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:super-single",
+      "productId": "blanco:super-single:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -1902,7 +1902,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:super-single:sku:221010",
+          "variantId": "blanco:super-single:accessories:sku:221010",
           "sku": "221010",
           "displayName": "221010 Diamond Grid For Super Single",
           "model": "Super Single",
@@ -2132,7 +2132,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:precis-50-50",
+      "productId": "blanco:precis-50-50:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -2155,7 +2155,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:precis-50-50:sku:516363",
+          "variantId": "blanco:precis-50-50:accessories:sku:516363",
           "sku": "516363",
           "displayName": "516363 Precis Grid for 50/50",
           "model": "50/50",
@@ -2359,7 +2359,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:precis-60-40",
+      "productId": "blanco:precis-60-40:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -2382,7 +2382,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:precis-60-40:sku:236782",
+          "variantId": "blanco:precis-60-40:accessories:sku:236782",
           "sku": "236782",
           "displayName": "236782 Precis Grid for 60/40 Low Divide Large Side",
           "model": "60/40",
@@ -2391,7 +2391,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:precis-60-40:sku:236783",
+          "variantId": "blanco:precis-60-40:accessories:sku:236783",
           "sku": "236783",
           "displayName": "236783 Precis Grid for 60/40 Low Divide Small Bowl",
           "model": "60/40",
@@ -2400,7 +2400,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:precis-60-40:sku:516364",
+          "variantId": "blanco:precis-60-40:accessories:sku:516364",
           "sku": "516364",
           "displayName": "516364 Precis Grid for 60/40 Reg Divide Large Side",
           "model": "60/40",
@@ -2409,7 +2409,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:precis-60-40:sku:516366",
+          "variantId": "blanco:precis-60-40:accessories:sku:516366",
           "sku": "516366",
           "displayName": "516366 Precis Grid for 60/40 Regular Divide Small Side",
           "model": "60/40",
@@ -2534,7 +2534,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:precis-super-single",
+      "productId": "blanco:precis-super-single:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -2557,7 +2557,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:precis-super-single:sku:221206",
+          "variantId": "blanco:precis-super-single:accessories:sku:221206",
           "sku": "221206",
           "displayName": "221206 Precis Grid for Super Single",
           "model": "Super Single",
@@ -2673,7 +2673,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:precis-21",
+      "productId": "blanco:precis-21:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -2696,7 +2696,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:precis-21:sku:221014",
+          "variantId": "blanco:precis-21:accessories:sku:221014",
           "sku": "221014",
           "displayName": "221014 Precis Grid for 21in Single",
           "model": "21\"",
@@ -2823,7 +2823,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:precis-24",
+      "productId": "blanco:precis-24:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -2846,7 +2846,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:precis-24:sku:234061",
+          "variantId": "blanco:precis-24:accessories:sku:234061",
           "sku": "234061",
           "displayName": "234061 Precis 24in Grid",
           "model": "24\"",
@@ -3086,7 +3086,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:precis-30-single-bowl",
+      "productId": "blanco:precis-30-single-bowl:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -3109,7 +3109,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:precis-30-single-bowl:sku:236593",
+          "variantId": "blanco:precis-30-single-bowl:accessories:sku:236593",
           "sku": "236593",
           "displayName": "236593 Precis Grid for 30 inch Single",
           "model": "30\"",
@@ -3237,7 +3237,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:precis-bar",
+      "productId": "blanco:precis-bar:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -3261,7 +3261,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:precis-bar:sku:221013",
+          "variantId": "blanco:precis-bar:accessories:sku:221013",
           "sku": "221013",
           "displayName": "221013 Precis Grid for Bar Sink",
           "model": "Bar",
@@ -3490,7 +3490,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:inteos-33-workstation",
+      "productId": "blanco:inteos-33-workstation:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -3513,7 +3513,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:inteos-33-workstation:sku:443345",
+          "variantId": "blanco:inteos-33-workstation:accessories:sku:443345",
           "sku": "443345",
           "displayName": "443345 Inteos 33in Grid",
           "model": "33\" WS",
@@ -3673,7 +3673,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       ]
     },
     {
-      "productId": "blanco:ikon-apron-front",
+      "productId": "blanco:ikon-apron-front:accessories",
       "category": "sink_accessory",
       "subcategory": "blanco_accessory",
       "manufacturer": "Blanco",
@@ -3696,7 +3696,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
       "sourceVersion": "2026-07-10",
       "variants": [
         {
-          "variantId": "blanco:ikon-apron-front:sku:235010",
+          "variantId": "blanco:ikon-apron-front:accessories:sku:235010",
           "sku": "235010",
           "displayName": "235010 Wood Cutting Board for Ikon Apron Front Sink",
           "model": "33\"",
@@ -3705,7 +3705,7 @@ export const ESF_PLUMBING_CATALOG_SEED = {
           "availability": "special_order"
         },
         {
-          "variantId": "blanco:ikon-apron-front:sku:235011",
+          "variantId": "blanco:ikon-apron-front:accessories:sku:235011",
           "sku": "235011",
           "displayName": "235011 Ikon Grid For 33in Single Bowl",
           "model": "33\"",

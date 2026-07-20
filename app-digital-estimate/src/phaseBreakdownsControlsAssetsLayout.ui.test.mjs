@@ -105,21 +105,24 @@ assert.ok(configView.includes("450"));
 assert.ok(configView.includes('setSaveState("unsaved")'));
 assert.ok(configView.includes("infoDraft"));
 
-// Sink hierarchy
-assert.ok(configView.includes("de-sink-source-stock"));
-assert.ok(configView.includes("de-sink-source-special-order"));
-assert.ok(configView.includes("ESF Stock Sinks"));
-assert.ok(configView.includes("Special-Order Sinks"));
+// Sink hierarchy — unified ESF catalog (no Stock / Special-Order split)
+assert.ok(configView.includes("ESF Sinks"));
+assert.ok(configView.includes("ESF Faucets"));
+assert.ok(configView.includes("de-${role}-source-esf") || configView.includes("source-esf"));
+assert.ok(!configView.includes("de-sink-source-stock"));
+assert.ok(!configView.includes("de-sink-source-special-order"));
+assert.ok(!configView.includes("ESF Stock Sinks"));
+assert.ok(!configView.includes("Special-Order Sinks"));
 assert.ok(configView.includes("de-${role}-source-${kind}") || configView.includes('["none", noneLabel]'));
 assert.ok(configView.includes("customer_provided"));
+assert.ok(configView.includes("Project add-ons"));
+assert.ok(!configView.includes("Approved add-ons"));
+assert.ok(!configView.includes('"Special order"'));
 
 const sinks = listProducts({ category: "sink", customerVisibleOnly: true }).filter(
   (p) => p.active && !isNonSinkPlumbingRow(p),
 );
-const stock = sinks.filter((p) => p.availability === "stock");
-const special = sinks.filter((p) => p.availability !== "stock");
-assert.ok(stock.length >= 10, `expected stock sinks, got ${stock.length}`);
-assert.ok(special.length >= 10, `expected special-order sinks, got ${special.length}`);
+assert.ok(sinks.length >= 20, `expected approved sinks, got ${sinks.length}`);
 assert.ok(!sinks.some((p) => /strainer|flange/i.test(p.displayName)));
 
 // Images
@@ -148,8 +151,7 @@ assert.ok(configView.includes("sticky top-0"));
 console.log(
   JSON.stringify(
     {
-      stockSinks: stock.length,
-      specialOrderSinks: special.length,
+      approvedSinks: sinks.length,
       eliteThumbs: eliteThumbs.length,
       productCatalogMapKeys: Object.keys(imageMap).length,
       productCatalogPublicBytes: (() => {

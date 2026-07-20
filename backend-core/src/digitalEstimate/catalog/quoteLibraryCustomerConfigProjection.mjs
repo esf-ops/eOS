@@ -115,6 +115,12 @@ export function buildQuoteLibraryCustomerConfigProjection(input = {}) {
     deltaFromPublished,
     lastCustomerActivityAt,
     selectedMaterialGroup,
+    selectedMaterialSummary: input.selectedMaterialSummary || selectedMaterialGroup || null,
+    selectedSinkSummary: input.selectedSinkSummary || null,
+    selectedFaucetSummary: input.selectedFaucetSummary || null,
+    reviewRequested: Boolean(input.reviewRequested),
+    reviewOnlyOutstandingCount: Number(input.reviewOnlyOutstandingCount) || 0,
+    customerSelectionStatus: input.customerSelectionStatus || QUOTE_LIBRARY_CUSTOMER_CONFIG_STATUS,
     meaningfulOptionChanges,
     missingInformationCount,
     status: QUOTE_LIBRARY_CUSTOMER_CONFIG_STATUS

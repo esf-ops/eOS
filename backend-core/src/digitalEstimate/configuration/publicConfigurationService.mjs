@@ -1612,6 +1612,7 @@ export function createPublicConfigurationService(deps) {
         }))
       });
 
+      const firstRoomSummary = (customerConfigurationSummary?.rooms || [])[0] || null;
       const quoteLibraryProjection = buildQuoteLibraryCustomerConfigProjection({
         configuredTotal: result.totals?.configuredDisplayTotal ?? result.public?.configuredDisplayTotal,
         baselineTotal: result.totals?.baselineDisplayTotal ?? result.public?.baselineDisplayTotal,
@@ -1622,6 +1623,30 @@ export function createPublicConfigurationService(deps) {
           rooms.map((r) => [r.roomKey, r.selectedMaterialGroup])
         ),
         selectedMaterialGroup: rooms[0]?.selectedMaterialGroup || null,
+        selectedMaterialSummary:
+          firstRoomSummary?.material?.displayName ||
+          firstRoomSummary?.material?.groupLabel ||
+          rooms[0]?.selectedMaterialLabel ||
+          rooms[0]?.selectedMaterialGroup ||
+          null,
+        selectedSinkSummary:
+          firstRoomSummary?.sink?.displayName ||
+          (firstRoomSummary?.sink?.source === "customer_provided"
+            ? "Customer-provided sink"
+            : firstRoomSummary?.sink?.source === "none"
+              ? "No sink"
+              : null),
+        selectedFaucetSummary:
+          firstRoomSummary?.faucet?.displayName ||
+          (firstRoomSummary?.faucet?.source === "customer_provided"
+            ? "Customer-provided faucet"
+            : firstRoomSummary?.faucet?.source === "none"
+              ? "No faucet"
+              : null),
+        reviewRequested: Boolean(session?.status === "review_requested"),
+        reviewOnlyOutstandingCount: (missingInformationRequirements || []).filter(
+          (r) => r.severity === "review" || /review|specialty/i.test(String(r.code || ""))
+        ).length,
         missingInformationRequirements,
         now: new Date()
       });

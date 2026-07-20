@@ -2,7 +2,7 @@
   "contract": "esf-plumbing-specialty-catalog-v1",
   "sourceVersion": "2026-07-10",
   "sourceLabel": "esf-plumbing-specialty-program-2026-07-10.xlsx",
-  "generatedAt": "2026-07-20T17:36:01.437Z",
+  "generatedAt": "2026-07-20T20:54:41.767Z",
   "workbookPath": "_local/catalog-source/esf-plumbing-specialty-program-2026-07-10.xlsx",
   "productCount": 116,
   "countsBySheet": {
@@ -509,7 +509,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:diamond-50-50",
+      "productId": "blanco:diamond-50-50:accessories",
       "displayName": "Diamond 50/50 Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -519,7 +519,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:diamond-60-40",
+      "productId": "blanco:diamond-60-40:accessories",
       "displayName": "Diamond 60/40 Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -529,7 +529,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:super-single",
+      "productId": "blanco:super-single:accessories",
       "displayName": "Super Single Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -544,7 +544,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:precis-50-50",
+      "productId": "blanco:precis-50-50:accessories",
       "displayName": "Precis 50/50 Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -554,7 +554,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:precis-60-40",
+      "productId": "blanco:precis-60-40:accessories",
       "displayName": "Precis 60/40 Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -564,7 +564,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:precis-super-single",
+      "productId": "blanco:precis-super-single:accessories",
       "displayName": "Precis Super Single Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -574,7 +574,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:precis-21",
+      "productId": "blanco:precis-21:accessories",
       "displayName": "Precis 21\" Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -584,7 +584,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:precis-24",
+      "productId": "blanco:precis-24:accessories",
       "displayName": "Precis 24\" Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -599,7 +599,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:precis-30-single-bowl",
+      "productId": "blanco:precis-30-single-bowl:accessories",
       "displayName": "Precis 30\" Single Bowl Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -609,7 +609,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:precis-bar",
+      "productId": "blanco:precis-bar:accessories",
       "displayName": "Precis Bar Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -624,7 +624,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:inteos-33-workstation",
+      "productId": "blanco:inteos-33-workstation:accessories",
       "displayName": "Inteos 33\" Workstation Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -634,7 +634,7 @@
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
     {
-      "productId": "blanco:ikon-apron-front",
+      "productId": "blanco:ikon-apron-front:accessories",
       "displayName": "Ikon Apron Front Accessories",
       "sourceSheet": "Blanco Sink Program (Non Stock)"
     },
@@ -860,17 +860,17 @@
     },
     {
       "productId": "specialty:free-power-3-device-charging-station-wholesale-and-partner-15-w",
-      "displayName": "Free Power 3 Device Charging Station Wholesale and Partner (15 W)",
+      "displayName": "FreePower 3-Device Charging Station",
       "sourceSheet": "Specialty Items"
     },
     {
       "productId": "specialty:glowback-led-panels-are-custom-made-for-each-project-to-fit-the-dimensions-of-each-piece-project",
-      "displayName": "Glowback LED panels are custom made for each project to fit the dimensions of each piece.   Projects will be bid upon request and provided dimensions. Preferred provider to prevent lighting gaps and ensure full backlighting coverage.",
+      "displayName": "Glowback LED Backlighting",
       "sourceSheet": "Specialty Items"
     },
     {
       "productId": "specialty:invisacook-places-induction-technology-beneath-the-countertop-allowing-compatible-surfaces-to-re",
-      "displayName": "InvisaCook places induction technology beneath the countertop, allowing compatible surfaces to remain visually clean while creating a true cooking zone directly on the slab.  Visit website, select product, and ESF will custom quote.",
+      "displayName": "InvisaCook",
       "sourceSheet": "Specialty Items"
     }
   ],

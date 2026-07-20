@@ -101,6 +101,16 @@ export function buildOriginalBreakdown(estimate: {
   };
 }
 
+function customerFriendlyOptionLabel(optionKey: string | undefined, displayLabel: string | undefined): string {
+  const key = String(optionKey || "");
+  const label = String(displayLabel || "").trim();
+  if (/^qty-sink/.test(key) || /kitchen sink cutouts?/i.test(label)) return "Sink cutout";
+  if (/^qty-bar/.test(key) || /vanity\/?bar sink cutouts?/i.test(label)) return "Vanity / bar sink cutout";
+  if (/esf stainless kitchen sink/i.test(label)) return "ESF sink";
+  if (/^Option:\s*/i.test(label)) return label.replace(/^Option:\s*/i, "");
+  return label || "Item";
+}
+
 /**
  * Updated estimate from server calculation public DTO (options + custom lines + rooms).
  */
@@ -131,7 +141,7 @@ export function buildUpdatedBreakdown(args: {
       const amount = row.amount != null ? Number(row.amount) : null;
       lines.push({
         key: `upd-sum-${i}`,
-        label: row.label || "Item",
+        label: customerFriendlyOptionLabel(undefined, row.label),
         amount: Number.isFinite(amount as number) ? amount : null,
         roomName: row.roomName || null,
         category: "Summary",
@@ -155,11 +165,17 @@ export function buildUpdatedBreakdown(args: {
     for (const [i, opt] of (calc?.options || []).entries()) {
       if (opt.included) continue;
       const amount = opt.visiblePrice != null ? Number(opt.visiblePrice) : null;
+      const friendly = customerFriendlyOptionLabel(opt.optionKey, opt.displayLabel);
+      const category = /^qty-sink|^qty-bar/i.test(String(opt.optionKey || ""))
+        ? "Cutout"
+        : /^sink:|^faucet:|^accessory:|^specialty:/i.test(String(opt.optionKey || ""))
+          ? "Product"
+          : "Option";
       lines.push({
         key: `upd-opt-${opt.optionKey || i}`,
-        label: opt.displayLabel || "Option",
+        label: friendly,
         amount: Number.isFinite(amount as number) ? amount : null,
-        category: "Option",
+        category,
         amountLabel: moneyLabel(amount),
       });
     }

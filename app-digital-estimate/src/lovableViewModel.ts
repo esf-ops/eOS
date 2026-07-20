@@ -186,6 +186,25 @@ function addonOptions(options: ConfigOption[]): ConfigOption[] {
     for (const role of ROOM_CHOICE_ROLES) {
       if (key.startsWith(`${role}:`)) return false;
     }
+    // Derived from room sink/faucet selections — never customer-editable qty controls.
+    if (
+      key === "qty-sink" ||
+      key === "qty-bar" ||
+      key.startsWith("qty-sink:") ||
+      key.startsWith("qty-bar:")
+    ) {
+      return false;
+    }
+    const label = String(o.displayLabel || "").toLowerCase();
+    if (
+      /kitchen sink cutouts?|vanity\/?bar sink cutouts?|esf stainless kitchen sink/.test(label)
+    ) {
+      return false;
+    }
+    // Sink/faucet product lines owned by room selection must not appear as project qty.
+    if (/^esf[-_ ]?(sink|faucet)/i.test(key) || /sink product|faucet product/.test(label)) {
+      return false;
+    }
     return true;
   });
 }

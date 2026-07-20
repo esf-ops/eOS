@@ -143,6 +143,8 @@ export type ConfigProduct = {
   optionKey?: string | null;
   variants?: ConfigProductVariant[];
   pricingTreatment?: string | null;
+  visibleSellPrice?: number | null;
+  visibleDelta?: number | null;
 };
 
 export type ProductDraft = {
@@ -157,6 +159,8 @@ export type ProductDraft = {
   notes?: string;
   displayLabel?: string | null;
   availability?: string | null;
+  /** Customer-provided faucet hole count (optional; missing → structured requirement). */
+  holeCount?: string | number | null;
 };
 
 export type RoomProductDrafts = {
