@@ -554,6 +554,25 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     return null;
   }
 
+  /**
+   * True when Studio publish requested customer configuration (not document-only).
+   * Do not infer from existing saved selections.
+   */
+  function configurationIntendsCustomerConfigure(configuration) {
+    const cfg = configuration && typeof configuration === "object" ? configuration : {};
+    if (cfg.enableConfiguration === true || cfg.configurationMode === "configure") return true;
+    if (cfg.enableConfiguration === false || cfg.configurationMode === "document") return false;
+    const groups = Array.isArray(cfg.customerChoiceGroups) ? cfg.customerChoiceGroups : [];
+    const keys = Array.isArray(cfg.allowedOptionKeys) ? cfg.allowedOptionKeys : [];
+    const materialIds = Array.isArray(cfg.allowedMaterialIds) ? cfg.allowedMaterialIds : [];
+    const materialGroups = Array.isArray(cfg.allowedMaterialGroupCodes)
+      ? cfg.allowedMaterialGroupCodes
+      : Array.isArray(cfg.allowedMaterialGroups)
+        ? cfg.allowedMaterialGroups
+        : [];
+    return groups.length > 0 || keys.length > 0 || materialIds.length > 0 || materialGroups.length > 0;
+  }
+
   async function applyConfigurationEnvelope({
     organizationId,
     actorUserId,
@@ -570,7 +589,12 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       organizationId,
       actorUserId,
       publicationId,
-      {}
+      {
+        customerChoiceGroups: Array.isArray(cfg.customerChoiceGroups)
+          ? cfg.customerChoiceGroups
+          : undefined,
+        configuration: cfg
+      }
     );
     const envelopeId = draft?.envelope?.id || draft?.id;
     if (!envelopeId) {
@@ -752,9 +776,17 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           opt.optionKey,
           opt.compatibilityJson || {}
         );
+        // Never pass sellPrice into putOptions — rejectClientAuthoritativeEconomics
+        // treats it as caller authority; putOptions resolves price from catalog.
+        const {
+          sellPrice: _dropSellPrice,
+          sell_price: _dropSellPriceSnake,
+          price: _dropPrice,
+          rate: _dropRate,
+          ...safeOpt
+        } = opt;
         options.push({
-          ...opt,
-          sellPrice: priced.sellPrice ?? opt.sellPrice ?? 0,
+          ...safeOpt,
           availabilityState: priced.availabilityState || opt.availabilityState || "active"
         });
       }
@@ -869,6 +901,33 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         sourceQuoteFingerprint: freezeProbe.sourceQuoteFingerprint
       });
       if (existing) {
+        const intendsConfigure = configurationIntendsCustomerConfigure(configuration);
+        if (intendsConfigure && configurationStudioService) {
+          const envelopes = await configurationStudioService.listEnvelopes(
+            organizationId,
+            existing.id
+          );
+          const hasActive = (envelopes || []).some(
+            (e) => String(e.status || "") === "active"
+          );
+          if (!hasActive) {
+            const repaired = await applyConfigurationEnvelope({
+              organizationId,
+              actorUserId,
+              publicationId: existing.id,
+              configuration,
+              estimate
+            });
+            if (!repaired.configured) {
+              throw deError(
+                repaired.message ||
+                  "Configuration envelope is required for this customer link but could not be activated",
+                repaired.reason || "envelope_failed",
+                422
+              );
+            }
+          }
+        }
         const linkMeta = await linkMetaForPublication(organizationId, existing);
         return {
           ok: true,
@@ -878,6 +937,9 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           customerUrl: linkMeta.customerUrl,
           linkStatus: linkMeta.linkStatus,
           readiness: readiness.readiness,
+          envelope: intendsConfigure
+            ? { configured: true, repaired: true }
+            : { configured: false, reason: "document_only" },
           staffNotice:
             linkMeta.customerUrl
               ? "Publication already exists for this approved estimate revision and configuration. Customer URL is unchanged."
@@ -926,22 +988,49 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         throw mapStudioPublicationPersistenceError(e);
       }
 
-      let envelope = { configured: false };
-      try {
-        envelope = await applyConfigurationEnvelope({
-          organizationId,
-          actorUserId,
-          publicationId: result.publication.id,
-          configuration,
-          estimate
-        });
-      } catch (e) {
-        // Publication is immutable once created; surface envelope failure without rolling back.
-        envelope = {
-          configured: false,
-          reason: e?.code || "envelope_failed",
-          message: e?.message || "Configuration envelope failed"
-        };
+      const intendsConfigure = configurationIntendsCustomerConfigure(configuration);
+      let envelope = { configured: false, reason: "document_only" };
+      if (intendsConfigure) {
+        try {
+          envelope = await applyConfigurationEnvelope({
+            organizationId,
+            actorUserId,
+            publicationId: result.publication.id,
+            configuration,
+            estimate
+          });
+        } catch (e) {
+          envelope = {
+            configured: false,
+            reason: e?.code || "envelope_failed",
+            message: e?.message || "Configuration envelope failed"
+          };
+        }
+        if (!envelope.configured) {
+          // Configuration-enabled publish must not leave customers on a static-only link.
+          try {
+            await revokeDigitalEstimatePublication({
+              env,
+              organizationId,
+              actorUserId,
+              repository: deRepository,
+              publicationId: result.publication.id,
+              body: {
+                confirm: true,
+                reason:
+                  "Configuration envelope activation failed — publication revoked to avoid static-only customer links"
+              }
+            });
+          } catch {
+            /* best-effort revoke */
+          }
+          throw deError(
+            envelope.message ||
+              "Customer configuration envelope could not be activated for this publication",
+            envelope.reason || "envelope_failed",
+            422
+          );
+        }
       }
 
       return {

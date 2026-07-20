@@ -1713,3 +1713,14 @@
 | **Ops** | Deploy Brain + digital-estimate + Estimate Studio. Rebuild plumbing seed via `node scripts/build-digital-estimate-plumbing-catalog.mjs` when the workbook changes. Workbook source: `_local/catalog-source/esf-plumbing-specialty-program-2026-07-10.xlsx`. |
 | **Out of scope** | Sold-job task automation; vendor image scraping; inventing prices for Glowback/InvisaCook; golden-math audit of all commercial rules; Quote Library dashboard redesign. |
 
+### 122. Digital Estimate configure-enabled publish must open ConfigurationView (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Studio publications that request customer configuration (`customerChoiceGroups` / `allowedOptionKeys` / material allow-lists) **must** activate a configuration envelope before the customer URL is considered successful. `putOptions` strips caller-supplied `sellPrice` and resolves prices server-side — seeded catalog options must never fail activation with `forbidden_caller_authority`. If envelope activation fails, the publication is revoked and publish returns an error (no static-only customer link for configure-enabled publishes). **Replace Link** rotates only the access token and preserves the active envelope. Empty `configuration: {}` remains document-only (static read-only). Frontend continues to select ConfigurationView only when exchange returns `lifecycle=active` **and** a configuration object — never by inferring from saved selections. |
+| **Why** | After the full-catalog options phase, Studio seeded room product options with `sellPrice` into `putOptions`, which rejected them as caller authority. Publish still returned `/e/<token>`; exchange found no active envelope (`lifecycle=blocked`); the app fell back to the legacy static document. Replace Link rotated the token on the same envelope-less publication, so the new URL stayed static. |
+| **SQL** | None. |
+| **Ops** | Deploy Brain (+ Estimate Studio if UI notices change). Republish or Replace Link on affected estimates after deploy so the envelope activates. Confirm customer `/e/<token>` opens ConfigurationView with room options. |
+| **Out of scope** | Changing SYNTHETIC_PILOT_ONLY; document-mode redesign; sold-job. |
+
