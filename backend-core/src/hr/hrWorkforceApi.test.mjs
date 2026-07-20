@@ -42,8 +42,12 @@ attachHrWorkforceRoutes(app, {
 });
 
 assert.ok(routes.has("GET /api/hr/workforce/dashboard"));
+assert.ok(routes.has("GET /api/hr/workforce/access"));
 assert.ok(routes.has("GET /api/hr/workforce/sections"));
 assert.ok(routes.has("GET /api/hr/workforce/mistakes/log"));
+assert.ok(routes.has("GET /api/hr/workforce/departments/assignments"));
+assert.ok(routes.has("POST /api/hr/workforce/departments/assignments"));
+assert.ok(routes.has("DELETE /api/hr/workforce/departments/assignments/:id"));
 assert.ok(routes.has("POST /api/hr/workforce/mistakes"));
 assert.ok(routes.has("PATCH /api/hr/workforce/mistakes/:id"));
 assert.ok(routes.has("DELETE /api/hr/workforce/mistakes/:id"));

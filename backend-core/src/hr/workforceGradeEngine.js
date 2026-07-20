@@ -4,7 +4,16 @@
  */
 
 export const DEFAULT_TIMEZONE = "America/Chicago";
-export const DEFAULT_WEEK_START_DAY = 1; // Monday
+
+/**
+ * Scorecard operational week: Thursday through Wednesday.
+ * week_start = Thursday, week_end = Wednesday (+6 days).
+ * (Examples: July 9–15, July 16–22, July 30–August 5.)
+ */
+export const SCORECARD_WEEK_START_DAY = 4; // Thursday (0=Sun … 6=Sat)
+
+/** Alias used by scorecard helpers — always Thursday start. */
+export const DEFAULT_WEEK_START_DAY = SCORECARD_WEEK_START_DAY;
 
 export const DEFAULT_GRADE_THRESHOLDS = Object.freeze([
   { grade: "A", maxMistakes: 1 },
@@ -335,6 +344,7 @@ export function buildCategoryBreakdown(mistakes) {
 }
 
 /**
+ * Readable week label, e.g. "July 9–15", "July 30–August 5", "December 31–January 6, 2027".
  * @param {string} weekStart
  * @param {string} weekEnd
  */
@@ -344,10 +354,38 @@ export function formatWeekLabel(weekStart, weekEnd) {
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return `${weekStart} – ${weekEnd}`;
   }
-  const opts = { month: "short", day: "numeric" };
-  const a = start.toLocaleDateString(undefined, opts);
-  const b = end.toLocaleDateString(undefined, { ...opts, year: "numeric" });
-  return `${a} – ${b}`;
+
+  const startMonth = start.toLocaleDateString("en-US", { month: "long" });
+  const endMonth = end.toLocaleDateString("en-US", { month: "long" });
+  const startDay = start.getDate();
+  const endDay = end.getDate();
+  const startYear = start.getFullYear();
+  const endYear = end.getFullYear();
+
+  if (startYear !== endYear) {
+    return `${startMonth} ${startDay}, ${startYear}–${endMonth} ${endDay}, ${endYear}`;
+  }
+  if (startMonth !== endMonth) {
+    return `${startMonth} ${startDay}–${endMonth} ${endDay}`;
+  }
+  return `${startMonth} ${startDay}–${endDay}`;
+}
+
+/**
+ * Selector label with Current/Last week prefix when applicable.
+ * @param {string} weekStart
+ * @param {string} weekEnd
+ * @param {{ currentWeekStart?: string|null, lastWeekStart?: string|null }} [ctx]
+ */
+export function formatWeekOptionLabel(weekStart, weekEnd, ctx = {}) {
+  const base = formatWeekLabel(weekStart, weekEnd);
+  if (ctx.currentWeekStart && weekStart === ctx.currentWeekStart) {
+    return `Current week · ${base}`;
+  }
+  if (ctx.lastWeekStart && weekStart === ctx.lastWeekStart) {
+    return `Last week · ${base}`;
+  }
+  return base;
 }
 
 /**
@@ -398,17 +436,17 @@ export function shortSectionName(name) {
 }
 
 /**
- * @param {string} name
+ * Compact card trend text (section name already shown in the card heading).
+ * @param {string} [_name]
  * @param {string|null} current
  * @param {string|null} prior
  * @param {string} [trend]
  */
-export function formatGradeTrendDisplay(name, current, prior, trend = "neutral") {
-  const short = shortSectionName(name);
-  if (!current) return `${short}: —`;
-  if (!prior) return `${short}: ${current}`;
+export function formatGradeTrendDisplay(_name, current, prior, trend = "neutral") {
+  if (!current) return "—";
+  if (!prior) return "No prior week";
   const arrow = trend === "up" ? "↑" : trend === "down" ? "↓" : "→";
-  return `${short}: ${current} ${arrow} last week ${prior}`;
+  return `${current} ${arrow} last week ${prior}`;
 }
 
 /**

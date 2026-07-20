@@ -8,17 +8,23 @@ import {
   computeProductionWeeklyGrade,
   computeSectionCountGrade,
   computeZeroGoalCountGrade,
+  formatGradeTrendDisplay,
   formatScorecardReportLine,
   formatSectionActualDisplay,
   formatWeekLabel,
+  formatWeekOptionLabel,
   gradeTrend,
   isManagerRole,
   isWorkforceManager,
   MANAGER_ROLES,
+  SCORECARD_WEEK_START_DAY,
+  shiftWeekStart,
   sumWeightedMistakes,
   weekEndForWeekStart,
   weekStartForIsoDate
 } from "./workforceGradeEngine.js";
+
+assert.equal(SCORECARD_WEEK_START_DAY, 4, "scorecard weeks start on Thursday");
 
 assert.equal(computeLetterGrade(0), "A");
 assert.equal(computeLetterGrade(1), "A");
@@ -53,6 +59,40 @@ assert.equal(computeSectionCountGrade(1), "B");
 assert.equal(computeSectionCountGrade(3), "D");
 assert.equal(computeSectionCountGrade(4), "F");
 
+// Thursday–Wednesday week boundaries
+assert.equal(weekStartForIsoDate("2026-07-09"), "2026-07-09"); // Thursday
+assert.equal(weekStartForIsoDate("2026-07-10"), "2026-07-09"); // Friday → prior Thursday
+assert.equal(weekStartForIsoDate("2026-07-15"), "2026-07-09"); // Wednesday → week start Thu
+assert.equal(weekStartForIsoDate("2026-07-16"), "2026-07-16"); // next Thursday
+assert.equal(weekEndForWeekStart("2026-07-09"), "2026-07-15");
+assert.equal(shiftWeekStart("2026-07-16", -1), "2026-07-09");
+
+// Month / year boundary labels
+assert.equal(formatWeekLabel("2026-07-09", "2026-07-15"), "July 9–15");
+assert.equal(formatWeekLabel("2026-07-30", "2026-08-05"), "July 30–August 5");
+assert.equal(formatWeekLabel("2026-12-31", "2027-01-06"), "December 31, 2026–January 6, 2027");
+
+assert.equal(
+  formatWeekOptionLabel("2026-07-16", "2026-07-22", {
+    currentWeekStart: "2026-07-16",
+    lastWeekStart: "2026-07-09"
+  }),
+  "Current week · July 16–22"
+);
+assert.equal(
+  formatWeekOptionLabel("2026-07-09", "2026-07-15", {
+    currentWeekStart: "2026-07-16",
+    lastWeekStart: "2026-07-09"
+  }),
+  "Last week · July 9–15"
+);
+
+assert.equal(formatGradeTrendDisplay("Plumbing accessories non billable service calls", "A", "B", "up"), "A ↑ last week B");
+assert.equal(formatGradeTrendDisplay("Office", "F", "C", "down"), "F ↓ last week C");
+assert.equal(formatGradeTrendDisplay("Office", "A", "A", "flat"), "A → last week A");
+assert.equal(formatGradeTrendDisplay("Office", "A", null, "neutral"), "No prior week");
+assert.equal(formatGradeTrendDisplay("Long name that would truncate", "A", "B", "up").includes("…"), false);
+
 const productionSection = {
   metricKind: "production",
   goalNumeric: 9250,
@@ -73,9 +113,6 @@ assert.equal(
 
 assert.equal(computeOverallCompanyGrade([{ letterGrade: "A" }, { letterGrade: "F" }]), "C");
 
-assert.equal(weekStartForIsoDate("2026-07-01"), "2026-06-29");
-assert.equal(weekEndForWeekStart("2026-06-29"), "2026-07-05");
-
 const weighted = sumWeightedMistakes([{ severity: "minor" }, { severity: "major" }]);
 assert.equal(weighted, 4);
 
@@ -83,10 +120,10 @@ const breakdown = buildCategoryBreakdown([{ category_label: "Takeoff" }, { categ
 assert.deepEqual(breakdown, { Takeoff: 1, Other: 1 });
 
 assert.equal(gradeTrend("A", "B"), "up");
-assert.ok(formatWeekLabel("2026-06-30", "2026-07-06").includes("Jun"));
 
 assert.ok(MANAGER_ROLES instanceof Set);
 assert.equal(isManagerRole("admin"), true);
 assert.equal(isWorkforceManager({ role: "viewer" }), false);
+assert.equal(isWorkforceManager({ role: "executive" }), true);
 
 console.log("workforceGradeEngine.test.mjs: ok");

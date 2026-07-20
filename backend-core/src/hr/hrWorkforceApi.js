@@ -21,12 +21,22 @@ import {
   gradeTrend,
   isWorkforceManager,
   listRecentWeekStarts,
+  SCORECARD_WEEK_START_DAY,
+  shiftWeekStart,
   sumWeightedMistakes,
   todayIsoInTimezone,
   weekEndForWeekStart,
   weekStartForIsoDate
 } from "./workforceGradeEngine.js";
 import { ensureDefaultGradingSections, mapSectionRow } from "./workforceGradingSections.js";
+import {
+  DEPARTMENT_GROUPS,
+  departmentSlugForSection,
+  getDepartmentGroup,
+  isValidDepartmentSlug,
+  listAssignedDepartmentGroups,
+  sectionIdsForDepartments
+} from "./workforceDepartments.js";
 import {
   buildMetricValueFromBody,
   buildQuickCountLogEntry,
@@ -129,7 +139,8 @@ async function loadGradeSettings(db, organizationId) {
     if (!data) return defaults;
     return {
       timezone: pickStr(data.timezone) || DEFAULT_TIMEZONE,
-      week_start_day: Number(data.week_start_day ?? DEFAULT_WEEK_START_DAY),
+      // Scorecard weeks are always Thursday–Wednesday regardless of legacy settings.
+      week_start_day: SCORECARD_WEEK_START_DAY,
       grade_thresholds: Array.isArray(data.grade_thresholds) ? data.grade_thresholds : DEFAULT_GRADE_THRESHOLDS,
       severity_weights:
         data.severity_weights && typeof data.severity_weights === "object"
@@ -140,6 +151,150 @@ async function loadGradeSettings(db, organizationId) {
     if (isMissingTableError(e)) return defaults;
     throw e;
   }
+}
+
+/**
+ * Full scorecard access for CEO/executives/admins/HR managers.
+ * @param {{ role?: string|null }|null|undefined} user
+ */
+function hasFullScorecardAccess(user) {
+  return isWorkforceManager(user);
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} organizationId
+ * @param {string} userId
+ */
+async function loadUserDepartmentAssignments(db, organizationId, userId) {
+  try {
+    const { data, error } = await db
+      .from("workforce_department_user_access")
+      .select("id, user_id, department_slug, is_active, created_at, created_by_user_id")
+      .eq("organization_id", organizationId)
+      .eq("user_id", userId)
+      .eq("is_active", true);
+    if (error) {
+      if (isMissingTableError(error)) return [];
+      throw error;
+    }
+    return (data ?? []).map((row) => ({
+      id: String(row.id),
+      userId: String(row.user_id),
+      slug: String(row.department_slug),
+      departmentSlug: String(row.department_slug),
+      isActive: Boolean(row.is_active),
+      createdAt: row.created_at ?? null,
+      createdByUserId: row.created_by_user_id ? String(row.created_by_user_id) : null
+    }));
+  } catch (e) {
+    if (isMissingTableError(e)) return [];
+    throw e;
+  }
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} organizationId
+ */
+async function loadAllDepartmentAssignments(db, organizationId) {
+  try {
+    const { data, error } = await db
+      .from("workforce_department_user_access")
+      .select("id, user_id, department_slug, is_active, created_at, created_by_user_id")
+      .eq("organization_id", organizationId)
+      .eq("is_active", true)
+      .order("department_slug", { ascending: true });
+    if (error) {
+      if (isMissingTableError(error)) return [];
+      throw error;
+    }
+    return data ?? [];
+  } catch (e) {
+    if (isMissingTableError(e)) return [];
+    throw e;
+  }
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {object} user
+ * @param {string} organizationId
+ */
+async function resolveScorecardAccess(db, user, organizationId) {
+  const fullAccess = hasFullScorecardAccess(user);
+  if (fullAccess) {
+    return {
+      fullAccess: true,
+      canManageDepartments: true,
+      canGenerateReport: true,
+      departmentSlugs: DEPARTMENT_GROUPS.map((g) => g.slug),
+      departments: DEPARTMENT_GROUPS.map((g) => ({ slug: g.slug, name: g.name, sectionIds: [...g.sectionIds] })),
+      allowedSectionIds: null
+    };
+  }
+
+  const assignments = await loadUserDepartmentAssignments(db, organizationId, String(user.id));
+  const departments = listAssignedDepartmentGroups(assignments).map((g) => ({
+    slug: g.slug,
+    name: g.name,
+    sectionIds: [...g.sectionIds]
+  }));
+  const departmentSlugs = departments.map((d) => d.slug);
+  const allowedSectionIds = sectionIdsForDepartments(departmentSlugs);
+
+  return {
+    fullAccess: false,
+    canManageDepartments: false,
+    canGenerateReport: false,
+    departmentSlugs,
+    departments,
+    allowedSectionIds
+  };
+}
+
+/**
+ * @param {object} access
+ * @param {string} sectionId
+ */
+function canAccessSection(access, sectionId) {
+  if (!access) return false;
+  if (access.fullAccess) return true;
+  if (!(access.allowedSectionIds instanceof Set)) return false;
+  return access.allowedSectionIds.has(String(sectionId));
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} organizationId
+ * @param {Iterable<string>} userIds
+ */
+async function loadUserDisplayNames(db, organizationId, userIds) {
+  const ids = [...new Set([...userIds].map((id) => String(id)).filter(Boolean))];
+  /** @type {Map<string, { id: string, fullName: string|null, email: string|null }>} */
+  const map = new Map();
+  if (!ids.length) return map;
+  try {
+    const { data, error } = await db
+      .from("user_profiles")
+      .select("id, full_name, email")
+      .eq("organization_id", organizationId)
+      .in("id", ids);
+    if (error) {
+      if (isMissingTableError(error)) return map;
+      throw error;
+    }
+    for (const row of data ?? []) {
+      map.set(String(row.id), {
+        id: String(row.id),
+        fullName: row.full_name ?? null,
+        email: row.email ?? null
+      });
+    }
+  } catch (e) {
+    if (!isMissingTableError(e)) throw e;
+  }
+  return map;
 }
 
 /**
@@ -276,17 +431,29 @@ async function loadExistingWeekValue(db, organizationId, sectionId, weekStart) {
  * @param {string} weekStart
  * @param {object} settings
  * @param {number} [weekCount]
+ * @param {Set<string>|null} [allowedSectionIds]
  */
-async function loadMistakesLogWeeks(db, organizationId, weekStart, settings, weekCount = 8) {
-  const sections = await loadGradingSections(db, organizationId);
+async function loadMistakesLogWeeks(
+  db,
+  organizationId,
+  weekStart,
+  settings,
+  weekCount = 8,
+  allowedSectionIds = null
+) {
+  let sections = await loadGradingSections(db, organizationId);
+  if (allowedSectionIds instanceof Set) {
+    sections = sections.filter((s) => allowedSectionIds.has(s.sectionId));
+  }
   const sectionById = new Map(sections.map((s) => [s.sectionId, s]));
-  const weekStarts = listRecentWeekStarts(weekStart, settings.timezone, settings.week_start_day, weekCount);
+  const weekStarts = listRecentWeekStarts(weekStart, settings.timezone, SCORECARD_WEEK_START_DAY, weekCount);
 
   const fullSelect =
-    "id, section_id, severity, category_label, occurred_at, description, job_customer, person_involved, week_start";
-  const basicSelect = "id, section_id, severity, category_label, occurred_at, description, week_start";
+    "id, section_id, severity, category_label, occurred_at, description, job_customer, person_involved, week_start, logged_by_user_id, updated_at, updated_by_user_id";
+  const basicSelect =
+    "id, section_id, severity, category_label, occurred_at, description, week_start, logged_by_user_id";
 
-  let mistakeRes = await db
+  let q = db
     .from("workforce_mistakes")
     .select(fullSelect)
     .eq("organization_id", organizationId)
@@ -294,36 +461,77 @@ async function loadMistakesLogWeeks(db, organizationId, weekStart, settings, wee
     .not("section_id", "is", null)
     .order("occurred_at", { ascending: false });
 
+  if (allowedSectionIds instanceof Set) {
+    q = q.in("section_id", [...allowedSectionIds]);
+  }
+
+  let mistakeRes = await q;
+
   if (mistakeRes.error) {
     const msg = String(mistakeRes.error.message ?? "").toLowerCase();
-    if (msg.includes("job_customer") || msg.includes("person_involved")) {
-      mistakeRes = await db
+    if (
+      msg.includes("job_customer") ||
+      msg.includes("person_involved") ||
+      msg.includes("updated_by_user_id") ||
+      msg.includes("updated_at")
+    ) {
+      let basicQ = db
         .from("workforce_mistakes")
         .select(basicSelect)
         .eq("organization_id", organizationId)
         .in("week_start", weekStarts)
         .not("section_id", "is", null)
         .order("occurred_at", { ascending: false });
+      if (allowedSectionIds instanceof Set) {
+        basicQ = basicQ.in("section_id", [...allowedSectionIds]);
+      }
+      mistakeRes = await basicQ;
     }
   }
 
   if (mistakeRes.error && !isMissingTableError(mistakeRes.error)) throw mistakeRes.error;
-  const mistakeData = mistakeRes.error ? [] : mistakeRes.data ?? [];
+  let mistakeData = mistakeRes.error ? [] : mistakeRes.data ?? [];
+  if (allowedSectionIds instanceof Set) {
+    mistakeData = mistakeData.filter((m) => allowedSectionIds.has(String(m.section_id)));
+  }
+
+  const nameIds = [];
+  for (const m of mistakeData) {
+    if (m.logged_by_user_id) nameIds.push(String(m.logged_by_user_id));
+    if (m.updated_by_user_id) nameIds.push(String(m.updated_by_user_id));
+  }
+  const names = await loadUserDisplayNames(db, organizationId, nameIds);
 
   /** @type {Map<string, object>} */
   const weekValuesByKey = new Map();
   for (const ws of weekStarts) {
     const values = await loadSectionWeekValues(db, organizationId, ws);
     for (const [sectionId, value] of values) {
+      if (allowedSectionIds instanceof Set && !allowedSectionIds.has(sectionId)) continue;
       weekValuesByKey.set(`${sectionId}::${ws}`, value);
     }
   }
+
+  const currentWeekStart = weekStartForIsoDate(
+    todayIsoInTimezone(new Date(), settings.timezone),
+    SCORECARD_WEEK_START_DAY
+  );
+  const lastWeekStart = shiftWeekStart(currentWeekStart, -1, SCORECARD_WEEK_START_DAY);
+  const labelCtx = { currentWeekStart, lastWeekStart };
 
   const weeks = weekStarts.map((ws) => {
     const weekMistakes = mistakeData.filter((m) => m.week_start === ws);
     const mapped = weekMistakes.map((m) => {
       const section = sectionById.get(String(m.section_id));
-      return mapIncidentRow({ ...m, section_name: section?.name ?? null });
+      const logged = m.logged_by_user_id ? names.get(String(m.logged_by_user_id)) : null;
+      const updated = m.updated_by_user_id ? names.get(String(m.updated_by_user_id)) : null;
+      return mapIncidentRow({
+        ...m,
+        section_name: section?.name ?? null,
+        department_slug: departmentSlugForSection(String(m.section_id)),
+        logged_by_name: logged?.fullName || logged?.email || null,
+        updated_by_name: updated?.fullName || updated?.email || null
+      });
     });
 
     for (const section of sections) {
@@ -331,12 +539,15 @@ async function loadMistakesLogWeeks(db, organizationId, weekStart, settings, wee
       const weekValue = weekValuesByKey.get(`${section.sectionId}::${ws}`) ?? {};
       const quickCount = readQuickCount(weekValue);
       if (quickCount != null && quickCount > 0) {
-        mapped.unshift(buildQuickCountLogEntry(section, quickCount, ws));
+        mapped.unshift({
+          ...buildQuickCountLogEntry(section, quickCount, ws),
+          departmentSlug: departmentSlugForSection(section.sectionId)
+        });
       }
     }
 
     return {
-      ...scorecardWeekMeta(ws),
+      ...scorecardWeekMeta(ws, labelCtx),
       mistakes: mapped
     };
   });
@@ -625,14 +836,23 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         return res.status(400).json({ ok: false, error: "Organization context required." });
       }
 
+      const access = await resolveScorecardAccess(db(), user, organizationId);
       const canManageCategories = isWorkforceManager(user);
       const settings = await loadGradeSettings(db(), organizationId);
       const sectionSeed = await ensureDefaultGradingSections(db(), organizationId, isMissingTableError);
       await closePastSectionSnapshots(db(), organizationId, settings);
 
       const weekStart = resolveRequestedWeekStart(req, settings);
-      const { weekEnd, weekLabel } = scorecardWeekMeta(weekStart);
       const weekOptions = await buildScorecardWeekOptions(db(), organizationId, settings, isMissingTableError);
+      const currentWeekStart = weekStartForIsoDate(
+        todayIsoInTimezone(new Date(), settings.timezone),
+        SCORECARD_WEEK_START_DAY
+      );
+      const lastWeekStart = shiftWeekStart(currentWeekStart, -1, SCORECARD_WEEK_START_DAY);
+      const { weekEnd, weekLabel } = scorecardWeekMeta(weekStart, {
+        currentWeekStart,
+        lastWeekStart
+      });
 
       let payload;
       try {
@@ -642,7 +862,12 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
           return res.json({
             ok: true,
             canManageCategories,
+            canManageDepartments: access.canManageDepartments,
+            fullAccess: access.fullAccess,
+            canGenerateReport: access.canGenerateReport,
+            departments: access.departments,
             gradingMode: "scorecard",
+            viewMode: access.fullAccess ? "executive" : "department",
             weekStart,
             weekEnd,
             weekLabel,
@@ -656,41 +881,242 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         throw e;
       }
 
-      if (!payload.sections.length) {
-        return res.json({
-          ok: true,
-          canManageCategories,
-          gradingMode: "scorecard",
-          weekStart,
-          weekEnd,
-          weekLabel,
-          weekOptions,
-          rows: [],
-          overallGrade: null,
-          schemaReady: sectionSeed.schemaReady,
-          warning: sectionSeed.schemaReady
-            ? null
-            : "Apply eliteos_workforce_quality_sections_v1.sql to enable section grading."
-        });
+      let rows = payload.rows ?? [];
+      if (!access.fullAccess) {
+        if (!(access.allowedSectionIds instanceof Set) || access.allowedSectionIds.size === 0) {
+          return res.json({
+            ok: true,
+            canManageCategories,
+            canManageDepartments: false,
+            fullAccess: false,
+            canGenerateReport: false,
+            departments: [],
+            gradingMode: "scorecard",
+            viewMode: "department",
+            weekStart,
+            weekEnd,
+            weekLabel,
+            weekOptions,
+            rows: [],
+            overallGrade: null,
+            executiveSummary: null,
+            narrative: null,
+            schemaReady: sectionSeed.schemaReady,
+            warning:
+              "No department groups are assigned to your account. Ask an HR manager or admin to grant Department Access."
+          });
+        }
+        rows = rows.filter((row) => access.allowedSectionIds.has(row.sectionId));
       }
 
       res.json({
         ok: true,
         canManageCategories,
+        canManageDepartments: access.canManageDepartments,
+        fullAccess: access.fullAccess,
+        canGenerateReport: access.canGenerateReport,
+        departments: access.departments,
         gradingMode: "scorecard",
+        viewMode: access.fullAccess ? "executive" : "department",
         schemaReady: sectionSeed.schemaReady,
         weekStart,
         weekEnd,
         weekLabel,
         weekOptions,
-        overallGrade: payload.overallGrade,
-        executiveSummary: payload.executiveSummary,
-        narrative: payload.narrative,
-        rows: payload.rows,
-        mistakes: (payload.mistakes ?? []).map(mapIncidentRow)
+        overallGrade: access.fullAccess ? payload.overallGrade : null,
+        executiveSummary: access.fullAccess ? payload.executiveSummary : null,
+        narrative: access.fullAccess ? payload.narrative : null,
+        rows,
+        mistakes: access.fullAccess
+          ? (payload.mistakes ?? []).map((m) =>
+              mapIncidentRow({
+                ...m,
+                department_slug: departmentSlugForSection(String(m.section_id))
+              })
+            )
+          : []
       });
     } catch (e) {
       respondServerError(res, e, HR_CLIENT_ERRORS.load);
+    }
+  });
+
+  app.get("/api/hr/workforce/access", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+      const access = await resolveScorecardAccess(db(), req.user, organizationId);
+      res.json({
+        ok: true,
+        fullAccess: access.fullAccess,
+        canManageDepartments: access.canManageDepartments,
+        canGenerateReport: access.canGenerateReport,
+        departments: access.departments,
+        departmentGroups: DEPARTMENT_GROUPS.map((g) => ({
+          slug: g.slug,
+          name: g.name,
+          sectionIds: [...g.sectionIds]
+        }))
+      });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
+    }
+  });
+
+  app.get("/api/hr/workforce/departments/assignments", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+      if (!hasFullScorecardAccess(req.user)) {
+        return res.status(403).json({ ok: false, error: "Only managers may manage department access." });
+      }
+
+      const rows = await loadAllDepartmentAssignments(db(), organizationId);
+      const userIds = rows.map((r) => String(r.user_id));
+      const names = await loadUserDisplayNames(db(), organizationId, userIds);
+      const assignments = rows.map((row) => {
+        const profile = names.get(String(row.user_id));
+        const group = getDepartmentGroup(row.department_slug);
+        return {
+          id: String(row.id),
+          userId: String(row.user_id),
+          userName: profile?.fullName || profile?.email || String(row.user_id),
+          userEmail: profile?.email ?? null,
+          departmentSlug: String(row.department_slug),
+          departmentName: group?.name ?? String(row.department_slug),
+          isActive: Boolean(row.is_active),
+          createdAt: row.created_at ?? null
+        };
+      });
+
+      res.json({
+        ok: true,
+        assignments,
+        departmentGroups: DEPARTMENT_GROUPS.map((g) => ({
+          slug: g.slug,
+          name: g.name,
+          sectionIds: [...g.sectionIds]
+        })),
+        schemaReady: true
+      });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
+    }
+  });
+
+  app.post("/api/hr/workforce/departments/assignments", ...guard, jsonParser, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const user = req.user;
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+      if (!hasFullScorecardAccess(user)) {
+        return res.status(403).json({ ok: false, error: "Only managers may manage department access." });
+      }
+
+      const targetUserId = pickStr(req.body?.user_id ?? req.body?.userId);
+      const departmentSlug = pickStr(req.body?.department_slug ?? req.body?.departmentSlug);
+      if (!targetUserId) return res.status(400).json({ ok: false, error: "user_id is required." });
+      if (!isValidDepartmentSlug(departmentSlug)) {
+        return res.status(400).json({ ok: false, error: "Invalid department_slug." });
+      }
+
+      const row = {
+        organization_id: organizationId,
+        user_id: targetUserId,
+        department_slug: departmentSlug,
+        is_active: true,
+        created_by_user_id: String(user.id)
+      };
+
+      const { data, error } = await db()
+        .from("workforce_department_user_access")
+        .upsert(row, { onConflict: "organization_id,user_id,department_slug" })
+        .select("*")
+        .single();
+      if (error) {
+        if (isMissingTableError(error)) {
+          return res.status(503).json({
+            ok: false,
+            error: "Apply eliteos_workforce_department_access_v1.sql to enable department assignments."
+          });
+        }
+        throw error;
+      }
+
+      await logAction({
+        user,
+        head: HR_HEAD_SLUG,
+        actionType: "workforce_department_access_granted",
+        entityType: "workforce_department_user_access",
+        entityId: data?.id,
+        entityLabel: departmentSlug,
+        metadata: { user_id: targetUserId, department_slug: departmentSlug },
+        req
+      });
+
+      res.status(201).json({ ok: true, assignment: data });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.save);
+    }
+  });
+
+  app.delete("/api/hr/workforce/departments/assignments/:id", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const user = req.user;
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+      if (!hasFullScorecardAccess(user)) {
+        return res.status(403).json({ ok: false, error: "Only managers may manage department access." });
+      }
+
+      const assignmentId = pickStr(req.params?.id);
+      if (!assignmentId) return res.status(400).json({ ok: false, error: "Assignment id required." });
+
+      const { data: existing, error: loadErr } = await db()
+        .from("workforce_department_user_access")
+        .select("id, user_id, department_slug")
+        .eq("organization_id", organizationId)
+        .eq("id", assignmentId)
+        .maybeSingle();
+      if (loadErr) {
+        if (isMissingTableError(loadErr)) {
+          return res.status(503).json({
+            ok: false,
+            error: "Apply eliteos_workforce_department_access_v1.sql to enable department assignments."
+          });
+        }
+        throw loadErr;
+      }
+      if (!existing) return res.status(404).json({ ok: false, error: "Assignment not found." });
+
+      const { error } = await db()
+        .from("workforce_department_user_access")
+        .update({ is_active: false })
+        .eq("organization_id", organizationId)
+        .eq("id", assignmentId);
+      if (error) throw error;
+
+      await logAction({
+        user,
+        head: HR_HEAD_SLUG,
+        actionType: "workforce_department_access_revoked",
+        entityType: "workforce_department_user_access",
+        entityId: assignmentId,
+        entityLabel: existing.department_slug,
+        metadata: {
+          user_id: existing.user_id,
+          department_slug: existing.department_slug
+        },
+        req
+      });
+
+      res.json({ ok: true, deleted: true, id: assignmentId });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.save);
     }
   });
 
@@ -700,8 +1126,13 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
 
+      const access = await resolveScorecardAccess(db(), req.user, organizationId);
       const sectionId = pickStr(req.query?.section_id ?? req.query?.sectionId);
       const weekStartParam = pickStr(req.query?.week_start ?? req.query?.weekStart);
+
+      if (sectionId && !canAccessSection(access, sectionId)) {
+        return res.status(403).json({ ok: false, error: "You do not have access to this section." });
+      }
 
       const settings = await loadGradeSettings(db(), organizationId);
       const tz = settings.timezone;
@@ -720,6 +1151,11 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       if (sectionId) {
         q = q.eq("section_id", sectionId);
+      } else if (!access.fullAccess && access.allowedSectionIds instanceof Set) {
+        if (!access.allowedSectionIds.size) {
+          return res.json({ ok: true, weekStart, mistakes: [], schemaReady: true });
+        }
+        q = q.in("section_id", [...access.allowedSectionIds]);
       } else {
         q = q.not("section_id", "is", null);
       }
@@ -758,6 +1194,12 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       if (!sectionId) {
         return res.status(400).json({ ok: false, error: "section_id is required." });
       }
+
+      const access = await resolveScorecardAccess(db(), user, organizationId);
+      if (!canAccessSection(access, sectionId)) {
+        return res.status(403).json({ ok: false, error: "You do not have access to this section." });
+      }
+
       if (!["minor", "moderate", "major"].includes(severity)) {
         return res.status(400).json({ ok: false, error: "severity must be minor, moderate, or major." });
       }
@@ -863,16 +1305,30 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
 
+      const access = await resolveScorecardAccess(db(), req.user, organizationId);
       const settings = await loadGradeSettings(db(), organizationId);
       const weekStart = resolveRequestedWeekStart(req, settings);
       const weekCount = Math.min(12, Math.max(1, Number(req.query?.weeks) || 8));
+      const allowedSectionIds = access.fullAccess ? null : access.allowedSectionIds;
+
+      if (!access.fullAccess && (!(allowedSectionIds instanceof Set) || allowedSectionIds.size === 0)) {
+        return res.json({ ok: true, selectedWeekStart: weekStart, weeks: [], schemaReady: true });
+      }
 
       try {
-        const { weeks } = await loadMistakesLogWeeks(db(), organizationId, weekStart, settings, weekCount);
+        const { weeks } = await loadMistakesLogWeeks(
+          db(),
+          organizationId,
+          weekStart,
+          settings,
+          weekCount,
+          allowedSectionIds
+        );
         res.json({
           ok: true,
           selectedWeekStart: weekStart,
           weeks,
+          fullAccess: access.fullAccess,
           schemaReady: true
         });
       } catch (e) {
@@ -910,16 +1366,27 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       }
       if (!existing) return res.status(404).json({ ok: false, error: "Mistake not found." });
 
+      const access = await resolveScorecardAccess(db(), user, organizationId);
+      if (!canAccessSection(access, existing.section_id)) {
+        return res.status(403).json({ ok: false, error: "You do not have access to this section." });
+      }
+
       const body = req.body ?? {};
       const settings = await loadGradeSettings(db(), organizationId);
       const tz = settings.timezone;
 
       /** @type {Record<string, unknown>} */
-      const patch = { updated_at: new Date().toISOString() };
+      const patch = {
+        updated_at: new Date().toISOString(),
+        updated_by_user_id: String(user.id)
+      };
 
       if (body.section_id != null || body.sectionId != null) {
         const sectionId = pickStr(body.section_id ?? body.sectionId);
         if (!sectionId) return res.status(400).json({ ok: false, error: "Invalid section_id." });
+        if (!canAccessSection(access, sectionId)) {
+          return res.status(403).json({ ok: false, error: "You do not have access to this section." });
+        }
         const { data: section, error: sectionErr } = await db()
           .from("workforce_grading_sections")
           .select("id, name")
@@ -1036,6 +1503,11 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       }
       if (!existing) return res.status(404).json({ ok: false, error: "Mistake not found." });
 
+      const access = await resolveScorecardAccess(db(), user, organizationId);
+      if (!canAccessSection(access, existing.section_id)) {
+        return res.status(403).json({ ok: false, error: "You do not have access to this section." });
+      }
+
       const { error } = await db()
         .from("workforce_mistakes")
         .delete()
@@ -1134,6 +1606,11 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         return res.status(400).json({ ok: false, error: "Section id required." });
       }
 
+      const access = await resolveScorecardAccess(db(), user, organizationId);
+      if (!canAccessSection(access, sectionId)) {
+        return res.status(403).json({ ok: false, error: "You do not have access to this section." });
+      }
+
       const settings = await loadGradeSettings(db(), organizationId);
       const tz = settings.timezone;
       const weekStart =
@@ -1217,6 +1694,12 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       if (!sectionId) {
         return res.status(400).json({ ok: false, error: "Section id required." });
       }
+
+      const access = await resolveScorecardAccess(db(), user, organizationId);
+      if (!canAccessSection(access, sectionId)) {
+        return res.status(403).json({ ok: false, error: "You do not have access to this section." });
+      }
+
       if (countRaw == null || countRaw === "") {
         return res.status(400).json({ ok: false, error: "count is required." });
       }
@@ -1319,6 +1802,14 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const user = req.user;
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+
+      const access = await resolveScorecardAccess(db(), user, organizationId);
+      if (!access.canGenerateReport) {
+        return res.status(403).json({
+          ok: false,
+          error: "Only CEO/admin/HR managers may generate the company weekly report."
+        });
+      }
 
       const settings = await loadGradeSettings(db(), organizationId);
       await ensureDefaultGradingSections(db(), organizationId, isMissingTableError);

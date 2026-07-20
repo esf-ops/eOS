@@ -841,6 +841,112 @@ body {
   white-space: nowrap;
 }
 
+.hr-mistakes-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+
+.hr-mistakes-filters .field {
+  min-width: 180px;
+  margin: 0;
+}
+
+.hr-mistakes-attribution {
+  font-size: 0.78rem;
+  color: var(--eos-ink-mid);
+  white-space: nowrap;
+}
+
+.hr-dept-access {
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-lg);
+  background: var(--eos-surface);
+  box-shadow: var(--sh-card);
+}
+
+.hr-dept-access-toggle {
+  appearance: none;
+  border: 1px solid var(--eos-line-strong);
+  background: #fff;
+  border-radius: var(--r-sm);
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  cursor: pointer;
+  color: var(--eos-ink-soft);
+}
+
+.hr-dept-access-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--eos-line);
+}
+
+.hr-dept-access-intro {
+  margin: 0 0 12px;
+  font-size: 0.86rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-dept-access-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+
+.hr-dept-access-form .field {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+
+.hr-dept-access-meta,
+.hr-dept-access-empty {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-dept-access-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.hr-dept-access-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  background: var(--eos-surface-muted);
+}
+
+.hr-dept-access-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hr-dept-access-item span {
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+}
+
 .hr-section-card {
   display: flex;
   flex-direction: column;
@@ -892,6 +998,19 @@ body {
   display: grid;
   gap: 8px;
   font-size: 0.82rem;
+}
+
+.hr-section-recent-wrap {
+  margin-top: 4px;
+}
+
+.hr-section-recent-title {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--eos-ink-muted);
 }
 
 .hr-section-recent li {
