@@ -324,10 +324,15 @@ export default function EstimateDigitalEstimatePanel({
           body.staffNotice ||
             "Publication already exists for this revision. Customer URL is unchanged."
         );
+      } else if (body.envelope?.configured) {
+        setActionNotice(
+          body.staffNotice ||
+            "Digital Estimate published with customer configuration. Open the customer link to verify the interactive configurator."
+        );
       } else {
         setActionNotice(
           body.staffNotice ||
-            "Digital Estimate published. Customer link is stable and reusable."
+            "Digital Estimate published as a document-only link (no customer configuration envelope)."
         );
       }
       if (body.envelope && body.envelope.configured === false && body.envelope.message) {

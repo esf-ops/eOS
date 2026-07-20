@@ -306,8 +306,18 @@ export function createConfigurationStudioService(deps) {
       const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
       const out = [];
       for (const incoming of options) {
-        rejectClientAuthoritativeEconomics(incoming);
-        let optionPayload = { ...incoming };
+        // Strip caller-supplied economics before authority checks — sell prices are
+        // always resolved server-side from the approved catalog / product seed.
+        const {
+          sellPrice: _ignoreSellPrice,
+          sell_price: _ignoreSellPriceSnake,
+          price: _ignorePrice,
+          rate: _ignoreRate,
+          cost: _ignoreCost,
+          ...safeIncoming
+        } = incoming && typeof incoming === "object" ? incoming : {};
+        rejectClientAuthoritativeEconomics(safeIncoming);
+        let optionPayload = { ...safeIncoming };
         const optionKey = String(optionPayload.optionKey || optionPayload.option_key || "");
         // Material selections use material:room:{materialId|group} — group resolved server-side from catalog
         const isMaterial = optionKey.startsWith("material:");
