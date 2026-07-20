@@ -82,6 +82,7 @@ type ScorecardPayload = {
   ok?: boolean;
   viewMode?: "executive" | "department";
   fullAccess?: boolean;
+  executiveDashboardAccess?: boolean;
   canManageDepartments?: boolean;
   canGenerateReport?: boolean;
   departments?: DepartmentInfo[];
@@ -96,10 +97,12 @@ type ScorecardPayload = {
   schemaReady?: boolean;
 };
 
-type EmployeeOption = {
-  id: string;
-  fullName: string;
+type EligibleUser = {
+  userId: string;
+  displayName: string;
   email?: string | null;
+  isActive?: boolean;
+  hasHrHeadAccess?: boolean;
 };
 
 type DepartmentAssignment = {
@@ -109,7 +112,17 @@ type DepartmentAssignment = {
   userEmail?: string | null;
   departmentSlug: string;
   departmentName: string;
+  accessType?: "executive_dashboard" | "department";
+  hasHrHeadAccess?: boolean;
   isActive?: boolean;
+};
+
+type AccessOption = {
+  slug: string;
+  name: string;
+  accessType: "executive_dashboard" | "department";
+  description: string;
+  sectionIds?: string[];
 };
 
 type DepartmentGroup = {
@@ -245,9 +258,10 @@ export default function HrApp() {
   const [deptAccessOpen, setDeptAccessOpen] = useState(false);
   const [deptAccessBusy, setDeptAccessBusy] = useState(false);
   const [deptAssignBusy, setDeptAssignBusy] = useState(false);
-  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [eligibleUsers, setEligibleUsers] = useState<EligibleUser[]>([]);
   const [deptAssignments, setDeptAssignments] = useState<DepartmentAssignment[]>([]);
   const [deptGroups, setDeptGroups] = useState<DepartmentGroup[]>([]);
+  const [accessOptions, setAccessOptions] = useState<AccessOption[]>([]);
   const [assignUserId, setAssignUserId] = useState("");
   const [assignDeptSlug, setAssignDeptSlug] = useState("");
 
@@ -346,16 +360,38 @@ export default function HrApp() {
     if (!sessionToken) return;
     setDeptAccessBusy(true);
     try {
-      const [empRes, assignRes] = await Promise.all([
-        apiGet("/api/hr/workforce/employees", sessionToken) as Promise<{ employees?: EmployeeOption[] }>,
+      const [usersRes, assignRes] = await Promise.all([
+        apiGet("/api/hr/workforce/departments/eligible-users", sessionToken) as Promise<{
+          users?: Array<{
+            userId?: string;
+            user_id?: string;
+            displayName?: string;
+            display_name?: string;
+            email?: string | null;
+            isActive?: boolean;
+            is_active?: boolean;
+            hasHrHeadAccess?: boolean;
+            has_hr_head_access?: boolean;
+          }>;
+        }>,
         apiGet("/api/hr/workforce/departments/assignments", sessionToken) as Promise<{
           assignments?: DepartmentAssignment[];
           departmentGroups?: DepartmentGroup[];
+          accessOptions?: AccessOption[];
         }>
       ]);
-      setEmployees(empRes.employees ?? []);
+      setEligibleUsers(
+        (usersRes.users ?? []).map((u) => ({
+          userId: String(u.userId ?? u.user_id ?? ""),
+          displayName: String(u.displayName ?? u.display_name ?? u.email ?? "User"),
+          email: u.email ?? null,
+          isActive: u.isActive !== false && u.is_active !== false,
+          hasHrHeadAccess: Boolean(u.hasHrHeadAccess ?? u.has_hr_head_access)
+        })).filter((u) => u.userId)
+      );
       setDeptAssignments(assignRes.assignments ?? []);
       setDeptGroups(assignRes.departmentGroups ?? []);
+      setAccessOptions(assignRes.accessOptions ?? []);
     } catch (e: unknown) {
       setErr(hrApiErrorMessage(e, "Unable to load department access."));
     } finally {
@@ -602,36 +638,42 @@ export default function HrApp() {
     if (!sessionToken || !assignUserId || !assignDeptSlug) return;
     setDeptAssignBusy(true);
     setErr(null);
+    setSuccess(null);
     try {
       await apiPost("/api/hr/workforce/departments/assignments", sessionToken, {
         user_id: assignUserId,
         department_slug: assignDeptSlug
       });
-      setSuccess("Department access assigned.");
+      const label =
+        assignDeptSlug === "executive_dashboard" ? "Executive Dashboard access" : "Department access";
+      setSuccess(`${label} assigned.`);
       setAssignUserId("");
       setAssignDeptSlug("");
       await loadDepartmentAccess();
+      await loadScorecard();
     } catch (e: unknown) {
-      setErr(hrApiErrorMessage(e, "Unable to assign department access."));
+      setErr(hrApiErrorMessage(e, "Unable to assign access."));
     } finally {
       setDeptAssignBusy(false);
     }
-  }, [sessionToken, assignUserId, assignDeptSlug, loadDepartmentAccess]);
+  }, [sessionToken, assignUserId, assignDeptSlug, loadDepartmentAccess, loadScorecard]);
 
   const removeDepartmentAssignment = useCallback(
     async (assignment: DepartmentAssignment) => {
       if (!sessionToken) return;
       if (!window.confirm(`Remove ${assignment.userName} from ${assignment.departmentName}?`)) return;
       setErr(null);
+      setSuccess(null);
       try {
         await apiDelete(`/api/hr/workforce/departments/assignments/${assignment.id}`, sessionToken);
-        setSuccess("Department access removed.");
+        setSuccess("Access assignment removed.");
         await loadDepartmentAccess();
+        await loadScorecard();
       } catch (e: unknown) {
-        setErr(hrApiErrorMessage(e, "Unable to remove department access."));
+        setErr(hrApiErrorMessage(e, "Unable to remove access assignment."));
       }
     },
-    [sessionToken, loadDepartmentAccess]
+    [sessionToken, loadDepartmentAccess, loadScorecard]
   );
 
   const generateReport = useCallback(async () => {
@@ -1137,28 +1179,57 @@ export default function HrApp() {
                 {deptAccessOpen ? (
                   <div className="hr-dept-access-panel">
                     <p className="hr-dept-access-intro">
-                      Assign users to department groups so they can enter quality data for those sections only.
+                      Assign Executive Dashboard for full company scorecard access, or department groups for limited
+                      operational entry. Eligible users come from active eliteOS application users in this organization
+                      (preferably with HR Head access).
                     </p>
+                    <div className="hr-dept-access-legend">
+                      <p>
+                        <strong>Executive Dashboard</strong> — Full company scorecard, all mistakes, executive summary,
+                        and weekly report access.
+                      </p>
+                      <p>
+                        <strong>Department groups</strong> — Limited entry and visibility for assigned operational
+                        sections.
+                      </p>
+                    </div>
                     <div className="hr-dept-access-form">
                       <label className="field">
                         User
                         <select value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)} disabled={deptAccessBusy}>
                           <option value="">Select user…</option>
-                          {employees.map((emp) => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.fullName}
-                              {emp.email ? ` (${emp.email})` : ""}
+                          {eligibleUsers.map((user) => (
+                            <option key={user.userId} value={user.userId}>
+                              {user.displayName}
+                              {user.email ? ` (${user.email})` : ""}
+                              {user.hasHrHeadAccess ? "" : " — no HR Head access"}
                             </option>
                           ))}
                         </select>
                       </label>
                       <label className="field">
-                        Department
+                        Access
                         <select value={assignDeptSlug} onChange={(e) => setAssignDeptSlug(e.target.value)} disabled={deptAccessBusy}>
-                          <option value="">Select department…</option>
-                          {(deptGroups.length ? deptGroups : scorecard?.departments ?? []).map((g) => (
-                            <option key={g.slug} value={g.slug}>
-                              {g.name}
+                          <option value="">Select access…</option>
+                          {(accessOptions.length
+                            ? accessOptions
+                            : [
+                                {
+                                  slug: "executive_dashboard",
+                                  name: "Executive Dashboard",
+                                  accessType: "executive_dashboard" as const,
+                                  description: "Full company scorecard access."
+                                },
+                                ...(deptGroups.length ? deptGroups : scorecard?.departments ?? []).map((g) => ({
+                                  slug: g.slug,
+                                  name: g.name,
+                                  accessType: "department" as const,
+                                  description: "Limited department entry."
+                                }))
+                              ]
+                          ).map((opt) => (
+                            <option key={opt.slug} value={opt.slug}>
+                              {opt.accessType === "executive_dashboard" ? `${opt.name} (full access)` : opt.name}
                             </option>
                           ))}
                         </select>
@@ -1171,7 +1242,23 @@ export default function HrApp() {
                       >
                         {deptAssignBusy ? "Assigning…" : "Assign"}
                       </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={deptAccessBusy || deptAssignBusy}
+                        onClick={() => void loadDepartmentAccess()}
+                      >
+                        {deptAccessBusy ? "Refreshing…" : "Refresh users"}
+                      </button>
                     </div>
+                    {assignDeptSlug ? (
+                      <p className="hr-dept-access-meta">
+                        {(accessOptions.find((o) => o.slug === assignDeptSlug)?.description ??
+                          (assignDeptSlug === "executive_dashboard"
+                            ? "Full company scorecard, all mistakes, executive summary, and weekly report access."
+                            : "Limited entry and visibility for assigned operational sections."))}
+                      </p>
+                    ) : null}
                     {deptAccessBusy ? <p className="hr-dept-access-meta">Loading assignments…</p> : null}
                     {deptAssignments.length ? (
                       <ul className="hr-dept-access-list">
@@ -1181,7 +1268,9 @@ export default function HrApp() {
                               <strong>{a.userName}</strong>
                               <span>
                                 {a.departmentName}
+                                {a.accessType === "executive_dashboard" ? " · Full scorecard" : ""}
                                 {a.userEmail ? ` · ${a.userEmail}` : ""}
+                                {a.hasHrHeadAccess === false ? " · No HR Head access" : ""}
                               </span>
                             </div>
                             <button
@@ -1196,7 +1285,7 @@ export default function HrApp() {
                         ))}
                       </ul>
                     ) : (
-                      <p className="hr-dept-access-empty">No department assignments yet.</p>
+                      <p className="hr-dept-access-empty">No access assignments yet.</p>
                     )}
                   </div>
                 ) : null}
