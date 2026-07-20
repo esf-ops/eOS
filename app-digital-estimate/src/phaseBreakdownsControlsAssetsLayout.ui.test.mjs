@@ -22,6 +22,7 @@ const repoRoot = join(appRoot, "..");
 
 const configView = readFileSync(join(srcRoot, "ConfigurationView.tsx"), "utf8");
 const vm = readFileSync(join(srcRoot, "lovableViewModel.ts"), "utf8");
+const api = readFileSync(join(srcRoot, "publicConfigApi.ts"), "utf8");
 const copy = readFileSync(
   join(repoRoot, "backend-core/src/digitalEstimate/catalog/customerFacingCopy.mjs"),
   "utf8",
@@ -135,9 +136,11 @@ assert.equal(resolveProductCatalogImageUrl({ productId: "totally-unknown-xyz" })
 const imageMap = JSON.parse(readFileSync(join(srcRoot, "productCatalogImageMap.json"), "utf8"));
 assert.ok(Object.keys(imageMap).length > 50);
 
-// Performance: MaterialThumb uses loading=lazy
+assert.ok(configView.includes("de-color-preview-full"));
 assert.ok(configView.includes('loading="lazy"'));
 assert.ok(configView.includes("de-material-thumb"));
+assert.ok(vm.includes("thumbnailUrl"));
+assert.ok(api.includes("thumbnailUrl") && api.includes("previewUrl"));
 
 // Modal sticky header
 assert.ok(configView.includes("sticky top-0"));

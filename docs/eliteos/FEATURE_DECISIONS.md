@@ -1768,3 +1768,14 @@
 | **Ops** | Deploy **Brain** + **app-digital-estimate** (static asset bundle larger by ~19MB product thumbs). Republish not required for layout/copy; new stock/special-order UI uses existing envelope options. |
 | **Out of scope** | Sourcing the remaining 89 Elite 100 photos; CDN migration; Studio per-room option override UI; inventing ungovered backsplash credits; sold-job. |
 
+### 127. Digital Estimate Elite 100 images use Supabase showroom pipeline (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Digital Estimate material imagery uses the **same Supabase-backed Elite 100 visual-asset pipeline** as the kiosk showroom iframe, Slab Inventory Elite 100 cards, and public carousel: `slab_color_collections` → `slab_color_catalog_items` → `slab_color_visual_assets` in public bucket `eliteos-slab-images`. Shared resolver `elite100CustomerImageResolver.mjs` returns customer-safe `thumbnailUrl` (600) + `previewUrl` (1024/hero). Original 40–55 MB masters are never used for the material grid. Local `/materials/elite100/` pilots remain fallback only. Prior “89 missing” counted repo files only and is retracted. |
+| **Why** | Hosted kiosk/inventory already display all program colors; DE must not invent photography work or duplicate masters into the Vite bundle. |
+| **SQL** | None new (existing `eliteos_slab_images_storage.sql` + `eliteos_slab_color_visual_assets.sql` + color catalog). |
+| **Ops** | Deploy Brain (+ digital-estimate). Ensure `SLABOS_ORGANIZATION_ID` or `PUBLIC_VISUALIZER_ORGANIZATION_ID` / `SLABCLOUD_ORGANIZATION_ID` is set on Brain so public DE can resolve visual assets. |
+| **Out of scope** | Re-uploading photos; CDN migration; signed-URL rotation; changing kiosk nav `/stone` pilots. |
+

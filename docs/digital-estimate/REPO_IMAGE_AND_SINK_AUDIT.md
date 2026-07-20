@@ -1,3 +1,5 @@
+> **CORRECTION (2026-07-20):** Elite 100 photos are **not** missing from the product. They live in Supabase (`eliteos-slab-images` / `slab_color_visual_assets`). See `ELITE100_SUPABASE_IMAGE_PIPELINE.md`. The 11 local files are pilots/fallback only.
+
 # Digital Estimate — repository image & sink catalog audit
 
 **Branch:** `fix/digital-estimate-breakdowns-controls-assets-and-layout`  

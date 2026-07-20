@@ -313,7 +313,8 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
     env,
     deRepository,
     configurationRepository,
-    pricingPolicyRepository
+    pricingPolicyRepository,
+    getSupabase
   });
 
   const expectedOrigin = readDigitalEstimatePublicConfigurationOrigin(env);

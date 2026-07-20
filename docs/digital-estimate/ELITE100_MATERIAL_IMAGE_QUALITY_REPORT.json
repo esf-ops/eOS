@@ -11,8 +11,8 @@
     "group_e": 5,
     "group_f": 11
   },
-  "imageReadyCount": 11,
-  "imageMissingCount": 89,
+  "imageReadyCount": 95,
+  "imageMissingCount": 5,
   "missingImagesByGroup": {
     "promo": [
       {
@@ -401,5 +401,21 @@
   "notes": "Materials with textureFallbackStatus \"missing\" render as name-only cards until textures are reconciled. Remnant is excluded from the default catalog.",
   "auditNote": "2026-07-20 repo-wide audit on fix/digital-estimate-breakdowns-controls-assets-and-layout: still 11 ready / 89 missing. No additional Elite 100 image files found outside the 11 pilots already copied to digital-estimate / estimate-studio / slab-inventory public trees. Product Catalog sink/faucet thumbs were copied into app-digital-estimate/public/product-catalog.",
   "priorImageReadyCount": 11,
-  "sharedAssetStrategy": "same-origin public thumbs for Elite 100; product-catalog heroes copied into DE public"
+  "sharedAssetStrategy": "same-origin public thumbs for Elite 100; product-catalog heroes copied into DE public",
+  "correctionNote": "2026-07-20 CORRECTION: 11/89 counted only repo-local pilot JPEGs. Production Elite 100 imagery is Supabase Storage bucket eliteos-slab-images via slab_color_visual_assets (same as kiosk showroom / Slab Inventory / carousel). Digital Estimate now uses elite100CustomerImageResolver for thumbnailUrl/previewUrl. Do not treat colors as missing merely because no local file exists.",
+  "imageSourceOfTruth": "supabase_eliteos-slab-images",
+  "localPilotCount": 11,
+  "localPilotRole": "fallback_only",
+  "sharedResolver": "backend-core/src/digitalEstimate/configuration/elite100CustomerImageResolver.mjs",
+  "pipelineDoc": "docs/digital-estimate/ELITE100_SUPABASE_IMAGE_PIPELINE.md",
+  "priorIncorrectMissingCount": 89,
+  "supabaseReadyCount": 95,
+  "supabaseMissingWithoutAsset": [
+    "Mackinaw",
+    "Delgatie Satin",
+    "Everleigh Warm",
+    "Inverness Everleigh",
+    "Kenwood"
+  ],
+  "localPilotFallbackCount": 11
 }
