@@ -23,6 +23,7 @@ import {
 import {
   assertPublicConfigurationOrigin,
   clearConfigurationSessionCookie,
+  readSessionSecretCandidatesFromCookie,
   readSessionSecretFromCookie,
   redactPublicConfigurationSecrets
 } from "./publicConfigurationSession.mjs";
@@ -171,25 +172,47 @@ export function attachDigitalEstimateReviewRequestRoutes(app, deps) {
     if (!rateLimitGate(req, res, env)) return;
     try {
       assertPublicConfigurationOrigin(req, expectedOrigin, env);
-      const rawSecret = readSessionSecretFromCookie(req);
+      const candidates = readSessionSecretCandidatesFromCookie(req);
       // No cookie / no open review is not a lifecycle failure — return empty current.
-      if (!rawSecret) {
+      if (!candidates.length) {
         return res.json({ ok: true, reviewRequest: null, code: "no_current_review_request" });
       }
-      const result = await service.getCurrentReviewRequest({ rawSecret });
-      res.json(result);
-    } catch (e) {
-      logReview("review request get failed", e, req);
-      // Session lookup failures → empty current (nonfatal). Lifecycle revoke still 404.
+      let lastErr = null;
+      for (const rawSecret of candidates) {
+        try {
+          const result = await service.getCurrentReviewRequest({ rawSecret });
+          return res.json(result);
+        } catch (e) {
+          lastErr = e;
+          if (
+            e?.code === "session_not_found" ||
+            e?.code === "session_invalid" ||
+            e?.code === "not_found" ||
+            e?.statusCode === 401 ||
+            e?.statusCode === 404
+          ) {
+            continue;
+          }
+          // Repository / schema gaps must not blank the configure UI.
+          logReview("review request get nonfatal", e, req);
+          return res.json({ ok: true, reviewRequest: null, code: "no_current_review_request" });
+        }
+      }
       if (
-        e?.code === "session_not_found" ||
-        e?.code === "session_invalid" ||
-        e?.code === "not_found" ||
-        e?.statusCode === 401
+        lastErr?.code === "session_not_found" ||
+        lastErr?.code === "session_invalid" ||
+        lastErr?.code === "not_found" ||
+        lastErr?.statusCode === 401 ||
+        lastErr?.statusCode === 404
       ) {
         return res.json({ ok: true, reviewRequest: null, code: "no_current_review_request" });
       }
-      publicError(res, e);
+      logReview("review request get failed", lastErr, req);
+      return res.json({ ok: true, reviewRequest: null, code: "no_current_review_request" });
+    } catch (e) {
+      logReview("review request get failed", e, req);
+      // Never 404 the configure shell for "no current review" / repo issues.
+      return res.json({ ok: true, reviewRequest: null, code: "no_current_review_request" });
     }
   });
 

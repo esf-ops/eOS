@@ -1680,3 +1680,14 @@
 | **Ops** | Deploy Brain + digital-estimate together. Existing links re-exchange to receive the new cookie. Confirm `/api/health` `buildId`. |
 | **Out of scope** | Domain=`.eliteosfab.com` cookie sharing; sold-job. |
 
+### 119. Digital Estimate selection persistence — fingerprint scope + invalid_selection (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Public `PUT /v2/selections` persists even when calculation input fingerprints collide across sessions (same material **group** / economic inputs). Engine fingerprints include `selectionFingerprint` (canonical selection hash / envelope option IDs). RPC + repository scope fingerprints with `#sel:…` on unique conflict. Supabase configuration repository implements `getLatestSelectionForSession` so resume restores saved envelope option IDs. Unauthorized option IDs return **422 `invalid_selection`** (with safe `selectionKey`), not generic 404. Persistence failures map to **500 `persistence_failed`** / **409 `stale_configuration`**, never bare lifecycle 404. `GET …/review-requests/current` always returns **200 + `reviewRequest: null`** when none / on repo gaps (missing amendment tables). UI keeps unsaved visual choice on `invalid_selection`. |
+| **Why** | Live PUT with valid session + canonical `material:{roomUuid}:e100-india-black-pearl` returned `{code:unavailable, diagnosticCode:DE-EXCHANGE-404}` because org-wide `uq_de_config_calc_input_fingerprint` rejected duplicate fingerprints (same-group color changes share group-level pricing inputs). Even when rows did persist, resume omitted `currentSelections` because Supabase repo lacked `getLatestSelectionForSession` (refresh showed Carrara Classic). Review current 404’d when the review table was missing. |
+| **SQL** | `backend-core/supabase/eliteos_digital_estimate_selection_fingerprint_scope_v1.sql` (apply on Brain deploy / ops). |
+| **Ops** | Deploy Brain + digital-estimate; apply SQL if RPC not yet updated (JS retry still scopes fingerprint). Retest India Black Pearl save → 200, `row_version` increments, refresh restores selection. |
+| **Out of scope** | Dropping the unique index entirely; sold-job; cookie SameSite revisit. |
+

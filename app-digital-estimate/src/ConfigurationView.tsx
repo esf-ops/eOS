@@ -491,7 +491,9 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
   const [projectNote, setProjectNote] = useState(config?.projectNote || "");
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
   const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saving" | "saved" | "error">(
+    "idle",
+  );
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pickerRoomId, setPickerRoomId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -555,7 +557,8 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
     for (const c of room?.colors || []) nextQty[c.optionKey] = 0;
     nextQty[color.optionKey] = 1;
     setQty(nextQty);
-    setSaveState("idle");
+    setSaveState("unsaved");
+    setSaveError(null);
     setPickerRoomId(null);
     void onSave({ qtyOverride: nextQty });
   }
@@ -568,7 +571,8 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
     }
     nextQty[optionKey] = 1;
     setQty(nextQty);
-    setSaveState("idle");
+    setSaveState("unsaved");
+    setSaveError(null);
     void onSave({ qtyOverride: nextQty });
   }
 
@@ -603,6 +607,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
       if (result.session?.rowVersion != null) setRowVersion(result.session.rowVersion);
       if (result.calculation) setLatestCalc(result.calculation as typeof latestCalc);
       setSaveState("saved");
+      setSaveError(null);
       onState({
         ...state,
         session: state.session
@@ -658,8 +663,15 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
         onFatal();
         return null;
       }
+      // Keep the customer's unsaved visual choice; do not claim saved / do not revert qty.
       setSaveState("error");
-      setSaveError(err instanceof Error ? err.message : "Unable to save");
+      setSaveError(
+        err.code === "invalid_selection" || err.code === "unknown_option"
+          ? err.message || "That selection is unavailable. Please choose another option."
+          : err instanceof Error
+            ? err.message
+            : "Unable to save",
+      );
       return null;
     }
   }
@@ -722,9 +734,18 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
         >
           {saveState === "saving" ? "Saving…" : "Save selections"}
         </button>
-        <span className="block text-center text-xs text-muted-foreground" role="status">
+        <span
+          className={`block text-center text-xs ${
+            saveState === "error" ? "text-destructive" : "text-muted-foreground"
+          }`}
+          role="status"
+          data-testid="de-save-status"
+          data-save-state={saveState}
+        >
+          {saveState === "unsaved" ? "Selection changed — not saved yet" : null}
+          {saveState === "saving" ? "Saving…" : null}
           {saveState === "saved" ? "Selection saved" : null}
-          {saveState === "error" ? saveError || "Unable to save" : null}
+          {saveState === "error" ? saveError || "Unable to save — your choice is still selected" : null}
         </span>
         {reviewUiEnabled() ? (
           <button

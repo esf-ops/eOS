@@ -110,8 +110,9 @@ export function normalizeSelectionPayload(raw, options) {
     const opt = byKey.get(String(key));
     if (!opt) {
       const err = new Error(`Unknown option_key: ${key}`);
-      err.code = "unknown_option";
-      err.statusCode = 400;
+      err.code = "invalid_selection";
+      err.statusCode = 422;
+      err.selectionKey = String(key).slice(0, 160);
       throw err;
     }
     const qty = Number(qtyRaw);
@@ -138,24 +139,44 @@ export function normalizeSelectionPayload(raw, options) {
     normalized[String(key)] = qty;
   }
 
-  // Apply defaults for required / included when missing
+  /** Room already has a positive material selection (mutually exclusive per room). */
+  function roomHasMaterialSelection(roomKey) {
+    const prefix = `material:${roomKey}:`;
+    return Object.entries(normalized).some(([k, q]) => k.startsWith(prefix) && Number(q) > 0);
+  }
+
+  function materialRoomKey(optionKey) {
+    if (!String(optionKey).startsWith("material:")) return null;
+    const parts = String(optionKey).split(":");
+    return parts.length >= 3 ? parts[1] : null;
+  }
+
+  // Apply defaults for required / included when missing.
+  // Never re-add a baseline material color when the customer already picked another
+  // material for that room (canonical envelope option ID wins).
   for (const opt of options) {
     const key = String(opt.option_key || opt.optionKey);
     if (normalized[key] != null) continue;
     const def = Number(opt.default_qty ?? opt.defaultQty ?? 0);
-    if (opt.required_selection || opt.requiredSelection || opt.included_in_baseline || opt.includedInBaseline) {
-      normalized[key] = def;
+    if (!(opt.required_selection || opt.requiredSelection || opt.included_in_baseline || opt.includedInBaseline)) {
+      continue;
     }
+    const roomKey = materialRoomKey(key);
+    if (roomKey && roomHasMaterialSelection(roomKey)) continue;
+    normalized[key] = def;
   }
 
   for (const opt of options) {
     const key = String(opt.option_key || opt.optionKey);
-    if ((opt.required_selection || opt.requiredSelection) && !(Number(normalized[key]) > 0)) {
-      const err = new Error(`Required option missing: ${key}`);
-      err.code = "required_option_missing";
-      err.statusCode = 400;
-      throw err;
-    }
+    if (!(opt.required_selection || opt.requiredSelection)) continue;
+    if (Number(normalized[key]) > 0) continue;
+    const roomKey = materialRoomKey(key);
+    // Room-level material requirement satisfied by any positive material option.
+    if (roomKey && roomHasMaterialSelection(roomKey)) continue;
+    const err = new Error(`Required option missing: ${key}`);
+    err.code = "required_option_missing";
+    err.statusCode = 400;
+    throw err;
   }
 
   const selectionHash = hashCanonical(normalized);

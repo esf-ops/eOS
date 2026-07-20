@@ -348,11 +348,21 @@ export function createReviewRequestService(deps) {
       }
       try {
         const session = await resolveSession(rawSecret);
-        assertSyntheticPublicationPublicAccess(session.publication_id, env);
-        const request = await amendmentRepository.getCurrentReviewRequestForSession(
-          session.organization_id,
-          session.id
-        );
+        try {
+          assertSyntheticPublicationPublicAccess(session.publication_id, env);
+        } catch {
+          return { ok: true, reviewRequest: null, code: "no_current_review_request" };
+        }
+        let request = null;
+        try {
+          request = await amendmentRepository.getCurrentReviewRequestForSession(
+            session.organization_id,
+            session.id
+          );
+        } catch {
+          // Missing amendment tables / schema must not 404 the configure UI.
+          return { ok: true, reviewRequest: null, code: "no_current_review_request" };
+        }
         if (!request) {
           return { ok: true, reviewRequest: null, code: "no_current_review_request" };
         }
@@ -370,7 +380,8 @@ export function createReviewRequestService(deps) {
         if (e?.statusCode === 404 || e?.statusCode === 401 || e?.code === "not_found") {
           return { ok: true, reviewRequest: null, code: "no_current_review_request" };
         }
-        throw e;
+        // Fail soft — absence of a review request is not a lifecycle failure.
+        return { ok: true, reviewRequest: null, code: "no_current_review_request" };
       }
     }
   };

@@ -358,15 +358,20 @@ export function classifyConfigurationMutationError(
 
   if (
     code === "unknown_option" ||
+    code === "invalid_selection" ||
     code === "unresolved_product" ||
     code === "forbidden_caller_authority" ||
     code === "idempotency_required" ||
     code === "concurrency_required" ||
     code === "configuration_unavailable" ||
+    code === "persistence_failed" ||
     code === "no_current_review_request"
   ) {
     return {
-      message: message || "That selection is unavailable",
+      message:
+        code === "invalid_selection" || code === "unknown_option"
+          ? message || "That selection is unavailable. Please choose another option."
+          : message || "That selection is unavailable",
       code,
       stage: stage || "selection",
       diagnosticCode: diagnosticCode || "DE-SAVE",
@@ -374,10 +379,10 @@ export function classifyConfigurationMutationError(
     };
   }
 
-  if (code === "row_version_conflict" || status === 409) {
+  if (code === "row_version_conflict" || code === "stale_configuration" || status === 409) {
     return {
       message: message || "Please refresh and try again",
-      code: "row_version_conflict",
+      code: code || "stale_configuration",
       stage: stage || "selection",
       diagnosticCode: diagnosticCode || "DE-SAVE",
       lifecycleFatal: false,

@@ -52,16 +52,19 @@ const SAFE_PUBLIC_ERROR_CODES = new Set([
   "origin_rejected",
   "origin_not_configured",
   "row_version_conflict",
+  "stale_configuration",
   "idempotency_required",
   "concurrency_required",
   "forbidden_caller_authority",
   "unknown_option",
+  "invalid_selection",
   "unresolved_product",
   "configuration_unavailable",
   "publication_revoked",
   "publication_expired",
   "publication_unavailable",
   "publication_superseded",
+  "persistence_failed",
   "no_current_review_request"
 ]);
 
@@ -133,8 +136,12 @@ function safeDiagnosticCode(e, status, safeCode) {
 }
 
 function publicError(res, e, stageHint = "token_exchange") {
-  const status = Number(e?.statusCode) || 404;
-  const code = e?.code || "not_found";
+  let status = Number(e?.statusCode) || 0;
+  // Selection-stage failures without an explicit status must not become lifecycle 404s.
+  if (!status) {
+    status = stageHint === "selection" ? 500 : 404;
+  }
+  const code = e?.code || (stageHint === "selection" ? "persistence_failed" : "not_found");
   let message = "Estimate unavailable";
   if (code === "origin_rejected" || code === "origin_not_configured") {
     message = "Configuration unavailable";
@@ -144,9 +151,14 @@ function publicError(res, e, stageHint = "token_exchange") {
     code === "session_invalid"
   ) {
     message = "Please refresh and try again";
-  } else if (status === 409 || code === "row_version_conflict") {
+  } else if (status === 409 || code === "row_version_conflict" || code === "stale_configuration") {
     message = "Please refresh and try again";
-  } else if (code === "unresolved_product" || code === "unknown_option" || code === "forbidden_caller_authority") {
+  } else if (
+    code === "unresolved_product" ||
+    code === "unknown_option" ||
+    code === "invalid_selection" ||
+    code === "forbidden_caller_authority"
+  ) {
     message = "That selection is unavailable";
   } else if (code === "publication_expired" || String(e?.message || "").includes("Pricing has expired")) {
     message = "Pricing has expired";
@@ -154,6 +166,8 @@ function publicError(res, e, stageHint = "token_exchange") {
     message = "Your estimate options were updated";
   } else if (code === "configuration_unavailable") {
     message = "Configuration unavailable";
+  } else if (code === "persistence_failed") {
+    message = "Unable to save right now. Please try again.";
   } else if (status === 400 || status === 422) {
     message = e?.message && /refresh|unavailable|try again/i.test(e.message)
       ? e.message
@@ -162,8 +176,10 @@ function publicError(res, e, stageHint = "token_exchange") {
     message = e?.message && /unavailable|expired|updated|revoked/i.test(e.message)
       ? e.message
       : "Estimate unavailable";
+  } else if (status >= 500) {
+    message = "Unable to save right now. Please try again.";
   }
-  const safeCode = SAFE_PUBLIC_ERROR_CODES.has(code) ? code : "unavailable";
+  const safeCode = SAFE_PUBLIC_ERROR_CODES.has(code) ? code : stageHint === "selection" ? "persistence_failed" : "unavailable";
   const stage =
     safeCode === "origin_rejected" || safeCode === "origin_not_configured"
       ? "origin"
@@ -171,7 +187,7 @@ function publicError(res, e, stageHint = "token_exchange") {
         ? "rate_limit"
         : stageHint || "token_exchange";
   const diagnostic =
-    stageHint === "selection" && (status === 400 || status === 401 || status === 409 || status === 422)
+    stageHint === "selection" && (status === 400 || status === 401 || status === 409 || status === 422 || status >= 500)
       ? safeDiagnosticCode(e, status, safeCode)
       : safeDiagnosticCode(e, status, safeCode);
   const recoverable =
@@ -180,15 +196,19 @@ function publicError(res, e, stageHint = "token_exchange") {
     safeCode === "session_not_found" ||
     safeCode === "session_invalid" ||
     safeCode === "row_version_conflict" ||
+    safeCode === "stale_configuration" ||
     safeCode === "unknown_option" ||
-    safeCode === "configuration_unavailable";
+    safeCode === "invalid_selection" ||
+    safeCode === "configuration_unavailable" ||
+    safeCode === "persistence_failed";
   const lifecycleFatal =
     e?.lifecycleFatal === true ||
     safeCode === "publication_revoked" ||
     safeCode === "publication_expired" ||
     safeCode === "publication_unavailable" ||
     safeCode === "publication_superseded";
-  res.status(status >= 400 && status < 600 ? status : 404).json({
+  /** @type {Record<string, unknown>} */
+  const body = {
     ok: false,
     error: message,
     stage,
@@ -196,7 +216,15 @@ function publicError(res, e, stageHint = "token_exchange") {
     diagnosticCode: diagnostic,
     recoverable,
     lifecycleFatal
-  });
+  };
+  if (
+    (safeCode === "invalid_selection" || safeCode === "unknown_option") &&
+    e?.selectionKey &&
+    typeof e.selectionKey === "string"
+  ) {
+    body.selectionKey = e.selectionKey.slice(0, 160);
+  }
+  res.status(status >= 400 && status < 600 ? status : 404).json(body);
 }
 
 function extractBearerToken(req) {
