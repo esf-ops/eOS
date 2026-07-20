@@ -1,0 +1,177 @@
+{
+  "strategy": "copy_lightweight_thumbs_from_slab_inventory_public",
+  "source": "app-slab-inventory/public/product-catalog",
+  "destination": "app-digital-estimate/public/product-catalog",
+  "copiedCount": 66,
+  "missingHeroFolders": [],
+  "totalBytes": 19560061,
+  "catalogItemsSample": [
+    {
+      "id": "kansas-1512um18-2",
+      "sku": "1512UM18",
+      "category": "sink"
+    },
+    {
+      "id": "kansas-2317um18-4",
+      "sku": "2317UM18",
+      "category": "sink"
+    },
+    {
+      "id": "kansas-3018um18-7",
+      "sku": "3018UM18",
+      "category": "sink"
+    },
+    {
+      "id": "kansas-3218um16-60-40-14",
+      "sku": "3218UM16 60.40",
+      "category": "sink"
+    },
+    {
+      "id": "kansas-3218um16-ss-16",
+      "sku": "3218UM16 SS",
+      "category": "sink"
+    }
+  ],
+  "copied": [
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-50-50",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-50-50/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-50-50/thumb.jpg",
+      "bytes": 104830
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-50-50-low-divide",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-50-50-low-divide/hero.png",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-50-50-low-divide/thumb.png",
+      "bytes": 241607
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-50-50-low-divide-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-50-50-low-divide-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-50-50-low-divide-sinks/thumb.jpg",
+      "bytes": 132669
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-50-50-regular-divide",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-50-50-regular-divide/coal-black.png",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-50-50-regular-divide/thumb.png",
+      "bytes": 919983
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-60-40-low-divide-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-60-40-low-divide-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-60-40-low-divide-sinks/thumb.jpg",
+      "bytes": 149455
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-60-40-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-60-40-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-60-40-sinks/thumb.jpg",
+      "bytes": 115317
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-60-40-sinks-low-divide",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-60-40-sinks-low-divide/hero.png",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-60-40-sinks-low-divide/thumb.png",
+      "bytes": 252144
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-60-40-sinks-regular-divide",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-60-40-sinks-regular-divide/hero.png",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-60-40-sinks-regular-divide/thumb.png",
+      "bytes": 212422
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-diamond-small-bar-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-diamond-small-bar-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-diamond-small-bar-sinks/thumb.jpg",
+      "bytes": 210519
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-ikon-apron-front-single-bowl",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-ikon-apron-front-single-bowl/coal-black.png",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-ikon-apron-front-single-bowl/thumb.png",
+      "bytes": 684882
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-liven-laundry-12-depth",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-liven-laundry-12-depth/hero.png",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-liven-laundry-12-depth/thumb.png",
+      "bytes": 1115268
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-21-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-21-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-21-sinks/thumb.jpg",
+      "bytes": 163642
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-24-sink",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-24-sink/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-24-sink/thumb.jpg",
+      "bytes": 118977
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-27-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-27-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-27-sinks/thumb.jpg",
+      "bytes": 94360
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-30-single-bowl",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-30-single-bowl/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-30-single-bowl/thumb.jpg",
+      "bytes": 78512
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-50-50-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-50-50-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-50-50-sinks/thumb.jpg",
+      "bytes": 96295
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-60-40-sinks-low-divide",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-60-40-sinks-low-divide/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-60-40-sinks-low-divide/thumb.jpg",
+      "bytes": 141586
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-60-40-sinks-regular-divide",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-60-40-sinks-regular-divide/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-60-40-sinks-regular-divide/thumb.jpg",
+      "bytes": 96211
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-bar-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-bar-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-bar-sinks/thumb.jpg",
+      "bytes": 139760
+    },
+    {
+      "kind": "sinks",
+      "id": "blanco-blanco-precis-super-single-sinks",
+      "src": "app-slab-inventory/public/product-catalog/sinks/blanco-blanco-precis-super-single-sinks/hero.jpg",
+      "dst": "app-digital-estimate/public/product-catalog/sinks/blanco-blanco-precis-super-single-sinks/thumb.jpg",
+      "bytes": 80206
+    }
+  ]
+}

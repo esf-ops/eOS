@@ -398,5 +398,8 @@
     "suede-brown-polished",
     "white-dove"
   ],
-  "notes": "Materials with textureFallbackStatus \"missing\" render as name-only cards until textures are reconciled. Remnant is excluded from the default catalog."
+  "notes": "Materials with textureFallbackStatus \"missing\" render as name-only cards until textures are reconciled. Remnant is excluded from the default catalog.",
+  "auditNote": "2026-07-20 repo-wide audit on fix/digital-estimate-breakdowns-controls-assets-and-layout: still 11 ready / 89 missing. No additional Elite 100 image files found outside the 11 pilots already copied to digital-estimate / estimate-studio / slab-inventory public trees. Product Catalog sink/faucet thumbs were copied into app-digital-estimate/public/product-catalog.",
+  "priorImageReadyCount": 11,
+  "sharedAssetStrategy": "same-origin public thumbs for Elite 100; product-catalog heroes copied into DE public"
 }

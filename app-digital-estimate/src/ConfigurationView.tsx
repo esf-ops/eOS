@@ -3,7 +3,7 @@
  * Pricing / accept / Supabase / client totals removed. Brain APIs only.
  * Room options consume envelope options / config.products — never hard-coded catalogs.
  */
-import { Component, useEffect, useId, useMemo, useState, type ErrorInfo, type ReactNode } from "react";
+import { Component, useEffect, useId, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import {
   buildSelectionItems,
   groupColorsByPricingGroup,
@@ -15,6 +15,12 @@ import {
   type LovableColor,
   type LovableRoom,
 } from "./lovableViewModel";
+import {
+  buildChangesBreakdown,
+  buildOriginalBreakdown,
+  buildUpdatedBreakdown,
+} from "./customerEstimateBreakdown";
+import { enrichProductImageUrl } from "./productCatalogImages";
 import {
   exchangeFragmentToken,
   fetchCurrentReviewRequest,
@@ -221,15 +227,16 @@ function ModalShell({
       data-testid={testId}
     >
       <div
-        className={`flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-background shadow-2xl sm:max-h-[85vh] sm:rounded-2xl ${
-          wide ? "max-w-5xl" : "max-w-lg"
+        className={`flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-background shadow-2xl sm:max-h-[90vh] sm:rounded-2xl ${
+          wide ? "max-w-[1200px]" : "max-w-lg"
         }`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        data-layout={wide ? "wide-catalog" : "compact"}
       >
-        <div className="border-b border-border px-6 py-4">
+        <div className="sticky top-0 z-10 border-b border-border bg-background px-6 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
               {eyebrow ? (
@@ -387,7 +394,7 @@ function ColorPickerModal({
                       <div className="truncate text-xs font-medium text-foreground">{c.name}</div>
                       <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
                         {c.pricingGroupLabel}
-                        {c.includedInBaseline ? " · Included" : " · Upgrade may apply"}
+                        {c.includedInBaseline ? " · Original selection" : " · Upgrade may apply"}
                       </div>
                     </div>
                   </button>
@@ -453,7 +460,7 @@ function ChoiceRadio({
             {opt.priceEffectLabel ? (
               <span className="ml-2 text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
             ) : opt.includedInBaseline ? (
-              <span className="ml-2 text-xs text-muted-foreground">Included</span>
+              <span className="ml-2 text-xs text-muted-foreground">Original selection</span>
             ) : null}
             {opt.availabilityText ? (
               <span className="ml-2 text-xs text-muted-foreground">{opt.availabilityText}</span>
@@ -492,7 +499,10 @@ function ProductCards({
     );
   }
   return (
-    <div className="grid gap-3 sm:grid-cols-2" data-testid={`de-${role}-product-grid`}>
+    <div
+      className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      data-testid={`de-${role}-product-grid`}
+    >
       {products.map((p) => {
         const variants = Array.isArray(p.variants) ? p.variants : [];
         const hasVariants = variants.length > 0;
@@ -501,21 +511,29 @@ function ProductCards({
           selectedOptionKey &&
           (selectedOptionKey === p.optionKey ||
             variants.some((v) => v.optionKey === selectedOptionKey));
+        const imageUrl = enrichProductImageUrl(p) || p.imageUrl;
+        const stockLabel =
+          String(p.availability || "").toLowerCase() === "stock"
+            ? "Stock"
+            : String(p.availability || "").toLowerCase() === "special_order"
+              ? "Special order"
+              : p.availabilityText || null;
         return (
           <div
             key={p.productId}
             className={`rounded-xl border p-3 ${selected ? "border-foreground ring-1 ring-foreground/20" : "border-border"}`}
             data-testid={`de-${role}-product-card`}
+            data-availability={p.availability || ""}
           >
             <div className="flex gap-3">
-              <MaterialThumb src={p.imageUrl} alt={p.displayName} size="md" />
+              <MaterialThumb src={imageUrl} alt={p.displayName} size="md" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-foreground">{p.displayName}</div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {[p.manufacturer, p.model].filter(Boolean).join(" · ") || p.category}
+                  {[p.manufacturer, p.model || p.finish].filter(Boolean).join(" · ") || p.category}
                 </div>
-                {p.availabilityText ? (
-                  <div className="mt-1 text-[11px] text-muted-foreground">{p.availabilityText}</div>
+                {stockLabel ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">{stockLabel}</div>
                 ) : null}
               </div>
             </div>
@@ -585,25 +603,41 @@ function optionsToProducts(options: LovableChoiceOption[], catalog: ConfigProduc
     (o) => o.sourceKind === "esf" || o.sourceKind === "stock" || o.sourceKind === "other",
   );
   if (!esf.length) return [];
-  return esf.map((o) => {
-    const fromCatalog = catalog.find(
-      (p) => p.productId === o.productId || p.optionKey === o.optionKey,
-    );
-    return {
-      ...(fromCatalog || {}),
-      productId: o.productId || fromCatalog?.productId || o.optionKey,
-      category: fromCatalog?.category || String(o.role),
-      displayName: o.displayLabel || fromCatalog?.displayName || "Option",
-      description: o.description ?? fromCatalog?.description ?? null,
-      imageUrl: fromCatalog?.imageUrl || o.imageAssetRef || null,
-      manufacturer: fromCatalog?.manufacturer || null,
-      model: fromCatalog?.model || null,
-      availabilityText: o.availabilityText || fromCatalog?.availabilityText || null,
-      optionKey: o.optionKey,
-      variants: fromCatalog?.variants || [],
-      sellPrice: o.visibleSellPrice ?? fromCatalog?.sellPrice ?? null,
-    } as ConfigProduct;
-  });
+  return esf
+    .filter((o) => {
+      const id = String(o.productId || o.optionKey || "").toLowerCase();
+      const label = String(o.displayLabel || "").toLowerCase();
+      return !/strainer|flange|\bgrid\b/.test(id) && !/strainer|flange|\bgrid\b/.test(label);
+    })
+    .map((o) => {
+      const fromCatalog = catalog.find(
+        (p) => p.productId === o.productId || p.optionKey === o.optionKey,
+      );
+      const availability =
+        fromCatalog?.availability ||
+        o.catalogAvailability ||
+        (String(o.productId || "").startsWith("blanco:") ? "special_order" : "stock");
+      const product: ConfigProduct = {
+        ...(fromCatalog || {}),
+        productId: o.productId || fromCatalog?.productId || o.optionKey,
+        category: fromCatalog?.category || String(o.role),
+        displayName: o.displayLabel || fromCatalog?.displayName || "Option",
+        description: o.description ?? fromCatalog?.description ?? null,
+        imageUrl: null,
+        manufacturer: fromCatalog?.manufacturer || o.manufacturer || null,
+        model: fromCatalog?.model || o.model || null,
+        availability,
+        availabilityText:
+          o.availabilityText ||
+          fromCatalog?.availabilityText ||
+          (availability === "stock" ? "Stock" : availability === "special_order" ? "Special order" : null),
+        optionKey: o.optionKey,
+        variants: fromCatalog?.variants || [],
+      };
+      product.imageUrl =
+        enrichProductImageUrl(product) || fromCatalog?.imageUrl || o.imageAssetRef || null;
+      return product;
+    });
 }
 
 function clearIncompatibleAccessoriesForRoom(
@@ -816,50 +850,118 @@ function PlumbingSourceModal({
     (o) => o.sourceKind === "esf" || o.sourceKind === "stock" || o.sourceKind === "other",
   );
   const productCards = optionsToProducts(esfOptions, products);
+  const stockProducts = productCards.filter(
+    (p) => String(p.availability || "").toLowerCase() === "stock",
+  );
+  const specialOrderProducts = productCards.filter(
+    (p) => String(p.availability || "").toLowerCase() !== "stock",
+  );
   const title = role === "sink" ? "Sink" : "Faucet";
   const noneLabel = role === "sink" ? "No sink" : "No faucet";
   const customerLabel =
     role === "sink" ? "Customer-provided sink" : "Customer-provided faucet";
-  const esfLabel = role === "sink" ? "Select an ESF sink" : "Select an ESF faucet";
-  const source = draft.source === "customer_provided" || draft.source === "none" || draft.source === "esf"
-    ? draft.source
-    : draft.source === "stock"
-      ? "esf"
-      : "none";
+  const source =
+    draft.source === "customer_provided" || draft.source === "none" || draft.source === "esf"
+      ? draft.source
+      : draft.source === "stock"
+        ? "esf"
+        : "none";
+  const [esfPane, setEsfPane] = useState<"menu" | "stock" | "special_order">("menu");
+  const showingCatalog = esfPane === "stock" || esfPane === "special_order";
 
   return (
     <ModalShell
       title={title}
       eyebrow={room.name}
       onClose={onClose}
-      wide={source === "esf"}
+      wide={showingCatalog}
       testId={`de-${role}-modal`}
     >
-      <div className="flex flex-col gap-2" data-testid={`de-${role}-source-choices`}>
-        {(
-          [
-            ["none", noneLabel],
-            ["customer_provided", customerLabel],
-            ["esf", esfLabel],
-          ] as const
-        ).map(([kind, label]) => {
-          const opt = findOptionBySource(options, role, kind);
-          const active = source === kind;
-          return (
+      {showingCatalog ? (
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <button
+            type="button"
+            className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => setEsfPane("menu")}
+            data-testid={`de-${role}-catalog-back`}
+          >
+            ← Back to {role} options
+          </button>
+          <div className="text-xs text-muted-foreground">
+            {esfPane === "stock" ? "ESF Stock Sinks" : role === "sink" ? "Special-Order Sinks" : "ESF faucets"}
+          </div>
+        </div>
+      ) : null}
+
+      {!showingCatalog ? (
+        <div className="flex flex-col gap-2" data-testid={`de-${role}-source-choices`}>
+          {(
+            [
+              ["none", noneLabel],
+              ["customer_provided", customerLabel],
+            ] as const
+          ).map(([kind, label]) => {
+            const opt = findOptionBySource(options, role, kind);
+            const active = source === kind;
+            return (
+              <button
+                key={kind}
+                type="button"
+                data-testid={`de-${role}-source-${kind}`}
+                className={`rounded-xl border px-4 py-3 text-left text-sm font-medium ${
+                  active ? "border-foreground bg-muted/30" : "border-border"
+                }`}
+                onClick={() => {
+                  setEsfPane("menu");
+                  onSelectSource(kind, opt?.optionKey);
+                }}
+              >
+                {opt?.displayLabel || label}
+              </button>
+            );
+          })}
+          {role === "sink" ? (
+            <>
+              <button
+                type="button"
+                data-testid="de-sink-source-stock"
+                className="rounded-xl border border-border px-4 py-3 text-left text-sm font-medium"
+                onClick={() => setEsfPane("stock")}
+              >
+                ESF Stock Sinks
+                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                  {stockProducts.length} in-stock options for this room
+                </span>
+              </button>
+              <button
+                type="button"
+                data-testid="de-sink-source-special-order"
+                className="rounded-xl border border-border px-4 py-3 text-left text-sm font-medium"
+                onClick={() => setEsfPane("special_order")}
+              >
+                Special-Order Sinks
+                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                  Blanco and other special-order programs
+                </span>
+              </button>
+            </>
+          ) : (
             <button
-              key={kind}
               type="button"
-              data-testid={`de-${role}-source-${kind}`}
+              data-testid="de-faucet-source-esf"
               className={`rounded-xl border px-4 py-3 text-left text-sm font-medium ${
-                active ? "border-foreground bg-muted/30" : "border-border"
+                source === "esf" ? "border-foreground bg-muted/30" : "border-border"
               }`}
-              onClick={() => onSelectSource(kind, opt?.optionKey)}
+              onClick={() => {
+                onSelectSource("esf", null);
+                setEsfPane("special_order");
+              }}
             >
-              {opt?.displayLabel || label}
+              Select an ESF faucet
             </button>
-          );
-        })}
-      </div>
+          )}
+        </div>
+      ) : null}
 
       {source === "customer_provided" ? (
         <div className="mt-5 space-y-3" data-testid={`de-${role}-customer-fields`}>
@@ -894,10 +996,16 @@ function PlumbingSourceModal({
         </div>
       ) : null}
 
-      {source === "esf" ? (
-        <div className="mt-5 space-y-4">
+      {showingCatalog ? (
+        <div className="mt-2 space-y-4" data-testid={`de-${role}-catalog-${esfPane}`}>
           <ProductCards
-            products={productCards}
+            products={
+              role === "sink" && esfPane === "stock"
+                ? stockProducts
+                : role === "sink"
+                  ? specialOrderProducts
+                  : productCards
+            }
             selectedOptionKey={draft.optionKey || null}
             onPick={onSelectProduct}
             role={role}
@@ -1096,10 +1204,12 @@ function CustomerRoomCard({
   room,
   onOpenModal,
   onRename,
+  onEdgeChange,
 }: {
   room: LovableRoom;
   onOpenModal: (kind: Exclude<ModalKind, null>) => void;
   onRename: (name: string) => void;
+  onEdgeChange?: (optionKey: string) => void;
 }) {
   const color = room.colors.find((c) => c.id === room.selectedColorId) || room.colors[0];
   const has = (role: string) => room.choiceOptions.some((c) => c.role === role);
@@ -1145,7 +1255,7 @@ function CustomerRoomCard({
           </dt>
           <dd className="mt-0.5 font-medium text-foreground" data-testid="de-room-backsplash-status">
             {room.backsplashSummary ||
-              (room.backsplashIncluded ? "Included" : "Not included")}
+              (room.backsplashIncluded ? "Original selection" : "Not included")}
           </dd>
         </div>
       </dl>
@@ -1153,9 +1263,9 @@ function CustomerRoomCard({
         {room.measurementStatus || "Measurements verified by estimator — locked for this estimate."}
       </p>
 
-      <div className="mt-5 space-y-2">
-        <div className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Selections
+      <div className="mt-5 grid gap-2 md:grid-cols-2" data-testid="de-room-selections">
+        <div className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground md:col-span-2">
+          Primary selections
         </div>
 
         <button
@@ -1175,7 +1285,7 @@ function CustomerRoomCard({
               </span>
               <span className="block text-xs text-muted-foreground">
                 {color?.pricingGroupLabel || "Elite 100"}
-                {color?.includedInBaseline ? " · Included" : " · Upgrade may apply"}
+                {color?.includedInBaseline ? " · Original selection" : " · Upgrade may apply"}
               </span>
             </span>
           </span>
@@ -1246,12 +1356,33 @@ function CustomerRoomCard({
         ) : null}
 
         {has("edge") ? (
-          <SummaryRow
-            label="Edge"
-            value={room.edgeSummary || "Choose edge"}
-            onClick={() => onOpenModal("edge")}
-            testId="de-open-edge-modal"
-          />
+          <label className="grid gap-1 rounded-xl border border-border bg-background px-4 py-3" data-testid="de-edge-dropdown">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Edge profile</span>
+            <select
+              className="mt-0.5 w-full rounded-md border border-border bg-background px-2 py-2 text-sm font-medium text-foreground"
+              value={
+                room.choiceOptions.find((c) => c.role === "edge" && c.selected)?.optionKey ||
+                room.choiceOptions.find((c) => c.role === "edge" && c.includedInBaseline)?.optionKey ||
+                ""
+              }
+              onChange={(e) => {
+                if (e.target.value) onEdgeChange?.(e.target.value);
+              }}
+              aria-label="Edge profile"
+            >
+              {room.choiceOptions
+                .filter((c) => c.role === "edge")
+                .map((opt) => {
+                  const effect = opt.priceEffectLabel || (opt.includedInBaseline ? "Original selection" : "");
+                  const label = effect ? `${opt.displayLabel} — ${effect}` : opt.displayLabel;
+                  return (
+                    <option key={opt.optionKey} value={opt.optionKey}>
+                      {label}
+                    </option>
+                  );
+                })}
+            </select>
+          </label>
         ) : null}
 
         {has("specialty") || room.specialtyProducts.length ? (
@@ -1317,7 +1448,25 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewRequest, setReviewRequest] = useState<CustomerReviewRequest | null>(null);
+  const [estimateTab, setEstimateTab] = useState<"original" | "updated" | "changes">("updated");
+  const [breakdownOpen, setBreakdownOpen] = useState(true);
   const requestSeq = useMemo(() => ({ n: 0 }), []);
+  const saveFnRef = useRef<() => Promise<number | null> | number | null | void>(() => null);
+  const hydrateReadyRef = useRef(false);
+
+  useEffect(() => {
+    hydrateReadyRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!hydrateReadyRef.current) return;
+    if (saveState !== "unsaved") return;
+    const timer = window.setTimeout(() => {
+      void saveFnRef.current();
+    }, 450);
+    return () => window.clearTimeout(timer);
+    // Debounced canonical autosave for all dirty draft fields (info, notes, qty, products).
+  }, [saveState, infoDraft, roomLabels, roomNotes, projectNote, productDrafts, backsplashDrafts, qty]);
 
   useEffect(() => {
     if (!reviewUiEnabled()) return;
@@ -1672,24 +1821,151 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     }
   }
 
+  saveFnRef.current = () => onSave();
+
+  const originalBreakdown = buildOriginalBreakdown(state.estimate);
+  const updatedBreakdown = buildUpdatedBreakdown({
+    calculation: latestCalc,
+    rooms: vm.rooms.map((r) => ({
+      id: r.id,
+      name: r.name,
+      selectedColorName: r.selectedColorName,
+    })),
+  });
+  const changeLines = vm.rooms.flatMap((room) => {
+    const lines: Array<{
+      roomName: string;
+      category: string;
+      originalLabel: string;
+      newLabel: string;
+      delta: number | null;
+      reviewRequired?: boolean;
+    }> = [];
+    const roles: Array<{ role: string; category: string; summary: string | null }> = [
+      { role: "backsplash", category: "Backsplash", summary: room.backsplashSummary },
+      { role: "sink", category: "Sink", summary: room.sinkSummary },
+      { role: "faucet", category: "Faucet", summary: room.faucetSummary },
+      { role: "edge", category: "Edge", summary: room.edgeSummary },
+    ];
+    for (const { role, category, summary } of roles) {
+      const opts = room.choiceOptions.filter((c) => c.role === role);
+      const selected = opts.find((c) => c.selected);
+      const baseline = opts.find((c) => c.includedInBaseline);
+      if (!selected || !baseline) continue;
+      if (selected.optionKey === baseline.optionKey) continue;
+      const delta =
+        selected.visibleDelta != null
+          ? Number(selected.visibleDelta)
+          : selected.visibleSellPrice != null
+            ? Number(selected.visibleSellPrice)
+            : null;
+      lines.push({
+        roomName: room.name,
+        category,
+        originalLabel: baseline.displayLabel,
+        newLabel: selected.displayLabel || summary || "Updated",
+        delta: Number.isFinite(delta as number) ? delta : null,
+        reviewRequired:
+          selected.priceEffectLabel === "Requires estimator review" ||
+          selected.availabilityState === "review_required",
+      });
+    }
+    const color = room.colors.find((c) => c.id === room.selectedColorId);
+    const baselineColor = room.colors.find((c) => c.includedInBaseline);
+    if (color && baselineColor && color.optionKey !== baselineColor.optionKey) {
+      lines.push({
+        roomName: room.name,
+        category: "Material",
+        originalLabel: baselineColor.name,
+        newLabel: color.name,
+        delta: null,
+      });
+    }
+    return lines;
+  });
+  const changesBreakdown = buildChangesBreakdown({
+    changeLines,
+    displayTotalDelta: latestCalc?.displayTotalDelta ?? null,
+  });
+  const activeBreakdown =
+    estimateTab === "original"
+      ? originalBreakdown
+      : estimateTab === "changes"
+        ? changesBreakdown
+        : updatedBreakdown;
+
   const summaryCard = (
-    <div className="rounded-2xl border border-border bg-background p-5 shadow-sm">
+    <div className="rounded-2xl border border-border bg-background p-5 shadow-sm" data-testid="de-estimate-panel">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">Your estimate</div>
-      <div className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
-        {vm.updatedTotalLabel}
+      <div className="mt-3 flex gap-1 rounded-lg border border-border bg-muted/30 p-1" data-testid="de-estimate-tabs" role="tablist">
+        {(
+          [
+            ["original", "Original"],
+            ["updated", "Updated"],
+            ["changes", "Changes"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={estimateTab === id}
+            data-testid={`de-estimate-tab-${id}`}
+            className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition ${
+              estimateTab === id
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setEstimateTab(id)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
-      <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm">
-        <Row label="Original estimate" value={vm.originalTotalLabel} muted />
-        {vm.materialUpgradeLabel ? (
-          <Row label="Material / option changes" value={vm.materialUpgradeLabel} />
-        ) : (
-          <Row label="Change from original" value={vm.changeFromOriginalLabel} />
-        )}
+      <div className="mt-4 space-y-2 text-sm">
+        <Row label="Original total" value={vm.originalTotalLabel} muted />
+        <Row label="Current configured total" value={vm.updatedTotalLabel} />
+        <Row label="Difference" value={vm.materialUpgradeLabel || vm.changeFromOriginalLabel} />
         <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold">
-          <span>Updated estimate</span>
-          <span data-testid="de-updated-total">{vm.updatedTotalLabel}</span>
+          <span>{activeBreakdown.title}</span>
+          <span data-testid="de-updated-total">{activeBreakdown.totalLabel}</span>
         </div>
       </div>
+      <button
+        type="button"
+        className="mt-3 text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+        data-testid="de-view-breakdown"
+        onClick={() => setBreakdownOpen((v) => !v)}
+      >
+        {breakdownOpen ? "Hide breakdown" : "View breakdown"}
+      </button>
+      {breakdownOpen ? (
+        <div
+          className="mt-3 max-h-[40vh] space-y-2 overflow-y-auto border-t border-border pt-3"
+          data-testid="de-estimate-breakdown"
+        >
+          {activeBreakdown.lines.length ? (
+            activeBreakdown.lines.map((line) => (
+              <div key={line.key} className="text-xs" data-testid="de-breakdown-line">
+                {line.roomName ? (
+                  <div className="font-medium text-foreground">{line.roomName}</div>
+                ) : null}
+                <div className="flex items-start justify-between gap-2 text-muted-foreground">
+                  <span>
+                    {line.category ? `${line.category}: ` : ""}
+                    {line.label}
+                  </span>
+                  {line.amountLabel ? (
+                    <span className="shrink-0 tabular-nums text-foreground">{line.amountLabel}</span>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-xs text-muted-foreground">{activeBreakdown.emptyMessage}</p>
+          )}
+        </div>
+      ) : null}
       <p className="mt-3 text-[11px] text-muted-foreground">
         Pricing valid through {formatDate(vm.pricingValidThrough)}. Totals calculated by your estimator
         system — not final acceptance.
@@ -1760,7 +2036,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   return (
     <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-28 lg:pb-10">
       <header className="border-b border-border bg-background">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex w-[min(100%,1650px)] max-w-[1650px] items-center justify-between px-4 sm:px-6 py-4">
           <div className="text-sm font-semibold tracking-tight text-foreground">
             Elite Surfaces &amp; Fabrication
           </div>
@@ -1768,7 +2044,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl px-6 py-10">
+      <div className="mx-auto w-[min(95vw,1650px)] max-w-[1650px] px-4 sm:px-6 py-8 lg:py-10" data-testid="de-page-shell">
         <div className="text-xs uppercase tracking-widest text-muted-foreground">Your project</div>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
           {vm.customerName}
@@ -1818,7 +2094,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             Started from your estimator&apos;s records. Suggested corrections are saved with your
             selections for review — they do not change source accounts directly.
           </p>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {(
               [
                 ["customerName", "Customer name"],
@@ -1857,7 +2133,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           </div>
         </section>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,30%)] xl:grid-cols-[minmax(0,1fr)_minmax(300px,28%)]" data-testid="de-main-layout">
           <div className="space-y-4">
             {vm.rooms.map((room) => (
               <CustomerRoomCard
@@ -1868,6 +2144,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                   setRoomLabels((prev) => ({ ...prev, [room.id]: name }));
                   setSaveState("unsaved");
                 }}
+                onEdgeChange={(optionKey) => selectChoice(optionKey, "edge", room.id)}
               />
             ))}
 
@@ -1958,12 +2235,12 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             ) : null}
           </div>
 
-          <aside className="hidden lg:sticky lg:top-6 lg:block lg:self-start">{summaryCard}</aside>
+          <aside className="hidden lg:sticky lg:top-6 lg:block lg:self-start" data-testid="de-estimate-workspace">{summaryCard}</aside>
         </div>
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background p-4 shadow-[0_-8px_28px_rgba(0,0,0,0.08)] lg:hidden">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+        <div className="mx-auto flex w-[min(100%,1650px)] items-center justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Updated</div>
             <div className="text-lg font-semibold tabular-nums">{vm.updatedTotalLabel}</div>
@@ -2065,16 +2342,6 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               </div>
             ))}
           </div>
-        </ModalShell>
-      ) : null}
-
-      {modalRoom && activeModal?.kind === "edge" ? (
-        <ModalShell title="Edge" eyebrow={modalRoom.name} onClose={() => setActiveModal(null)} testId="de-edge-modal">
-          <ChoiceRadio
-            options={modalRoom.choiceOptions.filter((c) => c.role === "edge")}
-            name={`edge-${modalRoom.id}`}
-            onSelect={(optionKey) => selectChoice(optionKey, "edge", modalRoom.id)}
-          />
         </ModalShell>
       ) : null}
 

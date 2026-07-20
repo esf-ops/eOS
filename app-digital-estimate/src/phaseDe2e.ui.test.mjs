@@ -33,9 +33,9 @@ assert.equal(/localStorage\./.test(api + app + configView), false);
 assert.equal(/sessionStorage\./.test(api + app + configView), false);
 assert.ok(app.includes("parseTokenFromHash") || api.includes("parseTokenFromHash"));
 assert.ok(app.includes("ReadOnlyEstimateView"));
-assert.ok(configView.includes("Original estimate"));
-assert.ok(configView.includes("Updated estimate"));
-assert.ok(configView.includes("Change from original") || configView.includes("Selected changes"));
+assert.ok(configView.includes("Original estimate") || configView.includes("Original total"));
+assert.ok(configView.includes("Updated estimate") || configView.includes("Current configured total") || configView.includes("Your updated estimate"));
+assert.ok(configView.includes("Change from original") || configView.includes("Selected changes") || configView.includes("Difference"));
 assert.ok(configView.includes("not final acceptance") || configView.includes("not an order or acceptance"));
 assert.ok(
   configView.includes("Pick an approved Elite 100 color") ||

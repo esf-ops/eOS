@@ -23,6 +23,17 @@ export const SIDE_SPLASH_HEIGHT_IN = STANDARD_BACKSPLASH_HEIGHT_IN;
 export const DEFAULT_ACCESSORY_MAX_QTY = 5;
 
 /**
+ * Grids, strainers, and flanges are accessories — never first-class sink cards.
+ * @param {{ productId?: string, displayName?: string, category?: string }} product
+ */
+export function isNonSinkPlumbingRow(product) {
+  const id = String(product?.productId || "").toLowerCase();
+  const name = String(product?.displayName || "").toLowerCase();
+  if (/strainer|flange|\bgrid\b/.test(id) || /strainer|flange|\bgrid\b/.test(name)) return true;
+  return false;
+}
+
+/**
  * @param {{ roomKey?: string, displayName?: string, name?: string, roomType?: string, type?: string }} room
  * @returns {'kitchen' | 'bar_prep' | 'vanity' | 'non_plumbing'}
  */
@@ -323,7 +334,7 @@ export function buildSinkOptionDefinitions(args) {
       category: "sink",
       roomType,
       customerVisibleOnly: true
-    }).filter((p) => p.active);
+    }).filter((p) => p.active && !isNonSinkPlumbingRow(p));
     for (const product of products) {
       // Seed family rows for Blanco (variants), not every color SKU.
       const safe = toCustomerSafeOptionFields(product);

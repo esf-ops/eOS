@@ -150,7 +150,7 @@ const included = toPublicConfigurationOption({
   sell_price: 0,
   included_in_baseline: true
 });
-assert.equal(included.priceEffectLabel, "Included");
+assert.equal(included.priceEffectLabel, "Original selection");
 
 const review = toPublicConfigurationOption({
   option_key: "specialty:kitchen:esf:glow",
@@ -159,11 +159,13 @@ const review = toPublicConfigurationOption({
   sell_price: 0,
   compatibility_json: { estimatorReviewRequired: true }
 });
-assert.equal(review.priceEffectLabel, "Requires review");
+assert.equal(review.priceEffectLabel, "Requires estimator review");
 
 assert.equal(isAccessoryFamilyHeading({ displayName: "Diamond 50/50 Accessories", variants: [{}] }), true);
 assert.equal(isAccessoryFamilyHeading({ displayName: "3018 Grid", variants: [] }), false);
 assert.equal(conciseCustomerTitle("221008 Diamond Grid For 50/50 Left Side"), "Diamond Grid For 50/50 Left Side");
-assert.equal(customerPriceEffectLabel({ includedInBaseline: true }), "Included");
+assert.equal(customerPriceEffectLabel({ includedInBaseline: true }), "Original selection");
+assert.equal(customerPriceEffectLabel({ customerPriceTreatment: "no_change" }), "No change");
+assert.equal(customerPriceEffectLabel({ visibleDelta: -120 }), "−$120");
 
 console.log("ok: customerFacingCopy + room eligibility + accessories + specialty polish");

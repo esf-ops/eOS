@@ -155,6 +155,22 @@ async function runScenario({ contextOptions = {} } = {}) {
       await route.fallback();
       return;
     }
+    if (route.request().url().includes("/v1/") && route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: {
+          "Access-Control-Allow-Origin": origin,
+          "Access-Control-Allow-Credentials": "true"
+        },
+        body: JSON.stringify({
+          ok: true,
+          estimate: BASELINE_RESPONSE.estimate,
+          access: { status: "active", pricingValidThrough: BASELINE_RESPONSE.estimate.pricingValidThrough }
+        })
+      });
+      return;
+    }
     await route.fulfill({
       status: 204,
       headers: {
@@ -194,6 +210,22 @@ async function runScenario({ contextOptions = {} } = {}) {
           "Access-Control-Allow-Credentials": "true"
         },
         body: JSON.stringify(BASELINE_RESPONSE)
+      });
+      return;
+    }
+    if (request.url().includes("/api/public-digital-estimate/v1/") && request.method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: {
+          "Access-Control-Allow-Origin": origin,
+          "Access-Control-Allow-Credentials": "true"
+        },
+        body: JSON.stringify({
+          ok: true,
+          estimate: BASELINE_RESPONSE.estimate,
+          access: { status: "active", pricingValidThrough: BASELINE_RESPONSE.estimate.pricingValidThrough }
+        })
       });
       return;
     }
