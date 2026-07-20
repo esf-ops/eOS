@@ -432,6 +432,27 @@ button.linkish {
 .eq-summary-tile.is-active { border-color: var(--eos-accent); background: var(--eos-accent-soft); }
 .eq-summary-value { font-size: 1.2rem; font-weight: 700; color: var(--eos-ink); }
 .eq-summary-label { font-size: 0.72rem; color: var(--eos-muted); }
+.eq-plain-status { font-size: 0.86rem; color: var(--eos-ink); margin: 4px 0; }
+.eq-de-pilot-diagnostic details {
+  margin-top: 4px;
+  border: 1px solid var(--eos-border);
+  border-radius: 8px;
+  background: #f7f8fa;
+  padding: 2px 10px;
+}
+.eq-de-pilot-diagnostic summary.eq-troubleshooting-toggle {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--eos-muted);
+  padding: 6px 0;
+}
+.eq-de-pilot-diagnostic details ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  color: var(--eos-muted);
+}
 .eq-filters {
   display: grid;
   grid-template-columns: 2fr 1fr 1fr;

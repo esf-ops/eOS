@@ -19,6 +19,7 @@ import {
   buildChangesBreakdown,
   buildOriginalBreakdown,
   buildUpdatedBreakdown,
+  groupBreakdownLinesByRoom,
 } from "./customerEstimateBreakdown";
 import { enrichProductImageUrl, resolveProductImageFields } from "./productCatalogImages";
 import {
@@ -2295,20 +2296,33 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           data-testid="de-estimate-breakdown"
         >
           {activeBreakdown.lines.length ? (
-            activeBreakdown.lines.map((line) => (
-              <div key={line.key} className="text-xs" data-testid="de-breakdown-line">
-                {line.roomName ? (
-                  <div className="font-medium text-foreground">{line.roomName}</div>
+            groupBreakdownLinesByRoom(activeBreakdown.lines).map((group) => (
+              <div
+                key={group.roomName || "project"}
+                className="space-y-1.5 border-b border-border/60 pb-2 last:border-b-0"
+                data-testid="de-breakdown-room-group"
+              >
+                {group.roomName ? (
+                  <div
+                    className="text-xs font-semibold text-foreground"
+                    data-testid="de-breakdown-room-heading"
+                  >
+                    {group.roomName}
+                  </div>
                 ) : null}
-                <div className="flex items-start justify-between gap-2 text-muted-foreground">
-                  <span>
-                    {line.category ? `${line.category}: ` : ""}
-                    {line.label}
-                  </span>
-                  {line.amountLabel ? (
-                    <span className="shrink-0 tabular-nums text-foreground">{line.amountLabel}</span>
-                  ) : null}
-                </div>
+                {group.lines.map((line) => (
+                  <div key={line.key} className="text-xs" data-testid="de-breakdown-line">
+                    <div className="flex items-start justify-between gap-2 text-muted-foreground">
+                      <span>
+                        {line.category ? `${line.category}: ` : ""}
+                        {line.label}
+                      </span>
+                      {line.amountLabel ? (
+                        <span className="shrink-0 tabular-nums text-foreground">{line.amountLabel}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))
           ) : (

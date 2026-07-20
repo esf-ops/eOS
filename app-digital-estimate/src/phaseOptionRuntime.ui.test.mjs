@@ -20,7 +20,11 @@ assert.ok(view.includes("All changes saved") || view.includes("Couldn't save —
 assert.ok(!view.includes('"Save selections"'), "permanent Save selections CTA removed");
 assert.ok(view.includes("AccessoriesOrSpecialtyModal"));
 assert.ok(view.includes("Sink accessories"));
-assert.ok(view.includes("Plumbing add-ons"));
+// Pre-existing drift found during the production polish phase: this assertion previously
+// required an exact-case "Plumbing add-ons" substring that never matched the shipped
+// "Faucet and plumbing add-ons" section header (lowercase "plumbing"). Not a business-logic
+// bug — isolated here as a stale test expectation and corrected to a case-insensitive check.
+assert.ok(/plumbing add-ons/i.test(view), "expected a Faucet/plumbing add-ons accessory section header");
 assert.ok(view.includes("clearIncompatibleAccessoriesForRoom"));
 
 assert.ok(vm.includes("looksLikeUuid"));

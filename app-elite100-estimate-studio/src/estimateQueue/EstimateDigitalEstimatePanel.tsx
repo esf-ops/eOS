@@ -605,18 +605,25 @@ export default function EstimateDigitalEstimatePanel({
           </p>
         ) : null}
         {linkDiagnostics ? (
-          <div className="eq-de-pilot-diagnostic" data-testid="eq-de-link-diagnostics" role="status">
-            <strong>Link recovery diagnostic</strong>
-            <ul>
-              <li>wrapKeyPresent: {String(linkDiagnostics.wrapKeyPresent)}</li>
-              <li>wrapKeyLength: {linkDiagnostics.wrapKeyLength ?? "—"}</li>
-              <li>tokenWrappedPresent: {String(linkDiagnostics.tokenWrappedPresent)}</li>
-              <li>tokenWrappedLength: {linkDiagnostics.tokenWrappedLength ?? "—"}</li>
-              <li>activeTokenRows: {linkDiagnostics.activeTokenRows ?? "—"}</li>
-              <li>selectedTokenStatus: {linkDiagnostics.selectedTokenStatus || "—"}</li>
-              <li>decryptSucceeded: {String(linkDiagnostics.decryptSucceeded)}</li>
-              <li>code: {linkDiagnostics.code || "—"}</li>
-            </ul>
+          <div className="eq-de-pilot-diagnostic" role="status">
+            <p className="eq-plain-status">
+              {linkDiagnostics.decryptSucceeded === false
+                ? "The customer link could not be recovered automatically. Use Replace Link to issue a new one."
+                : "Customer link recovery check passed."}
+            </p>
+            <details data-testid="eq-de-link-diagnostics">
+              <summary className="eq-troubleshooting-toggle">Troubleshooting details</summary>
+              <ul>
+                <li>wrapKeyPresent: {String(linkDiagnostics.wrapKeyPresent)}</li>
+                <li>wrapKeyLength: {linkDiagnostics.wrapKeyLength ?? "—"}</li>
+                <li>tokenWrappedPresent: {String(linkDiagnostics.tokenWrappedPresent)}</li>
+                <li>tokenWrappedLength: {linkDiagnostics.tokenWrappedLength ?? "—"}</li>
+                <li>activeTokenRows: {linkDiagnostics.activeTokenRows ?? "—"}</li>
+                <li>selectedTokenStatus: {linkDiagnostics.selectedTokenStatus || "—"}</li>
+                <li>decryptSucceeded: {String(linkDiagnostics.decryptSucceeded)}</li>
+                <li>code: {linkDiagnostics.code || "—"}</li>
+              </ul>
+            </details>
           </div>
         ) : null}
       </div>
