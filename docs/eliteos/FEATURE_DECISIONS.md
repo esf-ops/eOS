@@ -1817,3 +1817,14 @@
 | **SQL** | Manual apply: `backend-core/supabase/eliteos_workforce_executive_dashboard_access_v1.sql` (widens CHECK to include `executive_dashboard`). |
 | **Ops** | Apply SQL, redeploy **backend-core** + **app-hr**. Refresh users in Department Access after invites / HR Head grants. |
 | **Out of scope** | Browser queries to `auth.users`; granting System Admin / org settings via Executive Dashboard; auto-apply migration. |
+
+### 131. Digital Estimate CSP images, selection concurrency, save UI (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | (1) Customer HTML CSP `img-src` allows **`'self' data: blob:`** plus the origin from **`VITE_SUPABASE_URL`** (Elite 100 Storage thumbs/previews). No `https:` / `*` image wildcards; `script-src` / `connect-src` unchanged aside from existing Brain origin. CSP is injected at **app-digital-estimate build** (`vite.config.ts` → `htmlCsp.mjs`), not by API JSON headers. (2) Hosted sink **409** was **optimistic concurrency** (`row_version_conflict`): selection handlers fired immediate PUT **and** debounced autosave with the same `expectedRowVersion`. Saves are now **single-flight + queued draft**; **409 / DE-CONFIGURATION-STALE** triggers one refetch + retry. Missing options return **422 `option_not_allowed` / DE-OPTION-NOT-ALLOWED**; envelope mismatch returns **409 `stale_configuration` / DE-CONFIGURATION-STALE**. (3) Product cards render only when a **server envelope option key** exists. (4) Authoritative configured total updates only after successful save (`savedCalc`); pending labeled while unsaved; failure reverts to last saved total. (5) Legacy mobile bottom **Save** bar removed — one autosave status system (+ Retry on error). |
+| **Why** | Hosted materials blocked by CSP `img-src 'self' data:`; sink select raced to 409; totals looked finalized while a conflicting PUT failed; duplicate Save UI confused customers. |
+| **SQL** | None for this slice. Prior required migration may still apply: `eliteos_digital_estimate_configuration_updated_event_v1.sql`. |
+| **Ops** | Set **`VITE_SUPABASE_URL`** on the Digital Estimate Vercel project (public project URL only). Deploy **app-digital-estimate** + **backend-core**. |
+| **Out of scope** | Sink/faucet/add-on catalog cleanup (deferred); relaxing connect-src / script-src. |

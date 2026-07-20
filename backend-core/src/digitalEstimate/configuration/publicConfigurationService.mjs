@@ -884,7 +884,10 @@ export function createPublicConfigurationService(deps) {
         throw sessionRecoverable("session_invalid", "Please refresh and try again", "session_expired");
       }
       if (Number(session.row_version) !== Number(expectedRowVersion)) {
-        throw safeFail("row_version_conflict", "Please refresh and try again", 409);
+        throw safeFail("row_version_conflict", "Please refresh and try again", 409, {
+          diagnosticCode: "DE-CONFIGURATION-STALE",
+          recoverable: true
+        });
       }
 
       const publication = await deRepository.getPublication(
@@ -920,10 +923,18 @@ export function createPublicConfigurationService(deps) {
         throw sessionRecoverable("session_invalid", "Please refresh and try again", "envelope_missing");
       }
       if (!session.envelope_id || String(session.envelope_id) !== String(activeEnvelope.id)) {
-        throw sessionRecoverable("session_invalid", "Please refresh and try again", "envelope_mismatch");
+        throw safeFail("stale_configuration", "Please refresh and try again", 409, {
+          diagnosticCode: "DE-CONFIGURATION-STALE",
+          recoverable: true,
+          exchangeReason: "envelope_mismatch"
+        });
       }
       if (activeEnvelope.status !== "active") {
-        throw sessionRecoverable("session_invalid", "Please refresh and try again", "envelope_inactive");
+        throw safeFail("stale_configuration", "Please refresh and try again", 409, {
+          diagnosticCode: "DE-CONFIGURATION-STALE",
+          recoverable: true,
+          exchangeReason: "envelope_inactive"
+        });
       }
 
       await ensurePolicyFixtures(session.organization_id);
@@ -973,16 +984,10 @@ export function createPublicConfigurationService(deps) {
           const key = item.optionKey || item.option_key;
           const opt = findEnvelopeOptionForSelectionKey(options, key, id);
           if (!opt) {
-            const isEdge = String(key || "").startsWith("edge:");
-            throw safeFail(
-              isEdge ? "option_not_allowed" : "invalid_selection",
-              "That selection is unavailable",
-              422,
-              {
-                selectionKey: String(key || id || "").slice(0, 160) || null,
-                diagnosticCode: isEdge ? "DE-OPTION-NOT-ALLOWED" : "DE-SAVE"
-              }
-            );
+            throw safeFail("option_not_allowed", "That selection is unavailable", 422, {
+              selectionKey: String(key || id || "").slice(0, 160) || null,
+              diagnosticCode: "DE-OPTION-NOT-ALLOWED"
+            });
           }
           const avail = opt.availability_state || opt.availabilityState || "active";
           if (avail !== "active") {
@@ -1000,16 +1005,10 @@ export function createPublicConfigurationService(deps) {
           const opt = findEnvelopeOptionForSelectionKey(options, remapped, null);
           if (!opt) {
             if (Number(qty) <= 0) continue;
-            const isEdge = remapped.startsWith("edge:");
-            throw safeFail(
-              isEdge ? "option_not_allowed" : "invalid_selection",
-              "That selection is unavailable",
-              422,
-              {
-                selectionKey: String(remapped).slice(0, 160),
-                diagnosticCode: isEdge ? "DE-OPTION-NOT-ALLOWED" : "DE-SAVE"
-              }
-            );
+            throw safeFail("option_not_allowed", "That selection is unavailable", 422, {
+              selectionKey: String(remapped).slice(0, 160),
+              diagnosticCode: "DE-OPTION-NOT-ALLOWED"
+            });
           }
           selectionMap[opt.option_key || opt.optionKey] = Number(qty) || 0;
         }
@@ -1682,7 +1681,7 @@ export function createPublicConfigurationService(deps) {
       } catch (e) {
         if (e?.statusCode === 409 || e?.code === "row_version_conflict") {
           throw safeFail("stale_configuration", "Please refresh and try again", 409, {
-            diagnosticCode: "DE-SAVE",
+            diagnosticCode: "DE-CONFIGURATION-STALE",
             recoverable: true
           });
         }

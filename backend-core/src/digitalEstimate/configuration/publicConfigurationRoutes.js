@@ -58,8 +58,10 @@ const SAFE_PUBLIC_ERROR_CODES = new Set([
   "forbidden_caller_authority",
   "unknown_option",
   "invalid_selection",
+  "option_not_allowed",
   "unresolved_product",
   "configuration_unavailable",
+  "configuration_contract_invalid",
   "publication_revoked",
   "publication_expired",
   "publication_unavailable",
@@ -75,7 +77,10 @@ const SAFE_DIAGNOSTIC_CODES = new Set([
   "DE-STATE",
   "DE-RENDER",
   "DE-ORIGIN",
-  "DE-SAVE"
+  "DE-SAVE",
+  "DE-OPTION-NOT-ALLOWED",
+  "DE-CONFIGURATION-STALE",
+  "DE-CONFIGURATION-CONTRACT-INVALID"
 ]);
 
 /** Missing session cookie on an authenticated v2 mutation/read — not a lifecycle revoke. */
@@ -131,6 +136,16 @@ function safeDiagnosticCode(e, status, safeCode) {
   ) {
     return "DE-COOKIE";
   }
+  if (safeCode === "option_not_allowed" || safeCode === "invalid_selection" || safeCode === "unknown_option") {
+    return "DE-OPTION-NOT-ALLOWED";
+  }
+  if (
+    status === 409 ||
+    safeCode === "row_version_conflict" ||
+    safeCode === "stale_configuration"
+  ) {
+    return "DE-CONFIGURATION-STALE";
+  }
   if (status === 404 || status === 403 || status === 410) return "DE-EXCHANGE-404";
   return "DE-STATE";
 }
@@ -157,6 +172,7 @@ function publicError(res, e, stageHint = "token_exchange") {
     code === "unresolved_product" ||
     code === "unknown_option" ||
     code === "invalid_selection" ||
+    code === "option_not_allowed" ||
     code === "forbidden_caller_authority"
   ) {
     message = "That selection is unavailable";
@@ -199,6 +215,7 @@ function publicError(res, e, stageHint = "token_exchange") {
     safeCode === "stale_configuration" ||
     safeCode === "unknown_option" ||
     safeCode === "invalid_selection" ||
+    safeCode === "option_not_allowed" ||
     safeCode === "configuration_unavailable" ||
     safeCode === "persistence_failed";
   const lifecycleFatal =
@@ -218,7 +235,9 @@ function publicError(res, e, stageHint = "token_exchange") {
     lifecycleFatal
   };
   if (
-    (safeCode === "invalid_selection" || safeCode === "unknown_option") &&
+    (safeCode === "invalid_selection" ||
+      safeCode === "unknown_option" ||
+      safeCode === "option_not_allowed") &&
     e?.selectionKey &&
     typeof e.selectionKey === "string"
   ) {

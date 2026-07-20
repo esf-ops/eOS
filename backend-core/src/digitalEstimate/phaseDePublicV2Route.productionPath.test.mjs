@@ -445,10 +445,13 @@ console.log("\nphaseDePublicV2Route.productionPath.test.mjs\n");
       idempotencyKey: "sel-bad-1"
     })
   });
-  assert.equal(badMaterial.status, 400);
+  assert.equal(badMaterial.status, 422);
   const badBody = await badMaterial.json();
-  assert.equal(badBody.code, "unknown_option");
+  assert.ok(
+    badBody.code === "option_not_allowed" || badBody.code === "invalid_selection" || badBody.code === "unknown_option"
+  );
   assert.equal(badBody.stage, "selection");
+  assert.equal(badBody.diagnosticCode, "DE-OPTION-NOT-ALLOWED");
 
   const stale = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
     method: "PUT",
@@ -466,6 +469,7 @@ console.log("\nphaseDePublicV2Route.productionPath.test.mjs\n");
   assert.equal(stale.status, 409);
   const staleBody = await stale.json();
   assert.equal(staleBody.code, "row_version_conflict");
+  assert.equal(staleBody.diagnosticCode, "DE-CONFIGURATION-STALE");
 
   const resumed = await fetch(`${base}/api/public-digital-estimate/v2/session`, {
     method: "GET",

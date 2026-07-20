@@ -463,6 +463,7 @@ export function classifyConfigurationMutationError(
   if (
     code === "unknown_option" ||
     code === "invalid_selection" ||
+    code === "option_not_allowed" ||
     code === "unresolved_product" ||
     code === "forbidden_caller_authority" ||
     code === "idempotency_required" ||
@@ -473,12 +474,16 @@ export function classifyConfigurationMutationError(
   ) {
     return {
       message:
-        code === "invalid_selection" || code === "unknown_option"
+        code === "invalid_selection" || code === "unknown_option" || code === "option_not_allowed"
           ? message || "That selection is unavailable. Please choose another option."
           : message || "That selection is unavailable",
       code,
       stage: stage || "selection",
-      diagnosticCode: diagnosticCode || "DE-SAVE",
+      diagnosticCode:
+        diagnosticCode ||
+        (code === "option_not_allowed" || code === "invalid_selection" || code === "unknown_option"
+          ? "DE-OPTION-NOT-ALLOWED"
+          : "DE-SAVE"),
       lifecycleFatal: false,
     };
   }
@@ -488,7 +493,7 @@ export function classifyConfigurationMutationError(
       message: message || "Please refresh and try again",
       code: code || "stale_configuration",
       stage: stage || "selection",
-      diagnosticCode: diagnosticCode || "DE-SAVE",
+      diagnosticCode: diagnosticCode || "DE-CONFIGURATION-STALE",
       lifecycleFatal: false,
     };
   }

@@ -45,7 +45,11 @@ assert.ok(
 assert.ok(configView.includes("Search color"));
 assert.ok(configView.includes("ColorPickerModal"));
 assert.ok(configView.includes("lg:sticky"));
-assert.ok(configView.includes("fixed inset-x-0 bottom-0"));
+assert.ok(
+  !configView.includes("fixed inset-x-0 bottom-0"),
+  "legacy mobile Save bar removed — single autosave status system",
+);
+assert.ok(configView.includes("de-autosave-status-system") || configView.includes("de-save-status"));
 assert.ok(configView.includes("/materials/elite100/") || api.includes("imageAssetPath") || configView.includes("imageAssetPath"));
 assert.equal(configView.includes("Wholesale"), false);
 assert.equal(configView.includes("use tax"), false);
