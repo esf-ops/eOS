@@ -22,6 +22,34 @@ export type EstimateBreakdownView = {
   emptyMessage?: string;
 };
 
+export type BreakdownRoomGroup = {
+  roomName: string | null;
+  lines: BreakdownLine[];
+};
+
+/**
+ * Groups flat breakdown lines into room-scannable sections, preserving first-seen room order.
+ * Lines without a roomName (project-level summary/custom lines) are grouped last under a
+ * headerless "Project" bucket so the UI can render them without a room heading.
+ */
+export function groupBreakdownLinesByRoom(lines: BreakdownLine[]): BreakdownRoomGroup[] {
+  const order: Array<string | null> = [];
+  const byRoom = new Map<string | null, BreakdownLine[]>();
+  for (const line of lines) {
+    const roomKey = line.roomName || null;
+    if (!byRoom.has(roomKey)) {
+      byRoom.set(roomKey, []);
+      order.push(roomKey);
+    }
+    byRoom.get(roomKey)!.push(line);
+  }
+  // Render project-level (no room) lines last, after every named room section.
+  const named = order.filter((k) => k !== null);
+  const projectLines = byRoom.get(null);
+  const orderedKeys = projectLines ? [...named, null] : named;
+  return orderedKeys.map((roomName) => ({ roomName, lines: byRoom.get(roomName) || [] }));
+}
+
 function formatMoney(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
   return new Intl.NumberFormat("en-US", {
