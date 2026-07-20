@@ -769,6 +769,40 @@ export function createInMemoryConfigurationRepository(opts = {}) {
       return rows[0] ? structuredClone(rows[0]) : null;
     },
 
+    /**
+     * Latest successful customer draft for the active publication + envelope.
+     * Survives new configuration session exchange for the same stable link.
+     */
+    async getLatestSelectionForPublicationEnvelope(
+      organizationId,
+      publicationId,
+      envelopeId
+    ) {
+      if (!organizationId || !publicationId || !envelopeId) return null;
+      const rows = [...selections.values()]
+        .filter((sel) => {
+          if (sel.organization_id !== organizationId) return false;
+          if (String(sel.envelope_id) !== String(envelopeId)) return false;
+          const sess = sessions.get(String(sel.session_id));
+          if (!sess || sess.organization_id !== organizationId) return false;
+          if (String(sess.publication_id) !== String(publicationId)) return false;
+          if (String(sess.envelope_id || "") !== String(envelopeId)) return false;
+          // Successful save only — must have a calculation row.
+          const hasCalc = [...calculations.values()].some(
+            (c) =>
+              c.organization_id === organizationId &&
+              String(c.selection_id) === String(sel.id)
+          );
+          return hasCalc;
+        })
+        .sort((a, b) => {
+          const t = String(b.created_at).localeCompare(String(a.created_at));
+          if (t !== 0) return t;
+          return String(b.id).localeCompare(String(a.id));
+        });
+      return rows[0] ? structuredClone(rows[0]) : null;
+    },
+
     async getCalculationBySelectionId(organizationId, selectionId) {
       const row = [...calculations.values()].find(
         (c) => c.organization_id === organizationId && c.selection_id === selectionId
@@ -1702,6 +1736,49 @@ export function createSupabaseConfigurationRepository({ db }) {
         .limit(1);
       if (error) throw error;
       return data?.[0] ?? null;
+    },
+
+    /**
+     * Latest successful customer draft for org + publication + active envelope.
+     * Used when a new configuration session is exchanged for the same stable link.
+     */
+    async getLatestSelectionForPublicationEnvelope(
+      organizationId,
+      publicationId,
+      envelopeId
+    ) {
+      if (!organizationId || !publicationId || !envelopeId) return null;
+      const { data: sessionRows, error: sessionErr } = await db
+        .from("digital_estimate_configuration_sessions")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId)
+        .eq("envelope_id", envelopeId);
+      if (sessionErr) throw sessionErr;
+      const sessionIds = (sessionRows || []).map((s) => s.id).filter(Boolean);
+      if (!sessionIds.length) return null;
+
+      const { data: selRows, error: selErr } = await db
+        .from("digital_estimate_configuration_selections")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("envelope_id", envelopeId)
+        .in("session_id", sessionIds)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (selErr) throw selErr;
+
+      for (const sel of selRows || []) {
+        const { data: calcRows, error: calcErr } = await db
+          .from("digital_estimate_configuration_calculations")
+          .select("id")
+          .eq("organization_id", organizationId)
+          .eq("selection_id", sel.id)
+          .limit(1);
+        if (calcErr) throw calcErr;
+        if (calcRows?.[0]) return sel;
+      }
+      return null;
     },
 
     async getCalculationBySelectionId(organizationId, selectionId) {

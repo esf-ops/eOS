@@ -1691,3 +1691,14 @@
 | **Ops** | Deploy Brain + digital-estimate; apply SQL if RPC not yet updated (JS retry still scopes fingerprint). Retest India Black Pearl save → 200, `row_version` increments, refresh restores selection. |
 | **Out of scope** | Dropping the unique index entirely; sold-job; cookie SameSite revisit. |
 
+### 120. Digital Estimate draft restore across new sessions (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Customer configuration drafts are durable for the **active publication + envelope**, not only the transient browser session. `buildPublicState` loads `getLatestSelectionForSession` first, then falls back to `getLatestSelectionForPublicationEnvelope` (newest successful selection with a calculation, scoped by org/publication/envelope). Exchange DTO already includes restored `currentSelections`, notes, customer info, and `latestCalculation`. Frontend hydrates persisted draft over baseline Carrara (`effectiveQty` / session-keyed `ConfigurationView`). |
+| **Why** | After 91f1f83, PUT selections returned 200 and totals updated, but hard refresh POST’d a new session; session-only lookup returned no row so UI re-baselined to Carrara Classic / $8,361. |
+| **SQL** | None (read path only). |
+| **Ops** | Deploy Brain + digital-estimate. Retest: save India Black Pearl → refresh → exchange 201 → GET/configure shows India + updated total without re-selecting. |
+| **Out of scope** | Merging draft into the new session row at exchange time; cross-device identity beyond shared stable link. |
+
