@@ -242,6 +242,7 @@ export function App() {
   if (mode === "configure" && configState) {
     return (
       <ConfigurationView
+        key={configState.session?.id || "configure"}
         state={configState}
         onState={setConfigState}
         accessToken={accessToken}

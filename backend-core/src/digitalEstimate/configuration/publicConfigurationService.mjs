@@ -449,6 +449,20 @@ export function createPublicConfigurationService(deps) {
         session.id
       );
     }
+    // New session exchange must restore the latest successful draft for this
+    // active publication + envelope (stable link), not only the empty new session.
+    if (
+      !latestSelection &&
+      activeEnvelope?.id &&
+      publication?.id &&
+      typeof configurationRepository.getLatestSelectionForPublicationEnvelope === "function"
+    ) {
+      latestSelection = await configurationRepository.getLatestSelectionForPublicationEnvelope(
+        organizationId,
+        publication.id,
+        activeEnvelope.id
+      );
+    }
     if (session.latest_calculation_id && configurationRepository.getCalculation) {
       latestCalculation = await configurationRepository.getCalculation(
         organizationId,

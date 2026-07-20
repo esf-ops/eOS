@@ -197,17 +197,34 @@ export function mapEliteOsToLovableViewModel(
     : [];
 
   const options = config.options || [];
+  // Precedence: persisted draft < unsaved browser qty edits. Baseline defaults apply
+  // only when neither has a positive material selection for the room.
+  const persistedQty = config.currentSelections || {};
+  const effectiveQty: Record<string, number> = { ...persistedQty, ...qty };
+
+  function roomHasMaterialSelection(roomKey: string): boolean {
+    const prefix = `material:${roomKey}:`;
+    return Object.entries(effectiveQty).some(
+      ([key, value]) => key.startsWith(prefix) && Number(value) > 0,
+    );
+  }
+
   const rooms: LovableRoom[] = (config.rooms || []).map((r) => {
     const colors = colorsForRoom(r.roomKey, options, config.materials);
     const mats = materialOptionsForRoom(options, r.roomKey);
     const selectedOpt =
-      mats.find((m) => (qty[m.optionKey] ?? 0) > 0) ||
-      mats.find((m) => m.includedInBaseline || m.defaultQty > 0) ||
+      mats.find((m) => (effectiveQty[m.optionKey] ?? 0) > 0) ||
+      (!roomHasMaterialSelection(r.roomKey)
+        ? mats.find((m) => m.includedInBaseline || m.defaultQty > 0)
+        : null) ||
       mats[0] ||
       null;
     const selectedColor =
       colors.find((c) => c.optionKey === selectedOpt?.optionKey) ||
-      colors.find((c) => c.includedInBaseline) ||
+      colors.find((c) => (effectiveQty[c.optionKey] ?? 0) > 0) ||
+      (!roomHasMaterialSelection(r.roomKey)
+        ? colors.find((c) => c.includedInBaseline)
+        : null) ||
       colors[0] ||
       null;
     const calcRoom = calcRooms.find((cr) => String(cr.roomKey) === r.roomKey);
@@ -224,11 +241,17 @@ export function mapEliteOsToLovableViewModel(
       .map((o) => {
         const parts = o.optionKey.split(":");
         const role = parts[0] || "choice";
+        const rolePrefix = `${role}:${r.roomKey}:`;
+        const roleHasExplicit = Object.entries(effectiveQty).some(
+          ([key, value]) => key.startsWith(rolePrefix) && Number(value) > 0,
+        );
         return {
           optionKey: o.optionKey,
           displayLabel: o.displayLabel,
           role,
-          selected: (qty[o.optionKey] ?? o.defaultQty ?? 0) > 0,
+          selected: roleHasExplicit
+            ? (effectiveQty[o.optionKey] ?? 0) > 0
+            : (effectiveQty[o.optionKey] ?? o.defaultQty ?? 0) > 0,
           includedInBaseline: Boolean(o.includedInBaseline),
         };
       });
@@ -262,7 +285,7 @@ export function mapEliteOsToLovableViewModel(
     id: o.id,
     displayLabel: o.displayLabel,
     description: o.description ?? null,
-    quantity: qty[o.optionKey] ?? o.defaultQty ?? 0,
+    quantity: effectiveQty[o.optionKey] ?? o.defaultQty ?? 0,
     minQty: o.minQty,
     maxQty: o.maxQty ?? 99,
     selectable: o.selectable,
