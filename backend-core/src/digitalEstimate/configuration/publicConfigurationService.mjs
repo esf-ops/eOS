@@ -1026,7 +1026,7 @@ export function createPublicConfigurationService(deps) {
       const rooms = (ctx.rooms || []).map((r) => {
         let selected = r.baselineMaterialGroup;
         let chargeableBacksplashSf = Number(r.backsplashSf) || 0;
-        let edgeMode = "eased";
+        let edgeMode = "included";
         const roomType = inferRoomEligibilityType(r);
         for (const [key, qty] of Object.entries(normalized.selections)) {
           if (Number(qty) <= 0) continue;
@@ -1057,7 +1057,7 @@ export function createPublicConfigurationService(deps) {
               reviewFlags.push(`custom_height_backsplash:${r.roomKey}`);
             }
           } else if (key.startsWith(`edge:${r.roomKey}:`)) {
-            edgeMode = key.split(":")[2] || "eased";
+            edgeMode = key.split(":")[2] || "included";
           } else {
             const opt = options.find((o) => (o.option_key || o.optionKey) === key);
             const compat = opt?.compatibility_json || opt?.compatibilityJson || {};
@@ -1377,7 +1377,8 @@ export function createPublicConfigurationService(deps) {
 
         if (key.startsWith("edge:")) {
           const [, roomKey, mode] = key.split(":");
-          if (mode === "eased") continue;
+          // included / legacy eased = $0 baseline (Studio Estimate Scope authority)
+          if (mode === "eased" || mode === "included") continue;
           const roomRow = rooms.find((r) => r.roomKey === roomKey);
           const lf = Number(roomRow?.edgeLinearFeet) || Number(edgeLfTotal) || 0;
           const rate = mode === "d_edge" ? 25 : 15;

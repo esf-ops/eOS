@@ -218,8 +218,36 @@ console.log("\ndigitalEstimateProductOptions.test.mjs\n");
   assert.ok(seeded.some((o) => o.optionKey.startsWith("faucet:kitchen:")));
   assert.ok(seeded.some((o) => o.optionKey === "backsplash:kitchen:standard_4in"));
   assert.ok(seeded.some((o) => o.optionKey.startsWith("specialty:kitchen:esf:")));
-  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:eased"));
+  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:included"));
+  assert.ok(
+    seeded.some(
+      (o) =>
+        o.optionKey === "edge:kitchen:included" &&
+        o.displayLabel === "Included edges (eased)" &&
+        o.includedInBaseline === true
+    )
+  );
+  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:w_edge"));
+  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:d_edge"));
+  assert.equal(
+    seeded.filter((o) => o.optionKey.startsWith("edge:")).length,
+    3,
+    "Studio-governed edge set only"
+  );
   console.log("ok: default room product option bundle");
+}
+
+{
+  const wBaseline = buildDefaultRoomProductOptions({
+    rooms: [{ roomKey: "kitchen", displayName: "Kitchen", edgeMode: "w_edge" }],
+    choiceGroups: ["edge"],
+    estimateEdgeMode: "w_edge"
+  });
+  const wOpt = wBaseline.find((o) => o.optionKey === "edge:kitchen:w_edge");
+  assert.ok(wOpt?.includedInBaseline, "original Studio W edge is baseline");
+  assert.equal(wOpt?.displayLabel, "W edge");
+  assert.ok(!wBaseline.some((o) => o.optionKey === "edge:kitchen:eased"));
+  console.log("ok: edge authority uses Studio scope original");
 }
 
 {
@@ -230,7 +258,7 @@ console.log("\ndigitalEstimateProductOptions.test.mjs\n");
       "material:kitchen:e100-alabaster": 1,
       "sink:kitchen:esf:kansas:3018UM18": 1,
       "sink:kitchen:none": 0,
-      "edge:kitchen:eased": 1
+      "edge:kitchen:included": 1
     },
     missingInformationRequirements: [{ code: "customer_sink_model_required" }],
     selectedMaterialGroup: "group_b"

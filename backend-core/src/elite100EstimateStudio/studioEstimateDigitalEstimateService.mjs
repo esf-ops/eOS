@@ -26,6 +26,11 @@ import {
   studioEstimatePublicationFamilyRoot
 } from "./studioEstimatePublicationAdapter.mjs";
 import {
+  inferCustomerChoiceGroupsFromEnvelopeOptions,
+  inferFriendlyChoiceFlags,
+  partitionAllowedOptionKeys
+} from "./studioCustomerChoiceOptions.mjs";
+import {
   ensureStudioEstimatePublicationSource,
   mapStudioPublicationPersistenceError
 } from "./studioEstimatePublicationSource.mjs";
@@ -538,6 +543,12 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         }
       : null;
 
+    const publishedConfiguration = await resolvePublishedConfiguration({
+      organizationId,
+      publication: activeRaw,
+      configurationStudioService
+    });
+
     return {
       ok: true,
       readiness,
@@ -545,6 +556,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       preview,
       publications: publicationViews,
       activePublication,
+      publishedConfiguration,
       reviewRequests,
       links: {
         intakeCaseId: estimate.intakeCaseId || null,
@@ -552,6 +564,91 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         takeoffJobId: estimate.takeoffJobId || null
       }
     };
+  }
+
+  /**
+   * Recover the last saved customer-choice permissions for Studio checkbox hydration.
+   */
+  async function resolvePublishedConfiguration({
+    organizationId,
+    publication,
+    configurationStudioService: cfgService
+  }) {
+    if (!publication?.id) return null;
+    const events =
+      typeof deRepository.listEventsForPublication === "function"
+        ? await deRepository.listEventsForPublication(organizationId, publication.id, 80)
+        : [];
+    const configEv = (events || []).find(
+      (e) =>
+        e.event_type === "configuration_updated" ||
+        (e.event_type === "published" && e.metadata?.customerChoiceGroups)
+    );
+    let customerChoiceGroups = Array.isArray(configEv?.metadata?.customerChoiceGroups)
+      ? configEv.metadata.customerChoiceGroups.map(String)
+      : [];
+    let allowedOptionKeys = Array.isArray(configEv?.metadata?.allowedOptionKeys)
+      ? configEv.metadata.allowedOptionKeys.map(String)
+      : [];
+    const envelopeFingerprint = configEv?.metadata?.envelopeFingerprint
+      ? String(configEv.metadata.envelopeFingerprint)
+      : null;
+
+    if ((!customerChoiceGroups.length || !allowedOptionKeys.length) && cfgService) {
+      try {
+        const envelopes = await cfgService.listEnvelopes(organizationId, publication.id);
+        const active = (envelopes || []).find((e) => String(e.status || "") === "active");
+        const envelopeId = active?.id;
+        if (envelopeId) {
+          const graph = await cfgService.getEnvelope(organizationId, envelopeId);
+          const inferred = inferCustomerChoiceGroupsFromEnvelopeOptions(graph?.options || []);
+          if (!customerChoiceGroups.length && inferred.length) {
+            customerChoiceGroups = inferred;
+          }
+          if (!allowedOptionKeys.length) {
+            const keys = (graph?.options || [])
+              .map((o) => String(o.option_key || o.optionKey || ""))
+              .filter((k) => k === "qty-sink" || k === "qty-ss" || k === "qty-cook");
+            allowedOptionKeys = keys;
+          }
+        }
+      } catch {
+        /* hydration best-effort */
+      }
+    }
+
+    if (!customerChoiceGroups.length && !allowedOptionKeys.length && !envelopeFingerprint) {
+      return null;
+    }
+
+    const flags = inferFriendlyChoiceFlags({ customerChoiceGroups, allowedOptionKeys });
+    const { legacyUnknown } = partitionAllowedOptionKeys(allowedOptionKeys);
+    return {
+      customerChoiceGroups,
+      allowedOptionKeys,
+      legacyUnknownKeys: legacyUnknown,
+      choiceFlags: flags,
+      envelopeFingerprint,
+      pricingValidThrough: publication.pricing_valid_through
+        ? String(publication.pricing_valid_through).slice(0, 10)
+        : null,
+      estimatorNotes:
+        configEv?.metadata?.estimatorNotes != null
+          ? String(configEv.metadata.estimatorNotes)
+          : null
+    };
+  }
+
+  function latestEnvelopeFingerprintFromEvents(events) {
+    for (const e of events || []) {
+      if (
+        (e.event_type === "configuration_updated" || e.event_type === "published") &&
+        e.metadata?.envelopeFingerprint
+      ) {
+        return String(e.metadata.envelopeFingerprint);
+      }
+    }
+    return null;
   }
 
   async function findIdempotentReuse({
@@ -573,15 +670,16 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         typeof deRepository.listEventsForPublication === "function"
           ? await deRepository.listEventsForPublication(organizationId, pub.id, 50)
           : [];
+      const fingerprint = latestEnvelopeFingerprintFromEvents(events);
       const publishedEv = (events || []).find((e) => e.event_type === "published");
       const meta = publishedEv?.metadata || {};
       const sameEnvelope =
         !envelopeFingerprint ||
-        String(meta.envelopeFingerprint || "") === String(envelopeFingerprint);
+        String(fingerprint || meta.envelopeFingerprint || "") === String(envelopeFingerprint);
       const sameKey =
         idempotencyKey &&
         String(meta.idempotencyKey || "") === String(idempotencyKey);
-      // Same revision fingerprint: never create a duplicate active publication.
+      // Same revision + same configuration fingerprint: reuse without mutation.
       if (sameEnvelope && (sameKey || !idempotencyKey || meta.idempotencyKey)) {
         return pub;
       }
@@ -590,6 +688,26 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       }
     }
     return null;
+  }
+
+  /**
+   * Active publication for the same estimate revision (fingerprint may differ).
+   */
+  async function findActivePublicationForSameRevision({
+    organizationId,
+    estimate,
+    sourceQuoteFingerprint
+  }) {
+    const familyRoot = studioEstimatePublicationFamilyRoot(estimate);
+    const active =
+      typeof deRepository.listActivePublicationsForFamily === "function"
+        ? await deRepository.listActivePublicationsForFamily(organizationId, familyRoot)
+        : [];
+    return (
+      (active || []).find(
+        (pub) => String(pub.source_quote_fingerprint) === String(sourceQuoteFingerprint)
+      ) || null
+    );
   }
 
   /**
@@ -609,6 +727,35 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         ? cfg.allowedMaterialGroups
         : [];
     return groups.length > 0 || keys.length > 0 || materialIds.length > 0 || materialGroups.length > 0;
+  }
+
+  async function recordConfigurationFingerprintEvent({
+    organizationId,
+    publication,
+    actorUserId,
+    envelopeFingerprint,
+    configuration,
+    idempotencyKey
+  }) {
+    if (typeof deRepository.appendEvent !== "function") return;
+    const cfg = configuration && typeof configuration === "object" ? configuration : {};
+    await deRepository.appendEvent({
+      organization_id: organizationId,
+      publication_id: publication.id,
+      source_quote_id: publication.source_quote_id,
+      event_type: "configuration_updated",
+      actor_type: "user",
+      actor_user_id: actorUserId ?? null,
+      metadata: {
+        envelopeFingerprint,
+        idempotencyKey: idempotencyKey || null,
+        customerChoiceGroups: Array.isArray(cfg.customerChoiceGroups)
+          ? cfg.customerChoiceGroups
+          : [],
+        allowedOptionKeys: Array.isArray(cfg.allowedOptionKeys) ? cfg.allowedOptionKeys : [],
+        estimatorNotes: cfg.estimatorNotes != null ? String(cfg.estimatorNotes).slice(0, 2000) : null
+      }
+    });
   }
 
   async function applyConfigurationEnvelope({
@@ -803,14 +950,19 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           includeBacksplash: room.includeBacksplash,
           backsplashHeightMode: room.backsplashHeightMode,
           backsplashHeightIn: room.backsplashHeightIn,
-          pieces: Array.isArray(room.pieces) ? room.pieces : []
+          pieces: Array.isArray(room.pieces) ? room.pieces : [],
+          edgeMode: estimate.scope?.edgeMode || "included"
         };
       });
       const seeded = buildDefaultRoomProductOptions({
         rooms: roomRows,
         choiceGroups,
         groupId: roomChoicesGroup.id,
-        estimateAddOns: estimate.scope?.addOns || {}
+        estimateAddOns: estimate.scope?.addOns || {},
+        estimateEdgeMode: estimate.scope?.edgeMode || "included",
+        approvedEdgeModes: Array.isArray(cfg.allowedEdgeModes)
+          ? cfg.allowedEdgeModes
+          : undefined
       });
       for (const opt of seeded) {
         const priced = resolveOptionSellPriceFromCatalog(
@@ -1027,10 +1179,112 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           envelope: intendsConfigure
             ? { configured: true, repaired: true }
             : { configured: false, reason: "document_only" },
+          publishedConfiguration: {
+            customerChoiceGroups: Array.isArray(configuration?.customerChoiceGroups)
+              ? configuration.customerChoiceGroups
+              : [],
+            allowedOptionKeys: Array.isArray(configuration?.allowedOptionKeys)
+              ? configuration.allowedOptionKeys
+              : [],
+            envelopeFingerprint
+          },
           staffNotice:
             linkMeta.customerUrl
               ? "This revision is already published. The customer link is unchanged."
               : "Publication already exists for this revision. Use Replace Link to create a recoverable customer URL."
+        };
+      }
+
+      // Same estimate revision, different configuration fingerprint → update envelope
+      // on the active publication (do not claim "unchanged" and discard permissions).
+      const sameRevisionPub = await findActivePublicationForSameRevision({
+        organizationId,
+        estimate,
+        sourceQuoteFingerprint: freezeProbe.sourceQuoteFingerprint
+      });
+      if (sameRevisionPub) {
+        const intendsConfigure = configurationIntendsCustomerConfigure(configuration);
+        if (intendsConfigure && configurationStudioService) {
+          assertWithinBudget("update_envelope");
+          const updated = await applyConfigurationEnvelope({
+            organizationId,
+            actorUserId,
+            publicationId: sameRevisionPub.id,
+            configuration,
+            estimate
+          });
+          mark("update_envelope");
+          if (!updated.configured) {
+            throw deError(
+              updated.message ||
+                "Configuration envelope could not be updated for the changed permissions",
+              "DE-ENVELOPE-ACTIVATION-FAILED",
+              422
+            );
+          }
+          await recordConfigurationFingerprintEvent({
+            organizationId,
+            publication: sameRevisionPub,
+            actorUserId,
+            envelopeFingerprint,
+            configuration,
+            idempotencyKey
+          });
+          mark("record_config");
+          const linkMeta = await linkMetaForPublication(organizationId, sameRevisionPub);
+          console.info(
+            JSON.stringify({
+              msg: "studio_de_publish",
+              correlationId,
+              estimateId,
+              reused: false,
+              configurationUpdated: true,
+              phases,
+              elapsedMs: Date.now() - t0
+            })
+          );
+          return {
+            ok: true,
+            reused: false,
+            configurationUpdated: true,
+            correlationId,
+            phases,
+            publication: staffPublicationView(sameRevisionPub, linkMeta),
+            accessToken: null,
+            customerUrl: linkMeta.customerUrl,
+            linkStatus: linkMeta.linkStatus,
+            readiness: readiness.readiness,
+            envelope: { configured: true, updated: true },
+            publishedConfiguration: {
+              customerChoiceGroups: Array.isArray(configuration?.customerChoiceGroups)
+                ? configuration.customerChoiceGroups
+                : [],
+              allowedOptionKeys: Array.isArray(configuration?.allowedOptionKeys)
+                ? configuration.allowedOptionKeys
+                : [],
+              envelopeFingerprint
+            },
+            staffNotice:
+              "Configuration permissions updated. The customer link is unchanged."
+          };
+        }
+        // Document-only update on existing revision — treat as reuse.
+        const linkMeta = await linkMetaForPublication(organizationId, sameRevisionPub);
+        return {
+          ok: true,
+          reused: true,
+          correlationId,
+          phases,
+          publication: staffPublicationView(sameRevisionPub, linkMeta),
+          accessToken: null,
+          customerUrl: linkMeta.customerUrl,
+          linkStatus: linkMeta.linkStatus,
+          readiness: readiness.readiness,
+          envelope: { configured: false, reason: "document_only" },
+          staffNotice:
+            linkMeta.customerUrl
+              ? "This revision is already published. The customer link is unchanged."
+              : "Publication already exists for this revision."
         };
       }
 
@@ -1064,6 +1318,16 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             publishMetadata: {
               idempotencyKey,
               envelopeFingerprint,
+              customerChoiceGroups: Array.isArray(configuration?.customerChoiceGroups)
+                ? configuration.customerChoiceGroups
+                : [],
+              allowedOptionKeys: Array.isArray(configuration?.allowedOptionKeys)
+                ? configuration.allowedOptionKeys
+                : [],
+              estimatorNotes:
+                configuration?.estimatorNotes != null
+                  ? String(configuration.estimatorNotes).slice(0, 2000)
+                  : null,
               studioEstimateId: estimate.id,
               intakeCaseId: estimate.intakeCaseId || null,
               takeoffJobId: estimate.takeoffJobId || null,

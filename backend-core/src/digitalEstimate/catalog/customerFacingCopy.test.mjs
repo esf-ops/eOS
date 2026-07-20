@@ -144,8 +144,8 @@ assert.ok(!/Wholesale/i.test(priced.displayLabel));
 assert.equal(priced.priceEffectLabel, "+$650");
 
 const included = toPublicConfigurationOption({
-  option_key: "edge:kitchen:eased",
-  display_label: "Eased edge",
+  option_key: "edge:kitchen:included",
+  display_label: "Included edges (eased)",
   customer_price_treatment: "delta",
   sell_price: 0,
   included_in_baseline: true

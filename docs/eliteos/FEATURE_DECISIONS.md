@@ -1788,3 +1788,14 @@
 | **SQL** | Manual one-time reset using `backend-core/supabase/eliteos_workforce_scorecard_history_reset_v1.sql`, scoped to `elite_stone_fabrication`. This does not delete sections, department access, or configuration. |
 | **Ops** | Merge/deploy `backend-core` and `app-hr`, manually run the reset SQL in Supabase, then re-enter weekly data. |
 | **Out of scope** | Automatic rewriting of old `week_start` values, multi-tenant wipe, and AI narrative changes. |
+
+### 129. Digital Estimate envelope permissions, material All-tab, Studio edge authority (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | (1) Studio configuration fingerprint **includes `customerChoiceGroups`** (and related allow-lists). Permission edits on an already-published revision **re-apply / activate a new envelope** and record `configuration_updated` — they must not reuse as “unchanged.” Readiness returns `publishedConfiguration` so Studio checkboxes hydrate after refresh; draft vs published permissions are visible with Unsaved / Saving / Saved / Failed — Retry. (2) Material modal **All** tab is always valid (not reset to the first group); pricing-group labels normalize to Promo / A–F; image load failures show fallback and never remove or disable cards. (3) Customer edge options come from **Studio Estimate Scope authority** (`included` / `w_edge` / `d_edge` with Scope labels); original priced edge is baseline; remove the legacy hard-coded “Eased edge” seed path. |
+| **Why** | Hosted Studio checkboxes reverted after refresh; All (100) was not clickable; DE showed a generic eased/W/D seed that ignored the priced original edge. |
+| **SQL** | None. |
+| **Ops** | Deploy **Brain**, **app-elite100-estimate-studio**, and **app-digital-estimate**. Re-open Studio Digital Estimate and **Save / Update Configuration** once per live estimate so envelopes pick up corrected permissions and edge options. |
+| **Out of scope** | Per-room Internal Estimate profile catalogs on Studio estimates; inventing ungovered edge pricing; SQL migrations. |

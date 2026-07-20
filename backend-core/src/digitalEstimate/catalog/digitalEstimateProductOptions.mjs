@@ -18,6 +18,11 @@ import {
   sideSplashPieceDisplayName,
   sideSplashModeLabel
 } from "./customerFacingCopy.mjs";
+import {
+  buildAuthoritativeEdgeOptionDefinitions,
+  defaultApprovedStudioEdgeModes,
+  normalizeStudioEdgeMode
+} from "./studioEdgeAuthority.mjs";
 
 export const SIDE_SPLASH_HEIGHT_IN = STANDARD_BACKSPLASH_HEIGHT_IN;
 export const DEFAULT_ACCESSORY_MAX_QTY = 5;
@@ -668,32 +673,32 @@ export function buildBacksplashOptionDefinitions(args) {
 }
 
 /**
- * @param {{ roomKey: string, groupId?: string|null, defaultMode?: string }} args
+ * Edge options from Studio Estimate Scope authority (included / w_edge / d_edge).
+ * Do not invent a separate generic D/Eased/W seed with alternate labels.
+ *
+ * @param {{
+ *   roomKey: string,
+ *   groupId?: string|null,
+ *   defaultMode?: string,
+ *   originalEdgeMode?: string,
+ *   approvedEdgeModes?: string[]|null
+ * }} args
  */
 export function buildEdgeOptionDefinitions(args) {
-  const roomKey = String(args.roomKey);
-  const groupId = args.groupId ?? null;
-  const defaultMode = args.defaultMode || "eased";
-  return [
-    { key: "eased", label: "Eased edge" },
-    { key: "w_edge", label: "W edge" },
-    { key: "d_edge", label: "D edge" }
-  ].map((m) =>
-    baseOption({
-      groupId,
-      optionKey: `edge:${roomKey}:${m.key}`,
-      displayLabel: m.label,
-      includedInBaseline: defaultMode === m.key,
-      defaultQty: defaultMode === m.key ? 1 : 0,
-      sellPrice: 0,
-      pricingMode: "per_lf",
-      compatibilityJson: {
-        roomKey,
-        role: "edge_selection",
-        edgeMode: m.key
-      }
-    })
+  const original = normalizeStudioEdgeMode(
+    args.originalEdgeMode || args.defaultMode || "included"
   );
+  const approved =
+    args.approvedEdgeModes != null
+      ? args.approvedEdgeModes
+      : defaultApprovedStudioEdgeModes(original);
+  return buildAuthoritativeEdgeOptionDefinitions({
+    roomKey: String(args.roomKey),
+    groupId: args.groupId ?? null,
+    originalEdgeMode: original,
+    approvedEdgeModes: approved,
+    baseOption
+  });
 }
 
 /**
@@ -764,7 +769,9 @@ export function buildSideSplashOptionDefinitions(args) {
  *   rooms: Array<object>,
  *   choiceGroups: Iterable<string>|Set<string>|string[],
  *   groupId?: string|null,
- *   estimateAddOns?: Record<string, number>
+ *   estimateAddOns?: Record<string, number>,
+ *   estimateEdgeMode?: string|null,
+ *   approvedEdgeModes?: string[]|null
  * }} args
  */
 export function buildDefaultRoomProductOptions(args) {
@@ -773,6 +780,13 @@ export function buildDefaultRoomProductOptions(args) {
   );
   const groupId = args.groupId ?? null;
   const addOns = args.estimateAddOns || {};
+  const estimateEdgeMode = normalizeStudioEdgeMode(
+    args.estimateEdgeMode || "included"
+  );
+  const approvedEdgeModes =
+    args.approvedEdgeModes != null
+      ? args.approvedEdgeModes
+      : defaultApprovedStudioEdgeModes(estimateEdgeMode);
   /** @type {ReturnType<typeof baseOption>[]} */
   const options = [];
 
@@ -837,7 +851,17 @@ export function buildDefaultRoomProductOptions(args) {
     }
 
     if (choiceGroups.has("edge")) {
-      options.push(...buildEdgeOptionDefinitions({ roomKey, groupId, defaultMode: "eased" }));
+      const originalEdgeMode = normalizeStudioEdgeMode(
+        room.edgeMode || room.edgeDefaultMode || args.estimateEdgeMode || "included"
+      );
+      options.push(
+        ...buildEdgeOptionDefinitions({
+          roomKey,
+          groupId,
+          originalEdgeMode,
+          approvedEdgeModes
+        })
+      );
     }
 
     if (choiceGroups.has("sideSplash") || choiceGroups.has("sidesplash")) {
