@@ -1,11 +1,20 @@
 /**
  * DE.2E — configuration session secret + cookie helpers.
  * Raw secret never logged; DB stores SHA-256 hash only.
+ *
+ * Canonical production cookie (API host only — digital.eliteosfab.com → api.eliteosfab.com):
+ *   de_cfg_session=<base64url>; Path=/; Secure; HttpOnly; SameSite=None
+ *
+ * SameSite=None is required so credentialed cross-origin fetches from the public head
+ * reliably store and return the host-only API cookie. Path=/ avoids path-prefix ambiguity
+ * with /v2/selections vs /v2/review-requests/*. Legacy Path=/api/public-digital-estimate/v2
+ * cookies are expired on every set/clear.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   DE_PUBLIC_CONFIG_COOKIE_PATH,
+  DE_PUBLIC_CONFIG_COOKIE_PATH_LEGACY,
   DE_PUBLIC_CONFIG_SESSION_COOKIE,
   readDigitalEstimateSessionTtlHours
 } from "./publicConfigurationConfig.mjs";
@@ -20,8 +29,34 @@ export function generateConfigurationSessionSecret() {
   return { rawSecret, secretHash: hashConfigurationSessionSecret(rawSecret) };
 }
 
+/**
+ * Canonical hash used at create AND lookup — must stay identical.
+ * @param {string} rawSecret
+ */
 export function hashConfigurationSessionSecret(rawSecret) {
-  return createHash("sha256").update(String(rawSecret), "utf8").digest("hex");
+  return createHash("sha256").update(normalizeSessionSecret(rawSecret), "utf8").digest("hex");
+}
+
+/**
+ * Strip quotes / URI encoding so create-time and Cookie-header values match.
+ * @param {unknown} raw
+ */
+export function normalizeSessionSecret(raw) {
+  let s = String(raw ?? "").trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  if (/%[0-9A-Fa-f]{2}/.test(s)) {
+    try {
+      s = decodeURIComponent(s);
+    } catch {
+      /* keep */
+    }
+  }
+  return s.trim();
 }
 
 export function constantTimeEqualSessionHash(a, b) {
@@ -50,39 +85,31 @@ export function parseCookieHeader(req) {
     const eq = trimmed.indexOf("=");
     if (eq <= 0) continue;
     const k = trimmed.slice(0, eq).trim();
-    const v = trimmed.slice(eq + 1).trim();
-    try {
-      out[k] = decodeURIComponent(v);
-    } catch {
-      out[k] = v;
-    }
+    const v = normalizeSessionSecret(trimmed.slice(eq + 1));
+    out[k] = v;
   }
   return out;
 }
 
 /**
- * Prefer a non-empty session secret when duplicate Cookie headers exist
- * (e.g. Path=/ vs Path=/api/public-digital-estimate/v2).
  * @param {import('express').Request} req
  * @returns {string|null}
  */
 export function readSessionSecretFromCookie(req) {
-  const cookies = parseCookieHeader(req);
-  const raw = cookies[DE_PUBLIC_CONFIG_SESSION_COOKIE];
-  if (!raw || typeof raw !== "string") return null;
-  const s = raw.trim();
-  if (s.length < 20 || s.length > 256) return null;
-  return s;
+  const candidates = readSessionSecretCandidatesFromCookie(req);
+  return candidates.length ? candidates[candidates.length - 1] : null;
 }
 
 /**
- * Collect every de_cfg_session value from the Cookie header (duplicates possible).
+ * Collect every de_cfg_session value (duplicates from Path=/ vs legacy path).
+ * Order: header order. Callers should try from the end (newest / Path=/ last).
  * @param {import('express').Request} req
  * @returns {string[]}
  */
 export function listSessionSecretsFromCookieHeader(req) {
   const header = String(req?.headers?.cookie || "");
   const out = [];
+  const seen = new Set();
   for (const part of header.split(";")) {
     const trimmed = part.trim();
     if (!trimmed) continue;
@@ -90,27 +117,24 @@ export function listSessionSecretsFromCookieHeader(req) {
     if (eq <= 0) continue;
     const k = trimmed.slice(0, eq).trim();
     if (k !== DE_PUBLIC_CONFIG_SESSION_COOKIE) continue;
-    let v = trimmed.slice(eq + 1).trim();
-    try {
-      v = decodeURIComponent(v);
-    } catch {
-      /* keep raw */
-    }
-    v = v.trim();
-    if (v.length >= 20 && v.length <= 256) out.push(v);
+    const v = normalizeSessionSecret(trimmed.slice(eq + 1));
+    if (v.length < 20 || v.length > 256) continue;
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
   }
   return out;
 }
 
 /**
- * Deterministic cookie pick: last valid value wins (RFC path-length order often puts
- * more-specific path cookies later). Callers may try each secret if lookup fails.
+ * Candidates for lookup — reverse order so the canonical/newest cookie is tried first.
+ * @param {import('express').Request} req
+ * @returns {string[]}
  */
 export function readSessionSecretCandidatesFromCookie(req) {
   const listed = listSessionSecretsFromCookieHeader(req);
-  if (listed.length) return listed;
-  const single = readSessionSecretFromCookie(req);
-  return single ? [single] : [];
+  if (listed.length) return [...listed].reverse();
+  return [];
 }
 
 /**
@@ -129,14 +153,23 @@ export function buildSessionCookieOptions(args) {
     !isProd && String(env.DIGITAL_ESTIMATE_ALLOW_INSECURE_SESSION_COOKIE ?? "").trim() === "1";
   const ttlHours = readDigitalEstimateSessionTtlHours(env);
   const maxAge = args.maxAgeSeconds ?? ttlHours * 3600;
+  const secure = isProd || !allowInsecureDev;
+  // Cross-origin SPA (digital.*) → API (api.*) requires SameSite=None; Secure in production.
+  // Local insecure-dev keeps Lax so browsers accept non-Secure cookies.
   return {
     httpOnly: true,
-    secure: isProd || !allowInsecureDev,
-    sameSite: "strict",
+    secure,
+    sameSite: secure ? "none" : "lax",
     path: DE_PUBLIC_CONFIG_COOKIE_PATH,
     maxAge,
     // Do not set Domain — host-only cookie for the Brain API host.
   };
+}
+
+function sameSiteAttribute(sameSite) {
+  if (sameSite === "none") return "SameSite=None";
+  if (sameSite === "lax") return "SameSite=Lax";
+  return "SameSite=Strict";
 }
 
 /**
@@ -145,14 +178,15 @@ export function buildSessionCookieOptions(args) {
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function setConfigurationSessionCookie(res, rawSecret, env = process.env) {
-  // Expire obsolete Path=/ variants that can shadow the canonical cookie.
-  expireConfigurationSessionCookieAtPath(res, "/", env);
-  const opts = buildSessionCookieOptions({ env, rawSecret });
+  clearObsoleteConfigurationSessionCookies(res, env);
+  const secret = normalizeSessionSecret(rawSecret);
+  const opts = buildSessionCookieOptions({ env, rawSecret: secret });
+  // base64url is cookie-octet safe — do not URI-encode (avoids create/lookup asymmetry).
   const parts = [
-    `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=${encodeURIComponent(rawSecret)}`,
+    `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=${secret}`,
     `Path=${opts.path}`,
     `Max-Age=${Math.max(0, Number(opts.maxAge) || 0)}`,
-    `SameSite=Strict`,
+    sameSiteAttribute(opts.sameSite),
     "HttpOnly"
   ];
   if (opts.secure) parts.push("Secure");
@@ -160,30 +194,28 @@ export function setConfigurationSessionCookie(res, rawSecret, env = process.env)
 }
 
 function expireConfigurationSessionCookieAtPath(res, path, env = process.env) {
-  const isProd =
-    String(env.NODE_ENV || "").trim() === "production" ||
-    String(env.VERCEL_ENV || "").trim() === "production";
-  const allowInsecureDev =
-    !isProd && String(env.DIGITAL_ESTIMATE_ALLOW_INSECURE_SESSION_COOKIE ?? "").trim() === "1";
-  const secure = isProd || !allowInsecureDev;
-  const parts = [
-    `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=`,
-    `Path=${path}`,
-    "Max-Age=0",
-    "SameSite=Strict",
-    "HttpOnly"
-  ];
-  if (secure) parts.push("Secure");
-  res.append("Set-Cookie", parts.join("; "));
+  const opts = buildSessionCookieOptions({ env, rawSecret: "x", maxAgeSeconds: 0 });
+  for (const sameSite of ["None", "Lax", "Strict"]) {
+    const parts = [
+      `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=`,
+      `Path=${path}`,
+      "Max-Age=0",
+      `SameSite=${sameSite}`,
+      "HttpOnly"
+    ];
+    if (opts.secure || sameSite === "None") parts.push("Secure");
+    res.append("Set-Cookie", parts.join("; "));
+  }
 }
 
 /**
+ * Expire every known path/SameSite variant so only the next Set-Cookie remains.
  * @param {import('express').Response} res
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function clearObsoleteConfigurationSessionCookies(res, env = process.env) {
-  expireConfigurationSessionCookieAtPath(res, "/", env);
   expireConfigurationSessionCookieAtPath(res, DE_PUBLIC_CONFIG_COOKIE_PATH, env);
+  expireConfigurationSessionCookieAtPath(res, DE_PUBLIC_CONFIG_COOKIE_PATH_LEGACY, env);
 }
 
 /**
@@ -209,7 +241,6 @@ export function assertPublicConfigurationOrigin(req, expectedOrigin, env = proce
     err.statusCode = 403;
     throw err;
   }
-  // Development: allow localhost Vite public head when explicitly enabled
   const allowLocal =
     String(env.DIGITAL_ESTIMATE_ALLOW_LOCALHOST_PUBLIC_ORIGIN ?? "").trim() === "1";
   if (allowLocal && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
@@ -231,7 +262,10 @@ export function assertPublicConfigurationOrigin(req, expectedOrigin, env = proce
 export function redactPublicConfigurationSecrets(text) {
   return String(text ?? "")
     .replace(/(Authorization:\s*Bearer\s+)[^\s,]+/gi, "$1[redacted]")
-    .replace(new RegExp(`${DE_PUBLIC_CONFIG_SESSION_COOKIE}=[^;\\s]+`, "gi"), `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=[redacted]`)
+    .replace(
+      new RegExp(`${DE_PUBLIC_CONFIG_SESSION_COOKIE}=[^;\\s]+`, "gi"),
+      `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=[redacted]`
+    )
     .replace(/(\/api\/public-digital-estimate\/v1\/)([^/?#]+)/gi, "$1[redacted]")
     .replace(/(\/e\/)([^/?#]+)/gi, "$1[redacted]")
     .replace(/(#)([A-Za-z0-9_-]{20,})/g, "$1[redacted]");

@@ -1670,3 +1670,13 @@
 | **Ops** | Deploy Brain + digital-estimate together; confirm `buildId` matches merge SHA. Existing `/e/<token>` links re-exchange on recoverable session errors. |
 | **Out of scope** | Cookie SameSite=None; sold-job. |
 
+### 118. Digital Estimate session cookie SameSite=None + Path=/ (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Decision** | Canonical `de_cfg_session` is host-only on the Brain API host with **`Path=/`**, **`Secure`**, **`HttpOnly`**, **`SameSite=None`**. Legacy `Path=/api/public-digital-estimate/v2` + prior SameSite variants are expired on every set/clear. Session create hashes the same normalized secret used at lookup; exchange verifies the row is readable before 201. Fresh serverless request contexts must resolve the Set-Cookie value for PUT selections. |
+| **Why** | Live POST /v2/session 201 wrote durable Supabase rows, but PUT selections immediately failed session lookup (`session_not_found` / observed 404) because the cross-origin SPA→API cookie was not reliably stored/returned under SameSite=Strict + narrow Path — selections never persisted (row_version stayed 1). |
+| **SQL** | None. |
+| **Ops** | Deploy Brain + digital-estimate together. Existing links re-exchange to receive the new cookie. Confirm `/api/health` `buildId`. |
+| **Out of scope** | Domain=`.eliteosfab.com` cookie sharing; sold-job. |
+

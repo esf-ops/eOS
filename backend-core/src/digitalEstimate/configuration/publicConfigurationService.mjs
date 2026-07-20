@@ -554,18 +554,33 @@ export function createPublicConfigurationService(deps) {
         });
       }
 
+      if (!session?.id) {
+        throw exchangeUnavailable("session_persist_failed");
+      }
+
+      // Same-process verify: create hash must resolve before Set-Cookie (catches write/hash drift).
+      const verified = await configurationRepository.getSessionBySecretHash(secretHash);
+      if (!verified || String(verified.id) !== String(session.id)) {
+        throw exchangeUnavailable("session_persist_verify_failed");
+      }
+      if (!constantTimeEqualSessionHash(verified.session_secret_hash, secretHash)) {
+        throw exchangeUnavailable("session_hash_mismatch");
+      }
+
       const state = await buildPublicState({
         organizationId,
         publication,
         snap,
-        session,
+        session: verified,
         activeEnvelope
       });
 
       return {
         rawSecret,
         state,
-        publicOrigin: readDigitalEstimatePublicConfigurationOrigin(env)
+        publicOrigin: readDigitalEstimatePublicConfigurationOrigin(env),
+        // Safe ops-only prefix for correlated logs (never the raw secret).
+        sessionHashPrefix: secretHash.slice(0, 8)
       };
     },
 

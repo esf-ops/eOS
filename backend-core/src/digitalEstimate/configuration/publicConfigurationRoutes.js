@@ -337,7 +337,16 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
         body: req.body && typeof req.body === "object" ? req.body : {}
       });
       setConfigurationSessionCookie(res, result.rawSecret, env);
-      res.status(201).json({ ok: true, ...result.state });
+      // Do not echo rawSecret or full hash — only confirm session was established.
+      res.status(201).json({
+        ok: true,
+        ...result.state,
+        sessionCookie: {
+          established: true,
+          path: "/",
+          sameSite: "None"
+        }
+      });
     } catch (e) {
       logPublicCfg("session exchange failed", e, req);
       clearConfigurationSessionCookie(res, env);
