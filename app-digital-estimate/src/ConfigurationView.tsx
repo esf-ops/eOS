@@ -743,7 +743,10 @@ function optionsToProducts(options: LovableChoiceOption[], catalog: ConfigProduc
         availability,
         availabilityText: null,
         optionKey: o.optionKey,
-        variants: fromCatalog?.variants || [],
+        variants:
+          (Array.isArray(o.variants) && o.variants.length
+            ? o.variants
+            : fromCatalog?.variants) || [],
         visibleSellPrice: o.visibleSellPrice ?? null,
         visibleDelta: o.visibleDelta ?? null,
       };
@@ -2062,19 +2065,30 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     product: ConfigProduct,
     variantId?: string | null,
   ) {
-    const optionKey = resolveProductOptionKey(product, variantId) || product.optionKey;
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    if (variants.length > 1 && !variantId) {
+      setSaveState("error");
+      setSaveError("Choose a finish for this product before saving.");
+      return;
+    }
+    const resolvedVariantId =
+      variantId || (variants.length === 1 ? variants[0]?.variantId || variants[0]?.sku : null);
+    const optionKey =
+      resolveProductOptionKey(product, resolvedVariantId) || product.optionKey;
     if (!optionKey) {
       setSaveState("error");
       setSaveError("That product is unavailable. Please choose another option.");
       return;
     }
-    const variant = product.variants?.find((v) => v.variantId === variantId || v.sku === variantId);
+    const variant = product.variants?.find(
+      (v) => v.variantId === resolvedVariantId || v.sku === resolvedVariantId,
+    );
     const nextDraft: ProductDraft = {
       source: "esf",
       optionKey,
       productId: product.productId,
-      variantId: variantId || null,
-      variantSku: variant?.sku || variantId || null,
+      variantId: resolvedVariantId || null,
+      variantSku: variant?.sku || (resolvedVariantId as string) || null,
       manufacturer: product.manufacturer || "",
       model: product.model || "",
       finish: variant?.finish || variant?.color || product.finish || "",
@@ -2085,8 +2099,40 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         product.displayName,
       availability: variant?.availability || product.availability || null,
     };
-    updateProductDraft(roomId, role, nextDraft);
-    selectChoice(optionKey, role, roomId);
+    const nextDrafts = {
+      ...productDraftsRef.current,
+      [roomId]: { ...productDraftsRef.current[roomId], [role]: nextDraft },
+    };
+    productDraftsRef.current = nextDrafts;
+    setProductDrafts(nextDrafts);
+    const nextQty = { ...qtyRef.current };
+    const prefix = `${role}:${roomId}:`;
+    for (const key of Object.keys(nextQty)) {
+      if (key.startsWith(prefix)) {
+        if (role === "accessory" || role === "specialty") continue;
+        nextQty[key] = 0;
+      }
+    }
+    nextQty[optionKey] = 1;
+    if (role === "sink") {
+      const removed = clearIncompatibleAccessoriesForRoom(
+        nextQty,
+        roomId,
+        optionKey,
+        vm?.rooms || [],
+      );
+      if (removed.length) {
+        setAccessoryNotice(
+          removed.length === 1
+            ? `Removed incompatible accessory: ${removed[0]}`
+            : `Removed ${removed.length} incompatible sink accessories for this selection.`,
+        );
+      }
+    }
+    qtyRef.current = nextQty;
+    setQty(nextQty);
+    setSaveState("unsaved");
+    setSaveError(null);
   }
 
   saveFnRef.current = () => onSave();

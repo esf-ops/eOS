@@ -81,6 +81,19 @@ export type LovableChoiceOption = {
   catalogAvailability: string | null;
   manufacturer: string | null;
   model: string | null;
+  sku: string | null;
+  /** Finish variants from envelope customerSafe — required for Blanco multi-finish cards. */
+  variants: Array<{
+    variantId: string;
+    sku?: string | null;
+    displayName?: string | null;
+    finish?: string | null;
+    color?: string | null;
+    availability?: string | null;
+    imageUrl?: string | null;
+    sellPrice?: number | null;
+    optionKey?: string | null;
+  }>;
 };
 
 export type SideSplashPieceSummary = {
@@ -689,6 +702,20 @@ export function mapEliteOsToLovableViewModel(
           catalogAvailability: o.catalogAvailability ?? null,
           manufacturer: o.manufacturer ?? null,
           model: o.model ?? null,
+          sku: o.sku ?? null,
+          variants: Array.isArray(o.variants)
+            ? o.variants.map((v) => ({
+                variantId: String(v.variantId || v.sku || ""),
+                sku: v.sku ?? null,
+                displayName: v.displayName ?? null,
+                finish: v.finish ?? null,
+                color: v.color ?? null,
+                availability: v.availability ?? null,
+                imageUrl: v.imageUrl ?? null,
+                sellPrice: v.sellPrice != null ? Number(v.sellPrice) : null,
+                optionKey: v.optionKey ?? null,
+              }))
+            : [],
         };
       });
 

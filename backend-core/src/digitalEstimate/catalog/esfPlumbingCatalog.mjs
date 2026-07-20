@@ -60,15 +60,28 @@ export function resolveBlancoVariant(familyProductId, finishOrSku) {
   const needle = String(finishOrSku || "").trim().toLowerCase();
   if (!needle) return null;
 
+  const byVariantId = product.variants.find(
+    (v) => String(v.variantId || "").toLowerCase() === needle
+  );
+  if (byVariantId) return byVariantId;
+
   const bySku = product.variants.find((v) => String(v.sku || "").toLowerCase() === needle);
   if (bySku) return bySku;
 
+  // Accept canonical variant tokens like "blanco:family:sku:443311"
+  const skuFromToken = needle.match(/:sku:([^:]+)$/);
+  if (skuFromToken) {
+    const sku = skuFromToken[1];
+    const byTokenSku = product.variants.find((v) => String(v.sku || "").toLowerCase() === sku);
+    if (byTokenSku) return byTokenSku;
+  }
+
   const byFinish = product.variants.filter((v) => {
     const finish = String(v.finish || v.color || "").toLowerCase();
-    return finish === needle || finish.includes(needle) || needle.includes(finish);
+    return finish === needle;
   });
   if (byFinish.length === 1) return byFinish[0];
-  // Ambiguous finish match — require exact SKU
+  // Ambiguous finish match — require exact SKU (do not use broad includes)
   return null;
 }
 

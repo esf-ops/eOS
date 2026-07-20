@@ -1311,6 +1311,18 @@ export function createPublicConfigurationService(deps) {
             try {
               resolved = resolveCatalogProductSelection(parsed.productId, draft);
             } catch (e) {
+              if (e?.code === "missing_variant_sku") {
+                throw safeFail(
+                  "product_variant_required",
+                  "Choose a finish for this sink before saving",
+                  422,
+                  {
+                    selectionKey: String(key).slice(0, 160),
+                    diagnosticCode: "DE-PRODUCT-VARIANT-REQUIRED",
+                    productId: String(parsed.productId).slice(0, 160)
+                  }
+                );
+              }
               if (e?.code === "invalid_blanco_variant") {
                 throw safeFail("invalid_selection", "That sink finish is unavailable", 422, {
                   selectionKey: String(key).slice(0, 160),
@@ -1335,9 +1347,17 @@ export function createPublicConfigurationService(deps) {
               });
             }
             if (resolved.sellPrice != null) {
+              const finishLabel =
+                resolved.variant?.finish ||
+                resolved.variant?.color ||
+                resolved.variant?.sku ||
+                null;
+              const sinkName = finishLabel
+                ? `${resolved.product.displayName} · ${finishLabel}`
+                : resolved.product.displayName;
               calcOptions.push({
                 optionKey: key,
-                displayLabel: `ESF Sink — ${resolved.product.displayName}`,
+                displayLabel: `ESF Sink — ${sinkName}`,
                 quantity: 1,
                 sellPrice: resolved.sellPrice,
                 pricingMode: "per_each",
@@ -1381,8 +1401,23 @@ export function createPublicConfigurationService(deps) {
             try {
               resolved = resolveCatalogProductSelection(parsed.productId, draft);
             } catch (e) {
+              if (e?.code === "missing_variant_sku") {
+                throw safeFail(
+                  "product_variant_required",
+                  "Choose a finish for this faucet before saving",
+                  422,
+                  {
+                    selectionKey: String(key).slice(0, 160),
+                    diagnosticCode: "DE-PRODUCT-VARIANT-REQUIRED",
+                    productId: String(parsed.productId).slice(0, 160)
+                  }
+                );
+              }
               if (e?.code === "invalid_blanco_variant") {
-                throw safeFail("invalid_selection", "That faucet finish is unavailable", 422);
+                throw safeFail("invalid_selection", "That faucet finish is unavailable", 422, {
+                  selectionKey: String(key).slice(0, 160),
+                  diagnosticCode: "DE-SAVE"
+                });
               }
               throw e;
             }
