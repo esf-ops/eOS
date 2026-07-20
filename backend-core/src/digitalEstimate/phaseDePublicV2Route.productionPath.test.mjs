@@ -360,6 +360,29 @@ console.log("\nphaseDePublicV2Route.productionPath.test.mjs\n");
   const noCookieBody = await noCookie.json();
   assert.equal(noCookieBody.code, "session_required");
   assert.equal(noCookieBody.diagnosticCode, "DE-COOKIE");
+  assert.equal(noCookieBody.recoverable, true);
+  assert.equal(noCookieBody.lifecycleFatal, false);
+
+  const badCookie = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
+    method: "PUT",
+    headers: {
+      Origin: origin,
+      "Content-Type": "application/json",
+      Cookie: "de_cfg_session=dGVzdHRlc3R0ZXN0dGVzdHRlc3R0ZXN0dGVzdHRlc3Q"
+    },
+    body: JSON.stringify({
+      items: [{ optionKey: "material:kitchen:group_b", quantity: 1 }],
+      expectedRowVersion: 1,
+      idempotencyKey: "bad-cookie"
+    })
+  });
+  assert.equal(badCookie.status, 401);
+  const badCookieBody = await badCookie.json();
+  assert.ok(
+    badCookieBody.code === "session_not_found" || badCookieBody.code === "session_invalid"
+  );
+  assert.equal(badCookieBody.recoverable, true);
+  assert.equal(badCookieBody.lifecycleFatal, false);
 
   const exchanged = await fetch(`${base}/api/public-digital-estimate/v2/session`, {
     method: "POST",
@@ -500,6 +523,11 @@ console.log("\nphaseDePublicV2Route.productionPath.test.mjs\n");
   assert.ok(revokedSave.status === 404 || revokedSave.status === 410);
   const revokedBody = await revokedSave.json();
   assert.equal(revokedBody.ok, false);
+  assert.ok(
+    revokedBody.code === "publication_revoked" ||
+      revokedBody.code === "publication_unavailable" ||
+      revokedBody.lifecycleFatal === true
+  );
 
   await new Promise((r) => server.close(r));
   console.log("ok: revoked session cannot save selections");

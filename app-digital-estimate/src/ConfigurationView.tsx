@@ -628,7 +628,11 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
       if (
         allowRecover &&
         accessToken &&
-        (err.code === "session_required" || err.diagnosticCode === "DE-COOKIE" || err.status === 401)
+        (err.code === "session_required" ||
+          err.code === "session_not_found" ||
+          err.code === "session_invalid" ||
+          err.diagnosticCode === "DE-COOKIE" ||
+          err.status === 401)
       ) {
         try {
           const recovered = await exchangeFragmentToken(accessToken);
@@ -637,6 +641,14 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
             const recoveredVersion = recovered.session?.rowVersion;
             if (recoveredVersion != null) setRowVersion(recoveredVersion);
             return onSave({ qtyOverride: effectiveQty, allowSessionRecover: false });
+          }
+          if (
+            recovered.lifecycle === "revoked" ||
+            recovered.lifecycle === "expired" ||
+            recovered.lifecycle === "superseded"
+          ) {
+            onFatal();
+            return null;
           }
         } catch {
           /* fall through to inline error */

@@ -561,10 +561,16 @@ app.get("/api/health", (_req, res) => {
       String(process.env.MONDAY_QUOTES_BOARD_ID ?? "").trim()
   );
   const environment = String(process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development").trim() || "development";
+  const buildId = String(
+    process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || process.env.COMMIT_SHA || ""
+  )
+    .trim()
+    .slice(0, 12) || null;
   res.json({
     ok: true,
     app: "eliteOS Brain API",
     environment,
+    buildId,
     supabaseUrlPresent,
     supabaseServerKeyPresent,
     mondayTokenPresent,

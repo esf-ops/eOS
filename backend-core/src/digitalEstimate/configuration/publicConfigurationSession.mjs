@@ -61,6 +61,8 @@ export function parseCookieHeader(req) {
 }
 
 /**
+ * Prefer a non-empty session secret when duplicate Cookie headers exist
+ * (e.g. Path=/ vs Path=/api/public-digital-estimate/v2).
  * @param {import('express').Request} req
  * @returns {string|null}
  */
@@ -71,6 +73,44 @@ export function readSessionSecretFromCookie(req) {
   const s = raw.trim();
   if (s.length < 20 || s.length > 256) return null;
   return s;
+}
+
+/**
+ * Collect every de_cfg_session value from the Cookie header (duplicates possible).
+ * @param {import('express').Request} req
+ * @returns {string[]}
+ */
+export function listSessionSecretsFromCookieHeader(req) {
+  const header = String(req?.headers?.cookie || "");
+  const out = [];
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const k = trimmed.slice(0, eq).trim();
+    if (k !== DE_PUBLIC_CONFIG_SESSION_COOKIE) continue;
+    let v = trimmed.slice(eq + 1).trim();
+    try {
+      v = decodeURIComponent(v);
+    } catch {
+      /* keep raw */
+    }
+    v = v.trim();
+    if (v.length >= 20 && v.length <= 256) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Deterministic cookie pick: last valid value wins (RFC path-length order often puts
+ * more-specific path cookies later). Callers may try each secret if lookup fails.
+ */
+export function readSessionSecretCandidatesFromCookie(req) {
+  const listed = listSessionSecretsFromCookieHeader(req);
+  if (listed.length) return listed;
+  const single = readSessionSecretFromCookie(req);
+  return single ? [single] : [];
 }
 
 /**
@@ -105,6 +145,8 @@ export function buildSessionCookieOptions(args) {
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function setConfigurationSessionCookie(res, rawSecret, env = process.env) {
+  // Expire obsolete Path=/ variants that can shadow the canonical cookie.
+  expireConfigurationSessionCookieAtPath(res, "/", env);
   const opts = buildSessionCookieOptions({ env, rawSecret });
   const parts = [
     `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=${encodeURIComponent(rawSecret)}`,
@@ -117,21 +159,39 @@ export function setConfigurationSessionCookie(res, rawSecret, env = process.env)
   res.append("Set-Cookie", parts.join("; "));
 }
 
+function expireConfigurationSessionCookieAtPath(res, path, env = process.env) {
+  const isProd =
+    String(env.NODE_ENV || "").trim() === "production" ||
+    String(env.VERCEL_ENV || "").trim() === "production";
+  const allowInsecureDev =
+    !isProd && String(env.DIGITAL_ESTIMATE_ALLOW_INSECURE_SESSION_COOKIE ?? "").trim() === "1";
+  const secure = isProd || !allowInsecureDev;
+  const parts = [
+    `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=`,
+    `Path=${path}`,
+    "Max-Age=0",
+    "SameSite=Strict",
+    "HttpOnly"
+  ];
+  if (secure) parts.push("Secure");
+  res.append("Set-Cookie", parts.join("; "));
+}
+
+/**
+ * @param {import('express').Response} res
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+export function clearObsoleteConfigurationSessionCookies(res, env = process.env) {
+  expireConfigurationSessionCookieAtPath(res, "/", env);
+  expireConfigurationSessionCookieAtPath(res, DE_PUBLIC_CONFIG_COOKIE_PATH, env);
+}
+
 /**
  * @param {import('express').Response} res
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function clearConfigurationSessionCookie(res, env = process.env) {
-  const opts = buildSessionCookieOptions({ env, rawSecret: "x", maxAgeSeconds: 0 });
-  const parts = [
-    `${DE_PUBLIC_CONFIG_SESSION_COOKIE}=`,
-    `Path=${DE_PUBLIC_CONFIG_COOKIE_PATH}`,
-    "Max-Age=0",
-    "SameSite=Strict",
-    "HttpOnly"
-  ];
-  if (opts.secure) parts.push("Secure");
-  res.append("Set-Cookie", parts.join("; "));
+  clearObsoleteConfigurationSessionCookies(res, env);
 }
 
 /**

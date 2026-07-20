@@ -172,11 +172,23 @@ export function attachDigitalEstimateReviewRequestRoutes(app, deps) {
     try {
       assertPublicConfigurationOrigin(req, expectedOrigin, env);
       const rawSecret = readSessionSecretFromCookie(req);
-      if (!rawSecret) return res.status(404).json(UNAVAILABLE);
+      // No cookie / no open review is not a lifecycle failure — return empty current.
+      if (!rawSecret) {
+        return res.json({ ok: true, reviewRequest: null, code: "no_current_review_request" });
+      }
       const result = await service.getCurrentReviewRequest({ rawSecret });
       res.json(result);
     } catch (e) {
       logReview("review request get failed", e, req);
+      // Session lookup failures → empty current (nonfatal). Lifecycle revoke still 404.
+      if (
+        e?.code === "session_not_found" ||
+        e?.code === "session_invalid" ||
+        e?.code === "not_found" ||
+        e?.statusCode === 401
+      ) {
+        return res.json({ ok: true, reviewRequest: null, code: "no_current_review_request" });
+      }
       publicError(res, e);
     }
   });

@@ -66,7 +66,9 @@ function exchangeUnavailable(reason) {
 function configUnavailable(message = "Configuration unavailable") {
   const e = new Error(message);
   e.code = "configuration_unavailable";
-  e.statusCode = 404;
+  e.statusCode = 422;
+  e.diagnosticCode = "DE-SAVE";
+  e.recoverable = true;
   return e;
 }
 
@@ -74,6 +76,29 @@ function safeFail(code, message, statusCode = 400) {
   const e = new Error(message);
   e.code = code;
   e.statusCode = statusCode;
+  e.recoverable = statusCode < 500 && statusCode !== 404 && statusCode !== 410;
+  return e;
+}
+
+/** Recoverable session cookie / row problems — customer may re-exchange. */
+function sessionRecoverable(code, message = "Please refresh and try again", reason = null) {
+  const e = new Error(message);
+  e.code = code;
+  e.statusCode = 401;
+  e.diagnosticCode = "DE-COOKIE";
+  e.recoverable = true;
+  e.exchangeReason = reason || code;
+  return e;
+}
+
+/** True publication lifecycle failures — customer unavailable page. */
+function publicationLifecycle(code, message = "Estimate unavailable", statusCode = 404) {
+  const e = new Error(message);
+  e.code = code;
+  e.statusCode = statusCode;
+  e.diagnosticCode = "DE-EXCHANGE-404";
+  e.lifecycleFatal = true;
+  e.exchangeReason = code;
   return e;
 }
 
@@ -632,11 +657,20 @@ export function createPublicConfigurationService(deps) {
 
       const secretHash = hashConfigurationSessionSecret(rawSecret);
       const session = await configurationRepository.getSessionBySecretHash(secretHash);
-      if (!session || !constantTimeEqualSessionHash(session.session_secret_hash, secretHash)) {
-        throw unavailable();
+      if (!session) {
+        throw sessionRecoverable("session_not_found", "Please refresh and try again", "session_not_found");
+      }
+      if (!constantTimeEqualSessionHash(session.session_secret_hash, secretHash)) {
+        throw sessionRecoverable("session_invalid", "Please refresh and try again", "session_hash_mismatch");
+      }
+      if (session.status === "revoked" || session.status === "blocked" || session.status === "superseded") {
+        throw sessionRecoverable("session_invalid", "Please refresh and try again", `session_status_${session.status}`);
       }
       if (session.status !== "active" && session.status !== "configuring" && session.status !== "saved") {
-        throw unavailable();
+        throw sessionRecoverable("session_invalid", "Please refresh and try again", `session_status_${session.status}`);
+      }
+      if (session.expires_at && new Date(session.expires_at).getTime() < Date.now()) {
+        throw sessionRecoverable("session_invalid", "Please refresh and try again", "session_expired");
       }
       if (Number(session.row_version) !== Number(expectedRowVersion)) {
         throw safeFail("row_version_conflict", "Please refresh and try again", 409);
@@ -646,21 +680,40 @@ export function createPublicConfigurationService(deps) {
         session.organization_id,
         session.publication_id
       );
-      if (!publication || publication.status !== "active") throw unavailable();
-      assertSyntheticPublicationPublicAccess(publication.id, env);
+      if (!publication) {
+        throw publicationLifecycle("publication_unavailable");
+      }
+      if (publication.status === "revoked") {
+        throw publicationLifecycle("publication_revoked");
+      }
+      if (publication.status === "superseded") {
+        throw publicationLifecycle("publication_superseded");
+      }
+      if (publication.status !== "active") {
+        throw publicationLifecycle("publication_unavailable");
+      }
+      try {
+        assertSyntheticPublicationPublicAccess(publication.id, env);
+      } catch (e) {
+        throw publicationLifecycle("publication_unavailable");
+      }
       if (isPricingExpired(publication.pricing_valid_through)) {
-        throw configUnavailable("Pricing has expired");
+        throw publicationLifecycle("publication_expired", "Pricing has expired", 410);
       }
 
       const activeEnvelope = await configurationRepository.getActiveEnvelope(
         session.organization_id,
         session.publication_id
       );
-      if (!activeEnvelope) throw unavailable();
-      if (!session.envelope_id || session.envelope_id !== activeEnvelope.id) {
-        throw unavailable();
+      if (!activeEnvelope) {
+        throw sessionRecoverable("session_invalid", "Please refresh and try again", "envelope_missing");
       }
-      if (activeEnvelope.status !== "active") throw unavailable();
+      if (!session.envelope_id || String(session.envelope_id) !== String(activeEnvelope.id)) {
+        throw sessionRecoverable("session_invalid", "Please refresh and try again", "envelope_mismatch");
+      }
+      if (activeEnvelope.status !== "active") {
+        throw sessionRecoverable("session_invalid", "Please refresh and try again", "envelope_inactive");
+      }
 
       await ensurePolicyFixtures(session.organization_id);
       const snap = await deRepository.getSnapshotByPublicationId(

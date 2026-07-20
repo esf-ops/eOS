@@ -6,14 +6,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
 
-// Load classifier via dynamic import of the TS source through Vite is unavailable in node.
-// Mirror the exported classifier by evaluating the compiled logic from source string checks
-// plus a duplicated pure unit of the same rules for regression safety.
 const apiSrc = readFileSync(join(__dirname, "publicConfigApi.ts"), "utf8");
 const viewSrc = readFileSync(join(__dirname, "ConfigurationView.tsx"), "utf8");
 const appSrc = readFileSync(join(__dirname, "App.tsx"), "utf8");
@@ -25,11 +20,15 @@ assert.ok(apiSrc.includes("lifecycleFatal"));
 assert.ok(apiSrc.includes('method: "PUT"'));
 assert.ok(apiSrc.includes("/api/public-digital-estimate/v2/selections"));
 assert.ok(apiSrc.includes("session_required"));
+assert.ok(apiSrc.includes("session_not_found"));
+assert.ok(apiSrc.includes("publication_revoked"));
 assert.ok(apiSrc.includes("DE-SAVE"));
+assert.ok(apiSrc.includes("no_current_review_request") || apiSrc.includes("reviewRequest: null"));
 
 assert.ok(viewSrc.includes("lifecycleFatal"));
 assert.ok(viewSrc.includes("accessToken"));
 assert.ok(viewSrc.includes("exchangeFragmentToken"));
+assert.ok(viewSrc.includes("session_not_found"));
 assert.equal(
   /status === 401 \|\| status === 403 \|\| status === 404[\s\S]*onFatal\(\)/.test(viewSrc),
   false,
@@ -38,46 +37,42 @@ assert.equal(
 assert.ok(viewSrc.includes("err.lifecycleFatal"));
 assert.ok(appSrc.includes("accessToken={accessToken}"));
 
-// Pure classifier copy — keep in sync with publicConfigApi.classifyConfigurationMutationError
+// Keep in sync with publicConfigApi.classifyConfigurationMutationError
 function classifyConfigurationMutationError(status, body) {
   const code = String(body?.code || "").trim();
   const stage = String(body?.stage || "").trim();
   const diagnosticCode = String(body?.diagnosticCode || "").trim();
-  const message = String(body?.error || "").trim() || "Unable to save";
-
-  if (code === "session_required" || diagnosticCode === "DE-COOKIE" || status === 401) {
+  const FATAL_CODES = new Set([
+    "publication_revoked",
+    "publication_expired",
+    "publication_unavailable",
+    "publication_superseded"
+  ]);
+  if (body?.lifecycleFatal === true || FATAL_CODES.has(code) || status === 410) {
+    return { lifecycleFatal: true, code: code || "publication_unavailable" };
+  }
+  if (
+    code === "session_required" ||
+    code === "session_not_found" ||
+    code === "session_invalid" ||
+    diagnosticCode === "DE-COOKIE" ||
+    status === 401
+  ) {
     return { lifecycleFatal: false, code: code || "session_required" };
   }
   if (
     code === "unknown_option" ||
-    code === "unresolved_product" ||
-    code === "forbidden_caller_authority" ||
-    code === "idempotency_required" ||
-    code === "concurrency_required"
+    code === "configuration_unavailable" ||
+    code === "no_current_review_request"
   ) {
     return { lifecycleFatal: false, code };
   }
   if (code === "row_version_conflict" || status === 409) {
     return { lifecycleFatal: false, code: "row_version_conflict" };
   }
-  if (status === 410) {
-    return { lifecycleFatal: true, code: code || "unavailable" };
-  }
-  if (
-    status === 404 &&
-    body &&
-    (code === "unavailable" || diagnosticCode === "DE-EXCHANGE-404") &&
-    (stage === "token_exchange" ||
-      stage === "session" ||
-      stage === "lifecycle" ||
-      /revoked|expired|unavailable/i.test(message))
-  ) {
-    return { lifecycleFatal: true, code: code || "unavailable" };
-  }
   return {
     lifecycleFatal: false,
-    code: code || (status === 404 ? "save_route_or_server" : "save_failed"),
-    message
+    code: code || (status === 404 ? "save_route_or_server" : "save_failed")
   };
 }
 
@@ -91,13 +86,29 @@ function classifyConfigurationMutationError(status, body) {
 }
 
 {
-  // Legacy production shape before session_required (DE-STATE, no code)
-  const legacyMissing = classifyConfigurationMutationError(404, {
-    error: "Configuration unavailable",
-    diagnosticCode: "DE-STATE"
+  const notFound = classifyConfigurationMutationError(401, {
+    error: "Please refresh and try again",
+    code: "session_not_found",
+    stage: "selection",
+    diagnosticCode: "DE-COOKIE",
+    recoverable: true
   });
-  assert.equal(legacyMissing.lifecycleFatal, false);
-  assert.equal(legacyMissing.code, "save_route_or_server");
+  assert.equal(notFound.lifecycleFatal, false);
+}
+
+{
+  // Production shape that previously wiped the page (generic unavailable + message match)
+  const legacySelection404 = classifyConfigurationMutationError(404, {
+    error: "Estimate unavailable",
+    stage: "selection",
+    code: "unavailable",
+    diagnosticCode: "DE-EXCHANGE-404"
+  });
+  assert.equal(
+    legacySelection404.lifecycleFatal,
+    false,
+    "selection-stage generic unavailable must not be fatal"
+  );
 }
 
 {
@@ -108,11 +119,19 @@ function classifyConfigurationMutationError(status, body) {
 {
   const revoked = classifyConfigurationMutationError(404, {
     error: "Estimate unavailable",
-    code: "unavailable",
-    stage: "token_exchange",
-    diagnosticCode: "DE-EXCHANGE-404"
+    code: "publication_revoked",
+    stage: "selection",
+    lifecycleFatal: true
   });
   assert.equal(revoked.lifecycleFatal, true);
+}
+
+{
+  const expired = classifyConfigurationMutationError(410, {
+    error: "Pricing has expired",
+    code: "publication_expired"
+  });
+  assert.equal(expired.lifecycleFatal, true);
 }
 
 {
@@ -132,6 +151,5 @@ function classifyConfigurationMutationError(status, body) {
   assert.equal(conflict.lifecycleFatal, false);
 }
 
-void require;
-console.log("ok: save 404/server error is not estimate-unavailable; lifecycle 404 still fatal");
+console.log("ok: save 404/server error is not estimate-unavailable; lifecycle codes still fatal");
 console.log("\nAll phaseSelectionsSave UI tests passed.\n");
