@@ -73,6 +73,11 @@ export type LovableChoiceOption = {
   pieceKey: string | null;
   pieceLabel: string | null;
   selectable: boolean;
+  priceEffectLabel: string | null;
+  accessoryKind: string | null;
+  compatibleFamilyIds: string[];
+  visibleSellPrice: number | null;
+  visibleDelta: number | null;
 };
 
 export type SideSplashPieceSummary = {
@@ -279,6 +284,7 @@ export function classifySourceKind(role: string, optionKey: string, roomKey: str
 function parseSideSplashMeta(
   optionKey: string,
   roomKey: string,
+  option?: Partial<ConfigOption> | null,
 ): { pieceKey: string | null; pieceLabel: string | null; sideToken: string } {
   const token = optionTokenAfterRoom(optionKey, roomKey);
   const parts = token.split(":").filter(Boolean);
@@ -286,13 +292,63 @@ function parseSideSplashMeta(
   if (parts.length >= 2 && sides.has(parts[parts.length - 1].toLowerCase())) {
     const sideToken = parts[parts.length - 1];
     const pieceKey = parts.slice(0, -1).join(":") || "default";
+    const fromApi = String(option?.pieceDisplayName || "").trim();
+    let pieceLabel: string | null = fromApi || null;
+    if (!pieceLabel || looksLikeUuid(pieceLabel) || looksLikeUuid(pieceKey)) {
+      // Prefer API label; never fall back to raw UUID piece keys.
+      pieceLabel = fromApi && !looksLikeUuid(fromApi) ? fromApi : null;
+    }
+    if (!pieceLabel && !looksLikeUuid(pieceKey) && pieceKey !== "default") {
+      pieceLabel = pieceKey.replace(/[-_]/g, " ");
+    }
     return {
       pieceKey,
-      pieceLabel: pieceKey === "default" ? "Piece" : pieceKey.replace(/[-_]/g, " "),
+      pieceLabel,
       sideToken,
     };
   }
-  return { pieceKey: "default", pieceLabel: "Piece", sideToken: token };
+  return { pieceKey: "default", pieceLabel: "Countertop piece 1", sideToken: token };
+}
+
+function looksLikeUuid(value: string): boolean {
+  const s = String(value || "").trim();
+  if (!s) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s)) {
+    return true;
+  }
+  if (/^[0-9a-f]{32}$/i.test(s.replace(/[\s-]/g, ""))) return true;
+  if (/^[0-9a-f]{8}\s+[0-9a-f]{4}\s+[0-9a-f]{4}\s+[0-9a-f]{4}\s+[0-9a-f]{12}$/i.test(s)) {
+    return true;
+  }
+  return false;
+}
+
+function formatPriceEffect(opt: {
+  includedInBaseline?: boolean;
+  customerPriceTreatment?: string;
+  availabilityState?: string;
+  priceEffectLabel?: string | null;
+  visibleSellPrice?: number | null;
+  visibleDelta?: number | null;
+}): string | null {
+  if (opt.priceEffectLabel) return opt.priceEffectLabel;
+  const treatment = String(opt.customerPriceTreatment || "");
+  if (treatment === "review_required" || opt.availabilityState === "review_required") {
+    return "Requires review";
+  }
+  if (opt.includedInBaseline || treatment === "included" || treatment === "no_change") {
+    return "Included";
+  }
+  const delta =
+    opt.visibleDelta != null
+      ? Number(opt.visibleDelta)
+      : opt.visibleSellPrice != null
+        ? Number(opt.visibleSellPrice)
+        : null;
+  if (delta == null || !Number.isFinite(delta)) return null;
+  if (Math.abs(delta) < 0.005) return "Included";
+  if (delta < 0) return `${formatCurrency(Math.abs(delta))} credit`;
+  return `+${formatCurrency(delta)}`;
 }
 
 function productMatchesRoom(product: ConfigProduct, roomKey: string, roomDisplayName: string): boolean {
@@ -554,7 +610,7 @@ export function mapEliteOsToLovableViewModel(
           ([key, value]) => key.startsWith(rolePrefix) && Number(value) > 0,
         );
         const sideMeta =
-          role === "sidesplash" ? parseSideSplashMeta(o.optionKey, r.roomKey) : null;
+          role === "sidesplash" ? parseSideSplashMeta(o.optionKey, r.roomKey, o) : null;
         const displayLabel =
           role === "backsplash" ? normalizeBacksplashLabel(o.displayLabel) : o.displayLabel;
         return {
@@ -580,8 +636,15 @@ export function mapEliteOsToLovableViewModel(
           variantId: o.variantId ?? null,
           sourceKind: classifySourceKind(String(role), o.optionKey, r.roomKey),
           pieceKey: o.pieceKey ?? sideMeta?.pieceKey ?? null,
-          pieceLabel: sideMeta?.pieceLabel ?? null,
+          pieceLabel: o.pieceDisplayName || sideMeta?.pieceLabel || null,
           selectable: o.selectable !== false,
+          priceEffectLabel: formatPriceEffect(o),
+          accessoryKind: o.accessoryKind ?? null,
+          compatibleFamilyIds: Array.isArray(o.compatibleFamilyIds)
+            ? o.compatibleFamilyIds.map(String)
+            : [],
+          visibleSellPrice: o.visibleSellPrice ?? null,
+          visibleDelta: o.visibleDelta ?? null,
         };
       });
 
@@ -611,12 +674,18 @@ export function mapEliteOsToLovableViewModel(
     );
 
     const sideSplashMap = new Map<string, SideSplashPieceSummary>();
+    let sidePieceOrdinal = 0;
     for (const opt of choiceOptions.filter((c) => c.role === "sidesplash")) {
       const pk = opt.pieceKey || "default";
       if (!sideSplashMap.has(pk)) {
+        sidePieceOrdinal += 1;
+        const label =
+          opt.pieceLabel && !looksLikeUuid(opt.pieceLabel)
+            ? opt.pieceLabel
+            : `Countertop piece ${sidePieceOrdinal}`;
         sideSplashMap.set(pk, {
           pieceKey: pk,
-          pieceLabel: opt.pieceLabel || (pk === "default" ? "Side splash" : pk),
+          pieceLabel: label,
           summary: null,
           options: [],
         });
@@ -625,9 +694,16 @@ export function mapEliteOsToLovableViewModel(
     }
     const sideSplashPieces = [...sideSplashMap.values()].map((piece) => {
       const sel = piece.options.find((o) => o.selected) || piece.options.find((o) => o.includedInBaseline);
+      const modeLabel = (() => {
+        const token = String(sel?.optionKey || "").split(":").pop()?.toLowerCase();
+        if (token === "left") return "Left";
+        if (token === "right") return "Right";
+        if (token === "both") return "Both sides";
+        return "None";
+      })();
       return {
         ...piece,
-        summary: sel?.displayLabel || null,
+        summary: modeLabel,
       };
     });
 

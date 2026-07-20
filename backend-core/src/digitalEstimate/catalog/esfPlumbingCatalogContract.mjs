@@ -130,6 +130,11 @@ export function normalizeAvailability(statusOrAvailability) {
   return "special_order";
 }
 
+import {
+  customerFacingProductCopy,
+  stripInternalChannelTerms
+} from "./customerFacingCopy.mjs";
+
 /**
  * Strip internal cost/margin/vendor fields and project customer-safe availability copy.
  * Retains sellPrice when present — callers that must hide absolute prices should omit separately.
@@ -152,6 +157,12 @@ export function toCustomerSafeProduct(product) {
     out[key] = value;
   }
 
+  const copy = customerFacingProductCopy(product);
+  out.displayName = copy.displayName;
+  if (copy.description != null) out.description = copy.description;
+  else if (typeof out.description === "string") {
+    out.description = stripInternalChannelTerms(out.description) || null;
+  }
   out.availabilityText = customerAvailabilityText(/** @type {Availability} */ (product.availability));
   return out;
 }

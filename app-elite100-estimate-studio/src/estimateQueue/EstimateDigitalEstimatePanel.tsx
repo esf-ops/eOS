@@ -353,7 +353,7 @@ export default function EstimateDigitalEstimatePanel({
       setActionNotice(
         body.reused
           ? body.staffNotice ||
-              "Publication already exists for this revision. Customer URL is unchanged."
+              "This revision is already published. The customer link is unchanged."
           : body.envelope?.configured
             ? "Digital Estimate published."
             : body.staffNotice ||

@@ -3,7 +3,7 @@
  * Pricing / accept / Supabase / client totals removed. Brain APIs only.
  * Room options consume envelope options / config.products — never hard-coded catalogs.
  */
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { Component, useEffect, useId, useMemo, useState, type ErrorInfo, type ReactNode } from "react";
 import {
   buildSelectionItems,
   groupColorsByPricingGroup,
@@ -38,6 +38,57 @@ type Props = {
   /** Stable publication token for session recovery after cookie loss. */
   accessToken?: string | null;
 };
+
+class ConfiguratorErrorBoundary extends Component<
+  { children: ReactNode; onRetry?: () => void },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    // Safe internal diagnostic only — never render stack/variable names publicly.
+    console.error("de_configurator_error", {
+      name: error?.name,
+      message: String(error?.message || "").slice(0, 200),
+      componentStack: String(info?.componentStack || "").slice(0, 400),
+    });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="mx-auto max-w-lg p-8 text-center" data-testid="de-configurator-error">
+          <p className="text-base font-medium text-foreground">
+            We couldn’t save that change. Please try again.
+          </p>
+          <button
+            type="button"
+            className="mt-4 rounded-lg border border-border px-4 py-2 text-sm"
+            onClick={() => {
+              this.setState({ hasError: false });
+              this.props.onRetry?.();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function ConfigurationView(props: Props) {
+  return (
+    <ConfiguratorErrorBoundary>
+      <ConfigurationViewInner {...props} />
+    </ConfiguratorErrorBoundary>
+  );
+}
 
 type ModalKind =
   | "color"
@@ -399,7 +450,9 @@ function ChoiceRadio({
         >
           <span>
             <span className="font-medium text-foreground">{opt.displayLabel}</span>
-            {opt.includedInBaseline ? (
+            {opt.priceEffectLabel ? (
+              <span className="ml-2 text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
+            ) : opt.includedInBaseline ? (
               <span className="ml-2 text-xs text-muted-foreground">Included</span>
             ) : null}
             {opt.availabilityText ? (
@@ -527,30 +580,216 @@ function findOptionBySource(
 }
 
 function optionsToProducts(options: LovableChoiceOption[], catalog: ConfigProduct[]): ConfigProduct[] {
-  if (catalog.length) {
-    // Prefer API products, but keep optionKey linkage from envelope options when present.
-    return catalog.map((p) => {
-      const match = options.find(
-        (o) => o.productId === p.productId || o.optionKey === p.optionKey,
-      );
-      return {
-        ...p,
-        optionKey: p.optionKey || match?.optionKey || null,
-      };
-    });
-  }
-  return options
-    .filter((o) => o.sourceKind === "esf" || o.sourceKind === "stock" || o.sourceKind === "other")
-    .map((o) => ({
-      productId: o.productId || o.optionKey,
-      category: String(o.role),
-      displayName: o.displayLabel,
-      description: o.description,
-      imageUrl: o.imageAssetRef,
-      availabilityText: o.availabilityText,
+  // Envelope options are authoritative — catalog only enriches finish variants / images.
+  const esf = options.filter(
+    (o) => o.sourceKind === "esf" || o.sourceKind === "stock" || o.sourceKind === "other",
+  );
+  if (!esf.length) return [];
+  return esf.map((o) => {
+    const fromCatalog = catalog.find(
+      (p) => p.productId === o.productId || p.optionKey === o.optionKey,
+    );
+    return {
+      ...(fromCatalog || {}),
+      productId: o.productId || fromCatalog?.productId || o.optionKey,
+      category: fromCatalog?.category || String(o.role),
+      displayName: o.displayLabel || fromCatalog?.displayName || "Option",
+      description: o.description ?? fromCatalog?.description ?? null,
+      imageUrl: fromCatalog?.imageUrl || o.imageAssetRef || null,
+      manufacturer: fromCatalog?.manufacturer || null,
+      model: fromCatalog?.model || null,
+      availabilityText: o.availabilityText || fromCatalog?.availabilityText || null,
       optionKey: o.optionKey,
-      variants: [],
-    }));
+      variants: fromCatalog?.variants || [],
+      sellPrice: o.visibleSellPrice ?? fromCatalog?.sellPrice ?? null,
+    } as ConfigProduct;
+  });
+}
+
+function clearIncompatibleAccessoriesForRoom(
+  nextQty: Record<string, number>,
+  roomId: string,
+  sinkOptionKey: string,
+  rooms: LovableRoom[],
+) {
+  const room = rooms.find((r) => r.id === roomId);
+  if (!room) return;
+  const sinkToken = sinkOptionKey.split(":").slice(2).join(":").toLowerCase();
+  const sinkMode = sinkToken.startsWith("esf:")
+    ? "esf"
+    : sinkToken.startsWith("customer")
+      ? "customer_provided"
+      : sinkToken === "none"
+        ? "none"
+        : "other";
+  const sinkProductId = sinkMode === "esf" ? sinkToken.replace(/^esf:/, "") : null;
+  for (const opt of room.choiceOptions.filter((c) => c.role === "accessory")) {
+    const kind = opt.accessoryKind || "other";
+    if (kind !== "sink_accessory") continue;
+    let keep = false;
+    if (sinkMode === "esf" && sinkProductId) {
+      const families = opt.compatibleFamilyIds || [];
+      if (!families.length) {
+        const sinkHint = sinkProductId.replace(/^kansas:/, "").split(/[:/]/)[0] || "";
+        keep =
+          Boolean(sinkHint) &&
+          opt.displayLabel.toLowerCase().includes(sinkHint.toLowerCase().slice(0, 4));
+      } else {
+        keep = families.some(
+          (f) => f === sinkProductId || sinkProductId.startsWith(f) || f.startsWith(sinkProductId),
+        );
+      }
+    }
+    if (!keep) nextQty[opt.optionKey] = 0;
+  }
+}
+
+function AccessoriesOrSpecialtyModal({
+  kind,
+  room,
+  onClose,
+  onToggle,
+}: {
+  kind: "accessories" | "specialty";
+  room: LovableRoom;
+  onClose: () => void;
+  onToggle: (optionKey: string, role: "accessory" | "specialty") => void;
+}) {
+  if (kind === "specialty") {
+    const options = room.choiceOptions.filter((c) => c.role === "specialty");
+    return (
+      <ModalShell title="Specialty" eyebrow={room.name} onClose={onClose} testId="de-specialty-modal">
+        <div className="flex flex-col gap-2">
+          {options.map((opt) => (
+            <label
+              key={opt.optionKey}
+              className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+                opt.selected ? "border-foreground bg-muted/30" : "border-border"
+              }`}
+            >
+              <span>
+                <span className="block font-medium text-foreground">{opt.displayLabel}</span>
+                {opt.description ? (
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{opt.description}</span>
+                ) : null}
+                {opt.priceEffectLabel ? (
+                  <span className="mt-1 block text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
+                ) : null}
+              </span>
+              <input
+                type="checkbox"
+                checked={opt.selected}
+                onChange={() => onToggle(opt.optionKey, "specialty")}
+              />
+            </label>
+          ))}
+        </div>
+      </ModalShell>
+    );
+  }
+
+  const sinkSelected = room.choiceOptions.find((c) => c.role === "sink" && c.selected);
+  const sinkMode = sinkSelected?.sourceKind || "none";
+  const sinkProductId = sinkSelected?.productId || null;
+  const accessories = room.choiceOptions.filter((c) => c.role === "accessory");
+  const sinkAccessories = accessories.filter((opt) => {
+    if ((opt.accessoryKind || "sink_accessory") !== "sink_accessory") return false;
+    if (sinkMode === "none" || sinkMode === "customer_provided") return false;
+    if (sinkMode !== "esf" || !sinkProductId) return false;
+    const families = opt.compatibleFamilyIds || [];
+    if (!families.length) {
+      const sinkHint = sinkProductId.replace(/^kansas:/, "").split(/[:/]/)[0] || "";
+      return (
+        Boolean(sinkHint) &&
+        opt.displayLabel.toLowerCase().includes(sinkHint.toLowerCase().slice(0, 4))
+      );
+    }
+    return families.some(
+      (f) => f === sinkProductId || sinkProductId.startsWith(f) || f.startsWith(sinkProductId),
+    );
+  });
+  const plumbingAddons = accessories.filter(
+    (opt) => (opt.accessoryKind || "") === "plumbing_addon" ||
+      (!opt.accessoryKind &&
+        /soap|rinser|air switch|disposal|dispenser/i.test(opt.displayLabel)),
+  );
+
+  return (
+    <ModalShell title="Accessories" eyebrow={room.name} onClose={onClose} testId="de-accessories-modal">
+      <div className="space-y-5">
+        <section>
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Sink accessories
+          </h3>
+          {sinkMode === "none" ? (
+            <p className="text-sm text-muted-foreground">
+              Choose a sink to see compatible grids and accessories.
+            </p>
+          ) : sinkMode === "customer_provided" ? (
+            <p className="text-sm text-muted-foreground">
+              Model-specific sink accessories are available after an ESF sink is selected.
+            </p>
+          ) : sinkAccessories.length ? (
+            <div className="flex flex-col gap-2">
+              {sinkAccessories.map((opt) => (
+                <label
+                  key={opt.optionKey}
+                  className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
+                    opt.selected ? "border-foreground bg-muted/30" : "border-border"
+                  }`}
+                >
+                  <span>
+                    <span className="font-medium text-foreground">{opt.displayLabel}</span>
+                    {opt.priceEffectLabel ? (
+                      <span className="ml-2 text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
+                    ) : null}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={opt.selected}
+                    onChange={() => onToggle(opt.optionKey, "accessory")}
+                  />
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No compatible sink accessories for this selection.</p>
+          )}
+        </section>
+        <section>
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Plumbing add-ons
+          </h3>
+          {plumbingAddons.length ? (
+            <div className="flex flex-col gap-2">
+              {plumbingAddons.map((opt) => (
+                <label
+                  key={opt.optionKey}
+                  className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
+                    opt.selected ? "border-foreground bg-muted/30" : "border-border"
+                  }`}
+                >
+                  <span>
+                    <span className="font-medium text-foreground">{opt.displayLabel}</span>
+                    {opt.priceEffectLabel ? (
+                      <span className="ml-2 text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
+                    ) : null}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={opt.selected}
+                    onChange={() => onToggle(opt.optionKey, "accessory")}
+                  />
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No plumbing add-ons available for this room.</p>
+          )}
+        </section>
+      </div>
+    </ModalShell>
+  );
 }
 
 function PlumbingSourceModal({
@@ -959,8 +1198,11 @@ function CustomerRoomCard({
           <SummaryRow
             label="Side splash"
             value={
-              room.sideSplashPieces.map((p) => `${p.pieceLabel}: ${p.summary || "None"}`).join(" · ") ||
-              "Choose side splash"
+              room.sideSplashPieces.length
+                ? room.sideSplashPieces
+                    .map((p) => `${p.pieceLabel} — ${p.summary || "None"}`)
+                    .join("; ")
+                : "Choose side splash"
             }
             onClick={() => onOpenModal("sidesplash")}
             testId="de-open-sidesplash-modal"
@@ -1032,7 +1274,7 @@ function CustomerRoomCard({
   );
 }
 
-export function ConfigurationView({ state, onState, onFatal, accessToken }: Props) {
+function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props) {
   const formId = useId();
   const config = state.configuration;
   const [qty, setQty] = useState<Record<string, number>>(() => ({
@@ -1164,6 +1406,9 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
       }
     }
     nextQty[optionKey] = 1;
+    if (role === "sink") {
+      clearIncompatibleAccessoriesForRoom(nextQty, roomId, optionKey, vm?.rooms || []);
+    }
     setQty(nextQty);
     setSaveState("unsaved");
     setSaveError(null);
@@ -1226,7 +1471,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
         customerInfoDraft: infoDraft,
         roomLabelDrafts: roomLabels,
         roomNotes,
-        productNote,
+        projectNote,
         customerProductDrafts: effectiveProductDrafts,
         backsplashDrafts: effectiveBacksplashDrafts,
       });
@@ -1453,10 +1698,19 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
         <button
           type="button"
           onClick={() => void onSave()}
-          disabled={saveState === "saving"}
+          disabled={saveState === "saving" || saveState === "saved"}
           className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90 disabled:opacity-60"
+          data-testid="de-save-button"
         >
-          {saveState === "saving" ? "Saving…" : "Save selections"}
+          {saveState === "saving"
+            ? "Saving…"
+            : saveState === "error"
+              ? "Couldn't save — Retry"
+              : saveState === "saved"
+                ? "All changes saved"
+                : saveState === "unsaved"
+                  ? "Saving…"
+                  : "All changes saved"}
         </button>
         <span
           className={`block text-center text-xs ${
@@ -1466,16 +1720,21 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
           data-testid="de-save-status"
           data-save-state={saveState}
         >
-          {saveState === "unsaved" ? "Selection changed — not saved yet" : null}
+          {saveState === "unsaved" ? "Saving your changes…" : null}
           {saveState === "saving" ? "Saving…" : null}
-          {saveState === "saved" ? "Selection saved" : null}
-          {saveState === "error" ? saveError || "Unable to save — your choice is still selected" : null}
+          {saveState === "saved" ? "All changes saved" : null}
+          {saveState === "error" ? saveError || "We couldn’t save that change. Please try again." : null}
         </span>
         {reviewUiEnabled() ? (
           <button
             type="button"
             onClick={() => setReviewOpen(true)}
-            disabled={Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted}
+            disabled={
+              saveState === "unsaved" ||
+              saveState === "saving" ||
+              saveState === "error" ||
+              (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
+            }
             className="w-full rounded-lg border border-border bg-background py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
             {reviewRequest ? "Request already sent" : "Request estimator review"}
@@ -1584,7 +1843,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
                     data-testid={`de-info-${field}`}
                     onChange={(e) => {
                       setInfoDraft((prev) => ({ ...prev, [field]: e.target.value }));
-                      setSaveState("idle");
+                      setSaveState("unsaved");
                     }}
                   />
                   {sourceVal ? (
@@ -1607,7 +1866,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
                 onOpenModal={(kind) => setActiveModal({ roomId: room.id, kind })}
                 onRename={(name) => {
                   setRoomLabels((prev) => ({ ...prev, [room.id]: name }));
-                  setSaveState("idle");
+                  setSaveState("unsaved");
                 }}
               />
             ))}
@@ -1626,7 +1885,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
                 data-testid="de-project-note"
                 onChange={(e) => {
                   setProjectNote(e.target.value);
-                  setSaveState("idle");
+                  setSaveState("unsaved");
                 }}
                 onBlur={() => void onSave()}
               />
@@ -1672,7 +1931,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
                                 ...q,
                                 [opt.optionKey]: Number(e.target.value) || 0,
                               }));
-                              setSaveState("idle");
+                              setSaveState("unsaved");
                             }}
                             aria-label={`Quantity for ${opt.displayLabel}`}
                           />
@@ -1835,38 +2094,12 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
       ) : null}
 
       {modalRoom && (activeModal?.kind === "accessories" || activeModal?.kind === "specialty") ? (
-        <ModalShell
-          title={activeModal.kind === "accessories" ? "Accessories" : "Specialty"}
-          eyebrow={modalRoom.name}
+        <AccessoriesOrSpecialtyModal
+          kind={activeModal.kind}
+          room={modalRoom}
           onClose={() => setActiveModal(null)}
-          testId={`de-${activeModal.kind}-modal`}
-        >
-          <div className="flex flex-col gap-2">
-            {modalRoom.choiceOptions
-              .filter((c) => c.role === (activeModal.kind === "accessories" ? "accessory" : "specialty"))
-              .map((opt) => (
-                <label
-                  key={opt.optionKey}
-                  className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
-                    opt.selected ? "border-foreground bg-muted/30" : "border-border"
-                  }`}
-                >
-                  <span className="font-medium text-foreground">{opt.displayLabel}</span>
-                  <input
-                    type="checkbox"
-                    checked={opt.selected}
-                    onChange={() =>
-                      toggleMultiChoice(
-                        opt.optionKey,
-                        activeModal.kind === "accessories" ? "accessory" : "specialty",
-                        modalRoom.id,
-                      )
-                    }
-                  />
-                </label>
-              ))}
-          </div>
-        </ModalShell>
+          onToggle={(optionKey, role) => toggleMultiChoice(optionKey, role, modalRoom.id)}
+        />
       ) : null}
 
       {modalRoom && activeModal?.kind === "notes" ? (
@@ -1889,7 +2122,7 @@ export function ConfigurationView({ state, onState, onFatal, accessToken }: Prop
             data-testid="de-room-note"
             onChange={(e) => {
               setRoomNotes((prev) => ({ ...prev, [modalRoom.id]: e.target.value }));
-              setSaveState("idle");
+              setSaveState("unsaved");
             }}
           />
         </ModalShell>

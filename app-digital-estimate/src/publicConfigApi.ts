@@ -96,7 +96,13 @@ export type ConfigOption = {
   productId?: string | null;
   variantId?: string | null;
   pieceKey?: string | null;
+  pieceDisplayName?: string | null;
   sourceKind?: string | null;
+  visibleSellPrice?: number | null;
+  visibleDelta?: number | null;
+  priceEffectLabel?: string | null;
+  accessoryKind?: string | null;
+  compatibleFamilyIds?: string[];
 };
 
 export type ConfigProductVariant = {

@@ -1029,7 +1029,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             : { configured: false, reason: "document_only" },
           staffNotice:
             linkMeta.customerUrl
-              ? "Publication already exists for this approved estimate revision and configuration. Customer URL is unchanged."
+              ? "This revision is already published. The customer link is unchanged."
               : "Publication already exists for this revision. Use Replace Link to create a recoverable customer URL."
         };
       }

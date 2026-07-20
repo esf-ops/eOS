@@ -597,7 +597,30 @@ function normalizeSpecialty(workbook, excludedRows, sourceVersion) {
     if (usedIds.has(productId)) productId = `specialty:${slugBase}:${rowNum}`;
     usedIds.add(productId);
 
-    const displayName = specs ? `${name} (${specs})` : name;
+    // Customer-safe titles (never workbook paragraphs / channel labels).
+    let displayName = specs ? `${name} (${specs})` : name;
+    let description =
+      [specs, notes, website ? `Website: ${website}` : ""].filter(Boolean).join(" · ") || name;
+    if (/glowback/i.test(lower)) {
+      displayName = "Glowback LED Backlighting";
+      description = "Custom backlighting designed for your stone application.";
+    } else if (/invisacook/i.test(lower)) {
+      displayName = "InvisaCook";
+      description =
+        "Induction cooking technology installed beneath compatible countertop material.";
+    } else if (/free\s*power/i.test(lower)) {
+      displayName = "FreePower 3-Device Charging Station";
+      description = "Wireless charging installed below the countertop surface.";
+    } else {
+      displayName = displayName
+        .replace(/\b(wholesale|partner|direct)\b/gi, "")
+        .replace(/\(\s*\)/g, "")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      if (displayName.length > 72 && /\.\s/.test(displayName)) {
+        displayName = displayName.split(/\.\s/)[0].trim();
+      }
+    }
 
     /** @type {import('./esfPlumbingCatalogContract.mjs').NormalizedCatalogProduct} */
     const product = {
@@ -616,7 +639,7 @@ function normalizeSpecialty(workbook, excludedRows, sourceVersion) {
                 ? "InvisaCook"
                 : "ESF Specialty",
       displayName,
-      description: [specs, notes, website ? `Website: ${website}` : ""].filter(Boolean).join(" · ") || name,
+      description,
       availability: "special_order",
       customerVisible: true,
       active: true,

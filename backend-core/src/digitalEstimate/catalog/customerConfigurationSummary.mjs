@@ -140,16 +140,18 @@ export function buildCustomerConfigurationSummary(input = {}) {
       }
     } else if (parsed.kind === "accessory" && parsed.productId) {
       const product = getProductById(parsed.productId);
+      const safe = product ? toCustomerSafeProduct(product) : null;
       room.accessories.push({
         productId: parsed.productId,
-        displayName: product?.displayName || parsed.productId,
+        displayName: safe?.displayName || "Accessory",
         quantity: qty
       });
     } else if (parsed.kind === "specialty" && parsed.productId) {
       const product = getProductById(parsed.productId);
+      const safe = product ? toCustomerSafeProduct(product) : null;
       room.specialty.push({
         productId: parsed.productId,
-        displayName: product?.displayName || parsed.productId,
+        displayName: safe?.displayName || "Specialty item",
         pricingTreatment: product?.pricingTreatment || "priced",
         quantity: qty
       });
