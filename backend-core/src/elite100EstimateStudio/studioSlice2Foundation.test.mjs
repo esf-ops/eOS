@@ -202,7 +202,7 @@ console.log("\nstudioSlice2Foundation.test.mjs\n");
   assert.deepEqual(parts.legacyUnknown, ["mystery-key"]);
   const inferred = inferFriendlyChoiceFlags({ allowedOptionKeys: ["qty-sink", "qty-cook"] });
   assert.equal(inferred.sink, true);
-  assert.equal(inferred.cooktop, true);
+  assert.equal(inferred.cooktop_cutout, true);
   console.log("ok: friendly choice controls produce valid catalog keys; legacy unknowns preserved");
 }
 

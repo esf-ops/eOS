@@ -14,6 +14,14 @@ import {
   serverApprovedOptionCatalog
 } from "./configurationTrustedContext.mjs";
 import { enrichElite100MaterialsWithCustomerImages } from "./elite100CustomerImageResolver.mjs";
+import {
+  edgeProfileDisplayLabel,
+  isPremiumEdgeProfile,
+  normalizeEdgeProfileToken,
+  remapLegacyEdgeOptionKey,
+  resolvePremiumEdgeRatePerLf
+} from "../catalog/studioEdgeAuthority.mjs";
+import { resolvePublicVisualizerOrganizationId } from "../../visualizer/publicVisualizerConfig.mjs";
 import { normalizeSelectionPayload } from "./configurationValidation.mjs";
 import {
   mergeSelectionPayloadMeta,
@@ -116,12 +124,36 @@ function mapPersistenceError(error) {
       { diagnosticCode: "DE-SAVE", recoverable: true }
     );
   }
+  if (code === "23514" || /check constraint|violates check|event_type/i.test(message)) {
+    return safeFail(
+      "configuration_contract_invalid",
+      "Please refresh and try again",
+      422,
+      { diagnosticCode: "DE-CONFIGURATION-CONTRACT-INVALID", recoverable: true }
+    );
+  }
   if (error?.statusCode && error?.code) return error;
   return safeFail(
     "persistence_failed",
     "Unable to save right now. Please try again.",
     500,
     { diagnosticCode: "DE-SAVE", recoverable: true }
+  );
+}
+
+/**
+ * Resolve option key against envelope, remapping legacy edge tokens (eased→edge_eased, etc.).
+ */
+function findEnvelopeOptionForSelectionKey(options, key, id) {
+  const rawKey = key ? String(key) : "";
+  let opt = options.find(
+    (o) => o.id === id || (o.option_key || o.optionKey) === rawKey
+  );
+  if (opt || !rawKey.startsWith("edge:")) return opt || null;
+  const remapped = remapLegacyEdgeOptionKey(rawKey);
+  if (remapped === rawKey) return null;
+  return (
+    options.find((o) => (o.option_key || o.optionKey) === remapped) || null
   );
 }
 
@@ -525,8 +557,25 @@ export function createPublicConfigurationService(deps) {
         seedMaterials.push(mat);
       }
       if (seedMaterials.length) {
+        const orgId =
+          String(organizationId || publication?.organization_id || "").trim() ||
+          resolvePublicVisualizerOrganizationId() ||
+          String(env.SLABOS_ORGANIZATION_ID || "").trim() ||
+          String(env.PUBLIC_VISUALIZER_ORGANIZATION_ID || "").trim() ||
+          String(env.SLABCLOUD_ORGANIZATION_ID || "").trim() ||
+          null;
+        if (!orgId) {
+          console.info(
+            JSON.stringify({
+              msg: "de_elite100_image_resolver",
+              warning: "organization_id_missing",
+              hint: "Set SLABOS_ORGANIZATION_ID (preferred) or PUBLIC_VISUALIZER_ORGANIZATION_ID / SLABCLOUD_ORGANIZATION_ID on Brain"
+            })
+          );
+        }
         const enriched = await enrichElite100MaterialsWithCustomerImages(seedMaterials, {
           getSupabase: typeof getSupabase === "function" ? getSupabase : null,
+          organizationId: orgId,
           env
         });
         enrichedById = new Map(enriched.map((m) => [m.materialId, m]));
@@ -922,14 +971,18 @@ export function createPublicConfigurationService(deps) {
           rejectPublicSelectionAuthority(item);
           const id = item.optionId || item.option_id;
           const key = item.optionKey || item.option_key;
-          const opt = options.find(
-            (o) => o.id === id || (o.option_key || o.optionKey) === key
-          );
+          const opt = findEnvelopeOptionForSelectionKey(options, key, id);
           if (!opt) {
-            throw safeFail("invalid_selection", "That selection is unavailable", 422, {
-              selectionKey: String(key || id || "").slice(0, 160) || null,
-              diagnosticCode: "DE-SAVE"
-            });
+            const isEdge = String(key || "").startsWith("edge:");
+            throw safeFail(
+              isEdge ? "option_not_allowed" : "invalid_selection",
+              "That selection is unavailable",
+              422,
+              {
+                selectionKey: String(key || id || "").slice(0, 160) || null,
+                diagnosticCode: isEdge ? "DE-OPTION-NOT-ALLOWED" : "DE-SAVE"
+              }
+            );
           }
           const avail = opt.availability_state || opt.availabilityState || "active";
           if (avail !== "active") {
@@ -940,7 +993,26 @@ export function createPublicConfigurationService(deps) {
       } else {
         const rawMap =
           body.selections && typeof body.selections === "object" ? body.selections : {};
-        selectionMap = splitSelectionPayloadMeta(rawMap).quantities;
+        const split = splitSelectionPayloadMeta(rawMap);
+        selectionMap = {};
+        for (const [k, qty] of Object.entries(split.quantities || {})) {
+          const remapped = k.startsWith("edge:") ? remapLegacyEdgeOptionKey(k) : k;
+          const opt = findEnvelopeOptionForSelectionKey(options, remapped, null);
+          if (!opt) {
+            if (Number(qty) <= 0) continue;
+            const isEdge = remapped.startsWith("edge:");
+            throw safeFail(
+              isEdge ? "option_not_allowed" : "invalid_selection",
+              "That selection is unavailable",
+              422,
+              {
+                selectionKey: String(remapped).slice(0, 160),
+                diagnosticCode: isEdge ? "DE-OPTION-NOT-ALLOWED" : "DE-SAVE"
+              }
+            );
+          }
+          selectionMap[opt.option_key || opt.optionKey] = Number(qty) || 0;
+        }
       }
 
       const customerInfoDraft =
@@ -1026,7 +1098,7 @@ export function createPublicConfigurationService(deps) {
       const rooms = (ctx.rooms || []).map((r) => {
         let selected = r.baselineMaterialGroup;
         let chargeableBacksplashSf = Number(r.backsplashSf) || 0;
-        let edgeMode = "included";
+        let edgeMode = "edge_eased";
         const roomType = inferRoomEligibilityType(r);
         for (const [key, qty] of Object.entries(normalized.selections)) {
           if (Number(qty) <= 0) continue;
@@ -1057,7 +1129,7 @@ export function createPublicConfigurationService(deps) {
               reviewFlags.push(`custom_height_backsplash:${r.roomKey}`);
             }
           } else if (key.startsWith(`edge:${r.roomKey}:`)) {
-            edgeMode = key.split(":")[2] || "included";
+            edgeMode = normalizeEdgeProfileToken(key.split(":").slice(2).join(":"));
           } else {
             const opt = options.find((o) => (o.option_key || o.optionKey) === key);
             const compat = opt?.compatibility_json || opt?.compatibilityJson || {};
@@ -1376,26 +1448,29 @@ export function createPublicConfigurationService(deps) {
         }
 
         if (key.startsWith("edge:")) {
-          const [, roomKey, mode] = key.split(":");
-          // included / legacy eased = $0 baseline (Studio Estimate Scope authority)
-          if (mode === "eased" || mode === "included") continue;
+          const parts = key.split(":");
+          const roomKey = parts[1];
+          const token = normalizeEdgeProfileToken(parts.slice(2).join(":"));
+          if (!isPremiumEdgeProfile(token)) continue;
           const roomRow = rooms.find((r) => r.roomKey === roomKey);
           const lf = Number(roomRow?.edgeLinearFeet) || Number(edgeLfTotal) || 0;
-          const rate = mode === "d_edge" ? 25 : 15;
-          if (lf > 0) {
-            calcOptions.push({
-              optionKey: key,
-              displayLabel: mode === "d_edge" ? "D edge" : "W edge",
-              quantity: lf,
-              sellPrice: rate,
-              pricingMode: "per_each",
-              customerPriceTreatment: "absolute",
-              availabilityState: "active",
-              includedInBaseline: false,
-              defaultQty: 0,
-              baselineQuantity: 0
-            });
+          if (!(lf > 0)) {
+            reviewFlags.push(`edge_length_review:${roomKey}:${token}`);
+            continue;
           }
+          const rate = resolvePremiumEdgeRatePerLf(pricingBasis);
+          calcOptions.push({
+            optionKey: key,
+            displayLabel: edgeProfileDisplayLabel(token),
+            quantity: lf,
+            sellPrice: rate,
+            pricingMode: "per_each",
+            customerPriceTreatment: "absolute",
+            availabilityState: "active",
+            includedInBaseline: false,
+            defaultQty: 0,
+            baselineQuantity: 0
+          });
           continue;
         }
 
@@ -1615,15 +1690,26 @@ export function createPublicConfigurationService(deps) {
       }
 
       if (typeof configurationRepository.appendEvent === "function") {
-        await configurationRepository.appendEvent({
-          organization_id: session.organization_id,
-          envelope_id: activeEnvelope.id,
-          publication_id: session.publication_id,
-          session_id: session.id,
-          event_type: "quote_library_customer_config",
-          actor_type: "public",
-          metadata: quoteLibraryProjection
-        });
+        try {
+          await configurationRepository.appendEvent({
+            organization_id: session.organization_id,
+            envelope_id: activeEnvelope.id,
+            publication_id: session.publication_id,
+            session_id: session.id,
+            event_type: "quote_library_customer_config",
+            actor_type: "public",
+            metadata: quoteLibraryProjection
+          });
+        } catch (e) {
+          // Telemetry must never fail a successful customer save.
+          console.info(
+            JSON.stringify({
+              msg: "de_quote_library_event_skipped",
+              code: e?.code || null,
+              hint: "Apply eliteos_digital_estimate_configuration_updated_event_v1.sql if 23514"
+            })
+          );
+        }
       }
 
       return {

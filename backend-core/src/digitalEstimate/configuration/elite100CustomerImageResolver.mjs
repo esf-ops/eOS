@@ -141,8 +141,9 @@ export async function loadElite100CustomerImageIndex(opts = {}) {
   const env = opts.env ?? process.env;
   const organizationId =
     String(opts.organizationId || "").trim() ||
-    resolvePublicVisualizerOrganizationId() ||
     String(env.SLABOS_ORGANIZATION_ID || "").trim() ||
+    resolvePublicVisualizerOrganizationId() ||
+    String(env.PUBLIC_VISUALIZER_ORGANIZATION_ID || "").trim() ||
     String(env.SLABCLOUD_ORGANIZATION_ID || "").trim() ||
     null;
 

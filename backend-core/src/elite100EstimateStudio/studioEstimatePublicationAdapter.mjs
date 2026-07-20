@@ -110,6 +110,40 @@ export function studioEstimateQuoteNumber(estimate) {
  */
 export function hashConfigurationEnvelope(configuration) {
   const cfg = configuration && typeof configuration === "object" ? configuration : {};
+  // Normalize permission keys so camelCase / snake_case / order never fork fingerprints.
+  let customerChoiceGroups = [];
+  try {
+    // Lazy require-free: inline normalize (keep adapter free of Studio UI module cycles).
+    const alias = {
+      materialColor: "material_color",
+      cooktop: "cooktop_cutout",
+      sideSplash: "side_splash",
+      sidesplash: "side_splash",
+      accessory: "accessories"
+    };
+    const order = [
+      "material_color",
+      "sink",
+      "faucet",
+      "accessories",
+      "specialty",
+      "cooktop_cutout",
+      "edge",
+      "backsplash",
+      "side_splash"
+    ];
+    const set = new Set();
+    for (const raw of Array.isArray(cfg.customerChoiceGroups) ? cfg.customerChoiceGroups : []) {
+      let k = str(raw);
+      if (!k) continue;
+      if (alias[k]) k = alias[k];
+      k = k.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/-/g, "_").toLowerCase();
+      if (order.includes(k)) set.add(k);
+    }
+    customerChoiceGroups = order.filter((k) => set.has(k));
+  } catch {
+    customerChoiceGroups = [];
+  }
   // Every customer-choice permission flag must affect the fingerprint. Most friendly
   // groups (material/edge/faucet/…) have empty catalogKeys — omitting
   // customerChoiceGroups made permission edits look unchanged and skipped envelope re-seed.
@@ -131,15 +165,15 @@ export function hashConfigurationEnvelope(configuration) {
       : Array.isArray(cfg.allowedMaterialGroups)
         ? [...cfg.allowedMaterialGroups].map(str).filter(Boolean).sort()
         : [],
-    customerChoiceGroups: Array.isArray(cfg.customerChoiceGroups)
-      ? [...cfg.customerChoiceGroups].map(str).filter(Boolean).sort()
-      : [],
+    customerChoiceGroups,
     allowedOptionKeys: Array.isArray(cfg.allowedOptionKeys)
       ? [...cfg.allowedOptionKeys].map(str).filter(Boolean).sort()
       : [],
     allowedEdgeModes: Array.isArray(cfg.allowedEdgeModes)
       ? [...cfg.allowedEdgeModes].map(str).filter(Boolean).sort()
-      : [],
+      : Array.isArray(cfg.allowedEdgeProfiles)
+        ? [...cfg.allowedEdgeProfiles].map(str).filter(Boolean).sort()
+        : [],
     quantityLimits:
       cfg.quantityLimits && typeof cfg.quantityLimits === "object"
         ? Object.fromEntries(

@@ -20,9 +20,23 @@ import {
 } from "./customerFacingCopy.mjs";
 import {
   buildAuthoritativeEdgeOptionDefinitions,
-  defaultApprovedStudioEdgeModes,
-  normalizeStudioEdgeMode
+  defaultApprovedEdgeProfileTokens,
+  normalizeEdgeProfileToken,
+  resolveOriginalEdgeProfile
 } from "./studioEdgeAuthority.mjs";
+
+/** Local mirror of choice-group enablement (avoids Studio↔catalog import cycles). */
+function choiceGroupEnabled(groups, logicalId) {
+  const set = groups instanceof Set ? groups : new Set([...groups].map(String));
+  const aliases = {
+    material_color: ["material_color", "materialColor"],
+    cooktop_cutout: ["cooktop_cutout", "cooktop"],
+    side_splash: ["side_splash", "sideSplash", "sidesplash"],
+    accessories: ["accessories", "accessory"]
+  };
+  const keys = aliases[logicalId] || [logicalId];
+  return keys.some((k) => set.has(k));
+}
 
 export const SIDE_SPLASH_HEIGHT_IN = STANDARD_BACKSPLASH_HEIGHT_IN;
 export const DEFAULT_ACCESSORY_MAX_QTY = 5;
@@ -684,19 +698,40 @@ export function buildBacksplashOptionDefinitions(args) {
  *   approvedEdgeModes?: string[]|null
  * }} args
  */
+/**
+ * Edge options from Internal Estimate free/premium profile catalog.
+ * Do not seed Studio scope classifications (W edge / D edge / Included edges).
+ *
+ * @param {{
+ *   roomKey: string,
+ *   groupId?: string|null,
+ *   defaultMode?: string,
+ *   originalEdgeMode?: string,
+ *   originalProfileToken?: string,
+ *   approvedEdgeModes?: string[]|null,
+ *   approvedProfileTokens?: string[]|null,
+ *   includePremium?: boolean
+ * }} args
+ */
 export function buildEdgeOptionDefinitions(args) {
-  const original = normalizeStudioEdgeMode(
-    args.originalEdgeMode || args.defaultMode || "included"
+  const original = normalizeEdgeProfileToken(
+    args.originalProfileToken ||
+      args.originalEdgeMode ||
+      args.defaultMode ||
+      "edge_eased"
   );
   const approved =
-    args.approvedEdgeModes != null
-      ? args.approvedEdgeModes
-      : defaultApprovedStudioEdgeModes(original);
+    args.approvedProfileTokens != null
+      ? args.approvedProfileTokens
+      : args.approvedEdgeModes != null
+        ? args.approvedEdgeModes
+        : defaultApprovedEdgeProfileTokens(original);
   return buildAuthoritativeEdgeOptionDefinitions({
     roomKey: String(args.roomKey),
     groupId: args.groupId ?? null,
-    originalEdgeMode: original,
-    approvedEdgeModes: approved,
+    originalProfileToken: original,
+    approvedProfileTokens: approved,
+    includePremium: args.includePremium !== false,
     baseOption
   });
 }
@@ -780,13 +815,17 @@ export function buildDefaultRoomProductOptions(args) {
   );
   const groupId = args.groupId ?? null;
   const addOns = args.estimateAddOns || {};
-  const estimateEdgeMode = normalizeStudioEdgeMode(
-    args.estimateEdgeMode || "included"
-  );
-  const approvedEdgeModes =
-    args.approvedEdgeModes != null
-      ? args.approvedEdgeModes
-      : defaultApprovedStudioEdgeModes(estimateEdgeMode);
+  const originalProfile = resolveOriginalEdgeProfile({
+    edgeMode: args.estimateEdgeMode,
+    edgeProfileV2: args.estimateEdgeProfile,
+    edgeProfile: args.estimateEdgeProfile
+  });
+  const approvedProfileTokens =
+    args.approvedProfileTokens != null
+      ? args.approvedProfileTokens
+      : args.approvedEdgeModes != null
+        ? args.approvedEdgeModes
+        : defaultApprovedEdgeProfileTokens(originalProfile);
   /** @type {ReturnType<typeof baseOption>[]} */
   const options = [];
 
@@ -796,7 +835,7 @@ export function buildDefaultRoomProductOptions(args) {
     if (!roomKey) continue;
     const roomType = inferRoomEligibilityType(room);
 
-    if (choiceGroups.has("backsplash")) {
+    if (choiceGroupEnabled(choiceGroups, "backsplash")) {
       const heightMode = String(room.backsplashHeightMode || "").toLowerCase();
       let defaultMode = "standard_4in";
       if (room.includeBacksplash === false) defaultMode = "none";
@@ -813,10 +852,8 @@ export function buildDefaultRoomProductOptions(args) {
       );
     }
 
-    if (choiceGroups.has("sink")) {
+    if (choiceGroupEnabled(choiceGroups, "sink")) {
       const hasSinkAddon = Number(addOns["qty-sink"] || addOns["qty-bar"] || 0) > 0;
-      // Only kitchen/bar rooms default to customer-provided when the estimate includes a sink cutout.
-      // Reception / office stay on "No sink" so every room does not inherit the same draft.
       const defaultMode =
         hasSinkAddon && roomType !== "non_plumbing" ? "customer_provided" : "none";
       options.push(
@@ -830,7 +867,7 @@ export function buildDefaultRoomProductOptions(args) {
       );
     }
 
-    if (choiceGroups.has("faucet")) {
+    if (choiceGroupEnabled(choiceGroups, "faucet")) {
       options.push(
         ...buildFaucetOptionDefinitions({
           roomKey,
@@ -842,29 +879,31 @@ export function buildDefaultRoomProductOptions(args) {
       );
     }
 
-    if (choiceGroups.has("accessories") || choiceGroups.has("accessory")) {
+    if (choiceGroupEnabled(choiceGroups, "accessories")) {
       options.push(...buildAccessoryOptionDefinitions({ roomKey, roomType, groupId }));
     }
 
-    if (choiceGroups.has("specialty")) {
+    if (choiceGroupEnabled(choiceGroups, "specialty")) {
       options.push(...buildSpecialtyOptionDefinitions({ roomKey, roomType, groupId }));
     }
 
-    if (choiceGroups.has("edge")) {
-      const originalEdgeMode = normalizeStudioEdgeMode(
-        room.edgeMode || room.edgeDefaultMode || args.estimateEdgeMode || "included"
-      );
+    if (choiceGroupEnabled(choiceGroups, "edge")) {
+      const roomOriginal = resolveOriginalEdgeProfile({
+        edgeProfileV2: room.edgeProfileV2 || room.edgeProfile,
+        edgeProfile: room.edgeProfile,
+        edgeMode: room.edgeMode || room.edgeDefaultMode || args.estimateEdgeMode
+      });
       options.push(
         ...buildEdgeOptionDefinitions({
           roomKey,
           groupId,
-          originalEdgeMode,
-          approvedEdgeModes
+          originalProfileToken: roomOriginal,
+          approvedProfileTokens
         })
       );
     }
 
-    if (choiceGroups.has("sideSplash") || choiceGroups.has("sidesplash")) {
+    if (choiceGroupEnabled(choiceGroups, "side_splash")) {
       options.push(
         ...buildSideSplashOptionDefinitions({
           roomKey,

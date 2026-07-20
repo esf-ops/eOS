@@ -28,7 +28,9 @@ import {
 import {
   inferCustomerChoiceGroupsFromEnvelopeOptions,
   inferFriendlyChoiceFlags,
-  partitionAllowedOptionKeys
+  normalizeCustomerChoiceGroups,
+  partitionAllowedOptionKeys,
+  choiceGroupEnabled
 } from "./studioCustomerChoiceOptions.mjs";
 import {
   ensureStudioEstimatePublicationSource,
@@ -739,23 +741,36 @@ export function createStudioEstimateDigitalEstimateService(deps) {
   }) {
     if (typeof deRepository.appendEvent !== "function") return;
     const cfg = configuration && typeof configuration === "object" ? configuration : {};
-    await deRepository.appendEvent({
-      organization_id: organizationId,
-      publication_id: publication.id,
-      source_quote_id: publication.source_quote_id,
-      event_type: "configuration_updated",
-      actor_type: "user",
-      actor_user_id: actorUserId ?? null,
-      metadata: {
-        envelopeFingerprint,
-        idempotencyKey: idempotencyKey || null,
-        customerChoiceGroups: Array.isArray(cfg.customerChoiceGroups)
-          ? cfg.customerChoiceGroups
-          : [],
-        allowedOptionKeys: Array.isArray(cfg.allowedOptionKeys) ? cfg.allowedOptionKeys : [],
-        estimatorNotes: cfg.estimatorNotes != null ? String(cfg.estimatorNotes).slice(0, 2000) : null
+    try {
+      await deRepository.appendEvent({
+        organization_id: organizationId,
+        publication_id: publication.id,
+        source_quote_id: publication.source_quote_id,
+        event_type: "configuration_updated",
+        actor_type: "user",
+        actor_user_id: actorUserId ?? null,
+        metadata: {
+          envelopeFingerprint,
+          idempotencyKey: idempotencyKey || null,
+          customerChoiceGroups: Array.isArray(cfg.customerChoiceGroups)
+            ? normalizeCustomerChoiceGroups(cfg.customerChoiceGroups)
+            : [],
+          allowedOptionKeys: Array.isArray(cfg.allowedOptionKeys) ? cfg.allowedOptionKeys : [],
+          estimatorNotes: cfg.estimatorNotes != null ? String(cfg.estimatorNotes).slice(0, 2000) : null
+        }
+      });
+    } catch (e) {
+      const pg = String(e?.code || e?.cause?.code || "");
+      const msg = String(e?.message || "");
+      if (pg === "23514" || /check constraint|event_type/i.test(msg)) {
+        throw deError(
+          "Configuration event contract rejected by database. Apply eliteos_digital_estimate_configuration_updated_event_v1.sql.",
+          "DE-CONFIGURATION-CONTRACT-INVALID",
+          422
+        );
       }
-    });
+      throw e;
+    }
   }
 
   async function applyConfigurationEnvelope({
@@ -814,7 +829,9 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     // colors across allowed pricing groups (not only the originally published group).
     const baselineGroupCode = scopeMaterialGroupToCode(estimate.scope?.materialGroup) || "promo";
     const choiceGroups = new Set(
-      (Array.isArray(cfg.customerChoiceGroups) ? cfg.customerChoiceGroups : []).map(String)
+      normalizeCustomerChoiceGroups(
+        Array.isArray(cfg.customerChoiceGroups) ? cfg.customerChoiceGroups : []
+      )
     );
     const allowedIds = Array.isArray(cfg.allowedMaterialIds)
       ? cfg.allowedMaterialIds.map(String).filter(Boolean)
@@ -830,7 +847,9 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         .filter(Boolean)
     );
     const materialColorEnabled =
-      choiceGroups.has("materialColor") || allowedIds.length > 0 || allowedGroupCodes.size > 0;
+      choiceGroupEnabled(choiceGroups, "material_color") ||
+      allowedIds.length > 0 ||
+      allowedGroupCodes.size > 0;
     // Default: all customer groups except Remnant unless Remnant is explicitly allowed.
     if (materialColorEnabled && allowedGroupCodes.size === 0 && allowedIds.length === 0) {
       for (const code of ["promo", "group_a", "group_b", "group_c", "group_d", "group_e", "group_f"]) {
@@ -915,14 +934,14 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     );
     if (
       !roomChoicesGroup &&
-      (choiceGroups.has("backsplash") ||
-        choiceGroups.has("sink") ||
-        choiceGroups.has("faucet") ||
-        choiceGroups.has("accessories") ||
-        choiceGroups.has("specialty") ||
-        choiceGroups.has("edge") ||
-        choiceGroups.has("sideSplash") ||
-        choiceGroups.has("cooktop"))
+      (choiceGroupEnabled(choiceGroups, "backsplash") ||
+        choiceGroupEnabled(choiceGroups, "sink") ||
+        choiceGroupEnabled(choiceGroups, "faucet") ||
+        choiceGroupEnabled(choiceGroups, "accessories") ||
+        choiceGroupEnabled(choiceGroups, "specialty") ||
+        choiceGroupEnabled(choiceGroups, "edge") ||
+        choiceGroupEnabled(choiceGroups, "side_splash") ||
+        choiceGroupEnabled(choiceGroups, "cooktop_cutout"))
     ) {
       const created = await configurationStudioService.putGroups(organizationId, envelopeId, {
         groups: [
@@ -1075,8 +1094,23 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         }
       };
 
-      const configuration =
+      const rawConfiguration =
         body?.configuration && typeof body.configuration === "object" ? body.configuration : {};
+      let configuration;
+      try {
+        configuration = {
+          ...rawConfiguration,
+          customerChoiceGroups: normalizeCustomerChoiceGroups(
+            rawConfiguration.customerChoiceGroups || [],
+            { rejectUnknown: true }
+          )
+        };
+      } catch (e) {
+        if (e?.code === "DE-CONFIGURATION-CONTRACT-INVALID") {
+          throw deError(e.message, "DE-CONFIGURATION-CONTRACT-INVALID", 422);
+        }
+        throw e;
+      }
       // Same validation function as readiness GET (including configuration envelope fields).
       const readiness = await assessReadiness(organizationId, estimateId, configuration);
       mark("validate_request");

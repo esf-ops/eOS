@@ -42,9 +42,10 @@ export function readPublicVisualizerConfig() {
  * @returns {string|null}
  */
 export function resolvePublicVisualizerOrganizationId() {
+  // Prefer SlabOS org (same as kiosk / inventory Elite 100 surfaces).
   return (
-    String(process.env.PUBLIC_VISUALIZER_ORGANIZATION_ID ?? "").trim() ||
     String(process.env.SLABOS_ORGANIZATION_ID ?? "").trim() ||
+    String(process.env.PUBLIC_VISUALIZER_ORGANIZATION_ID ?? "").trim() ||
     String(process.env.SLABCLOUD_ORGANIZATION_ID ?? "").trim() ||
     null
   );
