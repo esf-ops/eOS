@@ -26,6 +26,8 @@ import { createPublicConfigurationService } from "./publicConfigurationService.m
 import {
   assertPublicConfigurationOrigin,
   clearConfigurationSessionCookie,
+  hashConfigurationSessionSecret,
+  readSessionSecretCandidatesFromCookie,
   readSessionSecretFromCookie,
   redactPublicConfigurationSecrets,
   setConfigurationSessionCookie
@@ -45,6 +47,8 @@ const PUBLIC_UNAVAILABLE = Object.freeze({
 const SAFE_PUBLIC_ERROR_CODES = new Set([
   "unavailable",
   "session_required",
+  "session_not_found",
+  "session_invalid",
   "origin_rejected",
   "origin_not_configured",
   "row_version_conflict",
@@ -52,7 +56,13 @@ const SAFE_PUBLIC_ERROR_CODES = new Set([
   "concurrency_required",
   "forbidden_caller_authority",
   "unknown_option",
-  "unresolved_product"
+  "unresolved_product",
+  "configuration_unavailable",
+  "publication_revoked",
+  "publication_expired",
+  "publication_unavailable",
+  "publication_superseded",
+  "no_current_review_request"
 ]);
 
 const SAFE_DIAGNOSTIC_CODES = new Set([
@@ -71,7 +81,9 @@ const SESSION_REQUIRED = Object.freeze({
   error: "Please refresh and try again",
   stage: "session",
   code: "session_required",
-  diagnosticCode: "DE-COOKIE"
+  diagnosticCode: "DE-COOKIE",
+  recoverable: true,
+  lifecycleFatal: false
 });
 
 function setPublicSecurityHeaders(res) {
@@ -84,18 +96,39 @@ function setPublicSecurityHeaders(res) {
   );
 }
 
-function logPublicCfg(label, e, req) {
+function logPublicCfg(label, e, req, extra = {}) {
   const path = redactPublicConfigurationSecrets(
     redactDigitalEstimateTokenPath(req?.originalUrl || req?.url || "")
   );
   const reason = e?.exchangeReason || e?.code || "error";
-  console.error(`[digital-estimate-public-config] ${label}`, reason, path);
+  const cookieCandidates = readSessionSecretCandidatesFromCookie(req);
+  const hashPrefix =
+    cookieCandidates[0] != null
+      ? hashConfigurationSessionSecret(cookieCandidates[0]).slice(0, 8)
+      : null;
+  console.error(`[digital-estimate-public-config] ${label}`, {
+    reason,
+    path,
+    cookiePresent: cookieCandidates.length > 0,
+    cookieCandidateCount: cookieCandidates.length,
+    sessionHashPrefix: hashPrefix,
+    recoverable: Boolean(e?.recoverable),
+    lifecycleFatal: Boolean(e?.lifecycleFatal),
+    ...extra
+  });
 }
 
 function safeDiagnosticCode(e, status, safeCode) {
   if (SAFE_DIAGNOSTIC_CODES.has(e?.diagnosticCode)) return e.diagnosticCode;
   if (safeCode === "origin_rejected" || safeCode === "origin_not_configured") return "DE-ORIGIN";
-  if (status === 404 || status === 403) return "DE-EXCHANGE-404";
+  if (
+    safeCode === "session_required" ||
+    safeCode === "session_not_found" ||
+    safeCode === "session_invalid"
+  ) {
+    return "DE-COOKIE";
+  }
+  if (status === 404 || status === 403 || status === 410) return "DE-EXCHANGE-404";
   return "DE-STATE";
 }
 
@@ -105,18 +138,30 @@ function publicError(res, e, stageHint = "token_exchange") {
   let message = "Estimate unavailable";
   if (code === "origin_rejected" || code === "origin_not_configured") {
     message = "Configuration unavailable";
+  } else if (
+    code === "session_required" ||
+    code === "session_not_found" ||
+    code === "session_invalid"
+  ) {
+    message = "Please refresh and try again";
   } else if (status === 409 || code === "row_version_conflict") {
     message = "Please refresh and try again";
   } else if (code === "unresolved_product" || code === "unknown_option" || code === "forbidden_caller_authority") {
     message = "That selection is unavailable";
-  } else if (String(e?.message || "").includes("Pricing has expired")) {
+  } else if (code === "publication_expired" || String(e?.message || "").includes("Pricing has expired")) {
     message = "Pricing has expired";
   } else if (String(e?.message || "").includes("options were updated")) {
     message = "Your estimate options were updated";
-  } else if (status === 400) {
-    message = "Please refresh and try again";
-  } else if (status === 404 || status === 403) {
-    message = e?.message && /unavailable|expired|updated/i.test(e.message) ? e.message : "Estimate unavailable";
+  } else if (code === "configuration_unavailable") {
+    message = "Configuration unavailable";
+  } else if (status === 400 || status === 422) {
+    message = e?.message && /refresh|unavailable|try again/i.test(e.message)
+      ? e.message
+      : "Please refresh and try again";
+  } else if (status === 404 || status === 403 || status === 410) {
+    message = e?.message && /unavailable|expired|updated|revoked/i.test(e.message)
+      ? e.message
+      : "Estimate unavailable";
   }
   const safeCode = SAFE_PUBLIC_ERROR_CODES.has(code) ? code : "unavailable";
   const stage =
@@ -126,15 +171,31 @@ function publicError(res, e, stageHint = "token_exchange") {
         ? "rate_limit"
         : stageHint || "token_exchange";
   const diagnostic =
-    stageHint === "selection" && (status === 400 || status === 409 || status === 422)
-      ? "DE-SAVE"
+    stageHint === "selection" && (status === 400 || status === 401 || status === 409 || status === 422)
+      ? safeDiagnosticCode(e, status, safeCode)
       : safeDiagnosticCode(e, status, safeCode);
+  const recoverable =
+    e?.recoverable === true ||
+    safeCode === "session_required" ||
+    safeCode === "session_not_found" ||
+    safeCode === "session_invalid" ||
+    safeCode === "row_version_conflict" ||
+    safeCode === "unknown_option" ||
+    safeCode === "configuration_unavailable";
+  const lifecycleFatal =
+    e?.lifecycleFatal === true ||
+    safeCode === "publication_revoked" ||
+    safeCode === "publication_expired" ||
+    safeCode === "publication_unavailable" ||
+    safeCode === "publication_superseded";
   res.status(status >= 400 && status < 600 ? status : 404).json({
     ok: false,
     error: message,
     stage,
     code: safeCode,
-    diagnosticCode: diagnostic
+    diagnosticCode: diagnostic,
+    recoverable,
+    lifecycleFatal
   });
 }
 
@@ -204,6 +265,21 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
   if (!configurationRepository) {
     return { mounted: false, reason: "repository_unavailable" };
   }
+
+  const isProd =
+    String(env.VERCEL_ENV || "").trim() === "production" ||
+    String(env.NODE_ENV || "").trim() === "production";
+  if (isProd && stack?.mode === "memory" && !deps.configurationRepository) {
+    console.error(
+      "[digital-estimate-public-config] refusing in-memory configuration repository in production (Vercel requires Supabase durability)"
+    );
+    return { mounted: false, reason: "memory_forbidden_in_production" };
+  }
+
+  console.log(
+    "[digital-estimate-public-config] repository mode=",
+    stack?.mode || (deps.configurationRepository ? "injected" : "unknown")
+  );
 
   const service = createPublicConfigurationService({
     env,
@@ -306,12 +382,32 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
     if (!requireJsonMutation(req, res)) return;
     try {
       assertPublicConfigurationOrigin(req, expectedOrigin, env);
-      const rawSecret = readSessionSecretFromCookie(req);
-      if (!rawSecret) return res.status(401).json(SESSION_REQUIRED);
-      const result = await service.saveSelections({ rawSecret, body: req.body || {} });
-      res.json(result);
+      const candidates = readSessionSecretCandidatesFromCookie(req);
+      if (!candidates.length) return res.status(401).json(SESSION_REQUIRED);
+      let lastErr = null;
+      for (const rawSecret of candidates) {
+        try {
+          const result = await service.saveSelections({ rawSecret, body: req.body || {} });
+          return res.json(result);
+        } catch (e) {
+          lastErr = e;
+          if (e?.code === "session_not_found" || e?.code === "session_invalid") {
+            continue;
+          }
+          throw e;
+        }
+      }
+      throw lastErr || Object.assign(new Error("Please refresh and try again"), {
+        code: "session_not_found",
+        statusCode: 401,
+        diagnosticCode: "DE-COOKIE",
+        recoverable: true,
+        exchangeReason: "session_not_found"
+      });
     } catch (e) {
-      logPublicCfg("selections put failed", e, req);
+      logPublicCfg("selections put failed", e, req, {
+        repositoryMode: stack?.mode || (deps.configurationRepository ? "injected" : "unknown")
+      });
       publicError(res, e, "selection");
     }
   }

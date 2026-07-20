@@ -344,27 +344,34 @@ export function createReviewRequestService(deps) {
 
     async getCurrentReviewRequest({ rawSecret }) {
       if (!isDigitalEstimateReviewRequestRuntimeEnabled(env)) {
-        throw unavailable();
+        return { ok: true, reviewRequest: null, code: "no_current_review_request" };
       }
-      const session = await resolveSession(rawSecret);
-      assertSyntheticPublicationPublicAccess(session.publication_id, env);
-      const request = await amendmentRepository.getCurrentReviewRequestForSession(
-        session.organization_id,
-        session.id
-      );
-      if (!request) {
-        return { ok: true, reviewRequest: null };
+      try {
+        const session = await resolveSession(rawSecret);
+        assertSyntheticPublicationPublicAccess(session.publication_id, env);
+        const request = await amendmentRepository.getCurrentReviewRequestForSession(
+          session.organization_id,
+          session.id
+        );
+        if (!request) {
+          return { ok: true, reviewRequest: null, code: "no_current_review_request" };
+        }
+        const selection = await configurationRepository.getLatestSelectionForSession(
+          session.organization_id,
+          session.id
+        );
+        return {
+          ok: true,
+          reviewRequest: customerSafeRequestView(request, {
+            currentSelectionHash: selection?.selection_hash ?? null
+          })
+        };
+      } catch (e) {
+        if (e?.statusCode === 404 || e?.statusCode === 401 || e?.code === "not_found") {
+          return { ok: true, reviewRequest: null, code: "no_current_review_request" };
+        }
+        throw e;
       }
-      const selection = await configurationRepository.getLatestSelectionForSession(
-        session.organization_id,
-        session.id
-      );
-      return {
-        ok: true,
-        reviewRequest: customerSafeRequestView(request, {
-          currentSelectionHash: selection?.selection_hash ?? null
-        })
-      };
     }
   };
 }

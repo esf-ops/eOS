@@ -170,6 +170,14 @@ function isGeneric404(e) {
   return e?.statusCode === 404 && (e.code === "not_found" || e.code === "configuration_unavailable");
 }
 
+function isSessionBlocked(e) {
+  return (
+    isGeneric404(e) ||
+    (e?.statusCode === 401 &&
+      (e.code === "session_invalid" || e.code === "session_not_found" || e.code === "session_required"))
+  );
+}
+
 console.log("\nphaseDe2g.sessionLifecycle.test.mjs\n");
 
 // --- Additive migration checksum + revoke semantics in SQL ---
@@ -262,7 +270,7 @@ console.log("\nphaseDe2g.sessionLifecycle.test.mjs\n");
             items: [{ optionKey: "material:kitchen:group_b", quantity: 1 }]
           }
         }),
-      isGeneric404
+      isSessionBlocked
     );
     await assert.rejects(
       () =>

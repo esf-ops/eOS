@@ -1659,3 +1659,14 @@
 | **Ops** | Deploy Brain + digital-estimate head together. Republish after deploy for multi-group + backsplash envelope. |
 | **Out of scope** | Weakening SameSite cookie policy; second pricing engine. |
 
+### 117. Digital Estimate selection save — explicit session vs lifecycle codes (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Selection save failures use explicit codes: recoverable `session_required` / `session_not_found` / `session_invalid` (401) vs fatal `publication_revoked` / `publication_expired` / `publication_unavailable` / `publication_superseded`. Customer UI fatals **only** on explicit lifecycle codes — never on bare 404 or message text containing “unavailable”. Sessions remain Supabase-durable (no production memory repo). `GET …/review-requests/current` returns **200 + reviewRequest:null** when none. `/api/health` exposes safe `buildId`. |
+| **Why** | Live PUT with cookie returned `code:unavailable` / `Estimate unavailable`; prior classifier treated that as fatal. |
+| **SQL** | None. |
+| **Ops** | Deploy Brain + digital-estimate together; confirm `buildId` matches merge SHA. Existing `/e/<token>` links re-exchange on recoverable session errors. |
+| **Out of scope** | Cookie SameSite=None; sold-job. |
+

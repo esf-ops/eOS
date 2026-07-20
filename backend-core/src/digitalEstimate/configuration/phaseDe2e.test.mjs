@@ -361,9 +361,11 @@ async function seedPublishedWithEnvelope() {
           items: [{ optionKey: "material:kitchen:group_b", quantity: 1 }]
         }
       }),
-    (e) => e.statusCode === 404 && e.code === "not_found"
+    (e) =>
+      (e.statusCode === 401 && e.code === "session_invalid") ||
+      (e.statusCode === 404 && e.code === "not_found")
   );
-  console.log("ok: superseded envelope revokes old session (generic 404)");
+  console.log("ok: superseded envelope revokes old session (save recoverable / resume 404)");
 }
 
 // --- Routes: Origin + Set-Cookie ---

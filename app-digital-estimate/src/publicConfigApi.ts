@@ -285,10 +285,19 @@ export type ConfigurationSaveError = Error & {
 /**
  * Classify a failed selections/review response.
  * Save/network failures must not be treated as full estimate unavailability.
+ * Fatal only for explicit publication lifecycle codes — never for bare 404 or
+ * message text containing "unavailable".
  */
 export function classifyConfigurationMutationError(
   status: number,
-  body: { error?: string; code?: string; stage?: string; diagnosticCode?: string } | null,
+  body: {
+    error?: string;
+    code?: string;
+    stage?: string;
+    diagnosticCode?: string;
+    recoverable?: boolean;
+    lifecycleFatal?: boolean;
+  } | null,
 ): Pick<ConfigurationSaveError, "code" | "stage" | "diagnosticCode" | "lifecycleFatal"> & {
   message: string;
 } {
@@ -297,7 +306,30 @@ export function classifyConfigurationMutationError(
   const diagnosticCode = String(body?.diagnosticCode || "").trim();
   const message = String(body?.error || "").trim() || "Unable to save";
 
-  if (code === "session_required" || diagnosticCode === "DE-COOKIE" || status === 401) {
+  const FATAL_CODES = new Set([
+    "publication_revoked",
+    "publication_expired",
+    "publication_unavailable",
+    "publication_superseded",
+  ]);
+
+  if (body?.lifecycleFatal === true || FATAL_CODES.has(code) || status === 410) {
+    return {
+      message: message || "This estimate is unavailable.",
+      code: code || "publication_unavailable",
+      stage: stage || "lifecycle",
+      diagnosticCode: diagnosticCode || "DE-EXCHANGE-404",
+      lifecycleFatal: true,
+    };
+  }
+
+  if (
+    code === "session_required" ||
+    code === "session_not_found" ||
+    code === "session_invalid" ||
+    diagnosticCode === "DE-COOKIE" ||
+    status === 401
+  ) {
     return {
       message: message === "Estimate unavailable" ? "Please refresh and try again" : message,
       code: code || "session_required",
@@ -306,12 +338,15 @@ export function classifyConfigurationMutationError(
       lifecycleFatal: false,
     };
   }
+
   if (
     code === "unknown_option" ||
     code === "unresolved_product" ||
     code === "forbidden_caller_authority" ||
     code === "idempotency_required" ||
-    code === "concurrency_required"
+    code === "concurrency_required" ||
+    code === "configuration_unavailable" ||
+    code === "no_current_review_request"
   ) {
     return {
       message: message || "That selection is unavailable",
@@ -321,6 +356,7 @@ export function classifyConfigurationMutationError(
       lifecycleFatal: false,
     };
   }
+
   if (code === "row_version_conflict" || status === 409) {
     return {
       message: message || "Please refresh and try again",
@@ -330,34 +366,8 @@ export function classifyConfigurationMutationError(
       lifecycleFatal: false,
     };
   }
-  if (status === 410) {
-    return {
-      message: message || "This estimate is unavailable.",
-      code: code || "unavailable",
-      stage: stage || "lifecycle",
-      diagnosticCode: diagnosticCode || "DE-EXCHANGE-404",
-      lifecycleFatal: true,
-    };
-  }
-  // Application JSON lifecycle revoke/expire (cookie present, session dead).
-  if (
-    status === 404 &&
-    body &&
-    (code === "unavailable" || diagnosticCode === "DE-EXCHANGE-404") &&
-    (stage === "token_exchange" ||
-      stage === "session" ||
-      stage === "lifecycle" ||
-      /revoked|expired|unavailable/i.test(message))
-  ) {
-    return {
-      message: message || "This estimate is unavailable.",
-      code: code || "unavailable",
-      stage: stage || "lifecycle",
-      diagnosticCode: diagnosticCode || "DE-EXCHANGE-404",
-      lifecycleFatal: true,
-    };
-  }
-  // Missing route / HTML 404 / 5xx / opaque network — keep configure UI alive.
+
+  // Bare 404 / selection-stage unavailable / HTML route miss — keep configure UI.
   return {
     message:
       status === 404 && !body
@@ -572,17 +582,21 @@ export async function fetchCurrentReviewRequest(): Promise<{
   reviewRequest: CustomerReviewRequest | null;
 }> {
   const base = apiBaseUrl();
-  const res = await fetch(`${base}/api/public-digital-estimate/v2/review-requests/current`, {
-    method: "GET",
-    credentials: "include",
-    headers: { Accept: "application/json" },
-  });
-  if (!res.ok) {
-    const err = new Error("Estimate unavailable");
-    (err as Error & { status?: number }).status = res.status;
-    throw err;
+  try {
+    const res = await fetch(`${base}/api/public-digital-estimate/v2/review-requests/current`, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      // Never treat missing/current-review errors as estimate lifecycle failure.
+      return { ok: true, reviewRequest: null };
+    }
+    const body = (await res.json()) as { ok?: boolean; reviewRequest?: CustomerReviewRequest | null };
+    return { ok: true, reviewRequest: body.reviewRequest ?? null };
+  } catch {
+    return { ok: true, reviewRequest: null };
   }
-  return (await res.json()) as { ok: boolean; reviewRequest: CustomerReviewRequest | null };
 }
 
 export type PublicEstimateAccess = {
