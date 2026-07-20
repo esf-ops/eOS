@@ -201,6 +201,44 @@ function readinessFailureError(readiness) {
   return err;
 }
 
+/** Soft budget for configure-enabled Studio publish (seed + activate). */
+const STUDIO_PUBLISH_BUDGET_MS = 45_000;
+
+/**
+ * After configure publish fails post-atomic, restore prior family publications so
+ * the previous working customer link remains usable.
+ */
+async function restorePriorPublicationsAfterFailedConfigure({
+  organizationId,
+  deRepository,
+  priorPublicationIds,
+  failedPublicationId
+}) {
+  const priors = Array.isArray(priorPublicationIds) ? priorPublicationIds : [];
+  for (const priorId of priors) {
+    if (!priorId || String(priorId) === String(failedPublicationId)) continue;
+    try {
+      await deRepository.updatePublication(organizationId, priorId, {
+        status: "active",
+        superseded_at: null,
+        superseded_by_publication_id: null
+      });
+      if (typeof deRepository.listTokensForPublication !== "function") continue;
+      const tokens = await deRepository.listTokensForPublication(organizationId, priorId);
+      const hasActive = (tokens || []).some((t) => !t.revoked_at);
+      if (hasActive) continue;
+      const revoked = [...(tokens || [])]
+        .filter((t) => t.revoked_at)
+        .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+      if (revoked[0]?.id && typeof deRepository.updateToken === "function") {
+        await deRepository.updateToken(organizationId, revoked[0].id, { revoked_at: null });
+      }
+    } catch {
+      /* best-effort restore */
+    }
+  }
+}
+
 function staffPublicationView(pub, linkMeta = null) {
   const base = {
     id: pub.id,
@@ -590,6 +628,9 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       actorUserId,
       publicationId,
       {
+        // Studio publish seeds options once via putOptions (batched). Avoid createDraft
+        // double-seeding ~200 options with sequential Supabase round-trips.
+        seedCatalogOptions: false,
         customerChoiceGroups: Array.isArray(cfg.customerChoiceGroups)
           ? cfg.customerChoiceGroups
           : undefined,
@@ -859,21 +900,52 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         throw deError("Explicit publish confirmation required", "confirm_required", 400);
       }
 
+      const correlationId =
+        strOrNull(body?.correlationId) ||
+        (typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `de-pub-${Date.now()}`);
+      const t0 = Date.now();
+      const phases = {};
+      const mark = (name) => {
+        phases[name] = Date.now() - t0;
+      };
+      const assertWithinBudget = (phase) => {
+        if (Date.now() - t0 > STUDIO_PUBLISH_BUDGET_MS) {
+          const err = deError(
+            `Digital Estimate publish exceeded ${STUDIO_PUBLISH_BUDGET_MS}ms during ${phase}`,
+            "DE-PUBLISH-TIMEOUT",
+            504
+          );
+          err.correlationId = correlationId;
+          err.phases = { ...phases };
+          throw err;
+        }
+      };
+
       const configuration =
         body?.configuration && typeof body.configuration === "object" ? body.configuration : {};
       // Same validation function as readiness GET (including configuration envelope fields).
       const readiness = await assessReadiness(organizationId, estimateId, configuration);
+      mark("validate_request");
       if (!readiness.readiness.eligible) {
         throw readinessFailureError(readiness.readiness);
       }
 
       const estimate = await loadEstimateRow(organizationId, estimateId);
+      mark("load_estimate");
       const synthetic = buildSyntheticQuoteHeaderFromStudioEstimate(estimate, { organizationId });
       const pricingValidThrough =
         readiness.readiness.details?.pricingValidThrough ||
         addDaysDateOnly(readDigitalEstimatePricingValidDays(env));
       const envelopeFingerprint = hashConfigurationEnvelope(configuration);
       const idempotencyKey = strOrNull(body.idempotencyKey);
+      const familyRoot = studioEstimatePublicationFamilyRoot(estimate);
+      const priorActive =
+        typeof deRepository.listActivePublicationsForFamily === "function"
+          ? await deRepository.listActivePublicationsForFamily(organizationId, familyRoot)
+          : [];
+      const priorPublicationIds = (priorActive || []).map((p) => p.id).filter(Boolean);
 
       const freezeProbe = buildPublicationFreezePayloads({
         header: synthetic,
@@ -911,6 +983,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             (e) => String(e.status || "") === "active"
           );
           if (!hasActive) {
+            assertWithinBudget("idempotent_repair");
             const repaired = await applyConfigurationEnvelope({
               organizationId,
               actorUserId,
@@ -918,20 +991,34 @@ export function createStudioEstimateDigitalEstimateService(deps) {
               configuration,
               estimate
             });
+            mark("repair_envelope");
             if (!repaired.configured) {
               throw deError(
                 repaired.message ||
                   "Configuration envelope is required for this customer link but could not be activated",
-                repaired.reason || "envelope_failed",
+                "DE-ENVELOPE-ACTIVATION-FAILED",
                 422
               );
             }
           }
         }
         const linkMeta = await linkMetaForPublication(organizationId, existing);
+        mark("build_response");
+        console.info(
+          JSON.stringify({
+            msg: "studio_de_publish",
+            correlationId,
+            estimateId,
+            reused: true,
+            phases,
+            elapsedMs: Date.now() - t0
+          })
+        );
         return {
           ok: true,
           reused: true,
+          correlationId,
+          phases,
           publication: staffPublicationView(existing, linkMeta),
           accessToken: null,
           customerUrl: linkMeta.customerUrl,
@@ -959,10 +1046,12 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       } catch (e) {
         throw mapStudioPublicationPersistenceError(e);
       }
+      mark("ensure_source");
 
       const wrapped = wrapRepositoryWithStudioHeader(deRepository, synthetic);
       let result;
       try {
+        assertWithinBudget("create_publication");
         result = await publishDigitalEstimate({
           env,
           organizationId,
@@ -979,7 +1068,8 @@ export function createStudioEstimateDigitalEstimateService(deps) {
               intakeCaseId: estimate.intakeCaseId || null,
               takeoffJobId: estimate.takeoffJobId || null,
               calculationFingerprint: estimate.approval?.calculationFingerprint || null,
-              studioEstimateRevision: Number(estimate.revision) || 1
+              studioEstimateRevision: Number(estimate.revision) || 1,
+              correlationId
             }
           }
         });
@@ -987,11 +1077,13 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         if (e?.statusCode && e.statusCode < 500) throw e;
         throw mapStudioPublicationPersistenceError(e);
       }
+      mark("create_publication");
 
       const intendsConfigure = configurationIntendsCustomerConfigure(configuration);
       let envelope = { configured: false, reason: "document_only" };
       if (intendsConfigure) {
         try {
+          assertWithinBudget("activate_envelope");
           envelope = await applyConfigurationEnvelope({
             organizationId,
             actorUserId,
@@ -999,10 +1091,12 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             configuration,
             estimate
           });
+          mark("activate_envelope");
         } catch (e) {
+          if (e?.code === "DE-PUBLISH-TIMEOUT") throw e;
           envelope = {
             configured: false,
-            reason: e?.code || "envelope_failed",
+            reason: e?.code || "DE-ENVELOPE-ACTIVATION-FAILED",
             message: e?.message || "Configuration envelope failed"
           };
         }
@@ -1024,18 +1118,53 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           } catch {
             /* best-effort revoke */
           }
-          throw deError(
+          await restorePriorPublicationsAfterFailedConfigure({
+            organizationId,
+            deRepository,
+            priorPublicationIds,
+            failedPublicationId: result.publication.id
+          });
+          mark("restore_prior_link");
+          console.info(
+            JSON.stringify({
+              msg: "studio_de_publish_failed",
+              correlationId,
+              estimateId,
+              code: "DE-ENVELOPE-ACTIVATION-FAILED",
+              phases,
+              elapsedMs: Date.now() - t0
+            })
+          );
+          const failErr = deError(
             envelope.message ||
               "Customer configuration envelope could not be activated for this publication",
-            envelope.reason || "envelope_failed",
+            "DE-ENVELOPE-ACTIVATION-FAILED",
             422
           );
+          failErr.correlationId = correlationId;
+          failErr.phases = { ...phases };
+          throw failErr;
         }
       }
+
+      mark("build_response");
+      console.info(
+        JSON.stringify({
+          msg: "studio_de_publish",
+          correlationId,
+          estimateId,
+          publicationId: result.publication?.id || null,
+          configured: Boolean(envelope.configured),
+          phases,
+          elapsedMs: Date.now() - t0
+        })
+      );
 
       return {
         ...result,
         reused: false,
+        correlationId,
+        phases,
         readiness: readiness.readiness,
         envelope,
         links: {

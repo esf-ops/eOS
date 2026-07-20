@@ -387,6 +387,25 @@ export function createInMemoryConfigurationRepository(opts = {}) {
       return structuredClone(row);
     },
 
+    /**
+     * Batch upsert draft options (one envelope check). Used by Studio publish seeding.
+     * @param {string} organizationId
+     * @param {string} envelopeId
+     * @param {object[]} optionInputs
+     */
+    async upsertDraftOptionsBatch(organizationId, envelopeId, optionInputs) {
+      const list = Array.isArray(optionInputs) ? optionInputs : [];
+      if (!list.length) return [];
+      const env = envelopes.get(String(envelopeId));
+      if (!env || env.organization_id !== organizationId) throw err("not_found", "envelope not found", 404);
+      assertDraft(env);
+      const out = [];
+      for (const input of list) {
+        out.push(await api.upsertDraftOption(organizationId, envelopeId, input));
+      }
+      return out;
+    },
+
     async removeDraftOption(organizationId, envelopeId, optionId) {
       const env = envelopes.get(String(envelopeId));
       if (!env || env.organization_id !== organizationId) throw err("not_found", "envelope not found", 404);
@@ -1591,6 +1610,84 @@ export function createSupabaseConfigurationRepository({ db }) {
         result = data?.[0];
       }
       return result ?? null;
+    },
+
+    /**
+     * Batch upsert draft options — one envelope check + chunked upserts.
+     * Avoids N×(getEnvelope + select + insert) round-trips that hang Studio publish.
+     */
+    async upsertDraftOptionsBatch(organizationId, envelopeId, optionInputs) {
+      const list = Array.isArray(optionInputs) ? optionInputs : [];
+      if (!list.length) return [];
+      const env = await this.getEnvelope(organizationId, envelopeId);
+      if (!env) {
+        const e = new Error("envelope not found");
+        e.code = "not_found";
+        e.statusCode = 404;
+        throw e;
+      }
+      if (!["draft", "ready"].includes(env.status)) {
+        const e = new Error("Only draft/ready envelopes can be mutated; clone to edit");
+        e.code = "immutable";
+        e.statusCode = 403;
+        throw e;
+      }
+      const now = new Date().toISOString();
+      const payloads = [];
+      for (const optionInput of list) {
+        const groupId = String(optionInput.group_id || optionInput.groupId || "");
+        const optionKey = String(optionInput.option_key || optionInput.optionKey || "");
+        if (!groupId || !optionKey) {
+          const e = new Error("group_id and option_key required");
+          e.code = "validation";
+          e.statusCode = 400;
+          throw e;
+        }
+        payloads.push({
+          organization_id: organizationId,
+          envelope_id: envelopeId,
+          group_id: groupId,
+          option_key: optionKey,
+          display_label: String(optionInput.display_label || optionInput.displayLabel || optionKey),
+          description_customer: optionInput.description_customer ?? optionInput.description ?? null,
+          image_asset_ref: optionInput.image_asset_ref ?? optionInput.imageAssetRef ?? null,
+          min_qty: Number(optionInput.min_qty ?? optionInput.minQty ?? 0),
+          max_qty: optionInput.max_qty ?? optionInput.maxQty ?? null,
+          default_qty: Number(optionInput.default_qty ?? optionInput.defaultQty ?? 0),
+          included_in_baseline: Boolean(
+            optionInput.included_in_baseline ?? optionInput.includedInBaseline
+          ),
+          required_selection: Boolean(
+            optionInput.required_selection ?? optionInput.requiredSelection
+          ),
+          availability_state:
+            optionInput.availability_state || optionInput.availabilityState || "active",
+          customer_price_treatment:
+            optionInput.customer_price_treatment ||
+            optionInput.customerPriceTreatment ||
+            "absolute",
+          pricing_mode: optionInput.pricing_mode || optionInput.pricingMode || "fixed",
+          sell_price: optionInput.sell_price ?? optionInput.sellPrice ?? null,
+          compatibility_json:
+            optionInput.compatibility_json ?? optionInput.compatibilityJson ?? {},
+          is_active_in_envelope:
+            optionInput.is_active_in_envelope ?? optionInput.isActiveInEnvelope ?? true,
+          sort_order: Number(optionInput.sort_order ?? optionInput.sortOrder ?? 0),
+          updated_at: now
+        });
+      }
+      const out = [];
+      const CHUNK = 80;
+      for (let i = 0; i < payloads.length; i += CHUNK) {
+        const chunk = payloads.slice(i, i + CHUNK);
+        const { data, error } = await db
+          .from("digital_estimate_configuration_options")
+          .upsert(chunk, { onConflict: "envelope_id,option_key" })
+          .select("*");
+        if (error) throw error;
+        if (Array.isArray(data)) out.push(...data);
+      }
+      return out;
     },
 
     async getEnvelopeGraph(organizationId, envelopeId) {

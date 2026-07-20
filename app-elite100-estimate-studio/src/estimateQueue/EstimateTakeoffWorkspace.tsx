@@ -75,6 +75,11 @@ export default function EstimateTakeoffWorkspace({
 }: Props) {
   const client = useMemo(() => createQuoteIntakeApiClient(), []);
   const [state, setState] = useState<OpenState>({ kind: "resolving" });
+  // Unmount Takeoff iframe when opening Scope/Digital/Review so its /results/latest
+  // poll cannot leak into Estimate Queue after navigation.
+  const [takeoffFrameMounted, setTakeoffFrameMounted] = useState(
+    () => !initialFocus || initialFocus === "takeoff"
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +210,7 @@ export default function EstimateTakeoffWorkspace({
   }, [state.kind === "ready" ? state.takeoffJobId : null]);
 
   // Fallback: if postMessage is missed, poll Takeoff review status and refresh scope.
+  // Event-driven prefer; slow poll only while AI is still running. Cleanup on unmount.
   useEffect(() => {
     if (state.kind !== "ready") return;
     if (state.displayStatus === "Needs estimator review" || state.displayStatus === "Scope in progress") {
@@ -212,50 +218,64 @@ export default function EstimateTakeoffWorkspace({
     }
     let cancelled = false;
     const takeoffJobId = state.takeoffJobId;
-    const timer = window.setInterval(() => {
-      void (async () => {
-        try {
-          const job = (await apiGet(
-            `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
-            authToken
-          )) as { reviewStatus?: string; status?: string };
-          if (cancelled) return;
-          if (String(job.reviewStatus ?? "").toLowerCase() !== "approved") {
-            // Keep display status in sync while AI runs — workspace stays usable.
-            const next = deriveEstimateTakeoffDisplayStatus({
-              takeoffJobId,
-              linkStatus: state.linkStatus,
-              jobStatus: job.status,
-              reviewStatus: job.reviewStatus
-            });
-            setState((prev) => {
-              if (prev.kind !== "ready" || prev.displayStatus === next) return prev;
-              return { ...prev, displayStatus: next };
-            });
-            return;
-          }
-          setState((prev) => {
-            if (prev.kind !== "ready" || prev.displayStatus === "Needs estimator review") return prev;
-            return {
-              ...prev,
-              displayStatus: "Needs estimator review",
-              scopeRefreshKey: prev.scopeRefreshKey + 1,
-              handoffNotice: "Takeoff approved — Estimate Scope refreshed."
-            };
+    const ac = new AbortController();
+
+    async function tick() {
+      if (cancelled || document.hidden) return;
+      try {
+        const job = (await apiGet(
+          `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
+          authToken,
+          { signal: ac.signal }
+        )) as { reviewStatus?: string; status?: string };
+        if (cancelled) return;
+        if (String(job.reviewStatus ?? "").toLowerCase() !== "approved") {
+          const next = deriveEstimateTakeoffDisplayStatus({
+            takeoffJobId,
+            linkStatus: state.linkStatus,
+            jobStatus: job.status,
+            reviewStatus: job.reviewStatus
           });
-          window.setTimeout(() => {
-            document
-              .querySelector('[data-testid="estimate-scope-panel"]')
-              ?.scrollIntoView({ behavior: "smooth", block: "start" });
-          }, 50);
-        } catch {
-          /* non-fatal */
+          setState((prev) => {
+            if (prev.kind !== "ready" || prev.displayStatus === next) return prev;
+            return { ...prev, displayStatus: next };
+          });
+          return;
         }
-      })();
-    }, 2000);
+        setState((prev) => {
+          if (prev.kind !== "ready" || prev.displayStatus === "Needs estimator review") return prev;
+          return {
+            ...prev,
+            displayStatus: "Needs estimator review",
+            scopeRefreshKey: prev.scopeRefreshKey + 1,
+            handoffNotice: "Takeoff approved — Estimate Scope refreshed."
+          };
+        });
+        window.setTimeout(() => {
+          document
+            .querySelector('[data-testid="estimate-scope-panel"]')
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 50);
+      } catch {
+        /* abort / non-fatal */
+      }
+    }
+
+    void tick();
+    const timer = window.setInterval(() => {
+      void tick();
+    }, 20_000);
+
+    function onVisibility() {
+      if (!document.hidden) void tick();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       cancelled = true;
+      ac.abort();
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [
     authToken,
@@ -353,13 +373,26 @@ export default function EstimateTakeoffWorkspace({
           </section>
 
           <div className="eq-takeoff-frame-wrap">
-            <iframe
-              title="AI Takeoff review"
-              className="eq-takeoff-frame"
-              data-testid="eq-takeoff-iframe"
-              src={takeoffSrc ?? undefined}
-              referrerPolicy="no-referrer"
-            />
+            {takeoffFrameMounted ? (
+              <iframe
+                title="AI Takeoff review"
+                className="eq-takeoff-frame"
+                data-testid="eq-takeoff-iframe"
+                src={takeoffSrc ?? undefined}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="eq-state" data-testid="eq-takeoff-iframe-paused">
+                <p>Takeoff worksheet is paused while you work Scope / Digital Estimate.</p>
+                <button
+                  type="button"
+                  className="eq-btn-secondary"
+                  onClick={() => setTakeoffFrameMounted(true)}
+                >
+                  Show Takeoff worksheet
+                </button>
+              </div>
+            )}
           </div>
           <p className="eq-footnote">
             Review the plan and edit the Takeoff worksheet above. Click{" "}
