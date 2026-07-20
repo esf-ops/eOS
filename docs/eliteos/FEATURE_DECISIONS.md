@@ -1799,3 +1799,14 @@
 | **SQL** | None. |
 | **Ops** | Deploy **Brain**, **app-elite100-estimate-studio**, and **app-digital-estimate**. Re-open Studio Digital Estimate and **Save / Update Configuration** once per live estimate so envelopes pick up corrected permissions and edge options. |
 | **Out of scope** | Per-room Internal Estimate profile catalogs on Studio estimates; inventing ungovered edge pricing; SQL migrations. |
+
+### 130. HR Department Access — eligible users + Executive Dashboard (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Department Access user picker loads **active org `user_profiles`** (plus `user_head_access` for HR Head status), not workforce roster / prior assignments alone. Prefer users with HR Head access; managers can still manage existing assignments if HR Head was later removed. Assignable access includes **`executive_dashboard`** (stored in `workforce_department_user_access.department_slug`, excluded from department→section mapping). That assignment grants full scorecard / mistakes / executive summary / report generation on the backend, but **does not** grant Department Access management, System Admin, or org settings. Role managers (`admin` / `executive` / `hr` / `super_admin`) retain full access + manage rights. |
+| **Why** | Newly invited eliteOS users with HR Head access were missing from the picker (roster merge was the wrong source); operators also need a single full-dashboard assignment without listing every department. |
+| **SQL** | Manual apply: `backend-core/supabase/eliteos_workforce_executive_dashboard_access_v1.sql` (widens CHECK to include `executive_dashboard`). |
+| **Ops** | Apply SQL, redeploy **backend-core** + **app-hr**. Refresh users in Department Access after invites / HR Head grants. |
+| **Out of scope** | Browser queries to `auth.users`; granting System Admin / org settings via Executive Dashboard; auto-apply migration. |

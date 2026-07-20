@@ -894,6 +894,23 @@ body {
   color: var(--eos-ink-muted);
 }
 
+.hr-dept-access-legend {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-dept-access-legend p {
+  margin: 0;
+}
+
+.hr-dept-access-legend strong {
+  color: var(--eos-ink-soft);
+  font-weight: 650;
+}
+
 .hr-dept-access-form {
   display: flex;
   flex-wrap: wrap;
