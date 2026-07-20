@@ -44,7 +44,11 @@ export function readDigitalEstimatePublicConfigRateLimitPerMinute(env = process.
 /** Cookie name for opaque configuration session secret (HttpOnly). */
 export const DE_PUBLIC_CONFIG_SESSION_COOKIE = "de_cfg_session";
 
-export const DE_PUBLIC_CONFIG_COOKIE_PATH = "/api/public-digital-estimate/v2";
+/** Canonical path on the API host (covers all /api/public-digital-estimate/v2/*). */
+export const DE_PUBLIC_CONFIG_COOKIE_PATH = "/";
+
+/** Legacy path — expired on every set/clear to prevent duplicate-cookie ambiguity. */
+export const DE_PUBLIC_CONFIG_COOKIE_PATH_LEGACY = "/api/public-digital-estimate/v2";
 
 export function readSafeDigitalEstimatePublicConfigurationConfig(env = process.env) {
   return {

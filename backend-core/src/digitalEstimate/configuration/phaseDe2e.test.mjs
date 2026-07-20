@@ -201,11 +201,21 @@ async function seedPublishedWithEnvelope() {
   });
   assert.equal(prod.httpOnly, true);
   assert.equal(prod.secure, true);
-  assert.equal(prod.sameSite, "strict");
+  assert.equal(prod.sameSite, "none");
+  assert.equal(prod.path, "/");
   const redacted = redactPublicConfigurationSecrets(
     `Authorization: Bearer ${rawSecret} cookie de_cfg_session=${rawSecret}`
   );
   assert.equal(redacted.includes(rawSecret), false);
+  // Create/lookup hash contract: normalize + hash must be stable
+  assert.equal(
+    hashConfigurationSessionSecret(`  ${rawSecret}  `),
+    hashConfigurationSessionSecret(rawSecret)
+  );
+  assert.equal(
+    hashConfigurationSessionSecret(`"${rawSecret}"`),
+    hashConfigurationSessionSecret(rawSecret)
+  );
   console.log("ok: session secret hash-only + Secure prod cookie + redaction");
 }
 
@@ -413,9 +423,12 @@ async function seedPublishedWithEnvelope() {
   const cookieHeader = setCookie.join(";") || ok.headers.get("set-cookie") || "";
   assert.ok(/de_cfg_session=/.test(cookieHeader));
   assert.ok(/HttpOnly/i.test(cookieHeader));
-  assert.ok(/Path=\/api\/public-digital-estimate\/v2/i.test(cookieHeader));
+  assert.ok(/Path=\//i.test(cookieHeader));
+  assert.ok(/SameSite=None/i.test(cookieHeader));
+  assert.ok(/Secure/i.test(cookieHeader));
   const body = await ok.json();
   assert.equal(body.ok, true);
+  assert.equal(body.sessionCookie?.established, true);
   assert.equal(JSON.stringify(body).includes(published.accessToken), false);
 
   // Legacy path mutation must not exist

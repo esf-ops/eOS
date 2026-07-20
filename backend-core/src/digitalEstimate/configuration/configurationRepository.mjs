@@ -1694,9 +1694,9 @@ export function createSupabaseConfigurationRepository({ db }) {
         .from("digital_estimate_configuration_sessions")
         .insert(payload)
         .select("*")
-        .limit(1);
+        .single();
       if (error) throw error;
-      const row = data?.[0];
+      const row = data;
       if (row) {
         await db.from("digital_estimate_configuration_events").insert({
           organization_id: args.organizationId,

@@ -394,14 +394,21 @@ console.log("\nphaseDePublicV2Route.productionPath.test.mjs\n");
     body: "{}"
   });
   assert.equal(exchanged.status, 201);
-  const setCookie = exchanged.headers.getSetCookie?.() || [];
-  const cookieHeader = setCookie.join(";") || exchanged.headers.get("set-cookie") || "";
-  const cookieMatch = /de_cfg_session=([^;]+)/i.exec(cookieHeader);
-  assert.ok(cookieMatch, "exchange must Set-Cookie de_cfg_session");
-  const cookie = `de_cfg_session=${cookieMatch[1]}`;
+  const setCookies = exchanged.headers.getSetCookie?.() || [];
+  let secretFromCookie = null;
+  for (const line of setCookies) {
+    const m = /de_cfg_session=([^;]*)/i.exec(line);
+    if (!m) continue;
+    const val = String(m[1] || "").trim();
+    if (val.length >= 20) secretFromCookie = val;
+  }
+  assert.ok(secretFromCookie, "exchange must Set-Cookie non-empty de_cfg_session");
+  assert.ok(setCookies.some((c) => /SameSite=None/i.test(c) || /SameSite=Lax/i.test(c)));
+  const cookie = `de_cfg_session=${secretFromCookie}`;
   const exchangedBody = await exchanged.json();
   const rowVersion = exchangedBody.session?.rowVersion;
   assert.ok(rowVersion != null);
+  assert.equal(exchangedBody.sessionCookie?.established, true);
 
   const saved = await fetch(`${base}/api/public-digital-estimate/v2/selections`, {
     method: "PUT",

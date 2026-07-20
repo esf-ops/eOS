@@ -221,25 +221,42 @@ export async function exchangeFragmentToken(token: string): Promise<Configuratio
     err.diagnosticCode = diagnosticCode;
     throw err;
   }
-  const setCookiePresent = typeof res.headers.getSetCookie === "function"
-    ? res.headers.getSetCookie().length > 0
-    : Boolean(res.headers.get("set-cookie"));
   // Browsers hide Set-Cookie from JS; absence here is not conclusive. Prefer body shape.
-  const body = (await res.json()) as ConfigurationState & { ok?: boolean };
-  if (!body || (body.ok === false)) {
+  const body = (await res.json()) as ConfigurationState & {
+    ok?: boolean;
+    sessionCookie?: { established?: boolean };
+  };
+  if (!body || body.ok === false) {
     const err = new Error("Estimate unavailable") as Error & { diagnosticCode?: string };
     err.diagnosticCode = "DE-STATE";
     throw err;
   }
   if (!body.estimate && body.lifecycle !== "active") {
-    // Baseline-only sessions still carry estimate when publication-only.
-    // Missing both estimate and configuration is a state/render failure.
     if (!body.configuration) {
       const err = new Error("Estimate unavailable") as Error & { diagnosticCode?: string };
-      err.diagnosticCode = setCookiePresent ? "DE-STATE" : "DE-COOKIE";
+      err.diagnosticCode = "DE-STATE";
       throw err;
     }
   }
+
+  // Verify the browser stored/sends the session cookie (separate request = serverless reality).
+  // One soft check only — failure is nonfatal here; save path re-exchanges once.
+  try {
+    const verify = await fetch(`${base}/api/public-digital-estimate/v2/session`, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (verify.ok) {
+      const verified = (await verify.json()) as ConfigurationState;
+      if (verified?.lifecycle === "active" && verified.configuration) {
+        return verified;
+      }
+    }
+  } catch {
+    /* keep exchange body */
+  }
+
   return body as ConfigurationState;
 }
 
