@@ -12,23 +12,38 @@ import {
   resolveBlancoVariant,
   toCustomerSafeProduct
 } from "./esfPlumbingCatalog.mjs";
+import {
+  customerFacingProductCopy,
+  isAccessoryFamilyHeading,
+  sideSplashPieceDisplayName,
+  sideSplashModeLabel
+} from "./customerFacingCopy.mjs";
 
 export const SIDE_SPLASH_HEIGHT_IN = STANDARD_BACKSPLASH_HEIGHT_IN;
 export const DEFAULT_ACCESSORY_MAX_QTY = 5;
 
 /**
  * @param {{ roomKey?: string, displayName?: string, name?: string, roomType?: string, type?: string }} room
- * @returns {'kitchen' | 'bar_prep' | 'vanity'}
+ * @returns {'kitchen' | 'bar_prep' | 'vanity' | 'non_plumbing'}
  */
 export function inferRoomEligibilityType(room) {
   const explicit = String(room?.roomType || room?.type || "").toLowerCase().trim();
   if (explicit === "kitchen" || explicit === "bar_prep" || explicit === "vanity") return explicit;
+  if (explicit === "non_plumbing" || explicit === "none" || explicit === "no_plumbing") {
+    return "non_plumbing";
+  }
   if (explicit === "bar" || explicit === "prep" || explicit === "entertainment") return "bar_prep";
   if (explicit === "bath" || explicit === "bathroom") return "vanity";
 
   const label = `${room?.displayName || ""} ${room?.name || ""} ${room?.roomKey || ""}`.toLowerCase();
   if (/\bvanity\b|\bbath(room)?\b|\bpowder\b/.test(label)) return "vanity";
-  if (/\bbar\b|\bprep\b|\bentertainment\b/.test(label)) return "bar_prep";
+  if (/\bcoffee\b|\bbar\b|\bprep\b|\bentertainment\b/.test(label)) return "bar_prep";
+  // Reception / office counters usually do not need a kitchen sink catalog.
+  if (
+    /\breception\b|\bfront\s*desk\b|\boffice\b|\blobby\b|\bconference\b|\bhostess\b/.test(label)
+  ) {
+    return "non_plumbing";
+  }
   return "kitchen";
 }
 
@@ -151,9 +166,11 @@ export function resolveCatalogProductSelection(productIdToken, draft = null) {
 export function toCustomerSafeOptionFields(product) {
   const safe = toCustomerSafeProduct(product);
   if (!safe) return {};
+  const copy = customerFacingProductCopy(safe);
   return {
     productId: safe.productId,
-    displayName: safe.displayName,
+    displayName: copy.displayName,
+    description: copy.description,
     manufacturer: safe.manufacturer,
     model: safe.model || null,
     finish: safe.finish || null,
@@ -165,11 +182,17 @@ export function toCustomerSafeOptionFields(product) {
     requiresCutout: Boolean(safe.requiresCutout),
     relatedCutoutType: safe.relatedCutoutType || null,
     roomEligibility: safe.roomEligibility || [],
+    compatibleFamilyIds: Array.isArray(safe.compatibleFamilyIds)
+      ? safe.compatibleFamilyIds
+      : Array.isArray(product?.compatibleFamilyIds)
+        ? product.compatibleFamilyIds
+        : [],
+    accessoryKind: classifyAccessoryKind(product),
     variants: Array.isArray(safe.variants)
       ? safe.variants.map((v) => ({
           variantId: v.variantId,
           sku: v.sku,
-          displayName: v.displayName || null,
+          displayName: customerFacingProductCopy(v).displayName,
           finish: v.finish || v.color || null,
           availability: v.availability || null,
           availabilityText: v.availabilityText || null,
@@ -178,8 +201,28 @@ export function toCustomerSafeOptionFields(product) {
         }))
       : undefined,
     sellPrice: safe.sellPrice != null ? Number(safe.sellPrice) : null,
-    installedPrice: safe.installedPrice != null ? Number(safe.installedPrice) : null
+    installedPrice: safe.installedPrice != null ? Number(safe.installedPrice) : null,
+    reviewRequired: copy.reviewRequired
   };
+}
+
+/**
+ * @param {{ category?: string, subcategory?: string } | null | undefined} product
+ * @returns {'sink_accessory'|'plumbing_addon'|'specialty'|'other'}
+ */
+export function classifyAccessoryKind(product) {
+  const cat = String(product?.category || "").toLowerCase();
+  if (cat === "specialty") return "specialty";
+  if (
+    cat === "soap_dispenser" ||
+    cat === "disposal_air_switch" ||
+    cat === "disposal_button" ||
+    cat === "glass_rinser"
+  ) {
+    return "plumbing_addon";
+  }
+  if (cat === "sink_accessory" || cat.includes("accessory")) return "sink_accessory";
+  return "other";
 }
 
 /**
@@ -270,6 +313,11 @@ export function buildSinkOptionDefinitions(args) {
     );
   }
 
+  // Reception / office counters: none + customer-provided only (no kitchen sink catalog).
+  if (roomType === "non_plumbing" || args.includeEsfProducts === false) {
+    return out;
+  }
+
   if (args.includeEsfProducts !== false) {
     const products = listProducts({
       category: "sink",
@@ -279,12 +327,13 @@ export function buildSinkOptionDefinitions(args) {
     for (const product of products) {
       // Seed family rows for Blanco (variants), not every color SKU.
       const safe = toCustomerSafeOptionFields(product);
+      const copy = customerFacingProductCopy(product);
       out.push(
         baseOption({
           groupId,
           optionKey: `sink:${roomKey}:esf:${product.productId}`,
-          displayLabel: product.displayName,
-          description: product.description || null,
+          displayLabel: copy.displayName,
+          description: copy.description || product.description || null,
           sellPrice: Number(product.sellPrice) || 0,
           customerPriceTreatment: "absolute",
           pricingMode: "per_each",
@@ -346,6 +395,10 @@ export function buildFaucetOptionDefinitions(args) {
     );
   }
 
+  if (roomType === "non_plumbing" || args.includeEsfProducts === false) {
+    return out;
+  }
+
   if (args.includeEsfProducts !== false) {
     const faucetCategories =
       roomType === "vanity"
@@ -362,12 +415,13 @@ export function buildFaucetOptionDefinitions(args) {
       }).filter((p) => p.active)) {
         if (seen.has(product.productId)) continue;
         seen.add(product.productId);
+        const copy = customerFacingProductCopy(product);
         out.push(
           baseOption({
             groupId,
             optionKey: `faucet:${roomKey}:esf:${product.productId}`,
-            displayLabel: product.displayName,
-            description: product.description || null,
+            displayLabel: copy.displayName,
+            description: copy.description || product.description || null,
             sellPrice: Number(product.sellPrice) || 0,
             customerPriceTreatment: "absolute",
             pricingMode: "per_each",
@@ -402,8 +456,10 @@ export function buildAccessoryOptionDefinitions(args) {
   const roomType = args.roomType || "kitchen";
   const groupId = args.groupId ?? null;
   const maxQty = args.maxQty ?? DEFAULT_ACCESSORY_MAX_QTY;
-  const categories = [
-    "sink_accessory",
+  if (roomType === "non_plumbing") return [];
+
+  const sinkAccessoryCategories = ["sink_accessory"];
+  const plumbingAddonCategories = [
     "soap_dispenser",
     "disposal_air_switch",
     "disposal_button",
@@ -411,35 +467,98 @@ export function buildAccessoryOptionDefinitions(args) {
   ];
   const out = [];
   const seen = new Set();
-  for (const category of categories) {
+
+  function pushProduct(product, accessoryKind) {
+    if (seen.has(product.productId)) return;
+    seen.add(product.productId);
+    if (isAccessoryFamilyHeading(product)) {
+      // Expand family headings into buyable variant SKUs — never expose the heading row.
+      for (const v of product.variants || []) {
+        const variantId = String(v.variantId || v.sku || "").trim();
+        if (!variantId) continue;
+        const variantKey = `var:${variantId}`;
+        if (seen.has(variantKey)) continue;
+        seen.add(variantKey);
+        const copy = customerFacingProductCopy({
+          displayName: v.displayName || v.finish || v.sku,
+          description: product.description
+        });
+        out.push(
+          baseOption({
+            groupId,
+            // Use variantId as the esf token so resolveCatalogProductSelection can find it.
+            optionKey: `accessory:${roomKey}:esf:${variantId}`,
+            displayLabel: copy.displayName,
+            description: copy.description,
+            sellPrice: Number(v.sellPrice ?? product.sellPrice) || 0,
+            customerPriceTreatment: "absolute",
+            pricingMode: "per_each",
+            minQty: 0,
+            maxQty,
+            defaultQty: 0,
+            imageAssetRef: v.imageUrl || product.imageUrl || null,
+            compatibilityJson: {
+              roomKey,
+              role: "accessory_selection",
+              productId: product.productId,
+              variantId,
+              roomType,
+              accessoryKind,
+              compatibleFamilyIds: Array.isArray(product.compatibleFamilyIds)
+                ? product.compatibleFamilyIds
+                : [],
+              customerSafe: toCustomerSafeOptionFields(product)
+            }
+          })
+        );
+      }
+      return;
+    }
+    const copy = customerFacingProductCopy(product);
+    out.push(
+      baseOption({
+        groupId,
+        optionKey: `accessory:${roomKey}:esf:${product.productId}`,
+        displayLabel: copy.displayName,
+        description: copy.description,
+        sellPrice: Number(product.sellPrice) || 0,
+        customerPriceTreatment: "absolute",
+        pricingMode: "per_each",
+        minQty: 0,
+        maxQty,
+        defaultQty: 0,
+        imageAssetRef: product.imageUrl || null,
+        compatibilityJson: {
+          roomKey,
+          role: "accessory_selection",
+          productId: product.productId,
+          roomType,
+          accessoryKind,
+          compatibleFamilyIds: Array.isArray(product.compatibleFamilyIds)
+            ? product.compatibleFamilyIds
+            : [],
+          customerSafe: toCustomerSafeOptionFields(product)
+        }
+      })
+    );
+  }
+
+  for (const category of sinkAccessoryCategories) {
     for (const product of listProducts({
       category,
       roomType,
       customerVisibleOnly: true
     }).filter((p) => p.active)) {
-      if (seen.has(product.productId)) continue;
-      seen.add(product.productId);
-      out.push(
-        baseOption({
-          groupId,
-          optionKey: `accessory:${roomKey}:esf:${product.productId}`,
-          displayLabel: product.displayName,
-          sellPrice: Number(product.sellPrice) || 0,
-          customerPriceTreatment: "absolute",
-          pricingMode: "per_each",
-          minQty: 0,
-          maxQty,
-          defaultQty: 0,
-          imageAssetRef: product.imageUrl || null,
-          compatibilityJson: {
-            roomKey,
-            role: "accessory_selection",
-            productId: product.productId,
-            roomType,
-            customerSafe: toCustomerSafeOptionFields(product)
-          }
-        })
-      );
+      pushProduct(product, "sink_accessory");
+    }
+  }
+  for (const category of plumbingAddonCategories) {
+    for (const product of listProducts({
+      category,
+      roomType,
+      customerVisibleOnly: true
+    }).filter((p) => p.active)) {
+      pushProduct(product, "plumbing_addon");
     }
   }
   return out;
@@ -456,6 +575,7 @@ export function buildSpecialtyOptionDefinitions(args) {
   const roomKey = String(args.roomKey);
   const roomType = args.roomType || "kitchen";
   const groupId = args.groupId ?? null;
+  if (roomType === "non_plumbing") return [];
   return listProducts({
     category: "specialty",
     roomType,
@@ -463,7 +583,9 @@ export function buildSpecialtyOptionDefinitions(args) {
   })
     .filter((p) => p.active)
     .map((product) => {
-      const reviewOnly = product.pricingTreatment === "review_only";
+      const copy = customerFacingProductCopy(product);
+      const reviewOnly =
+        product.pricingTreatment === "review_only" || copy.reviewRequired;
       const price =
         product.installedPrice != null
           ? Number(product.installedPrice)
@@ -473,12 +595,12 @@ export function buildSpecialtyOptionDefinitions(args) {
       return baseOption({
         groupId,
         optionKey: `specialty:${roomKey}:esf:${product.productId}`,
-        displayLabel: product.displayName,
-        description: product.description || null,
+        displayLabel: copy.displayName,
+        description: copy.description || product.description || null,
         sellPrice: reviewOnly ? 0 : price,
         customerPriceTreatment: reviewOnly ? "review_required" : "absolute",
         pricingMode: "per_each",
-        availabilityState: reviewOnly ? "active" : "active",
+        availabilityState: "active",
         imageAssetRef: product.imageUrl || null,
         maxQty: 1,
         compatibilityJson: {
@@ -577,6 +699,7 @@ export function buildSideSplashOptionDefinitions(args) {
   const groupId = args.groupId ?? null;
   const pieces = Array.isArray(args.pieces) ? args.pieces : [];
   const out = [];
+  let pieceIndex = 0;
 
   for (const piece of pieces) {
     if (!piece || piece.included === false) continue;
@@ -584,6 +707,9 @@ export function buildSideSplashOptionDefinitions(args) {
     if (pieceType.includes("backsplash") || pieceType.includes("splash")) continue;
     const pieceKey = String(piece.id || piece.key || piece.name || "").trim();
     if (!pieceKey) continue;
+    pieceIndex += 1;
+    const rawName = String(piece.name || piece.label || piece.displayName || "").trim();
+    const pieceDisplayName = sideSplashPieceDisplayName(rawName, pieceIndex);
     const depth = Number(piece.depthIn ?? piece.depth);
     const depthKnown = Number.isFinite(depth) && depth > 0;
 
@@ -597,13 +723,16 @@ export function buildSideSplashOptionDefinitions(args) {
         baseOption({
           groupId,
           optionKey: `sidesplash:${roomKey}:${pieceKey}:${mode.key}`,
-          displayLabel: `${mode.label} (${piece.name || pieceKey})`,
+          // Never put raw piece IDs in the customer-visible label.
+          displayLabel: `${pieceDisplayName} — ${sideSplashModeLabel(mode.key)}`,
           includedInBaseline: mode.key === "none",
           defaultQty: mode.key === "none" ? 1 : 0,
           sellPrice: 0,
           compatibilityJson: {
             roomKey,
             pieceKey,
+            pieceDisplayName,
+            pieceIndex,
             role: "sidesplash_selection",
             sideSplashMode: mode.key,
             depthIn: depthKnown ? depth : null,
@@ -661,13 +790,17 @@ export function buildDefaultRoomProductOptions(args) {
 
     if (choiceGroups.has("sink")) {
       const hasSinkAddon = Number(addOns["qty-sink"] || addOns["qty-bar"] || 0) > 0;
+      // Only kitchen/bar rooms default to customer-provided when the estimate includes a sink cutout.
+      // Reception / office stay on "No sink" so every room does not inherit the same draft.
+      const defaultMode =
+        hasSinkAddon && roomType !== "non_plumbing" ? "customer_provided" : "none";
       options.push(
         ...buildSinkOptionDefinitions({
           roomKey,
           roomType,
           groupId,
-          defaultMode: hasSinkAddon ? "customer_provided" : "none",
-          includeEsfProducts: true
+          defaultMode,
+          includeEsfProducts: roomType !== "non_plumbing"
         })
       );
     }
@@ -679,7 +812,7 @@ export function buildDefaultRoomProductOptions(args) {
           roomType,
           groupId,
           defaultMode: "none",
-          includeEsfProducts: true
+          includeEsfProducts: roomType !== "non_plumbing"
         })
       );
     }

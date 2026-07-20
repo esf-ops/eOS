@@ -3,6 +3,13 @@
  * Never expose internal pricing evidence, account groups, wholesale, margin, etc.
  */
 
+import {
+  conciseCustomerTitle,
+  customerPriceEffectLabel,
+  sideSplashPieceDisplayName,
+  stripInternalChannelTerms
+} from "../catalog/customerFacingCopy.mjs";
+
 export const CONFIGURATION_PUBLIC_OPTION_KEYS = Object.freeze([
   "optionKey",
   "groupKey",
@@ -19,6 +26,11 @@ export const CONFIGURATION_PUBLIC_OPTION_KEYS = Object.freeze([
   "pricingMode",
   "visibleSellPrice",
   "visibleDelta",
+  "priceEffectLabel",
+  "pieceDisplayName",
+  "pieceIndex",
+  "accessoryKind",
+  "compatibleFamilyIds",
   "notesCustomer",
   "unit"
 ]);
@@ -65,13 +77,48 @@ export function toPublicConfigurationOption(option, ctx = {}) {
     visibleDelta = sell;
   } else if (treatment === "absolute") {
     visibleSellPrice = sell;
+  } else if (treatment === "review_required") {
+    visibleSellPrice = null;
+    visibleDelta = null;
   }
+
+  const compat =
+    option.compatibility_json && typeof option.compatibility_json === "object"
+      ? option.compatibility_json
+      : option.compatibilityJson && typeof option.compatibilityJson === "object"
+        ? option.compatibilityJson
+        : {};
+  const pieceDisplayNameRaw = compat.pieceDisplayName || compat.piece_display_name || null;
+  const pieceIndex = Number(compat.pieceIndex || compat.piece_index || 0) || null;
+  const pieceDisplayName = pieceDisplayNameRaw
+    ? sideSplashPieceDisplayName(String(pieceDisplayNameRaw), pieceIndex || 1)
+    : null;
+
+  const rawLabel = String(option.display_label || option.displayLabel || "");
+  const displayLabel = conciseCustomerTitle(stripInternalChannelTerms(rawLabel), { maxLen: 96 });
+  const descriptionRaw = option.description_customer ?? option.description ?? null;
+  const description =
+    descriptionRaw != null ? stripInternalChannelTerms(String(descriptionRaw)) || null : null;
+
+  const reviewRequired =
+    treatment === "review_required" ||
+    Boolean(compat.estimatorReviewRequired) ||
+    String(compat.pricingTreatment || "") === "review_only";
+
+  const priceEffectLabel = customerPriceEffectLabel({
+    includedInBaseline: Boolean(option.included_in_baseline ?? option.includedInBaseline),
+    customerPriceTreatment: treatment,
+    availabilityState: String(option.availability_state || option.availabilityState || "active"),
+    visibleSellPrice,
+    visibleDelta,
+    reviewRequired
+  });
 
   return {
     optionKey: String(option.option_key || option.optionKey || ""),
     groupKey: String(ctx.groupKey || option.group_key || option.groupKey || ""),
-    displayLabel: String(option.display_label || option.displayLabel || ""),
-    description: option.description_customer ?? option.description ?? null,
+    displayLabel,
+    description,
     imageAssetRef: option.image_asset_ref ?? option.imageAssetRef ?? null,
     minQty: Number(option.min_qty ?? option.minQty ?? 0),
     maxQty: option.max_qty ?? option.maxQty ?? null,
@@ -83,6 +130,15 @@ export function toPublicConfigurationOption(option, ctx = {}) {
     pricingMode: String(option.pricing_mode || option.pricingMode || "fixed"),
     visibleSellPrice,
     visibleDelta,
+    priceEffectLabel,
+    pieceDisplayName,
+    pieceIndex,
+    accessoryKind: compat.accessoryKind || compat.accessory_kind || null,
+    compatibleFamilyIds: Array.isArray(compat.compatibleFamilyIds)
+      ? compat.compatibleFamilyIds.map(String)
+      : Array.isArray(compat.compatible_family_ids)
+        ? compat.compatible_family_ids.map(String)
+        : [],
     notesCustomer: option.notes_customer ?? option.notesCustomer ?? null,
     unit: option.sell_price_unit ?? option.sellPriceUnit ?? option.unit ?? null
   };

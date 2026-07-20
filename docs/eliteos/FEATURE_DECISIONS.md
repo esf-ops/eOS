@@ -1735,3 +1735,14 @@
 | **Ops** | Deploy Brain + Estimate Studio + AI Takeoff (iframe poll change). Retest: Publish completes promptly; Network shows no 1s loop; Back to Queue stops detail traffic; Queue loads once. |
 | **Out of scope** | Changing `digital_estimate_publish_atomic` to defer supersede (restore-on-failure covers fail-closed); sold-job. |
 
+### 124. Digital Estimate option runtime + customer polish (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Public ConfigurationView must not crash on notes (`productNote` typo → `projectNote`). Side-splash labels use piece display names (never UUIDs; fallback `Countertop piece N`). Room eligibility treats Reception/office as `non_plumbing` (none + customer-provided only). Accessory family headings expand to variant SKUs; sink accessories hide when No sink / customer-provided; plumbing add-ons stay separate. Product copy strips Wholesale/Partner/Direct and shortens Glowback/InvisaCook/FreePower. Public options expose `priceEffectLabel`. Autosave status replaces permanent Save CTA. Configurator error boundary hides raw exceptions. Idempotent Studio publish copy simplified. |
+| **Why** | Hosted configurator threw `productNote is not defined`, showed raw piece IDs, mixed accessory family headings with add-ons, and leaked channel/workbook prose. |
+| **SQL** | None. |
+| **Ops** | Deploy Brain + digital-estimate (+ Estimate Studio for publish copy). Republish (or Replace Link after republish with new envelope) for rooms that need corrected sink eligibility / accessory expansion. |
+| **Out of scope** | Full material image sourcing; golden-math pricing audit; Studio per-room category override UI; non-expiring link lifecycle; Quote Library projection; sold-job automation. |
+
