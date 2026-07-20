@@ -1768,3 +1768,14 @@
 | **Ops** | Deploy **Brain** + **app-digital-estimate** (static asset bundle larger by ~19MB product thumbs). Republish not required for layout/copy; new stock/special-order UI uses existing envelope options. |
 | **Out of scope** | Sourcing the remaining 89 Elite 100 photos; CDN migration; Studio per-room option override UI; inventing ungovered backsplash credits; sold-job. |
 
+### 127. HR scorecard week calendar restart + history reset (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Scorecard week selector enumerates **every** valid Thursday–Wednesday week from **`SCORECARD_EARLIEST_WEEK_START = 2026-06-25`** (June 25–July 1) through the current week, newest first. Invalid overlapping ranges (e.g. July 13–19) are never offered. Requested/saved `week_start` values are clamped to that calendar. A **manual destructive** SQL script deletes ESF scorecard history so data can be re-entered under corrected weeks. |
+| **Why** | Prior incorrect week buckets polluted history; ESF will re-enter from the June 25 start. |
+| **SQL** | Manual one-time: `backend-core/supabase/eliteos_workforce_scorecard_history_reset_v1.sql` (org-scoped to `elite_stone_fabrication`). Does **not** delete sections, department access, roster, categories, settings, users, or orgs. |
+| **Ops** | 1) Merge/deploy backend-core + app-hr. 2) Manually run the reset SQL in Supabase. 3) Re-enter weekly data. |
+| **Out of scope** | Automatic rewrite of old week_start values; multi-tenant wipe; AI narrative changes. |
+

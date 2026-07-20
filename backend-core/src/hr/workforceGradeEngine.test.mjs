@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   buildCategoryBreakdown,
+  clampScorecardWeekStart,
   computeDowntimeHoursGrade,
   computeLeadTimeMedianGrade,
   computeLetterGrade,
@@ -15,16 +16,21 @@ import {
   formatWeekOptionLabel,
   gradeTrend,
   isManagerRole,
+  isValidScorecardWeekStart,
   isWorkforceManager,
+  listScorecardWeekStartsThrough,
   MANAGER_ROLES,
+  SCORECARD_EARLIEST_WEEK_START,
   SCORECARD_WEEK_START_DAY,
   shiftWeekStart,
   sumWeightedMistakes,
   weekEndForWeekStart,
   weekStartForIsoDate
 } from "./workforceGradeEngine.js";
+import { buildScorecardWeekOptions } from "./workforceScorecard.js";
 
 assert.equal(SCORECARD_WEEK_START_DAY, 4, "scorecard weeks start on Thursday");
+assert.equal(SCORECARD_EARLIEST_WEEK_START, "2026-06-25");
 
 assert.equal(computeLetterGrade(0), "A");
 assert.equal(computeLetterGrade(1), "A");
@@ -65,11 +71,61 @@ assert.equal(weekStartForIsoDate("2026-07-10"), "2026-07-09"); // Friday → pri
 assert.equal(weekStartForIsoDate("2026-07-15"), "2026-07-09"); // Wednesday → week start Thu
 assert.equal(weekStartForIsoDate("2026-07-16"), "2026-07-16"); // next Thursday
 assert.equal(weekEndForWeekStart("2026-07-09"), "2026-07-15");
+assert.equal(weekEndForWeekStart("2026-06-25"), "2026-07-01");
 assert.equal(shiftWeekStart("2026-07-16", -1), "2026-07-09");
+assert.equal(shiftWeekStart("2026-07-02", -1), "2026-06-25");
+assert.equal(shiftWeekStart("2026-07-09", -1), "2026-07-02");
+
+assert.equal(isValidScorecardWeekStart("2026-06-25"), true);
+assert.equal(isValidScorecardWeekStart("2026-07-02"), true);
+assert.equal(isValidScorecardWeekStart("2026-07-09"), true);
+assert.equal(isValidScorecardWeekStart("2026-07-16"), true);
+assert.equal(isValidScorecardWeekStart("2026-07-13"), false); // Mon — invalid range start
+assert.equal(isValidScorecardWeekStart("2026-07-06"), false);
+assert.equal(isValidScorecardWeekStart("2026-06-29"), false);
+assert.equal(isValidScorecardWeekStart("2026-06-18"), false); // before earliest
+
+assert.equal(clampScorecardWeekStart("2026-06-18"), "2026-06-25");
+assert.equal(clampScorecardWeekStart("2026-07-10"), "2026-07-09");
+
+// Exact sequence from earliest through current (as of mid-week July 20, 2026)
+const weeksAsOfJuly20 = listScorecardWeekStartsThrough("2026-07-20");
+assert.deepEqual(weeksAsOfJuly20, [
+  "2026-07-16", // Current · July 16–22
+  "2026-07-09", // Last · July 9–15
+  "2026-07-02", // July 2–8
+  "2026-06-25" // June 25–July 1
+]);
+assert.equal(weeksAsOfJuly20.includes("2026-07-13"), false);
+assert.equal(weeksAsOfJuly20.includes("2026-07-06"), false);
+assert.equal(weeksAsOfJuly20.includes("2026-06-29"), false);
+assert.equal(weeksAsOfJuly20[weeksAsOfJuly20.length - 1], "2026-06-25");
+
+// Future weeks appear automatically
+const weeksAsOfJuly27 = listScorecardWeekStartsThrough("2026-07-27");
+assert.deepEqual(weeksAsOfJuly27.slice(0, 5), [
+  "2026-07-23",
+  "2026-07-16",
+  "2026-07-09",
+  "2026-07-02",
+  "2026-06-25"
+]);
+
+const weekOptions = await buildScorecardWeekOptions(null, null, { timezone: "America/Chicago" }, null, "2026-07-20");
+assert.equal(weekOptions.length, 4);
+assert.equal(weekOptions[0].weekLabel, "Current Week · July 16–22");
+assert.equal(weekOptions[1].weekLabel, "Last Week · July 9–15");
+assert.equal(weekOptions[2].weekLabel, "July 2–8");
+assert.equal(weekOptions[3].weekLabel, "June 25–July 1");
+assert.equal(
+  weekOptions.some((w) => w.weekStart === "2026-07-13" || w.weekLabel.includes("July 13")),
+  false
+);
 
 // Month / year boundary labels
 assert.equal(formatWeekLabel("2026-07-09", "2026-07-15"), "July 9–15");
 assert.equal(formatWeekLabel("2026-07-30", "2026-08-05"), "July 30–August 5");
+assert.equal(formatWeekLabel("2026-06-25", "2026-07-01"), "June 25–July 1");
 assert.equal(formatWeekLabel("2026-12-31", "2027-01-06"), "December 31, 2026–January 6, 2027");
 
 assert.equal(
@@ -77,14 +133,14 @@ assert.equal(
     currentWeekStart: "2026-07-16",
     lastWeekStart: "2026-07-09"
   }),
-  "Current week · July 16–22"
+  "Current Week · July 16–22"
 );
 assert.equal(
   formatWeekOptionLabel("2026-07-09", "2026-07-15", {
     currentWeekStart: "2026-07-16",
     lastWeekStart: "2026-07-09"
   }),
-  "Last week · July 9–15"
+  "Last Week · July 9–15"
 );
 
 assert.equal(formatGradeTrendDisplay("Plumbing accessories non billable service calls", "A", "B", "up"), "A ↑ last week B");
