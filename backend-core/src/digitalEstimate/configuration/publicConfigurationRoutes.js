@@ -79,6 +79,8 @@ const SAFE_DIAGNOSTIC_CODES = new Set([
   "DE-ORIGIN",
   "DE-SAVE",
   "DE-OPTION-NOT-ALLOWED",
+  "DE-PRODUCT-VARIANT-REQUIRED",
+  "DE-ACCESSORY-INCOMPATIBLE",
   "DE-CONFIGURATION-STALE",
   "DE-CONFIGURATION-CONTRACT-INVALID"
 ]);
@@ -139,6 +141,8 @@ function safeDiagnosticCode(e, status, safeCode) {
   if (safeCode === "option_not_allowed" || safeCode === "invalid_selection" || safeCode === "unknown_option") {
     return "DE-OPTION-NOT-ALLOWED";
   }
+  if (safeCode === "product_variant_required") return "DE-PRODUCT-VARIANT-REQUIRED";
+  if (safeCode === "incompatible_accessory") return "DE-ACCESSORY-INCOMPATIBLE";
   if (
     status === 409 ||
     safeCode === "row_version_conflict" ||

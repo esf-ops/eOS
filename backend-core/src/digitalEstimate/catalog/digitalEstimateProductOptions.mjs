@@ -148,19 +148,26 @@ export function resolveCatalogProductSelection(productIdToken, draft = null) {
   if (!product || !product.active) return null;
 
   if (!variant && Array.isArray(product.variants) && product.variants.length > 0) {
-    const finishOrSku = String(draft?.variantSku || draft?.variantId || draft?.finish || "").trim();
-    if (finishOrSku) {
-      variant = resolveBlancoVariant(product.productId, finishOrSku);
-      if (!variant) {
-        const err = new Error(`Invalid finish/SKU for ${product.productId}`);
-        err.code = "invalid_blanco_variant";
+    // Single approved finish → resolve automatically.
+    if (product.variants.length === 1) {
+      variant = product.variants[0];
+    } else {
+      const finishOrSku = String(
+        draft?.variantSku || draft?.variantId || draft?.finish || ""
+      ).trim();
+      if (finishOrSku) {
+        variant = resolveBlancoVariant(product.productId, finishOrSku);
+        if (!variant) {
+          const err = new Error(`Invalid finish/SKU for ${product.productId}`);
+          err.code = "invalid_blanco_variant";
+          throw err;
+        }
+      } else {
+        // Multi-finish family without exact SKU — never silently use family min price.
+        const err = new Error(`Exact finish/SKU required for ${product.productId}`);
+        err.code = "missing_variant_sku";
         throw err;
       }
-    } else if (draft?.source === "esf" || draft?.productId) {
-      // Do not silently underprice a multi-finish family with the min family price.
-      const err = new Error(`Exact finish/SKU required for ${product.productId}`);
-      err.code = "missing_variant_sku";
-      throw err;
     }
   }
 
@@ -950,6 +957,8 @@ export function isRoomProductOptionKey(optionKey) {
 
 /**
  * Resolve server sell price for a seeded/upserted option (never trust browser).
+ * Family-level Blanco keys may omit finish at seed time — use family sellPrice for
+ * envelope display. Customer save still requires exact variant via resolveCatalogProductSelection.
  * @param {string} optionKey
  * @param {object} [compatibilityJson]
  */
@@ -957,8 +966,27 @@ export function resolveOptionSellPriceFromCatalog(optionKey, compatibilityJson =
   const parsed = parseProductOptionKey(optionKey);
   if (!parsed) return { sellPrice: 0, availabilityState: "active" };
 
+  function resolveForSeed(productId) {
+    try {
+      return resolveCatalogProductSelection(productId);
+    } catch (e) {
+      if (e?.code === "missing_variant_sku" || e?.code === "invalid_blanco_variant") {
+        const product = getProductById(productId);
+        if (!product?.active) return null;
+        const sell =
+          product.sellPrice != null
+            ? Number(product.sellPrice)
+            : product.installedPrice != null
+              ? Number(product.installedPrice)
+              : 0;
+        return { product, variant: null, sellPrice: Number.isFinite(sell) ? sell : 0 };
+      }
+      throw e;
+    }
+  }
+
   if (parsed.kind === "specialty" && parsed.mode === "esf" && parsed.productId) {
-    const resolved = resolveCatalogProductSelection(parsed.productId);
+    const resolved = resolveForSeed(parsed.productId);
     if (!resolved) return { sellPrice: null, availabilityState: "unavailable" };
     if (resolved.product.pricingTreatment === "review_only") {
       return { sellPrice: 0, availabilityState: "active", pricingTreatment: "review_only" };
@@ -981,7 +1009,7 @@ export function resolveOptionSellPriceFromCatalog(optionKey, compatibilityJson =
     parsed.mode === "esf" &&
     parsed.productId
   ) {
-    const resolved = resolveCatalogProductSelection(parsed.productId);
+    const resolved = resolveForSeed(parsed.productId);
     if (!resolved) return { sellPrice: null, availabilityState: "unavailable" };
     return {
       sellPrice: resolved.sellPrice ?? 0,

@@ -1851,3 +1851,14 @@
 | **Ops** | Deploy **backend-core** + **app-digital-estimate** (+ Estimate Studio). For each live estimate: **Save / Update Configuration** once so the fingerprint change reseeds sink options. Do **not** rotate the customer link. |
 | **Out of scope** | Adding Product Catalog assets for Moen 5965 / 7804 BZG / 9126 BL (unmatched); inventing laundry sinks beyond workbook-tagged `Liven Laundry`; Quote Library UI redesign. |
 
+### 134. Digital Estimate Blanco Inteos variant save (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Multi-finish Blanco sink families (e.g. Inteos 33" Workstation) require an exact finish → SKU before Brain pricing. Hosted 500 was an uncaught `missing_variant_sku` during `resolveCatalogProductSelection` when the UI saved the family option with `source: esf` but without a finish (envelope `customerSafe.variants` were not plumbed into product cards, so the card offered Select instead of Choose finish). Fix: (1) public options → view-model → product cards carry variants; (2) auto-resolve single-finish families; (3) multi-finish without SKU returns **422 `product_variant_required` / `DE-PRODUCT-VARIANT-REQUIRED`** (never 500); (4) `resolveBlancoVariant` accepts canonical `…:sku:NNNN` tokens; (5) envelope seed price lookup may use family sellPrice when finish is omitted. |
+| **Why** | Customers could see Inteos and attempt save; Brain threw an unhandled Error → generic 500 + “Unable to save right now.” |
+| **SQL** | None. |
+| **Ops** | Deploy **backend-core** + **app-digital-estimate**. Existing links do not need token rotation; Save/Update Configuration optional if variants already on envelope options. |
+| **Out of scope** | Per-finish image assets for every Blanco SKU; changing family option keys to per-SKU keys. |
+
