@@ -110,6 +110,9 @@ export function studioEstimateQuoteNumber(estimate) {
  */
 export function hashConfigurationEnvelope(configuration) {
   const cfg = configuration && typeof configuration === "object" ? configuration : {};
+  // Every customer-choice permission flag must affect the fingerprint. Most friendly
+  // groups (material/edge/faucet/…) have empty catalogKeys — omitting
+  // customerChoiceGroups made permission edits look unchanged and skipped envelope re-seed.
   const normalized = {
     roomLocks: Array.isArray(cfg.roomLocks)
       ? cfg.roomLocks
@@ -123,8 +126,19 @@ export function hashConfigurationEnvelope(configuration) {
     allowedMaterialIds: Array.isArray(cfg.allowedMaterialIds)
       ? [...cfg.allowedMaterialIds].map(str).filter(Boolean).sort()
       : [],
+    allowedMaterialGroupCodes: Array.isArray(cfg.allowedMaterialGroupCodes)
+      ? [...cfg.allowedMaterialGroupCodes].map(str).filter(Boolean).sort()
+      : Array.isArray(cfg.allowedMaterialGroups)
+        ? [...cfg.allowedMaterialGroups].map(str).filter(Boolean).sort()
+        : [],
+    customerChoiceGroups: Array.isArray(cfg.customerChoiceGroups)
+      ? [...cfg.customerChoiceGroups].map(str).filter(Boolean).sort()
+      : [],
     allowedOptionKeys: Array.isArray(cfg.allowedOptionKeys)
       ? [...cfg.allowedOptionKeys].map(str).filter(Boolean).sort()
+      : [],
+    allowedEdgeModes: Array.isArray(cfg.allowedEdgeModes)
+      ? [...cfg.allowedEdgeModes].map(str).filter(Boolean).sort()
       : [],
     quantityLimits:
       cfg.quantityLimits && typeof cfg.quantityLimits === "object"

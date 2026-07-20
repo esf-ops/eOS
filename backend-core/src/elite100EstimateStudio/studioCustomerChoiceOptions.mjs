@@ -43,7 +43,7 @@ export const FRIENDLY_CUSTOMER_CHOICES = Object.freeze([
   {
     id: "edge",
     label: "Edge profile",
-    help: "Eased edge included by default; upgraded edges when allowed.",
+    help: "Included edges (eased) by default; W/D edge when allowed by Studio scope.",
     catalogKeys: []
   },
   {
@@ -139,6 +139,32 @@ export function inferFriendlyChoiceFlags(input = {}) {
   if (knownSet.has("qty-sink") || knownSet.has("qty-ss")) flags.sink = true;
   if (knownSet.has("qty-cook")) flags.cooktop = true;
   return flags;
+}
+
+/**
+ * Infer customerChoiceGroups from an activated envelope's option keys.
+ * Used to hydrate Studio checkboxes after refresh when metadata is missing.
+ * @param {Array<{ option_key?: string, optionKey?: string }>|null|undefined} options
+ * @returns {string[]}
+ */
+export function inferCustomerChoiceGroupsFromEnvelopeOptions(options) {
+  const groups = new Set();
+  for (const opt of options || []) {
+    const key = String(opt?.option_key || opt?.optionKey || "");
+    if (!key) continue;
+    if (key.startsWith("material:")) groups.add("materialColor");
+    else if (key.startsWith("sink:")) groups.add("sink");
+    else if (key.startsWith("faucet:")) groups.add("faucet");
+    else if (key.startsWith("accessory:") || key.startsWith("accessories:")) {
+      groups.add("accessories");
+    } else if (key.startsWith("specialty:")) groups.add("specialty");
+    else if (key.startsWith("edge:")) groups.add("edge");
+    else if (key.startsWith("backsplash:")) groups.add("backsplash");
+    else if (key.startsWith("sidesplash:")) groups.add("sideSplash");
+    else if (key === "qty-cook" || key.startsWith("qty-cook")) groups.add("cooktop");
+    else if (key === "qty-sink" || key === "qty-ss") groups.add("sink");
+  }
+  return FRIENDLY_CUSTOMER_CHOICES.map((d) => d.id).filter((id) => groups.has(id));
 }
 
 /**

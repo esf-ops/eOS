@@ -842,18 +842,36 @@ export function resolveProductOptionKey(
   return product.optionKey || null;
 }
 
-/** Group colors for modal tabs — preferred order. */
+/** Group colors for modal tabs — preferred order (short labels). */
 export const PRICING_GROUP_TAB_ORDER = [
-  "Group Promo",
-  "Group A",
-  "Group B",
-  "Group C",
-  "Group D",
-  "Group E",
-  "Group F",
+  "Promo",
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
   "Remnant",
   "Elite 100",
 ];
+
+/**
+ * Normalize pricing-group labels so Group Promo / Promo / group-promo collapse to one tab.
+ */
+export function normalizePricingGroupLabel(raw: string | null | undefined): string {
+  const s = String(raw || "").trim();
+  if (!s) return "Elite 100";
+  const key = s.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (key === "promo" || key === "group promo" || key === "group_promo") return "Promo";
+  const letter = key.match(/^(?:group\s*)?([a-f])$/);
+  if (letter) return letter[1]!.toUpperCase();
+  if (key === "remnant") return "Remnant";
+  if (key === "elite 100" || key === "elite100") return "Elite 100";
+  // "Group A" → "A"
+  const groupLetter = key.match(/^group\s+([a-f])$/);
+  if (groupLetter) return groupLetter[1]!.toUpperCase();
+  return s;
+}
 
 export function groupColorsByPricingGroup(colors: LovableColor[]): Array<{
   label: string;
@@ -861,7 +879,7 @@ export function groupColorsByPricingGroup(colors: LovableColor[]): Array<{
 }> {
   const map = new Map<string, LovableColor[]>();
   for (const c of colors) {
-    const label = c.pricingGroupLabel || "Elite 100";
+    const label = normalizePricingGroupLabel(c.pricingGroupLabel || "Elite 100");
     if (!map.has(label)) map.set(label, []);
     map.get(label)!.push(c);
   }

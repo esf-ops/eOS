@@ -92,21 +92,24 @@ assert.equal(readdirSync(fullDir).filter((f) => f.endsWith(".jpg")).length, 11);
 assert.equal(readdirSync(thumbDir).filter((f) => f.endsWith(".jpg")).length, 11);
 
 // Inline mirror of groupColorsByPricingGroup ordering for behavior check.
-const PRICING_GROUP_TAB_ORDER = [
-  "Group Promo",
-  "Group A",
-  "Group B",
-  "Group C",
-  "Group D",
-  "Group E",
-  "Group F",
-  "Remnant",
-  "Elite 100"
-];
+const PRICING_GROUP_TAB_ORDER = ["Promo", "A", "B", "C", "D", "E", "F", "Remnant", "Elite 100"];
+function normalizePricingGroupLabel(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "Elite 100";
+  const key = s.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (key === "promo" || key === "group promo" || key === "group_promo") return "Promo";
+  const letter = key.match(/^(?:group\s*)?([a-f])$/);
+  if (letter) return letter[1].toUpperCase();
+  if (key === "remnant") return "Remnant";
+  if (key === "elite 100" || key === "elite100") return "Elite 100";
+  const groupLetter = key.match(/^group\s+([a-f])$/);
+  if (groupLetter) return groupLetter[1].toUpperCase();
+  return s;
+}
 function groupColorsByPricingGroup(colors) {
   const map = new Map();
   for (const c of colors) {
-    const label = c.pricingGroupLabel || "Elite 100";
+    const label = normalizePricingGroupLabel(c.pricingGroupLabel || "Elite 100");
     if (!map.has(label)) map.set(label, []);
     map.get(label).push(c);
   }
@@ -122,10 +125,15 @@ function groupColorsByPricingGroup(colors) {
 }
 const grouped = groupColorsByPricingGroup([
   { pricingGroupLabel: "Group A" },
-  { pricingGroupLabel: "Group Promo" }
+  { pricingGroupLabel: "Group Promo" },
+  { pricingGroupLabel: "Promo" },
+  { pricingGroupLabel: "group-promo" }
 ]);
-assert.equal(grouped[0].label, "Group Promo");
-assert.equal(grouped[1].label, "Group A");
+assert.equal(grouped[0].label, "Promo");
+assert.equal(grouped[0].colors.length, 3, "Promo aliases collapse");
+assert.equal(grouped[1].label, "A");
+assert.equal(normalizePricingGroupLabel("Group Promo"), "Promo");
+assert.equal(normalizePricingGroupLabel("group_a"), "A");
 
 console.log("ok: customer info + room cards + color modal grouping wired");
 console.log("ok: textures present; public UI omits Wholesale/Direct/raw keys");

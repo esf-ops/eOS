@@ -217,6 +217,16 @@ export default function EstimateDigitalEstimatePanel({
       customerChoiceGroups: ["materialColor", "sink", "edge", "backsplash"]
     })
   );
+  const [publishedChoiceFlags, setPublishedChoiceFlags] = useState<Record<
+    string,
+    boolean
+  > | null>(null);
+  const [configHydrated, setConfigHydrated] = useState(false);
+  const configHydratedRef = useRef(false);
+  const [configSaveState, setConfigSaveState] = useState<
+    "clean" | "unsaved" | "saving" | "saved" | "failed"
+  >("clean");
+  const dirtyRef = useRef(false);
   const [legacyUnknownKeys, setLegacyUnknownKeys] = useState<string[]>([]);
   const [estimatorNotes, setEstimatorNotes] = useState("");
   const [roomLocked, setRoomLocked] = useState(true);
@@ -236,6 +246,13 @@ export default function EstimateDigitalEstimatePanel({
     }),
     [pricingValidThrough, choiceConfig, estimatorNotes, roomLocked]
   );
+
+  const configurationDirty = useMemo(() => {
+    if (!publishedChoiceFlags) return configHydrated && Boolean(customerUrl);
+    return FRIENDLY_CUSTOMER_CHOICES.some(
+      (d) => Boolean(choiceFlags[d.id]) !== Boolean(publishedChoiceFlags[d.id])
+    );
+  }, [choiceFlags, publishedChoiceFlags, configHydrated, customerUrl]);
 
   const readinessQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -268,6 +285,15 @@ export default function EstimateDigitalEstimatePanel({
           activePublication?: PublicationRow | null;
           publications?: PublicationRow[];
           reviewRequests?: ReviewRequestRow[];
+          publishedConfiguration?: {
+            customerChoiceGroups?: string[];
+            allowedOptionKeys?: string[];
+            legacyUnknownKeys?: string[];
+            choiceFlags?: Record<string, boolean>;
+            envelopeFingerprint?: string | null;
+            pricingValidThrough?: string | null;
+            estimatorNotes?: string | null;
+          } | null;
         };
         if (signal?.aborted) return;
         setEligible(Boolean(body.readiness?.eligible));
@@ -297,6 +323,31 @@ export default function EstimateDigitalEstimatePanel({
           setPricingValidThrough((prev) =>
             prev ? prev : String(body.activePublication!.pricingValidThrough).slice(0, 10)
           );
+        }
+
+        const published = body.publishedConfiguration;
+        if (published && (!configHydratedRef.current || !dirtyRef.current)) {
+          const flags =
+            published.choiceFlags ||
+            inferFriendlyChoiceFlags({
+              customerChoiceGroups: published.customerChoiceGroups || [],
+              allowedOptionKeys: published.allowedOptionKeys || []
+            });
+          setChoiceFlags(flags);
+          setPublishedChoiceFlags({ ...flags });
+          if (Array.isArray(published.legacyUnknownKeys)) {
+            setLegacyUnknownKeys(published.legacyUnknownKeys);
+          }
+          if (published.estimatorNotes) {
+            setEstimatorNotes((prev) => (prev ? prev : String(published.estimatorNotes)));
+          }
+          configHydratedRef.current = true;
+          setConfigHydrated(true);
+          dirtyRef.current = false;
+          setConfigSaveState("clean");
+        } else if (!published && !configHydratedRef.current) {
+          configHydratedRef.current = true;
+          setConfigHydrated(true);
         }
       } catch (e) {
         if (isAbortError(e) || signal?.aborted) return;
@@ -350,20 +401,33 @@ export default function EstimateDigitalEstimatePanel({
         setLinkStatus("active");
       }
       setPublishUiState("published");
+      const updated = Boolean((body as { configurationUpdated?: boolean }).configurationUpdated);
+      if (updated || !body.reused) {
+        setPublishedChoiceFlags({ ...choiceFlags });
+        dirtyRef.current = false;
+        setConfigSaveState("saved");
+        configHydratedRef.current = true;
+        setConfigHydrated(true);
+      }
       setActionNotice(
         body.reused
           ? body.staffNotice ||
               "This revision is already published. The customer link is unchanged."
-          : body.envelope?.configured
-            ? "Digital Estimate published."
-            : body.staffNotice ||
-              "Digital Estimate published as a document-only link (no customer configuration envelope)."
+          : updated
+            ? body.staffNotice || "Configuration permissions updated. The customer link is unchanged."
+            : body.envelope?.configured
+              ? "Digital Estimate published."
+              : body.staffNotice ||
+                "Digital Estimate published as a document-only link (no customer configuration envelope)."
       );
       // One explicit refresh after success — no background polling while pending.
+      dirtyRef.current = false;
       await load();
+      setConfigSaveState("saved");
     } catch (e) {
       setPublishUiState("failed");
       setActionNotice(null);
+      if (dirtyRef.current) setConfigSaveState("failed");
       if (e instanceof ApiError) {
         const formatted = formatStructuredPublishError(e);
         setActionError(
@@ -757,22 +821,61 @@ export default function EstimateDigitalEstimatePanel({
           <p className="eq-muted">
             Allowed customer options. Catalog keys are generated automatically for publish.
           </p>
-          {FRIENDLY_CUSTOMER_CHOICES.map((def) => (
-            <label key={def.id} className="eq-check">
-              <input
-                type="checkbox"
-                checked={Boolean(choiceFlags[def.id])}
-                onChange={(e) =>
-                  setChoiceFlags((prev) => ({ ...prev, [def.id]: e.target.checked }))
-                }
-                data-testid={`eq-de-choice-${def.id}`}
-              />
-              <span>
-                <strong>{def.label}</strong>
-                <span className="eq-muted"> — {def.help}</span>
-              </span>
-            </label>
-          ))}
+          {publishedChoiceFlags ? (
+            <p className="eq-footnote" data-testid="eq-de-published-vs-draft">
+              Published permissions are restored after refresh. Unsaved draft checkboxes are marked
+              below until you save.
+            </p>
+          ) : null}
+          {FRIENDLY_CUSTOMER_CHOICES.map((def) => {
+            const draftOn = Boolean(choiceFlags[def.id]);
+            const publishedOn =
+              publishedChoiceFlags != null ? Boolean(publishedChoiceFlags[def.id]) : null;
+            const differs = publishedOn != null && draftOn !== publishedOn;
+            return (
+              <label key={def.id} className="eq-check">
+                <input
+                  type="checkbox"
+                  checked={draftOn}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setChoiceFlags((prev) => ({ ...prev, [def.id]: next }));
+                    dirtyRef.current = true;
+                    setConfigSaveState("unsaved");
+                  }}
+                  data-testid={`eq-de-choice-${def.id}`}
+                />
+                <span>
+                  <strong>{def.label}</strong>
+                  <span className="eq-muted"> — {def.help}</span>
+                  {differs ? (
+                    <span className="eq-footnote" data-testid={`eq-de-choice-draft-${def.id}`}>
+                      {" "}
+                      (draft · published {publishedOn ? "on" : "off"})
+                    </span>
+                  ) : publishedOn != null ? (
+                    <span className="eq-muted" data-testid={`eq-de-choice-published-${def.id}`}>
+                      {" "}
+                      · published
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            );
+          })}
+          <p className="eq-footnote" data-testid="eq-de-config-save-state">
+            {configSaveState === "unsaved" || configurationDirty
+              ? "Unsaved configuration changes"
+              : configSaveState === "saving"
+                ? "Saving…"
+                : configSaveState === "failed"
+                  ? "Failed — Retry"
+                  : configSaveState === "saved"
+                    ? "Saved"
+                    : publishedChoiceFlags
+                      ? "Saved"
+                      : null}
+          </p>
           {legacyUnknownKeys.length ? (
             <p className="eq-footnote" data-testid="eq-de-legacy-keys-note">
               Preserving {legacyUnknownKeys.length} legacy option key
@@ -835,10 +938,35 @@ export default function EstimateDigitalEstimatePanel({
           className="eq-btn-primary"
           disabled={publishing || !eligible}
           data-testid="eq-publish-digital-estimate"
-          onClick={() => void publish()}
+          onClick={() => {
+            setConfigSaveState(configurationDirty || Boolean(customerUrl) ? "saving" : "saving");
+            void publish();
+          }}
         >
-          {publishing ? "Publishing…" : "Publish Digital Estimate"}
+          {publishing
+            ? customerUrl && configurationDirty
+              ? "Saving…"
+              : "Publishing…"
+            : customerUrl
+              ? configurationDirty
+                ? "Save / Update Configuration"
+                : "Publish Digital Estimate"
+              : "Publish Digital Estimate"}
         </button>
+        {customerUrl && configurationDirty ? (
+          <button
+            type="button"
+            className="eq-btn-secondary"
+            disabled={publishing || !eligible}
+            data-testid="eq-save-configuration"
+            onClick={() => {
+              setConfigSaveState("saving");
+              void publish();
+            }}
+          >
+            {configSaveState === "failed" ? "Retry save" : "Save configuration"}
+          </button>
+        ) : null}
         <button
           type="button"
           className="eq-btn-secondary"

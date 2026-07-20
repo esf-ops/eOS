@@ -17,6 +17,10 @@ const dePanel = readFileSync(
 
 assert.ok(panel.includes("EstimateDigitalEstimatePanel"));
 assert.ok(dePanel.includes("Publish Digital Estimate"));
+assert.ok(dePanel.includes("Save / Update Configuration") || dePanel.includes("eq-save-configuration"));
+assert.ok(dePanel.includes("Unsaved configuration changes"));
+assert.ok(dePanel.includes("publishedConfiguration"));
+assert.ok(dePanel.includes("eq-de-published-vs-draft") || dePanel.includes("draft · published"));
 assert.ok(dePanel.includes("Copy Customer Link"));
 assert.ok(dePanel.includes("Open Customer Preview"));
 assert.ok(dePanel.includes("Replace Link"));

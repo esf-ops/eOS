@@ -270,8 +270,9 @@ function ColorPickerModal({
 }) {
   const [q, setQ] = useState("");
   const groups = useMemo(() => groupColorsByPricingGroup(room.colors), [room.colors]);
-  const [activeGroup, setActiveGroup] = useState(() => groups[0]?.label || "All");
+  const [activeGroup, setActiveGroup] = useState<string>("All");
   const [previewId, setPreviewId] = useState(room.selectedColorId);
+  const [previewBroken, setPreviewBroken] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -284,10 +285,16 @@ function ColorPickerModal({
   }, [onClose]);
 
   useEffect(() => {
+    // "All" is always valid — never snap back to the first pricing group.
+    if (activeGroup === "All") return;
     if (!groups.some((g) => g.label === activeGroup) && groups[0]) {
       setActiveGroup(groups[0].label);
     }
   }, [groups, activeGroup]);
+
+  useEffect(() => {
+    setPreviewBroken(false);
+  }, [previewId]);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -415,7 +422,7 @@ function ColorPickerModal({
             >
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Preview</div>
               <div className="mt-2 overflow-hidden rounded-lg border border-border bg-background">
-                {preview.imageFull || preview.imageThumb ? (
+                {(preview.imageFull || preview.imageThumb) && !previewBroken ? (
                   <img
                     src={preview.imageFull || preview.imageThumb || undefined}
                     alt={preview.name}
@@ -424,6 +431,7 @@ function ColorPickerModal({
                     className="aspect-square w-full object-cover"
                     data-testid="de-color-preview-full"
                     data-preview-src={preview.imageFull ? "full" : "thumb"}
+                    onError={() => setPreviewBroken(true)}
                   />
                 ) : (
                   <MaterialThumb src={null} alt={preview.name} size="lg" className="aspect-square h-auto min-h-[10rem] w-full rounded-none border-0" />
