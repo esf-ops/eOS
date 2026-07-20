@@ -31,10 +31,14 @@ import {
 } from "./workforceGradeEngine.js";
 import { ensureDefaultGradingSections, mapSectionRow } from "./workforceGradingSections.js";
 import {
+  ACCESS_ASSIGNMENT_OPTIONS,
   DEPARTMENT_GROUPS,
+  EXECUTIVE_DASHBOARD_SLUG,
+  accessOptionName,
   departmentSlugForSection,
-  getDepartmentGroup,
-  isValidDepartmentSlug,
+  hasExecutiveDashboardAssignment,
+  isExecutiveDashboardSlug,
+  isValidAccessSlug,
   listAssignedDepartmentGroups,
   sectionIdsForDepartments
 } from "./workforceDepartments.js";
@@ -155,11 +159,34 @@ async function loadGradeSettings(db, organizationId) {
 }
 
 /**
- * Full scorecard access for CEO/executives/admins/HR managers.
+ * Role-based full scorecard + Department Access management
+ * (admin / executive / hr / super_admin).
  * @param {{ role?: string|null }|null|undefined} user
  */
-function hasFullScorecardAccess(user) {
+function hasRoleFullScorecardAccess(user) {
   return isWorkforceManager(user);
+}
+
+/**
+ * Pure HR head grant check (mirrors launcherHeads resolveHeadAccessContext rules).
+ * Does not query auth.users.
+ * @param {{ role?: string|null, user_kind?: string|null, userKind?: string|null }} profile
+ * @param {Iterable<string>|null|undefined} explicitHeadSlugs
+ */
+export function computeHasHrHeadAccess(profile, explicitHeadSlugs) {
+  const role = String(profile?.role ?? "").trim().toLowerCase();
+  const userKind = String(profile?.user_kind ?? profile?.userKind ?? "internal").trim();
+  if (role === "admin" || role === "super_admin") return true;
+
+  const explicit = new Set(
+    [...(explicitHeadSlugs ?? [])].map((s) => String(s ?? "").trim()).filter(Boolean)
+  );
+  if (explicit.size > 0) return explicit.has(HR_HEAD_SLUG);
+
+  if (role === "executive") return true;
+  if (role === "hr") return true;
+  if (userKind === "dealer_partner") return false;
+  return false;
 }
 
 /**
@@ -218,24 +245,195 @@ async function loadAllDepartmentAssignments(db, organizationId) {
 }
 
 /**
+ * Active org application users eligible for Department Access assignment.
+ * Source: user_profiles (+ user_head_access for HR Head status). Never auth.users.
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} organizationId
+ */
+async function loadEligibleDepartmentUsers(db, organizationId) {
+  /** @type {Array<{
+   *   userId: string,
+   *   displayName: string,
+   *   email: string|null,
+   *   isActive: boolean,
+   *   hasHrHeadAccess: boolean,
+   *   role: string|null
+   * }>} */
+  const out = [];
+
+  let profiles;
+  try {
+    const { data, error } = await db
+      .from("user_profiles")
+      .select("id, email, full_name, role, is_active, user_kind")
+      .eq("organization_id", organizationId)
+      .eq("is_active", true)
+      .order("full_name", { ascending: true });
+    if (error) {
+      if (isMissingTableError(error)) return out;
+      throw error;
+    }
+    profiles = data ?? [];
+  } catch (e) {
+    if (isMissingTableError(e)) return out;
+    throw e;
+  }
+
+  if (!profiles.length) return out;
+
+  const ids = profiles.map((p) => String(p.id));
+  /** @type {Map<string, Set<string>>} */
+  const headsByUser = new Map();
+  try {
+    const { data: headRows, error: headErr } = await db
+      .from("user_head_access")
+      .select("user_id, head_slug")
+      .in("user_id", ids);
+    if (headErr) {
+      if (!isMissingTableError(headErr)) throw headErr;
+    } else {
+      for (const row of headRows ?? []) {
+        const uid = String(row.user_id);
+        if (!headsByUser.has(uid)) headsByUser.set(uid, new Set());
+        headsByUser.get(uid).add(String(row.head_slug ?? "").trim());
+      }
+    }
+  } catch (e) {
+    if (!isMissingTableError(e)) throw e;
+  }
+
+  /** Users with existing assignments (may lack HR head) — still eligible so managers can re-assign. */
+  const assignedUserIds = new Set();
+  try {
+    const existing = await loadAllDepartmentAssignments(db, organizationId);
+    for (const row of existing) assignedUserIds.add(String(row.user_id));
+  } catch {
+    /* ignore */
+  }
+
+  for (const p of profiles) {
+    const userId = String(p.id);
+    const hasHrHeadAccess = computeHasHrHeadAccess(p, headsByUser.get(userId) ?? new Set());
+    if (!hasHrHeadAccess && !assignedUserIds.has(userId)) continue;
+
+    const email = p.email != null ? String(p.email).trim() || null : null;
+    const displayName = String(p.full_name ?? "").trim() || email || userId;
+    out.push({
+      userId,
+      displayName,
+      email,
+      isActive: p.is_active !== false,
+      hasHrHeadAccess,
+      role: p.role != null ? String(p.role) : null
+    });
+  }
+
+  out.sort((a, b) => {
+    if (a.hasHrHeadAccess !== b.hasHrHeadAccess) return a.hasHrHeadAccess ? -1 : 1;
+    return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" });
+  });
+  return out;
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} organizationId
+ * @param {Iterable<string>} userIds
+ * @returns {Promise<Map<string, boolean>>}
+ */
+async function loadHrHeadAccessFlags(db, organizationId, userIds) {
+  /** @type {Map<string, boolean>} */
+  const map = new Map();
+  const ids = [...new Set([...userIds].map((id) => String(id)).filter(Boolean))];
+  if (!ids.length) return map;
+
+  let profiles = [];
+  try {
+    const { data, error } = await db
+      .from("user_profiles")
+      .select("id, role, user_kind, is_active")
+      .eq("organization_id", organizationId)
+      .in("id", ids);
+    if (error) {
+      if (isMissingTableError(error)) return map;
+      throw error;
+    }
+    profiles = data ?? [];
+  } catch (e) {
+    if (isMissingTableError(e)) return map;
+    throw e;
+  }
+
+  /** @type {Map<string, Set<string>>} */
+  const headsByUser = new Map();
+  try {
+    const { data: headRows, error: headErr } = await db
+      .from("user_head_access")
+      .select("user_id, head_slug")
+      .in("user_id", ids);
+    if (!headErr) {
+      for (const row of headRows ?? []) {
+        const uid = String(row.user_id);
+        if (!headsByUser.has(uid)) headsByUser.set(uid, new Set());
+        headsByUser.get(uid).add(String(row.head_slug ?? "").trim());
+      }
+    }
+  } catch {
+    /* ignore missing table */
+  }
+
+  for (const p of profiles) {
+    const uid = String(p.id);
+    map.set(uid, computeHasHrHeadAccess(p, headsByUser.get(uid) ?? new Set()));
+  }
+  for (const id of ids) {
+    if (!map.has(id)) map.set(id, false);
+  }
+  return map;
+}
+
+/**
  * @param {import("@supabase/supabase-js").SupabaseClient} db
  * @param {object} user
  * @param {string} organizationId
  */
 async function resolveScorecardAccess(db, user, organizationId) {
-  const fullAccess = hasFullScorecardAccess(user);
-  if (fullAccess) {
+  const roleFullAccess = hasRoleFullScorecardAccess(user);
+  const departmentsAll = DEPARTMENT_GROUPS.map((g) => ({
+    slug: g.slug,
+    name: g.name,
+    sectionIds: [...g.sectionIds]
+  }));
+
+  if (roleFullAccess) {
     return {
       fullAccess: true,
+      executiveDashboardAccess: true,
       canManageDepartments: true,
       canGenerateReport: true,
+      viewMode: "executive",
       departmentSlugs: DEPARTMENT_GROUPS.map((g) => g.slug),
-      departments: DEPARTMENT_GROUPS.map((g) => ({ slug: g.slug, name: g.name, sectionIds: [...g.sectionIds] })),
+      departments: departmentsAll,
       allowedSectionIds: null
     };
   }
 
   const assignments = await loadUserDepartmentAssignments(db, organizationId, String(user.id));
+  const executiveDashboardAccess = hasExecutiveDashboardAssignment(assignments);
+
+  if (executiveDashboardAccess) {
+    return {
+      fullAccess: true,
+      executiveDashboardAccess: true,
+      canManageDepartments: false,
+      canGenerateReport: true,
+      viewMode: "executive",
+      departmentSlugs: DEPARTMENT_GROUPS.map((g) => g.slug),
+      departments: departmentsAll,
+      allowedSectionIds: null
+    };
+  }
+
   const departments = listAssignedDepartmentGroups(assignments).map((g) => ({
     slug: g.slug,
     name: g.name,
@@ -246,8 +444,10 @@ async function resolveScorecardAccess(db, user, organizationId) {
 
   return {
     fullAccess: false,
+    executiveDashboardAccess: false,
     canManageDepartments: false,
     canGenerateReport: false,
+    viewMode: "department",
     departmentSlugs,
     departments,
     allowedSectionIds
@@ -866,10 +1066,11 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
             canManageCategories,
             canManageDepartments: access.canManageDepartments,
             fullAccess: access.fullAccess,
+            executiveDashboardAccess: access.executiveDashboardAccess,
             canGenerateReport: access.canGenerateReport,
             departments: access.departments,
             gradingMode: "scorecard",
-            viewMode: access.fullAccess ? "executive" : "department",
+            viewMode: access.viewMode,
             weekStart,
             weekEnd,
             weekLabel,
@@ -891,6 +1092,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
             canManageCategories,
             canManageDepartments: false,
             fullAccess: false,
+            executiveDashboardAccess: false,
             canGenerateReport: false,
             departments: [],
             gradingMode: "scorecard",
@@ -916,10 +1118,11 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         canManageCategories,
         canManageDepartments: access.canManageDepartments,
         fullAccess: access.fullAccess,
+        executiveDashboardAccess: access.executiveDashboardAccess,
         canGenerateReport: access.canGenerateReport,
         departments: access.departments,
         gradingMode: "scorecard",
-        viewMode: access.fullAccess ? "executive" : "department",
+        viewMode: access.viewMode,
         schemaReady: sectionSeed.schemaReady,
         weekStart,
         weekEnd,
@@ -952,13 +1155,52 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       res.json({
         ok: true,
         fullAccess: access.fullAccess,
+        executiveDashboardAccess: access.executiveDashboardAccess,
         canManageDepartments: access.canManageDepartments,
         canGenerateReport: access.canGenerateReport,
+        viewMode: access.viewMode,
         departments: access.departments,
         departmentGroups: DEPARTMENT_GROUPS.map((g) => ({
           slug: g.slug,
           name: g.name,
           sectionIds: [...g.sectionIds]
+        })),
+        accessOptions: ACCESS_ASSIGNMENT_OPTIONS.map((o) => ({
+          slug: o.slug,
+          name: o.name,
+          accessType: o.accessType,
+          description: o.description,
+          sectionIds: [...(o.sectionIds ?? [])]
+        }))
+      });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
+    }
+  });
+
+  app.get("/api/hr/workforce/departments/eligible-users", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+      if (!hasRoleFullScorecardAccess(req.user)) {
+        return res.status(403).json({ ok: false, error: "Only managers may manage department access." });
+      }
+
+      const users = await loadEligibleDepartmentUsers(db(), organizationId);
+      res.json({
+        ok: true,
+        users: users.map((u) => ({
+          user_id: u.userId,
+          userId: u.userId,
+          display_name: u.displayName,
+          displayName: u.displayName,
+          email: u.email,
+          is_active: u.isActive,
+          isActive: u.isActive,
+          has_hr_head_access: u.hasHrHeadAccess,
+          hasHrHeadAccess: u.hasHrHeadAccess,
+          role: u.role
         }))
       });
     } catch (e) {
@@ -971,23 +1213,26 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       jsonNoStore(res);
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
-      if (!hasFullScorecardAccess(req.user)) {
+      if (!hasRoleFullScorecardAccess(req.user)) {
         return res.status(403).json({ ok: false, error: "Only managers may manage department access." });
       }
 
       const rows = await loadAllDepartmentAssignments(db(), organizationId);
       const userIds = rows.map((r) => String(r.user_id));
       const names = await loadUserDisplayNames(db(), organizationId, userIds);
+      const hrFlags = await loadHrHeadAccessFlags(db(), organizationId, userIds);
       const assignments = rows.map((row) => {
         const profile = names.get(String(row.user_id));
-        const group = getDepartmentGroup(row.department_slug);
+        const slug = String(row.department_slug);
         return {
           id: String(row.id),
           userId: String(row.user_id),
           userName: profile?.fullName || profile?.email || String(row.user_id),
           userEmail: profile?.email ?? null,
-          departmentSlug: String(row.department_slug),
-          departmentName: group?.name ?? String(row.department_slug),
+          departmentSlug: slug,
+          departmentName: accessOptionName(slug),
+          accessType: isExecutiveDashboardSlug(slug) ? "executive_dashboard" : "department",
+          hasHrHeadAccess: hrFlags.get(String(row.user_id)) === true,
           isActive: Boolean(row.is_active),
           createdAt: row.created_at ?? null
         };
@@ -1000,6 +1245,13 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
           slug: g.slug,
           name: g.name,
           sectionIds: [...g.sectionIds]
+        })),
+        accessOptions: ACCESS_ASSIGNMENT_OPTIONS.map((o) => ({
+          slug: o.slug,
+          name: o.name,
+          accessType: o.accessType,
+          description: o.description,
+          sectionIds: [...(o.sectionIds ?? [])]
         })),
         schemaReady: true
       });
@@ -1014,15 +1266,37 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const user = req.user;
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
-      if (!hasFullScorecardAccess(user)) {
+      if (!hasRoleFullScorecardAccess(user)) {
         return res.status(403).json({ ok: false, error: "Only managers may manage department access." });
       }
 
       const targetUserId = pickStr(req.body?.user_id ?? req.body?.userId);
-      const departmentSlug = pickStr(req.body?.department_slug ?? req.body?.departmentSlug);
+      const departmentSlug = pickStr(
+        req.body?.department_slug ?? req.body?.departmentSlug ?? req.body?.access_slug ?? req.body?.accessSlug
+      );
       if (!targetUserId) return res.status(400).json({ ok: false, error: "user_id is required." });
-      if (!isValidDepartmentSlug(departmentSlug)) {
-        return res.status(400).json({ ok: false, error: "Invalid department_slug." });
+      if (!isValidAccessSlug(departmentSlug)) {
+        return res.status(400).json({
+          ok: false,
+          error: `Invalid department_slug. Use a department group or ${EXECUTIVE_DASHBOARD_SLUG}.`
+        });
+      }
+
+      const { data: targetProfile, error: targetErr } = await db()
+        .from("user_profiles")
+        .select("id, is_active, organization_id")
+        .eq("id", targetUserId)
+        .eq("organization_id", organizationId)
+        .maybeSingle();
+      if (targetErr && !isMissingTableError(targetErr)) throw targetErr;
+      if (!targetProfile) {
+        return res.status(400).json({
+          ok: false,
+          error: "User must be an active application user in this organization."
+        });
+      }
+      if (targetProfile.is_active === false) {
+        return res.status(400).json({ ok: false, error: "Cannot assign access to an inactive user." });
       }
 
       const row = {
@@ -1045,6 +1319,14 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
             error: "Apply eliteos_workforce_department_access_v1.sql to enable department assignments."
           });
         }
+        const msg = String(error.message ?? "").toLowerCase();
+        if (msg.includes("department_slug") && msg.includes("check")) {
+          return res.status(503).json({
+            ok: false,
+            error:
+              "Apply eliteos_workforce_executive_dashboard_access_v1.sql to enable Executive Dashboard assignments."
+          });
+        }
         throw error;
       }
 
@@ -1055,11 +1337,19 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         entityType: "workforce_department_user_access",
         entityId: data?.id,
         entityLabel: departmentSlug,
-        metadata: { user_id: targetUserId, department_slug: departmentSlug },
+        metadata: {
+          user_id: targetUserId,
+          department_slug: departmentSlug,
+          access_type: isExecutiveDashboardSlug(departmentSlug) ? "executive_dashboard" : "department"
+        },
         req
       });
 
-      res.status(201).json({ ok: true, assignment: data });
+      res.status(201).json({
+        ok: true,
+        assignment: data,
+        accessType: isExecutiveDashboardSlug(departmentSlug) ? "executive_dashboard" : "department"
+      });
     } catch (e) {
       respondServerError(res, e, HR_CLIENT_ERRORS.save);
     }
@@ -1071,7 +1361,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const user = req.user;
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
-      if (!hasFullScorecardAccess(user)) {
+      if (!hasRoleFullScorecardAccess(user)) {
         return res.status(403).json({ ok: false, error: "Only managers may manage department access." });
       }
 
