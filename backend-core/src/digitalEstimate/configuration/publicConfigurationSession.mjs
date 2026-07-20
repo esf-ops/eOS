@@ -97,7 +97,8 @@ export function parseCookieHeader(req) {
  */
 export function readSessionSecretFromCookie(req) {
   const candidates = readSessionSecretCandidatesFromCookie(req);
-  return candidates.length ? candidates[candidates.length - 1] : null;
+  // candidates are newest-first (reversed header order); prefer newest / Path=/.
+  return candidates.length ? candidates[0] : null;
 }
 
 /**

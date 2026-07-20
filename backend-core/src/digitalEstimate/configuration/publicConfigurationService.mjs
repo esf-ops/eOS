@@ -72,12 +72,36 @@ function configUnavailable(message = "Configuration unavailable") {
   return e;
 }
 
-function safeFail(code, message, statusCode = 400) {
+function safeFail(code, message, statusCode = 400, extra = {}) {
   const e = new Error(message);
   e.code = code;
   e.statusCode = statusCode;
   e.recoverable = statusCode < 500 && statusCode !== 404 && statusCode !== 410;
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined) e[k] = v;
+  }
   return e;
+}
+
+/** Map Supabase / persistence failures so public routes never emit bare 404. */
+function mapPersistenceError(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  if (code === "23505" || /uq_de_config_calc_input_fingerprint|duplicate key/i.test(message)) {
+    return safeFail(
+      "stale_configuration",
+      "Please refresh and try again",
+      409,
+      { diagnosticCode: "DE-SAVE", recoverable: true }
+    );
+  }
+  if (error?.statusCode && error?.code) return error;
+  return safeFail(
+    "persistence_failed",
+    "Unable to save right now. Please try again.",
+    500,
+    { diagnosticCode: "DE-SAVE", recoverable: true }
+  );
 }
 
 /** Recoverable session cookie / row problems — customer may re-exchange. */
@@ -778,7 +802,12 @@ export function createPublicConfigurationService(deps) {
           const opt = options.find(
             (o) => o.id === id || (o.option_key || o.optionKey) === key
           );
-          if (!opt) throw safeFail("unknown_option", "That selection is unavailable", 400);
+          if (!opt) {
+            throw safeFail("invalid_selection", "That selection is unavailable", 422, {
+              selectionKey: String(key || id || "").slice(0, 160) || null,
+              diagnosticCode: "DE-SAVE"
+            });
+          }
           const avail = opt.availability_state || opt.availabilityState || "active";
           if (avail !== "active") {
             throw safeFail("unresolved_product", "That selection is unavailable", 422);
@@ -857,7 +886,10 @@ export function createPublicConfigurationService(deps) {
               throw safeFail("unknown_material", "That selection is unavailable", 400);
             }
             if (!opt) {
-              throw safeFail("unknown_option", "That selection is unavailable", 400);
+              throw safeFail("invalid_selection", "That selection is unavailable", 422, {
+                selectionKey: String(key).slice(0, 160),
+                diagnosticCode: "DE-SAVE"
+              });
             }
             selected = resolved.materialGroup;
           } else if (key.startsWith(`backsplash:${r.roomKey}:`)) {
@@ -963,7 +995,10 @@ export function createPublicConfigurationService(deps) {
         const cat = catalog.get(key);
         const envOpt = options.find((o) => (o.option_key || o.optionKey) === key);
         if (!cat && !envOpt) {
-          throw safeFail("unknown_option", "That selection is unavailable", 400);
+          throw safeFail("invalid_selection", "That selection is unavailable", 422, {
+            selectionKey: String(key).slice(0, 160),
+            diagnosticCode: "DE-SAVE"
+          });
         }
         if (cat && cat.availabilityState !== "active") {
           throw safeFail("unresolved_product", "That selection is unavailable", 422);
@@ -1008,7 +1043,9 @@ export function createPublicConfigurationService(deps) {
         }
       }
 
-      const result = calculateElite100ConfigDelta({
+      let result;
+      try {
+        result = calculateElite100ConfigDelta({
         organizationId: session.organization_id,
         publication: {
           id: publication.id,
@@ -1036,6 +1073,8 @@ export function createPublicConfigurationService(deps) {
         authorizedMaterialMarkup: { bps: markupBps },
         materialTaxPolicy: { bps: 200 },
         options: calcOptions,
+        // Distinct per customer selection payload (color IDs), not only material group.
+        selectionFingerprint: normalized.selectionHash,
         baseline: {
           exactTotal: ctx.baselineDisplayTotal,
           displayTotal: ctx.baselineDisplayTotal,
@@ -1048,10 +1087,16 @@ export function createPublicConfigurationService(deps) {
         materialProgram: "elite_100",
         actor: { type: "public" }
       });
+      } catch (e) {
+        if (e?.statusCode) throw e;
+        throw mapPersistenceError(e);
+      }
 
       assertPublicConfigurationHasNoForbiddenContent(result.public);
 
-      const persisted = await configurationRepository.saveSelectionAndCalculationAtomic({
+      let persisted;
+      try {
+        persisted = await configurationRepository.saveSelectionAndCalculationAtomic({
         organizationId: session.organization_id,
         sessionId: session.id,
         expectedRowVersion: Number(expectedRowVersion),
@@ -1072,6 +1117,15 @@ export function createPublicConfigurationService(deps) {
         calculationInputFingerprint: result.inputFingerprint,
         calculationFingerprint: result.calculationFingerprint
       });
+      } catch (e) {
+        if (e?.statusCode === 409 || e?.code === "row_version_conflict") {
+          throw safeFail("stale_configuration", "Please refresh and try again", 409, {
+            diagnosticCode: "DE-SAVE",
+            recoverable: true
+          });
+        }
+        throw mapPersistenceError(e);
+      }
 
       return {
         ok: true,

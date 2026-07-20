@@ -668,7 +668,9 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             defaultQty: isDefault ? 1 : 0,
             minQty: 0,
             maxQty: 1,
-            requiredSelection: isDefault,
+            // Room needs one material; do not pin requiredSelection to the baseline
+            // color ID (that blocked saving alternate envelope option IDs).
+            requiredSelection: false,
             customerPriceTreatment: "delta",
             pricingMode: "replacement",
             imageAssetRef: mat.imageThumbPath,

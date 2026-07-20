@@ -856,13 +856,23 @@ export function createInMemoryConfigurationRepository(opts = {}) {
           selections.set(selectionId, selectionRow);
 
           const calcId = randomUUID();
+          let fingerprint = String(calculationInputFingerprint || "");
+          const existingFp = [...calculations.values()].find(
+            (c) =>
+              c.organization_id === organizationId &&
+              c.calculation_input_fingerprint === fingerprint
+          );
+          if (existingFp) {
+            // Public sessions may share economic inputs; scope fingerprint per selection.
+            fingerprint = `${fingerprint}#sel:${selectionId}`;
+          }
           const calcRow = {
             id: calcId,
             organization_id: organizationId,
             selection_id: selectionId,
             envelope_id: session.envelope_id,
             engine_version: engineVersion,
-            calculation_input_fingerprint: calculationInputFingerprint,
+            calculation_input_fingerprint: fingerprint,
             calculation_fingerprint: calculationFingerprint,
             customer_result_json: customerResultJson,
             internal_evidence_json: internalEvidenceJson,
@@ -1654,22 +1664,87 @@ export function createSupabaseConfigurationRepository({ db }) {
       return data?.[0] ?? null;
     },
 
+    async getLatestSelectionForSession(organizationId, sessionId) {
+      const { data: sessionRows, error: sessionErr } = await db
+        .from("digital_estimate_configuration_sessions")
+        .select("latest_calculation_id")
+        .eq("organization_id", organizationId)
+        .eq("id", sessionId)
+        .limit(1);
+      if (sessionErr) throw sessionErr;
+      const latestCalcId = sessionRows?.[0]?.latest_calculation_id;
+      if (latestCalcId) {
+        const { data: calcRows, error: calcErr } = await db
+          .from("digital_estimate_configuration_calculations")
+          .select("selection_id")
+          .eq("organization_id", organizationId)
+          .eq("id", latestCalcId)
+          .limit(1);
+        if (calcErr) throw calcErr;
+        const selectionId = calcRows?.[0]?.selection_id;
+        if (selectionId) {
+          const { data: selRows, error: selErr } = await db
+            .from("digital_estimate_configuration_selections")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .eq("id", selectionId)
+            .limit(1);
+          if (selErr) throw selErr;
+          if (selRows?.[0]) return selRows[0];
+        }
+      }
+      const { data, error } = await db
+        .from("digital_estimate_configuration_selections")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("session_id", sessionId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
+    async getCalculationBySelectionId(organizationId, selectionId) {
+      const { data, error } = await db
+        .from("digital_estimate_configuration_calculations")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("selection_id", selectionId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
     async saveSelectionAndCalculationAtomic(args) {
-      const { data, error } = await db.rpc("digital_estimate_save_selection_and_calculation", {
-        p_organization_id: args.organizationId,
-        p_session_id: args.sessionId,
-        p_expected_row_version: args.expectedRowVersion,
-        p_idempotency_key: args.idempotencyKey,
-        p_selection_payload_json: args.selectionPayload,
-        p_selection_hash: args.selectionHash,
-        p_engine_version: args.engineVersion,
-        p_calculation_input_fingerprint: args.calculationInputFingerprint,
-        p_customer_result_json: args.customerResultJson,
-        p_internal_evidence_json: args.internalEvidenceJson,
-        p_baseline_total: args.baselineTotal ?? null,
-        p_configured_total: args.configuredTotal ?? null,
-        p_pricing_valid_through: args.pricingValidThrough ?? null
-      });
+      const run = async (fingerprint) =>
+        db.rpc("digital_estimate_save_selection_and_calculation", {
+          p_organization_id: args.organizationId,
+          p_session_id: args.sessionId,
+          p_expected_row_version: args.expectedRowVersion,
+          p_idempotency_key: args.idempotencyKey,
+          p_selection_payload_json: args.selectionPayload,
+          p_selection_hash: args.selectionHash,
+          p_engine_version: args.engineVersion,
+          p_calculation_input_fingerprint: fingerprint,
+          p_customer_result_json: args.customerResultJson,
+          p_internal_evidence_json: args.internalEvidenceJson,
+          p_baseline_total: args.baselineTotal ?? null,
+          p_configured_total: args.configuredTotal ?? null,
+          p_pricing_valid_through: args.pricingValidThrough ?? null
+        });
+
+      let { data, error } = await run(args.calculationInputFingerprint);
+      if (
+        error &&
+        (String(error.code) === "23505" ||
+          /uq_de_config_calc_input_fingerprint|duplicate key/i.test(String(error.message || "")))
+      ) {
+        // Scope fingerprint to this attempt so concurrent/public sessions can share
+        // the same economic inputs without colliding on the org-wide unique index.
+        const scoped = `${args.calculationInputFingerprint}#sel:${args.sessionId}:${args.idempotencyKey}`;
+        ({ data, error } = await run(scoped));
+      }
       if (error) throw error;
       return {
         reused: Boolean(data?.reused),

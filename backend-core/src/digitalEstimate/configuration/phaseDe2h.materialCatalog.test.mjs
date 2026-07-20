@@ -337,7 +337,7 @@ function eliteHeader(group = "Group B") {
           items: [{ optionKey: "material:kitchen:e100-forged", quantity: 1 }]
         }
       }),
-    (e) => e.statusCode === 400 || e.code === "unknown_option"
+    (e) => e.statusCode === 422 || e.statusCode === 400 || e.code === "invalid_selection" || e.code === "unknown_option"
   );
 
   // Forged group on item rejected
