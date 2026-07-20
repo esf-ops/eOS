@@ -44,6 +44,7 @@ const PUBLIC_UNAVAILABLE = Object.freeze({
 
 const SAFE_PUBLIC_ERROR_CODES = new Set([
   "unavailable",
+  "session_required",
   "origin_rejected",
   "origin_not_configured",
   "row_version_conflict",
@@ -60,13 +61,17 @@ const SAFE_DIAGNOSTIC_CODES = new Set([
   "DE-COOKIE",
   "DE-STATE",
   "DE-RENDER",
-  "DE-ORIGIN"
+  "DE-ORIGIN",
+  "DE-SAVE"
 ]);
 
-const CONFIG_UNAVAILABLE = Object.freeze({
+/** Missing session cookie on an authenticated v2 mutation/read — not a lifecycle revoke. */
+const SESSION_REQUIRED = Object.freeze({
   ok: false,
-  error: "Configuration unavailable",
-  diagnosticCode: "DE-STATE"
+  error: "Please refresh and try again",
+  stage: "session",
+  code: "session_required",
+  diagnosticCode: "DE-COOKIE"
 });
 
 function setPublicSecurityHeaders(res) {
@@ -94,7 +99,7 @@ function safeDiagnosticCode(e, status, safeCode) {
   return "DE-STATE";
 }
 
-function publicError(res, e) {
+function publicError(res, e, stageHint = "token_exchange") {
   const status = Number(e?.statusCode) || 404;
   const code = e?.code || "not_found";
   let message = "Estimate unavailable";
@@ -119,13 +124,17 @@ function publicError(res, e) {
       ? "origin"
       : status === 429
         ? "rate_limit"
-        : "token_exchange";
+        : stageHint || "token_exchange";
+  const diagnostic =
+    stageHint === "selection" && (status === 400 || status === 409 || status === 422)
+      ? "DE-SAVE"
+      : safeDiagnosticCode(e, status, safeCode);
   res.status(status >= 400 && status < 600 ? status : 404).json({
     ok: false,
     error: message,
     stage,
     code: safeCode,
-    diagnosticCode: safeDiagnosticCode(e, status, safeCode)
+    diagnosticCode: diagnostic
   });
 }
 
@@ -266,13 +275,13 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
     try {
       assertPublicConfigurationOrigin(req, expectedOrigin, env);
       const rawSecret = readSessionSecretFromCookie(req);
-      if (!rawSecret) return res.status(404).json(PUBLIC_UNAVAILABLE);
+      if (!rawSecret) return res.status(401).json(SESSION_REQUIRED);
       const state = await service.resumeFromSessionSecret({ rawSecret });
       res.json({ ok: true, ...state });
     } catch (e) {
       logPublicCfg("session resume failed", e, req);
       clearConfigurationSessionCookie(res, env);
-      publicError(res, e);
+      publicError(res, e, "session");
     }
   });
 
@@ -282,30 +291,35 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
     try {
       assertPublicConfigurationOrigin(req, expectedOrigin, env);
       const rawSecret = readSessionSecretFromCookie(req);
-      if (!rawSecret) return res.status(404).json(CONFIG_UNAVAILABLE);
+      if (!rawSecret) return res.status(401).json(SESSION_REQUIRED);
       const state = await service.getConfiguration({ rawSecret });
       res.json({ ok: true, ...state });
     } catch (e) {
       logPublicCfg("configuration get failed", e, req);
-      publicError(res, e);
+      publicError(res, e, "configuration");
     }
   });
 
-  app.put("/api/public-digital-estimate/v2/selections", jsonParser, async (req, res) => {
+  async function handleSelectionsSave(req, res) {
     setPublicSecurityHeaders(res);
     if (!rateLimitGate(req, res, env, "selection")) return;
     if (!requireJsonMutation(req, res)) return;
     try {
       assertPublicConfigurationOrigin(req, expectedOrigin, env);
       const rawSecret = readSessionSecretFromCookie(req);
-      if (!rawSecret) return res.status(404).json(CONFIG_UNAVAILABLE);
+      if (!rawSecret) return res.status(401).json(SESSION_REQUIRED);
       const result = await service.saveSelections({ rawSecret, body: req.body || {} });
       res.json(result);
     } catch (e) {
       logPublicCfg("selections put failed", e, req);
-      publicError(res, e);
+      publicError(res, e, "selection");
     }
-  });
+  }
+
+  // Canonical contract: PUT /api/public-digital-estimate/v2/selections
+  app.put("/api/public-digital-estimate/v2/selections", jsonParser, handleSelectionsSave);
+  // Alias: same handler (some proxies mishandle PUT; keep one Brain save path)
+  app.post("/api/public-digital-estimate/v2/selections", jsonParser, handleSelectionsSave);
 
   app.post("/api/public-digital-estimate/v2/recalculate", jsonParser, async (req, res) => {
     setPublicSecurityHeaders(res);
@@ -314,13 +328,13 @@ export function attachDigitalEstimatePublicConfigurationRoutes(app, deps) {
     try {
       assertPublicConfigurationOrigin(req, expectedOrigin, env);
       const rawSecret = readSessionSecretFromCookie(req);
-      if (!rawSecret) return res.status(404).json(CONFIG_UNAVAILABLE);
+      if (!rawSecret) return res.status(401).json(SESSION_REQUIRED);
       // Recalculate uses same contract as PUT selections (idempotent server inputs only)
       const result = await service.saveSelections({ rawSecret, body: req.body || {} });
       res.json(result);
     } catch (e) {
       logPublicCfg("recalculate failed", e, req);
-      publicError(res, e);
+      publicError(res, e, "selection");
     }
   });
 
