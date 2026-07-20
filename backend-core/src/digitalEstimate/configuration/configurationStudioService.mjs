@@ -128,7 +128,8 @@ export function createConfigurationStudioService(deps) {
         actorUserId,
         body: {}
       });
-      // Seed default material group
+      // Seed material group with the full customer-visible Elite 100 catalog so
+      // public ColorPicker options match selectable envelope keys (save succeeds).
       const matGroup = await configurationRepository.upsertDraftGroup(organizationId, draft.id, {
         groupKey: "material_by_room",
         displayLabel: "Material by room",
@@ -136,34 +137,42 @@ export function createConfigurationStudioService(deps) {
         selectionMode: "single",
         mutuallyExclusive: true
       });
+      const catalogMaterials = listElite100CustomerMaterials(true);
       for (const room of ctx.rooms) {
         const code = room.baselineMaterialGroup || "group_b";
         const defaultMat = pickDefaultMaterialForGroup(code);
-        if (defaultMat) {
-          await configurationRepository.upsertDraftOption(organizationId, draft.id, {
-            groupId: matGroup.id,
-            optionKey: `material:${room.roomKey}:${defaultMat.materialId}`,
-            displayLabel: defaultMat.displayName,
-            description: `Default finish for ${room.displayName}`,
-            includedInBaseline: true,
-            defaultQty: 1,
-            minQty: 0,
-            maxQty: 1,
-            requiredSelection: true,
-            customerPriceTreatment: "delta",
-            pricingMode: "replacement",
-            sellPrice: 0,
-            imageAssetRef: defaultMat.imageThumbPath,
-            compatibilityJson: {
-              roomKey: room.roomKey,
-              materialColorId: defaultMat.materialId,
-              materialGroup: defaultMat.pricingGroupCode,
-              role: "material_selection",
-              isDefault: true,
-              catalogContract: ELITE100_MATERIAL_CATALOG_CONTRACT,
-              imageAssetRef: defaultMat.imageThumbPath
-            }
-          });
+        if (defaultMat && catalogMaterials.length) {
+          for (const mat of catalogMaterials) {
+            const isDefault = mat.materialId === defaultMat.materialId;
+            await configurationRepository.upsertDraftOption(organizationId, draft.id, {
+              groupId: matGroup.id,
+              optionKey: `material:${room.roomKey}:${mat.materialId}`,
+              displayLabel: mat.displayName,
+              description: isDefault
+                ? `Default finish for ${room.displayName}`
+                : `${mat.displayName} for ${room.displayName}`,
+              includedInBaseline: isDefault,
+              defaultQty: isDefault ? 1 : 0,
+              minQty: 0,
+              maxQty: 1,
+              // One material required per room; do not pin requiredSelection to the
+              // baseline color ID (that blocked saving alternate envelope option IDs).
+              requiredSelection: false,
+              customerPriceTreatment: "delta",
+              pricingMode: "replacement",
+              sellPrice: 0,
+              imageAssetRef: mat.imageThumbPath,
+              compatibilityJson: {
+                roomKey: room.roomKey,
+                materialColorId: mat.materialId,
+                materialGroup: mat.pricingGroupCode,
+                role: "material_selection",
+                isDefault,
+                catalogContract: ELITE100_MATERIAL_CATALOG_CONTRACT,
+                imageAssetRef: mat.imageThumbPath
+              }
+            });
+          }
         } else {
           // Legacy fallback when no catalog color exists for the baseline group
           await configurationRepository.upsertDraftOption(organizationId, draft.id, {

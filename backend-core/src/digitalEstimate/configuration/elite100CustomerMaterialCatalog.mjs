@@ -1,7 +1,16 @@
 /**
  * Server-authoritative Elite 100 customer material catalog (Digital Estimate).
- * Pricing group codes are internal-only — never project into public customer DTOs.
- * Image paths are same-origin static assets under /materials/elite100/.
+ *
+ * Contract: elite100-customer-materials-v2
+ *   - Generated from slabInventory/fixtures/elite100-2026.json (100 active colors).
+ *   - Remnant is NOT in the fixture; remnant rows (if added) default to
+ *     customerVisible:false / remnantPermitted:false and are excluded from the
+ *     default list unless remnantPermitted is passed to listElite100CustomerMaterials.
+ *   - Pricing group codes are internal-only — never project into public customer DTOs.
+ *   - Image paths are same-origin static assets under /materials/elite100/.
+ *
+ * v1 → v2: catalog grew from 17 hand-maintained colors to the full Elite 100;
+ * materialIds for the original 17 are preserved. Contract id bumped to v2.
  *
  * Texture inventory (Lovable → reconciled):
  *   antique-gray.jpg              → Antique Gray (promo) — exact name match
@@ -19,22 +28,87 @@
  * Ambiguous / unused: none from the Lovable Elite 100 texture set (11 unique colors).
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { GROUP_CODE_DISPLAY_NAMES } from "./approvedPricingFixtures.mjs";
 
-export const ELITE100_MATERIAL_CATALOG_CONTRACT = "elite100-customer-materials-v1";
+/** Current catalog contract (v2 = full Elite 100 from fixture). */
+export const ELITE100_MATERIAL_CATALOG_CONTRACT = "elite100-customer-materials-v2";
+
+/** @deprecated Prefer ELITE100_MATERIAL_CATALOG_CONTRACT (v2). Kept for migration / dual-export. */
+export const ELITE100_MATERIAL_CATALOG_CONTRACT_V1 = "elite100-customer-materials-v1";
 
 /** @typedef {{
  *   materialId: string,
  *   displayName: string,
  *   pricingGroupCode: string,
+ *   manufacturer?: string | null,
+ *   sourceMaterialName?: string | null,
  *   imageAssetKey: string | null,
  *   imageThumbPath: string | null,
  *   imageFullPath: string | null,
+ *   textureFallbackStatus: "ready" | "missing",
  *   customerVisible: boolean,
+ *   active: boolean,
+ *   remnantPermitted?: boolean,
  *   collectionLabel: string,
  *   colorFamily: string | null,
  *   patternType: string | null,
  * }} Elite100CustomerMaterial */
+
+const FIXTURE_GROUP_TO_CODE = Object.freeze({
+  Promo: "promo",
+  A: "group_a",
+  B: "group_b",
+  C: "group_c",
+  D: "group_d",
+  E: "group_e",
+  F: "group_f"
+});
+
+/**
+ * Reconciled texture assets keyed by display color_name.
+ * Asset keys may differ from materialId slug (e.g. classic-gray → Classic Grey).
+ * @type {Record<string, string>}
+ */
+const IMAGE_ASSET_BY_DISPLAY_NAME = Object.freeze({
+  "Antique Gray": "antique-gray",
+  "Bayshore Sand": "bayshore-sand",
+  "Bianco Carrara": "bianco-carrara",
+  "Carrara Classic": "carrara-classic",
+  "Carrara Royale": "carrara-royale",
+  "Classic Grey": "classic-gray",
+  "India Black Pearl": "india-black-pearl-polished",
+  Sicilia: "sicilia",
+  "Silver Pearl": "silver-pearl-polished",
+  "Suede Brown": "suede-brown-polished",
+  "White Dove": "white-dove"
+});
+
+/**
+ * Optional presentation metadata preserved from the v1 hand catalog.
+ * @type {Record<string, { colorFamily: string | null, patternType: string | null }>}
+ */
+const PRESENTATION_BY_MATERIAL_ID = Object.freeze({
+  "e100-carrara-classic": { colorFamily: "White", patternType: "veined" },
+  "e100-bianco-carrara": { colorFamily: "White", patternType: "veined" },
+  "e100-bayshore-sand": { colorFamily: "Beige", patternType: "solid" },
+  "e100-antique-gray": { colorFamily: "Gray", patternType: "solid" },
+  "e100-carrara-royale": { colorFamily: "White", patternType: "veined" },
+  "e100-classic-grey": { colorFamily: "Gray", patternType: "solid" },
+  "e100-india-black-pearl": { colorFamily: "Black", patternType: "solid" },
+  "e100-sicilia": { colorFamily: "White", patternType: "veined" },
+  "e100-silver-pearl": { colorFamily: "Gray", patternType: "solid" },
+  "e100-suede-brown": { colorFamily: "Brown", patternType: "solid" },
+  "e100-white-dove": { colorFamily: "White", patternType: "solid" },
+  "e100-axbridge": { colorFamily: "Gray", patternType: "solid" },
+  "e100-bear-hug": { colorFamily: "Beige", patternType: "solid" },
+  "e100-alabaster": { colorFamily: "White", patternType: "solid" },
+  "e100-calacatta-gold": { colorFamily: "White", patternType: "veined" },
+  "e100-belfast-gray": { colorFamily: "Gray", patternType: "solid" },
+  "e100-honeydew": { colorFamily: "Beige", patternType: "solid" }
+});
 
 /**
  * @param {string} assetKey
@@ -43,197 +117,117 @@ function imagePaths(assetKey) {
   return {
     imageAssetKey: assetKey,
     imageThumbPath: `/materials/elite100/thumb/${assetKey}.jpg`,
-    imageFullPath: `/materials/elite100/full/${assetKey}.jpg`,
+    imageFullPath: `/materials/elite100/full/${assetKey}.jpg`
   };
 }
 
+/**
+ * Slugify Elite 100 color_name → materialId suffix (preserves v1 ids for the original 17).
+ * @param {string} colorName
+ */
+export function slugifyElite100ColorName(colorName) {
+  return String(colorName || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " ")
+    .replace(/[''`]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Build a remnant catalog row (not in fixture). Defaults: not customer-visible, not permitted.
+ * @param {{ materialId: string, displayName: string, manufacturer?: string | null }} input
+ * @returns {Elite100CustomerMaterial}
+ */
+export function buildRemnantCustomerMaterial(input) {
+  return {
+    materialId: String(input.materialId),
+    displayName: String(input.displayName),
+    pricingGroupCode: "remnant",
+    manufacturer: input.manufacturer ?? null,
+    sourceMaterialName: input.manufacturer ?? null,
+    imageAssetKey: null,
+    imageThumbPath: null,
+    imageFullPath: null,
+    textureFallbackStatus: "missing",
+    customerVisible: false,
+    active: false,
+    remnantPermitted: false,
+    collectionLabel: "Remnant",
+    colorFamily: null,
+    patternType: null
+  };
+}
+
+/**
+ * @param {object} fixture
+ * @returns {Elite100CustomerMaterial[]}
+ */
+function buildMaterialsFromFixture(fixture) {
+  const groups = fixture?.groups || {};
+  /** @type {Elite100CustomerMaterial[]} */
+  const out = [];
+  const seenIds = new Set();
+
+  for (const [groupKey, items] of Object.entries(groups)) {
+    const pricingGroupCode = FIXTURE_GROUP_TO_CODE[groupKey];
+    if (!pricingGroupCode) {
+      throw new Error(`Unknown Elite 100 fixture group key: ${groupKey}`);
+    }
+    const list = Array.isArray(items) ? items : [];
+    for (const item of list) {
+      const displayName = String(item.color_name || "").trim();
+      if (!displayName) continue;
+      const slug = slugifyElite100ColorName(displayName);
+      if (!slug) {
+        throw new Error(`Unable to slugify Elite 100 color: ${displayName}`);
+      }
+      const materialId = `e100-${slug}`;
+      if (seenIds.has(materialId)) {
+        throw new Error(`Duplicate Elite 100 materialId: ${materialId}`);
+      }
+      seenIds.add(materialId);
+
+      const manufacturer = item.material_name != null ? String(item.material_name) : null;
+      const assetKey = IMAGE_ASSET_BY_DISPLAY_NAME[displayName] || null;
+      const images = assetKey
+        ? imagePaths(assetKey)
+        : { imageAssetKey: null, imageThumbPath: null, imageFullPath: null };
+      const presentation = PRESENTATION_BY_MATERIAL_ID[materialId] || {
+        colorFamily: null,
+        patternType: null
+      };
+
+      out.push({
+        materialId,
+        displayName,
+        pricingGroupCode,
+        manufacturer,
+        sourceMaterialName: manufacturer,
+        ...images,
+        textureFallbackStatus: assetKey ? "ready" : "missing",
+        customerVisible: true,
+        active: true,
+        remnantPermitted: false,
+        collectionLabel: "Elite 100",
+        colorFamily: presentation.colorFamily,
+        patternType: presentation.patternType
+      });
+    }
+  }
+
+  return out;
+}
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const elite100Fixture = JSON.parse(
+  readFileSync(join(__dirname, "../../slabInventory/fixtures/elite100-2026.json"), "utf8")
+);
+
 /** @type {Elite100CustomerMaterial[]} */
-export const ELITE100_CUSTOMER_MATERIALS = Object.freeze([
-  // Promo — reconciled textures
-  {
-    materialId: "e100-carrara-classic",
-    displayName: "Carrara Classic",
-    pricingGroupCode: "promo",
-    ...imagePaths("carrara-classic"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "White",
-    patternType: "veined",
-  },
-  {
-    materialId: "e100-bianco-carrara",
-    displayName: "Bianco Carrara",
-    pricingGroupCode: "promo",
-    ...imagePaths("bianco-carrara"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "White",
-    patternType: "veined",
-  },
-  {
-    materialId: "e100-bayshore-sand",
-    displayName: "Bayshore Sand",
-    pricingGroupCode: "promo",
-    ...imagePaths("bayshore-sand"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Beige",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-antique-gray",
-    displayName: "Antique Gray",
-    pricingGroupCode: "promo",
-    ...imagePaths("antique-gray"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Gray",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-carrara-royale",
-    displayName: "Carrara Royale",
-    pricingGroupCode: "promo",
-    ...imagePaths("carrara-royale"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "White",
-    patternType: "veined",
-  },
-  {
-    materialId: "e100-classic-grey",
-    displayName: "Classic Grey",
-    pricingGroupCode: "promo",
-    ...imagePaths("classic-gray"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Gray",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-india-black-pearl",
-    displayName: "India Black Pearl",
-    pricingGroupCode: "promo",
-    ...imagePaths("india-black-pearl-polished"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Black",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-sicilia",
-    displayName: "Sicilia",
-    pricingGroupCode: "promo",
-    ...imagePaths("sicilia"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "White",
-    patternType: "veined",
-  },
-  {
-    materialId: "e100-silver-pearl",
-    displayName: "Silver Pearl",
-    pricingGroupCode: "promo",
-    ...imagePaths("silver-pearl-polished"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Gray",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-suede-brown",
-    displayName: "Suede Brown",
-    pricingGroupCode: "promo",
-    ...imagePaths("suede-brown-polished"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Brown",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-white-dove",
-    displayName: "White Dove",
-    pricingGroupCode: "promo",
-    ...imagePaths("white-dove"),
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "White",
-    patternType: "solid",
-  },
-  // Cross-group colors without reconciled textures (name-only cards; still customer-selectable when frozen)
-  {
-    materialId: "e100-axbridge",
-    displayName: "Axbridge",
-    pricingGroupCode: "group_a",
-    imageAssetKey: null,
-    imageThumbPath: null,
-    imageFullPath: null,
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Gray",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-bear-hug",
-    displayName: "Bear Hug",
-    pricingGroupCode: "group_a",
-    imageAssetKey: null,
-    imageThumbPath: null,
-    imageFullPath: null,
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Beige",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-alabaster",
-    displayName: "Alabaster",
-    pricingGroupCode: "group_b",
-    imageAssetKey: null,
-    imageThumbPath: null,
-    imageFullPath: null,
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "White",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-calacatta-gold",
-    displayName: "Calacatta Gold",
-    pricingGroupCode: "group_b",
-    imageAssetKey: null,
-    imageThumbPath: null,
-    imageFullPath: null,
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "White",
-    patternType: "veined",
-  },
-  {
-    materialId: "e100-belfast-gray",
-    displayName: "Belfast Gray",
-    pricingGroupCode: "group_c",
-    imageAssetKey: null,
-    imageThumbPath: null,
-    imageFullPath: null,
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Gray",
-    patternType: "solid",
-  },
-  {
-    materialId: "e100-honeydew",
-    displayName: "Honeydew",
-    pricingGroupCode: "group_c",
-    imageAssetKey: null,
-    imageThumbPath: null,
-    imageFullPath: null,
-    customerVisible: true,
-    collectionLabel: "Elite 100",
-    colorFamily: "Beige",
-    patternType: "solid",
-  },
-]);
+export const ELITE100_CUSTOMER_MATERIALS = Object.freeze(buildMaterialsFromFixture(elite100Fixture));
 
 const LEGACY_GROUP_CODES = new Set([
   "promo",
@@ -243,7 +237,7 @@ const LEGACY_GROUP_CODES = new Set([
   "group_d",
   "group_e",
   "group_f",
-  "remnant",
+  "remnant"
 ]);
 
 /** @type {Map<string, Elite100CustomerMaterial>} */
@@ -259,11 +253,30 @@ export function getElite100CustomerMaterial(materialId) {
 }
 
 /**
- * @param {boolean} [customerVisibleOnly]
+ * Default list: active + customer-visible Elite 100 colors.
+ * Remnant (and inactive) rows are excluded unless explicitly opted in.
+ *
+ * @param {boolean} [customerVisibleOnly=true]
+ * @param {{ remnantPermitted?: boolean, includeInactive?: boolean }} [opts]
  * @returns {Elite100CustomerMaterial[]}
  */
-export function listElite100CustomerMaterials(customerVisibleOnly = true) {
-  return ELITE100_CUSTOMER_MATERIALS.filter((m) => (customerVisibleOnly ? m.customerVisible : true));
+export function listElite100CustomerMaterials(customerVisibleOnly = true, opts = {}) {
+  const remnantPermitted = Boolean(opts.remnantPermitted);
+  const includeInactive = Boolean(opts.includeInactive);
+  return ELITE100_CUSTOMER_MATERIALS.filter((m) => {
+    if (!includeInactive && m.active === false) return false;
+    const isRemnant = m.pricingGroupCode === "remnant";
+    if (isRemnant) {
+      if (!(remnantPermitted || m.remnantPermitted)) return false;
+      // Remnant defaults to customerVisible:false; only surface when permitted.
+      if (customerVisibleOnly && !m.customerVisible && !(remnantPermitted || m.remnantPermitted)) {
+        return false;
+      }
+      return true;
+    }
+    if (customerVisibleOnly && !m.customerVisible) return false;
+    return true;
+  });
 }
 
 /**
@@ -277,11 +290,14 @@ export function toStudioMaterialRecord(m) {
     pricingGroupCode: m.pricingGroupCode,
     imageThumbPath: m.imageThumbPath,
     imageFullPath: m.imageFullPath,
+    textureFallbackStatus: m.textureFallbackStatus || (m.imageThumbPath ? "ready" : "missing"),
     customerVisible: m.customerVisible,
+    active: m.active !== false,
     collectionLabel: m.collectionLabel,
     colorFamily: m.colorFamily,
     patternType: m.patternType,
-    hasImagery: Boolean(m.imageThumbPath),
+    manufacturer: m.manufacturer ?? m.sourceMaterialName ?? null,
+    hasImagery: Boolean(m.imageThumbPath)
   };
 }
 
@@ -299,6 +315,7 @@ export function toCustomerSafeMaterialRecord(m, ctx = {}) {
     displayName: m.displayName,
     imageAssetPath: m.imageThumbPath,
     imageFullPath: m.imageFullPath,
+    textureFallbackStatus: m.textureFallbackStatus || (m.imageThumbPath ? "ready" : "missing"),
     collectionLabel: m.collectionLabel,
     colorFamily: m.colorFamily,
     patternType: m.patternType,
@@ -320,9 +337,7 @@ export function toCustomerSafeMaterialRecord(m, ctx = {}) {
 export function pickDefaultMaterialForGroup(groupCode) {
   const code = String(groupCode || "").trim().toLowerCase();
   if (!code) return null;
-  const inGroup = ELITE100_CUSTOMER_MATERIALS.filter(
-    (m) => m.customerVisible && m.pricingGroupCode === code
-  );
+  const inGroup = listElite100CustomerMaterials(true).filter((m) => m.pricingGroupCode === code);
   if (!inGroup.length) return null;
   return inGroup.find((m) => m.imageThumbPath) || inGroup[0];
 }
@@ -368,7 +383,7 @@ export function resolveMaterialSelectionFromOption(opt) {
       materialId: mat.materialId,
       materialGroup: mat.pricingGroupCode,
       roomKey,
-      legacyGroupOnly: false,
+      legacyGroupOnly: false
     };
   }
 
@@ -379,7 +394,7 @@ export function resolveMaterialSelectionFromOption(opt) {
     materialId: null,
     materialGroup,
     roomKey,
-    legacyGroupOnly: true,
+    legacyGroupOnly: true
   };
 }
 

@@ -12,8 +12,12 @@ import { createConfigurationStudioService } from "./configurationStudioService.m
 import {
   ELITE100_CUSTOMER_MATERIALS,
   ELITE100_MATERIAL_CATALOG_CONTRACT,
+  ELITE100_MATERIAL_CATALOG_CONTRACT_V1,
+  buildRemnantCustomerMaterial,
   getElite100CustomerMaterial,
+  isKnownMaterialOrLegacyGroupToken,
   listElite100CustomerMaterials,
+  pickDefaultMaterialForGroup,
   resolveMaterialSelectionFromOption,
   toCustomerSafeMaterialRecord
 } from "./elite100CustomerMaterialCatalog.mjs";
@@ -23,6 +27,16 @@ import { FIXTURE_ELITE100_DIRECT_RATES_PER_SQFT, FIXTURE_ELITE100_WHOLESALE_RATE
 
 const ORG = "11111111-1111-4111-8111-111111111112";
 const QUOTE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+const EXPECTED_GROUP_COUNTS = Object.freeze({
+  promo: 15,
+  group_a: 18,
+  group_b: 18,
+  group_c: 17,
+  group_d: 16,
+  group_e: 5,
+  group_f: 11
+});
 
 const ENV_ON = {
   DIGITAL_ESTIMATE_API_ENABLED: "1",
@@ -74,11 +88,47 @@ function eliteHeader(group = "Group B") {
 
 // --- Catalog authority ---
 {
-  assert.equal(ELITE100_MATERIAL_CATALOG_CONTRACT, "elite100-customer-materials-v1");
+  assert.equal(ELITE100_MATERIAL_CATALOG_CONTRACT, "elite100-customer-materials-v2");
+  assert.equal(ELITE100_MATERIAL_CATALOG_CONTRACT_V1, "elite100-customer-materials-v1");
+
+  const activeVisible = listElite100CustomerMaterials();
+  assert.equal(activeVisible.length, 100);
+  assert.equal(ELITE100_CUSTOMER_MATERIALS.length, 100);
+
+  const groupCounts = {};
+  for (const m of activeVisible) {
+    groupCounts[m.pricingGroupCode] = (groupCounts[m.pricingGroupCode] || 0) + 1;
+  }
+  assert.deepEqual(groupCounts, EXPECTED_GROUP_COUNTS);
+
+  const ids = activeVisible.map((m) => m.materialId);
+  assert.equal(new Set(ids).size, 100, "every materialId is unique");
+
+  // Preserved v1 materialIds
+  for (const id of [
+    "e100-carrara-classic",
+    "e100-classic-grey",
+    "e100-india-black-pearl",
+    "e100-honeydew",
+    "e100-calacatta-gold",
+    "e100-alabaster"
+  ]) {
+    assert.ok(getElite100CustomerMaterial(id), `preserved materialId ${id}`);
+  }
+
   const royale = getElite100CustomerMaterial("e100-carrara-royale");
   assert.ok(royale);
   assert.equal(royale.pricingGroupCode, "promo");
   assert.equal(royale.imageThumbPath, "/materials/elite100/thumb/carrara-royale.jpg");
+  assert.equal(royale.textureFallbackStatus, "ready");
+  assert.equal(royale.active, true);
+  assert.equal(royale.customerVisible, true);
+  assert.equal(royale.collectionLabel, "Elite 100");
+
+  const missingTexture = getElite100CustomerMaterial("e100-moonflakes");
+  assert.ok(missingTexture);
+  assert.equal(missingTexture.imageThumbPath, null);
+  assert.equal(missingTexture.textureFallbackStatus, "missing");
 
   const safe = toCustomerSafeMaterialRecord(royale, {
     roomKey: "kitchen",
@@ -86,7 +136,19 @@ function eliteHeader(group = "Group B") {
   });
   assert.equal(safe.materialId, "e100-carrara-royale");
   assert.equal("pricingGroupCode" in safe, false);
+  assert.equal(safe.textureFallbackStatus, "ready");
   assertPublicConfigurationHasNoForbiddenContent(safe);
+
+  // Remnant / inactive excluded from default list
+  assert.equal(activeVisible.some((m) => m.pricingGroupCode === "remnant"), false);
+  assert.equal(activeVisible.every((m) => m.active && m.customerVisible), true);
+  const remnant = buildRemnantCustomerMaterial({
+    materialId: "e100-remnant-sample",
+    displayName: "Remnant Sample"
+  });
+  assert.equal(remnant.customerVisible, false);
+  assert.equal(remnant.remnantPermitted, false);
+  assert.equal(remnant.active, false);
 
   const forged = resolveMaterialSelectionFromOption({
     optionKey: "material:kitchen:e100-does-not-exist"
@@ -106,6 +168,11 @@ function eliteHeader(group = "Group B") {
   assert.equal(legacy.legacyGroupOnly, true);
 
   assert.equal(listElite100CustomerMaterials().filter((m) => m.imageThumbPath).length, 11);
+  assert.equal(listElite100CustomerMaterials().filter((m) => m.textureFallbackStatus === "ready").length, 11);
+  assert.ok(isKnownMaterialOrLegacyGroupToken("e100-carrara-classic"));
+  assert.ok(isKnownMaterialOrLegacyGroupToken("group_f"));
+  assert.ok(pickDefaultMaterialForGroup("promo")?.imageThumbPath);
+
   assert.throws(
     () => rejectPublicSelectionAuthority({ materialGroup: "group_f" }),
     (e) => e.statusCode === 400
@@ -114,7 +181,7 @@ function eliteHeader(group = "Group B") {
     () => rejectPublicSelectionAuthority({ total: 999 }),
     (e) => e.statusCode === 400
   );
-  console.log("ok: catalog authority + customer-safe projection + authority reject");
+  console.log("ok: catalog authority + full Elite 100 + customer-safe projection + authority reject");
 }
 
 // --- Engine: same-group $0 / cross-group delta ---
@@ -226,12 +293,17 @@ function eliteHeader(group = "Group B") {
   const draftGraph = await studio.createDraft(ORG, "u1", publication.id, {});
   const matGroup = draftGraph.groups.find((g) => g.group_key === "material_by_room");
   assert.ok(matGroup);
-  const seeded = draftGraph.options.find((o) => String(o.option_key).startsWith("material:"));
+  const seededMaterialOpts = draftGraph.options.filter((o) => String(o.option_key).startsWith("material:"));
+  assert.equal(seededMaterialOpts.length, 100, "createDraft seeds all customer-visible materials");
+  const seeded = seededMaterialOpts.find((o) => String(o.option_key).includes("e100-"));
   assert.ok(seeded);
   assert.ok(
     String(seeded.option_key).includes("e100-") || String(seeded.compatibility_json?.materialColorId || "").includes("e100-")
   );
+  const baselineSeeded = seededMaterialOpts.filter((o) => o.included_in_baseline || o.includedInBaseline);
+  assert.equal(baselineSeeded.length, 1, "only default material includedInBaseline");
 
+  // Upsert a few known options (createDraft already seeded all 100)
   await studio.putOptions(ORG, draftGraph.envelope.id, {
     options: [
       {
@@ -292,12 +364,17 @@ function eliteHeader(group = "Group B") {
   const exchanged = await service.exchangePublicationToken({ rawToken: published.accessToken });
   assert.equal(exchanged.state.lifecycle, "active");
   const materials = exchanged.state.configuration.materials || [];
-  assert.equal(materials.length, 3);
-  const ids = materials.map((m) => m.materialId).sort();
-  assert.deepEqual(ids, ["e100-alabaster", "e100-calacatta-gold", "e100-carrara-royale"].sort());
+  assert.equal(materials.length, 100);
+  const ids = materials.map((m) => m.materialId);
+  assert.equal(new Set(ids).size, 100);
+  assert.ok(ids.includes("e100-alabaster"));
+  assert.ok(ids.includes("e100-calacatta-gold"));
+  assert.ok(ids.includes("e100-carrara-royale"));
+  assert.ok(ids.includes("e100-skara-brae"));
   for (const m of materials) {
     assert.equal("pricingGroupCode" in m, false);
     assert.equal("materialGroup" in m, false);
+    assert.ok(m.textureFallbackStatus === "ready" || m.textureFallbackStatus === "missing");
     if (m.imageAssetPath) assert.ok(String(m.imageAssetPath).startsWith("/materials/elite100/"));
   }
   assertPublicConfigurationHasNoForbiddenContent(materials);
@@ -326,13 +403,25 @@ function eliteHeader(group = "Group B") {
   });
   assert.notEqual(Number(cross.calculation?.displayDelta ?? cross.calculation?.totals?.displayDelta), 0);
 
+  // Group F color from full catalog saves successfully
+  const groupF = await service.saveSelections({
+    rawSecret: exchanged.rawSecret,
+    body: {
+      expectedRowVersion: cross.session.rowVersion,
+      idempotencyKey: "mat-group-f-1",
+      items: [{ optionKey: "material:kitchen:e100-skara-brae", quantity: 1 }]
+    }
+  });
+  assert.equal(groupF.ok, true);
+  assert.notEqual(Number(groupF.calculation?.displayDelta ?? groupF.calculation?.totals?.displayDelta), 0);
+
   // Unknown color rejected
   await assert.rejects(
     () =>
       service.saveSelections({
         rawSecret: exchanged.rawSecret,
         body: {
-          expectedRowVersion: cross.session.rowVersion,
+          expectedRowVersion: groupF.session.rowVersion,
           idempotencyKey: "mat-forge-1",
           items: [{ optionKey: "material:kitchen:e100-forged", quantity: 1 }]
         }
@@ -346,7 +435,7 @@ function eliteHeader(group = "Group B") {
       service.saveSelections({
         rawSecret: exchanged.rawSecret,
         body: {
-          expectedRowVersion: cross.session.rowVersion,
+          expectedRowVersion: groupF.session.rowVersion,
           idempotencyKey: "mat-forge-group",
           items: [{ optionKey: "material:kitchen:e100-alabaster", quantity: 1, materialGroup: "group_f" }]
         }
@@ -354,12 +443,12 @@ function eliteHeader(group = "Group B") {
     (e) => e.statusCode === 400 || e.code === "forbidden_caller_authority"
   );
 
-  // Studio context exposes catalog for estimators
+  // Studio context exposes full catalog for estimators
   const ctx = await studio.getPublicationContext(ORG, publication.id);
-  assert.ok((ctx.context.materialCatalog || []).length >= 11);
+  assert.equal((ctx.context.materialCatalog || []).length, 100);
   assert.equal(ctx.context.materialCatalogContract, ELITE100_MATERIAL_CATALOG_CONTRACT);
 
-  console.log("ok: public color selection same/cross/forge + studio catalog");
+  console.log("ok: public color selection same/cross/forge + studio catalog (100)");
 }
 
 console.log("\nphaseDe2h.materialCatalog.test.mjs");
