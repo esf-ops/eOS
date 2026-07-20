@@ -1827,4 +1827,15 @@
 | **Why** | Hosted materials blocked by CSP `img-src 'self' data:`; sink select raced to 409; totals looked finalized while a conflicting PUT failed; duplicate Save UI confused customers. |
 | **SQL** | None for this slice. Prior required migration may still apply: `eliteos_digital_estimate_configuration_updated_event_v1.sql`. |
 | **Ops** | Set **`VITE_SUPABASE_URL`** on the Digital Estimate Vercel project (public project URL only). Deploy **app-digital-estimate** + **backend-core**. |
-| **Out of scope** | Sink/faucet/add-on catalog cleanup (deferred); relaxing connect-src / script-src. |
+| **Out of scope** | Relaxing connect-src / script-src. |
+
+### 132. Digital Estimate approved product catalog & pricing cleanup (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | (1) Customer sink hierarchy is **No sink / Customer-provided / ESF Sinks** (one catalog). Faucet hierarchy is **No faucet / Customer-provided / ESF Faucets**. Do **not** expose Stock vs Special Order as commercial programs; internal availability remains metadata only (`customerAvailabilityText` → null). (2) Approved workbook (`esf-plumbing-specialty-program-2026-07-10.xlsx` → `esfPlumbingCatalogSeed.mjs`) remains authoritative — 116 products; 53 excluded helper/blank/empty-family rows. Exact finish → SKU → sell price via Brain; multi-finish families require `variantSku` (`missing_variant_sku`). (3) **Project add-ons** replace Approved add-ons; hide derived `qty-sink` / `qty-bar` / sink-product qty controls. Sink accessories vs **Faucet and plumbing add-ons** stay separated; model-specific accessories only after ESF sink. (4) Updated breakdown uses customer-friendly cutout/product labels. Quote Library projection adds sink/faucet/material summaries + review flags (prepare-only). |
+| **Why** | Customers were choosing Stock vs Special-Order catalogs and editing duplicate cutout qty controls that overlap room selections. |
+| **SQL** | None. |
+| **Ops** | Deploy **backend-core** + **app-digital-estimate**. Republish / Save Configuration so envelopes reseed product options if needed. |
+| **Out of scope** | Full Product Catalog image backfill for all 116 SKUs; Quote Library UI redesign; inventing faucet-hole drilling prices. |

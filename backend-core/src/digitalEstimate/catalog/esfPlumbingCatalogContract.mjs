@@ -108,12 +108,15 @@ export const CUSTOMER_UNSAFE_PRODUCT_KEYS = Object.freeze([
 ]);
 
 /**
+ * Customer-facing availability copy.
+ * Elite does not expose Stock vs Special Order as commercial programs —
+ * keep internal availability metadata, return null for public labels.
+ *
  * @param {Availability | string | null | undefined} availability
  * @returns {string | null}
  */
 export function customerAvailabilityText(availability) {
-  if (availability === "stock") return "In stock";
-  if (availability === "special_order") return "Special order";
+  void availability;
   return null;
 }
 

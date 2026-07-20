@@ -28,10 +28,13 @@ assert.ok(view.includes("PlumbingSourceModal") || view.includes("de-sink-modal")
 assert.ok(view.includes("de-${role}-source-${kind}") || view.includes("PlumbingSourceModal"));
 assert.ok(view.includes("Customer-provided sink") || view.includes("customer_provided"));
 assert.ok(
-  view.includes("Select an ESF sink") ||
-    view.includes("ESF Stock Sinks") ||
+  view.includes("ESF Sinks") ||
+    view.includes("de-sink-source-esf") ||
     view.includes('["esf", esfLabel]'),
 );
+assert.ok(!view.includes("ESF Stock Sinks"));
+assert.ok(!view.includes("Special-Order Sinks"));
+assert.ok(!view.includes("Select an ESF faucet") || view.includes("ESF Faucets"));
 assert.ok(view.includes("No sink") && view.includes("No faucet"));
 assert.ok(view.includes("de-backsplash-custom-copy"));
 assert.ok(view.includes("Final measurements and pricing require estimator review."));

@@ -166,7 +166,7 @@ export function resolveCatalogProductSelection(productIdToken, draft = null) {
   if (!product || !product.active) return null;
 
   if (!variant && Array.isArray(product.variants) && product.variants.length > 0) {
-    const finishOrSku = String(draft?.variantSku || draft?.finish || "").trim();
+    const finishOrSku = String(draft?.variantSku || draft?.variantId || draft?.finish || "").trim();
     if (finishOrSku) {
       variant = resolveBlancoVariant(product.productId, finishOrSku);
       if (!variant) {
@@ -174,6 +174,11 @@ export function resolveCatalogProductSelection(productIdToken, draft = null) {
         err.code = "invalid_blanco_variant";
         throw err;
       }
+    } else if (draft?.source === "esf" || draft?.productId) {
+      // Do not silently underprice a multi-finish family with the min family price.
+      const err = new Error(`Exact finish/SKU required for ${product.productId}`);
+      err.code = "missing_variant_sku";
+      throw err;
     }
   }
 
