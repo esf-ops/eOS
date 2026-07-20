@@ -8,12 +8,18 @@ export const DEFAULT_TIMEZONE = "America/Chicago";
 /**
  * Scorecard operational week: Thursday through Wednesday.
  * week_start = Thursday, week_end = Wednesday (+6 days).
- * (Examples: July 9–15, July 16–22, July 30–August 5.)
+ * (Examples: June 25–July 1, July 9–15, July 16–22.)
  */
 export const SCORECARD_WEEK_START_DAY = 4; // Thursday (0=Sun … 6=Sat)
 
 /** Alias used by scorecard helpers — always Thursday start. */
 export const DEFAULT_WEEK_START_DAY = SCORECARD_WEEK_START_DAY;
+
+/**
+ * Earliest selectable / valid scorecard week_start (Thursday 2026-06-25 → week June 25–July 1).
+ * Weeks before this are rejected for the selector and normalized saves.
+ */
+export const SCORECARD_EARLIEST_WEEK_START = "2026-06-25";
 
 export const DEFAULT_GRADE_THRESHOLDS = Object.freeze([
   { grade: "A", maxMistakes: 1 },
@@ -380,10 +386,10 @@ export function formatWeekLabel(weekStart, weekEnd) {
 export function formatWeekOptionLabel(weekStart, weekEnd, ctx = {}) {
   const base = formatWeekLabel(weekStart, weekEnd);
   if (ctx.currentWeekStart && weekStart === ctx.currentWeekStart) {
-    return `Current week · ${base}`;
+    return `Current Week · ${base}`;
   }
   if (ctx.lastWeekStart && weekStart === ctx.lastWeekStart) {
-    return `Last week · ${base}`;
+    return `Last Week · ${base}`;
   }
   return base;
 }
@@ -463,4 +469,56 @@ export function listRecentWeekStarts(weekStart, timezone, weekStartDay, count = 
     out.push(shiftWeekStart(base, -i, weekStartDay));
   }
   return out;
+}
+
+/**
+ * Normalize any ISO date to a scorecard Thursday week_start, clamped to the earliest allowed week.
+ * @param {string} isoDate
+ * @param {number} [weekStartDay]
+ */
+export function clampScorecardWeekStart(isoDate, weekStartDay = SCORECARD_WEEK_START_DAY) {
+  const normalized = weekStartForIsoDate(isoDate, weekStartDay);
+  if (normalized < SCORECARD_EARLIEST_WEEK_START) return SCORECARD_EARLIEST_WEEK_START;
+  return normalized;
+}
+
+/**
+ * All valid scorecard week_starts from earliest through current (inclusive), newest first.
+ * Does not invent overlapping ranges — walks by exact 7-day Thursday steps only.
+ *
+ * @param {string} [asOfIsoDate] YYYY-MM-DD “today” (defaults to America/Chicago today when used via helpers)
+ * @param {string} [timezone]
+ * @param {string} [earliestWeekStart]
+ */
+export function listScorecardWeekStartsThrough(
+  asOfIsoDate,
+  timezone = DEFAULT_TIMEZONE,
+  earliestWeekStart = SCORECARD_EARLIEST_WEEK_START
+) {
+  const todayIso = asOfIsoDate || todayIsoInTimezone(new Date(), timezone);
+  const currentWeekStart = weekStartForIsoDate(todayIso, SCORECARD_WEEK_START_DAY);
+  const earliest = weekStartForIsoDate(earliestWeekStart, SCORECARD_WEEK_START_DAY);
+
+  /** @type {string[]} */
+  const out = [];
+  let cursor = currentWeekStart;
+  // Safety cap: ~20 years of weeks
+  for (let i = 0; i < 1100; i++) {
+    if (cursor < earliest) break;
+    out.push(cursor);
+    if (cursor === earliest) break;
+    cursor = shiftWeekStart(cursor, -1, SCORECARD_WEEK_START_DAY);
+  }
+  return out;
+}
+
+/**
+ * True when weekStart is a Thursday on/after the earliest allowed scorecard week.
+ * @param {string} weekStart
+ */
+export function isValidScorecardWeekStart(weekStart) {
+  const ws = String(weekStart ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ws)) return false;
+  if (ws < SCORECARD_EARLIEST_WEEK_START) return false;
+  return weekStartForIsoDate(ws, SCORECARD_WEEK_START_DAY) === ws;
 }

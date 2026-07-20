@@ -1771,11 +1771,20 @@
 ### 127. Digital Estimate Elite 100 images use Supabase showroom pipeline (2026-07-20)
 
 | Field | Value |
-|-------|--------|
+|---|---|
 | **Date** | 2026-07-20 |
-| **Decision** | Digital Estimate material imagery uses the **same Supabase-backed Elite 100 visual-asset pipeline** as the kiosk showroom iframe, Slab Inventory Elite 100 cards, and public carousel: `slab_color_collections` → `slab_color_catalog_items` → `slab_color_visual_assets` in public bucket `eliteos-slab-images`. Shared resolver `elite100CustomerImageResolver.mjs` returns customer-safe `thumbnailUrl` (600) + `previewUrl` (1024/hero). Original 40–55 MB masters are never used for the material grid. Local `/materials/elite100/` pilots remain fallback only. Prior “89 missing” counted repo files only and is retracted. |
-| **Why** | Hosted kiosk/inventory already display all program colors; DE must not invent photography work or duplicate masters into the Vite bundle. |
-| **SQL** | None new (existing `eliteos_slab_images_storage.sql` + `eliteos_slab_color_visual_assets.sql` + color catalog). |
-| **Ops** | Deploy Brain (+ digital-estimate). Ensure `SLABOS_ORGANIZATION_ID` or `PUBLIC_VISUALIZER_ORGANIZATION_ID` / `SLABCLOUD_ORGANIZATION_ID` is set on Brain so public DE can resolve visual assets. |
-| **Out of scope** | Re-uploading photos; CDN migration; signed-URL rotation; changing kiosk nav `/stone` pilots. |
+| **Decision** | Digital Estimate material imagery uses the **same Supabase-backed Elite 100 visual-asset pipeline** as the kiosk showroom iframe, Slab Inventory Elite 100 cards, and public carousel. |
+| **Why** | Hosted kiosk/inventory already display all program colors; Digital Estimate must not invent photography work or duplicate masters into the Vite bundle. |
+| **SQL** | None new. Existing `eliteos_slab_images_storage.sql`, `eliteos_slab_color_visual_assets.sql`, and color catalog resources remain authoritative. |
+| **Ops** | Deploy Brain and `app-digital-estimate`. Ensure `SLABOS_ORGANIZATION_ID`, `PUBLIC_VISUALIZER_ORGANIZATION_ID`, or `SLABCLOUD_ORGANIZATION_ID` is set so the public Digital Estimate can resolve visual assets. |
+| **Out of scope** | Re-uploading photos, CDN migration, signed-URL rotation, and changing kiosk navigation or `/stone` pilots. |
 
+### 128. HR scorecard week calendar restart + history reset (2026-07-20)
+
+| Field | Value |
+|---|---|
+| **Decision** | Scorecard week selector enumerates every valid Thursday-to-Wednesday week from `SCORECARD_EARLIEST_WEEK_START = 2026-06-25` through the current week. |
+| **Why** | Prior incorrect week buckets polluted history; ESF will re-enter from the June 25 start. |
+| **SQL** | Manual one-time reset using `backend-core/supabase/eliteos_workforce_scorecard_history_reset_v1.sql`, scoped to `elite_stone_fabrication`. This does not delete sections, department access, or configuration. |
+| **Ops** | Merge/deploy `backend-core` and `app-hr`, manually run the reset SQL in Supabase, then re-enter weekly data. |
+| **Out of scope** | Automatic rewriting of old `week_start` values, multi-tenant wipe, and AI narrative changes. |

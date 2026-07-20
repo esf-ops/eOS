@@ -20,7 +20,8 @@ import {
   formatWeekLabel,
   gradeTrend,
   isWorkforceManager,
-  listRecentWeekStarts,
+  clampScorecardWeekStart,
+  listScorecardWeekStartsThrough,
   SCORECARD_WEEK_START_DAY,
   shiftWeekStart,
   sumWeightedMistakes,
@@ -438,7 +439,7 @@ async function loadMistakesLogWeeks(
   organizationId,
   weekStart,
   settings,
-  weekCount = 8,
+  weekCount = 52,
   allowedSectionIds = null
 ) {
   let sections = await loadGradingSections(db, organizationId);
@@ -446,7 +447,9 @@ async function loadMistakesLogWeeks(
     sections = sections.filter((s) => allowedSectionIds.has(s.sectionId));
   }
   const sectionById = new Map(sections.map((s) => [s.sectionId, s]));
-  const weekStarts = listRecentWeekStarts(weekStart, settings.timezone, SCORECARD_WEEK_START_DAY, weekCount);
+  // Mistakes log: all valid weeks from earliest through selected/current (newest first).
+  const allWeekStarts = listScorecardWeekStartsThrough(weekStart, settings.timezone);
+  const weekStarts = allWeekStarts.slice(0, Math.min(1100, Math.max(1, weekCount)));
 
   const fullSelect =
     "id, section_id, severity, category_label, occurred_at, description, job_customer, person_involved, week_start, logged_by_user_id, updated_at, updated_by_user_id";
@@ -561,10 +564,9 @@ async function loadMistakesLogWeeks(
  */
 function resolveRequestedWeekStart(req, settings) {
   const tz = settings.timezone;
-  const weekStartDay = settings.week_start_day;
   const param = pickStr(req.query?.week_start ?? req.query?.weekStart ?? req.body?.week_start ?? req.body?.weekStart);
-  if (param) return weekStartForIsoDate(param, weekStartDay);
-  return weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), weekStartDay);
+  if (param) return clampScorecardWeekStart(param, SCORECARD_WEEK_START_DAY);
+  return clampScorecardWeekStart(todayIsoInTimezone(new Date(), tz), SCORECARD_WEEK_START_DAY);
 }
 
 /**
@@ -1136,9 +1138,10 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       const settings = await loadGradeSettings(db(), organizationId);
       const tz = settings.timezone;
-      const weekStart =
-        weekStartParam ||
-        weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), settings.week_start_day);
+      const weekStart = clampScorecardWeekStart(
+        weekStartParam || todayIsoInTimezone(new Date(), tz),
+        SCORECARD_WEEK_START_DAY
+      );
 
       let q = db()
         .from("workforce_mistakes")
@@ -1215,7 +1218,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       }
 
       const occurredIso = todayIsoInTimezone(occurredAt, tz);
-      const weekStart = weekStartForIsoDate(occurredIso, settings.week_start_day);
+      const weekStart = clampScorecardWeekStart(occurredIso, SCORECARD_WEEK_START_DAY);
 
       const { data: section, error: sectionErr } = await db()
         .from("workforce_grading_sections")
@@ -1308,7 +1311,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const access = await resolveScorecardAccess(db(), req.user, organizationId);
       const settings = await loadGradeSettings(db(), organizationId);
       const weekStart = resolveRequestedWeekStart(req, settings);
-      const weekCount = Math.min(12, Math.max(1, Number(req.query?.weeks) || 8));
+      const weekCount = Math.min(1100, Math.max(1, Number(req.query?.weeks) || 52));
       const allowedSectionIds = access.fullAccess ? null : access.allowedSectionIds;
 
       if (!access.fullAccess && (!(allowedSectionIds instanceof Set) || allowedSectionIds.size === 0)) {
@@ -1432,7 +1435,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         }
         patch.occurred_at = occurredAt.toISOString();
         const occurredIso = todayIsoInTimezone(occurredAt, tz);
-        patch.week_start = weekStartForIsoDate(occurredIso, settings.week_start_day);
+        patch.week_start = clampScorecardWeekStart(occurredIso, SCORECARD_WEEK_START_DAY);
       }
 
       let updateResult = await db()
@@ -1613,9 +1616,10 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       const settings = await loadGradeSettings(db(), organizationId);
       const tz = settings.timezone;
-      const weekStart =
-        weekStartParam ||
-        weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), settings.week_start_day);
+      const weekStart = clampScorecardWeekStart(
+        weekStartParam || todayIsoInTimezone(new Date(), tz),
+        SCORECARD_WEEK_START_DAY
+      );
 
       const { data: section, error: sectionErr } = await db()
         .from("workforce_grading_sections")
@@ -1710,9 +1714,10 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       const settings = await loadGradeSettings(db(), organizationId);
       const tz = settings.timezone;
-      const weekStart =
-        weekStartParam ||
-        weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), settings.week_start_day);
+      const weekStart = clampScorecardWeekStart(
+        weekStartParam || todayIsoInTimezone(new Date(), tz),
+        SCORECARD_WEEK_START_DAY
+      );
 
       const { data: section, error: sectionErr } = await db()
         .from("workforce_grading_sections")

@@ -302,7 +302,9 @@ export default function HrApp() {
     if (!sessionToken) return;
     setLogBusy(true);
     try {
-      const weekQ = selectedWeekStart ? `?week_start=${encodeURIComponent(selectedWeekStart)}&weeks=8` : "?weeks=8";
+      const weekQ = selectedWeekStart
+        ? `?week_start=${encodeURIComponent(selectedWeekStart)}&weeks=52`
+        : "?weeks=52";
       const res = (await apiGet(`/api/hr/workforce/mistakes/log${weekQ}`, sessionToken)) as {
         weeks?: MistakeLogWeek[];
       };
