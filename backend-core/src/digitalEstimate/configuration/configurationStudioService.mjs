@@ -37,6 +37,19 @@ function fail(code, message, statusCode = 400) {
   return e;
 }
 
+async function upsertOptionsBatch(configurationRepository, organizationId, envelopeId, options) {
+  const list = Array.isArray(options) ? options : [];
+  if (!list.length) return [];
+  if (typeof configurationRepository.upsertDraftOptionsBatch === "function") {
+    return configurationRepository.upsertDraftOptionsBatch(organizationId, envelopeId, list);
+  }
+  const out = [];
+  for (const opt of list) {
+    out.push(await configurationRepository.upsertDraftOption(organizationId, envelopeId, opt));
+  }
+  return out;
+}
+
 function percentToBps(pct) {
   const n = Number(pct);
   if (!Number.isFinite(n) || n < 0 || n > 100) {
@@ -134,8 +147,8 @@ export function createConfigurationStudioService(deps) {
         actorUserId,
         body: {}
       });
-      // Seed material group with the full customer-visible Elite 100 catalog so
-      // public ColorPicker options match selectable envelope keys (save succeeds).
+      // Seed material group shell. Full catalog seeding may be deferred to the caller
+      // (Studio publish) to avoid double-seeding hundreds of options one-by-one.
       const matGroup = await configurationRepository.upsertDraftGroup(organizationId, draft.id, {
         groupKey: "material_by_room",
         displayLabel: "Material by room",
@@ -143,14 +156,22 @@ export function createConfigurationStudioService(deps) {
         selectionMode: "single",
         mutuallyExclusive: true
       });
+
+      if (body.seedCatalogOptions === false) {
+        return await configurationRepository.getEnvelopeGraph(organizationId, draft.id);
+      }
+
+      // Seed material group with the full customer-visible Elite 100 catalog so
+      // public ColorPicker options match selectable envelope keys (save succeeds).
       const catalogMaterials = listElite100CustomerMaterials(true);
+      const materialOptions = [];
       for (const room of ctx.rooms) {
         const code = room.baselineMaterialGroup || "group_b";
         const defaultMat = pickDefaultMaterialForGroup(code);
         if (defaultMat && catalogMaterials.length) {
           for (const mat of catalogMaterials) {
             const isDefault = mat.materialId === defaultMat.materialId;
-            await configurationRepository.upsertDraftOption(organizationId, draft.id, {
+            materialOptions.push({
               groupId: matGroup.id,
               optionKey: `material:${room.roomKey}:${mat.materialId}`,
               displayLabel: mat.displayName,
@@ -181,7 +202,7 @@ export function createConfigurationStudioService(deps) {
           }
         } else {
           // Legacy fallback when no catalog color exists for the baseline group
-          await configurationRepository.upsertDraftOption(organizationId, draft.id, {
+          materialOptions.push({
             groupId: matGroup.id,
             optionKey: `material:${room.roomKey}:${code}`,
             displayLabel: `${room.displayName} — ${room.baselineMaterialLabel || code}`,
@@ -202,6 +223,7 @@ export function createConfigurationStudioService(deps) {
           });
         }
       }
+      await upsertOptionsBatch(configurationRepository, organizationId, draft.id, materialOptions);
 
       // Seed richer room product options only when caller explicitly enables choices
       // (avoid inferFriendlyChoiceFlags defaults — those would seed sinks on every draft).
@@ -254,17 +276,18 @@ export function createConfigurationStudioService(deps) {
             estimateAddOns:
               body.estimateAddOns || body.configuration?.estimateAddOns || {}
           });
-          for (const opt of seeded) {
+          const roomOptions = seeded.map((opt) => {
             const priced = resolveOptionSellPriceFromCatalog(
               opt.optionKey,
               opt.compatibilityJson || {}
             );
-            await configurationRepository.upsertDraftOption(organizationId, draft.id, {
+            return {
               ...opt,
               sellPrice: priced.sellPrice ?? opt.sellPrice ?? 0,
               availabilityState: priced.availabilityState || opt.availabilityState || "active"
-            });
-          }
+            };
+          });
+          await upsertOptionsBatch(configurationRepository, organizationId, draft.id, roomOptions);
         }
       }
 
@@ -304,7 +327,7 @@ export function createConfigurationStudioService(deps) {
       rejectClientAuthoritativeEconomics(body);
       const options = Array.isArray(body.options) ? body.options : [];
       const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
-      const out = [];
+      const resolved = [];
       for (const incoming of options) {
         // Strip caller-supplied economics before authority checks — sell prices are
         // always resolved server-side from the approved catalog / product seed.
@@ -332,18 +355,18 @@ export function createConfigurationStudioService(deps) {
           if (!parsed || !isKnownMaterialOrLegacyGroupToken(parsed.token)) {
             throw fail("unknown_material", `Unknown material selection: ${optionKey}`, 400);
           }
-          const resolved = resolveMaterialSelectionFromOption({
+          const resolvedMat = resolveMaterialSelectionFromOption({
             optionKey,
             compatibilityJson
           });
-          if (!resolved.materialGroup) {
+          if (!resolvedMat.materialGroup) {
             throw fail("unknown_material", `Unable to resolve pricing group for ${optionKey}`, 400);
           }
           // Never trust browser-supplied group / rates — overwrite from catalog when color id present
-          if (resolved.materialId) {
-            const mat = getElite100CustomerMaterial(resolved.materialId);
+          if (resolvedMat.materialId) {
+            const mat = getElite100CustomerMaterial(resolvedMat.materialId);
             if (!mat || !mat.customerVisible) {
-              throw fail("unknown_material", `Material not customer-visible: ${resolved.materialId}`, 400);
+              throw fail("unknown_material", `Material not customer-visible: ${resolvedMat.materialId}`, 400);
             }
             compatibilityJson = {
               ...compatibilityJson,
@@ -363,7 +386,7 @@ export function createConfigurationStudioService(deps) {
             compatibilityJson = {
               ...compatibilityJson,
               roomKey: compatibilityJson.roomKey || parsed.roomKey,
-              materialGroup: resolved.materialGroup,
+              materialGroup: resolvedMat.materialGroup,
               role: "material_selection"
             };
           }
@@ -393,25 +416,29 @@ export function createConfigurationStudioService(deps) {
         if (!isMaterial && !isRoomChoice && sellPrice == null && cat?.availabilityState === "active") {
           throw fail("missing_option_price", `No server price for ${optionKey}`, 422);
         }
-        out.push(
-          await configurationRepository.upsertDraftOption(organizationId, envelopeId, {
-            ...optionPayload,
-            optionKey,
-            compatibilityJson,
-            sellPrice: sellPrice ?? 0,
-            availabilityState:
-              catalogPrice?.availabilityState ||
-              cat?.availabilityState ||
-              optionPayload.availabilityState ||
-              "active",
-            customerPriceTreatment:
-              cat?.customerPriceTreatment || optionPayload.customerPriceTreatment || "absolute",
-            pricingMode: cat?.pricingMode || optionPayload.pricingMode || "fixed",
-            minQty: cat?.minQty ?? optionPayload.minQty ?? 0,
-            maxQty: cat?.maxQty ?? optionPayload.maxQty ?? null
-          })
-        );
+        resolved.push({
+          ...optionPayload,
+          optionKey,
+          compatibilityJson,
+          sellPrice: sellPrice ?? 0,
+          availabilityState:
+            catalogPrice?.availabilityState ||
+            cat?.availabilityState ||
+            optionPayload.availabilityState ||
+            "active",
+          customerPriceTreatment:
+            cat?.customerPriceTreatment || optionPayload.customerPriceTreatment || "absolute",
+          pricingMode: cat?.pricingMode || optionPayload.pricingMode || "fixed",
+          minQty: cat?.minQty ?? optionPayload.minQty ?? 0,
+          maxQty: cat?.maxQty ?? optionPayload.maxQty ?? null
+        });
       }
+      const out = await upsertOptionsBatch(
+        configurationRepository,
+        organizationId,
+        envelopeId,
+        resolved
+      );
       return { options: out };
     },
 

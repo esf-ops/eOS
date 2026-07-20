@@ -1724,3 +1724,14 @@
 | **Ops** | Deploy Brain (+ Estimate Studio if UI notices change). Republish or Replace Link on affected estimates after deploy so the envelope activates. Confirm customer `/e/<token>` opens ConfigurationView with room options. |
 | **Out of scope** | Changing SYNTHETIC_PILOT_ONLY; document-mode redesign; sold-job. |
 
+### 123. Studio Digital Estimate publish hang + polling leak (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Configure-enabled Studio publish seeds envelope options via **batched** Supabase upserts and **does not double-seed** in `createDraft` (`seedCatalogOptions: false` on the publish path). Publish records phase timings + correlation id; fails closed with `DE-ENVELOPE-ACTIVATION-FAILED` / `DE-PUBLISH-TIMEOUT` and **restores prior active publications + tokens** when envelope activation fails after atomic publish. Studio UI uses explicit Idle/Publishing/Published/Failed, client timeout, AbortController cleanup, and does not show revoked links as current. Takeoff parent poll is 20s (paused when hidden); Takeoff iframe is unmounted when opening Scope/Digital/Review; iframe `/results/latest` poll is 20s. Estimate Queue aborts in-flight loads on unmount and ignores AbortError. |
+| **Why** | Hosted publish hung for tens of seconds because ~200 options were upserted one-by-one (often twice). Meanwhile Takeoff workspace polled job + `/results/latest` every ~2–2.5s; that traffic survived while working Digital Estimate and competed with Queue loads after navigation. |
+| **SQL** | None (uses existing `uq_de_config_options_envelope_key`). |
+| **Ops** | Deploy Brain + Estimate Studio + AI Takeoff (iframe poll change). Retest: Publish completes promptly; Network shows no 1s loop; Back to Queue stops detail traffic; Queue loads once. |
+| **Out of scope** | Changing `digital_estimate_publish_atomic` to defer supersede (restore-on-failure covers fail-closed); sold-job. |
+

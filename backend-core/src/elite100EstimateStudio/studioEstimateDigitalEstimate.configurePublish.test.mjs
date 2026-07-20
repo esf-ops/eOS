@@ -146,7 +146,7 @@ async function harness() {
     configurationRepository: cfgRepo,
     pricingPolicyRepository: pricing
   });
-  return { studioRepo, deRepo, cfgRepo, svc, pubSvc };
+  return { studioRepo, deRepo, cfgRepo, cfgStudio: configurationStudioService, svc, pubSvc };
 }
 
 async function seedApproved(studioRepo, fingerprint) {
@@ -404,6 +404,123 @@ console.log("\nstudioEstimateDigitalEstimate.configurePublish.test.mjs\n");
   });
   assert.equal(emptySelectionsStillConfigure.mode, "configure");
   console.log("ok: frontend/backend publication-mode contracts match");
+}
+
+{
+  // Bounded-time configure publish + phase diagnostics
+  const { studioRepo, svc, pubSvc, deRepo } = await harness();
+  const row = await seedApproved(studioRepo, "fp-timing-1");
+  const t0 = Date.now();
+  const published = await svc.publish({
+    organizationId: ORG,
+    estimateId: row.id,
+    actorUserId: ACTOR,
+    body: {
+      confirm: true,
+      idempotencyKey: "timing-1",
+      configuration: { ...allChoiceConfig() }
+    }
+  });
+  const elapsed = Date.now() - t0;
+  assert.equal(published.ok, true);
+  assert.equal(published.envelope?.configured, true);
+  assert.ok(published.correlationId, "correlation id present");
+  assert.ok(published.phases && typeof published.phases === "object", "phase timings present");
+  assert.ok(elapsed < 15_000, `configure publish should complete promptly (got ${elapsed}ms)`);
+  const exchange = await pubSvc.exchangePublicationToken({ rawToken: published.accessToken });
+  assertConfigure(exchange.state, "timing publish");
+  assert.equal(
+    (await deRepo.listActivePublicationsForFamily(ORG, CASE_ID)).length >= 1,
+    true
+  );
+  console.log(`ok: configure publish bounded time (${elapsed}ms) with phases`);
+}
+
+{
+  // Failed envelope activation preserves prior working link
+  const { studioRepo, svc, pubSvc, cfgStudio, deRepo } = await harness();
+  const row = await seedApproved(studioRepo, "fp-preserve-1");
+  const first = await svc.publish({
+    organizationId: ORG,
+    estimateId: row.id,
+    actorUserId: ACTOR,
+    body: {
+      confirm: true,
+      idempotencyKey: "preserve-1",
+      configuration: { ...allChoiceConfig() }
+    }
+  });
+  assert.equal(first.envelope?.configured, true);
+  const firstToken = first.accessToken;
+  const firstOk = await pubSvc.exchangePublicationToken({ rawToken: firstToken });
+  assertConfigure(firstOk.state, "prior working link");
+
+  const revised = await studioRepo.createRevisionFrom(
+    ORG,
+    row.id,
+    {
+      status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+      scope: row.scope,
+      staleReason: null
+    },
+    ACTOR
+  );
+  const fp2 = "fp-preserve-2";
+  await studioRepo.update(
+    ORG,
+    revised.id,
+    {
+      status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+      calculationSnapshot: {
+        ...row.calculationSnapshot,
+        fingerprint: fp2,
+        totals: { customerDisplayTotal: 9100, exactInternalTotal: 10010 }
+      },
+      approval: {
+        ...row.approval,
+        calculationFingerprint: fp2,
+        customerDisplayTotal: 9100
+      },
+      pricingEngine: "quoteCalculator",
+      pricingVersion: 2
+    },
+    ACTOR
+  );
+
+  const realActivate = cfgStudio.activate.bind(cfgStudio);
+  cfgStudio.activate = async () => {
+    throw Object.assign(new Error("forced activation failure"), {
+      code: "DE-ENVELOPE-ACTIVATION-FAILED",
+      statusCode: 422
+    });
+  };
+  let failed = null;
+  try {
+    await svc.publish({
+      organizationId: ORG,
+      estimateId: revised.id,
+      actorUserId: ACTOR,
+      body: {
+        confirm: true,
+        idempotencyKey: "preserve-2-fail",
+        configuration: { ...allChoiceConfig() }
+      }
+    });
+  } catch (e) {
+    failed = e;
+  } finally {
+    cfgStudio.activate = realActivate;
+  }
+  assert.ok(failed, "publish must fail closed");
+  assert.equal(failed.code, "DE-ENVELOPE-ACTIVATION-FAILED");
+  const priorStillWorks = await pubSvc.exchangePublicationToken({ rawToken: firstToken });
+  assertConfigure(priorStillWorks.state, "prior link preserved after failed publish");
+  const active = await deRepo.listActivePublicationsForFamily(ORG, CASE_ID);
+  assert.ok(
+    active.some((p) => p.id === first.publication.id && p.status === "active"),
+    "prior publication restored to active"
+  );
+  console.log("ok: failed configure publish preserves previous working link");
 }
 
 console.log("\nAll configure-publish tests passed.\n");

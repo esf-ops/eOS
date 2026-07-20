@@ -957,7 +957,12 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           "token_wrap_persist_failed",
           "token_wrapped_column_unavailable",
           "token_wrapped_missing",
-          "active_token_missing"
+          "active_token_missing",
+          "DE-PUBLISH-TIMEOUT",
+          "DE-ENVELOPE-ACTIVATION-FAILED",
+          "DE-TOKEN-ROTATION-FAILED",
+          "DE-PUBLISH-CONFLICT",
+          "DE-PUBLISH-FAILED"
         ].includes(String(e.code)));
     const message = structured && e?.message ? e.message : fallbackMessage;
     const linkDiagnostics = e?.diagnostics || null;
@@ -967,6 +972,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         ok: false,
         error: message,
         code,
+        correlationId: e?.correlationId || null,
+        phases: e?.phases || null,
         field: e?.field || null,
         allowedRange: e?.allowedRange || null,
         blockers,
@@ -978,7 +985,9 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           message,
           field: e?.field || null,
           readinessBlockerCodes: readinessBlockerCodes || [],
-          linkDiagnostics
+          linkDiagnostics,
+          correlationId: e?.correlationId || null,
+          phases: e?.phases || null
         }
       }
     };

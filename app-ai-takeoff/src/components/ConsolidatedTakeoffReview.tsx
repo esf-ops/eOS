@@ -585,14 +585,27 @@ export default function ConsolidatedTakeoffReview() {
   }, [authToken, takeoffJobId, loadWorkspace]);
 
   // Keep polling after draft is ready so a later AI completion surfaces as pending.
+  // Prefer event-driven refresh; poll slowly and pause when the tab is hidden.
   useEffect(() => {
     if (!authToken || !takeoffJobId) return;
     if (approveStatus === "approved") return;
     if (aiPhase === "failed") return;
-    const timer = window.setInterval(() => {
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled || document.hidden) return;
       void loadWorkspace(authToken, takeoffJobId).catch(() => {});
-    }, 2500);
-    return () => window.clearInterval(timer);
+    };
+    tick();
+    const timer = window.setInterval(tick, 20_000);
+    function onVisibility() {
+      if (!document.hidden) tick();
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [authToken, takeoffJobId, aiPhase, approveStatus, loadWorkspace]);
   const buildReviewState = useCallback(() => {
     const roomCompleteness: Record<string, boolean> = {};

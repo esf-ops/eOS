@@ -31,8 +31,10 @@ assert.ok(dePanel.includes("eq-copy-customer-link"));
 assert.ok(dePanel.includes("eq-open-customer-preview"));
 assert.ok(
   dePanel.includes("linkReady") &&
-    dePanel.includes("activePublication?.customerUrl") &&
-    dePanel.includes("disabled={busy || !linkReady}"),
+    (dePanel.includes("activePublication?.customerUrl") ||
+      dePanel.includes("body.activePublication?.customerUrl")) &&
+    (dePanel.includes("disabled={publishing || !linkReady}") ||
+      dePanel.includes("disabled={busy || !linkReady}")),
   "Copy/Open stay enabled when readiness returns customerUrl after refresh"
 );
 assert.ok(!dePanel.includes("cannot be recovered after refresh"));
@@ -41,7 +43,8 @@ assert.ok(dePanel.includes("eq-de-pilot-diagnostic"));
 assert.ok(dePanel.includes("readinessQuery"));
 assert.ok(
   dePanel.includes("e instanceof ApiError") &&
-    dePanel.includes("Unable to publish Digital Estimate")
+    (dePanel.includes("Unable to publish Digital Estimate") ||
+      dePanel.includes("Unable to publish the Digital Estimate. No customer link was changed."))
 );
 
 console.log("\nmilestone4.digitalEstimate.ui.test.mjs\n");

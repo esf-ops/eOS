@@ -5,26 +5,31 @@ import { apiGet, apiPost } from "./api";
 
 /**
  * @param {string} token
- * @param {Record<string, string|number|undefined|null>} [query]
+ * @param {Record<string, string|number|undefined|null> & { signal?: AbortSignal }} [query]
  */
 export async function fetchEstimateQueue(token, query = {}) {
+  const { signal, ...rest } = query;
   const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(query)) {
+  for (const [k, v] of Object.entries(rest)) {
     if (v == null || v === "") continue;
     params.set(k, String(v));
   }
   const qs = params.toString();
-  return apiGet(`/api/elite100-estimate-studio/queue${qs ? `?${qs}` : ""}`, token);
+  return apiGet(`/api/elite100-estimate-studio/queue${qs ? `?${qs}` : ""}`, token, {
+    signal
+  });
 }
 
 /**
  * @param {string} token
  * @param {string} caseId
+ * @param {{ signal?: AbortSignal }} [opts]
  */
-export async function fetchEstimateQueuePreview(token, caseId) {
+export async function fetchEstimateQueuePreview(token, caseId, opts = {}) {
   return apiGet(
     `/api/elite100-estimate-studio/queue/${encodeURIComponent(caseId)}/preview`,
-    token
+    token,
+    { signal: opts.signal }
   );
 }
 

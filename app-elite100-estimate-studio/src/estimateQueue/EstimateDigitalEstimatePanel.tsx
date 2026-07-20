@@ -1,10 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost, ApiError } from "../lib/api";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { apiGet, apiPost, ApiError, isAbortError } from "../lib/api";
 import {
   FRIENDLY_CUSTOMER_CHOICES,
   buildCustomerChoiceConfiguration,
   inferFriendlyChoiceFlags
 } from "../../../backend-core/src/elite100EstimateStudio/studioCustomerChoiceOptions.mjs";
+
+const PUBLISH_CLIENT_TIMEOUT_MS = 55_000;
+
+type PublishUiState = "idle" | "publishing" | "published" | "failed";
 
 type ReadinessBlocker = {
   code?: string;
@@ -185,6 +189,8 @@ export default function EstimateDigitalEstimatePanel({
   estimateApproved
 }: Props) {
   const [busy, setBusy] = useState(false);
+  const [publishUiState, setPublishUiState] = useState<PublishUiState>("idle");
+  const publishInFlightRef = useRef(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -243,60 +249,82 @@ export default function EstimateDigitalEstimatePanel({
     return q ? `?${q}` : "";
   }, [pricingValidThrough, configuration.allowedOptionKeys, roomLocked, estimatorNotes]);
 
-  const load = useCallback(async () => {
-    if (!estimateApproved || !estimateId) return;
-    setLoadError(null);
-    try {
-      const body = (await apiGet(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/digital-estimate${readinessQuery}`,
-        authToken
-      )) as {
-        readiness?: {
-          eligible?: boolean;
-          blockers?: ReadinessBlocker[];
-          blockingReasons?: ReadinessBlocker[];
-          message?: string;
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!estimateApproved || !estimateId) return;
+      setLoadError(null);
+      try {
+        const body = (await apiGet(
+          `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/digital-estimate${readinessQuery}`,
+          authToken,
+          { signal }
+        )) as {
+          readiness?: {
+            eligible?: boolean;
+            blockers?: ReadinessBlocker[];
+            blockingReasons?: ReadinessBlocker[];
+            message?: string;
+          };
+          activePublication?: PublicationRow | null;
+          publications?: PublicationRow[];
+          reviewRequests?: ReviewRequestRow[];
         };
-        activePublication?: PublicationRow | null;
-        publications?: PublicationRow[];
-        reviewRequests?: ReviewRequestRow[];
-      };
-      setEligible(Boolean(body.readiness?.eligible));
-      const nextBlockers = Array.isArray(body.readiness?.blockingReasons)
-        ? body.readiness!.blockingReasons!
-        : Array.isArray(body.readiness?.blockers)
-          ? body.readiness!.blockers!
-          : [];
-      setBlockers(nextBlockers);
-      setActivePublication(body.activePublication || null);
-      setPublications(Array.isArray(body.publications) ? body.publications : []);
-      setReviewRequests(Array.isArray(body.reviewRequests) ? body.reviewRequests : []);
-      const url = body.activePublication?.customerUrl || null;
-      setCustomerUrl(url);
-      setLinkStatus(body.activePublication?.linkStatus || (url ? "active" : null));
-      setLinkDiagnostics(body.activePublication?.linkDiagnostics || null);
-      setLinkError(body.activePublication?.linkError || null);
-      if (body.activePublication?.pricingValidThrough && !pricingValidThrough) {
-        setPricingValidThrough(String(body.activePublication.pricingValidThrough).slice(0, 10));
+        if (signal?.aborted) return;
+        setEligible(Boolean(body.readiness?.eligible));
+        const nextBlockers = Array.isArray(body.readiness?.blockingReasons)
+          ? body.readiness!.blockingReasons!
+          : Array.isArray(body.readiness?.blockers)
+            ? body.readiness!.blockers!
+            : [];
+        setBlockers(nextBlockers);
+        setActivePublication(body.activePublication || null);
+        setPublications(Array.isArray(body.publications) ? body.publications : []);
+        setReviewRequests(Array.isArray(body.reviewRequests) ? body.reviewRequests : []);
+        const url = body.activePublication?.customerUrl || null;
+        const nextLinkStatus =
+          body.activePublication?.linkStatus || (url ? "active" : null);
+        // Never treat a revoked/gone link as the current customer URL.
+        if (nextLinkStatus === "active" && url) {
+          setCustomerUrl(url);
+          setLinkStatus("active");
+        } else {
+          setCustomerUrl(null);
+          setLinkStatus(nextLinkStatus || (body.activePublication ? "none" : null));
+        }
+        setLinkDiagnostics(body.activePublication?.linkDiagnostics || null);
+        setLinkError(body.activePublication?.linkError || null);
+        if (body.activePublication?.pricingValidThrough) {
+          setPricingValidThrough((prev) =>
+            prev ? prev : String(body.activePublication!.pricingValidThrough).slice(0, 10)
+          );
+        }
+      } catch (e) {
+        if (isAbortError(e) || signal?.aborted) return;
+        if (e instanceof ApiError) {
+          const formatted = formatStructuredPublishError(e);
+          setLoadError(formatted.message);
+        } else {
+          setLoadError("Unable to load Digital Estimate readiness");
+        }
       }
-    } catch (e) {
-      if (e instanceof ApiError) {
-        const formatted = formatStructuredPublishError(e);
-        setLoadError(formatted.message);
-      } else {
-        setLoadError("Unable to load Digital Estimate readiness");
-      }
-    }
-  }, [authToken, estimateApproved, estimateId, pricingValidThrough, readinessQuery]);
+    },
+    [authToken, estimateApproved, estimateId, readinessQuery]
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!estimateApproved || !estimateId) return;
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
+  }, [estimateApproved, estimateId, authToken, readinessQuery, load]);
 
   async function publish() {
+    if (publishInFlightRef.current || busy) return;
+    publishInFlightRef.current = true;
     setBusy(true);
+    setPublishUiState("publishing");
     setActionError(null);
-    setActionNotice(null);
+    setActionNotice("Publishing Digital Estimate…");
     setPublishDiagnostic(null);
     try {
       const body = (await apiPost(
@@ -306,7 +334,8 @@ export default function EstimateDigitalEstimatePanel({
           confirm: true,
           idempotencyKey,
           configuration
-        }
+        },
+        { timeoutMs: PUBLISH_CLIENT_TIMEOUT_MS }
       )) as {
         customerUrl?: string | null;
         linkStatus?: string | null;
@@ -314,62 +343,66 @@ export default function EstimateDigitalEstimatePanel({
         staffNotice?: string | null;
         publication?: PublicationRow;
         envelope?: { configured?: boolean; reason?: string; message?: string };
+        correlationId?: string;
       };
-      if (body.customerUrl) {
+      if (body.customerUrl && (body.linkStatus === "active" || !body.linkStatus)) {
         setCustomerUrl(body.customerUrl);
-        setLinkStatus(body.linkStatus || "active");
+        setLinkStatus("active");
       }
-      if (body.reused) {
-        setActionNotice(
-          body.staffNotice ||
-            "Publication already exists for this revision. Customer URL is unchanged."
-        );
-      } else if (body.envelope?.configured) {
-        setActionNotice(
-          body.staffNotice ||
-            "Digital Estimate published with customer configuration. Open the customer link to verify the interactive configurator."
-        );
-      } else {
-        setActionNotice(
-          body.staffNotice ||
-            "Digital Estimate published as a document-only link (no customer configuration envelope)."
-        );
-      }
-      if (body.envelope && body.envelope.configured === false && body.envelope.message) {
-        setActionNotice((prev) =>
-          `${prev || "Published."} Configuration envelope: ${body.envelope?.message}`
-        );
-      }
+      setPublishUiState("published");
+      setActionNotice(
+        body.reused
+          ? body.staffNotice ||
+              "Publication already exists for this revision. Customer URL is unchanged."
+          : body.envelope?.configured
+            ? "Digital Estimate published."
+            : body.staffNotice ||
+              "Digital Estimate published as a document-only link (no customer configuration envelope)."
+      );
+      // One explicit refresh after success — no background polling while pending.
       await load();
     } catch (e) {
+      setPublishUiState("failed");
+      setActionNotice(null);
       if (e instanceof ApiError) {
         const formatted = formatStructuredPublishError(e);
-        setActionError(formatted.message);
-        setPublishDiagnostic(formatted.diagnostic);
-      } else {
-        setActionError("Unable to publish Digital Estimate");
+        setActionError(
+          "Unable to publish the Digital Estimate. No customer link was changed."
+        );
+        setPublishDiagnostic({
+          ...formatted.diagnostic,
+          message: formatted.message
+        });
+      } else if (!isAbortError(e)) {
+        setActionError(
+          "Unable to publish the Digital Estimate. No customer link was changed."
+        );
         setPublishDiagnostic({
           status: undefined,
-          code: "unknown",
+          code: "DE-PUBLISH-FAILED",
           message: "Unable to publish Digital Estimate",
           field: null,
           readinessBlockerCodes: []
         });
       }
     } finally {
+      publishInFlightRef.current = false;
       setBusy(false);
     }
   }
 
   async function replaceLink() {
     if (!activePublication?.id) return;
+    if (publishInFlightRef.current || busy) return;
+    publishInFlightRef.current = true;
     setBusy(true);
     setActionError(null);
     try {
       const body = (await apiPost(
         `/api/elite100-estimate-studio/publications/${encodeURIComponent(activePublication.id)}/replace-token`,
         authToken,
-        { confirm: true }
+        { confirm: true },
+        { timeoutMs: PUBLISH_CLIENT_TIMEOUT_MS }
       )) as { customerUrl?: string; linkStatus?: string; linkDiagnostics?: LinkDiagnostics };
       if (body.customerUrl && body.linkStatus === "active") {
         setCustomerUrl(body.customerUrl);
@@ -377,6 +410,7 @@ export default function EstimateDigitalEstimatePanel({
         setLinkDiagnostics(body.linkDiagnostics || null);
         setLinkError(null);
         setActionNotice("Customer link replaced. Previous link is no longer valid.");
+        setPublishUiState("published");
       } else {
         setActionError(
           "Replace Link did not return a recoverable customer URL. Check Brain DIGITAL_ESTIMATE_LINK_WRAP_KEY."
@@ -392,16 +426,19 @@ export default function EstimateDigitalEstimatePanel({
             ? (e.body as { linkDiagnostics?: LinkDiagnostics })
             : {};
         if (body.linkDiagnostics) setLinkDiagnostics(body.linkDiagnostics);
-      } else {
+      } else if (!isAbortError(e)) {
         setActionError("Unable to replace link");
       }
     } finally {
+      publishInFlightRef.current = false;
       setBusy(false);
     }
   }
 
   async function revoke() {
     if (!activePublication?.id) return;
+    if (publishInFlightRef.current || busy) return;
+    publishInFlightRef.current = true;
     setBusy(true);
     setActionError(null);
     try {
@@ -413,16 +450,20 @@ export default function EstimateDigitalEstimatePanel({
       setCustomerUrl(null);
       setLinkStatus("revoked");
       setActionNotice("Publication revoked. Customer link is no longer valid.");
+      setPublishUiState("idle");
       await load();
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : "Unable to revoke publication");
+      if (!isAbortError(e)) {
+        setActionError(e instanceof ApiError ? e.message : "Unable to revoke publication");
+      }
     } finally {
+      publishInFlightRef.current = false;
       setBusy(false);
     }
   }
 
   async function copyLink() {
-    if (!customerUrl) return;
+    if (!customerUrl || linkStatus !== "active") return;
     try {
       await navigator.clipboard.writeText(customerUrl);
       if (activePublication?.id) {
@@ -443,6 +484,7 @@ export default function EstimateDigitalEstimatePanel({
   }
 
   const linkReady = Boolean(customerUrl) && linkStatus === "active";
+  const publishing = publishUiState === "publishing" || busy;
 
   return (
     <section className="eq-estimate-section" aria-label="Digital Estimate" data-testid="eq-digital-estimate">
@@ -779,25 +821,28 @@ export default function EstimateDigitalEstimatePanel({
         </div>
       ) : null}
       {actionNotice ? (
-        <div className="eq-state" role="status">
+        <div className="eq-state" role="status" data-testid="eq-de-publish-status">
           {actionNotice}
         </div>
       ) : null}
+      <p className="eq-muted" data-testid="eq-de-publish-ui-state">
+        Publish state: {publishUiState}
+      </p>
 
       <div className="eq-action-row">
         <button
           type="button"
           className="eq-btn-primary"
-          disabled={busy || !eligible}
+          disabled={publishing || !eligible}
           data-testid="eq-publish-digital-estimate"
           onClick={() => void publish()}
         >
-          Publish Digital Estimate
+          {publishing ? "Publishing…" : "Publish Digital Estimate"}
         </button>
         <button
           type="button"
           className="eq-btn-secondary"
-          disabled={busy || !linkReady}
+          disabled={publishing || !linkReady}
           data-testid="eq-copy-customer-link"
           onClick={() => void copyLink()}
         >
@@ -817,7 +862,7 @@ export default function EstimateDigitalEstimatePanel({
         <button
           type="button"
           className="eq-btn-secondary"
-          disabled={busy || !activePublication || activePublication.status !== "active"}
+          disabled={publishing || !activePublication || activePublication.status !== "active"}
           data-testid="eq-replace-customer-link"
           onClick={() => void replaceLink()}
         >
@@ -826,13 +871,18 @@ export default function EstimateDigitalEstimatePanel({
         <button
           type="button"
           className="eq-btn-ghost"
-          disabled={busy || !activePublication || activePublication.status !== "active"}
+          disabled={publishing || !activePublication || activePublication.status !== "active"}
           data-testid="eq-revoke-publication"
           onClick={() => void revoke()}
         >
           Revoke Publication
         </button>
-        <button type="button" className="eq-btn-ghost" disabled={busy} onClick={() => void load()}>
+        <button
+          type="button"
+          className="eq-btn-ghost"
+          disabled={publishing}
+          onClick={() => void load()}
+        >
           Refresh
         </button>
       </div>

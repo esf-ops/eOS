@@ -5,7 +5,7 @@ import {
   recordEstimateQueueOpened
 } from "../lib/estimateQueueApi.mjs";
 import { createQuoteIntakeApiClient } from "../lib/quoteIntakeApi.mjs";
-import { ApiError } from "../lib/api";
+import { ApiError, isAbortError } from "../lib/api";
 import {
   formatAge,
   formatReceivedAt,
@@ -103,7 +103,7 @@ export default function EstimateQueuePage({
     return () => window.clearTimeout(t);
   }, [search]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     if (!authToken) {
       setRows([]);
       setError("Sign in to view the Estimate Queue.");
@@ -117,25 +117,30 @@ export default function EstimateQueuePage({
         filter,
         sort,
         limit,
-        offset
+        offset,
+        signal
       })) as {
         cases?: QueueRow[];
         total?: number;
         attentionCount?: number;
       };
+      if (signal?.aborted) return;
       setRows(Array.isArray(body.cases) ? body.cases : []);
       setTotal(Number(body.total) || 0);
       setAttentionCount(Number(body.attentionCount) || 0);
     } catch (e) {
+      if (isAbortError(e) || signal?.aborted) return;
       setRows([]);
       setError(e instanceof ApiError ? e.message : "Unable to load Estimate Queue");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [authToken, debouncedSearch, filter, sort, offset, refreshTick]);
 
   useEffect(() => {
-    void load();
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
   }, [load]);
 
   useEffect(() => {
@@ -270,8 +275,18 @@ export default function EstimateQueuePage({
       </section>
 
       {error ? (
-        <div className="eq-state eq-state--error" role="alert">
+        <div className="eq-state eq-state--error" role="alert" data-testid="eq-queue-error">
           {error}
+          <div className="eq-action-row">
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              data-testid="eq-queue-retry"
+              onClick={() => setRefreshTick((n) => n + 1)}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       ) : null}
 
