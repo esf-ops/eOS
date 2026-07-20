@@ -1,0 +1,883 @@
+{
+  "contract": "esf-plumbing-specialty-catalog-v1",
+  "sourceVersion": "2026-07-10",
+  "sourceLabel": "esf-plumbing-specialty-program-2026-07-10.xlsx",
+  "generatedAt": "2026-07-20T17:36:01.437Z",
+  "workbookPath": "_local/catalog-source/esf-plumbing-specialty-program-2026-07-10.xlsx",
+  "productCount": 116,
+  "countsBySheet": {
+    "Kansas Sinks Program": 42,
+    "Blanco Sink Program (Non Stock)": 28,
+    "Faucets and Addons (Non Stock)": 36,
+    "Specialty Items": 10
+  },
+  "countsByCategory": {
+    "sink": 45,
+    "sink_accessory": 25,
+    "kitchen_faucet": 17,
+    "soap_dispenser": 4,
+    "beverage_faucet": 3,
+    "disposal_air_switch": 2,
+    "disposal_button": 1,
+    "bar_prep_faucet": 4,
+    "glass_rinser": 1,
+    "bathroom_faucet": 4,
+    "specialty": 10
+  },
+  "excludedRowCount": 53,
+  "excludedRows": [
+    {
+      "sheet": "Kansas Sinks Program",
+      "row": 1,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Kansas Sinks Program",
+      "row": 2,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Kansas Sinks Program",
+      "row": 45,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Kansas Sinks Program",
+      "row": 46,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Kansas Sinks Program",
+      "row": 47,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Kansas Sinks Program",
+      "row": 48,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 1,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 2,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 27,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 60,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 77,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 87,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 88,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": -1,
+      "reason": "empty_family:Blanco Diamond Small Bar Accessories"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 100,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 122,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 134,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 145,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 157,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 168,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 169,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": -1,
+      "reason": "empty_family:Blanco Precis 27\" Accessories"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 181,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 193,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 204,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 205,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": -1,
+      "reason": "empty_family:Blanco Liven Laundry Accessories"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 216,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 232,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 263,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 264,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 265,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Blanco Sink Program (Non Stock)",
+      "row": 266,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Faucets and Addons (Non Stock)",
+      "row": 1,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Faucets and Addons (Non Stock)",
+      "row": 2,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Faucets and Addons (Non Stock)",
+      "row": 39,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Faucets and Addons (Non Stock)",
+      "row": 40,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Faucets and Addons (Non Stock)",
+      "row": 41,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Faucets and Addons (Non Stock)",
+      "row": 42,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Faucets and Addons (Non Stock)",
+      "row": 43,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 1,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 2,
+      "reason": "helper_or_heading"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 13,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 14,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 15,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 16,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 17,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 18,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 19,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 20,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 21,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 22,
+      "reason": "blank_row"
+    },
+    {
+      "sheet": "Specialty Items",
+      "row": 23,
+      "reason": "blank_row"
+    }
+  ],
+  "missingImages": [
+    {
+      "productId": "kansas:1512UM18",
+      "displayName": "1512UM18 Small Single Bowl Stainless Steel UM Bar/Entertainment Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:1518UM18",
+      "displayName": "1518UM18 Small Single 1518 UM Stainless Steel VERTICAL sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:2317UM18",
+      "displayName": "2317UM18 Medium 23X17 Single Bowl UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:2317GRID",
+      "displayName": "2317 Grid",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3018UM16",
+      "displayName": "3018UM16 Super Single Bowl 16 Gauge Undermount Stainless Steel Sink 16GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3018UM18",
+      "displayName": "3018UM18 Super Single Large Bowl UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3018GRID",
+      "displayName": "3018 Grid",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3018UM18ADA",
+      "displayName": "3018UM18ADA Super Single UM Stainless Steel ADA 18ga",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218GRID5050",
+      "displayName": "3218 50/50 Grid",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218GRID6040Large",
+      "displayName": "3218 60/40 Grid Large",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218GRID6040Small",
+      "displayName": "3218 60/40 Grid Small",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218GRIDSuperSingle",
+      "displayName": "3218 Super Single Grid",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218UM185050",
+      "displayName": "3218UM18 50/50 Equal Double Bowl UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218UM16",
+      "displayName": "3218UM16 50/50 Equal Double Bowl 16 GAUGE UM Stainless Steel Sink 16GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218UM16SS",
+      "displayName": "3218UM16SS Super Single Bowl UM Stainless Steel Sink 16GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218UM186040",
+      "displayName": "3218UM18 60/40 Double Bowl UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3218UM18SS",
+      "displayName": "3218UM18SS Super Single Bowl UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3221GRIDLARGE",
+      "displayName": "3221 Large Grid",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3221GRIDSMALL",
+      "displayName": "3221 Small Grid",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3221UM16",
+      "displayName": "3221UM16 60/40 Double Bowl 16 GAUGE UM Stainless Steel Sink 16GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3221UM18",
+      "displayName": "3221UM18 60/40 Double Bowl UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:3221UM18R",
+      "displayName": "3221UM18R 40/60 Double Bowl UM Stainless Steel Sink 18GA REVERSED",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R103219UM18Black",
+      "displayName": "R10 Stainless Steel Black (Gunmetal Black) Super Single",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R10Medium18 Black",
+      "displayName": "R10 Stainless Steel Black (Gunmetal Black) Medium",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R155050GRID",
+      "displayName": "R15 50/50 Grid",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R153118UM1850/50",
+      "displayName": "R15 50/50 UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R153118UM1860/40",
+      "displayName": "R15 60/40 UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R15BARUM18",
+      "displayName": "R15 Bar UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R152318GRID",
+      "displayName": "R15 Medium Grid Single Bowl",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R15MEDIUMUM18",
+      "displayName": "R15 Medium Single Bowl UM Stainless Steel 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R153118GRID",
+      "displayName": "R15 Super Single Grid",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:R15SUPERSINGLEUM18",
+      "displayName": "R15 Super Single UM Stainless Steel Sink 18GA",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:VC1512WH",
+      "displayName": "VC1512 Oval China Sink White",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:VC1613BI",
+      "displayName": "VC1613 Oval China Sink BISCUIT",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:VC1613WH",
+      "displayName": "VC1613 Oval China Sink White",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:VC1638WH",
+      "displayName": "VC1638 Small Rectangular China Sink White",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:VC1912BI",
+      "displayName": "VC1912 Rectangle China Sink BISCUIT",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:VC1912WH",
+      "displayName": "VC1912 Rectangle China Sink White",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:WGWSBL",
+      "displayName": "Wingranite Super Single Workstation UM Sink with accessories Black",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:WS32",
+      "displayName": "WS 32 Super Single Workstation UM Stainless Steel Sink 18GA with accessories",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:StainlessSteelStStrainer",
+      "displayName": "Wstrainer 2 Standard Strainer",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "kansas:StainlessSteel3in1",
+      "displayName": "Wstrainer 3 in 1 Strainer",
+      "sourceSheet": "Kansas Sinks Program"
+    },
+    {
+      "productId": "blanco:diamond-50-50",
+      "displayName": "Diamond 50/50",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:diamond-50-50",
+      "displayName": "Diamond 50/50 Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:diamond-60-40",
+      "displayName": "Diamond 60/40 Sinks",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:diamond-60-40",
+      "displayName": "Diamond 60/40 Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:super-single",
+      "displayName": "Super Single",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:super-single",
+      "displayName": "Super Single Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:diamond-small-bar",
+      "displayName": "Diamond Small Bar Sinks",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-50-50",
+      "displayName": "Precis 50/50 Sinks",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-50-50",
+      "displayName": "Precis 50/50 Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-60-40",
+      "displayName": "Precis 60/40 Sinks",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-60-40",
+      "displayName": "Precis 60/40 Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-super-single",
+      "displayName": "Precis Super Single Sinks",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-super-single",
+      "displayName": "Precis Super Single Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-21",
+      "displayName": "Precis 21\" Sinks",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-21",
+      "displayName": "Precis 21\" Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-24",
+      "displayName": "Precis 24\" Sink",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-24",
+      "displayName": "Precis 24\" Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-27",
+      "displayName": "Precis 27\" Sinks",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-30-single-bowl",
+      "displayName": "Precis 30\" Single Bowl",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-30-single-bowl",
+      "displayName": "Precis 30\" Single Bowl Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-bar",
+      "displayName": "Precis Bar Sinks",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:precis-bar",
+      "displayName": "Precis Bar Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:liven-laundry-12-depth",
+      "displayName": "Liven Laundry 12\" Depth",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:inteos-33-workstation",
+      "displayName": "Inteos 33\" Workstation",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:inteos-33-workstation",
+      "displayName": "Inteos 33\" Workstation Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:ikon-apron-front-single-bowl",
+      "displayName": "Ikon Apron Front Single Bowl",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:ikon-apron-front",
+      "displayName": "Ikon Apron Front Accessories",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "blanco:strainer-and-flange",
+      "displayName": "Strainer and Flange",
+      "sourceSheet": "Blanco Sink Program (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9176-cz-pr-dst",
+      "displayName": "Stryke Single Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:deltarp101629czpr",
+      "displayName": "Stryke Soap and Lotion Dispenser",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta9184-ar-pr-dst",
+      "displayName": "Renaldi Single Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-1960-ar-dst",
+      "displayName": "Traditional Beverage Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-arc-4200",
+      "displayName": "Disposal Air Switch Controller",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-as-4201-srs",
+      "displayName": "Disposal Air Switch Button",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-rp100734ar",
+      "displayName": "Trinsic Metal Soap Dispenser",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9179-dst",
+      "displayName": "Coranto Single Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-19802z-sp-dst",
+      "displayName": "Lenta Single Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-1940-ar-dst",
+      "displayName": "Contemporary Square Beverage Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9191-bl-dst",
+      "displayName": "Monrovia Single Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9986-ar-dst",
+      "displayName": "Altado Single Handle Pull Down Bar/Prep Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9085-ar-pr-dst",
+      "displayName": "Cordova Single Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9159-tlv-ar-dst",
+      "displayName": "Trinsic Voiceiq Kitchen Faucet with Touch 20 Technology",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-gr250-ar",
+      "displayName": "Metal Glass Rinser",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-1930-ar-dst",
+      "displayName": "Contemporary Round Beverage Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9959-bl-dst",
+      "displayName": "Trinsic Single Handle Pull Down Bar/Prep Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-7864srs",
+      "displayName": "Sleek One Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-3942srs",
+      "displayName": "Liquid Lotion and Soap Dispenser",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-87918bzg",
+      "displayName": "Ronan One Handle Pull Down Kitchen Faucet with Swivel Control",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-s3947bzg",
+      "displayName": "Premium Modern Soap Dispenser",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-559lf-blmpu",
+      "displayName": "Trinsic Single Handle Bathroom Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-6901bl",
+      "displayName": "Voss Two Handle Bathroom Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-3559-sspd-dst",
+      "displayName": "Trinsic Two Handle Widespread Pull Down Bathroom Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9113-ar-dst",
+      "displayName": "Essa Single Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9159-cz-dst",
+      "displayName": "Trinsic Single Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-s53004",
+      "displayName": "Weymouth One Handle Pull Down Bar Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9659-ks-dst",
+      "displayName": "Trinsic Single Handle Pull Down Spring Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-9178-dst",
+      "displayName": "Leland Single Handle Pull Down Kitchen Faucet With Shieldspray Technology",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-4153-ar-dst",
+      "displayName": "Linden Single Handle Pull Out Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-7864-orb",
+      "displayName": "Sleek One Handle Pull Down Kitchen Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-6702-bl",
+      "displayName": "Genta LX One Handle Bathroom Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-5965",
+      "displayName": "Moen Align Single Handle High Arc Pull Down Bar Faucet",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-7804-bzg",
+      "displayName": "Moen Riverwood Single Handle Pull Down Kitchen Faucet Bronze",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:moen-9126-bl",
+      "displayName": "Moen Kurv One Handle High Arc Pulldown Kitchen Faucet Black",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "faucet:delta-72050-ar",
+      "displayName": "Delta Air Switch",
+      "sourceSheet": "Faucets and Addons (Non Stock)"
+    },
+    {
+      "productId": "specialty:point-pod-connect-silver-kitchen-counter-pop-up-outlet-15-w",
+      "displayName": "Point Pod Connect Silver Kitchen Counter Pop Up Outlet (15 W)",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:point-pod-connect-silver-kitchen-counter-pop-up-outlet-65w",
+      "displayName": "Point Pod Connect Silver Kitchen Counter Pop Up Outlet (65W)",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:point-pod-connect-black-kitchen-counter-pop-up-outlet-15-w",
+      "displayName": "Point Pod Connect Black Kitchen Counter Pop Up Outlet (15 W)",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:point-pod-connect-black-kitchen-counter-pop-up-outlet-65w",
+      "displayName": "Point Pod Connect Black Kitchen Counter Pop Up Outlet (65W)",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:hubbell-dual-sided-countertop-pop-up-receptacle-15amp",
+      "displayName": "Hubbell Dual-Sided Countertop Pop Up Receptacle (15Amp)",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:hubbell-tri-power-countertop-pop-up-receptacle-15-amp",
+      "displayName": "Hubbell Tri-Power Countertop Pop Up Receptacle (15 Amp)",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:hubbell-tri-power-countertop-pop-up-receptacle-20-amp",
+      "displayName": "Hubbell Tri-Power Countertop Pop Up Receptacle (20 Amp)",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:free-power-3-device-charging-station-wholesale-and-partner-15-w",
+      "displayName": "Free Power 3 Device Charging Station Wholesale and Partner (15 W)",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:glowback-led-panels-are-custom-made-for-each-project-to-fit-the-dimensions-of-each-piece-project",
+      "displayName": "Glowback LED panels are custom made for each project to fit the dimensions of each piece.   Projects will be bid upon request and provided dimensions. Preferred provider to prevent lighting gaps and ensure full backlighting coverage.",
+      "sourceSheet": "Specialty Items"
+    },
+    {
+      "productId": "specialty:invisacook-places-induction-technology-beneath-the-countertop-allowing-compatible-surfaces-to-re",
+      "displayName": "InvisaCook places induction technology beneath the countertop, allowing compatible surfaces to remain visually clean while creating a true cooking zone directly on the slab.  Visit website, select product, and ESF will custom quote.",
+      "sourceSheet": "Specialty Items"
+    }
+  ],
+  "notes": {
+    "brainSeedIncludesSellPrices": true,
+    "displayOnlyCatalogSeparate": true,
+    "displayOnlyBuildScript": "scripts/build-product-catalog.mjs",
+    "displayOnlyOutput": "app-slab-inventory/src/lib/productCatalogData.ts"
+  }
+}
