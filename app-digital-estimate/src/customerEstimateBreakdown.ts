@@ -104,8 +104,14 @@ export function buildOriginalBreakdown(estimate: {
 function customerFriendlyOptionLabel(optionKey: string | undefined, displayLabel: string | undefined): string {
   const key = String(optionKey || "");
   const label = String(displayLabel || "").trim();
-  if (/^qty-sink/.test(key) || /kitchen sink cutouts?/i.test(label)) return "Sink cutout";
-  if (/^qty-bar/.test(key) || /vanity\/?bar sink cutouts?/i.test(label)) return "Vanity / bar sink cutout";
+  // Prefer server room-specific cutout / product labels (e.g. "Kitchen — Sink cutout").
+  if (/—\s*(Sink|Bar\/prep|Vanity|Laundry)\s+sink\s+cutout/i.test(label)) return label;
+  if (/^(Customer-provided sink|ESF Sink\s*—|No sink)/i.test(label)) return label;
+  // Legacy workbook / qty-* labels only when the display text is still opaque.
+  if (/^qty-sink/i.test(key) && /kitchen sink cutouts?/i.test(label)) return "Sink cutout";
+  if (/^qty-bar/i.test(key) && /vanity\/?bar sink cutouts?/i.test(label)) return "Vanity / bar sink cutout";
+  if (/^qty-sink/i.test(key) && !label) return "Sink cutout";
+  if (/^qty-bar/i.test(key) && !label) return "Vanity / bar sink cutout";
   if (/esf stainless kitchen sink/i.test(label)) return "ESF sink";
   if (/^Option:\s*/i.test(label)) return label.replace(/^Option:\s*/i, "");
   return label || "Item";

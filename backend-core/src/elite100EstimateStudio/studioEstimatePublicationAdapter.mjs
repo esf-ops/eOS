@@ -12,6 +12,7 @@ import { collectUnresolvedItems } from "./studioEstimatePricing.mjs";
 import { assessElite100PublicationEligibility } from "../digitalEstimate/digitalEstimateEligibility.mjs";
 import { readDigitalEstimatePricingValidDays } from "../digitalEstimate/digitalEstimateConfig.mjs";
 import { serverApprovedOptionCatalog } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
+import { getCatalogMeta } from "../digitalEstimate/catalog/esfPlumbingCatalog.mjs";
 
 function str(v) {
   if (v == null) return "";
@@ -106,9 +107,11 @@ export function studioEstimateQuoteNumber(estimate) {
 
 /**
  * Hash of estimator-submitted configuration envelope (catalog IDs / booleans / limits).
+ * Includes product catalog fingerprint so Save/Update reseeds when the approved workbook seed changes.
  * @param {object|null|undefined} configuration
+ * @param {{ productCatalogFingerprint?: string|null }} [opts]
  */
-export function hashConfigurationEnvelope(configuration) {
+export function hashConfigurationEnvelope(configuration, opts = {}) {
   const cfg = configuration && typeof configuration === "object" ? configuration : {};
   // Normalize permission keys so camelCase / snake_case / order never fork fingerprints.
   let customerChoiceGroups = [];
@@ -183,7 +186,8 @@ export function hashConfigurationEnvelope(configuration) {
           )
         : {},
     pricingValidThrough: str(cfg.pricingValidThrough).slice(0, 10) || null,
-    estimatorNotes: str(cfg.estimatorNotes).slice(0, 2000) || null
+    estimatorNotes: str(cfg.estimatorNotes).slice(0, 2000) || null,
+    productCatalogFingerprint: str(opts.productCatalogFingerprint || cfg.productCatalogFingerprint) || null
   };
   return createHash("sha256").update(JSON.stringify(normalized)).digest("hex").slice(0, 32);
 }
@@ -572,7 +576,9 @@ export function assessStudioEstimatePublicationReadiness(input) {
       revision: Number(estimate.revision) || 1,
       calculationFingerprint: calcFp || null,
       repositoryMode: input.repositoryMode || null,
-      envelopeFingerprint: hashConfigurationEnvelope(cfg),
+      envelopeFingerprint: hashConfigurationEnvelope(cfg, {
+        productCatalogFingerprint: getCatalogMeta()?.fingerprint || null
+      }),
       pricingValidThrough
     }
   };

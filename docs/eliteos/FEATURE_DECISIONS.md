@@ -1839,3 +1839,15 @@
 | **SQL** | None. |
 | **Ops** | Deploy **backend-core** + **app-digital-estimate**. Republish / Save Configuration so envelopes reseed product options if needed. |
 | **Out of scope** | Full Product Catalog image backfill for all 116 SKUs; Quote Library UI redesign; inventing faucet-hole drilling prices. |
+
+### 133. Digital Estimate sink eligibility, faucet images, accessory compatibility (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | (1) Hosted Kitchen “0 approved sinks” was **stale envelope options** (only `none` / `customer_provided`), not a missing catalog — catalog has 45 sinks. Room eligibility is canonical (`kitchen` / `bar_prep` / `vanity` / `laundry_utility` / `non_plumbing`) via `roomEligibility.mjs`; display names never authorize eligibility. (2) Envelope fingerprint includes **product catalog fingerprint** so Studio **Save / Update Configuration** reseeds ESF sink/faucet/accessory keys when the approved workbook seed changes; customer link stays stable. (3) Faucet images resolve with exact productId (colon↔hyphen), SKU, normalized compact SKU, then manufacturer+model+finish keys — no broad substring matching. Public options may expose `thumbnailUrl` / `previewUrl` / `imageStatus` / `imageMatchType` (no filesystem paths). (4) Sink-specific accessories are cleared under No sink / Customer-provided (not charged); incompatible ESF accessory+sink returns **422 `incompatible_accessory`**. UI clears incompatibles on sink change with a customer notice. (5) Updated breakdown uses room-specific cutout labels (`Kitchen — Sink cutout`, etc.) and `ESF Sink — {name}` / `Customer-provided sink` lines. |
+| **Why** | Catalog phase shipped products, but live envelopes never reseeding after catalog growth left Kitchen empty; faucet cards used placeholder because image-map keys used hyphens vs catalog colons; accessories and generic cutout labels confused customers. |
+| **SQL** | None. |
+| **Ops** | Deploy **backend-core** + **app-digital-estimate** (+ Estimate Studio). For each live estimate: **Save / Update Configuration** once so the fingerprint change reseeds sink options. Do **not** rotate the customer link. |
+| **Out of scope** | Adding Product Catalog assets for Moen 5965 / 7804 BZG / 9126 BL (unmatched); inventing laundry sinks beyond workbook-tagged `Liven Laundry`; Quote Library UI redesign. |
+

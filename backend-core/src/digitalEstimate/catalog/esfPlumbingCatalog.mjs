@@ -8,6 +8,7 @@ import {
   toCustomerSafeProduct
 } from "./esfPlumbingCatalogContract.mjs";
 import { ESF_PLUMBING_CATALOG_SEED } from "./esfPlumbingCatalogSeed.mjs";
+import { productMatchesRoomType } from "./roomEligibility.mjs";
 
 export { ESF_PLUMBING_CATALOG_CONTRACT_ID, toCustomerSafeCatalog, toCustomerSafeProduct };
 
@@ -41,8 +42,7 @@ export function listProducts(filters = {}) {
     if (customerVisibleOnly && !p.customerVisible) return false;
     if (category && p.category !== category) return false;
     if (roomType) {
-      const rooms = Array.isArray(p.roomEligibility) ? p.roomEligibility : [];
-      if (!rooms.includes(/** @type {any} */ (roomType))) return false;
+      if (!productMatchesRoomType(p.roomEligibility, roomType)) return false;
     }
     return true;
   });
@@ -95,6 +95,9 @@ export function getCatalogMeta() {
   return {
     contract: ESF_PLUMBING_CATALOG_SEED?.contract || ESF_PLUMBING_CATALOG_CONTRACT_ID,
     sourceVersion: ESF_PLUMBING_CATALOG_SEED?.sourceVersion || null,
-    productCount: getCatalogProducts().length
+    generatedAt: ESF_PLUMBING_CATALOG_SEED?.generatedAt || null,
+    productCount: getCatalogProducts().length,
+    /** Stable fingerprint for envelope reseeding when catalog content changes. */
+    fingerprint: `${ESF_PLUMBING_CATALOG_SEED?.contract || "v1"}:${ESF_PLUMBING_CATALOG_SEED?.sourceVersion || "unknown"}:${ESF_PLUMBING_CATALOG_SEED?.generatedAt || "nogenerated"}:${getCatalogProducts().length}`
   };
 }

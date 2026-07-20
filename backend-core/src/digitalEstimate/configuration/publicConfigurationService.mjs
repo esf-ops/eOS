@@ -39,13 +39,16 @@ import {
 } from "../catalog/customerDraftRequirements.mjs";
 import {
   cutoutKeyForSinkSelection,
+  cutoutDisplayLabelForRoom,
   inferRoomEligibilityType,
   isRoomProductOptionKey,
   parseProductOptionKey,
+  productMatchesRoomType,
   resolveCatalogProductSelection,
   sideSplashBillableSf,
   sideSplashQtyFromMode
 } from "../catalog/digitalEstimateProductOptions.mjs";
+import { getProductById } from "../catalog/esfPlumbingCatalog.mjs";
 import { customerPriceEffectLabel } from "../catalog/customerFacingCopy.mjs";
 import {
   buildQuoteLibraryCustomerConfigProjection
@@ -300,6 +303,11 @@ function toCustomerSafeOption(opt, group) {
     manufacturer: customerSafe.manufacturer || null,
     model: customerSafe.model || null,
     finish: customerSafe.finish || null,
+    sku: customerSafe.sku || null,
+    thumbnailUrl: customerSafe.thumbnailUrl || customerSafe.imageUrl || null,
+    previewUrl: customerSafe.previewUrl || customerSafe.imageUrl || null,
+    imageStatus: customerSafe.imageStatus || null,
+    imageMatchType: customerSafe.imageMatchType || null,
     variants: Array.isArray(customerSafe.variants) ? customerSafe.variants : undefined,
     visibleSellPrice:
       treatment === "absolute" && sell != null ? Number(sell) : null,
@@ -1159,6 +1167,59 @@ export function createPublicConfigurationService(deps) {
         {};
 
       const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
+
+      // Strip / reject sink-specific accessories that are incompatible with the current sink mode.
+      // Orphans under No sink / Customer-provided are zeroed (not charged). Incompatible ESF pairs 422.
+      const sinkModeByRoom = new Map();
+      const sinkProductByRoom = new Map();
+      for (const [key, qtyRaw] of Object.entries(normalized.selections)) {
+        if (Number(qtyRaw) <= 0) continue;
+        const parsed = parseProductOptionKey(key);
+        if (parsed?.kind !== "sink" || !parsed.roomKey) continue;
+        sinkModeByRoom.set(parsed.roomKey, parsed.mode);
+        if (parsed.mode === "esf" && parsed.productId) {
+          sinkProductByRoom.set(parsed.roomKey, parsed.productId);
+        }
+      }
+      for (const [key, qtyRaw] of Object.entries(normalized.selections)) {
+        if (Number(qtyRaw) <= 0) continue;
+        const parsed = parseProductOptionKey(key);
+        if (parsed?.kind !== "accessory" || parsed.mode !== "esf" || !parsed.productId) continue;
+        const product = getProductById(parsed.productId);
+        const isSinkSpecific =
+          product?.category === "sink_accessory" ||
+          String(product?.subcategory || "").includes("accessory") ||
+          /grid|colander|cutting board|workstation accessory|strainer|flange/i.test(
+            String(product?.displayName || "")
+          );
+        if (!isSinkSpecific) continue;
+        const mode = sinkModeByRoom.get(parsed.roomKey) || "none";
+        if (mode === "none" || mode === "customer_provided" || mode === "customer") {
+          normalized.selections[key] = 0;
+          continue;
+        }
+        if (mode === "esf") {
+          const sinkId = sinkProductByRoom.get(parsed.roomKey) || "";
+          const families = Array.isArray(product?.compatibleFamilyIds)
+            ? product.compatibleFamilyIds.map(String)
+            : [];
+          const compatible =
+            !families.length ||
+            families.some((f) => f === sinkId || sinkId.startsWith(f) || f.startsWith(sinkId));
+          if (!compatible) {
+            throw safeFail(
+              "incompatible_accessory",
+              "That accessory is not compatible with the selected sink",
+              422,
+              {
+                selectionKey: String(key).slice(0, 160),
+                diagnosticCode: "DE-ACCESSORY-INCOMPATIBLE"
+              }
+            );
+          }
+        }
+      }
+
       const calcOptions = [];
       for (const [key, qtyRaw] of Object.entries(normalized.selections)) {
         if (key.startsWith("material:")) continue;
@@ -1173,17 +1234,30 @@ export function createPublicConfigurationService(deps) {
           const roomKey = parsed.roomKey;
           const roomRow = rooms.find((r) => r.roomKey === roomKey);
           const roomType = roomRow?.roomType || "kitchen";
+          const roomName = roomRow?.displayName || roomKey;
           const draft = mergedProductDrafts[roomKey]?.sink || null;
 
           if (parsed.mode === "none") continue;
 
           if (parsed.mode === "customer_provided" || parsed.mode === "customer") {
+            calcOptions.push({
+              optionKey: key,
+              displayLabel: "Customer-provided sink",
+              quantity: 1,
+              sellPrice: 0,
+              pricingMode: "per_each",
+              customerPriceTreatment: "absolute",
+              availabilityState: "active",
+              includedInBaseline: false,
+              defaultQty: 0,
+              baselineQuantity: 0
+            });
             const cutoutKey = cutoutKeyForSinkSelection(roomType, null);
             const sinkCutout = catalog.get(cutoutKey);
             if (sinkCutout?.sellPrice != null) {
               calcOptions.push({
                 optionKey: `${cutoutKey}:${roomKey}`,
-                displayLabel: sinkCutout.displayLabel,
+                displayLabel: cutoutDisplayLabelForRoom(roomType, roomName),
                 quantity: 1,
                 sellPrice: sinkCutout.sellPrice,
                 pricingMode: "per_each",
@@ -1203,7 +1277,7 @@ export function createPublicConfigurationService(deps) {
             if (sinkCutout?.sellPrice != null) {
               calcOptions.push({
                 optionKey: `qty-sink:${roomKey}`,
-                displayLabel: sinkCutout.displayLabel,
+                displayLabel: cutoutDisplayLabelForRoom(roomType, roomName),
                 quantity: 1,
                 sellPrice: sinkCutout.sellPrice,
                 pricingMode: "per_each",
@@ -1254,7 +1328,7 @@ export function createPublicConfigurationService(deps) {
             const roomsOk = Array.isArray(resolved.product.roomEligibility)
               ? resolved.product.roomEligibility
               : [];
-            if (roomsOk.length && !roomsOk.includes(roomType)) {
+            if (roomsOk.length && !productMatchesRoomType(roomsOk, roomType)) {
               throw safeFail("invalid_selection", "That sink is not available for this room", 422, {
                 selectionKey: String(key).slice(0, 160),
                 diagnosticCode: "DE-SAVE"
@@ -1263,7 +1337,7 @@ export function createPublicConfigurationService(deps) {
             if (resolved.sellPrice != null) {
               calcOptions.push({
                 optionKey: key,
-                displayLabel: resolved.product.displayName,
+                displayLabel: `ESF Sink — ${resolved.product.displayName}`,
                 quantity: 1,
                 sellPrice: resolved.sellPrice,
                 pricingMode: "per_each",
@@ -1279,7 +1353,7 @@ export function createPublicConfigurationService(deps) {
             if (sinkCutout?.sellPrice != null && resolved.product.requiresCutout) {
               calcOptions.push({
                 optionKey: `${cutoutKey}:${roomKey}`,
-                displayLabel: sinkCutout.displayLabel,
+                displayLabel: cutoutDisplayLabelForRoom(roomType, roomName),
                 quantity: 1,
                 sellPrice: sinkCutout.sellPrice,
                 pricingMode: "per_each",

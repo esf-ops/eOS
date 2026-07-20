@@ -53,6 +53,7 @@ import {
   inferRoomEligibilityType,
   resolveOptionSellPriceFromCatalog
 } from "../digitalEstimate/catalog/digitalEstimateProductOptions.mjs";
+import { getCatalogMeta } from "../digitalEstimate/catalog/esfPlumbingCatalog.mjs";
 
 function scopeMaterialGroupToCode(raw) {
   const s = String(raw || "").trim().toLowerCase();
@@ -1124,7 +1125,10 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       const pricingValidThrough =
         readiness.readiness.details?.pricingValidThrough ||
         addDaysDateOnly(readDigitalEstimatePricingValidDays(env));
-      const envelopeFingerprint = hashConfigurationEnvelope(configuration);
+      const catalogMeta = getCatalogMeta();
+      const envelopeFingerprint = hashConfigurationEnvelope(configuration, {
+        productCatalogFingerprint: catalogMeta.fingerprint
+      });
       const idempotencyKey = strOrNull(body.idempotencyKey);
       const familyRoot = studioEstimatePublicationFamilyRoot(estimate);
       const priorActive =
