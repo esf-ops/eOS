@@ -9,9 +9,11 @@ import {
   formatGradeTrendDisplay,
   formatScorecardReportLine,
   formatSectionActualDisplay,
+  clampScorecardWeekStart,
   formatWeekLabel,
   formatWeekOptionLabel,
   gradeTrend,
+  listScorecardWeekStartsThrough,
   normalizeValuePayload,
   SCORECARD_WEEK_START_DAY,
   shiftWeekStart,
@@ -484,49 +486,30 @@ export function buildScorecardReportHtml(rows, meta = {}) {
 }
 
 /**
- * Build week selector options anchored to the current week.
- * @param {import("@supabase/supabase-js").SupabaseClient} db
- * @param {string} organizationId
+ * Build week selector options: every valid Thu–Wed week from earliest through current.
+ * Newest first. Does not include invalid overlapping ranges or weeks before June 25–July 1.
+ *
+ * @param {import("@supabase/supabase-js").SupabaseClient} [_db]
+ * @param {string} [_organizationId]
  * @param {object} settings
- * @param {(error: unknown) => boolean} isMissingTableError
+ * @param {(error: unknown) => boolean} [_isMissingTableError]
+ * @param {string} [asOfIsoDate] optional YYYY-MM-DD for tests
  */
-export async function buildScorecardWeekOptions(db, organizationId, settings, isMissingTableError) {
-  const tz = settings.timezone;
-  const weekStartDay = SCORECARD_WEEK_START_DAY;
-  const currentWeekStart = weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), weekStartDay);
-  const lastWeekStart = shiftWeekStart(currentWeekStart, -1, weekStartDay);
-
-  /** @type {Set<string>} */
-  const weekSet = new Set([currentWeekStart, lastWeekStart]);
-
-  try {
-    const results = await Promise.all([
-      db
-        .from("workforce_mistakes")
-        .select("week_start")
-        .eq("organization_id", organizationId)
-        .not("section_id", "is", null),
-      db.from("workforce_section_week_values").select("week_start").eq("organization_id", organizationId),
-      db.from("workforce_section_week_snapshots").select("week_start").eq("organization_id", organizationId)
-    ]);
-    for (const res of results) {
-      if (res.error) {
-        if (isMissingTableError(res.error)) continue;
-        throw res.error;
-      }
-      for (const row of res.data ?? []) {
-        if (row.week_start) weekSet.add(String(row.week_start));
-      }
-    }
-  } catch (e) {
-    if (!isMissingTableError(e)) throw e;
-  }
-
-  const sorted = [...weekSet].sort((a, b) => b.localeCompare(a));
-  const rest = sorted.filter((ws) => ws !== currentWeekStart);
+export async function buildScorecardWeekOptions(
+  _db,
+  _organizationId,
+  settings,
+  _isMissingTableError,
+  asOfIsoDate = null
+) {
+  const tz = settings?.timezone || "America/Chicago";
+  const weekStarts = listScorecardWeekStartsThrough(asOfIsoDate, tz);
+  const currentWeekStart = weekStarts[0] ?? null;
+  const lastWeekStart =
+    currentWeekStart != null ? shiftWeekStart(currentWeekStart, -1, SCORECARD_WEEK_START_DAY) : null;
   const labelCtx = { currentWeekStart, lastWeekStart };
 
-  return [currentWeekStart, ...rest].map((weekStart) => {
+  return weekStarts.map((weekStart) => {
     const meta = scorecardWeekMeta(weekStart);
     return {
       ...meta,
@@ -536,6 +519,8 @@ export async function buildScorecardWeekOptions(db, organizationId, settings, is
     };
   });
 }
+
+export { clampScorecardWeekStart, listScorecardWeekStartsThrough };
 
 /**
  * @param {import("@supabase/supabase-js").SupabaseClient} db
