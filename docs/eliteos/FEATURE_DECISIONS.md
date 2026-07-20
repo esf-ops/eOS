@@ -1746,3 +1746,14 @@
 | **Ops** | Deploy Brain + digital-estimate (+ Estimate Studio for publish copy). Republish (or Replace Link after republish with new envelope) for rooms that need corrected sink eligibility / accessory expansion. |
 | **Out of scope** | Full material image sourcing; golden-math pricing audit; Studio per-room category override UI; non-expiring link lifecycle; Quote Library projection; sold-job automation. |
 
+### 125. HR Weekly Operations Scorecard — Thu–Wed weeks + department entry (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | Scorecard operational weeks are **Thursday through Wednesday** (`SCORECARD_WEEK_START_DAY = 4`; `week_start` = Thursday, `week_end` = Wednesday). Shared backend week helpers are the source of truth. Department heads receive scoped **Department Quality Entry** views for assigned groups (`service_quality`, `outside_partners`, `plumbing`, `shop_operations`, `quoting`, `machinery`) via org-scoped `workforce_department_user_access`. CEO/admin/executive/hr/`super_admin` retain the full dashboard, executive summary, mistakes log, and report freeze. All users write the same section/mistake/metric/snapshot tables — no department silos. Backend enforces section access on every read/write; frontend hiding is not sufficient. Card trend labels are compact (`A ↑ last week B`) without repeating the section name. |
+| **Why** | Department leads need focused entry without fragmenting CEO visibility; prior Monday-start weeks did not match ESF operational weeks. |
+| **SQL** | Manual apply: `backend-core/supabase/eliteos_workforce_department_access_v1.sql` |
+| **Ops** | Apply SQL, redeploy **backend-core** + **app-hr**. Assign department groups under HR Head → Department Access. Historical week rows are not auto-rewritten. |
+| **Out of scope** | Auto-migration of historical Monday-bucketed rows; new head/app; AI narrative. |
+

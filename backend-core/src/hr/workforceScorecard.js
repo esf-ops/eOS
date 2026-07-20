@@ -10,8 +10,10 @@ import {
   formatScorecardReportLine,
   formatSectionActualDisplay,
   formatWeekLabel,
+  formatWeekOptionLabel,
   gradeTrend,
   normalizeValuePayload,
+  SCORECARD_WEEK_START_DAY,
   shiftWeekStart,
   shortSectionName,
   todayIsoInTimezone,
@@ -275,7 +277,13 @@ export function mapIncidentRow(m) {
     personInvolved: m.person_involved ?? null,
     description: m.description ?? null,
     categoryLabel: m.category_label ?? null,
-    sectionName: m.section_name ?? m.sectionName ?? null
+    sectionName: m.section_name ?? m.sectionName ?? null,
+    departmentSlug: m.department_slug ?? m.departmentSlug ?? null,
+    loggedByUserId: m.logged_by_user_id ? String(m.logged_by_user_id) : null,
+    loggedByName: m.logged_by_name ?? m.loggedByName ?? null,
+    updatedAt: m.updated_at ?? null,
+    updatedByUserId: m.updated_by_user_id ? String(m.updated_by_user_id) : null,
+    updatedByName: m.updated_by_name ?? m.updatedByName ?? null
   };
 }
 
@@ -484,7 +492,7 @@ export function buildScorecardReportHtml(rows, meta = {}) {
  */
 export async function buildScorecardWeekOptions(db, organizationId, settings, isMissingTableError) {
   const tz = settings.timezone;
-  const weekStartDay = settings.week_start_day;
+  const weekStartDay = SCORECARD_WEEK_START_DAY;
   const currentWeekStart = weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), weekStartDay);
   const lastWeekStart = shiftWeekStart(currentWeekStart, -1, weekStartDay);
 
@@ -516,11 +524,17 @@ export async function buildScorecardWeekOptions(db, organizationId, settings, is
 
   const sorted = [...weekSet].sort((a, b) => b.localeCompare(a));
   const rest = sorted.filter((ws) => ws !== currentWeekStart);
+  const labelCtx = { currentWeekStart, lastWeekStart };
 
-  return [currentWeekStart, ...rest].map((weekStart) => ({
-    ...scorecardWeekMeta(weekStart),
-    isCurrentWeek: weekStart === currentWeekStart
-  }));
+  return [currentWeekStart, ...rest].map((weekStart) => {
+    const meta = scorecardWeekMeta(weekStart);
+    return {
+      ...meta,
+      weekLabel: formatWeekOptionLabel(meta.weekStart, meta.weekEnd, labelCtx),
+      isCurrentWeek: weekStart === currentWeekStart,
+      isLastWeek: weekStart === lastWeekStart
+    };
+  });
 }
 
 /**
@@ -557,12 +571,14 @@ export async function upsertWeekSnapshots(db, organizationId, weekStart, rows) {
 /**
  * @param {string} weekStart
  */
-export function scorecardWeekMeta(weekStart) {
+export function scorecardWeekMeta(weekStart, labelCtx = null) {
   const weekEnd = weekEndForWeekStart(weekStart);
   return {
     weekStart,
     weekEnd,
-    weekLabel: formatWeekLabel(weekStart, weekEnd)
+    weekLabel: labelCtx
+      ? formatWeekOptionLabel(weekStart, weekEnd, labelCtx)
+      : formatWeekLabel(weekStart, weekEnd)
   };
 }
 

@@ -58,18 +58,33 @@ type MistakeLogEntry = {
   entryKind?: string;
   sectionId: string;
   sectionName?: string | null;
+  departmentSlug?: string | null;
   weekStart?: string | null;
   occurredAt: string;
   severity: string | null;
   jobCustomer: string | null;
   personInvolved: string | null;
   description: string | null;
+  loggedByName?: string | null;
+  updatedByName?: string | null;
+  updatedAt?: string | null;
 };
 
 type MistakeLogWeek = WeekOption & { mistakes: MistakeLogEntry[] };
 
+type DepartmentInfo = {
+  slug: string;
+  name: string;
+  sectionIds: string[];
+};
+
 type ScorecardPayload = {
   ok?: boolean;
+  viewMode?: "executive" | "department";
+  fullAccess?: boolean;
+  canManageDepartments?: boolean;
+  canGenerateReport?: boolean;
+  departments?: DepartmentInfo[];
   weekStart?: string;
   weekLabel?: string;
   weekOptions?: WeekOption[];
@@ -79,6 +94,28 @@ type ScorecardPayload = {
   rows?: SectionRow[];
   warning?: string;
   schemaReady?: boolean;
+};
+
+type EmployeeOption = {
+  id: string;
+  fullName: string;
+  email?: string | null;
+};
+
+type DepartmentAssignment = {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail?: string | null;
+  departmentSlug: string;
+  departmentName: string;
+  isActive?: boolean;
+};
+
+type DepartmentGroup = {
+  slug: string;
+  name: string;
+  sectionIds: string[];
 };
 
 type ModalKind = "mistake" | "metric" | "editMistake" | null;
@@ -205,6 +242,18 @@ export default function HrApp() {
   const [metricDailySf, setMetricDailySf] = useState("");
   const [metricHours, setMetricHours] = useState("");
 
+  const [deptAccessOpen, setDeptAccessOpen] = useState(false);
+  const [deptAccessBusy, setDeptAccessBusy] = useState(false);
+  const [deptAssignBusy, setDeptAssignBusy] = useState(false);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [deptAssignments, setDeptAssignments] = useState<DepartmentAssignment[]>([]);
+  const [deptGroups, setDeptGroups] = useState<DepartmentGroup[]>([]);
+  const [assignUserId, setAssignUserId] = useState("");
+  const [assignDeptSlug, setAssignDeptSlug] = useState("");
+
+  const [logFilterDepartment, setLogFilterDepartment] = useState("");
+  const [logFilterSection, setLogFilterSection] = useState("");
+
   useEffect(() => {
     if (!supabase) return;
     let alive = true;
@@ -291,10 +340,36 @@ export default function HrApp() {
     }
   }, [sessionToken, selectedWeekStart, loadMistakesLog]);
 
+  const loadDepartmentAccess = useCallback(async () => {
+    if (!sessionToken) return;
+    setDeptAccessBusy(true);
+    try {
+      const [empRes, assignRes] = await Promise.all([
+        apiGet("/api/hr/workforce/employees", sessionToken) as Promise<{ employees?: EmployeeOption[] }>,
+        apiGet("/api/hr/workforce/departments/assignments", sessionToken) as Promise<{
+          assignments?: DepartmentAssignment[];
+          departmentGroups?: DepartmentGroup[];
+        }>
+      ]);
+      setEmployees(empRes.employees ?? []);
+      setDeptAssignments(assignRes.assignments ?? []);
+      setDeptGroups(assignRes.departmentGroups ?? []);
+    } catch (e: unknown) {
+      setErr(hrApiErrorMessage(e, "Unable to load department access."));
+    } finally {
+      setDeptAccessBusy(false);
+    }
+  }, [sessionToken]);
+
   useEffect(() => {
     if (!sessionToken) return;
     void loadScorecard();
   }, [sessionToken, loadScorecard]);
+
+  useEffect(() => {
+    if (!sessionToken || !scorecard?.canManageDepartments) return;
+    void loadDepartmentAccess();
+  }, [sessionToken, scorecard?.canManageDepartments, loadDepartmentAccess]);
 
   const signIn = useCallback(async () => {
     setAuthError(null);
@@ -521,6 +596,42 @@ export default function HrApp() {
     refreshAfterChange
   ]);
 
+  const assignDepartment = useCallback(async () => {
+    if (!sessionToken || !assignUserId || !assignDeptSlug) return;
+    setDeptAssignBusy(true);
+    setErr(null);
+    try {
+      await apiPost("/api/hr/workforce/departments/assignments", sessionToken, {
+        user_id: assignUserId,
+        department_slug: assignDeptSlug
+      });
+      setSuccess("Department access assigned.");
+      setAssignUserId("");
+      setAssignDeptSlug("");
+      await loadDepartmentAccess();
+    } catch (e: unknown) {
+      setErr(hrApiErrorMessage(e, "Unable to assign department access."));
+    } finally {
+      setDeptAssignBusy(false);
+    }
+  }, [sessionToken, assignUserId, assignDeptSlug, loadDepartmentAccess]);
+
+  const removeDepartmentAssignment = useCallback(
+    async (assignment: DepartmentAssignment) => {
+      if (!sessionToken) return;
+      if (!window.confirm(`Remove ${assignment.userName} from ${assignment.departmentName}?`)) return;
+      setErr(null);
+      try {
+        await apiDelete(`/api/hr/workforce/departments/assignments/${assignment.id}`, sessionToken);
+        setSuccess("Department access removed.");
+        await loadDepartmentAccess();
+      } catch (e: unknown) {
+        setErr(hrApiErrorMessage(e, "Unable to remove department access."));
+      }
+    },
+    [sessionToken, loadDepartmentAccess]
+  );
+
   const generateReport = useCallback(async () => {
     if (!sessionToken) return;
     setReportBusy(true);
@@ -567,6 +678,61 @@ export default function HrApp() {
   const narrative = scorecard?.narrative ?? "";
   const gradeCounts = executiveSummary?.gradeCounts ?? { A: 0, B: 0, C: 0, D: 0, F: 0 };
 
+  const viewMode = scorecard?.viewMode ?? (scorecard?.fullAccess ? "executive" : "department");
+  const isDepartmentView = viewMode === "department";
+  const isExecutiveView = viewMode === "executive" || Boolean(scorecard?.fullAccess);
+  const departmentNames = (scorecard?.departments ?? []).map((d) => d.name).join(", ");
+  const heroWeekLabel =
+    weekOptions.find((w) => w.weekStart === (scorecard?.weekStart ?? selectedWeekStart))?.weekLabel ??
+    scorecard?.weekLabel ??
+    "";
+
+  const allLoadedMistakes = useMemo(
+    () => mistakesLog.flatMap((week) => week.mistakes ?? []),
+    [mistakesLog]
+  );
+
+  const showAttributionColumns = useMemo(
+    () => allLoadedMistakes.some((m) => m.loggedByName || m.updatedByName),
+    [allLoadedMistakes]
+  );
+
+  const logSectionOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of allLoadedMistakes) {
+      if (m.sectionId) map.set(m.sectionId, m.sectionName ?? m.sectionId);
+    }
+    for (const row of rows) {
+      map.set(row.sectionId, row.name);
+    }
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [allLoadedMistakes, rows]);
+
+  const logDepartmentOptions = useMemo(() => {
+    const slugs = new Set<string>();
+    for (const m of allLoadedMistakes) {
+      if (m.departmentSlug) slugs.add(m.departmentSlug);
+    }
+    for (const g of deptGroups) slugs.add(g.slug);
+    return [...slugs]
+      .map((slug) => {
+        const fromGroup = deptGroups.find((g) => g.slug === slug);
+        const fromDept = scorecard?.departments?.find((d) => d.slug === slug);
+        return { slug, name: fromGroup?.name ?? fromDept?.name ?? slug };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [allLoadedMistakes, deptGroups, scorecard?.departments]);
+
+  const filterMistakes = useCallback(
+    (mistakes: MistakeLogEntry[]) =>
+      mistakes.filter((m) => {
+        if (logFilterDepartment && m.departmentSlug !== logFilterDepartment) return false;
+        if (logFilterSection && m.sectionId !== logFilterSection) return false;
+        return true;
+      }),
+    [logFilterDepartment, logFilterSection]
+  );
+
   const selectedWeekLog = useMemo(() => {
     const ws = scorecard?.weekStart ?? selectedWeekStart;
     return mistakesLog.find((w) => w.weekStart === ws) ?? mistakesLog[0] ?? null;
@@ -576,6 +742,14 @@ export default function HrApp() {
     const ws = scorecard?.weekStart ?? selectedWeekStart;
     return mistakesLog.filter((w) => w.weekStart !== ws);
   }, [mistakesLog, scorecard?.weekStart, selectedWeekStart]);
+
+  const recentMistakesForSection = useCallback(
+    (sectionId: string) =>
+      (selectedWeekLog?.mistakes ?? [])
+        .filter((m) => m.sectionId === sectionId && m.entryKind !== "quick_count")
+        .slice(0, 3),
+    [selectedWeekLog]
+  );
 
   const menuItems: EliteosTopbarMenuItem[] = [
     {
@@ -603,13 +777,15 @@ export default function HrApp() {
     }
   ];
 
-  const renderSectionCard = (row: SectionRow, variant: "grade" | "metric") => (
+  const renderSectionCard = (row: SectionRow, variant: "grade" | "metric") => {
+    const recentMistakes = variant === "grade" && isCountSection(row.metricKind) ? recentMistakesForSection(row.sectionId) : [];
+    return (
     <article key={row.sectionId} className={`hr-section-card hr-section-card--${variant}`}>
       <header className="hr-section-card-head">
         <h2>{row.name}</h2>
         <GradeChip grade={row.letterGrade} />
       </header>
-      {row.trendLabel && row.gradingEnabled ? (
+      {row.trendLabel ? (
         <p className={`hr-section-trend ${trendClass(row.trend)}`}>{row.trendLabel}</p>
       ) : null}
       <dl className="hr-section-metrics">
@@ -648,6 +824,21 @@ export default function HrApp() {
         </div>
       ) : null}
 
+      {recentMistakes.length ? (
+        <div className="hr-section-recent-wrap">
+          <p className="hr-section-recent-title">Recent detailed entries</p>
+          <ul className="hr-section-recent">
+            {recentMistakes.map((m) => (
+              <li key={m.id}>
+                <strong>{formatDate(m.occurredAt)}</strong>
+                {m.jobCustomer ? ` · ${m.jobCustomer}` : ""}
+                {m.description ? <p>{m.description}</p> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <footer className="hr-section-card-foot">
         {variant === "grade" && isCountSection(row.metricKind) ? (
           <button type="button" className="btn btn-primary btn-sm" onClick={() => openMistakeModal(row)}>
@@ -662,6 +853,7 @@ export default function HrApp() {
       </footer>
     </article>
   );
+  };
 
   const renderMistakeRow = (mistake: MistakeLogEntry) => {
     const isQuick = mistake.entryKind === "quick_count";
@@ -673,6 +865,16 @@ export default function HrApp() {
         <td>{mistake.description ?? "—"}</td>
         <td>{mistake.severity ?? "—"}</td>
         <td>{mistake.personInvolved ?? "—"}</td>
+        {showAttributionColumns ? (
+          <>
+            <td className="hr-mistakes-attribution">{mistake.loggedByName ?? "—"}</td>
+            <td className="hr-mistakes-attribution">
+              {mistake.updatedByName
+                ? `${mistake.updatedByName}${mistake.updatedAt ? ` · ${formatDateTime(mistake.updatedAt)}` : ""}`
+                : "—"}
+            </td>
+          </>
+        ) : null}
         <td className="hr-mistake-actions">
           {isQuick ? (
             <span className="hr-mistake-tag">Quick count</span>
@@ -691,7 +893,39 @@ export default function HrApp() {
     );
   };
 
-  const renderMistakeTable = (mistakes: MistakeLogEntry[]) => (
+  const mistakeTableColSpan = showAttributionColumns ? 9 : 7;
+
+  const renderMistakeLogFilters = () =>
+    isExecutiveView ? (
+      <div className="hr-mistakes-filters">
+        <label className="field">
+          Department
+          <select value={logFilterDepartment} onChange={(e) => setLogFilterDepartment(e.target.value)}>
+            <option value="">All departments</option>
+            {logDepartmentOptions.map((d) => (
+              <option key={d.slug} value={d.slug}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          Section
+          <select value={logFilterSection} onChange={(e) => setLogFilterSection(e.target.value)}>
+            <option value="">All sections</option>
+            {logSectionOptions.map(([sectionId, name]) => (
+              <option key={sectionId} value={sectionId}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    ) : null;
+
+  const renderMistakeTable = (mistakes: MistakeLogEntry[]) => {
+    const filtered = filterMistakes(mistakes);
+    return (
     <div className="hr-mistakes-table-wrap">
       <table className="hr-mistakes-table">
         <thead>
@@ -702,15 +936,21 @@ export default function HrApp() {
             <th>Description</th>
             <th>Severity</th>
             <th>Person</th>
+            {showAttributionColumns ? (
+              <>
+                <th>Entered by</th>
+                <th>Updated by</th>
+              </>
+            ) : null}
             <th />
           </tr>
         </thead>
         <tbody>
-          {mistakes.length ? (
-            mistakes.map(renderMistakeRow)
+          {filtered.length ? (
+            filtered.map(renderMistakeRow)
           ) : (
             <tr>
-              <td colSpan={7} className="hr-mistakes-empty">
+              <td colSpan={mistakeTableColSpan} className="hr-mistakes-empty">
                 No detailed mistakes logged for this week.
               </td>
             </tr>
@@ -719,6 +959,7 @@ export default function HrApp() {
       </table>
     </div>
   );
+  };
 
   return (
     <div className="shell">
@@ -775,8 +1016,15 @@ export default function HrApp() {
             <section className="hr-scorecard-hero">
               <div>
                 <p className="hero-eyebrow">HR Head · Operations</p>
-                <h1 className="hero-title">Weekly Operations Scorecard</h1>
-                <p className="hero-sub">Enter weekly counts and metrics, log detailed mistakes, and freeze the end-of-week report.</p>
+                <h1 className="hero-title">
+                  {isDepartmentView ? "Department Quality Entry" : "Weekly Operations Scorecard"}
+                </h1>
+                <p className="hero-sub">
+                  {isDepartmentView
+                    ? [departmentNames, heroWeekLabel].filter(Boolean).join(" · ") ||
+                      "Enter weekly counts and log detailed mistakes for your assigned departments."
+                    : "Enter weekly counts and metrics, log detailed mistakes, and freeze the end-of-week report."}
+                </p>
               </div>
               <div className="hr-scorecard-controls">
                 <label className="field">
@@ -784,12 +1032,12 @@ export default function HrApp() {
                   <select value={selectedWeekStart} onChange={(e) => setSelectedWeekStart(e.target.value)} disabled={busy}>
                     {weekOptions.map((w) => (
                       <option key={w.weekStart} value={w.weekStart}>
-                        {w.isCurrentWeek ? `Current week · ${w.weekLabel}` : w.weekLabel}
+                        {w.weekLabel}
                       </option>
                     ))}
                   </select>
                 </label>
-                {scorecard?.overallGrade ? (
+                {!isDepartmentView && scorecard?.overallGrade ? (
                   <div className="hr-overall-grade">
                     <span>Overall company grade</span>
                     <strong className={`hr-grade-badge hr-grade-badge--sm hr-grade-badge--${scorecard.overallGrade.toLowerCase()}`}>
@@ -804,7 +1052,7 @@ export default function HrApp() {
             {err ? <div className="banner banner-error">{err}</div> : null}
             {success ? <EosAlertBanner tone="success">{success}</EosAlertBanner> : null}
 
-            {executiveSummary ? (
+            {!isDepartmentView && executiveSummary ? (
               <section className="hr-exec-summary">
                 <h2 className="hr-scorecard-section-title">Executive Summary</h2>
                 <div className="hr-exec-summary-grid">
@@ -844,6 +1092,7 @@ export default function HrApp() {
               </section>
             ) : null}
 
+            {!isDepartmentView && scorecard?.canGenerateReport !== false ? (
             <div className="hr-scorecard-actions">
               <button type="button" className="btn btn-primary" disabled={reportBusy || busy} onClick={() => void generateReport()}>
                 {reportBusy ? "Generating…" : "Generate Weekly Report"}
@@ -859,8 +1108,9 @@ export default function HrApp() {
                 </>
               ) : null}
             </div>
+            ) : null}
 
-            {reportText || reportHtml ? (
+            {!isDepartmentView && (reportText || reportHtml) ? (
               <section className="hr-report-panel">
                 <h2 className="hr-report-title">Weekly report</h2>
                 {reportHtml ? (
@@ -871,21 +1121,107 @@ export default function HrApp() {
               </section>
             ) : null}
 
+            {isExecutiveView && scorecard?.canManageDepartments ? (
+              <section className="hr-dept-access">
+                <button
+                  type="button"
+                  className="hr-dept-access-toggle"
+                  onClick={() => setDeptAccessOpen((v) => !v)}
+                  aria-expanded={deptAccessOpen}
+                >
+                  {deptAccessOpen ? "Hide Department Access" : "Department Access"}
+                  {deptAssignments.length ? ` (${deptAssignments.length})` : ""}
+                </button>
+                {deptAccessOpen ? (
+                  <div className="hr-dept-access-panel">
+                    <p className="hr-dept-access-intro">
+                      Assign users to department groups so they can enter quality data for those sections only.
+                    </p>
+                    <div className="hr-dept-access-form">
+                      <label className="field">
+                        User
+                        <select value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)} disabled={deptAccessBusy}>
+                          <option value="">Select user…</option>
+                          {employees.map((emp) => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.fullName}
+                              {emp.email ? ` (${emp.email})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        Department
+                        <select value={assignDeptSlug} onChange={(e) => setAssignDeptSlug(e.target.value)} disabled={deptAccessBusy}>
+                          <option value="">Select department…</option>
+                          {(deptGroups.length ? deptGroups : scorecard?.departments ?? []).map((g) => (
+                            <option key={g.slug} value={g.slug}>
+                              {g.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={deptAssignBusy || deptAccessBusy || !assignUserId || !assignDeptSlug}
+                        onClick={() => void assignDepartment()}
+                      >
+                        {deptAssignBusy ? "Assigning…" : "Assign"}
+                      </button>
+                    </div>
+                    {deptAccessBusy ? <p className="hr-dept-access-meta">Loading assignments…</p> : null}
+                    {deptAssignments.length ? (
+                      <ul className="hr-dept-access-list">
+                        {deptAssignments.map((a) => (
+                          <li key={a.id}>
+                            <div className="hr-dept-access-item">
+                              <strong>{a.userName}</strong>
+                              <span>
+                                {a.departmentName}
+                                {a.userEmail ? ` · ${a.userEmail}` : ""}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={deptAccessBusy}
+                              onClick={() => void removeDepartmentAssignment(a)}
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="hr-dept-access-empty">No department assignments yet.</p>
+                    )}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
+            {gradeRows.length ? (
             <section className="hr-scorecard-section">
-              <h2 className="hr-scorecard-section-title">Grades</h2>
+              <h2 className="hr-scorecard-section-title">{isDepartmentView ? "Your sections" : "Grades"}</h2>
               <div className="hr-scorecard-grid">{gradeRows.map((row) => renderSectionCard(row, "grade"))}</div>
             </section>
+            ) : null}
 
+            {metricRows.length ? (
             <section className="hr-scorecard-section">
               <h2 className="hr-scorecard-section-title">Totals / Metrics</h2>
               <div className="hr-scorecard-grid">{metricRows.map((row) => renderSectionCard(row, "metric"))}</div>
             </section>
+            ) : null}
 
             <section className="hr-mistakes-log">
               <div className="hr-mistakes-log-head">
                 <h2 className="hr-scorecard-section-title">Mistakes Log</h2>
                 {logBusy ? <span className="hr-mistakes-log-meta">Updating…</span> : null}
               </div>
+
+              {renderMistakeLogFilters()}
 
               <div className="hr-mistakes-week-block">
                 <h3>{selectedWeekLog?.weekLabel ?? scorecard?.weekLabel ?? "Selected week"}</h3>
