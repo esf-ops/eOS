@@ -81,7 +81,7 @@ export function buildQuoteLibraryCustomerConfigProjection(input = {}) {
     ) {
       continue;
     }
-    if (kind === "edge" && (mode === "eased" || mode === "included")) continue;
+    if (kind === "edge" && (mode === "eased" || mode === "included" || mode === "edge_eased")) continue;
     if (kind === "sidesplash" && parts[parts.length - 1] === "none") continue;
 
     meaningfulOptionChanges.push({

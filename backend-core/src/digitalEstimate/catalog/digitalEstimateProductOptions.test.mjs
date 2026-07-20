@@ -218,21 +218,22 @@ console.log("\ndigitalEstimateProductOptions.test.mjs\n");
   assert.ok(seeded.some((o) => o.optionKey.startsWith("faucet:kitchen:")));
   assert.ok(seeded.some((o) => o.optionKey === "backsplash:kitchen:standard_4in"));
   assert.ok(seeded.some((o) => o.optionKey.startsWith("specialty:kitchen:esf:")));
-  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:included"));
+  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:edge_eased"));
   assert.ok(
     seeded.some(
       (o) =>
-        o.optionKey === "edge:kitchen:included" &&
-        o.displayLabel === "Included edges (eased)" &&
+        o.optionKey === "edge:kitchen:edge_eased" &&
+        o.displayLabel === "Eased" &&
         o.includedInBaseline === true
     )
   );
-  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:w_edge"));
-  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:d_edge"));
+  assert.ok(seeded.some((o) => o.optionKey === "edge:kitchen:edge_small_ogee"));
+  assert.ok(seeded.some((o) => o.displayLabel === "Knife"));
+  assert.ok(!seeded.some((o) => /W edge|D edge|Included edges/i.test(o.displayLabel)));
   assert.equal(
     seeded.filter((o) => o.optionKey.startsWith("edge:")).length,
-    3,
-    "Studio-governed edge set only"
+    8,
+    "Internal Estimate free+premium edge set"
   );
   console.log("ok: default room product option bundle");
 }
@@ -243,11 +244,12 @@ console.log("\ndigitalEstimateProductOptions.test.mjs\n");
     choiceGroups: ["edge"],
     estimateEdgeMode: "w_edge"
   });
-  const wOpt = wBaseline.find((o) => o.optionKey === "edge:kitchen:w_edge");
-  assert.ok(wOpt?.includedInBaseline, "original Studio W edge is baseline");
-  assert.equal(wOpt?.displayLabel, "W edge");
+  const wOpt = wBaseline.find((o) => o.optionKey === "edge:kitchen:edge_small_ogee");
+  assert.ok(wOpt?.includedInBaseline, "legacy w_edge maps to Small Ogee as original");
+  assert.equal(wOpt?.displayLabel, "Small Ogee");
   assert.ok(!wBaseline.some((o) => o.optionKey === "edge:kitchen:eased"));
-  console.log("ok: edge authority uses Studio scope original");
+  assert.ok(!wBaseline.some((o) => o.displayLabel === "W edge"));
+  console.log("ok: edge authority uses Internal Estimate profiles");
 }
 
 {
@@ -258,7 +260,7 @@ console.log("\ndigitalEstimateProductOptions.test.mjs\n");
       "material:kitchen:e100-alabaster": 1,
       "sink:kitchen:esf:kansas:3018UM18": 1,
       "sink:kitchen:none": 0,
-      "edge:kitchen:included": 1
+      "edge:kitchen:edge_eased": 1
     },
     missingInformationRequirements: [{ code: "customer_sink_model_required" }],
     selectedMaterialGroup: "group_b"

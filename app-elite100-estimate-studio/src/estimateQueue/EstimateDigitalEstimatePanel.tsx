@@ -214,7 +214,7 @@ export default function EstimateDigitalEstimatePanel({
   const [choiceFlags, setChoiceFlags] = useState<Record<string, boolean>>(() =>
     inferFriendlyChoiceFlags({
       allowedOptionKeys: ["qty-sink"],
-      customerChoiceGroups: ["materialColor", "sink", "edge", "backsplash"]
+      customerChoiceGroups: ["material_color", "sink", "edge", "backsplash"]
     })
   );
   const [publishedChoiceFlags, setPublishedChoiceFlags] = useState<Record<

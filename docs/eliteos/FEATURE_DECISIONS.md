@@ -1799,3 +1799,14 @@
 | **SQL** | None. |
 | **Ops** | Deploy **Brain**, **app-elite100-estimate-studio**, and **app-digital-estimate**. Re-open Studio Digital Estimate and **Save / Update Configuration** once per live estimate so envelopes pick up corrected permissions and edge options. |
 | **Out of scope** | Per-room Internal Estimate profile catalogs on Studio estimates; inventing ungovered edge pricing; SQL migrations. |
+
+### 130. Digital Estimate save contract, Internal Estimate edge profiles, Supabase imagery (2026-07-20)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-20 |
+| **Decision** | (1) Hosted `23514` on Studio Save/Update came from inserting `configuration_updated` into `quote_publication_events` outside the event_type check; public autosave failed the same way on `quote_library_customer_config` in `digital_estimate_configuration_events`. Migration **`eliteos_digital_estimate_configuration_updated_event_v1.sql`** widens both checks. Known contract violations map to **422 `DE-CONFIGURATION-CONTRACT-INVALID`** without rotating the customer link. (2) Canonical permission keys are snake_case (`material_color`, `cooktop_cutout`, `side_splash`, …); camelCase aliases normalize before fingerprint/persist. (3) Customer edge dropdown uses Internal Estimate free/premium profiles (Eased…Bevel / Small Ogee…Knife); Brain applies $15 wholesale or $25 direct per LF — never browser-authored rates; no W/D/included scope labels. (4) Elite 100 imagery prefers **`SLABOS_ORGANIZATION_ID`**, then public visualizer / slabcloud org ids; enrichment receives `organizationId` and fails soft when unset. |
+| **Why** | Hosted Studio configuration save and customer autosave both hit Postgres check constraints; edge choices were scope classifications; imagery had no reliable org id in the public DE path. |
+| **SQL** | **Required (manual apply):** `backend-core/supabase/eliteos_digital_estimate_configuration_updated_event_v1.sql` |
+| **Ops** | Apply SQL, deploy Brain + Studio + Digital Estimate. Set `SLABOS_ORGANIZATION_ID` on Brain if missing. Re-Save Configuration once so envelopes reseed edge profiles. |
+| **Out of scope** | Sink/faucet/add-on product-model cleanup (deferred); inventing edge LF when missing (review required). |

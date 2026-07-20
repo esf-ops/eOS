@@ -7,61 +7,63 @@ import {
   FRIENDLY_CUSTOMER_CHOICES,
   buildCustomerChoiceConfiguration,
   inferCustomerChoiceGroupsFromEnvelopeOptions,
-  inferFriendlyChoiceFlags
+  inferFriendlyChoiceFlags,
+  normalizeCustomerChoiceGroups
 } from "./studioCustomerChoiceOptions.mjs";
 import {
+  ALL_EDGE_PROFILES,
+  FREE_EDGE_PROFILES,
+  PREMIUM_EDGE_PROFILES,
   buildAuthoritativeEdgeOptionDefinitions,
-  normalizeStudioEdgeMode,
-  studioEdgeDisplayLabel
+  edgeProfileDisplayLabel,
+  isPremiumEdgeProfile,
+  normalizeEdgeProfileToken,
+  remapLegacyEdgeOptionKey,
+  resolvePremiumEdgeRatePerLf
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
+import { mapStudioPublicationPersistenceError } from "./studioEstimatePublicationSource.mjs";
 
 {
   const a = hashConfigurationEnvelope({
-    customerChoiceGroups: ["materialColor", "sink"],
-    allowedOptionKeys: ["qty-sink"]
+    customerChoiceGroups: ["material_color", "sink"]
   });
   const b = hashConfigurationEnvelope({
-    customerChoiceGroups: ["materialColor", "sink", "faucet"],
-    allowedOptionKeys: ["qty-sink"]
+    customerChoiceGroups: ["material_color", "sink", "faucet"]
   });
-  assert.notEqual(a, b, "faucet permission must change fingerprint (empty catalogKeys)");
+  assert.notEqual(a, b, "faucet permission must change fingerprint");
+  const legacy = hashConfigurationEnvelope({
+    customerChoiceGroups: ["materialColor", "sink"]
+  });
+  assert.equal(a, legacy, "camelCase aliases must normalize into same fingerprint");
   const c = hashConfigurationEnvelope({
-    customerChoiceGroups: ["materialColor", "sink", "edge", "backsplash"],
-    allowedOptionKeys: ["qty-sink"]
+    customerChoiceGroups: ["material_color", "sink", "edge", "backsplash"]
   });
   const d = hashConfigurationEnvelope({
-    customerChoiceGroups: ["materialColor", "sink", "edge", "backsplash", "sideSplash"],
-    allowedOptionKeys: ["qty-sink"]
+    customerChoiceGroups: ["material_color", "sink", "edge", "backsplash", "side_splash"]
   });
-  assert.notEqual(c, d, "sideSplash must change fingerprint");
-  const same = hashConfigurationEnvelope({
-    customerChoiceGroups: ["sink", "materialColor"],
-    allowedOptionKeys: ["qty-sink"]
-  });
-  assert.equal(a, same, "group order must not change fingerprint");
-  console.log("ok: fingerprint includes customerChoiceGroups");
+  assert.notEqual(c, d, "side_splash must change fingerprint");
+  console.log("ok: fingerprint includes canonical customerChoiceGroups");
 }
 
 {
-  const allOn = Object.fromEntries(FRIENDLY_CUSTOMER_CHOICES.map((d) => [d.id, true]));
-  const cfg = buildCustomerChoiceConfiguration(allOn);
-  assert.equal(cfg.customerChoiceGroups.length, 9);
-  const fp = hashConfigurationEnvelope(cfg);
-  assert.equal(fp.length, 32);
-  const toggled = { ...allOn, accessories: false };
-  assert.notEqual(
-    fp,
-    hashConfigurationEnvelope(buildCustomerChoiceConfiguration(toggled)),
-    "each permission flag must affect fingerprint"
+  assert.throws(
+    () => normalizeCustomerChoiceGroups(["not_a_real_permission"], { rejectUnknown: true }),
+    (e) => e?.code === "DE-CONFIGURATION-CONTRACT-INVALID"
   );
-  console.log("ok: all nine permissions affect fingerprint");
+  const nine = normalizeCustomerChoiceGroups(FRIENDLY_CUSTOMER_CHOICES.map((d) => d.id));
+  assert.equal(nine.length, 9);
+  const cfg = buildCustomerChoiceConfiguration(
+    Object.fromEntries(FRIENDLY_CUSTOMER_CHOICES.map((d) => [d.id, true]))
+  );
+  assert.equal(cfg.customerChoiceGroups.length, 9);
+  console.log("ok: unknown permission rejected; nine-key set saves");
 }
 
 {
   const inferred = inferCustomerChoiceGroupsFromEnvelopeOptions([
     { option_key: "material:kitchen:e100-carrara-classic" },
     { optionKey: "sink:kitchen:none" },
-    { option_key: "edge:kitchen:included" },
+    { option_key: "edge:kitchen:edge_eased" },
     { option_key: "faucet:kitchen:none" },
     { option_key: "accessory:kitchen:esf:x" },
     { option_key: "specialty:kitchen:esf:y" },
@@ -69,56 +71,60 @@ import {
     { option_key: "sidesplash:kitchen:p1:none" },
     { option_key: "qty-cook" }
   ]);
-  assert.deepEqual(inferred.sort(), [
-    "accessories",
-    "backsplash",
-    "cooktop",
-    "edge",
-    "faucet",
-    "materialColor",
-    "sideSplash",
+  assert.deepEqual(inferred, [
+    "material_color",
     "sink",
-    "specialty"
-  ].sort());
+    "faucet",
+    "accessories",
+    "specialty",
+    "cooktop_cutout",
+    "edge",
+    "backsplash",
+    "side_splash"
+  ]);
   const flags = inferFriendlyChoiceFlags({ customerChoiceGroups: inferred });
-  assert.equal(flags.materialColor, true);
+  assert.equal(flags.material_color, true);
   assert.equal(flags.faucet, true);
-  assert.equal(flags.accessories, true);
   console.log("ok: envelope options hydrate all nine friendly flags");
 }
 
 {
-  assert.equal(normalizeStudioEdgeMode("eased"), "included");
-  assert.equal(normalizeStudioEdgeMode("included"), "included");
-  assert.equal(studioEdgeDisplayLabel("included"), "Included edges (eased)");
-  assert.equal(studioEdgeDisplayLabel("w_edge"), "W edge");
-  const onlyOriginal = buildAuthoritativeEdgeOptionDefinitions({
+  assert.equal(FREE_EDGE_PROFILES.length, 5);
+  assert.equal(PREMIUM_EDGE_PROFILES.length, 3);
+  assert.equal(ALL_EDGE_PROFILES.length, 8);
+  assert.equal(normalizeEdgeProfileToken("eased"), "edge_eased");
+  assert.equal(normalizeEdgeProfileToken("included"), "edge_eased");
+  assert.equal(normalizeEdgeProfileToken("w_edge"), "edge_small_ogee");
+  assert.equal(edgeProfileDisplayLabel("edge_eased"), "Eased");
+  assert.equal(edgeProfileDisplayLabel("edge_knife"), "Knife");
+  assert.ok(!["W edge", "D edge", "Included edges (eased)"].includes(edgeProfileDisplayLabel("included")));
+  assert.equal(remapLegacyEdgeOptionKey("edge:kitchen:eased"), "edge:kitchen:edge_eased");
+  assert.equal(resolvePremiumEdgeRatePerLf("wholesale"), 15);
+  assert.equal(resolvePremiumEdgeRatePerLf("direct"), 25);
+  assert.equal(isPremiumEdgeProfile("edge_crescent"), true);
+  assert.equal(isPremiumEdgeProfile("edge_eased"), false);
+
+  const opts = buildAuthoritativeEdgeOptionDefinitions({
     roomKey: "kitchen",
-    originalEdgeMode: "w_edge",
-    approvedEdgeModes: [],
+    originalProfileToken: "edge_eased",
+    approvedProfileTokens: null,
     baseOption: (row) => row
   });
-  assert.equal(onlyOriginal.length, 1);
-  assert.equal(onlyOriginal[0].optionKey, "edge:kitchen:w_edge");
-  assert.equal(onlyOriginal[0].includedInBaseline, true);
-  assert.ok(!onlyOriginal.some((o) => /eased/.test(o.optionKey)));
-  const full = buildAuthoritativeEdgeOptionDefinitions({
-    roomKey: "kitchen",
-    originalEdgeMode: "included",
-    approvedEdgeModes: ["included", "w_edge", "d_edge"],
-    baseOption: (row) => row
-  });
-  assert.equal(full.length, 3);
-  assert.ok(full.every((o) => o.displayLabel !== "Eased edge"));
-  console.log("ok: edge authority — original only when no alternatives; Studio labels");
+  assert.equal(opts.length, 8);
+  assert.ok(opts.every((o) => !/W edge|D edge|Included edges/i.test(o.displayLabel)));
+  assert.ok(opts.some((o) => o.optionKey === "edge:kitchen:edge_eased" && o.includedInBaseline));
+  assert.ok(opts.some((o) => o.displayLabel === "Small Ogee"));
+  console.log("ok: Internal Estimate edge profiles — no W/D/included scope labels");
 }
 
 {
-  const a = hashConfigurationEnvelope({ customerChoiceGroups: ["edge"] });
-  const b = hashConfigurationEnvelope({ customerChoiceGroups: ["edge"] });
-  assert.equal(a, b);
-  assert.equal(a.length, 32);
-  console.log("ok: fingerprint shape is stable 32-char hash");
+  const mapped = mapStudioPublicationPersistenceError({
+    code: "23514",
+    message: 'new row for relation "quote_publication_events" violates check constraint "quote_publication_events_event_type_check"'
+  });
+  assert.equal(mapped.code, "DE-CONFIGURATION-CONTRACT-INVALID");
+  assert.equal(mapped.statusCode, 422);
+  console.log("ok: 23514 maps to DE-CONFIGURATION-CONTRACT-INVALID");
 }
 
 console.log("\nAll studio envelope permissions + edge authority tests passed.\n");

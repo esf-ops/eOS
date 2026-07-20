@@ -254,6 +254,7 @@ export function createConfigurationStudioService(deps) {
             "accessories",
             "specialty",
             "edge",
+            "side_splash",
             "sideSplash"
           ].includes(id)
         );

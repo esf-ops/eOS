@@ -65,6 +65,18 @@ export function mapStudioPublicationPersistenceError(e) {
       409
     );
   }
+  if (
+    code === "23514" ||
+    msg.includes("check constraint") ||
+    msg.includes("violates check") ||
+    msg.includes("event_type")
+  ) {
+    return deError(
+      "Configuration contract rejected by database. Apply eliteos_digital_estimate_configuration_updated_event_v1.sql if missing.",
+      "DE-CONFIGURATION-CONTRACT-INVALID",
+      422
+    );
+  }
   return deError("Publication storage is unavailable.", "publication_storage_unavailable", 503);
 }
 
