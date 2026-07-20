@@ -7,7 +7,9 @@
  *     customerVisible:false / remnantPermitted:false and are excluded from the
  *     default list unless remnantPermitted is passed to listElite100CustomerMaterials.
  *   - Pricing group codes are internal-only — never project into public customer DTOs.
- *   - Image paths are same-origin static assets under /materials/elite100/.
+ *   - Image URLs: prefer Supabase public bucket `eliteos-slab-images` via
+ *     elite100CustomerImageResolver (same pipeline as kiosk showroom / Slab Inventory).
+ *     Local `/materials/elite100/` pilots remain fallback only.
  *
  * v1 → v2: catalog grew from 17 hand-maintained colors to the full Elite 100;
  * materialIds for the original 17 are preserved. Contract id bumped to v2.
@@ -310,12 +312,21 @@ export function toCustomerSafeMaterialRecord(m, ctx = {}) {
   const groupLabel =
     GROUP_CODE_DISPLAY_NAMES[m.pricingGroupCode] ||
     (m.pricingGroupCode ? String(m.pricingGroupCode) : null);
+  const thumbnailUrl = m.thumbnailUrl || m.imageThumbPath || null;
+  const previewUrl = m.previewUrl || m.imageFullPath || thumbnailUrl || null;
+  const imageStatus =
+    m.imageStatus ||
+    m.textureFallbackStatus ||
+    (thumbnailUrl || previewUrl ? "ready" : "missing");
   return {
     materialId: m.materialId,
     displayName: m.displayName,
-    imageAssetPath: m.imageThumbPath,
-    imageFullPath: m.imageFullPath,
-    textureFallbackStatus: m.textureFallbackStatus || (m.imageThumbPath ? "ready" : "missing"),
+    imageAssetPath: thumbnailUrl,
+    imageFullPath: previewUrl,
+    thumbnailUrl,
+    previewUrl,
+    imageStatus,
+    textureFallbackStatus: imageStatus === "missing" ? "missing" : "ready",
     collectionLabel: m.collectionLabel,
     colorFamily: m.colorFamily,
     patternType: m.patternType,

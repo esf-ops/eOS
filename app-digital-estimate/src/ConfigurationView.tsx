@@ -419,8 +419,11 @@ function ColorPickerModal({
                   <img
                     src={preview.imageFull || preview.imageThumb || undefined}
                     alt={preview.name}
+                    loading="lazy"
+                    decoding="async"
                     className="aspect-square w-full object-cover"
                     data-testid="de-color-preview-full"
+                    data-preview-src={preview.imageFull ? "full" : "thumb"}
                   />
                 ) : (
                   <MaterialThumb src={null} alt={preview.name} size="lg" className="aspect-square h-auto min-h-[10rem] w-full rounded-none border-0" />

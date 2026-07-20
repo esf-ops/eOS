@@ -189,6 +189,9 @@ export type CustomerMaterial = {
   displayName: string;
   imageAssetPath?: string | null;
   imageFullPath?: string | null;
+  thumbnailUrl?: string | null;
+  previewUrl?: string | null;
+  imageStatus?: string | null;
   textureFallbackStatus?: string | null;
   collectionLabel?: string | null;
   colorFamily?: string | null;

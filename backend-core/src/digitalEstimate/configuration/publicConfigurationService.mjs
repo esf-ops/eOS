@@ -13,6 +13,7 @@ import {
   rejectClientAuthoritativeEconomics,
   serverApprovedOptionCatalog
 } from "./configurationTrustedContext.mjs";
+import { enrichElite100MaterialsWithCustomerImages } from "./elite100CustomerImageResolver.mjs";
 import { normalizeSelectionPayload } from "./configurationValidation.mjs";
 import {
   mergeSelectionPayloadMeta,
@@ -236,6 +237,7 @@ function toCustomerSafeOption(opt, group) {
       customerSafe.description ||
       null,
     imageAssetRef:
+      mat?.thumbnailUrl ||
       mat?.imageThumbPath ||
       opt.image_asset_ref ||
       opt.imageAssetRef ||
@@ -282,14 +284,16 @@ function toCustomerSafeOption(opt, group) {
   return publicOpt;
 }
 
-function buildCustomerSafeMaterials(graphOptions) {
+function buildCustomerSafeMaterials(graphOptions, enrichedById = null) {
   const materials = [];
   for (const opt of graphOptions || []) {
     const key = opt.option_key || opt.optionKey || "";
     if (!String(key).startsWith("material:")) continue;
     const resolved = resolveMaterialSelectionFromOption(opt);
     if (!resolved.materialId) continue;
-    const mat = getElite100CustomerMaterial(resolved.materialId);
+    const mat =
+      (enrichedById && enrichedById.get(resolved.materialId)) ||
+      getElite100CustomerMaterial(resolved.materialId);
     if (!mat) continue;
     const availability = opt.availability_state || opt.availabilityState || "active";
     materials.push(
@@ -317,7 +321,8 @@ export function createPublicConfigurationService(deps) {
   const {
     deRepository,
     configurationRepository,
-    pricingPolicyRepository = null
+    pricingPolicyRepository = null,
+    getSupabase = null
   } = deps;
   const env = deps.env ?? process.env;
 
@@ -507,7 +512,35 @@ export function createPublicConfigurationService(deps) {
         const g = (graph?.groups || []).find((x) => x.id === o.group_id);
         return toCustomerSafeOption(o, g);
       });
-    const materials = buildCustomerSafeMaterials(graph?.options || []);
+    let enrichedById = null;
+    try {
+      const seedMaterials = [];
+      const seen = new Set();
+      for (const opt of graph?.options || []) {
+        const resolved = resolveMaterialSelectionFromOption(opt);
+        if (!resolved.materialId || seen.has(resolved.materialId)) continue;
+        const mat = getElite100CustomerMaterial(resolved.materialId);
+        if (!mat) continue;
+        seen.add(resolved.materialId);
+        seedMaterials.push(mat);
+      }
+      if (seedMaterials.length) {
+        const enriched = await enrichElite100MaterialsWithCustomerImages(seedMaterials, {
+          getSupabase: typeof getSupabase === "function" ? getSupabase : null,
+          env
+        });
+        enrichedById = new Map(enriched.map((m) => [m.materialId, m]));
+      }
+    } catch {
+      enrichedById = null;
+    }
+    const materials = buildCustomerSafeMaterials(graph?.options || [], enrichedById);
+    // Prefer Supabase thumbnail on material options (same URLs as kiosk/showroom).
+    for (const opt of options) {
+      if (!opt.materialId || !enrichedById) continue;
+      const mat = enrichedById.get(opt.materialId);
+      if (mat?.thumbnailUrl) opt.imageAssetRef = mat.thumbnailUrl;
+    }
     assertPublicConfigurationHasNoForbiddenContent(materials);
 
     let latestSelection = null;
