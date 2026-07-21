@@ -210,8 +210,11 @@ console.log("\ndigitalEstimateProductOptions.test.mjs\n");
 }
 
 {
+  // Governed backsplash location authority (DE.Polish-3, section 2/3): backsplash choices
+  // are only seeded when the room has an estimator-approved eligible location
+  // (backsplashSf / backsplashMeasuredLengthIn > 0). See roomHasEligibleBacksplashLocations.
   const seeded = buildDefaultRoomProductOptions({
-    rooms: [{ roomKey: "kitchen", displayName: "Kitchen" }],
+    rooms: [{ roomKey: "kitchen", displayName: "Kitchen", backsplashSf: 10 }],
     choiceGroups: ["sink", "faucet", "backsplash", "specialty", "edge"]
   });
   assert.ok(seeded.some((o) => o.optionKey.startsWith("sink:kitchen:")));
@@ -236,6 +239,19 @@ console.log("\ndigitalEstimateProductOptions.test.mjs\n");
     "Internal Estimate free+premium edge set"
   );
   console.log("ok: default room product option bundle");
+}
+
+{
+  // Room with no estimator-approved backsplash location (no backsplashSf, no
+  // backsplashMeasuredLengthIn — e.g. an island-only room) must not be offered any priced
+  // backsplash choice at all (section 3/11: "do not offer fake priced backsplash choices").
+  const seeded = buildDefaultRoomProductOptions({
+    rooms: [{ roomKey: "island", displayName: "Island Room" }],
+    choiceGroups: ["sink", "faucet", "backsplash", "specialty", "edge"]
+  });
+  assert.ok(!seeded.some((o) => o.optionKey.startsWith("backsplash:island:")));
+  assert.ok(seeded.some((o) => o.optionKey.startsWith("sink:island:")), "non-backsplash groups still seed normally");
+  console.log("ok: room with no eligible backsplash location gets zero backsplash options");
 }
 
 {

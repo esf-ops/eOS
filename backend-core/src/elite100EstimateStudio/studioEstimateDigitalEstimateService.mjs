@@ -970,6 +970,10 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           includeBacksplash: room.includeBacksplash,
           backsplashHeightMode: room.backsplashHeightMode,
           backsplashHeightIn: room.backsplashHeightIn,
+          backsplashSf: Number(room.backsplashSqft) || 0,
+          backsplashMeasuredLengthIn: Number.isFinite(Number(room.backsplashMeasuredLengthIn))
+            ? Number(room.backsplashMeasuredLengthIn)
+            : null,
           pieces: Array.isArray(room.pieces) ? room.pieces : [],
           edgeMode: estimate.scope?.edgeMode || "included"
         };

@@ -532,6 +532,8 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
   const roomResults = [];
   let materialSellCents = 0;
   let materialTaxCents = 0;
+  let backsplashConfiguredSellCentsTotal = 0;
+  let backsplashConfiguredUseTaxCentsTotal = 0;
 
   for (const room of input.rooms) {
     const roomKey = String(room.roomKey || room.name || "");
@@ -565,6 +567,30 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
     materialSellCents += finalMaterialSellCents;
     materialTaxCents += taxCents;
 
+    // Governed backsplash: same material $/SF rate as the room's countertop (same stone),
+    // priced against a billed SF the caller has already resolved from estimator-approved
+    // geometry only (backsplashPricingAuthority.mjs) — this engine never sees raw geometry
+    // and never invents a rate or an SF. billedSf null means "not currently priceable"
+    // (review-required) and contributes nothing to any total.
+    const backsplashConfiguredBilledSf =
+      room.backsplashConfiguredBilledSf != null && Number.isFinite(Number(room.backsplashConfiguredBilledSf))
+        ? Number(room.backsplashConfiguredBilledSf)
+        : null;
+    let backsplashConfiguredSellCents = null;
+    let backsplashConfiguredUseTaxCents = null;
+    let backsplashConfiguredAmountCents = null;
+    if (backsplashConfiguredBilledSf != null) {
+      const bsMilli = sfToMilli(backsplashConfiguredBilledSf);
+      backsplashConfiguredSellCents = mulRateCentsByMilliSf(resolved.finalRateCents, bsMilli);
+      backsplashConfiguredUseTaxCents = applyBasisPointsToCents(
+        backsplashConfiguredSellCents,
+        input.materialTaxPolicy.bps
+      );
+      backsplashConfiguredAmountCents = backsplashConfiguredSellCents + backsplashConfiguredUseTaxCents;
+      backsplashConfiguredSellCentsTotal += backsplashConfiguredSellCents;
+      backsplashConfiguredUseTaxCentsTotal += backsplashConfiguredUseTaxCents;
+    }
+
     roomResults.push({
       roomKey,
       displayName: room.displayName || room.name || roomKey,
@@ -583,7 +609,12 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
       markupBps,
       markupCents,
       materialSellCents: finalMaterialSellCents,
-      materialUseTaxCents: taxCents
+      materialUseTaxCents: taxCents,
+      backsplashMode: room.backsplashMode || "none",
+      baselineBacksplashMode: room.baselineBacksplashMode || "none",
+      backsplashReviewCodes: Array.isArray(room.backsplashReviewCodes) ? room.backsplashReviewCodes : [],
+      backsplashConfiguredBilledSf,
+      backsplashConfiguredAmountCents
     });
   }
 
@@ -656,7 +687,10 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
 
   // Material deltas vs baseline group economics (never silently full-reprice the frozen total).
   const materialGroupDeltas = [];
+  const backsplashGroupDeltas = [];
   let materialDeltaCents = 0;
+  let backsplashDeltaCents = 0;
+  const roomByKeyForBaseline = new Map(input.rooms.map((r) => [String(r.roomKey || r.name || ""), r]));
   for (const r of roomResults) {
     const baselineGroupFromInput = input.baseline?.rooms
       ? input.baseline.rooms.find((x) => (x.roomKey || x.name) === r.roomKey)
@@ -669,6 +703,7 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
     const selectedGroup = r.selectedMaterialGroup;
 
     let exactMaterialDeltaCents = 0;
+    let bResolvedForRoom = null;
     if (!bGroup) {
       if (useFrozenBaselineAnchor && selectedGroup && selectedGroup !== r.baselineMaterialGroup) {
         throw fail(
@@ -693,6 +728,7 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
         materialRateOverrides: input.materialRateOverrides,
         asOf: input.asOf
       });
+      bResolvedForRoom = bResolved;
       if (bResolved.finalRateCents == null || r.resolution.finalRateCents == null) {
         throw fail(
           "unresolved_baseline_material",
@@ -715,10 +751,44 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
       toGroup: selectedGroup,
       exactMaterialDeltaCents
     });
+
+    // Backsplash baseline amount — priced at the BASELINE group's rate (bResolvedForRoom
+    // when the group changed, otherwise the room's own selected-group rate is also the
+    // baseline rate since nothing diverged). Never invented: null billedSf stays null.
+    const rawRoom = roomByKeyForBaseline.get(r.roomKey) || {};
+    const baselineBilledSf =
+      rawRoom.backsplashOriginalBilledSf != null && Number.isFinite(Number(rawRoom.backsplashOriginalBilledSf))
+        ? Number(rawRoom.backsplashOriginalBilledSf)
+        : null;
+    const baselineRateCents = bResolvedForRoom ? bResolvedForRoom.finalRateCents : r.resolution.finalRateCents;
+    let backsplashBaselineAmountCents = null;
+    if (baselineBilledSf != null && baselineRateCents != null) {
+      const bsMilli = sfToMilli(baselineBilledSf);
+      const bsSell = mulRateCentsByMilliSf(baselineRateCents, bsMilli);
+      const bsTax = applyBasisPointsToCents(bsSell, input.materialTaxPolicy.bps);
+      backsplashBaselineAmountCents = bsSell + bsTax;
+    }
+    r.backsplashBaselineAmountCents = backsplashBaselineAmountCents;
+    r.backsplashOriginalBilledSf = baselineBilledSf;
+
+    let exactBacksplashDeltaCents = 0;
+    if (backsplashBaselineAmountCents != null && r.backsplashConfiguredAmountCents != null) {
+      exactBacksplashDeltaCents = r.backsplashConfiguredAmountCents - backsplashBaselineAmountCents;
+    }
+    backsplashDeltaCents += exactBacksplashDeltaCents;
+    backsplashGroupDeltas.push({
+      roomKey: r.roomKey,
+      originalMode: r.baselineBacksplashMode,
+      configuredMode: r.backsplashMode,
+      backsplashBaselineAmountCents,
+      backsplashConfiguredAmountCents: r.backsplashConfiguredAmountCents,
+      exactBacksplashDeltaCents,
+      reviewCodes: r.backsplashReviewCodes
+    });
   }
 
   const selectionDeltaSubtotalCents =
-    materialDeltaCents + optionsCents + customCents + creditsCents;
+    materialDeltaCents + backsplashDeltaCents + optionsCents + customCents + creditsCents;
 
   // Spahn & Rose — after complete net pre-rounded (includes use tax)
   const memberGroupIds = new Set(
@@ -778,7 +848,13 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
   } else {
     // Absolute / standalone mode (no frozen baseline) — full material+options reprice.
     preAdjustmentSubtotalCents =
-      materialSellCents + materialTaxCents + optionsCents + customCents + creditsCents;
+      materialSellCents +
+      materialTaxCents +
+      backsplashConfiguredSellCentsTotal +
+      backsplashConfiguredUseTaxCentsTotal +
+      optionsCents +
+      customCents +
+      creditsCents;
     assertFiniteCents(preAdjustmentSubtotalCents, "preAdjustmentSubtotal");
     if (spahnCandidates.length === 1) {
       const rule = spahnCandidates[0];
@@ -831,6 +907,10 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
         selectedMaterialGroup: normalizeGroupCode(r.selectedMaterialGroup || r.materialGroup),
         baselineMaterialGroup: r.baselineMaterialGroup
           ? normalizeGroupCode(r.baselineMaterialGroup)
+          : null,
+        backsplashMode: r.backsplashMode || "none",
+        backsplashConfiguredBilledSf: Number.isFinite(Number(r.backsplashConfiguredBilledSf))
+          ? Number(r.backsplashConfiguredBilledSf)
           : null
       }))
       .sort((a, b) => String(a.roomKey).localeCompare(String(b.roomKey))),
@@ -883,6 +963,10 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
     materialSubtotalCents: materialSellCents,
     materialUseTaxCents: materialTaxCents,
     materialDeltaCents,
+    backsplashConfiguredSellCentsTotal,
+    backsplashConfiguredUseTaxCentsTotal,
+    backsplashDeltaCents,
+    backsplashGroupDeltas,
     selectionDeltaSubtotalCents,
     frozenBaselineAnchor: useFrozenBaselineAnchor,
     materialUseTax: {
@@ -934,6 +1018,7 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
     configuredDisplayTotalCents: configuredDisplayCents,
     materialSellCents,
     materialTaxCents,
+    backsplashDeltaCents,
     spahnCents,
     optionsCents,
     customCents,
@@ -990,6 +1075,7 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
     totals: {
       materialSell: centsToDollars(materialSellCents),
       materialUseTax: centsToDollars(materialTaxCents),
+      backsplashDelta: centsToDollars(backsplashDeltaCents),
       preAdjustmentSubtotal: centsToDollars(preAdjustmentSubtotalCents),
       spahnAdjustment: centsToDollars(spahnCents),
       configuredExactTotal: centsToDollars(configuredExactCents),
