@@ -219,9 +219,19 @@ export default function EstimateTakeoffWorkspace({
     let cancelled = false;
     const takeoffJobId = state.takeoffJobId;
     const ac = new AbortController();
+    let inFlight = false;
+    let timer: number | null = null;
+    let errors = 0;
+
+    const schedule = (delayMs: number) => {
+      if (cancelled) return;
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void tick(), delayMs);
+    };
 
     async function tick() {
-      if (cancelled || document.hidden) return;
+      if (cancelled || inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
       try {
         const job = (await apiGet(
           `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
@@ -229,6 +239,12 @@ export default function EstimateTakeoffWorkspace({
           { signal: ac.signal }
         )) as { reviewStatus?: string; status?: string };
         if (cancelled) return;
+        errors = 0;
+        const jobStatus = String(job.status ?? "").toLowerCase();
+        const reviewStatus = String(job.reviewStatus ?? "").toLowerCase();
+        const terminal =
+          ["completed", "failed", "cancelled", "canceled"].includes(jobStatus) ||
+          reviewStatus === "approved";
         if (String(job.reviewStatus ?? "").toLowerCase() !== "approved") {
           const next = deriveEstimateTakeoffDisplayStatus({
             takeoffJobId,
@@ -240,6 +256,7 @@ export default function EstimateTakeoffWorkspace({
             if (prev.kind !== "ready" || prev.displayStatus === next) return prev;
             return { ...prev, displayStatus: next };
           });
+          if (!terminal) schedule(20_000);
           return;
         }
         setState((prev) => {
@@ -257,24 +274,26 @@ export default function EstimateTakeoffWorkspace({
             ?.scrollIntoView({ behavior: "smooth", block: "start" });
         }, 50);
       } catch {
-        /* abort / non-fatal */
+        if (!cancelled && !ac.signal.aborted) {
+          errors += 1;
+          schedule(Math.min(60_000, 20_000 * 2 ** errors));
+        }
+      } finally {
+        inFlight = false;
       }
     }
 
     void tick();
-    const timer = window.setInterval(() => {
-      void tick();
-    }, 20_000);
 
     function onVisibility() {
-      if (!document.hidden) void tick();
+      if (document.visibilityState === "visible") void tick();
     }
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelled = true;
       ac.abort();
-      window.clearInterval(timer);
+      if (timer != null) window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [

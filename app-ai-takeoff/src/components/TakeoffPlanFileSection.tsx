@@ -748,13 +748,17 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
       generationStartedAtRef.current ??
       (workspace.processing?.startedAt ? Date.parse(workspace.processing.startedAt) : Date.now());
     generationStartedAtRef.current = startedAtMs;
+    const pollAbort = new AbortController();
 
     const poller = createJobStatusPoller({
       startedAtMs,
+      isVisible: () => document.visibilityState === "visible",
+      onStop: () => pollAbort.abort(),
       poll: async () => {
         const res = await labApiGet(
           `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
-          token
+          token,
+          { signal: pollAbort.signal }
         ) as WorkspaceState & { ok: boolean };
         setWorkspace(res);
 
@@ -770,7 +774,11 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
           return "completed";
         }
 
-        if (res.status === "failed") {
+        if (
+          res.status === "failed" ||
+          res.status === "cancelled" ||
+          res.status === "canceled"
+        ) {
           if (generationFlowRef.current) {
             const endpoint = `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/generate-ai-draft`;
             const view = mapGenerationFinishError(
@@ -801,9 +809,14 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
       },
     });
     jobPollerRef.current = poller;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") poller.wake();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       poller.stop();
+      document.removeEventListener("visibilitychange", onVisibility);
       if (jobPollerRef.current === poller) jobPollerRef.current = null;
     };
   // Stable deps only — callbacks read refs / latest closure via loadLatestResultIntoReview identity.

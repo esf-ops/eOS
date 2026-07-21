@@ -961,6 +961,7 @@ export async function saveTakeoffCorrection({
   baseResultId = null,
   reviewState = null,
   aiHandling = null,
+  clientMutationRevision = null,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -998,6 +999,44 @@ export async function saveTakeoffCorrection({
     takeoffJobId,
     jobRow.result_summary
   );
+  const incomingRevision =
+    clientMutationRevision == null ? null : Number(clientMutationRevision);
+  if (
+    incomingRevision != null &&
+    (!Number.isSafeInteger(incomingRevision) || incomingRevision < 1)
+  ) {
+    throw workspaceError("clientMutationRevision must be a positive safe integer");
+  }
+  const latestClientRevision = Number(
+    latestRow?.raw_ai_result_json?._meta?.clientMutationRevision ??
+      jobRow.result_summary?.clientMutationRevision ??
+      0
+  );
+  const latestResultId = String(latestRow?.id ?? "").trim() || null;
+  if (
+    baseResultId &&
+    latestResultId &&
+    String(baseResultId) !== latestResultId
+  ) {
+    const err = workspaceError(
+      "The estimator draft changed after editing began; stale correction was ignored",
+      409
+    );
+    err.code = "stale_takeoff_correction";
+    throw err;
+  }
+  if (
+    incomingRevision != null &&
+    Number.isSafeInteger(latestClientRevision) &&
+    incomingRevision <= latestClientRevision
+  ) {
+    const err = workspaceError(
+      "A newer estimator draft is already saved; stale correction was ignored",
+      409
+    );
+    err.code = "stale_takeoff_correction";
+    throw err;
+  }
   const now = new Date().toISOString();
   const schemaVersion = takeoffResult.schemaVersion ?? TAKEOFF_SCHEMA_VERSION;
   const summary = buildResultSummary(takeoffResult, computed, validation, importPlan);
@@ -1060,6 +1099,7 @@ export async function saveTakeoffCorrection({
       lastCorrectionAt: now,
       lastCorrectedByUserId: userId ?? null,
       estimatorConfirmed,
+      ...(incomingRevision != null ? { clientMutationRevision: incomingRevision } : {}),
       ...aiHandlingPatch,
       ...(priorHandling.lastMergedAiResultId && !aiHandlingPatch.lastMergedAiResultId
         ? { lastMergedAiResultId: priorHandling.lastMergedAiResultId }
@@ -1124,6 +1164,7 @@ export async function saveTakeoffCorrection({
         approvedByUserId: null,
         lastCorrectionId: correctionEntry.id,
         estimatorConfirmed,
+        ...(incomingRevision != null ? { clientMutationRevision: incomingRevision } : {}),
         ...(normalizedReviewState != null ? { reviewState: normalizedReviewState } : {}),
         ...(rawPayload._meta?.lastMergedAiResultId
           ? { lastMergedAiResultId: rawPayload._meta.lastMergedAiResultId }
@@ -1145,7 +1186,10 @@ export async function saveTakeoffCorrection({
     ok: true,
     takeoffJobId,
     correctionId: correctionEntry.id,
+    resultId: resultRowId,
     savedAt: now,
+    clientMutationRevision: incomingRevision,
+    normalizedTakeoffJson: takeoffResult,
     schemaVersion,
     reviewStatus: "needs_review",
     approvalStatus: "needs_review",
@@ -2046,6 +2090,12 @@ export async function getLatestTakeoffResult({
     savedAt: savedResult.created_at,
     schemaVersion: savedResult.schema_version,
     reviewStatus: savedResult.review_status ?? "needs_review",
+    clientMutationRevision:
+      Number(
+        rawJson?._meta?.clientMutationRevision ??
+          jobRow.result_summary?.clientMutationRevision ??
+          0
+      ) || 0,
     // Authoritative estimator draft for editing — never silently replaced by raw AI.
     resultId: savedResult.id ?? null,
     normalizedTakeoffJson: savedResult.normalized_takeoff_json,

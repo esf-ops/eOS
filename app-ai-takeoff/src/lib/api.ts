@@ -46,15 +46,27 @@ async function parseResponse(res: Response): Promise<unknown> {
   return json;
 }
 
-export async function labApiGet(path: string, token: string): Promise<unknown> {
+export async function labApiGet(
+  path: string,
+  token: string,
+  init: Pick<RequestInit, "signal"> = {}
+): Promise<unknown> {
   const t = token.trim();
   if (!t) throw new LabApiError("Sign in required", 401, null);
   return parseResponse(
-    await fetch(joinUrl(path), { headers: { authorization: `Bearer ${t}` } })
+    await fetch(joinUrl(path), {
+      headers: { authorization: `Bearer ${t}` },
+      signal: init.signal
+    })
   );
 }
 
-export async function labApiPost(path: string, token: string, body: unknown): Promise<unknown> {
+export async function labApiPost(
+  path: string,
+  token: string,
+  body: unknown,
+  init: Pick<RequestInit, "signal"> = {}
+): Promise<unknown> {
   const t = token.trim();
   if (!t) throw new LabApiError("Sign in required", 401, null);
   return parseResponse(
@@ -65,6 +77,7 @@ export async function labApiPost(path: string, token: string, body: unknown): Pr
         authorization: `Bearer ${t}`,
       },
       body: JSON.stringify(body),
+      signal: init.signal,
     })
   );
 }
@@ -152,7 +165,8 @@ export interface ListTakeoffJobsQuery {
 /** List org takeoff jobs (newest first). Organization is resolved server-side. */
 export async function listTakeoffJobs(
   token: string,
-  query: ListTakeoffJobsQuery = {}
+  query: ListTakeoffJobsQuery = {},
+  init: Pick<RequestInit, "signal"> = {}
 ): Promise<ListTakeoffJobsResponse> {
   const params = new URLSearchParams();
   if (query.status) params.set("status", query.status);
@@ -161,7 +175,7 @@ export async function listTakeoffJobs(
   if (query.offset != null) params.set("offset", String(query.offset));
   const qs = params.toString();
   const path = qs ? `/api/takeoff-jobs?${qs}` : "/api/takeoff-jobs";
-  return labApiGet(path, token) as Promise<ListTakeoffJobsResponse>;
+  return labApiGet(path, token, init) as Promise<ListTakeoffJobsResponse>;
 }
 
 export interface SaveTakeoffCorrectionResponse {
@@ -169,6 +183,9 @@ export interface SaveTakeoffCorrectionResponse {
   takeoffJobId: string;
   correctionId: string;
   savedAt: string;
+  resultId?: string | null;
+  clientMutationRevision?: number | null;
+  normalizedTakeoffJson?: unknown;
   reviewStatus: string;
   approvalStatus?: string;
   canApprove?: boolean;
@@ -223,12 +240,15 @@ export async function saveTakeoffCorrection(
       dismissedAiResultIds?: string[];
       sourceResultId?: string | null;
     } | null;
-  }
+    clientMutationRevision?: number;
+  },
+  init: Pick<RequestInit, "signal"> = {}
 ): Promise<SaveTakeoffCorrectionResponse> {
   return labApiPost(
     `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/corrections`,
     token,
-    body
+    body,
+    init
   ) as Promise<SaveTakeoffCorrectionResponse>;
 }
 

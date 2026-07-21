@@ -46,8 +46,10 @@ assert.ok(queue.includes("isAbortError"));
 assert.ok(queue.includes("AbortController"));
 assert.ok(queue.includes("eq-queue-retry"));
 
-assert.ok(takeoff.includes("20_000"));
+assert.ok(takeoff.includes("schedule(10_000)"));
 assert.ok(takeoff.includes("visibilitychange"));
 assert.ok(!takeoff.includes("2500)"), "must not use 2.5s latest poll");
+assert.ok(takeoff.includes("Poll job STATUS only"));
+assert.ok(takeoff.includes("nextVersion !== lastServerResultVersionRef.current"));
 
 console.log("ok: milestone7 publish/polling UI contracts");
