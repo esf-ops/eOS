@@ -1618,6 +1618,26 @@ export default function EstimateScopePanel({
         ) : (
           <dl className="eq-summary-dl" data-testid="eq-estimate-summary">
             <div>
+              <dt>Countertop material</dt>
+              <dd data-testid="eq-material-countertop-subtotal">
+                ${Number(
+                  (totals as Record<string, unknown>).materialCountertopSubtotal ??
+                    totals.materialSubtotal ??
+                    0,
+                ).toFixed(2)}
+              </dd>
+            </div>
+            {Number((totals as Record<string, unknown>).materialBacksplashSubtotal ?? 0) > 0 ? (
+              <div>
+                <dt>Backsplash material</dt>
+                <dd data-testid="eq-material-backsplash-subtotal">
+                  ${Number(
+                    (totals as Record<string, unknown>).materialBacksplashSubtotal ?? 0,
+                  ).toFixed(2)}
+                </dd>
+              </div>
+            ) : null}
+            <div>
               <dt>Material subtotal</dt>
               <dd>${Number(totals.materialSubtotal ?? 0).toFixed(2)}</dd>
             </div>

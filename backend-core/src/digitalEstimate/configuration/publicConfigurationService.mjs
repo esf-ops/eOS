@@ -7,6 +7,7 @@ import {
   calculateElite100ConfigDelta,
   ELITE100_CONFIG_DELTA_ENGINE_ID
 } from "./currentConfigDeltaEngine.mjs";
+import { resolveMaterialRateCents } from "./elite100ConfigDeltaEngineV2.mjs";
 import { assertPublicConfigurationHasNoForbiddenContent } from "./configurationPublicSerializer.mjs";
 import {
   buildTrustedConfigurationContext,
@@ -46,7 +47,7 @@ import {
   parseProductOptionKey,
   productMatchesRoomType,
   resolveCatalogProductSelection,
-  sideSplashBillableSf,
+  resolveSideSplashPriceEffect,
   sideSplashQtyFromMode
 } from "../catalog/digitalEstimateProductOptions.mjs";
 import { getProductById } from "../catalog/esfPlumbingCatalog.mjs";
@@ -316,6 +317,31 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     sell = edgeEffect.visibleDelta;
   }
 
+  let sideSplashEffect = null;
+  if (optionKey.startsWith("sidesplash:") || compat.role === "sidesplash_selection") {
+    const parsed = parseProductOptionKey(optionKey);
+    const roomRow = (ctx?.configuredRooms || ctx?.rooms || []).find(
+      (r) => String(r.roomKey) === String(parsed?.roomKey || compat.roomKey)
+    );
+    const piece = (roomRow?.pieces || []).find(
+      (p) => String(p.id || p.key) === String(parsed?.pieceKey || compat.pieceKey)
+    );
+    sideSplashEffect = resolveSideSplashPriceEffect({
+      mode: parsed?.sideMode || parsed?.mode || compat.sideSplashMode || "none",
+      depthIn: Number(piece?.depthIn ?? piece?.depth ?? compat.depthIn),
+      heightIn: Number(roomRow?.sideSplashHeightInches),
+      materialRateCents: Number(roomRow?.configuredMaterialRateCents)
+    });
+    treatment =
+      sideSplashEffect.amountCents == null
+        ? "review_required"
+        : sideSplashEffect.mode === "none"
+          ? "original_selection"
+          : "delta";
+    sell =
+      sideSplashEffect.amountCents != null ? sideSplashEffect.amountCents / 100 : null;
+  }
+
   const publicOpt = {
     id: opt.id,
     optionKey,
@@ -338,7 +364,10 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     roomKey: resolved.roomKey || compat.roomKey || null,
     productId,
     availabilityState:
-      edgeEffect && !edgeEffect.available ? "review_required" : availability,
+      (edgeEffect && !edgeEffect.available) ||
+      (sideSplashEffect && sideSplashEffect.amountCents == null)
+        ? "review_required"
+        : availability,
     catalogAvailability,
     availabilityText: customerSafe.availabilityText || null,
     customerPriceTreatment: treatment,
@@ -373,19 +402,25 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     pieceKey: compat.pieceKey || null,
     profileKey: edgeEffect?.profileKey || compat.edgeProfileToken || null,
     premium: edgeEffect ? edgeEffect.premium : null,
-    priceEffectCents: edgeEffect ? edgeEffect.priceEffectCents : null,
+    priceEffectCents:
+      edgeEffect?.priceEffectCents ?? sideSplashEffect?.amountCents ?? null,
     visibleSellPrice:
       treatment === "absolute" && sell != null ? Number(sell) : null,
     visibleDelta:
       (treatment === "delta" || treatment === "included_alternate" || treatment === "original_selection") &&
-      edgeEffect
-        ? edgeEffect.visibleDelta
+      (edgeEffect || sideSplashEffect)
+        ? edgeEffect
+          ? edgeEffect.visibleDelta
+          : sideSplashEffect.amountCents != null
+            ? sideSplashEffect.amountCents / 100
+            : null
         : treatment === "delta" && sell != null
           ? Number(sell)
           : null
   };
   publicOpt.priceEffectLabel =
     edgeEffect?.priceEffectLabel ||
+    sideSplashEffect?.priceEffectLabel ||
     customerPriceEffectLabel({
       includedInBaseline: publicOpt.includedInBaseline,
       customerPriceTreatment: treatment,
@@ -423,6 +458,108 @@ function buildCustomerSafeMaterials(graphOptions, enrichedById = null) {
     );
   }
   return materials;
+}
+
+/**
+ * Canonicalize persisted backsplash draft mode into the priced selection map.
+ * The room card and calculation must never read different authorities.
+ */
+function applyBacksplashDraftAuthority(selectionMap, backsplashDrafts, options) {
+  for (const [roomKey, draft] of Object.entries(backsplashDrafts || {})) {
+    const mode = String(draft?.mode || "").trim();
+    if (!mode) continue;
+    const prefix = `backsplash:${roomKey}:`;
+    const targetKey = `${prefix}${mode}`;
+    const target = options.find(
+      (o) => String(o.option_key || o.optionKey) === targetKey
+    );
+    if (!target) continue;
+    for (const opt of options) {
+      const key = String(opt.option_key || opt.optionKey || "");
+      if (key.startsWith(prefix)) selectionMap[key] = 0;
+    }
+    selectionMap[targetKey] = 1;
+  }
+}
+
+function selectedMaterialGroupForRoom(room, quantities, options) {
+  let selected = room.baselineMaterialGroup;
+  for (const [key, qty] of Object.entries(quantities || {})) {
+    if (Number(qty) <= 0 || !key.startsWith(`material:${room.roomKey}:`)) continue;
+    const opt = options.find((o) => String(o.option_key || o.optionKey) === key);
+    const resolved = resolveMaterialSelectionFromOption(opt || { optionKey: key });
+    if (resolved.materialGroup) selected = resolved.materialGroup;
+  }
+  return selected;
+}
+
+function selectedBacksplashModeForRoom(room, quantities, backsplashDrafts) {
+  const draftMode = String(backsplashDrafts?.[room.roomKey]?.mode || "").trim();
+  if (draftMode) return draftMode;
+  for (const [key, qty] of Object.entries(quantities || {})) {
+    if (Number(qty) > 0 && key.startsWith(`backsplash:${room.roomKey}:`)) {
+      return key.slice(`backsplash:${room.roomKey}:`.length);
+    }
+  }
+  return resolveOriginalBacksplashMode(room);
+}
+
+function resolveConfiguredRoomChoiceAuthority(
+  ctx,
+  quantities,
+  backsplashDrafts,
+  options,
+  organizationId
+) {
+  return (ctx.rooms || []).map((room) => {
+    const selectedMaterialGroup = selectedMaterialGroupForRoom(room, quantities, options);
+    const backsplashMode = selectedBacksplashModeForRoom(
+      room,
+      quantities,
+      backsplashDrafts
+    );
+    const requestedHeightInches = Number(
+      backsplashDrafts?.[room.roomKey]?.requestedHeightInches
+    );
+    const backsplashResolution = buildBacksplashPricingInput(room, backsplashMode, {
+      requestedHeightInches: Number.isFinite(requestedHeightInches)
+        ? requestedHeightInches
+        : null
+    });
+    // Legacy publications can carry groups outside the frozen schedule — a
+    // rate miss here must degrade that option to review, never break exchange.
+    let materialResolution = null;
+    try {
+      materialResolution = resolveMaterialRateCents({
+        organizationId,
+        pricingBasis: ctx.pricingBasis || "direct",
+        groupCode: selectedMaterialGroup,
+        frozenBaseRates: ctx.frozenBaseRates,
+        accountMemberships: ctx.partnerAccountId
+          ? (ctx.accountMemberships || []).filter(
+              (m) => m.partnerAccountId === ctx.partnerAccountId
+            )
+          : [],
+        materialRateOverrides: ctx.materialRateOverrides || [],
+        asOf: new Date().toISOString()
+      });
+    } catch {
+      materialResolution = null;
+    }
+    // Side splash is an independent add-on. When primary backsplash is None,
+    // business policy permits a standard 4-inch side splash.
+    const sideSplashHeightInches =
+      backsplashMode === "none"
+        ? 4
+        : backsplashResolution.selectedHeightInches;
+    return {
+      ...room,
+      selectedMaterialGroup,
+      backsplashMode,
+      sideSplashHeightInches,
+      configuredMaterialRateCents: materialResolution?.finalRateCents ?? null
+    };
+  });
 }
 
 /**
@@ -626,7 +763,7 @@ export function createPublicConfigurationService(deps) {
       rooms: ctx.rooms || [],
       pricingBasis: ctx.pricingBasis || "direct"
     };
-    const options = (graph?.options || [])
+    let options = (graph?.options || [])
       .filter((o) => o.is_active_in_envelope !== false)
       .map((o) => {
         const g = (graph?.groups || []).find((x) => x.id === o.group_id);
@@ -721,6 +858,27 @@ export function createPublicConfigurationService(deps) {
     if (customerCalc) assertPublicConfigurationHasNoForbiddenContent(customerCalc);
 
     const selectionMeta = splitSelectionPayloadMeta(latestSelection?.selection_payload_json);
+    const configuredRooms = resolveConfiguredRoomChoiceAuthority(
+      ctx,
+      selectionMeta.quantities,
+      selectionMeta.backsplashDrafts,
+      graph?.options || [],
+      organizationId
+    );
+    options = (graph?.options || [])
+      .filter((o) => o.is_active_in_envelope !== false)
+      .map((o) => {
+        const g = (graph?.groups || []).find((x) => x.id === o.group_id);
+        return toCustomerSafeOption(o, g, {
+          ...optionCtx,
+          configuredRooms
+        });
+      });
+    for (const opt of options) {
+      if (!opt.materialId || !enrichedById) continue;
+      const mat = enrichedById.get(opt.materialId);
+      if (mat?.thumbnailUrl) opt.imageAssetRef = mat.thumbnailUrl;
+    }
     const sourceProject = {
       customerName: baselineEstimate.project?.customerName || null,
       projectName: baselineEstimate.project?.projectName || null,
@@ -1171,6 +1329,7 @@ export function createPublicConfigurationService(deps) {
           ? sideSplashDrafts
           : priorMeta.sideSplashDrafts || {};
 
+      applyBacksplashDraftAuthority(selectionMap, mergedBacksplashDrafts, options);
       const normalized = normalizeSelectionPayload({ selections: selectionMap }, options);
 
       // Required groups / unresolved defaults
@@ -1266,7 +1425,10 @@ export function createPublicConfigurationService(deps) {
         // location/height authority only, never a customer-entered length. See
         // backsplashPricingAuthority.mjs for the full eligibility/rounding contract.
         const originalBacksplashMode = resolveOriginalBacksplashMode(r);
-        const effectiveBacksplashMode = selectedBacksplashMode || originalBacksplashMode;
+        const effectiveBacksplashMode =
+          String(mergedBacksplashDrafts[r.roomKey]?.mode || "").trim() ||
+          selectedBacksplashMode ||
+          originalBacksplashMode;
         const requestedHeightInches = Number(
           mergedBacksplashDrafts[r.roomKey]?.requestedHeightInches
         );
@@ -1289,6 +1451,10 @@ export function createPublicConfigurationService(deps) {
             frozenBacksplashByRoomKey.get(String(r.roomKey)) ?? null,
           backsplashConfiguredBilledSf: backsplashResolution.billedSf,
           backsplashHasEligibleLocations: backsplashResolution.hasEligibleLocations,
+          sideSplashHeightInches:
+            effectiveBacksplashMode === "none"
+              ? 4
+              : backsplashResolution.selectedHeightInches,
           edgeLinearFeet: Number(r.edgeLinearFeet) || 0,
           edgeMode,
           selectedMaterialGroup: selected,
@@ -1298,13 +1464,30 @@ export function createPublicConfigurationService(deps) {
         };
       });
 
+      for (const room of rooms) {
+        try {
+          const materialResolution = resolveMaterialRateCents({
+            organizationId: session.organization_id,
+            pricingBasis: ctx.pricingBasis || "direct",
+            groupCode: room.selectedMaterialGroup,
+            frozenBaseRates: ctx.frozenBaseRates,
+            accountMemberships: ctx.partnerAccountId
+              ? (ctx.accountMemberships || []).filter(
+                  (m) => m.partnerAccountId === ctx.partnerAccountId
+                )
+              : [],
+            materialRateOverrides: ctx.materialRateOverrides || [],
+            asOf: new Date().toISOString()
+          });
+          room.configuredMaterialRateCents = materialResolution.finalRateCents;
+        } catch {
+          // Unpriceable group → side-splash sections fall back to review-only.
+          room.configuredMaterialRateCents = null;
+        }
+      }
+
       const edgeLfTotal = rooms.reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0);
       const pricingBasis = ctx.pricingBasis || "direct";
-      const rateTable =
-        (ctx.frozenBaseRates && ctx.frozenBaseRates[pricingBasis]) ||
-        ctx.frozenBaseRates?.direct ||
-        {};
-
       const catalog = new Map(serverApprovedOptionCatalog().map((o) => [o.optionKey, o]));
 
       // Strip / reject sink-specific accessories that are incompatible with the current sink mode.
@@ -1655,42 +1838,54 @@ export function createPublicConfigurationService(deps) {
           continue;
         }
 
-        // Side splash — independent ceiling per piece from trusted depth; else review-only
+        // Side splash — each selected side is independently ceiled from
+        // estimator-approved run depth and configured backsplash height.
         if (parsed?.kind === "sidesplash") {
           const mode = parsed.sideMode || parsed.mode;
-          const splashQty = sideSplashQtyFromMode(mode);
-          if (splashQty <= 0) continue;
+          if (sideSplashQtyFromMode(mode) <= 0) continue;
           const roomRow = rooms.find((r) => r.roomKey === parsed.roomKey);
           const piece = (roomRow?.pieces || []).find(
             (p) => String(p.id || p.key) === String(parsed.pieceKey)
           );
-          const depth = Number(piece?.depthIn ?? piece?.depth);
-          const billableSf = sideSplashBillableSf(depth);
-          if (billableSf == null || billableSf <= 0) {
+          const selectedOption = options.find(
+            (o) => String(o.option_key || o.optionKey) === String(key)
+          );
+          const sideCompat =
+            selectedOption?.compatibility_json || selectedOption?.compatibilityJson || {};
+          const effect = resolveSideSplashPriceEffect({
+            mode,
+            depthIn: Number(piece?.depthIn ?? piece?.depth),
+            heightIn: Number(roomRow?.sideSplashHeightInches),
+            materialRateCents: Number(roomRow?.configuredMaterialRateCents)
+          });
+          if (effect.amountCents == null) {
             reviewFlags.push(
               `sidesplash_review:${parsed.roomKey}:${parsed.pieceKey}`
             );
             continue;
           }
-          const rate = Number(rateTable[roomRow?.selectedMaterialGroup] || 0);
-          if (rate > 0) {
-            calcOptions.push({
-              optionKey: key,
-              displayLabel: "Side splash",
-              quantity: 1,
-              sellPrice: Math.round(billableSf * splashQty * rate * 100) / 100,
-              pricingMode: "fixed",
-              customerPriceTreatment: "absolute",
-              availabilityState: "active",
-              includedInBaseline: false,
-              defaultQty: 0,
-              baselineQuantity: 0
-            });
-          } else {
-            reviewFlags.push(
-              `sidesplash_review:${parsed.roomKey}:${parsed.pieceKey}`
-            );
-          }
+          const pieceLabel = sideSplashPieceDisplayName(
+            sideCompat.pieceDisplayName ||
+              piece?.displayLabel ||
+              piece?.displayName ||
+              piece?.name ||
+              piece?.label,
+            Number(sideCompat.pieceIndex ?? piece?.pieceIndex ?? 0) + 1
+          );
+          const sideLabel =
+            mode === "both" ? "Both sides" : mode === "left" ? "Left side" : "Right side";
+          calcOptions.push({
+            optionKey: key,
+            displayLabel: `Side splash — ${sideLabel}, ${pieceLabel}`,
+            quantity: 1,
+            sellPrice: effect.amountCents / 100,
+            pricingMode: "fixed",
+            customerPriceTreatment: "absolute",
+            availabilityState: "active",
+            includedInBaseline: false,
+            defaultQty: 0,
+            baselineQuantity: 0
+          });
           continue;
         }
 
