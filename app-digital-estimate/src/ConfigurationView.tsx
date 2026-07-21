@@ -1009,7 +1009,8 @@ function PlumbingSourceModal({
   const noneLabel = role === "sink" ? "No sink" : "No faucet";
   const customerLabel =
     role === "sink" ? "Customer-provided sink" : "Customer-provided faucet";
-  const esfLabel = role === "sink" ? "ESF Sinks" : "ESF Faucets";
+  const esfLabel =
+    role === "sink" ? "Elite Stone Fabrication sinks" : "Elite Stone Fabrication faucets";
   const source =
     draft.source === "customer_provided" || draft.source === "none" || draft.source === "esf"
       ? draft.source
@@ -2896,7 +2897,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                           ) : null}
                         </div>
                         {unresolved ? (
-                          <span className="text-xs text-muted-foreground">Unavailable</span>
+                          <span className="text-xs text-muted-foreground">
+                            {opt.availabilityState === "review_required"
+                              ? "Needs review"
+                              : "Unavailable"}
+                          </span>
                         ) : (
                           <input
                             type="number"
