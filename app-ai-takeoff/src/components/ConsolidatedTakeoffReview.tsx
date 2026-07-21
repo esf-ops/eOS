@@ -27,12 +27,20 @@ import {
 } from "../lib/emptyManualTakeoffDraft.mjs";
 import {
   applyDeletionTombstones,
+  ensureUniqueTakeoffIdentity,
   hasEstimatorOwnedGeometry,
   removePieceFromTakeoff,
   removeRoomFromTakeoff,
   saveMergeTakeoffDrafts,
   summarizeAiFindingsPreview
 } from "@takeoff-core/takeoffAuthoritativeResult.mjs";
+import {
+  flattenPieces,
+  patchRun,
+  renameRoom,
+  reassignRun,
+  sfFrom
+} from "../lib/consolidatedWorksheetRows.mjs";
 import { getSupabase } from "../lib/supabase";
 import TakeoffPlanPreviewPanel, {
   type PlanPreviewFileMeta
@@ -69,116 +77,6 @@ type PieceRow = {
   note: string;
   lowConfidence: boolean;
 };
-
-function sfFrom(lengthIn: number, depthIn: number): number {
-  const l = Number(lengthIn) || 0;
-  const d = Number(depthIn) || 0;
-  if (l <= 0 || d <= 0) return 0;
-  return Math.round(((l * d) / 144) * 100) / 100;
-}
-
-function flattenPieces(result: any, excludedRunIds: Set<string>): PieceRow[] {
-  const rows: PieceRow[] = [];
-  for (const room of result?.rooms ?? []) {
-    for (const area of room.areas ?? []) {
-      for (const run of area.runs ?? []) {
-        const cutouts = run.cutouts || {};
-        const parts = Object.entries(cutouts)
-          .filter(([, v]) => Number(v) > 0)
-          .map(([k, v]) => `${k}:${v}`);
-        rows.push({
-          key: `${room.id}:${run.id}`,
-          roomId: room.id,
-          roomName: room.name || "Room",
-          areaId: area.id,
-          runId: run.id,
-          pieceName: run.label || area.label || "Piece",
-          lengthIn: Number(run.lengthIn) || 0,
-          depthIn: Number(run.depthIn) || 0,
-          quantity: Number(run.quantity) || 1,
-          countertopSf: sfFrom(Number(run.lengthIn) || 0, Number(run.depthIn) || 0),
-          backsplashHeightIn: Number(area.backsplashHeightIn ?? area.backsplashHeight ?? 0) || 0,
-          included: !excludedRunIds.has(run.id),
-          cutoutsLabel: parts.join(", "),
-          note: String(run.notes?.[0] ?? run.note ?? ""),
-          lowConfidence:
-            Boolean(run.requiresEstimatorReview) ||
-            String(run.confidence ?? "").toLowerCase() === "low"
-        });
-      }
-    }
-  }
-  return rows;
-}
-
-function patchRun(
-  result: any,
-  roomId: string,
-  runId: string,
-  patch: Record<string, unknown>
-): any {
-  return {
-    ...result,
-    rooms: (result.rooms ?? []).map((room: any) => {
-      if (room.id !== roomId) return room;
-      return {
-        ...room,
-        areas: (room.areas ?? []).map((area: any) => ({
-          ...area,
-          runs: (area.runs ?? []).map((run: any) =>
-            run.id === runId ? { ...run, ...patch } : run
-          )
-        }))
-      };
-    })
-  };
-}
-
-function renameRoom(result: any, roomId: string, name: string): any {
-  return {
-    ...result,
-    rooms: (result.rooms ?? []).map((room: any) =>
-      room.id === roomId ? { ...room, name } : room
-    )
-  };
-}
-
-function reassignRun(result: any, fromRoomId: string, runId: string, toRoomId: string): any {
-  if (fromRoomId === toRoomId) return result;
-  let moved: any = null;
-  const stripped = {
-    ...result,
-    rooms: (result.rooms ?? []).map((room: any) => {
-      if (room.id !== fromRoomId) return room;
-      return {
-        ...room,
-        areas: (room.areas ?? []).map((area: any) => ({
-          ...area,
-          runs: (area.runs ?? []).filter((r: any) => {
-            if (r.id === runId) {
-              moved = r;
-              return false;
-            }
-            return true;
-          })
-        }))
-      };
-    })
-  };
-  if (!moved) return result;
-  return {
-    ...stripped,
-    rooms: (stripped.rooms ?? []).map((room: any) => {
-      if (room.id !== toRoomId) return room;
-      const areas =
-        room.areas?.length > 0
-          ? [...room.areas]
-          : [{ id: `${room.id}-a1`, label: "Main", runs: [], backsplashScope: "stone" }];
-      areas[0] = { ...areas[0], runs: [...(areas[0].runs ?? []), moved] };
-      return { ...room, areas };
-    })
-  };
-}
 
 function addPiece(result: any, roomId: string): any {
   return addManualPiece(result, roomId);
@@ -396,10 +294,14 @@ export default function ConsolidatedTakeoffReview() {
       // Legacy replace path — load authoritative server draft (not pending AI).
       const rs = latest?.reviewState || {};
       hydrateReviewMeta(rs);
-      const cleaned = applyDeletionTombstones(result, {
-        deletedRoomIds: rs.deletedRoomIds ?? [],
-        deletedRunIds: rs.deletedRunIds ?? []
-      });
+      // Self-heal missing/duplicated run ids from older saved drafts so every
+      // row has its own identity (persists on next autosave).
+      const cleaned = ensureUniqueTakeoffIdentity(
+        applyDeletionTombstones(result, {
+          deletedRoomIds: rs.deletedRoomIds ?? [],
+          deletedRunIds: rs.deletedRunIds ?? []
+        })
+      ).takeoff;
       activeDraft = cleaned;
       setDraft(cleaned);
       applyPendingAiFromLatest(latest);
@@ -417,16 +319,18 @@ export default function ConsolidatedTakeoffReview() {
     } else if (result) {
       const rs = latest?.reviewState || {};
       hydrateReviewMeta(rs);
-      const cleaned = applyDeletionTombstones(result, {
-        deletedRoomIds: [
-          ...deletedRoomIdsRef.current,
-          ...((rs.deletedRoomIds as string[]) || [])
-        ],
-        deletedRunIds: [
-          ...deletedRunIdsRef.current,
-          ...((rs.deletedRunIds as string[]) || [])
-        ]
-      });
+      const cleaned = ensureUniqueTakeoffIdentity(
+        applyDeletionTombstones(result, {
+          deletedRoomIds: [
+            ...deletedRoomIdsRef.current,
+            ...((rs.deletedRoomIds as string[]) || [])
+          ],
+          deletedRunIds: [
+            ...deletedRunIdsRef.current,
+            ...((rs.deletedRunIds as string[]) || [])
+          ]
+        })
+      ).takeoff;
       activeDraft = cleaned;
       draftRef.current = cleaned;
       setDraft(cleaned);
@@ -535,7 +439,9 @@ export default function ConsolidatedTakeoffReview() {
     }
     const preview = summarizeAiFindingsPreview(serverAi);
     const { merged } = saveMergeTakeoffDrafts(local, serverAi, mergeTombstones());
-    await persistDraftWithResult(merged, {
+    // AI drafts can carry duplicate/placeholder run ids — heal before persisting.
+    const healed = ensureUniqueTakeoffIdentity(merged).takeoff;
+    await persistDraftWithResult(healed, {
       correctionNotes: "Auto-append AI findings (non-destructive)",
       aiHandling: pendingId
         ? {
@@ -714,7 +620,7 @@ export default function ConsolidatedTakeoffReview() {
     [updateDraft]
   );
 
-  const rows = useMemo(
+  const rows = useMemo<PieceRow[]>(
     () => (draft ? flattenPieces(draft, excludedRunIds) : []),
     [draft, excludedRunIds]
   );
@@ -1136,7 +1042,11 @@ export default function ConsolidatedTakeoffReview() {
                           onChange={(e) =>
                             updateDraft(
                               markRunEstimatorOwned(
-                                patchRun(draft, row.roomId, row.runId, { label: e.target.value }),
+                                patchRun(
+                                  draft,
+                                  { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+                                  { label: e.target.value }
+                                ),
                                 row.roomId,
                                 row.runId
                               )
@@ -1156,10 +1066,11 @@ export default function ConsolidatedTakeoffReview() {
                             const lengthIn = Number(e.target.value) || 0;
                             updateDraft(
                               markRunEstimatorOwned(
-                                patchRun(draft, row.roomId, row.runId, {
-                                  lengthIn,
-                                  sf: sfFrom(lengthIn, row.depthIn)
-                                }),
+                                patchRun(
+                                  draft,
+                                  { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+                                  { lengthIn, sf: sfFrom(lengthIn, row.depthIn) }
+                                ),
                                 row.roomId,
                                 row.runId
                               )
@@ -1179,10 +1090,11 @@ export default function ConsolidatedTakeoffReview() {
                             const depthIn = Number(e.target.value) || 0;
                             updateDraft(
                               markRunEstimatorOwned(
-                                patchRun(draft, row.roomId, row.runId, {
-                                  depthIn,
-                                  sf: sfFrom(row.lengthIn, depthIn)
-                                }),
+                                patchRun(
+                                  draft,
+                                  { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+                                  { depthIn, sf: sfFrom(row.lengthIn, depthIn) }
+                                ),
                                 row.roomId,
                                 row.runId
                               )
@@ -1200,9 +1112,11 @@ export default function ConsolidatedTakeoffReview() {
                           data-testid="ctr-quantity"
                           onChange={(e) =>
                             updateDraft(
-                              patchRun(draft, row.roomId, row.runId, {
-                                quantity: Number(e.target.value) || 1
-                              })
+                              patchRun(
+                                draft,
+                                { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+                                { quantity: Number(e.target.value) || 1 }
+                              )
                             )
                           }
                         />
@@ -1268,7 +1182,13 @@ export default function ConsolidatedTakeoffReview() {
                               const [k, v] = part.split(":").map((s) => s.trim());
                               if (k && v) cutouts[k] = Number(v) || 0;
                             }
-                            updateDraft(patchRun(draft, row.roomId, row.runId, { cutouts }));
+                            updateDraft(
+                              patchRun(
+                                draft,
+                                { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+                                { cutouts }
+                              )
+                            );
                           }}
                         />
                       </td>
@@ -1280,9 +1200,11 @@ export default function ConsolidatedTakeoffReview() {
                           data-testid="ctr-notes"
                           onChange={(e) =>
                             updateDraft(
-                              patchRun(draft, row.roomId, row.runId, {
-                                notes: e.target.value ? [e.target.value] : []
-                              })
+                              patchRun(
+                                draft,
+                                { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+                                { notes: e.target.value ? [e.target.value] : [] }
+                              )
                             )
                           }
                         />
