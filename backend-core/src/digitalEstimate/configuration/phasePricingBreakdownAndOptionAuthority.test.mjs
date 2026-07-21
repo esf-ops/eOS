@@ -222,6 +222,16 @@ function studioEstimateFixture() {
     opts.some((o) => /Ineligible/i.test(o.compatibilityJson.pieceDisplayName)),
     false
   );
+  const leftOfStoveModes = opts
+    .filter((o) => o.compatibilityJson.pieceDisplayName === "Left of Stove")
+    .map((o) => o.compatibilityJson.sideSplashMode)
+    .sort();
+  assert.deepEqual(leftOfStoveModes, ["left", "none"], "left-only run omits Right/Both");
+  const rightOfStoveModes = opts
+    .filter((o) => o.compatibilityJson.pieceDisplayName === "Right of Stove")
+    .map((o) => o.compatibilityJson.sideSplashMode)
+    .sort();
+  assert.deepEqual(rightOfStoveModes, ["none", "right"], "right-only run omits Left/Both");
   for (const opt of opts) {
     assert.equal(
       /[0-9a-f]{8}-[0-9a-f]{4}/i.test(opt.displayLabel),
@@ -234,7 +244,7 @@ function studioEstimateFixture() {
       "UUID must not appear in pieceDisplayName"
     );
   }
-  console.log("ok: side-splash modal uses estimator labels; ineligible runs omitted; no UUIDs in labels");
+  console.log("ok: side-splash modal uses estimator labels; ineligible runs/modes omitted; no UUIDs in labels");
 }
 
 // ---------------------------------------------------------------------------

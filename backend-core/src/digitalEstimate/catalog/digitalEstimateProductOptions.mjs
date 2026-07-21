@@ -781,12 +781,19 @@ export function buildSideSplashOptionDefinitions(args) {
     const depth = Number(piece.depthIn ?? piece.depth);
     const depthKnown = Number.isFinite(depth) && depth > 0;
 
-    for (const mode of [
-      { key: "none", label: "No side splash" },
-      { key: "left", label: "Left side splash" },
-      { key: "right", label: "Right side splash" },
-      { key: "both", label: "Both side splashes" }
-    ]) {
+    const modes = [{ key: "none", label: "No side splash" }];
+    // When per-side eligibility is known, only offer physically possible sides.
+    // A coarse sideSplashEligible=true without left/right detail keeps all modes.
+    // Legacy pieces without any flags also keep the full Left/Right/Both set.
+    const perSideKnown = left != null || right != null;
+    const allowLeft = !eligibilityKnown || left === true || (!perSideKnown && any === true);
+    const allowRight = !eligibilityKnown || right === true || (!perSideKnown && any === true);
+    if (allowLeft) modes.push({ key: "left", label: "Left side splash" });
+    if (allowRight) modes.push({ key: "right", label: "Right side splash" });
+    if (allowLeft && allowRight) {
+      modes.push({ key: "both", label: "Both side splashes" });
+    }
+    for (const mode of modes) {
       out.push(
         baseOption({
           groupId,
