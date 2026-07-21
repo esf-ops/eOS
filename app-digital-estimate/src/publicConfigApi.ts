@@ -46,10 +46,16 @@ export function clearFragmentFromUrl(): void {
   }
 }
 
+export type PublicMoneyAmount = {
+  amountCents: number | null;
+  displayAmount: number | null;
+};
+
 export type PublicRoomPricing = {
   kind: "original" | "updated" | string;
   rooms: Array<{
     roomName: string;
+    roomLabel?: string;
     countertopAmount: number | null;
     backsplashAmount: number | null;
     addOnsAmount: number | null;
@@ -60,9 +66,31 @@ export type PublicRoomPricing = {
       category?: string | null;
       label: string;
       amount: number | null;
+      amountCents?: number | null;
+      displayAmount?: number | null;
     }>;
     reviewRequired?: boolean;
     reviewRequiredCategories?: string[];
+    /** Nested normalized contract (same hierarchy as flat fields). */
+    countertop?: PublicMoneyAmount;
+    backsplash?: {
+      mode?: string | null;
+      label?: string | null;
+      amountCents: number | null;
+      displayAmount: number | null;
+    };
+    addOns?: {
+      amountCents: number | null;
+      displayAmount: number | null;
+      lines?: Array<{
+        category?: string | null;
+        label: string;
+        amount: number | null;
+        amountCents?: number | null;
+        displayAmount?: number | null;
+      }>;
+    };
+    roomTotalDetail?: PublicMoneyAmount;
   }>;
   projectAddOns: Array<{ label: string; amount: number | null }>;
   projectTotal?: number | null;
@@ -135,10 +163,14 @@ export type ConfigOption = {
   variantId?: string | null;
   pieceKey?: string | null;
   pieceDisplayName?: string | null;
+  pieceIndex?: number | null;
   sourceKind?: string | null;
   visibleSellPrice?: number | null;
   visibleDelta?: number | null;
   priceEffectLabel?: string | null;
+  priceEffectCents?: number | null;
+  profileKey?: string | null;
+  premium?: boolean | null;
   accessoryKind?: string | null;
   compatibleFamilyIds?: string[];
   /** stock | special_order from Product Catalog (customer-safe). */

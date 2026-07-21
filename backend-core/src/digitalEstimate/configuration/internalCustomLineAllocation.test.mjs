@@ -274,7 +274,10 @@ const SNAPSHOT_ROOMS = [
   const raw = JSON.stringify(dto);
   assert.equal(raw.includes("SECRET"), false);
   assert.equal(raw.includes("customLineAllocations"), false);
-  assert.equal(raw.includes("Cents"), false);
+  assert.equal(raw.includes("allocatedCents"), false);
+  assert.equal(raw.includes("internalAbsorbedCents"), false);
+  // Public contract may expose customer-safe amountCents / displayAmount pairs;
+  // only allocation/audit cents fields remain forbidden.
   console.log("ok: internal-only line absorbed into stone amounts; name/audit never in public DTO");
 }
 

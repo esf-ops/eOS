@@ -112,6 +112,12 @@ export function buildPublicationFreezePayloads(input) {
 function buildRoomPricingSnapshotSafely(header, iu, customerDisplayTotal, publishedAt) {
   try {
     const rooms = Array.isArray(iu.estimate_rooms) ? iu.estimate_rooms : [];
+    const fabricationAddOns =
+      iu.fabrication_add_ons && typeof iu.fabrication_add_ons === "object"
+        ? iu.fabrication_add_ons
+        : iu.fabrication?.addOns && typeof iu.fabrication.addOns === "object"
+          ? iu.fabrication.addOns
+          : null;
     return buildRoomPricingPublishSnapshot({
       estimateId: header.id ?? null,
       quoteNumber: str(header.quote_number),
@@ -121,6 +127,9 @@ function buildRoomPricingSnapshotSafely(header, iu, customerDisplayTotal, publis
       // internal-only lines absorbed into stone categories by the versioned
       // deterministic allocation policy (never shown by name publicly).
       customLineItems: Array.isArray(iu.custom_line_items) ? iu.custom_line_items : [],
+      // Estimator fabrication quantities (sink cutout, ESF sink, cooktop, …)
+      // freeze as named Original Add-ons so the customer hierarchy is complete.
+      fabricationAddOns,
       customerDisplayTotalCents: dollarsToCents(Number(customerDisplayTotal) || 0),
       createdAt: publishedAt || null
     });

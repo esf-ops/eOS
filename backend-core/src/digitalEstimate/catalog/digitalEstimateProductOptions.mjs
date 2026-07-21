@@ -754,15 +754,25 @@ export function buildSideSplashOptionDefinitions(args) {
     if (!piece || piece.included === false) continue;
     const pieceType = String(piece.pieceType || piece.type || "").toLowerCase();
     if (pieceType.includes("backsplash") || pieceType.includes("splash")) continue;
+    // Only list runs with side-splash eligibility on at least one side.
+    // Legacy pieces without eligibility flags remain choosable (null = unknown).
+    const left = piece.sideSplashLeftEligible;
+    const right = piece.sideSplashRightEligible;
+    const any = piece.sideSplashEligible;
+    const eligibilityKnown = left != null || right != null || any != null;
+    if (eligibilityKnown && !(left === true || right === true || any === true)) {
+      continue;
+    }
     const pieceKey = String(piece.id || piece.key || piece.name || "").trim();
     if (!pieceKey) continue;
     pieceIndex += 1;
     // Customer label precedence: estimator piece label, estimator area label,
     // then a concise ordinal fallback. Never expose the piece/run UUID.
     const rawName = String(
-      piece.name ||
-        piece.label ||
+      piece.displayLabel ||
         piece.displayName ||
+        piece.name ||
+        piece.label ||
         piece.areaLabel ||
         piece.areaName ||
         ""
@@ -771,12 +781,19 @@ export function buildSideSplashOptionDefinitions(args) {
     const depth = Number(piece.depthIn ?? piece.depth);
     const depthKnown = Number.isFinite(depth) && depth > 0;
 
-    for (const mode of [
-      { key: "none", label: "No side splash" },
-      { key: "left", label: "Left side splash" },
-      { key: "right", label: "Right side splash" },
-      { key: "both", label: "Both side splashes" }
-    ]) {
+    const modes = [{ key: "none", label: "No side splash" }];
+    // When per-side eligibility is known, only offer physically possible sides.
+    // A coarse sideSplashEligible=true without left/right detail keeps all modes.
+    // Legacy pieces without any flags also keep the full Left/Right/Both set.
+    const perSideKnown = left != null || right != null;
+    const allowLeft = !eligibilityKnown || left === true || (!perSideKnown && any === true);
+    const allowRight = !eligibilityKnown || right === true || (!perSideKnown && any === true);
+    if (allowLeft) modes.push({ key: "left", label: "Left side splash" });
+    if (allowRight) modes.push({ key: "right", label: "Right side splash" });
+    if (allowLeft && allowRight) {
+      modes.push({ key: "both", label: "Both side splashes" });
+    }
+    for (const mode of modes) {
       out.push(
         baseOption({
           groupId,

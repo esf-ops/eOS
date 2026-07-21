@@ -64,7 +64,29 @@
 
 import { centsToDollars, dollarsToCents } from "./money.mjs";
 import { parseProductOptionKey } from "../catalog/digitalEstimateProductOptions.mjs";
+import { edgeProfileDisplayLabel } from "../catalog/studioEdgeAuthority.mjs";
 import { BACKSPLASH_REVIEW_CODES } from "./backsplashPricingAuthority.mjs";
+
+function edgeProfileDisplayLabelFromOption(displayLabel, optionKey) {
+  const fromKey = String(optionKey || "").split(":").slice(2).join(":");
+  if (fromKey) return edgeProfileDisplayLabel(fromKey);
+  return edgeProfileDisplayLabel(displayLabel) || String(displayLabel || "Edge");
+}
+
+/**
+ * Server-side invariant: configured mode `none` must never carry a non-zero
+ * Backsplash amount. Fail loudly rather than return misleading customer pricing.
+ * @param {object} room
+ */
+export function assertConfiguredBacksplashNoneIsZero(room) {
+  if (String(room?.backsplashMode || "") !== "none") return;
+  const cents = room?.backsplashAmountCents;
+  if (cents != null && Math.trunc(Number(cents)) !== 0) {
+    throw new Error(
+      `configured_backsplash_none_nonzero: room ${room.roomId || room.roomName} has Backsplash ${cents} cents with mode none`
+    );
+  }
+}
 
 /** Legacy/no-op cutout + stock-sink option key prefixes (never matched by parseProductOptionKey). */
 const CUTOUT_KEY_PATTERN = /^(qty-sink|qty-bar|qty-ss):(.+)$/;
@@ -450,9 +472,20 @@ export function buildUpdatedRoomPricingProjection(args) {
     if (room) {
       room.addOnsAmountCents += amountCents;
       if (amountCents !== 0 || Number(opt.qty || 0) > 0) {
+        const rawLabel = opt.displayLabel || opt.optionKey;
+        const label =
+          category === "edge"
+            ? `Edge — ${edgeProfileDisplayLabelFromOption(rawLabel, opt.optionKey)}`
+            : category === "sink_cutout"
+              ? rawLabel.includes("cutout") || rawLabel.includes("Cutout")
+                ? rawLabel
+                : `Sink cutout — ${rawLabel}`
+              : category === "sink" && !/^sink\b/i.test(rawLabel)
+                ? `Sink — ${rawLabel}`
+                : rawLabel;
         room.customerFacingLines.push({
           category,
-          label: opt.displayLabel || opt.optionKey,
+          label,
           amountCents
         });
       }
@@ -524,6 +557,11 @@ export function buildUpdatedRoomPricingProjection(args) {
 
   const rooms = order.map((key) => {
     const room = roomsByKey.get(key);
+    // Configured zero is authoritative — never fall back to Original when mode is none.
+    if (room.backsplashMode === "none") {
+      room.backsplashAmountCents = 0;
+    }
+    assertConfiguredBacksplashNoneIsZero(room);
     const backsplashForTotal = room.backsplashAmountCents ?? 0;
     const roomTotalCents = room.countertopAmountCents + backsplashForTotal + room.addOnsAmountCents;
     return { ...room, roomTotalCents };
@@ -810,6 +848,25 @@ export function buildChangesRoomPricingProjection(args) {
       });
     }
 
+    const originalCountertopCents = origRoom?.countertopAmountCents ?? null;
+    const updatedCountertopCents = room.countertopAmountCents ?? null;
+    if (
+      originalCountertopCents != null &&
+      updatedCountertopCents != null &&
+      updatedCountertopCents !== originalCountertopCents
+    ) {
+      rows.push({
+        roomId: room.roomId,
+        roomName: room.roomName,
+        category: "countertop",
+        categoryLabel: "Countertop",
+        originalLabel: "Countertop",
+        updatedLabel: "Countertop",
+        amountDeltaCents: updatedCountertopCents - originalCountertopCents,
+        status: "changed"
+      });
+    }
+
     const originalBacksplashMode = origRoom?.backsplashMode || "none";
     const updatedBacksplashMode = room.backsplashMode || "none";
     const originalBacksplashAmountCents = origRoom?.backsplashAmountCents ?? null;
@@ -902,16 +959,43 @@ export function buildChangesRoomPricingProjection(args) {
   };
 }
 
+function moneyPair(cents) {
+  if (cents == null || !Number.isFinite(Number(cents))) {
+    return { amountCents: null, displayAmount: null };
+  }
+  const amountCents = Math.trunc(Number(cents));
+  return { amountCents, displayAmount: centsToDollars(amountCents) };
+}
+
 /** Strip an internal room object down to the section-9 customer-safe public shape. */
 function toPublicRoom(room) {
+  assertConfiguredBacksplashNoneIsZero(room);
+  const countertop = moneyPair(room.countertopAmountCents);
+  const backsplash = moneyPair(room.backsplashAmountCents);
+  const addOns = moneyPair(room.addOnsAmountCents);
+  const roomTotal = moneyPair(room.roomTotalCents);
+  const addOnLines = (room.customerFacingLines || []).map((line) => {
+    const amount = moneyPair(line.amountCents);
+    return {
+      category: CHANGES_CATEGORY_LABEL[line.category] || line.category || "Add-on",
+      label: customerSafeProjectionLabel(line.label),
+      amount: amount.displayAmount,
+      amountCents: amount.amountCents,
+      displayAmount: amount.displayAmount
+    };
+  });
+  const backsplashLabel =
+    room.backsplashMode != null ? BACKSPLASH_MODE_LABEL[room.backsplashMode] || null : null;
   return {
+    // Flat fields (existing UI contract)
     roomName: customerSafeProjectionLabel(room.roomName, "Room"),
-    countertopAmount: room.countertopAmountCents != null ? centsToDollars(room.countertopAmountCents) : null,
-    backsplashAmount: room.backsplashAmountCents != null ? centsToDollars(room.backsplashAmountCents) : null,
-    addOnsAmount: room.addOnsAmountCents != null ? centsToDollars(room.addOnsAmountCents) : null,
-    roomTotal: room.roomTotalCents != null ? centsToDollars(room.roomTotalCents) : null,
+    roomLabel: customerSafeProjectionLabel(room.roomName, "Room"),
+    countertopAmount: countertop.displayAmount,
+    backsplashAmount: backsplash.displayAmount,
+    addOnsAmount: addOns.displayAmount,
+    roomTotal: roomTotal.displayAmount,
     selectedMaterial: room.selectedMaterial || null,
-    selectedBacksplash: room.backsplashMode != null ? BACKSPLASH_MODE_LABEL[room.backsplashMode] || null : null,
+    selectedBacksplash: backsplashLabel,
     selectedSink: room.selectedSink || null,
     selectedSinkFinish: room.selectedSinkFinish || null,
     selectedFaucet: room.selectedFaucet || null,
@@ -919,13 +1003,23 @@ function toPublicRoom(room) {
     selectedAccessories: room.selectedAccessories || [],
     selectedEdge: room.selectedEdge || null,
     selectedSpecialtyItems: room.selectedSpecialtyItems || [],
-    addOnLines: (room.customerFacingLines || []).map((line) => ({
-      category: CHANGES_CATEGORY_LABEL[line.category] || "Add-on",
-      label: customerSafeProjectionLabel(line.label),
-      amount: line.amountCents != null ? centsToDollars(line.amountCents) : null
-    })),
+    addOnLines,
     reviewRequired: (room.reviewRequiredItems || []).length > 0,
-    reviewRequiredCategories: (room.reviewRequiredItems || []).map((i) => i.category)
+    reviewRequiredCategories: (room.reviewRequiredItems || []).map((i) => i.category),
+    // Nested normalized contract (Original / Updated / Changes share this shape)
+    countertop,
+    backsplash: {
+      mode: room.backsplashMode || null,
+      label: backsplashLabel,
+      amountCents: backsplash.amountCents,
+      displayAmount: backsplash.displayAmount
+    },
+    addOns: {
+      amountCents: addOns.amountCents,
+      displayAmount: addOns.displayAmount,
+      lines: addOnLines
+    },
+    roomTotalDetail: roomTotal
   };
 }
 

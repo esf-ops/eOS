@@ -117,13 +117,41 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
         colorLabel: r.colorName || r.color_name || r.colorLabel || null,
         measurementsLocked: true,
         pieces: Array.isArray(r.pieces)
-          ? r.pieces.map((p, idx) => ({
-              id: String(p.id || p.key || p.name || `piece_${idx + 1}`),
-              name: p.name || p.label || null,
-              pieceType: p.pieceType || p.type || null,
-              depthIn: Number(p.depthIn ?? p.depth) || null,
-              included: p.included !== false
-            }))
+          ? r.pieces.map((p, idx) => {
+              const ordinal = idx + 1;
+              const rawLabel = String(
+                p.displayLabel ||
+                  p.displayName ||
+                  p.name ||
+                  p.label ||
+                  p.areaLabel ||
+                  p.areaName ||
+                  ""
+              ).trim();
+              const looksUuid =
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                  rawLabel
+                ) || /^[0-9a-f]{32}$/i.test(rawLabel.replace(/[\s-]/g, ""));
+              const displayLabel =
+                rawLabel && !looksUuid ? rawLabel : `Countertop run ${ordinal}`;
+              return {
+                id: String(p.id || p.key || p.takeoffRunId || `piece_${ordinal}`),
+                name: displayLabel,
+                label: displayLabel,
+                displayName: displayLabel,
+                displayLabel,
+                areaLabel: p.areaLabel || p.areaName || null,
+                pieceType: p.pieceType || p.type || null,
+                depthIn: Number(p.depthIn ?? p.depth) || null,
+                included: p.included !== false,
+                sideSplashLeftEligible:
+                  p.sideSplashLeftEligible == null ? null : Boolean(p.sideSplashLeftEligible),
+                sideSplashRightEligible:
+                  p.sideSplashRightEligible == null ? null : Boolean(p.sideSplashRightEligible),
+                sideSplashEligible:
+                  p.sideSplashEligible == null ? null : Boolean(p.sideSplashEligible)
+              };
+            })
           : []
       });
     }
@@ -289,7 +317,7 @@ export async function buildTrustedConfigurationContext(args) {
     publicationId,
     deRepository,
     pricingPolicyRepository = null,
-    pricingBasis = "direct"
+    pricingBasis: pricingBasisArg = null
   } = args;
 
   if (!organizationId) throw fail("organization_required", "organizationId required", 403);
@@ -305,6 +333,18 @@ export async function buildTrustedConfigurationContext(args) {
 
   const customerSnapshot = snap.customer_snapshot_json || {};
   const pricingEvidence = snap.pricing_evidence_json || {};
+  const calcCopy =
+    pricingEvidence.calculationSnapshotCopy &&
+    typeof pricingEvidence.calculationSnapshotCopy === "object"
+      ? pricingEvidence.calculationSnapshotCopy
+      : {};
+  const iu =
+    calcCopy.internal_ui && typeof calcCopy.internal_ui === "object" ? calcCopy.internal_ui : {};
+  // Prefer explicit caller override, then frozen Studio publication basis.
+  const frozenBasis = String(
+    pricingBasisArg || iu.pricing_basis || calcCopy.pricingBasis || "direct"
+  ).toLowerCase();
+  const pricingBasis = frozenBasis === "wholesale" ? "wholesale" : "direct";
 
   const { rooms, blockers } = extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot);
 

@@ -377,6 +377,15 @@ export function takeoffImportPayloadToRoomDrafts(payload) {
             lengthIn,
             depthIn,
             shape: p.shape ?? "rect",
+            // Estimator area label — customer side-splash fallback after piece name.
+            areaLabel: g.label || null,
+            // Physical side-splash eligibility from the approved Takeoff run.
+            ...(meta?.sideSplashLeftEligible != null
+              ? { sideSplashLeftEligible: meta.sideSplashLeftEligible === true }
+              : {}),
+            ...(meta?.sideSplashRightEligible != null
+              ? { sideSplashRightEligible: meta.sideSplashRightEligible === true }
+              : {}),
             // addSplash is intentionally omitted for counter pieces: backsplash is
             // represented via explicit "Backsplash" shapeType groups (equivalent math).
             takeoffImportSource: buildTakeoffSourceMetaForImport({

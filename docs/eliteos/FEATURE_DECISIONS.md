@@ -2050,3 +2050,21 @@
 | **Tests** | Added deterministic $3,208→$3,210 regression, frozen carve-out/removal/no-op sign tests, room ownership/reconciliation/UUID redaction tests, and `phaseBacksplashDeltaRoomBreakdown.test.ts` for side-splash summaries plus Original/Updated/Changes hierarchy. Full Digital Estimate UI suite and relevant backend pricing/catalog/snapshot suites pass. |
 | **SQL / env** | None. Existing JSON snapshots/envelopes are read additively; no new environment variables. |
 | **Deployment surfaces** | `backend-core` and `app-digital-estimate`. No manual deployment. |
+
+### 145. Digital Estimate pricing breakdown + option authority (2026-07-21)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-21 · `fix/digital-estimate-pricing-breakdown-and-option-authority` |
+| **Original completeness gap** | Publish-time `roomPricing` frozen Countertop/Backsplash via SF allocation but left Add-ons at `$0` / `not_currently_attributable`, and Studio `estimate_rooms` dropped pieces + priced edge LF + fabrication add-ons at the freeze boundary. Original therefore could not show sink product, sink cutout, or trip-charge hierarchy for new Studio publications. |
+| **Shared room-pricing contract** | Public Original/Updated DTOs now expose both the prior flat fields and a nested normalized shape (`countertop` / `backsplash{mode,label}` / `addOns{lines}` / `roomTotalDetail` with `amountCents` + `displayAmount`). Frontend continues to render through one shared hierarchy formatter. |
+| **No-backsplash invariant** | Configured mode `none` forces Backsplash to exactly `0` cents before serialization; `assertConfiguredBacksplashNoneIsZero` fails loudly on non-zero. Hidden frozen allocations still cannot reattach to ineligible Backsplash (prior §144 rule retained). |
+| **Material-group authority** | Engine already prices configured Countertop and Backsplash from the same resolved room material rate; this phase adds Direct + Wholesale Promo→Group F proof tests and Changes rows for Countertop amount deltas alongside material/backsplash. |
+| **Side-splash labels** | Studio publication now freezes estimator piece `displayLabel`s (Takeoff run labels) plus optional side-splash eligibility. Trusted context and option seeding prefer those labels; ineligible runs are omitted when flags are present; public options forward `pieceDisplayName`. |
+| **Edge option authority** | `resolveEdgeOptionPriceEffect` returns public-safe Original selection / Included / `+$N` effects from approved final priced edge LF × Direct ($25) or Wholesale ($15) rates. Public option serialization enriches seeded `sellPrice: 0` edge options with those effects so the UI never invents pricing. Premium selection still charges once via save-time calc options under room Add-ons as `Edge — {profile}`. |
+| **Fabrication freeze** | `fabrication_add_ons` (qty-sink, ESF sinks, cooktop, tear-out, …) are carved out of the stone pool and frozen as named room Add-ons; customer-provided sink `$0` placeholder is added when a cutout exists without an ESF sink product. Trip charge remains a project custom line. |
+| **Pricing basis** | Frozen Studio `pricing_basis` / `pricingBasis` now flows into trusted configuration context (was hard-defaulting to Direct). |
+| **Public redaction** | Forbidden tokens extended with `policyVersion`, `pricingBasis`, `ratePerLf`, `eligibleLf`, `billedSf`, `measuredSf`, `runId`, `areaId`. |
+| **SQL / env** | None. Additive JSON freeze fields only; legacy publications without pieces/add-ons keep prior fallbacks. |
+| **Deployment surfaces** | `backend-core` (Studio publication adapter, trusted context, room-pricing snapshot, public config options, projection) and `app-digital-estimate` (types + breakdown tests). No manual deployment. |
+| **Open business decisions** | (1) Project-level priced edge LF is assigned to the first countertop room (Studio edge is project-scoped; DE edge selection is room-scoped). (2) Legacy publications frozen before pieces/fabrication freeze cannot backfill Original Add-ons. (3) Side-splash eligibility omitted on older Studio seeds still lists all counter pieces (null = unknown). |

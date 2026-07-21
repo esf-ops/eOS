@@ -70,6 +70,94 @@ import {
   normalizeSnapshotCustomLines,
   INTERNAL_CUSTOM_LINE_ALLOCATION_VERSION
 } from "./internalCustomLineAllocation.mjs";
+import { PROTOTYPE_ADDON_UNIT_PRICES } from "../../quotes/quoteCalculator.js";
+import { dollarsToCents } from "./money.mjs";
+
+/** Fabrication add-ons that freeze as named Original Add-ons / project lines. */
+const ROOM_OWNED_FABRICATION_KEYS = Object.freeze({
+  "qty-sink": { category: "sink_cutout", roomHint: /kitchen/i },
+  "qty-bar": { category: "sink_cutout", roomHint: /bath|vanity|bar/i },
+  "qty-ss": { category: "sink", roomHint: /kitchen/i },
+  "qty-blanco": { category: "sink", roomHint: /kitchen/i },
+  "qty-v-rect": { category: "sink", roomHint: /bath|vanity/i },
+  "qty-v-oval": { category: "sink", roomHint: /bath|vanity/i },
+  "qty-cook": { category: "cooktop", roomHint: /kitchen/i },
+  "qty-outlet": { category: "outlet", roomHint: null }
+});
+
+/**
+ * Normalize estimator fabrication add-ons into snapshot custom-line rows so
+ * Original can render sink product / sink cutout / cooktop / tear-out by name.
+ * Amounts use the same Brain unit prices the Studio calculator used at publish.
+ *
+ * @param {Record<string, number>|null|undefined} addOns
+ * @param {Array<{ roomId: string, roomName: string, roomType?: string }>} rooms
+ */
+export function normalizeFabricationAddOnsForSnapshot(addOns, rooms = []) {
+  const src = addOns && typeof addOns === "object" ? addOns : {};
+  const out = [];
+  let i = 0;
+  for (const [key, qtyRaw] of Object.entries(src)) {
+    const qty = Math.max(0, Math.floor(Number(qtyRaw) || 0));
+    if (qty <= 0) continue;
+    const unit = PROTOTYPE_ADDON_UNIT_PRICES[key];
+    if (!unit) continue;
+    const ownership = ROOM_OWNED_FABRICATION_KEYS[key] || null;
+    let roomId = null;
+    let roomName = null;
+    if (ownership) {
+      const match =
+        (ownership.roomHint &&
+          rooms.find((r) => ownership.roomHint.test(String(r.roomName || r.roomType || "")))) ||
+        rooms[0] ||
+        null;
+      if (match) {
+        roomId = match.roomId;
+        roomName = match.roomName;
+      }
+    }
+    i += 1;
+    out.push({
+      lineKey: `fab-${key}-${i}`,
+      label: unit.name,
+      name: unit.name,
+      amountCents: dollarsToCents(unit.price) * qty,
+      customerFacing: true,
+      customer_facing: true,
+      roomId,
+      roomName,
+      category: ownership?.category || "fabrication",
+      quantity: qty,
+      unit: "ea"
+    });
+  }
+  // When a cutout exists without an ESF sink product, freeze a customer-safe
+  // $0 "Customer-provided sink" line so Original shows the sink product row.
+  const hasCutout = Number(src["qty-sink"] || 0) > 0 || Number(src["qty-bar"] || 0) > 0;
+  const hasEsfSink =
+    Number(src["qty-ss"] || 0) > 0 ||
+    Number(src["qty-blanco"] || 0) > 0 ||
+    Number(src["qty-v-rect"] || 0) > 0 ||
+    Number(src["qty-v-oval"] || 0) > 0;
+  if (hasCutout && !hasEsfSink) {
+    const kitchen =
+      rooms.find((r) => /kitchen/i.test(String(r.roomName || r.roomType || ""))) || rooms[0] || null;
+    out.push({
+      lineKey: "fab-customer-provided-sink",
+      label: "Customer-provided sink",
+      name: "Customer-provided sink",
+      amountCents: 0,
+      customerFacing: true,
+      customer_facing: true,
+      roomId: kitchen?.roomId || null,
+      roomName: kitchen?.roomName || null,
+      category: "sink",
+      quantity: 1,
+      unit: "ea"
+    });
+  }
+  return out;
+}
 
 /**
  * v2 (pricing-setup-scope-and-commercial-simplification): custom lines are now
@@ -114,6 +202,7 @@ function normalizeGeometry(room) {
  *     materialGroup?: string|null, colorName?: string|null
  *   }>,
  *   customLineItems?: Array<object>|null,
+ *   fabricationAddOns?: Record<string, number>|null,
  *   customerDisplayTotalCents: number,
  *   createdAt?: string|null,
  *   author?: string|null
@@ -134,7 +223,23 @@ export function buildRoomPricingPublishSnapshot(args) {
   // customerDisplayTotalCents includes internal-only line dollars (the
   // customer pays them without seeing them named), so both kinds are carved
   // out of the SF-allocated stone pool and re-attached explicitly.
-  const allCustomLines = normalizeSnapshotCustomLines(args?.customLineItems);
+  //
+  // Fabrication add-ons (sink cutout, ESF sink product, cooktop, tear-out)
+  // are also frozen by name so Original can render the complete room
+  // hierarchy the customer expects. Their dollars are carved out of the
+  // stone pool the same way customer-facing custom lines are.
+  const roomIdentity = rooms.map((room, idx) => ({
+    roomId: String(room?.id || room?.roomKey || slugRoomId(room?.name, idx)),
+    roomName: String(room?.name || room?.roomName || `Room ${idx + 1}`),
+    roomType: String(room?.roomType || room?.type || "")
+  }));
+  const fabricationLines = normalizeSnapshotCustomLines(
+    normalizeFabricationAddOnsForSnapshot(args?.fabricationAddOns, roomIdentity)
+  );
+  const allCustomLines = [
+    ...normalizeSnapshotCustomLines(args?.customLineItems),
+    ...fabricationLines
+  ];
   const customerFacingLines = allCustomLines.filter((l) => l.customerFacing !== false);
   const customerFacingTotalCents = customerFacingLines.reduce((s, l) => s + l.amountCents, 0);
   const internalOnlyTotalCents = allCustomLines
@@ -187,13 +292,15 @@ export function buildRoomPricingPublishSnapshot(args) {
     roomSnapshots.map((r) => [String(r.roomName).toLowerCase(), r])
   );
 
-  // Customer-facing custom lines: explicit, never hidden inside stone totals.
+  // Customer-facing custom lines + fabrication add-ons: explicit, never hidden
+  // inside stone totals.
   const projectAddOnLines = [];
   for (const line of customerFacingLines) {
     const room =
       (line.roomId && roomsById.get(String(line.roomId))) ||
       (line.roomName && roomsByName.get(String(line.roomName).toLowerCase())) ||
       null;
+    const isFabrication = String(line.lineKey || "").startsWith("fab-");
     const frozen = {
       lineKey: line.lineKey,
       label: line.label,
@@ -202,11 +309,12 @@ export function buildRoomPricingPublishSnapshot(args) {
       quantity: line.quantity,
       unit: line.unit,
       customerVisible: true,
-      source: "estimator_custom_line"
+      source: isFabrication ? "estimator_fabrication_addon" : "estimator_custom_line"
     };
     if (room) {
       room.customerFacingLines.push(frozen);
       room.addOnsAmountCents += line.amountCents;
+      room.addOnsAttributionStatus = "published_fabrication_and_custom_lines_v1";
     } else {
       projectAddOnLines.push(frozen);
     }

@@ -120,6 +120,101 @@ export function resolvePremiumEdgeRatePerLf(pricingBasis) {
 }
 
 /**
+ * Authoritative public-safe price effect for one edge profile option.
+ * Uses the approved final priced edge LF and pricing basis — never browser math.
+ *
+ * @param {{
+ *   profileToken: string,
+ *   originalProfileToken?: string|null,
+ *   edgeLinearFeet: number,
+ *   pricingBasis?: string|null
+ * }} args
+ * @returns {{
+ *   profileKey: string,
+ *   label: string,
+ *   original: boolean,
+ *   premium: boolean,
+ *   available: boolean,
+ *   priceEffectCents: number,
+ *   priceEffectLabel: string,
+ *   customerPriceTreatment: string,
+ *   visibleDelta: number|null,
+ *   visibleSellPrice: number|null
+ * }}
+ */
+export function resolveEdgeOptionPriceEffect(args) {
+  const def = resolveEdgeProfileDefinition(args?.profileToken) || FREE_EDGE_PROFILES[0];
+  const original = normalizeEdgeProfileToken(args?.originalProfileToken || "edge_eased");
+  const isOriginal = def.optionToken === original;
+  const premium = def.tier === "premium";
+  const lf = Math.max(0, Number(args?.edgeLinearFeet) || 0);
+  let priceEffectCents = 0;
+  let available = true;
+  if (premium) {
+    if (!(lf > 0)) {
+      available = false;
+      return {
+        profileKey: def.optionToken,
+        label: def.label,
+        original: isOriginal,
+        premium: true,
+        available: false,
+        priceEffectCents: 0,
+        priceEffectLabel: "Requires estimator review",
+        customerPriceTreatment: "review_required",
+        visibleDelta: null,
+        visibleSellPrice: null
+      };
+    }
+    const rate = resolvePremiumEdgeRatePerLf(args?.pricingBasis);
+    // Integer cents: dollars/LF × LF × 100, half-up.
+    priceEffectCents = Math.round(rate * lf * 100);
+  }
+  if (isOriginal) {
+    return {
+      profileKey: def.optionToken,
+      label: def.label,
+      original: true,
+      premium,
+      available: true,
+      priceEffectCents: 0,
+      priceEffectLabel: "Original selection",
+      customerPriceTreatment: "original_selection",
+      visibleDelta: null,
+      visibleSellPrice: null
+    };
+  }
+  if (!premium) {
+    return {
+      profileKey: def.optionToken,
+      label: def.label,
+      original: false,
+      premium: false,
+      available: true,
+      priceEffectCents: 0,
+      priceEffectLabel: "Included",
+      customerPriceTreatment: "included_alternate",
+      visibleDelta: null,
+      visibleSellPrice: null
+    };
+  }
+  const dollars = priceEffectCents / 100;
+  const label = `+$${Math.round(dollars).toLocaleString("en-US")}`;
+  return {
+    profileKey: def.optionToken,
+    label: def.label,
+    original: false,
+    premium: true,
+    available,
+    priceEffectCents,
+    priceEffectLabel: label,
+    customerPriceTreatment: "delta",
+    visibleDelta: dollars,
+    visibleSellPrice: null
+  };
+}
+
+/**
  * Original profile for a Studio / room scope row.
  * Studio scope historically stored edgeMode (included/w_edge/d_edge) — map to profiles.
  * Prefer explicit edgeProfile / edgeProfileV2 when present.

@@ -9,10 +9,12 @@
 import { createHash } from "node:crypto";
 import { STUDIO_ESTIMATE_STATUSES, STUDIO_UNRESOLVED_ADDON_KEYS } from "./studioEstimateTypes.mjs";
 import { collectUnresolvedItems } from "./studioEstimatePricing.mjs";
+import { resolveScopeEdgeLinearFeet } from "./studioScopeBilling.mjs";
 import { assessElite100PublicationEligibility } from "../digitalEstimate/digitalEstimateEligibility.mjs";
 import { readDigitalEstimatePricingValidDays } from "../digitalEstimate/digitalEstimateConfig.mjs";
 import { serverApprovedOptionCatalog } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
 import { getCatalogMeta } from "../digitalEstimate/catalog/esfPlumbingCatalog.mjs";
+import { looksLikeUuid } from "../digitalEstimate/catalog/customerFacingCopy.mjs";
 
 function str(v) {
   if (v == null) return "";
@@ -193,6 +195,80 @@ export function hashConfigurationEnvelope(configuration, opts = {}) {
 }
 
 /**
+ * Customer-safe piece label for Digital Estimate side-splash (never a UUID).
+ * @param {object} piece
+ * @param {number} ordinal 1-based within the room
+ */
+function customerSafePieceLabel(piece, ordinal) {
+  const candidates = [
+    piece?.name,
+    piece?.label,
+    piece?.displayName,
+    piece?.displayLabel,
+    piece?.areaLabel,
+    piece?.areaName
+  ];
+  for (const raw of candidates) {
+    const value = str(raw);
+    if (value && !looksLikeUuid(value)) return value;
+  }
+  return `Countertop run ${Math.max(1, ordinal)}`;
+}
+
+/**
+ * Persist side-splash-eligible countertop runs into the publication freeze.
+ * Labels come from estimator-edited Takeoff/Studio piece names — never run IDs.
+ * @param {Array<object>} pieces
+ */
+function freezePiecesForPublication(pieces) {
+  const out = [];
+  let ordinal = 0;
+  for (const piece of Array.isArray(pieces) ? pieces : []) {
+    if (!piece || piece.included === false) continue;
+    const pieceType = String(piece.pieceType || piece.type || "").toLowerCase();
+    ordinal += 1;
+    const leftEligible =
+      piece.sideSplashLeftEligible === true ||
+      piece.sideSplashEligible === true ||
+      piece.side_splash_left_eligible === true;
+    const rightEligible =
+      piece.sideSplashRightEligible === true ||
+      piece.sideSplashEligible === true ||
+      piece.side_splash_right_eligible === true;
+    // Legacy Studio seeds often omit eligibility flags. Treat missing as
+    // "eligible for customer choice" so existing envelopes keep working; when
+    // either flag is explicitly present, require at least one side.
+    const eligibilityKnown =
+      piece.sideSplashLeftEligible != null ||
+      piece.sideSplashRightEligible != null ||
+      piece.sideSplashEligible != null ||
+      piece.side_splash_left_eligible != null ||
+      piece.side_splash_right_eligible != null;
+    const sideSplashEligible = eligibilityKnown ? leftEligible || rightEligible : true;
+    const displayLabel = customerSafePieceLabel(piece, ordinal);
+    out.push({
+      id: str(piece.id || piece.key || piece.takeoffRunId || `piece-${ordinal}`),
+      name: displayLabel,
+      label: displayLabel,
+      displayName: displayLabel,
+      displayLabel,
+      areaLabel: str(piece.areaLabel || piece.areaName) || null,
+      pieceType: piece.pieceType || piece.type || "counter",
+      depthIn: Number.isFinite(Number(piece.depthIn ?? piece.depth))
+        ? Number(piece.depthIn ?? piece.depth)
+        : null,
+      included: true,
+      sideSplashLeftEligible: eligibilityKnown ? leftEligible : null,
+      sideSplashRightEligible: eligibilityKnown ? rightEligible : null,
+      sideSplashEligible,
+      // Internal trace only — never used as a customer label.
+      takeoffRunId: piece.takeoffRunId || piece.runId || null
+    });
+  }
+  return out;
+}
+
+/**
  * Build estimate_rooms for eligibility + configuration evidence (locked SF).
  * @param {object} estimate
  */
@@ -201,10 +277,15 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
   const materialGroup = str(scope.materialGroup) || "Group Promo";
   const colorName = scope.colorTbd ? null : str(scope.colorName) || null;
   const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
-  return rooms
-    .filter((r) => r && r.included !== false)
-    .map((r, idx) => {
-      const pieces = Array.isArray(r.pieces) ? r.pieces.filter((p) => p && p.included !== false) : [];
+  const edgeScope = resolveScopeEdgeLinearFeet(scope);
+  const finalEdgeLf = Number(edgeScope.finalLf) || 0;
+  const included = rooms.filter((r) => r && r.included !== false);
+  // Project-level priced open-edge LF is assigned to the first countertop room
+  // so DE room-scoped premium edge options have a governed length without
+  // double-counting across rooms.
+  let edgeAssigned = false;
+  return included.map((r, idx) => {
+      const pieces = freezePiecesForPublication(r.pieces);
       let countertopSqft = Number(r.countertopSqft);
       let backsplashSqft = Number(r.backsplashSqft);
       if (!Number.isFinite(countertopSqft) || countertopSqft < 0) {
@@ -213,8 +294,8 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
           .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
       }
       if (!Number.isFinite(backsplashSqft) || backsplashSqft < 0) {
-        backsplashSqft = pieces
-          .filter((p) => String(p.pieceType ?? "").toLowerCase().includes("backsplash"))
+        backsplashSqft = (Array.isArray(r.pieces) ? r.pieces : [])
+          .filter((p) => String(p?.pieceType ?? "").toLowerCase().includes("backsplash"))
           .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
       }
       // Backsplash location/height authority — estimator-approved at Studio Estimate Scope
@@ -238,6 +319,11 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
       const backsplashMeasuredLengthIn = Number.isFinite(Number(r.backsplashMeasuredLengthIn))
         ? Number(r.backsplashMeasuredLengthIn)
         : null;
+      let edgeLinearFeet = 0;
+      if (!edgeAssigned && countertopSqft > 0 && finalEdgeLf > 0) {
+        edgeLinearFeet = finalEdgeLf;
+        edgeAssigned = true;
+      }
       return {
         id: str(r.id) || `room-${idx + 1}`,
         name: str(r.name) || `Room ${idx + 1}`,
@@ -247,8 +333,12 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
         backsplashHeightMode,
         backsplashHeightIn,
         backsplashMeasuredLengthIn,
+        edgeLinearFeet,
+        edgeFinalLf: edgeLinearFeet,
+        edgeScopeSource: edgeScope.source || null,
         materialGroup,
         colorName,
+        pieces,
         notes: str(r.notes) || ""
       };
     });
@@ -342,10 +432,21 @@ function buildPrintSnapshot(estimate, customerDisplayTotal) {
 function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDisplayTotal) {
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   const rooms = buildStudioEstimateRoomsForPublication(estimate);
+  const pricingBasis =
+    String(scope.pricingBasis || calc?.pricingBasis || "").toLowerCase() === "wholesale"
+      ? "wholesale"
+      : "direct";
+  const fabricationAddOns =
+    calc?.fabrication?.addOns && typeof calc.fabrication.addOns === "object"
+      ? { ...calc.fabrication.addOns }
+      : scope.addOns && typeof scope.addOns === "object"
+        ? { ...scope.addOns }
+        : {};
   return {
     materialProgramDefault: "elite_100",
     material_program_default: "elite_100",
     materialGroup: str(scope.materialGroup) || "Group Promo",
+    pricingBasis,
     fingerprint: str(calc?.fingerprint || estimate?.calculationFingerprint) || null,
     pricingEngine: calc?.pricingEngine || estimate?.pricingEngine || null,
     pricingVersion: calc?.pricingVersion ?? estimate?.pricingVersion ?? null,
@@ -365,7 +466,9 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
     internal_ui: {
       material_program_default: "elite_100",
       customer_display_total: customerDisplayTotal,
+      pricing_basis: pricingBasis,
       estimate_rooms: rooms,
+      fabrication_add_ons: fabricationAddOns,
       custom_line_items: buildStudioCustomLineItemsForPublication(estimate),
       customer_catalog_permissions:
         estimate?.scope?.customerCatalogPermissions &&
@@ -418,21 +521,14 @@ export function buildSyntheticQuoteHeaderFromStudioEstimate(estimate, opts = {})
     project_address: str(scope.projectAddress) || null,
     estimated_material_group: str(scope.materialGroup) || "Group Promo",
     partner_account_id: scope.partnerAccountId || null,
+    // Prefer the customer-safe snapshot copy (rooms with pieces/edge LF,
+    // pricingBasis, fabrication add-ons). Keep print snapshot in sync.
     calculation_snapshot: {
       ...snapshotCopy,
-      // Eligibility reads internal_ui on this object
       internal_ui: {
-        material_program_default: "elite_100",
-        customer_display_total: customerDisplayTotal,
+        ...(snapshotCopy.internal_ui || {}),
         estimate_rooms: rooms,
-        custom_line_items: buildStudioCustomLineItemsForPublication(estimate),
-        customer_catalog_permissions:
-          estimate?.scope?.customerCatalogPermissions &&
-          typeof estimate.scope.customerCatalogPermissions === "object"
-            ? { ...estimate.scope.customerCatalogPermissions }
-            : {},
         customer_estimate_print_snapshot: printSnap
-        // Estimator-only notes intentionally excluded from customer-facing freeze path
       }
     }
   };

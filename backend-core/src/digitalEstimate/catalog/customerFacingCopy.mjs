@@ -180,23 +180,33 @@ export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
   if (treatment === "unavailable" || String(opt?.availabilityState || "") === "unavailable") {
     return "Unavailable";
   }
-  // Baseline / current: customer-facing relationship labels (not bare "Included").
-  if (opt?.includedInBaseline || treatment === "included") {
+  // Explicit edge / catalog labels take precedence when the serializer already
+  // resolved them (Original selection / Included / +$N).
+  if (typeof opt?.priceEffectLabel === "string" && opt.priceEffectLabel.trim()) {
+    return opt.priceEffectLabel.trim();
+  }
+  // Baseline / current: customer-facing relationship labels.
+  if (opt?.includedInBaseline || treatment === "included" || treatment === "original_selection") {
     return "Original selection";
   }
-  if (treatment === "no_change") {
-    return "No change";
+  // Free alternate profiles (and other zero-delta included-tier options).
+  if (treatment === "no_change" || treatment === "included_alternate") {
+    return treatment === "included_alternate" ? "Included" : "No change";
   }
   const delta =
     opt?.visibleDelta != null
       ? Number(opt.visibleDelta)
       : opt?.visibleSellPrice != null
         ? Number(opt.visibleSellPrice)
-        : null;
+        : opt?.priceEffectCents != null
+          ? Number(opt.priceEffectCents) / 100
+          : null;
   if (delta == null || !Number.isFinite(delta)) {
     return null;
   }
-  if (Math.abs(delta) < 0.005) return "No change";
+  if (Math.abs(delta) < 0.005) {
+    return treatment === "included_alternate" || opt?.edgeTier === "free" ? "Included" : "No change";
+  }
   if (delta < 0) return `−${formatMoney(Math.abs(delta))}`;
   return `+${formatMoney(delta)}`;
 }

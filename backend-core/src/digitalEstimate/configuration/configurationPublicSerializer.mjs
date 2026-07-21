@@ -65,7 +65,15 @@ export const CONFIGURATION_PUBLIC_FORBIDDEN_SUBSTRINGS = Object.freeze([
   "customLineAllocations",
   "allocatedCents",
   "internalReattachments",
-  "allocationRule"
+  "allocationRule",
+  "policyVersion",
+  "pricingBasis",
+  "ratePerLf",
+  "eligibleLf",
+  "billedSf",
+  "measuredSf",
+  "runId",
+  "areaId"
 ]);
 
 /**

@@ -99,6 +99,18 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
         const depthIn = Number(p.depthIn) || 0;
         const sqft = Math.round(((lengthIn * depthIn) / 144) * 100) / 100;
         const meta = importPieceByName.get(String(p.name || ""));
+        const leftEligible =
+          p.sideSplashLeftEligible != null
+            ? p.sideSplashLeftEligible === true
+            : meta?.sideSplashLeftEligible != null
+              ? meta.sideSplashLeftEligible === true
+              : null;
+        const rightEligible =
+          p.sideSplashRightEligible != null
+            ? p.sideSplashRightEligible === true
+            : meta?.sideSplashRightEligible != null
+              ? meta.sideSplashRightEligible === true
+              : null;
         pieces.push({
           id: p.id,
           name: p.name,
@@ -107,11 +119,14 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
           depthIn,
           sqft,
           included: true,
+          areaLabel: p.areaLabel || g.name || null,
           // Traceability back to the approved physical scope (structured, never parsed).
           ...(meta?.runId ? { takeoffRunId: meta.runId } : {}),
           ...(Array.isArray(meta?.cutouts) && meta.cutouts.length
             ? { cutouts: meta.cutouts }
             : {}),
+          ...(leftEligible != null ? { sideSplashLeftEligible: leftEligible } : {}),
+          ...(rightEligible != null ? { sideSplashRightEligible: rightEligible } : {}),
           notes: ""
         });
       }
