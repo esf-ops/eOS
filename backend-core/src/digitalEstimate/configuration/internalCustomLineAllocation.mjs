@@ -50,7 +50,12 @@ function cents(v) {
 export function stoneTargetForCategory(category) {
   const c = String(category || "").toLowerCase();
   if (c.includes("countertop") || c.includes("counter top")) return "countertop";
-  if (c.includes("backsplash") || c.includes("splash")) return "backsplash";
+  // Side splash is an Add-ons line, not the governed Backsplash category.
+  // Matching bare "splash" previously mis-routed "side_splash" into backsplash.
+  if (c.includes("side_splash") || c.includes("side splash") || c.includes("sidesplash")) {
+    return null;
+  }
+  if (c.includes("backsplash") || /(^|[^a-z])splash([^a-z]|$)/.test(c)) return "backsplash";
   return null;
 }
 

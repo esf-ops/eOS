@@ -48,6 +48,9 @@ console.log("ok: policy version is internal_custom_line_allocation_v1");
 {
   assert.equal(stoneTargetForCategory("Countertop"), "countertop");
   assert.equal(stoneTargetForCategory("Backsplash"), "backsplash");
+  assert.equal(stoneTargetForCategory("splash"), "backsplash");
+  assert.equal(stoneTargetForCategory("side_splash"), null);
+  assert.equal(stoneTargetForCategory("Side splash"), null);
   assert.equal(stoneTargetForCategory("Labor"), null);
   console.log("ok: stone category ownership resolves from line category");
 }

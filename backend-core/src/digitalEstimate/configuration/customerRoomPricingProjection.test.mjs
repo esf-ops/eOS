@@ -707,4 +707,74 @@ function assertNoOptionKeysOrSfLf(dto) {
   console.log("ok: UUID-like side-splash ids and forbidden pricing internals never reach public DTO");
 }
 
+// Frozen internal backsplash allocation must not invent a positive Backsplash
+// amount after the customer selects No backsplash (hosted +$2 display path).
+{
+  const publishedRoomPricing = {
+    snapshotVersion: "v2",
+    totalCents: 320_800,
+    rooms: [
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        countertopAmountCents: 272_710,
+        backsplashAmountCents: 48_090,
+        addOnsAmountCents: 0,
+        roomTotalCents: 320_800,
+        customerFacingLines: [],
+        originalBacksplashMode: "standard_4in"
+      }
+    ],
+    projectAddOnLines: [],
+    customLineAllocations: [
+      {
+        targets: [
+          {
+            roomId: "kitchen",
+            category: "backsplash",
+            allocatedCents: 200
+          }
+        ]
+      }
+    ]
+  };
+  const internal = {
+    frozenBaselineAnchor: true,
+    baselineExactTotalCents: 320_800,
+    configuredExactTotalCents: 272_910,
+    configuredDisplayTotalCents: 272_910,
+    exactConfigurationDeltaCents: -47_890,
+    rooms: [
+      {
+        roomKey: "kitchen",
+        displayName: "Kitchen",
+        chargeableCounterSf: 40,
+        materialSellCents: 272_710,
+        materialUseTaxCents: 0,
+        selectedMaterialGroup: "group_b",
+        baselineMaterialGroup: "group_b",
+        backsplashMode: "none",
+        baselineBacksplashMode: "standard_4in",
+        backsplashBaselineAmountCents: 47_890,
+        backsplashConfiguredAmountCents: 0,
+        backsplashReviewCodes: []
+      }
+    ],
+    materialGroupDeltas: [],
+    options: [],
+    customLines: [],
+    credits: []
+  };
+  const updated = buildUpdatedRoomPricingProjection({ internal, publishedRoomPricing });
+  const kitchen = updated.rooms[0];
+  assert.equal(kitchen.backsplashAmountCents, 0, "No backsplash must stay $0 after removal");
+  assert.equal(kitchen.countertopAmountCents, 272_910, "frozen internal cents fall onto Countertop");
+  assert.equal(kitchen.roomTotalCents, 272_910);
+  assert.ok(updated.deltaFromOriginalCents < 0);
+  const dto = toPublicRoomPricingDto(updated);
+  assert.equal(dto.rooms[0].backsplashAmount, 0);
+  assert.equal(dto.rooms[0].selectedBacksplash, "No backsplash");
+  console.log("ok: frozen internal allocation cannot invent Backsplash after mode none");
+}
+
 console.log("\nAll customerRoomPricingProjection tests passed.\n");

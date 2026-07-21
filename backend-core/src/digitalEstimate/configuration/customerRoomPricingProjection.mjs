@@ -474,7 +474,14 @@ export function buildUpdatedRoomPricingProjection(args) {
   for (const target of frozenInternalTargets) {
     const room = roomsByKey.get(target.roomKey);
     if (!room) continue;
-    if (target.category === "backsplash" && room.backsplashAmountCents != null) {
+    // Mode "none" initializes Backsplash to 0 (not null). Re-attaching a
+    // frozen internal allocation into that zero would invent a positive
+    // Backsplash amount after removal — keep those cents on Countertop.
+    if (
+      target.category === "backsplash" &&
+      room.backsplashAmountCents != null &&
+      room.backsplashMode !== "none"
+    ) {
       room.backsplashAmountCents += target.amountCents;
     } else {
       room.countertopAmountCents += target.amountCents;
