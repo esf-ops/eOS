@@ -2620,7 +2620,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         <div className="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
           <div className="font-medium text-foreground">{reviewRequest.statusLabel}</div>
           <div className="mt-1 text-muted-foreground">
-            Ref {reviewRequest.requestReference} · {formatDate(reviewRequest.requestedAt)}
+            Sent {formatDate(reviewRequest.requestedAt)}
           </div>
           <p className="mt-2 text-muted-foreground" data-testid="de-review-confirmation">
             {reviewRequest.nonAcceptanceNotice ||
