@@ -3,6 +3,90 @@
  * Pure helpers; no I/O.
  */
 
+/** Model-emitted placeholder ids that must never be treated as real identity. */
+const PLACEHOLDER_IDS = new Set([
+  "<uuid>",
+  "uuid",
+  "<id>",
+  "id",
+  "null",
+  "undefined",
+  "none",
+  "tbd",
+  "n/a",
+  "string"
+]);
+
+function isMissingOrPlaceholderId(raw) {
+  const id = String(raw ?? "").trim();
+  if (!id) return true;
+  return PLACEHOLDER_IDS.has(id.toLowerCase());
+}
+
+function freshTakeoffId(prefix) {
+  const core =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${core}`;
+}
+
+/**
+ * Enforce a stable, draft-wide-unique id on every room, area, and run/piece.
+ *
+ * Why: AI extraction output can carry missing, placeholder ("<uuid>"), or duplicated
+ * ids. Every editor surface (worksheet patch-by-runId, include/exclude sets, deletion
+ * tombstones, React row keys) assumes run ids are unique — duplicated ids make one
+ * edit fan out to every row sharing the id.
+ *
+ * Rules:
+ *   - the FIRST occurrence of an id keeps it (estimator references stay stable)
+ *   - later duplicates and missing/placeholder ids get a freshly generated id,
+ *     stored in the draft so it persists across save/reload
+ *   - the input object is never mutated; a clone is returned only when a change
+ *     was actually needed
+ *
+ * @param {object|null|undefined} takeoff normalized takeoff JSON
+ * @returns {{ takeoff: object|null|undefined, changed: boolean }}
+ */
+export function ensureUniqueTakeoffIdentity(takeoff) {
+  if (!takeoff || typeof takeoff !== "object" || !Array.isArray(takeoff.rooms)) {
+    return { takeoff, changed: false };
+  }
+  const seen = new Set();
+  let changed = false;
+  const claim = (raw, prefix) => {
+    let id = String(raw ?? "").trim();
+    if (isMissingOrPlaceholderId(id) || seen.has(id)) {
+      do {
+        id = freshTakeoffId(prefix);
+      } while (seen.has(id));
+      changed = true;
+    }
+    seen.add(id);
+    return id;
+  };
+  const base = structuredClone(takeoff);
+  for (const room of base.rooms) {
+    if (!room || typeof room !== "object") continue;
+    room.id = claim(room.id, "room");
+    for (const run of Array.isArray(room.runs) ? room.runs : []) {
+      if (run && typeof run === "object") run.id = claim(run.id, "run");
+    }
+    for (const piece of Array.isArray(room.pieces) ? room.pieces : []) {
+      if (piece && typeof piece === "object") piece.id = claim(piece.id, "run");
+    }
+    for (const area of Array.isArray(room.areas) ? room.areas : []) {
+      if (!area || typeof area !== "object") continue;
+      area.id = claim(area.id, "area");
+      for (const run of Array.isArray(area.runs) ? area.runs : []) {
+        if (run && typeof run === "object") run.id = claim(run.id, "run");
+      }
+    }
+  }
+  return { takeoff: changed ? base : takeoff, changed };
+}
+
 /**
  * @param {object|null|undefined} row quote_takeoff_results-shaped row
  */
