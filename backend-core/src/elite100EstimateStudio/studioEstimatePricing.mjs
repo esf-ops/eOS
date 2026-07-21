@@ -61,6 +61,37 @@ function round2(n) {
 }
 
 /**
+ * Billed-scope reconciliation invariant: the billed countertop SF shown to the
+ * estimator (Pricing Setup summary, buildStudioScopeBilling) and the billed
+ * countertop SF actually priced must be identical. A mismatch means duplicate
+ * or stale scope authority entered the calculation — fail loudly rather than
+ * return a misleading customer total.
+ *
+ * @param {number} displayedBilledCountertopSf
+ * @param {number} pricedBilledCountertopSf
+ */
+export function assertBilledCountertopScopeReconciles(
+  displayedBilledCountertopSf,
+  pricedBilledCountertopSf
+) {
+  const displayed = round2(displayedBilledCountertopSf);
+  const priced = round2(pricedBilledCountertopSf);
+  if (displayed !== priced) {
+    const err = new Error(
+      `Billed countertop scope mismatch: displayed ${displayed} SF vs priced ${priced} SF`
+    );
+    err.statusCode = 422;
+    err.code = "billed_scope_mismatch";
+    err.details = {
+      diagnosticCode: "STUDIO-BILLED-SCOPE-MISMATCH",
+      displayedBilledCountertopSf: displayed,
+      pricedBilledCountertopSf: priced
+    };
+    throw err;
+  }
+}
+
+/**
  * @param {object} scope
  * @param {{ actorUserId?: string|null, env?: NodeJS.ProcessEnv }} [opts]
  */
@@ -294,9 +325,89 @@ export async function calculateStudioEstimate(params) {
     rooms.reduce((s, r) => s + (Number(r.countertopSqft) || 0), 0) +
     scopeBilling.projectAdjustmentBilledSf;
   const chargeableSplash = rooms.reduce((s, r) => s + (Number(r.backsplashSqft) || 0), 0);
+
+  // Invariant: the billed countertop scope displayed to the estimator and the
+  // billed countertop scope being priced must match exactly. Backsplash SF is
+  // a separately attributed category and must never inflate countertop scope.
+  assertBilledCountertopScopeReconciles(scopeBilling.billedCountertopSf, chargeableCounter);
+
   const materialSf = round2(chargeableCounter + chargeableSplash);
-  const materialSubtotal = round2(materialSf * materialRate.rate);
+  const materialCountertopSubtotal = round2(chargeableCounter * materialRate.rate);
+  const materialBacksplashSubtotal = round2(chargeableSplash * materialRate.rate);
+  const materialSubtotal = round2(materialCountertopSubtotal + materialBacksplashSubtotal);
   const materialUseTax = round2(materialSubtotal * 0.02);
+
+  // Internal calculation evidence: every SF section contributing to the
+  // material subtotal, category-attributed. Never exposed publicly.
+  /** @type {Array<object>} */
+  const materialSections = [];
+  const sectionSourceType =
+    scopeBilling.pricingScopeSource === "takeoff" ? "takeoff_piece" : "manual_piece";
+  for (const row of scopeBilling.rooms) {
+    for (const s of row.sections) {
+      materialSections.push({
+        sourceType: sectionSourceType,
+        roomId: row.roomId,
+        roomName: row.roomName,
+        sourceId: s.key,
+        rawSf: s.rawSf,
+        billedSf: s.billableSf,
+        adjustmentSf: 0,
+        ratePerSf: materialRate.rate,
+        amountCents: Math.round(s.billableSf * materialRate.rate * 100),
+        category: "countertop"
+      });
+    }
+    for (const adj of row.adjustments) {
+      if (adj.adjustmentSf === 0) continue;
+      materialSections.push({
+        sourceType: "scope_adjustment",
+        roomId: row.roomId,
+        roomName: row.roomName,
+        sourceId: adj.id,
+        rawSf: adj.adjustmentSf,
+        billedSf: 0,
+        adjustmentSf: row.adjustmentBilledSf,
+        ratePerSf: materialRate.rate,
+        amountCents: Math.round(row.adjustmentBilledSf * materialRate.rate * 100),
+        category: "countertop"
+      });
+    }
+  }
+  if (scopeBilling.projectAdjustmentBilledSf !== 0) {
+    materialSections.push({
+      sourceType: "scope_adjustment",
+      roomId: null,
+      roomName: null,
+      sourceId: "project_adjustment",
+      rawSf: scopeBilling.adjustments
+        .filter((a) => a.adjustmentScope === "project")
+        .reduce((s, a) => s + a.adjustmentSf, 0),
+      billedSf: 0,
+      adjustmentSf: scopeBilling.projectAdjustmentBilledSf,
+      ratePerSf: materialRate.rate,
+      amountCents: Math.round(
+        scopeBilling.projectAdjustmentBilledSf * materialRate.rate * 100
+      ),
+      category: "countertop"
+    });
+  }
+  for (const r of rooms) {
+    const splashSf = Number(r.backsplashSqft) || 0;
+    if (splashSf <= 0) continue;
+    materialSections.push({
+      sourceType: "room_backsplash",
+      roomId: String(r.id ?? ""),
+      roomName: String(r.name ?? ""),
+      sourceId: "backsplash",
+      rawSf: Number(r.rawBacksplashSqft) || splashSf,
+      billedSf: splashSf,
+      adjustmentSf: 0,
+      ratePerSf: materialRate.rate,
+      amountCents: Math.round(splashSf * materialRate.rate * 100),
+      category: "backsplash"
+    });
+  }
 
   let fabricationSubtotal = 0;
   for (const [key, qty] of Object.entries(addOns)) {
@@ -386,6 +497,24 @@ export async function calculateStudioEstimate(params) {
     customLineItemsCustomerVisibleTotal + customLineItemsInternalOnlyTotal
   );
   fabricationSubtotal = round2(fabricationSubtotal + customLineItemsTotal);
+
+  // Internal-only custom-line dollars are absorbed into customer-facing stone
+  // categories at publication — they are dollars, never SF. Record them in the
+  // evidence table with zero SF so they cannot masquerade as billed scope.
+  if (customLineItemsInternalOnlyTotal !== 0) {
+    materialSections.push({
+      sourceType: "internal_custom_line",
+      roomId: null,
+      roomName: null,
+      sourceId: "internal_only_custom_lines",
+      rawSf: 0,
+      billedSf: 0,
+      adjustmentSf: 0,
+      ratePerSf: 0,
+      amountCents: Math.round(customLineItemsInternalOnlyTotal * 100),
+      category: "hidden_allocation"
+    });
+  }
 
   const cfg = readTrustedPartnerAccountConfig(env);
   const spahn = isSpahnTrustedPartner(scope.partnerAccountId, cfg);
@@ -502,6 +631,10 @@ export async function calculateStudioEstimate(params) {
       countertopSqft: round2(chargeableCounter),
       backsplashSqft: round2(chargeableSplash),
       subtotal: materialSubtotal,
+      countertopSubtotal: materialCountertopSubtotal,
+      backsplashSubtotal: materialBacksplashSubtotal,
+      // Internal-only section evidence (source/room/raw/billed/rate/category).
+      sections: materialSections,
       useTaxPercent: 2,
       useTaxAmount: materialUseTax
     },
@@ -532,6 +665,8 @@ export async function calculateStudioEstimate(params) {
       exactInternalTotal,
       customerDisplayTotal,
       materialSubtotal,
+      materialCountertopSubtotal,
+      materialBacksplashSubtotal,
       materialUseTax,
       fabricationSubtotal,
       accountAdjustment,

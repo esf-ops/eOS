@@ -966,6 +966,66 @@ export function sideSplashQtyFromMode(mode) {
 }
 
 /**
+ * Authoritative side-splash option effect. Each selected side is an
+ * independent section: raw SF is ceiled before multiplying by side count.
+ *
+ * @param {{
+ *   mode: string,
+ *   depthIn: number,
+ *   heightIn: number,
+ *   materialRateCents: number
+ * }} args
+ * @returns {{
+ *   mode: string,
+ *   selectedSideCount: number,
+ *   billedSfPerSide: number|null,
+ *   amountCents: number|null,
+ *   priceEffectLabel: string
+ * }}
+ */
+export function resolveSideSplashPriceEffect(args) {
+  const mode = String(args?.mode || "none").toLowerCase();
+  const selectedSideCount = sideSplashQtyFromMode(mode);
+  if (selectedSideCount === 0) {
+    return {
+      mode: "none",
+      selectedSideCount: 0,
+      billedSfPerSide: 0,
+      amountCents: 0,
+      priceEffectLabel: "Original selection"
+    };
+  }
+
+  const billedSfPerSide = sideSplashBillableSf(args?.depthIn, args?.heightIn);
+  const materialRateCents = Number(args?.materialRateCents);
+  if (
+    billedSfPerSide == null ||
+    billedSfPerSide <= 0 ||
+    !Number.isInteger(materialRateCents) ||
+    materialRateCents <= 0
+  ) {
+    return {
+      mode,
+      selectedSideCount,
+      billedSfPerSide: null,
+      amountCents: null,
+      priceEffectLabel: "Requires estimator review"
+    };
+  }
+
+  // Integer cents. Each side is ceiled independently, then extended at the
+  // configured room material rate.
+  const amountCents = billedSfPerSide * selectedSideCount * materialRateCents;
+  return {
+    mode,
+    selectedSideCount,
+    billedSfPerSide,
+    amountCents,
+    priceEffectLabel: `+$${Math.round(amountCents / 100).toLocaleString("en-US")}`
+  };
+}
+
+/**
  * Whether putOptions / save should accept this room-choice prefix without the fixed catalog.
  * @param {string} optionKey
  */
