@@ -107,6 +107,9 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
         backsplashSf: Number.isFinite(bs) ? bs : 0,
         rawBacksplashSf: splashBilled.rawSf,
         backsplashHeightMode: r.backsplashHeightMode || null,
+        backsplashHeightIn: Number.isFinite(Number(r.backsplashHeightIn))
+          ? Number(r.backsplashHeightIn)
+          : null,
         backsplashMeasuredLengthIn: r.backsplashMeasuredLengthIn ?? null,
         edgeLinearFeet: Number(r.edgeLinearFeet ?? r.edge_linear_feet) || 0,
         baselineMaterialGroup: groupCode,
@@ -430,6 +433,11 @@ export async function buildTrustedConfigurationContext(args) {
       sourceQuoteFingerprint: pub.source_quote_fingerprint
     },
     project: customerSnapshot.project || {},
+    // Raw frozen customer snapshot — internal use only (e.g. building the Original room
+    // pricing projection for the Changes view). Never forward this object directly to a
+    // public response; always go through buildOriginalRoomPricingProjection + the
+    // allowlisted toPublicRoomPricingDto/toPublicChangesPricingDto helpers.
+    customerSnapshot,
     baselineDisplayTotal: Number.isFinite(baselineDisplayTotal) ? baselineDisplayTotal : null,
     pricingValidThrough: pub.pricing_valid_through,
     rooms,

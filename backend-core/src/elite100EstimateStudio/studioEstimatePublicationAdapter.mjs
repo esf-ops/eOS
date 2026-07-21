@@ -217,12 +217,36 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
           .filter((p) => String(p.pieceType ?? "").toLowerCase().includes("backsplash"))
           .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
       }
+      // Backsplash location/height authority — estimator-approved at Studio Estimate Scope
+      // (studioRoomBacksplash.mjs). Additive: rooms.backsplashHeightMode/backsplashHeightIn/
+      // backsplashMeasuredLengthIn were historically dropped at this exact freeze boundary,
+      // which is why elite100-config-delta-v2 could never govern backsplash pricing (see
+      // FEATURE_DECISIONS.md §137). Legacy publications frozen before this change simply lack
+      // these fields — explicit legacy fallback, never backfilled/fabricated.
+      const rawHeightMode = str(r.backsplashHeightMode);
+      const backsplashHeightMode =
+        rawHeightMode === "standard" ||
+        rawHeightMode === "custom" ||
+        rawHeightMode === "full_height"
+          ? rawHeightMode
+          : backsplashSqft > 0
+            ? "standard"
+            : "none";
+      const backsplashHeightIn = Number.isFinite(Number(r.backsplashHeightIn))
+        ? Number(r.backsplashHeightIn)
+        : null;
+      const backsplashMeasuredLengthIn = Number.isFinite(Number(r.backsplashMeasuredLengthIn))
+        ? Number(r.backsplashMeasuredLengthIn)
+        : null;
       return {
         id: str(r.id) || `room-${idx + 1}`,
         name: str(r.name) || `Room ${idx + 1}`,
         roomType: str(r.roomType) || "Kitchen",
         countertopSqft,
         backsplashSqft,
+        backsplashHeightMode,
+        backsplashHeightIn,
+        backsplashMeasuredLengthIn,
         materialGroup,
         colorName,
         notes: str(r.notes) || ""

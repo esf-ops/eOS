@@ -38,12 +38,19 @@
  *    In standalone/non-anchor mode (no frozen baseline at all) the engine's
  *    own absolute reprice *is* the authoritative figure, so this projection
  *    uses it directly (attributionStatus: "absolute_reprice").
- *  - Not currently priced anywhere in the system: Backsplash. `chargeableBacksplashSf`
- *    is computed in publicConfigurationService.mjs but elite100-config-delta-v2
- *    never reads it — backsplash contributes $0 to every configured total
- *    today. Full-height / custom-height selections are flagged review-required
- *    (existing reviewFlags) rather than priced. This is a genuine pricing gap,
- *    not something this projection may invent a number for.
+ *  - Room-owned and now fully governed (DE.Polish-3): Backsplash. The
+ *    calc engine (elite100ConfigDeltaEngineV2.mjs) prices the room's
+ *    `backsplashConfiguredBilledSf` — resolved server-side from estimator-
+ *    approved geometry only via backsplashPricingAuthority.mjs — at the
+ *    room's own material rate, independently rounded from countertop. When
+ *    billedSf cannot be resolved (missing geometry, unauthorized custom/full
+ *    height, etc.) the engine reports `backsplashConfiguredAmountCents: null`
+ *    and this projection surfaces that as `backsplashAmountCents: null` +
+ *    a review-required item, never inventing a number.
+ *  - Side splashes remain a distinct Add-ons line (see
+ *    categoryForOptionKey / CATEGORY_BY_PARSED_KIND) — never folded into the
+ *    Backsplash category, per the section-9 ownership rule confirmed in
+ *    FEATURE_DECISIONS.md §137.
  *  - Not currently attributable to a room at all: the *original* (frozen,
  *    pre-Digital-Estimate) absolute countertop/backsplash dollar split.
  *    customer_estimate_print_snapshot only ever stores per-room square
@@ -57,9 +64,19 @@
 
 import { centsToDollars, dollarsToCents } from "./money.mjs";
 import { parseProductOptionKey } from "../catalog/digitalEstimateProductOptions.mjs";
+import { BACKSPLASH_REVIEW_CODES } from "./backsplashPricingAuthority.mjs";
 
 /** Legacy/no-op cutout + stock-sink option key prefixes (never matched by parseProductOptionKey). */
 const CUTOUT_KEY_PATTERN = /^(qty-sink|qty-bar|qty-ss):(.+)$/;
+
+/** Plain-language labels for governed backsplash review codes (section 12). */
+const BACKSPLASH_REVIEW_LABEL = Object.freeze({
+  [BACKSPLASH_REVIEW_CODES.FULL_HEIGHT_MEASUREMENT_REQUIRED]: "Full-height backsplash",
+  [BACKSPLASH_REVIEW_CODES.CUSTOM_HEIGHT_REVIEW]: "Custom-height backsplash",
+  [BACKSPLASH_REVIEW_CODES.GEOMETRY_MISSING]: "Backsplash",
+  [BACKSPLASH_REVIEW_CODES.REMOVAL_CREDIT_UNRESOLVED]: "Backsplash removal credit",
+  [BACKSPLASH_REVIEW_CODES.HEIGHT_OUT_OF_RANGE]: "Custom-height backsplash"
+});
 
 const CATEGORY_BY_PARSED_KIND = Object.freeze({
   sink: "sink",
@@ -178,9 +195,29 @@ export function buildUpdatedRoomPricingProjection(args) {
   //    (never exposed), then add each room's exact material delta on top.
   //  - standalone mode: the engine's own absolute per-room reprice already *is* the
   //    authoritative figure — use it directly, no allocation needed.
+  //
+  // IMPORTANT (DE.Polish-3 fix): the frozen baseline total is a single opaque
+  // project-level number produced by the legacy calculator, which already implicitly
+  // included whatever backsplash dollars existed originally — this projection has no
+  // way to know that decomposition on its own. Now that backsplash is *separately,
+  // explicitly* priced via backsplashBaselineAmountCents/backsplashConfiguredAmountCents
+  // (see elite100ConfigDeltaEngineV2.mjs), allocating the FULL baseline total to
+  // "Countertop" and then ALSO adding the real backsplash line would double-count every
+  // room's backsplash dollars. So the known baseline backsplash amount (when resolvable)
+  // is subtracted out of the pool that gets SF-allocated to Countertop *before* the
+  // backsplash line is added back separately — the two together still sum to exactly the
+  // frozen baseline total, and the reconciliation invariant (room = countertop + backsplash
+  // + add-ons) is never violated.
   const useProportionalAllocation = frozenBaselineAnchor && baselineExactTotalCents != null;
+  const knownBaselineBacksplashCents = internalRooms.reduce(
+    (s, r) => s + (r.backsplashBaselineAmountCents != null ? Math.trunc(Number(r.backsplashBaselineAmountCents)) : 0),
+    0
+  );
+  const countertopOnlyBaselineCents = useProportionalAllocation
+    ? baselineExactTotalCents - knownBaselineBacksplashCents
+    : null;
   const baselineShares = useProportionalAllocation
-    ? allocateProportionally(baselineExactTotalCents, internalRooms.map((r) => Number(r.chargeableCounterSf) || 0))
+    ? allocateProportionally(countertopOnlyBaselineCents, internalRooms.map((r) => Number(r.chargeableCounterSf) || 0))
     : [];
 
   const order = [];
@@ -189,11 +226,32 @@ export function buildUpdatedRoomPricingProjection(args) {
     const roomKey = String(r.roomKey);
     order.push(roomKey);
     const absoluteReprice = Math.trunc(Number(r.materialSellCents || 0) + Number(r.materialUseTaxCents || 0));
+    // When the configured backsplash amount cannot be resolved (review-required), the
+    // engine keeps that room's contribution to the total unchanged from baseline (delta
+    // stays 0 rather than inventing a new number) — mirror that here so the displayed
+    // room total always matches the authoritative configured total exactly.
+    const backsplashAmountCents =
+      r.backsplashConfiguredAmountCents != null
+        ? Math.trunc(Number(r.backsplashConfiguredAmountCents))
+        : r.backsplashBaselineAmountCents != null
+          ? Math.trunc(Number(r.backsplashBaselineAmountCents))
+          : null;
+    const reviewRequiredItems = [];
+    for (const code of Array.isArray(r.backsplashReviewCodes) ? r.backsplashReviewCodes : []) {
+      reviewRequiredItems.push({
+        category: "backsplash",
+        label: BACKSPLASH_REVIEW_LABEL[code] || "Backsplash",
+        reason: "requires_estimator_review",
+        code
+      });
+    }
     roomsByKey.set(roomKey, {
       roomId: roomKey,
       roomName: r.displayName || roomKey,
       countertopAmountCents: useProportionalAllocation ? baselineShares[idx] : absoluteReprice,
-      backsplashAmountCents: 0,
+      backsplashAmountCents,
+      backsplashMode: r.backsplashMode || "none",
+      backsplashFromMode: r.baselineBacksplashMode || "none",
       addOnsAmountCents: 0,
       materialDeltaCents: 0,
       materialFromGroup: r.baselineMaterialGroup || null,
@@ -206,7 +264,7 @@ export function buildUpdatedRoomPricingProjection(args) {
       selectedAccessories: [],
       selectedEdge: null,
       selectedSpecialtyItems: [],
-      reviewRequiredItems: [],
+      reviewRequiredItems,
       customerFacingLines: [],
       attributionStatus: useProportionalAllocation ? "proportional_allocation_of_baseline" : "absolute_reprice"
     });
@@ -222,20 +280,18 @@ export function buildUpdatedRoomPricingProjection(args) {
     if (useProportionalAllocation) room.countertopAmountCents += deltaCents;
   }
 
+  // Backsplash review items are sourced directly from each room's
+  // backsplashReviewCodes (see loop above) — those codes are already
+  // room-attributed and structured. This flat reviewFlags list only carries
+  // specialty/side-splash/edge review markers that have no equivalent
+  // per-room structured field yet.
   for (const flag of reviewFlags) {
     const parts = String(flag || "").split(":");
     const kind = parts[0];
     const roomKey = parts[1];
     const room = roomsByKey.get(roomKey);
     if (!room) continue;
-    if (kind === "full_height_backsplash" || kind === "custom_height_backsplash") {
-      room.backsplashAmountCents = null;
-      room.reviewRequiredItems.push({
-        category: "backsplash",
-        label: kind === "full_height_backsplash" ? "Full-height backsplash" : "Custom-height backsplash",
-        reason: "requires_estimator_review"
-      });
-    } else if (kind === "specialty_review") {
+    if (kind === "specialty_review") {
       room.reviewRequiredItems.push({ category: "specialty", label: "Specialty item", reason: "requires_estimator_review" });
     } else if (kind === "sidesplash_review") {
       room.reviewRequiredItems.push({ category: "side_splash", label: "Side splash", reason: "requires_estimator_review" });
@@ -353,14 +409,53 @@ function slugRoomId(name, index) {
 }
 
 /**
- * Build the Original room pricing projection from the immutable published
- * customer snapshot. Never recalculates anything — reads only what was
- * frozen at publish time. Per-room absolute countertop/backsplash dollars are
- * NOT available in the current snapshot schema (see module doc); rooms are
- * returned with those fields null and attributionStatus
- * "not_currently_attributable" until a future publish-time schema change
- * captures them. Legacy flat lineItems are attributed to a room only when
- * unambiguous.
+ * Build the Original room pricing projection FROM the immutable
+ * publish-time room pricing snapshot (section 20/13). Preferred path — used
+ * whenever `customerSnapshot.roomPricing` exists (all publications created
+ * after DE.Polish-3). Never recalculates anything; every dollar here was
+ * frozen once, at publish time, by roomPricingPublishSnapshot.mjs.
+ *
+ * @param {ReturnType<typeof import("./roomPricingPublishSnapshot.mjs").buildRoomPricingPublishSnapshot>} snapshot
+ */
+export function buildOriginalRoomPricingProjectionFromSnapshot(snapshot) {
+  const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const rooms = (Array.isArray(snap.rooms) ? snap.rooms : []).map((r, i) => ({
+    roomId: r?.roomId || `room-${i + 1}`,
+    roomName: r?.roomName || `Room ${i + 1}`,
+    countertopAmountCents: r?.countertopAmountCents != null ? Math.trunc(Number(r.countertopAmountCents)) : null,
+    backsplashAmountCents: r?.backsplashAmountCents != null ? Math.trunc(Number(r.backsplashAmountCents)) : null,
+    backsplashMode: r?.originalBacksplashMode || "none",
+    addOnsAmountCents: Math.trunc(Number(r?.addOnsAmountCents) || 0),
+    roomTotalCents: r?.roomTotalCents != null ? Math.trunc(Number(r.roomTotalCents)) : null,
+    selectedMaterial: r?.selectedMaterialLabel || null,
+    customerFacingLines: [],
+    reviewRequiredItems: [],
+    attributionStatus: r?.pricingSourceVersion || "published_allocation_v1"
+  }));
+
+  const projectAddOnsTotalCents = Math.trunc(Number(snap.projectAddOnsCents) || 0);
+  const projectTotalCents = snap.totalCents != null ? Math.trunc(Number(snap.totalCents)) : null;
+
+  return {
+    kind: "original",
+    rooms,
+    projectAddOns: [],
+    projectAddOnsTotalCents,
+    projectTotalCents,
+    unresolvedLegacyLines: [],
+    reconciliationStatus: snap.reconciliationStatus || "reconciled",
+    snapshotAvailability: "available"
+  };
+}
+
+/**
+ * Legacy fallback Original projection, built directly from the frozen
+ * customer-facing summary (name / lineItems / totals only) when a
+ * publication predates the DE.Polish-3 room pricing snapshot (section 19).
+ * Per-room absolute countertop/backsplash dollars are NOT available in this
+ * legacy shape; rooms are returned with those fields null and
+ * attributionStatus "not_currently_attributable" — never invented. Legacy
+ * flat lineItems are attributed to a room only when unambiguous.
  *
  * @param {{
  *   rooms?: Array<{ name?: string, materialLabel?: string|null, colorLabel?: string|null }>,
@@ -368,7 +463,7 @@ function slugRoomId(name, index) {
  *   totals?: { estimatedProjectTotal?: number|null }
  * }} customerSnapshot
  */
-export function buildOriginalRoomPricingProjection(customerSnapshot) {
+export function buildLegacyOriginalRoomPricingProjection(customerSnapshot) {
   const snap = customerSnapshot && typeof customerSnapshot === "object" ? customerSnapshot : {};
   const snapRooms = Array.isArray(snap.rooms) ? snap.rooms : [];
   const lineItems = Array.isArray(snap.lineItems) ? snap.lineItems : [];
@@ -414,12 +509,36 @@ export function buildOriginalRoomPricingProjection(customerSnapshot) {
     projectAddOnsTotalCents,
     projectTotalCents,
     unresolvedLegacyLines,
-    reconciliationStatus: "not_attributable"
+    reconciliationStatus: "not_attributable",
+    snapshotAvailability: "legacy_room_pricing_snapshot_unavailable"
   };
+}
+
+/**
+ * Original view dispatcher (section 20). Uses the immutable publish-time
+ * room pricing snapshot whenever the publication has one; falls back to the
+ * legacy flat-summary reconstruction for publications frozen before
+ * DE.Polish-3 (section 19). Never mixes the two, never uses live customer
+ * selections or current catalog prices.
+ *
+ * @param {{
+ *   roomPricing?: ReturnType<typeof import("./roomPricingPublishSnapshot.mjs").buildRoomPricingPublishSnapshot>|null,
+ *   rooms?: Array<object>,
+ *   lineItems?: Array<object>,
+ *   totals?: object
+ * }} customerSnapshot
+ */
+export function buildOriginalRoomPricingProjection(customerSnapshot) {
+  const snap = customerSnapshot && typeof customerSnapshot === "object" ? customerSnapshot : {};
+  if (snap.roomPricing && typeof snap.roomPricing === "object" && Array.isArray(snap.roomPricing.rooms)) {
+    return buildOriginalRoomPricingProjectionFromSnapshot(snap.roomPricing);
+  }
+  return buildLegacyOriginalRoomPricingProjection(snap);
 }
 
 const CHANGES_CATEGORY_LABEL = Object.freeze({
   material: "Material",
+  backsplash: "Backsplash",
   sink: "Sink",
   sink_cutout: "Sink cutout",
   faucet: "Faucet",
@@ -428,6 +547,14 @@ const CHANGES_CATEGORY_LABEL = Object.freeze({
   side_splash: "Side splash",
   specialty: "Specialty",
   custom: "Item"
+});
+
+/** Customer-facing label for a governed backsplash mode (section 22). */
+const BACKSPLASH_MODE_LABEL = Object.freeze({
+  none: "No backsplash",
+  standard_4in: "4-inch backsplash",
+  custom_height: "Custom-height backsplash",
+  full_height: "Full-height backsplash"
 });
 
 /**
@@ -456,6 +583,36 @@ export function buildChangesRoomPricingProjection(args) {
         updatedLabel: room.materialToGroup || room.selectedMaterial || "Updated material",
         amountDeltaCents: room.materialDeltaCents,
         status: "changed"
+      });
+    }
+
+    const originalBacksplashMode = origRoom?.backsplashMode || "none";
+    const updatedBacksplashMode = room.backsplashMode || "none";
+    const originalBacksplashAmountCents = origRoom?.backsplashAmountCents ?? null;
+    const updatedBacksplashAmountCents = room.backsplashAmountCents ?? null;
+    const backsplashReviewItems = (room.reviewRequiredItems || []).filter((i) => i.category === "backsplash");
+    if (
+      updatedBacksplashMode !== originalBacksplashMode ||
+      updatedBacksplashAmountCents !== originalBacksplashAmountCents ||
+      backsplashReviewItems.length
+    ) {
+      const amountDeltaCents =
+        originalBacksplashAmountCents != null && updatedBacksplashAmountCents != null
+          ? updatedBacksplashAmountCents - originalBacksplashAmountCents
+          : null;
+      let status = "changed";
+      if (originalBacksplashMode === "none" && updatedBacksplashMode !== "none") status = "new_selection";
+      else if (originalBacksplashMode !== "none" && updatedBacksplashMode === "none") status = "removed";
+      if (backsplashReviewItems.length) status = "review_required";
+      rows.push({
+        roomId: room.roomId,
+        roomName: room.roomName,
+        category: "backsplash",
+        categoryLabel: CHANGES_CATEGORY_LABEL.backsplash,
+        originalLabel: BACKSPLASH_MODE_LABEL[originalBacksplashMode] || "No backsplash",
+        updatedLabel: BACKSPLASH_MODE_LABEL[updatedBacksplashMode] || "No backsplash",
+        amountDeltaCents,
+        status
       });
     }
 
@@ -500,6 +657,7 @@ export function buildChangesRoomPricingProjection(args) {
     }
 
     for (const item of room.reviewRequiredItems || []) {
+      if (item.category === "backsplash") continue; // already folded into the backsplash row above
       rows.push({
         roomId: room.roomId,
         roomName: room.roomName,
@@ -529,6 +687,7 @@ function toPublicRoom(room) {
     addOnsAmount: room.addOnsAmountCents != null ? centsToDollars(room.addOnsAmountCents) : null,
     roomTotal: room.roomTotalCents != null ? centsToDollars(room.roomTotalCents) : null,
     selectedMaterial: room.selectedMaterial || null,
+    selectedBacksplash: room.backsplashMode != null ? BACKSPLASH_MODE_LABEL[room.backsplashMode] || null : null,
     selectedSink: room.selectedSink || null,
     selectedSinkFinish: room.selectedSinkFinish || null,
     selectedFaucet: room.selectedFaucet || null,
@@ -580,11 +739,25 @@ export function toPublicChangesPricingDto(changes) {
  * Small internal-only summary reusable by Queue / Workspace / Studio
  * customer-activity surfaces in a later phase. Deliberately does not include
  * per-room detail or option keys — just the top-line facts those surfaces
- * need (section 10).
+ * need (section 10/25).
+ *
+ * @param {ReturnType<typeof buildUpdatedRoomPricingProjection>} updated
+ * @param {{
+ *   lastSavedAt?: string|null,
+ *   missingInformationCount?: number,
+ *   pricingValidThrough?: string|null,
+ *   snapshotVersion?: string|null,
+ *   snapshotAvailability?: string|null
+ * }} [meta]
  */
 export function toInternalQueueWorkspaceSummary(updated, meta = {}) {
   const rooms = updated?.rooms || [];
+  const unresolvedPricingCount = rooms.filter(
+    (r) => (r.backsplashMode || "none") !== "none" && r.backsplashAmountCents == null
+  ).length;
   return {
+    snapshotVersion: meta.snapshotVersion ?? null,
+    snapshotAvailability: meta.snapshotAvailability ?? null,
     originalTotal: updated?.originalTotalCents != null ? centsToDollars(updated.originalTotalCents) : null,
     configuredTotal: updated?.configuredExactTotalCents != null ? centsToDollars(updated.configuredExactTotalCents) : null,
     delta: updated?.deltaFromOriginalCents != null ? centsToDollars(updated.deltaFromOriginalCents) : null,
@@ -592,9 +765,12 @@ export function toInternalQueueWorkspaceSummary(updated, meta = {}) {
     changedRoomCount: rooms.filter(
       (r) => r.materialDeltaCents !== 0 || r.addOnsAmountCents !== 0
     ).length,
-    lastSavedAt: meta.lastSavedAt ?? null,
     reviewRequiredCount: updated?.reviewRequiredCount ?? 0,
-    missingInformationCount: Number(meta.missingInformationCount) || 0,
-    reconciliationStatus: updated?.reconciliationStatus || "not_attributable"
+    unresolvedPricingCount,
+    reconciliationStatus: updated?.reconciliationStatus || "not_attributable",
+    lastSavedAt: meta.lastSavedAt ?? null,
+    pricingValidThrough: meta.pricingValidThrough ?? null,
+    backsplashPricingStatus: unresolvedPricingCount > 0 ? "review_required" : "priced",
+    missingInformationCount: Number(meta.missingInformationCount) || 0
   };
 }

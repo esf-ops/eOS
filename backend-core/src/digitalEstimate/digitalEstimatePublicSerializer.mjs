@@ -185,6 +185,7 @@ function buildOriginalRoomPricingDtoSafely(snap) {
   try {
     return toPublicRoomPricingDto(
       buildOriginalRoomPricingProjection({
+        roomPricing: snap.roomPricing && typeof snap.roomPricing === "object" ? snap.roomPricing : null,
         rooms: Array.isArray(snap.rooms) ? snap.rooms : [],
         lineItems: Array.isArray(snap.lineItems) ? snap.lineItems : [],
         totals: snap.totals && typeof snap.totals === "object" ? snap.totals : {}

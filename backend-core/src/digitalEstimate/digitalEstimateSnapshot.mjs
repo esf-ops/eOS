@@ -9,6 +9,8 @@ import {
   DIGITAL_ESTIMATE_TERMS_VERSION
 } from "./digitalEstimateConfig.mjs";
 import { sha256CanonicalJson } from "./digitalEstimateToken.mjs";
+import { buildRoomPricingPublishSnapshot } from "./configuration/roomPricingPublishSnapshot.mjs";
+import { dollarsToCents } from "./configuration/money.mjs";
 
 /**
  * @param {{
@@ -37,6 +39,7 @@ export function buildPublicationFreezePayloads(input) {
   const rooms = buildCustomerRooms(iu, snapshot, printSnap);
   const lineItems = buildCustomerLineItems(iu, printSnap);
   const notes = parseNotes(iu.customer_estimate_customer_facing_notes ?? iu.customerFacingNotes);
+  const roomPricing = buildRoomPricingSnapshotSafely(header, iu, customerDisplayTotal, input.publishedAt);
 
   const project = {
     customerName: str(header.customer_name),
@@ -65,7 +68,13 @@ export function buildPublicationFreezePayloads(input) {
       text: "This digital estimate is provided for planning and review. Totals are frozen at publication and are not recalculated in your browser."
     },
     materialGroupDisplay: str(snapshot.materialGroup ?? snapshot.material_group ?? header.estimated_material_group),
-    colorDisplay: extractPrimaryColorLabel(iu, rooms)
+    colorDisplay: extractPrimaryColorLabel(iu, rooms),
+    // Immutable publish-time room pricing snapshot (DE.Polish-3, section 13). Frozen once,
+    // here, forever — never recomputed on read. See roomPricingPublishSnapshot.mjs for the
+    // full source-authority + storage-design rationale. Defensive: a bug here must never
+    // block publication of the (already-working) baseline estimate, so failures are
+    // isolated and this is simply omitted (null) rather than thrown.
+    roomPricing
   };
 
   const pricingEvidence = {
@@ -98,6 +107,22 @@ export function buildPublicationFreezePayloads(input) {
     pricingEvidenceHash: sha256CanonicalJson(pricingEvidence),
     sourceQuoteFingerprint
   };
+}
+
+function buildRoomPricingSnapshotSafely(header, iu, customerDisplayTotal, publishedAt) {
+  try {
+    const rooms = Array.isArray(iu.estimate_rooms) ? iu.estimate_rooms : [];
+    return buildRoomPricingPublishSnapshot({
+      estimateId: header.id ?? null,
+      quoteNumber: str(header.quote_number),
+      revision: num(header.revision_number) || 1,
+      rooms,
+      customerDisplayTotalCents: dollarsToCents(Number(customerDisplayTotal) || 0),
+      createdAt: publishedAt || null
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 function buildCustomerRooms(iu, snapshot, printSnap) {

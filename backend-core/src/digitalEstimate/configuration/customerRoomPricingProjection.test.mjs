@@ -19,6 +19,7 @@ import {
 } from "./customerRoomPricingProjection.mjs";
 import { assertPublicConfigurationHasNoForbiddenContent } from "./configurationPublicSerializer.mjs";
 import { assertPublicDtoHasNoForbiddenContent } from "../digitalEstimatePublicSerializer.mjs";
+import { BACKSPLASH_REVIEW_CODES } from "./backsplashPricingAuthority.mjs";
 
 console.log("\ncustomerRoomPricingProjection.test.mjs\n");
 
@@ -220,17 +221,34 @@ function assertNoOptionKeysOrSfLf(dto) {
   console.log("ok: customer-provided sink has no ESF product charge; room without a sink has no cutout");
 }
 
-// 7. Backsplash review-required flag: amount null, room total still reconciles (no fabricated price)
+// 7. Backsplash review-required flag: amount null, room total still reconciles (no fabricated price).
+// Sourced from the room's own governed backsplashReviewCodes (backsplashPricingAuthority.mjs +
+// elite100ConfigDeltaEngineV2.mjs), not a flat legacy reviewFlags string.
 {
-  const r = calculateElite100ConfigDeltaV2(baseInputV2());
-  const updated = buildUpdatedRoomPricingProjection({
-    internal: r.internal,
-    reviewFlags: ["full_height_backsplash:kitchen"]
-  });
+  const r = calculateElite100ConfigDeltaV2(
+    baseInputV2({
+      rooms: [
+        {
+          roomKey: "kitchen",
+          displayName: "Kitchen",
+          chargeableCounterSf: 40,
+          selectedMaterialGroup: "promo",
+          baselineMaterialGroup: "promo",
+          backsplashMode: "full_height",
+          baselineBacksplashMode: "standard_4in",
+          backsplashReviewCodes: [BACKSPLASH_REVIEW_CODES.FULL_HEIGHT_MEASUREMENT_REQUIRED],
+          backsplashConfiguredBilledSf: null
+        },
+        { roomKey: "powder", displayName: "Powder Bath", chargeableCounterSf: 6, selectedMaterialGroup: "group_a", baselineMaterialGroup: "group_a" }
+      ]
+    })
+  );
+  const updated = buildUpdatedRoomPricingProjection({ internal: r.internal });
   const kitchen = updated.rooms.find((x) => x.roomId === "kitchen");
   assert.equal(kitchen.backsplashAmountCents, null);
   assert.equal(kitchen.reviewRequiredItems.length, 1);
   assert.equal(kitchen.reviewRequiredItems[0].category, "backsplash");
+  assert.equal(kitchen.reviewRequiredItems[0].code, BACKSPLASH_REVIEW_CODES.FULL_HEIGHT_MEASUREMENT_REQUIRED);
   assert.equal(kitchen.roomTotalCents, kitchen.countertopAmountCents + kitchen.addOnsAmountCents);
   assert.equal(updated.reconciliationStatus, "review_required");
   console.log("ok: full-height backsplash flags review-required without inventing a price; still reconciles");
@@ -353,20 +371,36 @@ function assertNoOptionKeysOrSfLf(dto) {
 {
   const r = calculateElite100ConfigDeltaV2(baseInputV2());
   const updated = buildUpdatedRoomPricingProjection({ internal: r.internal });
-  const summary = toInternalQueueWorkspaceSummary(updated, { lastSavedAt: "2026-07-21T00:00:00Z", missingInformationCount: 2 });
+  const summary = toInternalQueueWorkspaceSummary(updated, {
+    lastSavedAt: "2026-07-21T00:00:00Z",
+    missingInformationCount: 2,
+    pricingValidThrough: "2026-08-20",
+    snapshotVersion: "v1",
+    snapshotAvailability: "available"
+  });
   assert.deepEqual(Object.keys(summary).sort(), [
+    "backsplashPricingStatus",
     "changedRoomCount",
     "configuredTotal",
     "delta",
     "lastSavedAt",
     "missingInformationCount",
     "originalTotal",
+    "pricingValidThrough",
     "reconciliationStatus",
     "reviewRequiredCount",
-    "roomCount"
+    "roomCount",
+    "snapshotAvailability",
+    "snapshotVersion",
+    "unresolvedPricingCount"
   ]);
   assert.equal(summary.roomCount, 2);
   assert.equal(summary.missingInformationCount, 2);
+  assert.equal(summary.pricingValidThrough, "2026-08-20");
+  assert.equal(summary.snapshotVersion, "v1");
+  assert.equal(summary.snapshotAvailability, "available");
+  assert.equal(summary.backsplashPricingStatus, "priced");
+  assert.equal(summary.unresolvedPricingCount, 0);
   console.log("ok: internal Queue/Workspace summary is a flat, option-key-free top-line projection");
 }
 
@@ -436,6 +470,87 @@ function assertNoOptionKeysOrSfLf(dto) {
   }
   assert.equal(updated.reconciliationStatus, "reconciled");
   console.log("ok: an option with no room-attributable key stays project-level and is never assigned to a room");
+}
+
+// 19. Regression (DE.Polish-3): a room whose frozen baseline total already implicitly
+// includes an unchanged, governed backsplash amount must NOT have that amount counted
+// twice (once folded into the SF-weighted "Countertop" baseline allocation, and again as
+// the separately-priced "Backsplash" line). roomTotal must equal the room's exact
+// proportional share of the frozen baseline total, with countertop+backsplash summing
+// back to that share exactly, for every room — never inflating the project total.
+{
+  const r = calculateElite100ConfigDeltaV2(
+    baseInputV2({
+      rooms: [
+        {
+          roomKey: "kitchen",
+          displayName: "Kitchen",
+          chargeableCounterSf: 40,
+          selectedMaterialGroup: "promo",
+          baselineMaterialGroup: "promo",
+          backsplashMode: "standard_4in",
+          baselineBacksplashMode: "standard_4in",
+          backsplashReviewCodes: [],
+          backsplashOriginalBilledSf: 8,
+          backsplashConfiguredBilledSf: 8
+        },
+        { roomKey: "powder", displayName: "Powder Bath", chargeableCounterSf: 6, selectedMaterialGroup: "group_a", baselineMaterialGroup: "group_a" }
+      ]
+    })
+  );
+  const updated = buildUpdatedRoomPricingProjection({ internal: r.internal });
+  const kitchen = updated.rooms.find((x) => x.roomId === "kitchen");
+  assert.ok(kitchen.backsplashAmountCents > 0, "unchanged 4-inch backsplash must still price a real amount");
+  assert.equal(
+    kitchen.countertopAmountCents + kitchen.backsplashAmountCents + kitchen.addOnsAmountCents,
+    kitchen.roomTotalCents
+  );
+  assert.equal(
+    updated.roomSubtotalCents + updated.projectAddOnsTotalCents + updated.governedAdjustmentsCents,
+    updated.configuredExactTotalCents,
+    "no-op save with an unchanged baked-in backsplash must reconcile exactly — never double-count"
+  );
+  assert.equal(updated.reconciliationStatus, "reconciled");
+  // The frozen baseline total is unchanged (no mode/material change) so the project total
+  // must equal the baseline exactly — proof the backsplash dollars were not added twice.
+  assert.equal(updated.configuredExactTotalCents, updated.originalTotalCents);
+  console.log("ok: unchanged baked-in backsplash is never double-counted between Countertop and Backsplash");
+}
+
+// 20. Regression: when the configured backsplash amount is unresolved (review-required),
+// the room total still carries the known baseline backsplash dollars forward unchanged
+// (mirrors the engine's own "delta stays 0 when unresolved" rule) rather than silently
+// dropping money out of the room total while still charging it project-wide.
+{
+  const r = calculateElite100ConfigDeltaV2(
+    baseInputV2({
+      rooms: [
+        {
+          roomKey: "kitchen",
+          displayName: "Kitchen",
+          chargeableCounterSf: 40,
+          selectedMaterialGroup: "promo",
+          baselineMaterialGroup: "promo",
+          backsplashMode: "full_height",
+          baselineBacksplashMode: "standard_4in",
+          backsplashReviewCodes: ["full_height_measurement_required"],
+          backsplashOriginalBilledSf: 8,
+          backsplashConfiguredBilledSf: null
+        },
+        { roomKey: "powder", displayName: "Powder Bath", chargeableCounterSf: 6, selectedMaterialGroup: "group_a", baselineMaterialGroup: "group_a" }
+      ]
+    })
+  );
+  const updated = buildUpdatedRoomPricingProjection({ internal: r.internal });
+  const kitchen = updated.rooms.find((x) => x.roomId === "kitchen");
+  assert.ok(kitchen.backsplashAmountCents > 0, "unresolved backsplash carries the known baseline $ forward, never $0/null");
+  assert.equal(kitchen.reviewRequiredItems.length, 1);
+  assert.equal(
+    updated.roomSubtotalCents + updated.projectAddOnsTotalCents + updated.governedAdjustmentsCents,
+    updated.configuredExactTotalCents
+  );
+  assert.equal(updated.configuredExactTotalCents, updated.originalTotalCents);
+  console.log("ok: unresolved backsplash pricing carries the known baseline $ forward and still reconciles exactly");
 }
 
 console.log("\nAll customerRoomPricingProjection tests passed.\n");

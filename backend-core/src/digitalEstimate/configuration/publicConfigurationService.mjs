@@ -55,8 +55,16 @@ import {
 } from "../catalog/quoteLibraryCustomerConfigProjection.mjs";
 import { buildCustomerConfigurationSummary } from "../catalog/customerConfigurationSummary.mjs";
 import {
+  buildBacksplashPricingInput,
+  resolveOriginalBacksplashMode,
+  roomHasEligibleBacksplashLocations
+} from "./backsplashPricingAuthority.mjs";
+import {
   buildUpdatedRoomPricingProjection,
+  buildOriginalRoomPricingProjection,
+  buildChangesRoomPricingProjection,
   toPublicRoomPricingDto,
+  toPublicChangesPricingDto,
   toInternalQueueWorkspaceSummary
 } from "./customerRoomPricingProjection.mjs";
 import {
@@ -692,6 +700,11 @@ export function createPublicConfigurationService(deps) {
           countertopIncluded: Number(r.chargeableCounterSf) > 0,
           backsplashIncluded: Number(r.backsplashSf) > 0,
           backsplashHeightMode: r.backsplashHeightMode || null,
+          // Governed backsplash location authority (section 2/3): whether this room has any
+          // estimator-approved backsplash location at all. When false, the UI must not offer
+          // priced backsplash choices — show "No backsplash locations are available for this
+          // room." instead. Never exposes segment lengths/geometry, only this boolean.
+          backsplashLocationsAvailable: roomHasEligibleBacksplashLocations(r),
           customerMayEditLabel: true,
           locked: true
         })),
@@ -1109,7 +1122,7 @@ export function createPublicConfigurationService(deps) {
       // Build DE.2C rooms from material: selections + baseline (server resolves color → group)
       const rooms = (ctx.rooms || []).map((r) => {
         let selected = r.baselineMaterialGroup;
-        let chargeableBacksplashSf = Number(r.backsplashSf) || 0;
+        let selectedBacksplashMode = null;
         let edgeMode = "edge_eased";
         const roomType = inferRoomEligibilityType(r);
         for (const [key, qty] of Object.entries(normalized.selections)) {
@@ -1128,18 +1141,7 @@ export function createPublicConfigurationService(deps) {
             }
             selected = resolved.materialGroup;
           } else if (key.startsWith(`backsplash:${r.roomKey}:`)) {
-            const mode = key.split(":")[2];
-            if (mode === "none") chargeableBacksplashSf = 0;
-            else if (mode === "standard_4in" || mode === "full_height") {
-              chargeableBacksplashSf = Number(r.backsplashSf) || 0;
-              if (mode === "full_height") {
-                reviewFlags.push(`full_height_backsplash:${r.roomKey}`);
-              }
-            } else if (mode === "custom_height") {
-              // Do not invent chargeable SF for custom height — review required.
-              chargeableBacksplashSf = 0;
-              reviewFlags.push(`custom_height_backsplash:${r.roomKey}`);
-            }
+            selectedBacksplashMode = key.split(":")[2];
           } else if (key.startsWith(`edge:${r.roomKey}:`)) {
             edgeMode = normalizeEdgeProfileToken(key.split(":").slice(2).join(":"));
           } else {
@@ -1150,11 +1152,32 @@ export function createPublicConfigurationService(deps) {
             }
           }
         }
+
+        // Governed backsplash geometry resolution (section 2/10) — estimator-approved
+        // location/height authority only, never a customer-entered length. See
+        // backsplashPricingAuthority.mjs for the full eligibility/rounding contract.
+        const originalBacksplashMode = resolveOriginalBacksplashMode(r);
+        const effectiveBacksplashMode = selectedBacksplashMode || originalBacksplashMode;
+        const requestedHeightInches = Number(
+          mergedBacksplashDrafts[r.roomKey]?.requestedHeightInches
+        );
+        const backsplashResolution = buildBacksplashPricingInput(r, effectiveBacksplashMode, {
+          requestedHeightInches: Number.isFinite(requestedHeightInches) ? requestedHeightInches : null
+        });
+        for (const code of backsplashResolution.reviewCodes) {
+          reviewFlags.push(`${code}:${r.roomKey}`);
+        }
+
         return {
           roomKey: r.roomKey,
           displayName: r.displayName,
           chargeableCounterSf: r.chargeableCounterSf,
-          chargeableBacksplashSf,
+          backsplashMode: effectiveBacksplashMode,
+          baselineBacksplashMode: originalBacksplashMode,
+          backsplashReviewCodes: backsplashResolution.reviewCodes,
+          backsplashOriginalBilledSf: backsplashResolution.originalBilledSf,
+          backsplashConfiguredBilledSf: backsplashResolution.billedSf,
+          backsplashHasEligibleLocations: backsplashResolution.hasEligibleLocations,
           edgeLinearFeet: Number(r.edgeLinearFeet) || 0,
           edgeMode,
           selectedMaterialGroup: selected,
@@ -1228,7 +1251,7 @@ export function createPublicConfigurationService(deps) {
       const calcOptions = [];
       for (const [key, qtyRaw] of Object.entries(normalized.selections)) {
         if (key.startsWith("material:")) continue;
-        if (key.startsWith("backsplash:")) continue; // handled via chargeableBacksplashSf
+        if (key.startsWith("backsplash:")) continue; // handled via room.backsplashConfiguredBilledSf (governed engine input)
         const qty = Number(qtyRaw) || 0;
         if (qty <= 0) continue;
 
@@ -1775,7 +1798,12 @@ export function createPublicConfigurationService(deps) {
         roomPricingProjection = buildUpdatedRoomPricingProjection({ internal: result.internal, reviewFlags });
         roomPricingInternalSummary = toInternalQueueWorkspaceSummary(roomPricingProjection, {
           lastSavedAt: new Date().toISOString(),
-          missingInformationCount: (missingInformationRequirements || []).length
+          missingInformationCount: (missingInformationRequirements || []).length,
+          pricingValidThrough: ctx.pricingValidThrough || null,
+          snapshotVersion: ctx.customerSnapshot?.roomPricing?.snapshotVersion || null,
+          snapshotAvailability: ctx.customerSnapshot?.roomPricing
+            ? "available"
+            : "legacy_room_pricing_snapshot_unavailable"
         });
         if (roomPricingProjection.reconciliationStatus === "failed") {
           console.warn(
@@ -1794,17 +1822,45 @@ export function createPublicConfigurationService(deps) {
           ? toPublicRoomPricingDto(roomPricingProjection)
           : null;
 
+      // Changes view (section 22): immutable Original (publish-time room pricing snapshot,
+      // or explicit legacy fallback) compared against the Updated projection just computed
+      // above. Isolated behind its own try/catch for the same reason as roomPricingProjection
+      // — never allowed to block a save.
+      let publicRoomPricingChanges = null;
+      try {
+        if (roomPricingProjection && roomPricingProjection.reconciliationStatus !== "failed") {
+          const originalProjection = buildOriginalRoomPricingProjection(ctx.customerSnapshot || {});
+          const changesProjection = buildChangesRoomPricingProjection({
+            original: originalProjection,
+            updated: roomPricingProjection
+          });
+          publicRoomPricingChanges = toPublicChangesPricingDto(changesProjection);
+        }
+      } catch (e) {
+        console.warn("[customerRoomPricingProjection] changes projection failed; omitting", e?.message || e);
+        publicRoomPricingChanges = null;
+      }
+
       const customerResultJson = {
         ...result.public,
         missingInformationRequirements,
         reviewRequiredMessages: [
           ...(result.public?.reviewRequiredMessages || []),
           ...reviewFlags.map((f) => {
-            if (f.startsWith("custom_height_backsplash:")) {
+            if (f.startsWith("full_height_measurement_required:")) {
+              return "Full-height backsplash measurements will be confirmed by your estimator.";
+            }
+            if (f.startsWith("custom_backsplash_height_review:")) {
               return "Custom backsplash height requires estimator review.";
             }
-            if (f.startsWith("full_height_backsplash:")) {
-              return "Full-height backsplash measurements will be confirmed by your estimator.";
+            if (f.startsWith("backsplash_height_out_of_range:")) {
+              return "That backsplash height requires estimator review.";
+            }
+            if (f.startsWith("backsplash_geometry_missing:")) {
+              return "Backsplash pricing for this room requires estimator review.";
+            }
+            if (f.startsWith("backsplash_removal_credit_unresolved:")) {
+              return "Your backsplash removal credit will be confirmed by your estimator.";
             }
             if (f.startsWith("specialty_review:")) {
               return "A specialty item requires estimator review and custom quoting.";
@@ -1817,7 +1873,8 @@ export function createPublicConfigurationService(deps) {
         ],
         customerConfigurationSummary,
         quoteLibraryCustomerConfig: quoteLibraryProjection,
-        roomPricing: publicRoomPricing
+        roomPricing: publicRoomPricing,
+        roomPricingChanges: publicRoomPricingChanges
       };
       assertPublicConfigurationHasNoForbiddenContent(customerResultJson);
 

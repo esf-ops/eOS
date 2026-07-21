@@ -5,6 +5,7 @@
 
 import { ceilBillableSquareFeet } from "../../quotes/billableSquareFeet.mjs";
 import { STANDARD_BACKSPLASH_HEIGHT_IN } from "../../quotes/vanitySideSplash.js";
+import { roomHasEligibleBacksplashLocations } from "../configuration/backsplashPricingAuthority.mjs";
 import {
   getCutoutCatalogKeyForProduct,
   getProductById,
@@ -832,7 +833,7 @@ export function buildDefaultRoomProductOptions(args) {
     if (!roomKey) continue;
     const roomType = inferRoomEligibilityType(room);
 
-    if (choiceGroupEnabled(choiceGroups, "backsplash")) {
+    if (choiceGroupEnabled(choiceGroups, "backsplash") && roomHasEligibleBacksplashLocations(room)) {
       const heightMode = String(room.backsplashHeightMode || "").toLowerCase();
       let defaultMode = "standard_4in";
       if (room.includeBacksplash === false) defaultMode = "none";
