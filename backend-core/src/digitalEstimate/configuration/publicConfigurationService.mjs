@@ -1795,7 +1795,14 @@ export function createPublicConfigurationService(deps) {
       let roomPricingProjection = null;
       let roomPricingInternalSummary = null;
       try {
-        roomPricingProjection = buildUpdatedRoomPricingProjection({ internal: result.internal, reviewFlags });
+        roomPricingProjection = buildUpdatedRoomPricingProjection({
+          internal: result.internal,
+          reviewFlags,
+          // Frozen publish-time snapshot: preserves the custom-line allocation
+          // policy (explicit customer-facing lines + absorbed internal-only
+          // allocations) across every Updated recalculation.
+          publishedRoomPricing: ctx.customerSnapshot?.roomPricing || null
+        });
         roomPricingInternalSummary = toInternalQueueWorkspaceSummary(roomPricingProjection, {
           lastSavedAt: new Date().toISOString(),
           missingInformationCount: (missingInformationRequirements || []).length,

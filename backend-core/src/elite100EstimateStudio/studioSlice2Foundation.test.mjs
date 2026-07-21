@@ -79,11 +79,15 @@ console.log("\nstudioSlice2Foundation.test.mjs\n");
   assert.equal(custom.fabrication.customLineItemsCustomerVisibleTotal, 100);
   assert.equal(custom.fabrication.customLineItemsInternalOnlyTotal, 75);
   assert.ok(custom.totals.exactInternalTotal >= 175);
+  // Internal-only lines are CHARGED (included in the customer display total)
+  // but absorbed by name into stone categories at publication — the customer
+  // pays them without ever seeing the internal description
+  // (internal_custom_line_allocation_v1).
   assert.equal(
     custom.totals.customerDisplayTotal,
-    custom.totals.exactInternalTotal - 75 - (custom.totals.internalMarkupAmount || 0)
+    custom.totals.exactInternalTotal - (custom.totals.internalMarkupAmount || 0)
   );
-  console.log("ok: custom line items calculate server-side; internal-only excluded from customer display");
+  console.log("ok: custom line items calculate server-side; internal-only charged but absorbed (never named publicly)");
 }
 
 {

@@ -29,6 +29,19 @@ import {
   billableBacksplashFromRoom,
   billableCountertopFromRoom
 } from "../quotes/billableSquareFeet.mjs";
+import {
+  buildStudioScopeBilling,
+  collectScopeAdjustmentIssues,
+  normalizeEdgeScopeAdjustment,
+  resolveScopeEdgeLinearFeet
+} from "./studioScopeBilling.mjs";
+import {
+  isPremiumEdgeProfile,
+  normalizeEdgeProfileToken,
+  edgeProfileDisplayLabel,
+  resolveEdgeProfileDefinition,
+  resolvePremiumEdgeRatePerLf
+} from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
 
 /** D-edge / Dupont-style specialty — product brief $25/LF (matches Direct upgraded edge). */
 export const STUDIO_D_EDGE_RATE_PER_LF = UPGRADED_EDGE_RATE_DIRECT_V2;
@@ -73,6 +86,16 @@ export function assertScopeAuthority(scope, opts = {}) {
     err.code = "invalid_material_group";
     throw err;
   }
+  // Governed estimator scope adjustments are audited pricing inputs — a
+  // non-zero adjustment without a reason is not a valid pricing request.
+  const adjustmentIssues = collectScopeAdjustmentIssues(scope);
+  if (adjustmentIssues.length) {
+    const err = new Error(adjustmentIssues[0].message);
+    err.statusCode = 400;
+    err.code = "adjustment_reason_required";
+    err.details = adjustmentIssues;
+    throw err;
+  }
 }
 
 /**
@@ -111,6 +134,10 @@ export function collectUnresolvedItems(scope) {
  */
 export function scopeToCalculatorRooms(scope) {
   const rooms = Array.isArray(scope?.rooms) ? scope.rooms : [];
+  // Section-billing authority (measured/billed + governed estimator
+  // adjustments as independent sections) — single source with the UI summary.
+  const scopeBilling = buildStudioScopeBilling(scope);
+  const billingByRoomId = new Map(scopeBilling.rooms.map((row) => [row.roomId, row]));
   return rooms
     .filter((r) => r && r.included !== false)
     .map((r, idx) => {
@@ -124,6 +151,7 @@ export function scopeToCalculatorRooms(scope) {
           (p) => String(p.pieceType ?? "").toLowerCase() !== "backsplash"
         )
       });
+      const billingRow = billingByRoomId.get(String(r.id ?? ""));
       let backsplashRaw = Number(r.backsplashSqft);
       if (!Number.isFinite(backsplashRaw) || backsplashRaw < 0) {
         backsplashRaw = pieces
@@ -139,7 +167,9 @@ export function scopeToCalculatorRooms(scope) {
         backsplashSqft: splashPolicy.backsplashSqft,
         backsplashSections: r.backsplashSections
       });
-      const countertopSqft = counterBilled.billableSf;
+      const countertopSqft = billingRow
+        ? billingRow.billedWithAdjustmentsSf
+        : counterBilled.billableSf;
       const backsplashSqft = splashBilled.billableSf;
       return {
         id: r.id || `room-${idx}`,
@@ -257,7 +287,12 @@ export async function calculateStudioEstimate(params) {
   }
 
   // Recompute material on studio rate authority (covers Watts Promo override).
-  const chargeableCounter = rooms.reduce((s, r) => s + (Number(r.countertopSqft) || 0), 0);
+  // Room rows already carry section-ceiled billed SF including governed room
+  // adjustments; the project-level adjustment is its own independent section.
+  const scopeBilling = buildStudioScopeBilling(scope);
+  const chargeableCounter =
+    rooms.reduce((s, r) => s + (Number(r.countertopSqft) || 0), 0) +
+    scopeBilling.projectAdjustmentBilledSf;
   const chargeableSplash = rooms.reduce((s, r) => s + (Number(r.backsplashSqft) || 0), 0);
   const materialSf = round2(chargeableCounter + chargeableSplash);
   const materialSubtotal = round2(materialSf * materialRate.rate);
@@ -269,17 +304,63 @@ export async function calculateStudioEstimate(params) {
     if (unit) fabricationSubtotal = round2(fabricationSubtotal + unit.price * Number(qty));
   }
 
-  // Edge / miter / build-up from approved calculator rates only.
-  // W edge: wholesale $15/LF, direct $25/LF (quoteCalculator v2 upgraded edge — not universal $15).
-  // D edge: $25/LF (product brief; aligns with Direct upgraded-edge rate).
+  // Edge from approved calculator rates only.
+  //  - Canonical profiles (studioEdgeAuthority): free tier $0; premium tier
+  //    priced per LF by pricing basis (wholesale $15 / direct $25 — the same
+  //    rates the Digital Estimate premium-edge path uses).
+  //  - Legacy scopes without an explicit edgeProfileToken keep the historical
+  //    W/D branch exactly so previously priced estimates do not shift.
   const edgeMode = String(scope.edgeMode ?? "included");
   const edgeLf = Math.max(0, Number(scope.edgeLinearFeet) || 0);
-  if (edgeMode === "w_edge" && edgeLf > 0) {
-    fabricationSubtotal = round2(
-      fabricationSubtotal + edgeLf * resolveStudioWEdgeRatePerLf(pricingBasis)
-    );
-  } else if (edgeMode === "d_edge" && edgeLf > 0) {
-    fabricationSubtotal = round2(fabricationSubtotal + edgeLf * STUDIO_D_EDGE_RATE_PER_LF);
+  const explicitEdgeProfile = scope.edgeProfileToken
+    ? resolveEdgeProfileDefinition(scope.edgeProfileToken)
+    : null;
+  const edgeScope = resolveScopeEdgeLinearFeet(scope);
+  let edgeSummary;
+  if (explicitEdgeProfile) {
+    const premium = isPremiumEdgeProfile(explicitEdgeProfile.optionToken);
+    const ratePerLf = premium ? resolvePremiumEdgeRatePerLf(pricingBasis) : 0;
+    const pricedLf = premium ? edgeScope.finalLf : 0;
+    const amount = premium ? round2(pricedLf * ratePerLf) : 0;
+    if (amount > 0) fabricationSubtotal = round2(fabricationSubtotal + amount);
+    edgeSummary = {
+      profileToken: explicitEdgeProfile.optionToken,
+      profileLabel: edgeProfileDisplayLabel(explicitEdgeProfile.optionToken),
+      tier: explicitEdgeProfile.tier,
+      derivedLf: edgeScope.derivedLf,
+      adjustmentLf: edgeScope.adjustmentLf,
+      finalLf: edgeScope.finalLf,
+      pricedLf,
+      ratePerLf,
+      amount,
+      source: edgeScope.source
+    };
+  } else {
+    // Legacy pricing branch — unchanged W/D behavior for saved scopes.
+    let amount = 0;
+    if (edgeMode === "w_edge" && edgeLf > 0) {
+      amount = round2(edgeLf * resolveStudioWEdgeRatePerLf(pricingBasis));
+    } else if (edgeMode === "d_edge" && edgeLf > 0) {
+      amount = round2(edgeLf * STUDIO_D_EDGE_RATE_PER_LF);
+    }
+    if (amount > 0) fabricationSubtotal = round2(fabricationSubtotal + amount);
+    edgeSummary = {
+      profileToken: normalizeEdgeProfileToken(edgeMode),
+      profileLabel: edgeProfileDisplayLabel(edgeMode),
+      tier: edgeMode === "w_edge" || edgeMode === "d_edge" ? "premium" : "free",
+      derivedLf: edgeLf,
+      adjustmentLf: 0,
+      finalLf: edgeLf,
+      pricedLf: amount > 0 ? edgeLf : 0,
+      ratePerLf:
+        edgeMode === "w_edge"
+          ? resolveStudioWEdgeRatePerLf(pricingBasis)
+          : edgeMode === "d_edge"
+            ? STUDIO_D_EDGE_RATE_PER_LF
+            : 0,
+      amount,
+      source: "legacy_edge_mode"
+    };
   }
   const miterLf = Math.max(0, Number(scope.miterLinearFeet) || 0);
   const miterKey = String(scope.miterHeightKey ?? "");
@@ -317,8 +398,36 @@ export async function calculateStudioEstimate(params) {
   const markupPercent = Number(scope.internalMarkupPercent ?? 0) || 0;
   const internalMarkupAmount = markupPercent > 0 ? round2(materialSubtotal * (markupPercent / 100)) : 0;
   const exactInternalTotal = round2(afterAccount + internalMarkupAmount);
-  // Markup + internal-only custom lines never customer-facing.
-  const customerDisplayTotal = round2(afterAccount - customLineItemsInternalOnlyTotal);
+  // Internal markup is never customer-facing. Internal-only custom lines ARE
+  // charged to the customer — their names are hidden and their dollars are
+  // absorbed into customer-facing stone categories at publication by the
+  // deterministic allocation policy (internal_custom_line_allocation_v1),
+  // so the customer total reconciles to the authoritative total exactly.
+  const customerDisplayTotal = round2(afterAccount);
+
+  // Governed adjustment audit (snapshotted with the calculation): billed SF
+  // effect and cent effect per adjustment, at this calculation's material rate.
+  const adjustmentAudit = scopeBilling.adjustments.map((adj) => {
+    const billedSf =
+      adj.adjustmentScope === "project"
+        ? scopeBilling.projectAdjustmentBilledSf
+        : scopeBilling.rooms.find((r) => r.roomId === adj.roomId)?.adjustmentBilledSf ?? 0;
+    return {
+      ...adj,
+      billedSf,
+      pricingEffectCents: Math.round(billedSf * materialRate.rate * 102) // incl. 2% use tax
+    };
+  });
+  const edgeAdjustment = normalizeEdgeScopeAdjustment(scope);
+  const edgeAdjustmentAudit =
+    edgeAdjustment.adjustmentLf !== 0
+      ? {
+          ...edgeAdjustment,
+          pricingEffectCents: Math.round(
+            edgeAdjustment.adjustmentLf * (edgeSummary.ratePerLf || 0) * 100
+          )
+        }
+      : null;
 
   const fingerprint = createHash("sha256")
     .update(
@@ -334,10 +443,18 @@ export async function calculateStudioEstimate(params) {
           quantity: r.quantity,
           unitPrice: r.unitPrice,
           customerFacing: r.customerFacing,
-          category: r.category
+          category: r.category,
+          roomId: r.roomId || null
         })),
         edgeMode,
         edgeLf,
+        edgeProfileToken: explicitEdgeProfile?.optionToken || null,
+        edgeScopeAdjustment: edgeAdjustment.adjustmentLf,
+        countertopScopeAdjustments: scopeBilling.adjustments.map((a) => ({
+          scope: a.adjustmentScope,
+          roomId: a.roomId,
+          sf: a.adjustmentSf
+        })),
         miterKey,
         miterLf,
         buildup,
@@ -358,7 +475,22 @@ export async function calculateStudioEstimate(params) {
     fingerprint,
     calculatedAt: new Date().toISOString(),
     pricingEngine: "quoteCalculator+studioTrustedOverlays",
-    pricingVersion: 1,
+    pricingVersion: 2,
+    // Internal measured-vs-billed scope evidence (never public): exact measured
+    // SF, independently section-ceiled billed SF, and governed adjustments with
+    // their billed + cent effects at this calculation's rate.
+    scopeBilling: {
+      version: scopeBilling.version,
+      pricingScopeSource: scopeBilling.pricingScopeSource,
+      measuredCountertopSf: scopeBilling.measuredCountertopSf,
+      adjustedMeasuredCountertopSf: scopeBilling.adjustedMeasuredCountertopSf,
+      billedBeforeAdjustmentsSf: scopeBilling.billedBeforeAdjustmentsSf,
+      billedCountertopSf: scopeBilling.billedCountertopSf,
+      independentSectionCount: scopeBilling.independentSectionCount,
+      rooms: scopeBilling.rooms,
+      adjustments: adjustmentAudit,
+      edgeAdjustment: edgeAdjustmentAudit
+    },
     material: {
       group: materialRate.group,
       basis: materialRate.basis,
@@ -376,6 +508,7 @@ export async function calculateStudioEstimate(params) {
     fabrication: {
       subtotal: fabricationSubtotal,
       addOns,
+      edge: edgeSummary,
       customLineItems,
       customLineItemsTotal,
       customLineItemsCustomerVisibleTotal,

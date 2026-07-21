@@ -65,10 +65,25 @@
 
 import { allocateProportionally } from "./customerRoomPricingProjection.mjs";
 import { resolveOriginalBacksplashMode } from "./backsplashPricingAuthority.mjs";
+import {
+  allocateInternalOnlyCustomLines,
+  normalizeSnapshotCustomLines,
+  INTERNAL_CUSTOM_LINE_ALLOCATION_VERSION
+} from "./internalCustomLineAllocation.mjs";
 
-export const ROOM_PRICING_SNAPSHOT_VERSION = "v1";
+/**
+ * v2 (pricing-setup-scope-and-commercial-simplification): custom lines are now
+ * frozen explicitly — customer-facing lines appear as named room/project
+ * add-on lines; internal-only lines are absorbed into room Countertop /
+ * Backsplash amounts by the versioned deterministic allocation policy
+ * (internal_custom_line_allocation_v1) and the full audit trail is frozen in
+ * `customLineAllocations`. v1 snapshots (no custom-line fields) remain valid
+ * and are read with unchanged semantics.
+ */
+export const ROOM_PRICING_SNAPSHOT_VERSION = "v2";
 export const COUNTERTOP_BACKSPLASH_PRICING_SOURCE = "published_allocation_v1";
 export const ADD_ONS_NOT_ATTRIBUTABLE = "not_currently_attributable";
+export { INTERNAL_CUSTOM_LINE_ALLOCATION_VERSION };
 
 function slugRoomId(name, index) {
   const base = String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -98,8 +113,10 @@ function normalizeGeometry(room) {
  *     backsplashHeightMode?: string|null,
  *     materialGroup?: string|null, colorName?: string|null
  *   }>,
+ *   customLineItems?: Array<object>|null,
  *   customerDisplayTotalCents: number,
- *   createdAt?: string|null
+ *   createdAt?: string|null,
+ *   author?: string|null
  * }} args
  */
 export function buildRoomPricingPublishSnapshot(args) {
@@ -109,14 +126,34 @@ export function buildRoomPricingPublishSnapshot(args) {
     throw new Error("buildRoomPricingPublishSnapshot requires a finite customerDisplayTotalCents");
   }
 
+  // Custom lines (frozen explicitly at publish, section 13/14/15):
+  //  - customer-facing lines are carried by name — room-owned lines land on
+  //    their room; project-owned lines become named project add-on lines.
+  //  - internal-only lines are absorbed into the stone categories by the
+  //    versioned deterministic policy below — never shown by name publicly.
+  // customerDisplayTotalCents includes internal-only line dollars (the
+  // customer pays them without seeing them named), so both kinds are carved
+  // out of the SF-allocated stone pool and re-attached explicitly.
+  const allCustomLines = normalizeSnapshotCustomLines(args?.customLineItems);
+  const customerFacingLines = allCustomLines.filter((l) => l.customerFacing !== false);
+  const customerFacingTotalCents = customerFacingLines.reduce((s, l) => s + l.amountCents, 0);
+  const internalOnlyTotalCents = allCustomLines
+    .filter((l) => l.customerFacing === false)
+    .reduce((s, l) => s + l.amountCents, 0);
+
+  // Stone pool = frozen total minus every custom line. The pool is SF-allocated
+  // to rooms and split Countertop/Backsplash per room; custom-line dollars are
+  // then re-attached (explicitly or absorbed) so nothing is counted twice.
+  const stonePoolCents = totalCents - customerFacingTotalCents - internalOnlyTotalCents;
+
   const geometries = rooms.map(normalizeGeometry);
   const roomWeights = geometries.map((g) => g.countertopSf + g.backsplashSf);
-  const roomShares = rooms.length ? allocateProportionally(totalCents, roomWeights) : [];
+  const roomShares = rooms.length ? allocateProportionally(stonePoolCents, roomWeights) : [];
 
   const roomSnapshots = rooms.map((room, idx) => {
     const geometry = geometries[idx];
-    const roomTotalCents = roomShares[idx] ?? 0;
-    const [countertopAmountCents, backsplashAmountCentsRaw] = allocateProportionally(roomTotalCents, [
+    const roomStoneCents = roomShares[idx] ?? 0;
+    const [countertopAmountCents, backsplashAmountCentsRaw] = allocateProportionally(roomStoneCents, [
       geometry.countertopSf,
       geometry.backsplashSf
     ]);
@@ -125,15 +162,14 @@ export function buildRoomPricingPublishSnapshot(args) {
       backsplashSf: geometry.backsplashSf
     });
     const backsplashAmountCents = geometry.backsplashSf > 0 ? backsplashAmountCentsRaw : 0;
-    const addOnsAmountCents = 0;
 
     return {
       roomId: String(room?.id || room?.roomKey || slugRoomId(room?.name, idx)),
       roomName: String(room?.name || room?.roomName || `Room ${idx + 1}`),
       countertopAmountCents,
       backsplashAmountCents,
-      addOnsAmountCents,
-      roomTotalCents: countertopAmountCents + backsplashAmountCents + addOnsAmountCents,
+      addOnsAmountCents: 0,
+      roomTotalCents: 0, // finalized below after custom-line attachment
       customerFacingLines: [],
       selectedMaterialLabel: room?.materialGroup ? String(room.materialGroup) : null,
       selectedMaterialGroup: room?.materialGroup ? String(room.materialGroup) : null,
@@ -146,11 +182,74 @@ export function buildRoomPricingPublishSnapshot(args) {
       addOnsAttributionStatus: ADD_ONS_NOT_ATTRIBUTABLE
     };
   });
+  const roomsById = new Map(roomSnapshots.map((r) => [r.roomId, r]));
+  const roomsByName = new Map(
+    roomSnapshots.map((r) => [String(r.roomName).toLowerCase(), r])
+  );
+
+  // Customer-facing custom lines: explicit, never hidden inside stone totals.
+  const projectAddOnLines = [];
+  for (const line of customerFacingLines) {
+    const room =
+      (line.roomId && roomsById.get(String(line.roomId))) ||
+      (line.roomName && roomsByName.get(String(line.roomName).toLowerCase())) ||
+      null;
+    const frozen = {
+      lineKey: line.lineKey,
+      label: line.label,
+      amountCents: line.amountCents,
+      category: line.category || "custom",
+      quantity: line.quantity,
+      unit: line.unit,
+      customerVisible: true,
+      source: "estimator_custom_line"
+    };
+    if (room) {
+      room.customerFacingLines.push(frozen);
+      room.addOnsAmountCents += line.amountCents;
+    } else {
+      projectAddOnLines.push(frozen);
+    }
+  }
+
+  // Internal-only custom lines: deterministic absorption into stone categories
+  // (largest-remainder, integer cents) with a frozen audit trail. The base
+  // stone amounts just allocated are the policy weights.
+  const internalAllocation = allocateInternalOnlyCustomLines({
+    lines: allCustomLines,
+    rooms: roomSnapshots.map((r) => ({
+      roomId: r.roomId,
+      roomName: r.roomName,
+      countertopAmountCents: r.countertopAmountCents,
+      backsplashAmountCents: r.backsplashAmountCents
+    })),
+    author: args?.author ?? null,
+    timestamp: args?.createdAt ?? null
+  });
+  for (const alloc of internalAllocation.allocations) {
+    for (const target of alloc.targets) {
+      const room = roomsById.get(String(target.roomId));
+      if (!room) continue;
+      if (target.category === "backsplash") room.backsplashAmountCents += target.allocatedCents;
+      else room.countertopAmountCents += target.allocatedCents;
+    }
+  }
+
+  for (const room of roomSnapshots) {
+    room.roomTotalCents =
+      room.countertopAmountCents + room.backsplashAmountCents + room.addOnsAmountCents;
+  }
 
   const roomSubtotalCents = roomSnapshots.reduce((s, r) => s + r.roomTotalCents, 0);
-  const projectAddOnsCents = 0;
+  const projectAddOnsCents = projectAddOnLines.reduce((s, l) => s + l.amountCents, 0);
   const governedProjectAdjustmentsCents = 0;
-  const subtotalCents = roomSubtotalCents + projectAddOnsCents + governedProjectAdjustmentsCents;
+  const internalAbsorbedCents = internalAllocation.totalAllocatedCents;
+  // rooms (stone pool + absorbed internal) + explicit customer-facing lines +
+  // any unresolved internal cents must equal the frozen total exactly.
+  const subtotalCents =
+    roomSubtotalCents + projectAddOnsCents + governedProjectAdjustmentsCents;
+  const reconciled =
+    subtotalCents + internalAllocation.unresolvedCents === totalCents;
 
   return {
     snapshotVersion: ROOM_PRICING_SNAPSHOT_VERSION,
@@ -161,12 +260,22 @@ export function buildRoomPricingPublishSnapshot(args) {
     currency: "USD",
     rooms: roomSnapshots,
     roomSubtotalCents,
+    projectAddOnLines,
     projectAddOnsCents,
     governedProjectAdjustmentsCents,
+    customLineAllocations: internalAllocation.allocations,
+    customLineAllocationPolicyVersion: internalAllocation.policyVersion,
+    internalAbsorbedCents,
+    unresolvedInternalLines: internalAllocation.unresolved,
+    unresolvedInternalCents: internalAllocation.unresolvedCents,
     subtotalCents,
     taxCents: null,
     totalCents,
-    reconciliationStatus: subtotalCents === totalCents ? "reconciled" : "failed",
+    reconciliationStatus: !reconciled
+      ? "failed"
+      : internalAllocation.unresolved.length > 0
+        ? "review_required"
+        : "reconciled",
     createdAt: args?.createdAt ?? null
   };
 }
