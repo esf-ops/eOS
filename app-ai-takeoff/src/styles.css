@@ -4517,6 +4517,7 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-plan {
   position: sticky;
   top: 8px;
+  z-index: 0;
   min-width: 0;
   resize: both;
   overflow: auto;
@@ -4534,7 +4535,18 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   gap: 8px;
   margin-bottom: 8px;
 }
-.ctr-main { background: var(--eos-surface); border: 1px solid var(--eos-line); border-radius: 10px; padding: 12px; min-width: 0; }
+/* Keep the worksheet above a resized sticky plan panel so plan chrome cannot
+   intercept clicks on Backsplash / Cutouts / Notes. */
+.ctr-main {
+  position: relative;
+  z-index: 1;
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line);
+  border-radius: 10px;
+  padding: 12px;
+  min-width: 0;
+  isolation: isolate;
+}
 .ctr-summary { display: flex; flex-wrap: wrap; gap: 10px 16px; font-size: 0.85rem; margin-bottom: 10px; position: sticky; top: 0; background: var(--eos-surface); padding: 8px 0; z-index: 2; }
 .ctr-badge { padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; }
 .ctr-badge--block { background: var(--eos-danger-soft); color: var(--eos-danger); }
@@ -4544,6 +4556,8 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   max-height: min(70vh, 820px);
   border: 1px solid var(--eos-line);
   border-radius: 8px;
+  position: relative;
+  z-index: 1;
 }
 .ctr-table {
   width: max-content;
@@ -4556,48 +4570,96 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-table th, .ctr-table td {
   border-bottom: 1px solid var(--eos-line);
   padding: 8px 10px;
-  vertical-align: top;
+  vertical-align: middle;
   white-space: normal;
-  overflow: visible;
+  /* Contain overflowing controls so a stretched left-cell input cannot steal
+     pointer events from Backsplash / Cutouts / Notes. */
+  overflow: hidden;
   text-overflow: unset;
+  position: relative;
+  z-index: 0;
+}
+.ctr-table td:focus-within,
+.ctr-table td:hover {
+  z-index: 3;
+  overflow: visible;
 }
 .ctr-table th {
   text-align: left;
   background: var(--eos-bg-soft);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 4;
   font-weight: 700;
   white-space: nowrap;
+  overflow: hidden;
 }
-.ctr-table input,
+/* Text/select fill the cell; checkboxes must NOT — width:100% on checkboxes
+   stretched the Backsplash/Included hit boxes across neighboring columns. */
+.ctr-table input:not([type="checkbox"]):not([type="radio"]),
 .ctr-table select,
 .ctr-table textarea {
   width: 100%;
   min-width: 0;
+  max-width: 100%;
   padding: 6px 8px;
   font: inherit;
   box-sizing: border-box;
+  pointer-events: auto;
+}
+.ctr-table input[type="checkbox"],
+.ctr-table input[type="radio"] {
+  width: 1rem;
+  height: 1rem;
+  min-width: 1rem;
+  max-width: 1rem;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  accent-color: var(--eos-accent, #2a6f97);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.ctr-table input:focus-visible,
+.ctr-table select:focus-visible,
+.ctr-table textarea:focus-visible {
+  outline: 2px solid var(--eos-accent, #2a6f97);
+  outline-offset: 1px;
 }
 .ctr-col-room { min-width: 10rem; }
 .ctr-col-piece { min-width: 12rem; }
 .ctr-col-dim { min-width: 5.5rem; max-width: 7rem; }
 .ctr-col-qty { min-width: 4.25rem; max-width: 5rem; }
 .ctr-col-sf { min-width: 4.5rem; }
-.ctr-col-bs { min-width: 8.5rem; max-width: 11rem; }
+.ctr-col-bs { min-width: 9.5rem; width: 10.5rem; }
 .ctr-col-incl { min-width: 4.5rem; text-align: center; }
 .ctr-backsplash-help { margin: 0.35rem 0 0.75rem; font-size: 0.9rem; }
 .ctr-bs-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
+  max-width: 100%;
   font-size: 0.85rem;
-  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
 }
-.ctr-bs-toggle input { margin: 0; }
+.ctr-bs-toggle-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .ctr-col-cutouts { min-width: 8rem; }
 .ctr-col-notes { min-width: 12rem; }
 .ctr-col-actions { min-width: 7.5rem; white-space: nowrap; }
+.ctr-col-bs,
+.ctr-col-incl,
+.ctr-col-cutouts,
+.ctr-col-notes,
+.ctr-col-actions {
+  z-index: 1;
+}
 .ctr-room-rename {
   margin-top: 0;
   min-width: 12rem;
@@ -4658,10 +4720,16 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-piece-name,
 .ctr-note-input,
 .ctr-cutouts-input {
-  min-width: 100%;
-  overflow: visible;
+  /* Fill the cell without forcing overflow into neighboring columns. */
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  pointer-events: auto;
 }
 .ctr-dim-input {
-  min-width: 4.5rem;
+  min-width: 0;
+  max-width: 100%;
   font-variant-numeric: tabular-nums;
+  pointer-events: auto;
 }

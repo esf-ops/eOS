@@ -1019,7 +1019,13 @@ export default function ConsolidatedTakeoffReview() {
                           </td>
                         </tr>
                       ) : null}
-                      {section.pieces.map((row) => (
+                      {section.pieces.map((row) => {
+                        const rowControlKey = `${row.roomId}-${row.areaId}-${row.runId}`;
+                        const bsId = `ctr-bs-${rowControlKey}`;
+                        const inclId = `ctr-incl-${rowControlKey}`;
+                        const cutId = `ctr-cutouts-${rowControlKey}`;
+                        const rowLocked = approveStatus === "approved";
+                        return (
                     <tr
                       key={row.key}
                       className={[
@@ -1033,6 +1039,7 @@ export default function ConsolidatedTakeoffReview() {
                         <select
                           aria-label="Room"
                           value={row.roomId}
+                          disabled={rowLocked}
                           onChange={(e) => {
                             const to = e.target.value;
                             updateDraft(reassignRun(draft, row.roomId, row.runId, to));
@@ -1137,12 +1144,17 @@ export default function ConsolidatedTakeoffReview() {
                         {row.countertopSf.toFixed(2)}
                       </td>
                       <td className="ctr-col-bs">
-                        <label className="ctr-bs-toggle">
+                        <label className="ctr-bs-toggle" htmlFor={bsId}>
                           <input
+                            id={bsId}
                             type="checkbox"
                             checked={row.backsplashEligible}
                             aria-label="Include backsplash for this run"
                             data-testid="ctr-backsplash-eligible"
+                            data-room-id={row.roomId}
+                            data-area-id={row.areaId}
+                            data-run-id={row.runId}
+                            disabled={rowLocked}
                             onChange={(e) =>
                               updateDraft(
                                 markRunEstimatorOwned(
@@ -1165,31 +1177,50 @@ export default function ConsolidatedTakeoffReview() {
                               )
                             }
                           />
-                          <span>{row.backsplashEligible ? "Include" : "No backsplash"}</span>
+                          <span className="ctr-bs-toggle-label">
+                            {row.backsplashEligible ? "Include" : "No backsplash"}
+                          </span>
                         </label>
                       </td>
                       <td className="ctr-col-incl">
-                        <input
-                          type="checkbox"
-                          checked={row.included}
-                          aria-label="Include piece"
-                          onChange={(e) => {
-                            setExcludedRunIds((prev) => {
-                              const next = new Set(prev);
-                              if (e.target.checked) next.delete(row.runId);
-                              else next.add(row.runId);
-                              return next;
-                            });
-                            scheduleSave();
-                          }}
-                        />
+                        <label htmlFor={inclId} className="ctr-bs-toggle">
+                          <input
+                            id={inclId}
+                            type="checkbox"
+                            checked={row.included}
+                            aria-label="Include piece"
+                            data-testid="ctr-include-piece"
+                            disabled={rowLocked}
+                            onChange={(e) => {
+                              setExcludedRunIds((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.delete(row.runId);
+                                else next.add(row.runId);
+                                return next;
+                              });
+                              scheduleSave();
+                            }}
+                          />
+                          <span className="ctr-bs-toggle-label">
+                            {row.included ? "Yes" : "No"}
+                          </span>
+                        </label>
                       </td>
                       <td className="ctr-col-cutouts">
+                        <label className="eq-sr-only" htmlFor={cutId}>
+                          Cutouts for {row.pieceName}
+                        </label>
                         <input
+                          id={cutId}
                           className="ctr-cutouts-input"
                           value={row.cutoutsLabel}
                           aria-label="Cutouts"
+                          data-testid="ctr-cutouts"
+                          data-room-id={row.roomId}
+                          data-area-id={row.areaId}
+                          data-run-id={row.runId}
                           placeholder="sink:1"
+                          disabled={rowLocked}
                           onChange={(e) => {
                             const label = e.target.value;
                             const cutouts: Record<string, number> = {};
@@ -1200,7 +1231,11 @@ export default function ConsolidatedTakeoffReview() {
                             updateDraft(
                               patchRun(
                                 draft,
-                                { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+                                {
+                                  roomId: row.roomId,
+                                  areaId: row.areaId,
+                                  runId: row.runId
+                                },
                                 { cutouts }
                               )
                             );
@@ -1236,7 +1271,8 @@ export default function ConsolidatedTakeoffReview() {
                         </button>
                       </td>
                     </tr>
-                      ))}
+                        );
+                      })}
                     </React.Fragment>
                   ))}
                 </tbody>
