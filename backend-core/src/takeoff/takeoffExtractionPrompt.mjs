@@ -39,7 +39,7 @@
  *     visible geometry. Do not deduct cutouts from material sf. Nonstandard depths must
  *     cite evidence. Conflict → requiresEstimatorReview, never silent resolution.
  */
-export const PROMPT_VERSION = "v6.2";
+export const PROMPT_VERSION = "v6.3";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -85,6 +85,7 @@ const SCHEMA_EXAMPLE = `
               "shape": "rect",
               "pieceType": "counter",
               "backsplashEligible": true,
+              "cutouts": [{ "type": "kitchen_sink", "quantity": 1, "source": "ai_suggested" }],
               "exposedEndOverhangIn": 0,
               "sourcePages": [1],
               "notes": ["Sink at center"],
@@ -100,6 +101,7 @@ const SCHEMA_EXAMPLE = `
               "shape": "rect",
               "pieceType": "counter",
               "backsplashEligible": true,
+              "cutouts": [{ "type": "cooktop", "quantity": 1, "source": "ai_suggested" }],
               "sourcePages": [1],
               "notes": ["Range at right end — backsplash interrupted"],
               "lengthEvidenceId": "dim-002",
@@ -217,6 +219,10 @@ BACKSPLASH — READ CAREFULLY (eligibility, not height)
 
 CUTOUTS AND EXCLUSIONS — CRITICAL RULE
 • Sink cutouts, cooktop cutouts, and faucet holes are FABRICATION OPERATIONS, not material exclusions.
+• When a run clearly shows a physical opening, record it on that run as structured cutouts:
+  run.cutouts = [{ "type": <one of "kitchen_sink" | "vanity_bar_sink" | "cooktop" | "electrical_outlet" | "pop_up_outlet" | "other">, "quantity": <integer>, "source": "ai_suggested" }]
+  For "other", include a short "note" describing the opening. Do NOT use freeform strings.
+  Your cutout suggestion is not final; the estimator confirms per run before approval.
 • Do NOT add sink/cooktop/faucet cutouts to area.exclusions[].
 • Record them in area.notes[] or area.cutouts[] (if that field is present) for reference only.
 • Do NOT subtract sink/cooktop/cutout area from material square footage.

@@ -147,6 +147,11 @@ export const TAKEOFF_SHAPE_TYPE = Object.freeze({
  *   Estimator/AI suggestion: this counter run meets a wall/cabinet and can receive splash.
  *   Customer chooses height/style later; do not store ordinary 4" height for eligibility.
  * @property {"ai_suggested"|"estimator_confirmed"|"manual"|"legacy_height"|"default"|string} [backsplashEligibilitySource]
+ * @property {Array<{type:"kitchen_sink"|"vanity_bar_sink"|"cooktop"|"electrical_outlet"|"pop_up_outlet"|"other",quantity:number,source?:string,note?:string}>} [cutouts]
+ *   Structured physical openings on this run (fabrication operations, never material
+ *   deductions). Legacy string/object shapes normalize via takeoffCutoutScope.mjs.
+ * @property {boolean} [sideSplashLeftEligible]  physical side-splash eligibility (left end meets wall/cabinet)
+ * @property {boolean} [sideSplashRightEligible] physical side-splash eligibility (right end meets wall/cabinet)
  * @property {number} [exposedEndOverhangIn]
  * @property {number[]} [sourcePages]
  * @property {string[]} [notes]
@@ -171,6 +176,9 @@ export function makeTakeoffRun(overrides = {}) {
     ...(overrides.backsplashEligibilitySource != null && {
       backsplashEligibilitySource: String(overrides.backsplashEligibilitySource)
     }),
+    ...(overrides.cutouts != null && { cutouts: overrides.cutouts }),
+    ...(overrides.sideSplashLeftEligible != null && { sideSplashLeftEligible: Boolean(overrides.sideSplashLeftEligible) }),
+    ...(overrides.sideSplashRightEligible != null && { sideSplashRightEligible: Boolean(overrides.sideSplashRightEligible) }),
     ...(overrides.exposedEndOverhangIn != null && { exposedEndOverhangIn: Number(overrides.exposedEndOverhangIn) }),
     ...(overrides.sourcePages != null && { sourcePages: overrides.sourcePages }),
     ...(overrides.notes != null && { notes: overrides.notes }),

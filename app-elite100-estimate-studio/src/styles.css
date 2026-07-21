@@ -823,6 +823,22 @@ button.linkish {
   .eq-table .hide-sm { display: none; }
 }
 
+/* Read-only approved physical scope summary (Takeoff authority). */
+.eq-approved-scope {
+  margin: 6px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-border, #d7dde3);
+  border-radius: 8px;
+  background: var(--eos-bg-soft, #f7f9fb);
+}
+.eq-approved-scope-list {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 0.88rem;
+  display: grid;
+  gap: 2px;
+}
+
 .eq-room-backsplash {
   margin-top: 10px;
   padding: 10px 12px;

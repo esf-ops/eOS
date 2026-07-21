@@ -104,6 +104,14 @@ function cutoutTotalsFromRooms(rooms = []) {
       if (p.included === false) continue;
       pieces += 1;
       countertopSf += Number(p.sqft) || 0;
+      // Structured cutouts seeded from approved Takeoff scope.
+      for (const c of Array.isArray(p.cutouts) ? p.cutouts : []) {
+        const qty = Number(c?.quantity) || 0;
+        if (c?.type === "kitchen_sink") kitchenSink += qty;
+        else if (c?.type === "vanity_bar_sink") vanitySink += qty;
+        else if (c?.type === "cooktop") cooktop += qty;
+        else if (c?.type === "electrical_outlet") outlet += qty;
+      }
     }
   }
   return { rooms: rooms.length, pieces, countertopSf, backsplashSf, kitchenSink, vanitySink, cooktop, outlet };

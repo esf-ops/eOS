@@ -13,6 +13,7 @@
 import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
 import { emptyReviewState, normalizeReviewState } from "./takeoffReviewStatus.mjs";
 import { sfFromRun } from "./takeoffMeasurementCalc.mjs";
+import { normalizeRunCutouts } from "./takeoffCutoutScope.mjs";
 
 /**
  * Hard blockers only — must map to a real calculation / assignment / persist failure.
@@ -669,11 +670,14 @@ export function buildConsolidatedTakeoffSummary(takeoffResult, reviewState, comp
       for (const run of area.runs ?? []) {
         if (excludedRuns.has(run.id)) continue;
         includedPieces += 1;
-        const cutouts = run.cutouts || area.cutouts || {};
-        kitchenSink += Number(cutouts.kitchenSink ?? cutouts.kitchen_sink ?? 0) || 0;
-        vanitySink += Number(cutouts.vanitySink ?? cutouts.vanity_sink ?? cutouts.barSink ?? 0) || 0;
-        cooktop += Number(cutouts.cooktop ?? 0) || 0;
-        outlet += Number(cutouts.outlet ?? cutouts.outlets ?? 0) || 0;
+        // Structured or legacy cutouts — normalized once, never string-parsed here.
+        const { cutouts } = normalizeRunCutouts(run.cutouts ?? area.cutouts);
+        for (const c of cutouts) {
+          if (c.type === "kitchen_sink") kitchenSink += c.quantity;
+          else if (c.type === "vanity_bar_sink") vanitySink += c.quantity;
+          else if (c.type === "cooktop") cooktop += c.quantity;
+          else if (c.type === "electrical_outlet") outlet += c.quantity;
+        }
       }
     }
   }

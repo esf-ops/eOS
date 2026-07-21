@@ -13,6 +13,10 @@
  */
 
 import { resolveRunBacksplashEligible } from "../../../backend-core/src/takeoff/takeoffBacksplashEligibility.mjs";
+import {
+  normalizeRunCutouts,
+  summarizeRunCutouts
+} from "../../../backend-core/src/takeoff/takeoffCutoutScope.mjs";
 
 /** Rounded square feet from length × depth inches. */
 export function sfFrom(lengthIn, depthIn) {
@@ -34,10 +38,7 @@ export function flattenPieces(result, excludedRunIds) {
   for (const room of result?.rooms ?? []) {
     for (const area of room.areas ?? []) {
       for (const run of area.runs ?? []) {
-        const cutouts = run.cutouts || {};
-        const parts = Object.entries(cutouts)
-          .filter(([, v]) => Number(v) > 0)
-          .map(([k, v]) => `${k}:${v}`);
+        const { cutouts } = normalizeRunCutouts(run.cutouts);
         const eligibility = resolveRunBacksplashEligible(run, area);
         rows.push({
           key: `${room.id}:${area.id}:${run.id}`,
@@ -52,7 +53,10 @@ export function flattenPieces(result, excludedRunIds) {
           countertopSf: sfFrom(Number(run.lengthIn) || 0, Number(run.depthIn) || 0),
           backsplashEligible: eligibility.eligible,
           included: !excludedRunIds.has(run.id),
-          cutoutsLabel: parts.join(", "),
+          cutouts,
+          cutoutsSummary: summarizeRunCutouts(cutouts),
+          sideSplashLeftEligible: run.sideSplashLeftEligible === true,
+          sideSplashRightEligible: run.sideSplashRightEligible === true,
           note: String(run.notes?.[0] ?? run.note ?? ""),
           lowConfidence:
             Boolean(run.requiresEstimatorReview) ||

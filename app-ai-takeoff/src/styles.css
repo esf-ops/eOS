@@ -4566,6 +4566,9 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   border-spacing: 0;
   font-size: 0.84rem;
   table-layout: auto;
+  /* Scroll room below the final row so the sticky action bar never has to sit
+     on top of the last row's Backsplash/Included/Cutouts controls. */
+  margin-bottom: 56px;
 }
 .ctr-table th, .ctr-table td {
   border-bottom: 1px solid var(--eos-line);
@@ -4697,7 +4700,29 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-sf { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctr-row--excluded { opacity: 0.45; }
 .ctr-row--low { background: var(--eos-warn-soft); }
-.ctr-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; position: sticky; bottom: 0; background: var(--eos-surface); padding: 10px 0 4px; }
+/* Sticky bottom action bar. pointer-events none on the container so the
+   full-width strip (flex gaps + padding) can never intercept clicks meant for
+   the last worksheet row underneath it — only real children take clicks. */
+.ctr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  position: sticky;
+  bottom: 0;
+  background: transparent;
+  padding: 10px 0 4px;
+  pointer-events: none;
+}
+.ctr-actions > * {
+  pointer-events: auto;
+}
+.ctr-actions > .ctr-issues,
+.ctr-actions > .ctr-approve-msg,
+.ctr-actions > .ctr-approve-diag {
+  background: var(--eos-surface);
+}
 .ctr-btn-primary { background: var(--eos-accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 600; cursor: pointer; }
 .ctr-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 .ctr-btn-secondary { background: var(--eos-bg-soft); border: 1px solid var(--eos-line-strong); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
@@ -4726,6 +4751,84 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   max-width: 100%;
   box-sizing: border-box;
   pointer-events: auto;
+}
+/* Structured cutouts popover — replaces the freeform "sink:1" text input. */
+.ctr-cutouts-pop {
+  position: relative;
+  pointer-events: auto;
+}
+.ctr-cutouts-summary {
+  display: block;
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--eos-line-strong, var(--eos-line));
+  border-radius: 6px;
+  background: var(--eos-bg-soft);
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+.ctr-cutouts-summary::-webkit-details-marker { display: none; }
+.ctr-cutouts-summary:focus-visible {
+  outline: 2px solid var(--eos-accent, #2a6f97);
+  outline-offset: 1px;
+}
+.ctr-cutouts-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 6;
+  min-width: 15rem;
+  display: grid;
+  gap: 6px;
+  background: var(--eos-surface, #fff);
+  border: 1px solid var(--eos-line-strong, var(--eos-line));
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  padding: 10px 12px;
+}
+.ctr-cutouts-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ctr-cutouts-qty {
+  width: 3.5rem !important;
+  min-width: 3.5rem;
+  padding: 2px 6px;
+}
+.ctr-cutouts-note {
+  flex: 1 1 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 0.8rem;
+}
+.ctr-cutouts-sidesplash {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--eos-line);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+.ctr-cutouts-side-title {
+  flex: 1 1 100%;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eos-ink-muted);
+}
+/* Keep the cell (and its open popover) above neighbors while the menu is open. */
+.ctr-table td:has(.ctr-cutouts-pop[open]) {
+  z-index: 5;
+  overflow: visible;
 }
 .ctr-dim-input {
   min-width: 0;
