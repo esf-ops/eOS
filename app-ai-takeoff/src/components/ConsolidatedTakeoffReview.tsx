@@ -39,6 +39,13 @@ import {
   provisionalEligibleBacksplashSf
 } from "@takeoff-core/takeoffBacksplashEligibility.mjs";
 import {
+  normalizeTakeoffCutoutScope,
+  setCutoutNote,
+  setCutoutQuantity,
+  TAKEOFF_CUTOUT_TYPES,
+  toggleCutoutEntry
+} from "@takeoff-core/takeoffCutoutScope.mjs";
+import {
   flattenPieces,
   patchRun,
   renameRoom,
@@ -64,6 +71,13 @@ type ApprovalDiagnostic = {
   advisoryCount: number;
 };
 
+type CutoutEntry = {
+  type: string;
+  quantity: number;
+  source?: string;
+  note?: string;
+};
+
 type PieceRow = {
   key: string;
   roomId: string;
@@ -77,15 +91,22 @@ type PieceRow = {
   countertopSf: number;
   backsplashEligible: boolean;
   included: boolean;
-  cutoutsLabel: string;
+  cutouts: CutoutEntry[];
+  cutoutsSummary: string;
+  sideSplashLeftEligible: boolean;
+  sideSplashRightEligible: boolean;
   note: string;
   lowConfidence: boolean;
 };
 
-/** Unique ids + per-run backsplash eligibility (legacy height → eligible). */
+/**
+ * Unique ids + per-run backsplash eligibility (legacy height → eligible) +
+ * structured cutouts (legacy "sink:1" strings / object maps → typed entries).
+ */
 function healTakeoffDraft(takeoff: any) {
   const unique = ensureUniqueTakeoffIdentity(takeoff).takeoff;
-  return normalizeTakeoffBacksplashEligibility(unique).takeoff;
+  const eligible = normalizeTakeoffBacksplashEligibility(unique).takeoff;
+  return normalizeTakeoffCutoutScope(eligible).takeoff;
 }
 
 function addPiece(result: any, roomId: string): any {
@@ -1207,40 +1228,177 @@ export default function ConsolidatedTakeoffReview() {
                         </label>
                       </td>
                       <td className="ctr-col-cutouts">
-                        <label className="eq-sr-only" htmlFor={cutId}>
-                          Cutouts for {row.pieceName}
-                        </label>
-                        <input
+                        <details
+                          className="ctr-cutouts-pop"
                           id={cutId}
-                          className="ctr-cutouts-input"
-                          value={row.cutoutsLabel}
-                          aria-label="Cutouts"
                           data-testid="ctr-cutouts"
                           data-room-id={row.roomId}
                           data-area-id={row.areaId}
                           data-run-id={row.runId}
-                          placeholder="sink:1"
-                          disabled={rowLocked}
-                          onChange={(e) => {
-                            const label = e.target.value;
-                            const cutouts: Record<string, number> = {};
-                            for (const part of label.split(",")) {
-                              const [k, v] = part.split(":").map((s) => s.trim());
-                              if (k && v) cutouts[k] = Number(v) || 0;
-                            }
-                            updateDraft(
-                              patchRun(
-                                draft,
-                                {
-                                  roomId: row.roomId,
-                                  areaId: row.areaId,
-                                  runId: row.runId
-                                },
-                                { cutouts }
-                              )
-                            );
-                          }}
-                        />
+                        >
+                          <summary
+                            className="ctr-cutouts-summary"
+                            data-testid="ctr-cutouts-summary"
+                            aria-label={`Cutouts for ${row.pieceName}`}
+                          >
+                            {row.cutoutsSummary}
+                          </summary>
+                          <div className="ctr-cutouts-menu" data-testid="ctr-cutouts-menu">
+                            {TAKEOFF_CUTOUT_TYPES.map(
+                              (opt: { type: string; label: string }) => {
+                                const entry = row.cutouts.find(
+                                  (c: CutoutEntry) => c.type === opt.type
+                                );
+                                const checked = Boolean(entry);
+                                const boxId = `${cutId}-${opt.type}`;
+                                return (
+                                  <div key={opt.type} className="ctr-cutouts-option">
+                                    <label className="ctr-bs-toggle" htmlFor={boxId}>
+                                      <input
+                                        id={boxId}
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={rowLocked}
+                                        data-testid={`ctr-cutout-${opt.type}`}
+                                        onChange={(e) =>
+                                          updateDraft(
+                                            markRunEstimatorOwned(
+                                              patchRun(
+                                                draft,
+                                                {
+                                                  roomId: row.roomId,
+                                                  areaId: row.areaId,
+                                                  runId: row.runId
+                                                },
+                                                {
+                                                  cutouts: toggleCutoutEntry(
+                                                    row.cutouts,
+                                                    opt.type,
+                                                    e.target.checked
+                                                  )
+                                                }
+                                              ),
+                                              row.roomId,
+                                              row.runId
+                                            )
+                                          )
+                                        }
+                                      />
+                                      <span className="ctr-bs-toggle-label">{opt.label}</span>
+                                    </label>
+                                    {checked ? (
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        className="ctr-cutouts-qty"
+                                        aria-label={`${opt.label} quantity`}
+                                        value={entry?.quantity ?? 1}
+                                        disabled={rowLocked}
+                                        onChange={(e) =>
+                                          updateDraft(
+                                            patchRun(
+                                              draft,
+                                              {
+                                                roomId: row.roomId,
+                                                areaId: row.areaId,
+                                                runId: row.runId
+                                              },
+                                              {
+                                                cutouts: setCutoutQuantity(
+                                                  row.cutouts,
+                                                  opt.type,
+                                                  Number(e.target.value) || 1
+                                                )
+                                              }
+                                            )
+                                          )
+                                        }
+                                      />
+                                    ) : null}
+                                    {checked && opt.type === "other" ? (
+                                      <input
+                                        className="ctr-cutouts-note"
+                                        placeholder="Describe the opening (required)"
+                                        aria-label="Other cutout note"
+                                        data-testid="ctr-cutout-other-note"
+                                        value={entry?.note ?? ""}
+                                        disabled={rowLocked}
+                                        onChange={(e) =>
+                                          updateDraft(
+                                            patchRun(
+                                              draft,
+                                              {
+                                                roomId: row.roomId,
+                                                areaId: row.areaId,
+                                                runId: row.runId
+                                              },
+                                              {
+                                                cutouts: setCutoutNote(
+                                                  row.cutouts,
+                                                  "other",
+                                                  e.target.value
+                                                )
+                                              }
+                                            )
+                                          )
+                                        }
+                                      />
+                                    ) : null}
+                                  </div>
+                                );
+                              }
+                            )}
+                            <div className="ctr-cutouts-sidesplash">
+                              <span className="ctr-cutouts-side-title">Side splash eligible</span>
+                              <label className="ctr-bs-toggle" htmlFor={`${cutId}-ss-left`}>
+                                <input
+                                  id={`${cutId}-ss-left`}
+                                  type="checkbox"
+                                  checked={row.sideSplashLeftEligible}
+                                  disabled={rowLocked}
+                                  data-testid="ctr-sidesplash-left"
+                                  onChange={(e) =>
+                                    updateDraft(
+                                      patchRun(
+                                        draft,
+                                        {
+                                          roomId: row.roomId,
+                                          areaId: row.areaId,
+                                          runId: row.runId
+                                        },
+                                        { sideSplashLeftEligible: e.target.checked }
+                                      )
+                                    )
+                                  }
+                                />
+                                <span className="ctr-bs-toggle-label">Left</span>
+                              </label>
+                              <label className="ctr-bs-toggle" htmlFor={`${cutId}-ss-right`}>
+                                <input
+                                  id={`${cutId}-ss-right`}
+                                  type="checkbox"
+                                  checked={row.sideSplashRightEligible}
+                                  disabled={rowLocked}
+                                  data-testid="ctr-sidesplash-right"
+                                  onChange={(e) =>
+                                    updateDraft(
+                                      patchRun(
+                                        draft,
+                                        {
+                                          roomId: row.roomId,
+                                          areaId: row.areaId,
+                                          runId: row.runId
+                                        },
+                                        { sideSplashRightEligible: e.target.checked }
+                                      )
+                                    )
+                                  }
+                                />
+                                <span className="ctr-bs-toggle-label">Right</span>
+                              </label>
+                            </div>
+                          </div>
+                        </details>
                       </td>
                       <td className="ctr-col-notes">
                         <input

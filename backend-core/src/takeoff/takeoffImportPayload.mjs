@@ -21,6 +21,11 @@ import {
   resolveRunBacksplashEligible,
   sumEligibleBacksplashLengthIn
 } from "./takeoffBacksplashEligibility.mjs";
+import {
+  buildApprovedScopeSummary,
+  deriveFabricationQuantitiesFromImportPayload,
+  normalizeRunCutouts
+} from "./takeoffCutoutScope.mjs";
 
 export const TAKEOFF_IMPORT_SCHEMA_VERSION = "takeoff_import_v1";
 
@@ -271,10 +276,9 @@ export function buildTakeoffImportPayload(params) {
         }
 
         const { eligible } = resolveRunBacksplashEligible(run, area);
-        const cutouts =
-          run.cutouts && typeof run.cutouts === "object" && !Array.isArray(run.cutouts)
-            ? { ...run.cutouts }
-            : {};
+        // Structured cutout contract — legacy strings/maps normalize here so no
+        // downstream consumer ever string-parses cutouts again.
+        const { cutouts } = normalizeRunCutouts(run.cutouts);
         importRoom.pieces.push({
           name: run.label,
           pieceType: pt,
@@ -292,6 +296,9 @@ export function buildTakeoffImportPayload(params) {
           areaId: area.id ?? null,
           backsplashEligible: eligible,
           cutouts,
+          sideSplashLeftEligible: run.sideSplashLeftEligible === true,
+          sideSplashRightEligible: run.sideSplashRightEligible === true,
+          waterfall: isWaterfall || undefined,
           backsplash: backsplashMetaForRun(run, area),
         });
       }
@@ -303,6 +310,11 @@ export function buildTakeoffImportPayload(params) {
 
     payload.rooms.push(importRoom);
   }
+
+  // Physical-scope authority handoff: governed fabrication quantities plus a
+  // read-only summary Pricing Setup renders instead of manual zero-fields.
+  payload.fabricationQuantities = deriveFabricationQuantitiesFromImportPayload(payload);
+  payload.scopeSummary = buildApprovedScopeSummary(payload);
 
   return payload;
 }

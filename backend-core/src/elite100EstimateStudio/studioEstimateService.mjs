@@ -17,6 +17,18 @@ import {
   scopeFingerprint
 } from "./studioEstimatePricing.mjs";
 import { deriveRoomBacksplashFromImportRoom } from "./studioRoomBacksplash.mjs";
+import {
+  buildApprovedScopeSummary,
+  deriveFabricationQuantitiesFromImportPayload
+} from "../takeoff/takeoffCutoutScope.mjs";
+
+/** Cutout add-on keys owned by approved Takeoff scope (see TAKEOFF_CUTOUT_TYPES). */
+export const TAKEOFF_DERIVED_ADDON_KEYS = Object.freeze([
+  "qty-sink",
+  "qty-bar",
+  "qty-cook",
+  "qty-outlet"
+]);
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
 import { loadStudioPartnerAccount } from "./studioPartnerAccountSearch.mjs";
 
@@ -75,12 +87,17 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
     (importPayload?.rooms ?? []).map((r) => [String(r.name || ""), r])
   );
   const rooms = drafts.map((d) => {
+    const importRoom = importRoomsByName.get(String(d.name || ""));
+    const importPieceByName = new Map(
+      (importRoom?.pieces ?? []).map((p) => [String(p.name || ""), p])
+    );
     const pieces = [];
     for (const g of d.guidedShapeGroups ?? []) {
       for (const p of g.pieces ?? []) {
         const lengthIn = Number(p.lengthIn) || 0;
         const depthIn = Number(p.depthIn) || 0;
         const sqft = Math.round(((lengthIn * depthIn) / 144) * 100) / 100;
+        const meta = importPieceByName.get(String(p.name || ""));
         pieces.push({
           id: p.id,
           name: p.name,
@@ -89,6 +106,11 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
           depthIn,
           sqft,
           included: true,
+          // Traceability back to the approved physical scope (structured, never parsed).
+          ...(meta?.runId ? { takeoffRunId: meta.runId } : {}),
+          ...(Array.isArray(meta?.cutouts) && meta.cutouts.length
+            ? { cutouts: meta.cutouts }
+            : {}),
           notes: ""
         });
       }
@@ -120,11 +142,37 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
     };
   });
 
+  // Takeoff is the physical-scope authority: governed fabrication quantities
+  // come from approved structured cutouts — never manual zero-field entry.
+  const scopeSummary =
+    importPayload?.scopeSummary && typeof importPayload.scopeSummary === "object"
+      ? importPayload.scopeSummary
+      : buildApprovedScopeSummary(importPayload);
+  const derived =
+    importPayload?.fabricationQuantities &&
+    typeof importPayload.fabricationQuantities === "object"
+      ? importPayload.fabricationQuantities
+      : deriveFabricationQuantitiesFromImportPayload(importPayload);
+  const derivedAddOns = derived.addOnQuantities || {};
+
+  const baseAddOns =
+    baseScope?.addOns && typeof baseScope.addOns === "object" ? baseScope.addOns : {};
+  const addOns = { ...baseAddOns };
+  // Cutout-derived keys are always Takeoff-authoritative (including back to 0),
+  // so a stale manual quantity can never double-charge an opening.
+  for (const key of TAKEOFF_DERIVED_ADDON_KEYS) {
+    addOns[key] = Number(derivedAddOns[key] ?? 0) || 0;
+  }
+
   return {
     ...emptyStudioEstimateScope(),
     ...(baseScope || {}),
     // New empty scope is Wholesale; preserved baseScope.pricingBasis wins when provided.
-    rooms: rooms.length ? rooms : baseScope?.rooms || []
+    rooms: rooms.length ? rooms : baseScope?.rooms || [],
+    addOns,
+    physicalScopeSource: "takeoff",
+    takeoffScopeSummary: scopeSummary,
+    edgeEligibleLinearFeet: Number(scopeSummary?.edgeEligibleLinearFeet) || 0
   };
 }
 

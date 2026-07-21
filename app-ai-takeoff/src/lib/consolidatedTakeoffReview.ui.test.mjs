@@ -94,7 +94,11 @@ assert.ok(!component.includes("Backsplash height (in)"));
 assert.ok(!component.includes("data-testid=\"ctr-backsplash-height\""));
 assert.ok(component.includes("normalizeTakeoffBacksplashEligibility"));
 assert.ok(component.includes("htmlFor={bsId}"));
-assert.ok(component.includes("htmlFor={cutId}"));
+// Structured cutouts popover — no freeform "sink:1" text input remains.
+assert.ok(component.includes("htmlFor={boxId}"));
+assert.ok(component.includes("TAKEOFF_CUTOUT_TYPES"));
+assert.ok(component.includes("data-testid=\"ctr-cutouts-summary\""));
+assert.ok(!component.includes('placeholder="sink:1"'));
 assert.ok(styles.includes('input:not([type="checkbox"]):not([type="radio"])'));
 assert.ok(styles.includes("isolation: isolate"));
 assert.ok(component.includes("data-testid=\"ctr-room-name\""));

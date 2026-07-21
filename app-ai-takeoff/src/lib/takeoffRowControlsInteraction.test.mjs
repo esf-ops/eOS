@@ -11,6 +11,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { flattenPieces, patchRun } from "./consolidatedWorksheetRows.mjs";
 import { normalizeTakeoffBacksplashEligibility } from "../../../backend-core/src/takeoff/takeoffBacksplashEligibility.mjs";
+import {
+  normalizeTakeoffCutoutScope,
+  toggleCutoutEntry
+} from "../../../backend-core/src/takeoff/takeoffCutoutScope.mjs";
 import { buildTakeoffImportPayload } from "../../../backend-core/src/takeoff/takeoffImportPayload.mjs";
 import { computeTakeoffMeasurements } from "../../../backend-core/src/takeoff/takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult } from "../../../backend-core/src/takeoff/takeoffValidator.mjs";
@@ -135,50 +139,54 @@ function extractControlBlock(marker) {
   console.log("  ✓ 3. backsplash checkbox changes only one row");
 }
 
-// ── 4. cutouts input is not readOnly ─────────────────────────────────────────
+// ── 4. cutout controls locked only by approval ───────────────────────────────
 {
-  const block = extractControlBlock('data-testid="ctr-cutouts"');
-  assert.ok(!block.includes("readOnly"), "4: cutouts has no readOnly prop");
+  const block = extractControlBlock("ctr-cutout-${opt.type}");
+  assert.ok(!block.includes("readOnly"), "4: cutout checkbox has no readOnly prop");
   assert.ok(block.includes("disabled={rowLocked}"), "4: only approval locks cutouts");
   assert.ok(
-    !/ctr-cutouts[\s\S]{0,500}disabled=\{saveStatus/.test(component),
+    !/ctr-cutout-\$\{opt\.type\}[\s\S]{0,500}disabled=\{saveStatus/.test(component),
     "4: saveStatus does not disable cutouts"
   );
-  console.log("  ✓ 4. cutouts input is not readOnly");
+  console.log("  ✓ 4. cutout controls locked only by approval");
 }
 
-// ── 5. cutouts input receives focus (focusable markup + CSS) ─────────────────
+// ── 5. cutout controls receive focus (focusable markup + CSS) ────────────────
 {
-  assert.ok(component.includes("htmlFor={cutId}"), "5: cutouts label association");
-  assert.ok(component.includes("id={cutId}"), "5: cutouts unique id");
+  assert.ok(component.includes("htmlFor={boxId}"), "5: cutout option label association");
+  assert.ok(component.includes("id={cutId}"), "5: cutouts popover unique id");
   assert.ok(
-    styles.includes(".ctr-cutouts-input") && styles.includes("pointer-events: auto"),
-    "5: cutouts pointer-events auto"
+    styles.includes(".ctr-cutouts-summary") && styles.includes(".ctr-cutouts-menu"),
+    "5: cutouts popover styled control"
   );
   assert.ok(
     styles.includes("input:focus-visible") || styles.includes(":focus-visible"),
     "5: visible focus ring"
   );
   assert.ok(
-    !/ctr-cutouts-input[\s\S]{0,200}pointer-events:\s*none/.test(styles),
-    "5: cutouts not pointer-events none"
+    !/ctr-cutouts-pop[\s\S]{0,200}pointer-events:\s*none/.test(styles),
+    "5: cutouts popover not pointer-events none"
   );
-  console.log("  ✓ 5. cutouts input focusable wiring");
+  console.log("  ✓ 5. cutout controls focusable wiring");
 }
 
-// ── 6. cutouts input updates only one row ────────────────────────────────────
+// ── 6. cutout selection updates only one row ─────────────────────────────────
 {
   let draft = fourRunDraft();
   draft = patchRun(
     draft,
     { roomId: "room-kitchen", areaId: "area-main", runId: "run-2" },
-    { cutouts: { sink: 1 } }
+    { cutouts: toggleCutoutEntry([], "kitchen_sink", true) }
   );
   const rows = flattenPieces(draft, new Set());
-  assert.equal(rows.find((r) => r.runId === "run-2").cutoutsLabel, "sink:1", "6: row 2 cutouts");
-  assert.equal(rows.find((r) => r.runId === "run-1").cutoutsLabel, "", "6: row 1 unchanged");
-  assert.equal(rows.find((r) => r.runId === "run-3").cutoutsLabel, "", "6: row 3 unchanged");
-  console.log("  ✓ 6. cutouts input updates only one row");
+  assert.equal(
+    rows.find((r) => r.runId === "run-2").cutoutsSummary,
+    "Kitchen sink",
+    "6: row 2 cutouts"
+  );
+  assert.equal(rows.find((r) => r.runId === "run-1").cutoutsSummary, "None", "6: row 1 unchanged");
+  assert.equal(rows.find((r) => r.runId === "run-3").cutoutsSummary, "None", "6: row 3 unchanged");
+  console.log("  ✓ 6. cutout selection updates only one row");
 }
 
 // ── 7. autosave state does not disable either control ────────────────────────
@@ -207,12 +215,14 @@ function extractControlBlock(marker) {
   draft = patchRun(
     draft,
     { roomId: "room-kitchen", areaId: "area-main", runId: "run-2" },
-    { cutouts: { cooktop: 1 } }
+    { cutouts: toggleCutoutEntry([], "cooktop", true) }
   );
-  const reloaded = normalizeTakeoffBacksplashEligibility(structuredClone(draft)).takeoff;
+  const reloaded = normalizeTakeoffCutoutScope(
+    normalizeTakeoffBacksplashEligibility(structuredClone(draft)).takeoff
+  ).takeoff;
   const rows = flattenPieces(reloaded, new Set());
   assert.equal(rows.find((r) => r.runId === "run-1").backsplashEligible, true, "8: bs preserved");
-  assert.equal(rows.find((r) => r.runId === "run-2").cutoutsLabel, "cooktop:1", "8: cutouts preserved");
+  assert.equal(rows.find((r) => r.runId === "run-2").cutoutsSummary, "Cooktop", "8: cutouts preserved");
   console.log("  ✓ 8. save/reload preserves both values");
 }
 
@@ -222,7 +232,7 @@ function extractControlBlock(marker) {
   const cutBlock = extractControlBlock('data-testid="ctr-cutouts"');
   assert.ok(!/tabIndex=\{\s*-1\s*\}/.test(bsBlock), "9: bs not removed from tab order");
   assert.ok(!/tabIndex=\{\s*-1\s*\}/.test(cutBlock), "9: cutouts not removed from tab order");
-  assert.ok(component.includes("htmlFor={bsId}") && component.includes("htmlFor={cutId}"));
+  assert.ok(component.includes("htmlFor={bsId}") && component.includes("htmlFor={boxId}"));
   console.log("  ✓ 9. Tab can reach both controls (no tabIndex=-1)");
 }
 
@@ -346,9 +356,17 @@ function extractControlBlock(marker) {
   assert.equal(byName["Sink wall"].backsplashEligible, true, "15: run1 eligible");
   assert.equal(byName["Stove wall"].backsplashEligible, false, "15: run2 not eligible");
   assert.equal(byName["Fridge wall"].backsplashEligible, true, "15: run3 eligible");
-  assert.deepEqual(byName["Sink wall"].cutouts, { sink: 1 }, "15: run1 cutouts in payload");
-  assert.deepEqual(byName["Fridge wall"].cutouts, { cooktop: 1 }, "15: run3 cutouts in payload");
-  assert.deepEqual(byName["Stove wall"].cutouts, {}, "15: run2 empty cutouts");
+  assert.deepEqual(
+    byName["Sink wall"].cutouts,
+    [{ type: "kitchen_sink", quantity: 1, source: "legacy" }],
+    "15: run1 legacy cutouts normalized to structured payload"
+  );
+  assert.deepEqual(
+    byName["Fridge wall"].cutouts,
+    [{ type: "cooktop", quantity: 1, source: "legacy" }],
+    "15: run3 legacy cutouts normalized to structured payload"
+  );
+  assert.deepEqual(byName["Stove wall"].cutouts, [], "15: run2 empty cutouts");
   console.log("  ✓ 15. approval payload preserves cutouts + eligibility");
 }
 

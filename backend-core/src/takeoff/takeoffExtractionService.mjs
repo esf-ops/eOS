@@ -46,6 +46,7 @@ import {
   ensureUniqueTakeoffIdentity
 } from "./takeoffAuthoritativeResult.mjs";
 import { normalizeTakeoffBacksplashEligibility } from "./takeoffBacksplashEligibility.mjs";
+import { normalizeTakeoffCutoutScope } from "./takeoffCutoutScope.mjs";
 import { syncIntakeTakeoffLinkFromJob } from "./intakeTakeoffLinkStatus.mjs";
 import { evaluateTakeoffQaGate }       from "./takeoffQaGate.mjs";
 import { getExtractionProvider, getInventoryProvider, getEvidenceProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
@@ -385,7 +386,9 @@ export async function runAiTakeoffExtraction({
       fileName: file.original_filename,
     },
   }).takeoff;
-  const normalized = normalizeTakeoffBacksplashEligibility(uniqueIds).takeoff;
+  const normalized = normalizeTakeoffCutoutScope(
+    normalizeTakeoffBacksplashEligibility(uniqueIds).takeoff
+  ).takeoff;
 
   // 10. Server-side recompute — AI totals are NEVER used for pricing.
   let computed, validation, importPlan, qaGate;

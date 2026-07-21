@@ -551,7 +551,7 @@ function approvedPayload(result) {
     "utf8"
   );
   assert.ok(prompt.includes("backsplashEligible"));
-  assert.ok(prompt.includes('PROMPT_VERSION = "v6.2"'));
+  assert.ok(/PROMPT_VERSION = "v6\.[2-9]\d*"/.test(prompt), "prompt is v6.2+");
   console.log("  ✓ wiring: extraction + prompt + resolve helper");
 }
 
