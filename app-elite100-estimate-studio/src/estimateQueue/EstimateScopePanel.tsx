@@ -3,6 +3,10 @@ import { apiGet, apiPatch, apiPost, ApiError } from "../lib/api";
 
 import EstimateDigitalEstimatePanel from "./EstimateDigitalEstimatePanel";
 import { applyRoomBacksplashPatch } from "../../../backend-core/src/elite100EstimateStudio/studioRoomBacksplash.mjs";
+import {
+  buildStudioScopeBilling,
+  resolveScopeEdgeLinearFeet
+} from "../../../backend-core/src/elite100EstimateStudio/studioScopeBilling.mjs";
 
 type CustomLineItem = {
   id?: string;
@@ -13,6 +17,48 @@ type CustomLineItem = {
   unit?: string;
   unitPrice?: number;
   customerFacing?: boolean;
+  roomId?: string | null;
+  roomName?: string | null;
+};
+
+type CountertopScopeAdjustment = {
+  id: string;
+  adjustmentScope: "room" | "project";
+  roomId: string | null;
+  adjustmentSf: number;
+  adjustmentReason: string;
+  adjustedBy?: string | null;
+  adjustedAt?: string | null;
+};
+
+type EdgeScopeAdjustment = {
+  adjustmentLf: number;
+  adjustmentReason: string;
+  adjustedBy?: string | null;
+  adjustedAt?: string | null;
+};
+
+/**
+ * Canonical edge profiles — must mirror studioEdgeAuthority.mjs
+ * (FREE_EDGE_PROFILES / PREMIUM_EDGE_PROFILES). Legacy W/D scope tokens are
+ * never shown; saved legacy scopes map to their canonical equivalent.
+ */
+const CANONICAL_EDGE_PROFILES: Array<{ token: string; label: string; tier: "free" | "premium" }> = [
+  { token: "edge_eased", label: "Eased", tier: "free" },
+  { token: "edge_large_eased", label: "Large Eased", tier: "free" },
+  { token: "edge_full_bullnose", label: "Full Bullnose", tier: "free" },
+  { token: "edge_large_ogee", label: "Large Ogee", tier: "free" },
+  { token: "edge_bevel", label: "Bevel", tier: "free" },
+  { token: "edge_small_ogee", label: "Small Ogee", tier: "premium" },
+  { token: "edge_crescent", label: "Crescent", tier: "premium" },
+  { token: "edge_knife", label: "Knife", tier: "premium" }
+];
+
+const LEGACY_EDGE_MODE_TO_PROFILE: Record<string, string> = {
+  included: "edge_eased",
+  eased: "edge_eased",
+  w_edge: "edge_small_ogee",
+  d_edge: "edge_small_ogee"
 };
 
 type StudioEstimate = {
@@ -53,9 +99,13 @@ type StudioEstimate = {
     }>;
     addOns?: Record<string, number>;
     customLineItems?: CustomLineItem[];
-    edgeMode?: string;
+    customerCatalogPermissions?: Record<string, boolean>;
+    edgeMode?: string | null;
+    edgeProfileToken?: string | null;
     edgeLinearFeet?: number;
     edgeEligibleLinearFeet?: number;
+    edgeScopeAdjustment?: EdgeScopeAdjustment | null;
+    countertopScopeAdjustments?: CountertopScopeAdjustment[];
     miterHeightKey?: string | null;
     miterLinearFeet?: number;
     buildupSqft?: number;
@@ -73,7 +123,11 @@ type StudioEstimate = {
       otherCutouts?: number;
       backsplashEligibleRunCount?: number;
       eligibleBacksplashLengthIn?: number;
+      totalRunLengthIn?: number;
+      derivedOpenEdgeLengthIn?: number;
+      derivedOpenEdgeLf?: number;
       edgeEligibleLinearFeet?: number;
+      edgeScopeSource?: string;
       countertopSqft?: number;
       reviewCutouts?: Array<{
         roomName?: string;
@@ -86,6 +140,7 @@ type StudioEstimate = {
   calculation?: {
     totals?: Record<string, number>;
     material?: Record<string, unknown>;
+    scopeBilling?: Record<string, unknown> | null;
     fabrication?: Record<string, unknown>;
     account?: Record<string, unknown>;
     internalMarkup?: Record<string, unknown>;
@@ -152,6 +207,9 @@ export default function EstimateScopePanel({
   const [dirty, setDirty] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  // Under Takeoff authority miter/build-up start as "Not identified in
+  // approved scope" — this opens the explicit specialty-fabrication fields.
+  const [specialtyFabricationOpen, setSpecialtyFabricationOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -332,6 +390,54 @@ export default function EstimateScopePanel({
     setDirty(true);
   }
 
+  /**
+   * Upsert the governed estimator SF adjustment for a room (roomId) or the
+   * project (roomId null). Zero adjustments with no reason are dropped.
+   */
+  function patchCountertopAdjustment(
+    roomId: string | null,
+    partial: Partial<Pick<CountertopScopeAdjustment, "adjustmentSf" | "adjustmentReason">>
+  ) {
+    setEstimate((prev) => {
+      if (!prev) return prev;
+      const id = roomId ? `ctsa-room-${roomId}` : "ctsa-project";
+      const existing = (prev.scope?.countertopScopeAdjustments || []).filter((a) => a.id !== id);
+      const current = (prev.scope?.countertopScopeAdjustments || []).find((a) => a.id === id);
+      const next: CountertopScopeAdjustment = {
+        id,
+        adjustmentScope: roomId ? "room" : "project",
+        roomId,
+        adjustmentSf: current?.adjustmentSf ?? 0,
+        adjustmentReason: current?.adjustmentReason ?? "",
+        ...partial,
+        adjustedAt: new Date().toISOString()
+      };
+      const keep = next.adjustmentSf !== 0 || next.adjustmentReason.trim() !== "";
+      return {
+        ...prev,
+        scope: {
+          ...(prev.scope || {}),
+          countertopScopeAdjustments: keep ? [...existing, next] : existing
+        }
+      };
+    });
+    setDirty(true);
+  }
+
+  function patchEdgeAdjustment(partial: Partial<EdgeScopeAdjustment>) {
+    setEstimate((prev) => {
+      if (!prev) return prev;
+      const current = prev.scope?.edgeScopeAdjustment || { adjustmentLf: 0, adjustmentReason: "" };
+      const next = { ...current, ...partial, adjustedAt: new Date().toISOString() };
+      const keep = Number(next.adjustmentLf) !== 0 || String(next.adjustmentReason || "").trim() !== "";
+      return {
+        ...prev,
+        scope: { ...(prev.scope || {}), edgeScopeAdjustment: keep ? next : null }
+      };
+    });
+    setDirty(true);
+  }
+
   async function saveDraft() {
     if (!estimate?.id || !estimate.scope) return;
     setBusy(true);
@@ -454,10 +560,50 @@ export default function EstimateScopePanel({
   const totals = estimate.calculation?.totals;
   // Approved Takeoff = physical-scope authority. Manual quantity entry only
   // exists as a clearly-labeled fallback when no approved Takeoff seeded scope.
-  const takeoffAuthority = Boolean(
-    scope.physicalScopeSource === "takeoff" && scope.takeoffScopeSummary
-  );
+  // Authority follows physicalScopeSource alone — the summary is display data
+  // (older estimates heal it server-side on next load) and must not flip the
+  // estimate back into manual mode when momentarily absent.
+  const takeoffAuthority = scope.physicalScopeSource === "takeoff";
   const scopeSummary = scope.takeoffScopeSummary || null;
+  // Display-only mirror of the backend-authoritative scope billing (same pure
+  // module the pricing engine uses). Internal estimator data — never public.
+  const scopeBilling = buildStudioScopeBilling(scope) as {
+    measuredCountertopSf: number;
+    adjustedMeasuredCountertopSf: number;
+    billedBeforeAdjustmentsSf: number;
+    billedCountertopSf: number;
+    independentSectionCount: number;
+    rooms: Array<{
+      roomId: string;
+      measuredSf: number;
+      billedSf: number;
+      billedWithAdjustmentsSf: number;
+    }>;
+  };
+  const edgeScope = resolveScopeEdgeLinearFeet(scope) as {
+    derivedLf: number;
+    adjustmentLf: number;
+    finalLf: number;
+    source: string;
+  };
+  const activeEdgeProfileToken =
+    scope.edgeProfileToken ||
+    LEGACY_EDGE_MODE_TO_PROFILE[String(scope.edgeMode || "included")] ||
+    "edge_eased";
+  const activeEdgeProfile = CANONICAL_EDGE_PROFILES.find(
+    (p) => p.token === activeEdgeProfileToken
+  );
+  const roomAdjustmentFor = (roomId: string) =>
+    (scope.countertopScopeAdjustments || []).find(
+      (a) => a.adjustmentScope === "room" && a.roomId === roomId
+    ) || null;
+  const projectAdjustment =
+    (scope.countertopScopeAdjustments || []).find((a) => a.adjustmentScope === "project") || null;
+  const legacyGenericProductQty =
+    ["qty-ss", "qty-v-rect", "qty-v-oval"].reduce(
+      (s, k) => s + (Number(scope.addOns?.[k]) || 0),
+      0
+    );
 
   return (
     <div className="eq-estimate-panel" data-testid="estimate-scope-panel">
@@ -671,12 +817,69 @@ export default function EstimateScopePanel({
         </div>
 
         <h3>Approved physical scope</h3>
-        {takeoffAuthority && scopeSummary ? (
+        {takeoffAuthority ? (
           <div className="eq-approved-scope" data-testid="eq-approved-scope-summary">
-            <p className="eq-muted">
-              Read-only summary from the approved Takeoff. To change physical scope, review the
-              Takeoff above and re-approve — quantities below are derived, never retyped.
+            <p className="eq-muted" data-testid="eq-approved-scope-label">
+              <strong>Approved physical scope.</strong> Read-only summary from the approved
+              Takeoff. To change physical scope, review the Takeoff above and re-approve —
+              quantities below are derived, never retyped.
             </p>
+            <dl className="eq-status-dl" data-testid="eq-measured-billed-scope">
+              <div>
+                <dt>Measured countertop scope</dt>
+                <dd data-testid="eq-measured-countertop-sf">
+                  {scopeBilling.measuredCountertopSf.toFixed(2)} SF
+                </dd>
+              </div>
+              <div>
+                <dt>Billed countertop scope</dt>
+                <dd data-testid="eq-billed-countertop-sf">
+                  {scopeBilling.billedCountertopSf} SF
+                </dd>
+              </div>
+              <div>
+                <dt>Independent pricing sections</dt>
+                <dd data-testid="eq-independent-section-count">
+                  {scopeBilling.independentSectionCount}
+                </dd>
+              </div>
+            </dl>
+            <p className="eq-footnote">
+              Each independently priced section rounds its raw SF up on its own, then billed
+              sections are summed — the measured total is never rounded as one number. Estimator
+              SF adjustments (below, per room) are governed sections that round independently.
+            </p>
+            <div className="eq-scope-grid">
+              <label>
+                Project-level SF adjustment (±, explicit)
+                <input
+                  type="number"
+                  step={0.01}
+                  value={projectAdjustment?.adjustmentSf ?? 0}
+                  disabled={blocked}
+                  data-testid="eq-project-sf-adjustment"
+                  onChange={(e) =>
+                    patchCountertopAdjustment(null, {
+                      adjustmentSf: Number(e.target.value) || 0
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Project adjustment reason{" "}
+                {(projectAdjustment?.adjustmentSf ?? 0) !== 0 ? "(required)" : ""}
+                <input
+                  value={projectAdjustment?.adjustmentReason ?? ""}
+                  disabled={blocked}
+                  data-testid="eq-project-sf-adjustment-reason"
+                  placeholder="Use room adjustments where applicable"
+                  onChange={(e) =>
+                    patchCountertopAdjustment(null, { adjustmentReason: e.target.value })
+                  }
+                />
+              </label>
+            </div>
+            {scopeSummary ? (
             <ul className="eq-approved-scope-list">
               <li>{Number(scopeSummary.pieceCount ?? 0)} countertop pieces</li>
               <li>
@@ -696,32 +899,35 @@ export default function EstimateScopePanel({
                 {Number(scopeSummary.electricalOutletCutouts ?? 0) === 1 ? "" : "s"}
               </li>
               <li>
-                {Number(scopeSummary.backsplashEligibleRunCount ?? 0)} backsplash-eligible run
-                {Number(scopeSummary.backsplashEligibleRunCount ?? 0) === 1 ? "" : "s"}
-                {Number(scopeSummary.eligibleBacksplashLengthIn ?? 0) > 0
-                  ? ` · ${Number(scopeSummary.eligibleBacksplashLengthIn ?? 0).toFixed(1)} in eligible length`
-                  : ""}
+                {Number(scopeSummary.popUpOutletCutouts ?? 0)} pop-up outlet opening
+                {Number(scopeSummary.popUpOutletCutouts ?? 0) === 1 ? "" : "s"}
+              </li>
+              <li data-testid="eq-backsplash-scope-summary">
+                Backsplash-eligible runs: {Number(scopeSummary.backsplashEligibleRunCount ?? 0)} ·
+                Eligible length: {Number(scopeSummary.eligibleBacksplashLengthIn ?? 0).toFixed(2)}{" "}
+                in · Source: Approved Takeoff
               </li>
               <li>
-                {Number(scopeSummary.edgeEligibleLinearFeet ?? 0).toFixed(1)} LF eligible edge
-                (derived)
+                Derived open edge: {edgeScope.derivedLf.toFixed(2)} LF (run length minus
+                backsplash-eligible length)
               </li>
             </ul>
-            {Number(scopeSummary.popUpOutletCutouts ?? 0) > 0 ||
-            Number(scopeSummary.otherCutouts ?? 0) > 0 ? (
+            ) : null}
+            {Number(scopeSummary?.popUpOutletCutouts ?? 0) > 0 ||
+            Number(scopeSummary?.otherCutouts ?? 0) > 0 ? (
               <div className="eq-state eq-state--warn" data-testid="eq-scope-review-cutouts">
                 Needs estimator review (not auto-priced):{" "}
                 {[
-                  Number(scopeSummary.popUpOutletCutouts ?? 0) > 0
-                    ? `${scopeSummary.popUpOutletCutouts} pop-up outlet`
+                  Number(scopeSummary?.popUpOutletCutouts ?? 0) > 0
+                    ? `${scopeSummary?.popUpOutletCutouts} pop-up outlet`
                     : null,
-                  Number(scopeSummary.otherCutouts ?? 0) > 0
-                    ? `${scopeSummary.otherCutouts} other cutout${Number(scopeSummary.otherCutouts ?? 0) === 1 ? "" : "s"}`
+                  Number(scopeSummary?.otherCutouts ?? 0) > 0
+                    ? `${scopeSummary?.otherCutouts} other cutout${Number(scopeSummary?.otherCutouts ?? 0) === 1 ? "" : "s"}`
                     : null
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                {(scopeSummary.reviewCutouts || [])
+                {(scopeSummary?.reviewCutouts || [])
                   .filter((c) => c.note)
                   .map((c, i) => (
                     <span key={i}> · {c.roomName ? `${c.roomName}: ` : ""}{c.note}</span>
@@ -770,8 +976,11 @@ export default function EstimateScopePanel({
                 <div className="eq-room-fields">
                   {takeoffAuthority ? (
                     <p className="eq-muted" data-testid="eq-room-countertop-readonly">
-                      Countertop: {Number(room.countertopSqft ?? 0).toFixed(2)} SF (from approved
-                      Takeoff)
+                      Countertop measured: {Number(room.countertopSqft ?? 0).toFixed(2)} SF ·
+                      billed:{" "}
+                      {scopeBilling.rooms.find((r) => r.roomId === String(room.id))
+                        ?.billedWithAdjustmentsSf ?? 0}{" "}
+                      SF (from approved Takeoff)
                     </p>
                   ) : (
                     <label>
@@ -786,6 +995,44 @@ export default function EstimateScopePanel({
                       />
                     </label>
                   )}
+                  {takeoffAuthority && room.included !== false ? (
+                    <>
+                      <label>
+                        Estimator SF adjustment (±)
+                        <input
+                          type="number"
+                          step={0.01}
+                          value={roomAdjustmentFor(String(room.id))?.adjustmentSf ?? 0}
+                          disabled={blocked}
+                          data-testid="eq-room-sf-adjustment"
+                          data-room-id={room.id}
+                          onChange={(e) =>
+                            patchCountertopAdjustment(String(room.id), {
+                              adjustmentSf: Number(e.target.value) || 0
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        Adjustment reason{" "}
+                        {(roomAdjustmentFor(String(room.id))?.adjustmentSf ?? 0) !== 0
+                          ? "(required)"
+                          : ""}
+                        <input
+                          value={roomAdjustmentFor(String(room.id))?.adjustmentReason ?? ""}
+                          disabled={blocked}
+                          data-testid="eq-room-sf-adjustment-reason"
+                          data-room-id={room.id}
+                          placeholder="e.g. field-verified overhang not in Takeoff"
+                          onChange={(e) =>
+                            patchCountertopAdjustment(String(room.id), {
+                              adjustmentReason: e.target.value
+                            })
+                          }
+                        />
+                      </label>
+                    </>
+                  ) : null}
                 </div>
                 {takeoffAuthority ? (
                   <p
@@ -961,28 +1208,80 @@ export default function EstimateScopePanel({
           </>
         )}
 
-        <h3>Products and services</h3>
-        <div className="eq-addon-grid" data-testid="eq-product-addon-grid">
+        <h3>Customer-selectable catalogs</h3>
+        <p className="eq-muted">
+          Exact products (model, finish, SKU, governed price) resolve through the Digital
+          Estimate catalogs — never generic quantity fields here. Physical openings come from
+          the approved Takeoff.
+        </p>
+        <div className="eq-addon-grid" data-testid="eq-catalog-permissions">
           {(
             [
-              ["qty-ss", "ESF stainless kitchen sink"],
-              ["qty-v-rect", "Rectangular vanity sink"],
-              ["qty-v-oval", "Oval vanity sink"],
-              ["tearout", "Tear-out"]
+              ["sink", "Customer may select sink"],
+              ["faucet", "Customer may select faucet"],
+              ["accessories", "Customer may select accessories"],
+              ["specialty", "Customer may select specialty items"],
+              ["edge", "Customer may select edge profile"],
+              ["backsplash", "Customer may select backsplash style"]
             ] as const
           ).map(([key, label]) => (
-            <label key={key}>
-              {label}
+            <label key={key} className="eq-check">
               <input
-                type="number"
-                min={0}
-                step={1}
-                value={scope.addOns?.[key] ?? 0}
+                type="checkbox"
+                checked={scope.customerCatalogPermissions?.[key] !== false}
                 disabled={blocked}
-                onChange={(e) => patchAddon(key, Math.max(0, Number(e.target.value) || 0))}
+                data-testid={`eq-catalog-permission-${key}`}
+                onChange={(e) =>
+                  patchScope({
+                    customerCatalogPermissions: {
+                      ...(scope.customerCatalogPermissions || {}),
+                      [key]: e.target.checked
+                    }
+                  })
+                }
               />
+              {label}
             </label>
           ))}
+        </div>
+        {legacyGenericProductQty > 0 ? (
+          <div className="eq-state eq-state--warn" data-testid="eq-legacy-product-qty-warning">
+            This estimate carries legacy generic sink quantities (
+            {legacyGenericProductQty} total) saved before catalog governance. They still price
+            for backward compatibility — clear them and use the sink catalog instead.
+            <button
+              type="button"
+              className="eq-btn-ghost"
+              disabled={blocked}
+              data-testid="eq-clear-legacy-product-qty"
+              onClick={() => {
+                patchAddon("qty-ss", 0);
+                patchAddon("qty-v-rect", 0);
+                patchAddon("qty-v-oval", 0);
+              }}
+            >
+              Clear legacy quantities
+            </button>
+          </div>
+        ) : null}
+
+        <h3>Services</h3>
+        <p className="eq-muted">
+          Estimator-controlled services. Tear-out is a service preset; extra trips and other
+          services are customer-facing custom lines below.
+        </p>
+        <div className="eq-addon-grid" data-testid="eq-service-grid">
+          <label>
+            Tear-out
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={scope.addOns?.["tearout"] ?? 0}
+              disabled={blocked}
+              onChange={(e) => patchAddon("tearout", Math.max(0, Number(e.target.value) || 0))}
+            />
+          </label>
         </div>
 
         <h3>Custom line items</h3>
@@ -1011,19 +1310,46 @@ export default function EstimateScopePanel({
                       value={line.category || "Other"}
                       disabled={blocked}
                       onChange={(e) => patchCustomLine(index, { category: e.target.value })}
+                      data-testid="eq-custom-line-category"
                     >
                       {[
+                        "Countertop",
+                        "Backsplash",
                         "Sink",
                         "Faucet",
                         "Plumbing fixture",
                         "Accessory",
                         "Labor",
+                        "Service",
                         "Fee",
                         "Discount/Credit",
                         "Other"
                       ].map((c) => (
                         <option key={c} value={c}>
                           {c}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Ownership
+                    <select
+                      value={line.roomId || ""}
+                      disabled={blocked}
+                      data-testid="eq-custom-line-room"
+                      onChange={(e) => {
+                        const roomId = e.target.value || null;
+                        const room = (scope.rooms || []).find((r) => String(r.id) === roomId);
+                        patchCustomLine(index, {
+                          roomId,
+                          roomName: room ? room.name || null : null
+                        });
+                      }}
+                    >
+                      <option value="">Project</option>
+                      {(scope.rooms || []).map((r) => (
+                        <option key={r.id} value={String(r.id)}>
+                          {r.name || r.id}
                         </option>
                       ))}
                     </select>
@@ -1097,90 +1423,162 @@ export default function EstimateScopePanel({
           </button>
         </div>
 
-        <h3>Commercial adjustments</h3>
+        <h3>Edge</h3>
         <div className="eq-scope-grid">
           <label>
-            Edge profile
+            Edge profile (canonical)
             <select
-              value={scope.edgeMode || "included"}
+              value={activeEdgeProfileToken}
               disabled={blocked}
-              onChange={(e) => {
-                const edgeMode = e.target.value;
-                // With approved Takeoff geometry, upgraded-edge LF is derived —
-                // the estimator never retypes it.
-                patchScope(
-                  takeoffAuthority && edgeMode !== "included"
-                    ? { edgeMode, edgeLinearFeet: Number(scope.edgeEligibleLinearFeet) || 0 }
-                    : { edgeMode }
-                );
-              }}
+              data-testid="eq-edge-profile"
+              onChange={(e) =>
+                // Canonical token is the authority; legacy edgeMode is cleared
+                // so old W/D tokens can never resurface on this estimate.
+                patchScope({ edgeProfileToken: e.target.value, edgeMode: null })
+              }
             >
-              <option value="included">Included edges (eased)</option>
-              <option value="w_edge">W edge</option>
-              <option value="d_edge">D edge</option>
+              <optgroup label="Included">
+                {CANONICAL_EDGE_PROFILES.filter((p) => p.tier === "free").map((p) => (
+                  <option key={p.token} value={p.token}>
+                    {p.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Premium">
+                {CANONICAL_EDGE_PROFILES.filter((p) => p.tier === "premium").map((p) => (
+                  <option key={p.token} value={p.token}>
+                    {p.label} (premium)
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </label>
           {takeoffAuthority ? (
-            <label>
-              Edge LF (derived from Takeoff)
-              <input
-                type="number"
-                value={
-                  scope.edgeMode === "included"
-                    ? 0
-                    : Number(scope.edgeLinearFeet ?? scope.edgeEligibleLinearFeet ?? 0)
-                }
-                readOnly
-                disabled
-                data-testid="eq-edge-lf-readonly"
-              />
-            </label>
+            <>
+              <label>
+                Derived open edge (LF)
+                <input
+                  type="number"
+                  value={edgeScope.derivedLf}
+                  readOnly
+                  disabled
+                  data-testid="eq-edge-derived-lf"
+                />
+              </label>
+              <label>
+                Estimator edge adjustment (± LF)
+                <input
+                  type="number"
+                  step={0.01}
+                  value={scope.edgeScopeAdjustment?.adjustmentLf ?? 0}
+                  disabled={blocked}
+                  data-testid="eq-edge-adjustment"
+                  onChange={(e) =>
+                    patchEdgeAdjustment({ adjustmentLf: Number(e.target.value) || 0 })
+                  }
+                />
+              </label>
+              <label>
+                Edge adjustment reason{" "}
+                {(scope.edgeScopeAdjustment?.adjustmentLf ?? 0) !== 0 ? "(required)" : ""}
+                <input
+                  value={scope.edgeScopeAdjustment?.adjustmentReason ?? ""}
+                  disabled={blocked}
+                  data-testid="eq-edge-adjustment-reason"
+                  placeholder="e.g. waterfall side edges not in derived proxy"
+                  onChange={(e) => patchEdgeAdjustment({ adjustmentReason: e.target.value })}
+                />
+              </label>
+              <label>
+                Final priced edge (LF)
+                <input
+                  type="number"
+                  value={edgeScope.finalLf}
+                  readOnly
+                  disabled
+                  data-testid="eq-edge-final-lf"
+                />
+              </label>
+            </>
           ) : (
             <label>
-              Edge LF
+              Edge LF (manual)
               <input
                 type="number"
                 min={0}
                 value={scope.edgeLinearFeet ?? 0}
-                disabled={blocked || scope.edgeMode === "included"}
+                disabled={blocked || (activeEdgeProfile ? activeEdgeProfile.tier === "free" : false)}
                 onChange={(e) => patchScope({ edgeLinearFeet: Number(e.target.value) })}
               />
             </label>
           )}
-          <label>
-            Miter height
-            <select
-              value={scope.miterHeightKey || ""}
+        </div>
+        {takeoffAuthority ? (
+          <p className="eq-footnote" data-testid="eq-edge-source-note">
+            Source: run length minus backsplash-eligible length (
+            {edgeScope.source}). Interim proxy — seams, waterfalls, interior and side edges are
+            not modeled yet; use the adjustment with a reason where field geometry differs.
+          </p>
+        ) : null}
+
+        <h3>Specialty fabrication (miter / build-up)</h3>
+        {takeoffAuthority && !specialtyFabricationOpen && !scope.miterHeightKey && !(Number(scope.buildupSqft) > 0) ? (
+          <div data-testid="eq-specialty-not-identified">
+            <p className="eq-muted">
+              Not identified in approved scope. The approved Takeoff does not carry miter or
+              build-up authority yet.
+            </p>
+            <button
+              type="button"
+              className="eq-btn-secondary"
               disabled={blocked}
-              onChange={(e) => patchScope({ miterHeightKey: e.target.value || null })}
+              data-testid="eq-add-specialty-fabrication"
+              onClick={() => setSpecialtyFabricationOpen(true)}
             >
-              <option value="">None</option>
-              <option value="2-3in">2–3 in ($65/LF)</option>
-              <option value="4in">4 in ($70/LF)</option>
-              <option value="5in">5 in ($75/LF)</option>
-              <option value="6in">6 in ($80/LF)</option>
-            </select>
-          </label>
-          <label>
-            Miter LF
-            <input
-              type="number"
-              min={0}
-              value={scope.miterLinearFeet ?? 0}
-              disabled={blocked || !scope.miterHeightKey}
-              onChange={(e) => patchScope({ miterLinearFeet: Number(e.target.value) })}
-            />
-          </label>
-          <label>
-            Build-up SF
-            <input
-              type="number"
-              min={0}
-              value={scope.buildupSqft ?? 0}
-              disabled={blocked}
-              onChange={(e) => patchScope({ buildupSqft: Number(e.target.value) })}
-            />
-          </label>
+              Add specialty fabrication
+            </button>
+          </div>
+        ) : (
+          <div className="eq-scope-grid" data-testid="eq-specialty-fabrication-fields">
+            <label>
+              Miter height
+              <select
+                value={scope.miterHeightKey || ""}
+                disabled={blocked}
+                onChange={(e) => patchScope({ miterHeightKey: e.target.value || null })}
+              >
+                <option value="">None</option>
+                <option value="2-3in">2–3 in ($65/LF)</option>
+                <option value="4in">4 in ($70/LF)</option>
+                <option value="5in">5 in ($75/LF)</option>
+                <option value="6in">6 in ($80/LF)</option>
+              </select>
+            </label>
+            <label>
+              Miter LF
+              <input
+                type="number"
+                min={0}
+                value={scope.miterLinearFeet ?? 0}
+                disabled={blocked || !scope.miterHeightKey}
+                onChange={(e) => patchScope({ miterLinearFeet: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              Build-up SF
+              <input
+                type="number"
+                min={0}
+                value={scope.buildupSqft ?? 0}
+                disabled={blocked}
+                onChange={(e) => patchScope({ buildupSqft: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+        )}
+
+        <h3>Commercial adjustments</h3>
+        <div className="eq-scope-grid">
           <label>
             Internal markup % (authorized only)
             <select

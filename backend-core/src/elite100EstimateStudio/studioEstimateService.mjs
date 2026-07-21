@@ -19,7 +19,8 @@ import {
 import { deriveRoomBacksplashFromImportRoom } from "./studioRoomBacksplash.mjs";
 import {
   buildApprovedScopeSummary,
-  deriveFabricationQuantitiesFromImportPayload
+  deriveFabricationQuantitiesFromImportPayload,
+  normalizeRunCutouts
 } from "../takeoff/takeoffCutoutScope.mjs";
 
 /** Cutout add-on keys owned by approved Takeoff scope (see TAKEOFF_CUTOUT_TYPES). */
@@ -176,6 +177,121 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
   };
 }
 
+function round2(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+/**
+ * Rebuild the approved-scope summary directly from already-seeded scope rooms.
+ * Healing path for estimates whose scope was seeded from an approved Takeoff
+ * before `physicalScopeSource`/`takeoffScopeSummary` existed (or via the raw
+ * fallback seed) — the rooms ARE takeoff-derived, only the authority metadata
+ * is missing. Never invoked for estimates without an approved Takeoff.
+ *
+ * @param {Array<object>} rooms studio scope rooms
+ */
+export function buildApprovedScopeSummaryFromScopeRooms(rooms) {
+  let pieceCount = 0;
+  let backsplashEligibleRunCount = 0;
+  let eligibleBacksplashLengthIn = 0;
+  let totalRunLengthIn = 0;
+  const countsByType = {};
+  const reviewCutouts = [];
+  let countertopSqft = 0;
+
+  for (const room of Array.isArray(rooms) ? rooms : []) {
+    if (!room || room.included === false) continue;
+    backsplashEligibleRunCount += Number(room.eligibleRunCount) || 0;
+    if (room.includeBacksplash) {
+      eligibleBacksplashLengthIn = round2(
+        eligibleBacksplashLengthIn + (Number(room.backsplashMeasuredLengthIn) || 0)
+      );
+    }
+    countertopSqft = round2(countertopSqft + (Number(room.countertopSqft) || 0));
+    for (const piece of room.pieces ?? []) {
+      if (!piece || piece.included === false) continue;
+      pieceCount += 1;
+      if (!String(piece.pieceType ?? "counter").toLowerCase().includes("backsplash")) {
+        totalRunLengthIn = round2(totalRunLengthIn + (Number(piece.lengthIn) || 0));
+      }
+      const { cutouts } = normalizeRunCutouts(piece.cutouts);
+      for (const e of cutouts) {
+        countsByType[e.type] = (countsByType[e.type] ?? 0) + e.quantity;
+        if (e.type === "pop_up_outlet" || e.type === "other") {
+          reviewCutouts.push({
+            roomName: String(room.name ?? ""),
+            type: e.type,
+            quantity: e.quantity,
+            note: e.note ?? null
+          });
+        }
+      }
+    }
+  }
+
+  const derivedOpenEdgeLengthIn = Math.max(
+    0,
+    round2(totalRunLengthIn - eligibleBacksplashLengthIn)
+  );
+
+  return {
+    source: "takeoff",
+    pieceCount,
+    kitchenSinkCutouts: countsByType.kitchen_sink ?? 0,
+    vanityBarSinkCutouts: countsByType.vanity_bar_sink ?? 0,
+    cooktopCutouts: countsByType.cooktop ?? 0,
+    electricalOutletCutouts: countsByType.electrical_outlet ?? 0,
+    popUpOutletCutouts: countsByType.pop_up_outlet ?? 0,
+    otherCutouts: countsByType.other ?? 0,
+    backsplashEligibleRunCount,
+    eligibleBacksplashLengthIn,
+    totalRunLengthIn,
+    derivedOpenEdgeLengthIn,
+    derivedOpenEdgeLf: round2(derivedOpenEdgeLengthIn / 12),
+    edgeEligibleLengthIn: derivedOpenEdgeLengthIn,
+    edgeEligibleLinearFeet: round2(derivedOpenEdgeLengthIn / 12),
+    edgeScopeSource: "derived_open_edge_v1",
+    reviewCutouts,
+    countertopSqft
+  };
+}
+
+/**
+ * Ensure a scope seeded from an approved Takeoff carries the authority
+ * metadata Pricing Setup renders from (`physicalScopeSource` +
+ * `takeoffScopeSummary`). Fixes the hosted "Manual physical scope" regression
+ * where approved Takeoff rooms were visible but the authority fields were
+ * missing (fallback seed path / estimates seeded before those fields existed).
+ *
+ * @param {object} scope
+ * @param {object|null} importPayload full approved payload when available
+ */
+export function healScopeTakeoffAuthority(scope, importPayload = null) {
+  const rooms = Array.isArray(scope?.rooms) ? scope.rooms : [];
+  if (!rooms.length) return scope;
+  if (scope.physicalScopeSource === "takeoff" && scope.takeoffScopeSummary) {
+    return scope;
+  }
+  const scopeSummary = importPayload
+    ? buildApprovedScopeSummary(importPayload)
+    : buildApprovedScopeSummaryFromScopeRooms(rooms);
+  const next = {
+    ...scope,
+    physicalScopeSource: "takeoff",
+    takeoffScopeSummary: scopeSummary,
+    edgeEligibleLinearFeet: Number(scopeSummary?.edgeEligibleLinearFeet) || 0
+  };
+  if (importPayload) {
+    const derived = deriveFabricationQuantitiesFromImportPayload(importPayload);
+    const addOns = { ...(scope.addOns || {}) };
+    for (const key of TAKEOFF_DERIVED_ADDON_KEYS) {
+      addOns[key] = Number(derived.addOnQuantities?.[key] ?? 0) || 0;
+    }
+    next.addOns = addOns;
+  }
+  return next;
+}
+
 /**
  * @param {{
  *   repository?: object,
@@ -270,6 +386,7 @@ export function createStudioEstimateService(deps = {}) {
             calculatedAt: row.calculationSnapshot.calculatedAt,
             totals: row.calculationSnapshot.totals,
             material: row.calculationSnapshot.material,
+            scopeBilling: row.calculationSnapshot.scopeBilling || null,
             fabrication: row.calculationSnapshot.fabrication,
             account: row.calculationSnapshot.account,
             internalMarkup: row.calculationSnapshot.internalMarkup,
@@ -460,6 +577,38 @@ export function createStudioEstimateService(deps = {}) {
       }
     }
 
+    // Authority handoff healing: Takeoff is approved at this point, so any
+    // seeded rooms are takeoff-derived. Older estimates (and the raw fallback
+    // seed above) may lack physicalScopeSource/takeoffScopeSummary, which made
+    // Pricing Setup incorrectly show "Manual physical scope" — restore the
+    // authority metadata without touching the commercial scope.
+    if (
+      Array.isArray(scope.rooms) &&
+      scope.rooms.length &&
+      (scope.physicalScopeSource !== "takeoff" || !scope.takeoffScopeSummary)
+    ) {
+      let healPayload = null;
+      if (latest?.normalizedTakeoffJson) {
+        try {
+          healPayload = buildTakeoffImportPayload({
+            takeoffJobId: row.takeoffJobId,
+            takeoffResultId: resultId,
+            takeoffResult: latest.normalizedTakeoffJson,
+            reviewState: latest.reviewState || null,
+            computed: latest.computedMeasurementsJson || null,
+            validation: latest.validationDiagnosticsJson || null,
+            requireApproved: true,
+            reviewStatus: "approved",
+            approvedAt: workspace.approvedAt || null,
+            approvedBy: workspace.approvedByUserId || null
+          });
+        } catch {
+          healPayload = null;
+        }
+      }
+      scope = healScopeTakeoffAuthority(scope, healPayload);
+    }
+
     const takeoffChanged =
       row.sourceTakeoffResultId &&
       resultId &&
@@ -542,10 +691,23 @@ export function createStudioEstimateService(deps = {}) {
     const nextScope = seedScopeFromTakeoffPayload(payload, {
       customerName: row.scope?.customerName,
       projectName: row.scope?.projectName,
+      projectAddress: row.scope?.projectAddress,
       partnerAccountId: row.scope?.partnerAccountId,
-      materialGroupId: row.scope?.materialGroupId,
-      colorId: row.scope?.colorId,
-      markupPercent: row.scope?.markupPercent
+      pricingBasis: row.scope?.pricingBasis,
+      materialGroup: row.scope?.materialGroup,
+      colorName: row.scope?.colorName,
+      colorTbd: row.scope?.colorTbd,
+      customLineItems: row.scope?.customLineItems,
+      customerCatalogPermissions: row.scope?.customerCatalogPermissions,
+      edgeProfileToken: row.scope?.edgeProfileToken,
+      edgeScopeAdjustment: row.scope?.edgeScopeAdjustment,
+      // Room-level SF adjustments are dropped on re-sync (room geometry may
+      // have changed); governed project-level adjustments survive.
+      countertopScopeAdjustments: Array.isArray(row.scope?.countertopScopeAdjustments)
+        ? row.scope.countertopScopeAdjustments.filter((a) => a?.adjustmentScope === "project")
+        : [],
+      estimatorNotes: row.scope?.estimatorNotes,
+      internalMarkupPercent: row.scope?.internalMarkupPercent
     });
     const preview = {
       previousRoomCount: Array.isArray(row.scope?.rooms) ? row.scope.rooms.length : 0,
@@ -638,6 +800,22 @@ export function createStudioEstimateService(deps = {}) {
       if ("partnerAccountId" in clean) {
         const resolved = await resolveTrustedPartnerOnScope(organizationId, nextScope);
         Object.assign(nextScope, resolved.scope);
+      }
+      // Server-side audit stamp — the browser never asserts who adjusted scope.
+      if (Array.isArray(nextScope.countertopScopeAdjustments)) {
+        const now = new Date().toISOString();
+        nextScope.countertopScopeAdjustments = nextScope.countertopScopeAdjustments.map((a) =>
+          a && typeof a === "object"
+            ? { ...a, adjustedBy: actorUserId || a.adjustedBy || null, adjustedAt: a.adjustedAt || now }
+            : a
+        );
+      }
+      if (nextScope.edgeScopeAdjustment && typeof nextScope.edgeScopeAdjustment === "object") {
+        nextScope.edgeScopeAdjustment = {
+          ...nextScope.edgeScopeAdjustment,
+          adjustedBy: actorUserId || nextScope.edgeScopeAdjustment.adjustedBy || null,
+          adjustedAt: nextScope.edgeScopeAdjustment.adjustedAt || new Date().toISOString()
+        };
       }
       const wasApproved = row.status === STUDIO_ESTIMATE_STATUSES.APPROVED;
       const scopeChanged = scopeFingerprint(row.scope) !== scopeFingerprint(nextScope);

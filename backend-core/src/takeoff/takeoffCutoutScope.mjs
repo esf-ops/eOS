@@ -356,7 +356,7 @@ export function buildApprovedScopeSummary(importPayload) {
   let pieceCount = 0;
   let backsplashEligibleRunCount = 0;
   let eligibleBacksplashLengthIn = 0;
-  let edgeEligibleLengthIn = 0;
+  let totalRunLengthIn = 0;
 
   for (const room of importPayload?.rooms ?? []) {
     backsplashEligibleRunCount += Number(room?.eligibleRunCount) || 0;
@@ -366,13 +366,22 @@ export function buildApprovedScopeSummary(importPayload) {
     for (const piece of room?.pieces ?? []) {
       if (piece?.includedInTakeoff === false) continue;
       pieceCount += 1;
-      // Exposed-edge proxy until edge geometry is captured per run: counter run
-      // lengths (splash pieces are vertical geometry, not finished edge).
+      // Counter run lengths only — splash pieces are vertical geometry, not finished edge.
       if (String(piece?.pieceType ?? "counter") === "counter") {
-        edgeEligibleLengthIn = round2(edgeEligibleLengthIn + (Number(piece?.lengthIn) || 0));
+        totalRunLengthIn = round2(totalRunLengthIn + (Number(piece?.lengthIn) || 0));
       }
     }
   }
+
+  // Interim exposed-edge proxy (derived_open_edge_v1): approved counter run
+  // length minus backsplash-eligible run length. Wall-backed (splash-eligible)
+  // runs are not finished front edge; everything else is provisionally open.
+  // Not perfect geometry — seams, interior edges, waterfalls, side edges are
+  // not modeled yet (future per-run exposure authority, see FEATURE_DECISIONS).
+  const derivedOpenEdgeLengthIn = Math.max(
+    0,
+    round2(totalRunLengthIn - eligibleBacksplashLengthIn)
+  );
 
   return {
     source: "takeoff",
@@ -385,8 +394,12 @@ export function buildApprovedScopeSummary(importPayload) {
     otherCutouts: derived.countsByType.other ?? 0,
     backsplashEligibleRunCount,
     eligibleBacksplashLengthIn,
-    edgeEligibleLengthIn,
-    edgeEligibleLinearFeet: round2(edgeEligibleLengthIn / 12),
+    totalRunLengthIn,
+    derivedOpenEdgeLengthIn,
+    derivedOpenEdgeLf: round2(derivedOpenEdgeLengthIn / 12),
+    edgeEligibleLengthIn: derivedOpenEdgeLengthIn,
+    edgeEligibleLinearFeet: round2(derivedOpenEdgeLengthIn / 12),
+    edgeScopeSource: "derived_open_edge_v1",
     reviewCutouts: derived.reviewCutouts,
     countertopSqft: Number(importPayload?.totals?.chargeableCountertopSqft) || 0
   };

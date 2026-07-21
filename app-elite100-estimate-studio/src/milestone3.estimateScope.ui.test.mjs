@@ -42,7 +42,9 @@ assert.ok(api.includes("apiPatch"));
 assert.ok(panel.includes("eq-custom-lines"));
 assert.ok(panel.includes("eq-include-backsplash"));
 assert.ok(panel.includes("pricingBasis || \"wholesale\""));
-assert.ok(panel.includes("Included edges (eased)"));
+// Canonical edge profiles replaced the legacy Included/W/D choices.
+assert.ok(panel.includes("Edge profile (canonical)"));
+assert.equal(panel.includes("Included edges (eased)"), false);
 
 const dePanel = readFileSync(
   join(root, "src/estimateQueue/EstimateDigitalEstimatePanel.tsx"),

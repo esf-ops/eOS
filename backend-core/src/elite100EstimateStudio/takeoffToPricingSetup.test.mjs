@@ -208,11 +208,14 @@ function approvedPayload() {
     scope.takeoffScopeSummary.edgeEligibleLinearFeet,
     "30: matches summary"
   );
-  assert.ok(panel.includes('data-testid="eq-edge-lf-readonly"'), "30: read-only edge LF input");
-  const idx = panel.indexOf('data-testid="eq-edge-lf-readonly"');
+  // Canonical edge model: the derived open-edge LF and the final priced LF are
+  // read-only displays; the estimator only enters a governed ± adjustment.
+  assert.ok(panel.includes('data-testid="eq-edge-derived-lf"'), "30: derived edge LF display");
+  assert.ok(panel.includes('data-testid="eq-edge-final-lf"'), "30: final priced edge display");
+  const idx = panel.indexOf('data-testid="eq-edge-derived-lf"');
   const block = panel.slice(idx - 600, idx + 100);
   assert.ok(block.includes("readOnly"), "30: readOnly attr");
-  assert.ok(!panel.includes('value="w_edge">W edge</option>') === false, "30: edge modes intact");
+  assert.ok(!panel.includes("W edge"), "30: legacy W edge option removed");
   console.log("  ✓ 30. geometry-derived Edge LF is read-only");
 }
 
@@ -241,18 +244,16 @@ function approvedPayload() {
   console.log("  ✓ 32. material selection remains editable");
 }
 
-// ── 33. products remain configurable ──────────────────────────────────────────
+// ── 33. products remain configurable (via governed catalogs + services) ───────
 {
-  assert.ok(panel.includes('data-testid="eq-product-addon-grid"'), "33: product grid present");
-  const idx = panel.indexOf('data-testid="eq-product-addon-grid"');
-  const before = panel.slice(idx - 400, idx);
-  assert.ok(
-    !before.includes("takeoffAuthority ? null"),
-    "33: product grid not hidden by authority"
-  );
-  for (const key of ["qty-ss", "qty-v-rect", "qty-v-oval", "tearout"]) {
-    assert.ok(panel.slice(idx).includes(`"${key}"`), `33: ${key} configurable`);
-  }
+  // Generic sink quantity fields are retired — customers resolve exact products
+  // through the catalog permissions section; tear-out stays a service preset.
+  assert.ok(panel.includes('data-testid="eq-catalog-permissions"'), "33: catalog permissions present");
+  assert.ok(panel.includes('data-testid="eq-service-grid"'), "33: services grid present");
+  assert.ok(panel.includes('"tearout"'), "33: tearout configurable");
+  assert.ok(!panel.includes("ESF stainless kitchen sink"), "33: generic sink qty field removed");
+  // Backend still honors legacy saved quantities so older estimates keep totals.
+  assert.ok(panel.includes("eq-legacy-product-qty-warning"), "33: legacy qty surfaced as warning");
   console.log("  ✓ 33. products remain configurable");
 }
 

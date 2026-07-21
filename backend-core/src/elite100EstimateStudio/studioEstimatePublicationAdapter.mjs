@@ -255,12 +255,59 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
 }
 
 /**
+ * Custom lines for the publication freeze source, from the approved
+ * calculation snapshot (server-calculated) or scope fallback. Carries
+ * ownership + visibility so the room pricing snapshot can freeze explicit
+ * customer-facing lines and absorb internal-only lines by policy.
+ * @param {object} estimate
+ */
+export function buildStudioCustomLineItemsForPublication(estimate) {
+  const calc = estimate?.calculationSnapshot || estimate?.calculation || null;
+  const fromCalc = Array.isArray(calc?.fabrication?.customLineItems)
+    ? calc.fabrication.customLineItems
+    : null;
+  const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+  const raw = fromCalc || (Array.isArray(scope.customLineItems) ? scope.customLineItems : []);
+  return raw
+    .map((line, i) => {
+      const name = str(line?.name);
+      if (!name) return null;
+      const qty = Number(line?.quantity ?? 1) || 0;
+      const unitPrice = Number(line?.unitPrice ?? 0) || 0;
+      return {
+        lineKey: str(line?.lineKey) || str(line?.id) || `studio-cli-${i + 1}`,
+        name,
+        category: str(line?.category) || "Other",
+        quantity: qty,
+        unit: str(line?.unit) || "ea",
+        lineTotal: Math.round(qty * unitPrice * 100) / 100,
+        customer_facing: line?.customerFacing !== false,
+        customerFacing: line?.customerFacing !== false,
+        roomId: str(line?.roomId),
+        roomName: str(line?.roomName)
+      };
+    })
+    .filter(Boolean);
+}
+
+/**
  * Customer-safe print snapshot rooms / totals (no rates, markup, or wholesale).
+ * Customer-facing custom lines appear EXPLICITLY as named rows in the customer
+ * breakdown; internal-only lines never appear here (they are absorbed into
+ * stone categories by the room pricing snapshot's allocation policy).
  * @param {object} estimate
  * @param {number} customerDisplayTotal
  */
 function buildPrintSnapshot(estimate, customerDisplayTotal) {
   const rooms = buildStudioEstimateRoomsForPublication(estimate);
+  const customLines = buildStudioCustomLineItemsForPublication(estimate);
+  const customerFacingRows = customLines
+    .filter((l) => l.customerFacing)
+    .map((l, i) => ({
+      key: `custom-line-${l.lineKey || i + 1}`,
+      label: l.roomName ? `${l.roomName} — ${l.name}` : l.name,
+      displayAmount: l.lineTotal
+    }));
   return {
     finalRounded: customerDisplayTotal,
     rooms: rooms.map((r) => {
@@ -275,6 +322,7 @@ function buildPrintSnapshot(estimate, customerDisplayTotal) {
       };
     }),
     summaryRows: [
+      ...customerFacingRows,
       {
         key: "project_total",
         label: "Estimated project total",
@@ -318,6 +366,12 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
       material_program_default: "elite_100",
       customer_display_total: customerDisplayTotal,
       estimate_rooms: rooms,
+      custom_line_items: buildStudioCustomLineItemsForPublication(estimate),
+      customer_catalog_permissions:
+        estimate?.scope?.customerCatalogPermissions &&
+        typeof estimate.scope.customerCatalogPermissions === "object"
+          ? { ...estimate.scope.customerCatalogPermissions }
+          : {},
       customer_estimate_print_snapshot: buildPrintSnapshot(estimate, customerDisplayTotal)
     }
   };
@@ -371,6 +425,12 @@ export function buildSyntheticQuoteHeaderFromStudioEstimate(estimate, opts = {})
         material_program_default: "elite_100",
         customer_display_total: customerDisplayTotal,
         estimate_rooms: rooms,
+        custom_line_items: buildStudioCustomLineItemsForPublication(estimate),
+        customer_catalog_permissions:
+          estimate?.scope?.customerCatalogPermissions &&
+          typeof estimate.scope.customerCatalogPermissions === "object"
+            ? { ...estimate.scope.customerCatalogPermissions }
+            : {},
         customer_estimate_print_snapshot: printSnap
         // Estimator-only notes intentionally excluded from customer-facing freeze path
       }

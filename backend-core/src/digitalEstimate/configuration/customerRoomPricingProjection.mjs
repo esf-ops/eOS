@@ -175,8 +175,15 @@ function applySelectedLabel(room, category, opt) {
  *
  * @param {{
  *   internal: Record<string, unknown>,
- *   reviewFlags?: string[]
+ *   reviewFlags?: string[],
+ *   publishedRoomPricing?: Record<string, unknown>|null
  * }} args
+ *   publishedRoomPricing — the immutable publish-time room pricing snapshot
+ *   (roomPricingPublishSnapshot v2). When present, the Updated projection
+ *   preserves the frozen custom-line treatment: explicit customer-facing
+ *   lines stay explicit and internal-only allocations stay absorbed into the
+ *   same room stone categories under the same frozen policy version — never
+ *   re-derived under current pricing.
  */
 export function buildUpdatedRoomPricingProjection(args) {
   const internal = args?.internal;
@@ -184,6 +191,10 @@ export function buildUpdatedRoomPricingProjection(args) {
     throw new Error("buildUpdatedRoomPricingProjection requires internal calculation result");
   }
   const reviewFlags = Array.isArray(args.reviewFlags) ? args.reviewFlags : [];
+  const published =
+    args?.publishedRoomPricing && typeof args.publishedRoomPricing === "object"
+      ? args.publishedRoomPricing
+      : null;
 
   const internalRooms = Array.isArray(internal.rooms) ? internal.rooms : [];
   const frozenBaselineAnchor = Boolean(internal.frozenBaselineAnchor);
@@ -213,8 +224,73 @@ export function buildUpdatedRoomPricingProjection(args) {
     (s, r) => s + (r.backsplashBaselineAmountCents != null ? Math.trunc(Number(r.backsplashBaselineAmountCents)) : 0),
     0
   );
+
+  // Frozen custom-line treatment (publish-time snapshot v2, anchor mode only):
+  // both explicit customer-facing lines and absorbed internal-only allocations
+  // are carved OUT of the SF-allocated countertop pool and re-attached to the
+  // same rooms/categories they were frozen to — the total is unchanged, but
+  // the policy (and the customer-visible line names) are preserved exactly.
+  const engineRoomKeySet = new Set(internalRooms.map((r) => String(r.roomKey)));
+  const engineRoomNameByKey = new Map(
+    internalRooms.map((r) => [String(r.displayName || r.roomKey).toLowerCase(), String(r.roomKey)])
+  );
+  const resolveFrozenRoomKey = (roomId, roomName) => {
+    if (roomId != null && engineRoomKeySet.has(String(roomId))) return String(roomId);
+    const byName = roomName != null ? engineRoomNameByKey.get(String(roomName).toLowerCase()) : null;
+    return byName || null;
+  };
+  /** @type {Array<{ roomKey: string|null, category: string, label: string, amountCents: number }>} */
+  const frozenRoomCustomLines = [];
+  /** @type {Array<{ label: string, amountCents: number }>} */
+  const frozenProjectAddOnLines = [];
+  /** @type {Array<{ roomKey: string, category: "countertop"|"backsplash", amountCents: number }>} */
+  const frozenInternalTargets = [];
+  if (useProportionalAllocation && published) {
+    for (const snapRoom of Array.isArray(published.rooms) ? published.rooms : []) {
+      for (const line of Array.isArray(snapRoom?.customerFacingLines) ? snapRoom.customerFacingLines : []) {
+        const roomKey = resolveFrozenRoomKey(snapRoom.roomId, snapRoom.roomName);
+        const frozen = {
+          roomKey,
+          category: String(line.category || "custom"),
+          label: String(line.label || "Item"),
+          amountCents: Math.trunc(Number(line.amountCents) || 0)
+        };
+        // Room disappeared from the engine result — keep the frozen line
+        // explicit at project level rather than dropping dollars.
+        if (roomKey == null) frozenProjectAddOnLines.push({ label: frozen.label, amountCents: frozen.amountCents });
+        else frozenRoomCustomLines.push(frozen);
+      }
+    }
+    for (const line of Array.isArray(published.projectAddOnLines) ? published.projectAddOnLines : []) {
+      frozenProjectAddOnLines.push({
+        label: String(line.label || "Item"),
+        amountCents: Math.trunc(Number(line.amountCents) || 0)
+      });
+    }
+    for (const alloc of Array.isArray(published.customLineAllocations) ? published.customLineAllocations : []) {
+      const snapRooms = Array.isArray(published.rooms) ? published.rooms : [];
+      for (const target of Array.isArray(alloc?.targets) ? alloc.targets : []) {
+        const snapRoom = snapRooms.find((r) => String(r.roomId) === String(target.roomId)) || null;
+        const roomKey = resolveFrozenRoomKey(target.roomId, snapRoom?.roomName);
+        if (!roomKey) continue; // room disappeared — cents stay in the pool
+        frozenInternalTargets.push({
+          roomKey,
+          category: target.category === "backsplash" ? "backsplash" : "countertop",
+          amountCents: Math.trunc(Number(target.allocatedCents) || 0)
+        });
+      }
+    }
+  }
+  const frozenRoomCustomLinesCents = frozenRoomCustomLines.reduce((s, l) => s + l.amountCents, 0);
+  const frozenProjectAddOnCents = frozenProjectAddOnLines.reduce((s, l) => s + l.amountCents, 0);
+  const frozenInternalCents = frozenInternalTargets.reduce((s, t) => s + t.amountCents, 0);
+
   const countertopOnlyBaselineCents = useProportionalAllocation
-    ? baselineExactTotalCents - knownBaselineBacksplashCents
+    ? baselineExactTotalCents -
+      knownBaselineBacksplashCents -
+      frozenRoomCustomLinesCents -
+      frozenProjectAddOnCents -
+      frozenInternalCents
     : null;
   const baselineShares = useProportionalAllocation
     ? allocateProportionally(countertopOnlyBaselineCents, internalRooms.map((r) => Number(r.chargeableCounterSf) || 0))
@@ -320,6 +396,29 @@ export function buildUpdatedRoomPricingProjection(args) {
     }
   }
 
+  // Re-attach frozen custom-line dollars (carved out of the pool above):
+  // internal-only allocations absorb silently into stone categories; explicit
+  // customer-facing lines stay named on their room.
+  for (const target of frozenInternalTargets) {
+    const room = roomsByKey.get(target.roomKey);
+    if (!room) continue;
+    if (target.category === "backsplash" && room.backsplashAmountCents != null) {
+      room.backsplashAmountCents += target.amountCents;
+    } else {
+      room.countertopAmountCents += target.amountCents;
+    }
+  }
+  for (const line of frozenRoomCustomLines) {
+    const room = roomsByKey.get(line.roomKey);
+    if (!room) continue;
+    room.addOnsAmountCents += line.amountCents;
+    room.customerFacingLines.push({
+      category: "custom",
+      label: line.label,
+      amountCents: line.amountCents
+    });
+  }
+
   const rooms = order.map((key) => {
     const room = roomsByKey.get(key);
     const backsplashForTotal = room.backsplashAmountCents ?? 0;
@@ -333,12 +432,15 @@ export function buildUpdatedRoomPricingProjection(args) {
   const creditsCents = allCredits.reduce((s, c) => s + Math.trunc(Number(c.amountCents || 0)), 0);
   const spahnAdjustmentCents = internal.spahnAndRose ? Math.trunc(Number(internal.spahnAndRose.amountCents || 0)) : 0;
 
-  const projectAddOns = allCustomLines
-    .filter((l) => l.customerFacing !== false)
-    .map((l) => ({ label: l.label, amountCents: Math.trunc(Number(l.amountCents || 0)) }));
+  const projectAddOns = [
+    ...allCustomLines
+      .filter((l) => l.customerFacing !== false)
+      .map((l) => ({ label: l.label, amountCents: Math.trunc(Number(l.amountCents || 0)) })),
+    ...frozenProjectAddOnLines
+  ];
 
   const roomSubtotalCents = rooms.reduce((s, r) => s + r.roomTotalCents, 0);
-  const projectAddOnsTotalCents = customLinesCents;
+  const projectAddOnsTotalCents = customLinesCents + frozenProjectAddOnCents;
   const governedAdjustmentsCents = creditsCents + spahnAdjustmentCents + projectLevelOptionsCents;
   const reconciledSumCents = roomSubtotalCents + projectAddOnsTotalCents + governedAdjustmentsCents;
   const configuredExactTotalCents = Math.trunc(Number(internal.configuredExactTotalCents));
@@ -428,18 +530,33 @@ export function buildOriginalRoomPricingProjectionFromSnapshot(snapshot) {
     addOnsAmountCents: Math.trunc(Number(r?.addOnsAmountCents) || 0),
     roomTotalCents: r?.roomTotalCents != null ? Math.trunc(Number(r.roomTotalCents)) : null,
     selectedMaterial: r?.selectedMaterialLabel || null,
-    customerFacingLines: [],
+    // Frozen explicit customer-facing custom lines (v2 snapshots). Internal-only
+    // allocations are already absorbed inside the frozen stone amounts and are
+    // never re-exposed here.
+    customerFacingLines: (Array.isArray(r?.customerFacingLines) ? r.customerFacingLines : [])
+      .filter((l) => l && l.customerVisible !== false)
+      .map((l) => ({
+        category: "custom",
+        label: String(l.label || "Item"),
+        amountCents: Math.trunc(Number(l.amountCents) || 0)
+      })),
     reviewRequiredItems: [],
     attributionStatus: r?.pricingSourceVersion || "published_allocation_v1"
   }));
 
+  const projectAddOns = (Array.isArray(snap.projectAddOnLines) ? snap.projectAddOnLines : [])
+    .filter((l) => l && l.customerVisible !== false)
+    .map((l) => ({
+      label: String(l.label || "Item"),
+      amountCents: Math.trunc(Number(l.amountCents) || 0)
+    }));
   const projectAddOnsTotalCents = Math.trunc(Number(snap.projectAddOnsCents) || 0);
   const projectTotalCents = snap.totalCents != null ? Math.trunc(Number(snap.totalCents)) : null;
 
   return {
     kind: "original",
     rooms,
-    projectAddOns: [],
+    projectAddOns,
     projectAddOnsTotalCents,
     projectTotalCents,
     unresolvedLegacyLines: [],

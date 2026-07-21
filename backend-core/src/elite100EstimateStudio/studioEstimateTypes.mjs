@@ -48,6 +48,25 @@ export const STUDIO_UNRESOLVED_ADDON_KEYS = Object.freeze([
 
 export const ALLOWED_INTERNAL_MARKUP_PERCENTS = Object.freeze([0, 5, 8, 10, 12, 15, 20]);
 
+/**
+ * Generic sink product quantity keys retired from Pricing Setup entry
+ * (products resolve via governed catalogs — sink/faucet/accessory/specialty).
+ * Backend pricing still honors saved legacy quantities so older estimates
+ * keep their totals; the UI only surfaces them as a legacy warning.
+ */
+export const RETIRED_GENERIC_PRODUCT_ADDON_KEYS = Object.freeze([
+  "qty-ss",
+  "qty-v-rect",
+  "qty-v-oval"
+]);
+
+/** Edge scope provenance markers (see FEATURE_DECISIONS — derived open edge). */
+export const EDGE_SCOPE_SOURCES = Object.freeze({
+  DERIVED: "derived_open_edge_v1",
+  ADJUSTED: "estimator_adjusted_open_edge_v1",
+  MANUAL: "manual"
+});
+
 export function isStudioEstimateStatus(value) {
   return STUDIO_ESTIMATE_STATUS_VALUES.includes(String(value ?? ""));
 }
@@ -66,8 +85,18 @@ export function emptyStudioEstimateScope() {
     rooms: [],
     addOns: {},
     customLineItems: [],
+    // Canonical edge profile token (studioEdgeAuthority). Legacy scopes may
+    // still carry edgeMode included/w_edge/d_edge — normalized on read.
+    edgeProfileToken: "edge_eased",
     edgeMode: "included",
     edgeLinearFeet: 0,
+    // Governed estimator adjustments — reason required when non-zero, audited,
+    // snapshotted, included in authoritative pricing (never customer-editable).
+    countertopScopeAdjustments: [],
+    edgeScopeAdjustment: null,
+    // Which Digital Estimate catalogs the customer may use (estimator-set;
+    // missing key = allowed). Enforcement lives in the publication/config flow.
+    customerCatalogPermissions: {},
     miterHeightKey: null,
     miterLinearFeet: 0,
     buildupSqft: 0,

@@ -117,6 +117,10 @@ function buildRoomPricingSnapshotSafely(header, iu, customerDisplayTotal, publis
       quoteNumber: str(header.quote_number),
       revision: num(header.revision_number) || 1,
       rooms,
+      // Custom lines freeze explicitly: customer-facing lines by name,
+      // internal-only lines absorbed into stone categories by the versioned
+      // deterministic allocation policy (never shown by name publicly).
+      customLineItems: Array.isArray(iu.custom_line_items) ? iu.custom_line_items : [],
       customerDisplayTotalCents: dollarsToCents(Number(customerDisplayTotal) || 0),
       createdAt: publishedAt || null
     });

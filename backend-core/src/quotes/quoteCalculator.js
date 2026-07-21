@@ -386,6 +386,12 @@ const CUSTOM_LINE_ITEM_CATEGORIES = new Set([
   "Labor",
   "Fee",
   "Discount/Credit",
+  // Stone-category ownership — drives deterministic internal-only custom-line
+  // allocation into customer-facing Countertop/Backsplash amounts (see
+  // internalCustomLineAllocation.mjs).
+  "Countertop",
+  "Backsplash",
+  "Service",
   "Other"
 ]);
 
