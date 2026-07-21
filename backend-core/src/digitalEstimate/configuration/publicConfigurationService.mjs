@@ -55,6 +55,11 @@ import {
 } from "../catalog/quoteLibraryCustomerConfigProjection.mjs";
 import { buildCustomerConfigurationSummary } from "../catalog/customerConfigurationSummary.mjs";
 import {
+  buildUpdatedRoomPricingProjection,
+  toPublicRoomPricingDto,
+  toInternalQueueWorkspaceSummary
+} from "./customerRoomPricingProjection.mjs";
+import {
   isDigitalEstimatePublicConfigurationRuntimeEnabled,
   readDigitalEstimatePublicConfigurationOrigin,
   readDigitalEstimateSessionTtlHours
@@ -1760,6 +1765,35 @@ export function createPublicConfigurationService(deps) {
         now: new Date()
       });
 
+      // Authoritative room-level pricing projection (Phase 2 production polish). Purely additive
+      // and read-only over the already-computed, trusted `result.internal` — a bug here must
+      // never be able to block a save, so it is fully isolated behind its own try/catch and
+      // simply omitted (with a safe internal diagnostic) rather than surfaced as a failure.
+      let roomPricingProjection = null;
+      let roomPricingInternalSummary = null;
+      try {
+        roomPricingProjection = buildUpdatedRoomPricingProjection({ internal: result.internal, reviewFlags });
+        roomPricingInternalSummary = toInternalQueueWorkspaceSummary(roomPricingProjection, {
+          lastSavedAt: new Date().toISOString(),
+          missingInformationCount: (missingInformationRequirements || []).length
+        });
+        if (roomPricingProjection.reconciliationStatus === "failed") {
+          console.warn(
+            "[customerRoomPricingProjection] reconciliation failed for envelope",
+            activeEnvelope.id,
+            roomPricingProjection.diagnostics
+          );
+        }
+      } catch (e) {
+        console.warn("[customerRoomPricingProjection] projection failed; omitting roomPricing", e?.message || e);
+        roomPricingProjection = null;
+        roomPricingInternalSummary = null;
+      }
+      const publicRoomPricing =
+        roomPricingProjection && roomPricingProjection.reconciliationStatus !== "failed"
+          ? toPublicRoomPricingDto(roomPricingProjection)
+          : null;
+
       const customerResultJson = {
         ...result.public,
         missingInformationRequirements,
@@ -1782,7 +1816,8 @@ export function createPublicConfigurationService(deps) {
           })
         ],
         customerConfigurationSummary,
-        quoteLibraryCustomerConfig: quoteLibraryProjection
+        quoteLibraryCustomerConfig: quoteLibraryProjection,
+        roomPricing: publicRoomPricing
       };
       assertPublicConfigurationHasNoForbiddenContent(customerResultJson);
 
@@ -1791,7 +1826,9 @@ export function createPublicConfigurationService(deps) {
         missingInformationRequirements,
         reviewFlags,
         quoteLibraryCustomerConfig: quoteLibraryProjection,
-        customerConfigurationSummary
+        customerConfigurationSummary,
+        roomPricingProjection,
+        roomPricingInternalSummary
       };
 
       let persisted;

@@ -3,6 +3,11 @@
  * Never starts from an internal quote API response.
  */
 
+import {
+  buildOriginalRoomPricingProjection,
+  toPublicRoomPricingDto
+} from "./configuration/customerRoomPricingProjection.mjs";
+
 export const PUBLIC_ESTIMATE_DTO_KEYS = Object.freeze([
   "documentTitle",
   "quoteNumber",
@@ -16,7 +21,8 @@ export const PUBLIC_ESTIMATE_DTO_KEYS = Object.freeze([
   "totals",
   "notes",
   "disclosures",
-  "print"
+  "print",
+  "roomPricing"
 ]);
 
 export const PUBLIC_PROJECT_KEYS = Object.freeze([
@@ -95,7 +101,12 @@ export function buildPublicDigitalEstimateDto(customerSnapshot, access = {}) {
       publishedAt: str(snap.publishedAt),
       pricingValidThrough: str(snap.pricingValidThrough),
       estimatedProjectTotal: num(totalsIn.estimatedProjectTotal)
-    }
+    },
+    // Authoritative room-level pricing projection (Phase 2 production polish). Read-only over
+    // the immutable frozen snapshot — never recalculates. Defensive: a bug here must never break
+    // the (already-working) baseline estimate response, so it is isolated and simply omitted
+    // (null) rather than surfaced as a failure.
+    roomPricing: buildOriginalRoomPricingDtoSafely(snap)
   };
 
   assertAllowlistedObject(estimate, PUBLIC_ESTIMATE_DTO_KEYS);
@@ -167,6 +178,20 @@ export function assertPublicDtoHasNoForbiddenContent(dto) {
       err.code = "public_dto_leak";
       throw err;
     }
+  }
+}
+
+function buildOriginalRoomPricingDtoSafely(snap) {
+  try {
+    return toPublicRoomPricingDto(
+      buildOriginalRoomPricingProjection({
+        rooms: Array.isArray(snap.rooms) ? snap.rooms : [],
+        lineItems: Array.isArray(snap.lineItems) ? snap.lineItems : [],
+        totals: snap.totals && typeof snap.totals === "object" ? snap.totals : {}
+      })
+    );
+  } catch (e) {
+    return null;
   }
 }
 
