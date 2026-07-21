@@ -16,6 +16,7 @@ import {
   billableBacksplashFromRoom,
   billableCountertopFromRoom
 } from "../../quotes/billableSquareFeet.mjs";
+import { normalizeCustomerCatalogPermissions } from "./customerCatalogPermissions.mjs";
 
 function fail(code, message, statusCode = 422) {
   const e = new Error(message);
@@ -455,6 +456,16 @@ export async function buildTrustedConfigurationContext(args) {
     });
   }
 
+  // Frozen at Studio publication (Pricing Setup → Customer-selectable catalogs).
+  // Missing keys default to allowed. Never invent permissions from client input.
+  const customerCatalogPermissions = normalizeCustomerCatalogPermissions(
+    iu.customer_catalog_permissions ||
+      iu.customerCatalogPermissions ||
+      calcCopy.customerCatalogPermissions ||
+      customerSnapshot.customerCatalogPermissions ||
+      null
+  );
+
   return {
     organizationId,
     publication: {
@@ -478,6 +489,7 @@ export async function buildTrustedConfigurationContext(args) {
     // public response; always go through buildOriginalRoomPricingProjection + the
     // allowlisted toPublicRoomPricingDto/toPublicChangesPricingDto helpers.
     customerSnapshot,
+    customerCatalogPermissions,
     baselineDisplayTotal: Number.isFinite(baselineDisplayTotal) ? baselineDisplayTotal : null,
     pricingValidThrough: pub.pricing_valid_through,
     rooms,

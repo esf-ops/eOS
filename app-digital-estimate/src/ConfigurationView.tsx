@@ -24,6 +24,11 @@ import {
 import { summarizeSideSplashSelections } from "./sideSplashSummary";
 import { enrichProductImageUrl, resolveProductImageFields } from "./productCatalogImages";
 import {
+  groupMissingInformationRequirements,
+  missingInfoHeadline,
+} from "./itemsForLater";
+import { normalizeCatalogPermissions } from "./catalogPermissions";
+import {
   exchangeFragmentToken,
   fetchConfiguration,
   fetchCurrentReviewRequest,
@@ -250,9 +255,10 @@ function ModalShell({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+              data-testid="de-modal-done"
             >
-              Close
+              Done
             </button>
           </div>
         </div>
@@ -391,20 +397,28 @@ function ColorPickerModal({
                     onFocus={() => setPreviewId(c.id)}
                     data-testid="de-color-card"
                     data-group={c.pricingGroupLabel}
-                    className={`group overflow-hidden rounded-xl border text-left transition ${
+                    className={`group relative overflow-hidden rounded-xl border text-left transition ${
                       selected
-                        ? "border-foreground shadow-sm ring-2 ring-foreground/20"
+                        ? "border-foreground bg-foreground/5 shadow-sm ring-2 ring-foreground/25"
                         : previewing
                           ? "border-foreground/50"
                           : "border-border hover:border-foreground/40 hover:shadow-sm"
                     } disabled:opacity-50`}
                   >
+                    {selected ? (
+                      <span
+                        className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-background"
+                        data-testid="de-color-selected-badge"
+                      >
+                        <span aria-hidden>✓</span> Selected
+                      </span>
+                    ) : null}
                     <MaterialThumb src={c.imageThumb} alt={c.name} size="lg" className="rounded-none border-0 border-b border-border/60" />
                     <div className="px-3 py-2">
                       <div className="truncate text-xs font-medium text-foreground">{c.name}</div>
                       <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
                         {c.pricingGroupLabel}
-                        {c.includedInBaseline ? " · Original selection" : " · Upgrade may apply"}
+                        {c.includedInBaseline ? " · Original selection" : ""}
                       </div>
                     </div>
                   </button>
@@ -461,23 +475,34 @@ function ChoiceRadio({
 }) {
   if (!options.length) return null;
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" role="radiogroup" aria-label={name}>
       {options.map((opt) => (
         <label
           key={opt.optionKey}
-          className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
-            opt.selected ? "border-foreground bg-muted/30" : "border-border bg-background"
+          data-selected={opt.selected ? "true" : "false"}
+          data-testid="de-choice-option"
+          className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm transition focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-foreground ${
+            opt.selected
+              ? "border-foreground bg-foreground/5 ring-2 ring-foreground/20"
+              : "border-border bg-background hover:border-foreground/40"
           }`}
         >
-          <span>
-            <span className="font-medium text-foreground">{opt.displayLabel}</span>
+          <span className="min-w-0 flex-1">
+            {opt.selected ? (
+              <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-background">
+                <span aria-hidden>✓</span> Selected
+              </span>
+            ) : null}
+            <span className="block font-semibold text-foreground">{opt.displayLabel}</span>
             {opt.priceEffectLabel ? (
-              <span className="ml-2 text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
+              <span className="mt-0.5 block text-xs font-medium tabular-nums text-foreground">
+                {opt.priceEffectLabel}
+              </span>
             ) : opt.includedInBaseline ? (
-              <span className="ml-2 text-xs text-muted-foreground">Original selection</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">Original selection</span>
             ) : null}
             {opt.availabilityText ? (
-              <span className="ml-2 text-xs text-muted-foreground">{opt.availabilityText}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">{opt.availabilityText}</span>
             ) : null}
           </span>
           <input
@@ -486,6 +511,8 @@ function ChoiceRadio({
             checked={opt.selected}
             disabled={opt.selectable === false}
             onChange={() => onSelect(opt.optionKey)}
+            className="mt-1 h-4 w-4"
+            aria-label={opt.displayLabel}
           />
         </label>
       ))}
@@ -1214,31 +1241,101 @@ function BacksplashModal({
   );
 }
 
-function SummaryRow({
+function formatMoneyLabel(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Math.round(Number(n)));
+}
+
+function formatSignedMoney(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  const v = Number(n);
+  if (Math.abs(v) < 0.005) return "No change";
+  const abs = formatMoneyLabel(Math.abs(v));
+  return v < 0 ? `−${abs}` : `+${abs}`;
+}
+
+function SelectionRow({
   label,
   value,
+  detail,
+  priceEffect,
   onClick,
   testId,
+  readOnly,
+  actionLabel = "Change",
 }: {
   label: string;
   value: string;
-  onClick: () => void;
+  detail?: string | null;
+  priceEffect?: string | null;
+  onClick?: () => void;
   testId?: string;
+  readOnly?: boolean;
+  actionLabel?: string;
 }) {
+  const body = (
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className="mt-0.5 block text-sm font-semibold text-foreground">{value}</span>
+        {detail ? (
+          <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
+        ) : null}
+        {priceEffect ? (
+          <span
+            className="mt-1 block text-xs font-medium tabular-nums text-foreground"
+            data-testid="de-selection-price-effect"
+          >
+            {priceEffect}
+          </span>
+        ) : null}
+      </span>
+      {readOnly ? (
+        <span className="shrink-0 text-xs text-muted-foreground">As published</span>
+      ) : (
+        <span className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground">
+          {actionLabel}
+        </span>
+      )}
+    </>
+  );
+  if (readOnly || !onClick) {
+    return (
+      <div
+        className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-left"
+        data-testid={testId}
+        data-readonly="true"
+      >
+        {body}
+      </div>
+    );
+  }
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className="flex w-full items-center justify-between rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-foreground/40"
+      className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-foreground/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
     >
-      <span>
-        <span className="block text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
-        <span className="mt-0.5 block text-sm font-medium text-foreground">{value}</span>
-      </span>
-      <span className="text-xs font-medium text-muted-foreground">Change</span>
+      {body}
     </button>
   );
+}
+
+/** @deprecated alias — prefer SelectionRow */
+function SummaryRow(props: {
+  label: string;
+  value: string;
+  onClick: () => void;
+  testId?: string;
+}) {
+  return <SelectionRow {...props} />;
 }
 
 function ReviewRequestModal({
@@ -1246,13 +1343,18 @@ function ReviewRequestModal({
   onSubmit,
   onClose,
   busy,
+  configuredTotalLabel,
+  unresolvedCount,
 }: {
   rooms: LovableRoom[];
   onSubmit: (message: string) => void;
   onClose: () => void;
   busy: boolean;
+  configuredTotalLabel?: string | null;
+  unresolvedCount?: number;
 }) {
   const [message, setMessage] = useState("");
+  const submittedRef = useRef(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -1264,49 +1366,73 @@ function ReviewRequestModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
       role="presentation"
+      data-testid="de-review-modal"
     >
       <div
         className="w-full max-w-md rounded-2xl bg-background p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-labelledby="review-modal-title"
+        aria-modal="true"
       >
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">Request a review</div>
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">Request review</div>
         <div id="review-modal-title" className="mt-1 text-lg font-semibold text-foreground">
-          Send your selections to your estimator
+          Ready for Elite to review your selections?
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          This is not an order or acceptance. Pricing and availability remain subject to estimator review.
+          This is not final acceptance. Pricing and availability remain subject to estimator review.
         </p>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Rooms: {rooms.map((r) => r.name).join(", ")}
-        </p>
+        <dl className="mt-4 space-y-1.5 rounded-xl border border-border bg-muted/20 px-3 py-3 text-sm">
+          {configuredTotalLabel ? (
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">Current estimate</dt>
+              <dd className="font-semibold tabular-nums" data-testid="de-review-confirm-total">
+                {configuredTotalLabel}
+              </dd>
+            </div>
+          ) : null}
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Rooms</dt>
+            <dd data-testid="de-review-confirm-rooms">{rooms.length}</dd>
+          </div>
+          {unresolvedCount != null && unresolvedCount > 0 ? (
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">Details still needed</dt>
+              <dd data-testid="de-review-confirm-unresolved">{unresolvedCount}</dd>
+            </div>
+          ) : null}
+        </dl>
         <label className="mt-4 block text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Optional note
         </label>
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          rows={4}
+          rows={3}
           maxLength={1000}
-          placeholder="Anything your estimator should know…"
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          placeholder="Anything Elite should know…"
+          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
         />
         <div className="mt-5 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-border px-3 py-1.5 text-xs"
+            className="rounded-md border border-border px-3 py-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
           >
             Cancel
           </button>
           <button
             type="button"
-            disabled={busy}
-            onClick={() => onSubmit(message.trim())}
-            className="rounded-md bg-foreground px-3 py-1.5 text-xs font-semibold text-background disabled:opacity-40"
+            disabled={busy || submittedRef.current}
+            data-testid="de-review-submit"
+            onClick={() => {
+              if (busy || submittedRef.current) return;
+              submittedRef.current = true;
+              onSubmit(message.trim());
+            }}
+            className="rounded-md bg-foreground px-4 py-2 text-xs font-semibold text-background disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
           >
-            {busy ? "Sending…" : "Send for review"}
+            {busy ? "Sending…" : "Request review"}
           </button>
         </div>
       </div>
@@ -1319,134 +1445,146 @@ function CustomerRoomCard({
   onOpenModal,
   onRename,
   onEdgeChange,
+  catalogPermissions,
 }: {
   room: LovableRoom;
   onOpenModal: (kind: Exclude<ModalKind, null>) => void;
   onRename: (name: string) => void;
   onEdgeChange?: (optionKey: string) => void;
+  catalogPermissions?: Record<string, boolean> | null;
 }) {
   const color = room.colors.find((c) => c.id === room.selectedColorId) || room.colors[0];
   const has = (role: string) => room.choiceOptions.some((c) => c.role === role);
   const hasSideSplash = room.sideSplashPieces.length > 0;
+  const allowed = (key: string) =>
+    catalogPermissions == null || catalogPermissions[key] !== false;
+  const selectedEffect = (role: string) => {
+    const sel =
+      room.choiceOptions.find((c) => c.role === role && c.selected) ||
+      room.choiceOptions.find((c) => c.role === role && c.includedInBaseline);
+    return sel?.priceEffectLabel || null;
+  };
+  const colorEffect = color?.includedInBaseline
+    ? "Original selection"
+    : color
+      ? "Price updates when saved"
+      : null;
+  const pricing = room.roomPricing;
+  const roomStatus =
+    pricing?.changeFromOriginal != null && Math.abs(pricing.changeFromOriginal) >= 0.005
+      ? "Updated"
+      : "As published";
 
   return (
-    <div className="rounded-2xl border border-border bg-background p-6 shadow-sm" data-testid="de-room-card">
-      <div className="flex items-start justify-between gap-4">
+    <article
+      className="rounded-2xl border border-border bg-background p-5 shadow-sm sm:p-6"
+      data-testid="de-room-card"
+    >
+      <header className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">Room</div>
           {room.customerMayEditLabel ? (
             <input
-              className="mt-0.5 w-full rounded-md border border-transparent bg-transparent text-lg font-semibold text-foreground outline-none hover:border-border focus:border-border focus:bg-background focus:px-2"
+              className="w-full rounded-md border border-transparent bg-transparent text-lg font-semibold text-foreground outline-none hover:border-border focus:border-border focus:bg-background focus:px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
               value={room.name}
               aria-label="Room name"
               data-testid="de-room-label"
               onChange={(e) => onRename(e.target.value)}
             />
           ) : (
-            <div className="mt-0.5 text-lg font-semibold text-foreground">{room.name}</div>
+            <h2 className="text-lg font-semibold text-foreground" data-testid="de-room-label">
+              {room.name}
+            </h2>
           )}
-          {room.sourceName && room.sourceName !== room.name ? (
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              From estimate: {room.sourceName}
-            </div>
-          ) : null}
-        </div>
-        <MaterialThumb src={color?.imageThumb || color?.imageFull} alt={color?.name || "Color"} size="md" />
-      </div>
-
-      <dl className="mt-5 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-        <div className="rounded-xl bg-muted/40 px-3 py-2">
-          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Countertops
-          </dt>
-          <dd className="mt-0.5 font-medium text-foreground" data-testid="de-room-counter-status">
-            {room.countertopIncluded === false ? "Not included" : "Included"}
-          </dd>
-        </div>
-        <div className="rounded-xl bg-muted/40 px-3 py-2">
-          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Backsplash
-          </dt>
-          <dd className="mt-0.5 font-medium text-foreground" data-testid="de-room-backsplash-status">
-            {room.backsplashSummary ||
-              (room.backsplashIncluded ? "Original selection" : "Not included")}
-          </dd>
-        </div>
-      </dl>
-      <p className="mt-2 text-[11px] text-muted-foreground">
-        {room.measurementStatus || "Measurements verified by estimator — locked for this estimate."}
-      </p>
-
-      <div className="mt-5 grid gap-2 md:grid-cols-2" data-testid="de-room-selections">
-        <div className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground md:col-span-2">
-          Primary selections
-        </div>
-
-        <button
-          type="button"
-          onClick={() => onOpenModal("color")}
-          data-testid="de-open-color-modal"
-          className="flex w-full items-center justify-between rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-foreground/40"
-        >
-          <span className="flex items-center gap-3">
-            <MaterialThumb src={color?.imageThumb || color?.imageFull} alt={color?.name || "Color"} size="sm" />
-            <span>
-              <span className="block text-[10px] uppercase tracking-wider text-muted-foreground">
-                Material / color
-              </span>
-              <span className="block text-sm font-medium text-foreground">
-                {color?.name || room.selectedColorName || "Choose a color"}
-              </span>
-              <span className="block text-xs text-muted-foreground">
-                {color?.pricingGroupLabel || "Elite 100"}
-                {color?.includedInBaseline ? " · Original selection" : " · Upgrade may apply"}
-              </span>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span
+              className="rounded-full border border-border px-2 py-0.5"
+              data-testid="de-room-status"
+            >
+              {roomStatus}
             </span>
-          </span>
-          <span className="text-xs font-medium text-muted-foreground">Change</span>
-        </button>
-        {room.baselineLabel ? (
-          <div className="text-xs text-muted-foreground">Original finish · {room.baselineLabel}</div>
+            {pricing?.roomTotal != null ? (
+              <span className="font-semibold tabular-nums text-foreground" data-testid="de-room-total">
+                {formatMoneyLabel(pricing.roomTotal)}
+              </span>
+            ) : null}
+            {pricing?.changeFromOriginal != null &&
+            Math.abs(pricing.changeFromOriginal) >= 0.005 ? (
+              <span data-testid="de-room-delta" className="tabular-nums">
+                {formatSignedMoney(pricing.changeFromOriginal)} from original
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <MaterialThumb
+          src={color?.imageThumb || color?.imageFull}
+          alt={color?.name || "Color"}
+          size="md"
+        />
+      </header>
+
+      <div className="mt-5 grid gap-2" data-testid="de-room-selections">
+        {allowed("material") || color ? (
+          <SelectionRow
+            label="Material"
+            value={color?.name || room.selectedColorName || "Choose a material"}
+            detail={color?.pricingGroupLabel || "Elite 100"}
+            priceEffect={colorEffect}
+            readOnly={!allowed("material")}
+            onClick={() => onOpenModal("color")}
+            testId="de-open-color-modal"
+          />
         ) : null}
 
         {has("backsplash") ? (
-          <SummaryRow
+          <SelectionRow
             label="Backsplash"
             value={room.backsplashSummary || "Choose backsplash"}
+            detail={
+              room.backsplashSummary === "No backsplash"
+                ? "Removes the standard backsplash from eligible wall runs"
+                : "Applies to eligible wall runs approved by Elite"
+            }
+            priceEffect={selectedEffect("backsplash")}
+            readOnly={!allowed("backsplash")}
             onClick={() => onOpenModal("backsplash")}
             testId="de-open-backsplash-modal"
           />
         ) : null}
 
         {hasSideSplash ? (
-          <SummaryRow
+          <SelectionRow
             label="Side splash"
             value={summarizeSideSplashSelections(room.sideSplashPieces)}
+            readOnly={!allowed("side_splash")}
             onClick={() => onOpenModal("sidesplash")}
             testId="de-open-sidesplash-modal"
           />
         ) : null}
 
         {has("sink") ? (
-          <SummaryRow
+          <SelectionRow
             label="Sink"
             value={room.sinkSummary || "Choose sink"}
+            priceEffect={selectedEffect("sink")}
+            readOnly={!allowed("sink")}
             onClick={() => onOpenModal("sink")}
             testId="de-open-sink-modal"
           />
         ) : null}
 
         {has("faucet") ? (
-          <SummaryRow
+          <SelectionRow
             label="Faucet"
             value={room.faucetSummary || "Choose faucet"}
+            priceEffect={selectedEffect("faucet")}
+            readOnly={!allowed("faucet")}
             onClick={() => onOpenModal("faucet")}
             testId="de-open-faucet-modal"
           />
         ) : null}
 
-        {has("accessory") || room.accessoryProducts.length ? (
-          <SummaryRow
+        {(has("accessory") || room.accessoryProducts.length) && allowed("accessories") ? (
+          <SelectionRow
             label="Accessories"
             value={room.accessoriesSummary || "None selected"}
             onClick={() => onOpenModal("accessories")}
@@ -1455,7 +1593,7 @@ function CustomerRoomCard({
         ) : null}
 
         {has("cooktop") ? (
-          <SummaryRow
+          <SelectionRow
             label="Cooktop / cutouts"
             value={room.cooktopSummary || "Choose cooktop option"}
             onClick={() => onOpenModal("cooktop")}
@@ -1464,52 +1602,130 @@ function CustomerRoomCard({
         ) : null}
 
         {has("edge") ? (
-          <label className="grid gap-1 rounded-xl border border-border bg-background px-4 py-3" data-testid="de-edge-dropdown">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Edge profile</span>
-            <select
-              className="mt-0.5 w-full rounded-md border border-border bg-background px-2 py-2 text-sm font-medium text-foreground"
-              value={
-                room.choiceOptions.find((c) => c.role === "edge" && c.selected)?.optionKey ||
-                room.choiceOptions.find((c) => c.role === "edge" && c.includedInBaseline)?.optionKey ||
-                ""
-              }
-              onChange={(e) => {
-                if (e.target.value) onEdgeChange?.(e.target.value);
-              }}
-              aria-label="Edge profile"
+          allowed("edge") ? (
+            <div
+              className="rounded-xl border border-border bg-background px-4 py-3"
+              data-testid="de-edge-dropdown"
             >
-              {room.choiceOptions
-                .filter((c) => c.role === "edge")
-                .map((opt) => {
-                  const effect = opt.priceEffectLabel || (opt.includedInBaseline ? "Original selection" : "");
-                  const label = effect ? `${opt.displayLabel} — ${effect}` : opt.displayLabel;
-                  return (
-                    <option key={opt.optionKey} value={opt.optionKey}>
-                      {label}
-                    </option>
-                  );
-                })}
-            </select>
-          </label>
+              <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Edge
+              </div>
+              <label className="mt-1 block">
+                <span className="sr-only">Edge profile</span>
+                <select
+                  className="mt-0.5 w-full rounded-md border border-border bg-background px-2 py-2 text-sm font-semibold text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                  value={
+                    room.choiceOptions.find((c) => c.role === "edge" && c.selected)?.optionKey ||
+                    room.choiceOptions.find((c) => c.role === "edge" && c.includedInBaseline)
+                      ?.optionKey ||
+                    ""
+                  }
+                  onChange={(e) => {
+                    if (e.target.value) onEdgeChange?.(e.target.value);
+                  }}
+                  aria-label="Edge profile"
+                >
+                  {room.choiceOptions
+                    .filter((c) => c.role === "edge")
+                    .map((opt) => {
+                      const effect =
+                        opt.priceEffectLabel ||
+                        (opt.includedInBaseline ? "Original selection" : "");
+                      const label = effect
+                        ? `${opt.displayLabel} — ${effect}`
+                        : opt.displayLabel;
+                      return (
+                        <option key={opt.optionKey} value={opt.optionKey}>
+                          {label}
+                        </option>
+                      );
+                    })}
+                </select>
+              </label>
+              {selectedEffect("edge") ? (
+                <div className="mt-1 text-xs font-medium tabular-nums text-foreground">
+                  {selectedEffect("edge")}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <SelectionRow
+              label="Edge"
+              value={room.edgeSummary || "As published"}
+              priceEffect={selectedEffect("edge")}
+              readOnly
+              testId="de-edge-readonly"
+            />
+          )
         ) : null}
 
-        {has("specialty") || room.specialtyProducts.length ? (
-          <SummaryRow
-            label="Specialty"
+        {(has("specialty") || room.specialtyProducts.length) && allowed("specialty") ? (
+          <SelectionRow
+            label="Specialty options"
             value={room.specialtySummary || "None selected"}
             onClick={() => onOpenModal("specialty")}
             testId="de-open-specialty-modal"
           />
         ) : null}
 
-        <SummaryRow
+        <SelectionRow
           label="Notes"
           value={room.roomNote?.trim() ? room.roomNote.trim().slice(0, 80) : "Add a note"}
           onClick={() => onOpenModal("notes")}
           testId="de-open-notes-modal"
+          actionLabel="Edit"
         />
       </div>
-    </div>
+
+      {pricing ? (
+        <section
+          className="mt-5 rounded-xl border border-border bg-muted/20 px-4 py-3"
+          data-testid="de-room-price-summary"
+          aria-label={`${room.name} price summary`}
+        >
+          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Room price summary
+          </div>
+          <dl className="mt-2 space-y-1.5 text-sm">
+            <div className="flex justify-between gap-3">
+              <dt>Countertop</dt>
+              <dd className="tabular-nums" data-testid="de-room-countertop-amount">
+                {formatMoneyLabel(pricing.countertopAmount)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt data-testid="de-room-backsplash-status">Backsplash</dt>
+              <dd className="tabular-nums" data-testid="de-room-backsplash-amount">
+                {formatMoneyLabel(pricing.backsplashAmount)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt>Add-ons</dt>
+              <dd className="tabular-nums">{formatMoneyLabel(pricing.addOnsAmount)}</dd>
+            </div>
+            {(pricing.addOnLines || []).map((line, i) => (
+              <div
+                key={`${line.label}-${i}`}
+                className="flex justify-between gap-3 pl-3 text-xs text-muted-foreground"
+                data-testid="de-room-addon-line"
+              >
+                <dt>{line.label}</dt>
+                <dd className="tabular-nums">{formatMoneyLabel(line.amount)}</dd>
+              </div>
+            ))}
+            <div className="flex justify-between gap-3 border-t border-border/60 pt-2 font-semibold text-foreground">
+              <dt>Room total</dt>
+              <dd className="tabular-nums">{formatMoneyLabel(pricing.roomTotal)}</dd>
+            </div>
+          </dl>
+        </section>
+      ) : (
+        <p className="mt-4 text-[11px] text-muted-foreground" data-testid="de-room-counter-status">
+          {room.measurementStatus ||
+            "Measurements verified by estimator — locked for this estimate."}
+        </p>
+      )}
+    </article>
   );
 }
 
@@ -2381,7 +2597,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             Couldn’t save — Retry
           </button>
         ) : null}
-        {reviewUiEnabled() ? (
+            {reviewUiEnabled() ? (
           <button
             type="button"
             onClick={() => setReviewOpen(true)}
@@ -2391,9 +2607,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               saveState === "error" ||
               (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
             }
-            className="w-full rounded-lg border border-border bg-background py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+            data-testid="de-request-review"
+            className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90 disabled:opacity-50"
           >
-            {reviewRequest ? "Request already sent" : "Request estimator review"}
+            {reviewRequest ? "Request already sent" : "Request review"}
           </button>
         ) : null}
         {reviewError ? <p className="text-center text-xs text-destructive">{reviewError}</p> : null}
@@ -2404,9 +2621,9 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           <div className="mt-1 text-muted-foreground">
             Ref {reviewRequest.requestReference} · {formatDate(reviewRequest.requestedAt)}
           </div>
-          <p className="mt-2 text-muted-foreground">
+          <p className="mt-2 text-muted-foreground" data-testid="de-review-confirmation">
             {reviewRequest.nonAcceptanceNotice ||
-              "Submitted for review — not an order or acceptance."}
+              "Your selections were sent to Elite for review."}
           </p>
         </div>
       ) : null}
@@ -2414,111 +2631,215 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   );
 
   return (
-    <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-10">
+    <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-28 lg:pb-10">
       <header className="border-b border-border bg-background">
-        <div className="mx-auto flex w-[min(100%,1650px)] max-w-[1650px] items-center justify-between px-4 sm:px-6 py-4">
+        <div className="mx-auto flex w-[min(100%,1650px)] max-w-[1650px] items-center justify-between px-4 sm:px-6 py-3">
           <div className="text-sm font-semibold tracking-tight text-foreground">
-            Elite Surfaces &amp; Fabrication
+            Elite Stone Fabrication
           </div>
-          <span className="text-xs text-muted-foreground">Elite 100 Digital Estimate</span>
+          <span className="text-xs text-muted-foreground">Digital Estimate</span>
         </div>
       </header>
 
-      <div className="mx-auto w-[min(95vw,1650px)] max-w-[1650px] px-4 sm:px-6 py-8 lg:py-10" data-testid="de-page-shell">
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">Your project</div>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
-          {vm.customerName}
-        </h1>
-        {vm.projectName ? (
-          <p className="mt-1 text-sm text-muted-foreground">{vm.projectName}</p>
-        ) : null}
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          Confirm your project details and choose approved Elite 100 colors for each room. Totals
-          update from eliteOS when you save — measurements stay locked.
-        </p>
-        {vm.lockedScopeNotice ? (
-          <p className="mt-2 max-w-2xl text-xs text-muted-foreground">{vm.lockedScopeNotice}</p>
-        ) : null}
-
-        {vm.missingInformationRequirements.length ? (
-          <div
-            className="mt-6 rounded-2xl border border-border bg-muted/30 px-4 py-3"
-            data-testid="de-missing-info-banner"
-            role="status"
-          >
-            <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Items for later ({vm.missingInformationRequirements.length})
-            </div>
-            <ul className="mt-2 space-y-1.5 text-sm text-foreground">
-              {vm.missingInformationRequirements.map((req, i) => (
-                <li key={`${req.code}-${req.roomKey || ""}-${i}`}>
-                  {req.customerCopy || req.message}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              These notes do not block saving your selections.
-            </p>
-          </div>
-        ) : null}
-
+      <div
+        className="mx-auto w-[min(95vw,1650px)] max-w-[1650px] px-4 sm:px-6 py-6 lg:py-8"
+        data-testid="de-page-shell"
+      >
         <section
-          className="mt-8 rounded-2xl border border-border bg-background p-6 shadow-sm"
-          data-testid="de-customer-info"
-          aria-label="Customer and project information"
+          className="rounded-2xl border border-border bg-background px-4 py-4 shadow-sm sm:px-5"
+          data-testid="de-compact-header"
+          aria-label="Estimate summary"
         >
-          <div className="text-xs uppercase tracking-widest text-muted-foreground">
-            Customer information
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Started from your estimator&apos;s records. Suggested corrections are saved with your
-            selections for review — they do not change source accounts directly.
+          <h1
+            className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl"
+            data-testid="de-project-name"
+          >
+            {vm.projectName || "Your project"}
+          </h1>
+          <p className="mt-0.5 text-sm text-muted-foreground" data-testid="de-customer-name">
+            {vm.customerName}
           </p>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {(
-              [
-                ["customerName", "Customer name"],
-                ["projectName", "Project / job name"],
-                ["phone", "Phone"],
-                ["email", "Email"],
-                ["projectAddress", "Project address"],
-              ] as const
-            ).map(([field, label]) => {
-              const sourceVal = String(vm.sourceProject[field] || "");
-              const draftVal = infoDraft[field] || "";
-              const changed = Boolean(draftVal) && draftVal !== sourceVal;
-              return (
-                <label
-                  key={field}
-                  className={field === "projectAddress" ? "sm:col-span-2 grid gap-1 text-sm" : "grid gap-1 text-sm"}
-                >
-                  <span className="text-xs font-medium text-muted-foreground">{label}</span>
-                  <input
-                    className="rounded-md border border-border bg-background px-3 py-2"
-                    value={draftVal}
-                    data-testid={`de-info-${field}`}
-                    onChange={(e) => {
-                      setInfoDraft((prev) => ({ ...prev, [field]: e.target.value }));
-                      setSaveState("unsaved");
-                    }}
-                  />
-                  {sourceVal ? (
-                    <span className="text-[11px] text-muted-foreground">
-                      {changed ? `Suggested change · estimator value: ${sourceVal}` : "Matches estimate"}
-                    </span>
-                  ) : null}
-                </label>
-              );
-            })}
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {vm.quoteNumber ? (
+              <span data-testid="de-quote-number">{vm.quoteNumber}</span>
+            ) : null}
+            {vm.pricingValidThrough ? (
+              <span data-testid="de-pricing-valid">
+                Pricing valid through {formatDate(vm.pricingValidThrough)}
+              </span>
+            ) : null}
           </div>
+
+          <dl
+            className="mt-4 grid grid-cols-1 gap-2 border-t border-border/70 pt-3 text-sm sm:grid-cols-3"
+            data-testid="de-header-totals"
+          >
+            <div className="flex items-baseline justify-between gap-2 sm:block">
+              <dt className="text-xs text-muted-foreground">Original estimate</dt>
+              <dd
+                className="font-semibold tabular-nums text-foreground"
+                data-testid="de-header-original"
+              >
+                {vm.originalTotalLabel}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2 sm:block">
+              <dt className="text-xs text-muted-foreground">Current estimate</dt>
+              <dd
+                className="font-semibold tabular-nums text-foreground"
+                data-testid="de-header-current"
+              >
+                {authoritativeUpdatedLabel}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2 sm:block">
+              <dt className="text-xs text-muted-foreground">Difference</dt>
+              <dd
+                className="font-semibold tabular-nums text-foreground"
+                data-testid="de-header-difference"
+              >
+                {authoritativeDiffLabel || "No change"}
+              </dd>
+            </div>
+          </dl>
+
+          <p
+            className={`mt-3 text-xs ${
+              saveState === "error" ? "text-destructive" : "text-muted-foreground"
+            }`}
+            role="status"
+            data-testid="de-header-save-status"
+            data-save-state={saveState}
+          >
+            {saveState === "idle" || saveState === "saved" ? "All changes saved" : null}
+            {saveState === "unsaved" ? "Saving…" : null}
+            {saveState === "saving" ? "Saving…" : null}
+            {saveState === "error"
+              ? saveError || "Couldn’t save — use Retry below"
+              : null}
+          </p>
+          <p className="mt-3 text-sm text-foreground" data-testid="de-primary-instruction">
+            Review each room and choose the options you prefer.
+          </p>
         </section>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,30%)] xl:grid-cols-[minmax(0,1fr)_minmax(300px,28%)]" data-testid="de-main-layout">
-          <div className="space-y-4">
+        {(() => {
+          const grouped = groupMissingInformationRequirements(
+            vm.missingInformationRequirements,
+            Object.fromEntries(vm.rooms.map((r) => [r.id, r.name])),
+          );
+          if (!grouped.length) return null;
+          return (
+            <details
+              className="mt-4 rounded-2xl border border-border bg-muted/20 px-4 py-3"
+              data-testid="de-missing-info-banner"
+            >
+              <summary
+                className="cursor-pointer list-none text-sm font-medium text-foreground"
+                data-testid="de-missing-info-summary"
+              >
+                {missingInfoHeadline(grouped)}
+                <span className="ml-2 text-xs font-normal text-muted-foreground underline-offset-2 hover:underline">
+                  View details
+                </span>
+              </summary>
+              <div className="mt-3 space-y-3 border-t border-border/60 pt-3">
+                {grouped.map((g) => (
+                  <div key={g.key} data-testid="de-missing-info-group">
+                    <div className="text-sm font-medium text-foreground">{g.title}</div>
+                    <div className="text-[11px] text-muted-foreground">{g.timingLabel}</div>
+                    {g.rooms.length ? (
+                      <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
+                        {g.rooms.map((room) => (
+                          <li key={room}>{room}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </details>
+          );
+        })()}
+
+        <details
+          className="mt-4 rounded-2xl border border-border bg-background px-4 py-3 shadow-sm"
+          data-testid="de-customer-info"
+        >
+          <summary
+            className="cursor-pointer list-none text-sm font-medium text-foreground"
+            data-testid="de-project-details-summary"
+          >
+            Project details
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              Contact, address, and corrections
+            </span>
+          </summary>
+          <div className="mt-3 border-t border-border/60 pt-3">
+            <p className="text-xs text-muted-foreground">
+              Started from your estimator&apos;s records. Suggested corrections are saved with your
+              selections for review — they do not change source accounts directly.
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {(
+                [
+                  ["customerName", "Customer name"],
+                  ["projectName", "Project / job name"],
+                  ["phone", "Phone"],
+                  ["email", "Email"],
+                  ["projectAddress", "Project address"],
+                ] as const
+              ).map(([field, label]) => {
+                const sourceVal = String(vm.sourceProject[field] || "");
+                const draftVal = infoDraft[field] || "";
+                const changed = Boolean(draftVal) && draftVal !== sourceVal;
+                return (
+                  <label
+                    key={field}
+                    className={
+                      field === "projectAddress"
+                        ? "sm:col-span-2 grid gap-1 text-sm"
+                        : "grid gap-1 text-sm"
+                    }
+                  >
+                    <span className="text-xs font-medium text-muted-foreground">{label}</span>
+                    <input
+                      className="rounded-md border border-border bg-background px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                      value={draftVal}
+                      data-testid={`de-info-${field}`}
+                      onChange={(e) => {
+                        setInfoDraft((prev) => ({ ...prev, [field]: e.target.value }));
+                        setSaveState("unsaved");
+                      }}
+                    />
+                    {sourceVal ? (
+                      <span className="text-[11px] text-muted-foreground">
+                        {changed
+                          ? `Suggested change · estimator value: ${sourceVal}`
+                          : "Matches estimate"}
+                      </span>
+                    ) : null}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </details>
+
+        <div
+          className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,30%)] xl:grid-cols-[minmax(0,1fr)_minmax(300px,28%)]"
+          data-testid="de-main-layout"
+        >
+          <div className="space-y-4" data-testid="de-rooms-column">
             {vm.rooms.map((room) => (
               <CustomerRoomCard
                 key={room.id}
                 room={{ ...room, roomNote: roomNotes[room.id] || room.roomNote || "" }}
+                catalogPermissions={normalizeCatalogPermissions(
+                  (vm.catalogPermissions ||
+                    config?.customerCatalogPermissions ||
+                    null) as Record<string, boolean> | null,
+                )}
                 onOpenModal={(kind) => setActiveModal({ roomId: room.id, kind })}
                 onRename={(name) => {
                   setRoomLabels((prev) => ({ ...prev, [room.id]: name }));
@@ -2612,6 +2933,34 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                   ))}
                 </ul>
               </div>
+            ) : null}
+
+            {reviewUiEnabled() ? (
+              <section
+                className="rounded-2xl border border-border bg-background p-5 shadow-sm"
+                data-testid="de-review-cta"
+              >
+                <h2 className="text-base font-semibold text-foreground">
+                  Ready for Elite to review your selections?
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Send your current configured estimate for review — not final acceptance.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setReviewOpen(true)}
+                  disabled={
+                    saveState === "unsaved" ||
+                    saveState === "saving" ||
+                    saveState === "error" ||
+                    (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
+                  }
+                  className="mt-4 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                  data-testid="de-request-review-bottom"
+                >
+                  {reviewRequest ? "Request already sent" : "Request review"}
+                </button>
+              </section>
             ) : null}
           </div>
 
@@ -2761,10 +3110,41 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         <ReviewRequestModal
           rooms={vm.rooms}
           busy={reviewBusy}
+          configuredTotalLabel={authoritativeUpdatedLabel}
+          unresolvedCount={vm.missingInformationRequirements.length}
           onClose={() => setReviewOpen(false)}
           onSubmit={(note) => void onSendReview(note)}
         />
       ) : null}
+
+      {/* Mobile / tablet compact sticky total bar */}
+      <div
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 p-3 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden"
+        data-testid="de-mobile-total-bar"
+      >
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          data-testid="de-mobile-total-open"
+          onClick={() => {
+            setBreakdownOpen(true);
+            setEstimateTab("updated");
+            document
+              .querySelector('[data-testid="de-estimate-workspace"]')
+              ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }}
+        >
+          <span>
+            <span className="block text-[11px] uppercase tracking-wider text-muted-foreground">
+              Current estimate
+            </span>
+            <span className="text-base font-semibold tabular-nums text-foreground">
+              {authoritativeUpdatedLabel}
+            </span>
+          </span>
+          <span className="text-xs font-medium text-muted-foreground">View summary</span>
+        </button>
+      </div>
     </div>
   );
 }

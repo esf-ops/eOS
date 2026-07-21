@@ -134,6 +134,15 @@ export type LovableRoom = {
   faucetProducts: ConfigProduct[];
   accessoryProducts: ConfigProduct[];
   specialtyProducts: ConfigProduct[];
+  /** Authoritative room dollars from latest calculation — never invented client-side. */
+  roomPricing: {
+    countertopAmount: number | null;
+    backsplashAmount: number | null;
+    addOnsAmount: number | null;
+    roomTotal: number | null;
+    addOnLines: Array<{ label: string; amount: number | null; category?: string | null }>;
+    changeFromOriginal: number | null;
+  } | null;
 };
 
 export type LovableAddon = {
@@ -186,6 +195,8 @@ export type LovableEstimateViewModel = {
   lineItems: Array<{ label: string; amountLabel: string }>;
   materialUpgradeLabel: string | null;
   missingInformationRequirements: MissingInformationRequirement[];
+  /** Frozen estimator catalog permissions (missing key = allowed). */
+  catalogPermissions: Record<string, boolean>;
 };
 
 function materialOptionsForRoom(options: ConfigOption[], roomKey: string): ConfigOption[] {
@@ -860,6 +871,84 @@ export function mapEliteOsToLovableViewModel(
         r.displayName,
         new Set(choiceOptions.filter((c) => c.role === "specialty").map((c) => c.optionKey)),
       ),
+      roomPricing: (() => {
+        const rp = (
+          latestCalc as {
+            roomPricing?: {
+              rooms?: Array<{
+                roomId?: string;
+                roomName?: string;
+                countertopAmount?: number | null;
+                backsplashAmount?: number | null;
+                addOnsAmount?: number | null;
+                roomTotal?: number | null;
+                addOnLines?: Array<{
+                  label?: string;
+                  amount?: number | null;
+                  category?: string | null;
+                }>;
+              }>;
+            } | null;
+            roomPricingChanges?: {
+              rows?: Array<{ roomName?: string; amountDelta?: number | null }>;
+            } | null;
+          } | null
+        )?.roomPricing;
+        const roomsList = Array.isArray(rp?.rooms) ? rp.rooms : [];
+        const match =
+          roomsList.find((x) => String(x.roomId) === String(r.roomKey)) ||
+          roomsList.find(
+            (x) =>
+              String(x.roomName || "").toLowerCase() ===
+              String(labelDraft || r.displayName || "").toLowerCase(),
+          ) ||
+          null;
+        if (!match) return null;
+        const changeRows =
+          (
+            latestCalc as {
+              roomPricingChanges?: {
+                rows?: Array<{ roomName?: string; amountDelta?: number | null }>;
+              } | null;
+            } | null
+          )?.roomPricingChanges?.rows || [];
+        const roomDelta = changeRows
+          .filter(
+            (row) =>
+              String(row.roomName || "").toLowerCase() ===
+              String(match.roomName || labelDraft || r.displayName || "").toLowerCase(),
+          )
+          .reduce((s, row) => s + (Number(row.amountDelta) || 0), 0);
+        return {
+          countertopAmount:
+            match.countertopAmount != null && Number.isFinite(Number(match.countertopAmount))
+              ? Number(match.countertopAmount)
+              : null,
+          backsplashAmount:
+            match.backsplashAmount != null && Number.isFinite(Number(match.backsplashAmount))
+              ? Number(match.backsplashAmount)
+              : null,
+          addOnsAmount:
+            match.addOnsAmount != null && Number.isFinite(Number(match.addOnsAmount))
+              ? Number(match.addOnsAmount)
+              : null,
+          roomTotal:
+            match.roomTotal != null && Number.isFinite(Number(match.roomTotal))
+              ? Number(match.roomTotal)
+              : null,
+          addOnLines: Array.isArray(match.addOnLines)
+            ? match.addOnLines.map((line) => ({
+                label: String(line.label || "Item"),
+                amount:
+                  line.amount != null && Number.isFinite(Number(line.amount))
+                    ? Number(line.amount)
+                    : null,
+                category: line.category ?? null,
+              }))
+            : [],
+          changeFromOriginal: changeRows.length ? roomDelta : null,
+        };
+      })(),
     };
   });
 
@@ -909,6 +998,18 @@ export function mapEliteOsToLovableViewModel(
       amountLabel: formatCurrency(li.amount),
     })),
     missingInformationRequirements,
+    catalogPermissions: {
+      material: true,
+      sink: true,
+      faucet: true,
+      accessories: true,
+      specialty: true,
+      edge: true,
+      backsplash: true,
+      side_splash: true,
+      ...((config as { customerCatalogPermissions?: Record<string, boolean> })
+        .customerCatalogPermissions || {}),
+    },
   };
 }
 

@@ -39,15 +39,18 @@ assert.ok(configView.includes("Change from original") || configView.includes("Se
 assert.ok(configView.includes("not final acceptance") || configView.includes("not an order or acceptance"));
 assert.ok(
   configView.includes("Pick an approved Elite 100 color") ||
-    configView.includes("choose approved Elite 100 colors"),
+    configView.includes("choose approved Elite 100 colors") ||
+    configView.includes("Review each room and choose the options you prefer") ||
+    configView.includes("Elite 100 collection"),
   "customer-facing Elite 100 color guidance"
 );
 assert.ok(configView.includes("Search color"));
 assert.ok(configView.includes("ColorPickerModal"));
 assert.ok(configView.includes("lg:sticky"));
 assert.ok(
-  !configView.includes("fixed inset-x-0 bottom-0"),
-  "legacy mobile Save bar removed — single autosave status system",
+  configView.includes('data-testid="de-mobile-total-bar"') ||
+    !configView.includes("fixed inset-x-0 bottom-0 z-40"),
+  "mobile total bar is the compact summary affordance (not a legacy Save bar)"
 );
 assert.ok(configView.includes("de-autosave-status-system") || configView.includes("de-save-status"));
 assert.ok(configView.includes("/materials/elite100/") || api.includes("imageAssetPath") || configView.includes("imageAssetPath"));

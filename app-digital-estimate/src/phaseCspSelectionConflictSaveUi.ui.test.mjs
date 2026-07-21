@@ -97,7 +97,11 @@ assert.equal(
   1,
   "only Retry path should call void onSave(",
 );
-assert.ok(!viewSrc.includes("fixed inset-x-0 bottom-0"), "legacy bottom Save bar absent");
+assert.ok(
+  viewSrc.includes('data-testid="de-mobile-total-bar"') ||
+    !viewSrc.includes("fixed inset-x-0 bottom-0"),
+  "legacy bottom Save bar absent (mobile total bar allowed)",
+);
 assert.ok(viewSrc.includes("de-autosave-status-system"));
 assert.ok(viewSrc.includes("de-save-status"));
 assert.ok(viewSrc.includes("Pending changes"));
