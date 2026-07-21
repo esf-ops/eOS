@@ -219,9 +219,15 @@ export function rejectPublicSelectionAuthority(body) {
   const forbidden = [
     "chargeableCounterSf",
     "countertopSqft",
+    "countertopSf",
+    "backsplashSqft",
+    "backsplashSf",
     "roomSf",
     "edgeLf",
+    "edgeLinearFeet",
     "cutoutCount",
+    "pieceCount",
+    "fabricationQuantity",
     "lockedMeasurement",
     "policyId",
     "pricingPolicyVersionId",
@@ -259,6 +265,58 @@ export function rejectPublicSelectionAuthority(body) {
   }
   if (Array.isArray(body.items)) {
     for (const item of body.items) rejectPublicSelectionAuthority(item);
+  }
+}
+
+/** Fabrication / scope quantity keys customers must never alter via public save. */
+const GOVERNED_SCOPE_QUANTITY_KEYS = new Set([
+  "qty-cook",
+  "qty-sink",
+  "qty-bar",
+  "qty-outlet",
+  "qty-ss",
+  "qty-v-rect",
+  "qty-v-oval",
+  "qty-blanco",
+  "tearout",
+  "waterfall",
+  "popup_outlet_cutout"
+]);
+
+/**
+ * Reject crafted public saves that try to change governed Takeoff / Pricing Setup
+ * fabrication quantities (cutouts, sinks seeded from scope, etc.).
+ * Call with the caller's explicit `items` list — not the merged selection map —
+ * so lingering baseline keys do not break ordinary saves.
+ * @param {Array<{ optionKey?: string, option_key?: string, quantity?: unknown }>|null|undefined} items
+ */
+export function rejectGovernedScopeQuantitySelections(items) {
+  for (const item of items || []) {
+    const key = String(item?.optionKey || item?.option_key || "");
+    const qty = Number(item?.quantity) || 0;
+    if (!key || !(qty > 0)) continue;
+    if (
+      GOVERNED_SCOPE_QUANTITY_KEYS.has(key) ||
+      /^qty-(cook|sink|bar|outlet)(:|$)/i.test(key)
+    ) {
+      throw safeFail(
+        "governed_scope_quantity_forbidden",
+        "That selection is unavailable",
+        403
+      );
+    }
+  }
+}
+
+/** Drop governed fabrication qty keys from the working selection map (non-authoritative). */
+function stripGovernedScopeQuantitiesFromMap(selectionMap) {
+  for (const key of Object.keys(selectionMap || {})) {
+    if (
+      GOVERNED_SCOPE_QUANTITY_KEYS.has(key) ||
+      /^qty-(cook|sink|bar|outlet)(:|$)/i.test(key)
+    ) {
+      delete selectionMap[key];
+    }
   }
 }
 
@@ -306,10 +364,16 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     const token = normalizeEdgeProfileToken(
       compat.edgeProfileToken || parts.slice(2).join(":") || "edge_eased"
     );
-    const roomRow = (ctx?.rooms || []).find((r) => String(r.roomKey) === String(roomKey));
+    const roomRow = (ctx?.configuredRooms || ctx?.rooms || []).find(
+      (r) => String(r.roomKey) === String(roomKey)
+    );
     const lf =
       Number(roomRow?.edgeLinearFeet) ||
-      (ctx?.rooms || []).reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0) ||
+      Number(ctx?.edgeLinearFeetTotal) ||
+      (ctx?.configuredRooms || ctx?.rooms || []).reduce(
+        (s, r) => s + (Number(r.edgeLinearFeet) || 0),
+        0
+      ) ||
       0;
     edgeEffect = resolveEdgeOptionPriceEffect({
       profileToken: token,
@@ -765,7 +829,8 @@ export function createPublicConfigurationService(deps) {
     }));
     const optionCtx = {
       rooms: ctx.rooms || [],
-      pricingBasis: ctx.pricingBasis || "direct"
+      pricingBasis: ctx.pricingBasis || "direct",
+      edgeLinearFeetTotal: Number(ctx.edgeLinearFeetTotal) || 0
     };
     let options = (graph?.options || [])
       .filter((o) => o.is_active_in_envelope !== false)
@@ -1339,6 +1404,8 @@ export function createPublicConfigurationService(deps) {
           : priorMeta.sideSplashDrafts || {};
 
       applyBacksplashDraftAuthority(selectionMap, mergedBacksplashDrafts, options);
+      rejectGovernedScopeQuantitySelections(body.items || body.selections || []);
+      stripGovernedScopeQuantitiesFromMap(selectionMap);
       const normalized = normalizeSelectionPayload({ selections: selectionMap }, options);
 
       // Catalog permissions frozen at publication — reject crafted saves for

@@ -466,6 +466,13 @@ export async function buildTrustedConfigurationContext(args) {
       null
   );
 
+  // Project-level governed open-edge LF (Studio freezes onto rooms; also keep
+  // an aggregate so premium edge option effects never fail for missing per-room LF).
+  const edgeLinearFeetTotal = rooms.reduce(
+    (s, r) => s + (Number(r.edgeLinearFeet) || 0),
+    0
+  );
+
   return {
     organizationId,
     publication: {
@@ -490,6 +497,7 @@ export async function buildTrustedConfigurationContext(args) {
     // allowlisted toPublicRoomPricingDto/toPublicChangesPricingDto helpers.
     customerSnapshot,
     customerCatalogPermissions,
+    edgeLinearFeetTotal,
     baselineDisplayTotal: Number.isFinite(baselineDisplayTotal) ? baselineDisplayTotal : null,
     pricingValidThrough: pub.pricing_valid_through,
     rooms,

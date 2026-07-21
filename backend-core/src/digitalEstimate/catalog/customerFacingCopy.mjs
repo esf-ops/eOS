@@ -175,7 +175,7 @@ export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
     treatment === "review_required" ||
     String(opt?.availabilityState || "") === "review_required"
   ) {
-    return "Requires estimator review";
+    return "Elite will confirm this option and price.";
   }
   if (treatment === "unavailable" || String(opt?.availabilityState || "") === "unavailable") {
     return "Unavailable";

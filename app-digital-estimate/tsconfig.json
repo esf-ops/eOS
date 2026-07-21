@@ -15,7 +15,11 @@
     "resolveJsonModule": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "@quote-lib/*": ["../app-quote/src/lib/*"]
+    }
   },
   "include": ["src"]
 }

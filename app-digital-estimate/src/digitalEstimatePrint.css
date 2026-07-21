@@ -1,0 +1,71 @@
+/**
+ * Screen vs print visibility for Digital Estimate customer page.
+ * Interactive chrome is hidden when printing; the shared estimate document shows.
+ */
+
+@media print {
+  @page {
+    margin: 0.5in;
+  }
+
+  body {
+    background: #fff !important;
+    color: #0f172a !important;
+  }
+
+  .de-no-print,
+  [data-testid="de-estimate-tabs"],
+  [data-testid="de-mobile-total-bar"],
+  [data-testid="de-request-review"],
+  [data-testid="de-request-review-bottom"],
+  [data-testid="de-review-cta"],
+  [data-testid="de-save-button"],
+  [data-testid="de-autosave-status-system"],
+  [data-testid="de-print-estimate"],
+  [data-testid="de-print-estimate-mobile"],
+  [data-testid="de-print-estimate-bottom"],
+  .de-interactive-chrome {
+    display: none !important;
+  }
+
+  .de-print-root {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  .de-screen-root {
+    display: none !important;
+  }
+
+  .de-print-room {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .de-print-selection-list {
+    margin: 0 0 6px;
+    padding-left: 1.1rem;
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+
+  .de-print-selection-list li {
+    margin: 0 0 2px;
+    overflow-wrap: anywhere;
+  }
+
+  .de-print-addon-detail {
+    margin: 4px 0 6px;
+  }
+}
+
+@media screen {
+  .de-print-root {
+    display: none !important;
+  }
+}

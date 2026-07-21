@@ -557,6 +557,7 @@ export function classifyConfigurationMutationError(
     code === "incompatible_accessory" ||
     code === "forbidden_caller_authority" ||
     code === "catalog_permission_denied" ||
+    code === "governed_scope_quantity_forbidden" ||
     code === "idempotency_required" ||
     code === "concurrency_required" ||
     code === "configuration_unavailable" ||

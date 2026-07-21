@@ -17,11 +17,12 @@ import {
 } from "./lovableViewModel";
 import {
   buildChangesBreakdown,
-  buildOriginalBreakdown,
   buildUpdatedBreakdown,
   groupBreakdownLinesByRoom,
 } from "./customerEstimateBreakdown";
 import { summarizeSideSplashSelections } from "./sideSplashSummary";
+import { buildDigitalEstimatePrintModel } from "./customerPrintAdapter";
+import { DigitalEstimatePrintDocument } from "./DigitalEstimatePrintDocument";
 import { enrichProductImageUrl, resolveProductImageFields } from "./productCatalogImages";
 import {
   groupMissingInformationRequirements,
@@ -1386,7 +1387,7 @@ function ReviewRequestModal({
         <dl className="mt-4 space-y-1.5 rounded-xl border border-border bg-muted/20 px-3 py-3 text-sm">
           {configuredTotalLabel ? (
             <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Current estimate</dt>
+              <dt className="text-muted-foreground">Your estimate</dt>
               <dd className="font-semibold tabular-nums" data-testid="de-review-confirm-total">
                 {configuredTotalLabel}
               </dd>
@@ -1473,7 +1474,7 @@ function CustomerRoomCard({
   const pricing = room.roomPricing;
   const roomStatus =
     pricing?.changeFromOriginal != null && Math.abs(pricing.changeFromOriginal) >= 0.005
-      ? "Updated"
+      ? "Changed"
       : "As published";
 
   return (
@@ -1511,7 +1512,7 @@ function CustomerRoomCard({
             {pricing?.changeFromOriginal != null &&
             Math.abs(pricing.changeFromOriginal) >= 0.005 ? (
               <span data-testid="de-room-delta" className="tabular-nums">
-                {formatSignedMoney(pricing.changeFromOriginal)} from original
+                {formatSignedMoney(pricing.changeFromOriginal)} from published estimate
               </span>
             ) : null}
           </div>
@@ -1761,7 +1762,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   );
   const [projectNote, setProjectNote] = useState(config?.projectNote || "");
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
-  /** Last server-confirmed calculation — authoritative Updated total source. */
+  /** Last server-confirmed calculation — authoritative Your estimate source. */
   const [savedCalc, setSavedCalc] = useState(config?.latestCalculation ?? null);
   const [rowVersion, setRowVersion] = useState(state.session?.rowVersion ?? 1);
   const [saveState, setSaveState] = useState<"idle" | "unsaved" | "saving" | "saved" | "error">(
@@ -1776,7 +1777,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewRequest, setReviewRequest] = useState<CustomerReviewRequest | null>(null);
-  const [estimateTab, setEstimateTab] = useState<"original" | "updated" | "changes">("updated");
+  const [estimateTab, setEstimateTab] = useState<"estimate" | "changes">("estimate");
   const [breakdownOpen, setBreakdownOpen] = useState(true);
   const requestSeq = useMemo(() => ({ n: 0 }), []);
   const saveFnRef = useRef<() => Promise<number | null> | number | null | void>(() => null);
@@ -2363,16 +2364,15 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     productDrafts,
     backsplashDrafts,
   );
-  const authoritativeUpdatedLabel = vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel;
+  const authoritativeEstimateLabel = vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel;
   const authoritativeDiffLabel =
     vmForTotals?.materialUpgradeLabel ||
     vmForTotals?.changeFromOriginalLabel ||
     vm.materialUpgradeLabel ||
     vm.changeFromOriginalLabel;
 
-  const originalBreakdown = buildOriginalBreakdown(state.estimate);
-  const updatedBreakdown = buildUpdatedBreakdown({
-    calculation: displayCalc,
+  const estimateBreakdown = buildUpdatedBreakdown({
+    calculation: savedCalc,
     rooms: vm.rooms.map((r) => ({
       id: r.id,
       name: r.name,
@@ -2411,9 +2411,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         roomName: room.name,
         category,
         originalLabel: baseline.displayLabel,
-        newLabel: selected.displayLabel || summary || "Updated",
+        newLabel: selected.displayLabel || summary || "Changed",
         delta: Number.isFinite(delta as number) ? delta : null,
         reviewRequired:
+          selected.priceEffectLabel === "Elite will confirm this option and price." ||
           selected.priceEffectLabel === "Requires estimator review" ||
           selected.availabilityState === "review_required",
         pending: totalPending,
@@ -2434,29 +2435,78 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     return lines;
   });
   const changesBreakdown = buildChangesBreakdown({
-    changeLines,
+    changeLines: totalPending ? [] : changeLines,
     displayTotalDelta:
-      (displayCalc as { displayTotalDelta?: number } | null)?.displayTotalDelta ?? null,
+      (savedCalc as { displayTotalDelta?: number } | null)?.displayTotalDelta ?? null,
     roomPricingChanges:
-      (displayCalc as {
+      (savedCalc as {
         roomPricingChanges?: import("./publicConfigApi").PublicRoomPricingChanges | null;
       } | null)?.roomPricingChanges ?? null,
   });
-  const activeBreakdown =
-    estimateTab === "original"
-      ? originalBreakdown
-      : estimateTab === "changes"
-        ? changesBreakdown
-        : updatedBreakdown;
+  const activeBreakdown = estimateTab === "changes" ? changesBreakdown : estimateBreakdown;
+
+  const canPrint =
+    (saveState === "idle" || saveState === "saved") && !totalPending && Boolean(savedCalc);
+  const printDisabledReason =
+    saveState === "saving" || saveState === "unsaved"
+      ? "Saving…"
+      : saveState === "error"
+        ? "Save failed — retry before printing"
+        : !savedCalc
+          ? "Estimate not ready"
+          : null;
+
+  const printModel = useMemo(
+    () =>
+      buildDigitalEstimatePrintModel({
+        rooms: vm.rooms,
+        roomPricing:
+          (savedCalc as { roomPricing?: import("./publicConfigApi").PublicRoomPricing | null } | null)
+            ?.roomPricing ?? null,
+        estimateTotal:
+          (savedCalc as { configuredDisplayTotal?: number | null } | null)?.configuredDisplayTotal ??
+          null,
+        customerName: vm.customerName,
+        projectName: vm.projectName,
+        projectAddress: vm.projectAddress,
+        quoteNumber: vm.quoteNumber,
+        pricingValidThrough: vm.pricingValidThrough
+          ? formatDate(vm.pricingValidThrough)
+          : null,
+        projectNote,
+      }),
+    [vm, savedCalc, projectNote],
+  );
+
+  const onPrintEstimate = () => {
+    if (!canPrint) return;
+    window.print();
+  };
+
+  const printEstimateButton = (testId: string, className?: string) => (
+    <button
+      type="button"
+      onClick={onPrintEstimate}
+      disabled={!canPrint}
+      aria-label={canPrint ? "Print estimate" : printDisabledReason || "Print estimate unavailable"}
+      aria-disabled={!canPrint}
+      data-testid={testId}
+      className={
+        className ||
+        "w-full rounded-lg border border-border bg-background py-3 text-sm font-semibold text-foreground transition hover:bg-muted/40 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+      }
+    >
+      {saveState === "saving" || saveState === "unsaved" ? "Saving…" : "Print estimate"}
+    </button>
+  );
 
   const summaryCard = (
     <div className="rounded-2xl border border-border bg-background p-5 shadow-sm" data-testid="de-estimate-panel">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">Your estimate</div>
-      <div className="mt-3 flex gap-1 rounded-lg border border-border bg-muted/30 p-1" data-testid="de-estimate-tabs" role="tablist">
+      <div className="mt-3 flex gap-1 rounded-lg border border-border bg-muted/30 p-1" data-testid="de-estimate-tabs" role="tablist" aria-label="Estimate summary">
         {(
           [
-            ["original", "Original"],
-            ["updated", "Updated"],
+            ["estimate", "Estimate"],
             ["changes", "Changes"],
           ] as const
         ).map(([id, label]) => (
@@ -2464,9 +2514,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             key={id}
             type="button"
             role="tab"
+            id={`de-tab-${id}`}
             aria-selected={estimateTab === id}
+            aria-controls={`de-tabpanel-${id}`}
             data-testid={`de-estimate-tab-${id}`}
-            className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition ${
+            className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
               estimateTab === id
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -2477,12 +2529,15 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           </button>
         ))}
       </div>
-      <div className="mt-4 space-y-2 text-sm">
-        <Row label="Original total" value={vm.originalTotalLabel} muted />
-        <Row
-          label={totalPending ? "Configured total (saved)" : "Current configured total"}
-          value={authoritativeUpdatedLabel}
-        />
+      <div
+        className="mt-4 space-y-2 text-sm"
+        role="tabpanel"
+        id={`de-tabpanel-${estimateTab}`}
+        aria-labelledby={`de-tab-${estimateTab}`}
+        data-testid="de-estimate-tabpanel"
+      >
+        <Row label="Published estimate" value={vm.originalTotalLabel} muted />
+        <Row label="Your estimate" value={authoritativeEstimateLabel} />
         {totalPending ? (
           <div
             className="flex items-center justify-between text-xs text-muted-foreground"
@@ -2500,7 +2555,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       </div>
       <button
         type="button"
-        className="mt-3 text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+        className="mt-3 text-xs font-medium text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
         data-testid="de-view-breakdown"
         onClick={() => setBreakdownOpen((v) => !v)}
       >
@@ -2558,6 +2613,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         Pricing valid through {formatDate(vm.pricingValidThrough)}. Totals calculated by your estimator
         system — not final acceptance.
       </p>
+      <div className="mt-4 de-interactive-chrome">{printEstimateButton("de-print-estimate")}</div>
       <div className="mt-5 space-y-2" data-testid="de-autosave-status-system">
         {accessoryNotice ? (
           <p
@@ -2632,7 +2688,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   );
 
   return (
-    <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-28 lg:pb-10">
+    <>
+    <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-36 lg:pb-10 de-screen-root de-no-print">
       <header className="border-b border-border bg-background">
         <div className="mx-auto flex w-[min(100%,1650px)] max-w-[1650px] items-center justify-between px-4 sm:px-6 py-3">
           <div className="text-sm font-semibold tracking-tight text-foreground">
@@ -2676,7 +2733,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             data-testid="de-header-totals"
           >
             <div className="flex items-baseline justify-between gap-2 sm:block">
-              <dt className="text-xs text-muted-foreground">Original estimate</dt>
+              <dt className="text-xs text-muted-foreground">Published estimate</dt>
               <dd
                 className="font-semibold tabular-nums text-foreground"
                 data-testid="de-header-original"
@@ -2685,12 +2742,12 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               </dd>
             </div>
             <div className="flex items-baseline justify-between gap-2 sm:block">
-              <dt className="text-xs text-muted-foreground">Current estimate</dt>
+              <dt className="text-xs text-muted-foreground">Your estimate</dt>
               <dd
                 className="font-semibold tabular-nums text-foreground"
                 data-testid="de-header-current"
               >
-                {authoritativeUpdatedLabel}
+                {authoritativeEstimateLabel}
               </dd>
             </div>
             <div className="flex items-baseline justify-between gap-2 sm:block">
@@ -2870,76 +2927,6 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               />
             </div>
 
-            {vm.addons.length ? (
-              <div className="rounded-2xl border border-border bg-background p-6">
-                <div className="text-xs uppercase tracking-widest text-muted-foreground">Options</div>
-                <div className="mt-1 text-lg font-semibold text-foreground">Project add-ons</div>
-                <ul className="mt-4 space-y-3">
-                  {vm.addons.map((opt) => {
-                    const unresolved =
-                      !opt.selectable ||
-                      opt.availabilityState === "unavailable" ||
-                      opt.availabilityState === "review_required";
-                    return (
-                      <li
-                        key={opt.optionKey}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-border px-4 py-3"
-                      >
-                        <div>
-                          <div className="text-sm font-medium text-foreground">{opt.displayLabel}</div>
-                          {opt.includedInBaseline ? (
-                            <div className="text-[11px] text-muted-foreground">Included</div>
-                          ) : null}
-                          {unresolved ? (
-                            <div className="text-[11px] text-muted-foreground">
-                              Requires estimator review
-                            </div>
-                          ) : null}
-                        </div>
-                        {unresolved ? (
-                          <span className="text-xs text-muted-foreground">
-                            {opt.availabilityState === "review_required"
-                              ? "Needs review"
-                              : "Unavailable"}
-                          </span>
-                        ) : (
-                          <input
-                            type="number"
-                            className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                            min={opt.minQty}
-                            max={opt.maxQty}
-                            value={qty[opt.optionKey] ?? opt.quantity}
-                            onChange={(e) => {
-                              setQty((q) => ({
-                                ...q,
-                                [opt.optionKey]: Number(e.target.value) || 0,
-                              }));
-                              setSaveState("unsaved");
-                            }}
-                            aria-label={`Quantity for ${opt.displayLabel}`}
-                          />
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ) : null}
-
-            {vm.lineItems.length ? (
-              <div className="rounded-2xl border border-border bg-background p-6">
-                <div className="text-xs uppercase tracking-widest text-muted-foreground">Included</div>
-                <ul className="mt-3 space-y-2 text-sm">
-                  {vm.lineItems.map((li, i) => (
-                    <li key={`${li.label}-${i}`} className="flex justify-between gap-3">
-                      <span>{li.label}</span>
-                      <span className="tabular-nums text-muted-foreground">{li.amountLabel}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
             {reviewUiEnabled() ? (
               <section
                 className="rounded-2xl border border-border bg-background p-5 shadow-sm"
@@ -2949,8 +2936,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                   Ready for Elite to review your selections?
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Send your current configured estimate for review — not final acceptance.
+                  Send your estimate for review — not final acceptance.
                 </p>
+                <div className="mt-4 space-y-2 de-interactive-chrome">
+                  {printEstimateButton("de-print-estimate-bottom")}
+                </div>
                 <button
                   type="button"
                   onClick={() => setReviewOpen(true)}
@@ -2960,13 +2950,15 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                     saveState === "error" ||
                     (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
                   }
-                  className="mt-4 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                  className="mt-2 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                   data-testid="de-request-review-bottom"
                 >
                   {reviewRequest ? "Request already sent" : "Request review"}
                 </button>
               </section>
-            ) : null}
+            ) : (
+              <div className="de-interactive-chrome">{printEstimateButton("de-print-estimate-bottom")}</div>
+            )}
           </div>
 
           <aside className="lg:sticky lg:top-6 lg:self-start" data-testid="de-estimate-workspace">
@@ -3115,7 +3107,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         <ReviewRequestModal
           rooms={vm.rooms}
           busy={reviewBusy}
-          configuredTotalLabel={authoritativeUpdatedLabel}
+          configuredTotalLabel={authoritativeEstimateLabel}
           unresolvedCount={vm.missingInformationRequirements.length}
           onClose={() => setReviewOpen(false)}
           onSubmit={(note) => void onSendReview(note)}
@@ -3124,7 +3116,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
 
       {/* Mobile / tablet compact sticky total bar */}
       <div
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 p-3 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 p-3 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden de-no-print"
         data-testid="de-mobile-total-bar"
       >
         <button
@@ -3133,7 +3125,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           data-testid="de-mobile-total-open"
           onClick={() => {
             setBreakdownOpen(true);
-            setEstimateTab("updated");
+            setEstimateTab("estimate");
             document
               .querySelector('[data-testid="de-estimate-workspace"]')
               ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -3141,15 +3133,20 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         >
           <span>
             <span className="block text-[11px] uppercase tracking-wider text-muted-foreground">
-              Current estimate
+              Your estimate
             </span>
             <span className="text-base font-semibold tabular-nums text-foreground">
-              {authoritativeUpdatedLabel}
+              {authoritativeEstimateLabel}
             </span>
           </span>
           <span className="text-xs font-medium text-muted-foreground">View summary</span>
         </button>
+        <div className="mt-2">{printEstimateButton("de-print-estimate-mobile")}</div>
       </div>
     </div>
+    <div className="de-print-root" aria-hidden="true">
+      <DigitalEstimatePrintDocument model={printModel} />
+    </div>
+    </>
   );
 }

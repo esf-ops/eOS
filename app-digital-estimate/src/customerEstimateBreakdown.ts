@@ -149,7 +149,7 @@ export function buildRoomHierarchyBreakdown(
   const lines = roomHierarchyLines({ ...pricing, kind });
   lines.push({
     key: `${kind}-project-total`,
-    label: "Project total",
+    label: kind === "original" ? "Published estimate" : "Your estimate",
     amount: total,
     amountLabel: moneyLabel(total),
     roomName: null,
@@ -157,7 +157,7 @@ export function buildRoomHierarchyBreakdown(
   });
   return {
     kind,
-    title: kind === "original" ? "Original estimate" : "Your updated estimate",
+    title: kind === "original" ? "Published estimate" : "Your estimate",
     total,
     totalLabel: moneyLabel(total),
     lines,
@@ -225,11 +225,11 @@ export function buildOriginalBreakdown(estimate: {
       : null;
   return {
     kind: "original",
-    title: "Original estimate",
+    title: "Published estimate",
     total: Number.isFinite(total as number) ? total : null,
     totalLabel: moneyLabel(total),
     lines,
-    emptyMessage: lines.length ? undefined : "Original estimate details are not available.",
+    emptyMessage: lines.length ? undefined : "Published estimate details are not available.",
   };
 }
 
@@ -337,11 +337,11 @@ export function buildUpdatedBreakdown(args: {
     calc?.configuredDisplayTotal != null ? Number(calc.configuredDisplayTotal) : null;
   return {
     kind: "updated",
-    title: "Your updated estimate",
+    title: "Your estimate",
     total: Number.isFinite(total as number) ? total : null,
     totalLabel: moneyLabel(total),
     lines,
-    emptyMessage: lines.length ? undefined : "Save a selection to refresh your updated estimate.",
+    emptyMessage: lines.length ? undefined : "Save a selection to refresh your estimate.",
   };
 }
 
@@ -381,7 +381,7 @@ export function buildChangesBreakdown(args: {
           amount: row.amountDelta,
           amountLabel:
             row.status === "review_required"
-              ? "Requires estimator review"
+              ? "Elite will confirm this option and price."
               : row.amountDelta == null
                 ? "—"
                 : row.amountDelta < 0
@@ -411,7 +411,7 @@ export function buildChangesBreakdown(args: {
         : null;
     lines.push({
       key: "chg-project-total",
-      label: "Project total change",
+      label: "Difference from published estimate",
       amount: total,
       amountLabel:
         total == null
@@ -437,12 +437,12 @@ export function buildChangesBreakdown(args: {
               ? `+${formatMoney(total)}`
               : "No change",
       lines,
-      emptyMessage: lines.length ? undefined : "No changes from the original estimate yet.",
+      emptyMessage: lines.length ? undefined : "No changes from the published estimate yet.",
     };
   }
   const lines: BreakdownLine[] = args.changeLines.map((c, i) => {
     let amountLabel = "No change";
-    if (c.reviewRequired) amountLabel = "Requires estimator review";
+    if (c.reviewRequired) amountLabel = "Elite will confirm this option and price.";
     else if (c.delta != null && Number.isFinite(c.delta) && Math.abs(c.delta) >= 0.005) {
       amountLabel = c.delta < 0 ? `−${formatMoney(Math.abs(c.delta))}` : `+${formatMoney(c.delta)}`;
     }
@@ -473,6 +473,6 @@ export function buildChangesBreakdown(args: {
             ? `−${formatMoney(Math.abs(total))}`
             : `+${formatMoney(total)}`,
     lines,
-    emptyMessage: lines.length ? undefined : "No changes from the original estimate yet.",
+    emptyMessage: lines.length ? undefined : "No changes from the published estimate yet.",
   };
 }

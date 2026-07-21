@@ -2101,3 +2101,21 @@
 | **SQL / env** | None. |
 | **Deployment surfaces** | `backend-core`, `app-digital-estimate`, `app-elite100-estimate-studio`. No manual deployment. |
 | **Open UX decisions** | (1) Material "price effect" on the room row still says "Price updates when saved" until a dedicated material option effect label is returned on the material option DTO. (2) Legacy publications without `customerCatalogPermissions` keep all catalogs allowed. (3) Focus return to the triggering control after modal close is best-effort via natural browser focus; a dedicated focus trap library was not added. |
+
+### 148. Digital Estimate customer summary, edge pricing, and print (2026-07-21)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-21 · `fix/digital-estimate-customer-summary-edge-and-print` |
+| **Purpose** | Simplify the customer Digital Estimate summary, price canonical premium edges immediately when governed inputs exist, remove obsolete public quantity/Included controls, and add a customer browser print document that reuses shared ESF estimate-document branding. |
+| **Summary tabs** | Customer tabs are **Estimate \| Changes** only. The customer-facing Original tab is removed. Immutable published/original calculation data remains available internally for audit, Differences, Changes, estimator review, and publication history — no backfill of incomplete legacy Original snapshots. |
+| **Terminology** | Customer labels use **Published estimate**, **Your estimate**, and **Difference** (including “from published estimate”). “Updated” / “Current configured total” are not customer-facing tab or total labels. Internal variable names (`updated`, `changeFromOriginal`, etc.) may remain. |
+| **Estimate authority** | The Estimate tab and print document use only the latest successfully saved calculation (`savedCalc` / `roomPricing`). Pending browser drafts do not print as a completed estimate; Print is disabled while saving or after a failed save. |
+| **Canonical edge effects** | When governed edge LF, pricing basis, and profile rate exist, premium profiles (Small Ogee / Crescent / Knife) return authoritative `+$N` via `resolveEdgeOptionPriceEffect`. Original → “Original selection”; other included profiles → “Included”. Review copy is “Elite will confirm this option and price.” only when a required governed input is missing — not merely because a profile is premium. Trusted context exposes `edgeLinearFeetTotal` so room-row LF gaps still resolve. Frontend displays backend `priceEffectLabel` only (no LF × rate in React). |
+| **Removed public controls** | Generic Project add-ons quantity block (e.g. Cooktop Cutouts) and standalone Included card are removed. Trip charge and other customer-visible project lines appear once under the Estimate project breakdown / print Project charges. |
+| **Scope quantity protection** | Public save rejects crafted items altering governed fabrication quantities (`governed_scope_quantity_forbidden`). Working selection maps strip those keys so leftover baseline qty does not break ordinary saves. |
+| **Print architecture** | `buildDigitalEstimatePrintModel` + `DigitalEstimatePrintDocument` adapt the saved public Estimate DTO into a customer-safe document using shared `@quote-lib/customerEstimate` logo, CSS, terms, and branch constants. Future customer PDF/email can reuse the same adapter; this branch does not change email delivery. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `backend-core`, `app-digital-estimate` (shared document assets via `@quote-lib` alias). No manual deployment. |
+| **Open decisions** | (1) Material row still says “Price updates when saved” until a dedicated material option effect lands on the DTO. (2) Legacy publications with incomplete Original line detail still show aggregate Published totals / supported Changes only. (3) Customer email PDF attachment remains a follow-on using the shared adapter. |
+
