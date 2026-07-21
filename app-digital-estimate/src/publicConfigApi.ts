@@ -332,6 +332,8 @@ export type ConfigurationState = {
     groups?: Array<{ id: string; groupKey: string; displayLabel: string; required?: boolean }>;
     options?: ConfigOption[];
     materials?: CustomerMaterial[];
+    /** Frozen estimator catalog permissions (missing key = allowed). */
+    customerCatalogPermissions?: Record<string, boolean>;
     /** Optional customer-safe catalog products from API (sinks/faucets/etc.). Never invent client-side. */
     products?: ConfigProduct[];
     /** Persisted plumbing drafts (manufacturer/model/variant) — server key customerProductDrafts */
@@ -554,6 +556,7 @@ export function classifyConfigurationMutationError(
     code === "product_variant_required" ||
     code === "incompatible_accessory" ||
     code === "forbidden_caller_authority" ||
+    code === "catalog_permission_denied" ||
     code === "idempotency_required" ||
     code === "concurrency_required" ||
     code === "configuration_unavailable" ||

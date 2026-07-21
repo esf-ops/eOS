@@ -1217,12 +1217,14 @@ export default function EstimateScopePanel({
         <div className="eq-addon-grid" data-testid="eq-catalog-permissions">
           {(
             [
+              ["material", "Customer may select material / color"],
               ["sink", "Customer may select sink"],
               ["faucet", "Customer may select faucet"],
               ["accessories", "Customer may select accessories"],
               ["specialty", "Customer may select specialty items"],
               ["edge", "Customer may select edge profile"],
-              ["backsplash", "Customer may select backsplash style"]
+              ["backsplash", "Customer may select backsplash style"],
+              ["side_splash", "Customer may select side splash"]
             ] as const
           ).map(([key, label]) => (
             <label key={key} className="eq-check">

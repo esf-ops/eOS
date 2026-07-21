@@ -37,6 +37,10 @@ import {
   splitSelectionPayloadMeta
 } from "./customerConfigurationDraft.mjs";
 import {
+  collectForbiddenCatalogSelections,
+  normalizeCustomerCatalogPermissions
+} from "./customerCatalogPermissions.mjs";
+import {
   buildMissingInformationRequirements
 } from "../catalog/customerDraftRequirements.mjs";
 import {
@@ -936,6 +940,11 @@ export function createPublicConfigurationService(deps) {
         groups,
         options,
         materials,
+        // Frozen estimator catalog permissions (missing key = allowed).
+        // Public-safe booleans only — never rates or internal policy ids.
+        customerCatalogPermissions: normalizeCustomerCatalogPermissions(
+          ctx.customerCatalogPermissions
+        ),
         currentSelections: selectionMeta.quantities,
         latestCalculation: customerCalc,
         missingInformationRequirements: Array.isArray(
@@ -1331,6 +1340,24 @@ export function createPublicConfigurationService(deps) {
 
       applyBacksplashDraftAuthority(selectionMap, mergedBacksplashDrafts, options);
       const normalized = normalizeSelectionPayload({ selections: selectionMap }, options);
+
+      // Catalog permissions frozen at publication — reject crafted saves for
+      // categories the estimator disabled (baseline/original may remain).
+      const catalogPermissions = normalizeCustomerCatalogPermissions(
+        ctx.customerCatalogPermissions
+      );
+      const forbiddenCatalog = collectForbiddenCatalogSelections({
+        selections: normalized.selections,
+        options,
+        permissions: catalogPermissions
+      });
+      if (forbiddenCatalog.length) {
+        throw safeFail(
+          "catalog_permission_denied",
+          "That catalog is not available on this estimate",
+          403
+        );
+      }
 
       // Required groups / unresolved defaults
       for (const opt of options) {

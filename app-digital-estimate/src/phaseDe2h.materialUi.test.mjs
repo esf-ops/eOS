@@ -18,8 +18,9 @@ assert.ok(configView.includes("Search color"));
 assert.ok(configView.includes("CustomerRoomCard"));
 assert.ok(configView.includes("lg:sticky"));
 assert.ok(
-  !configView.includes("fixed inset-x-0 bottom-0"),
-  "legacy mobile Save bar removed — single autosave status system",
+  configView.includes('data-testid="de-mobile-total-bar"') ||
+    !configView.includes("fixed inset-x-0 bottom-0"),
+  "mobile total bar is the compact summary affordance (not a legacy Save bar)",
 );
 assert.ok(configView.includes("de-autosave-status-system") || configView.includes("de-save-status"));
 assert.ok(api.includes("CustomerMaterial"));

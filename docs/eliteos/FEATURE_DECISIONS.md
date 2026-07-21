@@ -2085,3 +2085,19 @@
 | **Tests** | `phaseBacksplashSideSplashLivePricing.test.mjs` (20-item service-level matrix: none→$0 through save/serializer/reload, stale-save immunity, Left/Right/Both independent sections, depth/height/material authority, Add-ons ownership, Changes rows, redaction, new-Original sink+cutout freeze), `studioMaterialSubtotalScope.test.mjs` (15-item billed-scope contract incl. invariant + approval block), `phaseBacksplashSideSplashLive.ui.test.ts` (frontend renders authoritative $0 and side-splash lines). Full DE configuration/catalog and Studio suites pass; `phaseDe2b` + `phaseDe2f.ui` failures pre-exist on main. |
 | **SQL / env** | None. |
 | **Deployment surfaces** | `backend-core`, `app-digital-estimate`, `app-elite100-estimate-studio`. No manual deployment. |
+
+### 147. Digital Estimate customer-experience polish (2026-07-21)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-21 · `feature/digital-estimate-customer-experience-polish` |
+| **Purpose** | Presentation and flow polish only. Pricing formulas, Takeoff, Pricing Setup scope, Original immutability, session/concurrency, and public redaction are unchanged. All money and option effects remain backend DTO authority. |
+| **UX problems addressed** | Dense header before rooms; full customer-info form blocking the flow; repetitive "Items for later" list; weak option selected states; room cards without authoritative room totals; catalog permissions frozen in Studio but not enforced on public saves; mobile lacked a usable sticky total; review CTA was secondary. |
+| **Page hierarchy** | Branding → compact project header (name, customer, quote, pricing-valid, Original/Current/Difference, save status, primary instruction) → grouped Items for later disclosure → Project details disclosure → room cards → project note / add-ons → Request review CTA; desktop sticky summary remains; mobile sticky total bar opens summary. |
+| **Items for later** | `groupMissingInformationRequirements` collapses identical needs and lists affected rooms; timing labels distinguish review / fabrication / optional. |
+| **Room card contract** | Material → Backsplash → Side splash → Sink → Faucet → Accessories → Edge → Specialty → Notes → Room price summary (Countertop / Backsplash / Add-ons + sublines / Room total) from authoritative `roomPricing`. Disabled catalog categories render read-only ("As published") with no Change control. |
+| **Selected states** | Strong border + ring + `Selected` badge + checkmark on material cards and ChoiceRadio options; Done closes modals; Escape retained. |
+| **Catalog permissions** | Frozen `customerCatalogPermissions` flow from Studio publication → trusted context → public configuration DTO. Save rejects non-baseline selections in disabled categories with `catalog_permission_denied` (403). Studio Pricing Setup now also exposes material and side-splash permission toggles (additive). Missing key remains allowed. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `backend-core`, `app-digital-estimate`, `app-elite100-estimate-studio`. No manual deployment. |
+| **Open UX decisions** | (1) Material "price effect" on the room row still says "Price updates when saved" until a dedicated material option effect label is returned on the material option DTO. (2) Legacy publications without `customerCatalogPermissions` keep all catalogs allowed. (3) Focus return to the triggering control after modal close is best-effort via natural browser focus; a dedicated focus trap library was not added. |
