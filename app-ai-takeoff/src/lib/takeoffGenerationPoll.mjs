@@ -4,6 +4,8 @@
  * - 2s interval for first 30s, then ~4.5s with jitter
  * - Skips ticks while a request is in flight
  * - Stops immediately when terminal
+ * - Pauses requests while the document is hidden
+ * - Exponential backoff after errors
  *
  * OPTIONS preflights on each poll are expected for cross-origin API calls with
  * Authorization headers. Reducing them later would require same-origin proxy/rewrite
@@ -32,8 +34,10 @@ export function pollIntervalMs(elapsedMs) {
  *   onTick?: (elapsedMs: number) => void,
  *   sleep?: (ms: number) => Promise<void>,
  *   now?: () => number,
+ *   isVisible?: () => boolean,
+ *   onStop?: () => void,
  * }} options
- * @returns {{ stop: () => void, pollInFlight: () => boolean }}
+ * @returns {{ stop: () => void, pollInFlight: () => boolean, wake: () => void }}
  */
 export function createJobStatusPoller({
   poll,
@@ -41,15 +45,19 @@ export function createJobStatusPoller({
   onTick,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = () => Date.now(),
+  isVisible = () => true,
+  onStop,
 }) {
   let stopped = false;
   let inFlight = false;
   let timer = null;
+  let errorCount = 0;
 
   const stop = () => {
     stopped = true;
     if (timer) clearTimeout(timer);
     timer = null;
+    onStop?.();
   };
 
   const scheduleNext = (delayMs) => {
@@ -65,6 +73,10 @@ export function createJobStatusPoller({
       }
       return;
     }
+    if (!isVisible()) {
+      scheduleNext(10_000);
+      return;
+    }
 
     inFlight = true;
     const elapsedMs = Math.max(0, now() - startedAtMs);
@@ -72,6 +84,7 @@ export function createJobStatusPoller({
 
     try {
       const outcome = await poll();
+      errorCount = 0;
       if (stopped) return;
       if (outcome === "completed" || outcome === "failed") {
         stop();
@@ -79,7 +92,8 @@ export function createJobStatusPoller({
       }
       scheduleNext(pollIntervalMs(elapsedMs));
     } catch {
-      if (!stopped) scheduleNext(pollIntervalMs(Math.max(0, now() - startedAtMs)));
+      errorCount += 1;
+      if (!stopped) scheduleNext(Math.min(60_000, 5_000 * 2 ** (errorCount - 1)));
     } finally {
       inFlight = false;
     }
@@ -90,5 +104,6 @@ export function createJobStatusPoller({
   return {
     stop,
     pollInFlight: () => inFlight,
+    wake: () => scheduleNext(0),
   };
 }

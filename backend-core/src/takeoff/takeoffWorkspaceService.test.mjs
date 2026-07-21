@@ -1355,6 +1355,112 @@ function makeMockSupabase({
   console.log("ok: saveTakeoffCorrection — audit metadata stored");
 }
 
+// Explicit per-run backsplash booleans round-trip through correction storage.
+{
+  const capturedInserts = [];
+  const { supabase } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow({ status: "completed" }),
+    resultRows: [makeResultRow()],
+    capturedInserts,
+  });
+  const takeoff = makeApprovableTakeoff();
+  const run = takeoff.rooms[0].areas[0].runs[0];
+  run.backsplashEligible = true;
+  run.backsplashEligibilitySource = "estimator_confirmed";
+  run.backsplashEligibilityUpdatedAt = "2026-07-21T16:00:00.000Z";
+
+  const saved = await saveTakeoffCorrection({
+    supabase,
+    organizationId: ORG_ID,
+    userId: USER_ID,
+    takeoffJobId: JOB_ID,
+    takeoffResult: takeoff,
+    clientMutationRevision: 1,
+  });
+  const inserted = capturedInserts.find((i) => i.table === "quote_takeoff_results").rows[0];
+  assert.equal(
+    inserted.normalized_takeoff_json.rooms[0].areas[0].runs[0].backsplashEligible,
+    true,
+    "backend stores explicit true"
+  );
+  assert.equal(
+    saved.normalizedTakeoffJson.rooms[0].areas[0].runs[0].backsplashEligible,
+    true,
+    "save response returns explicit true"
+  );
+  assert.equal(saved.clientMutationRevision, 1, "save response returns client revision");
+
+  const latest = await getLatestTakeoffResult({
+    supabase,
+    organizationId: ORG_ID,
+    takeoffJobId: JOB_ID,
+  });
+  assert.equal(
+    latest.normalizedTakeoffJson.rooms[0].areas[0].runs[0].backsplashEligible,
+    true,
+    "next latest response returns explicit true"
+  );
+  assert.equal(latest.clientMutationRevision, 1, "latest returns persisted revision");
+
+  const falseTakeoff = structuredClone(takeoff);
+  falseTakeoff.rooms[0].areas[0].runs[0].backsplashEligible = false;
+  falseTakeoff.rooms[0].areas[0].runs[0].backsplashEligibilityUpdatedAt =
+    "2026-07-21T16:01:00.000Z";
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  const savedFalse = await saveTakeoffCorrection({
+    supabase,
+    organizationId: ORG_ID,
+    userId: USER_ID,
+    takeoffJobId: JOB_ID,
+    takeoffResult: falseTakeoff,
+    clientMutationRevision: 2,
+  });
+  assert.equal(
+    savedFalse.normalizedTakeoffJson.rooms[0].areas[0].runs[0].backsplashEligible,
+    false,
+    "backend response preserves explicit false"
+  );
+  const latestFalse = await getLatestTakeoffResult({
+    supabase,
+    organizationId: ORG_ID,
+    takeoffJobId: JOB_ID,
+  });
+  assert.equal(
+    latestFalse.normalizedTakeoffJson.rooms[0].areas[0].runs[0].backsplashEligible,
+    false,
+    "latest preserves explicit false"
+  );
+  await assert.rejects(
+    () =>
+      saveTakeoffCorrection({
+        supabase,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        takeoffJobId: JOB_ID,
+        takeoffResult: takeoff,
+        clientMutationRevision: 1,
+      }),
+    (err) => err.statusCode === 409 && err.code === "stale_takeoff_correction",
+    "older client revision is rejected"
+  );
+  await assert.rejects(
+    () =>
+      saveTakeoffCorrection({
+        supabase,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        takeoffJobId: JOB_ID,
+        takeoffResult: takeoff,
+        baseResultId: RESULT_ID_2,
+        clientMutationRevision: 3,
+      }),
+    (err) => err.statusCode === 409 && err.code === "stale_takeoff_correction",
+    "stale base result is rejected"
+  );
+  console.log("ok: saveTakeoffCorrection — backsplash true/false round-trip + stale guard");
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // approveTakeoffJob — success, org scope, no result, QA/validation block
 // ═══════════════════════════════════════════════════════════════════════════════

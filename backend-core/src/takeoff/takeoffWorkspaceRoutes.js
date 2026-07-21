@@ -132,7 +132,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
       return res.status(201).json({ ok: true, ...result });
     } catch (e) {
       const status = e.statusCode ?? 500;
-      const code = status < 500 ? "validation_error" : "server_error";
+      const code = e.code ?? (status < 500 ? "validation_error" : "server_error");
       return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
     }
   });
@@ -256,7 +256,14 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
 
       const takeoffJobId = String(req.params.id ?? "").trim();
       const body = req.body && typeof req.body === "object" ? req.body : {};
-      const { takeoffResult, correctionNotes, baseResultId, reviewState, aiHandling } = body;
+      const {
+        takeoffResult,
+        correctionNotes,
+        baseResultId,
+        reviewState,
+        aiHandling,
+        clientMutationRevision
+      } = body;
 
       const result = await saveTakeoffCorrection({
         supabase,
@@ -268,6 +275,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         baseResultId: baseResultId ?? null,
         reviewState: reviewState ?? null,
         aiHandling: aiHandling ?? null,
+        clientMutationRevision: clientMutationRevision ?? null,
       });
 
       return res.status(201).json(result);

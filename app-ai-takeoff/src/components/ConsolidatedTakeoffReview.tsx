@@ -52,6 +52,13 @@ import {
   reassignRun,
   sfFrom
 } from "../lib/consolidatedWorksheetRows.mjs";
+import {
+  isTakeoffJobTerminal,
+  resultVersionOf,
+  shouldAcceptServerDraft,
+  shouldPollTakeoffJob,
+  takeoffPollBackoffMs
+} from "../lib/takeoffDraftConcurrency.mjs";
 import { getSupabase } from "../lib/supabase";
 import TakeoffPlanPreviewPanel, {
   type PlanPreviewFileMeta
@@ -201,6 +208,17 @@ export default function ConsolidatedTakeoffReview() {
   const deletedRoomIdsRef = useRef(deletedRoomIds);
   const deletedRunIdsRef = useRef(deletedRunIds);
   const saveStatusRef = useRef(saveStatus);
+  const mutationRevisionRef = useRef(0);
+  const savedMutationRevisionRef = useRef(0);
+  const queuedMutationRevisionRef = useRef(0);
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const latestResultIdRef = useRef<string | null>(null);
+  const latestLocalSaveAtRef = useRef<string | null>(null);
+  const lastServerResultVersionRef = useRef<string | null>(null);
+  const loadSequenceRef = useRef(0);
+  const appliedLoadSequenceRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const pollAbortRef = useRef<AbortController | null>(null);
   draftRef.current = draft;
   excludedRef.current = excludedRunIds;
   deletedRoomIdsRef.current = deletedRoomIds;
@@ -286,14 +304,22 @@ export default function ConsolidatedTakeoffReview() {
     opts?: { forceServer?: boolean; discardLocal?: boolean }
   ) => {
     setLoadError(null);
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const requestSequence = ++loadSequenceRef.current;
+    const requestMutationRevision = mutationRevisionRef.current;
     const job = (await labApiGet(
       `/api/takeoff-jobs/${encodeURIComponent(jobId)}`,
-      token
+      token,
+      { signal: controller.signal }
     )) as any;
     const latest = (await labApiGet(
       `/api/takeoff-jobs/${encodeURIComponent(jobId)}/results/latest`,
-      token
+      token,
+      { signal: controller.signal }
     ).catch(() => null)) as any;
+    if (controller.signal.aborted) return;
     // Authoritative estimator draft only — never treat pending AI as this payload.
     const result =
       latest?.normalizedTakeoffJson ||
@@ -305,6 +331,25 @@ export default function ConsolidatedTakeoffReview() {
     const reviewStatus = String(job?.reviewStatus ?? latest?.reviewStatus ?? "").toLowerCase();
     const usableServer = hasUsableTakeoffGeometry(result);
     const pendingAiAvailable = Boolean(latest?.pendingAiAvailable && latest?.pendingAiDraft);
+    const acceptServerDraft =
+      opts?.discardLocal === true ||
+      shouldAcceptServerDraft({
+        requestMutationRevision,
+        currentMutationRevision: mutationRevisionRef.current,
+        requestSequence,
+        latestAppliedSequence: appliedLoadSequenceRef.current,
+        serverSavedAt: latest?.savedAt ?? null,
+        latestLocalSaveAt: latestLocalSaveAtRef.current
+      });
+    if (latest?.resultId) latestResultIdRef.current = String(latest.resultId);
+    const serverRevision = Number(latest?.clientMutationRevision) || 0;
+    savedMutationRevisionRef.current = Math.max(
+      savedMutationRevisionRef.current,
+      serverRevision
+    );
+    mutationRevisionRef.current = Math.max(mutationRevisionRef.current, serverRevision);
+    lastServerResultVersionRef.current =
+      resultVersionOf(latest) ?? lastServerResultVersionRef.current;
 
     if (jobStatus === "failed" || jobStatus === "error") setAiPhase("failed");
     else if (jobStatus === "processing" || jobStatus === "pending" || jobStatus === "queued") {
@@ -334,7 +379,9 @@ export default function ConsolidatedTakeoffReview() {
         })
       );
       activeDraft = cleaned;
+      draftRef.current = cleaned;
       setDraft(cleaned);
+      appliedLoadSequenceRef.current = requestSequence;
       applyPendingAiFromLatest(latest);
     } else if (result && usableServer && dirty && !opts?.forceServer && localOwned) {
       // Keep unsaved local estimator draft; still surface pending AI from server.
@@ -347,7 +394,7 @@ export default function ConsolidatedTakeoffReview() {
     } else if (result && localOwned && dirty && !opts?.forceServer) {
       unionLocalTombstones(latest?.reviewState || {});
       applyPendingAiFromLatest(latest);
-    } else if (result) {
+    } else if (result && acceptServerDraft) {
       const rs = latest?.reviewState || {};
       hydrateReviewMeta(rs);
       const cleaned = healTakeoffDraft(
@@ -365,6 +412,12 @@ export default function ConsolidatedTakeoffReview() {
       activeDraft = cleaned;
       draftRef.current = cleaned;
       setDraft(cleaned);
+      appliedLoadSequenceRef.current = requestSequence;
+      applyPendingAiFromLatest(latest);
+    } else if (result) {
+      // A local edit or newer hydration happened after this request began.
+      // Keep the editable draft; only surface pending AI metadata.
+      unionLocalTombstones(latest?.reviewState || {});
       applyPendingAiFromLatest(latest);
     } else if (!hasUsableTakeoffGeometry(activeDraft)) {
       activeDraft = createEmptyManualTakeoffDraft();
@@ -407,38 +460,65 @@ export default function ConsolidatedTakeoffReview() {
       }
     ) => {
       if (!authToken || !takeoffJobId || !takeoffResult) return;
-      draftRef.current = takeoffResult;
-      setDraft(takeoffResult);
+      const snapshot = structuredClone(takeoffResult);
+      const revision = ++mutationRevisionRef.current;
+      queuedMutationRevisionRef.current = revision;
+      draftRef.current = snapshot;
+      setDraft(snapshot);
       setSaveStatus("saving");
       setSaveError(null);
       try {
-        const ownership = collectManualOwnershipIds(takeoffResult);
+        const ownership = collectManualOwnershipIds(snapshot);
         const roomCompleteness: Record<string, boolean> = {};
-        for (const room of takeoffResult?.rooms ?? []) {
+        for (const room of snapshot?.rooms ?? []) {
           if (room?.id) roomCompleteness[room.id] = true;
         }
-        await saveTakeoffCorrection(authToken, takeoffJobId, {
-          takeoffResult,
-          correctionNotes: opts?.correctionNotes ?? "Consolidated worksheet autosave",
-          reviewState: {
-            excludedRunIds: [...excludedRef.current],
-            excludedRoomIds: [],
-            deletedRoomIds: [...deletedRoomIdsRef.current],
-            deletedRunIds: [...deletedRunIdsRef.current],
-            roomCompleteness,
-            flagResolutions: {},
-            referenceTotalAcks: {},
-            evidenceAcks: {},
-            manualRoomIds: ownership.manualRoomIds,
-            manualRunIds: ownership.manualRunIds
-          },
-          aiHandling: opts?.aiHandling ?? null
-        });
-        setSaveStatus("saved");
-        window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
+        const request = saveChainRef.current
+          .catch(() => undefined)
+          .then(() =>
+            saveTakeoffCorrection(authToken, takeoffJobId, {
+              takeoffResult: snapshot,
+              baseResultId: latestResultIdRef.current,
+              clientMutationRevision: revision,
+              correctionNotes: opts?.correctionNotes ?? "Consolidated worksheet autosave",
+              reviewState: {
+                excludedRunIds: [...excludedRef.current],
+                excludedRoomIds: [],
+                deletedRoomIds: [...deletedRoomIdsRef.current],
+                deletedRunIds: [...deletedRunIdsRef.current],
+                roomCompleteness,
+                flagResolutions: {},
+                referenceTotalAcks: {},
+                evidenceAcks: {},
+                manualRoomIds: ownership.manualRoomIds,
+                manualRunIds: ownership.manualRunIds
+              },
+              aiHandling: opts?.aiHandling ?? null
+            })
+          );
+        saveChainRef.current = request;
+        const response = await request;
+        savedMutationRevisionRef.current = Math.max(
+          savedMutationRevisionRef.current,
+          revision
+        );
+        latestLocalSaveAtRef.current = response.savedAt;
+        if (response.resultId) latestResultIdRef.current = response.resultId;
+        lastServerResultVersionRef.current =
+          resultVersionOf(response) ?? lastServerResultVersionRef.current;
+        setAiPhase("ready");
+        if (revision === mutationRevisionRef.current) {
+          setSaveStatus("saved");
+          window.setTimeout(
+            () => setSaveStatus((s) => (s === "saved" ? "idle" : s)),
+            1200
+          );
+        }
       } catch (e) {
-        setSaveStatus("error");
-        setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+        if (revision === mutationRevisionRef.current) {
+          setSaveStatus("error");
+          setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+        }
         throw e;
       }
     },
@@ -490,12 +570,10 @@ export default function ConsolidatedTakeoffReview() {
     setAiAppendNotice(
       "AI findings were added. Estimator-owned geometry and removals were preserved."
     );
-    await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
   }, [
     authToken,
     takeoffJobId,
     persistDraftWithResult,
-    loadWorkspace,
     mergeTombstones,
     unionLocalTombstones
   ]);
@@ -518,30 +596,94 @@ export default function ConsolidatedTakeoffReview() {
   useEffect(() => {
     if (!authToken || !takeoffJobId) return;
     void loadWorkspace(authToken, takeoffJobId).catch((e) => {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setLoadError(e instanceof LabApiError ? e.message : "Unable to load Takeoff");
     });
   }, [authToken, takeoffJobId, loadWorkspace]);
 
-  // Keep polling after draft is ready so a later AI completion surfaces as pending.
-  // Prefer event-driven refresh; poll slowly and pause when the tab is hidden.
+  useEffect(
+    () => () => {
+      loadAbortRef.current?.abort();
+      pollAbortRef.current?.abort();
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    },
+    []
+  );
+
+  // Poll job STATUS only while AI processing is genuinely non-terminal. The
+  // full editable draft is fetched once when the result version changes — never
+  // every 20 seconds, never after a local correction save.
   useEffect(() => {
     if (!authToken || !takeoffJobId) return;
     if (approveStatus === "approved") return;
-    if (aiPhase === "failed") return;
-    let cancelled = false;
-    const tick = () => {
-      if (cancelled || document.hidden) return;
-      void loadWorkspace(authToken, takeoffJobId).catch(() => {});
+    if (aiPhase !== "queued" && aiPhase !== "processing") return;
+    let stopped = false;
+    let timer: number | null = null;
+    let inFlight = false;
+    let errors = 0;
+    pollAbortRef.current?.abort();
+    const controller = new AbortController();
+    pollAbortRef.current = controller;
+
+    const schedule = (delayMs: number) => {
+      if (stopped) return;
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void tick(), delayMs);
     };
-    tick();
-    const timer = window.setInterval(tick, 20_000);
+
+    const tick = async () => {
+      if (stopped || inFlight) return;
+      if (
+        !shouldPollTakeoffJob({
+          jobStatus: aiPhase,
+          reviewStatus: approveStatus,
+          visibilityState: document.visibilityState
+        })
+      ) {
+        return;
+      }
+      inFlight = true;
+      try {
+        const job = (await labApiGet(
+          `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
+          authToken,
+          { signal: controller.signal }
+        )) as any;
+        if (stopped || controller.signal.aborted) return;
+        errors = 0;
+        const status = String(job?.status ?? "").toLowerCase();
+        const review = String(job?.reviewStatus ?? "").toLowerCase();
+        if (isTakeoffJobTerminal(status, review)) {
+          if (status === "failed" || status === "cancelled" || status === "canceled") {
+            setAiPhase("failed");
+            return;
+          }
+          setAiPhase("ready");
+          const nextVersion = resultVersionOf(job);
+          if (nextVersion && nextVersion !== lastServerResultVersionRef.current) {
+            await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
+          }
+          return;
+        }
+        schedule(10_000);
+      } catch (error) {
+        if (stopped || controller.signal.aborted) return;
+        errors += 1;
+        schedule(takeoffPollBackoffMs(errors - 1));
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void tick();
     function onVisibility() {
-      if (!document.hidden) tick();
+      if (document.visibilityState === "visible") void tick();
     }
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      cancelled = true;
-      window.clearInterval(timer);
+      stopped = true;
+      controller.abort();
+      if (timer != null) window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [authToken, takeoffJobId, aiPhase, approveStatus, loadWorkspace]);
@@ -567,19 +709,49 @@ export default function ConsolidatedTakeoffReview() {
 
   const persistDraft = useCallback(async () => {
     if (!authToken || !takeoffJobId || !draftRef.current) return;
+    const snapshot = structuredClone(draftRef.current);
+    const revision = mutationRevisionRef.current || ++mutationRevisionRef.current;
+    if (revision <= queuedMutationRevisionRef.current) return;
+    queuedMutationRevisionRef.current = revision;
     setSaveStatus("saving");
     setSaveError(null);
     try {
-      await saveTakeoffCorrection(authToken, takeoffJobId, {
-        takeoffResult: draftRef.current,
-        reviewState: buildReviewState(),
-        correctionNotes: "Consolidated worksheet autosave"
-      });
-      setSaveStatus("saved");
-      window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
+      const request = saveChainRef.current
+        .catch(() => undefined)
+        .then(() =>
+          saveTakeoffCorrection(authToken, takeoffJobId, {
+            takeoffResult: snapshot,
+            baseResultId: latestResultIdRef.current,
+            clientMutationRevision: revision,
+            reviewState: buildReviewState(),
+            correctionNotes: "Consolidated worksheet autosave"
+          })
+        );
+      saveChainRef.current = request;
+      const response = await request;
+      savedMutationRevisionRef.current = Math.max(
+        savedMutationRevisionRef.current,
+        revision
+      );
+      latestLocalSaveAtRef.current = response.savedAt;
+      if (response.resultId) latestResultIdRef.current = response.resultId;
+      lastServerResultVersionRef.current =
+        resultVersionOf(response) ?? lastServerResultVersionRef.current;
+      setAiPhase("ready");
+      // Never apply response.normalizedTakeoffJson here. The optimistic draft
+      // may already contain newer edits than this serialized request.
+      if (revision === mutationRevisionRef.current) {
+        setSaveStatus("saved");
+        window.setTimeout(
+          () => setSaveStatus((s) => (s === "saved" ? "idle" : s)),
+          1200
+        );
+      }
     } catch (e) {
-      setSaveStatus("error");
-      setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+      if (revision === mutationRevisionRef.current) {
+        setSaveStatus("error");
+        setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+      }
     }
   }, [authToken, takeoffJobId, buildReviewState]);
 
@@ -593,6 +765,10 @@ export default function ConsolidatedTakeoffReview() {
 
   const updateDraft = useCallback(
     (next: any) => {
+      // Ref update is synchronous: the 600ms autosave always captures the same
+      // draft the checkbox rendered, even before React commits the state update.
+      draftRef.current = next;
+      mutationRevisionRef.current += 1;
       setDraft(next);
       scheduleSave();
     },

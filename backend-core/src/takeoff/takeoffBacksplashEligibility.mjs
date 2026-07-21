@@ -36,15 +36,31 @@ function areaForcesNoBacksplash(area) {
  * @returns {{ eligible: boolean, source: string }}
  */
 export function resolveRunBacksplashEligible(run, area = null) {
+  // Explicit per-run estimator/manual decisions are the physical-scope authority.
+  // This check MUST precede legacy area flags: islands commonly carry a stale
+  // `backsplashIncluded:false`, and hydration previously used that area hint to
+  // reset an estimator-confirmed true on the final run.
+  const explicitSource = String(run?.backsplashEligibilitySource || "explicit");
+  const estimatorAuthoritative =
+    explicitSource === "estimator_confirmed" ||
+    explicitSource === "manual" ||
+    explicitSource === "previously_saved_manual";
+  if (
+    typeof run?.backsplashEligible === "boolean" &&
+    (estimatorAuthoritative || run.backsplashEligible === false)
+  ) {
+    return {
+      eligible: run.backsplashEligible,
+      source: explicitSource
+    };
+  }
+
   if (areaForcesNoBacksplash(area)) {
     return { eligible: false, source: "area_excluded" };
   }
 
   if (typeof run?.backsplashEligible === "boolean") {
-    return {
-      eligible: run.backsplashEligible,
-      source: String(run.backsplashEligibilitySource || "explicit")
-    };
+    return { eligible: run.backsplashEligible, source: explicitSource };
   }
 
   const pt = pieceTypeOf(run);
@@ -143,11 +159,6 @@ export function normalizeTakeoffBacksplashEligibility(takeoff) {
           resolved.source === "default" ? "default" : resolved.source;
       }
       changed = true;
-    } else if (areaForcesNoBacksplash(area) && run.backsplashEligible === true) {
-      // Area-level no-stone / tile-by-others wins over a stale true flag.
-      run.backsplashEligible = false;
-      run.backsplashEligibilitySource = "area_excluded";
-      changed = true;
     }
     return run;
   };
@@ -175,8 +186,17 @@ export function normalizeTakeoffBacksplashEligibility(takeoff) {
         if (runs.some((r) => typeof r?.backsplashEligible === "boolean") && nextLinear !== prevLinear) {
           area = { ...area, runs, backsplashLinearIn: nextLinear };
           if (nextLinear > 0 && area.backsplashIncluded === false) {
-            // Eligibility on runs wins over a stale false include flag for linear sync;
-            // do not force include=true when scope is no_stone (already handled above).
+            // An explicit estimator-confirmed run decision outranks a stale area
+            // exclusion. Align the area aggregate so later legacy readers cannot
+            // reinterpret the run on hydration.
+            const hasConfirmedEligibleRun = runs.some(
+              (r) =>
+                r?.backsplashEligible === true &&
+                r?.backsplashEligibilitySource === "estimator_confirmed"
+            );
+            if (hasConfirmedEligibleRun) {
+              area = { ...area, backsplashIncluded: true };
+            }
           } else if (nextLinear > 0 && area.backsplashIncluded == null) {
             area = { ...area, backsplashIncluded: true };
           }

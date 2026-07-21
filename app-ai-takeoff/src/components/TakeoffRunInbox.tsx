@@ -4,7 +4,7 @@
  * Loads recent takeoff jobs via GET /api/takeoff-jobs and lets the user open a run
  * (updates parent state + ?takeoffJobId= deep link).
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { listTakeoffJobs, LabApiError, type TakeoffJobListItem } from "../lib/api";
 
 export interface TakeoffRunInboxProps {
@@ -53,38 +53,72 @@ export default function TakeoffRunInbox({
   const [jobs, setJobs] = useState<TakeoffJobListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadInFlightRef = useRef(false);
 
-  const loadJobs = useCallback(async () => {
+  const loadJobs = useCallback(async (signal?: AbortSignal) => {
     if (!token) {
       setJobs([]);
       setLoading(false);
-      return;
+      return false;
     }
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     setLoading(true);
     setError(null);
     try {
-      const res = await listTakeoffJobs(token, { limit: 25 });
+      const res = await listTakeoffJobs(token, { limit: 25 }, { signal });
+      if (signal?.aborted) return false;
       setJobs(res.jobs ?? []);
+      return true;
     } catch (err) {
+      if (signal?.aborted) return false;
       const msg = err instanceof LabApiError ? err.message : String(err);
       setError(msg);
       setJobs([]);
+      return false;
     } finally {
+      loadInFlightRef.current = false;
       setLoading(false);
     }
   }, [token]);
 
   useEffect(() => {
     if (pauseBackgroundRefresh) return;
-    void loadJobs();
+    const ac = new AbortController();
+    void loadJobs(ac.signal);
+    return () => ac.abort();
   }, [loadJobs, refreshKey, pauseBackgroundRefresh]);
 
   const hasProcessingJobs = jobs.some((j) => j.status === "processing");
 
   useEffect(() => {
     if (!token || !hasProcessingJobs || pauseBackgroundRefresh) return;
-    const interval = setInterval(() => void loadJobs(), 10000);
-    return () => clearInterval(interval);
+    let stopped = false;
+    let timer: number | null = null;
+    let errors = 0;
+    const ac = new AbortController();
+    const schedule = (delayMs: number) => {
+      if (stopped) return;
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void tick(), delayMs);
+    };
+    const tick = async () => {
+      if (stopped || document.visibilityState !== "visible") return;
+      const ok = await loadJobs(ac.signal);
+      errors = ok ? 0 : errors + 1;
+      schedule(ok ? 10_000 : Math.min(60_000, 10_000 * 2 ** errors));
+    };
+    schedule(10_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stopped = true;
+      ac.abort();
+      if (timer != null) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [token, hasProcessingJobs, loadJobs, pauseBackgroundRefresh]);
 
   return (
