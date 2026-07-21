@@ -59,7 +59,13 @@ export const CONFIGURATION_PUBLIC_FORBIDDEN_SUBSTRINGS = Object.freeze([
   "base_rate",
   "raw_token",
   "rawToken",
-  "service_role"
+  "service_role",
+  // Frozen hidden custom-line allocation internals (publish snapshot audit
+  // and configured-state reattachment records) must never reach the browser.
+  "customLineAllocations",
+  "allocatedCents",
+  "internalReattachments",
+  "allocationRule"
 ]);
 
 /**

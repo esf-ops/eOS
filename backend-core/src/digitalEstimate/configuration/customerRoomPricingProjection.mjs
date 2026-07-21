@@ -471,20 +471,44 @@ export function buildUpdatedRoomPricingProjection(args) {
   // Re-attach frozen custom-line dollars (carved out of the pool above):
   // internal-only allocations absorb silently into stone categories; explicit
   // customer-facing lines stay named on their room.
+  //
+  // Configured-state eligibility rule (Updated only — the frozen Original
+  // snapshot and its customLineAllocations audit are NEVER rewritten):
+  //  - Backsplash is eligible only while the room's configured mode is not
+  //    "none" and the configured amount is resolvable. Mode "none" writes an
+  //    explicit $0; re-adding frozen hidden cents into that zero would invent
+  //    a positive Backsplash amount after removal.
+  //  - When a frozen Backsplash target becomes ineligible, its integer cents
+  //    redistribute to the room's remaining eligible stone target under the
+  //    same governed hierarchy (internal_custom_line_allocation_v1 rule 5:
+  //    no eligible backsplash → Countertop absorbs). With one eligible target
+  //    the largest-remainder distribution is the full amount — deterministic
+  //    by construction, no balancing plug, exact reconciliation preserved.
+  //  - Each redirect is recorded as an internal derived-reattachment audit
+  //    row (never exposed in public DTOs; hidden line names stay hidden).
+  /** @type {Array<{ roomId: string, fromCategory: string, toCategory: string, amountCents: number, reason: string }>} */
+  const internalReattachments = [];
   for (const target of frozenInternalTargets) {
     const room = roomsByKey.get(target.roomKey);
     if (!room) continue;
-    // Mode "none" initializes Backsplash to 0 (not null). Re-attaching a
-    // frozen internal allocation into that zero would invent a positive
-    // Backsplash amount after removal — keep those cents on Countertop.
-    if (
-      target.category === "backsplash" &&
-      room.backsplashAmountCents != null &&
-      room.backsplashMode !== "none"
-    ) {
+    const backsplashEligible =
+      room.backsplashAmountCents != null && room.backsplashMode !== "none";
+    if (target.category === "backsplash" && backsplashEligible) {
       room.backsplashAmountCents += target.amountCents;
     } else {
       room.countertopAmountCents += target.amountCents;
+      if (target.category === "backsplash") {
+        internalReattachments.push({
+          roomId: String(target.roomKey),
+          fromCategory: "backsplash",
+          toCategory: "countertop",
+          amountCents: target.amountCents,
+          reason:
+            room.backsplashMode === "none"
+              ? "configured_backsplash_removed"
+              : "configured_backsplash_unresolved"
+        });
+      }
     }
   }
   for (const line of frozenRoomCustomLines) {
@@ -558,7 +582,10 @@ export function buildUpdatedRoomPricingProjection(args) {
     deltaFromOriginalCents: internal.exactConfigurationDeltaCents != null ? Math.trunc(Number(internal.exactConfigurationDeltaCents)) : null,
     reviewRequiredCount,
     reconciliationStatus,
-    diagnostics
+    diagnostics,
+    // Internal-only derived reattachment audit (configured-state eligibility
+    // redirects of frozen hidden allocations). Never mapped into public DTOs.
+    internalReattachments
   };
 }
 
