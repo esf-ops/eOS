@@ -131,7 +131,7 @@ export function sideSplashModeLabel(mode) {
 export function sideSplashPieceDisplayName(pieceDisplayName, pieceIndex = 1) {
   const name = String(pieceDisplayName || "").trim();
   if (name && !looksLikeUuid(name)) return name;
-  return `Countertop piece ${Math.max(1, Number(pieceIndex) || 1)}`;
+  return `Countertop run ${Math.max(1, Number(pieceIndex) || 1)}`;
 }
 
 /**

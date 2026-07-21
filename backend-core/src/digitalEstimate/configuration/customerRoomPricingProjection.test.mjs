@@ -355,8 +355,8 @@ function assertNoOptionKeysOrSfLf(dto) {
   const changes = buildChangesRoomPricingProjection({ original, updated });
   const materialRow = changes.rows.find((row) => row.category === "material");
   assert.ok(materialRow);
-  assert.equal(materialRow.originalLabel, "promo");
-  assert.equal(materialRow.updatedLabel, "group_b");
+  assert.equal(materialRow.originalLabel, "Group Promo");
+  assert.equal(materialRow.updatedLabel, "Group B");
   const sinkRow = changes.rows.find((row) => row.category === "sink");
   assert.equal(sinkRow.status, "new_selection");
   assert.equal(sinkRow.originalLabel, "Not selected");
@@ -551,6 +551,160 @@ function assertNoOptionKeysOrSfLf(dto) {
   );
   assert.equal(updated.configuredExactTotalCents, updated.originalTotalCents);
   console.log("ok: unresolved backsplash pricing carries the known baseline $ forward and still reconciles exactly");
+}
+
+// Hosted $3,208 regression at the projection boundary: the frozen backsplash
+// category is removed, Countertop remains byte-for-byte, and the public room
+// hierarchy reconciles to the lower authoritative total.
+{
+  const frozenBacksplashCents = 47_890;
+  const frozenCountertopCents = 272_910;
+  const publishedRoomPricing = {
+    snapshotVersion: "v2",
+    totalCents: 320_800,
+    rooms: [
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        countertopAmountCents: frozenCountertopCents,
+        backsplashAmountCents: frozenBacksplashCents,
+        addOnsAmountCents: 0,
+        roomTotalCents: 320_800,
+        customerFacingLines: [],
+        originalBacksplashMode: "standard_4in"
+      }
+    ],
+    projectAddOnLines: [],
+    customLineAllocations: []
+  };
+  const internal = {
+    frozenBaselineAnchor: true,
+    baselineExactTotalCents: 320_800,
+    configuredExactTotalCents: frozenCountertopCents,
+    configuredDisplayTotalCents: frozenCountertopCents,
+    exactConfigurationDeltaCents: -frozenBacksplashCents,
+    rooms: [
+      {
+        roomKey: "kitchen",
+        displayName: "Kitchen",
+        chargeableCounterSf: 40,
+        materialSellCents: frozenCountertopCents,
+        materialUseTaxCents: 0,
+        selectedMaterialGroup: "group_b",
+        baselineMaterialGroup: "group_b",
+        backsplashMode: "none",
+        baselineBacksplashMode: "standard_4in",
+        backsplashBaselineAmountCents: frozenBacksplashCents,
+        backsplashConfiguredAmountCents: 0,
+        backsplashReviewCodes: []
+      }
+    ],
+    materialGroupDeltas: [],
+    options: [],
+    customLines: [],
+    credits: []
+  };
+  const updated = buildUpdatedRoomPricingProjection({ internal, publishedRoomPricing });
+  const kitchen = updated.rooms[0];
+  assert.equal(kitchen.countertopAmountCents, frozenCountertopCents);
+  assert.equal(kitchen.backsplashAmountCents, 0);
+  assert.equal(kitchen.roomTotalCents, frozenCountertopCents);
+  assert.equal(updated.deltaFromOriginalCents, -frozenBacksplashCents);
+  assert.ok(updated.deltaFromOriginalCents < 0, "removal delta sign must stay negative");
+  assert.equal(updated.reconciliationStatus, "reconciled");
+  const dto = toPublicRoomPricingDto(updated);
+  assert.equal(dto.rooms[0].countertopAmount, frozenCountertopCents / 100);
+  assert.equal(dto.rooms[0].backsplashAmount, 0);
+  assert.equal(dto.projectTotal, frozenCountertopCents / 100);
+  console.log("ok: hosted removal preserves Countertop, zeros Backsplash, lowers total by exact frozen carve-out");
+}
+
+// Room-owned product + cutout lines remain nested on the room; project-owned
+// options stay project-level. Public output has no room ids or option keys.
+{
+  const r = calculateElite100ConfigDeltaV2(
+    baseInputV2({
+      options: [
+        {
+          optionKey: "sink:kitchen:esf:blanco:precis-27",
+          displayLabel: 'Sink — Precis 27"',
+          quantity: 1,
+          sellPrice: 575,
+          pricingMode: "fixed",
+          customerPriceTreatment: "absolute",
+          availabilityState: "active",
+          includedInBaseline: false
+        },
+        {
+          optionKey: "qty-sink:kitchen",
+          displayLabel: "Kitchen sink cutout",
+          quantity: 1,
+          sellPrice: 200,
+          pricingMode: "fixed",
+          customerPriceTreatment: "absolute",
+          availabilityState: "active",
+          includedInBaseline: false
+        },
+        {
+          optionKey: "delivery-service",
+          displayLabel: "Delivery service",
+          quantity: 1,
+          sellPrice: 75,
+          pricingMode: "fixed",
+          customerPriceTreatment: "absolute",
+          availabilityState: "active",
+          includedInBaseline: false
+        }
+      ]
+    })
+  );
+  const updated = buildUpdatedRoomPricingProjection({ internal: r.internal });
+  const dto = toPublicRoomPricingDto(updated);
+  const kitchen = dto.rooms.find((room) => room.roomName === "Kitchen");
+  assert.deepEqual(
+    kitchen.addOnLines.map((line) => line.label),
+    ['Sink — Precis 27"', "Kitchen sink cutout"]
+  );
+  assert.ok(dto.projectAddOns.some((line) => line.label === "Delivery service"));
+  const raw = JSON.stringify(dto);
+  assert.equal(raw.includes("optionKey"), false);
+  assert.equal(raw.includes("roomId"), false);
+  assert.equal(raw.includes("qty-sink"), false);
+  console.log("ok: sink/cutout stay under Kitchen; project option remains project-level; ids/keys redacted");
+}
+
+// Defensive UUID stripping at the public pricing boundary.
+{
+  const dto = toPublicRoomPricingDto({
+    kind: "updated",
+    configuredExactTotalCents: 10_000,
+    reconciliationStatus: "reconciled",
+    rooms: [
+      {
+        roomName: "Kitchen",
+        countertopAmountCents: 5_000,
+        backsplashAmountCents: 0,
+        addOnsAmountCents: 5_000,
+        roomTotalCents: 10_000,
+        customerFacingLines: [
+          {
+            category: "side_splash",
+            label: "run d1c2b3a4-f5e6-4d7c-8b9a-0a1b2c3d4e5f — Right",
+            amountCents: 5_000
+          }
+        ],
+        reviewRequiredItems: []
+      }
+    ],
+    projectAddOns: []
+  });
+  const raw = JSON.stringify(dto);
+  assert.equal(raw.includes("d1c2b3a4"), false);
+  assert.equal(raw.includes("runId"), false);
+  assert.equal(raw.includes("SF"), false);
+  assert.equal(raw.includes("LF"), false);
+  assert.equal(raw.includes("rate"), false);
+  console.log("ok: UUID-like side-splash ids and forbidden pricing internals never reach public DTO");
 }
 
 console.log("\nAll customerRoomPricingProjection tests passed.\n");

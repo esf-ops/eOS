@@ -21,6 +21,7 @@ import {
   buildUpdatedBreakdown,
   groupBreakdownLinesByRoom,
 } from "./customerEstimateBreakdown";
+import { summarizeSideSplashSelections } from "./sideSplashSummary";
 import { enrichProductImageUrl, resolveProductImageFields } from "./productCatalogImages";
 import {
   exchangeFragmentToken,
@@ -1420,13 +1421,7 @@ function CustomerRoomCard({
         {hasSideSplash ? (
           <SummaryRow
             label="Side splash"
-            value={
-              room.sideSplashPieces.length
-                ? room.sideSplashPieces
-                    .map((p) => `${p.pieceLabel} — ${p.summary || "None"}`)
-                    .join("; ")
-                : "Choose side splash"
-            }
+            value={summarizeSideSplashSelections(room.sideSplashPieces)}
             onClick={() => onOpenModal("sidesplash")}
             testId="de-open-sidesplash-modal"
           />
@@ -2225,6 +2220,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     changeLines,
     displayTotalDelta:
       (displayCalc as { displayTotalDelta?: number } | null)?.displayTotalDelta ?? null,
+    roomPricingChanges:
+      (displayCalc as {
+        roomPricingChanges?: import("./publicConfigApi").PublicRoomPricingChanges | null;
+      } | null)?.roomPricingChanges ?? null,
   });
   const activeBreakdown =
     estimateTab === "original"
@@ -2302,19 +2301,27 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                 className="space-y-1.5 border-b border-border/60 pb-2 last:border-b-0"
                 data-testid="de-breakdown-room-group"
               >
-                {group.roomName ? (
-                  <div
-                    className="text-xs font-semibold text-foreground"
-                    data-testid="de-breakdown-room-heading"
-                  >
-                    {group.roomName}
-                  </div>
-                ) : null}
+                <div
+                  className="text-xs font-semibold text-foreground"
+                  data-testid="de-breakdown-room-heading"
+                >
+                  {group.roomName || "Project"}
+                </div>
                 {group.lines.map((line) => (
-                  <div key={line.key} className="text-xs" data-testid="de-breakdown-line">
-                    <div className="flex items-start justify-between gap-2 text-muted-foreground">
+                  <div
+                    key={line.key}
+                    className={`text-xs ${line.indent ? "pl-3" : ""}`}
+                    data-testid="de-breakdown-line"
+                  >
+                    <div
+                      className={`flex items-start justify-between gap-2 ${
+                        line.emphasis
+                          ? "font-semibold text-foreground"
+                          : "text-muted-foreground"
+                      }`}
+                    >
                       <span>
-                        {line.category ? `${line.category}: ` : ""}
+                        {line.category && !line.indent ? `${line.category}: ` : ""}
                         {line.label}
                       </span>
                       {line.amountLabel ? (

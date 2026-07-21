@@ -282,3 +282,67 @@ test("reconciliation: backsplash delta is fully captured inside configuredExactT
   assert.equal(r.internal.configuredExactTotalCents, 500000 - originalAmount);
   assert.equal(r.internal.selectionDeltaSubtotalCents, -originalAmount);
 });
+
+// Hosted regression — an unresolved removal on a frozen $3,208 publication
+// previously re-ceiled the unchanged exact total to $3,210, producing a fake
+// +$2 customer delta.
+test("hosted regression: unresolved 4-inch removal never turns $3,208 into $3,210", () => {
+  const room = {
+    roomKey: "kitchen",
+    displayName: "Kitchen",
+    chargeableCounterSf: 40,
+    selectedMaterialGroup: "group_b",
+    baselineMaterialGroup: "group_b",
+    backsplashMode: "none",
+    baselineBacksplashMode: "standard_4in",
+    backsplashReviewCodes: ["backsplash_removal_credit_unresolved"],
+    backsplashOriginalBilledSf: null,
+    backsplashConfiguredBilledSf: 0
+  };
+  const r = calculateElite100ConfigDeltaV2(anchoredInput(room, { baselineExactTotal: 3208 }));
+  assert.equal(r.internal.backsplashDeltaCents, 0);
+  assert.equal(r.internal.configuredExactTotalCents, 320800);
+  assert.equal(r.internal.configuredDisplayTotalCents, 320800);
+  assert.equal(r.internal.customerDisplayTotalDeltaCents, 0);
+  assert.ok(r.internal.customerDisplayTotalDeltaCents <= 0);
+});
+
+test("frozen published backsplash carve-out is credited exactly and preserves removal sign", () => {
+  const frozenBacksplashCents = 47_890;
+  const room = {
+    ...roomWithBacksplash({
+      room: {
+        backsplashHeightMode: "standard",
+        backsplashSf: 7,
+        backsplashMeasuredLengthIn: 252
+      },
+      selectedMode: "none"
+    }),
+    backsplashBaselineAmountCents: frozenBacksplashCents
+  };
+  const r = calculateElite100ConfigDeltaV2(anchoredInput(room, { baselineExactTotal: 3208 }));
+  assert.equal(r.internal.backsplashDeltaCents, -frozenBacksplashCents);
+  assert.equal(r.internal.rooms[0].backsplashConfiguredAmountCents, 0);
+  assert.equal(r.internal.configuredExactTotalCents, 320800 - frozenBacksplashCents);
+  assert.equal(r.internal.configuredDisplayTotalCents, 320800 - frozenBacksplashCents);
+  assert.ok(r.internal.customerDisplayTotalDeltaCents < 0);
+});
+
+test("unchanged 4-inch mode preserves frozen carve-out byte-for-byte", () => {
+  const frozenBacksplashCents = 47_890;
+  const room = {
+    ...roomWithBacksplash({
+      room: {
+        backsplashHeightMode: "standard",
+        backsplashSf: 7,
+        backsplashMeasuredLengthIn: 252
+      },
+      selectedMode: "standard_4in"
+    }),
+    backsplashBaselineAmountCents: frozenBacksplashCents
+  };
+  const r = calculateElite100ConfigDeltaV2(anchoredInput(room, { baselineExactTotal: 3208 }));
+  assert.equal(r.internal.backsplashDeltaCents, 0);
+  assert.equal(r.internal.rooms[0].backsplashConfiguredAmountCents, frozenBacksplashCents);
+  assert.equal(r.internal.configuredDisplayTotalCents, 320800);
+});

@@ -52,7 +52,7 @@ assert.equal(
 assert.equal(sideSplashPieceDisplayName("Island top", 1), "Island top");
 assert.equal(
   sideSplashPieceDisplayName("d1c2b3a4-f5e6-4d7c-8b9a-0a1b2c3d4e5f", 2),
-  "Countertop piece 2"
+  "Countertop run 2"
 );
 
 assert.equal(inferRoomEligibilityType({ name: "Kitchen" }), "kitchen");
@@ -106,7 +106,7 @@ for (const o of sides) {
   assert.ok(!/d1c2b3a4/i.test(o.displayLabel), o.displayLabel);
 }
 assert.ok(sides.some((o) => /Island top/.test(o.displayLabel)));
-assert.ok(sides.some((o) => /Countertop piece 2/.test(o.displayLabel)));
+assert.ok(sides.some((o) => /Countertop run 2/.test(o.displayLabel)));
 assert.equal(sides[0].compatibilityJson.pieceKey, "d1c2b3a4-f5e6-4d7c-8b9a-0a1b2c3d4e5f");
 
 const accessories = buildAccessoryOptionDefinitions({
