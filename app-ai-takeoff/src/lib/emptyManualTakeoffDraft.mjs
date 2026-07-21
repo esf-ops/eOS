@@ -96,6 +96,9 @@ export function addManualPiece(takeoff, roomId, opts = {}) {
     depthIn: Number(opts.depthIn) || 25.5,
     quantity: Number(opts.quantity) || 1,
     pieceType: "counter",
+    // New pieces default off — estimator opts in per run.
+    backsplashEligible: opts.backsplashEligible === true,
+    backsplashEligibilitySource: "manual",
     _estimatorOwned: true,
     _manual: true
   };

@@ -4584,7 +4584,17 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-col-dim { min-width: 5.5rem; max-width: 7rem; }
 .ctr-col-qty { min-width: 4.25rem; max-width: 5rem; }
 .ctr-col-sf { min-width: 4.5rem; }
+.ctr-col-bs { min-width: 8.5rem; max-width: 11rem; }
 .ctr-col-incl { min-width: 4.5rem; text-align: center; }
+.ctr-backsplash-help { margin: 0.35rem 0 0.75rem; font-size: 0.9rem; }
+.ctr-bs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.ctr-bs-toggle input { margin: 0; }
 .ctr-col-cutouts { min-width: 8rem; }
 .ctr-col-notes { min-width: 12rem; }
 .ctr-col-actions { min-width: 7.5rem; white-space: nowrap; }

@@ -1946,3 +1946,20 @@
 | **Tests** | New `app-ai-takeoff/src/lib/takeoffPieceRowIdentity.test.mjs` — 12 regression tests (four distinct names; single-row piece/length/depth/quantity edits; single-piece room move; unique id on add; no value-shift on delete; save/reload id stability; unique ids in the approve payload via `listIncludedPieces`; all distinct pieces in the Estimate Scope import plan via `planTakeoffImport`; unique row keys after healing, with the pre-fix collision explicitly reproduced) + wiring assertions. Existing suites re-run green: `backend-core/src/takeoff` (89/89), `consolidatedTakeoffReview.ui.test.mjs`, `emptyManualTakeoffDraft.test.mjs`, `app-ai-takeoff` vite build. The 4 pre-existing `tsc --noEmit` errors in this component exist identically on `main` (verified by stash-compare) — none added. |
 | **Deployment surfaces** | `app-ai-takeoff` (worksheet component + new lib) and `backend-core` (extraction normalization + shared helper). No env vars, no schema change, no API contract change. |
 
+### 139. AI Takeoff Review — per-run backsplash eligibility (replace shared height field) (2026-07-21)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-21 |
+| **Bug** | After the piece-row identity fix (§138), editing **Backsplash height** on one Takeoff Review row still updated sibling pieces. Separately, forcing estimators to enter height per row was the wrong product model. |
+| **Root cause** | The consolidated worksheet's backsplash control wrote `area.backsplashHeightIn` (area-scoped), then `flattenPieces` read that same area field onto every child run — so every sibling row shared one value even with unique run ids. |
+| **Product model** | Estimator marks **per-run** `backsplashEligible: boolean` ("Include backsplash for this run"). Customer later chooses No / 4-inch / custom / full-height in Digital Estimate. Brain prices from **sum of approved eligible run lengths × customer height/style**. Estimators never enter ordinary 4" height at takeoff. |
+| **Contract** | Persist on each run: `backsplashEligible`, optional `backsplashEligibilitySource` (`ai_suggested` / `estimator_confirmed` / `manual` / `legacy_height` / …). Approved import payload includes per-piece `backsplashEligible` plus room aggregates `eligibleBacksplashLengthIn`, `eligibleRunCount`, `excludedRunCount`. Geometry authority for eligible length = approved run `lengthIn` where eligible. |
+| **Legacy normalization** | `normalizeTakeoffBacksplashEligibility` (new `takeoffBacksplashEligibility.mjs`): positive legacy area/run height → initial `backsplashEligible = true` (source `legacy_height`); zero/blank + area excluded → false; already-boolean values kept. Applied at AI extraction normalize and at consolidated worksheet hydration/AI-append. No SQL migration. Historical published estimates untouched. |
+| **UI** | Column renamed **Backsplash**; checkbox control with Include / No backsplash labels; helper copy: "Mark the countertop runs that meet a wall or cabinet…". Height number input removed. Summary SF is a provisional eligible@4″ preview only. |
+| **Extraction** | Prompt `PROMPT_VERSION` → `v6.2`: require per-run `backsplashEligible`; do not ask for ordinary 4" height. Normalization persists the boolean. |
+| **Downstream** | `buildTakeoffImportPayload`, `planTakeoffImport`, `deriveRoomBacksplashFromImportRoom`, and Studio seed fallback consume eligibility / eligible length — not room-name heuristics or hard-coded 4" as eligibility. Digital Estimate customer height path still uses `backsplashMeasuredLengthIn` (now seeded from eligible runs). |
+| **Tests** | New `app-ai-takeoff/src/lib/takeoffBacksplashEligibility.test.mjs` (15 regressions + wiring). UI wiring test updated for the new column/control. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `app-ai-takeoff`, `backend-core` (takeoff + studioRoomBacksplash + extraction prompt). |
+

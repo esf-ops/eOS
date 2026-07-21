@@ -35,6 +35,10 @@ import {
   summarizeAiFindingsPreview
 } from "@takeoff-core/takeoffAuthoritativeResult.mjs";
 import {
+  normalizeTakeoffBacksplashEligibility,
+  provisionalEligibleBacksplashSf
+} from "@takeoff-core/takeoffBacksplashEligibility.mjs";
+import {
   flattenPieces,
   patchRun,
   renameRoom,
@@ -71,12 +75,18 @@ type PieceRow = {
   depthIn: number;
   quantity: number;
   countertopSf: number;
-  backsplashHeightIn: number;
+  backsplashEligible: boolean;
   included: boolean;
   cutoutsLabel: string;
   note: string;
   lowConfidence: boolean;
 };
+
+/** Unique ids + per-run backsplash eligibility (legacy height → eligible). */
+function healTakeoffDraft(takeoff: any) {
+  const unique = ensureUniqueTakeoffIdentity(takeoff).takeoff;
+  return normalizeTakeoffBacksplashEligibility(unique).takeoff;
+}
 
 function addPiece(result: any, roomId: string): any {
   return addManualPiece(result, roomId);
@@ -294,14 +304,14 @@ export default function ConsolidatedTakeoffReview() {
       // Legacy replace path — load authoritative server draft (not pending AI).
       const rs = latest?.reviewState || {};
       hydrateReviewMeta(rs);
-      // Self-heal missing/duplicated run ids from older saved drafts so every
-      // row has its own identity (persists on next autosave).
-      const cleaned = ensureUniqueTakeoffIdentity(
+      // Self-heal missing/duplicated run ids and legacy area-level backsplash
+      // height → per-run eligibility (persists on next autosave).
+      const cleaned = healTakeoffDraft(
         applyDeletionTombstones(result, {
           deletedRoomIds: rs.deletedRoomIds ?? [],
           deletedRunIds: rs.deletedRunIds ?? []
         })
-      ).takeoff;
+      );
       activeDraft = cleaned;
       setDraft(cleaned);
       applyPendingAiFromLatest(latest);
@@ -319,7 +329,7 @@ export default function ConsolidatedTakeoffReview() {
     } else if (result) {
       const rs = latest?.reviewState || {};
       hydrateReviewMeta(rs);
-      const cleaned = ensureUniqueTakeoffIdentity(
+      const cleaned = healTakeoffDraft(
         applyDeletionTombstones(result, {
           deletedRoomIds: [
             ...deletedRoomIdsRef.current,
@@ -330,7 +340,7 @@ export default function ConsolidatedTakeoffReview() {
             ...((rs.deletedRunIds as string[]) || [])
           ]
         })
-      ).takeoff;
+      );
       activeDraft = cleaned;
       draftRef.current = cleaned;
       setDraft(cleaned);
@@ -439,8 +449,9 @@ export default function ConsolidatedTakeoffReview() {
     }
     const preview = summarizeAiFindingsPreview(serverAi);
     const { merged } = saveMergeTakeoffDrafts(local, serverAi, mergeTombstones());
-    // AI drafts can carry duplicate/placeholder run ids — heal before persisting.
-    const healed = ensureUniqueTakeoffIdentity(merged).takeoff;
+    // AI drafts can carry duplicate/placeholder run ids and legacy height-only
+    // backsplash — heal identity + eligibility before persisting.
+    const healed = healTakeoffDraft(merged);
     await persistDraftWithResult(healed, {
       correctionNotes: "Auto-append AI findings (non-destructive)",
       aiHandling: pendingId
@@ -660,12 +671,8 @@ export default function ConsolidatedTakeoffReview() {
       rooms: roomOptions.length,
       includedPieces: included.length,
       countertopSf: included.reduce((s, r) => s + r.countertopSf, 0),
-      backsplashSf: included.reduce((s, r) => {
-        const h = Number(r.backsplashHeightIn) || 0;
-        const l = Number(r.lengthIn) || 0;
-        if (h <= 0 || l <= 0) return s;
-        return s + (l * h) / 144;
-      }, 0),
+      // Provisional 4" preview for eligible runs only — not customer pricing authority.
+      backsplashSf: provisionalEligibleBacksplashSf(included),
       blockingCount: blocking.length,
       advisoryCount: advisory.length
     };
@@ -902,7 +909,7 @@ export default function ConsolidatedTakeoffReview() {
               <span>{localSummary.rooms} rooms</span>
               <span>{localSummary.includedPieces} pieces</span>
               <span>{localSummary.countertopSf.toFixed(2)} SF countertop</span>
-              <span>{localSummary.backsplashSf.toFixed(2)} SF backsplash</span>
+              <span>{localSummary.backsplashSf.toFixed(2)} SF backsplash (eligible @ 4″)</span>
               {blocking.length ? (
                 <span className="ctr-badge ctr-badge--block">{blocking.length} blocking</span>
               ) : null}
@@ -910,6 +917,11 @@ export default function ConsolidatedTakeoffReview() {
                 <span className="ctr-badge ctr-badge--warn">{advisory.length} advisory</span>
               ) : null}
             </div>
+
+            <p className="ctr-muted ctr-backsplash-help" data-testid="ctr-backsplash-help">
+              Mark the countertop runs that meet a wall or cabinet. Islands and open edges
+              should be left off.
+            </p>
 
             <div className="ctr-table-wrap">
               <table className="ctr-table" data-testid="ctr-worksheet">
@@ -921,7 +933,7 @@ export default function ConsolidatedTakeoffReview() {
                     <th className="ctr-col-dim">Depth (in)</th>
                     <th className="ctr-col-qty">Quantity</th>
                     <th className="ctr-col-sf">Square feet</th>
-                    <th className="ctr-col-dim">Backsplash height (in)</th>
+                    <th className="ctr-col-bs">Backsplash</th>
                     <th className="ctr-col-incl">Included</th>
                     <th className="ctr-col-cutouts">Cutouts</th>
                     <th className="ctr-col-notes">Notes</th>
@@ -1124,34 +1136,37 @@ export default function ConsolidatedTakeoffReview() {
                       <td className="ctr-col-sf ctr-sf" data-testid="ctr-sqft">
                         {row.countertopSf.toFixed(2)}
                       </td>
-                      <td className="ctr-col-dim">
-                        <input
-                          className="ctr-dim-input"
-                          type="number"
-                          step="0.5"
-                          value={row.backsplashHeightIn || ""}
-                          aria-label="Backsplash height inches"
-                          data-testid="ctr-backsplash-height"
-                          onChange={(e) => {
-                            const h = Number(e.target.value) || 0;
-                            setDraft((prev: any) => ({
-                              ...prev,
-                              rooms: (prev.rooms ?? []).map((room: any) =>
-                                room.id !== row.roomId
-                                  ? room
-                                  : {
-                                      ...room,
-                                      areas: (room.areas ?? []).map((area: any) =>
-                                        area.id === row.areaId
-                                          ? { ...area, backsplashHeightIn: h }
-                                          : area
-                                      )
+                      <td className="ctr-col-bs">
+                        <label className="ctr-bs-toggle">
+                          <input
+                            type="checkbox"
+                            checked={row.backsplashEligible}
+                            aria-label="Include backsplash for this run"
+                            data-testid="ctr-backsplash-eligible"
+                            onChange={(e) =>
+                              updateDraft(
+                                markRunEstimatorOwned(
+                                  patchRun(
+                                    draft,
+                                    {
+                                      roomId: row.roomId,
+                                      areaId: row.areaId,
+                                      runId: row.runId
+                                    },
+                                    {
+                                      backsplashEligible: e.target.checked,
+                                      backsplashEligibilitySource: "estimator_confirmed",
+                                      backsplashEligibilityUpdatedAt: new Date().toISOString()
                                     }
+                                  ),
+                                  row.roomId,
+                                  row.runId
+                                )
                               )
-                            }));
-                            scheduleSave();
-                          }}
-                        />
+                            }
+                          />
+                          <span>{row.backsplashEligible ? "Include" : "No backsplash"}</span>
+                        </label>
                       </td>
                       <td className="ctr-col-incl">
                         <input

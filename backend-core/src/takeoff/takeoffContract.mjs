@@ -143,6 +143,10 @@ export const TAKEOFF_SHAPE_TYPE = Object.freeze({
  * @property {number} depthIn
  * @property {"rect"|"tri"} [shape]
  * @property {"counter"|"splash"|"fhb"} [pieceType]
+ * @property {boolean} [backsplashEligible]
+ *   Estimator/AI suggestion: this counter run meets a wall/cabinet and can receive splash.
+ *   Customer chooses height/style later; do not store ordinary 4" height for eligibility.
+ * @property {"ai_suggested"|"estimator_confirmed"|"manual"|"legacy_height"|"default"|string} [backsplashEligibilitySource]
  * @property {number} [exposedEndOverhangIn]
  * @property {number[]} [sourcePages]
  * @property {string[]} [notes]
@@ -163,6 +167,10 @@ export function makeTakeoffRun(overrides = {}) {
     depthIn: Number(overrides.depthIn) || 0,
     shape: overrides.shape ?? "rect",
     pieceType: overrides.pieceType ?? "counter",
+    ...(overrides.backsplashEligible != null && { backsplashEligible: Boolean(overrides.backsplashEligible) }),
+    ...(overrides.backsplashEligibilitySource != null && {
+      backsplashEligibilitySource: String(overrides.backsplashEligibilitySource)
+    }),
     ...(overrides.exposedEndOverhangIn != null && { exposedEndOverhangIn: Number(overrides.exposedEndOverhangIn) }),
     ...(overrides.sourcePages != null && { sourcePages: overrides.sourcePages }),
     ...(overrides.notes != null && { notes: overrides.notes }),
