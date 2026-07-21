@@ -19,6 +19,7 @@ import {
   isPremiumEdgeProfile,
   normalizeEdgeProfileToken,
   remapLegacyEdgeOptionKey,
+  resolveEdgeOptionPriceEffect,
   resolvePremiumEdgeRatePerLf
 } from "../catalog/studioEdgeAuthority.mjs";
 import { resolvePublicVisualizerOrganizationId } from "../../visualizer/publicVisualizerConfig.mjs";
@@ -49,7 +50,10 @@ import {
   sideSplashQtyFromMode
 } from "../catalog/digitalEstimateProductOptions.mjs";
 import { getProductById } from "../catalog/esfPlumbingCatalog.mjs";
-import { customerPriceEffectLabel } from "../catalog/customerFacingCopy.mjs";
+import {
+  customerPriceEffectLabel,
+  sideSplashPieceDisplayName
+} from "../catalog/customerFacingCopy.mjs";
 import {
   buildQuoteLibraryCustomerConfigProjection
 } from "../catalog/quoteLibraryCustomerConfigProjection.mjs";
@@ -253,9 +257,17 @@ export function rejectPublicSelectionAuthority(body) {
   }
 }
 
-function toCustomerSafeOption(opt, group) {
+/**
+ * @param {object} opt
+ * @param {object|null|undefined} group
+ * @param {{
+ *   rooms?: Array<{ roomKey?: string, edgeLinearFeet?: number }>,
+ *   pricingBasis?: string|null
+ * }|null} [ctx]
+ */
+function toCustomerSafeOption(opt, group, ctx = null) {
   const availability = opt.availability_state || opt.availabilityState || "active";
-  const treatment = opt.customer_price_treatment || opt.customerPriceTreatment || "absolute";
+  let treatment = opt.customer_price_treatment || opt.customerPriceTreatment || "absolute";
   const resolved = resolveMaterialSelectionFromOption(opt);
   const mat = resolved.materialId ? getElite100CustomerMaterial(resolved.materialId) : null;
   const compat =
@@ -272,13 +284,44 @@ function toCustomerSafeOption(opt, group) {
     compat.productId ||
     null;
   const catalogAvailability = customerSafe.availability || compat.catalogAvailability || null;
-  const sell = opt.sell_price ?? opt.sellPrice ?? null;
+  let sell = opt.sell_price ?? opt.sellPrice ?? null;
+  const optionKey = String(opt.option_key || opt.optionKey || "");
+  const pieceDisplayNameRaw = compat.pieceDisplayName || compat.piece_display_name || null;
+  const pieceIndex = Number(compat.pieceIndex || compat.piece_index || 0) || null;
+  const pieceDisplayName = pieceDisplayNameRaw
+    ? sideSplashPieceDisplayName(String(pieceDisplayNameRaw), pieceIndex || 1)
+    : null;
+
+  // Authoritative edge price effects (Included / Original selection / +$N).
+  // Seeded envelope options still carry sellPrice: 0 — resolve from locked LF.
+  let edgeEffect = null;
+  if (optionKey.startsWith("edge:") || compat.role === "edge_selection") {
+    const parts = optionKey.split(":");
+    const roomKey = parts[1] || compat.roomKey || null;
+    const token = normalizeEdgeProfileToken(
+      compat.edgeProfileToken || parts.slice(2).join(":") || "edge_eased"
+    );
+    const roomRow = (ctx?.rooms || []).find((r) => String(r.roomKey) === String(roomKey));
+    const lf =
+      Number(roomRow?.edgeLinearFeet) ||
+      (ctx?.rooms || []).reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0) ||
+      0;
+    edgeEffect = resolveEdgeOptionPriceEffect({
+      profileToken: token,
+      originalProfileToken: compat.originalEdgeProfile || null,
+      edgeLinearFeet: lf,
+      pricingBasis: ctx?.pricingBasis || "direct"
+    });
+    treatment = edgeEffect.customerPriceTreatment;
+    sell = edgeEffect.visibleDelta;
+  }
+
   const publicOpt = {
     id: opt.id,
-    optionKey: opt.option_key || opt.optionKey,
+    optionKey,
     groupId: opt.group_id || opt.groupId,
     groupKey: group?.group_key || group?.groupKey || null,
-    displayLabel: mat?.displayName || opt.display_label || opt.displayLabel,
+    displayLabel: edgeEffect?.label || mat?.displayName || opt.display_label || opt.displayLabel,
     description:
       opt.description_customer ||
       opt.description ||
@@ -294,17 +337,20 @@ function toCustomerSafeOption(opt, group) {
     materialId: resolved.materialId || null,
     roomKey: resolved.roomKey || compat.roomKey || null,
     productId,
-    availabilityState: availability,
+    availabilityState:
+      edgeEffect && !edgeEffect.available ? "review_required" : availability,
     catalogAvailability,
     availabilityText: customerSafe.availabilityText || null,
     customerPriceTreatment: treatment,
     minQty: Number(opt.min_qty ?? opt.minQty ?? 0),
     maxQty: opt.max_qty ?? opt.maxQty ?? null,
     defaultQty: Number(opt.default_qty ?? opt.defaultQty ?? 0),
-    includedInBaseline: Boolean(opt.included_in_baseline ?? opt.includedInBaseline),
+    includedInBaseline: Boolean(
+      edgeEffect ? edgeEffect.original : opt.included_in_baseline ?? opt.includedInBaseline
+    ),
     requiredSelection: Boolean(opt.required_selection ?? opt.requiredSelection),
     selectable:
-      availability === "active" &&
+      (edgeEffect ? edgeEffect.available : availability === "active") &&
       treatment !== "unavailable" &&
       treatment !== "review_required",
     accessoryKind: compat.accessoryKind || customerSafe.accessoryKind || null,
@@ -322,18 +368,35 @@ function toCustomerSafeOption(opt, group) {
     imageStatus: customerSafe.imageStatus || null,
     imageMatchType: customerSafe.imageMatchType || null,
     variants: Array.isArray(customerSafe.variants) ? customerSafe.variants : undefined,
+    pieceDisplayName,
+    pieceIndex,
+    pieceKey: compat.pieceKey || null,
+    profileKey: edgeEffect?.profileKey || compat.edgeProfileToken || null,
+    premium: edgeEffect ? edgeEffect.premium : null,
+    priceEffectCents: edgeEffect ? edgeEffect.priceEffectCents : null,
     visibleSellPrice:
       treatment === "absolute" && sell != null ? Number(sell) : null,
-    visibleDelta: treatment === "delta" && sell != null ? Number(sell) : null
+    visibleDelta:
+      (treatment === "delta" || treatment === "included_alternate" || treatment === "original_selection") &&
+      edgeEffect
+        ? edgeEffect.visibleDelta
+        : treatment === "delta" && sell != null
+          ? Number(sell)
+          : null
   };
-  publicOpt.priceEffectLabel = customerPriceEffectLabel({
-    includedInBaseline: publicOpt.includedInBaseline,
-    customerPriceTreatment: treatment,
-    availabilityState: availability,
-    visibleSellPrice: publicOpt.visibleSellPrice,
-    visibleDelta: publicOpt.visibleDelta,
-    reviewRequired: treatment === "review_required" || Boolean(compat.estimatorReviewRequired)
-  });
+  publicOpt.priceEffectLabel =
+    edgeEffect?.priceEffectLabel ||
+    customerPriceEffectLabel({
+      includedInBaseline: publicOpt.includedInBaseline,
+      customerPriceTreatment: treatment,
+      availabilityState: publicOpt.availabilityState,
+      visibleSellPrice: publicOpt.visibleSellPrice,
+      visibleDelta: publicOpt.visibleDelta,
+      priceEffectCents: publicOpt.priceEffectCents,
+      edgeTier: edgeEffect?.premium ? "premium" : edgeEffect ? "free" : null,
+      reviewRequired:
+        treatment === "review_required" || Boolean(compat.estimatorReviewRequired)
+    });
   return publicOpt;
 }
 
@@ -559,11 +622,15 @@ export function createPublicConfigurationService(deps) {
       mutuallyExclusive: Boolean(g.mutually_exclusive),
       sortOrder: g.sort_order
     }));
+    const optionCtx = {
+      rooms: ctx.rooms || [],
+      pricingBasis: ctx.pricingBasis || "direct"
+    };
     const options = (graph?.options || [])
       .filter((o) => o.is_active_in_envelope !== false)
       .map((o) => {
         const g = (graph?.groups || []).find((x) => x.id === o.group_id);
-        return toCustomerSafeOption(o, g);
+        return toCustomerSafeOption(o, g, optionCtx);
       });
     let enrichedById = null;
     try {

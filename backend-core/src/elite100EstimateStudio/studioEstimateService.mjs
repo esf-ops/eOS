@@ -112,6 +112,12 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
           ...(Array.isArray(meta?.cutouts) && meta.cutouts.length
             ? { cutouts: meta.cutouts }
             : {}),
+          ...(meta?.sideSplashLeftEligible != null
+            ? { sideSplashLeftEligible: meta.sideSplashLeftEligible === true }
+            : {}),
+          ...(meta?.sideSplashRightEligible != null
+            ? { sideSplashRightEligible: meta.sideSplashRightEligible === true }
+            : {}),
           notes: ""
         });
       }

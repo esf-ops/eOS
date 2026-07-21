@@ -754,15 +754,25 @@ export function buildSideSplashOptionDefinitions(args) {
     if (!piece || piece.included === false) continue;
     const pieceType = String(piece.pieceType || piece.type || "").toLowerCase();
     if (pieceType.includes("backsplash") || pieceType.includes("splash")) continue;
+    // Only list runs with side-splash eligibility on at least one side.
+    // Legacy pieces without eligibility flags remain choosable (null = unknown).
+    const left = piece.sideSplashLeftEligible;
+    const right = piece.sideSplashRightEligible;
+    const any = piece.sideSplashEligible;
+    const eligibilityKnown = left != null || right != null || any != null;
+    if (eligibilityKnown && !(left === true || right === true || any === true)) {
+      continue;
+    }
     const pieceKey = String(piece.id || piece.key || piece.name || "").trim();
     if (!pieceKey) continue;
     pieceIndex += 1;
     // Customer label precedence: estimator piece label, estimator area label,
     // then a concise ordinal fallback. Never expose the piece/run UUID.
     const rawName = String(
-      piece.name ||
-        piece.label ||
+      piece.displayLabel ||
         piece.displayName ||
+        piece.name ||
+        piece.label ||
         piece.areaLabel ||
         piece.areaName ||
         ""
