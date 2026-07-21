@@ -42,13 +42,15 @@ assert.equal(/\bcost\b/i.test(configView.match(/data-testid="de-estimate-breakdo
 
 // Estimate tabs / breakdown
 assert.ok(configView.includes("de-estimate-tabs"));
-assert.ok(configView.includes("de-estimate-tab-"));
-assert.ok(configView.includes('["original", "Original"]') || configView.includes('"original"'));
-assert.ok(configView.includes('["updated", "Updated"]') || configView.includes('"updated"'));
-assert.ok(configView.includes('["changes", "Changes"]') || configView.includes('"changes"'));
-assert.ok(configView.includes("buildOriginalBreakdown"));
+assert.ok(configView.includes("de-estimate-tab-${id}") || configView.includes('de-estimate-tab-'));
+assert.ok(configView.includes('["estimate", "Estimate"]'));
+assert.ok(configView.includes('["changes", "Changes"]'));
+assert.ok(!configView.includes('["original", "Original"]'));
+assert.ok(!configView.includes('["updated", "Updated"]'));
 assert.ok(configView.includes("buildUpdatedBreakdown"));
 assert.ok(configView.includes("buildChangesBreakdown"));
+assert.ok(configView.includes("Print estimate"));
+assert.ok(!configView.includes("Project add-ons"));
 
 const original = buildOriginalBreakdown({
   lineItems: [{ label: "Fabrication", amount: 1200 }],
@@ -58,6 +60,7 @@ const original = buildOriginalBreakdown({
 assert.equal(original.kind, "original");
 assert.equal(original.total, 8400);
 assert.ok(original.lines.some((l) => l.label === "Fabrication"));
+assert.equal(original.title, "Published estimate");
 
 const updated = buildUpdatedBreakdown({
   calculation: {
@@ -68,6 +71,7 @@ const updated = buildUpdatedBreakdown({
   },
 });
 assert.equal(updated.total, 9000);
+assert.equal(updated.title, "Your estimate");
 assert.ok(updated.lines.some((l) => /D edge|Skara/.test(l.label)));
 
 const changes = buildChangesBreakdown({
@@ -96,7 +100,10 @@ assert.ok(copy.includes("Original selection"));
 assert.ok(vm.includes("Original selection"));
 assert.equal(customerPriceEffectLabel({ includedInBaseline: true }), "Original selection");
 assert.equal(customerPriceEffectLabel({ customerPriceTreatment: "no_change" }), "No change");
-assert.equal(customerPriceEffectLabel({ reviewRequired: true }), "Requires estimator review");
+assert.equal(
+  customerPriceEffectLabel({ reviewRequired: true }),
+  "Elite will confirm this option and price.",
+);
 
 // Customer info autosave pipeline
 assert.ok(configView.includes("saveFnRef"));
@@ -105,9 +112,13 @@ assert.ok(configView.includes("450"));
 assert.ok(configView.includes('setSaveState("unsaved")'));
 assert.ok(configView.includes("infoDraft"));
 
-// Sink hierarchy — unified ESF catalog (no Stock / Special-Order split)
-assert.ok(configView.includes("ESF Sinks"));
-assert.ok(configView.includes("ESF Faucets"));
+// Sink hierarchy — unified Elite Stone Fabrication catalog (no Stock / Special-Order split)
+assert.ok(
+  configView.includes("Elite Stone Fabrication sinks") || configView.includes("ESF Sinks"),
+);
+assert.ok(
+  configView.includes("Elite Stone Fabrication faucets") || configView.includes("ESF Faucets"),
+);
 assert.ok(configView.includes("de-${role}-source-esf") || configView.includes("source-esf"));
 assert.ok(!configView.includes("de-sink-source-stock"));
 assert.ok(!configView.includes("de-sink-source-special-order"));
@@ -115,7 +126,7 @@ assert.ok(!configView.includes("ESF Stock Sinks"));
 assert.ok(!configView.includes("Special-Order Sinks"));
 assert.ok(configView.includes("de-${role}-source-${kind}") || configView.includes('["none", noneLabel]'));
 assert.ok(configView.includes("customer_provided"));
-assert.ok(configView.includes("Project add-ons"));
+assert.ok(!configView.includes("Project add-ons"));
 assert.ok(!configView.includes("Approved add-ons"));
 assert.ok(!configView.includes('"Special order"'));
 

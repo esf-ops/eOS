@@ -192,7 +192,7 @@ assert.ok(view.includes('e.key === "Escape"'), "42. Escape closes");
 assert.ok(view.includes('data-testid="de-modal-done"'), "43. Done closes modal");
 assert.ok(view.includes("Selected"), "44. selected not color-only");
 assert.ok(view.includes("py-3"), "45. tap-sized controls");
-assert.ok(view.includes("pb-28 lg:pb-10"), "46. sticky bar clearance");
+assert.ok(view.includes("pb-36 lg:pb-10") || view.includes("pb-28 lg:pb-10"), "46. sticky bar clearance");
 console.log("ok: 41-48 responsive/a11y markers");
 
 // --- 49-60 regression markers ---

@@ -159,7 +159,7 @@ const review = toPublicConfigurationOption({
   sell_price: 0,
   compatibility_json: { estimatorReviewRequired: true }
 });
-assert.equal(review.priceEffectLabel, "Requires estimator review");
+assert.equal(review.priceEffectLabel, "Elite will confirm this option and price.");
 
 assert.equal(isAccessoryFamilyHeading({ displayName: "Diamond 50/50 Accessories", variants: [{}] }), true);
 assert.equal(isAccessoryFamilyHeading({ displayName: "3018 Grid", variants: [] }), false);

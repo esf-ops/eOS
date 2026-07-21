@@ -123,6 +123,9 @@ export function resolvePremiumEdgeRatePerLf(pricingBasis) {
  * Authoritative public-safe price effect for one edge profile option.
  * Uses the approved final priced edge LF and pricing basis — never browser math.
  *
+ * Review-required only when a governed pricing input is truly missing (LF / rate).
+ * Canonical premium profiles never review-required merely for being premium.
+ *
  * @param {{
  *   profileToken: string,
  *   originalProfileToken?: string|null,
@@ -135,15 +138,31 @@ export function resolvePremiumEdgeRatePerLf(pricingBasis) {
  *   original: boolean,
  *   premium: boolean,
  *   available: boolean,
- *   priceEffectCents: number,
+ *   priceEffectCents: number|null,
  *   priceEffectLabel: string,
  *   customerPriceTreatment: string,
  *   visibleDelta: number|null,
- *   visibleSellPrice: number|null
+ *   visibleSellPrice: number|null,
+ *   reviewReasonCode?: string|null
  * }}
  */
 export function resolveEdgeOptionPriceEffect(args) {
-  const def = resolveEdgeProfileDefinition(args?.profileToken) || FREE_EDGE_PROFILES[0];
+  const def = resolveEdgeProfileDefinition(args?.profileToken);
+  if (!def) {
+    return {
+      profileKey: normalizeEdgeProfileToken(args?.profileToken),
+      label: "Edge profile",
+      original: false,
+      premium: false,
+      available: false,
+      priceEffectCents: null,
+      priceEffectLabel: "Elite will confirm this option and price.",
+      customerPriceTreatment: "review_required",
+      visibleDelta: null,
+      visibleSellPrice: null,
+      reviewReasonCode: "unknown_profile"
+    };
+  }
   const original = normalizeEdgeProfileToken(args?.originalProfileToken || "edge_eased");
   const isOriginal = def.optionToken === original;
   const premium = def.tier === "premium";
@@ -159,14 +178,30 @@ export function resolveEdgeOptionPriceEffect(args) {
         original: isOriginal,
         premium: true,
         available: false,
-        priceEffectCents: 0,
-        priceEffectLabel: "Requires estimator review",
+        priceEffectCents: null,
+        priceEffectLabel: "Elite will confirm this option and price.",
         customerPriceTreatment: "review_required",
         visibleDelta: null,
-        visibleSellPrice: null
+        visibleSellPrice: null,
+        reviewReasonCode: "missing_edge_lf"
       };
     }
     const rate = resolvePremiumEdgeRatePerLf(args?.pricingBasis);
+    if (!(Number(rate) > 0)) {
+      return {
+        profileKey: def.optionToken,
+        label: def.label,
+        original: isOriginal,
+        premium: true,
+        available: false,
+        priceEffectCents: null,
+        priceEffectLabel: "Elite will confirm this option and price.",
+        customerPriceTreatment: "review_required",
+        visibleDelta: null,
+        visibleSellPrice: null,
+        reviewReasonCode: "missing_edge_rate"
+      };
+    }
     // Integer cents: dollars/LF × LF × 100, half-up.
     priceEffectCents = Math.round(rate * lf * 100);
   }
@@ -181,7 +216,8 @@ export function resolveEdgeOptionPriceEffect(args) {
       priceEffectLabel: "Original selection",
       customerPriceTreatment: "original_selection",
       visibleDelta: null,
-      visibleSellPrice: null
+      visibleSellPrice: null,
+      reviewReasonCode: null
     };
   }
   if (!premium) {
@@ -195,7 +231,8 @@ export function resolveEdgeOptionPriceEffect(args) {
       priceEffectLabel: "Included",
       customerPriceTreatment: "included_alternate",
       visibleDelta: null,
-      visibleSellPrice: null
+      visibleSellPrice: null,
+      reviewReasonCode: null
     };
   }
   const dollars = priceEffectCents / 100;
@@ -210,7 +247,8 @@ export function resolveEdgeOptionPriceEffect(args) {
     priceEffectLabel: label,
     customerPriceTreatment: "delta",
     visibleDelta: dollars,
-    visibleSellPrice: null
+    visibleSellPrice: null,
+    reviewReasonCode: null
   };
 }
 

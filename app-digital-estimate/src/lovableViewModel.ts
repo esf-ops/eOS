@@ -203,36 +203,6 @@ function materialOptionsForRoom(options: ConfigOption[], roomKey: string): Confi
   return options.filter((o) => o.optionKey.startsWith(`material:${roomKey}:`));
 }
 
-function addonOptions(options: ConfigOption[]): ConfigOption[] {
-  return options.filter((o) => {
-    const key = o.optionKey || "";
-    if (key.startsWith("material:")) return false;
-    for (const role of ROOM_CHOICE_ROLES) {
-      if (key.startsWith(`${role}:`)) return false;
-    }
-    // Derived from room sink/faucet selections — never customer-editable qty controls.
-    if (
-      key === "qty-sink" ||
-      key === "qty-bar" ||
-      key.startsWith("qty-sink:") ||
-      key.startsWith("qty-bar:")
-    ) {
-      return false;
-    }
-    const label = String(o.displayLabel || "").toLowerCase();
-    if (
-      /kitchen sink cutouts?|vanity\/?bar sink cutouts?|esf stainless kitchen sink/.test(label)
-    ) {
-      return false;
-    }
-    // Sink/faucet product lines owned by room selection must not appear as project qty.
-    if (/^esf[-_ ]?(sink|faucet)/i.test(key) || /sink product|faucet product/.test(label)) {
-      return false;
-    }
-    return true;
-  });
-}
-
 function colorsForRoom(
   roomKey: string,
   options: ConfigOption[],
@@ -952,19 +922,6 @@ export function mapEliteOsToLovableViewModel(
     };
   });
 
-  const addons: LovableAddon[] = addonOptions(options).map((o) => ({
-    optionKey: o.optionKey,
-    id: o.id,
-    displayLabel: o.displayLabel,
-    description: o.description ?? null,
-    quantity: effectiveQty[o.optionKey] ?? o.defaultQty ?? 0,
-    minQty: o.minQty,
-    maxQty: o.maxQty ?? 99,
-    selectable: o.selectable,
-    includedInBaseline: Boolean(o.includedInBaseline),
-    availabilityState: o.availabilityState,
-  }));
-
   const materialUpgrade =
     delta != null && Math.abs(delta) >= 0.005
       ? formatCurrency(delta)
@@ -985,7 +942,8 @@ export function mapEliteOsToLovableViewModel(
     sourceProject,
     customerInfoDraft: draft,
     rooms,
-    addons,
+    // Project add-on quantity controls removed — do not surface governed qty options.
+    addons: [],
     originalTotal: baseline,
     updatedTotal: configured,
     changeFromOriginal: delta,
@@ -993,10 +951,8 @@ export function mapEliteOsToLovableViewModel(
     updatedTotalLabel: formatCurrency(configured),
     changeFromOriginalLabel: formatCurrency(delta),
     materialUpgradeLabel: materialUpgrade,
-    lineItems: (estimate.lineItems || []).map((li) => ({
-      label: li.label || "Included item",
-      amountLabel: formatCurrency(li.amount),
-    })),
+    // Trip charge / project lines appear once via roomPricing.projectAddOns in Estimate.
+    lineItems: [],
     missingInformationRequirements,
     catalogPermissions: {
       material: true,

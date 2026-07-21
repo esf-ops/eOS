@@ -1,8 +1,12 @@
 import { execSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import { buildDigitalEstimateHtmlCsp, supabaseOriginFromUrl } from "./src/htmlCsp.mjs";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function readBackendConnectOrigin(mode: string): string {
   const env = loadEnv(mode, process.cwd(), "");
@@ -78,6 +82,11 @@ function digitalEstimateHtmlPlugin(mode: string) {
 
 export default defineConfig(({ mode }) => ({
   plugins: [tailwindcss(), react(), digitalEstimateHtmlPlugin(mode)],
+  resolve: {
+    alias: {
+      "@quote-lib": path.resolve(repoRoot, "app-quote/src/lib"),
+    },
+  },
   server: {
     port: 5195,
     proxy: {

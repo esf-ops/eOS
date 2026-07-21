@@ -67,7 +67,10 @@ const dupSkus = [...skuCounts.entries()].filter(([, n]) => n > 1);
 assert.equal(dupSkus.length, 0, `duplicate SKUs: ${JSON.stringify(dupSkus.slice(0, 5))}`);
 console.log("ok: unique IDs / no duplicate SKUs");
 
-assert.ok(viewSrc.includes("ESF Sinks") && viewSrc.includes("ESF Faucets"));
+assert.ok(
+  (viewSrc.includes("Elite Stone Fabrication sinks") || viewSrc.includes("ESF Sinks")) &&
+    (viewSrc.includes("Elite Stone Fabrication faucets") || viewSrc.includes("ESF Faucets")),
+);
 assert.ok(viewSrc.includes("de-${role}-source-esf") || viewSrc.includes('source-esf'));
 assert.ok(!viewSrc.includes("ESF Stock Sinks"));
 assert.ok(!viewSrc.includes("Special-Order Sinks"));
@@ -103,11 +106,11 @@ console.log("ok: 12–14 / 20–21 exact finish → SKU → price");
 
 assert.ok(viewSrc.includes("customer_sink_model_required") || viewSrc.includes("provide the model later"));
 assert.ok(viewSrc.includes("de-faucet-hole-count") || viewSrc.includes("holeCount"));
-assert.ok(viewSrc.includes("Faucet and plumbing add-ons"));
-assert.ok(viewSrc.includes("Project add-ons"));
+assert.ok(viewSrc.includes("Faucet and plumbing add-ons") || viewSrc.includes("Accessories"));
+assert.ok(!viewSrc.includes("Project add-ons"));
 assert.ok(!viewSrc.includes("Approved add-ons"));
-assert.ok(vmSrc.includes("qty-sink") && vmSrc.includes("return false"));
-console.log("ok: customer-provided fields + project add-ons filter");
+assert.ok(vmSrc.includes("addons: []") && vmSrc.includes("lineItems: []"));
+console.log("ok: customer-provided fields + project add-ons removed");
 
 assert.ok(
   accessories.every((p) => !isAccessoryFamilyHeading(p) || (p.variants || []).length > 0),
