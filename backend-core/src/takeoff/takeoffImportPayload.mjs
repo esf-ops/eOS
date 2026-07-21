@@ -271,6 +271,10 @@ export function buildTakeoffImportPayload(params) {
         }
 
         const { eligible } = resolveRunBacksplashEligible(run, area);
+        const cutouts =
+          run.cutouts && typeof run.cutouts === "object" && !Array.isArray(run.cutouts)
+            ? { ...run.cutouts }
+            : {};
         importRoom.pieces.push({
           name: run.label,
           pieceType: pt,
@@ -287,6 +291,7 @@ export function buildTakeoffImportPayload(params) {
           roomId: room.id ?? null,
           areaId: area.id ?? null,
           backsplashEligible: eligible,
+          cutouts,
           backsplash: backsplashMetaForRun(run, area),
         });
       }

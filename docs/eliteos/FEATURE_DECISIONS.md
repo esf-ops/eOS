@@ -1963,3 +1963,16 @@
 | **SQL / env** | None. |
 | **Deployment surfaces** | `app-ai-takeoff`, `backend-core` (takeoff + studioRoomBacksplash + extraction prompt). |
 
+### 140. AI Takeoff Review — Backsplash checkbox / Cutouts input unclickable (CSS hit-target regression) (2026-07-21)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-21 |
+| **Bug** | After §139, hosted Takeoff Review showed per-run Backsplash checkboxes and Cutouts inputs, but clicks/typing did nothing. Length / Depth / Quantity remained editable. |
+| **Root cause** | **CSS / hit-testing overlay (not disabled-state).** `.ctr-table input { width: 100% }` applied to checkboxes, stretching Backsplash/Included hit boxes. Combined with `overflow: visible` on table cells, `min-width: 100%` on text inputs, and a nowrap Backsplash label ("No backsplash"), overflowing controls from mid-row columns intercepted pointer events on Cutouts. A resized sticky plan panel could also paint over the worksheet (`resize: both` without stacking isolation). Autosave was **not** disabling the controls. |
+| **Fix** | (1) Scope `width: 100%` to non-checkbox inputs only; give checkboxes fixed 1rem size + `pointer-events: auto`. (2) Default cell `overflow: hidden` with `td:focus-within` elevation (`z-index: 3`) so focused controls win hit-testing without permanently clipping. (3) Stack `.ctr-main` / table above `.ctr-plan` (`isolation: isolate`, z-index). (4) Unique `id` + `htmlFor` labels per `roomId-areaId-runId` for Backsplash, Included, Cutouts. (5) Disable row controls only when `approveStatus === "approved"` — never on save/AI phase. (6) Include `cutouts` on approved import payload pieces. |
+| **Tests** | New `takeoffRowControlsInteraction.test.mjs` (15 regressions). Existing identity + eligibility suites re-run. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `app-ai-takeoff` (CSS + worksheet), `backend-core` (import payload cutouts passthrough). |
+| **Hosted acceptance** | Toggle Backsplash on rows 1 and 3 independently; edit Cutouts on row 2; autosave + refresh; Tab/Space; approve payload carries both. |
+
