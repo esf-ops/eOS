@@ -45,6 +45,7 @@ import {
   mergeAiDraftPreservingConfirmed,
   ensureUniqueTakeoffIdentity
 } from "./takeoffAuthoritativeResult.mjs";
+import { normalizeTakeoffBacksplashEligibility } from "./takeoffBacksplashEligibility.mjs";
 import { syncIntakeTakeoffLinkFromJob } from "./intakeTakeoffLinkStatus.mjs";
 import { evaluateTakeoffQaGate }       from "./takeoffQaGate.mjs";
 import { getExtractionProvider, getInventoryProvider, getEvidenceProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
@@ -371,7 +372,8 @@ export async function runAiTakeoffExtraction({
   // Models can emit missing/placeholder/duplicated room/area/run ids. Every reviewer
   // surface patches, excludes, and deletes by run id — enforce draft-wide uniqueness
   // here so one estimator edit can never fan out across rows sharing an id.
-  const normalized = ensureUniqueTakeoffIdentity({
+  // Then normalize per-run backsplashEligible (legacy area height → eligibility only).
+  const uniqueIds = ensureUniqueTakeoffIdentity({
     schemaVersion: TAKEOFF_SCHEMA_VERSION,
     id:            parsed.id   ?? crypto.randomUUID(),
     status:        "draft",    // AI output is always 'draft' — estimator must review before use
@@ -383,6 +385,7 @@ export async function runAiTakeoffExtraction({
       fileName: file.original_filename,
     },
   }).takeoff;
+  const normalized = normalizeTakeoffBacksplashEligibility(uniqueIds).takeoff;
 
   // 10. Server-side recompute — AI totals are NEVER used for pricing.
   let computed, validation, importPlan, qaGate;

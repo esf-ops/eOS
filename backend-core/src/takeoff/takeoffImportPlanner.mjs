@@ -26,6 +26,7 @@
  */
 
 import { TAKEOFF_DIAGNOSTIC_LEVEL, TAKEOFF_DIAGNOSTIC_CODE, TAKEOFF_STATUS } from "./takeoffContract.mjs";
+import { resolveRunBacksplashEligible } from "./takeoffBacksplashEligibility.mjs";
 
 const { WARNING, INFO } = TAKEOFF_DIAGNOSTIC_LEVEL;
 const C = TAKEOFF_DIAGNOSTIC_CODE;
@@ -115,9 +116,26 @@ function planArea(area, areaPath) {
     if (warning) warnings.push(warning);
 
     const hasBsRuns = splashRuns.length > 0;
-    const hasLinearBs = (area.backsplashLinearIn ?? 0) > 0;
-    // backsplashMode: exclude only when area explicitly has no backsplash
-    const backsplashMode = (area.backsplashIncluded === false) ? "exclude" : "include";
+    const eligibleCounterRuns = counterRuns.filter(
+      (r) => resolveRunBacksplashEligible(r, area).eligible
+    );
+    const eligibleLen = eligibleCounterRuns.reduce(
+      (s, r) => s + (Number(r.lengthIn) || 0),
+      0
+    );
+    const hasEligibilitySignal = counterRuns.some(
+      (r) => typeof r.backsplashEligible === "boolean"
+    );
+    const hasLinearBs = !hasEligibilitySignal && (area.backsplashLinearIn ?? 0) > 0;
+    // Prefer per-run eligibility; fall back to legacy area include flag.
+    const backsplashMode =
+      area.backsplashIncluded === false
+        ? "exclude"
+        : hasEligibilitySignal
+          ? eligibleLen > 0
+            ? "include"
+            : "exclude"
+          : "include";
 
     const pieces = counterRuns.map((r) => ({
       label: r.label,
@@ -125,18 +143,20 @@ function planArea(area, areaPath) {
       lengthIn: Number(r.lengthIn) || 0,
       depthIn: Number(r.depthIn) || STANDARD_COUNTER_DEPTH_IN,
       shape: r.shape ?? "rect",
+      backsplashEligible: resolveRunBacksplashEligible(r, area).eligible,
       ...(r.notes?.length && { notes: r.notes })
     }));
 
     // If area has splash runs co-located (not a separate backsplash area), fold them in.
-    if (hasBsRuns && !hasLinearBs) {
+    if (hasBsRuns && !hasLinearBs && eligibleLen <= 0) {
       for (const r of splashRuns) {
         pieces.push({
           label: r.label,
           pieceType: "splash",
           lengthIn: Number(r.lengthIn) || 0,
           depthIn: Number(r.depthIn) || STANDARD_BACKSPLASH_HEIGHT_IN,
-          shape: r.shape ?? "rect"
+          shape: r.shape ?? "rect",
+          backsplashEligible: true
         });
       }
     }
@@ -153,8 +173,26 @@ function planArea(area, areaPath) {
     };
     groups.push(group);
 
-    // If backsplash is expressed as linear inches, add a separate Backsplash group.
-    if (hasLinearBs) {
+    // Eligible counter lengths → separate Backsplash group (provisional 4" for IE seed).
+    // Customer Digital Estimate still chooses the real height/style later.
+    if (eligibleLen > 0) {
+      groups.push({
+        label: `${area.label} — Backsplash`,
+        shapeType: "Backsplash",
+        overlapMode: "none",
+        backsplashMode: "include",
+        pieces: [{
+          label: "Eligible backsplash length",
+          pieceType: "splash",
+          lengthIn: eligibleLen,
+          depthIn: STANDARD_BACKSPLASH_HEIGHT_IN,
+          shape: "rect",
+          backsplashEligible: true
+        }],
+        ...(area.sourcePages?.length && { sourcePages: area.sourcePages })
+      });
+    } else if (hasLinearBs) {
+      // Legacy area-level linear inches (no per-run eligibility on draft yet).
       const heightIn = area.backsplashHeightIn ?? STANDARD_BACKSPLASH_HEIGHT_IN;
       groups.push({
         label: `${area.label} — Backsplash`,

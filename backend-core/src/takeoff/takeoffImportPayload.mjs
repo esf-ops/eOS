@@ -17,6 +17,10 @@ import {
 } from "./takeoffApprovalGate.mjs";
 import { emptyReviewState, normalizeReviewState } from "./takeoffReviewStatus.mjs";
 import { buildTakeoffSourceMetaForImport } from "./takeoffImportMeasurements.mjs";
+import {
+  resolveRunBacksplashEligible,
+  sumEligibleBacksplashLengthIn
+} from "./takeoffBacksplashEligibility.mjs";
 
 export const TAKEOFF_IMPORT_SCHEMA_VERSION = "takeoff_import_v1";
 
@@ -41,21 +45,40 @@ function resolvePieceType(run) {
 
 function backsplashMetaForRun(run, area) {
   const pt = resolvePieceType(run);
+  const { eligible } = resolveRunBacksplashEligible(run, area);
   if (pt === "counter") {
-    if ((area.backsplashScope === "no_stone" || area.backsplashScope === "tile_by_others")) {
-      return { scope: area.backsplashScope, heightIn: 0, linearIn: 0, sqft: 0, type: "none" };
+    if (area.backsplashScope === "no_stone" || area.backsplashScope === "tile_by_others") {
+      return {
+        scope: area.backsplashScope,
+        eligible: false,
+        heightIn: null,
+        linearIn: 0,
+        sqft: 0,
+        type: "none"
+      };
     }
-    return null;
+    // Counter runs: eligibility only. Customer chooses height later — do not invent 4".
+    return {
+      scope: area.backsplashScope ?? "stone",
+      eligible,
+      heightIn: null,
+      linearIn: eligible ? Number(run.lengthIn) || 0 : 0,
+      sqft: 0,
+      type: eligible ? "eligible" : "none"
+    };
   }
-  const h = Number(run.depthIn) || area.backsplashHeightIn || 4;
+  // Explicit splash / FHB geometry pieces keep measured height as optional metadata.
+  const h = Number(run.depthIn) || 0;
   let type = "standard";
   if (pt === "fhb" || h >= 48) type = "full_height";
   else if (h > 4.5) type = "high";
+  else if (h <= 0) type = "eligible";
   return {
     scope: area.backsplashScope ?? "stone",
-    heightIn: h,
+    eligible: true,
+    heightIn: h > 0 ? h : null,
     linearIn: Number(run.lengthIn) || 0,
-    sqft: sfFromRun(run.lengthIn, run.depthIn),
+    sqft: h > 0 ? sfFromRun(run.lengthIn, run.depthIn) : 0,
     type,
   };
 }
@@ -218,12 +241,16 @@ export function buildTakeoffImportPayload(params) {
 
   for (const room of importReady.rooms ?? []) {
     const planRoom = importPlan.rooms.find((pr) => pr.roomId === room.id);
+    const eligibility = sumEligibleBacksplashLengthIn(room);
     /** @type {import('./takeoffImportPayload.mjs').TakeoffImportRoom} */
     const importRoom = {
       name: room.name,
       type: room.roomType ?? room.type ?? null,
       sourcePages: room.sourcePages ?? [],
       pieces: [],
+      eligibleBacksplashLengthIn: eligibility.eligibleBacksplashLengthIn,
+      eligibleRunCount: eligibility.eligibleRunCount,
+      excludedRunCount: eligibility.excludedRunCount,
       suggestedAddOns: suggestedAddOns.filter((a) =>
         a.sourceNote.toLowerCase().includes(String(room.name).toLowerCase())
       ),
@@ -243,6 +270,7 @@ export function buildTakeoffImportPayload(params) {
           if (len <= 0 || dep <= 0) continue;
         }
 
+        const { eligible } = resolveRunBacksplashEligible(run, area);
         importRoom.pieces.push({
           name: run.label,
           pieceType: pt,
@@ -255,6 +283,10 @@ export function buildTakeoffImportPayload(params) {
           sourcePage: run.sourcePage ?? area.sourcePages?.[0] ?? null,
           sourceEvidenceIds: run.sourceEvidenceIds ?? [],
           reviewStatus: "approved",
+          runId: run.id ?? null,
+          roomId: room.id ?? null,
+          areaId: area.id ?? null,
+          backsplashEligible: eligible,
           backsplash: backsplashMetaForRun(run, area),
         });
       }

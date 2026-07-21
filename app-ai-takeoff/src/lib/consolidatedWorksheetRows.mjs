@@ -6,8 +6,13 @@
  * hydration). Update helpers here additionally scope by room and area so a patch
  * can only ever land on exactly one run.
  *
+ * Backsplash contract: eligibility is per-run (`backsplashEligible`), never an
+ * area-shared height. Customer chooses height/style later in Digital Estimate.
+ *
  * Pure functions — no I/O, no React. Safe for browser + Node tests.
  */
+
+import { resolveRunBacksplashEligible } from "../../../backend-core/src/takeoff/takeoffBacksplashEligibility.mjs";
 
 /** Rounded square feet from length × depth inches. */
 export function sfFrom(lengthIn, depthIn) {
@@ -33,6 +38,7 @@ export function flattenPieces(result, excludedRunIds) {
         const parts = Object.entries(cutouts)
           .filter(([, v]) => Number(v) > 0)
           .map(([k, v]) => `${k}:${v}`);
+        const eligibility = resolveRunBacksplashEligible(run, area);
         rows.push({
           key: `${room.id}:${area.id}:${run.id}`,
           roomId: room.id,
@@ -44,7 +50,7 @@ export function flattenPieces(result, excludedRunIds) {
           depthIn: Number(run.depthIn) || 0,
           quantity: Number(run.quantity) || 1,
           countertopSf: sfFrom(Number(run.lengthIn) || 0, Number(run.depthIn) || 0),
-          backsplashHeightIn: Number(area.backsplashHeightIn ?? area.backsplashHeight ?? 0) || 0,
+          backsplashEligible: eligibility.eligible,
           included: !excludedRunIds.has(run.id),
           cutoutsLabel: parts.join(", "),
           note: String(run.notes?.[0] ?? run.note ?? ""),

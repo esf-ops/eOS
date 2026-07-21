@@ -1,7 +1,10 @@
 /**
  * Room-level backsplash scope for Studio Estimate Scope.
- * Takeoff geometry remains authoritative for measured lengths/heights;
- * commercial include/height controls live on the estimate room.
+ *
+ * Takeoff authority for length = sum of approved run lengths where
+ * `backsplashEligible === true` (never room/piece name heuristics).
+ * Customer later chooses No / 4-inch / custom / full-height; Studio seeds a
+ * provisional standard 4" include when any eligible length exists.
  */
 
 function round2(n) {
@@ -21,6 +24,16 @@ export function deriveRoomBacksplashFromImportRoom(importRoom) {
   let maxHeightIn = 0;
   let heightMode = "none";
   let source = null;
+  let sawEligibilityField = false;
+
+  // Prefer room-level aggregate from the import payload when present.
+  const roomEligibleLen = Number(importRoom?.eligibleBacksplashLengthIn);
+  if (Number.isFinite(roomEligibleLen) && roomEligibleLen > 0) {
+    measuredLengthIn = roomEligibleLen;
+    heightMode = "standard";
+    source = "estimator";
+    sawEligibilityField = true;
+  }
 
   for (const p of pieces) {
     const bs = p?.backsplash && typeof p.backsplash === "object" ? p.backsplash : null;
@@ -29,6 +42,33 @@ export function deriveRoomBacksplashFromImportRoom(importRoom) {
       pieceType.includes("backsplash") ||
       pieceType === "fhb" ||
       pieceType === "splash";
+
+    // New contract: per-run boolean eligibility on counter pieces.
+    if (typeof p?.backsplashEligible === "boolean" || typeof bs?.eligible === "boolean") {
+      sawEligibilityField = true;
+      const eligible =
+        typeof p?.backsplashEligible === "boolean"
+          ? p.backsplashEligible
+          : Boolean(bs?.eligible);
+      if (!eligible) continue;
+      if (!(Number.isFinite(roomEligibleLen) && roomEligibleLen > 0)) {
+        measuredLengthIn += Number(bs?.linearIn) || Number(p.lengthIn) || 0;
+      }
+      // Optional authoritative vertical height (FHB / custom) — never invent 4" here.
+      const explicitH = Number(bs?.heightIn);
+      if (Number.isFinite(explicitH) && explicitH > 0) {
+        maxHeightIn = Math.max(maxHeightIn, explicitH);
+        if (bs?.type === "full_height" || explicitH >= 48) heightMode = "full_height";
+        else if (bs?.type === "high" || explicitH > 4.5) {
+          if (heightMode !== "full_height") heightMode = "custom";
+        } else if (heightMode === "none") heightMode = "standard";
+        if (Number(bs?.sqft) > 0) backsplashSqft += Number(bs.sqft);
+      } else if (heightMode === "none") {
+        heightMode = "standard";
+      }
+      source = source || "estimator";
+      continue;
+    }
 
     if (bs && bs.type && bs.type !== "none") {
       backsplashSqft += Number(bs.sqft) || 0;
@@ -49,6 +89,7 @@ export function deriveRoomBacksplashFromImportRoom(importRoom) {
     }
   }
 
+  measuredLengthIn = round2(measuredLengthIn);
   const includeBacksplash =
     backsplashSqft > 0 || measuredLengthIn > 0 || maxHeightIn > 0;
 
@@ -60,8 +101,13 @@ export function deriveRoomBacksplashFromImportRoom(importRoom) {
       if (heightMode === "none") {
         heightMode = maxHeightIn >= 48 ? "full_height" : maxHeightIn > 4.5 ? "custom" : "standard";
       }
+    } else if (sawEligibilityField || measuredLengthIn > 0) {
+      // Eligible length without vertical height → provisional Studio seed at 4".
+      // Customer Digital Estimate still chooses the real mode later.
+      backsplashHeightIn = 4;
+      heightMode = "standard";
+      source = source || "calculated";
     } else {
-      // Standard 4" only when included and no explicit height exists.
       backsplashHeightIn = 4;
       heightMode = "standard";
       source = source || "calculated";
@@ -85,7 +131,9 @@ export function deriveRoomBacksplashFromImportRoom(importRoom) {
     backsplashMeasuredLengthIn: measuredLengthIn > 0 ? round2(measuredLengthIn) : null,
     backsplashSqft: includeBacksplash ? round2(backsplashSqft) : 0,
     backsplashHeightMode: includeBacksplash ? heightMode : "none",
-    backsplashSource: includeBacksplash ? source || "calculated" : null
+    backsplashSource: includeBacksplash ? source || "calculated" : null,
+    eligibleRunCount: Number(importRoom?.eligibleRunCount) || null,
+    excludedRunCount: Number(importRoom?.excludedRunCount) || null
   };
 }
 

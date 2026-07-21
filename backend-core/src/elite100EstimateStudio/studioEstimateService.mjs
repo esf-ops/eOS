@@ -380,33 +380,26 @@ export function createStudioEstimateService(deps = {}) {
               countertopSqft: pieces.reduce((s, p) => s + p.sqft, 0),
               ...deriveRoomBacksplashFromImportRoom({
                 name: room.name,
-                pieces: (room.areas ?? []).flatMap((area) => {
-                  const linear = Number(area.backsplashLinearIn) || 0;
-                  const h = Number(area.backsplashHeightIn ?? area.backsplashHeight ?? 0);
-                  if (linear <= 0) return [];
-                  const heightIn = h > 0 ? h : 4;
-                  const sqft = Math.round(((linear * heightIn) / 144) * 100) / 100;
-                  return [
-                    {
-                      name: `${area.label || "Area"} splash`,
-                      pieceType: "backsplash",
-                      lengthIn: linear,
-                      depthIn: heightIn,
-                      sqft,
-                      backsplash: {
-                        type:
-                          heightIn >= 48
-                            ? "full_height"
-                            : heightIn > 4.5
-                              ? "high"
-                              : "standard",
-                        heightIn,
-                        linearIn: linear,
-                        sqft
-                      }
+                pieces: (room.areas ?? []).flatMap((area) =>
+                  (area.runs ?? []).map((run) => ({
+                    name: run.label || "Piece",
+                    pieceType: run.pieceType || "counter",
+                    lengthIn: Number(run.lengthIn) || 0,
+                    depthIn: Number(run.depthIn) || 0,
+                    sqft: Math.round(
+                      (((Number(run.lengthIn) || 0) * (Number(run.depthIn) || 0)) / 144) * 100
+                    ) / 100,
+                    backsplashEligible: run.backsplashEligible === true,
+                    backsplash: {
+                      eligible: run.backsplashEligible === true,
+                      type: run.backsplashEligible === true ? "eligible" : "none",
+                      linearIn:
+                        run.backsplashEligible === true ? Number(run.lengthIn) || 0 : 0,
+                      heightIn: null,
+                      sqft: 0
                     }
-                  ];
-                })
+                  }))
+                )
               }),
               pieces,
               notes: ""

@@ -39,7 +39,7 @@
  *     visible geometry. Do not deduct cutouts from material sf. Nonstandard depths must
  *     cite evidence. Conflict → requiresEstimatorReview, never silent resolution.
  */
-export const PROMPT_VERSION = "v6.1";
+export const PROMPT_VERSION = "v6.2";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -71,8 +71,6 @@ const SCHEMA_EXAMPLE = `
           "areaType": "countertop",
           "overlapMode": "L-Shape",
           "backsplashIncluded": true,
-          "backsplashHeightIn": 4,
-          "backsplashLinearIn": 163.5,
           "cornerDeductions": [{ "depthA_in": 25.5, "depthB_in": 25.5 }],
           "exclusions": [{ "label": "Sink cutout", "lengthIn": 33, "depthIn": 22 }],
           "notes": ["No backsplash behind range"],
@@ -86,6 +84,7 @@ const SCHEMA_EXAMPLE = `
               "depthIn": 25.5,
               "shape": "rect",
               "pieceType": "counter",
+              "backsplashEligible": true,
               "exposedEndOverhangIn": 0,
               "sourcePages": [1],
               "notes": ["Sink at center"],
@@ -100,6 +99,7 @@ const SCHEMA_EXAMPLE = `
               "depthIn": 25.5,
               "shape": "rect",
               "pieceType": "counter",
+              "backsplashEligible": true,
               "sourcePages": [1],
               "notes": ["Range at right end — backsplash interrupted"],
               "lengthEvidenceId": "dim-002",
@@ -122,6 +122,7 @@ const SCHEMA_EXAMPLE = `
               "depthIn": 41.0,
               "shape": "rect",
               "pieceType": "counter",
+              "backsplashEligible": false,
               "sourcePages": [1],
               "notes": ["Seating on south side"],
               "lengthEvidenceId": "dim-003",
@@ -195,22 +196,24 @@ EVIDENCE TRACEABILITY (v6) — REQUIRED FOR EVERY RUN
 • Set assemblyConfidence = "high" when the run directly matches a single unambiguous evidence dimension.
   Set "medium" when inferring from adjacent dimensions or multiple sources. Set "low" when uncertain.
 
-BACKSPLASH — READ CAREFULLY
-• backsplashIncluded: set true whenever any backsplash applies to this area; set false only when the plan or notes explicitly say otherwise.
-• backsplashLinearIn: REQUIRED when backsplash is present. Set to the total linear inches of counter wall that receives backsplash (from the run lengths, minus appliance openings and open sides). Do NOT leave unset or at 0 when a backsplash note exists.
-• backsplashHeightIn: REQUIRED when backsplashLinearIn > 0. Default is 4 (inches) unless the plan specifies a different height. Always set explicitly.
+BACKSPLASH — READ CAREFULLY (eligibility, not height)
+• Per-run field backsplashEligible (boolean) is REQUIRED on every counter run:
+  - true = this run meets a wall or cabinet and can receive stone backsplash
+  - false = island, open peninsula edge, exposed/open run, or plan says no B/S on that run
+• Do NOT invent a backsplash height for ordinary 4-inch pricing. The customer chooses No / 4-inch / custom / full-height later. Estimators only mark eligibility.
+• backsplashIncluded (area): set true when ANY run in the area is backsplashEligible; set false when the plan says no stone backsplash for the whole area.
+• Optional legacy fields backsplashLinearIn / backsplashHeightIn may be omitted. Prefer per-run backsplashEligible instead.
 • CRITICAL: If a plan note, label, or annotation mentions B/S, backsplash, splash, 4" B/S, 4 inch B/S, "std B/S", or similar:
-  - Set backsplashIncluded = true on the relevant area.
-  - Estimate backsplashLinearIn from the runs that receive backsplash (typically the perimeter/wall runs; exclude islands, open peninsula sides, and appliance gaps).
-  - Set backsplashHeightIn = 4 for standard backsplash, or use the height stated in the note.
+  - Set backsplashEligible = true on the wall-backed counter runs that receive backsplash.
+  - Set backsplashEligible = false on islands, open peninsula sides, and appliance-gap runs.
   - Record the note in the area's notes array.
-• If the plan or note says "no B/S", "no backsplash", "n/b/s" → set backsplashIncluded = false, backsplashLinearIn = 0, and add to assumptions: "No backsplash per plan note."
-• If the note says "tile on wall", "existing tile", or "customer tile" → set backsplashIncluded = false. Stone backsplash is not required. Add to notes: "Tile on wall — stone backsplash not fabricated." Add to assumptions: "Tile backsplash noted — review required."
-• If the plan shows a backsplash sqft total (e.g. "8.52 sq ft B/S", "8.5 sf backsplash") but you cannot determine specific linear inches: record it in aiProvidedTotals.backsplashExactSf and add to projectAssumptions: "Backsplash sqft reference found but linear inches could not be determined — estimator must verify and enter backsplashLinearIn manually." Do NOT leave all areas with backsplashLinearIn = 0 when you also record a positive aiProvidedTotals.backsplashExactSf unless the notes explicitly say no backsplash.
-• "full height", "FHB", "full-height backsplash" → pieceType = "fhb" on the backsplash run; use height from counter to upper cabinets if visible, otherwise note "FHB height unknown — review required."
-• Open peninsula/island sides: no backsplash unless plan explicitly notes it.
-• Range/cooktop/refrigerator openings interrupt backsplash — subtract the appliance opening width from backsplashLinearIn unless the plan says otherwise.
-• When you record a backsplash-related assumption or note, also set backsplashIncluded and backsplashLinearIn consistently. Do not leave them unset.
+• If the plan or note says "no B/S", "no backsplash", "n/b/s" → set backsplashEligible = false on all runs, backsplashIncluded = false, and add to assumptions: "No backsplash per plan note."
+• If the note says "tile on wall", "existing tile", or "customer tile" → set backsplashEligible = false. Stone backsplash is not required. Add to notes: "Tile on wall — stone backsplash not fabricated." Add to assumptions: "Tile backsplash noted — review required."
+• If the plan shows a backsplash sqft total (e.g. "8.52 sq ft B/S", "8.5 sf backsplash") but you cannot determine which runs are eligible: record it in aiProvidedTotals.backsplashExactSf and add to projectAssumptions: "Backsplash sqft reference found but eligible runs could not be determined — estimator must mark backsplashEligible per run."
+• "full height", "FHB", "full-height backsplash" → pieceType = "fhb" on an explicit splash/FHB run when measured; optionally set vertical height on that splash run only. Do NOT put ordinary eligibility into height fields.
+• Open peninsula/island sides: backsplashEligible = false unless the plan explicitly notes splash there.
+• Range/cooktop/refrigerator openings interrupt backsplash — mark those interrupted segments ineligible or shorten the eligible wall runs accordingly.
+• Your backsplashEligible suggestion is not final; the estimator confirms before approval.
 
 CUTOUTS AND EXCLUSIONS — CRITICAL RULE
 • Sink cutouts, cooktop cutouts, and faucet holes are FABRICATION OPERATIONS, not material exclusions.
@@ -263,7 +266,7 @@ REFERENCE TOTALS ARE COMPARISON-ONLY
 
 NO BACKSPLASH — HONOR EXPLICITLY
 • If the plan says "no b/s", "no BS", "n/b/s", "NO BS", "no backsplash", or a referenceTotals entry has
-  noBacksplash = true: set backsplashIncluded = false and backsplashLinearIn = 0 on ALL areas.
+  noBacksplash = true: set backsplashIncluded = false and backsplashEligible = false on ALL runs/areas.
   Do NOT add any backsplash to any area, even if a wall run exists, unless a conflicting page explicitly
   requires stone backsplash.
 • If a different page conflicts (e.g. "FHB on range wall"), set requiresEstimatorReview = true on that area
