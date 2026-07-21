@@ -68,6 +68,18 @@ import { BACKSPLASH_REVIEW_CODES } from "./backsplashPricingAuthority.mjs";
 
 /** Legacy/no-op cutout + stock-sink option key prefixes (never matched by parseProductOptionKey). */
 const CUTOUT_KEY_PATTERN = /^(qty-sink|qty-bar|qty-ss):(.+)$/;
+const UUID_TOKEN_PATTERN =
+  /[0-9a-f]{8}[-\s][0-9a-f]{4}[-\s][1-5][0-9a-f]{3}[-\s][89ab][0-9a-f]{3}[-\s][0-9a-f]{12}/gi;
+
+function customerSafeProjectionLabel(value, fallback = "Item") {
+  const cleaned = String(value || "")
+    .replace(UUID_TOKEN_PATTERN, "")
+    .replace(/\brun\s+(?:id\s*)?[-—:]?\s*(?=$|[;—,])/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s—:;,]+|[\s—:;,]+$/g, "")
+    .trim();
+  return cleaned || fallback;
+}
 
 /** Plain-language labels for governed backsplash review codes (section 12). */
 const BACKSPLASH_REVIEW_LABEL = Object.freeze({
@@ -284,16 +296,61 @@ export function buildUpdatedRoomPricingProjection(args) {
   const frozenRoomCustomLinesCents = frozenRoomCustomLines.reduce((s, l) => s + l.amountCents, 0);
   const frozenProjectAddOnCents = frozenProjectAddOnLines.reduce((s, l) => s + l.amountCents, 0);
   const frozenInternalCents = frozenInternalTargets.reduce((s, t) => s + t.amountCents, 0);
+  const frozenInternalByRoomCategory = new Map();
+  for (const target of frozenInternalTargets) {
+    const key = `${target.roomKey}:${target.category}`;
+    frozenInternalByRoomCategory.set(
+      key,
+      (frozenInternalByRoomCategory.get(key) || 0) + target.amountCents
+    );
+  }
+  const frozenCountertopByRoom = new Map();
+  const frozenBacksplashByRoom = new Map();
+  if (useProportionalAllocation && published) {
+    for (const snapRoom of Array.isArray(published.rooms) ? published.rooms : []) {
+      const roomKey = resolveFrozenRoomKey(snapRoom?.roomId, snapRoom?.roomName);
+      if (!roomKey) continue;
+      if (snapRoom?.countertopAmountCents != null) {
+        frozenCountertopByRoom.set(
+          roomKey,
+          Math.trunc(Number(snapRoom.countertopAmountCents) || 0) -
+            (frozenInternalByRoomCategory.get(`${roomKey}:countertop`) || 0)
+        );
+      }
+      if (snapRoom?.backsplashAmountCents != null) {
+        frozenBacksplashByRoom.set(
+          roomKey,
+          Math.trunc(Number(snapRoom.backsplashAmountCents) || 0) -
+            (frozenInternalByRoomCategory.get(`${roomKey}:backsplash`) || 0)
+        );
+      }
+    }
+  }
+  const hasCompleteFrozenCategoryOwnership =
+    internalRooms.length > 0 &&
+    internalRooms.every(
+      (r) =>
+        frozenCountertopByRoom.has(String(r.roomKey)) &&
+        frozenBacksplashByRoom.has(String(r.roomKey))
+    );
+  const effectiveBaselineBacksplashCents = hasCompleteFrozenCategoryOwnership
+    ? [...frozenBacksplashByRoom.values()].reduce((sum, cents) => sum + cents, 0)
+    : knownBaselineBacksplashCents;
 
   const countertopOnlyBaselineCents = useProportionalAllocation
     ? baselineExactTotalCents -
-      knownBaselineBacksplashCents -
+      effectiveBaselineBacksplashCents -
       frozenRoomCustomLinesCents -
       frozenProjectAddOnCents -
       frozenInternalCents
     : null;
   const baselineShares = useProportionalAllocation
-    ? allocateProportionally(countertopOnlyBaselineCents, internalRooms.map((r) => Number(r.chargeableCounterSf) || 0))
+    ? hasCompleteFrozenCategoryOwnership
+      ? internalRooms.map((r) => frozenCountertopByRoom.get(String(r.roomKey)) || 0)
+      : allocateProportionally(
+          countertopOnlyBaselineCents,
+          internalRooms.map((r) => Number(r.chargeableCounterSf) || 0)
+        )
     : [];
 
   const order = [];
@@ -306,12 +363,20 @@ export function buildUpdatedRoomPricingProjection(args) {
     // engine keeps that room's contribution to the total unchanged from baseline (delta
     // stays 0 rather than inventing a new number) — mirror that here so the displayed
     // room total always matches the authoritative configured total exactly.
-    const backsplashAmountCents =
+    const frozenBaselineBacksplash = frozenBacksplashByRoom.get(roomKey);
+    const configuredBacksplash =
       r.backsplashConfiguredAmountCents != null
         ? Math.trunc(Number(r.backsplashConfiguredAmountCents))
-        : r.backsplashBaselineAmountCents != null
-          ? Math.trunc(Number(r.backsplashBaselineAmountCents))
-          : null;
+        : null;
+    const backsplashAmountCents =
+      r.backsplashMode === "none"
+        ? 0
+        : configuredBacksplash != null
+          ? configuredBacksplash
+          : frozenBaselineBacksplash ??
+            (r.backsplashBaselineAmountCents != null
+              ? Math.trunc(Number(r.backsplashBaselineAmountCents))
+              : null);
     const reviewRequiredItems = [];
     for (const code of Array.isArray(r.backsplashReviewCodes) ? r.backsplashReviewCodes : []) {
       reviewRequiredItems.push({
@@ -377,6 +442,7 @@ export function buildUpdatedRoomPricingProjection(args) {
   }
 
   let projectLevelOptionsCents = 0;
+  const projectOptionLines = [];
   for (const opt of Array.isArray(internal.options) ? internal.options : []) {
     const amountCents = Math.trunc(Number(opt.amountCents || 0));
     const { roomKey, category } = categoryForOptionKey(opt.optionKey);
@@ -393,19 +459,56 @@ export function buildUpdatedRoomPricingProjection(args) {
       applySelectedLabel(room, category, opt);
     } else {
       projectLevelOptionsCents += amountCents;
+      if (amountCents !== 0 || Number(opt.qty || 0) > 0) {
+        projectOptionLines.push({
+          label: opt.displayLabel || "Project add-on",
+          amountCents
+        });
+      }
     }
   }
 
   // Re-attach frozen custom-line dollars (carved out of the pool above):
   // internal-only allocations absorb silently into stone categories; explicit
   // customer-facing lines stay named on their room.
+  //
+  // Configured-state eligibility rule (Updated only — the frozen Original
+  // snapshot and its customLineAllocations audit are NEVER rewritten):
+  //  - Backsplash is eligible only while the room's configured mode is not
+  //    "none" and the configured amount is resolvable. Mode "none" writes an
+  //    explicit $0; re-adding frozen hidden cents into that zero would invent
+  //    a positive Backsplash amount after removal.
+  //  - When a frozen Backsplash target becomes ineligible, its integer cents
+  //    redistribute to the room's remaining eligible stone target under the
+  //    same governed hierarchy (internal_custom_line_allocation_v1 rule 5:
+  //    no eligible backsplash → Countertop absorbs). With one eligible target
+  //    the largest-remainder distribution is the full amount — deterministic
+  //    by construction, no balancing plug, exact reconciliation preserved.
+  //  - Each redirect is recorded as an internal derived-reattachment audit
+  //    row (never exposed in public DTOs; hidden line names stay hidden).
+  /** @type {Array<{ roomId: string, fromCategory: string, toCategory: string, amountCents: number, reason: string }>} */
+  const internalReattachments = [];
   for (const target of frozenInternalTargets) {
     const room = roomsByKey.get(target.roomKey);
     if (!room) continue;
-    if (target.category === "backsplash" && room.backsplashAmountCents != null) {
+    const backsplashEligible =
+      room.backsplashAmountCents != null && room.backsplashMode !== "none";
+    if (target.category === "backsplash" && backsplashEligible) {
       room.backsplashAmountCents += target.amountCents;
     } else {
       room.countertopAmountCents += target.amountCents;
+      if (target.category === "backsplash") {
+        internalReattachments.push({
+          roomId: String(target.roomKey),
+          fromCategory: "backsplash",
+          toCategory: "countertop",
+          amountCents: target.amountCents,
+          reason:
+            room.backsplashMode === "none"
+              ? "configured_backsplash_removed"
+              : "configured_backsplash_unresolved"
+        });
+      }
     }
   }
   for (const line of frozenRoomCustomLines) {
@@ -436,6 +539,7 @@ export function buildUpdatedRoomPricingProjection(args) {
     ...allCustomLines
       .filter((l) => l.customerFacing !== false)
       .map((l) => ({ label: l.label, amountCents: Math.trunc(Number(l.amountCents || 0)) })),
+    ...projectOptionLines,
     ...frozenProjectAddOnLines
   ];
 
@@ -478,7 +582,10 @@ export function buildUpdatedRoomPricingProjection(args) {
     deltaFromOriginalCents: internal.exactConfigurationDeltaCents != null ? Math.trunc(Number(internal.exactConfigurationDeltaCents)) : null,
     reviewRequiredCount,
     reconciliationStatus,
-    diagnostics
+    diagnostics,
+    // Internal-only derived reattachment audit (configured-state eligibility
+    // redirects of frozen hidden allocations). Never mapped into public DTOs.
+    internalReattachments
   };
 }
 
@@ -536,7 +643,7 @@ export function buildOriginalRoomPricingProjectionFromSnapshot(snapshot) {
     customerFacingLines: (Array.isArray(r?.customerFacingLines) ? r.customerFacingLines : [])
       .filter((l) => l && l.customerVisible !== false)
       .map((l) => ({
-        category: "custom",
+        category: String(l.category || "custom"),
         label: String(l.label || "Item"),
         amountCents: Math.trunc(Number(l.amountCents) || 0)
       })),
@@ -696,8 +803,8 @@ export function buildChangesRoomPricingProjection(args) {
         roomName: room.roomName,
         category: "material",
         categoryLabel: CHANGES_CATEGORY_LABEL.material,
-        originalLabel: room.materialFromGroup || "Original material",
-        updatedLabel: room.materialToGroup || room.selectedMaterial || "Updated material",
+        originalLabel: origRoom?.selectedMaterial || "Original material",
+        updatedLabel: room.selectedMaterial || "Updated material",
         amountDeltaCents: room.materialDeltaCents,
         status: "changed"
       });
@@ -798,7 +905,7 @@ export function buildChangesRoomPricingProjection(args) {
 /** Strip an internal room object down to the section-9 customer-safe public shape. */
 function toPublicRoom(room) {
   return {
-    roomName: room.roomName,
+    roomName: customerSafeProjectionLabel(room.roomName, "Room"),
     countertopAmount: room.countertopAmountCents != null ? centsToDollars(room.countertopAmountCents) : null,
     backsplashAmount: room.backsplashAmountCents != null ? centsToDollars(room.backsplashAmountCents) : null,
     addOnsAmount: room.addOnsAmountCents != null ? centsToDollars(room.addOnsAmountCents) : null,
@@ -812,6 +919,11 @@ function toPublicRoom(room) {
     selectedAccessories: room.selectedAccessories || [],
     selectedEdge: room.selectedEdge || null,
     selectedSpecialtyItems: room.selectedSpecialtyItems || [],
+    addOnLines: (room.customerFacingLines || []).map((line) => ({
+      category: CHANGES_CATEGORY_LABEL[line.category] || "Add-on",
+      label: customerSafeProjectionLabel(line.label),
+      amount: line.amountCents != null ? centsToDollars(line.amountCents) : null
+    })),
     reviewRequired: (room.reviewRequiredItems || []).length > 0,
     reviewRequiredCategories: (room.reviewRequiredItems || []).map((i) => i.category)
   };
@@ -825,13 +937,19 @@ function toPublicRoom(room) {
 export function toPublicRoomPricingDto(projection) {
   const rooms = (projection?.rooms || []).map(toPublicRoom);
   const projectAddOns = (projection?.projectAddOns || []).map((l) => ({
-    label: l.label,
+    label: customerSafeProjectionLabel(l.label, "Project item"),
     amount: l.amountCents != null ? centsToDollars(l.amountCents) : null
   }));
   return {
     kind: projection?.kind || "updated",
     rooms,
     projectAddOns,
+    projectTotal:
+      projection?.configuredExactTotalCents != null
+        ? centsToDollars(projection.configuredExactTotalCents)
+        : projection?.projectTotalCents != null
+          ? centsToDollars(projection.projectTotalCents)
+          : null,
     reconciliationStatus: projection?.reconciliationStatus || "not_attributable"
   };
 }
@@ -841,14 +959,16 @@ export function toPublicChangesPricingDto(changes) {
   return {
     kind: "changes",
     rows: (changes?.rows || []).map((r) => ({
-      roomName: r.roomName,
+      roomName: customerSafeProjectionLabel(r.roomName, "Room"),
       category: r.category,
       categoryLabel: r.categoryLabel,
-      originalLabel: r.originalLabel,
-      updatedLabel: r.updatedLabel,
+      originalLabel: customerSafeProjectionLabel(r.originalLabel, "Not selected"),
+      updatedLabel: customerSafeProjectionLabel(r.updatedLabel, "Not selected"),
       amountDelta: r.amountDeltaCents != null ? centsToDollars(r.amountDeltaCents) : null,
       status: r.status
-    }))
+    })),
+    totalDelta:
+      changes?.totalDeltaCents != null ? centsToDollars(changes.totalDeltaCents) : null
   };
 }
 

@@ -752,21 +752,46 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
       exactMaterialDeltaCents
     });
 
-    // Backsplash baseline amount — priced at the BASELINE group's rate (bResolvedForRoom
-    // when the group changed, otherwise the room's own selected-group rate is also the
-    // baseline rate since nothing diverged). Never invented: null billedSf stays null.
+    // Backsplash baseline amount. Prefer the exact frozen publish-time category
+    // carve-out when present (published_allocation_v1); otherwise price the
+    // frozen billed SF at the baseline group's governed rate. The frozen cents
+    // are trusted server evidence, never browser input.
     const rawRoom = roomByKeyForBaseline.get(r.roomKey) || {};
     const baselineBilledSf =
       rawRoom.backsplashOriginalBilledSf != null && Number.isFinite(Number(rawRoom.backsplashOriginalBilledSf))
         ? Number(rawRoom.backsplashOriginalBilledSf)
         : null;
     const baselineRateCents = bResolvedForRoom ? bResolvedForRoom.finalRateCents : r.resolution.finalRateCents;
-    let backsplashBaselineAmountCents = null;
-    if (baselineBilledSf != null && baselineRateCents != null) {
+    const frozenBaselineBacksplashCents =
+      rawRoom.backsplashBaselineAmountCents != null &&
+      Number.isFinite(Number(rawRoom.backsplashBaselineAmountCents))
+        ? Math.trunc(Number(rawRoom.backsplashBaselineAmountCents))
+        : null;
+    let backsplashBaselineAmountCents = frozenBaselineBacksplashCents;
+    if (
+      backsplashBaselineAmountCents == null &&
+      baselineBilledSf != null &&
+      baselineRateCents != null
+    ) {
       const bsMilli = sfToMilli(baselineBilledSf);
       const bsSell = mulRateCentsByMilliSf(baselineRateCents, bsMilli);
       const bsTax = applyBasisPointsToCents(bsSell, input.materialTaxPolicy.bps);
       backsplashBaselineAmountCents = bsSell + bsTax;
+    }
+    const materialUnchanged =
+      normalizeGroupCode(rawRoom.baselineMaterialGroup) ===
+      normalizeGroupCode(rawRoom.selectedMaterialGroup);
+    const modeUnchanged =
+      String(r.baselineBacksplashMode || "none") === String(r.backsplashMode || "none");
+    // A no-op mode/material save must preserve the frozen category amount
+    // byte-for-byte. Repricing it from SF can drift from a legacy
+    // published_allocation_v1 carve-out and create a fake delta.
+    if (
+      frozenBaselineBacksplashCents != null &&
+      materialUnchanged &&
+      modeUnchanged
+    ) {
+      r.backsplashConfiguredAmountCents = frozenBaselineBacksplashCents;
     }
     r.backsplashBaselineAmountCents = backsplashBaselineAmountCents;
     r.backsplashOriginalBilledSf = baselineBilledSf;
@@ -881,7 +906,33 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
     throw fail("negative_total", "Unauthorized negative configured total");
   }
 
-  const configuredDisplayCents = ceilCentsToTenDollars(configuredExactCents);
+  // A frozen publication is already the customer-facing monetary anchor.
+  // Re-ceiling the whole configured total can reverse a zero/negative change:
+  // e.g. $3,208 + unresolved $0 delta became $3,210 (+$2). Preserve the
+  // anchor and apply the exact governed delta in cents. Standalone estimates
+  // (no frozen anchor) retain the existing ceil-to-$10 display rule.
+  const anchoredExactDeltaCents =
+    useFrozenBaselineAnchor && baselineExactCents != null
+      ? configuredExactCents - baselineExactCents
+      : null;
+  const configuredDisplayCents =
+    useFrozenBaselineAnchor &&
+    baselineDisplayCents != null &&
+    anchoredExactDeltaCents != null
+      ? baselineDisplayCents + anchoredExactDeltaCents
+      : ceilCentsToTenDollars(configuredExactCents);
+  if (anchoredExactDeltaCents < 0 && configuredDisplayCents > baselineDisplayCents) {
+    throw fail(
+      "display_delta_sign_reversal",
+      "Configured display total cannot increase for a negative governed delta"
+    );
+  }
+  if (anchoredExactDeltaCents > 0 && configuredDisplayCents < baselineDisplayCents) {
+    throw fail(
+      "display_delta_sign_reversal",
+      "Configured display total cannot decrease for a positive governed delta"
+    );
+  }
   const displayRoundingAdjustmentCents = configuredDisplayCents - configuredExactCents;
 
   const exactDeltaCents =
@@ -909,6 +960,10 @@ export function calculateElite100ConfigDeltaV2(rawInput) {
           ? normalizeGroupCode(r.baselineMaterialGroup)
           : null,
         backsplashMode: r.backsplashMode || "none",
+        backsplashBaselineAmountCents:
+          r.backsplashBaselineAmountCents != null
+            ? Math.trunc(Number(r.backsplashBaselineAmountCents))
+            : null,
         backsplashConfiguredBilledSf: Number.isFinite(Number(r.backsplashConfiguredBilledSf))
           ? Number(r.backsplashConfiguredBilledSf)
           : null

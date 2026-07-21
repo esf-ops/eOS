@@ -1119,6 +1119,48 @@ export function createPublicConfigurationService(deps) {
       /** @type {string[]} */
       const reviewFlags = [];
 
+      // Exact frozen backsplash category ownership from the immutable
+      // publication snapshot. Internal-only custom-line allocations are
+      // removed from the category carve-out here and reattached later by the
+      // room projection policy; only the governed original backsplash amount
+      // becomes the pricing baseline/credit authority.
+      const publishedRoomPricing =
+        ctx.customerSnapshot?.roomPricing &&
+        typeof ctx.customerSnapshot.roomPricing === "object"
+          ? ctx.customerSnapshot.roomPricing
+          : null;
+      const frozenInternalBacksplashByRoomId = new Map();
+      for (const allocation of Array.isArray(publishedRoomPricing?.customLineAllocations)
+        ? publishedRoomPricing.customLineAllocations
+        : []) {
+        for (const target of Array.isArray(allocation?.targets) ? allocation.targets : []) {
+          if (target?.category !== "backsplash") continue;
+          const roomId = String(target.roomId || "");
+          frozenInternalBacksplashByRoomId.set(
+            roomId,
+            (frozenInternalBacksplashByRoomId.get(roomId) || 0) +
+              Math.trunc(Number(target.allocatedCents) || 0)
+          );
+        }
+      }
+      const frozenBacksplashByRoomKey = new Map();
+      for (const snapRoom of Array.isArray(publishedRoomPricing?.rooms)
+        ? publishedRoomPricing.rooms
+        : []) {
+        const roomKey =
+          (ctx.rooms || []).find(
+            (r) =>
+              String(r.roomKey) === String(snapRoom?.roomId) ||
+              String(r.displayName || "").toLowerCase() ===
+                String(snapRoom?.roomName || "").toLowerCase()
+          )?.roomKey || null;
+        if (!roomKey || snapRoom?.backsplashAmountCents == null) continue;
+        const governedCents =
+          Math.trunc(Number(snapRoom.backsplashAmountCents) || 0) -
+          (frozenInternalBacksplashByRoomId.get(String(snapRoom.roomId || "")) || 0);
+        frozenBacksplashByRoomKey.set(String(roomKey), governedCents);
+      }
+
       // Build DE.2C rooms from material: selections + baseline (server resolves color → group)
       const rooms = (ctx.rooms || []).map((r) => {
         let selected = r.baselineMaterialGroup;
@@ -1176,6 +1218,8 @@ export function createPublicConfigurationService(deps) {
           baselineBacksplashMode: originalBacksplashMode,
           backsplashReviewCodes: backsplashResolution.reviewCodes,
           backsplashOriginalBilledSf: backsplashResolution.originalBilledSf,
+          backsplashBaselineAmountCents:
+            frozenBacksplashByRoomKey.get(String(r.roomKey)) ?? null,
           backsplashConfiguredBilledSf: backsplashResolution.billedSf,
           backsplashHasEligibleLocations: backsplashResolution.hasEligibleLocations,
           edgeLinearFeet: Number(r.edgeLinearFeet) || 0,

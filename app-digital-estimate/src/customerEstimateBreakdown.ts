@@ -4,6 +4,11 @@
  * using published snapshot + server calculation DTOs — never invents prices.
  */
 
+import type {
+  PublicRoomPricing,
+  PublicRoomPricingChanges,
+} from "./publicConfigApi";
+
 export type BreakdownLine = {
   key: string;
   label: string;
@@ -11,6 +16,8 @@ export type BreakdownLine = {
   roomName?: string | null;
   category?: string | null;
   amountLabel: string;
+  indent?: boolean;
+  emphasis?: boolean;
 };
 
 export type EstimateBreakdownView = {
@@ -64,6 +71,99 @@ function moneyLabel(n: number | null | undefined): string {
   return formatMoney(n);
 }
 
+function roomHierarchyLines(pricing: PublicRoomPricing): BreakdownLine[] {
+  const lines: BreakdownLine[] = [];
+  for (const [roomIndex, room] of (pricing.rooms || []).entries()) {
+    const roomName = room.roomName || `Room ${roomIndex + 1}`;
+    lines.push(
+      {
+        key: `${pricing.kind}-room-${roomIndex}-countertop`,
+        label: "Countertop",
+        amount: room.countertopAmount,
+        amountLabel: moneyLabel(room.countertopAmount),
+        roomName,
+      },
+      {
+        key: `${pricing.kind}-room-${roomIndex}-backsplash`,
+        label: "Backsplash",
+        amount: room.backsplashAmount,
+        amountLabel: moneyLabel(room.backsplashAmount),
+        roomName,
+      },
+      {
+        key: `${pricing.kind}-room-${roomIndex}-addons`,
+        label: "Add-ons",
+        amount: room.addOnsAmount,
+        amountLabel: moneyLabel(room.addOnsAmount),
+        roomName,
+      },
+    );
+    for (const [lineIndex, addOn] of (room.addOnLines || []).entries()) {
+      lines.push({
+        key: `${pricing.kind}-room-${roomIndex}-addon-${lineIndex}`,
+        label: addOn.label || "Item",
+        amount: addOn.amount,
+        amountLabel: moneyLabel(addOn.amount),
+        roomName,
+        category: addOn.category || null,
+        indent: true,
+      });
+    }
+    lines.push({
+      key: `${pricing.kind}-room-${roomIndex}-total`,
+      label: `${roomName} total`,
+      amount: room.roomTotal,
+      amountLabel: moneyLabel(room.roomTotal),
+      roomName,
+      emphasis: true,
+    });
+  }
+  for (const [index, line] of (pricing.projectAddOns || []).entries()) {
+    lines.push({
+      key: `${pricing.kind}-project-${index}`,
+      label: line.label || "Project item",
+      amount: line.amount,
+      amountLabel: moneyLabel(line.amount),
+      roomName: null,
+      category: "Project",
+    });
+  }
+  return lines;
+}
+
+export function buildRoomHierarchyBreakdown(
+  kind: "original" | "updated",
+  pricing: PublicRoomPricing,
+): EstimateBreakdownView {
+  const total =
+    pricing.projectTotal != null && Number.isFinite(Number(pricing.projectTotal))
+      ? Number(pricing.projectTotal)
+      : (pricing.rooms || []).reduce(
+          (sum, room) => sum + (Number(room.roomTotal) || 0),
+          0,
+        ) +
+        (pricing.projectAddOns || []).reduce(
+          (sum, line) => sum + (Number(line.amount) || 0),
+          0,
+        );
+  const lines = roomHierarchyLines({ ...pricing, kind });
+  lines.push({
+    key: `${kind}-project-total`,
+    label: "Project total",
+    amount: total,
+    amountLabel: moneyLabel(total),
+    roomName: null,
+    emphasis: true,
+  });
+  return {
+    kind,
+    title: kind === "original" ? "Original estimate" : "Your updated estimate",
+    total,
+    totalLabel: moneyLabel(total),
+    lines,
+  };
+}
+
 /**
  * Original estimate = immutable published customer snapshot line items + room summaries.
  */
@@ -76,7 +176,11 @@ export function buildOriginalBreakdown(estimate: {
     summaryLines?: string[];
   }>;
   totals?: { estimatedProjectTotal?: number | null };
+  roomPricing?: PublicRoomPricing | null;
 } | null): EstimateBreakdownView {
+  if (estimate?.roomPricing?.rooms?.length) {
+    return buildRoomHierarchyBreakdown("original", estimate.roomPricing);
+  }
   const lines: BreakdownLine[] = [];
   const rooms = estimate?.rooms || [];
   for (const [i, room] of rooms.entries()) {
@@ -163,10 +267,14 @@ export function buildUpdatedBreakdown(args: {
     customerConfigurationSummary?: {
       lines?: Array<{ label?: string; amount?: number | null; roomName?: string | null }>;
     } | null;
+    roomPricing?: PublicRoomPricing | null;
   } | null;
   rooms?: Array<{ id: string; name: string; selectedColorName?: string | null; materialLabel?: string | null }>;
 }): EstimateBreakdownView {
   const calc = args.calculation;
+  if (calc?.roomPricing?.rooms?.length) {
+    return buildRoomHierarchyBreakdown("updated", calc.roomPricing);
+  }
   const lines: BreakdownLine[] = [];
 
   const summaryLines = calc?.customerConfigurationSummary?.lines;
@@ -251,7 +359,87 @@ export function buildChangesBreakdown(args: {
     pending?: boolean;
   }>;
   displayTotalDelta?: number | null;
+  roomPricingChanges?: PublicRoomPricingChanges | null;
 }): EstimateBreakdownView {
+  if (args.roomPricingChanges?.rows) {
+    const lines: BreakdownLine[] = [];
+    const roomOrder: string[] = [];
+    const byRoom = new Map<string, PublicRoomPricingChanges["rows"]>();
+    for (const row of args.roomPricingChanges.rows) {
+      if (!byRoom.has(row.roomName)) {
+        byRoom.set(row.roomName, []);
+        roomOrder.push(row.roomName);
+      }
+      byRoom.get(row.roomName)!.push(row);
+    }
+    for (const roomName of roomOrder) {
+      const rows = byRoom.get(roomName) || [];
+      for (const [index, row] of rows.entries()) {
+        lines.push({
+          key: `chg-room-${roomOrder.indexOf(roomName)}-${index}`,
+          label: `${row.originalLabel} → ${row.updatedLabel}`,
+          amount: row.amountDelta,
+          amountLabel:
+            row.status === "review_required"
+              ? "Requires estimator review"
+              : row.amountDelta == null
+                ? "—"
+                : row.amountDelta < 0
+                  ? `−${formatMoney(Math.abs(row.amountDelta))}`
+                  : row.amountDelta > 0
+                    ? `+${formatMoney(row.amountDelta)}`
+                    : "No change",
+          roomName,
+          category: row.categoryLabel,
+        });
+      }
+      const roomDelta = rows.every((row) => row.amountDelta != null)
+        ? rows.reduce((sum, row) => sum + Number(row.amountDelta || 0), 0)
+        : null;
+      lines.push({
+        key: `chg-room-${roomOrder.indexOf(roomName)}-total`,
+        label: `${roomName} total change`,
+        amount: roomDelta,
+        amountLabel: moneyLabel(roomDelta),
+        roomName,
+        emphasis: true,
+      });
+    }
+    const total =
+      args.roomPricingChanges.totalDelta != null
+        ? Number(args.roomPricingChanges.totalDelta)
+        : null;
+    lines.push({
+      key: "chg-project-total",
+      label: "Project total change",
+      amount: total,
+      amountLabel:
+        total == null
+          ? "—"
+          : total < 0
+            ? `−${formatMoney(Math.abs(total))}`
+            : total > 0
+              ? `+${formatMoney(total)}`
+              : "No change",
+      roomName: null,
+      emphasis: true,
+    });
+    return {
+      kind: "changes",
+      title: "Changes",
+      total,
+      totalLabel:
+        total == null
+          ? "—"
+          : total < 0
+            ? `−${formatMoney(Math.abs(total))}`
+            : total > 0
+              ? `+${formatMoney(total)}`
+              : "No change",
+      lines,
+      emptyMessage: lines.length ? undefined : "No changes from the original estimate yet.",
+    };
+  }
   const lines: BreakdownLine[] = args.changeLines.map((c, i) => {
     let amountLabel = "No change";
     if (c.reviewRequired) amountLabel = "Requires estimator review";

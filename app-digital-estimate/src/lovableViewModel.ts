@@ -342,7 +342,15 @@ function parseSideSplashMeta(
       sideToken,
     };
   }
-  return { pieceKey: "default", pieceLabel: "Countertop piece 1", sideToken: token };
+  return { pieceKey: "default", pieceLabel: "Countertop run 1", sideToken: token };
+}
+
+function sideSplashModeSummary(mode: string | null | undefined): string {
+  const value = String(mode || "").toLowerCase();
+  if (value === "left") return "Left";
+  if (value === "right") return "Right";
+  if (value === "both") return "Both";
+  return "None";
 }
 
 function looksLikeUuid(value: string): boolean {
@@ -666,7 +674,11 @@ export function mapEliteOsToLovableViewModel(
         const sideMeta =
           role === "sidesplash" ? parseSideSplashMeta(o.optionKey, r.roomKey, o) : null;
         const displayLabel =
-          role === "backsplash" ? normalizeBacksplashLabel(o.displayLabel) : o.displayLabel;
+          role === "backsplash"
+            ? normalizeBacksplashLabel(o.displayLabel)
+            : role === "sidesplash"
+              ? sideSplashModeSummary(sideMeta?.sideToken)
+              : o.displayLabel;
         return {
           optionKey: o.optionKey,
           displayLabel,
@@ -753,7 +765,7 @@ export function mapEliteOsToLovableViewModel(
         const label =
           opt.pieceLabel && !looksLikeUuid(opt.pieceLabel)
             ? opt.pieceLabel
-            : `Countertop piece ${sidePieceOrdinal}`;
+            : `Countertop run ${sidePieceOrdinal}`;
         sideSplashMap.set(pk, {
           pieceKey: pk,
           pieceLabel: label,
@@ -769,7 +781,7 @@ export function mapEliteOsToLovableViewModel(
         const token = String(sel?.optionKey || "").split(":").pop()?.toLowerCase();
         if (token === "left") return "Left";
         if (token === "right") return "Right";
-        if (token === "both") return "Both sides";
+        if (token === "both") return "Both";
         return "None";
       })();
       return {

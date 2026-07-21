@@ -11,6 +11,7 @@ import {
 import {
   buildUpdatedRoomPricingProjection,
   buildOriginalRoomPricingProjection,
+  buildOriginalRoomPricingProjectionFromSnapshot,
   buildChangesRoomPricingProjection,
   toPublicRoomPricingDto,
   toPublicChangesPricingDto,
@@ -355,8 +356,8 @@ function assertNoOptionKeysOrSfLf(dto) {
   const changes = buildChangesRoomPricingProjection({ original, updated });
   const materialRow = changes.rows.find((row) => row.category === "material");
   assert.ok(materialRow);
-  assert.equal(materialRow.originalLabel, "promo");
-  assert.equal(materialRow.updatedLabel, "group_b");
+  assert.equal(materialRow.originalLabel, "Group Promo");
+  assert.equal(materialRow.updatedLabel, "Group B");
   const sinkRow = changes.rows.find((row) => row.category === "sink");
   assert.equal(sinkRow.status, "new_selection");
   assert.equal(sinkRow.originalLabel, "Not selected");
@@ -551,6 +552,520 @@ function assertNoOptionKeysOrSfLf(dto) {
   );
   assert.equal(updated.configuredExactTotalCents, updated.originalTotalCents);
   console.log("ok: unresolved backsplash pricing carries the known baseline $ forward and still reconciles exactly");
+}
+
+// Hosted $3,208 regression at the projection boundary: the frozen backsplash
+// category is removed, Countertop remains byte-for-byte, and the public room
+// hierarchy reconciles to the lower authoritative total.
+{
+  const frozenBacksplashCents = 47_890;
+  const frozenCountertopCents = 272_910;
+  const publishedRoomPricing = {
+    snapshotVersion: "v2",
+    totalCents: 320_800,
+    rooms: [
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        countertopAmountCents: frozenCountertopCents,
+        backsplashAmountCents: frozenBacksplashCents,
+        addOnsAmountCents: 0,
+        roomTotalCents: 320_800,
+        customerFacingLines: [],
+        originalBacksplashMode: "standard_4in"
+      }
+    ],
+    projectAddOnLines: [],
+    customLineAllocations: []
+  };
+  const internal = {
+    frozenBaselineAnchor: true,
+    baselineExactTotalCents: 320_800,
+    configuredExactTotalCents: frozenCountertopCents,
+    configuredDisplayTotalCents: frozenCountertopCents,
+    exactConfigurationDeltaCents: -frozenBacksplashCents,
+    rooms: [
+      {
+        roomKey: "kitchen",
+        displayName: "Kitchen",
+        chargeableCounterSf: 40,
+        materialSellCents: frozenCountertopCents,
+        materialUseTaxCents: 0,
+        selectedMaterialGroup: "group_b",
+        baselineMaterialGroup: "group_b",
+        backsplashMode: "none",
+        baselineBacksplashMode: "standard_4in",
+        backsplashBaselineAmountCents: frozenBacksplashCents,
+        backsplashConfiguredAmountCents: 0,
+        backsplashReviewCodes: []
+      }
+    ],
+    materialGroupDeltas: [],
+    options: [],
+    customLines: [],
+    credits: []
+  };
+  const updated = buildUpdatedRoomPricingProjection({ internal, publishedRoomPricing });
+  const kitchen = updated.rooms[0];
+  assert.equal(kitchen.countertopAmountCents, frozenCountertopCents);
+  assert.equal(kitchen.backsplashAmountCents, 0);
+  assert.equal(kitchen.roomTotalCents, frozenCountertopCents);
+  assert.equal(updated.deltaFromOriginalCents, -frozenBacksplashCents);
+  assert.ok(updated.deltaFromOriginalCents < 0, "removal delta sign must stay negative");
+  assert.equal(updated.reconciliationStatus, "reconciled");
+  const dto = toPublicRoomPricingDto(updated);
+  assert.equal(dto.rooms[0].countertopAmount, frozenCountertopCents / 100);
+  assert.equal(dto.rooms[0].backsplashAmount, 0);
+  assert.equal(dto.projectTotal, frozenCountertopCents / 100);
+  console.log("ok: hosted removal preserves Countertop, zeros Backsplash, lowers total by exact frozen carve-out");
+}
+
+// Room-owned product + cutout lines remain nested on the room; project-owned
+// options stay project-level. Public output has no room ids or option keys.
+{
+  const r = calculateElite100ConfigDeltaV2(
+    baseInputV2({
+      options: [
+        {
+          optionKey: "sink:kitchen:esf:blanco:precis-27",
+          displayLabel: 'Sink — Precis 27"',
+          quantity: 1,
+          sellPrice: 575,
+          pricingMode: "fixed",
+          customerPriceTreatment: "absolute",
+          availabilityState: "active",
+          includedInBaseline: false
+        },
+        {
+          optionKey: "qty-sink:kitchen",
+          displayLabel: "Kitchen sink cutout",
+          quantity: 1,
+          sellPrice: 200,
+          pricingMode: "fixed",
+          customerPriceTreatment: "absolute",
+          availabilityState: "active",
+          includedInBaseline: false
+        },
+        {
+          optionKey: "delivery-service",
+          displayLabel: "Delivery service",
+          quantity: 1,
+          sellPrice: 75,
+          pricingMode: "fixed",
+          customerPriceTreatment: "absolute",
+          availabilityState: "active",
+          includedInBaseline: false
+        }
+      ]
+    })
+  );
+  const updated = buildUpdatedRoomPricingProjection({ internal: r.internal });
+  const dto = toPublicRoomPricingDto(updated);
+  const kitchen = dto.rooms.find((room) => room.roomName === "Kitchen");
+  assert.deepEqual(
+    kitchen.addOnLines.map((line) => line.label),
+    ['Sink — Precis 27"', "Kitchen sink cutout"]
+  );
+  assert.ok(dto.projectAddOns.some((line) => line.label === "Delivery service"));
+  const raw = JSON.stringify(dto);
+  assert.equal(raw.includes("optionKey"), false);
+  assert.equal(raw.includes("roomId"), false);
+  assert.equal(raw.includes("qty-sink"), false);
+  console.log("ok: sink/cutout stay under Kitchen; project option remains project-level; ids/keys redacted");
+}
+
+// Defensive UUID stripping at the public pricing boundary.
+{
+  const dto = toPublicRoomPricingDto({
+    kind: "updated",
+    configuredExactTotalCents: 10_000,
+    reconciliationStatus: "reconciled",
+    rooms: [
+      {
+        roomName: "Kitchen",
+        countertopAmountCents: 5_000,
+        backsplashAmountCents: 0,
+        addOnsAmountCents: 5_000,
+        roomTotalCents: 10_000,
+        customerFacingLines: [
+          {
+            category: "side_splash",
+            label: "run d1c2b3a4-f5e6-4d7c-8b9a-0a1b2c3d4e5f — Right",
+            amountCents: 5_000
+          }
+        ],
+        reviewRequiredItems: []
+      }
+    ],
+    projectAddOns: []
+  });
+  const raw = JSON.stringify(dto);
+  assert.equal(raw.includes("d1c2b3a4"), false);
+  assert.equal(raw.includes("runId"), false);
+  assert.equal(raw.includes("SF"), false);
+  assert.equal(raw.includes("LF"), false);
+  assert.equal(raw.includes("rate"), false);
+  console.log("ok: UUID-like side-splash ids and forbidden pricing internals never reach public DTO");
+}
+
+// Frozen internal backsplash allocation must not invent a positive Backsplash
+// amount after the customer selects No backsplash (hosted +$2 display path).
+{
+  const publishedRoomPricing = {
+    snapshotVersion: "v2",
+    totalCents: 320_800,
+    rooms: [
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        countertopAmountCents: 272_710,
+        backsplashAmountCents: 48_090,
+        addOnsAmountCents: 0,
+        roomTotalCents: 320_800,
+        customerFacingLines: [],
+        originalBacksplashMode: "standard_4in"
+      }
+    ],
+    projectAddOnLines: [],
+    customLineAllocations: [
+      {
+        targets: [
+          {
+            roomId: "kitchen",
+            category: "backsplash",
+            allocatedCents: 200
+          }
+        ]
+      }
+    ]
+  };
+  const internal = {
+    frozenBaselineAnchor: true,
+    baselineExactTotalCents: 320_800,
+    configuredExactTotalCents: 272_910,
+    configuredDisplayTotalCents: 272_910,
+    exactConfigurationDeltaCents: -47_890,
+    rooms: [
+      {
+        roomKey: "kitchen",
+        displayName: "Kitchen",
+        chargeableCounterSf: 40,
+        materialSellCents: 272_710,
+        materialUseTaxCents: 0,
+        selectedMaterialGroup: "group_b",
+        baselineMaterialGroup: "group_b",
+        backsplashMode: "none",
+        baselineBacksplashMode: "standard_4in",
+        backsplashBaselineAmountCents: 47_890,
+        backsplashConfiguredAmountCents: 0,
+        backsplashReviewCodes: []
+      }
+    ],
+    materialGroupDeltas: [],
+    options: [],
+    customLines: [],
+    credits: []
+  };
+  const updated = buildUpdatedRoomPricingProjection({ internal, publishedRoomPricing });
+  const kitchen = updated.rooms[0];
+  assert.equal(kitchen.backsplashAmountCents, 0, "No backsplash must stay $0 after removal");
+  assert.equal(kitchen.countertopAmountCents, 272_910, "frozen internal cents fall onto Countertop");
+  assert.equal(kitchen.roomTotalCents, 272_910);
+  assert.ok(updated.deltaFromOriginalCents < 0);
+  const dto = toPublicRoomPricingDto(updated);
+  assert.equal(dto.rooms[0].backsplashAmount, 0);
+  assert.equal(dto.rooms[0].selectedBacksplash, "No backsplash");
+  console.log("ok: frozen internal allocation cannot invent Backsplash after mode none");
+}
+
+// ---------------------------------------------------------------------------
+// Configured-state eligibility for frozen internal allocations (Updated only).
+// Hidden line "Slab broker holdback" ($500) was frozen at publish as
+// Countertop $400 + Backsplash $100. Original: CT $4,400 / BS $1,100 / $5,500.
+// ---------------------------------------------------------------------------
+const HIDDEN_LINE_LABEL = "Slab broker holdback";
+
+function sharedAllocationSnapshot() {
+  return {
+    snapshotVersion: "v2",
+    totalCents: 550_000,
+    rooms: [
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        countertopAmountCents: 440_000,
+        backsplashAmountCents: 110_000,
+        addOnsAmountCents: 0,
+        roomTotalCents: 550_000,
+        customerFacingLines: [],
+        originalBacksplashMode: "standard_4in"
+      }
+    ],
+    projectAddOnLines: [],
+    customLineAllocations: [
+      {
+        lineKey: "hidden-1",
+        label: HIDDEN_LINE_LABEL,
+        originalAmountCents: 50_000,
+        customerVisible: false,
+        policyVersion: "internal_custom_line_allocation_v1",
+        allocationRule: "room_no_category_proportional",
+        targets: [
+          { roomId: "kitchen", category: "countertop", allocatedCents: 40_000 },
+          { roomId: "kitchen", category: "backsplash", allocatedCents: 10_000 }
+        ]
+      }
+    ]
+  };
+}
+
+function sharedAllocationInternal({ mode }) {
+  const removed = mode === "none";
+  return {
+    frozenBaselineAnchor: true,
+    baselineExactTotalCents: 550_000,
+    configuredExactTotalCents: removed ? 450_000 : 550_000,
+    configuredDisplayTotalCents: removed ? 450_000 : 550_000,
+    exactConfigurationDeltaCents: removed ? -100_000 : 0,
+    rooms: [
+      {
+        roomKey: "kitchen",
+        displayName: "Kitchen",
+        chargeableCounterSf: 40,
+        materialSellCents: 400_000,
+        materialUseTaxCents: 0,
+        selectedMaterialGroup: "group_b",
+        baselineMaterialGroup: "group_b",
+        backsplashMode: mode,
+        baselineBacksplashMode: "standard_4in",
+        backsplashBaselineAmountCents: 100_000,
+        backsplashConfiguredAmountCents: removed ? 0 : 100_000,
+        backsplashReviewCodes: []
+      }
+    ],
+    materialGroupDeltas: [],
+    options: [],
+    customLines: [],
+    credits: []
+  };
+}
+
+// 11-A. Room-owned shared line: removal keeps BS $0; full hidden $500 lands on
+// eligible Countertop; deterministic; exact reconciliation; audit recorded.
+{
+  const snapshot = sharedAllocationSnapshot();
+  const frozenBefore = JSON.parse(JSON.stringify(snapshot));
+  const updated = buildUpdatedRoomPricingProjection({
+    internal: sharedAllocationInternal({ mode: "none" }),
+    publishedRoomPricing: snapshot
+  });
+  const kitchen = updated.rooms[0];
+  assert.equal(kitchen.backsplashAmountCents, 0, "configured No backsplash stays exactly $0");
+  assert.equal(kitchen.countertopAmountCents, 450_000, "Countertop absorbs full hidden $500");
+  assert.equal(kitchen.roomTotalCents, 450_000);
+  assert.equal(updated.roomSubtotalCents, updated.configuredExactTotalCents);
+  assert.equal(updated.reconciliationStatus, "reconciled");
+  assert.ok(updated.deltaFromOriginalCents < 0, "removal delta stays negative");
+  assert.deepEqual(updated.internalReattachments, [
+    {
+      roomId: "kitchen",
+      fromCategory: "backsplash",
+      toCategory: "countertop",
+      amountCents: 10_000,
+      reason: "configured_backsplash_removed"
+    }
+  ]);
+  const again = buildUpdatedRoomPricingProjection({
+    internal: sharedAllocationInternal({ mode: "none" }),
+    publishedRoomPricing: sharedAllocationSnapshot()
+  });
+  assert.deepEqual(again.rooms, updated.rooms, "largest-remainder redistribution is deterministic");
+  // Original snapshot object was never mutated by the Updated projection.
+  assert.deepEqual(snapshot, frozenBefore, "frozen snapshot must remain byte-identical");
+  console.log("ok: removal keeps BS $0, redirects hidden cents to eligible Countertop, audited + deterministic");
+}
+
+// 11-B. Restoring 4-inch restores frozen category eligibility exactly.
+{
+  const updated = buildUpdatedRoomPricingProjection({
+    internal: sharedAllocationInternal({ mode: "standard_4in" }),
+    publishedRoomPricing: sharedAllocationSnapshot()
+  });
+  const kitchen = updated.rooms[0];
+  assert.equal(kitchen.backsplashAmountCents, 110_000, "restored BS = governed + frozen hidden share");
+  assert.equal(kitchen.countertopAmountCents, 440_000);
+  assert.equal(kitchen.roomTotalCents, 550_000);
+  assert.equal(updated.deltaFromOriginalCents, 0);
+  assert.deepEqual(updated.internalReattachments, [], "no redirect when Backsplash is eligible again");
+  console.log("ok: restoring 4-inch reattaches frozen hidden share to Backsplash with zero delta");
+}
+
+// 11-C. Original stays the frozen publication allocation, unchanged by Updated.
+{
+  const original = buildOriginalRoomPricingProjectionFromSnapshot(sharedAllocationSnapshot());
+  assert.equal(original.rooms[0].countertopAmountCents, 440_000);
+  assert.equal(original.rooms[0].backsplashAmountCents, 110_000);
+  assert.equal(original.projectTotalCents, 550_000);
+  console.log("ok: Original projection reflects frozen allocation exactly (hidden share inside BS)");
+}
+
+// 11-D. Changes shows the removal without exposing the hidden line, and every
+// public DTO stays free of hidden names / internal allocation fields.
+{
+  const snapshot = sharedAllocationSnapshot();
+  const updated = buildUpdatedRoomPricingProjection({
+    internal: sharedAllocationInternal({ mode: "none" }),
+    publishedRoomPricing: snapshot
+  });
+  const original = buildOriginalRoomPricingProjection({ roomPricing: snapshot });
+  const changes = buildChangesRoomPricingProjection({ original, updated });
+  const removalRow = changes.rows.find((r) => r.category === "backsplash");
+  assert.ok(removalRow, "backsplash removal row present");
+  assert.equal(removalRow.status, "removed");
+  assert.ok(removalRow.amountDeltaCents < 0, "category delta stays negative");
+  const publicPayload = JSON.stringify({
+    original: toPublicRoomPricingDto(original),
+    updated: toPublicRoomPricingDto(updated),
+    changes: toPublicChangesPricingDto(changes)
+  });
+  for (const forbidden of [
+    HIDDEN_LINE_LABEL,
+    "allocatedCents",
+    "customLineAllocations",
+    "internalReattachments",
+    "allocationRule",
+    "policyVersion"
+  ]) {
+    assert.equal(publicPayload.includes(forbidden), false, `leaked: ${forbidden}`);
+  }
+  console.log("ok: Changes shows removal; hidden line names/allocation internals never reach public DTOs");
+}
+
+// 11-E. Project-owned shared hidden line: redistribution touches only the
+// configured-eligible targets; per-room ownership preserved; reconciles.
+{
+  const snapshot = {
+    snapshotVersion: "v2",
+    totalCents: 355_000,
+    rooms: [
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        countertopAmountCents: 200_000,
+        backsplashAmountCents: 55_000,
+        addOnsAmountCents: 0,
+        roomTotalCents: 255_000,
+        customerFacingLines: [],
+        originalBacksplashMode: "standard_4in"
+      },
+      {
+        roomId: "bath",
+        roomName: "Bath",
+        countertopAmountCents: 100_000,
+        backsplashAmountCents: 0,
+        addOnsAmountCents: 0,
+        roomTotalCents: 100_000,
+        customerFacingLines: [],
+        originalBacksplashMode: "none"
+      }
+    ],
+    projectAddOnLines: [],
+    customLineAllocations: [
+      {
+        lineKey: "hidden-2",
+        label: HIDDEN_LINE_LABEL,
+        originalAmountCents: 10_000,
+        customerVisible: false,
+        policyVersion: "internal_custom_line_allocation_v1",
+        allocationRule: "project_no_category_proportional",
+        targets: [
+          { roomId: "kitchen", category: "backsplash", allocatedCents: 5_000 },
+          { roomId: "bath", category: "countertop", allocatedCents: 5_000 }
+        ]
+      }
+    ]
+  };
+  const internal = {
+    frozenBaselineAnchor: true,
+    baselineExactTotalCents: 355_000,
+    configuredExactTotalCents: 305_000,
+    configuredDisplayTotalCents: 305_000,
+    exactConfigurationDeltaCents: -50_000,
+    rooms: [
+      {
+        roomKey: "kitchen",
+        displayName: "Kitchen",
+        chargeableCounterSf: 30,
+        materialSellCents: 200_000,
+        materialUseTaxCents: 0,
+        selectedMaterialGroup: "group_b",
+        baselineMaterialGroup: "group_b",
+        backsplashMode: "none",
+        baselineBacksplashMode: "standard_4in",
+        backsplashBaselineAmountCents: 50_000,
+        backsplashConfiguredAmountCents: 0,
+        backsplashReviewCodes: []
+      },
+      {
+        roomKey: "bath",
+        displayName: "Bath",
+        chargeableCounterSf: 10,
+        materialSellCents: 95_000,
+        materialUseTaxCents: 0,
+        selectedMaterialGroup: "group_a",
+        baselineMaterialGroup: "group_a",
+        backsplashMode: "none",
+        baselineBacksplashMode: "none",
+        backsplashBaselineAmountCents: null,
+        backsplashConfiguredAmountCents: 0,
+        backsplashReviewCodes: []
+      }
+    ],
+    materialGroupDeltas: [],
+    options: [],
+    customLines: [],
+    credits: []
+  };
+  const updated = buildUpdatedRoomPricingProjection({ internal, publishedRoomPricing: snapshot });
+  const kitchen = updated.rooms.find((r) => r.roomId === "kitchen");
+  const bath = updated.rooms.find((r) => r.roomId === "bath");
+  assert.equal(kitchen.backsplashAmountCents, 0);
+  assert.equal(kitchen.countertopAmountCents, 205_000, "kitchen share redirects within kitchen only");
+  assert.equal(bath.backsplashAmountCents, 0, "No-backsplash room never receives hidden BS cents");
+  assert.equal(bath.countertopAmountCents, 100_000, "bath keeps its own frozen countertop share");
+  assert.equal(updated.roomSubtotalCents, 305_000);
+  assert.equal(updated.reconciliationStatus, "reconciled");
+  console.log("ok: project-owned hidden line redistributes only to configured-eligible targets");
+}
+
+// 11-F. Backsplash-only hidden line: documented policy rule 5
+// (internal_custom_line_allocation_v1) explicitly permits Countertop
+// absorption when no eligible backsplash remains — audited, never fabricated.
+{
+  const snapshot = sharedAllocationSnapshot();
+  snapshot.customLineAllocations = [
+    {
+      lineKey: "hidden-3",
+      label: HIDDEN_LINE_LABEL,
+      originalAmountCents: 10_000,
+      customerVisible: false,
+      policyVersion: "internal_custom_line_allocation_v1",
+      allocationRule: "room_category_direct",
+      targets: [{ roomId: "kitchen", category: "backsplash", allocatedCents: 10_000 }]
+    }
+  ];
+  // Frozen carve-outs: CT 440000 (no internal CT target), governed BS 100000.
+  const updated = buildUpdatedRoomPricingProjection({
+    internal: sharedAllocationInternal({ mode: "none" }),
+    publishedRoomPricing: snapshot
+  });
+  const kitchen = updated.rooms[0];
+  assert.equal(kitchen.backsplashAmountCents, 0);
+  assert.equal(kitchen.countertopAmountCents, 450_000);
+  assert.equal(updated.reconciliationStatus, "reconciled");
+  assert.equal(updated.internalReattachments.length, 1);
+  assert.equal(updated.internalReattachments[0].reason, "configured_backsplash_removed");
+  console.log("ok: backsplash-only hidden line absorbs into Countertop per documented rule 5, audited");
 }
 
 console.log("\nAll customerRoomPricingProjection tests passed.\n");

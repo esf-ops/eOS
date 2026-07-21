@@ -757,7 +757,16 @@ export function buildSideSplashOptionDefinitions(args) {
     const pieceKey = String(piece.id || piece.key || piece.name || "").trim();
     if (!pieceKey) continue;
     pieceIndex += 1;
-    const rawName = String(piece.name || piece.label || piece.displayName || "").trim();
+    // Customer label precedence: estimator piece label, estimator area label,
+    // then a concise ordinal fallback. Never expose the piece/run UUID.
+    const rawName = String(
+      piece.name ||
+        piece.label ||
+        piece.displayName ||
+        piece.areaLabel ||
+        piece.areaName ||
+        ""
+    ).trim();
     const pieceDisplayName = sideSplashPieceDisplayName(rawName, pieceIndex);
     const depth = Number(piece.depthIn ?? piece.depth);
     const depthKnown = Number.isFinite(depth) && depth > 0;

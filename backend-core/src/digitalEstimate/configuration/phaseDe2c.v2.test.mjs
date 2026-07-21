@@ -142,9 +142,9 @@ function frozenBaselineKitchen40(overrides = {}) {
   assert.equal(r.internal.optionsTotalCents, 16500);
   assert.equal(r.totals.exactDelta, 165);
   assert.equal(r.totals.configuredExactTotal, 2205);
-  assert.equal(r.totals.configuredDisplayTotal, 2210);
-  assert.equal(r.internal.displayRoundingAdjustmentCents, 500);
-  console.log("ok: v2 golden 3×$55 vanity → $165 / display $2210");
+  assert.equal(r.totals.configuredDisplayTotal, 2205);
+  assert.equal(r.internal.displayRoundingAdjustmentCents, 0);
+  console.log("ok: v2 golden 3×$55 vanity → exact $165 anchored display delta");
 }
 
 // Included default option remains $0 delta
@@ -199,7 +199,7 @@ function frozenBaselineKitchen40(overrides = {}) {
   assert.equal(r.internal.materialDeltaCents, 61200);
   assert.equal(r.totals.exactDelta, 612);
   assert.equal(r.totals.configuredExactTotal, 2652);
-  assert.equal(r.totals.configuredDisplayTotal, 2660);
+  assert.equal(r.totals.configuredDisplayTotal, 2652);
   console.log("ok: v2 golden Promo→Group B → rate+tax difference delta");
 }
 
@@ -236,7 +236,7 @@ function frozenBaselineKitchen40(overrides = {}) {
   console.log("ok: v2 unresolved baseline evidence blocks material delta");
 }
 
-// Final rounding deterministic
+// Frozen-anchor display delta deterministic (no whole-total re-rounding)
 {
   const r = calculateElite100ConfigDeltaV2(
     frozenBaselineKitchen40({
@@ -244,14 +244,14 @@ function frozenBaselineKitchen40(overrides = {}) {
     })
   );
   assert.equal(r.totals.configuredExactTotal, 2205);
-  assert.equal(r.totals.configuredDisplayTotal, 2210);
+  assert.equal(r.totals.configuredDisplayTotal, 2205);
   const again = calculateElite100ConfigDeltaV2(
     frozenBaselineKitchen40({
       options: [{ optionKey: "qty-v-rect", quantity: 3, sellPrice: 55, pricingMode: "per_each" }]
     })
   );
   assert.equal(again.calculationFingerprint, r.calculationFingerprint);
-  console.log("ok: v2 golden final rounding deterministic");
+  console.log("ok: v2 frozen-anchor display delta deterministic");
 }
 
 // Public DTO never exposes internal economics

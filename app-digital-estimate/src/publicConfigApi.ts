@@ -46,6 +46,43 @@ export function clearFragmentFromUrl(): void {
   }
 }
 
+export type PublicRoomPricing = {
+  kind: "original" | "updated" | string;
+  rooms: Array<{
+    roomName: string;
+    countertopAmount: number | null;
+    backsplashAmount: number | null;
+    addOnsAmount: number | null;
+    roomTotal: number | null;
+    selectedMaterial?: string | null;
+    selectedBacksplash?: string | null;
+    addOnLines?: Array<{
+      category?: string | null;
+      label: string;
+      amount: number | null;
+    }>;
+    reviewRequired?: boolean;
+    reviewRequiredCategories?: string[];
+  }>;
+  projectAddOns: Array<{ label: string; amount: number | null }>;
+  projectTotal?: number | null;
+  reconciliationStatus?: string;
+};
+
+export type PublicRoomPricingChanges = {
+  kind: "changes";
+  rows: Array<{
+    roomName: string;
+    category: string;
+    categoryLabel: string;
+    originalLabel: string;
+    updatedLabel: string;
+    amountDelta: number | null;
+    status: string;
+  }>;
+  totalDelta?: number | null;
+};
+
 export type PublicEstimate = {
   documentTitle: string;
   quoteNumber: string | null;
@@ -72,6 +109,7 @@ export type PublicEstimate = {
   };
   notes: string[];
   disclosures: { version: string | null; text: string | null };
+  roomPricing?: PublicRoomPricing | null;
 };
 
 export type ConfigOption = {
@@ -289,6 +327,8 @@ export type ConfigurationState = {
         displayDelta?: number;
       };
       pricingValidThrough?: string | null;
+      roomPricing?: PublicRoomPricing | null;
+      roomPricingChanges?: PublicRoomPricingChanges | null;
     } | null;
     baselineDisplayTotal?: number | null;
   } | null;

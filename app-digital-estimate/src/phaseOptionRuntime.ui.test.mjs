@@ -28,7 +28,7 @@ assert.ok(/plumbing add-ons/i.test(view), "expected a Faucet/plumbing add-ons ac
 assert.ok(view.includes("clearIncompatibleAccessoriesForRoom"));
 
 assert.ok(vm.includes("looksLikeUuid"));
-assert.ok(vm.includes("Countertop piece"));
+assert.ok(vm.includes("Countertop run"));
 assert.ok(vm.includes("pieceDisplayName"));
 assert.ok(vm.includes("priceEffectLabel"));
 assert.ok(api.includes("priceEffectLabel"));
