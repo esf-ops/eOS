@@ -99,7 +99,7 @@ console.log("ok: catalog permissions + services section replace the zero-filled 
 // 20/21. Backsplash scope is a read-only Takeoff summary under authority;
 // customer chooses the height mode later in the Digital Estimate.
 assert.ok(panel.includes("eq-backsplash-scope-summary"));
-assert.ok(panel.includes("Backsplash-eligible runs:"));
+assert.ok(panel.includes("Backsplash-approved runs:"));
 assert.ok(panel.includes("Source: Approved Takeoff"));
 assert.ok(panel.includes("eq-room-backsplash-readonly"));
 assert.ok(panel.includes("customer chooses No / 4-inch / custom / full height later"));
@@ -122,14 +122,15 @@ for (const label of ["Eased", "Large Eased", "Full Bullnose", "Large Ogee", "Bev
 }
 console.log("ok: canonical included + premium edge profiles; W/D removed");
 
-// 10. Derived edge display + governed adjustment; estimator never retypes Edge LF.
+// 10. Finished-edge display + governed adjustment; estimator never retypes Edge LF.
 assert.ok(panel.includes("eq-edge-derived-lf"));
 assert.ok(panel.includes("eq-edge-adjustment"));
 assert.ok(panel.includes("eq-edge-adjustment-reason"));
 assert.ok(panel.includes("eq-edge-final-lf"));
-assert.ok(panel.includes("run length minus"));
+assert.ok(panel.includes("Approved finished edge"));
+assert.ok(panel.includes("independent of backsplash"));
 assert.ok(panel.includes("resolveScopeEdgeLinearFeet"));
-console.log("ok: derived edge LF + estimator adjustment + final priced edge are wired");
+console.log("ok: approved finished-edge LF + estimator adjustment + final priced edge are wired");
 
 // 12. Miter/build-up: "Not identified in approved scope" + explicit specialty action.
 assert.ok(panel.includes("eq-specialty-not-identified"));

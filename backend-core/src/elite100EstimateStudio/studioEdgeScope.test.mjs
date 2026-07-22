@@ -32,7 +32,10 @@ function takeoffScope(extra = {}) {
       totalRunLengthIn: 305.04,
       derivedOpenEdgeLengthIn: 185.04,
       derivedOpenEdgeLf: 15.42,
-      edgeScopeSource: "derived_open_edge_v1",
+      approvedFinishedEdgeLf: 15.42,
+      edgeEligibleLinearFeet: 15.42,
+      edgeScopeSource: "finished_edge_v2",
+      edgeGeometryConfirmationRequired: false,
       countertopSqft: 30
     },
     rooms: [
@@ -80,47 +83,88 @@ function takeoffScope(extra = {}) {
   console.log("ok: legacy w_edge/d_edge/included map onto canonical tokens");
 }
 
-// 26. Derived open edge = total counter run length − backsplash-eligible length.
+// 26. Finished-edge authority is independent of backsplash (retired: run − splash).
 {
-  const summary = buildApprovedScopeSummary({
-    rooms: [
-      {
-        name: "Kitchen",
-        eligibleRunCount: 1,
-        eligibleBacksplashLengthIn: 100,
-        pieces: [
-          { pieceType: "counter", lengthIn: 150, includedInTakeoff: true },
-          { pieceType: "counter", lengthIn: 100, includedInTakeoff: true },
-          // Splash pieces are vertical geometry — never finished edge.
-          { pieceType: "backsplash", lengthIn: 100, includedInTakeoff: true },
-          // Excluded pieces never count.
-          { pieceType: "counter", lengthIn: 55, includedInTakeoff: false }
-        ]
+  const pieces = [
+    {
+      id: "a",
+      pieceType: "counter",
+      lengthIn: 150,
+      depthIn: 25.5,
+      includedInTakeoff: true,
+      backsplashEligible: true,
+      backsplashEligibleLengthIn: 100,
+      finishedEdge: {
+        frontEdgeLengthIn: 150,
+        leftExposedEdgeLengthIn: 0,
+        rightExposedEdgeLengthIn: 0,
+        otherExposedEdgeLengthIn: 0,
+        totalFinishedEdgeLengthIn: 150,
+        approved: true,
+        source: "estimator_confirmed"
       }
-    ],
+    },
+    {
+      id: "b",
+      pieceType: "counter",
+      lengthIn: 100,
+      depthIn: 25.5,
+      includedInTakeoff: true,
+      backsplashEligible: false,
+      finishedEdge: {
+        frontEdgeLengthIn: 100,
+        leftExposedEdgeLengthIn: 0,
+        rightExposedEdgeLengthIn: 0,
+        otherExposedEdgeLengthIn: 0,
+        totalFinishedEdgeLengthIn: 100,
+        approved: true,
+        source: "estimator_confirmed"
+      }
+    },
+    // Splash pieces are vertical geometry — never finished edge.
+    { pieceType: "backsplash", lengthIn: 100, includedInTakeoff: true },
+    // Excluded pieces never count.
+    { pieceType: "counter", lengthIn: 55, includedInTakeoff: false }
+  ];
+  const summary = buildApprovedScopeSummary({
+    rooms: [{ name: "Kitchen", pieces }],
     totals: { chargeableCountertopSqft: 30 }
   });
   assert.equal(summary.totalRunLengthIn, 250);
-  assert.equal(summary.derivedOpenEdgeLengthIn, 150); // 250 − 100
-  assert.equal(summary.derivedOpenEdgeLf, 12.5);
-  assert.equal(summary.edgeScopeSource, "derived_open_edge_v1");
-  console.log("ok: derived open edge = run length − backsplash-eligible length (150 in / 12.5 LF)");
+  assert.equal(summary.eligibleBacksplashLengthIn, 100);
+  assert.equal(summary.backsplashEligibleRunCount, 1);
+  // Front edges sum to 250 in — NOT 250 − 100 = 150 (retired subtraction).
+  assert.equal(summary.derivedOpenEdgeLengthIn, 250);
+  assert.equal(summary.derivedOpenEdgeLf, Math.round((250 / 12) * 100) / 100);
+  assert.equal(summary.edgeScopeSource, "finished_edge_v2");
+  assert.equal(summary.retiredEdgeFormula, "derived_open_edge_v1");
+  assert.equal(summary.legacyDerivedOpenEdgeLengthIn, 150); // audit only
+  console.log("ok: finished_edge_v2 = sum of approved fronts (not run − backsplash)");
 }
 
-// 27. Derived edge can never be negative.
+// 27. Unconfirmed drafts do not invent priced edge LF (confirmation required).
 {
   const summary = buildApprovedScopeSummary({
     rooms: [
       {
         name: "Bath",
-        eligibleBacksplashLengthIn: 500,
-        pieces: [{ pieceType: "counter", lengthIn: 100 }]
+        pieces: [
+          {
+            pieceType: "counter",
+            lengthIn: 100,
+            depthIn: 25,
+            includedInTakeoff: true,
+            backsplashEligible: false
+          }
+        ]
       }
     ],
     totals: { chargeableCountertopSqft: 8 }
   });
+  assert.equal(summary.edgeGeometryConfirmationRequired, true);
   assert.equal(summary.derivedOpenEdgeLengthIn, 0);
-  console.log("ok: derived edge clamps at zero (eligible length exceeding run length)");
+  assert.equal(summary.edgeScopeSource, "finished_edge_geometry_required");
+  console.log("ok: unconfirmed drafts require geometry confirmation (priced LF = 0)");
 }
 
 // Free canonical profile prices $0 regardless of LF.

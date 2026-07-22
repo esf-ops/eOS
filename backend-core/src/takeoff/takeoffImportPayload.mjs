@@ -26,6 +26,7 @@ import {
   deriveFabricationQuantitiesFromImportPayload,
   normalizeRunCutouts
 } from "./takeoffCutoutScope.mjs";
+import { attachDraftPieceGeometry } from "./takeoffPieceGeometryAuthority.mjs";
 
 export const TAKEOFF_IMPORT_SCHEMA_VERSION = "takeoff_import_v1";
 
@@ -279,7 +280,7 @@ export function buildTakeoffImportPayload(params) {
         // Structured cutout contract — legacy strings/maps normalize here so no
         // downstream consumer ever string-parses cutouts again.
         const { cutouts } = normalizeRunCutouts(run.cutouts);
-        importRoom.pieces.push({
+        const basePiece = {
           name: run.label,
           pieceType: pt,
           shapeType: run.shape ?? "rect",
@@ -295,12 +296,33 @@ export function buildTakeoffImportPayload(params) {
           roomId: room.id ?? null,
           areaId: area.id ?? null,
           backsplashEligible: eligible,
+          backsplashEligibleLengthIn: eligible
+            ? Math.max(
+                0,
+                Number(run.backsplashEligibleLengthIn) || Number(run.lengthIn) || 0
+              )
+            : 0,
           cutouts,
           sideSplashLeftEligible: run.sideSplashLeftEligible === true,
           sideSplashRightEligible: run.sideSplashRightEligible === true,
+          leftExposed: run.leftExposed,
+          rightExposed: run.rightExposed,
+          frontExposed: run.frontExposed,
+          backExposed: run.backExposed,
+          finishedEdge: run.finishedEdge || null,
+          backsplashGeometry: run.backsplashGeometry || null,
           waterfall: isWaterfall || undefined,
           backsplash: backsplashMetaForRun(run, area),
-        });
+          areaType: area.areaType || null
+        };
+        importRoom.pieces.push(
+          run.finishedEdge?.approved
+            ? basePiece
+            : attachDraftPieceGeometry(basePiece, {
+                eligible,
+                areaType: area.areaType || null
+              })
+        );
       }
     }
 

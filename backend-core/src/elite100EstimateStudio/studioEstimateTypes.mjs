@@ -60,9 +60,14 @@ export const RETIRED_GENERIC_PRODUCT_ADDON_KEYS = Object.freeze([
   "qty-v-oval"
 ]);
 
-/** Edge scope provenance markers (see FEATURE_DECISIONS — derived open edge). */
+/** Edge scope provenance markers (see FEATURE_DECISIONS — finished edge geometry). */
 export const EDGE_SCOPE_SOURCES = Object.freeze({
+  /** @deprecated Retired: totalRun − backsplashEligible. Historical audit only. */
   DERIVED: "derived_open_edge_v1",
+  /** Sum of estimator-approved per-piece finished-edge sections. */
+  FINISHED_EDGE: "finished_edge_v2",
+  /** Draft suggestions present; confirmation required before publish. */
+  CONFIRMATION_REQUIRED: "finished_edge_geometry_required",
   ADJUSTED: "estimator_adjusted_open_edge_v1",
   MANUAL: "manual"
 });

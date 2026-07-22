@@ -128,6 +128,13 @@ type StudioEstimate = {
       derivedOpenEdgeLf?: number;
       edgeEligibleLinearFeet?: number;
       edgeScopeSource?: string;
+      edgeGeometryConfirmationRequired?: boolean;
+      approvedFinishedEdgeLf?: number;
+      suggestedFinishedEdgeLf?: number;
+      finishedEdgeByPiece?: Array<object>;
+      backsplashByPiece?: Array<object>;
+      legacyDerivedOpenEdgeLf?: number | null;
+      edgeScopeSource?: string;
       countertopSqft?: number;
       reviewCutouts?: Array<{
         roomName?: string;
@@ -585,6 +592,7 @@ export default function EstimateScopePanel({
     adjustmentLf: number;
     finalLf: number;
     source: string;
+    confirmationRequired?: boolean;
   };
   const activeEdgeProfileToken =
     scope.edgeProfileToken ||
@@ -903,14 +911,50 @@ export default function EstimateScopePanel({
                 {Number(scopeSummary.popUpOutletCutouts ?? 0) === 1 ? "" : "s"}
               </li>
               <li data-testid="eq-backsplash-scope-summary">
-                Backsplash-eligible runs: {Number(scopeSummary.backsplashEligibleRunCount ?? 0)} ·
-                Eligible length: {Number(scopeSummary.eligibleBacksplashLengthIn ?? 0).toFixed(2)}{" "}
-                in · Source: Approved Takeoff
+                Backsplash-approved runs:{" "}
+                {Number(scopeSummary.backsplashEligibleRunCount ?? 0)} · Approved eligible
+                length:{" "}
+                {(Number(scopeSummary.eligibleBacksplashLengthIn ?? 0) / 12).toFixed(2)} LF (
+                {Number(scopeSummary.eligibleBacksplashLengthIn ?? 0).toFixed(2)} in) ·{" "}
+                Source: Approved Takeoff
               </li>
-              <li>
-                Derived open edge: {edgeScope.derivedLf.toFixed(2)} LF (run length minus
-                backsplash-eligible length)
+              <li data-testid="eq-finished-edge-scope-summary">
+                {scopeSummary.edgeGeometryConfirmationRequired
+                  ? `Finished edge suggestions: ${Number(scopeSummary.suggestedFinishedEdgeLf ?? 0).toFixed(2)} LF — confirm per-piece edges in Takeoff before publish`
+                  : `Approved finished edge total: ${Number(scopeSummary.approvedFinishedEdgeLf ?? edgeScope.derivedLf ?? 0).toFixed(2)} LF`}
+                {scopeSummary.edgeScopeSource
+                  ? ` · Source: ${scopeSummary.edgeScopeSource}`
+                  : ""}
               </li>
+              {Array.isArray(scopeSummary.finishedEdgeByPiece) &&
+              scopeSummary.finishedEdgeByPiece.length > 0 ? (
+                <li data-testid="eq-finished-edge-by-piece">
+                  Finished edge by piece:
+                  <ul className="eq-scope-piece-list">
+                    {(scopeSummary.finishedEdgeByPiece as Array<Record<string, unknown>>).map(
+                      (p, i) => {
+                        const parts: string[] = [];
+                        const front = Number(p.frontEdgeLengthIn) || 0;
+                        const left = Number(p.leftExposedEdgeLengthIn) || 0;
+                        const right = Number(p.rightExposedEdgeLengthIn) || 0;
+                        const other = Number(p.otherExposedEdgeLengthIn) || 0;
+                        if (front > 0) parts.push(`front ${(front / 12).toFixed(2)} LF`);
+                        if (left > 0) parts.push(`left ${(left / 12).toFixed(2)} LF`);
+                        if (right > 0) parts.push(`right ${(right / 12).toFixed(2)} LF`);
+                        if (other > 0) parts.push(`other ${(other / 12).toFixed(2)} LF`);
+                        const name = String(p.pieceName || p.pieceId || `Piece ${i + 1}`);
+                        const status = p.approved === true ? "" : " (suggested)";
+                        return (
+                          <li key={String(p.pieceId || i)}>
+                            {name}: {parts.length ? parts.join("; ") : "no exposed edge"}
+                            {status}
+                          </li>
+                        );
+                      }
+                    )}
+                  </ul>
+                </li>
+              ) : null}
             </ul>
             ) : null}
             {Number(scopeSummary?.popUpOutletCutouts ?? 0) > 0 ||
@@ -1458,7 +1502,7 @@ export default function EstimateScopePanel({
           {takeoffAuthority ? (
             <>
               <label>
-                Derived open edge (LF)
+                Approved finished edge (LF)
                 <input
                   type="number"
                   value={edgeScope.derivedLf}
@@ -1487,7 +1531,7 @@ export default function EstimateScopePanel({
                   value={scope.edgeScopeAdjustment?.adjustmentReason ?? ""}
                   disabled={blocked}
                   data-testid="eq-edge-adjustment-reason"
-                  placeholder="e.g. waterfall side edges not in derived proxy"
+                  placeholder="e.g. waterfall side edges not in approved piece sections"
                   onChange={(e) => patchEdgeAdjustment({ adjustmentReason: e.target.value })}
                 />
               </label>
@@ -1517,9 +1561,13 @@ export default function EstimateScopePanel({
         </div>
         {takeoffAuthority ? (
           <p className="eq-footnote" data-testid="eq-edge-source-note">
-            Source: run length minus backsplash-eligible length (
-            {edgeScope.source}). Interim proxy — seams, waterfalls, interior and side edges are
-            not modeled yet; use the adjustment with a reason where field geometry differs.
+            Source: sum of estimator-approved per-piece finished edges (
+            {edgeScope.source}). Finished-edge LF is independent of backsplash mode. Use the
+            adjustment with a reason only when field geometry differs from the approved piece
+            sections.
+            {edgeScope.confirmationRequired
+              ? " Confirmation required in Takeoff before Digital Estimate publication."
+              : ""}
           </p>
         ) : null}
 

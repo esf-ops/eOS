@@ -48,6 +48,7 @@ import {
 import {
   flattenPieces,
   patchRun,
+  patchRunFinishedEdge,
   renameRoom,
   reassignRun,
   sfFrom
@@ -97,6 +98,11 @@ type PieceRow = {
   quantity: number;
   countertopSf: number;
   backsplashEligible: boolean;
+  finishedEdgeTotalIn?: number | null;
+  finishedEdgeApproved?: boolean;
+  frontEdgeLengthIn?: number | null;
+  leftExposed?: boolean | null;
+  rightExposed?: boolean | null;
   included: boolean;
   cutouts: CutoutEntry[];
   cutoutsSummary: string;
@@ -880,6 +886,17 @@ export default function ConsolidatedTakeoffReview() {
     if (approveStatus === "approving" || approveStatus === "approved") return;
     if (blocking.length > 0) return;
 
+    const unconfirmedEdge = rows.filter((r) => r.included && !r.finishedEdgeApproved);
+    if (unconfirmedEdge.length > 0) {
+      setApproveStatus("error");
+      setApproveMsg(
+        `Confirm finished edges for ${unconfirmedEdge.length} piece${
+          unconfirmedEdge.length === 1 ? "" : "s"
+        } before approving Takeoff (Backsplash ≠ finished edge).`
+      );
+      return;
+    }
+
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
       await persistDraft();
@@ -950,6 +967,7 @@ export default function ConsolidatedTakeoffReview() {
     authToken,
     takeoffJobId,
     draft,
+    rows,
     approveStatus,
     blocking.length,
     advisory.length,
@@ -1131,6 +1149,7 @@ export default function ConsolidatedTakeoffReview() {
                     <th className="ctr-col-qty">Quantity</th>
                     <th className="ctr-col-sf">Square feet</th>
                     <th className="ctr-col-bs">Backsplash</th>
+                    <th className="ctr-col-edge">Finished edge</th>
                     <th className="ctr-col-incl">Included</th>
                     <th className="ctr-col-cutouts">Cutouts</th>
                     <th className="ctr-col-notes">Notes</th>
@@ -1140,7 +1159,7 @@ export default function ConsolidatedTakeoffReview() {
                 <tbody>
                   {roomSections.length === 0 ? (
                     <tr data-testid="ctr-empty-worksheet">
-                      <td colSpan={11} className="ctr-muted">
+                      <td colSpan={12} className="ctr-muted">
                         No rooms yet. Add a room, then add a piece to start measuring.
                       </td>
                     </tr>
@@ -1365,7 +1384,20 @@ export default function ConsolidatedTakeoffReview() {
                                     {
                                       backsplashEligible: e.target.checked,
                                       backsplashEligibilitySource: "estimator_confirmed",
-                                      backsplashEligibilityUpdatedAt: new Date().toISOString()
+                                      backsplashEligibilityUpdatedAt: new Date().toISOString(),
+                                      backsplashEligibleLengthIn: e.target.checked
+                                        ? Number(row.lengthIn) || 0
+                                        : 0,
+                                      backsplashGeometry: {
+                                        backsplashEligible: e.target.checked,
+                                        backsplashEligibleLengthIn: e.target.checked
+                                          ? Number(row.lengthIn) || 0
+                                          : 0,
+                                        backsplashEdge: "back",
+                                        approved: true,
+                                        source: "estimator_confirmed",
+                                        approvalSource: "estimator_confirmed"
+                                      }
                                     }
                                   ),
                                   row.roomId,
@@ -1378,6 +1410,186 @@ export default function ConsolidatedTakeoffReview() {
                             {row.backsplashEligible ? "Include" : "No backsplash"}
                           </span>
                         </label>
+                      </td>
+                      <td className="ctr-col-edge">
+                        <details className="ctr-cutouts-pop" data-testid="ctr-finished-edge">
+                          <summary className="ctr-cutouts-summary">
+                            {row.finishedEdgeApproved
+                              ? `${((Number(row.finishedEdgeTotalIn) || 0) / 12).toFixed(2)} LF ✓`
+                              : row.finishedEdgeTotalIn != null
+                                ? `${((Number(row.finishedEdgeTotalIn) || 0) / 12).toFixed(2)} LF draft`
+                                : "Set edges"}
+                          </summary>
+                          <div className="ctr-cutouts-menu">
+                            <p className="ctr-muted" style={{ margin: "0 0 0.5rem", fontSize: 12 }}>
+                              Front defaults to full run length. Left/right use depth when
+                              exposed. Backsplash does not remove the front finished edge.
+                            </p>
+                            <label className="ctr-bs-toggle" style={{ display: "block", marginBottom: 4 }}>
+                              <input
+                                type="checkbox"
+                                defaultChecked={
+                                  row.frontEdgeLengthIn == null
+                                    ? true
+                                    : Number(row.frontEdgeLengthIn) > 0
+                                }
+                                disabled={rowLocked}
+                                data-testid="ctr-edge-front-exposed"
+                                onChange={(e) => {
+                                  const front = e.target.checked ? Number(row.lengthIn) || 0 : 0;
+                                  const left =
+                                    row.leftExposed === true ? Number(row.depthIn) || 0 : 0;
+                                  const right =
+                                    row.rightExposed === true ? Number(row.depthIn) || 0 : 0;
+                                  updateDraft(
+                                    markRunEstimatorOwned(
+                                      patchRunFinishedEdge(
+                                        draft,
+                                        {
+                                          roomId: row.roomId,
+                                          areaId: row.areaId,
+                                          runId: row.runId
+                                        },
+                                        {
+                                          frontEdgeLengthIn: front,
+                                          leftExposedEdgeLengthIn: left,
+                                          rightExposedEdgeLengthIn: right,
+                                          otherExposedEdgeLengthIn: 0,
+                                          adjustmentIn: 0
+                                        }
+                                      ),
+                                      row.roomId,
+                                      row.runId
+                                    )
+                                  );
+                                }}
+                              />
+                              <span className="ctr-bs-toggle-label">
+                                Front exposed ({Number(row.lengthIn) || 0} in)
+                              </span>
+                            </label>
+                            <label className="ctr-bs-toggle" style={{ display: "block", marginBottom: 4 }}>
+                              <input
+                                type="checkbox"
+                                checked={row.leftExposed === true}
+                                disabled={rowLocked}
+                                data-testid="ctr-edge-left-exposed"
+                                onChange={(e) => {
+                                  const front =
+                                    row.frontEdgeLengthIn != null
+                                      ? Number(row.frontEdgeLengthIn) || 0
+                                      : Number(row.lengthIn) || 0;
+                                  const left = e.target.checked ? Number(row.depthIn) || 0 : 0;
+                                  const right =
+                                    row.rightExposed === true ? Number(row.depthIn) || 0 : 0;
+                                  updateDraft(
+                                    markRunEstimatorOwned(
+                                      patchRunFinishedEdge(
+                                        draft,
+                                        {
+                                          roomId: row.roomId,
+                                          areaId: row.areaId,
+                                          runId: row.runId
+                                        },
+                                        {
+                                          frontEdgeLengthIn: front,
+                                          leftExposedEdgeLengthIn: left,
+                                          rightExposedEdgeLengthIn: right,
+                                          otherExposedEdgeLengthIn: 0,
+                                          adjustmentIn: 0
+                                        }
+                                      ),
+                                      row.roomId,
+                                      row.runId
+                                    )
+                                  );
+                                }}
+                              />
+                              <span className="ctr-bs-toggle-label">
+                                Left exposed ({Number(row.depthIn) || 0} in depth)
+                              </span>
+                            </label>
+                            <label className="ctr-bs-toggle" style={{ display: "block", marginBottom: 4 }}>
+                              <input
+                                type="checkbox"
+                                checked={row.rightExposed === true}
+                                disabled={rowLocked}
+                                data-testid="ctr-edge-right-exposed"
+                                onChange={(e) => {
+                                  const front =
+                                    row.frontEdgeLengthIn != null
+                                      ? Number(row.frontEdgeLengthIn) || 0
+                                      : Number(row.lengthIn) || 0;
+                                  const left =
+                                    row.leftExposed === true ? Number(row.depthIn) || 0 : 0;
+                                  const right = e.target.checked ? Number(row.depthIn) || 0 : 0;
+                                  updateDraft(
+                                    markRunEstimatorOwned(
+                                      patchRunFinishedEdge(
+                                        draft,
+                                        {
+                                          roomId: row.roomId,
+                                          areaId: row.areaId,
+                                          runId: row.runId
+                                        },
+                                        {
+                                          frontEdgeLengthIn: front,
+                                          leftExposedEdgeLengthIn: left,
+                                          rightExposedEdgeLengthIn: right,
+                                          otherExposedEdgeLengthIn: 0,
+                                          adjustmentIn: 0
+                                        }
+                                      ),
+                                      row.roomId,
+                                      row.runId
+                                    )
+                                  );
+                                }}
+                              />
+                              <span className="ctr-bs-toggle-label">
+                                Right / outer end ({Number(row.depthIn) || 0} in depth)
+                              </span>
+                            </label>
+                            <button
+                              type="button"
+                              className="ctr-btn-secondary"
+                              data-testid="ctr-confirm-finished-edge"
+                              disabled={rowLocked}
+                              onClick={() => {
+                                const front =
+                                  row.frontEdgeLengthIn != null
+                                    ? Number(row.frontEdgeLengthIn) || 0
+                                    : Number(row.lengthIn) || 0;
+                                const depth = Number(row.depthIn) || 0;
+                                const leftIn = row.leftExposed === true ? depth : 0;
+                                const rightIn = row.rightExposed === true ? depth : 0;
+                                updateDraft(
+                                  markRunEstimatorOwned(
+                                    patchRunFinishedEdge(
+                                      draft,
+                                      {
+                                        roomId: row.roomId,
+                                        areaId: row.areaId,
+                                        runId: row.runId
+                                      },
+                                      {
+                                        frontEdgeLengthIn: front || Number(row.lengthIn) || 0,
+                                        leftExposedEdgeLengthIn: leftIn,
+                                        rightExposedEdgeLengthIn: rightIn,
+                                        otherExposedEdgeLengthIn: 0,
+                                        adjustmentIn: 0
+                                      }
+                                    ),
+                                    row.roomId,
+                                    row.runId
+                                  )
+                                );
+                              }}
+                            >
+                              Confirm finished edge
+                            </button>
+                          </div>
+                        </details>
                       </td>
                       <td className="ctr-col-incl">
                         <label htmlFor={inclId} className="ctr-bs-toggle">
