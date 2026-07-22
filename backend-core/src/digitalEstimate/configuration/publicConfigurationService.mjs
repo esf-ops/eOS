@@ -17,6 +17,8 @@ import {
 import { enrichElite100MaterialsWithCustomerImages } from "./elite100CustomerImageResolver.mjs";
 import {
   edgeProfileDisplayLabel,
+  edgeEffectFromFrozenPublication,
+  findFrozenEdgeOptionEffect,
   isPremiumEdgeProfile,
   normalizeEdgeProfileToken,
   remapLegacyEdgeOptionKey,
@@ -356,7 +358,8 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     : null;
 
   // Authoritative edge price effects (Included / Original selection / +$N).
-  // Seeded envelope options still carry sellPrice: 0 — resolve from locked LF.
+  // Priority: (1) frozen publication edge_option_effects, (2) trusted-context
+  // LF × rate for unpublished/preview flows, (3) review-required when absent.
   let edgeEffect = null;
   if (optionKey.startsWith("edge:") || compat.role === "edge_selection") {
     const parts = optionKey.split(":");
@@ -364,28 +367,33 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     const token = normalizeEdgeProfileToken(
       compat.edgeProfileToken || parts.slice(2).join(":") || "edge_eased"
     );
-    const roomRow =
-      (ctx?.configuredRooms || ctx?.rooms || []).find(
-        (r) => String(r.roomKey) === String(roomKey)
-      ) ||
-      (ctx?.configuredRooms || ctx?.rooms || []).find(
-        (r) =>
-          String(r.displayName || "").toLowerCase() === String(roomKey || "").toLowerCase()
-      );
-    const lf =
-      Number(roomRow?.edgeLinearFeet) ||
-      Number(ctx?.edgeLinearFeetTotal) ||
-      (ctx?.configuredRooms || ctx?.rooms || []).reduce(
-        (s, r) => s + (Number(r.edgeLinearFeet) || 0),
-        0
-      ) ||
-      0;
-    edgeEffect = resolveEdgeOptionPriceEffect({
-      profileToken: token,
-      originalProfileToken: compat.originalEdgeProfile || null,
-      edgeLinearFeet: lf,
-      pricingBasis: ctx?.pricingBasis || "direct"
-    });
+    const frozen = findFrozenEdgeOptionEffect(ctx?.edgeOptionEffects, token);
+    if (frozen) {
+      edgeEffect = edgeEffectFromFrozenPublication(frozen);
+    } else {
+      const roomRow =
+        (ctx?.configuredRooms || ctx?.rooms || []).find(
+          (r) => String(r.roomKey) === String(roomKey)
+        ) ||
+        (ctx?.configuredRooms || ctx?.rooms || []).find(
+          (r) =>
+            String(r.displayName || "").toLowerCase() === String(roomKey || "").toLowerCase()
+        );
+      const lf =
+        Number(roomRow?.edgeLinearFeet) ||
+        Number(ctx?.edgeLinearFeetTotal) ||
+        (ctx?.configuredRooms || ctx?.rooms || []).reduce(
+          (s, r) => s + (Number(r.edgeLinearFeet) || 0),
+          0
+        ) ||
+        0;
+      edgeEffect = resolveEdgeOptionPriceEffect({
+        profileToken: token,
+        originalProfileToken: compat.originalEdgeProfile || null,
+        edgeLinearFeet: lf,
+        pricingBasis: ctx?.pricingBasis || "direct"
+      });
+    }
     treatment = edgeEffect.customerPriceTreatment;
     sell = edgeEffect.visibleDelta;
   }
@@ -835,7 +843,8 @@ export function createPublicConfigurationService(deps) {
     const optionCtx = {
       rooms: ctx.rooms || [],
       pricingBasis: ctx.pricingBasis || "direct",
-      edgeLinearFeetTotal: Number(ctx.edgeLinearFeetTotal) || 0
+      edgeLinearFeetTotal: Number(ctx.edgeLinearFeetTotal) || 0,
+      edgeOptionEffects: Array.isArray(ctx.edgeOptionEffects) ? ctx.edgeOptionEffects : []
     };
     let options = (graph?.options || [])
       .filter((o) => o.is_active_in_envelope !== false)
@@ -1993,6 +2002,33 @@ export function createPublicConfigurationService(deps) {
           const roomKey = parts[1];
           const token = normalizeEdgeProfileToken(parts.slice(2).join(":"));
           if (!isPremiumEdgeProfile(token)) continue;
+          const frozen = findFrozenEdgeOptionEffect(ctx.edgeOptionEffects, token);
+          if (frozen) {
+            if (
+              frozen.reviewRequired ||
+              frozen.customerPriceTreatment === "review_required" ||
+              frozen.priceEffectCents == null
+            ) {
+              reviewFlags.push(`edge_length_review:${roomKey}:${token}`);
+              continue;
+            }
+            const cents = Math.trunc(Number(frozen.priceEffectCents) || 0);
+            if (!(cents > 0)) continue;
+            calcOptions.push({
+              optionKey: key,
+              displayLabel: frozen.profile || edgeProfileDisplayLabel(token),
+              quantity: 1,
+              sellPrice: cents / 100,
+              pricingMode: "fixed",
+              customerPriceTreatment: "absolute",
+              availabilityState: "active",
+              includedInBaseline: false,
+              defaultQty: 0,
+              baselineQuantity: 0
+            });
+            continue;
+          }
+          // Legacy publications without frozen edge_option_effects: LF × rate.
           const roomRow = rooms.find((r) => r.roomKey === roomKey);
           const lf = Number(roomRow?.edgeLinearFeet) || Number(edgeLfTotal) || 0;
           if (!(lf > 0)) {

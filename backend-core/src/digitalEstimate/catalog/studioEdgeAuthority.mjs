@@ -253,6 +253,123 @@ export function resolveEdgeOptionPriceEffect(args) {
 }
 
 /**
+ * Customer-safe edge option effects frozen at Studio → Digital Estimate publication.
+ * Built from the approved Studio final priced edge LF + pricing basis + original profile.
+ * Never includes LF, rate, or pricing basis in the returned rows.
+ *
+ * @param {{
+ *   finalPricedEdgeLf: number,
+ *   pricingBasis?: string|null,
+ *   originalProfileToken?: string|null,
+ *   roomKey?: string|null,
+ *   roomName?: string|null
+ * }} args
+ * @returns {Array<{
+ *   profileKey: string,
+ *   profile: string,
+ *   classification: "included"|"premium",
+ *   originalSelection: boolean,
+ *   available: boolean,
+ *   reviewRequired: boolean,
+ *   priceEffectCents: number|null,
+ *   priceEffectLabel: string,
+ *   customerPriceTreatment: string,
+ *   roomKey: string|null,
+ *   roomName: string|null
+ * }>}
+ */
+export function buildCustomerSafeEdgeOptionEffects(args) {
+  const finalLf = Math.max(0, Number(args?.finalPricedEdgeLf) || 0);
+  const pricingBasis = args?.pricingBasis || "direct";
+  const original = normalizeEdgeProfileToken(args?.originalProfileToken || "edge_eased");
+  const roomKey =
+    args?.roomKey != null && String(args.roomKey).trim()
+      ? String(args.roomKey).trim()
+      : null;
+  const roomName =
+    args?.roomName != null && String(args.roomName).trim()
+      ? String(args.roomName).trim()
+      : null;
+
+  return ALL_EDGE_PROFILES.map((def) => {
+    const effect = resolveEdgeOptionPriceEffect({
+      profileToken: def.optionToken,
+      originalProfileToken: original,
+      edgeLinearFeet: finalLf,
+      pricingBasis
+    });
+    const reviewRequired = effect.customerPriceTreatment === "review_required";
+    return {
+      profileKey: def.optionToken,
+      profile: def.label,
+      classification: def.tier === "premium" ? "premium" : "included",
+      originalSelection: Boolean(effect.original),
+      available: Boolean(effect.available) && !reviewRequired,
+      reviewRequired,
+      priceEffectCents:
+        effect.priceEffectCents == null ? null : Number(effect.priceEffectCents),
+      priceEffectLabel: String(effect.priceEffectLabel || ""),
+      customerPriceTreatment: String(effect.customerPriceTreatment || "review_required"),
+      roomKey,
+      roomName
+    };
+  });
+}
+
+/**
+ * Lookup a frozen customer-safe edge effect by profile token.
+ * @param {Array<object>|null|undefined} effects
+ * @param {string} profileToken
+ */
+export function findFrozenEdgeOptionEffect(effects, profileToken) {
+  const token = normalizeEdgeProfileToken(profileToken);
+  if (!Array.isArray(effects) || !effects.length) return null;
+  return (
+    effects.find(
+      (e) => normalizeEdgeProfileToken(e?.profileKey || e?.profile) === token
+    ) || null
+  );
+}
+
+/**
+ * Map a frozen publication effect into the runtime edge-effect shape used by
+ * public option DTOs. Prefer this over re-resolving LF × rate for published DE.
+ * @param {object|null|undefined} frozen
+ */
+export function edgeEffectFromFrozenPublication(frozen) {
+  if (!frozen || typeof frozen !== "object") return null;
+  const reviewRequired =
+    Boolean(frozen.reviewRequired) ||
+    frozen.customerPriceTreatment === "review_required";
+  const cents =
+    frozen.priceEffectCents == null ? null : Number(frozen.priceEffectCents);
+  const premium = frozen.classification === "premium";
+  const original = Boolean(frozen.originalSelection);
+  let treatment = String(frozen.customerPriceTreatment || "");
+  if (!treatment) {
+    if (reviewRequired) treatment = "review_required";
+    else if (original) treatment = "original_selection";
+    else if (!premium) treatment = "included_alternate";
+    else treatment = "delta";
+  }
+  return {
+    profileKey: frozen.profileKey || normalizeEdgeProfileToken(frozen.profile),
+    label: frozen.profile || edgeProfileDisplayLabel(frozen.profileKey),
+    original,
+    premium,
+    available: Boolean(frozen.available) && !reviewRequired,
+    priceEffectCents: Number.isFinite(cents) ? cents : null,
+    priceEffectLabel: String(frozen.priceEffectLabel || ""),
+    customerPriceTreatment: treatment,
+    visibleDelta:
+      treatment === "delta" && Number.isFinite(cents) ? cents / 100 : null,
+    visibleSellPrice: null,
+    reviewReasonCode: reviewRequired ? "frozen_review_required" : null,
+    fromFrozenPublication: true
+  };
+}
+
+/**
  * Original profile for a Studio / room scope row.
  * Studio scope historically stored edgeMode (included/w_edge/d_edge) — map to profiles.
  * Prefer explicit edgeProfile / edgeProfileV2 when present.

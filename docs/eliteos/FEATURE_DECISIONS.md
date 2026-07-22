@@ -2131,4 +2131,19 @@
 | **SQL / env** | No new migration. Requires existing applied `eliteos_digital_estimate_amendment_v1.sql` tables (already present). Flags unchanged: `DIGITAL_ESTIMATE_REVIEW_REQUESTS_ENABLED`, `VITE_DIGITAL_ESTIMATE_REVIEW_UI_ENABLED`. |
 | **Deployment surfaces** | `backend-core`, `app-digital-estimate`. No manual deployment. |
 
+### 150. Digital Estimate publish calculated edge option effects (2026-07-21)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-21 · `fix/digital-estimate-publish-calculated-edge-effects` |
+| **Problem** | Hosted Digital Estimate showed Included / Upgraded groups correctly, but upgraded profiles still rendered “Elite will confirm this option and price.” Studio already knew final priced edge LF, pricing basis, premium rate, and per-profile charges; publication dropped the final customer-safe effect and the public runtime re-resolved LF (often `0` → `missing_edge_lf`). |
+| **Studio authority** | Final priced edge LF: `calculationSnapshot.fabrication.edge.finalLf` (from `resolveScopeEdgeLinearFeet` in `studioEstimatePricing.mjs`). Premium charge: `resolvePremiumEdgeRatePerLf` × final LF via `resolveEdgeOptionPriceEffect` (`studioEdgeAuthority.mjs`). |
+| **Publication drop point (fixed)** | `studioEstimatePublicationAdapter.mjs` `buildCustomerSafeCalculationSnapshotCopy` previously froze rooms / `edge_linear_feet_total` but never froze per-profile option effects. Now freezes customer-safe `internal_ui.edge_option_effects` (profile, classification, originalSelection, available, reviewRequired, priceEffectCents, priceEffectLabel, roomKey/roomName). Never includes LF, rate, pricing basis, cost, margin, or internal IDs in those rows. |
+| **Runtime priority** | (1) frozen `edge_option_effects` → (2) trusted-context LF × rate for unpublished/preview / legacy pubs → (3) review-required only when no authoritative effect exists. Published Digital Estimates must not silently replace a frozen effect with a runtime recomputation. |
+| **Save** | Premium selection uses frozen `priceEffectCents` as one room Add-ons line (`Edge — {profile}`, qty 1, fixed absolute). No LF × rate in the frontend. Legacy pubs without freeze keep the prior LF × rate path. |
+| **Room ownership** | Temporary approved policy preserved: project-level priced open-edge LF (and therefore frozen effects’ `roomKey`) is assigned to the **first countertop room**. Digital Estimate must not re-guess ownership across rooms. |
+| **Legacy** | Publications without `edge_option_effects` may still fall back to trusted-context calculation / “Elite will confirm…” when evidence is absent. Newly published revisions that contain calculated effects must not show review-required for those premium profiles. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `backend-core` (publication adapter, trusted context, public configuration). No manual deployment. |
+
 
