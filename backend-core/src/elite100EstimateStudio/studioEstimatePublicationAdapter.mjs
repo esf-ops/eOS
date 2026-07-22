@@ -15,6 +15,10 @@ import { readDigitalEstimatePricingValidDays } from "../digitalEstimate/digitalE
 import { serverApprovedOptionCatalog } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
 import { getCatalogMeta } from "../digitalEstimate/catalog/esfPlumbingCatalog.mjs";
 import { looksLikeUuid } from "../digitalEstimate/catalog/customerFacingCopy.mjs";
+import {
+  buildCustomerSafeEdgeOptionEffects,
+  normalizeEdgeProfileToken
+} from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
 
 function str(v) {
   if (v == null) return "";
@@ -274,15 +278,23 @@ function freezePiecesForPublication(pieces) {
  */
 export function buildStudioEstimateRoomsForPublication(estimate) {
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+  const calc = estimate?.calculationSnapshot || estimate?.calculation || null;
   const materialGroup = str(scope.materialGroup) || "Group Promo";
   const colorName = scope.colorTbd ? null : str(scope.colorName) || null;
   const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
   const edgeScope = resolveScopeEdgeLinearFeet(scope);
-  const finalEdgeLf = Number(edgeScope.finalLf) || 0;
+  // Prefer the approved Studio calculation final LF when present; otherwise
+  // fall back to scope-derived LF (legacy / pre-calc freeze paths).
+  const calcEdge = calc?.fabrication?.edge;
+  const finalEdgeLf =
+    calcEdge && Number.isFinite(Number(calcEdge.finalLf))
+      ? Math.max(0, Number(calcEdge.finalLf))
+      : Number(edgeScope.finalLf) || 0;
   const included = rooms.filter((r) => r && r.included !== false);
-  // Project-level priced open-edge LF is assigned to the first countertop room
-  // so DE room-scoped premium edge options have a governed length without
-  // double-counting across rooms.
+  // Temporary room-ownership policy (FEATURE_DECISIONS §150): project-level
+  // priced open-edge LF is assigned to the first countertop room so DE
+  // room-scoped premium edge options have a single governed owner without
+  // double-counting across rooms. Digital Estimate must not re-guess ownership.
   let edgeAssigned = false;
   return included.map((r, idx) => {
       const pieces = freezePiecesForPublication(r.pieces);
@@ -442,6 +454,31 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
       : scope.addOns && typeof scope.addOns === "object"
         ? { ...scope.addOns }
         : {};
+  const edgeLfTotal = Number(
+    rooms.reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0)
+  );
+  const calcEdge = calc?.fabrication?.edge;
+  const finalPricedEdgeLf =
+    calcEdge && Number.isFinite(Number(calcEdge.finalLf))
+      ? Math.max(0, Number(calcEdge.finalLf))
+      : edgeLfTotal;
+  const originalProfileToken = normalizeEdgeProfileToken(
+    calcEdge?.profileToken || scope.edgeProfileToken || "edge_eased"
+  );
+  // Same temporary ownership policy as room freeze: first countertop room that
+  // received the project aggregate edge LF (or first countertop room).
+  const ownerRoom =
+    rooms.find((r) => Number(r.edgeLinearFeet) > 0) ||
+    rooms.find((r) => Number(r.countertopSqft) > 0) ||
+    rooms[0] ||
+    null;
+  const edgeOptionEffects = buildCustomerSafeEdgeOptionEffects({
+    finalPricedEdgeLf,
+    pricingBasis,
+    originalProfileToken,
+    roomKey: ownerRoom?.id || null,
+    roomName: ownerRoom?.name || null
+  });
   return {
     materialProgramDefault: "elite_100",
     material_program_default: "elite_100",
@@ -468,11 +505,12 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
       customer_display_total: customerDisplayTotal,
       pricing_basis: pricingBasis,
       estimate_rooms: rooms,
-      // Project aggregate for DE premium edge option effects when a room row
+      // Project aggregate for legacy DE option resolution when a room row
       // lacks per-room LF (legacy pubs / multi-room assignment).
-      edge_linear_feet_total: Number(
-        rooms.reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0)
-      ),
+      edge_linear_feet_total: edgeLfTotal,
+      // Customer-safe frozen per-profile effects (no LF/rate/basis). Preferred
+      // authority for published Digital Estimate option labels + save amounts.
+      edge_option_effects: edgeOptionEffects,
       fabrication_add_ons: fabricationAddOns,
       custom_line_items: buildStudioCustomLineItemsForPublication(estimate),
       customer_catalog_permissions:

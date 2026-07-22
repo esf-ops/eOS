@@ -499,6 +499,14 @@ export async function buildTrustedConfigurationContext(args) {
     }
   }
 
+  // Frozen customer-safe edge option effects (publication authority). Prefer over
+  // runtime LF × rate for published Digital Estimates. Legacy pubs may omit.
+  const edgeOptionEffects = Array.isArray(iu.edge_option_effects)
+    ? iu.edge_option_effects
+    : Array.isArray(iu.edgeOptionEffects)
+      ? iu.edgeOptionEffects
+      : [];
+
   return {
     organizationId,
     publication: {
@@ -524,6 +532,7 @@ export async function buildTrustedConfigurationContext(args) {
     customerSnapshot,
     customerCatalogPermissions,
     edgeLinearFeetTotal,
+    edgeOptionEffects,
     baselineDisplayTotal: Number.isFinite(baselineDisplayTotal) ? baselineDisplayTotal : null,
     pricingValidThrough: pub.pricing_valid_through,
     rooms,

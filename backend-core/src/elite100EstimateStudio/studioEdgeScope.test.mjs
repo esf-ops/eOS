@@ -260,6 +260,17 @@ function takeoffScope(extra = {}) {
   assert.equal(raw.includes("derivedLf"), false);
   assert.equal(raw.includes("edgeScopeAdjustment"), false);
   assert.equal(raw.includes("waterfall side edges"), false);
+  const effects = header.calculation_snapshot?.internal_ui?.edge_option_effects;
+  assert.ok(Array.isArray(effects) && effects.length === 8);
+  const knife = effects.find((e) => e.profileKey === "edge_knife");
+  assert.equal(knife.originalSelection, true);
+  assert.equal(knife.priceEffectCents, 0);
+  assert.equal(knife.priceEffectLabel, "Original selection");
+  // Other premiums still carry the calculated project edge effect (not review-required).
+  const crescent = effects.find((e) => e.profileKey === "edge_crescent");
+  assert.ok(crescent.priceEffectCents > 0);
+  assert.equal(crescent.reviewRequired, false);
+  assert.equal(JSON.stringify(effects).includes("ratePerLf"), false);
   console.log("ok: customer-facing publication freeze carries no edge LF, rate, or adjustment detail");
 }
 
