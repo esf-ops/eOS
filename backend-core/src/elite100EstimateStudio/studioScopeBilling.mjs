@@ -75,6 +75,55 @@ export function normalizeCountertopScopeAdjustments(scope) {
 }
 
 /**
+ * Normalize estimator finished-edge absolute override (Pricing Setup).
+ * Blank / null finalLf → inactive (use Takeoff approved total ± legacy adjustment).
+ * Explicit 0 is a valid override and requires a reason.
+ *
+ * @param {object|null|undefined} scope
+ */
+export function normalizeFinishedEdgeOverride(scope) {
+  const raw =
+    scope?.finishedEdgeOverride && typeof scope.finishedEdgeOverride === "object"
+      ? scope.finishedEdgeOverride
+      : null;
+  if (!raw) {
+    return {
+      active: false,
+      finalLf: null,
+      reason: "",
+      overriddenBy: null,
+      overriddenAt: null
+    };
+  }
+  const hasKey =
+    Object.prototype.hasOwnProperty.call(raw, "finalLf") ||
+    Object.prototype.hasOwnProperty.call(raw, "final_lf");
+  const rawLf = raw.finalLf ?? raw.final_lf;
+  const blank =
+    !hasKey ||
+    rawLf == null ||
+    rawLf === "" ||
+    (typeof rawLf === "string" && !String(rawLf).trim());
+  if (blank) {
+    return {
+      active: false,
+      finalLf: null,
+      reason: String(raw.reason ?? raw.overrideReason ?? "").trim(),
+      overriddenBy: raw.overriddenBy != null ? String(raw.overriddenBy) : null,
+      overriddenAt: raw.overriddenAt != null ? String(raw.overriddenAt) : null
+    };
+  }
+  const finalLf = round2(Number(rawLf));
+  return {
+    active: true,
+    finalLf: Number.isFinite(finalLf) ? finalLf : null,
+    reason: String(raw.reason ?? raw.overrideReason ?? "").trim(),
+    overriddenBy: raw.overriddenBy != null ? String(raw.overriddenBy) : null,
+    overriddenAt: raw.overriddenAt != null ? String(raw.overriddenAt) : null
+  };
+}
+
+/**
  * Collect adjustment validation problems (reason required when non-zero).
  * @param {object|null|undefined} scope
  */
@@ -94,6 +143,26 @@ export function collectScopeAdjustmentIssues(scope) {
       code: "adjustment_reason_required",
       message: `Edge scope adjustment (${edgeAdj.adjustmentLf > 0 ? "+" : ""}${edgeAdj.adjustmentLf} LF) requires a reason.`
     });
+  }
+  const override = normalizeFinishedEdgeOverride(scope);
+  if (override.active) {
+    if (override.finalLf == null || !Number.isFinite(override.finalLf)) {
+      issues.push({
+        code: "finished_edge_override_invalid",
+        message: "Finished-edge override must be a finite number (LF)."
+      });
+    } else if (override.finalLf < 0) {
+      issues.push({
+        code: "finished_edge_override_negative",
+        message: "Finished-edge override cannot be negative."
+      });
+    }
+    if (!override.reason) {
+      issues.push({
+        code: "finished_edge_override_reason_required",
+        message: "Finished-edge override requires a reason."
+      });
+    }
   }
   return issues;
 }
@@ -203,58 +272,86 @@ export function normalizeEdgeScopeAdjustment(scope) {
 
 /**
  * Resolve the priced finished-edge LF for a scope.
- *  - Takeoff authority: sum of approved per-piece finished-edge sections
- *    (`finished_edge_v2`) plus governed estimator adjustment, never below zero.
- *  - Confirmation-required drafts: derivedLf = 0 until geometry is confirmed
- *    (never fall back to retired totalRun − backsplash subtraction for pricing).
- *  - Manual fallback: estimator-entered edgeLinearFeet (legacy behavior).
+ * Precedence:
+ *  1. Explicit Pricing Setup finishedEdgeOverride.finalLf (absolute, ≥0)
+ *  2. Takeoff approved finished-edge total + legacy ± edgeScopeAdjustment
+ *  3. Manual edgeLinearFeet
  *
- * Historical publications that already froze `derived_open_edge_v1` values remain
- * unchanged — this function only reads the stored summary LF.
+ * Approved estimate publication must not re-gate on per-piece draft flags —
+ * the calculation snapshot finalLf is publication authority.
  *
  * @param {object|null|undefined} scope
- * @returns {{ derivedLf: number, adjustmentLf: number, finalLf: number, source: string, confirmationRequired?: boolean }}
+ * @returns {{
+ *   derivedLf: number,
+ *   takeoffApprovedLf: number,
+ *   adjustmentLf: number,
+ *   overrideLf: number|null,
+ *   overrideActive: boolean,
+ *   finalLf: number,
+ *   source: string,
+ *   confirmationRequired?: boolean
+ * }}
  */
 export function resolveScopeEdgeLinearFeet(scope) {
   const adjustment = normalizeEdgeScopeAdjustment(scope);
+  const override = normalizeFinishedEdgeOverride(scope);
+
   if (scope?.physicalScopeSource === "takeoff") {
     const summary = scope?.takeoffScopeSummary || {};
     const edgeSource = String(
       summary.edgeScopeSource || scope?.edgeScopeSource || EDGE_SCOPE_SOURCES.FINISHED_EDGE
     );
     const confirmationRequired =
-      summary.edgeGeometryConfirmationRequired === true ||
-      edgeSource === EDGE_SCOPE_SOURCES.CONFIRMATION_REQUIRED ||
-      edgeSource === "finished_edge_geometry_required";
+      !override.active &&
+      (summary.edgeGeometryConfirmationRequired === true ||
+        edgeSource === EDGE_SCOPE_SOURCES.CONFIRMATION_REQUIRED ||
+        edgeSource === "finished_edge_geometry_required");
 
     // Prefer finished-edge / stored eligible LF. Do not recompute subtraction.
     let derivedLf = round2(
       Number(
-        summary.derivedOpenEdgeLf ??
+        summary.approvedFinishedEdgeLf ??
+          summary.derivedOpenEdgeLf ??
           summary.edgeEligibleLinearFeet ??
           scope?.edgeEligibleLinearFeet ??
           0
       ) || 0
     );
 
-    // New drafts that still need confirmation must not price a guessed edge LF.
+    // New drafts that still need confirmation must not price a guessed edge LF
+    // unless the estimator set an explicit Pricing Setup override.
     if (confirmationRequired && edgeSource !== EDGE_SCOPE_SOURCES.DERIVED) {
-      // If summary already has finished_edge_v2 LF, use it; otherwise zero until confirmed.
       if (
         edgeSource === EDGE_SCOPE_SOURCES.CONFIRMATION_REQUIRED ||
         edgeSource === "finished_edge_geometry_required"
       ) {
-        derivedLf = round2(Number(summary.approvedFinishedEdgeLf) || derivedLf || 0);
-        if (!(Number(summary.approvedFinishedEdgeLf) > 0)) {
-          derivedLf = 0;
-        }
+        derivedLf = round2(Number(summary.approvedFinishedEdgeLf) || 0);
       }
+    }
+
+    const takeoffApprovedLf = derivedLf;
+
+    if (override.active && override.finalLf != null) {
+      const finalLf = Math.max(0, round2(override.finalLf));
+      return {
+        derivedLf: takeoffApprovedLf,
+        takeoffApprovedLf,
+        adjustmentLf: 0,
+        overrideLf: finalLf,
+        overrideActive: true,
+        finalLf,
+        confirmationRequired: false,
+        source: EDGE_SCOPE_SOURCES.OVERRIDE
+      };
     }
 
     const finalLf = Math.max(0, round2(derivedLf + adjustment.adjustmentLf));
     return {
       derivedLf,
+      takeoffApprovedLf,
       adjustmentLf: adjustment.adjustmentLf,
+      overrideLf: null,
+      overrideActive: false,
       finalLf,
       confirmationRequired,
       source:
@@ -267,16 +364,31 @@ export function resolveScopeEdgeLinearFeet(scope) {
               : EDGE_SCOPE_SOURCES.FINISHED_EDGE
     };
   }
-  // Manual / legacy path: prefer estimator-entered edgeLinearFeet, but do not
-  // drop takeoff-derived eligible LF when physicalScopeSource was never set to
-  // "takeoff" (common on older Studio scopes that still carry edgeEligibleLinearFeet).
+  // Manual / legacy path
   const manualLf = Math.max(0, round2(Number(scope?.edgeLinearFeet) || 0));
   const eligibleLf = Math.max(0, round2(Number(scope?.edgeEligibleLinearFeet) || 0));
   const derivedLf = manualLf > 0 ? manualLf : eligibleLf;
+
+  if (override.active && override.finalLf != null) {
+    const finalLf = Math.max(0, round2(override.finalLf));
+    return {
+      derivedLf,
+      takeoffApprovedLf: derivedLf,
+      adjustmentLf: 0,
+      overrideLf: finalLf,
+      overrideActive: true,
+      finalLf,
+      source: EDGE_SCOPE_SOURCES.OVERRIDE
+    };
+  }
+
   const finalLf = Math.max(0, round2(derivedLf + adjustment.adjustmentLf));
   return {
     derivedLf,
+    takeoffApprovedLf: derivedLf,
     adjustmentLf: adjustment.adjustmentLf,
+    overrideLf: null,
+    overrideActive: false,
     finalLf,
     source: EDGE_SCOPE_SOURCES.MANUAL
   };

@@ -66,9 +66,11 @@ export const EDGE_SCOPE_SOURCES = Object.freeze({
   DERIVED: "derived_open_edge_v1",
   /** Sum of estimator-approved per-piece finished-edge sections. */
   FINISHED_EDGE: "finished_edge_v2",
-  /** Draft suggestions present; confirmation required before publish. */
+  /** Draft suggestions present; confirmation required before calculate (unless override). */
   CONFIRMATION_REQUIRED: "finished_edge_geometry_required",
   ADJUSTED: "estimator_adjusted_open_edge_v1",
+  /** Absolute Pricing Setup finished-edge override (replaces Takeoff total). */
+  OVERRIDE: "finished_edge_override_v1",
   MANUAL: "manual"
 });
 
@@ -99,6 +101,8 @@ export function emptyStudioEstimateScope() {
     // snapshotted, included in authoritative pricing (never customer-editable).
     countertopScopeAdjustments: [],
     edgeScopeAdjustment: null,
+    // Absolute finished-edge LF override (Pricing Setup). Null/blank = use Takeoff.
+    finishedEdgeOverride: null,
     // Which Digital Estimate catalogs the customer may use (estimator-set;
     // missing key = allowed). Enforcement lives in the publication/config flow.
     customerCatalogPermissions: {},

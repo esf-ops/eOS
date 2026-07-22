@@ -2172,11 +2172,27 @@
 | **New contracts** | Independent JSON on each piece/run (`takeoffPieceGeometryAuthority.mjs`): (A) backsplash — `backsplashEligible`, `backsplashEligibleLengthIn`, `backsplashEdge`, label, approval source; (B) finished edge — front / left / right / other lengths, total, estimator adjustment+reason, approval source. Never derive one from the other. |
 | **Draft defaults** | Wall: front = run length, back finished = 0, ends from exposure flags; island: no backsplash, multi-edge exposure suggested; peninsula: no backsplash on open sides, front + outer end. Names may inform draft only — never production pricing. |
 | **Estimator approval** | Worksheet: Backsplash at wall? Yes/No (+ length override with reason); finished-edge editor (front/left/right + Confirm). Takeoff Approve blocks until every included piece has confirmed finished edges. Corrections via `saveTakeoffCorrection` reset job to `needs_review`. |
-| **Pricing Setup** | Shows approved backsplash run count + length, finished edge by piece, approved total LF, estimator ± LF adjustment, final priced LF. Source `finished_edge_v2`. Confirmation-required drafts show suggestions and block Digital Estimate publication. |
-| **Publication** | Freezes governed priced edge LF / customer-safe edge + backsplash option effects as before. Public DE DTO still has no LF/SF/rates/dimensions. |
-| **Legacy** | Historical publications that froze `derived_open_edge_v1` LF remain unchanged. Existing drafts without per-piece finished-edge approval get `finished_edge_geometry_required` (priced LF = 0 until confirmed) — no silent reinterpretation. |
+| **Pricing Setup** | Shows approved backsplash run count + length, finished edge by piece, approved total LF, estimator ± LF adjustment, final priced LF. Source `finished_edge_v2`. Confirmation-required drafts show suggestions. **Publication blocking after estimate approval superseded by §153.** |
+| **Publication** | Freezes governed priced edge LF / customer-safe edge + backsplash option effects as before. Public DE DTO still has no LF/SF/rates/dimensions. Post-approval geometry gate removed in §153. |
+| **Legacy** | Historical publications that froze `derived_open_edge_v1` LF remain unchanged. Existing drafts without per-piece finished-edge approval get `finished_edge_geometry_required` (priced LF = 0 until confirmed or Pricing Setup override) — no silent reinterpretation. |
 | **Invariants** | Eligible length ↔ run count; finished-edge LF independent of backsplash mode / edge profile; sections owned by one piece; final priced edge = approved sections + explicit adjustment; public DTO redaction unchanged. |
 | **SQL / env** | None. Additive JSON on existing Takeoff / scope payloads. |
 | **Deployment surfaces** | `backend-core`, `app-ai-takeoff`, `app-elite100-estimate-studio`. No manual deployment. |
 | **Open business decisions** | (1) Optional richer “other/back” length editor beyond exposure flags. (2) Whether island/peninsula draft heuristics should be further constrained by areaType only (labels already draft-only). |
+
+### 153. Studio finished-edge override + publication readiness (2026-07-22)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-22 · `fix/studio-finished-edge-override-and-publish-readiness` |
+| **Hosted failure** | Estimate approved + “Ready to publish” while Publish stayed blocked by `finished_edge_geometry_required` (“Confirm finished-edge geometry…”). |
+| **Lost / stale field** | `finishedEdge.approved` / `finishedEdgeConfirmed` was confirmed on Takeoff runs and present on the import payload, but `seedScopeFromTakeoffPayload` dropped `finishedEdge` (and backsplash geometry) when building Studio scope pieces. Separately, `assessStudioEstimatePublicationReadiness` re-checked `takeoffScopeSummary.edgeGeometryConfirmationRequired` / `edgeScopeSource === finished_edge_geometry_required` **after** estimate approval — a duplicate gate independent of the approved calculation snapshot. |
+| **Persistence path** | Worksheet `patchRunFinishedEdge` → run.finishedEdge (`finishedEdgeConfirmed`, lengths, approvedAt) → correction save → approval import payload → `scopeSummary` + pieces → **now** Studio seed copies `finishedEdge` onto scope pieces → pricing reads `takeoffScopeSummary` / override → approval freezes `fabrication.edge.finalLf` → publication uses approved snapshot (warnings only for stale piece metadata). |
+| **Approved geometry contract** | Per piece: `finishedEdgeConfirmed`, front/left/right/other lengths, `totalFinishedEdgeLengthIn`, estimator adjustment+reason, `approvalSource`, `approvedAt`. Canonical boolean is `finishedEdgeConfirmed` (aliased with `approved`). |
+| **Manual override** | `scope.finishedEdgeOverride: { finalLf, reason, overriddenBy, overriddenAt }`. Blank = use Takeoff approved total (± legacy `edgeScopeAdjustment`). Absolute override replaces Takeoff total (`finished_edge_override_v1`). Reason required; negative rejected; change is price-bearing (stales approval). |
+| **Final LF precedence** | (1) active finishedEdgeOverride.finalLf → (2) Takeoff approved finished-edge LF + legacy ± adjustment → (3) manual edgeLinearFeet. |
+| **Publication readiness** | After estimate approval with non-negative `calculationSnapshot.fabrication.edge.finalLf`, geometry confirmation is **warning-only** (never a blocker). Approved 0 LF publishes with warning. Advisory Takeoff / legacy metadata do not block. |
+| **Messages** | Never show “Ready to publish” and “Confirm geometry before publishing” together. UI also filters post-approval geometry blockers. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `backend-core`, `app-ai-takeoff`, `app-elite100-estimate-studio`. No manual deployment. |
 

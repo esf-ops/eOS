@@ -184,7 +184,13 @@ export function buildStudioPublicationReadinessDto(args) {
     publicationConfigurationStatus,
     publicationStatus,
     pricingBlockers,
-    configBlockers
+    configBlockers,
+    warnings: Array.isArray(readiness.warnings) ? readiness.warnings : [],
+    publicationBlockers: blockers.filter(
+      (b) =>
+        !PRICING_BLOCKER_CODES.has(String(b?.code || "")) &&
+        !PUBLICATION_CONFIG_BLOCKER_CODES.has(String(b?.code || ""))
+    )
   });
 
   return {
@@ -225,6 +231,7 @@ export function buildStudioPublicationReadinessDto(args) {
           !PRICING_BLOCKER_CODES.has(String(b?.code || "")) &&
           !PUBLICATION_CONFIG_BLOCKER_CODES.has(String(b?.code || ""))
       ),
+      warnings: Array.isArray(readiness.warnings) ? readiness.warnings : [],
       availableActions
     },
     primaryMessage,
@@ -240,7 +247,9 @@ export function buildStudioPublicationReadinessDto(args) {
  *   publicationConfigurationStatus: string,
  *   publicationStatus: string,
  *   pricingBlockers: object[],
- *   configBlockers: object[]
+ *   configBlockers: object[],
+ *   warnings?: object[],
+ *   publicationBlockers?: object[]
  * }} s
  */
 export function resolvePrimaryReadinessMessage(s) {
@@ -278,10 +287,27 @@ export function resolvePrimaryReadinessMessage(s) {
   }
   if (s.approvalStatus === "approved_current") {
     if (s.publicationStatus === "ready_to_publish" || s.publicationStatus === "published_current") {
+      const hasAdvisoryGeometry = (s.warnings || []).some(
+        (w) =>
+          String(w?.code || "").includes("finished_edge") ||
+          String(w?.code || "").includes("geometry")
+      );
+      if (hasAdvisoryGeometry) {
+        return {
+          code: "ready_with_geometry_advisory",
+          message:
+            "Estimate approved. Finished-edge geometry includes advisory items."
+        };
+      }
       return {
         code: "ready",
         message: "Estimate approved. Ready to publish the Digital Estimate."
       };
+    }
+    // Never claim "ready" while publication is blocked — prefer the first real blocker.
+    const pubFirst = (s.publicationBlockers || [])[0];
+    if (pubFirst?.message) {
+      return { code: pubFirst.code || "blocked", message: pubFirst.message };
     }
   }
   const pricingFirst = s.pricingBlockers[0];
@@ -312,6 +338,7 @@ export const PRICE_BEARING_SCOPE_FIELDS = Object.freeze([
   "addOns",
   "customLineItems",
   "edgeScopeAdjustment",
+  "finishedEdgeOverride",
   "physicalScopeSource"
 ]);
 

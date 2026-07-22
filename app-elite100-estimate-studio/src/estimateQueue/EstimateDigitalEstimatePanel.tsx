@@ -622,6 +622,14 @@ export default function EstimateDigitalEstimatePanel({
               ) {
                 return false;
               }
+              // Post-approval geometry confirmation is advisory-only — never list as a block.
+              if (
+                approvalStatus === "approved_current" &&
+                (b.code === "finished_edge_geometry_required" ||
+                  /Confirm finished-edge geometry/i.test(String(b.message || "")))
+              ) {
+                return false;
+              }
               return true;
             })
             .map((b, i) => (

@@ -60,7 +60,9 @@ export function flattenPieces(result, excludedRunIds) {
             run.finishedEdge?.totalFinishedEdgeLengthIn != null
               ? Number(run.finishedEdge.totalFinishedEdgeLengthIn)
               : null,
-          finishedEdgeApproved: run.finishedEdge?.approved === true,
+          finishedEdgeApproved:
+            run.finishedEdge?.finishedEdgeConfirmed === true ||
+            run.finishedEdge?.approved === true,
           frontEdgeLengthIn: Number(run.finishedEdge?.frontEdgeLengthIn) || null,
           leftExposed: run.leftExposed ?? run.finishedEdge?.leftExposed ?? null,
           rightExposed: run.rightExposed ?? run.finishedEdge?.rightExposed ?? null,
@@ -227,6 +229,7 @@ export function patchRunFinishedEdge(result, locator, finishedEdge) {
     frontExposed: front > 0,
     backExposed: other > 0,
     finishedEdge: {
+      finishedEdgeConfirmed: true,
       frontEdgeLengthIn: front,
       leftExposedEdgeLengthIn: left,
       rightExposedEdgeLengthIn: right,
@@ -235,6 +238,7 @@ export function patchRunFinishedEdge(result, locator, finishedEdge) {
       approved: true,
       source: "estimator_confirmed",
       approvalSource: "estimator_confirmed",
+      approvedAt: new Date().toISOString(),
       adjustmentIn: adj,
       adjustmentReason: fe.adjustmentReason || null
     }

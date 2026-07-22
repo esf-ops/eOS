@@ -678,18 +678,70 @@ export function assessStudioEstimatePublicationReadiness(input) {
     });
   }
 
+  /** @type {Array<{ code: string, message: string, severity?: string }>} */
+  const warnings = [];
+
+  // Approved calculation snapshot is the finished-edge authority for publication.
+  // Do NOT re-run a Takeoff draft geometry gate after estimate approval — that
+  // produced the hosted contradiction: "Ready to publish" + finished_edge_geometry_required.
+  const approvedEdgeFinalLf = Number(
+    estimate.calculationSnapshot?.fabrication?.edge?.finalLf ??
+      estimate.calculation?.fabrication?.edge?.finalLf
+  );
+  const hasValidApprovedEdgeLf =
+    estimate.status === STUDIO_ESTIMATE_STATUSES.APPROVED &&
+    Number.isFinite(approvedEdgeFinalLf) &&
+    approvedEdgeFinalLf >= 0;
+
   const scopeSummary =
     estimate.scope?.takeoffScopeSummary && typeof estimate.scope.takeoffScopeSummary === "object"
       ? estimate.scope.takeoffScopeSummary
       : null;
-  if (
-    scopeSummary?.edgeGeometryConfirmationRequired === true ||
-    String(scopeSummary?.edgeScopeSource || "") === "finished_edge_geometry_required"
+  const overrideActive =
+    estimate.scope?.finishedEdgeOverride &&
+    typeof estimate.scope.finishedEdgeOverride === "object" &&
+    (estimate.scope.finishedEdgeOverride.finalLf != null ||
+      estimate.scope.finishedEdgeOverride.final_lf != null) &&
+    String(estimate.scope.finishedEdgeOverride.finalLf ?? "").trim() !== "";
+
+  if (hasValidApprovedEdgeLf) {
+    if (approvedEdgeFinalLf === 0) {
+      warnings.push({
+        code: "finished_edge_zero_lf",
+        message: "Finished edge is approved at 0 LF.",
+        severity: "warning"
+      });
+    }
+    if (overrideActive) {
+      warnings.push({
+        code: "finished_edge_override_used",
+        message: "Estimator finished-edge override was used for the approved calculation.",
+        severity: "warning"
+      });
+    }
+    if (
+      scopeSummary?.edgeGeometryConfirmationRequired === true ||
+      String(scopeSummary?.edgeScopeSource || "") === "finished_edge_geometry_required"
+    ) {
+      warnings.push({
+        code: "legacy_finished_edge_geometry_advisory",
+        message:
+          "Piece-level finished-edge confirmation metadata is incomplete or legacy; approved calculation LF is authoritative.",
+        severity: "warning"
+      });
+    }
+  } else if (
+    estimate.status !== STUDIO_ESTIMATE_STATUSES.APPROVED &&
+    (scopeSummary?.edgeGeometryConfirmationRequired === true ||
+      String(scopeSummary?.edgeScopeSource || "") === "finished_edge_geometry_required") &&
+    !overrideActive
   ) {
-    blockers.push({
-      code: "finished_edge_geometry_required",
+    // Pre-approval advisory only — never a post-approval publication block.
+    warnings.push({
+      code: "finished_edge_geometry_advisory",
       message:
-        "Confirm finished-edge geometry for each Takeoff piece before publishing a Digital Estimate."
+        "Confirm finished-edge geometry in Takeoff or set a Pricing Setup override before calculating.",
+      severity: "warning"
     });
   }
 
@@ -806,6 +858,7 @@ export function assessStudioEstimatePublicationReadiness(input) {
     allowedRange: eligible ? null : blockers[0].allowedRange || null,
     blockers,
     blockingReasons,
+    warnings,
     eliteEligibility,
     details: {
       studioEstimateId: estimate.id,
@@ -817,7 +870,8 @@ export function assessStudioEstimatePublicationReadiness(input) {
       envelopeFingerprint: hashConfigurationEnvelope(cfg, {
         productCatalogFingerprint: getCatalogMeta()?.fingerprint || null
       }),
-      pricingValidThrough
+      pricingValidThrough,
+      approvedFinishedEdgeLf: hasValidApprovedEdgeLf ? approvedEdgeFinalLf : null
     }
   };
 }

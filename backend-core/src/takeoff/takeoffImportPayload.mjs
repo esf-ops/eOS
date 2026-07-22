@@ -316,7 +316,7 @@ export function buildTakeoffImportPayload(params) {
           areaType: area.areaType || null
         };
         importRoom.pieces.push(
-          run.finishedEdge?.approved
+          run.finishedEdge?.approved === true || run.finishedEdge?.finishedEdgeConfirmed === true
             ? basePiece
             : attachDraftPieceGeometry(basePiece, {
                 eligible,
