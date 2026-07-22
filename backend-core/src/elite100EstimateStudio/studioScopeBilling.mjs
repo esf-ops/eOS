@@ -231,10 +231,15 @@ export function resolveScopeEdgeLinearFeet(scope) {
           : EDGE_SCOPE_SOURCES.DERIVED
     };
   }
+  // Manual / legacy path: prefer estimator-entered edgeLinearFeet, but do not
+  // drop takeoff-derived eligible LF when physicalScopeSource was never set to
+  // "takeoff" (common on older Studio scopes that still carry edgeEligibleLinearFeet).
   const manualLf = Math.max(0, round2(Number(scope?.edgeLinearFeet) || 0));
-  const finalLf = Math.max(0, round2(manualLf + adjustment.adjustmentLf));
+  const eligibleLf = Math.max(0, round2(Number(scope?.edgeEligibleLinearFeet) || 0));
+  const derivedLf = manualLf > 0 ? manualLf : eligibleLf;
+  const finalLf = Math.max(0, round2(derivedLf + adjustment.adjustmentLf));
   return {
-    derivedLf: manualLf,
+    derivedLf,
     adjustmentLf: adjustment.adjustmentLf,
     finalLf,
     source: EDGE_SCOPE_SOURCES.MANUAL
