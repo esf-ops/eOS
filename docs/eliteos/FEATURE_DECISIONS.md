@@ -2119,3 +2119,16 @@
 | **Deployment surfaces** | `backend-core`, `app-digital-estimate` (shared document assets via `@quote-lib` alias). No manual deployment. |
 | **Open decisions** | (1) Material row still says “Price updates when saved” until a dedicated material option effect lands on the DTO. (2) Legacy publications with incomplete Original line detail still show aggregate Published totals / supported Changes only. (3) Customer email PDF attachment remains a follow-on using the shared adapter. |
 
+### 149. Digital Estimate edge groups + Request review submit (2026-07-21)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-21 · `fix/digital-estimate-edge-groups-and-review-submit` |
+| **Edge UI** | Native flat `<select>` replaced with grouped **Included edges** / **Upgraded edges** selector. Labels use backend `priceEffectLabel` only (Original selection / Included / `+$N`). |
+| **Missing edge-pricing input** | Hosted premium “review-required” when governed open-edge LF never reached option resolution (room freeze lacked readable LF / aggregate). Trusted context now reads `edgeLinearFeet` **or** `edgeFinalLf`, recovers project `edge_linear_feet_total` / fabrication `finalLf` when room LF is zero, and new publications freeze `internal_ui.edge_linear_feet_total`. Premium cents remain `finalPricedEdgeLf × governedPremiumRate` in `resolveEdgeOptionPriceEffect` (no React math). |
+| **Request review root cause** | Supabase amendment repository implemented `getReviewRequest` / list / publish RPC but **omitted `createReviewRequest` and `getCurrentReviewRequestForSession`**, so hosted POST threw and `publicError` mapped it to generic **Estimate unavailable** even for a valid active configure session. |
+| **Review readiness** | Aligned with save: envelope mismatch → `stale_configuration` 409; revoked/expired/superseded publications → lifecycle messages; pending save blocked in UI with “Please wait for your changes to finish saving.” Success confirmation: “Your selections were sent to Elite for review.” Responses include `code` for frontend mapping. Incomplete legacy Original detail does not block review. |
+| **SQL / env** | No new migration. Requires existing applied `eliteos_digital_estimate_amendment_v1.sql` tables (already present). Flags unchanged: `DIGITAL_ESTIMATE_REVIEW_REQUESTS_ENABLED`, `VITE_DIGITAL_ESTIMATE_REVIEW_UI_ENABLED`. |
+| **Deployment surfaces** | `backend-core`, `app-digital-estimate`. No manual deployment. |
+
+

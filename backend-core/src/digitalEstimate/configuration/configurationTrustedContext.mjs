@@ -112,7 +112,8 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
           ? Number(r.backsplashHeightIn)
           : null,
         backsplashMeasuredLengthIn: r.backsplashMeasuredLengthIn ?? null,
-        edgeLinearFeet: Number(r.edgeLinearFeet ?? r.edge_linear_feet) || 0,
+        edgeLinearFeet:
+          Number(r.edgeLinearFeet ?? r.edge_linear_feet ?? r.edgeFinalLf ?? r.edge_final_lf) || 0,
         baselineMaterialGroup: groupCode,
         baselineMaterialLabel: GROUP_CODE_DISPLAY_NAMES[groupCode] || String(groupRaw || ""),
         colorLabel: r.colorName || r.color_name || r.colorLabel || null,
@@ -468,10 +469,35 @@ export async function buildTrustedConfigurationContext(args) {
 
   // Project-level governed open-edge LF (Studio freezes onto rooms; also keep
   // an aggregate so premium edge option effects never fail for missing per-room LF).
-  const edgeLinearFeetTotal = rooms.reduce(
+  let edgeLinearFeetTotal = rooms.reduce(
     (s, r) => s + (Number(r.edgeLinearFeet) || 0),
     0
   );
+  // Recover from additive project freeze fields when room rows predate per-room LF.
+  if (!(edgeLinearFeetTotal > 0)) {
+    const fromIu =
+      Number(
+        iu.edge_linear_feet_total ??
+          iu.edgeLinearFeetTotal ??
+          iu.final_priced_edge_lf ??
+          iu.finalPricedEdgeLf
+      ) || 0;
+    const fromFabrication =
+      Number(
+        calcCopy.fabrication?.edge?.finalLf ??
+          calcCopy.fabrication?.edge?.final_lf ??
+          calcCopy.edge?.finalLf
+      ) || 0;
+    const recovered = fromIu > 0 ? fromIu : fromFabrication;
+    if (recovered > 0) {
+      edgeLinearFeetTotal = recovered;
+      // Seed the first countertop room so room-scoped option resolution finds LF.
+      const target = rooms.find((r) => Number(r.chargeableCounterSf) > 0) || rooms[0];
+      if (target && !(Number(target.edgeLinearFeet) > 0)) {
+        target.edgeLinearFeet = recovered;
+      }
+    }
+  }
 
   return {
     organizationId,

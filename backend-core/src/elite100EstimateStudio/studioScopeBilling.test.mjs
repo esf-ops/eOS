@@ -304,6 +304,20 @@ function fourPieceScope(extra = {}) {
   console.log("ok: edge scope = derived 15.42 LF + 2.5 adjustment = 17.92 LF (adjusted source)");
 }
 
+// Manual / legacy scopes still honor edgeEligibleLinearFeet when edgeLinearFeet is 0.
+{
+  const resolved = resolveScopeEdgeLinearFeet({
+    physicalScopeSource: "manual",
+    edgeLinearFeet: 0,
+    edgeEligibleLinearFeet: 10.13,
+    edgeScopeAdjustment: { adjustmentLf: 0 }
+  });
+  assert.equal(resolved.derivedLf, 10.13);
+  assert.equal(resolved.finalLf, 10.13);
+  assert.equal(resolved.source, "manual");
+  console.log("ok: manual path falls back to edgeEligibleLinearFeet when edgeLinearFeet is 0");
+}
+
 // Excluded room / excluded pieces never bill.
 {
   const scope = fourPieceScope();

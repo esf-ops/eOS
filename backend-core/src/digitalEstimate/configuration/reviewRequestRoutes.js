@@ -48,21 +48,39 @@ function logReview(label, e, req) {
 function publicError(res, e) {
   const status = Number(e?.statusCode) || 404;
   const code = e?.code || "not_found";
-  let message = "Estimate unavailable";
+  let message = "We couldn’t send your review request. Please try again.";
   if (code === "origin_rejected" || code === "origin_not_configured") {
-    message = "Configuration unavailable";
-  } else if (status === 409 || code === "row_version_conflict" || code === "stale_selection") {
+    message = "We couldn’t send your review request. Please try again.";
+  } else if (
+    code === "publication_revoked" ||
+    code === "publication_expired" ||
+    code === "publication_unavailable"
+  ) {
+    message = "This estimate link is no longer active. Please contact Elite.";
+  } else if (code === "publication_superseded") {
+    message = "A newer estimate is available. Please use the latest link.";
+  } else if (status === 409 || code === "row_version_conflict" || code === "stale_selection" || code === "stale_configuration") {
+    message = "Please wait for your changes to finish saving.";
+  } else if (code === "incomplete_configuration" || code === "note_too_long" || code === "stale_calculation") {
+    message = e.message || "Please save your selections first";
+  } else if (code === "session_invalid" || code === "session_not_found" || code === "session_required") {
     message = "Please refresh and try again";
-  } else if (code === "incomplete_configuration" || code === "note_too_long") {
-    message = e.message || "Please refresh and try again";
   } else if (code === "forbidden_caller_authority") {
     message = "Please refresh and try again";
   } else if (String(e?.message || "").includes("Pricing has expired")) {
-    message = "Pricing has expired";
+    message = "This estimate link is no longer active. Please contact Elite.";
   } else if (status === 400) {
+    message = e.message || "Please refresh and try again";
+  } else if (code === "not_found" && status === 404) {
+    // Session/cookie miss — not a valid reason to brand an active estimate unavailable.
     message = "Please refresh and try again";
   }
-  res.status(status >= 400 && status < 600 ? status : 404).json({ ok: false, error: message });
+  res.status(status >= 400 && status < 600 ? status : 404).json({
+    ok: false,
+    error: message,
+    code,
+    lifecycleFatal: Boolean(e?.lifecycleFatal) || status === 410
+  });
 }
 
 function requireJsonMutation(req, res) {

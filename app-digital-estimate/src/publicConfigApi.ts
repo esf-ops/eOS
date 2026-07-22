@@ -522,9 +522,33 @@ export function classifyConfigurationMutationError(
     "publication_superseded",
   ]);
 
+  if (
+    code === "publication_revoked" ||
+    code === "publication_expired" ||
+    code === "publication_unavailable"
+  ) {
+    return {
+      message: "This estimate link is no longer active. Please contact Elite.",
+      code,
+      stage: stage || "lifecycle",
+      diagnosticCode: diagnosticCode || "DE-EXCHANGE-404",
+      lifecycleFatal: true,
+    };
+  }
+
+  if (code === "publication_superseded") {
+    return {
+      message: "A newer estimate is available. Please use the latest link.",
+      code,
+      stage: stage || "lifecycle",
+      diagnosticCode: diagnosticCode || "DE-EXCHANGE-410",
+      lifecycleFatal: true,
+    };
+  }
+
   if (body?.lifecycleFatal === true || FATAL_CODES.has(code) || status === 410) {
     return {
-      message: message || "This estimate is unavailable.",
+      message: message || "This estimate link is no longer active. Please contact Elite.",
       code: code || "publication_unavailable",
       stage: stage || "lifecycle",
       diagnosticCode: diagnosticCode || "DE-EXCHANGE-404",
@@ -586,12 +610,26 @@ export function classifyConfigurationMutationError(
     };
   }
 
-  if (code === "row_version_conflict" || code === "stale_configuration" || status === 409) {
+  if (code === "row_version_conflict" || code === "stale_configuration" || code === "stale_selection" || status === 409) {
     return {
-      message: message || "Please refresh and try again",
+      message:
+        /finish saving|refresh and try again|save your selections/i.test(message)
+          ? message
+          : "Please wait for your changes to finish saving.",
       code: code || "stale_configuration",
       stage: stage || "selection",
       diagnosticCode: diagnosticCode || "DE-CONFIGURATION-STALE",
+      lifecycleFatal: false,
+    };
+  }
+
+  // Never surface generic "Estimate unavailable" for a configure-session mutation.
+  if (/estimate unavailable/i.test(message)) {
+    return {
+      message: "We couldn’t send your review request. Please try again.",
+      code: code || (status === 404 ? "save_route_or_server" : "save_failed"),
+      stage: stage || "selection",
+      diagnosticCode: diagnosticCode || "DE-SAVE",
       lifecycleFatal: false,
     };
   }
@@ -600,8 +638,8 @@ export function classifyConfigurationMutationError(
   return {
     message:
       status === 404 && !body
-        ? "Unable to save right now. Please try again."
-        : message || "Unable to save right now. Please try again.",
+        ? "We couldn’t send your review request. Please try again."
+        : message || "We couldn’t send your review request. Please try again.",
     code: code || (status === 404 ? "save_route_or_server" : "save_failed"),
     stage: stage || "selection",
     diagnosticCode: diagnosticCode || "DE-SAVE",

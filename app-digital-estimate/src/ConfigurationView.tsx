@@ -29,6 +29,7 @@ import {
   missingInfoHeadline,
 } from "./itemsForLater";
 import { normalizeCatalogPermissions } from "./catalogPermissions";
+import { sortEdgeOptionsByCanonicalOrder } from "./edgeGroups";
 import {
   exchangeFragmentToken,
   fetchConfiguration,
@@ -1608,44 +1609,83 @@ function CustomerRoomCard({
             <div
               className="rounded-xl border border-border bg-background px-4 py-3"
               data-testid="de-edge-dropdown"
+              role="group"
+              aria-label="Edge profile"
             >
               <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                 Edge
               </div>
-              <label className="mt-1 block">
-                <span className="sr-only">Edge profile</span>
-                <select
-                  className="mt-0.5 w-full rounded-md border border-border bg-background px-2 py-2 text-sm font-semibold text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
-                  value={
-                    room.choiceOptions.find((c) => c.role === "edge" && c.selected)?.optionKey ||
-                    room.choiceOptions.find((c) => c.role === "edge" && c.includedInBaseline)
-                      ?.optionKey ||
-                    ""
-                  }
-                  onChange={(e) => {
-                    if (e.target.value) onEdgeChange?.(e.target.value);
-                  }}
-                  aria-label="Edge profile"
-                >
-                  {room.choiceOptions
-                    .filter((c) => c.role === "edge")
-                    .map((opt) => {
-                      const effect =
-                        opt.priceEffectLabel ||
-                        (opt.includedInBaseline ? "Original selection" : "");
-                      const label = effect
-                        ? `${opt.displayLabel} — ${effect}`
-                        : opt.displayLabel;
-                      return (
-                        <option key={opt.optionKey} value={opt.optionKey}>
-                          {label}
-                        </option>
-                      );
-                    })}
-                </select>
-              </label>
-              {selectedEffect("edge") ? (
-                <div className="mt-1 text-xs font-medium tabular-nums text-foreground">
+              {(() => {
+                const edgeOpts = room.choiceOptions.filter((c) => c.role === "edge");
+                const { included, upgraded } = sortEdgeOptionsByCanonicalOrder(edgeOpts);
+                const selectedKey =
+                  edgeOpts.find((c) => c.selected)?.optionKey ||
+                  edgeOpts.find((c) => c.includedInBaseline)?.optionKey ||
+                  "";
+                const renderGroup = (title: string, opts: typeof edgeOpts, testId: string) =>
+                  opts.length ? (
+                    <div className="mt-3" data-testid={testId}>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {title}
+                      </div>
+                      <ul className="mt-1.5 space-y-1">
+                        {opts.map((opt) => {
+                          const selected = opt.optionKey === selectedKey;
+                          const effect =
+                            opt.priceEffectLabel ||
+                            (opt.includedInBaseline ? "Original selection" : "Included");
+                          // Never surface internal review diagnostics as the primary edge tag
+                          // when a priced effect is already available.
+                          const effectLabel =
+                            /^\+\$/.test(effect) ||
+                            effect === "Original selection" ||
+                            effect === "Included"
+                              ? effect
+                              : opt.availabilityState === "review_required"
+                                ? "Elite will confirm this option and price."
+                                : effect;
+                          return (
+                            <li key={opt.optionKey}>
+                              <button
+                                type="button"
+                                role="radio"
+                                aria-checked={selected}
+                                data-testid="de-edge-option"
+                                data-edge-token={opt.optionKey}
+                                data-selected={selected ? "true" : "false"}
+                                className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
+                                  selected
+                                    ? "border-foreground bg-muted/40 ring-1 ring-foreground/20"
+                                    : "border-border hover:bg-muted/20"
+                                }`}
+                                onClick={() => onEdgeChange?.(opt.optionKey)}
+                              >
+                                <span className="font-medium text-foreground">
+                                  {opt.displayLabel}
+                                  {selected ? (
+                                    <span className="sr-only"> (selected)</span>
+                                  ) : null}
+                                </span>
+                                <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
+                                  {effectLabel}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null;
+                return (
+                  <>
+                    {renderGroup("Included edges", included, "de-edge-group-included")}
+                    {renderGroup("Upgraded edges", upgraded, "de-edge-group-upgraded")}
+                  </>
+                );
+              })()}
+              {selectedEffect("edge") &&
+              !/^Elite will confirm/i.test(String(selectedEffect("edge"))) ? (
+                <div className="mt-2 text-xs font-medium tabular-nums text-foreground">
                   {selectedEffect("edge")}
                 </div>
               ) : null}
@@ -2186,11 +2226,22 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
 
   async function onSendReview(note: string) {
     if (!reviewUiEnabled()) return;
+    if (saveState === "unsaved" || saveState === "saving") {
+      setReviewError("Please wait for your changes to finish saving.");
+      return;
+    }
+    if (saveState === "error") {
+      setReviewError("Please save your selections first");
+      return;
+    }
     setReviewBusy(true);
     setReviewError(null);
     try {
-      const reviewRowVersion = saveState === "saved" ? rowVersion : await onSave();
-      if (reviewRowVersion == null) return;
+      const reviewRowVersion = saveState === "saved" || saveState === "idle" ? rowVersion : await onSave();
+      if (reviewRowVersion == null) {
+        setReviewError("Please wait for your changes to finish saving.");
+        return;
+      }
       const result = await submitReviewRequest({
         expectedRowVersion: reviewRowVersion,
         idempotencyKey: `review-${formId}-${reviewRequest?.requestReference || "new"}`,
@@ -2204,7 +2255,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         onFatal();
         return;
       }
-      setReviewError(e instanceof Error ? e.message : "Unable to send for review");
+      const msg = e instanceof Error ? e.message : "We couldn’t send your review request. Please try again.";
+      setReviewError(/estimate unavailable/i.test(msg)
+        ? "We couldn’t send your review request. Please try again."
+        : msg);
     } finally {
       setReviewBusy(false);
     }

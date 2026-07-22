@@ -20,10 +20,18 @@ import {
   rejectSyntheticCallerAuthority
 } from "../syntheticPilotGuard.mjs";
 
-function unavailable(message = "Estimate unavailable") {
+function unavailable(message = "Estimate unavailable", code = "not_found") {
   const e = new Error(message);
-  e.code = "not_found";
+  e.code = code;
   e.statusCode = 404;
+  return e;
+}
+
+function publicationLifecycle(code, message, statusCode = 410) {
+  const e = new Error(message);
+  e.code = code;
+  e.statusCode = statusCode;
+  e.lifecycleFatal = true;
   return e;
 }
 
@@ -34,10 +42,13 @@ function configUnavailable(message = "Configuration unavailable") {
   return e;
 }
 
-function safeFail(code, message, statusCode = 400) {
+function safeFail(code, message, statusCode = 400, extra = {}) {
   const e = new Error(message);
   e.code = code;
   e.statusCode = statusCode;
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined) e[k] = v;
+  }
   return e;
 }
 
@@ -131,7 +142,7 @@ function customerSafeRequestView(request, { currentSelectionHash = null } = {}) 
       : [],
     customerNote: request.customer_note,
     nonAcceptanceNotice:
-      "This is not an order or acceptance. Pricing and availability remain subject to estimator review.",
+      "Your selections were sent to Elite for review. This is not an order or acceptance.",
     currentSelectionsDifferFromSubmitted: selectionsDiffer,
     emailSent: false
   };
@@ -181,8 +192,11 @@ export function createReviewRequestService(deps) {
 
       const customerNote = sanitizeCustomerNote(body?.customerNote ?? body?.customer_note ?? null);
       const session = await resolveSession(rawSecret);
+      if (session.status === "revoked" || session.status === "blocked" || session.status === "superseded") {
+        throw safeFail("session_invalid", "Please refresh and try again", 401);
+      }
       if (!["active", "configuring", "saved"].includes(session.status)) {
-        throw unavailable();
+        throw safeFail("session_invalid", "Please refresh and try again", 401);
       }
       if (Number(session.row_version) !== Number(expectedRowVersion)) {
         throw safeFail("row_version_conflict", "Please refresh and try again", 409);
@@ -192,19 +206,68 @@ export function createReviewRequestService(deps) {
         session.organization_id,
         session.publication_id
       );
-      if (!publication || publication.status !== "active") throw unavailable();
-      assertSyntheticPublicationPublicAccess(publication.id, env);
+      if (!publication) {
+        throw publicationLifecycle(
+          "publication_unavailable",
+          "This estimate link is no longer active. Please contact Elite.",
+          404
+        );
+      }
+      if (publication.status === "revoked") {
+        throw publicationLifecycle(
+          "publication_revoked",
+          "This estimate link is no longer active. Please contact Elite."
+        );
+      }
+      if (publication.status === "superseded") {
+        throw publicationLifecycle(
+          "publication_superseded",
+          "A newer estimate is available. Please use the latest link."
+        );
+      }
+      if (publication.status !== "active") {
+        throw publicationLifecycle(
+          "publication_unavailable",
+          "This estimate link is no longer active. Please contact Elite.",
+          404
+        );
+      }
+      try {
+        assertSyntheticPublicationPublicAccess(publication.id, env);
+      } catch {
+        throw publicationLifecycle(
+          "publication_unavailable",
+          "This estimate link is no longer active. Please contact Elite.",
+          404
+        );
+      }
       if (isPricingExpired(publication.pricing_valid_through)) {
-        throw configUnavailable("Pricing has expired");
+        throw publicationLifecycle(
+          "publication_expired",
+          "This estimate link is no longer active. Please contact Elite."
+        );
       }
 
       const activeEnvelope = await configurationRepository.getActiveEnvelope(
         session.organization_id,
         session.publication_id
       );
-      if (!activeEnvelope) throw unavailable();
-      if (!session.envelope_id || session.envelope_id !== activeEnvelope.id) {
-        throw unavailable();
+      if (!activeEnvelope) {
+        throw safeFail("session_invalid", "Please refresh and try again", 401, {
+          exchangeReason: "envelope_missing"
+        });
+      }
+      if (!session.envelope_id || String(session.envelope_id) !== String(activeEnvelope.id)) {
+        throw safeFail("stale_configuration", "Please refresh and try again", 409, {
+          diagnosticCode: "DE-CONFIGURATION-STALE",
+          exchangeReason: "envelope_mismatch"
+        });
+      }
+      if (activeEnvelope.status !== "active") {
+        throw safeFail("stale_configuration", "Please refresh and try again", 409, {
+          diagnosticCode: "DE-CONFIGURATION-STALE",
+          exchangeReason: "envelope_inactive"
+        });
       }
 
       const selection = await configurationRepository.getLatestSelectionForSession(
@@ -371,7 +434,7 @@ export function createReviewRequestService(deps) {
           currentSelectionHash: selection.selection_hash
         }),
         disclaimer:
-          "Your selections were sent to your estimator. This is not an order or acceptance. Pricing and availability remain subject to estimator review."
+          "Your selections were sent to Elite for review. This is not an order or acceptance.",
       };
     },
 
