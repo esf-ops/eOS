@@ -38,6 +38,13 @@ type EdgeScopeAdjustment = {
   adjustedAt?: string | null;
 };
 
+type FinishedEdgeOverride = {
+  finalLf: number | null;
+  reason: string;
+  overriddenBy?: string | null;
+  overriddenAt?: string | null;
+};
+
 /**
  * Canonical edge profiles — must mirror studioEdgeAuthority.mjs
  * (FREE_EDGE_PROFILES / PREMIUM_EDGE_PROFILES). Legacy W/D scope tokens are
@@ -105,6 +112,7 @@ type StudioEstimate = {
     edgeLinearFeet?: number;
     edgeEligibleLinearFeet?: number;
     edgeScopeAdjustment?: EdgeScopeAdjustment | null;
+    finishedEdgeOverride?: FinishedEdgeOverride | null;
     countertopScopeAdjustments?: CountertopScopeAdjustment[];
     miterHeightKey?: string | null;
     miterLinearFeet?: number;
@@ -126,6 +134,7 @@ type StudioEstimate = {
       totalRunLengthIn?: number;
       derivedOpenEdgeLengthIn?: number;
       derivedOpenEdgeLf?: number;
+      approvedFinishedEdgeLf?: number;
       edgeEligibleLinearFeet?: number;
       edgeScopeSource?: string;
       edgeGeometryConfirmationRequired?: boolean;
@@ -445,6 +454,40 @@ export default function EstimateScopePanel({
     setDirty(true);
   }
 
+  function patchFinishedEdgeOverride(partial: Partial<FinishedEdgeOverride>) {
+    setEstimate((prev) => {
+      if (!prev) return prev;
+      const current = prev.scope?.finishedEdgeOverride || { finalLf: null, reason: "" };
+      const next = { ...current, ...partial, overriddenAt: new Date().toISOString() };
+      const blank =
+        next.finalLf == null ||
+        next.finalLf === ("" as unknown as number) ||
+        (typeof next.finalLf === "number" && !Number.isFinite(next.finalLf) && Number.isNaN(next.finalLf));
+      // Empty string from clearing the input → deactivate override.
+      const cleared =
+        partial.finalLf === null ||
+        (typeof partial.finalLf === "number" && Number.isNaN(partial.finalLf));
+      if (cleared || (blank && !String(next.reason || "").trim())) {
+        return {
+          ...prev,
+          scope: { ...(prev.scope || {}), finishedEdgeOverride: null }
+        };
+      }
+      return {
+        ...prev,
+        scope: {
+          ...(prev.scope || {}),
+          finishedEdgeOverride: {
+            finalLf: next.finalLf == null || Number.isNaN(Number(next.finalLf)) ? null : Number(next.finalLf),
+            reason: String(next.reason || ""),
+            overriddenAt: next.overriddenAt
+          }
+        }
+      };
+    });
+    setDirty(true);
+  }
+
   async function saveDraft() {
     if (!estimate?.id || !estimate.scope) return;
     setBusy(true);
@@ -589,7 +632,10 @@ export default function EstimateScopePanel({
   };
   const edgeScope = resolveScopeEdgeLinearFeet(scope) as {
     derivedLf: number;
+    takeoffApprovedLf?: number;
     adjustmentLf: number;
+    overrideLf?: number | null;
+    overrideActive?: boolean;
     finalLf: number;
     source: string;
     confirmationRequired?: boolean;
@@ -1502,13 +1548,55 @@ export default function EstimateScopePanel({
           {takeoffAuthority ? (
             <>
               <label>
-                Approved finished edge (LF)
+                Approved finished edge from Takeoff (LF)
                 <input
                   type="number"
-                  value={edgeScope.derivedLf}
+                  value={
+                    Number(
+                      scope.takeoffScopeSummary?.approvedFinishedEdgeLf ??
+                        edgeScope.takeoffApprovedLf ??
+                        edgeScope.derivedLf ??
+                        0
+                    )
+                  }
                   readOnly
                   disabled
                   data-testid="eq-edge-derived-lf"
+                />
+              </label>
+              <label>
+                Estimator finished-edge override (LF)
+                <input
+                  type="number"
+                  step={0.01}
+                  min={0}
+                  value={
+                    scope.finishedEdgeOverride?.finalLf == null
+                      ? ""
+                      : scope.finishedEdgeOverride.finalLf
+                  }
+                  disabled={blocked}
+                  placeholder="Blank = use Takeoff total"
+                  data-testid="eq-finished-edge-override"
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw === "") {
+                      patchFinishedEdgeOverride({ finalLf: null });
+                      return;
+                    }
+                    patchFinishedEdgeOverride({ finalLf: Number(raw) });
+                  }}
+                />
+              </label>
+              <label>
+                Override reason{" "}
+                {scope.finishedEdgeOverride?.finalLf != null ? "(required)" : ""}
+                <input
+                  value={scope.finishedEdgeOverride?.reason ?? ""}
+                  disabled={blocked}
+                  data-testid="eq-finished-edge-override-reason"
+                  placeholder="Required when override LF is set"
+                  onChange={(e) => patchFinishedEdgeOverride({ reason: e.target.value })}
                 />
               </label>
               <label>
@@ -1517,7 +1605,7 @@ export default function EstimateScopePanel({
                   type="number"
                   step={0.01}
                   value={scope.edgeScopeAdjustment?.adjustmentLf ?? 0}
-                  disabled={blocked}
+                  disabled={blocked || Boolean(scope.finishedEdgeOverride?.finalLf != null)}
                   data-testid="eq-edge-adjustment"
                   onChange={(e) =>
                     patchEdgeAdjustment({ adjustmentLf: Number(e.target.value) || 0 })
@@ -1529,14 +1617,14 @@ export default function EstimateScopePanel({
                 {(scope.edgeScopeAdjustment?.adjustmentLf ?? 0) !== 0 ? "(required)" : ""}
                 <input
                   value={scope.edgeScopeAdjustment?.adjustmentReason ?? ""}
-                  disabled={blocked}
+                  disabled={blocked || Boolean(scope.finishedEdgeOverride?.finalLf != null)}
                   data-testid="eq-edge-adjustment-reason"
-                  placeholder="e.g. waterfall side edges not in approved piece sections"
+                  placeholder="Legacy ± LF when no absolute override"
                   onChange={(e) => patchEdgeAdjustment({ adjustmentReason: e.target.value })}
                 />
               </label>
               <label>
-                Final priced edge (LF)
+                Final priced finished edge (LF)
                 <input
                   type="number"
                   value={edgeScope.finalLf}
@@ -1561,12 +1649,16 @@ export default function EstimateScopePanel({
         </div>
         {takeoffAuthority ? (
           <p className="eq-footnote" data-testid="eq-edge-source-note">
-            Source: sum of estimator-approved per-piece finished edges (
-            {edgeScope.source}). Finished-edge LF is independent of backsplash mode. Use the
-            adjustment with a reason only when field geometry differs from the approved piece
-            sections.
+            Source:{" "}
+            {edgeScope.overrideActive
+              ? "estimator finished-edge override"
+              : "sum of estimator-approved per-piece finished edges"}{" "}
+            ({edgeScope.source}). Finished-edge LF is independent of backsplash mode.
+            {edgeScope.overrideActive
+              ? " Absolute override replaces the Takeoff total for pricing."
+              : " Use an absolute override or ± LF adjustment with a reason when field geometry differs."}
             {edgeScope.confirmationRequired
-              ? " Confirmation required in Takeoff before Digital Estimate publication."
+              ? " Confirmation required in Takeoff (or set an override) before Digital Estimate publication."
               : ""}
           </p>
         ) : null}

@@ -61,6 +61,17 @@ function approvedPayload() {
                   depthIn: 25.5,
                   pieceType: "counter",
                   backsplashEligible: true,
+                  finishedEdge: {
+                    finishedEdgeConfirmed: true,
+                    frontEdgeLengthIn: 100,
+                    leftExposedEdgeLengthIn: 0,
+                    rightExposedEdgeLengthIn: 0,
+                    otherExposedEdgeLengthIn: 0,
+                    totalFinishedEdgeLengthIn: 100,
+                    approved: true,
+                    source: "estimator_confirmed",
+                    approvalSource: "estimator_confirmed"
+                  },
                   cutouts: [{ type: "kitchen_sink", quantity: 1, source: "estimator_confirmed" }]
                 },
                 {
@@ -70,6 +81,17 @@ function approvedPayload() {
                   depthIn: 25.5,
                   pieceType: "counter",
                   backsplashEligible: true,
+                  finishedEdge: {
+                    finishedEdgeConfirmed: true,
+                    frontEdgeLengthIn: 80,
+                    leftExposedEdgeLengthIn: 0,
+                    rightExposedEdgeLengthIn: 0,
+                    otherExposedEdgeLengthIn: 0,
+                    totalFinishedEdgeLengthIn: 80,
+                    approved: true,
+                    source: "estimator_confirmed",
+                    approvalSource: "estimator_confirmed"
+                  },
                   cutouts: [
                     { type: "cooktop", quantity: 1, source: "estimator_confirmed" },
                     { type: "electrical_outlet", quantity: 2, source: "estimator_confirmed" }
@@ -82,6 +104,17 @@ function approvedPayload() {
                   depthIn: 40,
                   pieceType: "counter",
                   backsplashEligible: false,
+                  finishedEdge: {
+                    finishedEdgeConfirmed: true,
+                    frontEdgeLengthIn: 72,
+                    leftExposedEdgeLengthIn: 40,
+                    rightExposedEdgeLengthIn: 40,
+                    otherExposedEdgeLengthIn: 72,
+                    totalFinishedEdgeLengthIn: 224,
+                    approved: true,
+                    source: "estimator_confirmed",
+                    approvalSource: "estimator_confirmed"
+                  },
                   cutouts: []
                 }
               ]
@@ -208,10 +241,10 @@ function approvedPayload() {
     scope.takeoffScopeSummary.edgeEligibleLinearFeet,
     "30: matches summary"
   );
-  // Canonical edge model: the derived open-edge LF and the final priced LF are
-  // read-only displays; the estimator only enters a governed ± adjustment.
-  assert.ok(panel.includes('data-testid="eq-edge-derived-lf"'), "30: derived edge LF display");
+  // Canonical edge model: Takeoff total is read-only; estimator may set absolute override.
+  assert.ok(panel.includes('data-testid="eq-edge-derived-lf"'), "30: Takeoff finished-edge LF display");
   assert.ok(panel.includes('data-testid="eq-edge-final-lf"'), "30: final priced edge display");
+  assert.ok(panel.includes('data-testid="eq-finished-edge-override"'), "30: finished-edge override");
   const idx = panel.indexOf('data-testid="eq-edge-derived-lf"');
   const block = panel.slice(idx - 600, idx + 100);
   assert.ok(block.includes("readOnly"), "30: readOnly attr");

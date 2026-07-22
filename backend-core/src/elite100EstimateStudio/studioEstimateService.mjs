@@ -132,6 +132,22 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
             : {}),
           ...(leftEligible != null ? { sideSplashLeftEligible: leftEligible } : {}),
           ...(rightEligible != null ? { sideSplashRightEligible: rightEligible } : {}),
+          // Preserve estimator-confirmed finished-edge + backsplash geometry —
+          // dropping these forced takeoffScopeSummary rebuilds into
+          // finished_edge_geometry_required after Takeoff approval.
+          ...(meta?.backsplashEligible != null
+            ? { backsplashEligible: meta.backsplashEligible === true }
+            : {}),
+          ...(meta?.backsplashEligibleLengthIn != null
+            ? { backsplashEligibleLengthIn: Number(meta.backsplashEligibleLengthIn) || 0 }
+            : {}),
+          ...(meta?.backsplashGeometry ? { backsplashGeometry: meta.backsplashGeometry } : {}),
+          ...(meta?.finishedEdge ? { finishedEdge: meta.finishedEdge } : {}),
+          ...(meta?.leftExposed != null ? { leftExposed: meta.leftExposed === true } : {}),
+          ...(meta?.rightExposed != null ? { rightExposed: meta.rightExposed === true } : {}),
+          ...(meta?.frontExposed != null ? { frontExposed: meta.frontExposed === true } : {}),
+          ...(meta?.backExposed != null ? { backExposed: meta.backExposed === true } : {}),
+          ...(meta?.areaType ? { areaType: meta.areaType } : {}),
           notes: ""
         });
       }
@@ -851,6 +867,14 @@ export function createStudioEstimateService(deps = {}) {
           ...nextScope.edgeScopeAdjustment,
           adjustedBy: actorUserId || nextScope.edgeScopeAdjustment.adjustedBy || null,
           adjustedAt: nextScope.edgeScopeAdjustment.adjustedAt || new Date().toISOString()
+        };
+      }
+      if (nextScope.finishedEdgeOverride && typeof nextScope.finishedEdgeOverride === "object") {
+        nextScope.finishedEdgeOverride = {
+          ...nextScope.finishedEdgeOverride,
+          overriddenBy: actorUserId || nextScope.finishedEdgeOverride.overriddenBy || null,
+          overriddenAt:
+            nextScope.finishedEdgeOverride.overriddenAt || new Date().toISOString()
         };
       }
       const wasApproved = row.status === STUDIO_ESTIMATE_STATUSES.APPROVED;

@@ -124,6 +124,7 @@ console.log("ok: canonical included + premium edge profiles; W/D removed");
 
 // 10. Finished-edge display + governed adjustment; estimator never retypes Edge LF.
 assert.ok(panel.includes("eq-edge-derived-lf"));
+assert.ok(panel.includes("eq-finished-edge-override"));
 assert.ok(panel.includes("eq-edge-adjustment"));
 assert.ok(panel.includes("eq-edge-adjustment-reason"));
 assert.ok(panel.includes("eq-edge-final-lf"));

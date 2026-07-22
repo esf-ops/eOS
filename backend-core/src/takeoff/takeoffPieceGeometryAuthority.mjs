@@ -149,6 +149,7 @@ export function resolvePieceFinishedEdgeGeometry(piece, opts = {}) {
     }
     const source = String(raw.source || "estimator_confirmed");
     const approved =
+      raw.finishedEdgeConfirmed === true ||
       raw.approved === true ||
       source === "estimator_confirmed" ||
       source === "manual" ||
@@ -163,11 +164,13 @@ export function resolvePieceFinishedEdgeGeometry(piece, opts = {}) {
       leftExposed: left > 0,
       rightExposed: right > 0,
       backExposed: other > 0,
+      finishedEdgeConfirmed: approved,
       approved,
       source,
       adjustmentIn: adj,
       adjustmentReason: raw.adjustmentReason || raw.adjustment_reason || null,
-      approvalSource: raw.approvalSource || raw.approval_source || source
+      approvalSource: raw.approvalSource || raw.approval_source || source,
+      approvedAt: raw.approvedAt || raw.approved_at || null
     };
   }
   if (opts.preferDraft !== false && isCounterPiece(piece)) {
