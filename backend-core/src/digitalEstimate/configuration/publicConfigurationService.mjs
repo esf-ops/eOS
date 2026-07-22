@@ -364,9 +364,14 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     const token = normalizeEdgeProfileToken(
       compat.edgeProfileToken || parts.slice(2).join(":") || "edge_eased"
     );
-    const roomRow = (ctx?.configuredRooms || ctx?.rooms || []).find(
-      (r) => String(r.roomKey) === String(roomKey)
-    );
+    const roomRow =
+      (ctx?.configuredRooms || ctx?.rooms || []).find(
+        (r) => String(r.roomKey) === String(roomKey)
+      ) ||
+      (ctx?.configuredRooms || ctx?.rooms || []).find(
+        (r) =>
+          String(r.displayName || "").toLowerCase() === String(roomKey || "").toLowerCase()
+      );
     const lf =
       Number(roomRow?.edgeLinearFeet) ||
       Number(ctx?.edgeLinearFeetTotal) ||

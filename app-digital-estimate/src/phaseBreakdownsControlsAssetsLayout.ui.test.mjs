@@ -91,7 +91,8 @@ assert.ok(changes.lines[0].amountLabel.startsWith("+$"));
 
 // Edge dropdown
 assert.ok(configView.includes("de-edge-dropdown"));
-assert.ok(configView.includes("Edge profile"));
+assert.ok(configView.includes("de-edge-group-included") || configView.includes("Included edges"));
+assert.ok(configView.includes("de-edge-group-upgraded") || configView.includes("Upgraded edges"));
 assert.equal(configView.includes("de-edge-modal"), false);
 assert.ok(configView.includes("onEdgeChange"));
 

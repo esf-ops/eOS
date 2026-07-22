@@ -468,6 +468,11 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
       customer_display_total: customerDisplayTotal,
       pricing_basis: pricingBasis,
       estimate_rooms: rooms,
+      // Project aggregate for DE premium edge option effects when a room row
+      // lacks per-room LF (legacy pubs / multi-room assignment).
+      edge_linear_feet_total: Number(
+        rooms.reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0)
+      ),
       fabrication_add_ons: fabricationAddOns,
       custom_line_items: buildStudioCustomLineItemsForPublication(estimate),
       customer_catalog_permissions:

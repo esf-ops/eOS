@@ -589,8 +589,156 @@ export function createSupabaseAmendmentRepository({ db }) {
     e.code = "supabase_misconfigured";
     throw e;
   }
+
+  async function appendEvent(row) {
+    const { error } = await db.from("digital_estimate_amendment_events").insert({
+      organization_id: row.organization_id,
+      review_request_id: row.review_request_id ?? null,
+      amendment_id: row.amendment_id ?? null,
+      publication_id: row.publication_id ?? null,
+      event_type: row.event_type,
+      actor_type: row.actor_type || "public",
+      actor_user_id: row.actor_user_id ?? null,
+      metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {}
+    });
+    if (error) throw error;
+  }
+
   return {
     mode: "supabase",
+    async createReviewRequest(trusted) {
+      const {
+        organizationId,
+        publicationId,
+        publicationSnapshotId = null,
+        envelopeId,
+        envelopeVersion,
+        sessionId,
+        selectionId,
+        calculationId,
+        selectionHash,
+        calculationInputFingerprint,
+        clientIdempotencyKey,
+        customerNote = null,
+        requestSnapshotJson,
+        baselineDisplayTotal = null,
+        configuredDisplayTotal = null,
+        displayDelta = null,
+        pricingValidThrough = null
+      } = trusted;
+
+      // Idempotency: same session + client key
+      {
+        const { data: existing, error } = await db
+          .from("digital_estimate_configuration_review_requests")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .eq("session_id", sessionId)
+          .eq("client_idempotency_key", clientIdempotencyKey)
+          .limit(1);
+        if (error) throw error;
+        if (existing?.[0]) return { reused: true, request: existing[0] };
+      }
+
+      const requestFingerprint = sha256CanonicalJson({
+        selectionHash,
+        calculationInputFingerprint,
+        publicationId,
+        envelopeId
+      });
+
+      // Open duplicate (same fingerprint) — return existing
+      {
+        const openStatuses = [
+          REVIEW_STATUS.REQUESTED,
+          REVIEW_STATUS.REVIEWING,
+          REVIEW_STATUS.CLARIFICATION,
+          REVIEW_STATUS.AMENDMENT_PREPARED
+        ];
+        const { data: openDup, error } = await db
+          .from("digital_estimate_configuration_review_requests")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .eq("session_id", sessionId)
+          .eq("request_fingerprint", requestFingerprint)
+          .in("status", openStatuses)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (error) throw error;
+        if (openDup?.[0]) return { reused: true, request: openDup[0] };
+      }
+
+      const row = {
+        organization_id: organizationId,
+        publication_id: publicationId,
+        publication_snapshot_id: publicationSnapshotId,
+        envelope_id: envelopeId,
+        envelope_version: envelopeVersion,
+        session_id: sessionId,
+        selection_id: selectionId,
+        calculation_id: calculationId,
+        selection_hash: selectionHash,
+        calculation_input_fingerprint: calculationInputFingerprint,
+        request_fingerprint: requestFingerprint,
+        client_idempotency_key: clientIdempotencyKey,
+        status: REVIEW_STATUS.REQUESTED,
+        customer_note: customerNote,
+        request_snapshot_json: requestSnapshotJson,
+        baseline_display_total: baselineDisplayTotal,
+        configured_display_total: configuredDisplayTotal,
+        display_delta: displayDelta,
+        pricing_valid_through: pricingValidThrough
+      };
+
+      const { data: inserted, error: insertError } = await db
+        .from("digital_estimate_configuration_review_requests")
+        .insert(row)
+        .select("*")
+        .limit(1);
+      if (insertError) {
+        // Race on unique idempotency key — re-read
+        if (String(insertError.code || "") === "23505") {
+          const { data: raced } = await db
+            .from("digital_estimate_configuration_review_requests")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .eq("session_id", sessionId)
+            .eq("client_idempotency_key", clientIdempotencyKey)
+            .limit(1);
+          if (raced?.[0]) return { reused: true, request: raced[0] };
+        }
+        throw insertError;
+      }
+      const request = inserted?.[0];
+      if (!request) throw err("persistence_failed", "Unable to create review request", 500);
+
+      try {
+        await appendEvent({
+          organization_id: organizationId,
+          review_request_id: request.id,
+          publication_id: publicationId,
+          event_type: "review_requested",
+          actor_type: "public",
+          metadata: { selectionHash }
+        });
+      } catch {
+        // Event append is best-effort; request row is the authority.
+      }
+      return { reused: false, request };
+    },
+
+    async getCurrentReviewRequestForSession(organizationId, sessionId) {
+      const { data, error } = await db
+        .from("digital_estimate_configuration_review_requests")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("session_id", sessionId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
     async getReviewRequest(organizationId, requestId) {
       const { data, error } = await db
         .from("digital_estimate_configuration_review_requests")
