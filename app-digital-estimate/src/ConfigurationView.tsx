@@ -1777,6 +1777,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const [qty, setQty] = useState<Record<string, number>>(() => ({
     ...(config?.currentSelections || {}),
   }));
+  /** Last server-confirmed selection map — restored on failed save. */
+  const [savedQty, setSavedQty] = useState<Record<string, number>>(() => ({
+    ...(config?.currentSelections || {}),
+  }));
   const [infoDraft, setInfoDraft] = useState<CustomerInfoDraft>(() => ({
     customerName: config?.customerInfoDraft?.customerName || config?.sourceProject?.customerName || state.estimate?.project?.customerName || "",
     projectName: config?.customerInfoDraft?.projectName || config?.sourceProject?.projectName || state.estimate?.project?.projectName || "",
@@ -1797,9 +1801,15 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const [productDrafts, setProductDrafts] = useState<Record<string, RoomProductDrafts>>(
     () => ({ ...(config?.customerProductDrafts || config?.productDrafts || {}) }),
   );
+  const [savedProductDrafts, setSavedProductDrafts] = useState<Record<string, RoomProductDrafts>>(
+    () => ({ ...(config?.customerProductDrafts || config?.productDrafts || {}) }),
+  );
   const [backsplashDrafts, setBacksplashDrafts] = useState<Record<string, BacksplashDraft>>(
     () => ({ ...(config?.backsplashDrafts || {}) }),
   );
+  const [savedBacksplashDrafts, setSavedBacksplashDrafts] = useState<
+    Record<string, BacksplashDraft>
+  >(() => ({ ...(config?.backsplashDrafts || {}) }));
   const [projectNote, setProjectNote] = useState(config?.projectNote || "");
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
   /** Last server-confirmed calculation — authoritative Your estimate source. */
@@ -2082,9 +2092,18 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         setSavedCalc(result.calculation as typeof latestCalc);
       }
       if (result.customerProductDrafts || result.productDrafts) {
-        setProductDrafts(result.customerProductDrafts || result.productDrafts || effectiveProductDrafts);
+        const nextDrafts =
+          result.customerProductDrafts || result.productDrafts || effectiveProductDrafts;
+        setProductDrafts(nextDrafts);
+        setSavedProductDrafts(nextDrafts);
       }
-      if (result.backsplashDrafts) setBacksplashDrafts(result.backsplashDrafts);
+      if (result.backsplashDrafts) {
+        setBacksplashDrafts(result.backsplashDrafts);
+        setSavedBacksplashDrafts(result.backsplashDrafts);
+      }
+      setQty(effectiveQty);
+      setSavedQty(effectiveQty);
+      qtyRef.current = effectiveQty;
       const stillPending = pendingSaveRef.current;
       setSaveState(stillPending ? "unsaved" : "saved");
       setSaveError(null);
@@ -2208,17 +2227,33 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         finishFlight();
         return null;
       }
+      // Atomic rollback: restore last server-confirmed configuration + calculation.
+      // Never leave candidate selections or Pending changes after a failed save.
+      setQty({ ...savedQty });
+      qtyRef.current = { ...savedQty };
+      setBacksplashDrafts({ ...savedBacksplashDrafts });
+      backsplashDraftsRef.current = { ...savedBacksplashDrafts };
+      setProductDrafts({ ...savedProductDrafts });
+      productDraftsRef.current = { ...savedProductDrafts };
       setLatestCalc(savedCalc);
-      setSaveState("error");
-      setSaveError(
+      const restoreMsg =
+        err.code === "selection_unavailable" ||
         err.code === "invalid_selection" ||
-          err.code === "unknown_option" ||
-          err.code === "option_not_allowed"
-          ? err.message || "That selection is unavailable. Please choose another option."
-          : err instanceof Error
-            ? err.message
-            : "Unable to save",
-      );
+        err.code === "unknown_option" ||
+        err.code === "option_not_allowed" ||
+        err.code === "unresolved_product"
+          ? err.message ||
+            "We couldn’t save that selection. Your previous estimate has been restored. Please choose another option."
+          : err.code === "stale_configuration" || err.code === "row_version_conflict"
+            ? err.message ||
+              "This estimate changed in another session. We restored the latest saved version."
+            : err instanceof Error
+              ? err.message
+              : "We couldn’t save your change. Your previous estimate has been restored. Please try again.";
+      setSaveError(restoreMsg);
+      // Cleared pending — UI returns to saved state; error banner remains until dismissed.
+      setSaveState("saved");
+      pendingSaveRef.current = false;
       finishFlight();
       return null;
     }
@@ -2230,8 +2265,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       setReviewError("Please wait for your changes to finish saving.");
       return;
     }
-    if (saveState === "error") {
-      setReviewError("Please save your selections first");
+    if (saveError) {
+      setReviewError("Please resolve the save error first, then try again.");
       return;
     }
     setReviewBusy(true);
@@ -2433,63 +2468,18 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       selectedColorName: r.selectedColorName,
     })),
   });
-  const changeLines = vm.rooms.flatMap((room) => {
-    const lines: Array<{
-      roomName: string;
-      category: string;
-      originalLabel: string;
-      newLabel: string;
-      delta: number | null;
-      reviewRequired?: boolean;
-      pending?: boolean;
-    }> = [];
-    const roles: Array<{ role: string; category: string; summary: string | null }> = [
-      { role: "backsplash", category: "Backsplash", summary: room.backsplashSummary },
-      { role: "sink", category: "Sink", summary: room.sinkSummary },
-      { role: "faucet", category: "Faucet", summary: room.faucetSummary },
-      { role: "edge", category: "Edge", summary: room.edgeSummary },
-    ];
-    for (const { role, category, summary } of roles) {
-      const opts = room.choiceOptions.filter((c) => c.role === role);
-      const selected = opts.find((c) => c.selected);
-      const baseline = opts.find((c) => c.includedInBaseline);
-      if (!selected || !baseline) continue;
-      if (selected.optionKey === baseline.optionKey) continue;
-      const delta =
-        selected.visibleDelta != null
-          ? Number(selected.visibleDelta)
-          : selected.visibleSellPrice != null
-            ? Number(selected.visibleSellPrice)
-            : null;
-      lines.push({
-        roomName: room.name,
-        category,
-        originalLabel: baseline.displayLabel,
-        newLabel: selected.displayLabel || summary || "Changed",
-        delta: Number.isFinite(delta as number) ? delta : null,
-        reviewRequired:
-          selected.priceEffectLabel === "Elite will confirm this option and price." ||
-          selected.priceEffectLabel === "Requires estimator review" ||
-          selected.availabilityState === "review_required",
-        pending: totalPending,
-      });
-    }
-    const color = room.colors.find((c) => c.id === room.selectedColorId);
-    const baselineColor = room.colors.find((c) => c.includedInBaseline);
-    if (color && baselineColor && color.optionKey !== baselineColor.optionKey) {
-      lines.push({
-        roomName: room.name,
-        category: "Material",
-        originalLabel: baselineColor.name,
-        newLabel: color.name,
-        delta: null,
-        pending: totalPending,
-      });
-    }
-    return lines;
-  });
+  const changeLines: Array<{
+    roomName: string;
+    category: string;
+    originalLabel: string;
+    newLabel: string;
+    delta: number | null;
+    reviewRequired?: boolean;
+    pending?: boolean;
+  }> = [];
+  // Changes compare savedCalculation only — never candidate room labels or review copy.
   const changesBreakdown = buildChangesBreakdown({
-    changeLines: totalPending ? [] : changeLines,
+    changeLines,
     displayTotalDelta:
       (savedCalc as { displayTotalDelta?: number } | null)?.displayTotalDelta ?? null,
     roomPricingChanges:
@@ -2693,19 +2683,22 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           data-testid="de-save-status"
           data-save-state={saveState}
         >
-          {saveState === "idle" || saveState === "saved" ? "All changes saved" : null}
+          {saveError ? (
+            <span className="block text-destructive">{saveError}</span>
+          ) : saveState === "idle" || saveState === "saved" ? (
+            "All changes saved"
+          ) : null}
           {saveState === "unsaved" ? "Saving your changes…" : null}
           {saveState === "saving" ? "Saving…" : null}
-          {saveState === "error" ? saveError || "We couldn’t save that change. Please try again." : null}
         </span>
-        {saveState === "error" ? (
+        {saveError ? (
           <button
             type="button"
-            onClick={() => void onSave()}
-            className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90"
-            data-testid="de-save-button"
+            onClick={() => setSaveError(null)}
+            className="w-full rounded-lg border border-border bg-background py-3 text-sm font-semibold text-foreground transition hover:bg-muted/40"
+            data-testid="de-save-error-dismiss"
           >
-            Couldn’t save — Retry
+            Dismiss
           </button>
         ) : null}
             {reviewUiEnabled() ? (
@@ -2817,18 +2810,19 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
 
           <p
             className={`mt-3 text-xs ${
-              saveState === "error" ? "text-destructive" : "text-muted-foreground"
+              saveError ? "text-destructive" : "text-muted-foreground"
             }`}
             role="status"
             data-testid="de-header-save-status"
             data-save-state={saveState}
           >
-            {saveState === "idle" || saveState === "saved" ? "All changes saved" : null}
-            {saveState === "unsaved" ? "Saving…" : null}
-            {saveState === "saving" ? "Saving…" : null}
-            {saveState === "error"
-              ? saveError || "Couldn’t save — use Retry below"
-              : null}
+            {saveError
+              ? saveError
+              : saveState === "idle" || saveState === "saved"
+                ? "All changes saved"
+                : null}
+            {!saveError && saveState === "unsaved" ? "Saving…" : null}
+            {!saveError && saveState === "saving" ? "Saving…" : null}
           </p>
           <p className="mt-3 text-sm text-foreground" data-testid="de-primary-instruction">
             Review each room and choose the options you prefer.

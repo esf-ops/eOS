@@ -552,9 +552,27 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       configurationStudioService
     });
 
+    const { buildStudioPublicationReadinessDto } = await import(
+      "./studioPublicationReadiness.mjs"
+    );
+    const readinessDto = buildStudioPublicationReadinessDto({
+      estimate,
+      readiness,
+      configuration,
+      publishedConfiguration,
+      activePublication
+    });
+
     return {
       ok: true,
-      readiness,
+      readiness: {
+        ...readiness,
+        ...readinessDto,
+        // Preserve flat blockers for older clients.
+        eligible: readinessDto.eligible,
+        message: readinessDto.primaryMessage?.message || readiness.message,
+        code: readinessDto.primaryMessage?.code || readiness.code
+      },
       estimate: studioEstimateService.safeEstimateView(estimate),
       preview,
       publications: publicationViews,

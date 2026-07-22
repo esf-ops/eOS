@@ -197,6 +197,12 @@ export default function EstimateDigitalEstimatePanel({
   const [publishDiagnostic, setPublishDiagnostic] = useState<PublishDiagnostic | null>(null);
   const [eligible, setEligible] = useState(false);
   const [blockers, setBlockers] = useState<ReadinessBlocker[]>([]);
+  const [primaryMessage, setPrimaryMessage] = useState<{ code?: string; message?: string } | null>(
+    null
+  );
+  const [approvalStatus, setApprovalStatus] = useState<string | null>(null);
+  const [publicationConfigStatus, setPublicationConfigStatus] = useState<string | null>(null);
+  const [serverConfigDirty, setServerConfigDirty] = useState(false);
   const [activePublication, setActivePublication] = useState<PublicationRow | null>(null);
   const [publications, setPublications] = useState<PublicationRow[]>([]);
   const [reviewRequests, setReviewRequests] = useState<ReviewRequestRow[]>([]);
@@ -248,11 +254,12 @@ export default function EstimateDigitalEstimatePanel({
   );
 
   const configurationDirty = useMemo(() => {
+    if (serverConfigDirty) return true;
     if (!publishedChoiceFlags) return configHydrated && Boolean(customerUrl);
     return FRIENDLY_CUSTOMER_CHOICES.some(
       (d) => Boolean(choiceFlags[d.id]) !== Boolean(publishedChoiceFlags[d.id])
     );
-  }, [choiceFlags, publishedChoiceFlags, configHydrated, customerUrl]);
+  }, [choiceFlags, publishedChoiceFlags, configHydrated, customerUrl, serverConfigDirty]);
 
   const readinessQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -281,6 +288,13 @@ export default function EstimateDigitalEstimatePanel({
             blockers?: ReadinessBlocker[];
             blockingReasons?: ReadinessBlocker[];
             message?: string;
+            primaryMessage?: { code?: string; message?: string };
+            pricing?: { approvalStatus?: string; calculationStatus?: string };
+            publicationConfiguration?: {
+              status?: string;
+              configurationDirty?: boolean;
+            };
+            publication?: { status?: string; ready?: boolean; availableActions?: string[] };
           };
           activePublication?: PublicationRow | null;
           publications?: PublicationRow[];
@@ -303,6 +317,17 @@ export default function EstimateDigitalEstimatePanel({
             ? body.readiness!.blockers!
             : [];
         setBlockers(nextBlockers);
+        setPrimaryMessage(
+          body.readiness?.primaryMessage ||
+            (body.readiness?.message
+              ? { code: "legacy", message: body.readiness.message }
+              : null)
+        );
+        setApprovalStatus(body.readiness?.pricing?.approvalStatus || null);
+        setPublicationConfigStatus(body.readiness?.publicationConfiguration?.status || null);
+        setServerConfigDirty(
+          Boolean(body.readiness?.publicationConfiguration?.configurationDirty)
+        );
         setActivePublication(body.activePublication || null);
         setPublications(Array.isArray(body.publications) ? body.publications : []);
         setReviewRequests(Array.isArray(body.reviewRequests) ? body.reviewRequests : []);
@@ -570,14 +595,41 @@ export default function EstimateDigitalEstimatePanel({
           <span className="eq-muted">Blocked — resolve readiness issues before publish</span>
         )}
       </p>
+      {primaryMessage?.message ? (
+        <p
+          className="eq-de-primary-message"
+          data-testid="eq-de-primary-message"
+          data-approval-status={approvalStatus || ""}
+          data-publication-config-status={publicationConfigStatus || ""}
+        >
+          {primaryMessage.message}
+        </p>
+      ) : null}
       {blockers.length ? (
         <ul className="eq-de-blockers" data-testid="eq-de-blockers">
-          {blockers.map((b, i) => (
-            <li key={`${b.code || "b"}-${i}`}>
-              {b.message || b.code}
-              {b.field ? ` (${b.field})` : ""}
-            </li>
-          ))}
+          {blockers
+            .filter((b) => {
+              if (
+                approvalStatus === "approved_current" &&
+                (b.code === "estimate_not_approved" ||
+                  /Approve the Studio estimate/i.test(String(b.message || "")))
+              ) {
+                return false;
+              }
+              if (
+                approvalStatus === "approved_current" &&
+                b.code === "calculation_fingerprint_mismatch"
+              ) {
+                return false;
+              }
+              return true;
+            })
+            .map((b, i) => (
+              <li key={`${b.code || "b"}-${i}`}>
+                {b.message || b.code}
+                {b.field ? ` (${b.field})` : ""}
+              </li>
+            ))}
         </ul>
       ) : null}
 

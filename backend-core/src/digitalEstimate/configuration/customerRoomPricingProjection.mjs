@@ -66,6 +66,7 @@ import { centsToDollars, dollarsToCents } from "./money.mjs";
 import { parseProductOptionKey } from "../catalog/digitalEstimateProductOptions.mjs";
 import { edgeProfileDisplayLabel } from "../catalog/studioEdgeAuthority.mjs";
 import { BACKSPLASH_REVIEW_CODES } from "./backsplashPricingAuthority.mjs";
+import { sanitizeChangesSelectionLabel, isForbiddenSelectionLabel } from "./selectionAuthority.mjs";
 
 function edgeProfileDisplayLabelFromOption(displayLabel, optionKey) {
   const fromKey = String(optionKey || "").split(":").slice(2).join(":");
@@ -908,8 +909,16 @@ export function buildChangesRoomPricingProjection(args) {
       seenCategories.add(line.category);
       const origList = origLinesByCategory.get(line.category) || [];
       const origAmountCents = origList.reduce((s, l) => s + Math.trunc(Number(l.amountCents || 0)), 0);
-      const origLabel = origList.length ? origList.map((l) => l.label).join(", ") : "Not selected";
+      const origLabel = sanitizeChangesSelectionLabel(
+        origList.length ? origList.map((l) => l.label).join(", ") : "Not selected",
+        "Not selected"
+      );
+      const updatedLabel = sanitizeChangesSelectionLabel(
+        line.label,
+        CHANGES_CATEGORY_LABEL[line.category] || "Item"
+      );
       const delta = line.amountCents - origAmountCents;
+      if (isForbiddenSelectionLabel(line.label) && delta === 0) continue;
       if (delta === 0 && origList.length) continue; // unchanged selection, no dollar effect
       rows.push({
         roomId: room.roomId,
@@ -917,7 +926,7 @@ export function buildChangesRoomPricingProjection(args) {
         category: line.category,
         categoryLabel: CHANGES_CATEGORY_LABEL[line.category] || "Item",
         originalLabel: origLabel,
-        updatedLabel: line.label,
+        updatedLabel,
         amountDeltaCents: delta,
         status: origList.length ? "changed" : "new_selection"
       });
@@ -930,7 +939,10 @@ export function buildChangesRoomPricingProjection(args) {
         roomName: room.roomName,
         category,
         categoryLabel: CHANGES_CATEGORY_LABEL[category] || "Item",
-        originalLabel: list.map((l) => l.label).join(", "),
+        originalLabel: sanitizeChangesSelectionLabel(
+          list.map((l) => l.label).join(", "),
+          "Not selected"
+        ),
         updatedLabel: "Removed",
         amountDeltaCents: -amountCents,
         status: "removed"
@@ -939,13 +951,16 @@ export function buildChangesRoomPricingProjection(args) {
 
     for (const item of room.reviewRequiredItems || []) {
       if (item.category === "backsplash") continue; // already folded into the backsplash row above
+      const semantic =
+        CHANGES_CATEGORY_LABEL[item.category] ||
+        sanitizeChangesSelectionLabel(item.label, "Item");
       rows.push({
         roomId: room.roomId,
         roomName: room.roomName,
         category: item.category,
         categoryLabel: CHANGES_CATEGORY_LABEL[item.category] || "Item",
         originalLabel: "Not selected",
-        updatedLabel: item.label,
+        updatedLabel: isForbiddenSelectionLabel(item.label) ? semantic : sanitizeChangesSelectionLabel(item.label, semantic),
         amountDeltaCents: null,
         status: "review_required"
       });
