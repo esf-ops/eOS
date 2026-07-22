@@ -202,33 +202,69 @@ export function normalizeEdgeScopeAdjustment(scope) {
 }
 
 /**
- * Resolve the priced open-edge LF for a scope.
- *  - Takeoff authority: derived open edge (total run − backsplash-eligible run)
- *    plus governed estimator adjustment, never below zero.
+ * Resolve the priced finished-edge LF for a scope.
+ *  - Takeoff authority: sum of approved per-piece finished-edge sections
+ *    (`finished_edge_v2`) plus governed estimator adjustment, never below zero.
+ *  - Confirmation-required drafts: derivedLf = 0 until geometry is confirmed
+ *    (never fall back to retired totalRun − backsplash subtraction for pricing).
  *  - Manual fallback: estimator-entered edgeLinearFeet (legacy behavior).
  *
+ * Historical publications that already froze `derived_open_edge_v1` values remain
+ * unchanged — this function only reads the stored summary LF.
+ *
  * @param {object|null|undefined} scope
- * @returns {{ derivedLf: number, adjustmentLf: number, finalLf: number, source: string }}
+ * @returns {{ derivedLf: number, adjustmentLf: number, finalLf: number, source: string, confirmationRequired?: boolean }}
  */
 export function resolveScopeEdgeLinearFeet(scope) {
   const adjustment = normalizeEdgeScopeAdjustment(scope);
   if (scope?.physicalScopeSource === "takeoff") {
-    const derivedLf = round2(
+    const summary = scope?.takeoffScopeSummary || {};
+    const edgeSource = String(
+      summary.edgeScopeSource || scope?.edgeScopeSource || EDGE_SCOPE_SOURCES.FINISHED_EDGE
+    );
+    const confirmationRequired =
+      summary.edgeGeometryConfirmationRequired === true ||
+      edgeSource === EDGE_SCOPE_SOURCES.CONFIRMATION_REQUIRED ||
+      edgeSource === "finished_edge_geometry_required";
+
+    // Prefer finished-edge / stored eligible LF. Do not recompute subtraction.
+    let derivedLf = round2(
       Number(
-        scope?.takeoffScopeSummary?.derivedOpenEdgeLf ??
+        summary.derivedOpenEdgeLf ??
+          summary.edgeEligibleLinearFeet ??
           scope?.edgeEligibleLinearFeet ??
           0
       ) || 0
     );
+
+    // New drafts that still need confirmation must not price a guessed edge LF.
+    if (confirmationRequired && edgeSource !== EDGE_SCOPE_SOURCES.DERIVED) {
+      // If summary already has finished_edge_v2 LF, use it; otherwise zero until confirmed.
+      if (
+        edgeSource === EDGE_SCOPE_SOURCES.CONFIRMATION_REQUIRED ||
+        edgeSource === "finished_edge_geometry_required"
+      ) {
+        derivedLf = round2(Number(summary.approvedFinishedEdgeLf) || derivedLf || 0);
+        if (!(Number(summary.approvedFinishedEdgeLf) > 0)) {
+          derivedLf = 0;
+        }
+      }
+    }
+
     const finalLf = Math.max(0, round2(derivedLf + adjustment.adjustmentLf));
     return {
       derivedLf,
       adjustmentLf: adjustment.adjustmentLf,
       finalLf,
+      confirmationRequired,
       source:
         adjustment.adjustmentLf !== 0
           ? EDGE_SCOPE_SOURCES.ADJUSTED
-          : EDGE_SCOPE_SOURCES.DERIVED
+          : edgeSource === EDGE_SCOPE_SOURCES.DERIVED
+            ? EDGE_SCOPE_SOURCES.DERIVED
+            : confirmationRequired
+              ? EDGE_SCOPE_SOURCES.CONFIRMATION_REQUIRED
+              : EDGE_SCOPE_SOURCES.FINISHED_EDGE
     };
   }
   // Manual / legacy path: prefer estimator-entered edgeLinearFeet, but do not

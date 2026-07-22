@@ -52,6 +52,18 @@ export function flattenPieces(result, excludedRunIds) {
           quantity: Number(run.quantity) || 1,
           countertopSf: sfFrom(Number(run.lengthIn) || 0, Number(run.depthIn) || 0),
           backsplashEligible: eligibility.eligible,
+          backsplashEligibleLengthIn: eligibility.eligible
+            ? Math.max(0, Number(run.backsplashEligibleLengthIn) || Number(run.lengthIn) || 0)
+            : 0,
+          finishedEdge: run.finishedEdge || null,
+          finishedEdgeTotalIn:
+            run.finishedEdge?.totalFinishedEdgeLengthIn != null
+              ? Number(run.finishedEdge.totalFinishedEdgeLengthIn)
+              : null,
+          finishedEdgeApproved: run.finishedEdge?.approved === true,
+          frontEdgeLengthIn: Number(run.finishedEdge?.frontEdgeLengthIn) || null,
+          leftExposed: run.leftExposed ?? run.finishedEdge?.leftExposed ?? null,
+          rightExposed: run.rightExposed ?? run.finishedEdge?.rightExposed ?? null,
           included: !excludedRunIds.has(run.id),
           cutouts,
           cutoutsSummary: summarizeRunCutouts(cutouts),
@@ -159,4 +171,72 @@ export function reassignRun(result, fromRoomId, runId, toRoomId) {
       return { ...room, areas };
     })
   };
+}
+
+/**
+ * Set backsplash eligibility on a run with optional eligible length override.
+ * When eligible and length omitted, defaults to full piece run length.
+ */
+export function patchRunBacksplashEligibility(result, locator, args) {
+  const eligible = Boolean(args?.eligible);
+  const length =
+    eligible === false
+      ? 0
+      : Number.isFinite(Number(args?.eligibleLengthIn))
+        ? Math.max(0, Number(args.eligibleLengthIn))
+        : null;
+  return patchRun(result, locator, {
+    backsplashEligible: eligible,
+    backsplashEligibilitySource: "estimator_confirmed",
+    ...(length != null
+      ? {
+          backsplashEligibleLengthIn: length,
+          backsplashGeometry: {
+            backsplashEligible: eligible,
+            backsplashEligibleLengthIn: length,
+            backsplashEdge: "back",
+            approved: true,
+            source: "estimator_confirmed",
+            approvalSource: "estimator_confirmed",
+            ...(args?.reason ? { overrideReason: String(args.reason) } : {})
+          }
+        }
+      : {})
+  });
+}
+
+/**
+ * Persist estimator-approved finished-edge geometry on a run.
+ */
+export function patchRunFinishedEdge(result, locator, finishedEdge) {
+  const fe = finishedEdge && typeof finishedEdge === "object" ? finishedEdge : {};
+  const front = Math.max(0, Number(fe.frontEdgeLengthIn) || 0);
+  const left = Math.max(0, Number(fe.leftExposedEdgeLengthIn) || 0);
+  const right = Math.max(0, Number(fe.rightExposedEdgeLengthIn) || 0);
+  const other = Math.max(0, Number(fe.otherExposedEdgeLengthIn) || 0);
+  const adj = Number(fe.adjustmentIn) || 0;
+  if (adj !== 0 && !String(fe.adjustmentReason || "").trim()) {
+    throw Object.assign(new Error("Finished-edge adjustment requires a reason"), {
+      code: "finished_edge_adjustment_reason_required"
+    });
+  }
+  const total = Math.max(0, Math.round((front + left + right + other + adj) * 100) / 100);
+  return patchRun(result, locator, {
+    leftExposed: left > 0,
+    rightExposed: right > 0,
+    frontExposed: front > 0,
+    backExposed: other > 0,
+    finishedEdge: {
+      frontEdgeLengthIn: front,
+      leftExposedEdgeLengthIn: left,
+      rightExposedEdgeLengthIn: right,
+      otherExposedEdgeLengthIn: other,
+      totalFinishedEdgeLengthIn: total,
+      approved: true,
+      source: "estimator_confirmed",
+      approvalSource: "estimator_confirmed",
+      adjustmentIn: adj,
+      adjustmentReason: fe.adjustmentReason || null
+    }
+  });
 }

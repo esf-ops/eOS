@@ -678,6 +678,21 @@ export function assessStudioEstimatePublicationReadiness(input) {
     });
   }
 
+  const scopeSummary =
+    estimate.scope?.takeoffScopeSummary && typeof estimate.scope.takeoffScopeSummary === "object"
+      ? estimate.scope.takeoffScopeSummary
+      : null;
+  if (
+    scopeSummary?.edgeGeometryConfirmationRequired === true ||
+    String(scopeSummary?.edgeScopeSource || "") === "finished_edge_geometry_required"
+  ) {
+    blockers.push({
+      code: "finished_edge_geometry_required",
+      message:
+        "Confirm finished-edge geometry for each Takeoff piece before publishing a Digital Estimate."
+    });
+  }
+
   const scope = estimate.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   if (!str(scope.customerName)) {
     blockers.push({

@@ -22,6 +22,11 @@ import {
   deriveFabricationQuantitiesFromImportPayload,
   normalizeRunCutouts
 } from "../takeoff/takeoffCutoutScope.mjs";
+import {
+  attachDraftPieceGeometry,
+  buildGeometryAuthoritySummary,
+  EDGE_GEOMETRY_SOURCES
+} from "../takeoff/takeoffPieceGeometryAuthority.mjs";
 
 /** Cutout add-on keys owned by approved Takeoff scope (see TAKEOFF_CUTOUT_TYPES). */
 export const TAKEOFF_DERIVED_ADDON_KEYS = Object.freeze([
@@ -203,25 +208,23 @@ function round2(n) {
  * fallback seed) — the rooms ARE takeoff-derived, only the authority metadata
  * is missing. Never invoked for estimates without an approved Takeoff.
  *
+ * Finished-edge authority: sum of approved per-piece finished-edge sections.
+ * Backsplash length: sum of per-piece eligible lengths (never room-level length
+ * with zero eligible runs).
+ *
  * @param {Array<object>} rooms studio scope rooms
  */
 export function buildApprovedScopeSummaryFromScopeRooms(rooms) {
   let pieceCount = 0;
-  let backsplashEligibleRunCount = 0;
-  let eligibleBacksplashLengthIn = 0;
   let totalRunLengthIn = 0;
   const countsByType = {};
   const reviewCutouts = [];
   let countertopSqft = 0;
+  /** @type {Array<object>} */
+  const flatPieces = [];
 
   for (const room of Array.isArray(rooms) ? rooms : []) {
     if (!room || room.included === false) continue;
-    backsplashEligibleRunCount += Number(room.eligibleRunCount) || 0;
-    if (room.includeBacksplash) {
-      eligibleBacksplashLengthIn = round2(
-        eligibleBacksplashLengthIn + (Number(room.backsplashMeasuredLengthIn) || 0)
-      );
-    }
     countertopSqft = round2(countertopSqft + (Number(room.countertopSqft) || 0));
     for (const piece of room.pieces ?? []) {
       if (!piece || piece.included === false) continue;
@@ -229,6 +232,19 @@ export function buildApprovedScopeSummaryFromScopeRooms(rooms) {
       if (!String(piece.pieceType ?? "counter").toLowerCase().includes("backsplash")) {
         totalRunLengthIn = round2(totalRunLengthIn + (Number(piece.lengthIn) || 0));
       }
+      // Never infer eligibility from room.includeBacksplash / measured length —
+      // that produced hosted "0 eligible runs / non-zero length" contradictions.
+      flatPieces.push(
+        piece?.finishedEdge || piece?.backsplashGeometry
+          ? piece
+          : attachDraftPieceGeometry(
+              {
+                ...piece,
+                backsplashEligible: piece.backsplashEligible === true
+              },
+              { areaType: room.roomType || room.type || null }
+            )
+      );
       const { cutouts } = normalizeRunCutouts(piece.cutouts);
       for (const e of cutouts) {
         countsByType[e.type] = (countsByType[e.type] ?? 0) + e.quantity;
@@ -244,10 +260,7 @@ export function buildApprovedScopeSummaryFromScopeRooms(rooms) {
     }
   }
 
-  const derivedOpenEdgeLengthIn = Math.max(
-    0,
-    round2(totalRunLengthIn - eligibleBacksplashLengthIn)
-  );
+  const geometry = buildGeometryAuthoritySummary(flatPieces, { totalRunLengthIn });
 
   return {
     source: "takeoff",
@@ -258,14 +271,22 @@ export function buildApprovedScopeSummaryFromScopeRooms(rooms) {
     electricalOutletCutouts: countsByType.electrical_outlet ?? 0,
     popUpOutletCutouts: countsByType.pop_up_outlet ?? 0,
     otherCutouts: countsByType.other ?? 0,
-    backsplashEligibleRunCount,
-    eligibleBacksplashLengthIn,
+    backsplashEligibleRunCount: geometry.backsplashEligibleRunCount,
+    eligibleBacksplashLengthIn: geometry.eligibleBacksplashLengthIn,
+    backsplashByPiece: geometry.backsplashByPiece,
+    finishedEdgeByPiece: geometry.finishedEdgeByPiece,
+    approvedFinishedEdgeLf: geometry.approvedFinishedEdgeLf,
+    suggestedFinishedEdgeLf: geometry.suggestedFinishedEdgeLf,
+    edgeGeometryConfirmationRequired: geometry.edgeGeometryConfirmationRequired,
     totalRunLengthIn,
-    derivedOpenEdgeLengthIn,
-    derivedOpenEdgeLf: round2(derivedOpenEdgeLengthIn / 12),
-    edgeEligibleLengthIn: derivedOpenEdgeLengthIn,
-    edgeEligibleLinearFeet: round2(derivedOpenEdgeLengthIn / 12),
-    edgeScopeSource: "derived_open_edge_v1",
+    derivedOpenEdgeLengthIn: geometry.derivedOpenEdgeLengthIn,
+    derivedOpenEdgeLf: geometry.derivedOpenEdgeLf,
+    edgeEligibleLengthIn: geometry.edgeEligibleLengthIn,
+    edgeEligibleLinearFeet: geometry.edgeEligibleLinearFeet,
+    edgeScopeSource: geometry.edgeScopeSource,
+    legacyDerivedOpenEdgeLengthIn: geometry.legacyDerivedOpenEdgeLengthIn,
+    legacyDerivedOpenEdgeLf: geometry.legacyDerivedOpenEdgeLf,
+    retiredEdgeFormula: EDGE_GEOMETRY_SOURCES.DERIVED_OPEN_EDGE_V1,
     reviewCutouts,
     countertopSqft
   };
