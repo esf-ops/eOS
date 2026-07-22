@@ -58,10 +58,19 @@ export function validateEnvelopeStructure(envelopeGraph) {
 /**
  * Normalize client selection to allowlisted option_key → qty.
  * Rejects spoofed prices/rates/org/account fields.
+ *
+ * Unchanged frozen baseline / previously saved selections may remain even when
+ * the envelope marks them review_required or the option row is temporarily
+ * missing (canonical backsplash modes / prior saved keys only).
+ *
  * @param {unknown} raw
  * @param {Array<Record<string, unknown>>} options
+ * @param {{
+ *   priorSelections?: Record<string, number>|null,
+ *   allowCanonicalBacksplashOrphans?: boolean
+ * }} [ctx]
  */
-export function normalizeSelectionPayload(raw, options) {
+export function normalizeSelectionPayload(raw, options, ctx = {}) {
   const forbiddenCallerFields = [
     "organizationId",
     "organization_id",
@@ -101,6 +110,10 @@ export function normalizeSelectionPayload(raw, options) {
         ? raw
         : {};
 
+  const priorSelections =
+    ctx.priorSelections && typeof ctx.priorSelections === "object" ? ctx.priorSelections : {};
+  const allowCanonicalBacksplashOrphans = ctx.allowCanonicalBacksplashOrphans !== false;
+
   const byKey = new Map(
     options.map((o) => [String(o.option_key || o.optionKey), o])
   );
@@ -108,18 +121,32 @@ export function normalizeSelectionPayload(raw, options) {
   const normalized = {};
   for (const [key, qtyRaw] of Object.entries(selections)) {
     const opt = byKey.get(String(key));
-    if (!opt) {
-      const err = new Error(`Unknown option_key: ${key}`);
-      err.code = "invalid_selection";
-      err.statusCode = 422;
-      err.selectionKey = String(key).slice(0, 160);
-      throw err;
-    }
     const qty = Number(qtyRaw);
     if (!Number.isFinite(qty)) {
       const err = new Error(`Invalid qty for ${key}`);
       err.code = "invalid_qty";
       err.statusCode = 400;
+      throw err;
+    }
+    if (!opt) {
+      if (!(qty > 0)) continue;
+      const priorQty = Number(priorSelections[key] || 0);
+      const mode = String(key).startsWith("backsplash:")
+        ? String(key).split(":").slice(2).join(":")
+        : "";
+      const canonicalBs =
+        allowCanonicalBacksplashOrphans &&
+        String(key).startsWith("backsplash:") &&
+        ["none", "standard_4in", "custom_height", "full_height"].includes(mode);
+      if ((priorQty > 0 && qty === priorQty) || canonicalBs) {
+        normalized[String(key)] = qty;
+        continue;
+      }
+      const err = new Error(`Unknown option_key: ${key}`);
+      err.code = "invalid_selection";
+      err.statusCode = 422;
+      err.selectionKey = String(key).slice(0, 160);
+      err.restoreSavedState = true;
       throw err;
     }
     const min = Number(opt.min_qty ?? opt.minQty ?? 0);
@@ -130,11 +157,21 @@ export function normalizeSelectionPayload(raw, options) {
       err.statusCode = 400;
       throw err;
     }
-    if (String(opt.availability_state || opt.availabilityState) === "review_required" && qty > 0) {
-      const err = new Error(`Option requires estimator review: ${key}`);
-      err.code = "requires_estimator_review";
-      err.statusCode = 422;
-      throw err;
+    const avail = String(opt.availability_state || opt.availabilityState || "active");
+    if ((avail === "review_required" || avail === "unavailable") && qty > 0) {
+      const included = Boolean(opt.included_in_baseline ?? opt.includedInBaseline);
+      const defaultQty = Number(opt.default_qty ?? opt.defaultQty ?? 0) || 0;
+      const priorQty = Number(priorSelections[key] || 0);
+      const unchangedBaseline = included && defaultQty > 0 && qty === defaultQty;
+      const unchangedSaved = priorQty > 0 && qty === priorQty;
+      if (!unchangedBaseline && !unchangedSaved) {
+        const err = new Error(`Option requires estimator review: ${key}`);
+        err.code = "selection_unavailable";
+        err.statusCode = 422;
+        err.reason = "pricing_unavailable";
+        err.restoreSavedState = true;
+        throw err;
+      }
     }
     normalized[String(key)] = qty;
   }

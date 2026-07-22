@@ -59,6 +59,7 @@ const SAFE_PUBLIC_ERROR_CODES = new Set([
   "unknown_option",
   "invalid_selection",
   "option_not_allowed",
+  "selection_unavailable",
   "unresolved_product",
   "configuration_unavailable",
   "configuration_contract_invalid",
@@ -138,7 +139,7 @@ function safeDiagnosticCode(e, status, safeCode) {
   ) {
     return "DE-COOKIE";
   }
-  if (safeCode === "option_not_allowed" || safeCode === "invalid_selection" || safeCode === "unknown_option") {
+  if (safeCode === "option_not_allowed" || safeCode === "invalid_selection" || safeCode === "unknown_option" || safeCode === "selection_unavailable") {
     return "DE-OPTION-NOT-ALLOWED";
   }
   if (safeCode === "product_variant_required") return "DE-PRODUCT-VARIANT-REQUIRED";
@@ -171,15 +172,19 @@ function publicError(res, e, stageHint = "token_exchange") {
   ) {
     message = "Please refresh and try again";
   } else if (status === 409 || code === "row_version_conflict" || code === "stale_configuration") {
-    message = "Please refresh and try again";
+    message = "This estimate changed in another session. We restored the latest saved version.";
   } else if (
     code === "unresolved_product" ||
     code === "unknown_option" ||
     code === "invalid_selection" ||
     code === "option_not_allowed" ||
+    code === "selection_unavailable" ||
     code === "forbidden_caller_authority"
   ) {
-    message = "That selection is unavailable";
+    message =
+      e?.restoreSavedState === true
+        ? "We couldn’t save that selection. Your previous estimate has been restored. Please choose another option."
+        : "That selection is unavailable";
   } else if (code === "publication_expired" || String(e?.message || "").includes("Pricing has expired")) {
     message = "Pricing has expired";
   } else if (String(e?.message || "").includes("options were updated")) {
@@ -220,6 +225,7 @@ function publicError(res, e, stageHint = "token_exchange") {
     safeCode === "unknown_option" ||
     safeCode === "invalid_selection" ||
     safeCode === "option_not_allowed" ||
+    safeCode === "selection_unavailable" ||
     safeCode === "configuration_unavailable" ||
     safeCode === "persistence_failed";
   const lifecycleFatal =
@@ -238,6 +244,9 @@ function publicError(res, e, stageHint = "token_exchange") {
     recoverable,
     lifecycleFatal
   };
+  if (e?.restoreSavedState === true) {
+    body.restoreSavedState = true;
+  }
   if (
     (safeCode === "invalid_selection" ||
       safeCode === "unknown_option" ||

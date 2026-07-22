@@ -43,6 +43,11 @@ import {
   normalizeCustomerCatalogPermissions
 } from "./customerCatalogPermissions.mjs";
 import {
+  classifyPublicSelection,
+  isCanonicalBacksplashMode,
+  selectionMayBypassAvailability
+} from "./selectionAuthority.mjs";
+import {
   buildMissingInformationRequirements
 } from "../catalog/customerDraftRequirements.mjs";
 import {
@@ -544,6 +549,8 @@ function buildCustomerSafeMaterials(graphOptions, enrichedById = null) {
 /**
  * Canonicalize persisted backsplash draft mode into the priced selection map.
  * The room card and calculation must never read different authorities.
+ * Known modes (none / 4-inch / custom / full) apply even when the envelope
+ * option row is missing so a valid draft cannot soft-fail into option_not_allowed.
  */
 function applyBacksplashDraftAuthority(selectionMap, backsplashDrafts, options) {
   for (const [roomKey, draft] of Object.entries(backsplashDrafts || {})) {
@@ -551,16 +558,47 @@ function applyBacksplashDraftAuthority(selectionMap, backsplashDrafts, options) 
     if (!mode) continue;
     const prefix = `backsplash:${roomKey}:`;
     const targetKey = `${prefix}${mode}`;
-    const target = options.find(
+    const target = (options || []).find(
       (o) => String(o.option_key || o.optionKey) === targetKey
     );
-    if (!target) continue;
-    for (const opt of options) {
+    if (!target && !isCanonicalBacksplashMode(mode)) continue;
+    for (const opt of options || []) {
       const key = String(opt.option_key || opt.optionKey || "");
+      if (key.startsWith(prefix)) selectionMap[key] = 0;
+    }
+    // Also clear any stray map keys for this room's backsplash modes.
+    for (const key of Object.keys(selectionMap)) {
       if (key.startsWith(prefix)) selectionMap[key] = 0;
     }
     selectionMap[targetKey] = 1;
   }
+}
+
+/**
+ * Reject newly requested unavailable options; allow unchanged baseline / prior saved.
+ * @returns {{ code: string, reason: string, category: string, optionKey: string }|null}
+ */
+function availabilityRejectionForSelection(opt, qty, priorSelections) {
+  if (!(Number(qty) > 0)) return null;
+  const key = String(opt?.option_key || opt?.optionKey || "");
+  const avail = opt?.availability_state || opt?.availabilityState || "active";
+  if (avail !== "unavailable" && avail !== "review_required") return null;
+  const classification = classifyPublicSelection({
+    optionKey: key,
+    quantity: qty,
+    option: opt,
+    priorSelections
+  });
+  if (selectionMayBypassAvailability(classification)) return null;
+  return {
+    code: "selection_unavailable",
+    reason:
+      avail === "review_required"
+        ? "pricing_unavailable"
+        : "option_not_in_frozen_catalog",
+    category: String(key).split(":")[0] || "option",
+    optionKey: key
+  };
 }
 
 function selectedMaterialGroupForRoom(room, quantities, options) {
@@ -1314,42 +1352,133 @@ export function createPublicConfigurationService(deps) {
       );
       const options = graph?.options || [];
 
-      // Normalize: accept items[{optionId|optionKey, quantity}] or selections map
+      // Load prior saved selections first — needed to classify baseline vs new.
+      let priorMeta = {
+        customerInfoDraft: null,
+        roomLabelDrafts: {},
+        roomNotes: {},
+        projectNote: null,
+        customerProductDrafts: {},
+        backsplashDrafts: {},
+        sideSplashDrafts: {},
+        quantities: {}
+      };
+      if (typeof configurationRepository.getLatestSelectionForSession === "function") {
+        const prior = await configurationRepository.getLatestSelectionForSession(
+          session.organization_id,
+          session.id
+        );
+        priorMeta = splitSelectionPayloadMeta(prior?.selection_payload_json);
+      }
+      const priorSelections =
+        priorMeta.quantities && typeof priorMeta.quantities === "object"
+          ? priorMeta.quantities
+          : {};
+
+      // Normalize: accept items[{optionId|optionKey, quantity}] or selections map.
+      // Unchanged frozen baseline / prior saved selections may remain even when the
+      // live envelope no longer lists them or marks them unavailable.
       let selectionMap = {};
       if (Array.isArray(body.items)) {
         for (const item of body.items) {
           rejectPublicSelectionAuthority(item);
           const id = item.optionId || item.option_id;
-          const key = item.optionKey || item.option_key;
-          const opt = findEnvelopeOptionForSelectionKey(options, key, id);
+          const key = String(item.optionKey || item.option_key || "");
+          const qty = Number(item.quantity ?? item.qty ?? 0);
+          const remapped = key.startsWith("edge:") ? remapLegacyEdgeOptionKey(key) : key;
+          const opt = findEnvelopeOptionForSelectionKey(options, remapped, id);
           if (!opt) {
-            throw safeFail("option_not_allowed", "That selection is unavailable", 422, {
-              selectionKey: String(key || id || "").slice(0, 160) || null,
-              diagnosticCode: "DE-OPTION-NOT-ALLOWED"
+            if (!(qty > 0)) continue;
+            const priorQty = Number(priorSelections[remapped] || priorSelections[key] || 0);
+            const canonicalBacksplash =
+              remapped.startsWith("backsplash:") &&
+              isCanonicalBacksplashMode(remapped.split(":").slice(2).join(":"));
+            if (priorQty > 0 && qty === priorQty) {
+              // B: existing saved configured selection — keep even if option row gone.
+              selectionMap[remapped] = qty;
+              continue;
+            }
+            if (canonicalBacksplash) {
+              // Draft authority will canonicalize; allow the key through.
+              selectionMap[remapped] = qty;
+              continue;
+            }
+            throw safeFail(
+              "selection_unavailable",
+              "That selection is unavailable",
+              422,
+              {
+                selectionKey: remapped.slice(0, 160) || null,
+                diagnosticCode: "DE-OPTION-NOT-ALLOWED",
+                reason: "option_not_in_frozen_catalog",
+                category: remapped.split(":")[0] || "option",
+                restoreSavedState: true
+              }
+            );
+          }
+          const optKey = opt.option_key || opt.optionKey;
+          const classification = classifyPublicSelection({
+            optionKey: optKey,
+            quantity: qty,
+            option: opt,
+            priorSelections
+          });
+          const rejection = availabilityRejectionForSelection(opt, qty, priorSelections);
+          if (rejection && classification === "newly_requested") {
+            throw safeFail(rejection.code, "That selection is unavailable", 422, {
+              selectionKey: String(optKey).slice(0, 160),
+              diagnosticCode: "DE-OPTION-NOT-ALLOWED",
+              reason: rejection.reason,
+              category: rejection.category,
+              restoreSavedState: true
             });
           }
-          const avail = opt.availability_state || opt.availabilityState || "active";
-          if (avail !== "active") {
-            throw safeFail("unresolved_product", "That selection is unavailable", 422);
-          }
-          selectionMap[opt.option_key || opt.optionKey] = Number(item.quantity ?? item.qty ?? 0);
+          selectionMap[optKey] = qty;
         }
       } else {
         const rawMap =
           body.selections && typeof body.selections === "object" ? body.selections : {};
         const split = splitSelectionPayloadMeta(rawMap);
         selectionMap = {};
-        for (const [k, qty] of Object.entries(split.quantities || {})) {
+        for (const [k, qtyRaw] of Object.entries(split.quantities || {})) {
           const remapped = k.startsWith("edge:") ? remapLegacyEdgeOptionKey(k) : k;
+          const qty = Number(qtyRaw) || 0;
           const opt = findEnvelopeOptionForSelectionKey(options, remapped, null);
           if (!opt) {
-            if (Number(qty) <= 0) continue;
-            throw safeFail("option_not_allowed", "That selection is unavailable", 422, {
-              selectionKey: String(remapped).slice(0, 160),
-              diagnosticCode: "DE-OPTION-NOT-ALLOWED"
+            if (!(qty > 0)) continue;
+            const priorQty = Number(priorSelections[remapped] || priorSelections[k] || 0);
+            const canonicalBacksplash =
+              remapped.startsWith("backsplash:") &&
+              isCanonicalBacksplashMode(remapped.split(":").slice(2).join(":"));
+            if ((priorQty > 0 && qty === priorQty) || canonicalBacksplash) {
+              selectionMap[remapped] = qty;
+              continue;
+            }
+            throw safeFail(
+              "selection_unavailable",
+              "That selection is unavailable",
+              422,
+              {
+                selectionKey: String(remapped).slice(0, 160),
+                diagnosticCode: "DE-OPTION-NOT-ALLOWED",
+                reason: "option_not_in_frozen_catalog",
+                category: remapped.split(":")[0] || "option",
+                restoreSavedState: true
+              }
+            );
+          }
+          const optKey = opt.option_key || opt.optionKey;
+          const rejection = availabilityRejectionForSelection(opt, qty, priorSelections);
+          if (rejection) {
+            throw safeFail(rejection.code, "That selection is unavailable", 422, {
+              selectionKey: String(optKey).slice(0, 160),
+              diagnosticCode: "DE-OPTION-NOT-ALLOWED",
+              reason: rejection.reason,
+              category: rejection.category,
+              restoreSavedState: true
             });
           }
-          selectionMap[opt.option_key || opt.optionKey] = Number(qty) || 0;
+          selectionMap[optKey] = qty;
         }
       }
 
@@ -1371,23 +1500,6 @@ export function createPublicConfigurationService(deps) {
         body.sideSplashDrafts || body.side_splash_drafts || {}
       );
 
-      // Preserve prior drafts when caller omits them (material-only saves).
-      let priorMeta = {
-        customerInfoDraft: null,
-        roomLabelDrafts: {},
-        roomNotes: {},
-        projectNote: null,
-        customerProductDrafts: {},
-        backsplashDrafts: {},
-        sideSplashDrafts: {}
-      };
-      if (typeof configurationRepository.getLatestSelectionForSession === "function") {
-        const prior = await configurationRepository.getLatestSelectionForSession(
-          session.organization_id,
-          session.id
-        );
-        priorMeta = splitSelectionPayloadMeta(prior?.selection_payload_json);
-      }
       const mergedInfo =
         body.customerInfoDraft != null || body.customer_info_draft != null
           ? customerInfoDraft
@@ -1420,7 +1532,11 @@ export function createPublicConfigurationService(deps) {
       applyBacksplashDraftAuthority(selectionMap, mergedBacksplashDrafts, options);
       rejectGovernedScopeQuantitySelections(body.items || body.selections || []);
       stripGovernedScopeQuantitiesFromMap(selectionMap);
-      const normalized = normalizeSelectionPayload({ selections: selectionMap }, options);
+      const normalized = normalizeSelectionPayload(
+        { selections: selectionMap },
+        options,
+        { priorSelections, allowCanonicalBacksplashOrphans: true }
+      );
 
       // Catalog permissions frozen at publication — reject crafted saves for
       // categories the estimator disabled (baseline/original may remain).
@@ -1436,17 +1552,29 @@ export function createPublicConfigurationService(deps) {
         throw safeFail(
           "catalog_permission_denied",
           "That catalog is not available on this estimate",
-          403
+          403,
+          {
+            reason: "category_not_permitted",
+            category: forbiddenCatalog[0]?.category || null,
+            restoreSavedState: true
+          }
         );
       }
 
-      // Required groups / unresolved defaults
+      // Newly requested unavailable / review_required options only — never block
+      // an unrelated change because an unchanged baseline option is review_required.
       for (const opt of options) {
         const key = opt.option_key || opt.optionKey;
         const qty = Number(normalized.selections[key] || 0);
-        const avail = opt.availability_state || opt.availabilityState || "active";
-        if ((avail === "unavailable" || avail === "review_required") && qty > 0) {
-          throw safeFail("unresolved_product", "That selection is unavailable", 422);
+        const rejection = availabilityRejectionForSelection(opt, qty, priorSelections);
+        if (rejection) {
+          throw safeFail(rejection.code, "That selection is unavailable", 422, {
+            selectionKey: String(key).slice(0, 160),
+            diagnosticCode: "DE-OPTION-NOT-ALLOWED",
+            reason: rejection.reason,
+            category: rejection.category,
+            restoreSavedState: true
+          });
         }
       }
 

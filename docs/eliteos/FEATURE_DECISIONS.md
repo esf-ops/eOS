@@ -2146,4 +2146,17 @@
 | **SQL / env** | None. |
 | **Deployment surfaces** | `backend-core` (publication adapter, trusted context, public configuration). No manual deployment. |
 
+### 151. Digital Estimate atomic save + Studio publication readiness (2026-07-21)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-21 · `fix/digital-estimate-save-and-publication-readiness` |
+| **Problem** | Hosted DE mixed pending candidate selections with saved totals (header ≠ breakdown), failed Backsplash saves left “Pending changes” / unavailable errors, Changes could surface review copy as a selection, and Studio showed Approved + “Approve before publishing” simultaneously when only publication settings were dirty. |
+| **Rejected save path** | Full-map save validated every qty>0 option against live envelope `availability_state`. An unchanged frozen/prior selection marked `review_required` (often premium edge) threw `unresolved_product` / `option_not_allowed` and blocked unrelated Backsplash changes. `normalizeSelectionPayload` also hard-failed `review_required` qty>0 and unknown keys. |
+| **Selection classification** | `selectionAuthority.mjs`: `unchanged_frozen_baseline` \| `existing_saved_configured` \| `newly_requested`. Only newly requested must be active in the frozen envelope. Canonical backsplash modes (`none` / `standard_4in` / …) may apply even if the option row is briefly missing. |
+| **Atomic save / rollback** | Failed save restores `savedQty` / `savedBacksplashDrafts` / `savedProductDrafts` / `savedCalc`, clears Pending, shows restore copy, does not auto-retry the rejected payload. Success replaces saved configuration + calculation together. Changes tab uses `savedCalc.roomPricingChanges` only. |
+| **Studio readiness DTO** | `buildStudioPublicationReadinessDto`: `pricing.calculationStatus` / `pricing.approvalStatus` / `publicationConfiguration.status` / `publication.status` + `primaryMessage`. Permission-only fields (`customerCatalogPermissions`, `pricingValidThrough`, room locks, choice groups) do not stale approval; price-bearing scope fields do. UI filters contradictory Approve blockers when `approved_current`. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `backend-core`, `app-digital-estimate`, `app-elite100-estimate-studio`. No manual deployment. |
+
 
