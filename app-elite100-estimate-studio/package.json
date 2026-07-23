@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node src/phaseDe11.ui.test.mjs && node src/phaseDe11.oneTimeLink.ui.test.mjs && node src/milestone1.estimateQueue.ui.test.mjs && node src/milestone2.openEstimate.ui.test.mjs && node src/milestone3.estimateScope.ui.test.mjs && node src/milestone4.digitalEstimate.ui.test.mjs && node src/milestone5.reviewRequest.ui.test.mjs && node src/milestone6.estimateQueueDashboard.ui.test.mjs && node src/phasePricingSetupSimplification.ui.test.mjs && node src/estimateQueue/estimateCommandCenter.ui.test.mjs"
+    "test": "node src/phaseDe11.ui.test.mjs && node src/phaseDe11.oneTimeLink.ui.test.mjs && node src/milestone1.estimateQueue.ui.test.mjs && node src/milestone2.openEstimate.ui.test.mjs && node src/milestone3.estimateScope.ui.test.mjs && node src/milestone4.digitalEstimate.ui.test.mjs && node src/milestone5.reviewRequest.ui.test.mjs && node src/milestone6.estimateQueueDashboard.ui.test.mjs && node src/phasePricingSetupSimplification.ui.test.mjs && node src/estimateQueue/estimateCommandCenter.ui.test.mjs && node src/estimateQueue/studioShellAndEmailSync.ui.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
