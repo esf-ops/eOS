@@ -15,6 +15,14 @@ function pickStr(v) {
  */
 export function deriveQuoteAccountName(row) {
   const r = row && typeof row === "object" ? row : {};
+  const identityName =
+    pickStr(r.snapshot_identity_account) ||
+    pickStr(
+      r.customer_identity_snapshot && typeof r.customer_identity_snapshot === "object"
+        ? r.customer_identity_snapshot.accountDisplayName
+        : null
+    );
+  if (identityName) return identityName;
   const explicit = pickStr(r.account_name);
   if (explicit) return explicit;
   const snapAlias = pickStr(r.snapshot_account) || pickStr(r.snapshot_account_legacy);
@@ -84,7 +92,8 @@ export function quoteSearchOrClauseForTerm(term) {
     `branch.ilike.${pat}`,
     `calculation_snapshot->internal_ui->job_info->>account.ilike.${pat}`,
     `calculation_snapshot->internal_ui->>account.ilike.${pat}`,
-    `calculation_snapshot->internal_ui->>project_name.ilike.${pat}`
+    `calculation_snapshot->internal_ui->>project_name.ilike.${pat}`,
+    `customer_identity_snapshot->>accountDisplayName.ilike.${pat}`
   ].join(",");
 }
 
@@ -128,6 +137,7 @@ export function quoteAccountFilterOrClause(account) {
     `account_name.ilike.${pat}`,
     `calculation_snapshot->internal_ui->job_info->>account.ilike.${pat}`,
     `calculation_snapshot->internal_ui->>account.ilike.${pat}`,
+    `customer_identity_snapshot->>accountDisplayName.ilike.${pat}`,
     `quote_number.ilike.${pat}`,
     `quote_number_base.ilike.${pat}`
   ].join(",");
@@ -232,9 +242,11 @@ export function applyQuoteLibrarySort(qb, sortRaw, ascending) {
 export const QUOTE_LIBRARY_LIST_SELECT =
   "id,quote_number,quote_number_base,revision_number,revision_label,quote_family_root_id,is_current_revision," +
   "archived_at,quote_source,quote_status,customer_name,customer_email,customer_phone,account_name," +
+  "account_directory_account_id," +
   "project_name,project_address,city,state,zip,sales_rep,branch,grand_total,estimated_sqft," +
   "created_at,updated_at,prepared_by,created_by," +
   "snapshot_pricing_mode:calculation_snapshot->internal_ui->>internal_material_basis," +
   "snapshot_account:calculation_snapshot->internal_ui->job_info->>account," +
   "snapshot_account_legacy:calculation_snapshot->internal_ui->>account," +
-  "snapshot_customer_display_total:calculation_snapshot->internal_ui->>customer_display_total";
+  "snapshot_customer_display_total:calculation_snapshot->internal_ui->>customer_display_total," +
+  "snapshot_identity_account:customer_identity_snapshot->>accountDisplayName";

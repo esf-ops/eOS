@@ -48,6 +48,10 @@ import TakeoffImportCompletionChecklist from "./components/internal-estimate/Tak
 import TakeoffMeasurementComparisonPanel from "./components/internal-estimate/TakeoffMeasurementComparisonPanel";
 import TakeoffQuoteReadinessSummary from "./components/internal-estimate/TakeoffQuoteReadinessSummary";
 import TakeoffSuggestedAddOnsReviewPanel from "./components/internal-estimate/TakeoffSuggestedAddOnsReviewPanel";
+import AccountDirectoryEstimatePanel, {
+  type AccountDirectoryEstimateSelection
+} from "./components/internal-estimate/AccountDirectoryEstimatePanel";
+import { buildIdentitySaveFields } from "./lib/accountDirectoryEstimate.mjs";
 import TakeoffSourcePlanDrawer from "./components/internal-estimate/TakeoffSourcePlanDrawer";
 import TakeoffFeedbackForm from "../../shared/eliteos-ui/TakeoffFeedbackForm";
 import TakeoffIssueReportModal from "../../shared/eliteos-ui/TakeoffIssueReportModal";
@@ -415,6 +419,16 @@ export default function InternalEstimateApp() {
   const [accountName, setAccountName] = useState("");
   const [accountPhone, setAccountPhone] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
+  const [accountDirectorySelection, setAccountDirectorySelection] =
+    useState<AccountDirectoryEstimateSelection>({
+      accountId: null,
+      contactId: null,
+      locationId: null,
+      snapshot: null,
+      account: null,
+      explicitRelink: false,
+      refreshIdentity: false
+    });
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -1531,6 +1545,7 @@ export default function InternalEstimateApp() {
   }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, ensureAccessToken]);
 
   const buildSubmitPayload = useCallback((saveModeOverride?: InternalSaveIntent) => {
+    const identityFields = buildIdentitySaveFields(accountDirectorySelection);
     const base = {
       ...buildCalcPayload(),
       customerDisplayTotal: customerDisplayTotalRef.current,
@@ -1545,7 +1560,8 @@ export default function InternalEstimateApp() {
       branch: branch.trim() || null,
       sales_rep: salesRep.trim() || null,
       entered_by: enteredBy.trim() || null,
-      quote_status: quoteWorkflowStatus.trim() || "draft"
+      quote_status: quoteWorkflowStatus.trim() || "draft",
+      ...identityFields
     };
     if (urlQuoteId) {
       const mode = saveModeOverride ?? saveIntent;
@@ -1573,7 +1589,8 @@ export default function InternalEstimateApp() {
     quoteWorkflowStatus,
     urlQuoteId,
     saveIntent,
-    revisionNoteDraft
+    revisionNoteDraft,
+    accountDirectorySelection
   ]);
 
   const savePrimaryLabel = useMemo(() => {
@@ -1620,6 +1637,15 @@ export default function InternalEstimateApp() {
     setAccountName("");
     setAccountPhone("");
     setAccountEmail("");
+    setAccountDirectorySelection({
+      accountId: null,
+      contactId: null,
+      locationId: null,
+      snapshot: null,
+      account: null,
+      explicitRelink: false,
+      refreshIdentity: false
+    });
     setCustomerName("");
     setPhone("");
     setEmail("");
@@ -1807,6 +1833,11 @@ export default function InternalEstimateApp() {
               ? true
               : true;
         applyPostSaveQuoteIdentity(qid, qn, revLab, isCurrent, sm);
+        setAccountDirectorySelection((prev) => ({
+          ...prev,
+          explicitRelink: false,
+          refreshIdentity: false
+        }));
         const savedLabel = qn || (revLab ? `revision ${revLab}` : "quote");
         if (takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta)) {
           setTakeoffShowFeedbackAfterSave(true);
@@ -2450,6 +2481,31 @@ export default function InternalEstimateApp() {
         setCustomerName(String(q.customer_name ?? ""));
         setEmail(String(q.customer_email ?? ""));
         setPhone(String(q.customer_phone ?? ""));
+        {
+          const accountId = q.account_directory_account_id ? String(q.account_directory_account_id) : null;
+          const contactId = q.account_directory_contact_id ? String(q.account_directory_contact_id) : null;
+          const locationId = q.account_directory_location_id ? String(q.account_directory_location_id) : null;
+          const snapIdentity =
+            q.customer_identity_snapshot && typeof q.customer_identity_snapshot === "object"
+              ? (q.customer_identity_snapshot as Record<string, unknown>)
+              : null;
+          setAccountDirectorySelection({
+            accountId,
+            contactId,
+            locationId,
+            snapshot: snapIdentity,
+            account: snapIdentity
+              ? {
+                  id: accountId || String(snapIdentity.accountId || ""),
+                  displayName: String(snapIdentity.accountDisplayName || ""),
+                  status: snapIdentity.accountStatus != null ? String(snapIdentity.accountStatus) : null,
+                  quickbooksLinked: Boolean(snapIdentity.quickbooksLinked)
+                }
+              : null,
+            explicitRelink: false,
+            refreshIdentity: false
+          });
+        }
         setProjectName(String(q.project_name ?? ""));
         setProjectAddress(String(q.project_address ?? ""));
         setCity(String(q.city ?? ""));
@@ -3188,6 +3244,22 @@ export default function InternalEstimateApp() {
               </p>
             </div>
             <div className="ie-job-groups">
+              {sessionToken ? (
+                <AccountDirectoryEstimatePanel
+                  sessionToken={sessionToken}
+                  selection={accountDirectorySelection}
+                  onSelectionChange={setAccountDirectorySelection}
+                  onApplyJobInfo={(fields) => {
+                    setAccountName(fields.accountName);
+                    setAccountPhone(fields.accountPhone);
+                    setAccountEmail(fields.accountEmail);
+                    setCustomerName(fields.customerName);
+                    setPhone(fields.phone);
+                    setEmail(fields.email);
+                  }}
+                  accountDirectoryUrl={String(import.meta.env.VITE_HEAD_URL_ACCOUNT_DIRECTORY ?? "").trim() || undefined}
+                />
+              ) : null}
               <div className="ie-job-group">
                 <p className="ie-job-group-head">Account</p>
                 <div className="grid3 ie-job-grid">

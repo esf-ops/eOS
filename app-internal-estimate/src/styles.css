@@ -5457,6 +5457,143 @@ textarea:focus {
   gap: 22px;
 }
 
+.ie-account-directory-panel .ie-ad-unlinked,
+.ie-account-directory-panel .ie-ad-selected {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ie-ad-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.ie-ad-result {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  background: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.ie-ad-result:hover,
+.ie-ad-result:focus-visible {
+  border-color: rgba(112, 26, 26, 0.35);
+  outline: none;
+}
+
+.ie-ad-selected-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.ie-ad-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ie-ad-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(11, 26, 51, 0.12);
+  background: rgba(11, 26, 51, 0.04);
+  color: var(--eos-ink-mid, #445);
+}
+
+.ie-ad-badge-ok {
+  background: rgba(22, 120, 74, 0.08);
+  border-color: rgba(22, 120, 74, 0.28);
+  color: #166a42;
+}
+
+.ie-ad-badge-muted {
+  opacity: 0.9;
+}
+
+.ie-ad-notice {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(180, 120, 20, 0.08);
+  border: 1px solid rgba(180, 120, 20, 0.22);
+  font-size: 0.85rem;
+  color: var(--eos-ink-mid, #445);
+}
+
+.ie-ad-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.ie-ad-prospect-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.ie-ad-prospect-form label {
+  flex: 1 1 220px;
+}
+
+.ie-ad-snapshot-preview {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(11, 26, 51, 0.12);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.ie-ad-snapshot-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 14px;
+}
+
+.ie-ad-snapshot-dl dt {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--eos-ink-muted, #778);
+  margin: 0 0 2px;
+}
+
+.ie-ad-snapshot-dl dd {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.ie-ad-location-note {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
 .ie-job-group {
   display: flex;
   flex-direction: column;

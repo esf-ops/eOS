@@ -37,7 +37,19 @@ import {
   takeoffImportContextFromSaveBody,
 } from "./internalQuoteTakeoffAudit.mjs";
 import { isActiveTakeoffImport } from "./internalQuoteTakeoffImportChecklist.mjs";
-
+import {
+  actorRole,
+  actorUserId,
+  createProspectForEstimate,
+  getAccountDirectoryServiceForEstimate,
+  loadAccountForEstimateSelection,
+  lookupAccountsForEstimate,
+  roleHasCapability,
+  ACCOUNT_DIRECTORY_CAPABILITIES
+} from "./internalQuoteAccountLookup.mjs";
+import { AccountDirectoryError } from "../accountDirectory/accountDirectoryErrors.mjs";
+import { buildCustomerIdentitySnapshot } from "./customerIdentitySnapshot.mjs";
+import { permissionsForRole } from "../accountDirectory/accountDirectoryAuth.mjs";
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -129,7 +141,12 @@ function listRow(r) {
     created_at: r.created_at,
     updated_at: r.updated_at,
     monday_item_id: r.monday_item_id,
-    monday_board_id: r.monday_board_id
+    monday_board_id: r.monday_board_id,
+    account_directory_account_id: r.account_directory_account_id ?? null,
+    account_directory_contact_id: r.account_directory_contact_id ?? null,
+    account_directory_location_id: r.account_directory_location_id ?? null,
+    customer_identity_snapshot: r.customer_identity_snapshot ?? null,
+    account_linked: Boolean(r.account_directory_account_id)
   };
 }
 
@@ -154,6 +171,131 @@ export function attachInternalQuoteRoutes(app, deps) {
   };
   /** Partner users blocked before head check so 403 always uses partner_use_partner_routes (not head-only denial). */
   const stack = [requireAuth(), rejectPartnerOnlyUser, headQuote];
+
+  app.get("/api/internal-quotes/account-lookup", ...stack, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(400).json({ ok: false, error: "Organization context required." });
+      }
+      const service = getAccountDirectoryServiceForEstimate({ getSupabase });
+      const role = actorRole(req);
+      const result = await lookupAccountsForEstimate({
+        service,
+        organizationId: orgCtx.organizationId,
+        role,
+        search: String(req.query.q ?? req.query.search ?? ""),
+        limit: req.query.limit
+      });
+      res.json({
+        ok: true,
+        ...result,
+        permissions: {
+          canCreateProspect: roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.EDIT),
+          ...permissionsForRole(role)
+        }
+      });
+    } catch (e) {
+      if (e instanceof AccountDirectoryError) {
+        return res.status(e.status || 400).json({ ok: false, error: e.message, code: e.code });
+      }
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/internal-quotes/account-lookup/prospects", ...stack, jsonParser, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(400).json({ ok: false, error: "Organization context required." });
+      }
+      const service = getAccountDirectoryServiceForEstimate({ getSupabase });
+      const detail = await createProspectForEstimate({
+        service,
+        organizationId: orgCtx.organizationId,
+        role: actorRole(req),
+        actorUserId: actorUserId(req),
+        requestId: String(req.headers?.["x-request-id"] || "") || null,
+        payload: req.body && typeof req.body === "object" ? req.body : {}
+      });
+      res.status(201).json({ ok: true, ...detail });
+    } catch (e) {
+      if (e instanceof AccountDirectoryError) {
+        return res.status(e.status || 400).json({ ok: false, error: e.message, code: e.code });
+      }
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/api/internal-quotes/account-lookup/:accountId", ...stack, async (req, res) => {
+    try {
+      const accountId = String(req.params.accountId || "").trim();
+      if (!isUuid(accountId)) return res.status(400).json({ ok: false, error: "Invalid account id" });
+      const db = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(400).json({ ok: false, error: "Organization context required." });
+      }
+      const service = getAccountDirectoryServiceForEstimate({ getSupabase });
+      const detail = await loadAccountForEstimateSelection({
+        service,
+        organizationId: orgCtx.organizationId,
+        role: actorRole(req),
+        accountId
+      });
+      res.json({ ok: true, ...detail });
+    } catch (e) {
+      if (e instanceof AccountDirectoryError) {
+        return res.status(e.status || 400).json({ ok: false, error: e.message, code: e.code });
+      }
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/internal-quotes/account-lookup/:accountId/snapshot", ...stack, jsonParser, async (req, res) => {
+    try {
+      const accountId = String(req.params.accountId || "").trim();
+      if (!isUuid(accountId)) return res.status(400).json({ ok: false, error: "Invalid account id" });
+      const db = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(400).json({ ok: false, error: "Organization context required." });
+      }
+      const service = getAccountDirectoryServiceForEstimate({ getSupabase });
+      const detail = await loadAccountForEstimateSelection({
+        service,
+        organizationId: orgCtx.organizationId,
+        role: actorRole(req),
+        accountId
+      });
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const contactId = String(body.contactId ?? body.contact_id ?? "").trim();
+      const locationId = String(body.locationId ?? body.location_id ?? "").trim();
+      const contact =
+        (contactId && detail.contacts.find((c) => c.id === contactId)) || detail.primaryContact;
+      const location =
+        (locationId && detail.locations.find((l) => l.id === locationId)) || detail.primaryLocation;
+      const draftSnapshot = buildCustomerIdentitySnapshot({
+        account: detail.account,
+        contact,
+        location
+      });
+      res.json({
+        ok: true,
+        account: detail.account,
+        contact: contact || null,
+        location: location || null,
+        draftSnapshot
+      });
+    } catch (e) {
+      if (e instanceof AccountDirectoryError) {
+        return res.status(e.status || 400).json({ ok: false, error: e.message, code: e.code });
+      }
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
 
   app.post("/api/internal-quotes/calculate", ...stack, jsonParser, async (req, res) => {
     try {

@@ -110,13 +110,31 @@ export function displayAccountColumn(r: Record<string, unknown>): {
   primary: string;
   subline: string;
   projectCell: string;
+  accountLinked: boolean;
+  accountDirectoryAccountId: string | null;
 } {
-  const acct = String(r.account_name ?? "").trim();
+  const identityName =
+    typeof r.snapshot_identity_account === "string"
+      ? String(r.snapshot_identity_account).trim()
+      : r.customer_identity_snapshot &&
+          typeof r.customer_identity_snapshot === "object" &&
+          !Array.isArray(r.customer_identity_snapshot)
+        ? String(
+            (r.customer_identity_snapshot as { accountDisplayName?: unknown }).accountDisplayName ?? ""
+          ).trim()
+        : "";
+  const acct = identityName || String(r.account_name ?? "").trim();
   const cust = String(r.customer_name ?? "").trim();
   const proj = String(r.project_name ?? "").trim();
+  const accountDirectoryAccountId = r.account_directory_account_id
+    ? String(r.account_directory_account_id).trim()
+    : null;
+  const accountLinked = Boolean(
+    r.account_linked === true || accountDirectoryAccountId
+  );
   const n = (s: string) => s.toLowerCase();
-  const primary = acct || "—";
+  const primary = accountLinked ? acct || "—" : acct || "Unlinked customer";
   const subline = cust && n(cust) !== n(acct) ? cust : "";
   const projectCell = proj || "";
-  return { primary, subline, projectCell };
+  return { primary, subline, projectCell, accountLinked, accountDirectoryAccountId };
 }

@@ -2,13 +2,13 @@
  * Restore a historical internal quote revision as a new latest revision (non-destructive).
  */
 
-import { calculateQuote } from "./quoteCalculator.js";
-import { processInternalQuoteSave } from "./internalQuoteSave.js";
 import {
   mergeRowOrganizationId,
   organizationScopeOrFilter,
   tableHasOrganizationId
 } from "../organizations/organizationContext.js";
+import { calculateQuote } from "./quoteCalculator.js";
+import { processInternalQuoteSave } from "./internalQuoteSave.js";
 
 function applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg) {
   if (!orgId || !hasQuoteHeadersOrg) return qb;
@@ -74,7 +74,11 @@ export function buildInternalSavePayloadFromQuoteRow(row) {
     project_type: row.project_type,
     entered_by: row.prepared_by,
     prepared_by: row.prepared_by,
-    quote_status: row.quote_status
+    quote_status: row.quote_status,
+    account_directory_account_id: row.account_directory_account_id ?? null,
+    account_directory_contact_id: row.account_directory_contact_id ?? null,
+    account_directory_location_id: row.account_directory_location_id ?? null,
+    customer_identity_snapshot: row.customer_identity_snapshot ?? null
   };
 }
 

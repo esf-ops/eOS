@@ -20,6 +20,10 @@ import {
 import * as esf from "./quoteEsfNumber.js";
 import { generateQuoteNumber, isMissingRelationError, persistQuoteSubmission, replaceQuoteLinesAndRooms } from "./quotePersist.js";
 import { resolveAccountNameForPersist } from "./quoteLibrarySearch.js";
+import {
+  legacyFieldsFromIdentitySnapshot,
+  resolveIdentityPersistFields
+} from "./customerIdentitySnapshot.mjs";
 
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
@@ -205,6 +209,23 @@ export async function processInternalQuoteSave(params) {
     state: body.state
   };
 
+  function identityHeaderExtras(existingRow = null, mode = saveMode) {
+    const identity = resolveIdentityPersistFields({
+      body,
+      existingRow,
+      saveMode: mode
+    });
+    const legacy = legacyFieldsFromIdentitySnapshot(identity.customer_identity_snapshot);
+    // When linked, keep header customer/account fields aligned with frozen snapshot for Monday/PDF fallbacks.
+    if (identity.customer_identity_snapshot) {
+      if (legacy.account_name) persistBody.account_name = legacy.account_name;
+      if (legacy.customer_name) persistBody.customer_name = legacy.customer_name;
+      if (legacy.customer_email) persistBody.customer_email = legacy.customer_email;
+      if (legacy.customer_phone) persistBody.customer_phone = legacy.customer_phone;
+    }
+    return identity;
+  }
+
   /** --- save_as_new_quote / create --- */
   async function runFreshInsert(revisedFromId) {
     const orgKey = esf.organizationKeyForQuotes(orgId);
@@ -229,7 +250,8 @@ export async function processInternalQuoteSave(params) {
       revised_from_quote_id: revisedFromId || null,
       revision_note: noteFromBody(body),
       monday_item_id: null,
-      monday_board_id: null
+      monday_board_id: null,
+      ...identityHeaderExtras(null, revisedFromId ? "save_as_new_quote" : "create")
     };
 
     const { quoteId, mondaySync } = await persistQuoteSubmission(db, {
@@ -292,6 +314,7 @@ export async function processInternalQuoteSave(params) {
     row = await ensureRevisionFamilyMetadata(db, row, orgId, hasQuoteHeadersOrg);
 
     const fin = buildInternalFinancialHeader(persistBody, calc);
+    const identity = identityHeaderExtras(row, "update_existing");
     const updates = {
       ...fin,
       customer_name: persistBody.customer_name ?? null,
@@ -312,7 +335,8 @@ export async function processInternalQuoteSave(params) {
       notes_length: persistBody.notes ? String(persistBody.notes).length : null,
       calculation_snapshot: patchPrintSnapshotQuoteNumber(snapshotToStore, row.quote_number),
       revision_note: noteFromBody(body) != null ? noteFromBody(body) : row.revision_note,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      ...identity
     };
 
     let ub = db.from("quote_headers").update(updates).eq("id", existingId).eq("quote_source", "internal_quote");
@@ -438,7 +462,8 @@ export async function processInternalQuoteSave(params) {
       revised_from_quote_id: row.id,
       revision_note: noteFromBody(body),
       monday_item_id: row.monday_item_id ?? null,
-      monday_board_id: row.monday_board_id ?? null
+      monday_board_id: row.monday_board_id ?? null,
+      ...identityHeaderExtras(row, "save_revision")
     };
 
     const { quoteId, mondaySync } = await persistQuoteSubmission(db, {
