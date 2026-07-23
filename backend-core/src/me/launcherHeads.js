@@ -40,6 +40,15 @@ export const HEAD_LAUNCHER_CATALOG = [
     roleNote: "Does not change actual user permissions — use System Admin for head access."
   },
   {
+    slug: "account_directory",
+    label: "Account Directory",
+    description: "Customer and prospect accounts, estimating contacts, locations, and QuickBooks links.",
+    category: "Revenue",
+    href: "/account-directory",
+    roleNote:
+      "Standalone account identity — not wired into Estimate Studio yet. Requires account_directory head access; edit/archive/QuickBooks link actions use role-mapped capabilities."
+  },
+  {
     slug: "pricing_admin",
     label: "eliteOS Pricing Admin Head",
     description: "Material tiers, add-ons, and quote pricing policy (authorized staff only).",
@@ -269,8 +278,8 @@ function defaultSlugSet(role, userKind) {
 
   const base = new Set(["brain_health"]);
   const roleHints = {
-    sales: ["sales", "quote", "quote_library", "custom_quote", "visualizer", "reports"],
-    estimator: ["quote", "quote_library", "custom_quote", "visualizer", "reports"],
+    sales: ["sales", "quote", "quote_library", "custom_quote", "visualizer", "reports", "account_directory"],
+    estimator: ["quote", "quote_library", "custom_quote", "visualizer", "reports", "account_directory"],
     accounting: ["finance", "reports", "pricing_admin", "quickbooks_intelligence"],
     production: ["production", "shop_tv", "reports"],
     shop_tv: ["shop_tv"],
