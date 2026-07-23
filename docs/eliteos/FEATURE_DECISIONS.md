@@ -2180,6 +2180,23 @@
 | **Deployment surfaces** | `backend-core`, `app-ai-takeoff`, `app-elite100-estimate-studio`. No manual deployment. |
 | **Open business decisions** | (1) Optional richer “other/back” length editor beyond exposure flags. (2) Whether island/peninsula draft heuristics should be further constrained by areaType only (labels already draft-only). |
 
+### 154. Elite 100 Estimate Studio Command Center (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `feature/estimate-command-center-polish` |
+| **Goal** | Default Studio landing is a read-only Command Center that answers what needs attention, stage, why, owner, age, and next action — without rewriting the workflow engine. |
+| **Architecture** | Existing queue API rows + `studioEstimateQueueWorkflow` → `studioCommandCenterViewModel` → operational stage / attention / next action → existing workspace `openTarget` (`takeoff` \| `scope` \| `digital` \| `review`). |
+| **Default landing** | `StudioApp` `mainNav` defaults to `"command-center"`. Legacy queue remains at `"estimate-queue"` (nav: Legacy queue + in-page “Open legacy queue”). Publications and Customer review tabs unchanged. |
+| **Stage precedence** | `takeoff_failed` → `review_requested` → `pricing_stale` → `takeoff` → `pricing` → `ready_to_publish` → `customer` → `new` → `closed` → `unclassified`. Needs attention is an overlay filter, not a separate primary stage. |
+| **Attention** | Uses existing `needsAttention` / `attentionReasons` codes with plain-language titles (never show codes as primary copy). |
+| **Next actions** | Derived from existing `openTarget` + workflow; labels like Review Takeoff / Complete Pricing / Publish Estimate / Review customer changes. |
+| **No workflow writes** | List/filter/sort/search/select are read-only. Primary action may call existing `recordEstimateQueueOpened` then navigate into the existing workspace. No new status persistence. |
+| **Accepted / Sold** | Not exposed as live stages (backend still hardcodes `accepted:false` / `sold:false`). |
+| **Rollback** | Change StudioApp default `mainNav` back to `"publications"` or `"estimate-queue"`. No SQL / data migration. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `app-elite100-estimate-studio`, `backend-core` (view-model module only). No manual deployment. |
+
 ### 153. Studio finished-edge override + publication readiness (2026-07-22)
 
 | Field | Value |
