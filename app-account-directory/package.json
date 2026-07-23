@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:ui-contract": "node src/lib/accountDirectoryUiContract.test.mjs",
-    "test:form-contract": "node src/lib/accountDirectoryForm.test.mjs"
+    "test:form-contract": "node src/lib/accountDirectoryForm.test.mjs",
+    "test:workspace": "node src/lib/accountDirectoryWorkspace.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
