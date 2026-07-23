@@ -1,8 +1,9 @@
 import { apiGet, apiPatch, apiPost } from "./api";
 import type {
   AccountDetailResponse,
+  AccountListParams,
   AccountListResponse,
-  AccountTab,
+  AccountSummaryResponse,
   AddAliasPayload,
   AddContactPayload,
   AddLocationPayload,
@@ -13,7 +14,7 @@ import type {
 
 const BASE = "/api/account-directory";
 
-function qs(params: Record<string, string | undefined>): string {
+function qs(params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     const v = String(value ?? "").trim();
@@ -27,12 +28,23 @@ export async function fetchAccountDirectoryPermissions(token: string) {
   return (await apiGet(`${BASE}/permissions`, token)) as PermissionsResponse;
 }
 
-export async function listAccounts(
-  token: string,
-  opts: { tab: AccountTab; search?: string; status?: string }
-) {
+export async function fetchAccountDirectorySummary(token: string) {
+  return (await apiGet(`${BASE}/summary`, token)) as AccountSummaryResponse;
+}
+
+export async function listAccounts(token: string, opts: AccountListParams) {
   return (await apiGet(
-    `${BASE}/accounts${qs({ tab: opts.tab, search: opts.search, status: opts.status })}`,
+    `${BASE}/accounts${qs({
+      tab: opts.tab,
+      search: opts.search,
+      status: opts.status,
+      page: opts.page,
+      pageSize: opts.pageSize,
+      sort: opts.sort,
+      linked: opts.linked,
+      missingContact: opts.missingContact,
+      missingLocation: opts.missingLocation
+    })}`,
     token
   )) as AccountListResponse;
 }
@@ -88,23 +100,41 @@ export async function updateAccount(token: string, accountId: string, payload: U
 }
 
 export async function addContact(token: string, accountId: string, payload: AddContactPayload) {
-  return (await apiPost(`${BASE}/accounts/${encodeURIComponent(accountId)}/contacts`, token, payload)) as AccountDetailResponse;
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/contacts`,
+    token,
+    payload
+  )) as AccountDetailResponse;
 }
 
 export async function addLocation(token: string, accountId: string, payload: AddLocationPayload) {
-  return (await apiPost(`${BASE}/accounts/${encodeURIComponent(accountId)}/locations`, token, payload)) as AccountDetailResponse;
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/locations`,
+    token,
+    payload
+  )) as AccountDetailResponse;
 }
 
 export async function addAlias(token: string, accountId: string, payload: AddAliasPayload) {
-  return (await apiPost(`${BASE}/accounts/${encodeURIComponent(accountId)}/aliases`, token, payload)) as AccountDetailResponse;
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/aliases`,
+    token,
+    payload
+  )) as AccountDetailResponse;
 }
 
 export async function archiveAccount(token: string, accountId: string) {
-  return (await apiPost(`${BASE}/accounts/${encodeURIComponent(accountId)}/archive`, token)) as AccountDetailResponse;
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/archive`,
+    token
+  )) as AccountDetailResponse;
 }
 
 export async function restoreAccount(token: string, accountId: string) {
-  return (await apiPost(`${BASE}/accounts/${encodeURIComponent(accountId)}/restore`, token)) as AccountDetailResponse;
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/restore`,
+    token
+  )) as AccountDetailResponse;
 }
 
 export async function linkQuickBooks(

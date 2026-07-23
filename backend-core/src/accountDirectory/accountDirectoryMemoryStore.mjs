@@ -94,7 +94,7 @@ export function createAccountDirectoryMemoryStore() {
             a.displayName,
             a.legalName,
             ...listContactsForAccount(a.id).map((c) => `${c.displayName} ${c.email} ${c.phone}`),
-            ...listLocationsForAccount(a.id).map((l) => `${l.city} ${l.state}`),
+            ...listLocationsForAccount(a.id).map((l) => `${l.city} ${l.state} ${l.postalCode}`),
             ...listAliasesForAccount(a.id).map((x) => x.aliasValue),
             ...listLinksForAccount(a.id).map((x) => x.externalDisplayName)
           ]
@@ -166,6 +166,12 @@ export function createAccountDirectoryMemoryStore() {
         .map(clone);
     },
 
+    async listContactsForOrganization(organizationId) {
+      return Array.from(contacts.values())
+        .filter((c) => c.organizationId === organizationId)
+        .map(clone);
+    },
+
     async insertLocation(row) {
       const id = row.id || randomUUID();
       const record = {
@@ -223,6 +229,12 @@ export function createAccountDirectoryMemoryStore() {
         .map(clone);
     },
 
+    async listLocationsForOrganization(organizationId) {
+      return Array.from(locations.values())
+        .filter((l) => l.organizationId === organizationId)
+        .map(clone);
+    },
+
     async insertAlias(row) {
       const id = row.id || randomUUID();
       const record = {
@@ -264,6 +276,12 @@ export function createAccountDirectoryMemoryStore() {
 
     async listAliases(organizationId, accountId) {
       return listAliasesForAccount(accountId)
+        .filter((a) => a.organizationId === organizationId)
+        .map(clone);
+    },
+
+    async listAliasesForOrganization(organizationId) {
+      return Array.from(aliases.values())
         .filter((a) => a.organizationId === organizationId)
         .map(clone);
     },
@@ -370,6 +388,12 @@ export function createAccountDirectoryMemoryStore() {
 
     async listExternalLinks(organizationId, accountId) {
       return listLinksForAccount(accountId)
+        .filter((l) => l.organizationId === organizationId)
+        .map(clone);
+    },
+
+    async listExternalLinksForOrganization(organizationId) {
+      return Array.from(externalLinks.values())
         .filter((l) => l.organizationId === organizationId)
         .map(clone);
     },

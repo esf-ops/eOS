@@ -6,15 +6,21 @@ export type AccountListItem = {
   id: string;
   name: string;
   displayName?: string;
+  legalName?: string | null;
   primaryContact?: string | null;
   primaryEmail?: string | null;
   primaryPhone?: string | null;
   city?: string | null;
   state?: string | null;
+  postalCode?: string | null;
   status: AccountStatus;
   quickbooksLinked?: boolean;
   updatedAt?: string | null;
   rowVersion?: number | null;
+  source?: string | null;
+  hasPrimaryContact?: boolean | null;
+  hasPrimaryLocation?: boolean | null;
+  hasAliases?: boolean | null;
 };
 
 export type AccountContact = {
@@ -46,7 +52,12 @@ export type AccountAlias = {
 export type ExternalLink = {
   id: string;
   system: string;
-  externalId: string;
+  externalId?: string;
+  externalDisplayName?: string | null;
+  sourceSnapshotDate?: string | null;
+  linkedAt?: string | null;
+  linkedBy?: string | null;
+  isActive?: boolean;
   url?: string | null;
 };
 
@@ -76,10 +87,43 @@ export type AccountDirectoryPermissions = {
   canLinkQuickBooks?: boolean;
 };
 
+export type AccountSummary = {
+  total: number;
+  active: number;
+  prospects: number;
+  needsReview: number;
+  archived: number;
+  quickbooksLinked: number;
+  missingPrimaryContact: number;
+  missingPrimaryLocation: number;
+};
+
+export type AccountSummaryResponse = {
+  ok?: boolean;
+  summary?: AccountSummary;
+};
+
+export type AccountListParams = {
+  tab?: string;
+  search?: string;
+  status?: string;
+  page?: number;
+  pageSize?: number;
+  sort?: string;
+  linked?: string;
+  missingContact?: string;
+  missingLocation?: string;
+};
+
 export type AccountListResponse = {
   ok?: boolean;
   items?: AccountListItem[];
   total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  hasPreviousPage?: boolean;
+  hasNextPage?: boolean;
 };
 
 export type AccountDetailResponse = {

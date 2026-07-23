@@ -275,9 +275,14 @@ async function main() {
     assert.ok(actions.includes("update_account"));
     assert.ok(actions.includes("archive_account"));
     assert.ok(actions.includes("restore_account"));
-    // sales cannot see audit
+    // view-capable roles see friendly activity; no raw JSON payloads
     const asSales = await service.getAccount({ organizationId: ORG, role: "sales", accountId: account.id });
-    assert.equal(asSales.auditHistory, undefined);
+    assert.ok(Array.isArray(asSales.auditHistory));
+    assert.ok(asSales.auditHistory.some((e) => e.action === "create_account"));
+    for (const entry of asSales.auditHistory) {
+      assert.equal(typeof entry.detail === "string" || entry.detail == null, true);
+      assert.equal(String(JSON.stringify(entry)).includes("raw_payload"), false);
+    }
   }
 
   // 17. list/search paginated and bounded
@@ -346,7 +351,216 @@ async function main() {
     assert.equal(json.includes("Open A/R"), false);
     assert.equal(json.includes("QB Total Balance"), false);
     assert.ok(detail.externalLinks?.[0]?.externalId);
-    assert.equal(detail.externalLinks[0].system, "QuickBooks");
+    assert.equal(detail.externalLinks[0].system, "QuickBooks Desktop");
+    const asSales = await service.getAccount({ organizationId: ORG, role: "sales", accountId: account.id });
+    assert.equal(asSales.externalLinks?.[0]?.externalId, undefined);
+    assert.equal(asSales.externalLinks?.[0]?.externalDisplayName, "Clean Response Co");
+  }
+
+  // 21–35. premium directory: pagination meta, search fields, filters, summary, sort
+  {
+    const { service } = svc();
+    const names = [];
+    for (let i = 0; i < 12; i++) {
+      const created = await service.createAccount({
+        organizationId: ORG,
+        role: "sales",
+        actorUserId: ACTOR,
+        payload: {
+          displayName: `Premium ${String(i).padStart(2, "0")}`,
+          primaryContactName: i === 3 ? "Contact Search Target" : undefined,
+          primaryEmail: i === 4 ? "search-target@example.test" : undefined,
+          primaryPhone: i === 5 ? "555-010-9999" : undefined,
+          city: i === 6 ? "Austin" : i === 7 ? "Dallas" : undefined,
+          state: i === 6 ? "TX" : i === 7 ? "TX" : undefined,
+          postalCode: i === 6 ? "78701" : undefined
+        }
+      });
+      names.push(created.id);
+      if (i === 8) {
+        await service.addAlias({
+          organizationId: ORG,
+          role: "sales",
+          actorUserId: ACTOR,
+          accountId: created.id,
+          payload: { alias: "Alias Search Token Zed" }
+        });
+      }
+      if (i % 2 === 0) {
+        await service.linkQuickBooks({
+          organizationId: ORG,
+          role: "admin",
+          actorUserId: ACTOR,
+          accountId: created.id,
+          payload: { externalId: `PREM-${i}`, externalDisplayName: created.displayName }
+        });
+      }
+    }
+    // missing contact / location sentinels
+    const noContact = await service.createAccount({
+      organizationId: ORG,
+      role: "sales",
+      actorUserId: ACTOR,
+      payload: { displayName: "No Contact Sentinel", city: "Denver", state: "CO" }
+    });
+    const noLocation = await service.createAccount({
+      organizationId: ORG,
+      role: "sales",
+      actorUserId: ACTOR,
+      payload: {
+        displayName: "No Location Sentinel",
+        primaryContactName: "Lonely Contact",
+        primaryEmail: "lonely@example.test"
+      }
+    });
+
+    const page1 = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      page: 1,
+      pageSize: 5,
+      sort: "name_asc"
+    });
+    assert.equal(page1.items.length, 5);
+    assert.ok(page1.total >= 14);
+    assert.equal(page1.page, 1);
+    assert.equal(page1.pageSize, 5);
+    assert.ok(page1.totalPages >= 3);
+    assert.equal(page1.hasPreviousPage, false);
+    assert.equal(page1.hasNextPage, true);
+    assert.ok(page1.items[0].hasPrimaryContact !== undefined);
+
+    const page2 = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      page: 2,
+      pageSize: 5,
+      sort: "name_asc"
+    });
+    assert.equal(page2.page, 2);
+    assert.equal(page2.hasPreviousPage, true);
+    assert.ok(page2.items.every((item) => !page1.items.some((a) => a.id === item.id)));
+
+    // reachability: collect all pages
+    const seen = new Set();
+    let page = 1;
+    let hasNext = true;
+    while (hasNext) {
+      const batch = await service.listAccounts({
+        organizationId: ORG,
+        role: "sales",
+        page,
+        pageSize: 5,
+        sort: "name_asc"
+      });
+      for (const item of batch.items) seen.add(item.id);
+      hasNext = batch.hasNextPage;
+      page += 1;
+      assert.ok(page < 50);
+    }
+    assert.equal(seen.size, page1.total);
+
+    const byContact = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      search: "Contact Search Target",
+      page: 1,
+      pageSize: 20
+    });
+    assert.ok(byContact.items.some((i) => i.primaryContact === "Contact Search Target"));
+
+    const byEmail = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      search: "search-target@example.test",
+      page: 1,
+      pageSize: 20
+    });
+    assert.ok(byEmail.total >= 1);
+
+    const byPhone = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      search: "555-010-9999",
+      page: 1,
+      pageSize: 20
+    });
+    assert.ok(byPhone.total >= 1);
+
+    const byCity = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      search: "Austin",
+      page: 1,
+      pageSize: 20
+    });
+    assert.ok(byCity.items.some((i) => i.city === "Austin"));
+
+    const byAlias = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      search: "Alias Search Token",
+      page: 1,
+      pageSize: 20
+    });
+    assert.ok(byAlias.total >= 1);
+
+    const linked = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      linked: "true",
+      page: 1,
+      pageSize: 100
+    });
+    assert.ok(linked.items.every((i) => i.quickbooksLinked));
+
+    const unlinked = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      linked: "false",
+      page: 1,
+      pageSize: 100
+    });
+    assert.ok(unlinked.items.every((i) => !i.quickbooksLinked));
+
+    const missingContact = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      missingContact: "true",
+      page: 1,
+      pageSize: 100
+    });
+    assert.ok(missingContact.items.some((i) => i.id === noContact.id));
+    assert.ok(missingContact.items.every((i) => !i.hasPrimaryContact));
+
+    const missingLocation = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      missingLocation: "true",
+      page: 1,
+      pageSize: 100
+    });
+    assert.ok(missingLocation.items.some((i) => i.id === noLocation.id));
+    assert.ok(missingLocation.items.every((i) => !i.hasPrimaryLocation));
+
+    const sortedDesc = await service.listAccounts({
+      organizationId: ORG,
+      role: "sales",
+      sort: "name_desc",
+      page: 1,
+      pageSize: 3
+    });
+    assert.ok(
+      String(sortedDesc.items[0].displayName).localeCompare(String(sortedDesc.items[1].displayName)) >= 0
+    );
+
+    const summary = await service.getSummary({ organizationId: ORG, role: "sales" });
+    assert.ok(summary.total >= 14);
+    assert.ok(summary.quickbooksLinked >= 6);
+    assert.ok(summary.missingPrimaryContact >= 1);
+    assert.ok(summary.missingPrimaryLocation >= 1);
+    assert.equal(typeof summary.active, "number");
+    assert.equal(typeof summary.prospects, "number");
   }
 
   console.log("accountDirectoryService.test.mjs: ok");

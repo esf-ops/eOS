@@ -107,10 +107,15 @@ export function createAccountDirectoryService(deps) {
     return out;
   }
 
-  function toListItem(account, contacts, locations, links) {
-    const primaryContact = contacts.find((c) => c.isPrimaryEstimating && c.isActive) || contacts.find((c) => c.isActive);
-    const primaryLoc = locations.find((l) => l.isPrimaryAccountLocation && l.isActive) || locations.find((l) => l.isActive);
+  function toListItem(account, contacts, locations, links, aliases = []) {
+    const activeContacts = contacts.filter((c) => c.isActive !== false);
+    const activeLocations = locations.filter((l) => l.isActive !== false);
+    const primaryContact =
+      activeContacts.find((c) => c.isPrimaryEstimating) || activeContacts[0] || null;
+    const primaryLoc =
+      activeLocations.find((l) => l.isPrimaryAccountLocation) || activeLocations[0] || null;
     const qbLinked = links.some((l) => l.isActive && l.externalSystem === "quickbooks_desktop");
+    const hasAliases = aliases.some((a) => a.isActive !== false);
     return {
       id: account.id,
       name: account.displayName,
@@ -121,13 +126,170 @@ export function createAccountDirectoryService(deps) {
       primaryPhone: primaryContact?.phone ?? null,
       city: primaryLoc?.city ?? null,
       state: primaryLoc?.state ?? null,
+      postalCode: primaryLoc?.postalCode ?? null,
       status: account.archivedAt ? "archived" : account.status,
       quickbooksLinked: qbLinked,
       updatedAt: account.updatedAt,
+      createdAt: account.createdAt ?? null,
       rowVersion: account.rowVersion,
       archivedAt: account.archivedAt ?? null,
-      source: account.source
+      source: account.source,
+      hasPrimaryContact: Boolean(primaryContact),
+      hasPrimaryLocation: Boolean(primaryLoc),
+      hasAliases
     };
+  }
+
+  function groupByAccountId(rows) {
+    /** @type {Map<string, any[]>} */
+    const map = new Map();
+    for (const row of rows || []) {
+      const key = String(row.accountId);
+      const list = map.get(key);
+      if (list) list.push(row);
+      else map.set(key, [row]);
+    }
+    return map;
+  }
+
+  function parseBoolQuery(value) {
+    if (value == null || value === "") return null;
+    const s = String(value).trim().toLowerCase();
+    if (s === "true" || s === "1" || s === "yes") return true;
+    if (s === "false" || s === "0" || s === "no") return false;
+    return null;
+  }
+
+  function resolveTabScope(tab, status) {
+    let statusIn = null;
+    let includeArchived = false;
+    const t = String(tab || "accounts").trim();
+    if (t === "prospects") statusIn = ["prospect"];
+    else if (t === "needs_review") statusIn = ["needs_review"];
+    else if (t === "archived") {
+      statusIn = ["archived"];
+      includeArchived = true;
+    } else {
+      statusIn = status ? [String(status)] : ["active", "inactive", "prospect", "needs_review"];
+    }
+    return { statusIn, includeArchived };
+  }
+
+  function matchesDirectorySearch(account, contacts, locations, aliases, query) {
+    const q = normalizeAccountDirectorySearch(query);
+    if (!q) return true;
+    const hay = [
+      account.displayName,
+      account.legalName,
+      ...contacts.map((c) => [c.displayName, c.email, c.phone, c.phoneNormalized].filter(Boolean).join(" ")),
+      ...locations.map((l) => [l.city, l.state, l.postalCode, l.addressLine1, l.label].filter(Boolean).join(" ")),
+      ...aliases.map((a) => a.aliasValue)
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return normalizeAccountDirectorySearch(hay).includes(q);
+  }
+
+  function sortDirectoryItems(items, sort) {
+    const key = String(sort || "name_asc").trim();
+    const sorted = [...items];
+    sorted.sort((a, b) => {
+      if (key === "name_desc") {
+        return (
+          String(b.displayName || "").localeCompare(String(a.displayName || "")) ||
+          String(a.id).localeCompare(String(b.id))
+        );
+      }
+      if (key === "updated_desc") {
+        return (
+          String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")) ||
+          String(a.displayName || "").localeCompare(String(b.displayName || ""))
+        );
+      }
+      if (key === "updated_asc") {
+        return (
+          String(a.updatedAt || "").localeCompare(String(b.updatedAt || "")) ||
+          String(a.displayName || "").localeCompare(String(b.displayName || ""))
+        );
+      }
+      return (
+        String(a.displayName || "").localeCompare(String(b.displayName || "")) ||
+        String(a.id).localeCompare(String(b.id))
+      );
+    });
+    return sorted;
+  }
+
+  function paginationResult(items, pageNum, limit) {
+    const total = items.length;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+    const safePage = totalPages === 0 ? 1 : Math.min(pageNum, totalPages);
+    const offset = (safePage - 1) * limit;
+    return {
+      items: items.slice(offset, offset + limit),
+      total,
+      page: safePage,
+      pageSize: limit,
+      totalPages,
+      hasPreviousPage: safePage > 1,
+      hasNextPage: totalPages > 0 && safePage < totalPages
+    };
+  }
+
+  /**
+   * Load org accounts + related rows once, enrich in memory.
+   * Avoids N+1 contact/location/link lookups per list row.
+   */
+  async function buildDirectoryIndex(organizationId, { statusIn, includeArchived }) {
+    const [{ items: accounts }, contacts, locations, aliases, links] = await Promise.all([
+      store.listAccounts(organizationId, {
+        statusIn,
+        includeArchived,
+        search: null,
+        limit: 5000,
+        offset: 0
+      }),
+      store.listContactsForOrganization(organizationId),
+      store.listLocationsForOrganization(organizationId),
+      store.listAliasesForOrganization(organizationId),
+      store.listExternalLinksForOrganization(organizationId)
+    ]);
+
+    const contactsByAccount = groupByAccountId(contacts);
+    const locationsByAccount = groupByAccountId(locations);
+    const aliasesByAccount = groupByAccountId(aliases);
+    const linksByAccount = groupByAccountId(links);
+
+    return accounts.map((account) => {
+      const c = contactsByAccount.get(account.id) || [];
+      const l = locationsByAccount.get(account.id) || [];
+      const al = aliasesByAccount.get(account.id) || [];
+      const lk = linksByAccount.get(account.id) || [];
+      return {
+        account,
+        contacts: c,
+        locations: l,
+        aliases: al,
+        links: lk,
+        item: toListItem(account, c, l, lk, al)
+      };
+    });
+  }
+
+  function filterDirectoryRows(rows, { search, linked, missingContact, missingLocation }) {
+    const linkedFilter = parseBoolQuery(linked);
+    const missingContactFilter = parseBoolQuery(missingContact);
+    const missingLocationFilter = parseBoolQuery(missingLocation);
+    return rows.filter((row) => {
+      if (search && !matchesDirectorySearch(row.account, row.contacts, row.locations, row.aliases, search)) {
+        return false;
+      }
+      if (linkedFilter === true && !row.item.quickbooksLinked) return false;
+      if (linkedFilter === false && row.item.quickbooksLinked) return false;
+      if (missingContactFilter === true && row.item.hasPrimaryContact) return false;
+      if (missingLocationFilter === true && row.item.hasPrimaryLocation) return false;
+      return true;
+    });
   }
 
   async function hydrateDetail(organizationId, account, { includeAudit, role }) {
@@ -137,7 +299,7 @@ export function createAccountDirectoryService(deps) {
       store.listAliases(organizationId, account.id),
       store.listExternalLinks(organizationId, account.id)
     ]);
-    const item = toListItem(account, contacts, locations, links);
+    const item = toListItem(account, contacts, locations, links, aliases);
     /** @type {any} */
     const detail = {
       ...item,
@@ -174,16 +336,22 @@ export function createAccountDirectoryService(deps) {
         isActive: a.isActive,
         rowVersion: a.rowVersion
       })),
-      externalLinks: links.map((l) => ({
-        id: l.id,
-        system: l.externalSystem === "quickbooks_desktop" ? "QuickBooks" : l.externalSystem,
-        externalSystem: l.externalSystem,
-        externalId: l.externalId,
-        externalDisplayName: l.externalDisplayName,
-        isActive: l.isActive
-      }))
+      externalLinks: links.map((l) => {
+        const canSeeExternalId = roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
+        return {
+          id: l.id,
+          system: l.externalSystem === "quickbooks_desktop" ? "QuickBooks Desktop" : l.externalSystem,
+          externalSystem: l.externalSystem,
+          externalId: canSeeExternalId ? l.externalId : undefined,
+          externalDisplayName: l.externalDisplayName,
+          sourceSnapshotDate: l.sourceSnapshotDate ?? null,
+          linkedAt: l.linkedAt ?? null,
+          linkedBy: l.linkedBy ?? null,
+          isActive: l.isActive
+        };
+      })
     };
-    if (includeAudit && roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN)) {
+    if (includeAudit && roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW)) {
       const events = await store.listAuditEvents(organizationId, account.id, { limit: 100 });
       detail.auditHistory = events.map((e) => ({
         id: e.id,
@@ -199,42 +367,65 @@ export function createAccountDirectoryService(deps) {
   }
 
   return {
-    async listAccounts({ organizationId, role, tab, status, search, page, pageSize }) {
+    async listAccounts({
+      organizationId,
+      role,
+      tab,
+      status,
+      search,
+      page,
+      pageSize,
+      sort,
+      linked,
+      missingContact,
+      missingLocation
+    }) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW);
       const limit = Math.min(Math.max(Number(pageSize) || DEFAULT_PAGE, 1), MAX_PAGE);
       const pageNum = Math.max(Number(page) || 1, 1);
-      const offset = (pageNum - 1) * limit;
-
-      let statusIn = null;
-      let includeArchived = false;
-      const t = String(tab || "accounts").trim();
-      if (t === "prospects") statusIn = ["prospect"];
-      else if (t === "needs_review") statusIn = ["needs_review"];
-      else if (t === "archived") {
-        statusIn = ["archived"];
-        includeArchived = true;
-      } else {
-        statusIn = status ? [String(status)] : ["active", "inactive", "prospect", "needs_review"];
-      }
-
-      const { total, items } = await store.listAccounts(organizationId, {
-        statusIn,
-        includeArchived,
+      const scope = resolveTabScope(tab, status);
+      const rows = await buildDirectoryIndex(organizationId, scope);
+      const filtered = filterDirectoryRows(rows, {
         search: search ? String(search).trim() : null,
-        limit,
-        offset
+        linked,
+        missingContact,
+        missingLocation
       });
+      const sortedItems = sortDirectoryItems(
+        filtered.map((r) => r.item),
+        sort
+      );
+      return paginationResult(sortedItems, pageNum, limit);
+    },
 
-      const mapped = [];
-      for (const account of items) {
-        const [contacts, locations, links] = await Promise.all([
-          store.listContacts(organizationId, account.id),
-          store.listLocations(organizationId, account.id),
-          store.listExternalLinks(organizationId, account.id)
-        ]);
-        mapped.push(toListItem(account, contacts, locations, links));
+    async getSummary({ organizationId, role }) {
+      requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW);
+      const rows = await buildDirectoryIndex(organizationId, {
+        statusIn: null,
+        includeArchived: true
+      });
+      const summary = {
+        total: rows.length,
+        active: 0,
+        prospects: 0,
+        needsReview: 0,
+        archived: 0,
+        quickbooksLinked: 0,
+        missingPrimaryContact: 0,
+        missingPrimaryLocation: 0
+      };
+      for (const row of rows) {
+        const status = row.item.status;
+        if (status === "archived" || row.account.archivedAt) summary.archived += 1;
+        else if (status === "prospect") summary.prospects += 1;
+        else if (status === "needs_review") summary.needsReview += 1;
+        else if (status === "active" || status === "inactive") summary.active += 1;
+
+        if (row.item.quickbooksLinked) summary.quickbooksLinked += 1;
+        if (!row.item.hasPrimaryContact) summary.missingPrimaryContact += 1;
+        if (!row.item.hasPrimaryLocation) summary.missingPrimaryLocation += 1;
       }
-      return { items: mapped, total, page: pageNum, pageSize: limit };
+      return summary;
     },
 
     async getAccount({ organizationId, role, accountId }) {

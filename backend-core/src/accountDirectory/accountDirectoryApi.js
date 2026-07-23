@@ -134,6 +134,13 @@ export function attachAccountDirectoryRoutes(app, deps) {
     res.json({ ok: true, permissions });
   });
 
+  app.get("/api/account-directory/summary", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const summary = await service.getSummary(ctx);
+      res.json({ ok: true, summary });
+    });
+  });
+
   app.get("/api/account-directory/accounts", ...guard, async (req, res) => {
     await withOrg(req, res, async (ctx) => {
       const data = await service.listAccounts({
@@ -142,7 +149,11 @@ export function attachAccountDirectoryRoutes(app, deps) {
         status: req.query?.status,
         search: req.query?.search ?? req.query?.q,
         page: req.query?.page,
-        pageSize: req.query?.pageSize ?? req.query?.limit
+        pageSize: req.query?.pageSize ?? req.query?.limit,
+        sort: req.query?.sort,
+        linked: req.query?.linked,
+        missingContact: req.query?.missingContact,
+        missingLocation: req.query?.missingLocation
       });
       res.json({ ok: true, ...data });
     });

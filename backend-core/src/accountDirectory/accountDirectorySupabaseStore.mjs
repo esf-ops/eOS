@@ -340,6 +340,15 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return (data || []).map(mapContact);
     },
 
+    async listContactsForOrganization(organizationId) {
+      const { data, error } = await db()
+        .from("account_directory_contacts")
+        .select("*")
+        .eq("organization_id", organizationId);
+      if (error) throw dbError(error, "Could not list organization contacts.");
+      return (data || []).map(mapContact);
+    },
+
     async insertLocation(row) {
       if (row.isPrimaryAccountLocation && row.isActive !== false) {
         await db()
@@ -437,6 +446,15 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return (data || []).map(mapLocation);
     },
 
+    async listLocationsForOrganization(organizationId) {
+      const { data, error } = await db()
+        .from("account_directory_locations")
+        .select("*")
+        .eq("organization_id", organizationId);
+      if (error) throw dbError(error, "Could not list organization locations.");
+      return (data || []).map(mapLocation);
+    },
+
     async insertAlias(row) {
       const { data, error } = await db()
         .from("account_directory_aliases")
@@ -494,6 +512,15 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         .eq("account_id", accountId)
         .order("created_at", { ascending: true });
       if (error) throw dbError(error, "Could not list aliases.");
+      return (data || []).map(mapAlias);
+    },
+
+    async listAliasesForOrganization(organizationId) {
+      const { data, error } = await db()
+        .from("account_directory_aliases")
+        .select("*")
+        .eq("organization_id", organizationId);
+      if (error) throw dbError(error, "Could not list organization aliases.");
       return (data || []).map(mapAlias);
     },
 
@@ -635,6 +662,15 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         .eq("account_id", accountId)
         .order("linked_at", { ascending: false });
       if (error) throw dbError(error, "Could not list external links.");
+      return (data || []).map(mapLink);
+    },
+
+    async listExternalLinksForOrganization(organizationId) {
+      const { data, error } = await db()
+        .from("account_directory_external_links")
+        .select("*")
+        .eq("organization_id", organizationId);
+      if (error) throw dbError(error, "Could not list organization external links.");
       return (data || []).map(mapLink);
     },
 
