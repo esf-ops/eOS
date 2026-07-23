@@ -262,7 +262,7 @@ begin
       using (
         organization_id in (
           select organization_id from public.user_profiles
-          where user_id = auth.uid() and organization_id is not null
+          where id = auth.uid() and organization_id is not null
         )
       );
   end if;
@@ -280,7 +280,7 @@ begin
       using (
         organization_id in (
           select organization_id from public.user_profiles
-          where user_id = auth.uid() and organization_id is not null
+          where id = auth.uid() and organization_id is not null
         )
       );
   end if;
@@ -298,7 +298,7 @@ begin
       using (
         organization_id in (
           select organization_id from public.user_profiles
-          where user_id = auth.uid() and organization_id is not null
+          where id = auth.uid() and organization_id is not null
         )
       );
   end if;
@@ -316,7 +316,7 @@ begin
       using (
         organization_id in (
           select organization_id from public.user_profiles
-          where user_id = auth.uid() and organization_id is not null
+          where id = auth.uid() and organization_id is not null
         )
       );
   end if;
@@ -334,7 +334,7 @@ begin
       using (
         organization_id in (
           select organization_id from public.user_profiles
-          where user_id = auth.uid() and organization_id is not null
+          where id = auth.uid() and organization_id is not null
         )
       );
   end if;
@@ -352,7 +352,7 @@ begin
       using (
         organization_id in (
           select organization_id from public.user_profiles
-          where user_id = auth.uid() and organization_id is not null
+          where id = auth.uid() and organization_id is not null
         )
       );
   end if;
