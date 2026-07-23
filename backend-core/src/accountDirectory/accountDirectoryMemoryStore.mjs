@@ -297,6 +297,50 @@ export function createAccountDirectoryMemoryStore() {
       return { ok: true, link: clone(record) };
     },
 
+    async listActiveExternalLinksByExternalId(organizationId, externalSystem, externalId) {
+      return Array.from(externalLinks.values())
+        .filter(
+          (l) =>
+            l.organizationId === organizationId &&
+            l.externalSystem === externalSystem &&
+            l.externalId === externalId &&
+            l.isActive
+        )
+        .map(clone);
+    },
+
+    async countAccounts(organizationId) {
+      return Array.from(accounts.values()).filter((a) => a.organizationId === organizationId).length;
+    },
+
+    async countContacts(organizationId) {
+      return Array.from(contacts.values()).filter((c) => c.organizationId === organizationId).length;
+    },
+
+    async countLocations(organizationId) {
+      return Array.from(locations.values()).filter((l) => l.organizationId === organizationId).length;
+    },
+
+    async countActiveExternalLinks(organizationId, externalSystem = null) {
+      return Array.from(externalLinks.values()).filter(
+        (l) =>
+          l.organizationId === organizationId &&
+          l.isActive &&
+          (externalSystem == null || l.externalSystem === externalSystem)
+      ).length;
+    },
+
+    async listAllActiveExternalLinks(organizationId, externalSystem = "quickbooks_desktop") {
+      return Array.from(externalLinks.values())
+        .filter(
+          (l) =>
+            l.organizationId === organizationId &&
+            l.isActive &&
+            l.externalSystem === externalSystem
+        )
+        .map(clone);
+    },
+
     async updateExternalLink(organizationId, linkId, patch) {
       const current = assertOrg(externalLinks.get(linkId), organizationId);
       if (!current) return { ok: false, code: "not_found" };

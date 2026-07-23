@@ -531,6 +531,68 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return { ok: true, link: mapLink(data) };
     },
 
+    async listActiveExternalLinksByExternalId(organizationId, externalSystem, externalId) {
+      const { data, error } = await db()
+        .from("account_directory_external_links")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("external_system", externalSystem)
+        .eq("external_id", externalId)
+        .eq("is_active", true);
+      if (error) throw dbError(error, "Could not look up external link.");
+      return (data || []).map(mapLink);
+    },
+
+    async countAccounts(organizationId) {
+      const { count, error } = await db()
+        .from("account_directory_accounts")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId);
+      if (error) throw dbError(error, "Could not count accounts.");
+      return count ?? 0;
+    },
+
+    async countContacts(organizationId) {
+      const { count, error } = await db()
+        .from("account_directory_contacts")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId);
+      if (error) throw dbError(error, "Could not count contacts.");
+      return count ?? 0;
+    },
+
+    async countLocations(organizationId) {
+      const { count, error } = await db()
+        .from("account_directory_locations")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId);
+      if (error) throw dbError(error, "Could not count locations.");
+      return count ?? 0;
+    },
+
+    async countActiveExternalLinks(organizationId, externalSystem = null) {
+      let q = db()
+        .from("account_directory_external_links")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("is_active", true);
+      if (externalSystem) q = q.eq("external_system", externalSystem);
+      const { count, error } = await q;
+      if (error) throw dbError(error, "Could not count external links.");
+      return count ?? 0;
+    },
+
+    async listAllActiveExternalLinks(organizationId, externalSystem = "quickbooks_desktop") {
+      const { data, error } = await db()
+        .from("account_directory_external_links")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("external_system", externalSystem)
+        .eq("is_active", true);
+      if (error) throw dbError(error, "Could not list external links.");
+      return (data || []).map(mapLink);
+    },
+
     async updateExternalLink(organizationId, linkId, patch) {
       const { data: currentRow, error: loadErr } = await db()
         .from("account_directory_external_links")
