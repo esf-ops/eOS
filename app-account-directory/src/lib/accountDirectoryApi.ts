@@ -42,15 +42,49 @@ export async function getAccount(token: string, accountId: string) {
 }
 
 export async function createAccount(token: string, payload: CreateAccountPayload) {
-  return (await apiPost(`${BASE}/accounts`, token, payload)) as AccountDetailResponse;
+  const body: CreateAccountPayload = {
+    displayName: String(payload.displayName ?? "").trim(),
+    ...(payload.primaryEmail ? { primaryEmail: payload.primaryEmail } : {}),
+    ...(payload.primaryPhone ? { primaryPhone: payload.primaryPhone } : {}),
+    ...(payload.city ? { city: payload.city } : {}),
+    ...(payload.state ? { state: payload.state } : {})
+  };
+  return (await apiPost(`${BASE}/accounts`, token, body)) as AccountDetailResponse;
 }
 
 export async function createProspect(token: string, payload: CreateAccountPayload) {
-  return (await apiPost(`${BASE}/prospects`, token, payload)) as AccountDetailResponse;
+  const body: CreateAccountPayload = {
+    displayName: String(payload.displayName ?? "").trim(),
+    ...(payload.primaryEmail ? { primaryEmail: payload.primaryEmail } : {}),
+    ...(payload.primaryPhone ? { primaryPhone: payload.primaryPhone } : {}),
+    ...(payload.city ? { city: payload.city } : {}),
+    ...(payload.state ? { state: payload.state } : {})
+  };
+  return (await apiPost(`${BASE}/prospects`, token, body)) as AccountDetailResponse;
 }
 
 export async function updateAccount(token: string, accountId: string, payload: UpdateAccountPayload) {
-  return (await apiPatch(`${BASE}/accounts/${encodeURIComponent(accountId)}`, token, payload)) as AccountDetailResponse;
+  const body: UpdateAccountPayload = {};
+  if (payload.displayName != null) body.displayName = String(payload.displayName).trim();
+  if (payload.primaryEmail !== undefined) {
+    const v = String(payload.primaryEmail ?? "").trim();
+    if (v) body.primaryEmail = v;
+  }
+  if (payload.primaryPhone !== undefined) {
+    const v = String(payload.primaryPhone ?? "").trim();
+    if (v) body.primaryPhone = v;
+  }
+  if (payload.city !== undefined) {
+    const v = String(payload.city ?? "").trim();
+    if (v) body.city = v;
+  }
+  if (payload.state !== undefined) {
+    const v = String(payload.state ?? "").trim();
+    if (v) body.state = v;
+  }
+  if (payload.status != null) body.status = payload.status;
+  if (payload.rowVersion != null) body.rowVersion = payload.rowVersion;
+  return (await apiPatch(`${BASE}/accounts/${encodeURIComponent(accountId)}`, token, body)) as AccountDetailResponse;
 }
 
 export async function addContact(token: string, accountId: string, payload: AddContactPayload) {

@@ -2268,3 +2268,16 @@
 | **Rollback** | Hide launcher card / unset `HEAD_URL_ACCOUNT_DIRECTORY`; revert app/API; leave unapplied migration alone. No estimates or QB production data affected. |
 | **Revisit trigger** | Controlled seed import branch; Estimate Studio account picker; Supabase repository cutover after migration apply. |
 
+
+### 159. Account Directory create form contract (displayName + JSON body) (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `fix/account-directory-create-form-contract` |
+| **Hosted failure** | New account Save POSTed `{ name: "…" }` and returned `display_name_required` even when the modal showed a filled Account name. |
+| **Root cause** | (1) Mutating Account Directory routes had **no `express.json()`** (Brain has no global JSON parser), so `req.body` was empty. (2) Frontend form/API used `name` while the domain column/API contract is `displayName` / `display_name`. |
+| **Decision** | Canonical write field is **`displayName`**. API boundary may map deprecated `name` → `displayName` (prefer `displayName` when both present). Frontend form + client serialize `displayName` only. Mutating routes use `express.json`. `ACCOUNT_DIRECTORY_STORE=supabase` uses a real Supabase store (no silent memory fallback). Account `notes` are not persisted in v1 (removed from create UI/payload). |
+| **SQL** | None. |
+| **Impacted** | `app-account-directory/**`, `backend-core/src/accountDirectory/**`, `package.json`, this entry. |
+| **Revisit** | Optional nested primaryContact/primaryLocation payload shape; account notes column. |
+

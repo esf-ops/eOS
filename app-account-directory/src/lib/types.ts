@@ -5,6 +5,7 @@ export type AccountStatus = "active" | "prospect" | "needs_review" | "archived" 
 export type AccountListItem = {
   id: string;
   name: string;
+  displayName?: string;
   primaryContact?: string | null;
   primaryEmail?: string | null;
   primaryPhone?: string | null;
@@ -13,6 +14,7 @@ export type AccountListItem = {
   status: AccountStatus;
   quickbooksLinked?: boolean;
   updatedAt?: string | null;
+  rowVersion?: number | null;
 };
 
 export type AccountContact = {
@@ -91,16 +93,17 @@ export type PermissionsResponse = {
 };
 
 export type CreateAccountPayload = {
-  name: string;
+  displayName: string;
   primaryEmail?: string;
   primaryPhone?: string;
   city?: string;
   state?: string;
-  notes?: string;
+  rowVersion?: number;
 };
 
 export type UpdateAccountPayload = Partial<CreateAccountPayload> & {
   status?: AccountStatus;
+  rowVersion?: number;
 };
 
 export type AddContactPayload = {

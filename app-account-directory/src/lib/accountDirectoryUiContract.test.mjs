@@ -42,6 +42,8 @@ assert.ok(api.includes('const BASE = "/api/account-directory"'));
 assert.ok(api.includes("${BASE}/accounts"));
 assert.ok(api.includes("${BASE}/prospects"));
 assert.ok(api.includes("link-quickbooks"));
+assert.ok(api.includes("displayName"));
+assert.equal(api.includes("payload.displayName") || api.includes("displayName: String(payload.displayName"), true);
 assert.equal(app.includes("Estimate Studio"), false);
 assert.equal(app.includes("estimate-studio"), false);
 console.log("ok: account-directory API client wired; no Estimate Studio coupling");

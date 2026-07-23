@@ -19,9 +19,15 @@ import type {
   AccountDetail,
   AccountDirectoryPermissions,
   AccountListItem,
-  AccountTab,
-  CreateAccountPayload
+  AccountTab
 } from "./lib/types";
+import {
+  draftFromAccountDetail,
+  emptyAccountWriteDraft,
+  serializeAccountWritePayload,
+  validateAccountDisplayName,
+  type AccountWriteDraft
+} from "./lib/accountDirectoryForm";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 
@@ -119,8 +125,15 @@ function defaultPermissions(): AccountDirectoryPermissions {
   };
 }
 
-function emptyForm(): CreateAccountPayload {
-  return { name: "", primaryEmail: "", primaryPhone: "", city: "", state: "", notes: "" };
+type ModalFormState = AccountWriteDraft & {
+  /** Contact name / location label / alias / optional QB display name */
+  auxLabel: string;
+  /** Contact role / postal / alias source / QB List ID */
+  auxExtra: string;
+};
+
+function emptyForm(): ModalFormState {
+  return { ...emptyAccountWriteDraft(), auxLabel: "", auxExtra: "" };
 }
 
 export default function AccountDirectoryApp() {
@@ -153,7 +166,7 @@ export default function AccountDirectoryApp() {
   const [detailError, setDetailError] = useState<string | null>(null);
 
   const [modal, setModal] = useState<ModalKind>(null);
-  const [form, setForm] = useState<CreateAccountPayload>(emptyForm());
+  const [form, setForm] = useState<ModalFormState>(emptyForm());
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -314,16 +327,12 @@ export default function AccountDirectoryApp() {
   }, [supabase]);
 
   const openModal = useCallback(
-    (kind: ModalKind, seed?: Partial<CreateAccountPayload>) => {
+    (kind: ModalKind, seed?: Partial<ModalFormState>) => {
       setFormError(null);
       if (kind === "edit" && detail) {
         setForm({
-          name: detail.name,
-          primaryEmail: detail.primaryEmail ?? "",
-          primaryPhone: detail.primaryPhone ?? "",
-          city: detail.city ?? "",
-          state: detail.state ?? "",
-          notes: detail.notes ?? ""
+          ...emptyForm(),
+          ...draftFromAccountDetail(detail)
         });
       } else if (seed) {
         setForm({ ...emptyForm(), ...seed });
@@ -342,71 +351,86 @@ export default function AccountDirectoryApp() {
   }, [formBusy]);
 
   const submitForm = useCallback(async () => {
-    if (!sessionToken || !modal) return;
-    const name = form.name.trim();
+    if (!sessionToken || !modal || formBusy) return;
+
+    const accountModals = modal === "new-account" || modal === "new-prospect" || modal === "edit";
+    if (accountModals) {
+      const err = validateAccountDisplayName(form.displayName);
+      if (err) {
+        setFormError(err);
+        return;
+      }
+    }
+
+    const auxLabel = form.auxLabel.trim();
     if (
-      !name &&
-      modal !== "add-alias" &&
-      modal !== "add-contact" &&
-      modal !== "add-location" &&
-      modal !== "link-qb" &&
-      modal !== "archive-confirm"
+      (modal === "add-contact" || modal === "add-location" || modal === "add-alias") &&
+      !auxLabel
     ) {
       setFormError("Name is required.");
       return;
     }
-    if (modal === "link-qb" && !form.notes?.trim()) {
+    if (modal === "link-qb" && !form.auxExtra.trim()) {
       setFormError("QuickBooks List ID is required.");
       return;
     }
+
     setFormBusy(true);
     setFormError(null);
     try {
       if (modal === "new-account") {
-        const res = await createAccount(sessionToken, { ...form, name });
+        const payload = serializeAccountWritePayload(form);
+        const res = await createAccount(sessionToken, payload);
         if (res.account?.id) {
           setSelectedId(res.account.id);
           setActiveTab("accounts");
         }
         setActionMessage("Account created.");
       } else if (modal === "new-prospect") {
-        const res = await createProspect(sessionToken, { ...form, name });
+        const payload = serializeAccountWritePayload(form);
+        const res = await createProspect(sessionToken, payload);
         if (res.account?.id) {
           setSelectedId(res.account.id);
           setActiveTab("prospects");
         }
         setActionMessage("Prospect created.");
       } else if (modal === "edit" && selectedId) {
-        await updateAccount(sessionToken, selectedId, { ...form, name });
+        const payload = serializeAccountWritePayload(form, {
+          rowVersion: detail?.rowVersion != null ? Number(detail.rowVersion) : undefined
+        });
+        await updateAccount(sessionToken, selectedId, payload);
         await loadDetail(selectedId);
         setActionMessage("Account updated.");
       } else if (modal === "add-contact" && selectedId) {
         await addContact(sessionToken, selectedId, {
-          name,
+          name: auxLabel,
           email: form.primaryEmail?.trim() || undefined,
           phone: form.primaryPhone?.trim() || undefined,
-          role: form.notes?.trim() || undefined
+          role: form.auxExtra.trim() || undefined
         });
         await loadDetail(selectedId);
         setActionMessage("Contact added.");
       } else if (modal === "add-location" && selectedId) {
         await addLocation(sessionToken, selectedId, {
-          label: name,
+          label: auxLabel,
           line1: form.primaryEmail?.trim() || undefined,
           city: form.city?.trim() || undefined,
           state: form.state?.trim() || undefined,
-          postalCode: form.notes?.trim() || undefined
+          postalCode: form.auxExtra.trim() || undefined
         });
         await loadDetail(selectedId);
         setActionMessage("Location added.");
       } else if (modal === "add-alias" && selectedId) {
-        await addAlias(sessionToken, selectedId, { alias: name, source: form.notes?.trim() || undefined });
+        await addAlias(sessionToken, selectedId, {
+          alias: auxLabel,
+          source: form.auxExtra.trim() || undefined
+        });
         await loadDetail(selectedId);
         setActionMessage("Alias added.");
       } else if (modal === "link-qb" && selectedId) {
         await linkQuickBooks(sessionToken, selectedId, {
-          externalId: String(form.notes || "").trim(),
-          externalDisplayName: form.name.trim() || undefined
+          externalId: form.auxExtra.trim(),
+          externalDisplayName: form.displayName.trim() || form.auxLabel.trim() || undefined
         });
         await loadDetail(selectedId);
         setActionMessage("QuickBooks linked.");
@@ -417,13 +441,14 @@ export default function AccountDirectoryApp() {
         setActionMessage("Account archived.");
       }
       setModal(null);
+      setForm(emptyForm());
       await loadList();
     } catch (e: unknown) {
       setFormError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setFormBusy(false);
     }
-  }, [form, loadDetail, loadList, modal, selectedId, sessionToken]);
+  }, [detail, form, formBusy, loadDetail, loadList, modal, selectedId, sessionToken]);
 
   const handleRestore = useCallback(async () => {
     if (!sessionToken || !selectedId) return;
@@ -793,7 +818,7 @@ export default function AccountDirectoryApp() {
                         type="button"
                         className="btn btn-secondary btn-sm"
                         disabled={formBusy}
-                        onClick={() => openModal("link-qb", { name: detail?.name || "" })}
+                        onClick={() => openModal("link-qb", { displayName: detail?.name || detail?.displayName || "" })}
                       >
                         Link QuickBooks
                       </button>
@@ -961,15 +986,15 @@ export default function AccountDirectoryApp() {
                 <label className="field">
                   Display name (optional)
                   <input
-                    value={form.name}
-                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    value={form.displayName}
+                    onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
                   />
                 </label>
                 <label className="field">
                   QuickBooks List ID
                   <input
-                    value={form.notes ?? ""}
-                    onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                    value={form.auxExtra}
+                    onChange={(e) => setForm((f) => ({ ...f, auxExtra: e.target.value }))}
                     autoFocus
                     required
                   />
@@ -986,8 +1011,22 @@ export default function AccountDirectoryApp() {
                         ? "Alias"
                         : "Account name"}
                   <input
-                    value={form.name}
-                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    value={
+                      modal === "add-contact" || modal === "add-location" || modal === "add-alias"
+                        ? form.auxLabel
+                        : form.displayName
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (modal === "add-contact" || modal === "add-location" || modal === "add-alias") {
+                        setForm((f) => ({ ...f, auxLabel: v }));
+                        return;
+                      }
+                      setForm((f) => ({ ...f, displayName: v }));
+                      if (formError === "Account name is required." && v.trim()) {
+                        setFormError(null);
+                      }
+                    }}
                     autoFocus
                   />
                 </label>
@@ -996,24 +1035,18 @@ export default function AccountDirectoryApp() {
                     <label className="field">
                       {modal === "add-location" ? "Address line 1" : "Primary email"}
                       <input
-                        value={modal === "add-location" ? form.primaryEmail ?? "" : form.primaryEmail ?? ""}
-                        onChange={(e) =>
-                          setForm((f) =>
-                            modal === "add-location"
-                              ? { ...f, primaryEmail: e.target.value }
-                              : { ...f, primaryEmail: e.target.value }
-                          )
-                        }
+                        value={form.primaryEmail}
+                        onChange={(e) => setForm((f) => ({ ...f, primaryEmail: e.target.value }))}
                       />
                     </label>
                     <label className="field">
                       {modal === "add-location" ? "Postal code" : "Primary phone"}
                       <input
-                        value={modal === "add-location" ? form.notes ?? "" : form.primaryPhone ?? ""}
+                        value={modal === "add-location" ? form.auxExtra : form.primaryPhone}
                         onChange={(e) =>
                           setForm((f) =>
                             modal === "add-location"
-                              ? { ...f, notes: e.target.value }
+                              ? { ...f, auxExtra: e.target.value }
                               : { ...f, primaryPhone: e.target.value }
                           )
                         }
@@ -1025,35 +1058,24 @@ export default function AccountDirectoryApp() {
                   <>
                     <label className="field">
                       City
-                      <input value={form.city ?? ""} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
+                      <input value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
                     </label>
                     <label className="field">
                       State
-                      <input
-                        value={form.state ?? ""}
-                        onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))}
-                      />
-                    </label>
-                    <label className="field">
-                      Notes
-                      <textarea
-                        rows={3}
-                        value={form.notes ?? ""}
-                        onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                      />
+                      <input value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} />
                     </label>
                   </>
                 ) : null}
                 {modal === "add-alias" ? (
                   <label className="field">
                     Source (optional)
-                    <input value={form.notes ?? ""} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+                    <input value={form.auxExtra} onChange={(e) => setForm((f) => ({ ...f, auxExtra: e.target.value }))} />
                   </label>
                 ) : null}
                 {modal === "add-contact" ? (
                   <label className="field">
                     Role (optional)
-                    <input value={form.notes ?? ""} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+                    <input value={form.auxExtra} onChange={(e) => setForm((f) => ({ ...f, auxExtra: e.target.value }))} />
                   </label>
                 ) : null}
               </div>

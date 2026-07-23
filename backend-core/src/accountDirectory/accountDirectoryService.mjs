@@ -1,25 +1,12 @@
 import { normalizeAccountDirectorySearch } from "./accountDirectoryMemoryStore.mjs";
 import { ACCOUNT_DIRECTORY_CAPABILITIES, roleHasCapability } from "./accountDirectoryAuth.mjs";
+import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
+
+export { AccountDirectoryError };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_PAGE = 100;
 const DEFAULT_PAGE = 50;
-
-export class AccountDirectoryError extends Error {
-  /**
-   * @param {string} code
-   * @param {string} message
-   * @param {number} [status]
-   * @param {object} [extra]
-   */
-  constructor(code, message, status = 400, extra = {}) {
-    super(message);
-    this.name = "AccountDirectoryError";
-    this.code = code;
-    this.status = status;
-    this.extra = extra;
-  }
-}
 
 function requireCap(role, capability) {
   if (!roleHasCapability(role, capability)) {
@@ -259,7 +246,7 @@ export function createAccountDirectoryService(deps) {
 
     async createAccount({ organizationId, role, actorUserId, requestId, payload, asProspect }) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EDIT);
-      const displayName = String(payload?.name ?? payload?.displayName ?? "").trim();
+      const displayName = String(payload?.displayName ?? "").trim();
       if (!displayName) {
         throw new AccountDirectoryError("display_name_required", "Account name is required.");
       }
@@ -334,8 +321,8 @@ export function createAccountDirectoryService(deps) {
       const expected = payload?.rowVersion ?? payload?.expectedRowVersion;
       const patch = {};
       const changed = [];
-      if (payload?.name != null || payload?.displayName != null) {
-        const displayName = String(payload?.name ?? payload?.displayName ?? "").trim();
+      if (payload?.displayName != null) {
+        const displayName = String(payload.displayName ?? "").trim();
         if (!displayName) throw new AccountDirectoryError("display_name_required", "Account name is required.");
         patch.displayName = displayName;
         changed.push("displayName");
