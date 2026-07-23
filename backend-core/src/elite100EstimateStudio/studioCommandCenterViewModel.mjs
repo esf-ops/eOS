@@ -378,7 +378,14 @@ export function toCommandCenterItem(row = {}, opts = {}) {
   const stageEnteredAt = row.lastActivityAt || row.receivedAt || null;
   const customerLabel = String(row.customerName || "").trim() || "Unknown customer";
   const projectLabel = String(row.projectName || "").trim() || "Untitled project";
-  const assignedUser = String(row.assignedEstimatorLabel || "").trim() || "Unassigned";
+  const assignedRaw = String(row.assignedEstimatorLabel || "").trim();
+  // Never surface truncated UUID stubs ("User 902c8f2c…") in the Command Center.
+  const assignedLooksLikeIdStub = /^user\s+[0-9a-f-]{6,}/i.test(assignedRaw);
+  const assignedUser = !assignedRaw || assignedRaw === "Unassigned"
+    ? "Unassigned"
+    : assignedLooksLikeIdStub
+      ? "Assigned estimator"
+      : assignedRaw;
   const severity = attentionSeverity(attention.reasons, workflow);
 
   return {
