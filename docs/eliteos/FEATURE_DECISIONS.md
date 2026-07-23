@@ -2180,6 +2180,18 @@
 | **Deployment surfaces** | `backend-core`, `app-ai-takeoff`, `app-elite100-estimate-studio`. No manual deployment. |
 | **Open business decisions** | (1) Optional richer “other/back” length editor beyond exposure flags. (2) Whether island/peninsula draft heuristics should be further constrained by areaType only (labels already draft-only). |
 
+### 156. Studio Home shell parity + Command Center email sync (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `fix/studio-home-shell-and-email-sync-command-center` |
+| **Shell** | Studio already imported `shared/eliteos-ui/EliteosTopbar` (same as Home). Gaps fixed: remove `statusSlot` “Private pilot”; wrap `.shell`; resolve org/logo/name/subtitle from `GET /api/me` like Home/Sales; Home-like account menu (Open Home, Profile & preferences); align `:root` tokens (`--eos-accent: #a3132f`, ink, Inter, `--r-md`, `--sh-1`) so the shared topbar matches Home. |
+| **Email sync** | Command Center calls thin `GET/POST /api/quote-intake/mailbox/sync-status|sync` that orchestrate existing `previewQuoteIntakeMailbox` + `importQuoteIntakeMailboxMessages` only. Same auth stack as mailbox preview/import (`ai_takeoff` + pilot allowlist). Process-local run lock/attach (no SQL). Refresh remains queue-only. |
+| **Counters** | `checked` / `created` / `duplicates` / `failed` / `manualReview` from preview+import; `ignored` only from preview non-importable rows (never fabricated mailbox totals). |
+| **Gaps** | No durable sync-run history table; no distributed multi-instance lock; no scheduled background sync exists today (manual-only). Documented for a later branch. |
+| **SQL / env** | None new. Reuses existing `QUOTE_INTAKE_*` / Graph flags. |
+| **Deployment surfaces** | `app-elite100-estimate-studio`, `backend-core` (quote-intake). No manual deployment. |
+
 ### 155. Estimate Command Center shared UI integration (2026-07-23)
 
 | Field | Value |

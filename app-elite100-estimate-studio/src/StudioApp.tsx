@@ -114,6 +114,10 @@ export default function StudioApp() {
   const [workspaceFocus, setWorkspaceFocus] = useState<
     "takeoff" | "scope" | "digital" | "review" | null
   >(null);
+  const [organizationName, setOrganizationName] = useState(DEFAULT_WORKSPACE_NAME);
+  const [organizationLogoUrl, setOrganizationLogoUrl] = useState(EOS_LOGO_URL);
+  const [userSubtitle, setUserSubtitle] = useState("");
+  const [profileFullName, setProfileFullName] = useState("");
 
   useEffect(() => {
     if (!supabase) return;
@@ -151,6 +155,50 @@ export default function StudioApp() {
         if (!alive) return;
         setStudioConfigOk(false);
         setBootError(e instanceof ApiError ? e.message : "Studio unavailable");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [sessionToken]);
+
+  // Same user/workspace identity source as Home Launcher (`GET /api/me`).
+  useEffect(() => {
+    if (!sessionToken) return;
+    let alive = true;
+    (async () => {
+      try {
+        const me = (await apiGet("/api/me", sessionToken)) as {
+          user?: {
+            email?: string;
+            full_name?: string;
+            fullName?: string;
+            job_title?: string | null;
+            department?: string | null;
+            role?: string;
+            organization_name?: string | null;
+            organization_logo_url?: string | null;
+          };
+        };
+        if (!alive) return;
+        const u = me?.user || {};
+        const name = String(u.full_name ?? u.fullName ?? "").trim();
+        if (name) setProfileFullName(name);
+        if (u.email) setUserEmail(String(u.email));
+        const subtitle =
+          String(u.job_title ?? "").trim() ||
+          String(u.department ?? "").trim() ||
+          String(u.role ?? "").trim() ||
+          "";
+        setUserSubtitle(subtitle);
+        const org = String(u.organization_name ?? "").trim();
+        if (org) setOrganizationName(org);
+        else setOrganizationName(DEFAULT_WORKSPACE_NAME);
+        const logo = String(u.organization_logo_url ?? "").trim();
+        setOrganizationLogoUrl(logo || EOS_LOGO_URL);
+      } catch {
+        if (!alive) return;
+        // Keep session fallbacks; topbar still renders.
       }
     })();
     return () => {
@@ -344,7 +392,47 @@ export default function StudioApp() {
   }
 
   const menuItems: EliteosTopbarMenuItem[] = [
-    { id: "home", label: "Home Launcher", href: homeLauncherUrl() }
+    {
+      label: "Open Home",
+      meta: "eliteOS Home Launcher",
+      href: homeLauncherUrl(),
+      icon: (
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M3 11.5L12 4l9 7.5" />
+          <path d="M5 10v10h14V10" />
+          <path d="M10 20v-6h4v6" />
+        </svg>
+      )
+    },
+    {
+      label: "Profile & preferences",
+      meta: "eliteOS Home",
+      href: `${homeLauncherUrl()}?view=profile`,
+      icon: (
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="8" r="3.5" />
+          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+        </svg>
+      )
+    }
   ];
 
   if (!uiEnabled()) {
@@ -370,42 +458,52 @@ export default function StudioApp() {
 
   if (!sessionToken) {
     return (
-      <form className="sign-in" onSubmit={signIn}>
-        <h1>Elite 100 Estimate Studio</h1>
-        <p className="muted">Sign in with your eliteOS account (private pilot).</p>
-        <label htmlFor="email">Email</label>
-        <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
+      <div className="shell">
+        <EliteosTopbar
+          appName="Elite 100 Estimate Studio"
+          organizationName={organizationName}
+          logoSrc={organizationLogoUrl}
+          homeHref={homeLauncherUrl()}
         />
-        {authError ? <div className="error-box">{authError}</div> : null}
-        <div className="actions">
-          <button type="submit">Sign in</button>
-        </div>
-      </form>
+        <main className="studio-shell">
+          <form className="sign-in" onSubmit={signIn}>
+            <h1>Sign in to continue</h1>
+            <p className="muted">Use your eliteOS staff account.</p>
+            <label htmlFor="email">Email</label>
+            <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            {authError ? <div className="error-box">{authError}</div> : null}
+            <div className="actions">
+              <button type="submit">Sign in</button>
+            </div>
+          </form>
+        </main>
+      </div>
     );
   }
 
-  const displayName = userMetaName || userEmail;
+  const displayName = profileFullName || userMetaName || userEmail;
 
   return (
-    <>
+    <div className="shell" data-testid="studio-app-shell">
       <EliteosTopbar
         appName="Elite 100 Estimate Studio"
-        organizationName={DEFAULT_WORKSPACE_NAME}
-        logoSrc={EOS_LOGO_URL}
+        organizationName={organizationName}
+        logoSrc={organizationLogoUrl}
         homeHref={homeLauncherUrl()}
         userName={displayName}
         userEmail={userEmail}
-        initials={userInitialsFor(userMetaName, userEmail)}
+        userSubtitle={userSubtitle}
+        initials={userInitialsFor(profileFullName || userMetaName, userEmail)}
         menuItems={menuItems}
         onSignOut={() => void signOut()}
-        statusSlot={<span>Private pilot</span>}
       />
       <main
         className={
@@ -749,6 +847,6 @@ export default function StudioApp() {
         </div>
         ) : null}
       </main>
-    </>
+    </div>
   );
 }
