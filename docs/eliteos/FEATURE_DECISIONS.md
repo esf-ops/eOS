@@ -2180,6 +2180,19 @@
 | **Deployment surfaces** | `backend-core`, `app-ai-takeoff`, `app-elite100-estimate-studio`. No manual deployment. |
 | **Open business decisions** | (1) Optional richer “other/back” length editor beyond exposure flags. (2) Whether island/peninsula draft heuristics should be further constrained by areaType only (labels already draft-only). |
 
+### 157. Mailbox sync run finalization (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `fix/quote-intake-mailbox-sync-run-finalization` |
+| **Hosted failure** | Sync inbox stayed `running` forever with 0 counters while `GET sync-status` polling succeeded. |
+| **Root cause** | Orchestrator launched preview/import asynchronously with **no overall timeout**, **no `finally` terminalization**, and counters written only at success. A hung Graph/bootstrap await left the process-local run `running` indefinitely with the initial empty result. |
+| **Fix** | `try/catch/finally` + `finalizeRun(runId, generation)`; server timeout (`QUOTE_INTAKE_MAILBOX_SYNC_TIMEOUT_MS`, default 90s); status-path reclaim of stale running; orphan `workerActive=false` → `abandoned_after_restart`; late workers cannot overwrite newer generations; intermediate counters after preview; UI stops polling on terminal states and re-enables Sync/Try again. |
+| **Connector cancel** | Underlying Graph/bootstrap work is not hard-cancelled; timed-out runs ignore late completion via generation/runId guards. |
+| **SQL / env** | No SQL. Optional `QUOTE_INTAKE_MAILBOX_SYNC_TIMEOUT_MS` (50–600000). |
+| **Limitation** | Process-local lock only; fresh process starts idle. Distributed lock is later work. |
+| **Deployment surfaces** | `backend-core` (quote-intake), `app-elite100-estimate-studio` (Command Center status UX). No manual deployment. |
+
 ### 156. Studio Home shell parity + Command Center email sync (2026-07-23)
 
 | Field | Value |

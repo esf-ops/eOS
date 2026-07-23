@@ -100,6 +100,15 @@ assert.ok(syncSvc.includes("persistenceNote"));
 assert.equal(syncSvc.includes("clientSecret"), false);
 assert.equal(page.includes("access_token"), false);
 assert.equal(page.includes("bodyPreview"), false);
-console.log("ok: result/failure/activity surfaces; no secret fields");
+assert.ok(page.includes("Still working"));
+assert.ok(page.includes("isEmailSyncTerminal") || page.includes("timed_out"));
+assert.ok(page.includes("Try again"));
+assert.ok(syncSvc.includes("timed_out"));
+assert.ok(syncSvc.includes("abandoned_after_restart"));
+assert.ok(syncSvc.includes("finalizeRun"));
+assert.ok(syncSvc.includes("QUOTE_INTAKE_MAILBOX_SYNC_TIMEOUT_MS") || syncSvc.includes("MAILBOX_SYNC_DEFAULT_TIMEOUT_MS"));
+assert.ok(syncSvc.includes("workerActive"));
+assert.ok(syncSvc.includes("finally"));
+console.log("ok: timeout/orphan terminalization + UI recovery hooks present");
 
 console.log("\nAll studio shell + email-sync UI tests passed.\n");

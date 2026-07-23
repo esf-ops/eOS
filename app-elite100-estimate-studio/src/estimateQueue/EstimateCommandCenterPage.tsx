@@ -60,11 +60,17 @@ type EmailSyncStatus = {
   canManualSync?: boolean;
   mailboxDisplay?: string | null;
   state?: string;
+  runId?: string | null;
   activeRunId?: string | null;
+  startedAt?: string | null;
   lastStartedAt?: string | null;
   lastCompletedAt?: string | null;
+  completedAt?: string | null;
   lastSuccessfulAt?: string | null;
+  elapsedSeconds?: number | null;
+  lastHeartbeatAt?: string | null;
   initiatedBy?: string | null;
+  retryable?: boolean;
   result?: {
     checked?: number;
     created?: number;
@@ -107,10 +113,25 @@ function syncStateLabel(status: EmailSyncStatus | null): string {
   if (state === "running") return "Syncing";
   if (state === "completed") return "Completed";
   if (state === "failed") return "Needs attention";
+  if (state === "timed_out") return "Timed out";
+  if (state === "abandoned_after_restart") return "Needs attention";
   if (state === "not_configured") return "Not configured";
   if (state === "permission_denied") return "Permission denied";
   if (status?.configured) return "Ready";
   return "Not configured";
+}
+
+function isEmailSyncTerminal(state: string | undefined): boolean {
+  return (
+    state === "completed" ||
+    state === "failed" ||
+    state === "timed_out" ||
+    state === "abandoned_after_restart"
+  );
+}
+
+function isEmailSyncFailureState(state: string | undefined): boolean {
+  return state === "failed" || state === "timed_out" || state === "abandoned_after_restart";
 }
 
 /**
@@ -213,10 +234,11 @@ export default function EstimateCommandCenterPage({
       if (Date.now() - started > EMAIL_SYNC_POLL_MAX_MS) {
         stopped = true;
         window.clearInterval(tick);
+        void loadEmailStatus();
         return;
       }
       void loadEmailStatus().then((status) => {
-        if (!status || status.state !== "running") {
+        if (!status || isEmailSyncTerminal(status.state)) {
           stopped = true;
           window.clearInterval(tick);
           if (status?.state === "completed") {
@@ -246,7 +268,7 @@ export default function EstimateCommandCenterPage({
       if (status.state === "completed") {
         setShowLastResult(true);
         setRefreshTick((n) => n + 1);
-      } else if (status.state === "failed") {
+      } else if (isEmailSyncFailureState(status.state)) {
         setShowLastResult(false);
       }
     } catch (e) {
@@ -432,6 +454,12 @@ export default function EstimateCommandCenterPage({
             Last synced: {formatSyncClock(emailStatus?.lastSuccessfulAt || emailStatus?.lastCompletedAt)}
             {" · "}
             Status: {syncStateLabel(emailStatus)}
+            {emailStatus?.state === "running" && Number.isFinite(Number(emailStatus?.elapsedSeconds))
+              ? ` · ${Number(emailStatus?.elapsedSeconds)}s`
+              : ""}
+            {emailStatus?.state === "running" && Number(emailStatus?.elapsedSeconds) >= 20
+              ? " · Still working…"
+              : ""}
             {emailStatus?.mailboxDisplay ? ` · ${emailStatus.mailboxDisplay}` : ""}
           </p>
         </div>
@@ -455,16 +483,22 @@ export default function EstimateCommandCenterPage({
           ) : null}
         </div>
 
-        {emailStatus?.state === "failed" || emailStatusError ? (
+        {isEmailSyncFailureState(emailStatus?.state) || emailStatusError ? (
           <div className="ecc-email-alert" data-tone="danger" data-testid="ecc-email-failure" role="alert">
-            <strong>Email sync needs attention</strong>
+            <strong>
+              {emailStatus?.state === "timed_out"
+                ? "Email sync timed out"
+                : "Email sync needs attention"}
+            </strong>
             <div>
               {emailStatus?.safeError?.message ||
                 emailStatusError ||
                 "The inbox could not be synchronized. No estimate records were changed."}
             </div>
             <div className="ecc-email-intake-actions" style={{ marginTop: "0.5rem" }}>
-              {emailStatus?.safeError?.retryable !== false && !emailSyncForbidden ? (
+              {(emailStatus?.retryable !== false ||
+                emailStatus?.safeError?.retryable !== false) &&
+              !emailSyncForbidden ? (
                 <button
                   type="button"
                   className="eq-btn-secondary"
@@ -488,15 +522,24 @@ export default function EstimateCommandCenterPage({
               <div className="ecc-email-details" data-testid="ecc-email-diagnostics">
                 <p className="eq-muted">
                   Category: {emailStatus?.safeError?.category || "unavailable"}
-                  {emailStatus?.activeRunId || emailStatus?.recentRuns?.[0]?.runId
-                    ? ` · Run: ${String(emailStatus.activeRunId || emailStatus.recentRuns?.[0]?.runId)}`
+                  {emailStatus?.runId || emailStatus?.activeRunId || emailStatus?.recentRuns?.[0]?.runId
+                    ? ` · Run: ${String(
+                        emailStatus.runId ||
+                          emailStatus.activeRunId ||
+                          emailStatus.recentRuns?.[0]?.runId
+                      )}`
                     : ""}
-                  {emailStatus?.lastStartedAt
-                    ? ` · Started: ${formatSyncClock(emailStatus.lastStartedAt)}`
+                  {emailStatus?.startedAt || emailStatus?.lastStartedAt
+                    ? ` · Started: ${formatSyncClock(
+                        emailStatus.startedAt || emailStatus.lastStartedAt
+                      )}`
                     : ""}
                 </p>
                 <p className="eq-muted">
-                  Retryable: {emailStatus?.safeError?.retryable === false ? "No" : "Yes"}
+                  Retryable:{" "}
+                  {emailStatus?.retryable === false || emailStatus?.safeError?.retryable === false
+                    ? "No"
+                    : "Yes"}
                 </p>
               </div>
             ) : null}
