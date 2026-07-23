@@ -48,7 +48,14 @@ type Props = {
   apiClient: QuoteIntakeApiClient;
   mailboxDisplay?: string | null;
   onClose: () => void;
-  onImported: () => void;
+  /** Called after a confirmed import finishes. Optional summary uses real audit/result counters only. */
+  onImported: (summary?: {
+    created: number;
+    duplicates: number;
+    failed: number;
+    manualReview: number;
+    requested: number;
+  }) => void;
 };
 
 type Phase = "idle" | "previewing" | "previewed" | "importing" | "done" | "error";
@@ -116,9 +123,30 @@ export default function MailboxSyncModal({
         messageIds: ids,
         confirm: true
       });
-      setResults(Array.isArray(res.results) ? (res.results as typeof results) : []);
+      const nextResults = Array.isArray(res.results) ? (res.results as typeof results) : [];
+      setResults(nextResults);
       setPhase("done");
-      onImported();
+      const audit =
+        res && typeof res === "object" && res.audit && typeof res.audit === "object"
+          ? (res.audit as Record<string, unknown>)
+          : {};
+      onImported({
+        created: Number.isFinite(Number(audit.createdCount))
+          ? Number(audit.createdCount)
+          : nextResults.filter((r) => r.status === "created").length,
+        duplicates: Number.isFinite(Number(audit.duplicateCount))
+          ? Number(audit.duplicateCount)
+          : nextResults.filter((r) => r.status === "duplicate").length,
+        failed: Number.isFinite(Number(audit.failedCount))
+          ? Number(audit.failedCount)
+          : nextResults.filter((r) => r.status === "failed").length,
+        manualReview: Number.isFinite(Number(audit.manualReviewCount))
+          ? Number(audit.manualReviewCount)
+          : nextResults.filter((r) => r.status === "manual_review").length,
+        requested: Number.isFinite(Number(audit.requestedCount))
+          ? Number(audit.requestedCount)
+          : ids.length
+      });
     } catch (e) {
       const classified = classifyQuoteIntakeError(e);
       if (classified.kind === "unauthorized" || classified.kind === "forbidden") {
