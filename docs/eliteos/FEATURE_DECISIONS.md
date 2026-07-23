@@ -2252,3 +2252,19 @@
 | **SQL / env** | None. |
 | **Deployment surfaces** | `backend-core`, `app-ai-takeoff`, `app-elite100-estimate-studio`. No manual deployment. |
 
+
+### 158. Account Directory foundation + QB workbook dry-run (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `feature/account-directory-foundation` |
+| **Decision** | Ship a **standalone Account Directory** domain + head for eliteOS account identity (accounts, contacts, locations, aliases, QuickBooks Desktop root List ID links). **Do not** wire into Estimate Studio, estimates, mailbox, Takeoff, or live QuickBooks write/import in this branch. Existing estimate snapshots remain authoritative. |
+| **Why** | Estimating, Command Center, Digital Estimate, and QB linkage need a governed account identity owner without coupling to Estimate Studio workflow or reinterpreting historical estimates. |
+| **Domain** | New tables `account_directory_*` (additive migration `backend-core/supabase/eliteos_account_directory_v1.sql` — **not applied**). Stable eliteOS UUID PKs; QB List ID is an external link only. Soft archive/restore; no hard delete in UI/API. Row-version concurrency on updates. |
+| **Permissions** | Head slug `account_directory` + role-mapped capabilities: `account_directory_view/edit/admin/external_link`. Server-enforced. Estimate Studio access does not grant Account Directory access. |
+| **Workbook** | Local dry-run only via `npm run account-directory:seed:dry-run`. Workbook under `local-imports/` (gitignored). Zero DB writes. Fake fixtures in tests only. |
+| **Store** | Foundation API defaults to in-memory store (`ACCOUNT_DIRECTORY_STORE=memory`) until migration is applied and a reviewed seed-import branch switches to Supabase. |
+| **Impacted files/docs** | `app-account-directory/**`, `backend-core/src/accountDirectory/**`, `backend-core/supabase/eliteos_account_directory_v1.sql`, launcher/governance/Home config, `package.json`, this entry. |
+| **Rollback** | Hide launcher card / unset `HEAD_URL_ACCOUNT_DIRECTORY`; revert app/API; leave unapplied migration alone. No estimates or QB production data affected. |
+| **Revisit trigger** | Controlled seed import branch; Estimate Studio account picker; Supabase repository cutover after migration apply. |
+

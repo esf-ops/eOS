@@ -89,6 +89,7 @@ const HEAD_URL_DEFAULTS: Record<string, string> = {
   pricing_admin: "http://localhost:5182",
   custom_quote: "http://localhost:5187",
   install_dashboard: "http://localhost:5189",
+  account_directory: "http://localhost:5190",
   public_quote: "http://localhost:5179",
   app_home: "http://localhost:5177"
 };
@@ -104,6 +105,7 @@ const HEAD_ENV_KEYS: Record<string, string> = {
   pricing_admin: "VITE_HEAD_URL_PRICING_ADMIN",
   custom_quote: "VITE_HEAD_URL_CUSTOM_QUOTE",
   install_dashboard: "VITE_HEAD_URL_INSTALL_DASHBOARD",
+  account_directory: "VITE_HEAD_URL_ACCOUNT_DIRECTORY",
   public_quote: "VITE_HEAD_URL_PUBLIC_QUOTE",
   org_directory: "VITE_HEAD_URL_ORG_DIRECTORY",
   app_home: "VITE_HEAD_URL_APP_HOME"

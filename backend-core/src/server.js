@@ -22,6 +22,7 @@ import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
 import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
 import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
 import { attachInstallDashboardRoutes } from "./install/installDashboardApi.js";
+import { attachAccountDirectoryRoutes } from "./accountDirectory/accountDirectoryApi.js";
 import { attachHrWorkforceRoutes } from "./hr/hrWorkforceApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { attachTakeoffInternalRoutes } from "./takeoff/takeoffInternalRoutes.js";
@@ -1259,6 +1260,12 @@ attachSlabInventoryRoutes(app, {
 });
 
 attachInstallDashboardRoutes(app, {
+  requireAuth,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachAccountDirectoryRoutes(app, {
   requireAuth,
   requireHeadAccess,
   getSupabase: supabaseServerClient

@@ -29,7 +29,8 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "custom_quote", // Custom Quote Tool — ESF-only off-program material quotes
   "visualizer", // Countertop Visualizer MVP — concept-only AI render (standalone head)
   "quickbooks_intelligence", // QuickBooks Intelligence — AR/revenue/payment insights (read-only)
-  "elite100_estimate_studio" // Elite 100 Estimate Studio — private pilot Digital Estimate publish head
+  "elite100_estimate_studio", // Elite 100 Estimate Studio — private pilot Digital Estimate publish head
+  "account_directory" // Account Directory — standalone account identity + estimating contacts (not Estimate Studio)
 ]);
 
 const _headSet = new Set(EOS_HEAD_SLUGS);
