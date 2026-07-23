@@ -4,6 +4,7 @@ import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopba
 import ConfigurationWorkspace from "./ConfigurationWorkspace";
 import ReviewWorkspace from "./ReviewWorkspace";
 import EstimateQueuePage from "./estimateQueue/EstimateQueuePage";
+import EstimateCommandCenterPage from "./estimateQueue/EstimateCommandCenterPage";
 import EstimateTakeoffWorkspace from "./estimateQueue/EstimateTakeoffWorkspace";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
@@ -96,9 +97,17 @@ export default function StudioApp() {
   const [publishStaffNotice, setPublishStaffNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [studioConfigOk, setStudioConfigOk] = useState<boolean | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [mainNav, setMainNav] = useState<
-    "publications" | "reviews" | "estimate-queue" | "estimate-workspace"
-  >("publications");
+    | "command-center"
+    | "estimate-queue"
+    | "publications"
+    | "reviews"
+    | "estimate-workspace"
+  >("command-center");
+  const [queueReturnNav, setQueueReturnNav] = useState<"command-center" | "estimate-queue">(
+    "command-center"
+  );
   const [intakeCaseId, setIntakeCaseId] = useState<string | null>(null);
   const [estimateWorkspaceCaseId, setEstimateWorkspaceCaseId] = useState<string | null>(null);
   const [workspaceFocus, setWorkspaceFocus] = useState<
@@ -113,11 +122,13 @@ export default function StudioApp() {
       setSessionToken(data.session?.access_token ?? null);
       const u = data.session?.user;
       setUserEmail(u?.email ?? "");
+      setUserId(u?.id ?? null);
       setUserMetaName(String(u?.user_metadata?.full_name ?? u?.user_metadata?.name ?? "").trim());
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setSessionToken(session?.access_token ?? null);
       setUserEmail(session?.user?.email ?? "");
+      setUserId(session?.user?.id ?? null);
       setUserMetaName(
         String(session?.user?.user_metadata?.full_name ?? session?.user?.user_metadata?.name ?? "").trim()
       );
@@ -397,7 +408,9 @@ export default function StudioApp() {
       />
       <main
         className={
-          mainNav === "estimate-queue" || mainNav === "estimate-workspace"
+          mainNav === "command-center" ||
+          mainNav === "estimate-queue" ||
+          mainNav === "estimate-workspace"
             ? "studio-shell studio-shell--wide"
             : "studio-shell"
         }
@@ -414,13 +427,29 @@ export default function StudioApp() {
         <nav className="studio-nav" aria-label="Studio sections">
           <button
             type="button"
-            className={mainNav === "estimate-queue" || mainNav === "estimate-workspace" ? "active" : ""}
+            className={
+              mainNav === "command-center" || mainNav === "estimate-workspace" ? "active" : ""
+            }
+            data-testid="studio-nav-command-center"
             onClick={() => {
-              setMainNav("estimate-queue");
+              setMainNav("command-center");
+              setQueueReturnNav("command-center");
               setEstimateWorkspaceCaseId(null);
             }}
           >
-            Estimate Queue
+            Command Center
+          </button>
+          <button
+            type="button"
+            className={mainNav === "estimate-queue" ? "active" : ""}
+            data-testid="studio-nav-legacy-queue"
+            onClick={() => {
+              setMainNav("estimate-queue");
+              setQueueReturnNav("estimate-queue");
+              setEstimateWorkspaceCaseId(null);
+            }}
+          >
+            Legacy queue
           </button>
           <button
             type="button"
@@ -438,12 +467,38 @@ export default function StudioApp() {
           </button>
         </nav>
 
+        {mainNav === "command-center" ? (
+          <EstimateCommandCenterPage
+            authToken={sessionToken}
+            currentUserId={userId}
+            selectedCaseId={intakeCaseId}
+            onSelectCase={setIntakeCaseId}
+            onOpenLegacyQueue={() => {
+              setQueueReturnNav("estimate-queue");
+              setMainNav("estimate-queue");
+            }}
+            onOpenEstimate={(caseId, options) => {
+              setQueueReturnNav("command-center");
+              setEstimateWorkspaceCaseId(caseId);
+              setIntakeCaseId(caseId);
+              const target = String(options?.openTarget || "takeoff");
+              setWorkspaceFocus(
+                target === "scope" || target === "digital" || target === "review" || target === "takeoff"
+                  ? target
+                  : "takeoff"
+              );
+              setMainNav("estimate-workspace");
+            }}
+          />
+        ) : null}
+
         {mainNav === "estimate-queue" ? (
           <EstimateQueuePage
             authToken={sessionToken}
             selectedCaseId={intakeCaseId}
             onSelectCase={setIntakeCaseId}
             onOpenEstimate={(caseId, options) => {
+              setQueueReturnNav("estimate-queue");
               setEstimateWorkspaceCaseId(caseId);
               setIntakeCaseId(caseId);
               const target = String(options?.openTarget || "takeoff");
@@ -463,10 +518,10 @@ export default function StudioApp() {
             caseId={estimateWorkspaceCaseId}
             initialFocus={workspaceFocus || "takeoff"}
             onBackToQueue={() => {
-              setMainNav("estimate-queue");
+              setMainNav(queueReturnNav);
               setEstimateWorkspaceCaseId(null);
               setWorkspaceFocus(null);
-              // Keep intakeCaseId so the queue restores the selected case.
+              // Keep intakeCaseId so the list restores the selected case.
             }}
           />
         ) : null}
@@ -479,6 +534,7 @@ export default function StudioApp() {
               setActionError("Session ended or access denied");
             }}
             onOpenEstimate={(caseId) => {
+              setQueueReturnNav("command-center");
               setEstimateWorkspaceCaseId(caseId);
               setIntakeCaseId(caseId);
               setMainNav("estimate-workspace");
