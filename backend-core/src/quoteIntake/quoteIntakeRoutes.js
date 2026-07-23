@@ -25,10 +25,6 @@ import {
   previewQuoteIntakeMailbox
 } from "./quoteIntakeMailboxService.mjs";
 import {
-  getQuoteIntakeMailboxSyncStatus,
-  startOrAttachQuoteIntakeMailboxSync
-} from "./quoteIntakeMailboxSyncService.mjs";
-import {
   bootstrapIntakeCaseTakeoff,
   bootstrapIntakeCasesAfterImport
 } from "./intakeAutoBootstrapService.mjs";
@@ -489,60 +485,6 @@ export function attachQuoteIntakeRoutes(app, deps) {
         res.status(200).json({ ok: true, ...imported });
       } catch (e) {
         console.error("[quote-intake] mailbox import failed", e?.code || "error");
-        res.status(graphErrorStatus(e)).json(safeGraphError(e));
-      }
-    }
-  );
-
-  // Command Center status — read-only; never contacts Graph / mailbox.
-  app.get(`${QUOTE_INTAKE_API_PREFIX}/mailbox/sync-status`, ...stack, async (req, res) => {
-    jsonNoStore(res);
-    try {
-      const organizationId = await orgIdFor(req);
-      const status = getQuoteIntakeMailboxSyncStatus({ organizationId, env });
-      res.status(200).json({ ok: true, status });
-    } catch (e) {
-      console.error("[quote-intake] mailbox sync-status failed", e?.code || "error");
-      res.status(graphErrorStatus(e)).json(safeGraphError(e));
-    }
-  });
-
-  // Command Center Sync inbox — orchestrates existing preview + import; 202 when accepted/attached.
-  app.post(
-    `${QUOTE_INTAKE_API_PREFIX}/mailbox/sync`,
-    ...stack,
-    jsonParser,
-    async (req, res) => {
-      jsonNoStore(res);
-      try {
-        const organizationId = await orgIdFor(req);
-        const out = startOrAttachQuoteIntakeMailboxSync({
-          env,
-          organizationId,
-          actorUserId: req.user?.id ?? null,
-          repository,
-          graphClient,
-          fetchImpl: graphFetchImpl,
-          getSupabase,
-          ensureStudioEstimate,
-          scheduleFn,
-          bootstrapIntakeCases:
-            typeof openEstimate === "function"
-              ? (args) =>
-                  bootstrapIntakeCasesAfterImport({
-                    ...args,
-                    openEstimate,
-                    repositoryMode
-                  })
-              : null
-        });
-        res.status(202).json({
-          ok: true,
-          attached: Boolean(out.attached),
-          status: out.status
-        });
-      } catch (e) {
-        console.error("[quote-intake] mailbox sync failed", e?.code || "error");
         res.status(graphErrorStatus(e)).json(safeGraphError(e));
       }
     }

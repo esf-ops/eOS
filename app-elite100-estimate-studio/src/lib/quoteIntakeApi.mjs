@@ -173,27 +173,6 @@ export function createQuoteIntakeApiClient(deps = {}) {
       return /** @type {Record<string, unknown>} */ (res.json) ?? {};
     },
 
-    /** Read-only Command Center email-sync status (no mailbox write). */
-    async getMailboxSyncStatus(token) {
-      const res = await get(`${QUOTE_INTAKE_API_PREFIX}/mailbox/sync-status`, token);
-      throwIfNotOk(res, "Unable to load mailbox sync status");
-      const body = /** @type {{ status?: object }} */ (res.json);
-      return body?.status ?? {};
-    },
-
-    /**
-     * Start or attach to canonical mailbox sync (preview + import importable messages).
-     * Expects HTTP 202 Accepted.
-     * @param {string} token
-     */
-    async startMailboxSync(token) {
-      const res = await post(`${QUOTE_INTAKE_API_PREFIX}/mailbox/sync`, token, {});
-      if (!(res.status === 202 || res.ok)) {
-        throwIfNotOk(res, "Unable to start mailbox sync");
-      }
-      return /** @type {Record<string, unknown>} */ (res.json) ?? {};
-    },
-
     /**
      * Idempotent Open Estimate — empty body only (no caller-controlled IDs/URLs).
      * @param {string} token
@@ -243,9 +222,7 @@ export const QUOTE_INTAKE_ALLOWED_PATH_PREFIXES = [
   `${QUOTE_INTAKE_API_PREFIX}/health`,
   `${QUOTE_INTAKE_API_PREFIX}/cases`,
   `${QUOTE_INTAKE_API_PREFIX}/mailbox/preview`,
-  `${QUOTE_INTAKE_API_PREFIX}/mailbox/import`,
-  `${QUOTE_INTAKE_API_PREFIX}/mailbox/sync-status`,
-  `${QUOTE_INTAKE_API_PREFIX}/mailbox/sync`
+  `${QUOTE_INTAKE_API_PREFIX}/mailbox/import`
 ];
 
 export function assertQuoteIntakePathAllowed(path) {

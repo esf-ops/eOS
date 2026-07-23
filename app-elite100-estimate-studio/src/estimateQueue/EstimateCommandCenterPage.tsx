@@ -7,6 +7,7 @@ import {
 import { createQuoteIntakeApiClient } from "../lib/quoteIntakeApi.mjs";
 import { ApiError, isAbortError } from "../lib/api";
 import { formatReceivedAt } from "../lib/quoteIntakeFormat.mjs";
+import MailboxSyncModal from "./MailboxSyncModal";
 import {
   COMMAND_CENTER_STAGE_TABS,
   COMMAND_CENTER_SUMMARY_CARDS,
@@ -55,33 +56,12 @@ type DetailState =
   | { kind: "ready"; caseId: string; preview: Record<string, unknown>; item: ReturnType<typeof toCommandCenterItem> }
   | { kind: "error"; caseId: string; message: string };
 
-type EmailSyncStatus = {
-  configured?: boolean;
-  canManualSync?: boolean;
-  mailboxDisplay?: string | null;
-  state?: string;
-  runId?: string | null;
-  activeRunId?: string | null;
-  startedAt?: string | null;
-  lastStartedAt?: string | null;
-  lastCompletedAt?: string | null;
-  completedAt?: string | null;
-  lastSuccessfulAt?: string | null;
-  elapsedSeconds?: number | null;
-  lastHeartbeatAt?: string | null;
-  initiatedBy?: string | null;
-  retryable?: boolean;
-  result?: {
-    checked?: number;
-    created?: number;
-    duplicates?: number;
-    ignored?: number | null;
-    failed?: number;
-    manualReview?: number;
-  };
-  safeError?: { category?: string; message?: string; retryable?: boolean } | null;
-  recentRuns?: Array<Record<string, unknown>>;
-  persistenceNote?: string;
+type ImportSummary = {
+  created: number;
+  duplicates: number;
+  failed: number;
+  manualReview: number;
+  requested: number;
 };
 
 const SORTS = [
@@ -91,9 +71,6 @@ const SORTS = [
   { key: "customer", label: "Customer / project" }
 ];
 
-const EMAIL_SYNC_POLL_MS = 2500;
-const EMAIL_SYNC_POLL_MAX_MS = 120000;
-
 function severityTone(severity: number, blocked: boolean): string {
   if (blocked || severity >= 3) return "danger";
   if (severity >= 2) return "warn";
@@ -101,42 +78,9 @@ function severityTone(severity: number, blocked: boolean): string {
   return "neutral";
 }
 
-function formatSyncClock(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function syncStateLabel(status: EmailSyncStatus | null): string {
-  const state = String(status?.state || "");
-  if (state === "running") return "Syncing";
-  if (state === "completed") return "Completed";
-  if (state === "failed") return "Needs attention";
-  if (state === "timed_out") return "Timed out";
-  if (state === "abandoned_after_restart") return "Needs attention";
-  if (state === "not_configured") return "Not configured";
-  if (state === "permission_denied") return "Permission denied";
-  if (status?.configured) return "Ready";
-  return "Not configured";
-}
-
-function isEmailSyncTerminal(state: string | undefined): boolean {
-  return (
-    state === "completed" ||
-    state === "failed" ||
-    state === "timed_out" ||
-    state === "abandoned_after_restart"
-  );
-}
-
-function isEmailSyncFailureState(state: string | undefined): boolean {
-  return state === "failed" || state === "timed_out" || state === "abandoned_after_restart";
-}
-
 /**
  * Elite 100 Estimate Command Center — presentation layer over the existing queue API.
- * Read-only list/filter/sort; writes only when the user opens an existing workspace action.
+ * Sync inbox opens the existing MailboxSyncModal (preview → confirm → import).
  */
 export default function EstimateCommandCenterPage({
   authToken,
@@ -162,126 +106,32 @@ export default function EstimateCommandCenterPage({
   const drawerCloseBtnRef = useRef<HTMLButtonElement | null>(null);
   const lastFocusRef = useRef<HTMLElement | null>(null);
   const intakeClient = useMemo(() => createQuoteIntakeApiClient(), []);
-  const [emailStatus, setEmailStatus] = useState<EmailSyncStatus | null>(null);
-  const [emailStatusError, setEmailStatusError] = useState<string | null>(null);
-  const [emailSyncForbidden, setEmailSyncForbidden] = useState(false);
-  const [emailActionBusy, setEmailActionBusy] = useState(false);
-  const [showEmailDetails, setShowEmailDetails] = useState(false);
-  const [showLastResult, setShowLastResult] = useState(false);
-  const emailStatusGenRef = useRef(0);
+  const [mailboxSyncOpen, setMailboxSyncOpen] = useState(false);
+  const [mailboxDisplay, setMailboxDisplay] = useState<string | null>(null);
+  const [importNotice, setImportNotice] = useState<ImportSummary | null>(null);
   const limit = 50;
 
-  const applyEmailStatus = useCallback((next: EmailSyncStatus, generation: number) => {
-    if (generation < emailStatusGenRef.current) return;
-    emailStatusGenRef.current = generation;
-    setEmailStatus(next);
-  }, []);
-
-  const loadEmailStatus = useCallback(
-    async (signal?: AbortSignal) => {
-      if (!authToken) {
-        setEmailStatus(null);
-        return null;
-      }
-      const generation = Date.now();
-      try {
-        const status = (await intakeClient.getMailboxSyncStatus(authToken)) as EmailSyncStatus;
-        if (signal?.aborted) return null;
-        applyEmailStatus(status, generation);
-        setEmailStatusError(null);
-        setEmailSyncForbidden(false);
-        return status;
-      } catch (e) {
-        if (isAbortError(e) || signal?.aborted) return null;
-        const status = e instanceof ApiError ? e.status : 0;
-        if (status === 401 || status === 403) {
-          setEmailSyncForbidden(true);
-          setEmailStatusError(null);
-          applyEmailStatus(
-            { configured: false, canManualSync: false, state: "permission_denied" },
-            generation
-          );
-          return null;
-        }
-        if (status === 404) {
-          applyEmailStatus(
-            { configured: false, canManualSync: false, state: "not_configured" },
-            generation
-          );
-          setEmailStatusError(null);
-          return null;
-        }
-        setEmailStatusError(e instanceof ApiError ? e.message : "Unable to load email intake status");
-        return null;
-      }
-    },
-    [authToken, intakeClient, applyEmailStatus]
-  );
-
   useEffect(() => {
-    const ac = new AbortController();
-    void loadEmailStatus(ac.signal);
-    return () => ac.abort();
-  }, [loadEmailStatus]);
-
-  // Restrained polling while a sync is running; stop on completion/failure/timeout.
-  useEffect(() => {
-    if (!authToken || emailStatus?.state !== "running") return;
-    const started = Date.now();
-    let stopped = false;
-    const tick = window.setInterval(() => {
-      if (stopped) return;
-      if (Date.now() - started > EMAIL_SYNC_POLL_MAX_MS) {
-        stopped = true;
-        window.clearInterval(tick);
-        void loadEmailStatus();
-        return;
-      }
-      void loadEmailStatus().then((status) => {
-        if (!status || isEmailSyncTerminal(status.state)) {
-          stopped = true;
-          window.clearInterval(tick);
-          if (status?.state === "completed") {
-            setShowLastResult(true);
-            setRefreshTick((n) => n + 1);
-          }
-        }
-      });
-    }, EMAIL_SYNC_POLL_MS);
-    return () => {
-      stopped = true;
-      window.clearInterval(tick);
-    };
-  }, [authToken, emailStatus?.state, loadEmailStatus]);
-
-  async function runInboxSync() {
-    if (!authToken || emailActionBusy || emailStatus?.state === "running") return;
-    setEmailActionBusy(true);
-    setShowEmailDetails(false);
-    try {
-      const body = (await intakeClient.startMailboxSync(authToken)) as {
-        status?: EmailSyncStatus;
-        attached?: boolean;
-      };
-      const status = (body.status || {}) as EmailSyncStatus;
-      applyEmailStatus(status, Date.now());
-      if (status.state === "completed") {
-        setShowLastResult(true);
-        setRefreshTick((n) => n + 1);
-      } else if (isEmailSyncFailureState(status.state)) {
-        setShowLastResult(false);
-      }
-    } catch (e) {
-      const status = e instanceof ApiError ? e.status : 0;
-      if (status === 401 || status === 403) {
-        setEmailSyncForbidden(true);
-      }
-      setEmailStatusError(e instanceof ApiError ? e.message : "Unable to start inbox sync");
-      void loadEmailStatus();
-    } finally {
-      setEmailActionBusy(false);
+    if (!authToken) {
+      setMailboxDisplay(null);
+      return;
     }
-  }
+    let alive = true;
+    void intakeClient
+      .getConfig(authToken)
+      .then((cfg: Record<string, unknown>) => {
+        if (!alive) return;
+        const display = String(cfg.mailboxDisplay || "").trim();
+        setMailboxDisplay(display || null);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setMailboxDisplay(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [authToken, intakeClient]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 280);
@@ -436,165 +286,38 @@ export default function EstimateCommandCenterPage({
             data-testid="ecc-refresh"
             title="Reload queue data without contacting the mailbox"
             disabled={loading}
-            onClick={() => setRefreshTick((n) => n + 1)}
+            onClick={() => {
+              setImportNotice(null);
+              setRefreshTick((n) => n + 1);
+            }}
           >
             Refresh
+          </button>
+          <button
+            type="button"
+            className="eq-btn-primary"
+            data-testid="ecc-sync-inbox"
+            title="Open mailbox preview — nothing is imported until you confirm"
+            disabled={!authToken}
+            onClick={() => setMailboxSyncOpen(true)}
+          >
+            Sync inbox
           </button>
         </div>
       </header>
 
-      <section
-        className="ecc-email-intake"
-        aria-label="Email intake"
-        data-testid="ecc-email-intake"
-      >
-        <div className="ecc-email-intake-main">
-          <h2 className="ecc-email-intake-title">Email intake</h2>
-          <p className="ecc-email-intake-meta">
-            Last synced: {formatSyncClock(emailStatus?.lastSuccessfulAt || emailStatus?.lastCompletedAt)}
-            {" · "}
-            Status: {syncStateLabel(emailStatus)}
-            {emailStatus?.state === "running" && Number.isFinite(Number(emailStatus?.elapsedSeconds))
-              ? ` · ${Number(emailStatus?.elapsedSeconds)}s`
-              : ""}
-            {emailStatus?.state === "running" && Number(emailStatus?.elapsedSeconds) >= 20
-              ? " · Still working…"
-              : ""}
-            {emailStatus?.mailboxDisplay ? ` · ${emailStatus.mailboxDisplay}` : ""}
-          </p>
+      {importNotice ? (
+        <div className="ecc-email-result" data-testid="ecc-import-notice" role="status">
+          <strong>Inbox import completed</strong>
+          <ul>
+            <li>{importNotice.requested} messages requested</li>
+            <li>{importNotice.created} new estimate requests created</li>
+            <li>{importNotice.duplicates} existing requests skipped</li>
+            <li>{importNotice.manualReview} sent to manual review</li>
+            <li>{importNotice.failed} failures</li>
+          </ul>
         </div>
-        <div className="ecc-email-intake-actions">
-          {emailStatus?.state === "running" ? (
-            <span className="ecc-sync-progress" data-testid="ecc-email-syncing">
-              Syncing…
-            </span>
-          ) : null}
-          {!emailSyncForbidden && emailStatus?.canManualSync ? (
-            <button
-              type="button"
-              className="eq-btn-primary"
-              data-testid="ecc-sync-inbox"
-              title="Run the canonical inbox ingestion process"
-              disabled={emailActionBusy || emailStatus?.state === "running"}
-              onClick={() => void runInboxSync()}
-            >
-              {emailStatus?.state === "running" || emailActionBusy ? "Syncing…" : "Sync inbox"}
-            </button>
-          ) : null}
-        </div>
-
-        {isEmailSyncFailureState(emailStatus?.state) || emailStatusError ? (
-          <div className="ecc-email-alert" data-tone="danger" data-testid="ecc-email-failure" role="alert">
-            <strong>
-              {emailStatus?.state === "timed_out"
-                ? "Email sync timed out"
-                : "Email sync needs attention"}
-            </strong>
-            <div>
-              {emailStatus?.safeError?.message ||
-                emailStatusError ||
-                "The inbox could not be synchronized. No estimate records were changed."}
-            </div>
-            <div className="ecc-email-intake-actions" style={{ marginTop: "0.5rem" }}>
-              {(emailStatus?.retryable !== false ||
-                emailStatus?.safeError?.retryable !== false) &&
-              !emailSyncForbidden ? (
-                <button
-                  type="button"
-                  className="eq-btn-secondary"
-                  data-testid="ecc-email-retry"
-                  disabled={emailActionBusy || emailStatus?.state === "running"}
-                  onClick={() => void runInboxSync()}
-                >
-                  Try again
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="eq-btn-ghost"
-                data-testid="ecc-email-view-details"
-                onClick={() => setShowEmailDetails((v) => !v)}
-              >
-                {showEmailDetails ? "Hide details" : "View details"}
-              </button>
-            </div>
-            {showEmailDetails ? (
-              <div className="ecc-email-details" data-testid="ecc-email-diagnostics">
-                <p className="eq-muted">
-                  Category: {emailStatus?.safeError?.category || "unavailable"}
-                  {emailStatus?.runId || emailStatus?.activeRunId || emailStatus?.recentRuns?.[0]?.runId
-                    ? ` · Run: ${String(
-                        emailStatus.runId ||
-                          emailStatus.activeRunId ||
-                          emailStatus.recentRuns?.[0]?.runId
-                      )}`
-                    : ""}
-                  {emailStatus?.startedAt || emailStatus?.lastStartedAt
-                    ? ` · Started: ${formatSyncClock(
-                        emailStatus.startedAt || emailStatus.lastStartedAt
-                      )}`
-                    : ""}
-                </p>
-                <p className="eq-muted">
-                  Retryable:{" "}
-                  {emailStatus?.retryable === false || emailStatus?.safeError?.retryable === false
-                    ? "No"
-                    : "Yes"}
-                </p>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {emailStatus?.state === "completed" && showLastResult ? (
-          <div className="ecc-email-result" data-testid="ecc-email-result">
-            <strong>Inbox sync completed</strong>
-            <ul>
-              {Number.isFinite(Number(emailStatus?.result?.checked)) ? (
-                <li>{Number(emailStatus?.result?.checked)} emails checked</li>
-              ) : null}
-              {Number.isFinite(Number(emailStatus?.result?.created)) ? (
-                <li>{Number(emailStatus?.result?.created)} new estimate requests created</li>
-              ) : null}
-              {Number.isFinite(Number(emailStatus?.result?.duplicates)) ? (
-                <li>{Number(emailStatus?.result?.duplicates)} existing requests skipped</li>
-              ) : null}
-              {emailStatus?.result?.ignored != null &&
-              Number.isFinite(Number(emailStatus.result.ignored)) ? (
-                <li>{Number(emailStatus.result.ignored)} unrelated emails ignored</li>
-              ) : null}
-              {Number.isFinite(Number(emailStatus?.result?.failed)) ? (
-                <li>{Number(emailStatus?.result?.failed)} failures</li>
-              ) : null}
-            </ul>
-          </div>
-        ) : null}
-
-        <details className="ecc-email-details" data-testid="ecc-sync-activity">
-          <summary>Sync activity</summary>
-          {Array.isArray(emailStatus?.recentRuns) && emailStatus.recentRuns.length ? (
-            <ul>
-              {emailStatus.recentRuns.slice(0, 10).map((run) => (
-                <li key={String(run.runId || run.startedAt)}>
-                  {formatSyncClock(String(run.startedAt || ""))}
-                  {" · "}
-                  {String(run.status || "—")}
-                  {" · "}
-                  initiated by {String(run.initiatedBy || "system")}
-                  {run.created != null ? ` · ${Number(run.created)} created` : ""}
-                  {run.duplicates != null ? ` · ${Number(run.duplicates)} skipped` : ""}
-                  {run.failed != null ? ` · ${Number(run.failed)} failed` : ""}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="eq-muted">
-              No recent sync runs in this server process yet. Durable run history is a later
-              enhancement.
-            </p>
-          )}
-        </details>
-      </section>
+      ) : null}
 
       <section className="ecc-summary" aria-label="Estimate summary">
         {COMMAND_CENTER_SUMMARY_CARDS.map((card) => {
@@ -957,6 +680,19 @@ export default function EstimateCommandCenterPage({
           </aside>
         </div>
       ) : null}
+      <MailboxSyncModal
+        open={mailboxSyncOpen}
+        authToken={authToken || ""}
+        apiClient={intakeClient}
+        mailboxDisplay={mailboxDisplay}
+        onClose={() => setMailboxSyncOpen(false)}
+        onImported={(summary) => {
+          setMailboxSyncOpen(false);
+          if (summary) setImportNotice(summary);
+          setRefreshTick((n) => n + 1);
+        }}
+      />
+
     </div>
   );
 }

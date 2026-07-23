@@ -2180,18 +2180,17 @@
 | **Deployment surfaces** | `backend-core`, `app-ai-takeoff`, `app-elite100-estimate-studio`. No manual deployment. |
 | **Open business decisions** | (1) Optional richer “other/back” length editor beyond exposure flags. (2) Whether island/peninsula draft heuristics should be further constrained by areaType only (labels already draft-only). |
 
-### 157. Mailbox sync run finalization (2026-07-23)
+### 157. Mailbox sync run finalization → preview/import Sync inbox (2026-07-23)
 
 | Field | Value |
 |-------|--------|
 | **Date / branch** | 2026-07-23 · `fix/quote-intake-mailbox-sync-run-finalization` |
-| **Hosted failure** | Sync inbox stayed `running` forever with 0 counters while `GET sync-status` polling succeeded. |
-| **Root cause** | Orchestrator launched preview/import asynchronously with **no overall timeout**, **no `finally` terminalization**, and counters written only at success. A hung Graph/bootstrap await left the process-local run `running` indefinitely with the initial empty result. |
-| **Fix** | `try/catch/finally` + `finalizeRun(runId, generation)`; server timeout (`QUOTE_INTAKE_MAILBOX_SYNC_TIMEOUT_MS`, default 90s); status-path reclaim of stale running; orphan `workerActive=false` → `abandoned_after_restart`; late workers cannot overwrite newer generations; intermediate counters after preview; UI stops polling on terminal states and re-enables Sync/Try again. |
-| **Connector cancel** | Underlying Graph/bootstrap work is not hard-cancelled; timed-out runs ignore late completion via generation/runId guards. |
-| **SQL / env** | No SQL. Optional `QUOTE_INTAKE_MAILBOX_SYNC_TIMEOUT_MS` (50–600000). |
-| **Limitation** | Process-local lock only; fresh process starts idle. Distributed lock is later work. |
-| **Deployment surfaces** | `backend-core` (quote-intake), `app-elite100-estimate-studio` (Command Center status UX). No manual deployment. |
+| **Hosted failure (a185b03)** | Background Sync inbox stayed `running` forever with empty counters. |
+| **Finalization (a185b03)** | Added timeout/`finally`/orphan reclaim for a process-local background runner. |
+| **Product correction** | Estimator-facing Command Center **Sync inbox** opens the existing proven `MailboxSyncModal` (preview → select → confirm → import), not a hidden background importer. |
+| **Decision** | Removed unused `/mailbox/sync` + `/mailbox/sync-status` orchestrator and `quoteIntakeMailboxSyncService` (no remaining callers). Command Center and Legacy queue both reuse `MailboxSyncModal` + existing preview/import endpoints. Refresh stays queue-only. Filters/search/sort persist via existing session prefs. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `app-elite100-estimate-studio`, `backend-core` (quote-intake routes only). No manual deployment. |
 
 ### 156. Studio Home shell parity + Command Center email sync (2026-07-23)
 
@@ -2199,7 +2198,7 @@
 |-------|--------|
 | **Date / branch** | 2026-07-23 · `fix/studio-home-shell-and-email-sync-command-center` |
 | **Shell** | Studio already imported `shared/eliteos-ui/EliteosTopbar` (same as Home). Gaps fixed: remove `statusSlot` “Private pilot”; wrap `.shell`; resolve org/logo/name/subtitle from `GET /api/me` like Home/Sales; Home-like account menu (Open Home, Profile & preferences); align `:root` tokens (`--eos-accent: #a3132f`, ink, Inter, `--r-md`, `--sh-1`) so the shared topbar matches Home. |
-| **Email sync** | Command Center calls thin `GET/POST /api/quote-intake/mailbox/sync-status|sync` that orchestrate existing `previewQuoteIntakeMailbox` + `importQuoteIntakeMailboxMessages` only. Same auth stack as mailbox preview/import (`ai_takeoff` + pilot allowlist). Process-local run lock/attach (no SQL). Refresh remains queue-only. |
+| **Email sync** | Superseded by §157: Command Center Sync inbox now opens existing `MailboxSyncModal` (preview/confirm/import). Background `/mailbox/sync*` runner removed. |
 | **Counters** | `checked` / `created` / `duplicates` / `failed` / `manualReview` from preview+import; `ignored` only from preview non-importable rows (never fabricated mailbox totals). |
 | **Gaps** | No durable sync-run history table; no distributed multi-instance lock; no scheduled background sync exists today (manual-only). Documented for a later branch. |
 | **SQL / env** | None new. Reuses existing `QUOTE_INTAKE_*` / Graph flags. |
