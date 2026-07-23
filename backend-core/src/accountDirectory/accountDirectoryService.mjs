@@ -279,7 +279,7 @@ export function createAccountDirectoryService(deps) {
           updatedBy: actorUserId
         });
       }
-      if (payload?.city || payload?.state || payload?.postalCode || payload?.line1) {
+      if (payload?.city || payload?.state || payload?.postalCode || payload?.line1 || payload?.sourceAddressRaw) {
         await store.insertLocation({
           organizationId,
           accountId: account.id,
@@ -288,6 +288,9 @@ export function createAccountDirectoryService(deps) {
           city: payload?.city ? String(payload.city).trim() : null,
           state: payload?.state ? String(payload.state).trim() : null,
           postalCode: payload?.postalCode ? String(payload.postalCode).trim() : null,
+          sourceAddressRaw: payload?.sourceAddressRaw
+            ? String(payload.sourceAddressRaw).trim()
+            : null,
           isPrimaryAccountLocation: true,
           createdBy: actorUserId,
           updatedBy: actorUserId

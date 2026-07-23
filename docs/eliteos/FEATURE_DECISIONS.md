@@ -2281,3 +2281,17 @@
 | **Impacted** | `app-account-directory/**`, `backend-core/src/accountDirectory/**`, `package.json`, this entry. |
 | **Revisit** | Optional nested primaryContact/primaryLocation payload shape; account notes column. |
 
+
+### 160. Account Directory controlled seed import (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `feature/account-directory-controlled-seed-import` |
+| **Decision** | One-time **admin CLI** imports only the clean `account-directory-seed.json` (expected 362). Review CSV, workbook XLSX, and child QB jobs are refused. Dry-run is default-safe; apply requires `--apply`, matching `--confirm-count`, `--environment production`, and `--confirm-production`. Idempotent on org + `quickbooks_desktop` + root List ID; never overwrites manually edited accounts. |
+| **Why** | Hosted Account Directory is empty and ready; foundation dry-run already produced a reviewed seed. Need a governed production load without a permanent employee-facing bulk-import UI. |
+| **Commands** | `npm run account-directory:seed:import` (dry-run/apply), `npm run account-directory:seed:verify`. |
+| **Env** | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ACCOUNT_DIRECTORY_STORE=supabase`, `ACCOUNT_DIRECTORY_SEED_ORGANIZATION_ID`, `ACCOUNT_DIRECTORY_SEED_ACTOR_USER_ID`. |
+| **SQL** | None. |
+| **Real apply** | Not run in development. Chris runs apply after merge/review. |
+| **Impacted** | `backend-core/src/accountDirectory/accountDirectoryControlledSeed*.mjs`, scripts, store lookup helpers, `package.json`, this entry. |
+
