@@ -2295,3 +2295,16 @@
 | **Real apply** | Not run in development. Chris runs apply after merge/review. |
 | **Impacted** | `backend-core/src/accountDirectory/accountDirectoryControlledSeed*.mjs`, scripts, store lookup helpers, `package.json`, this entry. |
 
+### 161. Account Directory master-list reconciliation (no SQL yet) (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `feature/account-directory-master-list-reconciliation` |
+| **Decision** | Broader sales master-list XLSX is reconciled against Account Directory via admin CLI (extract → classify → dry-run artifacts → gated apply). Never duplicates QB-linked accounts, never writes QuickBooks, never imports forbidden CRM/financial columns. |
+| **Classification schema gap** | Workbook fields `Sales Executive`, `Branch`, `Market`, `Account Type`, and source section have **no safe column** on `account_directory_accounts` (and must not be stuffed into notes). **No SQL in this branch.** Proposed future table: `account_directory_classifications` with org-scoped rows: `account_id`, `sales_executive`, `branch`, `market`, `account_type`, `source_section`, `relationship_class`, `source_system`, `row_version`, audit via existing events. Until approved, classifications live **only** in ignored dry-run/review artifacts (`classificationFieldsHeld`). |
+| **Idempotency** | New master-list creates use `external_system = account_master_list` + SHA-256 fingerprint (name/section/status/email/phone) — **not** a QuickBooks List ID. |
+| **Commands** | `npm run account-directory:master-list:profile`, `npm run account-directory:master-list:reconcile` (`--dry-run` / gated `--apply`). |
+| **SQL** | None (stop-and-document). |
+| **Real apply** | Not run in development. |
+| **Impacted** | `backend-core/src/accountDirectory/accountDirectoryMasterList*.mjs`, scripts, `package.json`, this entry. |
+
