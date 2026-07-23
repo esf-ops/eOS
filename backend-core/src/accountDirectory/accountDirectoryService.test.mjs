@@ -21,7 +21,7 @@ async function main() {
           organizationId: ORG,
           role: "installer",
           actorUserId: ACTOR,
-          payload: { name: "Acme" }
+          payload: { displayName: "Acme" }
         }),
       (e) => e instanceof AccountDirectoryError && e.status === 403
     );
@@ -36,7 +36,7 @@ async function main() {
           organizationId: ORG,
           role: "sales",
           actorUserId: ACTOR,
-          payload: { name: "  " }
+          payload: { displayName: "  " }
         }),
       (e) => e.code === "display_name_required"
     );
@@ -49,7 +49,7 @@ async function main() {
       organizationId: ORG,
       role: "sales",
       actorUserId: ACTOR,
-      payload: { name: "Prospect Co" },
+      payload: { displayName: "Prospect Co" },
       asProspect: true
     });
     assert.equal(account.status, "prospect");
@@ -63,14 +63,14 @@ async function main() {
       organizationId: ORG,
       role: "sales",
       actorUserId: ACTOR,
-      payload: { name: "Concurrency Co" }
+      payload: { displayName: "Concurrency Co" }
     });
     const ok = await service.updateAccount({
       organizationId: ORG,
       role: "sales",
       actorUserId: ACTOR,
       accountId: created.id,
-      payload: { name: "Concurrency Co Renamed", rowVersion: created.rowVersion }
+      payload: { displayName: "Concurrency Co Renamed", rowVersion: created.rowVersion }
     });
     assert.equal(ok.name, "Concurrency Co Renamed");
     await assert.rejects(
@@ -80,7 +80,7 @@ async function main() {
           role: "sales",
           actorUserId: ACTOR,
           accountId: created.id,
-          payload: { name: "Stale", rowVersion: created.rowVersion }
+          payload: { displayName: "Stale", rowVersion: created.rowVersion }
         }),
       (e) => e.code === "conflict" && e.status === 409
     );
@@ -93,7 +93,7 @@ async function main() {
       organizationId: ORG,
       role: "admin",
       actorUserId: ACTOR,
-      payload: { name: "Archive Me" }
+      payload: { displayName: "Archive Me" }
     });
     const archived = await service.archiveAccount({
       organizationId: ORG,
@@ -133,7 +133,7 @@ async function main() {
       organizationId: ORG,
       role: "sales",
       actorUserId: ACTOR,
-      payload: { name: "Contact Co", primaryContactName: "Ada", primaryEmail: "ada@example.test" }
+      payload: { displayName: "Contact Co", primaryContactName: "Ada", primaryEmail: "ada@example.test" }
     });
     assert.equal(created.contacts.filter((c) => c.isPrimary && c.isActive).length, 1);
     const updated = await service.addContact({
@@ -154,7 +154,7 @@ async function main() {
       organizationId: ORG,
       role: "sales",
       actorUserId: ACTOR,
-      payload: { name: "Loc Co", city: "Austin", state: "TX" }
+      payload: { displayName: "Loc Co", city: "Austin", state: "TX" }
     });
     await service.addLocation({
       organizationId: ORG,
@@ -175,7 +175,7 @@ async function main() {
       organizationId: ORG,
       role: "sales",
       actorUserId: ACTOR,
-      payload: { name: "Alias Target LLC" }
+      payload: { displayName: "Alias Target LLC" }
     });
     await service.addAlias({
       organizationId: ORG,
@@ -201,13 +201,13 @@ async function main() {
       organizationId: ORG,
       role: "admin",
       actorUserId: ACTOR,
-      payload: { name: "QB A" }
+      payload: { displayName: "QB A" }
     });
     const b = await service.createAccount({
       organizationId: ORG,
       role: "admin",
       actorUserId: ACTOR,
-      payload: { name: "QB B" }
+      payload: { displayName: "QB B" }
     });
     await service.linkQuickBooks({
       organizationId: ORG,
@@ -247,14 +247,14 @@ async function main() {
       organizationId: ORG,
       role: "admin",
       actorUserId: ACTOR,
-      payload: { name: "Audit Co" }
+      payload: { displayName: "Audit Co" }
     });
     account = await service.updateAccount({
       organizationId: ORG,
       role: "admin",
       actorUserId: ACTOR,
       accountId: account.id,
-      payload: { name: "Audit Co 2", rowVersion: account.rowVersion }
+      payload: { displayName: "Audit Co 2", rowVersion: account.rowVersion }
     });
     account = await service.archiveAccount({
       organizationId: ORG,
@@ -288,7 +288,7 @@ async function main() {
         organizationId: ORG,
         role: "sales",
         actorUserId: ACTOR,
-        payload: { name: `Paged ${String(i).padStart(2, "0")}` }
+        payload: { displayName: `Paged ${String(i).padStart(2, "0")}` }
       });
     }
     const page1 = await service.listAccounts({
@@ -330,7 +330,7 @@ async function main() {
       organizationId: ORG,
       role: "admin",
       actorUserId: ACTOR,
-      payload: { name: "Clean Response Co" }
+      payload: { displayName: "Clean Response Co" }
     });
     await service.linkQuickBooks({
       organizationId: ORG,
