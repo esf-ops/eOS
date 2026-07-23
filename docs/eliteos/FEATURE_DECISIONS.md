@@ -2180,6 +2180,21 @@
 | **Deployment surfaces** | `backend-core`, `app-ai-takeoff`, `app-elite100-estimate-studio`. No manual deployment. |
 | **Open business decisions** | (1) Optional richer “other/back” length editor beyond exposure flags. (2) Whether island/peninsula draft heuristics should be further constrained by areaType only (labels already draft-only). |
 
+### 155. Estimate Command Center shared UI integration (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `fix/estimate-command-center-shared-ui-integration` |
+| **Hosted failure** | Command Center rendered with unreadable nav/chips/cards (white-on-white), blank stage pills, green publication banner on the landing page, truncated UUID assignee stubs, duplicate Legacy queue controls, and a generic drawer that did not match Studio panels. |
+| **Root cause** | Global `button { color:#fff; background: accent }` in Studio `styles.css` painted every `<button>` — including `.studio-nav`, `.eq-chip`, and `.ecc-card` — so inactive labels and chip text became invisible on white surfaces. |
+| **Decision** | Visual integration only. Preserve Command Center workflow, stage adapter, next-action routes, and queue API. Scope primary-button styles to `.btn` / explicit action selectors; reuse Studio shell (`EliteosTopbar`, `studio-shell--wide`), `.eq-chip`, `.eq-btn-*`, `.eq-drawer*`, and `:root` tokens. |
+| **Navigation** | Primary: Command Center / Publications / Review Requests. Legacy queue once under **More → Open legacy queue**. Removed in-page duplicate “Open legacy queue”. |
+| **Banner** | Publication pilot banner only on Publications. Command Center uses page subtitle: “Manage estimate requests from intake through customer approval.” |
+| **Assignee display** | No safe display-name join without new requests/SQL in this branch. Neutralize `User {uuid…}` stubs to **Assigned estimator** / **Unassigned** in `toCommandCenterItem` presentation only. |
+| **Default landing** | Temporarily restored to Publications during the fix window; restored to `"command-center"` once shared-UI acceptance checks pass on this branch. |
+| **SQL / env** | None. |
+| **Deployment surfaces** | `app-elite100-estimate-studio`, `backend-core` (view-model presentation only). No manual deployment. |
+
 ### 154. Elite 100 Estimate Studio Command Center (2026-07-23)
 
 | Field | Value |

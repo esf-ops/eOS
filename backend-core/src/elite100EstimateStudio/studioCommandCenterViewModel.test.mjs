@@ -190,4 +190,20 @@ function row(extra = {}) {
   console.log("ok: summary counts match filtered queue; attention sort deterministic");
 }
 
+// Assignee presentation: never surface truncated UUID stubs
+{
+  const stub = toCommandCenterItem(
+    row({ assignedEstimatorLabel: "User 902c8f2c…", assignedEstimatorUserId: "902c8f2c-aaaa-bbbb-cccc-ddddeeee0001" })
+  );
+  assert.equal(stub.assignedUser, "Assigned estimator");
+  assert.equal(/902c8f2c/.test(stub.assignedUser), false);
+
+  const named = toCommandCenterItem(row({ assignedEstimatorLabel: "Chris Henely" }));
+  assert.equal(named.assignedUser, "Chris Henely");
+
+  const none = toCommandCenterItem(row({ assignedEstimatorLabel: "Unassigned", assignedEstimatorUserId: null }));
+  assert.equal(none.assignedUser, "Unassigned");
+  console.log("ok: assignee stubs neutralized; real names preserved");
+}
+
 console.log("\nAll studioCommandCenterViewModel tests passed.\n");

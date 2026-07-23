@@ -22,8 +22,9 @@ const detail = readFileSync(join(root, "src/estimateQueue/EstimateQueueCaseDetai
 const mailbox = readFileSync(join(root, "src/estimateQueue/MailboxSyncModal.tsx"), "utf8");
 const api = readFileSync(join(root, "src/lib/quoteIntakeApi.mjs"), "utf8");
 
-assert.ok(app.includes("Estimate Queue"));
 assert.ok(app.includes("EstimateQueuePage"));
+assert.ok(app.includes("Open legacy queue") || app.includes("estimate-queue"));
+assert.ok(app.includes("EstimateCommandCenterPage") || app.includes("command-center"));
 assert.ok(app.includes("EstimateTakeoffWorkspace") || app.includes("estimate-workspace"));
 assert.ok(queue.includes("Sync inbox"));
 assert.ok(queue.includes("estimate-queue-dashboard"));

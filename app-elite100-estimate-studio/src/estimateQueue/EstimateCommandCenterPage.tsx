@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchEstimateQueue,
   fetchEstimateQueuePreview,
@@ -24,7 +24,6 @@ export type EstimateCommandCenterPageProps = {
   selectedCaseId: string | null;
   onSelectCase: (caseId: string | null) => void;
   onOpenEstimate: (caseId: string, options?: { openTarget?: string }) => void;
-  onOpenLegacyQueue?: () => void;
 };
 
 type QueueApiRow = {
@@ -78,8 +77,7 @@ export default function EstimateCommandCenterPage({
   currentUserId = null,
   selectedCaseId,
   onSelectCase,
-  onOpenEstimate,
-  onOpenLegacyQueue
+  onOpenEstimate
 }: EstimateCommandCenterPageProps) {
   const prefs = useMemo(() => loadCommandCenterSessionPrefs() || {}, []);
   const [rows, setRows] = useState<QueueApiRow[]>([]);
@@ -95,6 +93,8 @@ export default function EstimateCommandCenterPage({
   const [refreshTick, setRefreshTick] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [detail, setDetail] = useState<DetailState>({ kind: "closed" });
+  const drawerCloseBtnRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusRef = useRef<HTMLElement | null>(null);
   const limit = 50;
 
   useEffect(() => {
@@ -182,6 +182,7 @@ export default function EstimateCommandCenterPage({
 
   async function openDetail(caseId: string) {
     if (!authToken) return;
+    lastFocusRef.current = document.activeElement as HTMLElement | null;
     const base = items.find((i) => i.estimateRef === caseId) || toCommandCenterItem({ id: caseId });
     onSelectCase(caseId);
     setDetail({ kind: "loading", caseId });
@@ -211,22 +212,34 @@ export default function EstimateCommandCenterPage({
 
   function closeDetail() {
     setDetail({ kind: "closed" });
+    const prev = lastFocusRef.current;
+    if (prev && typeof prev.focus === "function") {
+      window.setTimeout(() => prev.focus(), 0);
+    }
   }
 
   useEffect(() => {
+    if (detail.kind === "closed") return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") closeDetail();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeDetail();
+      }
     }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    const t = window.setTimeout(() => drawerCloseBtnRef.current?.focus(), 0);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.clearTimeout(t);
+    };
+  }, [detail.kind]);
 
   return (
     <div className="ecc" data-testid="estimate-command-center">
       <header className="ecc-header">
         <div>
           <h1 className="ecc-title">Elite 100 Estimate Command Center</h1>
-          <p className="ecc-subtitle">
+          <p className="ecc-subtitle" data-testid="ecc-subtitle">
             Manage estimate requests from intake through customer approval.
           </p>
         </div>
@@ -240,16 +253,6 @@ export default function EstimateCommandCenterPage({
           >
             Refresh
           </button>
-          {onOpenLegacyQueue ? (
-            <button
-              type="button"
-              className="eq-btn-secondary"
-              data-testid="ecc-legacy-queue"
-              onClick={onOpenLegacyQueue}
-            >
-              Open legacy queue
-            </button>
-          ) : null}
         </div>
       </header>
 
@@ -458,7 +461,7 @@ export default function EstimateCommandCenterPage({
                   ) : (
                     <p className="ecc-item-summary eq-muted">{item.summaryText}</p>
                   )}
-                  <p className="ecc-item-meta eq-muted">
+                  <p className="ecc-item-meta eq-muted" data-testid="ecc-item-assignee">
                     {item.assignedUser}
                     {item.receivedAt
                       ? ` · Received ${formatReceivedAt(item.receivedAt)}`
@@ -502,15 +505,20 @@ export default function EstimateCommandCenterPage({
       </div>
 
       {detail.kind !== "closed" ? (
-        <div className="ecc-drawer-root" data-testid="ecc-detail-drawer">
-          <button
-            type="button"
-            className="ecc-drawer-backdrop"
-            aria-label="Close estimate details"
-            onClick={closeDetail}
-          />
-          <aside className="ecc-drawer" role="dialog" aria-modal="true" aria-label="Estimate details">
-            <div className="ecc-drawer-header">
+        <div
+          className="eq-drawer-backdrop ecc-drawer-root"
+          role="presentation"
+          data-testid="ecc-detail-drawer"
+          onClick={closeDetail}
+        >
+          <aside
+            className="eq-drawer ecc-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Estimate details"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="eq-drawer-header ecc-drawer-header">
               <h2>
                 {detail.kind === "ready"
                   ? detail.item.customerLabel
@@ -518,10 +526,16 @@ export default function EstimateCommandCenterPage({
                     ? "Loading…"
                     : "Details"}
               </h2>
-              <button type="button" className="eq-btn-secondary" onClick={closeDetail}>
+              <button
+                type="button"
+                className="eq-btn-secondary"
+                ref={drawerCloseBtnRef}
+                data-testid="ecc-drawer-close"
+                onClick={closeDetail}
+              >
                 Close
               </button>
-            </div>
+            </header>
             {detail.kind === "loading" ? <p className="eq-muted">Loading estimate summary…</p> : null}
             {detail.kind === "error" ? (
               <p className="eq-state eq-state--error" role="alert">
@@ -532,7 +546,9 @@ export default function EstimateCommandCenterPage({
               <>
                 <p className="ecc-drawer-project">{detail.item.projectLabel}</p>
                 <p>
-                  <span className={`eq-pill eq-pill--${severityTone(detail.item.severity, detail.item.blocked)}`}>
+                  <span
+                    className={`eq-pill eq-pill--${severityTone(detail.item.severity, detail.item.blocked)}`}
+                  >
                     {detail.item.stageLabel}
                   </span>
                 </p>
@@ -543,8 +559,12 @@ export default function EstimateCommandCenterPage({
                     <span className="eq-muted">{detail.item.attentionDetail}</span>
                   </p>
                 ) : null}
-                <p className="eq-muted">
-                  Assigned to {detail.item.assignedUser}
+                <p className="eq-muted" data-testid="ecc-detail-assignee">
+                  {detail.item.assignedUser === "Unassigned"
+                    ? "Unassigned"
+                    : detail.item.assignedUser === "Assigned estimator"
+                      ? "Assigned estimator"
+                      : `Assigned to ${detail.item.assignedUser}`}
                   {detail.item.ageInStage ? ` · In stage ${detail.item.ageInStage}` : ""}
                 </p>
                 <p className="eq-muted">{detail.item.summaryText}</p>
@@ -582,14 +602,16 @@ export default function EstimateCommandCenterPage({
                     );
                   })}
                 </ol>
-                <button
-                  type="button"
-                  className="eq-btn-primary"
-                  data-testid="ecc-detail-primary"
-                  onClick={() => void runPrimary(detail.item)}
-                >
-                  {detail.item.nextActionLabel}
-                </button>
+                <div className="eq-drawer-actions">
+                  <button
+                    type="button"
+                    className="eq-btn-primary"
+                    data-testid="ecc-detail-primary"
+                    onClick={() => void runPrimary(detail.item)}
+                  >
+                    {detail.item.nextActionLabel}
+                  </button>
+                </div>
               </>
             ) : null}
           </aside>

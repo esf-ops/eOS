@@ -108,6 +108,7 @@ export default function StudioApp() {
   const [queueReturnNav, setQueueReturnNav] = useState<"command-center" | "estimate-queue">(
     "command-center"
   );
+  const [moreNavOpen, setMoreNavOpen] = useState(false);
   const [intakeCaseId, setIntakeCaseId] = useState<string | null>(null);
   const [estimateWorkspaceCaseId, setEstimateWorkspaceCaseId] = useState<string | null>(null);
   const [workspaceFocus, setWorkspaceFocus] = useState<
@@ -415,16 +416,18 @@ export default function StudioApp() {
             : "studio-shell"
         }
       >
-        <div className="pilot-banner">
-          Private Elite 100 Estimate Studio — publishes frozen Digital Estimates only. Does not recalculate or
-          modify the source Internal Estimate.
-        </div>
+        {mainNav === "publications" ? (
+          <div className="pilot-banner" data-testid="studio-publications-banner">
+            Private Elite 100 Estimate Studio — publishes frozen Digital Estimates only. Does not
+            recalculate or modify the source Internal Estimate.
+          </div>
+        ) : null}
         {bootError || studioConfigOk === false ? (
           <div className="error-box">{bootError || "Studio API unavailable for this account."}</div>
         ) : null}
         {actionError ? <div className="error-box">{actionError}</div> : null}
 
-        <nav className="studio-nav" aria-label="Studio sections">
+        <nav className="studio-nav" aria-label="Studio sections" data-testid="studio-primary-nav">
           <button
             type="button"
             className={
@@ -435,36 +438,64 @@ export default function StudioApp() {
               setMainNav("command-center");
               setQueueReturnNav("command-center");
               setEstimateWorkspaceCaseId(null);
+              setMoreNavOpen(false);
             }}
           >
             Command Center
           </button>
           <button
             type="button"
-            className={mainNav === "estimate-queue" ? "active" : ""}
-            data-testid="studio-nav-legacy-queue"
-            onClick={() => {
-              setMainNav("estimate-queue");
-              setQueueReturnNav("estimate-queue");
-              setEstimateWorkspaceCaseId(null);
-            }}
-          >
-            Legacy queue
-          </button>
-          <button
-            type="button"
             className={mainNav === "publications" ? "active" : ""}
-            onClick={() => setMainNav("publications")}
+            data-testid="studio-nav-publications"
+            onClick={() => {
+              setMainNav("publications");
+              setMoreNavOpen(false);
+            }}
           >
             Publications
           </button>
           <button
             type="button"
             className={mainNav === "reviews" ? "active" : ""}
-            onClick={() => setMainNav("reviews")}
+            data-testid="studio-nav-review-requests"
+            onClick={() => {
+              setMainNav("reviews");
+              setMoreNavOpen(false);
+            }}
           >
-            Customer review requests
+            Review Requests
           </button>
+          <div className="studio-nav-more">
+            <button
+              type="button"
+              className={mainNav === "estimate-queue" ? "active" : ""}
+              data-testid="studio-nav-more"
+              aria-expanded={moreNavOpen}
+              aria-haspopup="menu"
+              onClick={() => setMoreNavOpen((v) => !v)}
+            >
+              More
+            </button>
+            {moreNavOpen ? (
+              <ul className="studio-nav-more-menu" role="menu" data-testid="studio-nav-more-menu">
+                <li role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="studio-nav-legacy-queue"
+                    onClick={() => {
+                      setMainNav("estimate-queue");
+                      setQueueReturnNav("estimate-queue");
+                      setEstimateWorkspaceCaseId(null);
+                      setMoreNavOpen(false);
+                    }}
+                  >
+                    Open legacy queue
+                  </button>
+                </li>
+              </ul>
+            ) : null}
+          </div>
         </nav>
 
         {mainNav === "command-center" ? (
@@ -473,10 +504,6 @@ export default function StudioApp() {
             currentUserId={userId}
             selectedCaseId={intakeCaseId}
             onSelectCase={setIntakeCaseId}
-            onOpenLegacyQueue={() => {
-              setQueueReturnNav("estimate-queue");
-              setMainNav("estimate-queue");
-            }}
             onOpenEstimate={(caseId, options) => {
               setQueueReturnNav("command-center");
               setEstimateWorkspaceCaseId(caseId);
@@ -521,7 +548,6 @@ export default function StudioApp() {
               setMainNav(queueReturnNav);
               setEstimateWorkspaceCaseId(null);
               setWorkspaceFocus(null);
-              // Keep intakeCaseId so the list restores the selected case.
             }}
           />
         ) : null}
