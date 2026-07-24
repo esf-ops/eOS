@@ -15,6 +15,20 @@ export class ApiError extends Error {
   }
 }
 
+/** Gateway / temporary infrastructure failures — do not advance UI state. */
+export function isTransientHttpError(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  return e.status === 502 || e.status === 503 || e.status === 504;
+}
+
+export function transientFailureMessage(e: unknown): string {
+  if (isTransientHttpError(e)) {
+    return "Service temporarily unavailable. Your changes were not confirmed by the server. Nothing was published or sent. Retry this action after the service becomes available.";
+  }
+  if (e instanceof ApiError) return e.message;
+  return "Request failed";
+}
+
 export function isAbortError(e: unknown): boolean {
   if (!e || typeof e !== "object") return false;
   const name = String((e as { name?: string }).name || "");

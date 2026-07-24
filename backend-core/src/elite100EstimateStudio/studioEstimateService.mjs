@@ -47,6 +47,33 @@ import {
   normalizeProjectDetailsDraft,
   PROJECT_METADATA_SCOPE_KEYS
 } from "./studioProjectDetails.mjs";
+import { buildStudioWorkspaceWorkflow } from "./studioWorkspaceWorkflow.mjs";
+
+/**
+ * Structured mutation log — no PII, no scope dumps, no tokens.
+ * @param {string} action
+ * @param {object} fields
+ */
+function logStudioMutation(action, fields = {}) {
+  try {
+    console.info(
+      JSON.stringify({
+        msg: "studio_estimate_mutation",
+        action,
+        organizationId: fields.organizationId || null,
+        estimateId: fields.estimateId || null,
+        revision: fields.revision ?? null,
+        statusBefore: fields.statusBefore || null,
+        statusAfter: fields.statusAfter || null,
+        ok: fields.ok !== false,
+        errorCode: fields.errorCode || null,
+        durationMs: fields.durationMs ?? null
+      })
+    );
+  } catch {
+    /* ignore logging failures */
+  }
+}
 
 /**
  * Fingerprint of pricing/geometry scope — ignores project metadata fields.
@@ -471,9 +498,9 @@ export function createStudioEstimateService(deps = {}) {
     };
   }
 
-  function safeEstimateView(row) {
+  function safeEstimateView(row, extras = {}) {
     if (!row) return null;
-    return {
+    const base = {
       id: row.id,
       intakeCaseId: row.intakeCaseId,
       takeoffJobId: row.takeoffJobId,
@@ -505,6 +532,7 @@ export function createStudioEstimateService(deps = {}) {
             pricingVersion: row.calculationSnapshot.pricingVersion
           }
         : null,
+      calculationSnapshot: row.calculationSnapshot || null,
       calculationFingerprint: row.calculationFingerprint || row.calculationSnapshot?.fingerprint || null,
       pricingEngine: row.pricingEngine || row.calculationSnapshot?.pricingEngine || null,
       pricingVersion: row.pricingVersion ?? row.calculationSnapshot?.pricingVersion ?? null,
@@ -521,16 +549,36 @@ export function createStudioEstimateService(deps = {}) {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       createdByUserId: row.createdByUserId,
-      updatedByUserId: row.updatedByUserId
+      updatedByUserId: row.updatedByUserId,
+      previousRevisionSummary: extras.previousRevisionSummary || null
     };
+    base.workflow = buildStudioWorkspaceWorkflow(base, {
+      historicalApproval: extras.previousRevisionSummary || null
+    });
+    return base;
   }
 
   async function revisePreservingApprovedSnapshot(row, organizationId, actorUserId, input) {
+    const previousRevisionSummary = {
+      revision: Number(row.revision) || 1,
+      estimateId: row.id,
+      approvedAt: row.approval?.approvedAt || row.approvedAt || null,
+      exactInternalTotal:
+        row.approval?.exactInternalTotal ??
+        row.calculationSnapshot?.totals?.exactInternalTotal ??
+        null,
+      label:
+        row.approval?.exactInternalTotal != null
+          ? `Previous revision approved: $${Number(row.approval.exactInternalTotal).toFixed(2)}`
+          : `Previous revision ${Number(row.revision) || 1} was approved`
+    };
     if (typeof repository.createRevisionFrom === "function") {
-      return repository.createRevisionFrom(organizationId, row.id, input, actorUserId);
+      const next = await repository.createRevisionFrom(organizationId, row.id, input, actorUserId);
+      next.__previousRevisionSummary = previousRevisionSummary;
+      return next;
     }
     // Fallback for older injected repos: invalidate in place (tests may use minimal stubs).
-    return repository.update(
+    const updated = await repository.update(
       organizationId,
       row.id,
       {
@@ -561,6 +609,8 @@ export function createStudioEstimateService(deps = {}) {
       },
       actorUserId
     );
+    updated.__previousRevisionSummary = previousRevisionSummary;
+    return updated;
   }
 
   async function ensureEstimate({ organizationId, intakeCaseId, takeoffJobId, actorUserId }) {
@@ -1059,7 +1109,9 @@ export function createStudioEstimateService(deps = {}) {
           ...identityColumns,
           staleReason: "Scope changed after approval — recalculate and reapprove"
         });
-        return safeEstimateView(row);
+        const prev = row.__previousRevisionSummary || null;
+        delete row.__previousRevisionSummary;
+        return safeEstimateView(row, { previousRevisionSummary: prev });
       }
 
       /** @type {Record<string, unknown>} */
@@ -1087,6 +1139,7 @@ export function createStudioEstimateService(deps = {}) {
      * never creates intake/Takeoff duplicates.
      */
     async updateProjectDetails({ organizationId, estimateId, body, actorUserId }) {
+      const started = Date.now();
       rejectCallerAuthority(body);
       const draft = normalizeProjectDetailsDraft(body?.project || body || {});
       if (draft.errors.length) {
@@ -1094,6 +1147,13 @@ export function createStudioEstimateService(deps = {}) {
         err.statusCode = 422;
         err.code = "project_details_invalid";
         err.details = draft.errors;
+        logStudioMutation("update_project_details", {
+          organizationId,
+          estimateId,
+          ok: false,
+          errorCode: "project_details_invalid",
+          durationMs: Date.now() - started
+        });
         throw err;
       }
 
@@ -1102,8 +1162,16 @@ export function createStudioEstimateService(deps = {}) {
         const err = new Error("Estimate not found");
         err.statusCode = 404;
         err.code = "estimate_not_found";
+        logStudioMutation("update_project_details", {
+          organizationId,
+          estimateId,
+          ok: false,
+          errorCode: "estimate_not_found",
+          durationMs: Date.now() - started
+        });
         throw err;
       }
+      const statusBefore = row.status;
 
       /** @type {Record<string, unknown>} */
       const metaPatch = {};
@@ -1113,6 +1181,15 @@ export function createStudioEstimateService(deps = {}) {
         metaPatch.estimatorNotes = draft.estimatorNotes;
       }
       if (!Object.keys(metaPatch).length) {
+        logStudioMutation("update_project_details", {
+          organizationId,
+          estimateId: row.id,
+          revision: row.revision,
+          statusBefore,
+          statusAfter: row.status,
+          ok: true,
+          durationMs: Date.now() - started
+        });
         return {
           ok: true,
           estimate: safeEstimateView(row),
@@ -1144,6 +1221,15 @@ export function createStudioEstimateService(deps = {}) {
         actorUserId
       );
 
+      logStudioMutation("update_project_details", {
+        organizationId,
+        estimateId: updated.id,
+        revision: updated.revision,
+        statusBefore,
+        statusAfter: updated.status,
+        ok: true,
+        durationMs: Date.now() - started
+      });
       return {
         ok: true,
         estimate: safeEstimateView(updated),
@@ -1155,65 +1241,104 @@ export function createStudioEstimateService(deps = {}) {
     },
 
     async calculate({ organizationId, estimateId, actorUserId, body }) {
+      const started = Date.now();
       rejectCallerAuthority(body);
       let row = await repository.getById(organizationId, estimateId);
       if (!row) {
         const err = new Error("Estimate not found");
         err.statusCode = 404;
         err.code = "estimate_not_found";
-        throw err;
-      }
-      if (isManualStaffEstimate(row) && !isConfirmedManualPhysicalScope(row.scope)) {
-        const err = new Error("Confirm manual scope before calculating");
-        err.statusCode = 409;
-        err.code = "manual_scope_not_confirmed";
-        throw err;
-      }
-      row = await refreshTakeoffGate(row, organizationId, actorUserId);
-      let workspace = null;
-      if (!(isConfirmedManualPhysicalScope(row.scope) && !row.takeoffJobId)) {
-        workspace = await loadWorkspace({
+        logStudioMutation("calculate", {
           organizationId,
-          takeoffJobId: row.takeoffJobId
+          estimateId,
+          ok: false,
+          errorCode: "estimate_not_found",
+          durationMs: Date.now() - started
         });
+        throw err;
       }
-      assertPhysicalScopeAuthorized(row, workspace);
+      const statusBefore = row.status;
+      try {
+        if (isManualStaffEstimate(row) && !isConfirmedManualPhysicalScope(row.scope)) {
+          const err = new Error("Confirm manual scope before calculating");
+          err.statusCode = 409;
+          err.code = "manual_scope_not_confirmed";
+          throw err;
+        }
+        row = await refreshTakeoffGate(row, organizationId, actorUserId);
+        let workspace = null;
+        if (!(isConfirmedManualPhysicalScope(row.scope) && !row.takeoffJobId)) {
+          workspace = await loadWorkspace({
+            organizationId,
+            takeoffJobId: row.takeoffJobId
+          });
+        }
+        assertPhysicalScopeAuthorized(row, workspace);
 
-      const resolved = await resolveTrustedPartnerOnScope(organizationId, row.scope);
-      if (resolved.scope.partnerAccountId !== row.scope.partnerAccountId) {
+        const resolved = await resolveTrustedPartnerOnScope(organizationId, row.scope);
+        if (resolved.scope.partnerAccountId !== row.scope.partnerAccountId) {
+          row = await repository.update(
+            organizationId,
+            estimateId,
+            { scope: resolved.scope },
+            actorUserId
+          );
+        }
+
+        const calc = await calculateImpl({
+          scope: resolved.scope,
+          actorUserId,
+          env
+        });
+
         row = await repository.update(
           organizationId,
           estimateId,
-          { scope: resolved.scope },
+          {
+            calculationSnapshot: calc,
+            status: STUDIO_ESTIMATE_STATUSES.PRICED,
+            staleReason: null
+          },
           actorUserId
         );
+        logStudioMutation("calculate", {
+          organizationId,
+          estimateId: row.id,
+          revision: row.revision,
+          statusBefore,
+          statusAfter: row.status,
+          ok: true,
+          durationMs: Date.now() - started
+        });
+        return safeEstimateView(row);
+      } catch (e) {
+        logStudioMutation("calculate", {
+          organizationId,
+          estimateId,
+          revision: row?.revision,
+          statusBefore,
+          ok: false,
+          errorCode: e?.code || "calculate_failed",
+          durationMs: Date.now() - started
+        });
+        throw e;
       }
-
-      const calc = await calculateImpl({
-        scope: resolved.scope,
-        actorUserId,
-        env
-      });
-
-      row = await repository.update(
-        organizationId,
-        estimateId,
-        {
-          calculationSnapshot: calc,
-          status: STUDIO_ESTIMATE_STATUSES.PRICED,
-          staleReason: null
-        },
-        actorUserId
-      );
-      return safeEstimateView(row);
     },
 
     async approve({ organizationId, estimateId, actorUserId, body }) {
+      const started = Date.now();
       rejectCallerAuthority(body);
       if (body?.confirm !== true) {
         const err = new Error("confirm: true is required to approve");
         err.statusCode = 400;
         err.code = "confirm_required";
+        logStudioMutation("approve", {
+          organizationId,
+          estimateId,
+          ok: false,
+          errorCode: "confirm_required",
+          durationMs: Date.now() - started
+        });
         throw err;
       }
 
@@ -1222,72 +1347,111 @@ export function createStudioEstimateService(deps = {}) {
         const err = new Error("Estimate not found");
         err.statusCode = 404;
         err.code = "estimate_not_found";
-        throw err;
-      }
-
-      // Idempotent: already approved for same calculation fingerprint.
-      if (
-        row.status === STUDIO_ESTIMATE_STATUSES.APPROVED &&
-        row.approval?.calculationFingerprint &&
-        row.calculationSnapshot?.fingerprint === row.approval.calculationFingerprint
-      ) {
-        return safeEstimateView(row);
-      }
-
-      if (isManualStaffEstimate(row) && !isConfirmedManualPhysicalScope(row.scope)) {
-        const err = new Error("Confirm manual scope before approving");
-        err.statusCode = 409;
-        err.code = "manual_scope_not_confirmed";
-        throw err;
-      }
-
-      row = await refreshTakeoffGate(row, organizationId, actorUserId);
-      let workspace = null;
-      if (!(isConfirmedManualPhysicalScope(row.scope) && !row.takeoffJobId)) {
-        workspace = await loadWorkspace({
+        logStudioMutation("approve", {
           organizationId,
-          takeoffJobId: row.takeoffJobId
+          estimateId,
+          ok: false,
+          errorCode: "estimate_not_found",
+          durationMs: Date.now() - started
         });
-      }
-      assertPhysicalScopeAuthorized(row, workspace);
-
-      if (!row.calculationSnapshot?.fingerprint) {
-        const err = new Error("Calculate the estimate before approving");
-        err.statusCode = 409;
-        err.code = "not_priced";
         throw err;
       }
+      const statusBefore = row.status;
 
-      const unresolved = collectUnresolvedItems(row.scope);
-      if (unresolved.length && !row.scope?.unresolvedManualReview) {
-        const err = new Error("Unresolved commercial items block approval");
-        err.statusCode = 422;
-        err.code = "unresolved_items";
-        err.details = unresolved;
-        throw err;
+      try {
+        // Idempotent: already approved for same calculation fingerprint.
+        if (
+          row.status === STUDIO_ESTIMATE_STATUSES.APPROVED &&
+          row.approval?.calculationFingerprint &&
+          row.calculationSnapshot?.fingerprint === row.approval.calculationFingerprint
+        ) {
+          logStudioMutation("approve", {
+            organizationId,
+            estimateId: row.id,
+            revision: row.revision,
+            statusBefore,
+            statusAfter: row.status,
+            ok: true,
+            durationMs: Date.now() - started
+          });
+          return safeEstimateView(row);
+        }
+
+        if (isManualStaffEstimate(row) && !isConfirmedManualPhysicalScope(row.scope)) {
+          const err = new Error("Confirm manual scope before approving");
+          err.statusCode = 409;
+          err.code = "manual_scope_not_confirmed";
+          throw err;
+        }
+
+        row = await refreshTakeoffGate(row, organizationId, actorUserId);
+        let workspace = null;
+        if (!(isConfirmedManualPhysicalScope(row.scope) && !row.takeoffJobId)) {
+          workspace = await loadWorkspace({
+            organizationId,
+            takeoffJobId: row.takeoffJobId
+          });
+        }
+        assertPhysicalScopeAuthorized(row, workspace);
+
+        if (!row.calculationSnapshot?.fingerprint) {
+          const err = new Error("Calculate the estimate before approving");
+          err.statusCode = 409;
+          err.code = "not_priced";
+          throw err;
+        }
+
+        const unresolved = collectUnresolvedItems(row.scope);
+        if (unresolved.length && !row.scope?.unresolvedManualReview) {
+          const err = new Error("Unresolved commercial items block approval");
+          err.statusCode = 422;
+          err.code = "unresolved_items";
+          err.details = unresolved;
+          throw err;
+        }
+
+        const approval = {
+          approvedAt: new Date().toISOString(),
+          approvedByUserId: actorUserId || null,
+          calculationFingerprint: row.calculationSnapshot.fingerprint,
+          sourceTakeoffResultId: row.sourceTakeoffResultId,
+          scopeFingerprint: scopeFingerprint(row.scope),
+          exactInternalTotal: row.calculationSnapshot.totals?.exactInternalTotal ?? null,
+          customerDisplayTotal: row.calculationSnapshot.totals?.customerDisplayTotal ?? null
+        };
+
+        row = await repository.update(
+          organizationId,
+          estimateId,
+          {
+            status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+            approval,
+            staleReason: null
+          },
+          actorUserId
+        );
+        logStudioMutation("approve", {
+          organizationId,
+          estimateId: row.id,
+          revision: row.revision,
+          statusBefore,
+          statusAfter: row.status,
+          ok: true,
+          durationMs: Date.now() - started
+        });
+        return safeEstimateView(row);
+      } catch (e) {
+        logStudioMutation("approve", {
+          organizationId,
+          estimateId,
+          revision: row?.revision,
+          statusBefore,
+          ok: false,
+          errorCode: e?.code || "approve_failed",
+          durationMs: Date.now() - started
+        });
+        throw e;
       }
-
-      const approval = {
-        approvedAt: new Date().toISOString(),
-        approvedByUserId: actorUserId || null,
-        calculationFingerprint: row.calculationSnapshot.fingerprint,
-        sourceTakeoffResultId: row.sourceTakeoffResultId,
-        scopeFingerprint: scopeFingerprint(row.scope),
-        exactInternalTotal: row.calculationSnapshot.totals?.exactInternalTotal ?? null,
-        customerDisplayTotal: row.calculationSnapshot.totals?.customerDisplayTotal ?? null
-      };
-
-      row = await repository.update(
-        organizationId,
-        estimateId,
-        {
-          status: STUDIO_ESTIMATE_STATUSES.APPROVED,
-          approval,
-          staleReason: null
-        },
-        actorUserId
-      );
-      return safeEstimateView(row);
     }
   };
 }

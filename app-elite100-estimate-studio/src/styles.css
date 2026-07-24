@@ -885,7 +885,23 @@ button.linkish {
 }
 .eq-pre--compact { font-size: 0.72rem; max-height: 140px; overflow: auto; }
 .eq-footnote { font-size: 0.72rem; color: #7a8792; margin: 8px 0 0; }
-.eq-action-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.eq-workflow-header {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--eos-border, #d8dde6);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fafbfd 0%, #f4f6f9 100%);
+}
+.eq-workflow-header ul {
+  margin: 4px 0 0;
+  padding-left: 1.1rem;
+}
+.eq-workflow-current h3 {
+  margin: 2px 0 6px;
+  font-size: 1.15rem;
+}
 .eq-attachment-row {
   display: flex; flex-wrap: wrap; gap: 4px 12px;
   justify-content: space-between; align-items: baseline;

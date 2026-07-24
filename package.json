@@ -67,6 +67,7 @@
     "eos:test:studio-account-directory-delivery-safety": "node backend-core/src/elite100EstimateStudio/studioAccountDirectoryDeliverySafety.test.mjs",
     "eos:test:room-scoped-edge-pricing": "node backend-core/src/digitalEstimate/configuration/roomScopedEdgePricing.test.mjs && node backend-core/src/digitalEstimate/configuration/roomScopedEdgePricing.rootCause.test.mjs",
     "eos:test:studio-manual-estimate": "node backend-core/src/elite100EstimateStudio/studioManualEstimate.test.mjs && node app-elite100-estimate-studio/src/estimateQueue/manualEstimate.ui.test.mjs",
+    "eos:test:studio-workspace-workflow": "node backend-core/src/elite100EstimateStudio/studioWorkspaceWorkflow.test.mjs && node app-elite100-estimate-studio/src/estimateQueue/studioWorkspaceSequencing.ui.test.mjs",
     "eos:test:studio-manual-physical-scope-authority": "node backend-core/src/elite100EstimateStudio/studioManualPhysicalScopeAuthority.test.mjs",
     "eos:test:studio-manual-room-open-edge": "node backend-core/src/elite100EstimateStudio/studioManualRoomOpenEdge.test.mjs",
     "eos:test:studio-project-details": "node backend-core/src/elite100EstimateStudio/studioProjectDetails.test.mjs",

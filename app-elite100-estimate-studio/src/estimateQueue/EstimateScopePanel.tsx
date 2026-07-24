@@ -1,5 +1,12 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPatch, apiPost, ApiError } from "../lib/api";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  apiGet,
+  apiPatch,
+  apiPost,
+  ApiError,
+  isTransientHttpError,
+  transientFailureMessage
+} from "../lib/api";
 
 import EstimateDigitalEstimatePanel from "./EstimateDigitalEstimatePanel";
 import StudioAccountDirectoryPanel from "./StudioAccountDirectoryPanel";
@@ -8,6 +15,8 @@ import {
   buildStudioScopeBilling,
   resolveScopeEdgeLinearFeet
 } from "../../../backend-core/src/elite100EstimateStudio/studioScopeBilling.mjs";
+import { workflowAllowsAction } from "../../../backend-core/src/elite100EstimateStudio/studioWorkspaceWorkflow.mjs";
+import type { WorkspaceWorkflow } from "./EstimateWorkflowHeader";
 
 type CustomLineItem = {
   id?: string;
@@ -190,6 +199,13 @@ type StudioEstimate = {
   staleReason?: string | null;
   persistenceWarning?: string | null;
   updatedAt?: string | null;
+  workflow?: WorkspaceWorkflow | null;
+  previousRevisionSummary?: {
+    label?: string;
+    exactInternalTotal?: number | null;
+    revision?: number | null;
+    approvedAt?: string | null;
+  } | null;
 };
 
 type PartnerAccountOption = {
@@ -206,8 +222,17 @@ type Props = {
   refreshKey?: number;
   customerHint?: string;
   projectHint?: string;
+  workflow?: WorkspaceWorkflow | null;
   onEditManualScope?: () => void;
   onEditProjectDetails?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
+  onCanonicalEstimate?: (estimate: StudioEstimate) => void;
+  onActiveEstimateChange?: (
+    estimateId: string,
+    meta?: { revision?: number; previousRevisionSummary?: unknown }
+  ) => void;
+  onTransientFailure?: (err: unknown, retry?: (() => void) | null) => void;
 };
 
 const MATERIAL_GROUPS = [
@@ -232,8 +257,14 @@ export default function EstimateScopePanel({
   refreshKey = 0,
   customerHint = "",
   projectHint = "",
+  workflow: workflowProp = null,
   onEditManualScope,
-  onEditProjectDetails
+  onEditProjectDetails,
+  onDirtyChange,
+  onBusyChange,
+  onCanonicalEstimate,
+  onActiveEstimateChange,
+  onTransientFailure
 }: Props) {
   const [estimate, setEstimate] = useState<StudioEstimate | null>(null);
   const [partnerAccount, setPartnerAccount] = useState<PartnerAccountOption | null>(null);
@@ -248,8 +279,38 @@ export default function EstimateScopePanel({
   // Under Takeoff authority miter/build-up start as "Not identified in
   // approved scope" — this opens the explicit specialty-fabrication fields.
   const [specialtyFabricationOpen, setSpecialtyFabricationOpen] = useState(false);
+  const loadGenRef = useRef(0);
+  const estimateRevisionRef = useRef(0);
+
+  function markDirty(next = true) {
+    setDirty(next);
+    onDirtyChange?.(next);
+  }
+
+  function setBusyTracked(next: boolean) {
+    setBusy(next);
+    onBusyChange?.(next);
+  }
+
+  function applyEstimate(est: StudioEstimate | null) {
+    if (!est) return;
+    const rev = Number(est.revision) || 0;
+    if (estimateRevisionRef.current > rev && estimate?.id && est.id !== estimate.id) {
+      return;
+    }
+    estimateRevisionRef.current = Math.max(estimateRevisionRef.current, rev);
+    setEstimate(est);
+    onCanonicalEstimate?.(est);
+    if (est.id) {
+      onActiveEstimateChange?.(est.id, {
+        revision: est.revision,
+        previousRevisionSummary: est.previousRevisionSummary
+      });
+    }
+  }
 
   const load = useCallback(async () => {
+    const gen = ++loadGenRef.current;
     setLoadError(null);
     try {
       const q = takeoffJobId
@@ -259,15 +320,18 @@ export default function EstimateScopePanel({
         `/api/elite100-estimate-studio/intake-cases/${encodeURIComponent(caseId)}/estimate${q}`,
         authToken
       )) as { estimate?: StudioEstimate; partnerAccount?: PartnerAccountOption | null };
+      if (gen !== loadGenRef.current) return;
       const est = body.estimate || null;
       if (est?.scope) {
         if (!est.scope.customerName && customerHint) est.scope.customerName = customerHint;
         if (!est.scope.projectName && projectHint) est.scope.projectName = projectHint;
       }
-      setEstimate(est);
+      if (est) applyEstimate(est);
+      else setEstimate(null);
       setPartnerAccount(body.partnerAccount || null);
-      setDirty(false);
+      markDirty(false);
     } catch (e) {
+      if (gen !== loadGenRef.current) return;
       const msg = e instanceof ApiError ? e.message : "Unable to load estimate";
       const code =
         e instanceof ApiError && e.body && typeof e.body === "object" && e.body !== null && "code" in e.body
@@ -303,7 +367,7 @@ export default function EstimateScopePanel({
         )) as { estimate?: StudioEstimate };
         if (cancelled) return;
         if (body.estimate) {
-          setEstimate(body.estimate);
+          applyEstimate(body.estimate);
           setActionNotice("Estimate Scope seeded from approved Takeoff.");
         }
       } catch {
@@ -348,7 +412,7 @@ export default function EstimateScopePanel({
           }
         : prev
     );
-    setDirty(true);
+    markDirty(true);
     setActionNotice(null);
   }
 
@@ -377,7 +441,7 @@ export default function EstimateScopePanel({
         }
       };
     });
-    setDirty(true);
+    markDirty(true);
   }
 
   function patchCustomLine(index: number, partial: Partial<CustomLineItem>) {
@@ -387,7 +451,7 @@ export default function EstimateScopePanel({
       lines[index] = { ...lines[index], ...partial };
       return { ...prev, scope: { ...(prev.scope || {}), customLineItems: lines } };
     });
-    setDirty(true);
+    markDirty(true);
   }
 
   function addCustomLine() {
@@ -408,7 +472,7 @@ export default function EstimateScopePanel({
       ];
       return { ...prev, scope: { ...(prev.scope || {}), customLineItems: lines } };
     });
-    setDirty(true);
+    markDirty(true);
   }
 
   function removeCustomLine(index: number) {
@@ -418,7 +482,7 @@ export default function EstimateScopePanel({
       lines.splice(index, 1);
       return { ...prev, scope: { ...(prev.scope || {}), customLineItems: lines } };
     });
-    setDirty(true);
+    markDirty(true);
   }
 
   function patchAddon(key: string, qty: number) {
@@ -427,7 +491,7 @@ export default function EstimateScopePanel({
       const addOns = { ...(prev.scope?.addOns || {}), [key]: qty };
       return { ...prev, scope: { ...(prev.scope || {}), addOns } };
     });
-    setDirty(true);
+    markDirty(true);
   }
 
   /**
@@ -461,7 +525,7 @@ export default function EstimateScopePanel({
         }
       };
     });
-    setDirty(true);
+    markDirty(true);
   }
 
   function patchEdgeAdjustment(partial: Partial<EdgeScopeAdjustment>) {
@@ -475,7 +539,7 @@ export default function EstimateScopePanel({
         scope: { ...(prev.scope || {}), edgeScopeAdjustment: keep ? next : null }
       };
     });
-    setDirty(true);
+    markDirty(true);
   }
 
   function patchFinishedEdgeOverride(partial: Partial<FinishedEdgeOverride>) {
@@ -509,12 +573,12 @@ export default function EstimateScopePanel({
         }
       };
     });
-    setDirty(true);
+    markDirty(true);
   }
 
   async function saveDraft() {
     if (!estimate?.id || !estimate.scope) return;
-    setBusy(true);
+    setBusyTracked(true);
     setActionError(null);
     try {
       const body = (await apiPatch(
@@ -522,19 +586,25 @@ export default function EstimateScopePanel({
         authToken,
         { scope: estimate.scope }
       )) as { estimate?: StudioEstimate };
-      setEstimate(body.estimate || estimate);
-      setDirty(false);
-      setActionNotice("Draft scope saved.");
+      if (body.estimate) applyEstimate(body.estimate);
+      else setEstimate(estimate);
+      markDirty(false);
+      setActionNotice("Pricing Setup saved.");
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : "Save failed");
+      if (isTransientHttpError(e)) {
+        setActionError(transientFailureMessage(e));
+        onTransientFailure?.(e, () => void saveDraft());
+      } else {
+        setActionError(e instanceof ApiError ? e.message : "Save failed");
+      }
     } finally {
-      setBusy(false);
+      setBusyTracked(false);
     }
   }
 
   async function refreshFromTakeoff() {
     if (!estimate?.id) return;
-    setBusy(true);
+    setBusyTracked(true);
     setActionError(null);
     setActionNotice(null);
     try {
@@ -550,7 +620,7 @@ export default function EstimateScopePanel({
           : "Refresh Estimate Scope from approved Takeoff? Measured rooms/pieces will be replaced."
       );
       if (!ok) {
-        setBusy(false);
+        setBusyTracked(false);
         return;
       }
       const body = (await apiPost(
@@ -558,45 +628,70 @@ export default function EstimateScopePanel({
         authToken,
         { force: true, confirm: true }
       )) as { estimate?: StudioEstimate };
-      if (body.estimate) setEstimate(body.estimate);
-      setDirty(false);
+      if (body.estimate) applyEstimate(body.estimate);
+      markDirty(false);
       setActionNotice("Estimate Scope refreshed from Takeoff.");
     } catch (e) {
       setActionError(e instanceof ApiError ? e.message : "Refresh from Takeoff failed");
     } finally {
-      setBusy(false);
+      setBusyTracked(false);
     }
   }
 
   async function calculate() {
     if (!estimate?.id) return;
-    setBusy(true);
+    // Do not silently save unrelated form changes — require explicit Save Pricing Setup.
+    if (dirty) {
+      setActionError("Save Pricing Setup before calculating.");
+      return;
+    }
+    const wf = workflowProp || estimate.workflow || null;
+    if (wf && !workflowAllowsAction(wf, "calculate")) {
+      setActionError(
+        wf.nextRequiredActionDetail ||
+          wf.nextRequiredActionLabel ||
+          "Calculate is not available yet."
+      );
+      return;
+    }
+    setBusyTracked(true);
     setActionError(null);
     try {
-      if (dirty) {
-        await apiPatch(`/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimate.id)}`, authToken, {
-          scope: estimate.scope
-        });
-      }
       const body = (await apiPost(
         `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimate.id)}/calculate`,
         authToken,
         {}
       )) as { estimate?: StudioEstimate };
-      setEstimate(body.estimate || estimate);
-      setDirty(false);
+      if (body.estimate) applyEstimate(body.estimate);
+      markDirty(false);
       setActionNotice("Estimate calculated.");
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : "Calculate failed");
+      // Preserve form + server state; never claim calculated on failure.
+      if (isTransientHttpError(e)) {
+        const msg = transientFailureMessage(e);
+        setActionError(msg);
+        onTransientFailure?.(e, () => void calculate());
+      } else {
+        setActionError(e instanceof ApiError ? e.message : "Calculate failed");
+      }
     } finally {
-      setBusy(false);
+      setBusyTracked(false);
     }
   }
 
   async function approve() {
     if (!estimate?.id) return;
+    const wf = workflowProp || estimate.workflow || null;
+    if (dirty) {
+      setActionError("Save Pricing Setup before approving.");
+      return;
+    }
+    if (estimate.status !== "priced" || (wf && !workflowAllowsAction(wf, "approve"))) {
+      setActionError("Calculate the estimate before approving.");
+      return;
+    }
     if (!window.confirm("Approve this estimate? Scope and Takeoff changes will invalidate approval.")) return;
-    setBusy(true);
+    setBusyTracked(true);
     setActionError(null);
     try {
       const body = (await apiPost(
@@ -604,12 +699,17 @@ export default function EstimateScopePanel({
         authToken,
         { confirm: true }
       )) as { estimate?: StudioEstimate };
-      setEstimate(body.estimate || estimate);
+      if (body.estimate) applyEstimate(body.estimate);
       setActionNotice("Estimate approved. Ready for a later Digital Estimate publication step.");
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.message : "Approve failed");
+      if (isTransientHttpError(e)) {
+        setActionError(transientFailureMessage(e));
+        onTransientFailure?.(e, () => void approve());
+      } else {
+        setActionError(e instanceof ApiError ? e.message : "Approve failed");
+      }
     } finally {
-      setBusy(false);
+      setBusyTracked(false);
     }
   }
 
@@ -631,6 +731,21 @@ export default function EstimateScopePanel({
 
   const blocked = estimate.status === "needs_takeoff_approval";
   const scope = estimate.scope || {};
+  const workflow = workflowProp || estimate.workflow || null;
+  const pricingDirty = dirty;
+  const canCalculate =
+    !busy &&
+    !blocked &&
+    !pricingDirty &&
+    (!workflow || workflowAllowsAction(workflow, "calculate"));
+  const canApprove =
+    !busy &&
+    !blocked &&
+    !pricingDirty &&
+    estimate.status === "priced" &&
+    (!workflow || workflowAllowsAction(workflow, "approve"));
+  const approvalCurrent = workflow?.approvalCurrent === true;
+  const calculationCurrent = workflow?.calculationCurrent === true;
   const totals = estimate.calculation?.totals;
   // Approved Takeoff = physical-scope authority. Manual quantity entry only
   // exists as a clearly-labeled fallback when no approved Takeoff seeded scope.
@@ -716,20 +831,20 @@ export default function EstimateScopePanel({
           </div>
           <div>
             <dt>Calculation</dt>
-            <dd>
-              {estimate.calculation?.calculatedAt
-                ? `Calculated ${estimate.calculation.calculatedAt}`
-                : estimate.status === "priced" || estimate.status === "approved"
-                  ? "Priced"
-                  : "Not calculated"}
+            <dd data-testid="eq-calculation-label">
+              {workflow?.display?.calculationLabel ||
+                (calculationCurrent
+                  ? `Calculated ${estimate.calculation?.calculatedAt || ""}`.trim()
+                  : "Not calculated")}
             </dd>
           </div>
           <div>
             <dt>Approval</dt>
-            <dd>
-              {estimate.approval?.approvedAt || estimate.approvedAt
-                ? `Approved ${estimate.approval?.approvedAt || estimate.approvedAt}`
-                : "Not approved"}
+            <dd data-testid="eq-approval-label">
+              {workflow?.display?.approvalLabel ||
+                (approvalCurrent
+                  ? `Approved ${estimate.approval?.approvedAt || estimate.approvedAt || ""}`.trim()
+                  : "Not approved")}
             </dd>
           </div>
           <div>
@@ -2018,7 +2133,7 @@ export default function EstimateScopePanel({
 
       <section className="eq-estimate-section" aria-label="Estimate approval">
         <h2>D. Approval</h2>
-        {estimate.approval?.approvedAt ? (
+        {approvalCurrent && estimate.approval?.approvedAt ? (
           <p className="eq-muted" data-testid="eq-estimate-approved">
             Approved {estimate.approval.approvedAt}
             {estimate.approval.exactInternalTotal != null
@@ -2026,8 +2141,22 @@ export default function EstimateScopePanel({
               : ""}
           </p>
         ) : (
-          <p className="eq-muted">Not approved yet.</p>
+          <p className="eq-muted" data-testid="eq-estimate-not-approved">
+            Not approved yet.
+          </p>
         )}
+        {(workflow?.historicalApproval?.label || estimate.previousRevisionSummary?.label) &&
+        !approvalCurrent ? (
+          <p className="eq-footnote" data-testid="eq-historical-approval">
+            Historical:{" "}
+            {workflow?.historicalApproval?.label || estimate.previousRevisionSummary?.label}
+          </p>
+        ) : null}
+        {!canCalculate && pricingDirty ? (
+          <p className="eq-muted" data-testid="eq-calculate-blocked-dirty">
+            Save Pricing Setup before calculating.
+          </p>
+        ) : null}
         {actionError ? (
           <div className="eq-state eq-state--error" role="alert">
             {actionError}
@@ -2042,7 +2171,7 @@ export default function EstimateScopePanel({
           <button
             type="button"
             className="eq-btn-primary"
-            disabled={busy || blocked}
+            disabled={!canCalculate}
             data-testid="eq-calculate-estimate"
             onClick={() => void calculate()}
           >
@@ -2051,7 +2180,7 @@ export default function EstimateScopePanel({
           <button
             type="button"
             className="eq-btn-secondary"
-            disabled={busy || blocked || estimate.status !== "priced"}
+            disabled={!canApprove || estimate.status !== "priced"}
             data-testid="eq-approve-estimate"
             onClick={() => void approve()}
           >
@@ -2063,7 +2192,7 @@ export default function EstimateScopePanel({
         </div>
       </section>
 
-      {estimate.approval?.approvedAt || estimate.status === "approved" ? (
+      {approvalCurrent ? (
         <EstimateDigitalEstimatePanel
           authToken={authToken}
           estimateId={estimate.id}
