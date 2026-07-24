@@ -239,7 +239,9 @@ console.log("\nstudioEstimateDigitalEstimate.publishFix.test.mjs\n");
   assert.equal(customer?.field, "customerName");
   assert.equal(project?.field, "projectName");
   assert.match(customer.message, /Customer name is required/i);
-  assert.match(project.message, /Project name is required/i);
+  assert.match(project.message, /Add a project name before publishing/i);
+  assert.equal(project.action, "edit_project_details");
+  assert.equal(project.title, "Project name required");
   console.log("ok: 2 blank customer/project block readiness with field + message");
 }
 

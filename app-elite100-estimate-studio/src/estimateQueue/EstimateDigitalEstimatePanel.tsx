@@ -12,7 +12,9 @@ type PublishUiState = "idle" | "publishing" | "published" | "failed";
 
 type ReadinessBlocker = {
   code?: string;
+  title?: string;
   message?: string;
+  action?: string | null;
   field?: string | null;
   allowedRange?: { min?: string; max?: string } | null;
 };
@@ -130,6 +132,7 @@ type Props = {
   estimateId: string;
   estimateRevision?: number | null;
   estimateApproved: boolean;
+  onEditProjectDetails?: () => void;
 };
 
 function formatStructuredPublishError(e: ApiError): {
@@ -186,7 +189,8 @@ export default function EstimateDigitalEstimatePanel({
   authToken,
   estimateId,
   estimateRevision,
-  estimateApproved
+  estimateApproved,
+  onEditProjectDetails
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [publishUiState, setPublishUiState] = useState<PublishUiState>("idle");
@@ -633,9 +637,22 @@ export default function EstimateDigitalEstimatePanel({
               return true;
             })
             .map((b, i) => (
-              <li key={`${b.code || "b"}-${i}`}>
-                {b.message || b.code}
-                {b.field ? ` (${b.field})` : ""}
+              <li key={`${b.code || "b"}-${i}`} data-testid={`eq-de-blocker-${b.code || "unknown"}`}>
+                <div>
+                  {b.title ? <strong>{b.title}</strong> : null}
+                  {b.title ? <br /> : null}
+                  {b.message || b.code}
+                </div>
+                {b.action === "edit_project_details" || b.code === "project_name_required" ? (
+                  <button
+                    type="button"
+                    className="eq-btn-secondary"
+                    data-testid="eq-de-edit-project-details"
+                    onClick={() => onEditProjectDetails?.()}
+                  >
+                    Edit project details
+                  </button>
+                ) : null}
               </li>
             ))}
         </ul>

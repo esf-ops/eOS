@@ -207,6 +207,7 @@ type Props = {
   customerHint?: string;
   projectHint?: string;
   onEditManualScope?: () => void;
+  onEditProjectDetails?: () => void;
 };
 
 const MATERIAL_GROUPS = [
@@ -231,7 +232,8 @@ export default function EstimateScopePanel({
   refreshKey = 0,
   customerHint = "",
   projectHint = "",
-  onEditManualScope
+  onEditManualScope,
+  onEditProjectDetails
 }: Props) {
   const [estimate, setEstimate] = useState<StudioEstimate | null>(null);
   const [partnerAccount, setPartnerAccount] = useState<PartnerAccountOption | null>(null);
@@ -830,6 +832,11 @@ export default function EstimateScopePanel({
           </div>
         ) : null}
         <h3>Customer and project</h3>
+        <p className="eq-muted">
+          Prefer the <strong>Project details</strong> section above for project name and jobsite
+          address. Fields here stay in sync and do not change measured scope or pricing when only
+          metadata changes.
+        </p>
         {authToken ? (
           <StudioAccountDirectoryPanel
             sessionToken={authToken}
@@ -2062,6 +2069,7 @@ export default function EstimateScopePanel({
           estimateId={estimate.id}
           estimateRevision={estimate.revision ?? null}
           estimateApproved
+          onEditProjectDetails={onEditProjectDetails}
         />
       ) : null}
     </div>
