@@ -44,7 +44,26 @@ function takeoffScope(extra = {}) {
         name: "Kitchen",
         included: true,
         countertopSqft: 30,
-        pieces: [{ id: "p1", name: "Run A", pieceType: "counter", sqft: 30, included: true }]
+        approvedFinishedEdgeLf: 15.42,
+        edgeEligibleLinearFeet: 15.42,
+        pieces: [
+          {
+            id: "p1",
+            name: "Run A",
+            pieceType: "counter",
+            sqft: 30,
+            included: true,
+            finishedEdge: {
+              frontEdgeLengthIn: 185.04,
+              leftExposedEdgeLengthIn: 0,
+              rightExposedEdgeLengthIn: 0,
+              otherExposedEdgeLengthIn: 0,
+              totalFinishedEdgeLengthIn: 185.04,
+              approved: true,
+              source: "estimator_confirmed"
+            }
+          }
+        ]
       }
     ],
     addOns: {},

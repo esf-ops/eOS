@@ -372,7 +372,7 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     const token = normalizeEdgeProfileToken(
       compat.edgeProfileToken || parts.slice(2).join(":") || "edge_eased"
     );
-    const frozen = findFrozenEdgeOptionEffect(ctx?.edgeOptionEffects, token);
+    const frozen = findFrozenEdgeOptionEffect(ctx?.edgeOptionEffects, token, roomKey);
     if (frozen) {
       edgeEffect = edgeEffectFromFrozenPublication(frozen);
     } else {
@@ -384,20 +384,26 @@ function toCustomerSafeOption(opt, group, ctx = null) {
           (r) =>
             String(r.displayName || "").toLowerCase() === String(roomKey || "").toLowerCase()
         );
-      const lf =
-        Number(roomRow?.edgeLinearFeet) ||
-        Number(ctx?.edgeLinearFeetTotal) ||
-        (ctx?.configuredRooms || ctx?.rooms || []).reduce(
-          (s, r) => s + (Number(r.edgeLinearFeet) || 0),
-          0
-        ) ||
-        0;
-      edgeEffect = resolveEdgeOptionPriceEffect({
-        profileToken: token,
-        originalProfileToken: compat.originalEdgeProfile || null,
-        edgeLinearFeet: lf,
-        pricingBasis: ctx?.pricingBasis || "direct"
-      });
+      // Room-scoped only — never fall back to project edgeLinearFeetTotal.
+      const lf = Number(roomRow?.edgeLinearFeet) || 0;
+      const roomAuthoritative =
+        roomRow?.edgeQuantityAuthoritative !== false &&
+        (lf > 0 || roomRow?.edgeQuantityAuthoritative === true);
+      if (!roomAuthoritative && !(lf > 0)) {
+        edgeEffect = resolveEdgeOptionPriceEffect({
+          profileToken: token,
+          originalProfileToken: compat.originalEdgeProfile || null,
+          edgeLinearFeet: 0,
+          pricingBasis: ctx?.pricingBasis || "direct"
+        });
+      } else {
+        edgeEffect = resolveEdgeOptionPriceEffect({
+          profileToken: token,
+          originalProfileToken: compat.originalEdgeProfile || null,
+          edgeLinearFeet: lf,
+          pricingBasis: ctx?.pricingBasis || "direct"
+        });
+      }
     }
     treatment = edgeEffect.customerPriceTreatment;
     sell = edgeEffect.visibleDelta;
@@ -2130,7 +2136,7 @@ export function createPublicConfigurationService(deps) {
           const roomKey = parts[1];
           const token = normalizeEdgeProfileToken(parts.slice(2).join(":"));
           if (!isPremiumEdgeProfile(token)) continue;
-          const frozen = findFrozenEdgeOptionEffect(ctx.edgeOptionEffects, token);
+          const frozen = findFrozenEdgeOptionEffect(ctx.edgeOptionEffects, token, roomKey);
           if (frozen) {
             if (
               frozen.reviewRequired ||
@@ -2156,9 +2162,10 @@ export function createPublicConfigurationService(deps) {
             });
             continue;
           }
-          // Legacy publications without frozen edge_option_effects: LF × rate.
+          // Legacy publications without frozen edge_option_effects: room LF × rate.
+          // Never substitute project-wide edgeLfTotal for a room selection.
           const roomRow = rooms.find((r) => r.roomKey === roomKey);
-          const lf = Number(roomRow?.edgeLinearFeet) || Number(edgeLfTotal) || 0;
+          const lf = Number(roomRow?.edgeLinearFeet) || 0;
           if (!(lf > 0)) {
             reviewFlags.push(`edge_length_review:${roomKey}:${token}`);
             continue;

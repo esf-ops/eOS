@@ -19,6 +19,7 @@ import {
   buildCustomerSafeEdgeOptionEffects,
   normalizeEdgeProfileToken
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
+import { resolveRoomApprovedEligibleEdgeLf } from "./studioRoomEdgeQuantity.mjs";
 
 function str(v) {
   if (v == null) return "";
@@ -278,25 +279,19 @@ function freezePiecesForPublication(pieces) {
  */
 export function buildStudioEstimateRoomsForPublication(estimate) {
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
-  const calc = estimate?.calculationSnapshot || estimate?.calculation || null;
   const materialGroup = str(scope.materialGroup) || "Group Promo";
   const colorName = scope.colorTbd ? null : str(scope.colorName) || null;
   const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
   const edgeScope = resolveScopeEdgeLinearFeet(scope);
-  // Prefer the approved Studio calculation final LF when present; otherwise
-  // fall back to scope-derived LF (legacy / pre-calc freeze paths).
-  const calcEdge = calc?.fabrication?.edge;
-  const finalEdgeLf =
-    calcEdge && Number.isFinite(Number(calcEdge.finalLf))
-      ? Math.max(0, Number(calcEdge.finalLf))
-      : Number(edgeScope.finalLf) || 0;
   const included = rooms.filter((r) => r && r.included !== false);
-  // Temporary room-ownership policy (FEATURE_DECISIONS §150): project-level
-  // priced open-edge LF is assigned to the first countertop room so DE
-  // room-scoped premium edge options have a single governed owner without
-  // double-counting across rooms. Digital Estimate must not re-guess ownership.
-  let edgeAssigned = false;
+  // Room-scoped edge LF (FEATURE_DECISIONS §165): each room freezes its own
+  // approved eligible finished-edge quantity. Never assign project finalLf to
+  // the first countertop room.
   return included.map((r, idx) => {
+      const roomEdge = resolveRoomApprovedEligibleEdgeLf(r);
+      const edgeQuantityAuthoritative = roomEdge.authoritative === true;
+      const edgeLinearFeet =
+        edgeQuantityAuthoritative && roomEdge.lf != null ? Math.max(0, Number(roomEdge.lf) || 0) : 0;
       const pieces = freezePiecesForPublication(r.pieces);
       let countertopSqft = Number(r.countertopSqft);
       let backsplashSqft = Number(r.backsplashSqft);
@@ -331,11 +326,6 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
       const backsplashMeasuredLengthIn = Number.isFinite(Number(r.backsplashMeasuredLengthIn))
         ? Number(r.backsplashMeasuredLengthIn)
         : null;
-      let edgeLinearFeet = 0;
-      if (!edgeAssigned && countertopSqft > 0 && finalEdgeLf > 0) {
-        edgeLinearFeet = finalEdgeLf;
-        edgeAssigned = true;
-      }
       return {
         id: str(r.id) || `room-${idx + 1}`,
         name: str(r.name) || `Room ${idx + 1}`,
@@ -347,6 +337,11 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
         backsplashMeasuredLengthIn,
         edgeLinearFeet,
         edgeFinalLf: edgeLinearFeet,
+        edgeQuantityAuthoritative,
+        edgeQuantitySource: roomEdge.source || null,
+        edgeQuantityMissingReason: edgeQuantityAuthoritative
+          ? null
+          : roomEdge.missingReason || "missing_room_edge_lf",
         edgeScopeSource: edgeScope.source || null,
         materialGroup,
         colorName,
@@ -458,28 +453,40 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
     rooms.reduce((s, r) => s + (Number(r.edgeLinearFeet) || 0), 0)
   );
   const calcEdge = calc?.fabrication?.edge;
-  const finalPricedEdgeLf =
-    calcEdge && Number.isFinite(Number(calcEdge.finalLf))
-      ? Math.max(0, Number(calcEdge.finalLf))
-      : edgeLfTotal;
   const originalProfileToken = normalizeEdgeProfileToken(
     calcEdge?.profileToken || scope.edgeProfileToken || "edge_eased"
   );
-  // Same temporary ownership policy as room freeze: first countertop room that
-  // received the project aggregate edge LF (or first countertop room).
-  const ownerRoom =
-    rooms.find((r) => Number(r.edgeLinearFeet) > 0) ||
-    rooms.find((r) => Number(r.countertopSqft) > 0) ||
-    rooms[0] ||
-    null;
-  const edgeOptionEffects = buildCustomerSafeEdgeOptionEffects({
-    finalPricedEdgeLf,
-    pricingBasis,
-    originalProfileToken,
-    roomKey: ownerRoom?.id || null,
-    roomName: ownerRoom?.name || null
-  });
-  return {
+  // Per-room frozen effects: each room's approved LF × catalog rate.
+  // Rooms without authoritative LF get review_required premium effects (no
+  // project-total substitution).
+  /** @type {Array<object>} */
+  const edgeOptionEffects = [];
+  for (const room of rooms) {
+    const roomKey = room?.id || null;
+    const roomName = room?.name || null;
+    const authoritative = room?.edgeQuantityAuthoritative === true;
+    const roomLf = authoritative ? Math.max(0, Number(room.edgeLinearFeet) || 0) : 0;
+    const roomEffects = buildCustomerSafeEdgeOptionEffects({
+      finalPricedEdgeLf: roomLf,
+      pricingBasis,
+      originalProfileToken,
+      roomKey,
+      roomName
+    });
+    if (!authoritative) {
+      for (const row of roomEffects) {
+        if (row.classification === "premium" && !row.originalSelection) {
+          row.available = false;
+          row.reviewRequired = true;
+          row.priceEffectCents = null;
+          row.priceEffectLabel = "Elite will confirm this option and price.";
+          row.customerPriceTreatment = "review_required";
+          row.blockReason = "missing_room_edge_lf";
+        }
+      }
+    }
+    edgeOptionEffects.push(...roomEffects);
+  }  return {
     materialProgramDefault: "elite_100",
     material_program_default: "elite_100",
     materialGroup: str(scope.materialGroup) || "Group Promo",
