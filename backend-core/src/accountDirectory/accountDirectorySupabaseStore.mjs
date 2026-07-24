@@ -682,6 +682,31 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return (data || []).map(mapLink);
     },
 
+    /**
+     * Batched active external links for Live Digital Estimates (no per-account round trip).
+     * @param {string} organizationId
+     * @param {string[]} accountIds
+     * @param {string} [externalSystem]
+     */
+    async listActiveExternalLinksForAccountIds(
+      organizationId,
+      accountIds,
+      externalSystem = "quickbooks_desktop"
+    ) {
+      const ids = [...new Set((accountIds || []).map(String).filter(Boolean))];
+      if (!ids.length) return [];
+      let q = db()
+        .from("account_directory_external_links")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("is_active", true)
+        .in("account_id", ids);
+      if (externalSystem) q = q.eq("external_system", externalSystem);
+      const { data, error } = await q;
+      if (error) throw dbError(error, "Could not list external links.");
+      return (data || []).map(mapLink);
+    },
+
     async listExternalLinksForOrganization(organizationId) {
       const { data, error } = await db()
         .from("account_directory_external_links")

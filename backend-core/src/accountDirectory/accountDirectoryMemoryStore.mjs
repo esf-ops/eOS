@@ -406,6 +406,30 @@ export function createAccountDirectoryMemoryStore() {
         .map(clone);
     },
 
+    /**
+     * Batched active external links for portfolio / list enrichment (no N+1).
+     * @param {string} organizationId
+     * @param {string[]} accountIds
+     * @param {string} [externalSystem]
+     */
+    async listActiveExternalLinksForAccountIds(
+      organizationId,
+      accountIds,
+      externalSystem = "quickbooks_desktop"
+    ) {
+      const want = new Set((accountIds || []).map(String).filter(Boolean));
+      if (!want.size) return [];
+      return Array.from(externalLinks.values())
+        .filter(
+          (l) =>
+            l.organizationId === organizationId &&
+            want.has(String(l.accountId)) &&
+            l.isActive &&
+            (externalSystem == null || l.externalSystem === externalSystem)
+        )
+        .map(clone);
+    },
+
     async listExternalLinksForOrganization(organizationId) {
       return Array.from(externalLinks.values())
         .filter((l) => l.organizationId === organizationId)

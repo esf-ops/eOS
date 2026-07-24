@@ -2365,7 +2365,21 @@
 | **Grouping** | By `account_directory_account_id` when present; otherwise stable unlinked key. Never fuzzy name match. Batched AD lookup. Frozen publication identity preserved (`Published as …` when live AD name differs). |
 | **Mutations** | Publish / replace / revoke / copy link / email remain explicit estimator actions with existing confirmations. List/detail GET never publish, email, or record link-copied/viewed. |
 | **SQL** | None required (existing publication / event / review / studio_estimates / AD tables). |
-| **Tests** | `eos:test:live-digital-estimates`, `liveDigitalEstimates.ui.test.mjs`. |
+| **Tests** | `eos:test:live-digital-estimates`, `liveDigitalEstimates.ui.test.mjs`, `liveDigitalEstimatesQuickbooksConsistency.test.mjs`. |
 | **Impacted** | `app-elite100-estimate-studio`, `backend-core/src/elite100EstimateStudio/liveDigitalEstimates*`, DE repository portfolio list helpers, this entry. |
+
+### 167. Live Digital Estimates operations polish (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/live-digital-estimates-operations-polish` |
+| **Role** | Operational portfolio for estimators — not Analytics, not a publish console. |
+| **Grouping** | Canonical Account Directory `account_directory_account_id` controls linked groups. Unlinked rows keep stable identity keys (`unlinked:family|quote|pub:…`); group titles use frozen publication identity (never fuzzy name match; never repeat generic “Unlinked customers” per row). |
+| **QuickBooks Linked** | Canonical Account Directory active `quickbooks_desktop` external links only (shared helper with Studio AD panel / AD service). Never inferred from display name, frozen snapshot, partnerAccountId, or ad-hoc account columns. Portfolio exposes Linked / Not Linked labels only — never List IDs. |
+| **Detail** | Right-side drawer; GET detail is read-only (no copy, view, publish, revoke, replace, email, or review mutations on open). |
+| **Actions** | Neutral hierarchy for normal row actions; warning outline for linkage/expiration; destructive styling reserved for Revoke (confirmed). Publish / replace / revoke / copy remain explicit. |
+| **SQL** | None (UI + enrichment polish only). |
+| **Tests** | Existing Live DE suite + QB consistency regression + UI hierarchy/drawer contracts. |
+| **Impacted** | `LiveDigitalEstimatesPage`, `liveDigitalEstimatesService`, `accountDirectoryQuickbooksLinkage`, AD store batch link APIs, this entry. |
 
 

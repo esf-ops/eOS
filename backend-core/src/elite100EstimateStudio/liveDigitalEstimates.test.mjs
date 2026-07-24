@@ -91,8 +91,8 @@ async function buildHarness() {
     await adStore.insertExternalLink({
       organizationId: ORG,
       accountId: accountA,
-      system: "quickbooks",
-      externalId: "QB-ACME"
+      externalSystem: "quickbooks_desktop",
+      externalId: "QB-ACME-LIST-SENTINEL"
     });
   }
 
@@ -384,9 +384,11 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
 
   const unlinked = active.groups.find((g) => g.isUnlinkedGroup);
   assert.ok(unlinked);
-  assert.equal(unlinked.accountDisplayName, "Unlinked customers");
+  assert.equal(unlinked.accountDisplayName, "Legacy Walk-in");
+  assert.equal(unlinked.accountLinkageLabel, "Account Directory not linked");
   assert.ok(unlinked.publications.some((p) => p.publicationId === "pub-unlinked"));
-  console.log("ok: 5 unlinked publications under Unlinked customers");
+  assert.notEqual(unlinked.accountDisplayName, "Unlinked customers");
+  console.log("ok: 5 unlinked group uses frozen identity title, not repeated Unlinked customers");
 
   // Page of 1 but metrics over full filtered set
   const paged = await service.listPortfolio({
@@ -420,10 +422,11 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
   assert.ok(liveName);
   console.log("ok: 16–17 frozen publication identity + canonical AD grouping");
 
-  assert.equal(acmeGroups[0].quickbooksLinked === true || acmeGroups[0].quickbooksLinked === false, true);
+  assert.equal(acmeGroups[0].quickbooksLinked, true);
+  assert.equal(other.quickbooksLinked, false);
   const raw = JSON.stringify(active);
-  assert.doesNotMatch(raw, /token_hash|token_wrapped|pricing_evidence|QB-ACME|secret|service_role/i);
-  console.log("ok: 18–19 QB Linked/Not Linked only; no sensitive list fields");
+  assert.doesNotMatch(raw, /token_hash|token_wrapped|pricing_evidence|QB-ACME-LIST-SENTINEL|secret|service_role/i);
+  console.log("ok: 18–19 QB Linked/Not Linked from AD external links; no List IDs exposed");
 
   // Side-effect free GET simulation — no publish/email helpers invoked
   const beforeEvents = deRepo._dump ? deRepo._dump().events.length : 0;

@@ -1,6 +1,7 @@
 import { normalizeAccountDirectorySearch } from "./accountDirectoryMemoryStore.mjs";
 import { ACCOUNT_DIRECTORY_CAPABILITIES, roleHasCapability } from "./accountDirectoryAuth.mjs";
 import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
+import { isAccountQuickbooksLinked } from "./accountDirectoryQuickbooksLinkage.mjs";
 
 export { AccountDirectoryError };
 
@@ -114,7 +115,7 @@ export function createAccountDirectoryService(deps) {
       activeContacts.find((c) => c.isPrimaryEstimating) || activeContacts[0] || null;
     const primaryLoc =
       activeLocations.find((l) => l.isPrimaryAccountLocation) || activeLocations[0] || null;
-    const qbLinked = links.some((l) => l.isActive && l.externalSystem === "quickbooks_desktop");
+    const qbLinked = isAccountQuickbooksLinked(links);
     const hasAliases = aliases.some((a) => a.isActive !== false);
     return {
       id: account.id,
