@@ -75,7 +75,7 @@ body {
 .studio-grid {
   display: grid;
   gap: 1.25rem;
-  grid-template-columns: minmax(240px, 320px) 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (max-width: 860px) {
@@ -415,26 +415,247 @@ button.linkish {
 
 .review-table {
   width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.86rem;
+  table-layout: auto;
+}
+
+.review-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--eos-border);
+  border-radius: var(--eos-radius);
+  background: #fff;
 }
 
 .review-table th,
 .review-table td {
   border-bottom: 1px solid var(--eos-border);
   text-align: left;
-  padding: 0.45rem 0.35rem;
+  padding: 0.65rem 0.75rem;
   vertical-align: top;
+  white-space: nowrap;
+}
+
+.review-table th {
+  position: sticky;
+  top: 0;
+  background: #fafbfd;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eos-muted);
+  z-index: 1;
+}
+
+.review-table td:first-child,
+.review-table th:first-child {
+  white-space: normal;
+  min-width: 11rem;
 }
 
 .review-table tr.is-selected {
   background: var(--eos-accent-soft);
 }
 
+.review-workspace {
+  width: 100%;
+  max-width: none;
+}
+
+.review-workspace-header h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.25rem;
+}
+
+.review-toolbar {
+  align-items: end;
+  margin: 0.75rem 0 1rem;
+  flex-wrap: wrap;
+}
+
+.review-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--eos-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.review-filter-field select {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.88rem;
+  color: var(--eos-ink);
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--eos-border);
+}
+
+.review-secondary-meta {
+  font-size: 0.78rem;
+  margin-top: 0.15rem;
+}
+
+.review-status-pill {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: var(--eos-ink-soft);
+}
+
 .review-workspace textarea {
   width: 100%;
   margin: 0.35rem 0 0.75rem;
   font: inherit;
+}
+
+.review-action {
+  appearance: none;
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.review-action:focus-visible,
+.review-table button:focus-visible,
+.review-drawer-close:focus-visible {
+  outline: 2px solid var(--eos-accent);
+  outline-offset: 2px;
+}
+
+.review-action--primary {
+  background: #1f3a5f;
+  border: 1px solid #1f3a5f;
+  color: #fff;
+}
+
+.review-action--secondary,
+.review-action--neutral {
+  background: #fff;
+  border: 1px solid var(--eos-border);
+  color: var(--eos-ink);
+}
+
+.review-action--warning {
+  background: #fff;
+  border: 1px solid var(--eos-warn-border, #e0c48a);
+  color: var(--eos-warn);
+}
+
+.review-action--destructive {
+  background: #b42318;
+  border: 1px solid #b42318;
+  color: #fff;
+}
+
+.review-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.review-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 33, 0.35);
+  z-index: 40;
+}
+
+.review-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(560px, 100vw);
+  background: #fff;
+  border-left: 1px solid var(--eos-border);
+  box-shadow: -8px 0 24px rgba(20, 24, 33, 0.12);
+  z-index: 50;
+  padding: 1rem 1.15rem 1.75rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.review-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.review-drawer-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.review-stage {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.review-detail-section {
+  border-top: 1px solid var(--eos-line);
+  padding-top: 0.65rem;
+}
+
+.review-detail-section h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+}
+
+.review-pricing-list,
+.review-selection-list,
+.review-blockers ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.review-blockers li {
+  margin-bottom: 0.55rem;
+}
+
+.review-action-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.review-apply-check,
+.review-note-field {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.45rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .review-drawer {
+    width: 100vw;
+  }
 }
 
 /* ── Estimate Queue (Milestone 1) ─────────────────────────────────────────── */

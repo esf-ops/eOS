@@ -24,6 +24,12 @@ import {
 import { collectUnresolvedItems } from "./studioEstimatePricing.mjs";
 import { STUDIO_ESTIMATE_STATUSES, STUDIO_UNRESOLVED_ADDON_KEYS } from "./studioEstimateTypes.mjs";
 import { buildCustomerConfigurationSummary } from "../digitalEstimate/catalog/customerConfigurationSummary.mjs";
+import {
+  presentUnsupportedBlockers,
+  publicationStateGuidance,
+  toPublicBlockerDto,
+  toStaffSafeComparisonRow
+} from "./reviewRequestStaffSafePresentation.mjs";
 
 /** Operator-facing labels mapped onto existing REVIEW_STATUS authority. */
 export const STUDIO_REVIEW_OPERATOR_STATUS = Object.freeze({
@@ -198,6 +204,14 @@ export function detectUnsupportedSelections(request) {
       }
       continue;
     }
+    if (/^qty-?sink:/i.test(key)) {
+      blockers.push({
+        optionKey: key,
+        code: "unsupported_customer_option",
+        message: `Option not in server-approved catalog: ${key}`
+      });
+      continue;
+    }
     if (isRoomProductOptionKey(key)) {
       const parsed = parseProductOptionKey(key);
       if (
@@ -222,6 +236,13 @@ export function detectUnsupportedSelections(request) {
             message: `Invalid catalog product selection: ${key}`
           });
         }
+      } else if (parsed && ["sink", "faucet", "accessory", "specialty"].includes(parsed.kind)) {
+        // Non-esf / legacy room product tokens — treat as catalog review blockers.
+        blockers.push({
+          optionKey: key,
+          code: "invalid_selection",
+          message: `Invalid catalog product selection: ${key}`
+        });
       }
       continue;
     }
@@ -415,12 +436,37 @@ export function createStudioReviewRequestService(deps) {
         : null;
 
     const unsupported = detectUnsupportedSelections(request);
-    const unresolvedCommercial = estimateRow
+    const staffBlockers = presentUnsupportedBlockers(unsupported, request).map(toPublicBlockerDto);
+    const unresolvedCommercial = (estimateRow
       ? collectUnresolvedItems(estimateRow.scope || {})
-      : [];
+      : []
+    ).map((item) => ({
+      code: "unresolved_commercial",
+      title: "Commercial item needs review",
+      staffMessage: String(item.message || "A commercial item still needs estimator review."),
+      productDisplayName: null,
+      category: "Commercial",
+      room: null,
+      quantity: null,
+      estimatorAction: "Resolve the commercial item on the Studio estimate before republishing.",
+      blocksApply: true,
+      blocksRepublish: true
+    }));
     const resolution = parseResolutionReason(request.closed_reason);
+    const pubGuidance = publicationStateGuidance(publication?.status, {
+      replacementPublicationId: linkage.replacementPublicationId,
+      pricingValidThrough: request.pricing_valid_through
+    });
 
     const project = snap?.customer_snapshot_json?.project || {};
+    const safeComparisonRows = (comparison?.rows || []).map((row) => {
+      const blocked = staffBlockers.some(
+        (b) =>
+          b.productDisplayName &&
+          String(row.displayLabel || "").includes(String(b.productDisplayName))
+      ) || unsupported.some((u) => u.optionKey === row.optionKey);
+      return toStaffSafeComparisonRow({ ...row, blocked });
+    });
 
     return {
       ok: true,
@@ -456,20 +502,27 @@ export function createStudioReviewRequestService(deps) {
         revisedEstimateRevision: revised?.revision ?? null,
         revisedApproved: revised?.status === STUDIO_ESTIMATE_STATUSES.APPROVED
       },
-      comparison,
+      comparison: {
+        ...comparison,
+        rows: safeComparisonRows
+      },
       pricingComparison: {
         currentPublishedTotal: request.baseline_display_total,
         requestedConfiguredTotal: request.configured_display_total,
         delta: request.display_delta,
         currency: "USD"
       },
+      publicationGuidance: pubGuidance,
       blockers: {
-        unsupportedSelections: unsupported,
+        unsupportedSelections: staffBlockers,
         unresolvedCommercial,
+        hasBlockers: staffBlockers.length + unresolvedCommercial.length > 0,
+        canApplySelections: staffBlockers.length === 0,
         canRepublish:
           Boolean(revised) &&
           revised.status === STUDIO_ESTIMATE_STATUSES.APPROVED &&
-          !unsupported.length
+          staffBlockers.length === 0 &&
+          pubGuidance.allowRepublish === true
       },
       amendments: amendments.map((amd) => ({
         id: amd.id,
@@ -942,9 +995,19 @@ export function createStudioReviewRequestService(deps) {
 
       const unsupported = detectUnsupportedSelections(request);
       if (unsupported.length) {
+        const presented = presentUnsupportedBlockers(unsupported, request);
         throw deError(
-          unsupported.map((b) => b.message).join("; "),
+          presented.map((b) => b.staffMessage).join("; "),
           "unsupported_customer_option",
+          422
+        );
+      }
+
+      const pubStatus = String(detail.reviewRequest?.publicationStatus || "").toLowerCase();
+      if (pubStatus === "revoked" || pubStatus === "superseded" || pubStatus === "expired") {
+        throw deError(
+          "This publication cannot be republished directly. Open the current Studio estimate to prepare a new approved publication.",
+          "publication_not_republishable",
           422
         );
       }

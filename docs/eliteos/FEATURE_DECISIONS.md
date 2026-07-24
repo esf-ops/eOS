@@ -2394,4 +2394,18 @@
 | **Tests** | `eos:test:studio-review-requests-list`, Part 3 + Milestone 5 UI. |
 | **Impacted** | `amendmentRepository.mjs`, `studioReviewRequestService.mjs`, `ReviewWorkspace.tsx`, this entry. |
 
+### 169. Studio Review Requests operations polish (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/studio-review-requests-operations-polish` |
+| **Role** | Estimator action workspace for customer-submitted configuration changes (not Analytics, not publish console). |
+| **Layout** | Full-width scannable request table + accessible right-side detail drawer (Escape/Close/focus restore). Detail never overlays table headings. |
+| **Safety** | List/detail GET remain read-only. Raw option keys, UUIDs, and catalog tokens are never staff-facing; blockers use plain-language remediation + next action. |
+| **Publication state** | Active / revoked / superseded / expired guide valid actions. Revoked or superseded links are never silently reactivated; republish stays explicit and confirmed only when eligible. |
+| **Actions** | Neutral hierarchy: Start Review / Revise primary; Reject destructive; Republish only when valid. |
+| **SQL** | None. |
+| **Tests** | `reviewRequestStaffSafePresentation.test.mjs`, Milestone 5 UI, existing Part 3 / list suites. |
+| **Impacted** | `ReviewWorkspace.tsx`, `reviewRequestStaffSafePresentation.mjs`, `studioReviewRequestService.mjs`, this entry. |
+
 
