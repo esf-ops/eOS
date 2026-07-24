@@ -67,6 +67,8 @@ import {
 import { isDigitalEstimateReviewRequestsEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
 import { recoverStaffPublicationLinkMeta } from "../digitalEstimate/staffPublicationLinkRecovery.mjs";
 import { createLiveDigitalEstimatesService } from "./liveDigitalEstimatesService.mjs";
+import { createStudioManualEstimateService } from "./studioManualEstimateService.mjs";
+import { createQuoteIntakeRepository } from "../quoteIntake/quoteIntakeRepositoryFactory.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
@@ -625,6 +627,110 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       env,
       queryCounters: deps.liveDeQueryCounters || undefined
     });
+
+  const quoteIntakeRepository =
+    deps.quoteIntakeRepository ||
+    createQuoteIntakeRepository({ env, getSupabase }).repository;
+
+  const studioManualEstimateService =
+    deps.studioManualEstimateService ||
+    createStudioManualEstimateService({
+      quoteIntakeRepository,
+      studioEstimateRepository:
+        deps.studioEstimateRepository || studioEstimateService.repository,
+      studioEstimateService
+    });
+
+  app.post(
+    "/api/elite100-estimate-studio/manual-estimates",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const idempotencyKey =
+          String(req.get("idempotency-key") || req.body?.idempotencyKey || "").trim() || null;
+        const result = await studioManualEstimateService.createManualEstimate({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {},
+          idempotencyKey
+        });
+        auditStudioEstimate("manual_estimate.create", req, {
+          estimateId: result.estimateId,
+          intakeCaseId: result.intakeCaseId,
+          status: result.status,
+          revision: result.revision
+        });
+        res.status(201).json(result);
+      } catch (e) {
+        logStudio("manual estimate create failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to create manual estimate",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/confirm-manual-scope",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioManualEstimateService.confirmManualScope({
+          organizationId,
+          estimateId: req.params.estimateId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        auditStudioEstimate("manual_estimate.confirm_scope", req, {
+          estimateId: req.params.estimateId,
+          status: result?.estimate?.status
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("confirm manual scope failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to confirm manual scope",
+          code: e?.code,
+          details: e?.details || undefined
+        });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/elite100-estimate-studio/estimates/:estimateId/manual-scope",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const estimate = await studioManualEstimateService.saveManualScopeDraft({
+          organizationId,
+          estimateId: req.params.estimateId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        res.json({ ok: true, estimate });
+      } catch (e) {
+        logStudio("save manual scope failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to save manual scope",
+          code: e?.code
+        });
+      }
+    }
+  );
 
   app.get(
     "/api/elite100-estimate-studio/live-digital-estimates",

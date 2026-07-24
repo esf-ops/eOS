@@ -393,8 +393,19 @@ export function createStudioEstimateQueueService(deps = {}) {
       usableGeometryPresent ||
       String(resultSummary.reviewStatus ?? "").toLowerCase() === "needs_review";
 
+    const sourceType = String(caseRow.source_type || caseRow.sourceType || "").toLowerCase();
+    const estimateOrigin = String(scope?.estimateOrigin || "").toLowerCase();
+    const physicalScopeSource = String(scope?.physicalScopeSource || "").toLowerCase();
+    const isManualStaff =
+      sourceType === "manual" ||
+      estimateOrigin === "manual_staff" ||
+      physicalScopeSource === "manual_staff";
+
     const derivationInput = {
       caseStatus: caseRow.status,
+      sourceType,
+      estimateOrigin,
+      physicalScopeSource,
       firstOpenedAt: caseRow.first_opened_at || caseRow.firstOpenedAt || null,
       takeoffJobId: takeoffJob?.id || link?.takeoff_job_id || link?.takeoffJobId || null,
       takeoffJobStatus,
@@ -404,7 +415,7 @@ export function createStudioEstimateQueueService(deps = {}) {
       reviewOperatorStatus,
       staleReason: estimate?.stale_reason || estimate?.staleReason || null,
       estimateNotCalculated,
-      attachmentBlocked: att.attachmentBlocked,
+      attachmentBlocked: isManualStaff ? false : att.attachmentBlocked,
       customerViewed: false,
       customerSelectionsSaved: false,
       accepted: false,
@@ -417,7 +428,8 @@ export function createStudioEstimateQueueService(deps = {}) {
       estimatorDraftPresent,
       roomCount: takeoffRoomCount,
       pieceCount: takeoffPieceCount,
-      linkStatus: link?.relationship_status || link?.relationshipStatus || null
+      linkStatus: link?.relationship_status || link?.relationshipStatus || null,
+      manualScopeConfirmed: scope?.manualScopeConfirmed === true
     };
 
     const workflowStatus = deriveQueueWorkflowStatus(derivationInput);
@@ -426,13 +438,17 @@ export function createStudioEstimateQueueService(deps = {}) {
     const indicators = buildQueueIndicators(derivationInput, workflowStatus, attention);
 
     // Keep AI column aligned with authoritative workflow vocabulary (no "idle").
-    const takeoffDisplay = workflowStatus.startsWith("Takeoff")
-      ? workflowStatus
-      : takeoffReviewStatus === "approved"
-        ? "Approved"
-        : takeoffJobStatus === "failed" || takeoffJobStatus === "error"
-          ? "Takeoff failed"
-          : "Not started";
+    const takeoffDisplay = isManualStaff
+      ? scope?.manualScopeConfirmed
+        ? "Manual scope confirmed"
+        : "Manual scope"
+      : workflowStatus.startsWith("Takeoff")
+        ? workflowStatus
+        : takeoffReviewStatus === "approved"
+          ? "Approved"
+          : takeoffJobStatus === "failed" || takeoffJobStatus === "error"
+            ? "Takeoff failed"
+            : "Not started";
 
     const lastActivityAt =
       caseRow.last_activity_at ||
@@ -449,7 +465,14 @@ export function createStudioEstimateQueueService(deps = {}) {
       projectName: projectName || "Unknown",
       accountLinked: Boolean(accountLinked),
       accountDirectoryLinked: Boolean(accountLinked),
-      senderLabel: caseRow.mailbox_identity ? "Inbound mailbox" : "Inbound sender",
+      sourceType: sourceType || null,
+      sourceBadge: isManualStaff ? "Manual" : sourceType === "graph_mailbox" ? "Email" : null,
+      estimateOrigin: estimateOrigin || (isManualStaff ? "manual_staff" : null),
+      senderLabel: isManualStaff
+        ? "Manual estimate"
+        : caseRow.mailbox_identity
+          ? "Inbound mailbox"
+          : "Inbound sender",
       salespersonLabel: null,
       receivedAt: caseRow.received_at || caseRow.receivedAt || caseRow.created_at || null,
       attachmentStatus: att.count
@@ -488,6 +511,7 @@ export function createStudioEstimateQueueService(deps = {}) {
       countertopSf: roomStats.countertopSf || null,
       backsplashSf: roomStats.backsplashSf || null,
       caseStatus: caseRow.status,
+      manualScopeConfirmed: scope?.manualScopeConfirmed === true,
       searchText: [
         customerName,
         projectName,

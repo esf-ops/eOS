@@ -191,7 +191,7 @@ type PartnerAccountOption = {
 type Props = {
   authToken: string;
   caseId: string;
-  takeoffJobId: string;
+  takeoffJobId: string | null;
   takeoffDisplayStatus: string;
   refreshKey?: number;
   customerHint?: string;
@@ -238,9 +238,11 @@ export default function EstimateScopePanel({
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const q = encodeURIComponent(takeoffJobId);
+      const q = takeoffJobId
+        ? `?takeoffJobId=${encodeURIComponent(takeoffJobId)}`
+        : "";
       const body = (await apiGet(
-        `/api/elite100-estimate-studio/intake-cases/${encodeURIComponent(caseId)}/estimate?takeoffJobId=${q}`,
+        `/api/elite100-estimate-studio/intake-cases/${encodeURIComponent(caseId)}/estimate${q}`,
         authToken
       )) as { estimate?: StudioEstimate; partnerAccount?: PartnerAccountOption | null };
       const est = body.estimate || null;

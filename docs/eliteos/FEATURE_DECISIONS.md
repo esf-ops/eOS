@@ -2420,4 +2420,18 @@
 | **SQL** | None. |
 | **Impacted** | `ReviewWorkspace`, Live DE page/service, `staffPublicationLinkRecovery.mjs`, Publications + Studio DE link recovery call sites, this entry. |
 
+### 171. Manual Studio estimate creation — Start without plans (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `feature/studio-manual-estimate-creation` |
+| **Intake envelope** | Every Studio estimate still requires a real `quote_intake_cases` row. Manual estimates use `source_type=manual` — never a fake mailbox message, attachment, or Takeoff job. `studio_estimates.intake_case_id` remains NOT NULL. |
+| **Origin** | Durable `scope_json.estimateOrigin` / `physicalScopeSource` = `manual_staff` (server-authored). Browser cannot set `manualScopeConfirmed` or origin flags. |
+| **Physical scope** | Estimator-built rooms/pieces normalize into the same pricing scope shape as Takeoff-seeded rooms. Explicit **Confirm Manual Scope** stamps fingerprint + confirmation; then Pricing / Calculate / Approve / DE publish reuse existing services. |
+| **Pricing** | Origin does not change price. No frontend pricing constants. Fixed 2026 Vanity Program is **not** claimed — vanity tops use standard countertop pricing until a separate integration. |
+| **Delivery invariants** | Create/Save/Confirm/Calculate/Approve never publish, replace links, email, create reviews, mark sold, or write QB/Moraware. |
+| **AD / partner** | Account Directory identity and trusted partner pricing remain separate (existing rules). |
+| **SQL** | None — reused existing `source_type` check constraint value `manual`. |
+| **Impacted** | Manual estimate service/routes, scope gates, Command Center New Estimate, Manual Scope editor, queue/CC badges, this entry. |
+
 

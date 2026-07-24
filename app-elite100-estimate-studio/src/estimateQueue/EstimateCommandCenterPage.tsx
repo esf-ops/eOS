@@ -8,6 +8,7 @@ import { createQuoteIntakeApiClient } from "../lib/quoteIntakeApi.mjs";
 import { ApiError, isAbortError } from "../lib/api";
 import { formatReceivedAt } from "../lib/quoteIntakeFormat.mjs";
 import MailboxSyncModal from "./MailboxSyncModal";
+import ManualEstimateWizard from "./ManualEstimateWizard";
 import {
   COMMAND_CENTER_STAGE_TABS,
   COMMAND_CENTER_SUMMARY_CARDS,
@@ -47,6 +48,10 @@ type QueueApiRow = {
   estimateStatus?: string;
   digitalEstimateStatus?: string;
   customerReviewStatus?: string;
+  sourceBadge?: string | null;
+  sourceType?: string | null;
+  estimateOrigin?: string | null;
+  manualScopeConfirmed?: boolean;
   indicators?: Record<string, boolean>;
 };
 
@@ -109,6 +114,7 @@ export default function EstimateCommandCenterPage({
   const [mailboxSyncOpen, setMailboxSyncOpen] = useState(false);
   const [mailboxDisplay, setMailboxDisplay] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<ImportSummary | null>(null);
+  const [newEstimateOpen, setNewEstimateOpen] = useState(false);
   const limit = 50;
 
   useEffect(() => {
@@ -282,6 +288,16 @@ export default function EstimateCommandCenterPage({
         <div className="ecc-header-actions">
           <button
             type="button"
+            className="eq-btn-primary"
+            data-testid="ecc-new-estimate"
+            title="Create a new estimate draft"
+            disabled={!authToken}
+            onClick={() => setNewEstimateOpen(true)}
+          >
+            New Estimate
+          </button>
+          <button
+            type="button"
             className="eq-btn-secondary"
             data-testid="ecc-refresh"
             title="Reload queue data without contacting the mailbox"
@@ -295,7 +311,7 @@ export default function EstimateCommandCenterPage({
           </button>
           <button
             type="button"
-            className="eq-btn-primary"
+            className="eq-btn-secondary"
             data-testid="ecc-sync-inbox"
             title="Open mailbox preview — nothing is imported until you confirm"
             disabled={!authToken}
@@ -501,6 +517,12 @@ export default function EstimateCommandCenterPage({
                   <div className="ecc-item-top">
                     <h2 className="ecc-item-customer">
                       {item.customerLabel}
+                      {item.sourceBadge ? (
+                        <span className="ecc-source-badge" data-testid="ecc-source-badge">
+                          {" "}
+                          {item.sourceBadge}
+                        </span>
+                      ) : null}
                       {item.needsCompletionHint ? (
                         <span className="ecc-hint"> Needs details</span>
                       ) : null}
@@ -693,6 +715,18 @@ export default function EstimateCommandCenterPage({
         }}
       />
 
+      {authToken ? (
+        <ManualEstimateWizard
+          authToken={authToken}
+          open={newEstimateOpen}
+          onClose={() => setNewEstimateOpen(false)}
+          onCreated={({ intakeCaseId, openTarget }) => {
+            setRefreshTick((n) => n + 1);
+            onSelectCase(intakeCaseId);
+            onOpenEstimate(intakeCaseId, { openTarget: openTarget || "scope" });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

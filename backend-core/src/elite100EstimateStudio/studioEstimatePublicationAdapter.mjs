@@ -703,7 +703,11 @@ export function assessStudioEstimatePublicationReadiness(input) {
   }
 
   const takeoffStatus = str(input.takeoffReviewStatus).toLowerCase();
-  if (takeoffStatus !== "approved") {
+  const isConfirmedManual =
+    estimate?.scope?.physicalScopeSource === "manual_staff" &&
+    estimate?.scope?.estimateOrigin === "manual_staff" &&
+    estimate?.scope?.manualScopeConfirmed === true;
+  if (!isConfirmedManual && takeoffStatus !== "approved") {
     blockers.push({
       code: "takeoff_not_approved",
       message: "Current Takeoff must be approved before Digital Estimate publication"

@@ -12,6 +12,7 @@ import { deriveEstimateTakeoffDisplayStatus } from "../lib/estimateTakeoffStatus
 import type { QuoteIntakeCaseDto } from "../lib/quoteIntakeTypes";
 import { apiGet, ApiError } from "../lib/api";
 import EstimateScopePanel from "./EstimateScopePanel";
+import ManualPhysicalScopeEditor from "./ManualPhysicalScopeEditor";
 
 type Props = {
   authToken: string;
@@ -22,7 +23,9 @@ type Props = {
 
 type ReadyState = {
   kind: "ready";
-  takeoffJobId: string;
+  takeoffJobId: string | null;
+  manualMode: boolean;
+  estimateId: string | null;
   linkStatus: string;
   created: boolean;
   reused: boolean;
@@ -86,6 +89,42 @@ export default function EstimateTakeoffWorkspace({
     async function open() {
       setState({ kind: "resolving" });
       try {
+        let caseRow: QuoteIntakeCaseDto | null = null;
+        try {
+          caseRow = (await client.getCase(authToken, caseId)) as QuoteIntakeCaseDto;
+        } catch {
+          caseRow = null;
+        }
+        const sourceType = String(caseRow?.sourceType || "").toLowerCase();
+        const isManual = sourceType === "manual";
+
+        if (isManual) {
+          const estBody = (await apiGet(
+            `/api/elite100-estimate-studio/intake-cases/${encodeURIComponent(caseId)}/estimate`,
+            authToken
+          )) as { estimate?: { id?: string; scope?: { estimateOrigin?: string; manualScopeConfirmed?: boolean } } };
+          if (cancelled) return;
+          const estimateId = String(estBody.estimate?.id || "").trim() || null;
+          const confirmed = estBody.estimate?.scope?.manualScopeConfirmed === true;
+          setState({
+            kind: "ready",
+            takeoffJobId: null,
+            manualMode: true,
+            estimateId,
+            linkStatus: "manual",
+            created: false,
+            reused: true,
+            attachmentName: "No plan attachment",
+            persistenceWarning: null,
+            caseRow,
+            displayStatus: confirmed ? "Manual scope confirmed" : "Manual scope needs confirmation",
+            scopeRefreshKey: 0,
+            handoffNotice: null
+          });
+          setTakeoffFrameMounted(false);
+          return;
+        }
+
         const opened = await client.openEstimate(authToken, caseId);
         if (cancelled) return;
         const takeoffJobId = String(opened.takeoffJobId ?? "").trim();
@@ -96,13 +135,6 @@ export default function EstimateTakeoffWorkspace({
             code: "takeoff_unavailable"
           });
           return;
-        }
-
-        let caseRow: QuoteIntakeCaseDto | null = null;
-        try {
-          caseRow = (await client.getCase(authToken, caseId)) as QuoteIntakeCaseDto;
-        } catch {
-          caseRow = null;
         }
 
         let jobStatus = "";
@@ -121,6 +153,8 @@ export default function EstimateTakeoffWorkspace({
         setState({
           kind: "ready",
           takeoffJobId,
+          manualMode: false,
+          estimateId: null,
           linkStatus: String(opened.linkStatus ?? "queued"),
           created: Boolean(opened.created),
           reused: Boolean(opened.reused),
@@ -178,12 +212,12 @@ export default function EstimateTakeoffWorkspace({
   }, [state.kind, initialFocus]);
 
   const takeoffSrc =
-    state.kind === "ready"
+    state.kind === "ready" && state.takeoffJobId
       ? `${aiTakeoffHeadUrl()}/?takeoffJobId=${encodeURIComponent(state.takeoffJobId)}&consolidated=1`
       : null;
 
   useEffect(() => {
-    if (state.kind !== "ready") return;
+    if (state.kind !== "ready" || state.manualMode || !state.takeoffJobId) return;
     function onMessage(event: MessageEvent) {
       if (!isAllowedTakeoffMessageOrigin(String(event.origin || ""))) return;
       const data = event.data;
@@ -207,12 +241,12 @@ export default function EstimateTakeoffWorkspace({
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [state.kind === "ready" ? state.takeoffJobId : null]);
+  }, [state.kind === "ready" ? state.takeoffJobId : null, state.kind === "ready" ? state.manualMode : null]);
 
   // Fallback: if postMessage is missed, poll Takeoff review status and refresh scope.
   // Event-driven prefer; slow poll only while AI is still running. Cleanup on unmount.
   useEffect(() => {
-    if (state.kind !== "ready") return;
+    if (state.kind !== "ready" || state.manualMode || !state.takeoffJobId) return;
     if (state.displayStatus === "Needs estimator review" || state.displayStatus === "Scope in progress") {
       return;
     }
@@ -339,6 +373,12 @@ export default function EstimateTakeoffWorkspace({
 
       {state.kind === "ready" ? (
         <>
+          {state.manualMode ? (
+            <div className="eq-state" role="status" data-testid="manual-estimate-badge">
+              <strong>Manual Estimate</strong> — no email, plan, or AI Takeoff required. Confirm
+              manual scope before Pricing Setup.
+            </div>
+          ) : null}
           {state.persistenceWarning ? (
             <div className="eq-state eq-state--warn" role="status">
               {state.persistenceWarning}
@@ -349,13 +389,14 @@ export default function EstimateTakeoffWorkspace({
               {state.handoffNotice}
             </div>
           ) : null}
-          {state.displayStatus === "Takeoff queued" ||
-          state.displayStatus === "Takeoff processing" ? (
+          {!state.manualMode &&
+          (state.displayStatus === "Takeoff queued" ||
+            state.displayStatus === "Takeoff processing") ? (
             <div className="eq-state" role="status" data-testid="eq-ai-takeoff-processing-banner">
               AI Takeoff is processing. You may build or edit the takeoff now. AI findings will be added when ready.
             </div>
           ) : null}
-          {state.displayStatus === "Takeoff failed" ? (
+          {!state.manualMode && state.displayStatus === "Takeoff failed" ? (
             <div className="eq-state eq-state--warn" role="status" data-testid="eq-ai-takeoff-failed-banner">
               AI Takeoff failed. Retry AI Takeoff or continue manually.
             </div>
@@ -372,51 +413,87 @@ export default function EstimateTakeoffWorkspace({
               <div>{state.caseRow ? caseStatusLabel(state.caseRow) : "—"}</div>
             </div>
             <div>
-              <div className="eq-muted">Attachment</div>
-              <div>{safeText(state.attachmentName, "plan.pdf")}</div>
+              <div className="eq-muted">{state.manualMode ? "Source" : "Attachment"}</div>
+              <div>{state.manualMode ? "Manual" : safeText(state.attachmentName, "plan.pdf")}</div>
             </div>
             <div>
-              <div className="eq-muted">Takeoff status</div>
+              <div className="eq-muted">{state.manualMode ? "Scope status" : "Takeoff status"}</div>
               <div data-testid="eq-takeoff-display-status">{state.displayStatus}</div>
             </div>
-            <div>
-              <div className="eq-muted">Takeoff job</div>
+            {!state.manualMode ? (
               <div>
-                <code data-testid="eq-linked-takeoff-job">{state.takeoffJobId}</code>
-                <span className="eq-muted">
-                  {" "}
-                  · {state.reused ? "reused link" : state.created ? "created" : "linked"}
-                </span>
+                <div className="eq-muted">Takeoff job</div>
+                <div>
+                  <code data-testid="eq-linked-takeoff-job">{state.takeoffJobId}</code>
+                  <span className="eq-muted">
+                    {" "}
+                    · {state.reused ? "reused link" : state.created ? "created" : "linked"}
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : null}
           </section>
 
-          <div className="eq-takeoff-frame-wrap">
-            {takeoffFrameMounted ? (
-              <iframe
-                title="AI Takeoff review"
-                className="eq-takeoff-frame"
-                data-testid="eq-takeoff-iframe"
-                src={takeoffSrc ?? undefined}
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="eq-state" data-testid="eq-takeoff-iframe-paused">
-                <p>Takeoff worksheet is paused while you work Scope / Digital Estimate.</p>
-                <button
-                  type="button"
-                  className="eq-btn-secondary"
-                  onClick={() => setTakeoffFrameMounted(true)}
-                >
-                  Show Takeoff worksheet
-                </button>
+          {state.manualMode && state.estimateId ? (
+            <ManualPhysicalScopeEditor
+              authToken={authToken}
+              caseId={caseId}
+              estimateId={state.estimateId}
+              onConfirmed={() => {
+                setState((prev) =>
+                  prev.kind === "ready"
+                    ? {
+                        ...prev,
+                        displayStatus: "Manual scope confirmed",
+                        scopeRefreshKey: prev.scopeRefreshKey + 1,
+                        handoffNotice: "Manual scope confirmed — continue with Pricing Setup."
+                      }
+                    : prev
+                );
+                window.setTimeout(() => {
+                  document
+                    .querySelector('[data-testid="estimate-scope-panel"]')
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, 80);
+              }}
+            />
+          ) : null}
+
+          {!state.manualMode ? (
+            <>
+              <div className="eq-takeoff-frame-wrap">
+                {takeoffFrameMounted ? (
+                  <iframe
+                    title="AI Takeoff review"
+                    className="eq-takeoff-frame"
+                    data-testid="eq-takeoff-iframe"
+                    src={takeoffSrc ?? undefined}
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="eq-state" data-testid="eq-takeoff-iframe-paused">
+                    <p>Takeoff worksheet is paused while you work Scope / Digital Estimate.</p>
+                    <button
+                      type="button"
+                      className="eq-btn-secondary"
+                      onClick={() => setTakeoffFrameMounted(true)}
+                    >
+                      Show Takeoff worksheet
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          <p className="eq-footnote">
-            Review the plan and edit the Takeoff worksheet above. Click{" "}
-            <strong>Approve Takeoff &amp; Build Estimate</strong> to seed Estimate Scope below.
-          </p>
+              <p className="eq-footnote">
+                Review the plan and edit the Takeoff worksheet above. Click{" "}
+                <strong>Approve Takeoff &amp; Build Estimate</strong> to seed Estimate Scope below.
+              </p>
+            </>
+          ) : (
+            <p className="eq-footnote">
+              After Confirm Manual Scope, use Pricing Setup / Calculate / Approve below. Publish remains
+              an explicit later action.
+            </p>
+          )}
 
           <EstimateScopePanel
             authToken={authToken}

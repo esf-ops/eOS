@@ -211,6 +211,11 @@ export function nextActionFromRow(row = {}) {
   const target = String(row.openTarget || deriveQueueOpenTarget(row) || "takeoff");
   const workflow = String(row.workflowStatus || "");
   const reasons = new Set(row.attentionReasons || []);
+  const sourceType = String(row.sourceType || "").toLowerCase();
+  const isManual =
+    sourceType === "manual" ||
+    String(row.estimateOrigin || "").toLowerCase() === "manual_staff" ||
+    String(row.sourceBadge || "").toLowerCase() === "manual";
 
   if (workflow === "Takeoff failed" || reasons.has("failed")) {
     return {
@@ -240,7 +245,14 @@ export function nextActionFromRow(row = {}) {
       nextActionRoute: "digital"
     };
   }
-  if (target === "scope") {
+  if (isManual || target === "scope") {
+    if (isManual && !row.manualScopeConfirmed && workflow === "Scope in progress") {
+      return {
+        nextActionKey: "build_manual_scope",
+        nextActionLabel: "Build manual scope",
+        nextActionRoute: "scope"
+      };
+    }
     if (reasons.has("estimate_stale")) {
       return {
         nextActionKey: "recalculate",
@@ -250,8 +262,8 @@ export function nextActionFromRow(row = {}) {
     }
     if (reasons.has("estimate_not_calculated") || workflow === "Scope in progress") {
       return {
-        nextActionKey: "complete_pricing",
-        nextActionLabel: "Complete Pricing",
+        nextActionKey: isManual ? "complete_manual_pricing" : "complete_pricing",
+        nextActionLabel: isManual ? "Confirm manual scope" : "Complete Pricing",
         nextActionRoute: "scope"
       };
     }
@@ -393,6 +405,10 @@ export function toCommandCenterItem(row = {}, opts = {}) {
     customerLabel,
     projectLabel,
     quoteLabel: row.quoteLabel || row.quoteNumber || null,
+    sourceType: row.sourceType || null,
+    sourceBadge: row.sourceBadge || (String(row.sourceType || "").toLowerCase() === "manual" ? "Manual" : null),
+    estimateOrigin: row.estimateOrigin || null,
+    manualScopeConfirmed: row.manualScopeConfirmed === true,
     stageKey,
     stageLabel: stageLabelForWorkflow(workflow) || STAGE_LABELS[stageKey] || "Needs attention",
     workflowStatus: workflow,
