@@ -292,6 +292,33 @@ export function accountGroupKeyForPublication(row) {
   return `unlinked:pub:${row.publicationId}`;
 }
 
+/**
+ * Useful group title for unlinked publications from frozen identity.
+ * Never fuzzy-matches Account Directory by display name.
+ * @param {{
+ *   frozenAccountDisplayName?: string|null,
+ *   customerDisplayName?: string|null
+ * }} row
+ */
+export function unlinkedGroupDisplayTitle(row) {
+  const frozen = String(row?.frozenAccountDisplayName || "").trim();
+  const customer = String(row?.customerDisplayName || "").trim();
+  const name = frozen || customer;
+  if (!name) return "Unnamed unlinked customer";
+  if (/^unlinked customers?$/i.test(name)) return "Unlinked customer";
+  return name;
+}
+
+/**
+ * Singular/plural attention phrasing for group headers.
+ * @param {number} count
+ */
+export function attentionItemsPhrase(count) {
+  const n = Math.max(0, Number(count) || 0);
+  if (n === 1) return "1 item needs attention";
+  return `${n} items need attention`;
+}
+
 export function isActivePortfolioPublication(publicationStatus, accessExpiresAt, now = new Date()) {
   const st = String(publicationStatus || "").toLowerCase();
   if (st !== "active") return false;

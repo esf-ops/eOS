@@ -11,12 +11,16 @@ import {
   deriveAttentionReasons,
   deriveLiveDigitalEstimateStatus,
   deriveNextAction,
-  isActivePortfolioPublication
+  isActivePortfolioPublication,
+  unlinkedGroupDisplayTitle
 } from "./liveDigitalEstimatesStatus.mjs";
+import {
+  ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM,
+  isAccountQuickbooksLinked
+} from "../accountDirectory/accountDirectoryQuickbooksLinkage.mjs";
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 50;
-const UNLINKED_GROUP_LABEL = "Unlinked customers";
 
 /** Fields that must never appear on list DTOs. */
 const FORBIDDEN_LIST_KEYS = [
@@ -406,6 +410,8 @@ export function createLiveDigitalEstimatesService(deps) {
             accountDisplayName: null,
             accountDirectoryAccountId: null,
             isUnlinkedGroup: false,
+            accountDirectoryLinked: null,
+            accountLinkageLabel: null,
             activePublicationCount: pageRows.filter((r) => r.isActive).length,
             totalActivePublishedValue: sumActiveValue(pageRows),
             latestCustomerActivityAt: latestActivity(pageRows),
@@ -583,23 +589,17 @@ export function createLiveDigitalEstimatesService(deps) {
     /** @type {Map<string, { displayName: string, quickbooksLinked: boolean }>} */
     const map = new Map();
     if (!adStore || !ids.length) return map;
+
+    // 1) Account display names (one batch).
     if (typeof adStore.getAccountsByIds === "function") {
       const rows = await adStore.getAccountsByIds(organizationId, ids);
       for (const a of rows || []) {
         map.set(String(a.id), {
           displayName: String(a.display_name || a.displayName || a.name || "").trim() || "Account",
-          quickbooksLinked: Boolean(
-            a.quickbooks_linked ??
-              a.quickbooksLinked ??
-              a.quickbooks_customer_id ??
-              a.quickbooksCustomerId
-          )
+          quickbooksLinked: false
         });
       }
-      return map;
-    }
-    // Fallback: single listAccounts then filter (still one AD query).
-    if (typeof adStore.listAccounts === "function") {
+    } else if (typeof adStore.listAccounts === "function") {
       const listed = await adStore.listAccounts(organizationId, {
         includeArchived: true,
         limit: 5000,
@@ -610,11 +610,42 @@ export function createLiveDigitalEstimatesService(deps) {
         if (!want.has(String(a.id))) continue;
         map.set(String(a.id), {
           displayName: String(a.display_name || a.displayName || a.name || "").trim() || "Account",
-          quickbooksLinked: Boolean(
-            a.quickbooks_linked ?? a.quickbooksLinked ?? a.quickbooks_customer_id
-          )
+          quickbooksLinked: false
         });
       }
+    }
+
+    // 2) Canonical QB linkage from active quickbooks_desktop external links (one batch).
+    /** @type {Map<string, object[]>} */
+    const linksByAccount = new Map();
+    if (typeof adStore.listActiveExternalLinksForAccountIds === "function") {
+      const links = await adStore.listActiveExternalLinksForAccountIds(
+        organizationId,
+        ids,
+        ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM
+      );
+      for (const link of links || []) {
+        const accountId = String(link.accountId || link.account_id || "");
+        if (!accountId) continue;
+        if (!linksByAccount.has(accountId)) linksByAccount.set(accountId, []);
+        linksByAccount.get(accountId).push(link);
+      }
+    } else if (typeof adStore.listAllActiveExternalLinks === "function") {
+      const links = await adStore.listAllActiveExternalLinks(
+        organizationId,
+        ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM
+      );
+      const want = new Set(ids.map(String));
+      for (const link of links || []) {
+        const accountId = String(link.accountId || link.account_id || "");
+        if (!want.has(accountId)) continue;
+        if (!linksByAccount.has(accountId)) linksByAccount.set(accountId, []);
+        linksByAccount.get(accountId).push(link);
+      }
+    }
+
+    for (const [accountId, entry] of map) {
+      entry.quickbooksLinked = isAccountQuickbooksLinked(linksByAccount.get(accountId) || []);
     }
     return map;
   }
@@ -772,6 +803,7 @@ function computeMetrics(rows, now) {
   });
   return {
     activePublications: active.length,
+    needsAttention: active.filter((r) => r.needsAttention).length,
     publishedNotViewed: notViewed.length,
     viewedOrActive: viewedActive.length,
     reviewRequested: reviewRequested.length,
@@ -804,20 +836,27 @@ function buildAccountGroups(pageRows, allFiltered) {
   for (const r of allFiltered) {
     const key = r.accountGroupKey;
     if (!groupMeta.has(key)) {
+      const isUnlinked = !r.accountDirectoryAccountId;
       groupMeta.set(key, {
         groupKey: key,
         accountDirectoryAccountId: r.accountDirectoryAccountId,
-        accountDisplayName: r.accountDirectoryAccountId
-          ? r.accountDisplayName || r.frozenAccountDisplayName || "Account"
-          : UNLINKED_GROUP_LABEL,
-        isUnlinkedGroup: !r.accountDirectoryAccountId,
+        accountDisplayName: isUnlinked
+          ? unlinkedGroupDisplayTitle({
+              frozenAccountDisplayName: r.frozenAccountDisplayName,
+              customerDisplayName: r.customerDisplayName
+            })
+          : r.accountDisplayName || r.frozenAccountDisplayName || "Account",
+        isUnlinkedGroup: isUnlinked,
+        accountDirectoryLinked: !isUnlinked,
         quickbooksLinked: r.quickbooksLinked,
         rows: []
       });
     }
     const g = groupMeta.get(key);
     g.rows.push(r);
-    if (r.accountDisplayName) g.accountDisplayName = r.accountDisplayName;
+    if (!g.isUnlinkedGroup && r.accountDisplayName) {
+      g.accountDisplayName = r.accountDisplayName;
+    }
     if (r.quickbooksLinked != null) g.quickbooksLinked = r.quickbooksLinked;
   }
 
@@ -832,16 +871,21 @@ function buildAccountGroups(pageRows, allFiltered) {
   for (const [key, pubs] of pageByGroup) {
     const meta = groupMeta.get(key);
     const allInGroup = meta?.rows || pubs;
+    const isUnlinked = Boolean(meta?.isUnlinkedGroup);
     groups.push({
       groupKey: key,
       accountDirectoryAccountId: meta?.accountDirectoryAccountId || null,
-      accountDisplayName: meta?.accountDisplayName || UNLINKED_GROUP_LABEL,
-      isUnlinkedGroup: Boolean(meta?.isUnlinkedGroup),
+      accountDisplayName:
+        meta?.accountDisplayName ||
+        (isUnlinked ? "Unnamed unlinked customer" : "Account"),
+      isUnlinkedGroup: isUnlinked,
+      accountDirectoryLinked: !isUnlinked,
+      accountLinkageLabel: isUnlinked ? "Account Directory not linked" : null,
       activePublicationCount: allInGroup.filter((r) => r.isActive).length,
       totalActivePublishedValue: sumActiveValue(allInGroup),
       latestCustomerActivityAt: latestActivity(allInGroup),
       needingAttentionCount: allInGroup.filter((r) => r.needsAttention).length,
-      quickbooksLinked: meta?.isUnlinkedGroup ? null : meta?.quickbooksLinked ?? null,
+      quickbooksLinked: isUnlinked ? null : meta?.quickbooksLinked ?? null,
       publications: pubs.map(toPublicListRow)
     });
   }
