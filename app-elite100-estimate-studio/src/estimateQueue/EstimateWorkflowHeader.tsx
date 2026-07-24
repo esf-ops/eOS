@@ -46,7 +46,8 @@ const COMPLETED_LABELS: Record<string, string> = {
   pricing_saved: "Pricing Setup saved",
   calculated: "Calculated",
   approved: "Approved",
-  project_named: "Project named"
+  project_named: "Project named",
+  published: "Digital Estimate published"
 };
 
 const LATER_LABELS: Record<string, string> = {
@@ -54,7 +55,8 @@ const LATER_LABELS: Record<string, string> = {
   calculate: "Calculate",
   approve: "Approve",
   publish: "Publish",
-  configure_digital_estimate: "Configure Digital Estimate"
+  configure_digital_estimate: "Configure Digital Estimate",
+  replace_publication: "Replace publication"
 };
 
 export default function EstimateWorkflowHeader({

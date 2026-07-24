@@ -181,4 +181,75 @@ function sentinelEstimate(overrides = {}) {
   console.log("  ✓ T9 superseded → resolve_failure");
 }
 
+// 10–15 publication-aware workflow
+{
+  const approved = sentinelEstimate({
+    status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+    revision: 1,
+    scope: manualScope(true),
+    calculation: { fingerprint: "fp-pub-1" },
+    approval: { approvedAt: "2026-07-24T13:00:00Z" }
+  });
+  const ready = buildStudioWorkspaceWorkflow(approved);
+  assert.equal(ready.currentStage, "ready_to_publish");
+  assert.equal(ready.nextRequiredAction, "configure_digital_estimate");
+  console.log("  ✓ T10 approved without publication → ready_to_publish");
+
+  const activePub = {
+    state: "published_waiting_for_customer",
+    active: true,
+    historical: false,
+    publicationId: "pub-sentinel-1",
+    estimateId: approved.id,
+    revision: 1,
+    publishedAt: "2026-07-24T14:00:00Z",
+    expiresAt: "2026-08-22T00:00:00Z",
+    customerActivityState: "waiting",
+    customerActivityLabel: "Not viewed",
+    customerUrlAvailable: true,
+    customerUrl: "https://example.test/de/sentinel",
+    reviewRequestOpen: false,
+    reviewRequestId: null,
+    statusLabel: "Published — waiting on customer",
+    linkStatus: "active"
+  };
+  const published = buildStudioWorkspaceWorkflow(approved, { publication: activePub });
+  assert.equal(published.currentStage, "published");
+  assert.equal(published.nextRequiredAction, "wait_for_customer");
+  assert.ok(!published.allowedActions.includes("calculate"));
+  assert.ok(!published.allowedActions.includes("approve"));
+  assert.ok(!published.allowedActions.includes("publish") || published.nextRequiredAction !== "publish");
+  assert.notEqual(published.nextRequiredAction, "calculate");
+  assert.notEqual(published.nextRequiredAction, "approve");
+  assert.notEqual(published.nextRequiredAction, "publish");
+  assert.ok(published.allowedActions.includes("open_customer_view"));
+  assert.ok(published.allowedActions.includes("copy_customer_link"));
+  console.log("  ✓ T11–T15 published workflow gates + open/copy allowed");
+
+  const reviewPub = {
+    ...activePub,
+    state: "customer_review_requested",
+    reviewRequestOpen: true,
+    reviewRequestId: "rr-1",
+    statusLabel: "Published — customer requested changes",
+    customerActivityLabel: "Review requested"
+  };
+  const reviewWf = buildStudioWorkspaceWorkflow(approved, { publication: reviewPub });
+  assert.equal(reviewWf.nextRequiredAction, "review_customer_request");
+  console.log("  ✓ T16 open review request → review_customer_request");
+
+  const staleNew = sentinelEstimate({
+    status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+    revision: 2,
+    scope: manualScope(true),
+    staleReason: "Scope changed after approval — recalculate and reapprove"
+  });
+  const staleWf = buildStudioWorkspaceWorkflow(staleNew, {
+    publication: { ...activePub, historical: true, active: false, revision: 1 }
+  });
+  assert.equal(staleWf.nextRequiredAction, "calculate");
+  assert.equal(staleWf.currentStage, "calculation_required");
+  console.log("  ✓ T17 stale new revision takes precedence over historical publication");
+}
+
 console.log("\nstudioWorkspaceWorkflow.test.mjs — all passed\n");

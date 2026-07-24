@@ -18,6 +18,9 @@ import EstimateScopePanel from "./EstimateScopePanel";
 import ManualPhysicalScopeEditor from "./ManualPhysicalScopeEditor";
 import ProjectDetailsPanel from "./ProjectDetailsPanel";
 import EstimateWorkflowHeader, { type WorkspaceWorkflow } from "./EstimateWorkflowHeader";
+import EstimatePublicationSummary, {
+  type PublicationSummary
+} from "./EstimatePublicationSummary";
 
 type Props = {
   authToken: string;
@@ -99,15 +102,37 @@ export default function EstimateTakeoffWorkspace({
   const [transientError, setTransientError] = useState<string | null>(null);
   const [pendingRetry, setPendingRetry] = useState<(() => void) | null>(null);
   const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [publicationRefreshError, setPublicationRefreshError] = useState<string | null>(null);
+  const [sectionsExpanded, setSectionsExpanded] = useState(false);
+
+  const publicationSummary = useMemo((): PublicationSummary | null => {
+    const fromEst =
+      (canonicalEstimate?.publication as PublicationSummary | undefined) ||
+      (canonicalEstimate?.publicationSummary as PublicationSummary | undefined) ||
+      ((canonicalEstimate?.workflow as { publication?: PublicationSummary } | undefined)?.publication ??
+        null);
+    return fromEst && typeof fromEst === "object" ? fromEst : null;
+  }, [canonicalEstimate]);
 
   const workspaceWorkflow = useMemo((): WorkspaceWorkflow | null => {
     if (!canonicalEstimate) return null;
     return buildStudioWorkspaceWorkflow(canonicalEstimate, {
       manualScopeDirty: manualDirty,
       pricingDirty,
-      historicalApproval: previousRevisionSummary
+      historicalApproval: previousRevisionSummary,
+      publication: publicationSummary
     }) as WorkspaceWorkflow;
-  }, [canonicalEstimate, manualDirty, pricingDirty, previousRevisionSummary]);
+  }, [canonicalEstimate, manualDirty, pricingDirty, previousRevisionSummary, publicationSummary]);
+
+  const publishedFocus =
+    Boolean(publicationSummary?.active) &&
+    !manualDirty &&
+    !pricingDirty &&
+    (initialFocus === "digital" ||
+      initialFocus === "review" ||
+      workspaceWorkflow?.currentStage === "published");
+
+  const collapseCompleted = publishedFocus && !sectionsExpanded;
 
   function bumpRefresh(patch?: Partial<ReadyState>) {
     setState((prev) =>
@@ -186,11 +211,36 @@ export default function EstimateTakeoffWorkspace({
       setForceProjectEdit(true);
       return;
     }
-    if (action === "configure_digital_estimate" || action === "publish") {
+    if (
+      action === "wait_for_customer" ||
+      action === "open_customer_view" ||
+      action === "copy_customer_link" ||
+      action === "open_publication_details" ||
+      action === "configure_digital_estimate" ||
+      action === "publish" ||
+      action === "review_customer_request"
+    ) {
       document
-        .querySelector('[data-testid="estimate-digital-estimate-panel"], [data-testid="eq-digital-estimate-panel"]')
+        .querySelector(
+          '[data-testid="eq-publication-summary"], [data-testid="estimate-digital-estimate-panel"], [data-testid="eq-digital-estimate"]'
+        )
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (action === "open_customer_view" && publicationSummary?.customerUrl) {
+        window.open(publicationSummary.customerUrl, "_blank", "noopener,noreferrer");
+      }
+      if (action === "copy_customer_link") {
+        (document.querySelector('[data-testid="eq-copy-customer-link"]') as HTMLButtonElement | null)?.click();
+      }
     }
+  }
+
+  function scrollToPublicationDetails() {
+    setSectionsExpanded(true);
+    window.setTimeout(() => {
+      document
+        .querySelector('[data-testid="estimate-digital-estimate-panel"], [data-testid="eq-digital-estimate"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
   }
 
   useEffect(() => {
@@ -324,7 +374,15 @@ export default function EstimateTakeoffWorkspace({
     if (state.kind !== "ready") return;
     const focus = initialFocus || "takeoff";
     window.setTimeout(() => {
-      if (manualMode) {
+      if (focus === "digital" || focus === "review" || publicationSummary?.active) {
+        document
+          .querySelector(
+            '[data-testid="eq-publication-summary"], [data-testid="estimate-digital-estimate-panel"], [data-testid="eq-digital-estimate"], [data-testid="estimate-scope-panel"]'
+          )
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (manualMode && (focus === "scope" || focus === "takeoff")) {
         document
           .querySelector(
             '[data-testid="manual-physical-scope-editor"], [data-testid="estimate-scope-panel"]'
@@ -332,21 +390,17 @@ export default function EstimateTakeoffWorkspace({
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
         return;
       }
-      if (focus === "scope" || focus === "digital") {
+      if (focus === "scope") {
         document
           .querySelector('[data-testid="estimate-scope-panel"]')
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      } else if (focus === "review") {
-        document
-          .querySelector('[data-testid="estimate-digital-estimate-panel"], [data-testid="estimate-scope-panel"]')
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       } else {
         document
           .querySelector('[data-testid="eq-takeoff-iframe"]')
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
-    }, 120);
-  }, [state.kind, initialFocus, manualMode]);
+    }, 160);
+  }, [state.kind, initialFocus, manualMode, publicationSummary?.active]);
 
   const takeoffSrc =
     state.kind === "ready" && state.takeoffJobId
@@ -590,7 +644,51 @@ export default function EstimateTakeoffWorkspace({
             onRetry={pendingRetry}
           />
 
-          {state.estimateId ? (
+          {publicationSummary &&
+          (publicationSummary.active ||
+            publicationSummary.historical ||
+            publicationSummary.state !== "not_published") ? (
+            <EstimatePublicationSummary
+              publication={publicationSummary}
+              refreshError={publicationRefreshError}
+              busy={workflowBusy}
+              onRefreshStatus={() => {
+                setPublicationRefreshError(null);
+                refreshStatus();
+              }}
+              onViewPublicationDetails={scrollToPublicationDetails}
+              onReplacePublication={scrollToPublicationDetails}
+              onRevokePublication={scrollToPublicationDetails}
+              onReviewCustomerRequest={scrollToPublicationDetails}
+              onCopyCustomerLink={() => {
+                /* clipboard handled in summary — no mutation */
+              }}
+            />
+          ) : null}
+
+          {collapseCompleted ? (
+            <div className="eq-completed-sections" data-testid="eq-completed-sections">
+              <p className="eq-muted">Completed estimating stages</p>
+              <ul>
+                <li>✓ Project details</li>
+                <li>✓ {state.manualMode ? "Manual scope" : "Takeoff"}</li>
+                <li>✓ Pricing Setup</li>
+                <li>✓ Calculation</li>
+                <li>✓ Approval</li>
+                <li>✓ Digital Estimate published</li>
+              </ul>
+              <button
+                type="button"
+                className="eq-btn-ghost"
+                data-testid="eq-expand-completed-sections"
+                onClick={() => setSectionsExpanded(true)}
+              >
+                View completed sections
+              </button>
+            </div>
+          ) : null}
+
+          {(!collapseCompleted || sectionsExpanded) && state.estimateId ? (
             <ProjectDetailsPanel
               authToken={authToken}
               caseId={caseId}
@@ -606,7 +704,7 @@ export default function EstimateTakeoffWorkspace({
             />
           ) : null}
 
-          {state.manualMode && state.estimateId ? (
+          {(!collapseCompleted || sectionsExpanded) && state.manualMode && state.estimateId ? (
             <ManualPhysicalScopeEditor
               authToken={authToken}
               caseId={caseId}
@@ -635,7 +733,7 @@ export default function EstimateTakeoffWorkspace({
             />
           ) : null}
 
-          {!state.manualMode ? (
+          {!state.manualMode && (!collapseCompleted || sectionsExpanded || initialFocus === "takeoff") ? (
             <>
               <div className="eq-takeoff-frame-wrap">
                 {takeoffFrameMounted ? (
@@ -664,12 +762,12 @@ export default function EstimateTakeoffWorkspace({
                 <strong>Approve Takeoff &amp; Build Estimate</strong> to seed Estimate Scope below.
               </p>
             </>
-          ) : (
+          ) : state.manualMode && !collapseCompleted ? (
             <p className="eq-footnote">
               After Confirm Manual Scope, use Pricing Setup / Calculate / Approve below. Publish remains
               an explicit later action.
             </p>
-          )}
+          ) : null}
 
           <EstimateScopePanel
             authToken={authToken}
@@ -678,11 +776,23 @@ export default function EstimateTakeoffWorkspace({
             takeoffDisplayStatus={state.displayStatus}
             refreshKey={state.scopeRefreshKey}
             workflow={workspaceWorkflow}
+            collapseCompleted={collapseCompleted}
+            onExpandCompleted={() => setSectionsExpanded(true)}
             onDirtyChange={setPricingDirty}
             onBusyChange={setWorkflowBusy}
             onCanonicalEstimate={(est) => handleCanonicalEstimate(est as Record<string, unknown>)}
             onActiveEstimateChange={applyActiveEstimateChange}
             onTransientFailure={(err, retry) => handleTransientFailure(err, retry)}
+            onPublicationSummary={(pub) => {
+              if (!pub) return;
+              setCanonicalEstimate((prev) =>
+                prev
+                  ? { ...prev, publication: pub, publicationSummary: pub }
+                  : { publication: pub, publicationSummary: pub }
+              );
+              setPublicationRefreshError(null);
+            }}
+            onPublicationRefreshError={(msg) => setPublicationRefreshError(msg)}
             onEditManualScope={
               state.manualMode
                 ? () => {

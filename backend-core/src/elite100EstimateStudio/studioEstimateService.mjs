@@ -550,10 +550,12 @@ export function createStudioEstimateService(deps = {}) {
       updatedAt: row.updatedAt,
       createdByUserId: row.createdByUserId,
       updatedByUserId: row.updatedByUserId,
-      previousRevisionSummary: extras.previousRevisionSummary || null
+      previousRevisionSummary: extras.previousRevisionSummary || null,
+      publication: extras.publication || extras.publicationSummary || null
     };
     base.workflow = buildStudioWorkspaceWorkflow(base, {
-      historicalApproval: extras.previousRevisionSummary || null
+      historicalApproval: extras.previousRevisionSummary || null,
+      publication: extras.publication || extras.publicationSummary || null
     });
     return base;
   }

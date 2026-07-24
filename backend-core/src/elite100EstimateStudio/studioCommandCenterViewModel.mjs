@@ -231,7 +231,7 @@ export function nextActionFromRow(row = {}) {
       nextActionRoute: "review"
     };
   }
-  if (target === "digital" || workflow === "Ready for approval" || workflow === "Published") {
+  if (target === "digital" || workflow === "Ready for approval" || workflow === "Published" || workflow === "Customer reviewing") {
     if (reasons.has("approved_not_published") || workflow === "Ready for approval") {
       return {
         nextActionKey: "publish",

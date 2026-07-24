@@ -37,6 +37,7 @@ import {
   mapStudioPublicationPersistenceError
 } from "./studioEstimatePublicationSource.mjs";
 import { recoverStaffPublicationLinkMeta } from "../digitalEstimate/staffPublicationLinkRecovery.mjs";
+import { buildSafeStudioPublicationSummary } from "./studioPublicationSummary.mjs";
 import {
   listElite100CustomerMaterials,
   getElite100CustomerMaterial,
@@ -434,6 +435,27 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         }
       : null;
 
+    let customerViewed = false;
+    if (activeRaw?.id && typeof deRepository.listEventsForPublication === "function") {
+      try {
+        const events = await deRepository.listEventsForPublication(organizationId, activeRaw.id, 40);
+        customerViewed = (events || []).some((e) => {
+          const t = String(e.event_type || e.eventType || "").toLowerCase();
+          return t === "first_viewed" || t === "viewed" || t === "customer_viewed";
+        });
+      } catch {
+        customerViewed = false;
+      }
+    }
+
+    const publicationSummary = buildSafeStudioPublicationSummary({
+      estimate,
+      activePublication,
+      publications: publicationViews,
+      reviewRequests,
+      customerViewed
+    });
+
     const publishedConfiguration = await resolvePublishedConfiguration({
       organizationId,
       publication: activeRaw,
@@ -451,6 +473,10 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       activePublication
     });
 
+    const estimateView = studioEstimateService.safeEstimateView(estimate, {
+      publication: publicationSummary
+    });
+
     return {
       ok: true,
       readiness: {
@@ -461,10 +487,11 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         message: readinessDto.primaryMessage?.message || readiness.message,
         code: readinessDto.primaryMessage?.code || readiness.code
       },
-      estimate: studioEstimateService.safeEstimateView(estimate),
+      estimate: estimateView,
       preview,
       publications: publicationViews,
       activePublication,
+      publicationSummary,
       publishedConfiguration,
       reviewRequests,
       links: {
@@ -972,6 +999,71 @@ export function createStudioEstimateDigitalEstimateService(deps) {
 
   return {
     assessReadiness,
+
+    /**
+     * Bounded read-only publication summary for Studio workspace reopen.
+     * Never publishes, replaces, revokes, or notifies.
+     */
+    async getWorkspacePublicationSummary(organizationId, estimateId) {
+      const estimate = await loadEstimateRow(organizationId, estimateId);
+      if (!estimate) throw deError("Estimate not found", "estimate_not_found", 404);
+      const familyRoot = studioEstimatePublicationFamilyRoot(estimate);
+      const publications = await deRepository.listPublicationsForQuote(organizationId, estimate.id);
+      const familyActive =
+        typeof deRepository.listActivePublicationsForFamily === "function"
+          ? await deRepository.listActivePublicationsForFamily(organizationId, familyRoot)
+          : publications.filter((p) => p.status === "active");
+      const publicationViews = await staffPublicationViews(organizationId, publications);
+      const activeRaw =
+        familyActive[0] ||
+        publications.find((p) => p.status === "active" && !p.revoked_at && !p.superseded_at) ||
+        null;
+      const activePublication = activeRaw
+        ? staffPublicationView(activeRaw, await linkMetaForPublication(organizationId, activeRaw))
+        : null;
+
+      let reviewRequests = [];
+      if (amendmentRepository && typeof amendmentRepository.listReviewRequests === "function") {
+        const activeIds = new Set(
+          [...publications, ...familyActive].map((p) => String(p.id))
+        );
+        const all = await amendmentRepository.listReviewRequests(organizationId, { limit: 80 });
+        reviewRequests = (all || []).filter((r) => activeIds.has(String(r.publication_id)));
+      }
+
+      let customerViewed = false;
+      if (activeRaw?.id && typeof deRepository.listEventsForPublication === "function") {
+        try {
+          const events = await deRepository.listEventsForPublication(organizationId, activeRaw.id, 40);
+          customerViewed = (events || []).some((e) => {
+            const t = String(e.event_type || e.eventType || "").toLowerCase();
+            return t === "first_viewed" || t === "viewed" || t === "customer_viewed";
+          });
+        } catch {
+          customerViewed = false;
+        }
+      }
+
+      const publicationSummary = buildSafeStudioPublicationSummary({
+        estimate,
+        activePublication,
+        publications: publicationViews,
+        reviewRequests,
+        customerViewed
+      });
+
+      return {
+        ok: true,
+        publicationSummary,
+        estimate: studioEstimateService.safeEstimateView(estimate, {
+          publication: publicationSummary
+        }),
+        published: false,
+        replaced: false,
+        revoked: false,
+        notified: false
+      };
+    },
 
     async publish({ organizationId, estimateId, actorUserId, body }) {
       rejectCallerAuthority(body);
