@@ -134,6 +134,11 @@ function customQuoteUrl(): string {
   return raw.replace(/\/+$/, "") || "https://custom.eliteosfab.com";
 }
 
+function accountDirectoryUrl(): string {
+  const raw = String(import.meta.env.VITE_HEAD_URL_ACCOUNT_DIRECTORY ?? "").trim();
+  return raw.replace(/\/+$/, "") || "https://accounts.eliteosfab.com";
+}
+
 /**
  * eliteOS Home / Launcher canonical URL. Used by the user menu's "Open Home"
  * action. Configurable via `VITE_HEAD_URL_HOME` for staging / local dev;
@@ -296,6 +301,7 @@ export default function QuoteLibraryApp() {
 
   const internalBase = useMemo(() => internalEstimateUrl(), []);
   const customQuoteBase = useMemo(() => customQuoteUrl(), []);
+  const accountDirectoryBase = useMemo(() => accountDirectoryUrl(), []);
   const homeBase = useMemo(() => homeLauncherUrl(), []);
 
   const workspaceName = useMemo(() => resolveWorkspaceName(), []);
@@ -1375,6 +1381,13 @@ export default function QuoteLibraryApp() {
                             <td className="account-cell">
                               <div className="primary">{ac.primary}</div>
                               {ac.subline ? <div className="sub">Customer: {ac.subline}</div> : null}
+                              <div className="account-link-meta">
+                                {ac.accountLinked ? (
+                                  <span className="pill pill-account-linked">Account linked</span>
+                                ) : (
+                                  <span className="pill pill-account-unlinked">Unlinked customer</span>
+                                )}
+                              </div>
                             </td>
                             <td className="hide-sm">{ac.projectCell || "—"}</td>
                             <td className="hide-sm muted">{loc(r)}</td>
@@ -1426,6 +1439,7 @@ export default function QuoteLibraryApp() {
         sessionToken={sessionToken ?? ""}
         internalBase={internalBase}
         customQuoteBase={customQuoteBase}
+        accountDirectoryUrl={accountDirectoryBase}
         onClose={() => setDetailId(null)}
         runAction={runAction}
         onRevisionSelect={setDetailId}

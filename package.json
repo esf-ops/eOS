@@ -92,6 +92,7 @@
     "eos:test:quote-delivery": "npm run eos:build:customer-estimate-document && node backend-core/src/quoteDelivery/quoteDelivery.test.mjs && node backend-core/src/quoteDelivery/customerEstimatePrintSnapshotSave.test.mjs && node backend-core/src/scripts/customerPrintDisplayAggregation.test.mjs",
     "eos:test:quote-output-gate": "node backend-core/src/quotes/quoteOutputGate.test.mjs",
     "eos:test:quote-library-search": "node backend-core/src/quotes/quoteLibrarySearch.test.mjs && node backend-core/src/quotes/quoteLibraryArchive.test.mjs",
+    "eos:test:estimate-account-directory": "node backend-core/src/quotes/customerIdentitySnapshot.test.mjs && node backend-core/src/quotes/internalQuoteAccountLookup.test.mjs && node backend-core/src/quotes/estimateDocumentIdentity.test.mjs && node app-internal-estimate/src/lib/accountDirectoryEstimate.test.mjs",
     "eos:test:custom-quote": "node backend-core/src/quotes/customQuoteCalculator.test.mjs",
     "eos:test:customer-output-gate": "node backend-core/src/scripts/verifyCustomerOutputGate.mjs && node backend-core/src/quotes/quoteOutputGate.test.mjs",
     "eos:test:entered-by-defaults": "node app-internal-estimate/src/lib/enteredByDefaults.test.mjs",

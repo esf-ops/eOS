@@ -261,6 +261,8 @@ function mapListRow(r, handoffDocsByQuote) {
     is_current_revision: r.is_current_revision ?? null,
     archived_at: r.archived_at ?? null,
     account_name: deriveAccountName(r),
+    account_directory_account_id: r.account_directory_account_id ?? null,
+    account_linked: Boolean(r.account_directory_account_id),
     customer_name: r.customer_name,
     customer_email: r.customer_email,
     customer_phone: r.customer_phone,
@@ -846,6 +848,9 @@ export function attachQuoteLibraryRoutes(app, deps) {
       header: {
         ...header,
         account_name: deriveAccountName(header),
+        account_directory_account_id: header.account_directory_account_id ?? null,
+        account_linked: Boolean(header.account_directory_account_id),
+        customer_identity_snapshot: header.customer_identity_snapshot ?? null,
         quote_status_display: displayStatus(header.quote_status),
         customer_display_total: pickSnapshotCustomerDisplayTotal(header)
       },

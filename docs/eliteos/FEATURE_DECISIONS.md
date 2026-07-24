@@ -2308,3 +2308,17 @@
 | **Real apply** | Not run in development. |
 | **Impacted** | `backend-core/src/accountDirectory/accountDirectoryMasterList*.mjs`, scripts, `package.json`, this entry. |
 
+### 162. Estimate Studio ↔ Account Directory Phase 1 (2026-07-23)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-23 · `feature/estimate-studio-account-directory-integration` |
+| **Decision** | Internal Estimate links to Account Directory with **live IDs** (`account_directory_*_id`) plus a **frozen** `customer_identity_snapshot` on `quote_headers`. Print/PDF/email prefer the frozen snapshot. Quote Library shows linked/unlinked from saved columns/snapshot — no N+1 AD fetches. |
+| **Auth** | Account lookup routes sit on Internal Estimate (`quote`) head access — **not** Account Directory head access. Prospect create still requires AD **EDIT** capability on the role. |
+| **Save modes** | Create / save-as-new stamp a new snapshot. Update Existing and Save Revision retain account + snapshot unless `explicit_account_relink` or `refresh_customer_identity`. |
+| **Legacy** | Null linkage remains valid. Manual link only — no auto fuzzy backfill. |
+| **Out of scope** | Digital Estimate timeline, salesperson ownership, QuickBooks writes, pricing math, public/partner quotes. |
+| **SQL** | `backend-core/supabase/eliteos_estimate_account_directory_v1.sql` — **committed, not applied** in this branch. |
+| **Env** | None new (optional existing `VITE_HEAD_URL_ACCOUNT_DIRECTORY` for Open Directory links). |
+| **Impacted** | `app-internal-estimate`, `app-quote-library`, `backend-core` internal quote + quote delivery + quote library search, this entry. |
+

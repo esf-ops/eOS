@@ -3,6 +3,7 @@
  */
 
 import { sanitizeSnapshotForCustomer } from "./estimateContentSanitizer.js";
+import { documentIdentityFromHeader } from "../quotes/customerIdentitySnapshot.mjs";
 
 function str(v) {
   return v != null && String(v).trim() ? String(v).trim() : null;
@@ -88,16 +89,22 @@ export function buildCustomerEstimateDisplayFromSnapshot(header, options = {}) {
     }
   }
 
+  const identity = documentIdentityFromHeader(header);
+
   return {
     header: {
       quoteNumber: str(header.quote_number),
       revisionLabel: str(header.revision_label),
       revisionNumber: num(header.revision_number),
-      accountName,
-      customerName: str(header.customer_name),
-      customerEmail: str(header.customer_email),
+      // Prefer frozen customer_identity_snapshot when present (never live AD).
+      accountName: identity.accountName || accountName,
+      customerName: identity.customerName || str(header.customer_name),
+      customerEmail: identity.customerEmail || str(header.customer_email),
+      customerPhone: identity.customerPhone || str(header.customer_phone),
       projectName: str(header.project_name),
+      // Project/jobsite address stays on the quote — not Account Directory location.
       projectAddress: str(header.project_address),
+      identityFromFrozenSnapshot: identity.fromSnapshot,
       city: str(header.city),
       state: str(header.state),
       branch: str(header.branch),

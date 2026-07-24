@@ -204,6 +204,8 @@ export type QuoteDetailModalProps = {
   internalBase: string;
   /** Base URL for the Custom Quote head (e.g. https://custom.eliteosfab.com). */
   customQuoteBase: string;
+  /** Optional Account Directory head URL for opening linked accounts. */
+  accountDirectoryUrl?: string;
   /** Close the modal and return to the list. */
   onClose: () => void;
   /** Shared action runner that sets list msg/err state and refreshes data. */
@@ -220,6 +222,7 @@ export function QuoteDetailModal({
   sessionToken,
   internalBase,
   customQuoteBase,
+  accountDirectoryUrl,
   onClose,
   runAction,
   onRevisionSelect
@@ -414,7 +417,29 @@ export function QuoteDetailModal({
               <dl className="drawer-meta-dl">
                 <div className="dl-row">
                   <dt>Account</dt>
-                  <dd>{str(header.account_name) || "—"}</dd>
+                  <dd>
+                    {account.primary}
+                    <div className="account-link-meta" style={{ marginTop: 6 }}>
+                      {account.accountLinked ? (
+                        <span className="pill pill-account-linked">Account linked</span>
+                      ) : (
+                        <span className="pill pill-account-unlinked">Unlinked customer</span>
+                      )}
+                      {account.accountDirectoryAccountId && accountDirectoryUrl ? (
+                        <>
+                          {" "}
+                          <a
+                            href={`${accountDirectoryUrl.replace(/\/$/, "")}/?account=${encodeURIComponent(account.accountDirectoryAccountId)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Open Account Directory
+                          </a>
+                        </>
+                      ) : null}
+                    </div>
+                  </dd>
                 </div>
                 <div className="dl-row">
                   <dt>Customer</dt>

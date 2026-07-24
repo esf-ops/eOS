@@ -39,7 +39,8 @@ function testSearchFieldsIncludeRequiredColumns() {
     "created_by",
     "sales_rep",
     "calculation_snapshot->internal_ui->job_info->>account",
-    "calculation_snapshot->internal_ui->>account"
+    "calculation_snapshot->internal_ui->>account",
+    "customer_identity_snapshot->>accountDisplayName"
   ]) {
     assert.match(clause, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
@@ -49,6 +50,7 @@ function testAccountFilterIncludesSnapshotAccount() {
   const clause = quoteAccountFilterOrClause("Interior Elements");
   assert.match(clause, /account_name\.ilike/);
   assert.match(clause, /calculation_snapshot->internal_ui->job_info->>account\.ilike/);
+  assert.match(clause, /customer_identity_snapshot->>accountDisplayName\.ilike/);
 }
 
 function testAccountFilterDoesNotUseCustomerOrProject() {
@@ -159,6 +161,8 @@ function testListSelectIsLightweight() {
   assert.match(QUOTE_LIBRARY_LIST_SELECT, /created_by/);
   assert.match(QUOTE_LIBRARY_LIST_SELECT, /snapshot_pricing_mode:/);
   assert.match(QUOTE_LIBRARY_LIST_SELECT, /snapshot_account:calculation_snapshot->internal_ui->job_info->>account/);
+  assert.match(QUOTE_LIBRARY_LIST_SELECT, /account_directory_account_id/);
+  assert.match(QUOTE_LIBRARY_LIST_SELECT, /snapshot_identity_account:customer_identity_snapshot->>accountDisplayName/);
   assert.doesNotMatch(QUOTE_LIBRARY_LIST_SELECT, /calculation_snapshot[^->]/);
 }
 

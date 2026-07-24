@@ -1053,6 +1053,28 @@ input[type="checkbox"] {
   border-color: var(--eos-info-border);
 }
 
+.pill-account-linked {
+  background: var(--eos-success-soft);
+  color: var(--eos-success);
+  border-color: var(--eos-success-border);
+  font-size: 0.68rem;
+}
+
+.pill-account-unlinked {
+  background: rgba(11, 26, 51, 0.05);
+  color: var(--eos-ink-mid);
+  border-color: var(--eos-line);
+  font-size: 0.68rem;
+}
+
+.account-link-meta {
+  margin-top: 4px;
+}
+
+.account-cell .account-link-meta .pill {
+  display: inline-block;
+}
+
 .pill-status-neutral {
   background: rgba(11, 26, 51, 0.05);
   color: var(--eos-ink-mid);
