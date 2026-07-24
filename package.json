@@ -64,6 +64,7 @@
     "eos:test:slabcloud-v2-textures": "node backend-core/src/slabcloud/slabCloudV2TextureDiagnostic.test.mjs",
     "eos:test:slabcloud-visual-asset-cache": "node backend-core/src/slabcloud/slabCloudVisualAssetCache.test.mjs",
     "eos:test:studio-account-directory-continuity": "node backend-core/src/elite100EstimateStudio/studioAccountDirectoryContinuity.test.mjs",
+    "eos:test:studio-account-directory-delivery-safety": "node backend-core/src/elite100EstimateStudio/studioAccountDirectoryDeliverySafety.test.mjs",
     "eos:test:elite100-manual-visual-assets": "node backend-core/src/slabInventory/elite100ManualVisualAssets.test.mjs",
     "eos:test:slab-inventory-api": "node backend-core/src/slabInventory/slabInventoryApi.test.mjs",
     "eos:test:slab-inventory-image-resolver": "node backend-core/src/slabInventory/slabInventoryImageResolver.test.mjs",

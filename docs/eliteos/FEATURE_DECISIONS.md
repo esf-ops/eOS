@@ -2331,8 +2331,9 @@
 | **Primary workflow** | Estimate Queue → Elite 100 Estimate Studio → approved Studio estimate → Digital Estimate publication → customer review → sold-job handoff. |
 | **Decision** | Account Directory owns **canonical customer/company identity** on `studio_estimates` (`account_directory_*_id` + frozen `customer_identity_snapshot`). **`partnerAccountId` remains separate trusted-partner pricing authority** (Watts/Spahn) and must never receive an Account Directory UUID. |
 | **Digital Estimate** | Manual publish freezes the Studio `customerIdentitySnapshot` into the publication / bridge envelope. Public DE never queries live Account Directory. Existing publications stay historically unchanged. |
+| **Delivery safety (2026-07-24)** | AD search/select, prospect create, scope save, calculate, approve, revision, takeoff refresh, DE panel load, and readiness **never** publish or email. Only explicit estimator `POST …/digital-estimate/publish` with `confirm:true` (and existing explicit republish / quote-delivery send) may deliver. Proven by `eos:test:studio-account-directory-delivery-safety`. |
 | **APIs** | Studio-scoped routes under `/api/elite100-estimate-studio/account-directory*` (reuse AD service helpers; do **not** call `/api/internal-quotes/account-lookup` from Studio). |
-| **SQL** | `backend-core/supabase/eliteos_studio_estimate_account_directory_v1.sql` — **committed, not applied**. |
+| **SQL** | `backend-core/supabase/eliteos_studio_estimate_account_directory_v1.sql` — **committed, not applied**. No communication/publication triggers. |
 | **Secondary** | Internal Estimate + Quote Library AD integration (§162) remains; does not replace Studio. |
 | **Impacted** | `app-elite100-estimate-studio`, `backend-core/src/elite100EstimateStudio/*`, Digital Estimate publication bridge, this entry. |
 
