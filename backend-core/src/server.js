@@ -38,6 +38,7 @@ import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoute
 import { maybeAttachQuoteIntakeRoutes } from "./quoteIntake/quoteIntakeRoutes.js";
 import { openEstimateForIntakeCase } from "./takeoff/intakeOpenEstimateService.mjs";
 import { createStudioEstimateService } from "./elite100EstimateStudio/studioEstimateService.mjs";
+import { EOS_CORS_ALLOWED_HEADERS, EOS_CORS_METHODS } from "./http/eosCorsPolicy.mjs";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -536,8 +537,9 @@ app.use(
       return callback(null, false);
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "x-eos-cron-secret", "x-eliteos-cron-secret", "x-moraware-sync-secret", "x-organization-key"],
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    // Shared list — includes Idempotency-Key for Studio manual estimate create (and any other idempotent POSTs).
+    allowedHeaders: [...EOS_CORS_ALLOWED_HEADERS],
+    methods: [...EOS_CORS_METHODS]
   })
 );
 
