@@ -2352,3 +2352,20 @@
 | **Secondary** | Internal Estimate + Quote Library AD integration (§162) remains; does not replace Studio. |
 | **Impacted** | `app-elite100-estimate-studio`, `backend-core/src/elite100EstimateStudio/*`, Digital Estimate publication bridge, this entry. |
 
+### 166. Live Digital Estimates portfolio (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `feature/live-digital-estimates-portfolio` |
+| **Command Center** | Internal action queue — “what work should I do next?” |
+| **Live Digital Estimates** | Active customer-facing publication visibility — “what is out with customers, and what is happening?” Replaces search-only Publications as the primary nav label (internal key `publications` retained). |
+| **Review Requests** | Customer-submitted configuration change resolution workspace (unchanged). |
+| **Analytics** | Future performance reporting — not in this branch. |
+| **API** | `GET /api/elite100-estimate-studio/live-digital-estimates` (+ `/:publicationId` detail). Org-scoped, paginated, side-effect-free. Server derives status, nextAction, metrics, AD grouping. |
+| **Grouping** | By `account_directory_account_id` when present; otherwise stable unlinked key. Never fuzzy name match. Batched AD lookup. Frozen publication identity preserved (`Published as …` when live AD name differs). |
+| **Mutations** | Publish / replace / revoke / copy link / email remain explicit estimator actions with existing confirmations. List/detail GET never publish, email, or record link-copied/viewed. |
+| **SQL** | None required (existing publication / event / review / studio_estimates / AD tables). |
+| **Tests** | `eos:test:live-digital-estimates`, `liveDigitalEstimates.ui.test.mjs`. |
+| **Impacted** | `app-elite100-estimate-studio`, `backend-core/src/elite100EstimateStudio/liveDigitalEstimates*`, DE repository portfolio list helpers, this entry. |
+
+

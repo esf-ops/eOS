@@ -312,6 +312,101 @@ export function createInMemoryDigitalEstimateRepository(opts = {}) {
     },
 
     /**
+     * Portfolio list — bounded, lean rows (no full snapshot / tokens).
+     * @param {string} organizationId
+     * @param {{ includeInactive?: boolean, limit?: number, offset?: number }} [opts]
+     */
+    async listPortfolioPublications(organizationId, opts = {}) {
+      const includeInactive = opts.includeInactive === true;
+      const limit = Math.min(500, Math.max(1, Number(opts.limit) || 200));
+      const offset = Math.max(0, Number(opts.offset) || 0);
+      let rows = [...publications.values()].filter((p) => p.organization_id === organizationId);
+      if (!includeInactive) {
+        rows = rows.filter((p) => p.status === "active");
+      }
+      rows.sort((a, b) => String(b.published_at || "").localeCompare(String(a.published_at || "")));
+      return rows.slice(offset, offset + limit).map((p) => {
+        const snapRow = [...snapshots.values()].find(
+          (s) => s.organization_id === organizationId && s.publication_id === p.id
+        );
+        const customerSnap = snapRow?.customer_snapshot_json || null;
+        return {
+          id: p.id,
+          organization_id: p.organization_id,
+          source_quote_id: p.source_quote_id,
+          quote_family_root_id: p.quote_family_root_id,
+          quote_number: p.quote_number,
+          revision_number: p.revision_number,
+          revision_label: p.revision_label,
+          status: p.status,
+          published_at: p.published_at,
+          published_by_user_id: p.published_by_user_id,
+          access_expires_at: p.access_expires_at,
+          pricing_valid_through: p.pricing_valid_through,
+          portfolio_snapshot: customerSnap
+            ? {
+                project: customerSnap.project || null,
+                totals: customerSnap.totals || customerSnap.estimate?.totals || null,
+                customer_identity_snapshot:
+                  customerSnap.internal_ui?.customer_identity_snapshot ||
+                  customerSnap.customer_identity_snapshot ||
+                  null
+              }
+            : null,
+          account_directory_account_id: null,
+          link_status: p.status === "active" ? "active" : p.status
+        };
+      });
+    },
+
+    /**
+     * Aggregate view events for many publications in one pass.
+     * @param {string} organizationId
+     * @param {string[]} publicationIds
+     */
+    async aggregatePortfolioEvents(organizationId, publicationIds) {
+      const want = new Set((publicationIds || []).map(String));
+      /** @type {Map<string, object>} */
+      const map = new Map();
+      for (const id of want) {
+        map.set(id, {
+          hasFirstViewed: false,
+          hasViewed: false,
+          lastCustomerActivityAt: null,
+          lastCustomerActivityLabel: null
+        });
+      }
+      for (const e of events) {
+        if (e.organization_id !== organizationId) continue;
+        const pubId = String(e.publication_id || "");
+        if (!want.has(pubId)) continue;
+        const row = map.get(pubId);
+        const type = String(e.event_type || "");
+        const at = e.created_at || null;
+        if (type === "first_viewed") {
+          row.hasFirstViewed = true;
+          row.hasViewed = true;
+          row.lastCustomerActivityAt = at;
+          row.lastCustomerActivityLabel = "First viewed";
+        } else if (type === "viewed") {
+          row.hasViewed = true;
+          if (!row.lastCustomerActivityAt || String(at) > String(row.lastCustomerActivityAt)) {
+            row.lastCustomerActivityAt = at;
+            row.lastCustomerActivityLabel = "Viewed";
+          }
+        }
+      }
+      return map;
+    },
+
+    async listEventsForPublications(organizationId, publicationIds) {
+      const want = new Set((publicationIds || []).map(String));
+      return events.filter(
+        (e) => e.organization_id === organizationId && want.has(String(e.publication_id))
+      );
+    },
+
+    /**
      * Atomic publish for memory mode: all-or-nothing under a family mutex.
      * Mirrors digital_estimate_publish_atomic.
      */
@@ -880,6 +975,105 @@ export function createSupabaseDigitalEstimateRepository(deps) {
         .limit(limit);
       if (error) throw error;
       return data || [];
+    },
+
+    /**
+     * Portfolio publications — lean select, no tokens / evidence.
+     * @param {string} organizationId
+     * @param {{ includeInactive?: boolean, limit?: number, offset?: number }} [opts]
+     */
+    async listPortfolioPublications(organizationId, opts = {}) {
+      const includeInactive = opts.includeInactive === true;
+      const limit = Math.min(500, Math.max(1, Number(opts.limit) || 200));
+      const offset = Math.max(0, Number(opts.offset) || 0);
+      let q = db
+        .from("quote_publications")
+        .select(
+          "id, organization_id, source_quote_id, quote_family_root_id, quote_number, revision_number, revision_label, status, published_at, published_by_user_id, access_expires_at, pricing_valid_through"
+        )
+        .eq("organization_id", organizationId)
+        .order("published_at", { ascending: false })
+        .range(offset, offset + limit - 1);
+      if (!includeInactive) {
+        q = q.eq("status", "active");
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      const pubs = data || [];
+      if (!pubs.length) return [];
+
+      const ids = pubs.map((p) => p.id);
+      const { data: snaps, error: snapErr } = await db
+        .from("quote_publication_snapshots")
+        .select("publication_id, customer_snapshot_json")
+        .eq("organization_id", organizationId)
+        .in("publication_id", ids);
+      if (snapErr) throw snapErr;
+      const snapByPub = new Map(
+        (snaps || []).map((s) => [String(s.publication_id), s.customer_snapshot_json])
+      );
+
+      return pubs.map((p) => {
+        const customerSnap = snapByPub.get(String(p.id)) || null;
+        return {
+          ...p,
+          portfolio_snapshot: customerSnap
+            ? {
+                project: customerSnap.project || null,
+                totals: customerSnap.totals || customerSnap.estimate?.totals || null,
+                customer_identity_snapshot:
+                  customerSnap.internal_ui?.customer_identity_snapshot ||
+                  customerSnap.customer_identity_snapshot ||
+                  null
+              }
+            : null,
+          link_status: p.status === "active" ? "active" : p.status
+        };
+      });
+    },
+
+    async aggregatePortfolioEvents(organizationId, publicationIds) {
+      const want = (publicationIds || []).map(String).filter(Boolean);
+      /** @type {Map<string, object>} */
+      const map = new Map();
+      for (const id of want) {
+        map.set(id, {
+          hasFirstViewed: false,
+          hasViewed: false,
+          lastCustomerActivityAt: null,
+          lastCustomerActivityLabel: null
+        });
+      }
+      if (!want.length) return map;
+      const { data, error } = await db
+        .from("quote_publication_events")
+        .select("publication_id, event_type, created_at")
+        .eq("organization_id", organizationId)
+        .in("publication_id", want)
+        .in("event_type", ["first_viewed", "viewed"]);
+      if (error) throw error;
+      for (const e of data || []) {
+        const pubId = String(e.publication_id || "");
+        const row = map.get(pubId);
+        if (!row) continue;
+        const type = String(e.event_type || "");
+        const at = e.created_at || null;
+        if (type === "first_viewed") {
+          row.hasFirstViewed = true;
+          row.hasViewed = true;
+          if (!row.lastCustomerActivityAt || String(at) > String(row.lastCustomerActivityAt)) {
+            row.lastCustomerActivityAt = at;
+            row.lastCustomerActivityLabel = "First viewed";
+          }
+        } else if (type === "viewed") {
+          row.hasViewed = true;
+          if (!row.lastCustomerActivityAt || String(at) > String(row.lastCustomerActivityAt)) {
+            row.lastCustomerActivityAt = at;
+            row.lastCustomerActivityLabel = "Viewed";
+          }
+        }
+      }
+      return map;
     },
 
     /**

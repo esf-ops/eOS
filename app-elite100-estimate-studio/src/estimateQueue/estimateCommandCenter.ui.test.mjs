@@ -40,12 +40,12 @@ assert.ok(topbar.includes("export default function EliteosTopbar"));
 assert.equal(page.includes("EliteosTopbar"), false, "page must not nest a second topbar");
 console.log("ok: Command Center uses Studio shell / shared topbar");
 
-// 2–3. Publication banner absent on Command Center; remains on Publications
+// 2–3. Publication banner absent on Command Center; remains on publish-search path
 assert.ok(app.includes('mainNav === "publications"'));
 assert.ok(app.includes("studio-publications-banner"));
 assert.match(
   app,
-  /mainNav === "publications"[\s\S]*?studio-publications-banner/
+  /publicationsMode === "publish-search"[\s\S]*?studio-publications-banner/
 );
 assert.equal(page.includes("pilot-banner"), false);
 assert.equal(page.includes("publishes frozen Digital Estimates"), false);
@@ -54,7 +54,7 @@ console.log("ok: publication banner only on Publications; CC uses subtitle");
 
 // 4. Primary navigation labels are readable employee-oriented labels
 assert.ok(app.includes(">Command Center<") || app.includes("Command Center\n"));
-assert.ok(app.includes("Publications"));
+assert.ok(app.includes("Live Digital Estimates"));
 assert.ok(app.includes("Review Requests"));
 assert.ok(css.includes(".studio-nav button"));
 assert.ok(css.includes("color: var(--eos-ink)"));

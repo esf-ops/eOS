@@ -57,6 +57,7 @@ import {
   roleHasCapability
 } from "./studioAccountDirectoryLookup.mjs";
 import { AccountDirectoryError } from "../accountDirectory/accountDirectoryErrors.mjs";
+import { resolveAccountDirectoryStore } from "../accountDirectory/accountDirectoryApi.js";
 import { createDigitalEstimateConfigurationStack } from "../digitalEstimate/configuration/configurationFactory.mjs";
 import { createConfigurationStudioService } from "../digitalEstimate/configuration/configurationStudioService.mjs";
 import { isDigitalEstimateConfigurationEnabled } from "../digitalEstimate/configuration/configurationConfig.mjs";
@@ -69,6 +70,7 @@ import {
   buildLinkRecoveryDiagnostics,
   unwrapDigitalEstimateAccessTokenDetailed
 } from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
+import { createLiveDigitalEstimatesService } from "./liveDigitalEstimatesService.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
@@ -700,10 +702,127 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           studioDigitalEstimateService
         })
       : null);
+
+  const liveDigitalEstimatesService =
+    deps.liveDigitalEstimatesService ||
+    createLiveDigitalEstimatesService({
+      digitalEstimateRepository: repository,
+      studioEstimateRepository:
+        deps.studioEstimateRepository || studioEstimateService.repository || null,
+      amendmentRepository,
+      accountDirectoryStore: deps.accountDirectoryStore || null,
+      configurationRepository,
+      queryCounters: deps.liveDeQueryCounters || undefined
+    });
+
   app.get(
-    "/api/elite100-estimate-studio/partner-accounts",
+    "/api/elite100-estimate-studio/live-digital-estimates",
     ...staffStack,
     async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        // Prefer AD store from the same factory used by Studio AD routes.
+        let adStore = deps.accountDirectoryStore || null;
+        if (!adStore) {
+          try {
+            adStore = resolveAccountDirectoryStore({ env, getSupabase });
+          } catch {
+            adStore = null;
+          }
+        }
+        const service =
+          deps.liveDigitalEstimatesService ||
+          createLiveDigitalEstimatesService({
+            digitalEstimateRepository: repository,
+            studioEstimateRepository:
+              deps.studioEstimateRepository || studioEstimateService.repository || null,
+            amendmentRepository,
+            accountDirectoryStore: adStore,
+            configurationRepository
+          });
+        const result = await service.listPortfolio({
+          organizationId,
+          q: String(req.query?.q ?? ""),
+          status: req.query?.status ? String(req.query.status) : undefined,
+          accountId: req.query?.accountId ? String(req.query.accountId) : undefined,
+          estimatorUserId: req.query?.estimatorUserId
+            ? String(req.query.estimatorUserId)
+            : undefined,
+          branch: req.query?.branch ? String(req.query.branch) : undefined,
+          expiringWithinDays:
+            req.query?.expiringWithinDays != null
+              ? Number(req.query.expiringWithinDays)
+              : undefined,
+          history:
+            String(req.query?.history || "").trim() === "1" ||
+            String(req.query?.mode || "").toLowerCase() === "history",
+          needsAttentionOnly: String(req.query?.needsAttentionOnly || "") === "1",
+          accountLinked: req.query?.accountLinked
+            ? String(req.query.accountLinked)
+            : undefined,
+          quickbooksLinked: req.query?.quickbooksLinked
+            ? String(req.query.quickbooksLinked)
+            : undefined,
+          groupByAccount: String(req.query?.groupByAccount || "1") !== "0",
+          sort: req.query?.sort ? String(req.query.sort) : "activity",
+          limit: Number(req.query?.limit) || 25,
+          offset: Number(req.query?.offset) || 0
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("live digital estimates list failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load Live Digital Estimates",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/live-digital-estimates/:publicationId",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        let adStore = deps.accountDirectoryStore || null;
+        if (!adStore) {
+          try {
+            adStore = resolveAccountDirectoryStore({ env, getSupabase });
+          } catch {
+            adStore = null;
+          }
+        }
+        const service =
+          deps.liveDigitalEstimatesService ||
+          createLiveDigitalEstimatesService({
+            digitalEstimateRepository: repository,
+            studioEstimateRepository:
+              deps.studioEstimateRepository || studioEstimateService.repository || null,
+            amendmentRepository,
+            accountDirectoryStore: adStore,
+            configurationRepository
+          });
+        const result = await service.getPortfolioDetail(
+          organizationId,
+          String(req.params.publicationId)
+        );
+        res.json(result);
+      } catch (e) {
+        logStudio("live digital estimates detail failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load publication",
+          code: e?.code
+        });
+      }
+    }
+  );
+
+  app.get("/api/elite100-estimate-studio/partner-accounts", ...staffStack, async (req, res) => {
       res.set("Cache-Control", "no-store");
       try {
         const organizationId = await orgIdFor(req);

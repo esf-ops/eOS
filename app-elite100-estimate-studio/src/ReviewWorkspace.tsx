@@ -36,6 +36,7 @@ type Props = {
   token: string;
   onAuthFailure: () => void;
   onOpenEstimate?: (intakeCaseId: string) => void;
+  initialReviewRequestId?: string | null;
 };
 
 function money(n: number | null | undefined): string {
@@ -56,10 +57,15 @@ function operatorLabel(s: string | undefined | null): string {
   return map[v] || v || "—";
 }
 
-export default function ReviewWorkspace({ token, onAuthFailure, onOpenEstimate }: Props) {
+export default function ReviewWorkspace({
+  token,
+  onAuthFailure,
+  onOpenEstimate,
+  initialReviewRequestId = null
+}: Props) {
   const [rows, setRows] = useState<QueueRow[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialReviewRequestId || null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +123,13 @@ export default function ReviewWorkspace({ token, onAuthFailure, onOpenEstimate }
     void loadQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, statusFilter]);
+
+  useEffect(() => {
+    if (initialReviewRequestId) {
+      void loadDetail(initialReviewRequestId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, initialReviewRequestId]);
 
   const reviewRequest = (detail?.reviewRequest || null) as Record<string, unknown> | null;
   const linkage = (detail?.linkage || null) as Record<string, unknown> | null;

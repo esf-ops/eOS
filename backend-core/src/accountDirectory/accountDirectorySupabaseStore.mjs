@@ -181,6 +181,23 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return mapAccount(data);
     },
 
+    /**
+     * Batched account fetch for Live Digital Estimates portfolio (no N+1).
+     * @param {string} organizationId
+     * @param {string[]} accountIds
+     */
+    async getAccountsByIds(organizationId, accountIds) {
+      const ids = [...new Set((accountIds || []).map(String).filter(Boolean))];
+      if (!ids.length) return [];
+      const { data, error } = await db()
+        .from("account_directory_accounts")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .in("id", ids);
+      if (error) throw dbError(error, "Could not load accounts.");
+      return (data || []).map(mapAccount);
+    },
+
     async updateAccount(organizationId, accountId, patch, expectedRowVersion) {
       const current = await this.getAccount(organizationId, accountId);
       if (!current) return { ok: false, code: "not_found" };
