@@ -538,13 +538,30 @@ export function createStudioReviewRequestService(deps) {
     toOperatorReviewStatus,
 
     async list(organizationId, query = {}) {
+      const allowedStatuses = new Set(Object.values(REVIEW_STATUS));
+      const rawStatus = query.status != null ? String(query.status).trim() : "";
+      const statusFilter =
+        rawStatus && allowedStatuses.has(rawStatus) ? rawStatus : null;
+      // Unknown/empty status is safely ignored (same as "all").
       const rows = await amendmentRepository.listReviewRequests(organizationId, {
-        status: query.status || null,
+        status: statusFilter,
         limit: Number(query.limit) || 50
       });
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return { ok: true, reviewRequests: [] };
+      }
+      if (typeof amendmentRepository.listAmendmentsForRequest !== "function") {
+        throw deError(
+          "Review request enrichment is unavailable",
+          "amendment_repository_incomplete",
+          500
+        );
+      }
       const out = [];
       for (const r of rows) {
-        const publication = await deRepository.getPublication(organizationId, r.publication_id);
+        const publication = r.publication_id
+          ? await deRepository.getPublication(organizationId, r.publication_id)
+          : null;
         const estimateRow = publication
           ? await resolveEstimateForPublication(organizationId, publication)
           : null;
@@ -557,16 +574,21 @@ export function createStudioReviewRequestService(deps) {
           amendments,
           estimateRow
         });
-        const snap = r.request_snapshot_json || {};
+        const snap =
+          r.request_snapshot_json && typeof r.request_snapshot_json === "object"
+            ? r.request_snapshot_json
+            : {};
         const project = {};
         try {
-          const pubSnap = await deRepository.getSnapshotByPublicationId(
-            organizationId,
-            r.publication_id
-          );
-          Object.assign(project, pubSnap?.customer_snapshot_json?.project || {});
+          if (r.publication_id && typeof deRepository.getSnapshotByPublicationId === "function") {
+            const pubSnap = await deRepository.getSnapshotByPublicationId(
+              organizationId,
+              r.publication_id
+            );
+            Object.assign(project, pubSnap?.customer_snapshot_json?.project || {});
+          }
         } catch {
-          // ignore
+          // ignore snapshot enrichment failures
         }
         out.push({
           id: r.id,
@@ -578,9 +600,9 @@ export function createStudioReviewRequestService(deps) {
           customerName: project.customerName || null,
           projectName: project.projectName || null,
           requestedAt: r.created_at,
-          baselineDisplayTotal: r.baseline_display_total,
-          requestedDisplayTotal: r.configured_display_total,
-          displayDelta: r.display_delta,
+          baselineDisplayTotal: r.baseline_display_total ?? null,
+          requestedDisplayTotal: r.configured_display_total ?? null,
+          displayDelta: r.display_delta ?? null,
           changedSelectionCount: Array.isArray(snap.selectedOptions)
             ? snap.selectedOptions.length
             : 0,

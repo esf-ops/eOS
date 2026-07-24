@@ -761,6 +761,281 @@ export function createSupabaseAmendmentRepository({ db }) {
       if (error) throw error;
       return data || [];
     },
+
+    async updateReviewRequestStatus(organizationId, requestId, status, patch = {}) {
+      const current = await this.getReviewRequest(organizationId, requestId);
+      if (!current) throw err("not_found", "Review request not found", 404);
+      const update = {
+        status,
+        updated_at: new Date().toISOString()
+      };
+      if (patch.closed_reason != null) update.closed_reason = patch.closed_reason;
+      if (patch.closed_at != null) update.closed_at = patch.closed_at;
+      const { data, error } = await db
+        .from("digital_estimate_configuration_review_requests")
+        .update(update)
+        .eq("organization_id", organizationId)
+        .eq("id", requestId)
+        .select("*")
+        .limit(1);
+      if (error) throw error;
+      if (!data?.[0]) throw err("not_found", "Review request not found", 404);
+      return data[0];
+    },
+
+    async createAmendmentDraft(trusted) {
+      const {
+        organizationId,
+        reviewRequestId,
+        actorUserId,
+        draftSelectionsJson = {},
+        sourceSelectionFingerprint = null
+      } = trusted;
+      const req = await this.getReviewRequest(organizationId, reviewRequestId);
+      if (!req) throw err("not_found", "Review request not found", 404);
+
+      const existing = await this.listAmendmentsForRequest(organizationId, reviewRequestId);
+      const nextVersion =
+        existing.reduce((m, a) => Math.max(m, Number(a.amendment_version) || 0), 0) + 1;
+
+      const row = {
+        organization_id: organizationId,
+        review_request_id: reviewRequestId,
+        source_publication_id: req.publication_id,
+        source_publication_snapshot_id: req.publication_snapshot_id,
+        source_calculation_id: req.calculation_id,
+        parent_amendment_id: null,
+        amendment_version: nextVersion,
+        status: AMENDMENT_STATUS.DRAFT,
+        row_version: 1,
+        draft_selections_json: draftSelectionsJson,
+        customer_safe_explanation: null,
+        internal_notes_json: [],
+        clarification_message_customer: null,
+        pricing_policy_fingerprint: null,
+        catalog_fingerprint: null,
+        engine_version: null,
+        source_selection_fingerprint: sourceSelectionFingerprint || req.selection_hash,
+        final_calculation_fingerprint: null,
+        amendment_calculation_json: null,
+        customer_snapshot_json: null,
+        internal_evidence_json: null,
+        baseline_display_total: req.baseline_display_total,
+        configured_display_total: req.configured_display_total,
+        display_delta: req.display_delta,
+        pricing_valid_through: req.pricing_valid_through,
+        replacement_publication_id: null,
+        created_by_user_id: actorUserId ?? null,
+        published_by_user_id: null,
+        published_at: null
+      };
+
+      const { data: inserted, error: insertError } = await db
+        .from("digital_estimate_amendments")
+        .insert(row)
+        .select("*")
+        .limit(1);
+      if (insertError) throw insertError;
+      const amendment = inserted?.[0];
+      if (!amendment) throw err("persistence_failed", "Unable to create amendment draft", 500);
+
+      await this.updateReviewRequestStatus(
+        organizationId,
+        reviewRequestId,
+        REVIEW_STATUS.REVIEWING
+      );
+
+      try {
+        await appendEvent({
+          organization_id: organizationId,
+          review_request_id: reviewRequestId,
+          amendment_id: amendment.id,
+          event_type: "amendment_draft_created",
+          actor_type: "user",
+          actor_user_id: actorUserId ?? null
+        });
+        await appendEvent({
+          organization_id: organizationId,
+          review_request_id: reviewRequestId,
+          amendment_id: amendment.id,
+          event_type: "review_started",
+          actor_type: "user",
+          actor_user_id: actorUserId ?? null
+        });
+      } catch {
+        // Event append is best-effort.
+      }
+      return amendment;
+    },
+
+    async getAmendment(organizationId, amendmentId) {
+      const { data, error } = await db
+        .from("digital_estimate_amendments")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", amendmentId)
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
+    async listAmendmentsForRequest(organizationId, reviewRequestId) {
+      const { data, error } = await db
+        .from("digital_estimate_amendments")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("review_request_id", reviewRequestId)
+        .order("amendment_version", { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+
+    async appendEvent(row) {
+      return appendEvent(row);
+    },
+
+    async recordReplacementLinkCopied(organizationId, publicationId, actorUserId) {
+      const { data, error } = await db
+        .from("digital_estimate_amendments")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("replacement_publication_id", publicationId)
+        .limit(1);
+      if (error) throw error;
+      const amd = data?.[0];
+      if (!amd) return { ok: true, found: false };
+      await appendEvent({
+        organization_id: organizationId,
+        review_request_id: amd.review_request_id,
+        amendment_id: amd.id,
+        publication_id: publicationId,
+        event_type: "replacement_link_copied",
+        actor_type: "user",
+        actor_user_id: actorUserId ?? null,
+        metadata: {}
+      });
+      return { ok: true, found: true };
+    },
+
+    async updateAmendmentDraft(organizationId, amendmentId, patch, { expectedRowVersion, actorUserId } = {}) {
+      const row = await this.getAmendment(organizationId, amendmentId);
+      if (!row) throw err("not_found", "Amendment not found", 404);
+      if (![AMENDMENT_STATUS.DRAFT, AMENDMENT_STATUS.READY, AMENDMENT_STATUS.VALIDATING].includes(row.status)) {
+        throw err("immutable", "Published amendments cannot be edited", 403);
+      }
+      if (expectedRowVersion != null && Number(row.row_version) !== Number(expectedRowVersion)) {
+        throw err("row_version_conflict", "Amendment row_version conflict", 409);
+      }
+      if (patch.chargeableCounterSf != null || patch.lockedMeasurement != null) {
+        throw err("forbidden_caller_authority", "Locked measurements cannot be edited", 400);
+      }
+      const allowed = [
+        "draft_selections_json",
+        "customer_safe_explanation",
+        "internal_notes_json",
+        "clarification_message_customer",
+        "amendment_calculation_json",
+        "customer_snapshot_json",
+        "internal_evidence_json",
+        "pricing_policy_fingerprint",
+        "catalog_fingerprint",
+        "engine_version",
+        "final_calculation_fingerprint",
+        "baseline_display_total",
+        "configured_display_total",
+        "display_delta",
+        "pricing_valid_through",
+        "status",
+        "replacement_publication_id",
+        "published_at",
+        "published_by_user_id"
+      ];
+      const update = {
+        row_version: Number(row.row_version) + 1,
+        updated_at: new Date().toISOString()
+      };
+      for (const k of allowed) {
+        if (patch[k] !== undefined) update[k] = patch[k];
+      }
+      const { data, error } = await db
+        .from("digital_estimate_amendments")
+        .update(update)
+        .eq("organization_id", organizationId)
+        .eq("id", amendmentId)
+        .select("*")
+        .limit(1);
+      if (error) throw error;
+      if (!data?.[0]) throw err("not_found", "Amendment not found", 404);
+      try {
+        await appendEvent({
+          organization_id: organizationId,
+          review_request_id: row.review_request_id,
+          amendment_id: amendmentId,
+          event_type: "amendment_updated",
+          actor_type: "user",
+          actor_user_id: actorUserId ?? null
+        });
+      } catch {
+        // best-effort
+      }
+      return data[0];
+    },
+
+    async setClarificationRequired(organizationId, reviewRequestId, message, actorUserId) {
+      const req = await this.updateReviewRequestStatus(
+        organizationId,
+        reviewRequestId,
+        REVIEW_STATUS.CLARIFICATION
+      );
+      try {
+        await appendEvent({
+          organization_id: organizationId,
+          review_request_id: reviewRequestId,
+          event_type: "clarification_required",
+          actor_type: "user",
+          actor_user_id: actorUserId ?? null,
+          metadata: { hasMessage: Boolean(message) }
+        });
+      } catch {
+        // best-effort
+      }
+      return req;
+    },
+
+    async closeReviewRequest(organizationId, reviewRequestId, reason, actorUserId) {
+      const closedAt = new Date().toISOString();
+      const req = await this.updateReviewRequestStatus(organizationId, reviewRequestId, REVIEW_STATUS.CLOSED, {
+        closed_at: closedAt,
+        closed_reason: reason || "closed"
+      });
+      try {
+        await appendEvent({
+          organization_id: organizationId,
+          review_request_id: reviewRequestId,
+          event_type: "review_closed",
+          actor_type: "user",
+          actor_user_id: actorUserId ?? null,
+          metadata: { reason: req.closed_reason }
+        });
+      } catch {
+        // best-effort
+      }
+      return req;
+    },
+
+    async listEvents(organizationId, { reviewRequestId = null, amendmentId = null } = {}) {
+      let q = db
+        .from("digital_estimate_amendment_events")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: true });
+      if (reviewRequestId) q = q.eq("review_request_id", reviewRequestId);
+      if (amendmentId) q = q.eq("amendment_id", amendmentId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data || [];
+    },
+
     async publishAmendmentAtomic(args) {
       const { data, error } = await db.rpc("digital_estimate_publish_amendment_atomic", {
         p_organization_id: args.organizationId,

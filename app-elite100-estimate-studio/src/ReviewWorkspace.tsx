@@ -68,7 +68,9 @@ export default function ReviewWorkspace({
   const [selectedId, setSelectedId] = useState<string | null>(initialReviewRequestId || null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingQueue, setLoadingQueue] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [oneTimeLink, setOneTimeLink] = useState<string | null>(null);
   const [staffNotice, setStaffNotice] = useState<string | null>(null);
   const [resolutionNote, setResolutionNote] = useState("");
@@ -80,19 +82,33 @@ export default function ReviewWorkspace({
 
   async function loadQueue() {
     setError(null);
+    setErrorCode(null);
+    setLoadingQueue(true);
     try {
       const q = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : "";
       const body = (await apiGet(
         `/api/elite100-estimate-studio/review-requests${q}`,
         token
       )) as { reviewRequests?: QueueRow[] };
-      setRows(body.reviewRequests || []);
+      setRows(Array.isArray(body.reviewRequests) ? body.reviewRequests : []);
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         onAuthFailure();
         return;
       }
+      setRows([]);
+      const code =
+        e instanceof ApiError &&
+        e.body &&
+        typeof e.body === "object" &&
+        e.body !== null &&
+        "code" in e.body
+          ? String((e.body as { code?: unknown }).code || "")
+          : "";
+      setErrorCode(code || null);
       setError(e instanceof ApiError ? e.message : "Unable to load review queue");
+    } finally {
+      setLoadingQueue(false);
     }
   }
 
@@ -205,7 +221,12 @@ export default function ReviewWorkspace({
         Nonbinding configuration reviews only — not acceptance, sold, payment, or ordering. Revising
         opens a new Studio estimate revision; republish supersedes the prior Digital Estimate link.
       </p>
-      {error ? <div className="error-box">{error}</div> : null}
+      {error ? (
+        <div className="error-box" role="alert" data-testid="review-queue-error">
+          {error}
+          {errorCode ? <span className="muted"> ({errorCode})</span> : null}
+        </div>
+      ) : null}
       {staffNotice ? (
         <div className="warn-box" role="status">
           {staffNotice}
@@ -217,6 +238,7 @@ export default function ReviewWorkspace({
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
           aria-label="Filter by status"
+          data-testid="review-status-filter"
         >
           <option value="">All statuses</option>
           <option value="review_requested">new (review_requested)</option>
@@ -225,14 +247,24 @@ export default function ReviewWorkspace({
           <option value="updated_estimate_published">resolved_republished</option>
           <option value="review_closed">resolved / rejected</option>
         </select>
-        <button type="button" disabled={busy} onClick={() => void loadQueue()}>
+        <button
+          type="button"
+          disabled={busy || loadingQueue}
+          data-testid="review-queue-refresh"
+          onClick={() => void loadQueue()}
+        >
           Refresh
         </button>
       </div>
 
       <div className="studio-grid">
         <div>
-          <table className="review-table">
+          {loadingQueue ? (
+            <p className="muted" data-testid="review-queue-loading">
+              Loading review requests…
+            </p>
+          ) : null}
+          <table className="review-table" data-testid="review-queue-table">
             <thead>
               <tr>
                 <th>Customer / project</th>
@@ -263,7 +295,11 @@ export default function ReviewWorkspace({
               ))}
             </tbody>
           </table>
-          {!rows.length ? <p className="muted">No customer review requests.</p> : null}
+          {!loadingQueue && !error && !rows.length ? (
+            <p className="muted" data-testid="review-queue-empty">
+              No customer review requests.
+            </p>
+          ) : null}
         </div>
 
         <div>
