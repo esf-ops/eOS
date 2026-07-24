@@ -2427,12 +2427,28 @@
 | **Date / branch** | 2026-07-24 · `feature/studio-manual-estimate-creation` |
 | **Intake envelope** | Every Studio estimate still requires a real `quote_intake_cases` row. Manual estimates use `source_type=manual` — never a fake mailbox message, attachment, or Takeoff job. `studio_estimates.intake_case_id` remains NOT NULL. |
 | **Origin** | Durable `scope_json.estimateOrigin` / `physicalScopeSource` = `manual_staff` (server-authored). Browser cannot set `manualScopeConfirmed` or origin flags. |
-| **Physical scope** | Estimator-built rooms/pieces normalize into the same pricing scope shape as Takeoff-seeded rooms. Explicit **Confirm Manual Scope** stamps fingerprint + confirmation; then Pricing / Calculate / Approve / DE publish reuse existing services. |
+| **Physical scope** | Estimator-built rooms/pieces normalize into the same pricing scope shape as Takeoff-seeded rooms. Explicit **Confirm Manual Scope** stamps fingerprint + confirmation (including backsplash + openings); then Pricing / Calculate / Approve / DE publish reuse existing services. See §172 for single-authority rules. |
 | **Pricing** | Origin does not change price. No frontend pricing constants. Fixed 2026 Vanity Program is **not** claimed — vanity tops use standard countertop pricing until a separate integration. |
 | **Delivery invariants** | Create/Save/Confirm/Calculate/Approve never publish, replace links, email, create reviews, mark sold, or write QB/Moraware. |
 | **Idempotency** | Client `Idempotency-Key` → org-scoped `content_hash = sha256(manual_staff:orgId:key)`. Same key + same create payload returns the same case/estimate; same key + conflicting payload → `409 idempotency_payload_conflict`; different keys with identical payload create distinct estimates. Not a permanent business-payload dedupe. |
 | **AD / partner** | Account Directory identity and trusted partner pricing remain separate (existing rules). AD link is not required for draft create, calculate, or approve; publication freezes snapshot when present (§164). Null linkage remains valid. |
 | **SQL** | None — reused existing `source_type` check constraint value `manual`. |
 | **Impacted** | Manual estimate service/routes, scope gates, Command Center New Estimate, Manual Scope editor, queue/CC badges, this entry. |
+
+### 172. Manual physical-scope authority — single geometry source (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/manual-estimate-physical-scope-authority` |
+| **Decision** | Confirmed Manual Scope is the **single physical geometry authority** for manual estimates: rooms, pieces, dimensions/SF, finished-edge LF, backsplash geometry, and cutout opening counts. |
+| **Pricing Setup** | Consumes confirmed physical scope read-only (with **Edit Manual Scope**). Does not maintain a second editable Edge LF / backsplash / cutout measurement set when `physicalScopeSource=manual_staff`. |
+| **Backsplash** | Measured length × height (existing `/144` conversion) lives on rooms in Manual Scope; customer-selectable backsplash *style* remains a pricing/publication option and does not alter frozen measured geometry. |
+| **Cutouts** | Opening counts (`qty-sink` / `qty-bar` / `qty-cook` / `qty-outlet`) are physical scope; product model selection remains catalog/DE authority. Estimator UI uses plain labels, not raw keys. |
+| **Finished-edge LF** | Independent of base edge profile (Eased, etc.). Confirmed room/piece LF drives project pricing and room-level customer premium-edge options. Pricing Setup “Edge LF (manual)” is not a competing editable authority for manual estimates. |
+| **Project address** | Estimate `projectAddress` (jobsite) is independent of Account Directory account location. Linking/changing AD location does **not** overwrite a nonblank project address. Explicit **Use this as project address** is required. |
+| **Edits** | Saving Manual Scope after confirmation clears confirmation (and follows existing draft/stale/revision rules). Historical publications remain frozen. |
+| **Legacy** | Prefer confirmed room/piece geometry; fall back to legacy Pricing Setup fields only when no room/piece edge exists. GET does not rewrite. |
+| **SQL** | None. |
+| **Impacted** | `studioManualPhysicalScope.mjs`, Manual Scope editor, Estimate Scope panel, `studioScopeBilling` edge resolution, AD identity apply + panel, this entry. |
 
 

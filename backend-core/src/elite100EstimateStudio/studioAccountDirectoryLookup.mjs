@@ -70,6 +70,11 @@ export function applyStudioAccountDirectoryIdentity({
       body.refreshCustomerIdentity ??
         body.refresh_customer_identity ??
         nextScope.refreshCustomerIdentity
+    ),
+    useAccountLocationAsProjectAddress: Boolean(
+      body.useAccountLocationAsProjectAddress ??
+        body.use_account_location_as_project_address ??
+        nextScope.useAccountLocationAsProjectAddress
     )
   };
 
@@ -92,6 +97,8 @@ export function applyStudioAccountDirectoryIdentity({
   // Strip one-shot flags so they are not persisted into scope_json forever.
   delete scope.explicitAccountRelink;
   delete scope.refreshCustomerIdentity;
+  delete scope.useAccountLocationAsProjectAddress;
+  delete scope.use_account_location_as_project_address;
 
   scope.accountDirectoryAccountId = resolved.account_directory_account_id;
   scope.accountDirectoryContactId = resolved.account_directory_contact_id;
@@ -104,11 +111,16 @@ export function applyStudioAccountDirectoryIdentity({
     if (snap.contactDisplayName) scope.customerContactName = String(snap.contactDisplayName);
     if (snap.contactEmail) scope.customerEmail = String(snap.contactEmail);
     if (snap.contactPhone) scope.customerPhone = String(snap.contactPhone);
-    // Prefer account location as project address only when address was empty or refresh requested.
+    // Prefer account location as project address only when address was empty
+    // OR the estimator explicitly opted in (never on mere AD link / refresh).
     const addr = [snap.addressLine1, [snap.city, snap.state].filter(Boolean).join(", "), snap.postalCode]
       .filter(Boolean)
       .join(", ");
-    if (addr && (identityBody.refresh_customer_identity || !String(scope.projectAddress || "").trim())) {
+    const explicitUse =
+      identityBody.use_account_location_as_project_address === true ||
+      identityBody.useAccountLocationAsProjectAddress === true;
+    const projectBlank = !String(scope.projectAddress || "").trim();
+    if (addr && (explicitUse || projectBlank)) {
       scope.projectAddress = addr;
     }
   } else if (!resolved.account_directory_account_id) {

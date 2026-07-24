@@ -954,10 +954,12 @@ export function createStudioEstimateService(deps = {}) {
         "customerIdentitySnapshot" in clean ||
         "explicitAccountRelink" in clean ||
         "refreshCustomerIdentity" in clean ||
+        "useAccountLocationAsProjectAddress" in clean ||
         "account_directory_account_id" in (body || {}) ||
         "customer_identity_snapshot" in (body || {}) ||
         "explicitAccountRelink" in (body || {}) ||
-        "refreshCustomerIdentity" in (body || {});
+        "refreshCustomerIdentity" in (body || {}) ||
+        "useAccountLocationAsProjectAddress" in (body || {});
 
       let identityColumns = {
         accountDirectoryAccountId: row.accountDirectoryAccountId ?? null,

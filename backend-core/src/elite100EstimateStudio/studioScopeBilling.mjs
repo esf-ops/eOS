@@ -21,6 +21,34 @@ import {
 } from "../quotes/billableSquareFeet.mjs";
 import { EDGE_SCOPE_SOURCES } from "./studioEstimateTypes.mjs";
 
+/**
+ * Sum room/piece finished-edge LF for manual/legacy scopes (browser-safe; no node:crypto).
+ * @param {object|null|undefined} scope
+ */
+function sumRoomPieceEdgeLf(scope) {
+  const rooms = Array.isArray(scope?.rooms) ? scope.rooms : [];
+  let total = 0;
+  for (const room of rooms) {
+    if (!room || room.included === false) continue;
+    const pieces = Array.isArray(room.pieces) ? room.pieces : [];
+    let roomLf = 0;
+    let fromPieces = false;
+    for (const p of pieces) {
+      if (!p || p.included === false) continue;
+      const totalIn = Number(p?.finishedEdge?.totalFinishedEdgeLengthIn);
+      if (Number.isFinite(totalIn) && totalIn > 0) {
+        roomLf += totalIn / 12;
+        fromPieces = true;
+      }
+    }
+    if (!fromPieces) {
+      roomLf = Number(room.approvedFinishedEdgeLf) || Number(room.edgeEligibleLinearFeet) || 0;
+    }
+    total += roomLf;
+  }
+  return round2(total);
+}
+
 export const STUDIO_SCOPE_BILLING_VERSION = "studio_scope_billing_v1";
 
 function round2(n) {
@@ -364,10 +392,17 @@ export function resolveScopeEdgeLinearFeet(scope) {
               : EDGE_SCOPE_SOURCES.FINISHED_EDGE
     };
   }
-  // Manual / legacy path
+  // Manual / legacy path — prefer confirmed room/piece finished-edge geometry.
+  const roomSumLf = Math.max(0, round2(sumRoomPieceEdgeLf(scope)));
   const manualLf = Math.max(0, round2(Number(scope?.edgeLinearFeet) || 0));
   const eligibleLf = Math.max(0, round2(Number(scope?.edgeEligibleLinearFeet) || 0));
-  const derivedLf = manualLf > 0 ? manualLf : eligibleLf;
+  // Confirmed manual rooms win over a blank/stale Pricing Setup Edge LF (manual).
+  const derivedLf =
+    roomSumLf > 0
+      ? roomSumLf
+      : manualLf > 0
+        ? manualLf
+        : eligibleLf;
 
   if (override.active && override.finalLf != null) {
     const finalLf = Math.max(0, round2(override.finalLf));

@@ -537,6 +537,21 @@ export default function EstimateTakeoffWorkspace({
             takeoffJobId={state.takeoffJobId}
             takeoffDisplayStatus={state.displayStatus}
             refreshKey={state.scopeRefreshKey}
+            onEditManualScope={
+              state.manualMode
+                ? () => {
+                    setState((prev) =>
+                      prev.kind === "ready"
+                        ? {
+                            ...prev,
+                            handoffNotice:
+                              "Edit Manual Scope — save and reconfirm before calculating again."
+                          }
+                        : prev
+                    );
+                  }
+                : undefined
+            }
             customerHint={
               state.caseRow
                 ? String(state.caseRow.customerName || state.caseRow.customer || "")

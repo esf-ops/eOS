@@ -109,7 +109,15 @@ type StudioEstimate = {
       backsplashSource?: string | null;
       eligibleRunCount?: number | null;
       excludedRunCount?: number | null;
-      pieces?: Array<{ id: string; name: string; included?: boolean; sqft?: number }>;
+      pieces?: Array<{
+        id: string;
+        name: string;
+        included?: boolean;
+        sqft?: number;
+        finishedEdge?: { totalFinishedEdgeLengthIn?: number };
+      }>;
+      approvedFinishedEdgeLf?: number;
+      edgeEligibleLinearFeet?: number;
       notes?: string;
     }>;
     addOns?: Record<string, number>;
@@ -129,6 +137,8 @@ type StudioEstimate = {
     internalMarkupPercent?: number;
     unresolvedManualReview?: boolean;
     physicalScopeSource?: string | null;
+    estimateOrigin?: string | null;
+    manualScopeConfirmed?: boolean;
     takeoffScopeSummary?: {
       pieceCount?: number;
       kitchenSinkCutouts?: number;
@@ -196,6 +206,7 @@ type Props = {
   refreshKey?: number;
   customerHint?: string;
   projectHint?: string;
+  onEditManualScope?: () => void;
 };
 
 const MATERIAL_GROUPS = [
@@ -219,7 +230,8 @@ export default function EstimateScopePanel({
   takeoffDisplayStatus,
   refreshKey = 0,
   customerHint = "",
-  projectHint = ""
+  projectHint = "",
+  onEditManualScope
 }: Props) {
   const [estimate, setEstimate] = useState<StudioEstimate | null>(null);
   const [partnerAccount, setPartnerAccount] = useState<PartnerAccountOption | null>(null);
@@ -624,6 +636,9 @@ export default function EstimateScopePanel({
   // (older estimates heal it server-side on next load) and must not flip the
   // estimate back into manual mode when momentarily absent.
   const takeoffAuthority = scope.physicalScopeSource === "takeoff";
+  const manualStaffAuthority =
+    scope.physicalScopeSource === "manual_staff" || scope.estimateOrigin === "manual_staff";
+  const manualScopeConfirmed = manualStaffAuthority && scope.manualScopeConfirmed === true;
   const scopeSummary = scope.takeoffScopeSummary || null;
   // Display-only mirror of the backend-authoritative scope billing (same pure
   // module the pricing engine uses). Internal estimator data — never public.
@@ -749,9 +764,70 @@ export default function EstimateScopePanel({
       <section className="eq-estimate-section" aria-label="Pricing setup">
         <h2>B. Pricing Setup</h2>
         <p className="eq-muted">
-          Takeoff confirms what physically exists. Pricing Setup chooses how Elite prices and
-          sells it — customer, pricing basis, material, products, and adjustments.
+          {manualStaffAuthority
+            ? "Manual Scope confirms what physically exists. Pricing Setup chooses how Elite prices and sells it — customer, pricing basis, material, products, and adjustments."
+            : "Takeoff confirms what physically exists. Pricing Setup chooses how Elite prices and sells it — customer, pricing basis, material, products, and adjustments."}
         </p>
+        {manualStaffAuthority ? (
+          <div className="eq-state" data-testid="eq-confirmed-physical-scope">
+            <h3>Confirmed physical scope</h3>
+            {!manualScopeConfirmed ? (
+              <p className="eq-muted" data-testid="eq-manual-scope-unconfirmed">
+                Manual Scope is not confirmed yet. Confirm rooms, finished edge, backsplash, and
+                openings above before calculating.
+              </p>
+            ) : null}
+            <ul>
+              {(scope.rooms || [])
+                .filter((r) => r.included !== false)
+                .map((r) => {
+                  const edgeLf =
+                    Number(r.approvedFinishedEdgeLf) ||
+                    Number(r.edgeEligibleLinearFeet) ||
+                    (r.pieces || []).reduce((s, p) => {
+                      const totalIn = Number(p.finishedEdge?.totalFinishedEdgeLengthIn) || 0;
+                      return s + (totalIn > 0 ? totalIn / 12 : 0);
+                    }, 0);
+                  return (
+                    <li key={r.id}>
+                      <strong>{r.name}</strong>
+                      <ul>
+                        <li>Countertop: {Number(r.countertopSqft ?? 0).toFixed(2)} SF</li>
+                        <li>Finished edge: {edgeLf.toFixed(2)} LF</li>
+                        <li>
+                          Backsplash:{" "}
+                          {r.includeBacksplash
+                            ? `${Number(r.backsplashMeasuredLengthIn ?? 0)} in × ${Number(r.backsplashHeightIn ?? 0)} in = ${Number(r.backsplashSqft ?? 0).toFixed(2)} SF`
+                            : "none"}
+                        </li>
+                      </ul>
+                    </li>
+                  );
+                })}
+              <li>
+                Openings — sink: {Number(scope.addOns?.["qty-sink"] ?? 0)}; vanity/bar:{" "}
+                {Number(scope.addOns?.["qty-bar"] ?? 0)}; cooktop:{" "}
+                {Number(scope.addOns?.["qty-cook"] ?? 0)}; outlet:{" "}
+                {Number(scope.addOns?.["qty-outlet"] ?? 0)}
+              </li>
+            </ul>
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              data-testid="eq-edit-manual-scope"
+              onClick={() => {
+                onEditManualScope?.();
+                window.setTimeout(() => {
+                  document
+                    .querySelector('[data-testid="manual-physical-scope-editor"]')
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }, 40);
+              }}
+            >
+              Edit Manual Scope
+            </button>
+          </div>
+        ) : null}
         <h3>Customer and project</h3>
         {authToken ? (
           <StudioAccountDirectoryPanel
@@ -1191,6 +1267,17 @@ export default function EstimateScopePanel({
                       ? `${room.eligibleRunCount != null ? `${room.eligibleRunCount} eligible run${Number(room.eligibleRunCount) === 1 ? "" : "s"} · ` : ""}${Number(room.backsplashMeasuredLengthIn ?? 0).toFixed(1)} in eligible length — customer chooses No / 4-inch / custom / full height later`
                       : "no eligible runs (from approved Takeoff)"}
                   </p>
+                ) : manualStaffAuthority ? (
+                  <p
+                    className="eq-muted"
+                    data-testid="eq-room-backsplash-readonly"
+                    data-room-id={room.id}
+                  >
+                    Backsplash (confirmed Manual Scope):{" "}
+                    {room.includeBacksplash
+                      ? `${Number(room.backsplashMeasuredLengthIn ?? 0).toFixed(1)} in × ${Number(room.backsplashHeightIn ?? 0).toFixed(1)} in = ${Number(room.backsplashSqft ?? 0).toFixed(2)} SF (${room.backsplashHeightMode || "standard"})`
+                      : "none"}
+                  </p>
                 ) : (
                 <div
                   className="eq-room-backsplash"
@@ -1326,16 +1413,29 @@ export default function EstimateScopePanel({
             Cutout quantities (kitchen sink, vanity/bar sink, cooktop, electrical outlet) are
             derived from the approved Takeoff scope above — no manual re-entry.
           </p>
+        ) : manualStaffAuthority ? (
+          <div data-testid="eq-confirmed-cutouts-readonly">
+            <h3>Confirmed openings (Manual Scope)</h3>
+            <ul className="eq-muted">
+              <li>Kitchen sink openings: {Number(scope.addOns?.["qty-sink"] ?? 0)}</li>
+              <li>Vanity / bar sink openings: {Number(scope.addOns?.["qty-bar"] ?? 0)}</li>
+              <li>Cooktop openings: {Number(scope.addOns?.["qty-cook"] ?? 0)}</li>
+              <li>Electrical outlet openings: {Number(scope.addOns?.["qty-outlet"] ?? 0)}</li>
+            </ul>
+            <p className="eq-footnote">
+              Edit openings in Manual Scope. Product model selection remains below.
+            </p>
+          </div>
         ) : (
           <>
             <h3>Manual physical scope — cutout quantities</h3>
             <div className="eq-addon-grid" data-testid="eq-manual-cutout-grid">
               {(
                 [
-                  ["qty-sink", "Kitchen sink cutout"],
-                  ["qty-bar", "Vanity/bar sink cutout"],
-                  ["qty-cook", "Cooktop cutout"],
-                  ["qty-outlet", "Electrical outlet cutout"]
+                  ["qty-sink", "Kitchen sink openings"],
+                  ["qty-bar", "Vanity / bar sink openings"],
+                  ["qty-cook", "Cooktop openings"],
+                  ["qty-outlet", "Electrical outlet openings"]
                 ] as const
               ).map(([key, label]) => (
                 <label key={key}>
@@ -1690,6 +1790,40 @@ export default function EstimateScopePanel({
                 />
               </label>
             </>
+          ) : manualStaffAuthority ? (
+            <div data-testid="eq-confirmed-finished-edge">
+              <h4>Confirmed finished edge</h4>
+              <ul>
+                {(scope.rooms || [])
+                  .filter((r) => r.included !== false)
+                  .map((r) => {
+                    const pieceLf = (r.pieces || [])
+                      .filter((p) => p.included !== false)
+                      .reduce((s, p: any) => {
+                        const totalIn = Number(p?.finishedEdge?.totalFinishedEdgeLengthIn) || 0;
+                        return s + (totalIn > 0 ? totalIn / 12 : 0);
+                      }, 0);
+                    const lf =
+                      pieceLf > 0
+                        ? pieceLf
+                        : Number((r as any).approvedFinishedEdgeLf) ||
+                          Number((r as any).edgeEligibleLinearFeet) ||
+                          0;
+                    return (
+                      <li key={r.id}>
+                        {r.name}: {lf.toFixed(2)} LF
+                      </li>
+                    );
+                  })}
+              </ul>
+              <p className="eq-footnote">
+                Physical finished-edge LF comes from Manual Scope and is independent of the base
+                edge profile (Eased, etc.). Customer premium-edge options use these room LF values.
+              </p>
+              <p className="eq-muted" data-testid="eq-edge-final-lf-display">
+                Project finished edge for pricing: {edgeScope.finalLf.toFixed(2)} LF
+              </p>
+            </div>
           ) : (
             <label>
               Edge LF (manual)

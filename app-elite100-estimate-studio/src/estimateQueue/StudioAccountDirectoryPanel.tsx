@@ -143,6 +143,15 @@ export default function StudioAccountDirectoryPanel({
       setContacts(detail.contacts || []);
       setLocations(detail.locations || []);
       setLiveAccount(detail.account);
+      const accountAddr = [
+        snap?.addressLine1,
+        [snap?.city, snap?.state].filter(Boolean).join(", "),
+        snap?.postalCode
+      ]
+        .filter(Boolean)
+        .join(", ");
+      // Never silently overwrite a nonblank project/jobsite address on AD link.
+      const existingProjectAddress = String(scope.projectAddress || "").trim();
       patchScope({
         accountDirectoryAccountId: detail.account.id,
         accountDirectoryContactId: contact?.id || null,
@@ -152,20 +161,18 @@ export default function StudioAccountDirectoryPanel({
         customerContactName: String(snap?.contactDisplayName || ""),
         customerEmail: String(snap?.contactEmail || ""),
         customerPhone: String(snap?.contactPhone || ""),
-        projectAddress: [
-          snap?.addressLine1,
-          [snap?.city, snap?.state].filter(Boolean).join(", "),
-          snap?.postalCode
-        ]
-          .filter(Boolean)
-          .join(", ") || undefined,
+        ...(existingProjectAddress
+          ? {}
+          : accountAddr
+            ? { projectAddress: accountAddr }
+            : {}),
         explicitAccountRelink: true,
         refreshCustomerIdentity: Boolean(opts?.refresh)
       });
       setQuery("");
       setResults([]);
     },
-    [patchScope]
+    [patchScope, scope.projectAddress]
   );
 
   const loadAccount = useCallback(
@@ -274,6 +281,7 @@ export default function StudioAccountDirectoryPanel({
           customerContactName: String(snap?.contactDisplayName || ""),
           customerEmail: String(snap?.contactEmail || ""),
           customerPhone: String(snap?.contactPhone || ""),
+          // Location change refreshes identity snapshot only — not project/jobsite address.
           refreshCustomerIdentity: true,
           explicitAccountRelink: false
         });
@@ -430,9 +438,40 @@ export default function StudioAccountDirectoryPanel({
             </label>
           </div>
           <p className="eq-footnote">
-            Account location is the organization address. Project Name stays separate; jobsites may
-            differ.
+            Account location is the organization address. Project / jobsite address stays separate and
+            is not overwritten when you link an account or change location.
           </p>
+          <div className="eq-action-row">
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              data-testid="eq-ad-use-location-as-project-address"
+              disabled={blocked || !snapshot}
+              onClick={() => {
+                const addr = [
+                  snapshot?.addressLine1,
+                  [snapshot?.city, snapshot?.state].filter(Boolean).join(", "),
+                  snapshot?.postalCode
+                ]
+                  .filter(Boolean)
+                  .join(", ");
+                if (!addr) return;
+                if (
+                  String(scope.projectAddress || "").trim() &&
+                  !window.confirm("Replace the current project/jobsite address with the Account Directory location?")
+                ) {
+                  return;
+                }
+                patchScope({
+                  projectAddress: addr,
+                  useAccountLocationAsProjectAddress: true,
+                  refreshCustomerIdentity: false
+                });
+              }}
+            >
+              Use this as project address
+            </button>
+          </div>
           <div className="eq-action-row">
             <button
               type="button"
