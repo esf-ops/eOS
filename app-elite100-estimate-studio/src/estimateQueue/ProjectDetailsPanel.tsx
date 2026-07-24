@@ -3,7 +3,7 @@
  * Metadata only: never publishes, calculates, or clears pricing geometry.
  */
 import React, { useEffect, useState } from "react";
-import { ApiError, apiGet, apiPatch } from "../lib/api";
+import { ApiError, apiGet, apiPatch, isTransientHttpError, transientFailureMessage } from "../lib/api";
 
 type Props = {
   authToken: string;
@@ -14,6 +14,8 @@ type Props = {
   forceEdit?: boolean;
   onForceEditConsumed?: () => void;
   onSaved?: () => void;
+  onTransientFailure?: (err: unknown, retry?: (() => void) | null) => void;
+  onCanonicalEstimate?: (estimate: unknown) => void;
 };
 
 type SaveState = "idle" | "unsaved" | "saving" | "saved" | "failed";
@@ -25,7 +27,9 @@ export default function ProjectDetailsPanel({
   refreshKey = 0,
   forceEdit = false,
   onForceEditConsumed,
-  onSaved
+  onSaved,
+  onTransientFailure,
+  onCanonicalEstimate
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [projectName, setProjectName] = useState("");
@@ -62,19 +66,28 @@ export default function ProjectDetailsPanel({
           };
         };
         if (cancelled) return;
+        if (body.estimate) onCanonicalEstimate?.(body.estimate);
         const scope = body.estimate?.scope || {};
         const next = {
           projectName: String(scope.projectName || ""),
           projectAddress: String(scope.projectAddress || ""),
           estimatorNotes: String(scope.estimatorNotes || "")
         };
+        // Preserve in-progress edits across competing refreshes.
+        const currentlyDirty =
+          editing &&
+          (projectName !== baseline.projectName ||
+            projectAddress !== baseline.projectAddress ||
+            estimatorNotes !== baseline.estimatorNotes);
         setBaseline(next);
-        setProjectName(next.projectName);
-        setProjectAddress(next.projectAddress);
-        setEstimatorNotes(next.estimatorNotes);
         setResolvedEstimateId(body.estimate?.id || estimateId);
-        setSaveState("idle");
-        setEditing(false);
+        if (!currentlyDirty) {
+          setProjectName(next.projectName);
+          setProjectAddress(next.projectAddress);
+          setEstimatorNotes(next.estimatorNotes);
+          setSaveState("idle");
+          setEditing(false);
+        }
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof ApiError ? e.message : "Unable to load project details");
@@ -87,6 +100,8 @@ export default function ProjectDetailsPanel({
     return () => {
       cancelled = true;
     };
+    // Intentionally omit live form fields from deps — refreshKey drives reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, caseId, estimateId, refreshKey]);
 
   useEffect(() => {
@@ -155,7 +170,14 @@ export default function ProjectDetailsPanel({
       onSaved?.();
     } catch (e) {
       setSaveState("failed");
-      setMessage(e instanceof ApiError ? e.message : "Save failed");
+      // Preserve typed values — do not reset form on failure.
+      if (isTransientHttpError(e)) {
+        const msg = transientFailureMessage(e);
+        setMessage(msg);
+        onTransientFailure?.(e, () => void save());
+      } else {
+        setMessage(e instanceof ApiError ? e.message : "Save failed");
+      }
     }
   }
 

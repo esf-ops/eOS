@@ -278,6 +278,16 @@ export function createStudioManualEstimateService(deps) {
     const wasPriced = row.status === STUDIO_ESTIMATE_STATUSES.PRICED;
     const wasApproved = row.status === STUDIO_ESTIMATE_STATUSES.APPROVED;
     if (wasApproved && typeof estimateRepo.createRevisionFrom === "function") {
+      const previousRevisionSummary = {
+        revision: Number(row.revision) || 1,
+        estimateId: row.id,
+        approvedAt: row.approval?.approvedAt || null,
+        exactInternalTotal: row.approval?.exactInternalTotal ?? null,
+        label:
+          row.approval?.exactInternalTotal != null
+            ? `Previous revision approved: $${Number(row.approval.exactInternalTotal).toFixed(2)}`
+            : `Previous revision ${Number(row.revision) || 1} was approved`
+      };
       const revised = await estimateRepo.createRevisionFrom(
         organizationId,
         estimateId,
@@ -288,6 +298,7 @@ export function createStudioManualEstimateService(deps) {
         },
         actorUserId
       );
+      revised.__previousRevisionSummary = previousRevisionSummary;
       return safeManualView(revised);
     }
     /** @type {Record<string, unknown>} */
@@ -420,7 +431,10 @@ function safeManualView(row) {
     projectName: row.scope?.projectName || null,
     customerName: row.scope?.customerName || null,
     roomCount: Array.isArray(row.scope?.rooms) ? row.scope.rooms.length : 0,
-    staleReason: row.staleReason ?? null
+    staleReason: row.staleReason ?? null,
+    // When a save after approval opens a new revision, clients must switch to this id.
+    activeEstimateId: row.id,
+    previousRevisionSummary: row.__previousRevisionSummary || null
   };
 }
 

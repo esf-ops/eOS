@@ -2481,4 +2481,21 @@
 | **SQL** | None. |
 | **Impacted** | `studioProjectDetails.mjs`, estimate service/routes, publication readiness, Command Center labels, Project Details panel, Digital Estimate blockers, this entry. |
 
+### 175. Studio estimate action sequencing and recovery (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/studio-estimate-action-sequencing-and-recovery` |
+| **Canonical sequence** | Manual estimates follow one ordered path: **Save Manual Scope → Confirm Manual Scope → Save Pricing Setup → Calculate → Approve → Publish** (Configure Digital Estimate remains explicit before Publish). |
+| **Workflow state** | Each active revision exposes **one server-derived workflow** object (`buildStudioWorkspaceWorkflow`) — `nextRequiredAction`, `allowedActions`, blockers, completed/later steps. UI must not invent parallel next-step logic. |
+| **Invalid actions** | Buttons and primary workflow actions are **disabled or blocked** when not in `allowedActions` or when a blocker applies (e.g. unconfirmed scope, unsaved pricing, superseded revision). |
+| **Metadata edits** | Project name / address / internal notes changes **do not stale pricing** or clear calculation solely because metadata changed (see §174). |
+| **Coherent refresh** | Successful mutations (save scope, confirm, save pricing, calculate, approve, project details) **refresh all panels** from the same estimate DTO + workflow — no orphan panel state. |
+| **Transient failures** | HTTP **502 / 503 / 504** are treated as transient: show recovery UI, **never optimistically advance** workflow step, approval, calculation, or publication state. |
+| **Historical approval** | A prior revision’s approval appears as **historical only** (`historicalApproval` / previous-revision summary) — not as current approval on the active revision. |
+| **Recovery safety** | Retry / refresh / superseded recovery paths **never perform delivery actions** (no publish, replace link, email, review create, sold, QB/Moraware). |
+| **SQL** | None. |
+| **Tests** | `studioWorkspaceWorkflow.test.mjs`, `studioWorkspaceSequencing.ui.test.mjs`. |
+| **Impacted** | `studioWorkspaceWorkflow.mjs`, estimate service workflow attachment, Estimate Workflow header, Takeoff workspace, Scope panel, Project Details panel, `api.ts` transient helpers, this entry. |
+
 

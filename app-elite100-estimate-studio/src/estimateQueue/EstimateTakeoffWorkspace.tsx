@@ -10,10 +10,14 @@ import {
 } from "../lib/quoteIntakeFormat.mjs";
 import { deriveEstimateTakeoffDisplayStatus } from "../lib/estimateTakeoffStatus.mjs";
 import type { QuoteIntakeCaseDto } from "../lib/quoteIntakeTypes";
-import { apiGet, ApiError } from "../lib/api";
+import { apiGet, ApiError, transientFailureMessage } from "../lib/api";
+import {
+  buildStudioWorkspaceWorkflow
+} from "../../../backend-core/src/elite100EstimateStudio/studioWorkspaceWorkflow.mjs";
 import EstimateScopePanel from "./EstimateScopePanel";
 import ManualPhysicalScopeEditor from "./ManualPhysicalScopeEditor";
 import ProjectDetailsPanel from "./ProjectDetailsPanel";
+import EstimateWorkflowHeader, { type WorkspaceWorkflow } from "./EstimateWorkflowHeader";
 
 type Props = {
   authToken: string;
@@ -86,6 +90,108 @@ export default function EstimateTakeoffWorkspace({
     () => !initialFocus || initialFocus === "takeoff"
   );
   const [forceProjectEdit, setForceProjectEdit] = useState(false);
+  const [canonicalEstimate, setCanonicalEstimate] = useState<Record<string, unknown> | null>(null);
+  const [manualDirty, setManualDirty] = useState(false);
+  const [pricingDirty, setPricingDirty] = useState(false);
+  const [previousRevisionSummary, setPreviousRevisionSummary] = useState<Record<string, unknown> | null>(
+    null
+  );
+  const [transientError, setTransientError] = useState<string | null>(null);
+  const [pendingRetry, setPendingRetry] = useState<(() => void) | null>(null);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+
+  const workspaceWorkflow = useMemo((): WorkspaceWorkflow | null => {
+    if (!canonicalEstimate) return null;
+    return buildStudioWorkspaceWorkflow(canonicalEstimate, {
+      manualScopeDirty: manualDirty,
+      pricingDirty,
+      historicalApproval: previousRevisionSummary
+    }) as WorkspaceWorkflow;
+  }, [canonicalEstimate, manualDirty, pricingDirty, previousRevisionSummary]);
+
+  function bumpRefresh(patch?: Partial<ReadyState>) {
+    setState((prev) =>
+      prev.kind === "ready"
+        ? { ...prev, scopeRefreshKey: prev.scopeRefreshKey + 1, ...patch }
+        : prev
+    );
+  }
+
+  function applyActiveEstimateChange(
+    nextId: string,
+    meta?: { revision?: number; previousRevisionSummary?: unknown }
+  ) {
+    setState((prev) => {
+      if (prev.kind !== "ready") return prev;
+      if (prev.estimateId === nextId) return prev;
+      return {
+        ...prev,
+        estimateId: nextId,
+        scopeRefreshKey: prev.scopeRefreshKey + 1
+      };
+    });
+    if (meta?.previousRevisionSummary && typeof meta.previousRevisionSummary === "object") {
+      setPreviousRevisionSummary(meta.previousRevisionSummary as Record<string, unknown>);
+    }
+  }
+
+  function handleCanonicalEstimate(est: Record<string, unknown> | null) {
+    if (!est) return;
+    setCanonicalEstimate(est);
+    const id = String(est.id || "").trim();
+    if (id) {
+      setState((prev) =>
+        prev.kind === "ready" && prev.estimateId !== id
+          ? { ...prev, estimateId: id }
+          : prev
+      );
+    }
+    if (est.previousRevisionSummary && typeof est.previousRevisionSummary === "object") {
+      setPreviousRevisionSummary(est.previousRevisionSummary as Record<string, unknown>);
+    }
+    setTransientError(null);
+    setPendingRetry(null);
+  }
+
+  function handleTransientFailure(err: unknown, retry?: (() => void) | null) {
+    setTransientError(transientFailureMessage(err));
+    setPendingRetry(() => retry || null);
+  }
+
+  function refreshStatus() {
+    setTransientError(null);
+    setPendingRetry(null);
+    bumpRefresh();
+  }
+
+  function onPrimaryWorkflowAction(action: string) {
+    if (action === "confirm_manual_scope" || action === "save_manual_scope" || action === "complete_manual_scope") {
+      document
+        .querySelector('[data-testid="manual-physical-scope-editor"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (action === "save_pricing" || action === "complete_pricing" || action === "calculate" || action === "approve") {
+      document
+        .querySelector('[data-testid="estimate-scope-panel"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (action === "calculate") {
+        (document.querySelector('[data-testid="eq-calculate-estimate"]') as HTMLButtonElement | null)?.click();
+      } else if (action === "approve") {
+        (document.querySelector('[data-testid="eq-approve-estimate"]') as HTMLButtonElement | null)?.click();
+      }
+      return;
+    }
+    if (action === "add_project_name" || action === "edit_project_details") {
+      setForceProjectEdit(true);
+      return;
+    }
+    if (action === "configure_digital_estimate" || action === "publish") {
+      document
+        .querySelector('[data-testid="estimate-digital-estimate-panel"], [data-testid="eq-digital-estimate-panel"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -123,6 +229,9 @@ export default function EstimateTakeoffWorkspace({
             estBody.estimate?.accountDirectoryAccountId ||
               estBody.estimate?.scope?.accountDirectoryAccountId
           );
+          if (estBody.estimate) {
+            setCanonicalEstimate(estBody.estimate as Record<string, unknown>);
+          }
           setState({
             kind: "ready",
             takeoffJobId: null,
@@ -472,6 +581,15 @@ export default function EstimateTakeoffWorkspace({
             ) : null}
           </section>
 
+          <EstimateWorkflowHeader
+            workflow={workspaceWorkflow}
+            transientError={transientError}
+            busy={workflowBusy}
+            onPrimaryAction={onPrimaryWorkflowAction}
+            onRefreshStatus={refreshStatus}
+            onRetry={pendingRetry}
+          />
+
           {state.estimateId ? (
             <ProjectDetailsPanel
               authToken={authToken}
@@ -481,12 +599,10 @@ export default function EstimateTakeoffWorkspace({
               forceEdit={forceProjectEdit}
               onForceEditConsumed={() => setForceProjectEdit(false)}
               onSaved={() => {
-                setState((prev) =>
-                  prev.kind === "ready"
-                    ? { ...prev, scopeRefreshKey: prev.scopeRefreshKey + 1 }
-                    : prev
-                );
+                bumpRefresh();
               }}
+              onTransientFailure={(err, retry) => handleTransientFailure(err, retry)}
+              onCanonicalEstimate={(est) => handleCanonicalEstimate(est as Record<string, unknown>)}
             />
           ) : null}
 
@@ -495,7 +611,11 @@ export default function EstimateTakeoffWorkspace({
               authToken={authToken}
               caseId={caseId}
               estimateId={state.estimateId}
+              refreshKey={state.scopeRefreshKey}
+              onDirtyChange={setManualDirty}
+              onActiveEstimateChange={applyActiveEstimateChange}
               onConfirmed={() => {
+                setManualDirty(false);
                 setState((prev) =>
                   prev.kind === "ready"
                     ? {
@@ -557,6 +677,12 @@ export default function EstimateTakeoffWorkspace({
             takeoffJobId={state.takeoffJobId}
             takeoffDisplayStatus={state.displayStatus}
             refreshKey={state.scopeRefreshKey}
+            workflow={workspaceWorkflow}
+            onDirtyChange={setPricingDirty}
+            onBusyChange={setWorkflowBusy}
+            onCanonicalEstimate={(est) => handleCanonicalEstimate(est as Record<string, unknown>)}
+            onActiveEstimateChange={applyActiveEstimateChange}
+            onTransientFailure={(err, retry) => handleTransientFailure(err, retry)}
             onEditManualScope={
               state.manualMode
                 ? () => {

@@ -3,7 +3,7 @@
  * Confirmation is a separate explicit API call. Saving never publishes.
  */
 import React, { useEffect, useState } from "react";
-import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
+import { ApiError, apiGet, apiPatch, apiPost, isTransientHttpError, transientFailureMessage } from "../lib/api";
 
 type OpenEdgeMeasurementMode = "piece_sum" | "room_total";
 
@@ -45,7 +45,11 @@ type Props = {
   authToken: string;
   caseId: string;
   estimateId: string;
+  refreshKey?: number;
   onConfirmed?: () => void;
+  /** Fired when save/confirm returns a different active estimate id (revision). */
+  onActiveEstimateChange?: (estimateId: string, meta?: { revision?: number; previousRevisionSummary?: unknown }) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 const ROOM_TYPES = ["Kitchen", "Island", "Vanity", "Bar", "Laundry", "Fireplace", "Shower", "Other"];
@@ -259,7 +263,15 @@ function toApiRooms(rooms: RoomDraft[]) {
   }));
 }
 
-export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateId, onConfirmed }: Props) {
+export default function ManualPhysicalScopeEditor({
+  authToken,
+  caseId,
+  estimateId,
+  refreshKey = 0,
+  onConfirmed,
+  onActiveEstimateChange,
+  onDirtyChange
+}: Props) {
   const [rooms, setRooms] = useState<RoomDraft[]>([emptyRoom()]);
   const [cutouts, setCutouts] = useState({ "qty-sink": 0, "qty-cook": 0, "qty-outlet": 0, "qty-bar": 0 });
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
@@ -268,6 +280,11 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
   const [errors, setErrors] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [activeId, setActiveId] = useState(estimateId);
+
+  useEffect(() => {
+    setActiveId(estimateId);
+  }, [estimateId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -280,6 +297,12 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
         )) as { estimate?: { id?: string; scope?: Record<string, unknown> } };
         if (cancelled) return;
         const scope = body.estimate?.scope || null;
+        if (body.estimate?.id) {
+          setActiveId(body.estimate.id);
+          if (body.estimate.id !== estimateId) {
+            onActiveEstimateChange?.(body.estimate.id);
+          }
+        }
         setRooms(roomsFromScope(scope));
         const addOns = (scope?.addOns || {}) as Record<string, number>;
         setCutouts({
@@ -290,6 +313,7 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
         });
         setConfirmed(scope?.manualScopeConfirmed === true);
         setDirty(false);
+        onDirtyChange?.(false);
       } catch (e) {
         if (!cancelled) {
           setMessage(e instanceof ApiError ? e.message : "Unable to load manual scope");
@@ -302,7 +326,7 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
     return () => {
       cancelled = true;
     };
-  }, [authToken, caseId, estimateId]);
+  }, [authToken, caseId, estimateId, refreshKey]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -321,18 +345,35 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
     setMessage(null);
     setErrors([]);
     try {
-      await apiPatch(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/manual-scope`,
+      const body = (await apiPatch(
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(activeId)}/manual-scope`,
         authToken,
         { scope: { rooms: toApiRooms(rooms), addOns: cutouts } }
-      );
+      )) as {
+        estimate?: {
+          id?: string;
+          revision?: number;
+          manualScopeConfirmed?: boolean;
+          previousRevisionSummary?: unknown;
+          activeEstimateId?: string;
+        };
+      };
+      const nextId = body.estimate?.activeEstimateId || body.estimate?.id || activeId;
+      if (nextId && nextId !== activeId) {
+        setActiveId(nextId);
+        onActiveEstimateChange?.(nextId, {
+          revision: body.estimate?.revision,
+          previousRevisionSummary: body.estimate?.previousRevisionSummary
+        });
+      }
       setSaveState("saved");
       setConfirmed(false);
       setDirty(false);
+      onDirtyChange?.(false);
       setMessage("Manual scope saved. Confirm when the physical scope is complete.");
     } catch (e) {
       setSaveState("failed");
-      setMessage(e instanceof ApiError ? e.message : "Save failed");
+      setMessage(isTransientHttpError(e) ? transientFailureMessage(e) : e instanceof ApiError ? e.message : "Save failed");
     }
   }
 
@@ -340,19 +381,51 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
     setSaveState("saving");
     setMessage(null);
     setErrors([]);
+    let idForConfirm = activeId;
     try {
-      await apiPatch(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/manual-scope`,
-        authToken,
-        { scope: { rooms: toApiRooms(rooms), addOns: cutouts } }
-      );
+      // Atomic save+confirm of the same explicit draft when dirty.
+      if (dirty) {
+        const saved = (await apiPatch(
+          `/api/elite100-estimate-studio/estimates/${encodeURIComponent(activeId)}/manual-scope`,
+          authToken,
+          { scope: { rooms: toApiRooms(rooms), addOns: cutouts } }
+        )) as {
+          estimate?: {
+            id?: string;
+            revision?: number;
+            previousRevisionSummary?: unknown;
+            activeEstimateId?: string;
+          };
+        };
+        idForConfirm = saved.estimate?.activeEstimateId || saved.estimate?.id || activeId;
+        if (idForConfirm !== activeId) {
+          setActiveId(idForConfirm);
+          onActiveEstimateChange?.(idForConfirm, {
+            revision: saved.estimate?.revision,
+            previousRevisionSummary: saved.estimate?.previousRevisionSummary
+          });
+        }
+      }
       const result = (await apiPost(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/confirm-manual-scope`,
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(idForConfirm)}/confirm-manual-scope`,
         authToken,
         { confirm: true, rooms: toApiRooms(rooms), addOns: cutouts }
-      )) as { ok?: boolean; details?: string[] };
+      )) as {
+        ok?: boolean;
+        details?: string[];
+        estimate?: { id?: string; revision?: number; previousRevisionSummary?: unknown };
+      };
+      const nextId = result.estimate?.id || idForConfirm;
+      if (nextId !== activeId) {
+        setActiveId(nextId);
+        onActiveEstimateChange?.(nextId, {
+          revision: result.estimate?.revision,
+          previousRevisionSummary: result.estimate?.previousRevisionSummary
+        });
+      }
       setConfirmed(true);
       setDirty(false);
+      onDirtyChange?.(false);
       setSaveState("saved");
       setMessage("Manual scope confirmed. Continue in Pricing Setup.");
       onConfirmed?.();
@@ -362,7 +435,13 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
       if (e instanceof ApiError && Array.isArray((e as any).details)) {
         setErrors((e as any).details);
       }
-      setMessage(e instanceof ApiError ? e.message : "Unable to confirm manual scope");
+      setMessage(
+        isTransientHttpError(e)
+          ? transientFailureMessage(e)
+          : e instanceof ApiError
+            ? e.message
+            : "Unable to confirm manual scope"
+      );
     }
   }
 
@@ -371,6 +450,7 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
     setDirty(true);
     setConfirmed(false);
     setSaveState("idle");
+    onDirtyChange?.(true);
   }
 
   if (loading) {
@@ -973,7 +1053,7 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
           type="button"
           className="eq-btn-secondary"
           data-testid="manual-scope-save"
-          disabled={saveState === "saving"}
+          disabled={saveState === "saving" || !dirty}
           onClick={() => void saveDraft()}
         >
           Save Manual Scope
