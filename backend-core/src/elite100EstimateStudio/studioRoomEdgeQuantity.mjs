@@ -3,9 +3,17 @@
  *
  * Never allocate or copy project-wide finalLf onto a single room.
  * Never invent LF from perimeter / SF / even splits.
+ *
+ * Manual estimates: confirmedOpenEdgeLf (or mode-resolved room quantity) wins.
+ * Takeoff estimates: approved piece finished-edge / room fields unchanged.
  */
 
 import { sumFinishedEdgeLengthIn } from "../takeoff/takeoffPieceGeometryAuthority.mjs";
+import {
+  OPEN_EDGE_MEASUREMENT_MODES,
+  normalizeOpenEdgeMeasurementMode,
+  resolveManualRoomOpenEdgeQuantity
+} from "./studioManualPhysicalScope.mjs";
 
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
@@ -37,9 +45,11 @@ function pieceFinishedEdgeApproved(piece) {
  * Resolve approved eligible finished-edge LF for one Studio / publication room.
  *
  * Authority order:
- *  1. Sum of approved finished-edge records on included counter pieces
- *  2. Room-level persisted approved / eligible LF fields (already room-scoped)
- *  3. Publication envelope room.edgeLinearFeet only when edgeQuantityAuthoritative
+ *  1. Server-stamped confirmedOpenEdgeLf (manual confirm)
+ *  2. Manual openEdgeMeasurementMode room_total / piece_sum resolution
+ *  3. Sum of approved finished-edge records on included counter pieces (Takeoff)
+ *  4. Room-level persisted approved / eligible LF fields (already room-scoped)
+ *  5. Publication envelope room.edgeLinearFeet only when edgeQuantityAuthoritative
  *
  * Returns authoritative:false with lf:null when room-level quantity cannot be
  * established — callers must NOT substitute project finalLf.
@@ -64,6 +74,44 @@ export function resolveRoomApprovedEligibleEdgeLf(room) {
       source: "excluded_room",
       missingReason: null
     };
+  }
+
+  // 1. Canonical confirmed room open-edge (manual Confirm Manual Scope).
+  if (
+    room.openEdgeQuantityAuthoritative === true ||
+    (room.confirmedOpenEdgeLf != null && String(room.confirmedOpenEdgeLf).trim() !== "")
+  ) {
+    const n = Number(room.confirmedOpenEdgeLf ?? room.approvedFinishedEdgeLf);
+    if (Number.isFinite(n) && n >= 0) {
+      return {
+        lf: round2(n),
+        authoritative: true,
+        source: room.openEdgeSource || "confirmed_open_edge_lf",
+        missingReason: null
+      };
+    }
+  }
+
+  // 2. Manual measurement mode (draft or legacy rooms carrying mode).
+  if (room.openEdgeMeasurementMode) {
+    const mode = normalizeOpenEdgeMeasurementMode(room.openEdgeMeasurementMode);
+    const q = resolveManualRoomOpenEdgeQuantity(room, mode, { forConfirm: false });
+    if (q.authoritative && q.lf != null) {
+      return {
+        lf: round2(q.lf),
+        authoritative: true,
+        source: q.source || mode,
+        missingReason: null
+      };
+    }
+    if (mode === OPEN_EDGE_MEASUREMENT_MODES.ROOM_TOTAL) {
+      return {
+        lf: null,
+        authoritative: false,
+        source: null,
+        missingReason: q.missingReason || "missing_room_open_edge_lf"
+      };
+    }
   }
 
   const pieces = Array.isArray(room.pieces) ? room.pieces : [];
@@ -149,4 +197,64 @@ export function roomEdgeLfOrZero(room) {
   const q = resolveRoomApprovedEligibleEdgeLf(room);
   if (!q.authoritative || q.lf == null) return 0;
   return q.lf;
+}
+
+/**
+ * Legacy project-level edge LF may only apply when exactly one eligible room
+ * lacks room/piece quantities. Multi-room project-only LF is never allocated.
+ *
+ * @param {object|null|undefined} scope
+ * @returns {{
+ *   applyProjectFallback: boolean,
+ *   reviewRequired: boolean,
+ *   reason: string|null,
+ *   projectLf: number
+ * }}
+ */
+export function assessLegacyProjectEdgeFallback(scope) {
+  const projectLf = Math.max(
+    0,
+    round2(Number(scope?.edgeLinearFeet) || Number(scope?.edgeEligibleLinearFeet) || 0)
+  );
+  const rooms = (Array.isArray(scope?.rooms) ? scope.rooms : []).filter(
+    (r) => r && r.included !== false
+  );
+  if (!rooms.length || projectLf <= 0) {
+    return {
+      applyProjectFallback: false,
+      reviewRequired: false,
+      reason: null,
+      projectLf
+    };
+  }
+
+  const roomsMissing = rooms.filter((r) => {
+    const q = resolveRoomApprovedEligibleEdgeLf(r);
+    return !(q.authoritative && q.lf != null);
+  });
+
+  if (roomsMissing.length === 0) {
+    return {
+      applyProjectFallback: false,
+      reviewRequired: false,
+      reason: null,
+      projectLf
+    };
+  }
+
+  if (rooms.length === 1 && roomsMissing.length === 1) {
+    return {
+      applyProjectFallback: true,
+      reviewRequired: false,
+      reason: "single_room_project_lf_fallback",
+      projectLf
+    };
+  }
+
+  return {
+    applyProjectFallback: false,
+    reviewRequired: true,
+    reason: "legacy_multi_room_project_lf_unallocated",
+    projectLf
+  };
 }

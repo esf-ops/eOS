@@ -19,7 +19,7 @@ import {
   buildCustomerSafeEdgeOptionEffects,
   normalizeEdgeProfileToken
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
-import { resolveRoomApprovedEligibleEdgeLf } from "./studioRoomEdgeQuantity.mjs";
+import { resolveRoomApprovedEligibleEdgeLf, assessLegacyProjectEdgeFallback } from "./studioRoomEdgeQuantity.mjs";
 
 function str(v) {
   if (v == null) return "";
@@ -284,11 +284,35 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
   const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
   const edgeScope = resolveScopeEdgeLinearFeet(scope);
   const included = rooms.filter((r) => r && r.included !== false);
-  // Room-scoped edge LF (FEATURE_DECISIONS §165): each room freezes its own
-  // approved eligible finished-edge quantity. Never assign project finalLf to
-  // the first countertop room.
+  const legacyFallback = assessLegacyProjectEdgeFallback(scope);
+  // Room-scoped edge LF (FEATURE_DECISIONS §165 / §173): each room freezes its own
+  // confirmed/approved open-edge quantity. Never assign project finalLf to
+  // the first countertop room. Never divide project LF across rooms.
   return included.map((r, idx) => {
-      const roomEdge = resolveRoomApprovedEligibleEdgeLf(r);
+      let roomEdge = resolveRoomApprovedEligibleEdgeLf(r);
+      // Single-room legacy: project LF only when that room has no quantity.
+      if (
+        !roomEdge.authoritative &&
+        legacyFallback.applyProjectFallback &&
+        included.length === 1
+      ) {
+        roomEdge = {
+          lf: legacyFallback.projectLf,
+          authoritative: true,
+          source: "legacy_single_room_project_lf",
+          missingReason: null
+        };
+      } else if (
+        !roomEdge.authoritative &&
+        legacyFallback.reviewRequired
+      ) {
+        roomEdge = {
+          lf: null,
+          authoritative: false,
+          source: null,
+          missingReason: "legacy_multi_room_project_lf_unallocated"
+        };
+      }
       const edgeQuantityAuthoritative = roomEdge.authoritative === true;
       const edgeLinearFeet =
         edgeQuantityAuthoritative && roomEdge.lf != null ? Math.max(0, Number(roomEdge.lf) || 0) : 0;

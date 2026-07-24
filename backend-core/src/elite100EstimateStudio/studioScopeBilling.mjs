@@ -22,7 +22,8 @@ import {
 import { EDGE_SCOPE_SOURCES } from "./studioEstimateTypes.mjs";
 
 /**
- * Sum room/piece finished-edge LF for manual/legacy scopes (browser-safe; no node:crypto).
+ * Sum room open-edge LF for manual/legacy scopes (browser-safe; no node:crypto).
+ * Prefer confirmed room quantity; never double-count piece + room totals.
  * @param {object|null|undefined} scope
  */
 function sumRoomPieceEdgeLf(scope) {
@@ -30,13 +31,34 @@ function sumRoomPieceEdgeLf(scope) {
   let total = 0;
   for (const room of rooms) {
     if (!room || room.included === false) continue;
+    const confirmed = Number(room.confirmedOpenEdgeLf);
+    if (
+      Number.isFinite(confirmed) &&
+      confirmed >= 0 &&
+      (room.openEdgeQuantityAuthoritative === true || room.confirmedOpenEdgeLf != null)
+    ) {
+      total += confirmed;
+      continue;
+    }
+    const mode = String(room.openEdgeMeasurementMode || "").toLowerCase();
+    if (mode === "room_total") {
+      const roomLf =
+        Number(room.openEdgeLf) ||
+        Number(room.approvedFinishedEdgeLf) ||
+        Number(room.edgeEligibleLinearFeet) ||
+        0;
+      total += Number.isFinite(roomLf) && roomLf >= 0 ? roomLf : 0;
+      continue;
+    }
     const pieces = Array.isArray(room.pieces) ? room.pieces : [];
     let roomLf = 0;
     let fromPieces = false;
     for (const p of pieces) {
       if (!p || p.included === false) continue;
+      const pt = String(p.pieceType ?? p.type ?? "counter").toLowerCase();
+      if (pt.includes("backsplash") || pt === "shower" || pt === "fireplace") continue;
       const totalIn = Number(p?.finishedEdge?.totalFinishedEdgeLengthIn);
-      if (Number.isFinite(totalIn) && totalIn > 0) {
+      if (Number.isFinite(totalIn) && totalIn >= 0) {
         roomLf += totalIn / 12;
         fromPieces = true;
       }

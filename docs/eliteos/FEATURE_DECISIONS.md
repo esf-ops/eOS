@@ -2451,4 +2451,19 @@
 | **SQL** | None. |
 | **Impacted** | `studioManualPhysicalScope.mjs`, Manual Scope editor, Estimate Scope panel, `studioScopeBilling` edge resolution, AD identity apply + panel, this entry. |
 
+### 173. Manual room open-edge LF — canonical room quantity (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/manual-estimate-room-open-edge-authority` |
+| **Decision** | Every eligible manual room has **one** canonical confirmed open-edge LF (`confirmedOpenEdgeLf`), independent of base edge-profile selection. Customer premium-edge options price that room quantity only. |
+| **Measurement modes** | `piece_sum` (sum of included eligible piece Open edge LF) or `room_total` (one room-level Total open edge LF). Exactly one mode is authoritative — never both, never double-count. |
+| **Confirm** | Server validates mode + inputs, calculates room LF and derived project total, stamps fingerprint / confirming estimator / timestamp. Client cannot forge `confirmedOpenEdgeLf` or confirmation flags. |
+| **UI** | Manual Scope shows measurement mode and a prominent room total (“Open edge LF” / “Total open edge”). Pricing Setup shows confirmed room totals read-only; no competing editable Edge LF for confirmed manual rooms. |
+| **Publication** | Adapter freezes per-room confirmed LF by stable room key. Project LF is derived summary only and is never assigned to one room or allocated by SF/count/name. |
+| **Legacy** | Prefer confirmed room LF → piece sum → room-level fields → project LF only when exactly one eligible room has no room/piece value. Multi-room project-only LF → `review_required` (never guess). GET does not rewrite. |
+| **Takeoff** | Upstream authority unchanged (`approved` piece finished-edge / Takeoff summary). Shared downstream contract may read the same resolved room LF field; sources remain separate. |
+| **SQL** | None — scope JSON fields only. |
+| **Impacted** | `studioManualPhysicalScope.mjs`, `studioRoomEdgeQuantity.mjs`, `studioScopeBilling.mjs`, publication adapter, Manual Scope editor, Pricing Setup panel, this entry. |
+
 

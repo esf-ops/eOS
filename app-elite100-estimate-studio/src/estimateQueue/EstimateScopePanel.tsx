@@ -773,7 +773,7 @@ export default function EstimateScopePanel({
             <h3>Confirmed physical scope</h3>
             {!manualScopeConfirmed ? (
               <p className="eq-muted" data-testid="eq-manual-scope-unconfirmed">
-                Manual Scope is not confirmed yet. Confirm rooms, finished edge, backsplash, and
+                Manual Scope is not confirmed yet. Confirm rooms, open edge LF, backsplash, and
                 openings above before calculating.
               </p>
             ) : null}
@@ -782,6 +782,7 @@ export default function EstimateScopePanel({
                 .filter((r) => r.included !== false)
                 .map((r) => {
                   const edgeLf =
+                    Number((r as any).confirmedOpenEdgeLf) ||
                     Number(r.approvedFinishedEdgeLf) ||
                     Number(r.edgeEligibleLinearFeet) ||
                     (r.pieces || []).reduce((s, p) => {
@@ -793,7 +794,7 @@ export default function EstimateScopePanel({
                       <strong>{r.name}</strong>
                       <ul>
                         <li>Countertop: {Number(r.countertopSqft ?? 0).toFixed(2)} SF</li>
-                        <li>Finished edge: {edgeLf.toFixed(2)} LF</li>
+                        <li>Total open edge: {edgeLf.toFixed(2)} LF</li>
                         <li>
                           Backsplash:{" "}
                           {r.includeBacksplash
@@ -1792,36 +1793,34 @@ export default function EstimateScopePanel({
             </>
           ) : manualStaffAuthority ? (
             <div data-testid="eq-confirmed-finished-edge">
-              <h4>Confirmed finished edge</h4>
+              <h4>Confirmed open edge</h4>
               <ul>
                 {(scope.rooms || [])
                   .filter((r) => r.included !== false)
                   .map((r) => {
-                    const pieceLf = (r.pieces || [])
-                      .filter((p) => p.included !== false)
-                      .reduce((s, p: any) => {
-                        const totalIn = Number(p?.finishedEdge?.totalFinishedEdgeLengthIn) || 0;
-                        return s + (totalIn > 0 ? totalIn / 12 : 0);
-                      }, 0);
                     const lf =
-                      pieceLf > 0
-                        ? pieceLf
-                        : Number((r as any).approvedFinishedEdgeLf) ||
-                          Number((r as any).edgeEligibleLinearFeet) ||
-                          0;
+                      Number((r as any).confirmedOpenEdgeLf) ||
+                      Number((r as any).approvedFinishedEdgeLf) ||
+                      Number((r as any).edgeEligibleLinearFeet) ||
+                      (r.pieces || [])
+                        .filter((p) => p.included !== false)
+                        .reduce((s, p: any) => {
+                          const totalIn = Number(p?.finishedEdge?.totalFinishedEdgeLengthIn) || 0;
+                          return s + (totalIn > 0 ? totalIn / 12 : 0);
+                        }, 0);
                     return (
-                      <li key={r.id}>
+                      <li key={r.id} data-testid="eq-confirmed-room-open-edge">
                         {r.name}: {lf.toFixed(2)} LF
                       </li>
                     );
                   })}
               </ul>
               <p className="eq-footnote">
-                Physical finished-edge LF comes from Manual Scope and is independent of the base
-                edge profile (Eased, etc.). Customer premium-edge options use these room LF values.
+                Physical open-edge LF comes from Manual Scope and is independent of the base edge
+                profile (Eased, etc.). Customer premium-edge options use these room LF values.
               </p>
               <p className="eq-muted" data-testid="eq-edge-final-lf-display">
-                Project finished edge for pricing: {edgeScope.finalLf.toFixed(2)} LF
+                Project open edge (derived): {edgeScope.finalLf.toFixed(2)} LF
               </p>
             </div>
           ) : (
