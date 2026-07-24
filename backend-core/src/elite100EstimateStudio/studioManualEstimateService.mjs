@@ -11,6 +11,7 @@ import {
   applyNormalizedManualRooms,
   buildInitialManualScope,
   isConfirmedManualPhysicalScope,
+  manualCreateRequestFingerprint,
   manualScopeFingerprint,
   stripClientManualAuthority,
   validateManualScopeForConfirm
@@ -24,7 +25,9 @@ function deError(message, code, statusCode) {
 }
 
 /**
- * Idempotency content hash for manual cases (uses existing org+content_hash unique).
+ * Explicit Idempotency-Key → org-scoped intake content_hash.
+ * Hash is `sha256("manual_staff:" + orgId + ":" + key)` — never a business-payload
+ * dedupe. Distinct keys always create distinct cases even when payload is identical.
  * @param {string} organizationId
  * @param {string} idempotencyKey
  */
@@ -103,6 +106,7 @@ export function createStudioManualEstimateService(deps) {
     const contentHash = manualIdempotencyContentHash(org, key);
 
     // Never trust browser organizationId / origin / confirmation flags.
+    const requestFingerprint = manualCreateRequestFingerprint(body);
     const projectFields = {
       customerName: body.customerName,
       customerContactName: body.customerContactName,
@@ -117,10 +121,12 @@ export function createStudioManualEstimateService(deps) {
       customerIdentitySnapshot:
         body.customerIdentitySnapshot && typeof body.customerIdentitySnapshot === "object"
           ? body.customerIdentitySnapshot
-          : null
+          : null,
+      manualCreateRequestFingerprint: requestFingerprint
     };
 
     let caseRow = null;
+    let reusedExisting = false;
     try {
       caseRow = await intakeRepo.createCase({
         organizationId: org,
@@ -144,11 +150,14 @@ export function createStudioManualEstimateService(deps) {
         if (!caseRow) {
           caseRow = await resolveExistingFromIdempotency(org, contentHash);
         }
+        reusedExisting = Boolean(caseRow);
       } else {
         // Memory repo may throw duplicate_message with existingCaseId
         const existing = await resolveExistingFromIdempotency(org, contentHash);
-        if (existing) caseRow = existing;
-        else throw e;
+        if (existing) {
+          caseRow = existing;
+          reusedExisting = true;
+        } else throw e;
       }
     }
 
@@ -162,6 +171,16 @@ export function createStudioManualEstimateService(deps) {
     }
 
     let estimate = await estimateRepo.getActiveByIntakeCase(org, caseRow.id);
+    if (reusedExisting && estimate) {
+      const priorFp = String(estimate.scope?.manualCreateRequestFingerprint || "");
+      if (priorFp && priorFp !== requestFingerprint) {
+        throw deError(
+          "Idempotency-Key was already used with a different create payload",
+          "idempotency_payload_conflict",
+          409
+        );
+      }
+    }
     if (!estimate) {
       const scope = buildInitialManualScope(projectFields);
       estimate = await estimateRepo.create({

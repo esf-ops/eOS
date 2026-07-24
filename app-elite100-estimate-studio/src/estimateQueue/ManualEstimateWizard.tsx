@@ -2,7 +2,7 @@
  * New Estimate launcher + Start without plans wizard.
  * Creates a manual intake case + Studio estimate via authorized API only.
  */
-import React, { useId, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import { ApiError, apiPost } from "../lib/api";
 
 export type ManualEstimateWizardProps = {
@@ -35,7 +35,22 @@ export default function ManualEstimateWizard({
   const [projectName, setProjectName] = useState("");
   const [projectAddress, setProjectAddress] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
-  const [idemKey] = useState(() => newIdempotencyKey());
+  // Fresh key each time the launcher opens so intentional New Estimate creates
+  // are never collapsed by a prior session's Idempotency-Key. Retries within
+  // one open session reuse the same key (busy guard + same key on submit).
+  const [idemKey, setIdemKey] = useState(() => newIdempotencyKey());
+
+  useEffect(() => {
+    if (!open) return;
+    setIdemKey(newIdempotencyKey());
+    setMode("chooser");
+    setError(null);
+    setBusy(false);
+    setCustomerName("");
+    setProjectName("");
+    setProjectAddress("");
+    setInternalNotes("");
+  }, [open]);
 
   if (!open) return null;
 
@@ -73,7 +88,7 @@ export default function ManualEstimateWizard({
       onCreated({
         intakeCaseId: body.intakeCaseId,
         estimateId: body.estimateId,
-        openTarget: body.openTarget || "scope"
+        openTarget: body.openTarget || "manual-scope"
       });
       resetAndClose();
     } catch (e) {

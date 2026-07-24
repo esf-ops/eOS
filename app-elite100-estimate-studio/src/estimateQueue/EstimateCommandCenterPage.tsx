@@ -723,7 +723,7 @@ export default function EstimateCommandCenterPage({
           onCreated={({ intakeCaseId, openTarget }) => {
             setRefreshTick((n) => n + 1);
             onSelectCase(intakeCaseId);
-            onOpenEstimate(intakeCaseId, { openTarget: openTarget || "scope" });
+            onOpenEstimate(intakeCaseId, { openTarget: openTarget || "manual-scope" });
           }}
         />
       ) : null}

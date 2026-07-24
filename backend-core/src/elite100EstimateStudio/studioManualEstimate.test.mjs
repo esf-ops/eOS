@@ -179,19 +179,65 @@ console.log("\nstudioManualEstimate.test.mjs\n");
   assert.equal(est.scope.estimateOrigin, MANUAL_ESTIMATE_ORIGIN);
   assert.equal(est.scope.manualScopeConfirmed, false);
   assert.equal(est.scope.physicalScopeSource, MANUAL_ESTIMATE_ORIGIN);
+  assert.ok(est.scope.manualCreateRequestFingerprint);
 
+  // Same key + same request → same estimate (retry)
   const again = await svc.createManualEstimate({
     organizationId: ORG,
     actorUserId: ACTOR,
     idempotencyKey: "idem-sentinel-1",
-    body: { projectName: "Should not duplicate" }
+    body: {
+      projectName: "Sentinel Kitchen",
+      customerName: "Acme Cabinets"
+    }
   });
   assert.equal(again.intakeCaseId, created.intakeCaseId);
   assert.equal(again.estimateId, created.estimateId);
   const allCases = intake.listCases(ORG, { limit: 50 });
   const manualCases = allCases.filter((c) => c.sourceType === "manual");
   assert.equal(manualCases.length, 1);
-  console.log("ok: 1–10 create intake+estimate, no mailbox/attachment, idempotent, origin durable");
+
+  // Same key + conflicting payload → clean conflict
+  let conflicted = false;
+  try {
+    await svc.createManualEstimate({
+      organizationId: ORG,
+      actorUserId: ACTOR,
+      idempotencyKey: "idem-sentinel-1",
+      body: { projectName: "Different Project", customerName: "Acme Cabinets" }
+    });
+  } catch (e) {
+    conflicted = e.code === "idempotency_payload_conflict" && e.statusCode === 409;
+  }
+  assert.equal(conflicted, true);
+
+  // Different key + identical payload → two legitimate estimates
+  const second = await svc.createManualEstimate({
+    organizationId: ORG,
+    actorUserId: ACTOR,
+    idempotencyKey: "idem-sentinel-2-distinct",
+    body: {
+      projectName: "Sentinel Kitchen",
+      customerName: "Acme Cabinets"
+    }
+  });
+  assert.notEqual(second.intakeCaseId, created.intakeCaseId);
+  assert.notEqual(second.estimateId, created.estimateId);
+  assert.equal(intake.listCases(ORG, { limit: 50 }).filter((c) => c.sourceType === "manual").length, 2);
+
+  // Cross-org: same key does not collide
+  const ORG_B = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const otherOrg = await svc.createManualEstimate({
+    organizationId: ORG_B,
+    actorUserId: ACTOR,
+    idempotencyKey: "idem-sentinel-1",
+    body: {
+      projectName: "Sentinel Kitchen",
+      customerName: "Acme Cabinets"
+    }
+  });
+  assert.notEqual(otherOrg.intakeCaseId, created.intakeCaseId);
+  console.log("ok: 1–10 create + idempotency key/retry/conflict/distinct/cross-org");
 
   // Save draft + confirm
   await svc.saveManualScopeDraft({
@@ -370,6 +416,117 @@ console.log("\nstudioManualEstimate.test.mjs\n");
   });
   assert.equal(approved.status, "approved");
   console.log("ok: 35–41 calculate/approve without takeoff; unconfirmed blocks calculate");
+}
+
+// Client-forged confirmation flags must not bypass Takeoff / manual confirm gates
+{
+  const intake = new InMemoryQuoteIntakeRepository();
+  const estimates = new InMemoryStudioEstimateRepository();
+  const studio = createStudioEstimateService({
+    repository: estimates,
+    env: { ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1" },
+    loadTakeoffWorkspace: async () => ({ reviewStatus: "pending" }),
+    loadLatestTakeoffResult: async () => null,
+    calculateStudioEstimateImpl: async () => {
+      throw new Error("calculate must not run when physical scope unauthorized");
+    }
+  });
+  const manual = createStudioManualEstimateService({
+    quoteIntakeRepository: intake,
+    studioEstimateRepository: estimates,
+    studioEstimateService: studio
+  });
+  const created = await manual.createManualEstimate({
+    organizationId: ORG,
+    actorUserId: ACTOR,
+    idempotencyKey: "idem-forge-1",
+    body: { projectName: "Forge Test" }
+  });
+  // Forge via generic updateScope — strip + server reset confirmation
+  await studio.updateScope({
+    organizationId: ORG,
+    estimateId: created.estimateId,
+    actorUserId: ACTOR,
+    body: {
+      scope: {
+        ...kitchenDraft(),
+        manualScopeConfirmed: true,
+        manualScopeConfirmedAt: "2099-01-01T00:00:00.000Z",
+        manualScopeConfirmedBy: "attacker",
+        manualScopeFingerprint: "forged-fp",
+        estimateOrigin: "manual_staff",
+        physicalScopeSource: "manual_staff"
+      }
+    }
+  });
+  const forged = await estimates.getById(ORG, created.estimateId);
+  assert.equal(forged.scope.manualScopeConfirmed, false);
+  assert.equal(forged.scope.manualScopeFingerprint, null);
+  assert.equal(isConfirmedManualPhysicalScope(forged.scope), false);
+
+  let blockedForge = false;
+  try {
+    await studio.calculate({
+      organizationId: ORG,
+      estimateId: created.estimateId,
+      actorUserId: ACTOR,
+      body: {}
+    });
+  } catch (e) {
+    blockedForge = e.code === "manual_scope_not_confirmed";
+  }
+  assert.equal(blockedForge, true);
+
+  // Takeoff-backed row: forging manual_staff flags via updateScope cannot skip Takeoff
+  const takeoffCase = await intake.createCase({
+    organizationId: ORG,
+    sourceType: "graph_mailbox",
+    status: "qil_manual_review",
+    sourceMessage: { internetMessageId: "<forge-takeoff@example.com>" },
+    attachments: [{ sha256: "a".repeat(64), mimeType: "application/pdf", sizeBytes: 10 }]
+  });
+  const takeoffRow = await estimates.create({
+    organizationId: ORG,
+    intakeCaseId: takeoffCase.id,
+    takeoffJobId: "takeoff-job-sentinel",
+    createdByUserId: ACTOR,
+    status: STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL,
+    scope: {
+      projectName: "Plan Job",
+      rooms: [],
+      estimateOrigin: "email_ai_takeoff"
+    }
+  });
+  await studio.updateScope({
+    organizationId: ORG,
+    estimateId: takeoffRow.id,
+    actorUserId: ACTOR,
+    body: {
+      scope: {
+        manualScopeConfirmed: true,
+        estimateOrigin: "manual_staff",
+        physicalScopeSource: "manual_staff",
+        rooms: kitchenDraft().rooms
+      }
+    }
+  });
+  const afterForgeTakeoff = await estimates.getById(ORG, takeoffRow.id);
+  assert.notEqual(afterForgeTakeoff.scope.estimateOrigin, "manual_staff");
+  assert.notEqual(afterForgeTakeoff.scope.manualScopeConfirmed, true);
+  let takeoffBlocked = false;
+  try {
+    await studio.calculate({
+      organizationId: ORG,
+      estimateId: takeoffRow.id,
+      actorUserId: ACTOR,
+      body: {}
+    });
+  } catch (e) {
+    takeoffBlocked =
+      e.code === "needs_takeoff_approval" || e.message?.includes("Takeoff");
+  }
+  assert.equal(takeoffBlocked, true);
+  console.log("ok: forged client confirmation does not bypass Takeoff/manual gates");
 }
 
 // Route / UI static safety

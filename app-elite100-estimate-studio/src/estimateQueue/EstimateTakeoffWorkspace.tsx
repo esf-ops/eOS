@@ -26,6 +26,7 @@ type ReadyState = {
   takeoffJobId: string | null;
   manualMode: boolean;
   estimateId: string | null;
+  accountDirectoryLinked: boolean;
   linkStatus: string;
   created: boolean;
   reused: boolean;
@@ -102,15 +103,30 @@ export default function EstimateTakeoffWorkspace({
           const estBody = (await apiGet(
             `/api/elite100-estimate-studio/intake-cases/${encodeURIComponent(caseId)}/estimate`,
             authToken
-          )) as { estimate?: { id?: string; scope?: { estimateOrigin?: string; manualScopeConfirmed?: boolean } } };
+          )) as {
+            estimate?: {
+              id?: string;
+              accountDirectoryAccountId?: string | null;
+              scope?: {
+                estimateOrigin?: string;
+                manualScopeConfirmed?: boolean;
+                accountDirectoryAccountId?: string | null;
+              };
+            };
+          };
           if (cancelled) return;
           const estimateId = String(estBody.estimate?.id || "").trim() || null;
           const confirmed = estBody.estimate?.scope?.manualScopeConfirmed === true;
+          const adLinked = Boolean(
+            estBody.estimate?.accountDirectoryAccountId ||
+              estBody.estimate?.scope?.accountDirectoryAccountId
+          );
           setState({
             kind: "ready",
             takeoffJobId: null,
             manualMode: true,
             estimateId,
+            accountDirectoryLinked: adLinked,
             linkStatus: "manual",
             created: false,
             reused: true,
@@ -155,6 +171,7 @@ export default function EstimateTakeoffWorkspace({
           takeoffJobId,
           manualMode: false,
           estimateId: null,
+          accountDirectoryLinked: false,
           linkStatus: String(opened.linkStatus ?? "queued"),
           created: Boolean(opened.created),
           reused: Boolean(opened.reused),
@@ -191,10 +208,19 @@ export default function EstimateTakeoffWorkspace({
     };
   }, [authToken, caseId, client]);
 
+  const manualMode = state.kind === "ready" ? state.manualMode : false;
   useEffect(() => {
     if (state.kind !== "ready") return;
     const focus = initialFocus || "takeoff";
     window.setTimeout(() => {
+      if (manualMode) {
+        document
+          .querySelector(
+            '[data-testid="manual-physical-scope-editor"], [data-testid="estimate-scope-panel"]'
+          )
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
       if (focus === "scope" || focus === "digital") {
         document
           .querySelector('[data-testid="estimate-scope-panel"]')
@@ -209,7 +235,7 @@ export default function EstimateTakeoffWorkspace({
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }, 120);
-  }, [state.kind, initialFocus]);
+  }, [state.kind, initialFocus, manualMode]);
 
   const takeoffSrc =
     state.kind === "ready" && state.takeoffJobId
@@ -375,8 +401,18 @@ export default function EstimateTakeoffWorkspace({
         <>
           {state.manualMode ? (
             <div className="eq-state" role="status" data-testid="manual-estimate-badge">
-              <strong>Manual Estimate</strong> — no email, plan, or AI Takeoff required. Confirm
-              manual scope before Pricing Setup.
+              <strong>Manual Estimate</strong> — no email, plan, or AI Takeoff required.
+              <p className="eq-muted" data-testid="manual-next-step-scope">
+                Next: build rooms and pieces below, then <strong>Confirm Manual Scope</strong> before
+                Pricing Setup.
+              </p>
+              {!state.accountDirectoryLinked ? (
+                <p className="eq-muted" data-testid="manual-next-step-customer">
+                  Customer identity is incomplete — in Pricing Setup, search Account Directory (or
+                  create a prospect) to select/link the customer. Linking is optional for draft and
+                  calculate; use the existing Account Directory panel.
+                </p>
+              ) : null}
             </div>
           ) : null}
           {state.persistenceWarning ? (

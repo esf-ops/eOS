@@ -78,12 +78,41 @@ export function stripClientManualAuthority(scope) {
   delete next.manualScopeConfirmedAt;
   delete next.manualScopeConfirmedBy;
   delete next.manualScopeFingerprint;
+  delete next.manualCreateRequestFingerprint;
   delete next.estimateOrigin;
   delete next.physicalScopeSource;
   // Never accept takeoff authority markers from the browser on a manual draft.
   delete next.takeoffApproved;
   delete next.takeoffScopeSummary;
   return next;
+}
+
+/**
+ * Fingerprint of the create-request business fields for idempotency conflict checks.
+ * Not a permanent business-payload dedupe key — only compared when the same
+ * Idempotency-Key retries within an organization.
+ * @param {object} [body]
+ */
+export function manualCreateRequestFingerprint(body = {}) {
+  const payload = {
+    customerName: String(body.customerName || "").trim().slice(0, 200),
+    customerContactName: String(body.customerContactName || "").trim().slice(0, 200),
+    customerEmail: String(body.customerEmail || "").trim().slice(0, 200),
+    customerPhone: String(body.customerPhone || "").trim().slice(0, 80),
+    projectName: String(body.projectName || "").trim().slice(0, 200),
+    projectAddress: String(body.projectAddress || "").trim().slice(0, 400),
+    estimatorNotes: String(body.estimatorNotes || body.internalNotes || "").trim().slice(0, 4000),
+    accountDirectoryAccountId: body.accountDirectoryAccountId
+      ? String(body.accountDirectoryAccountId).trim()
+      : null,
+    accountDirectoryContactId: body.accountDirectoryContactId
+      ? String(body.accountDirectoryContactId).trim()
+      : null,
+    accountDirectoryLocationId: body.accountDirectoryLocationId
+      ? String(body.accountDirectoryLocationId).trim()
+      : null
+  };
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
 /**
@@ -408,6 +437,7 @@ export function buildInitialManualScope(projectFields = {}) {
     manualScopeConfirmed: false,
     manualScopeConfirmedAt: null,
     manualScopeConfirmedBy: null,
-    manualScopeFingerprint: null
+    manualScopeFingerprint: null,
+    manualCreateRequestFingerprint: projectFields.manualCreateRequestFingerprint || null
   };
 }

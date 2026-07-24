@@ -2430,7 +2430,8 @@
 | **Physical scope** | Estimator-built rooms/pieces normalize into the same pricing scope shape as Takeoff-seeded rooms. Explicit **Confirm Manual Scope** stamps fingerprint + confirmation; then Pricing / Calculate / Approve / DE publish reuse existing services. |
 | **Pricing** | Origin does not change price. No frontend pricing constants. Fixed 2026 Vanity Program is **not** claimed — vanity tops use standard countertop pricing until a separate integration. |
 | **Delivery invariants** | Create/Save/Confirm/Calculate/Approve never publish, replace links, email, create reviews, mark sold, or write QB/Moraware. |
-| **AD / partner** | Account Directory identity and trusted partner pricing remain separate (existing rules). |
+| **Idempotency** | Client `Idempotency-Key` → org-scoped `content_hash = sha256(manual_staff:orgId:key)`. Same key + same create payload returns the same case/estimate; same key + conflicting payload → `409 idempotency_payload_conflict`; different keys with identical payload create distinct estimates. Not a permanent business-payload dedupe. |
+| **AD / partner** | Account Directory identity and trusted partner pricing remain separate (existing rules). AD link is not required for draft create, calculate, or approve; publication freezes snapshot when present (§164). Null linkage remains valid. |
 | **SQL** | None — reused existing `source_type` check constraint value `manual`. |
 | **Impacted** | Manual estimate service/routes, scope gates, Command Center New Estimate, Manual Scope editor, queue/CC badges, this entry. |
 

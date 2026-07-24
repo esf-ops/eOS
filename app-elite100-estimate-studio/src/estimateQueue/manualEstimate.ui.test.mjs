@@ -32,6 +32,12 @@ assert.match(editor, /confirm-manual-scope/);
 assert.match(workspace, /manual-estimate-badge/);
 assert.match(workspace, /ManualPhysicalScopeEditor/);
 assert.match(workspace, /sourceType === "manual"/);
+assert.match(workspace, /manual-next-step-scope/);
+assert.match(workspace, /manual-next-step-customer/);
+assert.match(wizard, /setIdemKey\(newIdempotencyKey\(\)\)/);
+assert.match(wizard, /\[open\]/);
+const app = readFileSync(join(root, "app-elite100-estimate-studio/src/StudioApp.tsx"), "utf8");
+assert.match(app, /manual-scope/);
 assert.doesNotMatch(workspace, /useEffect\([\s\S]{0,200}confirm-manual-scope/);
 assert.doesNotMatch(wizard, /publishDigitalEstimate|link-copied/);
 
