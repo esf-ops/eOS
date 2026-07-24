@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { apiGet, apiPatch, apiPost, ApiError } from "../lib/api";
 
 import EstimateDigitalEstimatePanel from "./EstimateDigitalEstimatePanel";
+import StudioAccountDirectoryPanel from "./StudioAccountDirectoryPanel";
 import { applyRoomBacksplashPatch } from "../../../backend-core/src/elite100EstimateStudio/studioRoomBacksplash.mjs";
 import {
   buildStudioScopeBilling,
@@ -81,9 +82,16 @@ type StudioEstimate = {
   approvedByUserId?: string | null;
   scope?: {
     customerName?: string;
+    customerContactName?: string;
+    customerEmail?: string;
+    customerPhone?: string;
     projectName?: string;
     projectAddress?: string;
     partnerAccountId?: string | null;
+    accountDirectoryAccountId?: string | null;
+    accountDirectoryContactId?: string | null;
+    accountDirectoryLocationId?: string | null;
+    customerIdentitySnapshot?: Record<string, unknown> | null;
     pricingBasis?: string;
     materialGroup?: string;
     colorName?: string;
@@ -743,13 +751,59 @@ export default function EstimateScopePanel({
           sells it — customer, pricing basis, material, products, and adjustments.
         </p>
         <h3>Customer and project</h3>
+        {authToken ? (
+          <StudioAccountDirectoryPanel
+            sessionToken={authToken}
+            blocked={blocked}
+            scope={{
+              customerName: scope.customerName,
+              customerContactName: scope.customerContactName,
+              customerEmail: scope.customerEmail,
+              customerPhone: scope.customerPhone,
+              projectAddress: scope.projectAddress,
+              accountDirectoryAccountId: scope.accountDirectoryAccountId,
+              accountDirectoryContactId: scope.accountDirectoryContactId,
+              accountDirectoryLocationId: scope.accountDirectoryLocationId,
+              customerIdentitySnapshot: scope.customerIdentitySnapshot as
+                | import("./StudioAccountDirectoryPanel").StudioCustomerIdentitySnapshot
+                | null
+                | undefined
+            }}
+            patchScope={(patch) => patchScope(patch)}
+          />
+        ) : null}
         <div className="eq-scope-grid">
           <label>
-            Customer
+            Customer / company
             <input
               value={scope.customerName || ""}
               disabled={blocked}
+              data-testid="eq-customer-name"
               onChange={(e) => patchScope({ customerName: e.target.value })}
+            />
+          </label>
+          <label>
+            Contact
+            <input
+              value={scope.customerContactName || ""}
+              disabled={blocked}
+              onChange={(e) => patchScope({ customerContactName: e.target.value })}
+            />
+          </label>
+          <label>
+            Email
+            <input
+              value={scope.customerEmail || ""}
+              disabled={blocked}
+              onChange={(e) => patchScope({ customerEmail: e.target.value })}
+            />
+          </label>
+          <label>
+            Phone
+            <input
+              value={scope.customerPhone || ""}
+              disabled={blocked}
+              onChange={(e) => patchScope({ customerPhone: e.target.value })}
             />
           </label>
           <label>
@@ -774,7 +828,7 @@ export default function EstimateScopePanel({
               type="search"
               value={accountQuery}
               disabled={blocked}
-              placeholder="Search accounts by name"
+              placeholder="Search trusted partner accounts by name"
               data-testid="eq-partner-account-search"
               onChange={(e) => setAccountQuery(e.target.value)}
               autoComplete="off"
@@ -796,7 +850,7 @@ export default function EstimateScopePanel({
                 disabled={blocked || !scope.partnerAccountId}
                 onClick={() => selectPartnerAccount(null)}
               >
-                Clear account
+                Clear trusted partner
               </button>
               {accountOptions.map((opt) => (
                 <button
@@ -815,8 +869,8 @@ export default function EstimateScopePanel({
               ))}
             </div>
             <p className="eq-footnote">
-              Browser submits only the selected account id. Watts/Spahn rules use trusted id membership
-              only — never the display name.
+              Trusted partner pricing uses partnerAccountId membership only (Watts/Spahn). Selecting
+              an Account Directory account never grants trusted partner pricing by name.
             </p>
           </div>
         </div>

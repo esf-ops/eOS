@@ -37,6 +37,7 @@ export const TAKEOFF_DERIVED_ADDON_KEYS = Object.freeze([
 ]);
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
 import { loadStudioPartnerAccount } from "./studioPartnerAccountSearch.mjs";
+import { applyStudioAccountDirectoryIdentity } from "./studioAccountDirectoryLookup.mjs";
 
 function rejectCallerAuthority(body) {
   if (!body || typeof body !== "object") return;
@@ -432,6 +433,14 @@ export function createStudioEstimateService(deps = {}) {
       status: row.status,
       revision: row.revision,
       scope: row.scope,
+      accountDirectoryAccountId: row.accountDirectoryAccountId ?? row.scope?.accountDirectoryAccountId ?? null,
+      accountDirectoryContactId: row.accountDirectoryContactId ?? row.scope?.accountDirectoryContactId ?? null,
+      accountDirectoryLocationId: row.accountDirectoryLocationId ?? row.scope?.accountDirectoryLocationId ?? null,
+      customerIdentitySnapshot:
+        row.customerIdentitySnapshot ?? row.scope?.customerIdentitySnapshot ?? null,
+      accountLinked: Boolean(
+        row.accountDirectoryAccountId || row.scope?.accountDirectoryAccountId
+      ),
       calculation: row.calculationSnapshot
         ? {
             fingerprint: row.calculationSnapshot.fingerprint,
@@ -479,6 +488,22 @@ export function createStudioEstimateService(deps = {}) {
       {
         status: input.status || STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
         scope: input.scope ?? row.scope,
+        accountDirectoryAccountId:
+          "accountDirectoryAccountId" in input
+            ? input.accountDirectoryAccountId
+            : row.accountDirectoryAccountId,
+        accountDirectoryContactId:
+          "accountDirectoryContactId" in input
+            ? input.accountDirectoryContactId
+            : row.accountDirectoryContactId,
+        accountDirectoryLocationId:
+          "accountDirectoryLocationId" in input
+            ? input.accountDirectoryLocationId
+            : row.accountDirectoryLocationId,
+        customerIdentitySnapshot:
+          "customerIdentitySnapshot" in input
+            ? input.customerIdentitySnapshot
+            : row.customerIdentitySnapshot,
         approval: null,
         calculationSnapshot: null,
         staleReason: input.staleReason ?? null,
@@ -742,9 +767,16 @@ export function createStudioEstimateService(deps = {}) {
     });
     const nextScope = seedScopeFromTakeoffPayload(payload, {
       customerName: row.scope?.customerName,
+      customerContactName: row.scope?.customerContactName,
+      customerEmail: row.scope?.customerEmail,
+      customerPhone: row.scope?.customerPhone,
       projectName: row.scope?.projectName,
       projectAddress: row.scope?.projectAddress,
       partnerAccountId: row.scope?.partnerAccountId,
+      accountDirectoryAccountId: row.scope?.accountDirectoryAccountId,
+      accountDirectoryContactId: row.scope?.accountDirectoryContactId,
+      accountDirectoryLocationId: row.scope?.accountDirectoryLocationId,
+      customerIdentitySnapshot: row.scope?.customerIdentitySnapshot,
       pricingBasis: row.scope?.pricingBasis,
       materialGroup: row.scope?.materialGroup,
       colorName: row.scope?.colorName,
@@ -848,11 +880,48 @@ export function createStudioEstimateService(deps = {}) {
         throw err;
       }
 
-      const nextScope = { ...row.scope, ...clean };
+      let nextScope = { ...row.scope, ...clean };
       if ("partnerAccountId" in clean) {
         const resolved = await resolveTrustedPartnerOnScope(organizationId, nextScope);
         Object.assign(nextScope, resolved.scope);
       }
+
+      const identityTouched =
+        "accountDirectoryAccountId" in clean ||
+        "accountDirectoryContactId" in clean ||
+        "accountDirectoryLocationId" in clean ||
+        "customerIdentitySnapshot" in clean ||
+        "explicitAccountRelink" in clean ||
+        "refreshCustomerIdentity" in clean ||
+        "account_directory_account_id" in (body || {}) ||
+        "customer_identity_snapshot" in (body || {}) ||
+        "explicitAccountRelink" in (body || {}) ||
+        "refreshCustomerIdentity" in (body || {});
+
+      let identityColumns = {
+        accountDirectoryAccountId: row.accountDirectoryAccountId ?? null,
+        accountDirectoryContactId: row.accountDirectoryContactId ?? null,
+        accountDirectoryLocationId: row.accountDirectoryLocationId ?? null,
+        customerIdentitySnapshot: row.customerIdentitySnapshot ?? null
+      };
+
+      if (identityTouched || clean.accountDirectoryAccountId || clean.customerIdentitySnapshot) {
+        const saveMode = row.accountDirectoryAccountId ? "update_existing" : "create";
+        const applied = applyStudioAccountDirectoryIdentity({
+          body: { ...body, ...clean },
+          existingRow: row,
+          nextScope,
+          saveMode
+        });
+        nextScope = applied.scope;
+        identityColumns = {
+          accountDirectoryAccountId: applied.accountDirectoryAccountId,
+          accountDirectoryContactId: applied.accountDirectoryContactId,
+          accountDirectoryLocationId: applied.accountDirectoryLocationId,
+          customerIdentitySnapshot: applied.customerIdentitySnapshot
+        };
+      }
+
       // Server-side audit stamp — the browser never asserts who adjusted scope.
       if (Array.isArray(nextScope.countertopScopeAdjustments)) {
         const now = new Date().toISOString();
@@ -878,19 +947,33 @@ export function createStudioEstimateService(deps = {}) {
         };
       }
       const wasApproved = row.status === STUDIO_ESTIMATE_STATUSES.APPROVED;
-      const scopeChanged = scopeFingerprint(row.scope) !== scopeFingerprint(nextScope);
+      const priorIdentityFp = JSON.stringify({
+        a: row.accountDirectoryAccountId,
+        c: row.accountDirectoryContactId,
+        l: row.accountDirectoryLocationId,
+        s: row.customerIdentitySnapshot
+      });
+      const nextIdentityFp = JSON.stringify({
+        a: identityColumns.accountDirectoryAccountId,
+        c: identityColumns.accountDirectoryContactId,
+        l: identityColumns.accountDirectoryLocationId,
+        s: identityColumns.customerIdentitySnapshot
+      });
+      const scopeChanged =
+        scopeFingerprint(row.scope) !== scopeFingerprint(nextScope) || priorIdentityFp !== nextIdentityFp;
 
       if (wasApproved && scopeChanged) {
         row = await revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
           status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
           scope: nextScope,
+          ...identityColumns,
           staleReason: "Scope changed after approval — recalculate and reapprove"
         });
         return safeEstimateView(row);
       }
 
       /** @type {Record<string, unknown>} */
-      const patch = { scope: nextScope };
+      const patch = { scope: nextScope, ...identityColumns };
       if (row.status === STUDIO_ESTIMATE_STATUSES.PRICED && scopeChanged) {
         patch.status = STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE;
         patch.calculationSnapshot = null;

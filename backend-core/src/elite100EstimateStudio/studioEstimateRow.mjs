@@ -68,6 +68,19 @@ export function buildStudioEstimateRow(input) {
       : STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL,
     revision: Math.max(1, Number(input.revision) || 1),
     scope: { ...emptyStudioEstimateScope(), ...(input.scope || {}) },
+    accountDirectoryAccountId: input.accountDirectoryAccountId
+      ? String(input.accountDirectoryAccountId)
+      : null,
+    accountDirectoryContactId: input.accountDirectoryContactId
+      ? String(input.accountDirectoryContactId)
+      : null,
+    accountDirectoryLocationId: input.accountDirectoryLocationId
+      ? String(input.accountDirectoryLocationId)
+      : null,
+    customerIdentitySnapshot:
+      input.customerIdentitySnapshot && typeof input.customerIdentitySnapshot === "object"
+        ? input.customerIdentitySnapshot
+        : null,
     calculationSnapshot: calc,
     calculationFingerprint: calcMeta.fingerprint,
     pricingEngine: calcMeta.pricingEngine,
@@ -99,6 +112,27 @@ export function applyStudioEstimatePatch(row, patch, actorUserId = null) {
   if (patch.status && isStudioEstimateStatus(patch.status)) next.status = patch.status;
   if (patch.scope && typeof patch.scope === "object") {
     next.scope = { ...next.scope, ...patch.scope };
+  }
+  if ("accountDirectoryAccountId" in patch) {
+    next.accountDirectoryAccountId = patch.accountDirectoryAccountId
+      ? String(patch.accountDirectoryAccountId)
+      : null;
+  }
+  if ("accountDirectoryContactId" in patch) {
+    next.accountDirectoryContactId = patch.accountDirectoryContactId
+      ? String(patch.accountDirectoryContactId)
+      : null;
+  }
+  if ("accountDirectoryLocationId" in patch) {
+    next.accountDirectoryLocationId = patch.accountDirectoryLocationId
+      ? String(patch.accountDirectoryLocationId)
+      : null;
+  }
+  if ("customerIdentitySnapshot" in patch) {
+    next.customerIdentitySnapshot =
+      patch.customerIdentitySnapshot && typeof patch.customerIdentitySnapshot === "object"
+        ? patch.customerIdentitySnapshot
+        : null;
   }
   if ("calculationSnapshot" in patch) {
     next.calculationSnapshot = patch.calculationSnapshot;
@@ -139,6 +173,29 @@ export function applyStudioEstimatePatch(row, patch, actorUserId = null) {
 
 export function dbRowToStudioEstimate(row) {
   if (!row) return null;
+  const scope =
+    row.scope_json && typeof row.scope_json === "object" ? row.scope_json : emptyStudioEstimateScope();
+  const accountDirectoryAccountId = row.account_directory_account_id
+    ? String(row.account_directory_account_id)
+    : scope.accountDirectoryAccountId
+      ? String(scope.accountDirectoryAccountId)
+      : null;
+  const accountDirectoryContactId = row.account_directory_contact_id
+    ? String(row.account_directory_contact_id)
+    : scope.accountDirectoryContactId
+      ? String(scope.accountDirectoryContactId)
+      : null;
+  const accountDirectoryLocationId = row.account_directory_location_id
+    ? String(row.account_directory_location_id)
+    : scope.accountDirectoryLocationId
+      ? String(scope.accountDirectoryLocationId)
+      : null;
+  const customerIdentitySnapshot =
+    row.customer_identity_snapshot && typeof row.customer_identity_snapshot === "object"
+      ? row.customer_identity_snapshot
+      : scope.customerIdentitySnapshot && typeof scope.customerIdentitySnapshot === "object"
+        ? scope.customerIdentitySnapshot
+        : null;
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -147,7 +204,18 @@ export function dbRowToStudioEstimate(row) {
     sourceTakeoffResultId: row.source_takeoff_result_id ?? null,
     status: row.status,
     revision: Number(row.revision) || 1,
-    scope: row.scope_json && typeof row.scope_json === "object" ? row.scope_json : emptyStudioEstimateScope(),
+    scope: {
+      ...emptyStudioEstimateScope(),
+      ...scope,
+      accountDirectoryAccountId,
+      accountDirectoryContactId,
+      accountDirectoryLocationId,
+      customerIdentitySnapshot
+    },
+    accountDirectoryAccountId,
+    accountDirectoryContactId,
+    accountDirectoryLocationId,
+    customerIdentitySnapshot,
     calculationSnapshot: row.calculation_snapshot_json ?? null,
     calculationFingerprint: row.calculation_fingerprint ?? null,
     pricingEngine: row.pricing_engine ?? null,
@@ -174,6 +242,10 @@ export function studioEstimateToDbInsert(row) {
     status: row.status,
     revision: row.revision,
     scope_json: row.scope,
+    account_directory_account_id: row.accountDirectoryAccountId ?? null,
+    account_directory_contact_id: row.accountDirectoryContactId ?? null,
+    account_directory_location_id: row.accountDirectoryLocationId ?? null,
+    customer_identity_snapshot: row.customerIdentitySnapshot ?? null,
     calculation_snapshot_json: row.calculationSnapshot,
     calculation_fingerprint: row.calculationFingerprint,
     pricing_engine: row.pricingEngine,

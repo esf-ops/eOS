@@ -85,9 +85,20 @@ function attachmentSummary(attachments = []) {
 }
 
 function customerProjectFromScope(scope) {
-  const customerName = String(scope?.customerName ?? "").trim() || null;
+  const snap =
+    scope?.customerIdentitySnapshot && typeof scope.customerIdentitySnapshot === "object"
+      ? scope.customerIdentitySnapshot
+      : null;
+  const customerName =
+    String(snap?.accountDisplayName ?? "").trim() ||
+    String(scope?.customerName ?? "").trim() ||
+    null;
   const projectName = String(scope?.projectName ?? "").trim() || null;
-  return { customerName, projectName };
+  return {
+    customerName,
+    projectName,
+    accountLinked: Boolean(scope?.accountDirectoryAccountId || snap?.accountId)
+  };
 }
 
 function cutoutTotalsFromRooms(rooms = []) {
@@ -354,7 +365,7 @@ export function createStudioEstimateQueueService(deps = {}) {
       }))
     );
     const scope = estimate?.scope_json || estimate?.scope || {};
-    const { customerName, projectName } = customerProjectFromScope(scope);
+    const { customerName, projectName, accountLinked } = customerProjectFromScope(scope);
     const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
     const roomStats = cutoutTotalsFromRooms(rooms);
 
@@ -436,6 +447,8 @@ export function createStudioEstimateQueueService(deps = {}) {
       id: caseRow.id,
       customerName: customerName || "Unknown",
       projectName: projectName || "Unknown",
+      accountLinked: Boolean(accountLinked),
+      accountDirectoryLinked: Boolean(accountLinked),
       senderLabel: caseRow.mailbox_identity ? "Inbound mailbox" : "Inbound sender",
       salespersonLabel: null,
       receivedAt: caseRow.received_at || caseRow.receivedAt || caseRow.created_at || null,

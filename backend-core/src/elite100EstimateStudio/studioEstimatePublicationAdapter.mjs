@@ -548,6 +548,20 @@ export function buildSyntheticQuoteHeaderFromStudioEstimate(estimate, opts = {})
   const printSnap = buildPrintSnapshot(estimate, customerDisplayTotal);
   const snapshotCopy = buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDisplayTotal);
 
+  const snap =
+    estimate.customerIdentitySnapshot && typeof estimate.customerIdentitySnapshot === "object"
+      ? estimate.customerIdentitySnapshot
+      : scope.customerIdentitySnapshot && typeof scope.customerIdentitySnapshot === "object"
+        ? scope.customerIdentitySnapshot
+        : null;
+  const customerName =
+    str(snap?.accountDisplayName) ||
+    str(snap?.contactDisplayName) ||
+    str(scope.customerName) ||
+    null;
+  const customerEmail = str(snap?.contactEmail) || str(scope.customerEmail) || null;
+  const customerPhone = str(snap?.contactPhone) || str(scope.customerPhone) || null;
+
   return {
     id: estimate.id,
     organization_id: organizationId || null,
@@ -559,11 +573,21 @@ export function buildSyntheticQuoteHeaderFromStudioEstimate(estimate, opts = {})
     quote_family_root_id: studioEstimatePublicationFamilyRoot(estimate),
     is_current_revision: estimate.status === STUDIO_ESTIMATE_STATUSES.APPROVED,
     archived_at: null,
-    customer_name: str(scope.customerName) || null,
+    customer_name: customerName,
+    customer_email: customerEmail,
+    customer_phone: customerPhone,
     project_name: str(scope.projectName) || null,
     project_address: str(scope.projectAddress) || null,
     estimated_material_group: str(scope.materialGroup) || "Group Promo",
+    // Trusted partner pricing id only — never Account Directory UUID.
     partner_account_id: scope.partnerAccountId || null,
+    account_directory_account_id:
+      estimate.accountDirectoryAccountId || scope.accountDirectoryAccountId || null,
+    account_directory_contact_id:
+      estimate.accountDirectoryContactId || scope.accountDirectoryContactId || null,
+    account_directory_location_id:
+      estimate.accountDirectoryLocationId || scope.accountDirectoryLocationId || null,
+    customer_identity_snapshot: snap,
     // Prefer the customer-safe snapshot copy (rooms with pieces/edge LF,
     // pricingBasis, fabrication add-ons). Keep print snapshot in sync.
     calculation_snapshot: {
@@ -571,7 +595,8 @@ export function buildSyntheticQuoteHeaderFromStudioEstimate(estimate, opts = {})
       internal_ui: {
         ...(snapshotCopy.internal_ui || {}),
         estimate_rooms: rooms,
-        customer_estimate_print_snapshot: printSnap
+        customer_estimate_print_snapshot: printSnap,
+        customer_identity_snapshot: snap
       }
     }
   };

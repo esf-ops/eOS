@@ -120,11 +120,33 @@ export async function ensureStudioEstimatePublicationSource(input) {
     quote_number_base: baseNumber,
     quote_source: "elite100_studio_bridge",
     quote_status: "approved",
-    customer_name: str(scope.customerName) || null,
+    customer_name:
+      str(estimate.customerIdentitySnapshot?.accountDisplayName) ||
+      str(scope.customerIdentitySnapshot?.accountDisplayName) ||
+      str(scope.customerName) ||
+      null,
+    customer_email:
+      str(estimate.customerIdentitySnapshot?.contactEmail) ||
+      str(scope.customerIdentitySnapshot?.contactEmail) ||
+      str(scope.customerEmail) ||
+      null,
+    customer_phone:
+      str(estimate.customerIdentitySnapshot?.contactPhone) ||
+      str(scope.customerIdentitySnapshot?.contactPhone) ||
+      str(scope.customerPhone) ||
+      null,
     project_name: str(scope.projectName) || null,
     project_address: str(scope.projectAddress) || null,
     estimated_material_group: str(scope.materialGroup) || "Group Promo",
     partner_account_id: null,
+    account_directory_account_id:
+      estimate.accountDirectoryAccountId || scope.accountDirectoryAccountId || null,
+    account_directory_contact_id:
+      estimate.accountDirectoryContactId || scope.accountDirectoryContactId || null,
+    account_directory_location_id:
+      estimate.accountDirectoryLocationId || scope.accountDirectoryLocationId || null,
+    customer_identity_snapshot:
+      estimate.customerIdentitySnapshot || scope.customerIdentitySnapshot || null,
     calculation_snapshot: synthetic?.calculation_snapshot || {},
     revision_number: revision,
     revision_label: `R${revision}`,
