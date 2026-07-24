@@ -308,11 +308,15 @@ console.log("\nstudioManualPhysicalScopeAuthority.test.mjs\n");
     "utf8"
   );
   assert.match(editor, /manual-scope-backsplash/);
+  assert.match(editor, /manual-scope-open-edge/);
+  assert.match(editor, /Open edge LF/);
+  assert.match(editor, /Room total open edge/);
   assert.match(editor, /Kitchen sink openings/);
   assert.doesNotMatch(editor, />qty-sink</);
   assert.match(panel, /eq-confirmed-physical-scope/);
   assert.match(panel, /eq-edit-manual-scope/);
   assert.match(panel, /eq-confirmed-finished-edge/);
+  assert.match(panel, /Total open edge/);
   assert.match(panel, /eq-confirmed-cutouts-readonly/);
   assert.match(ad, /eq-ad-use-location-as-project-address/);
   assert.match(ad, /Never silently overwrite/);

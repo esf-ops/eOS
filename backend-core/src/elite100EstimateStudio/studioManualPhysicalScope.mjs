@@ -65,8 +65,235 @@ export const MANUAL_BACKSPLASH_MODES = Object.freeze([
   "full_height"
 ]);
 
+/**
+ * Open-edge measurement modes for manual rooms.
+ * Exactly one mode is authoritative per room — never both.
+ */
+export const OPEN_EDGE_MEASUREMENT_MODES = Object.freeze({
+  PIECE_SUM: "piece_sum",
+  ROOM_TOTAL: "room_total"
+});
+
+/** Room types that typically expose customer edge options. */
+export const OPEN_EDGE_ELIGIBLE_ROOM_TYPES = Object.freeze([
+  "Kitchen",
+  "Island",
+  "Vanity",
+  "Bar",
+  "Laundry",
+  "Other"
+]);
+
+/** Piece types that contribute to open-edge LF (customer edge options). */
+export const OPEN_EDGE_ELIGIBLE_PIECE_TYPES = Object.freeze([
+  "counter",
+  "island",
+  "vanity_top",
+  "bar_top",
+  "waterfall",
+  "custom_rect",
+  "other"
+]);
+
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {'piece_sum'|'room_total'}
+ */
+export function normalizeOpenEdgeMeasurementMode(value) {
+  const m = String(value || "").toLowerCase().trim();
+  if (
+    m === OPEN_EDGE_MEASUREMENT_MODES.ROOM_TOTAL ||
+    m === "room" ||
+    m === "room_level" ||
+    m === "total"
+  ) {
+    return OPEN_EDGE_MEASUREMENT_MODES.ROOM_TOTAL;
+  }
+  return OPEN_EDGE_MEASUREMENT_MODES.PIECE_SUM;
+}
+
+/**
+ * @param {object|null|undefined} piece
+ */
+export function isOpenEdgeEligiblePiece(piece) {
+  if (!piece || typeof piece !== "object") return false;
+  if (piece.included === false) return false;
+  const pt = String(piece.pieceType ?? piece.type ?? "counter").toLowerCase();
+  if (pt.includes("backsplash") || pt === "splash" || pt === "fhb") return false;
+  if (pt === "shower" || pt === "fireplace") return false;
+  if (OPEN_EDGE_ELIGIBLE_PIECE_TYPES.includes(pt)) return true;
+  // Unknown non-specialty types default to eligible (legacy "counter").
+  return !pt.includes("shower") && !pt.includes("fireplace");
+}
+
+/**
+ * @param {object|null|undefined} room
+ */
+export function roomNeedsOpenEdgeQuantity(room) {
+  if (!room || room.included === false) return false;
+  const pieces = Array.isArray(room.pieces) ? room.pieces : [];
+  if (pieces.some((p) => isOpenEdgeEligiblePiece(p))) return true;
+  const rt = String(room.roomType || "").trim();
+  return OPEN_EDGE_ELIGIBLE_ROOM_TYPES.includes(rt);
+}
+
+/**
+ * Piece open-edge LF from finishedEdge inches or finishedEdgeLf.
+ * @param {object|null|undefined} piece
+ */
+export function pieceOpenEdgeLf(piece) {
+  if (!isOpenEdgeEligiblePiece(piece)) return 0;
+  const totalIn = Number(piece?.finishedEdge?.totalFinishedEdgeLengthIn);
+  if (Number.isFinite(totalIn) && totalIn >= 0) {
+    return round2(totalIn / 12);
+  }
+  const lf = Number(piece?.finishedEdgeLf ?? piece?.openEdgeLf);
+  if (Number.isFinite(lf) && lf >= 0) return round2(lf);
+  return 0;
+}
+
+/**
+ * Sum included eligible piece open-edge LF for one room (piece_sum mode).
+ * @param {object|null|undefined} room
+ */
+export function sumPieceOpenEdgeLf(room) {
+  const pieces = Array.isArray(room?.pieces) ? room.pieces : [];
+  let total = 0;
+  for (const p of pieces) {
+    total += pieceOpenEdgeLf(p);
+  }
+  return round2(total);
+}
+
+/**
+ * Resolve room open-edge LF from measurement mode.
+ * Does not stamp confirmation — callers stamp confirmedOpenEdgeLf on confirm.
+ *
+ * @param {object} room
+ * @param {'piece_sum'|'room_total'} mode
+ * @param {{ forConfirm?: boolean }} [opts]
+ * @returns {{
+ *   lf: number|null,
+ *   authoritative: boolean,
+ *   source: string,
+ *   missingReason: string|null,
+ *   reviewRequired: boolean
+ * }}
+ */
+export function resolveManualRoomOpenEdgeQuantity(room, mode, opts = {}) {
+  const forConfirm = opts.forConfirm === true;
+  if (!room || room.included === false) {
+    return {
+      lf: 0,
+      authoritative: true,
+      source: "excluded_room",
+      missingReason: null,
+      reviewRequired: false
+    };
+  }
+  if (!roomNeedsOpenEdgeQuantity(room)) {
+    return {
+      lf: 0,
+      authoritative: true,
+      source: "not_edge_eligible",
+      missingReason: null,
+      reviewRequired: false
+    };
+  }
+
+  if (mode === OPEN_EDGE_MEASUREMENT_MODES.ROOM_TOTAL) {
+    // Room-total mode: never sum piece fields for authority.
+    const raw =
+      room.openEdgeLf ??
+      room.draftOpenEdgeLf ??
+      room.approvedFinishedEdgeLf ??
+      room.edgeEligibleLinearFeet;
+    if (raw == null || String(raw).trim() === "") {
+      return {
+        lf: forConfirm ? null : 0,
+        authoritative: false,
+        source: "room_total_missing",
+        missingReason: "missing_room_open_edge_lf",
+        reviewRequired: true
+      };
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      return {
+        lf: null,
+        authoritative: false,
+        source: "room_total_invalid",
+        missingReason: "invalid_room_open_edge_lf",
+        reviewRequired: true
+      };
+    }
+    return {
+      lf: round2(n),
+      authoritative: true,
+      source: "room_total",
+      missingReason: null,
+      reviewRequired: false
+    };
+  }
+
+  // piece_sum — only included eligible pieces; never add a room_total field.
+  const pieces = Array.isArray(room.pieces) ? room.pieces.filter(isOpenEdgeEligiblePiece) : [];
+  if (!pieces.length) {
+    return {
+      lf: forConfirm ? null : 0,
+      authoritative: false,
+      source: "piece_sum_empty",
+      missingReason: "missing_piece_open_edge_lf",
+      reviewRequired: true
+    };
+  }
+  let sum = 0;
+  let anyExplicit = false;
+  for (const p of pieces) {
+    const fe = p.finishedEdge;
+    const hasFe = fe && typeof fe === "object";
+    const hasLfField =
+      p.finishedEdgeLf != null ||
+      p.openEdgeLf != null ||
+      (hasFe &&
+        (fe.totalFinishedEdgeLengthIn != null ||
+          fe.frontEdgeLengthIn != null ||
+          fe.leftExposedEdgeLengthIn != null ||
+          fe.rightExposedEdgeLengthIn != null ||
+          fe.otherExposedEdgeLengthIn != null));
+    if (hasLfField) anyExplicit = true;
+    const lf = pieceOpenEdgeLf(p);
+    if (hasLfField && (!Number.isFinite(lf) || lf < 0)) {
+      return {
+        lf: null,
+        authoritative: false,
+        source: "piece_sum_invalid",
+        missingReason: "invalid_piece_open_edge_lf",
+        reviewRequired: true
+      };
+    }
+    sum += Number.isFinite(lf) && lf >= 0 ? lf : 0;
+  }
+  if (forConfirm && !anyExplicit) {
+    return {
+      lf: null,
+      authoritative: false,
+      source: "piece_sum_incomplete",
+      missingReason: "missing_piece_open_edge_lf",
+      reviewRequired: true
+    };
+  }
+  return {
+    lf: round2(sum),
+    authoritative: anyExplicit || !forConfirm,
+    source: "piece_sum",
+    missingReason: anyExplicit ? null : "missing_piece_open_edge_lf",
+    reviewRequired: !anyExplicit
+  };
 }
 
 function sqftFromDimensions(lengthIn, depthIn) {
@@ -100,6 +327,18 @@ export function stripClientManualAuthority(scope) {
   // Never accept takeoff authority markers from the browser on a manual draft.
   delete next.takeoffApproved;
   delete next.takeoffScopeSummary;
+  // Room-level open-edge confirmation is server-stamped only.
+  if (Array.isArray(next.rooms)) {
+    next.rooms = next.rooms.map((room) => {
+      if (!room || typeof room !== "object") return room;
+      const r = { ...room };
+      delete r.confirmedOpenEdgeLf;
+      delete r.openEdgeQuantityAuthoritative;
+      delete r.openEdgeSource;
+      delete r.openEdgeConfirmedAt;
+      return r;
+    });
+  }
   return next;
 }
 
@@ -294,8 +533,8 @@ export function normalizeManualRoomBacksplash(room) {
 }
 
 /**
- * Sum confirmed room finished-edge LF from piece geometry / room aggregates.
- * Prefer piece finishedEdge totals; fall back to room.approvedFinishedEdgeLf.
+ * Sum room open-edge LF using one authoritative quantity per included room.
+ * Prefer confirmedOpenEdgeLf, then mode-resolved quantity — never piece+room double count.
  * @param {object|null|undefined} scope
  */
 export function sumManualConfirmedEdgeLf(scope) {
@@ -303,21 +542,20 @@ export function sumManualConfirmedEdgeLf(scope) {
   let total = 0;
   for (const room of rooms) {
     if (!room || room.included === false) continue;
-    const pieces = Array.isArray(room.pieces) ? room.pieces : [];
-    let roomLf = 0;
-    let fromPieces = false;
-    for (const p of pieces) {
-      if (!p || p.included === false) continue;
-      const totalIn = Number(p?.finishedEdge?.totalFinishedEdgeLengthIn);
-      if (Number.isFinite(totalIn) && totalIn > 0) {
-        roomLf += totalIn / 12;
-        fromPieces = true;
-      }
+    const confirmed = Number(room.confirmedOpenEdgeLf);
+    if (Number.isFinite(confirmed) && confirmed >= 0 && room.openEdgeQuantityAuthoritative === true) {
+      total += confirmed;
+      continue;
     }
-    if (!fromPieces) {
-      roomLf = Number(room.approvedFinishedEdgeLf) || Number(room.edgeEligibleLinearFeet) || 0;
+    const mode = normalizeOpenEdgeMeasurementMode(room.openEdgeMeasurementMode);
+    const q = resolveManualRoomOpenEdgeQuantity(room, mode, { forConfirm: false });
+    if (q.lf != null && Number.isFinite(q.lf)) {
+      total += q.lf;
+      continue;
     }
-    total += roomLf;
+    const legacy =
+      Number(room.approvedFinishedEdgeLf) || Number(room.edgeEligibleLinearFeet) || 0;
+    total += Number.isFinite(legacy) && legacy >= 0 ? legacy : 0;
   }
   return round2(total);
 }
@@ -339,10 +577,35 @@ export function syncManualProjectEdgeFromRooms(scope) {
 }
 
 /**
- * Normalize rooms array from client draft into pricing-compatible rooms.
- * @param {unknown} roomsIn
+ * Infer open-edge measurement mode from legacy room shape when unset.
+ * @param {object} room
  */
-export function normalizeManualRooms(roomsIn) {
+function inferOpenEdgeMeasurementMode(room) {
+  if (room?.openEdgeMeasurementMode) {
+    return normalizeOpenEdgeMeasurementMode(room.openEdgeMeasurementMode);
+  }
+  // Explicit room-level draft without piece finished edges → room_total.
+  const piecesHaveEdge = (Array.isArray(room?.pieces) ? room.pieces : []).some(
+    (p) => p?.finishedEdge || p?.finishedEdgeLf != null || p?.openEdgeLf != null
+  );
+  if (!piecesHaveEdge) {
+    const hasRoomTotalInput =
+      room?.openEdgeLf != null ||
+      (room?.approvedFinishedEdgeLf != null && Number(room.approvedFinishedEdgeLf) > 0);
+    if (hasRoomTotalInput) return OPEN_EDGE_MEASUREMENT_MODES.ROOM_TOTAL;
+  }
+  return OPEN_EDGE_MEASUREMENT_MODES.PIECE_SUM;
+}
+
+/**
+ * Normalize rooms array from client draft into pricing-compatible rooms.
+ * Client may submit measurement mode + draft inputs; confirmedOpenEdgeLf is
+ * never accepted from the browser (stripped earlier / ignored here).
+ * @param {unknown} roomsIn
+ * @param {{ stampConfirmed?: boolean }} [opts]
+ */
+export function normalizeManualRooms(roomsIn, opts = {}) {
+  const stampConfirmed = opts.stampConfirmed === true;
   const rooms = Array.isArray(roomsIn) ? roomsIn : [];
   return rooms.map((room, idx) => {
     const id = stableId("room", room?.id || `room_${idx + 1}`);
@@ -359,27 +622,67 @@ export function normalizeManualRooms(roomsIn) {
         .filter((p) => !String(p.pieceType).toLowerCase().includes("backsplash"))
         .reduce((s, p) => s + (Number(p.sqft) || 0), 0)
     );
-    const edgeLf = round2(
-      pieces
-        .filter((p) => p.included !== false && p.finishedEdge)
-        .reduce(
-          (s, p) => s + (Number(p.finishedEdge.totalFinishedEdgeLengthIn) || 0) / 12,
-          0
-        )
-    );
+    const mode = inferOpenEdgeMeasurementMode(room);
+    // Draft room-total input (estimator entered). Never trust client confirmed*.
+    const draftRoomTotal =
+      room?.openEdgeLf != null && String(room.openEdgeLf).trim() !== ""
+        ? Number(room.openEdgeLf)
+        : null;
+    const roomForResolve = {
+      ...room,
+      id,
+      name,
+      roomType,
+      included,
+      pieces,
+      openEdgeMeasurementMode: mode,
+      openEdgeLf:
+        mode === OPEN_EDGE_MEASUREMENT_MODES.ROOM_TOTAL
+          ? draftRoomTotal != null && Number.isFinite(draftRoomTotal)
+            ? draftRoomTotal
+            : room?.openEdgeLf
+          : undefined
+    };
+    const edgeQ = resolveManualRoomOpenEdgeQuantity(roomForResolve, mode, {
+      forConfirm: stampConfirmed
+    });
+    const edgeLf =
+      edgeQ.lf != null && Number.isFinite(edgeQ.lf) ? round2(edgeQ.lf) : 0;
     const backsplash = normalizeManualRoomBacksplash(room);
-    return {
+    /** @type {Record<string, unknown>} */
+    const out = {
       id,
       name,
       roomType,
       included,
       countertopSqft,
+      openEdgeMeasurementMode: mode,
+      // Draft input retained for room_total editing; piece_sum ignores it for authority.
+      openEdgeLf:
+        mode === OPEN_EDGE_MEASUREMENT_MODES.ROOM_TOTAL
+          ? draftRoomTotal != null && Number.isFinite(draftRoomTotal)
+            ? round2(draftRoomTotal)
+            : edgeLf
+          : round2(sumPieceOpenEdgeLf({ pieces })),
+      // Compatible aliases for existing Pricing Setup / publication readers.
       approvedFinishedEdgeLf: edgeLf,
       edgeEligibleLinearFeet: edgeLf,
+      derivedOpenEdgeLf: edgeLf,
       pieces,
       notes: String(room?.notes || "").slice(0, 2000),
       ...backsplash
     };
+    if (stampConfirmed && edgeQ.authoritative && edgeQ.lf != null) {
+      out.confirmedOpenEdgeLf = edgeLf;
+      out.openEdgeQuantityAuthoritative = true;
+      out.openEdgeSource = edgeQ.source;
+    } else {
+      // Draft / unconfirmed — never leave forged confirmation markers.
+      out.confirmedOpenEdgeLf = null;
+      out.openEdgeQuantityAuthoritative = false;
+      out.openEdgeSource = edgeQ.source || mode;
+    }
+    return out;
   });
 }
 
@@ -410,9 +713,10 @@ export function normalizeManualAddOns(addOnsIn) {
  * Apply normalized manual rooms into a scope object (authority flags set by caller).
  * @param {object} baseScope
  * @param {{ rooms?: unknown, addOns?: object }} draft
+ * @param {{ stampConfirmed?: boolean }} [opts]
  */
-export function applyNormalizedManualRooms(baseScope, draft) {
-  const rooms = normalizeManualRooms(draft?.rooms);
+export function applyNormalizedManualRooms(baseScope, draft, opts = {}) {
+  const rooms = normalizeManualRooms(draft?.rooms, opts);
   const addOns = {
     ...(baseScope?.addOns && typeof baseScope.addOns === "object" ? baseScope.addOns : {}),
     ...normalizeManualAddOns(draft?.addOns)
@@ -439,26 +743,27 @@ export function validateManualScopeForConfirm(scope) {
   }
   let includedPieces = 0;
   for (const room of rooms) {
+    const roomLabel = String(room.name || room.id || "Room").trim() || "Room";
     if (!String(room.name || "").trim()) {
       errors.push("Every room needs a name.");
     }
     if (room.includeBacksplash === true) {
       const mode = String(room.backsplashHeightMode || "").toLowerCase();
       if (mode === "none") {
-        errors.push(`Room "${room.name || room.id}" includes backsplash but mode is None.`);
+        errors.push(`Room "${roomLabel}" includes backsplash but mode is None.`);
       }
       if (!(Number(room.backsplashMeasuredLengthIn) > 0)) {
-        errors.push(`Room "${room.name || room.id}" needs measured backsplash length.`);
+        errors.push(`Enter measured backsplash length for ${roomLabel}.`);
       }
       if (mode === "custom" || mode === "full_height") {
         if (!(Number(room.backsplashHeightIn) > 0)) {
-          errors.push(`Room "${room.name || room.id}" needs backsplash height for ${mode} mode.`);
+          errors.push(`Room "${roomLabel}" needs backsplash height for ${mode} mode.`);
         }
       }
     }
     const pieces = Array.isArray(room.pieces) ? room.pieces.filter((p) => p && p.included !== false) : [];
     if (!pieces.length) {
-      errors.push(`Room "${room.name || room.id}" needs at least one included piece.`);
+      errors.push(`Room "${roomLabel}" needs at least one included piece.`);
       continue;
     }
     for (const piece of pieces) {
@@ -478,12 +783,34 @@ export function validateManualScopeForConfirm(scope) {
         errors.push(`Piece "${piece.name}" cannot use both dimension and direct-area authority.`);
       }
     }
+
+    if (roomNeedsOpenEdgeQuantity(room)) {
+      const edgeMode = normalizeOpenEdgeMeasurementMode(room.openEdgeMeasurementMode);
+      const edgeQ = resolveManualRoomOpenEdgeQuantity(room, edgeMode, { forConfirm: true });
+      if (!edgeQ.authoritative || edgeQ.lf == null || !Number.isFinite(edgeQ.lf) || edgeQ.lf < 0) {
+        if (edgeMode === OPEN_EDGE_MEASUREMENT_MODES.ROOM_TOTAL) {
+          errors.push(`Enter total open edge LF for ${roomLabel}.`);
+        } else if (edgeQ.missingReason === "missing_piece_open_edge_lf") {
+          errors.push(
+            `${roomLabel} is set to By piece, but no included piece has valid open-edge LF.`
+          );
+        } else {
+          errors.push(
+            `${roomLabel} piece open-edge values do not produce a valid room total.`
+          );
+        }
+      } else if (edgeMode === OPEN_EDGE_MEASUREMENT_MODES.PIECE_SUM) {
+        const expected = sumPieceOpenEdgeLf(room);
+        if (round2(edgeQ.lf) !== round2(expected)) {
+          errors.push(
+            `${roomLabel} piece open-edge values do not produce a valid room total.`
+          );
+        }
+      }
+    }
   }
   if (includedPieces === 0) {
     errors.push("Add at least one included piece before confirming.");
-  }
-  if (!String(scope?.projectName || "").trim() && !String(scope?.customerName || "").trim()) {
-    // Soft: still allow confirm if rooms exist; wizard usually sets these.
   }
   return [...new Set(errors)];
 }
@@ -499,6 +826,9 @@ export function manualScopeFingerprint(scope) {
       id: r.id,
       name: r.name,
       roomType: r.roomType,
+      openEdgeMeasurementMode: normalizeOpenEdgeMeasurementMode(r.openEdgeMeasurementMode),
+      confirmedOpenEdgeLf: r.confirmedOpenEdgeLf ?? r.approvedFinishedEdgeLf ?? null,
+      openEdgeLf: r.openEdgeLf ?? null,
       includeBacksplash: r.includeBacksplash === true,
       backsplashHeightMode: r.backsplashHeightMode || "none",
       backsplashMeasuredLengthIn: r.backsplashMeasuredLengthIn ?? null,

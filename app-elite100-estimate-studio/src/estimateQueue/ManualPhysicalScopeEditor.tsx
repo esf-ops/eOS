@@ -5,6 +5,8 @@
 import React, { useEffect, useState } from "react";
 import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
 
+type OpenEdgeMeasurementMode = "piece_sum" | "room_total";
+
 type PieceDraft = {
   id: string;
   name: string;
@@ -14,7 +16,8 @@ type PieceDraft = {
   lengthIn: number;
   depthIn: number;
   sqft: number;
-  finishedEdgeLf: number;
+  /** Estimator-facing open-edge LF for this piece (piece_sum mode). */
+  openEdgeLf: number;
   notes: string;
 };
 
@@ -31,6 +34,9 @@ type RoomDraft = {
   name: string;
   roomType: string;
   included: boolean;
+  openEdgeMeasurementMode: OpenEdgeMeasurementMode;
+  /** Room-total mode input (LF). Ignored for authority in piece_sum mode. */
+  openEdgeLf: number;
   pieces: PieceDraft[];
   backsplash: BacksplashDraft;
 };
@@ -86,7 +92,7 @@ function emptyPiece(): PieceDraft {
     lengthIn: 0,
     depthIn: 25.5,
     sqft: 0,
-    finishedEdgeLf: 0,
+    openEdgeLf: 0,
     notes: ""
   };
 }
@@ -97,6 +103,8 @@ function emptyRoom(name = "Kitchen"): RoomDraft {
     name,
     roomType: name === "Kitchen" ? "Kitchen" : "Other",
     included: true,
+    openEdgeMeasurementMode: "piece_sum",
+    openEdgeLf: 0,
     pieces: [emptyPiece()],
     backsplash: emptyBacksplash()
   };
@@ -122,6 +130,23 @@ function pieceSqft(p: PieceDraft): number {
   return L > 0 && D > 0 ? Math.round(((L * D) / 144) * 100) / 100 : 0;
 }
 
+function isEdgeEligiblePiece(p: PieceDraft): boolean {
+  if (!p.included) return false;
+  const pt = String(p.pieceType || "").toLowerCase();
+  if (pt.includes("backsplash") || pt === "shower" || pt === "fireplace") return false;
+  return true;
+}
+
+/** Displayed room total open edge from the active measurement mode (never double-count). */
+function roomOpenEdgeTotal(room: RoomDraft): number {
+  if (room.openEdgeMeasurementMode === "room_total") {
+    return Math.max(0, Number(room.openEdgeLf) || 0);
+  }
+  return room.pieces
+    .filter(isEdgeEligiblePiece)
+    .reduce((s, p) => s + (Number(p.openEdgeLf) || 0), 0);
+}
+
 function roomsFromScope(scope: Record<string, unknown> | null): RoomDraft[] {
   const rooms = Array.isArray(scope?.rooms) ? scope!.rooms : [];
   if (!rooms.length) return [emptyRoom()];
@@ -129,28 +154,48 @@ function roomsFromScope(scope: Record<string, unknown> | null): RoomDraft[] {
     const modeRaw = String(r.backsplashHeightMode || "none").toLowerCase();
     const mode =
       modeRaw === "standard" || modeRaw === "custom" || modeRaw === "full_height" ? modeRaw : "none";
+    const edgeMode =
+      String(r.openEdgeMeasurementMode || "").toLowerCase() === "room_total"
+        ? "room_total"
+        : "piece_sum";
+    const pieces = (Array.isArray(r.pieces) ? r.pieces : []).map((p: any) => {
+      const fe = p.finishedEdge || {};
+      const totalIn = Number(fe.totalFinishedEdgeLengthIn) || 0;
+      const openEdgeLf =
+        totalIn > 0
+          ? Math.round((totalIn / 12) * 100) / 100
+          : Number(p.openEdgeLf ?? p.finishedEdgeLf) || 0;
+      return {
+        id: String(p.id || rid("piece")),
+        name: String(p.name || "Piece"),
+        pieceType: String(p.pieceType || "counter"),
+        included: p.included !== false,
+        measurementMode:
+          p.measurementMode === "direct_area" || p.directAreaOverride ? "direct_area" : "dimensions",
+        lengthIn: Number(p.lengthIn) || 0,
+        depthIn: Number(p.depthIn) || 0,
+        sqft: Number(p.sqft) || 0,
+        openEdgeLf,
+        notes: String(p.notes || "")
+      } as PieceDraft;
+    });
+    const pieceSum = pieces
+      .filter(isEdgeEligiblePiece)
+      .reduce((s, p) => s + (Number(p.openEdgeLf) || 0), 0);
+    const roomTotalLf =
+      Number(r.openEdgeLf) ||
+      Number(r.confirmedOpenEdgeLf) ||
+      Number(r.approvedFinishedEdgeLf) ||
+      pieceSum ||
+      0;
     return {
       id: String(r.id || rid("room")),
       name: String(r.name || "Room"),
       roomType: String(r.roomType || "Other"),
       included: r.included !== false,
-      pieces: (Array.isArray(r.pieces) ? r.pieces : []).map((p: any) => {
-        const fe = p.finishedEdge || {};
-        const totalIn = Number(fe.totalFinishedEdgeLengthIn) || 0;
-        return {
-          id: String(p.id || rid("piece")),
-          name: String(p.name || "Piece"),
-          pieceType: String(p.pieceType || "counter"),
-          included: p.included !== false,
-          measurementMode:
-            p.measurementMode === "direct_area" || p.directAreaOverride ? "direct_area" : "dimensions",
-          lengthIn: Number(p.lengthIn) || 0,
-          depthIn: Number(p.depthIn) || 0,
-          sqft: Number(p.sqft) || 0,
-          finishedEdgeLf: totalIn ? Math.round((totalIn / 12) * 100) / 100 : 0,
-          notes: String(p.notes || "")
-        } as PieceDraft;
-      }),
+      openEdgeMeasurementMode: edgeMode as OpenEdgeMeasurementMode,
+      openEdgeLf: edgeMode === "room_total" ? roomTotalLf : pieceSum,
+      pieces,
       backsplash: {
         includeBacksplash: r.includeBacksplash === true,
         backsplashHeightMode: (r.includeBacksplash === true ? mode : "none") as BacksplashDraft["backsplashHeightMode"],
@@ -168,6 +213,8 @@ function toApiRooms(rooms: RoomDraft[]) {
     name: r.name,
     roomType: r.roomType,
     included: r.included,
+    openEdgeMeasurementMode: r.openEdgeMeasurementMode,
+    openEdgeLf: r.openEdgeMeasurementMode === "room_total" ? Number(r.openEdgeLf) || 0 : undefined,
     includeBacksplash: r.backsplash.includeBacksplash && r.backsplash.backsplashHeightMode !== "none",
     backsplashHeightMode: r.backsplash.includeBacksplash ? r.backsplash.backsplashHeightMode : "none",
     backsplashMeasuredLengthIn: r.backsplash.backsplashMeasuredLengthIn,
@@ -187,17 +234,27 @@ function toApiRooms(rooms: RoomDraft[]) {
       sqft: p.sqft,
       notes: p.notes,
       finishedEdge:
-        p.finishedEdgeLf > 0
+        r.openEdgeMeasurementMode === "piece_sum" && (Number(p.openEdgeLf) || 0) >= 0
           ? {
-              frontEdgeLengthIn: Math.round(p.finishedEdgeLf * 12 * 100) / 100,
+              frontEdgeLengthIn: Math.round((Number(p.openEdgeLf) || 0) * 12 * 100) / 100,
               leftExposedEdgeLengthIn: 0,
               rightExposedEdgeLengthIn: 0,
               otherExposedEdgeLengthIn: 0,
-              totalFinishedEdgeLengthIn: Math.round(p.finishedEdgeLf * 12 * 100) / 100,
+              totalFinishedEdgeLengthIn: Math.round((Number(p.openEdgeLf) || 0) * 12 * 100) / 100,
               approved: true,
               source: "estimator_confirmed"
             }
-          : undefined
+          : r.openEdgeMeasurementMode === "piece_sum"
+            ? {
+                frontEdgeLengthIn: 0,
+                leftExposedEdgeLengthIn: 0,
+                rightExposedEdgeLengthIn: 0,
+                otherExposedEdgeLengthIn: 0,
+                totalFinishedEdgeLengthIn: 0,
+                approved: true,
+                source: "estimator_confirmed"
+              }
+            : undefined
     }))
   }));
 }
@@ -330,9 +387,9 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
         <div>
           <h3>Manual Scope</h3>
           <p className="muted">
-            Authoritative measured geometry for this estimate — rooms, pieces, finished edge,
+            Authoritative measured geometry for this estimate — rooms, pieces, open edge LF,
             backsplash, and openings. Pricing Setup consumes this after confirmation and does not
-            maintain a second measurement set.
+            maintain a second measurement set. Open edge LF is independent of the base edge profile.
           </p>
         </div>
         <p className="manual-scope-save-state" data-testid="manual-scope-save-state">
@@ -366,7 +423,7 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
       {rooms.map((room, ri) => {
         const roomPieces = room.pieces.filter((p) => p.included);
         const roomSf = roomPieces.reduce((s, p) => s + pieceSqft(p), 0);
-        const roomEdge = roomPieces.reduce((s, p) => s + (Number(p.finishedEdgeLf) || 0), 0);
+        const roomEdge = roomOpenEdgeTotal(room);
         const bsSf = backsplashSqft(room.backsplash);
         return (
           <article key={room.id} className="manual-scope-room" data-testid="manual-scope-room">
@@ -530,23 +587,26 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
                     />
                   </label>
                 )}
-                <label>
-                  Finished edge (LF)
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    value={piece.finishedEdgeLf || ""}
-                    data-testid="manual-piece-finished-edge-lf"
-                    onChange={(e) => {
-                      const next = [...rooms];
-                      const pieces = [...room.pieces];
-                      pieces[pi] = { ...piece, finishedEdgeLf: Number(e.target.value) || 0 };
-                      next[ri] = { ...room, pieces };
-                      markDirty(next);
-                    }}
-                  />
-                </label>
+                {room.openEdgeMeasurementMode === "piece_sum" && isEdgeEligiblePiece({ ...piece, included: true }) ? (
+                  <label>
+                    Open edge LF
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={piece.openEdgeLf || ""}
+                      data-testid="manual-piece-open-edge-lf"
+                      disabled={!piece.included}
+                      onChange={(e) => {
+                        const next = [...rooms];
+                        const pieces = [...room.pieces];
+                        pieces[pi] = { ...piece, openEdgeLf: Number(e.target.value) || 0 };
+                        next[ri] = { ...room, pieces };
+                        markDirty(next);
+                      }}
+                    />
+                  </label>
+                ) : null}
                 <label className="eq-check">
                   <input
                     type="checkbox"
@@ -585,6 +645,93 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
             >
               Add piece
             </button>
+
+            <fieldset className="manual-scope-open-edge" data-testid="manual-scope-open-edge">
+              <legend>Open edge</legend>
+              <div className="manual-scope-open-edge-mode" role="group" aria-label="Open edge measurement">
+                <span className="manual-scope-open-edge-label">Open edge measurement</span>
+                <label className="eq-check">
+                  <input
+                    type="radio"
+                    name={`open-edge-mode-${room.id}`}
+                    checked={room.openEdgeMeasurementMode === "piece_sum"}
+                    data-testid="manual-open-edge-mode-piece-sum"
+                    onChange={() => {
+                      if (room.openEdgeMeasurementMode === "piece_sum") return;
+                      if (
+                        !window.confirm(
+                          `Switch ${room.name || "this room"} to By piece? You will need to enter or confirm piece-level open edge LF. The previous room total will not be allocated automatically.`
+                        )
+                      ) {
+                        return;
+                      }
+                      const next = [...rooms];
+                      next[ri] = {
+                        ...room,
+                        openEdgeMeasurementMode: "piece_sum",
+                        openEdgeLf: roomOpenEdgeTotal({ ...room, openEdgeMeasurementMode: "piece_sum" })
+                      };
+                      markDirty(next);
+                    }}
+                  />{" "}
+                  By piece
+                </label>
+                <label className="eq-check">
+                  <input
+                    type="radio"
+                    name={`open-edge-mode-${room.id}`}
+                    checked={room.openEdgeMeasurementMode === "room_total"}
+                    data-testid="manual-open-edge-mode-room-total"
+                    onChange={() => {
+                      if (room.openEdgeMeasurementMode === "room_total") return;
+                      const pieceSum = room.pieces
+                        .filter(isEdgeEligiblePiece)
+                        .reduce((s, p) => s + (Number(p.openEdgeLf) || 0), 0);
+                      if (
+                        !window.confirm(
+                          `Switch ${room.name || "this room"} to Room total? Current piece sum is ${pieceSum.toFixed(2)} LF. Only the room total will be authoritative — piece values will not be added.`
+                        )
+                      ) {
+                        return;
+                      }
+                      const next = [...rooms];
+                      next[ri] = {
+                        ...room,
+                        openEdgeMeasurementMode: "room_total",
+                        openEdgeLf: pieceSum > 0 ? pieceSum : Number(room.openEdgeLf) || 0
+                      };
+                      markDirty(next);
+                    }}
+                  />{" "}
+                  Room total
+                </label>
+              </div>
+              {room.openEdgeMeasurementMode === "room_total" ? (
+                <label>
+                  Total open edge LF
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={room.openEdgeLf || ""}
+                    data-testid="manual-room-open-edge-lf"
+                    onChange={(e) => {
+                      const next = [...rooms];
+                      next[ri] = { ...room, openEdgeLf: Number(e.target.value) || 0 };
+                      markDirty(next);
+                    }}
+                  />
+                </label>
+              ) : (
+                <p className="manual-scope-room-open-edge-total" data-testid="manual-room-open-edge-total">
+                  Room total open edge: <strong>{roomEdge.toFixed(2)} LF</strong>
+                </p>
+              )}
+              <p className="eq-footnote">
+                Open edge LF is the eligible length for customer edge choices. It is independent of
+                the base edge profile (Eased, Ogee, etc.).
+              </p>
+            </fieldset>
 
             <fieldset className="manual-scope-backsplash" data-testid="manual-scope-backsplash">
               <legend>Backsplash</legend>
@@ -736,7 +883,7 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
               <strong>{room.name || "Room"}</strong>
               <ul>
                 <li>Countertop: {roomSf.toFixed(2)} SF</li>
-                <li>Finished edge: {roomEdge.toFixed(2)} LF</li>
+                <li>Total open edge: {roomEdge.toFixed(2)} LF</li>
                 <li>
                   Backsplash:{" "}
                   {room.backsplash.includeBacksplash
@@ -791,14 +938,14 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
         <ul>
           {includedRooms.map((r) => {
             const sf = r.pieces.filter((p) => p.included).reduce((s, p) => s + pieceSqft(p), 0);
-            const edge = r.pieces.filter((p) => p.included).reduce((s, p) => s + (Number(p.finishedEdgeLf) || 0), 0);
+            const edge = roomOpenEdgeTotal(r);
             const bs = backsplashSqft(r.backsplash);
             return (
               <li key={r.id}>
                 <strong>{r.name}</strong>
                 <ul>
                   <li>Countertop: {sf.toFixed(2)} SF</li>
-                  <li>Finished edge: {edge.toFixed(2)} LF</li>
+                  <li>Total open edge: {edge.toFixed(2)} LF</li>
                   <li>
                     Backsplash:{" "}
                     {r.backsplash.includeBacksplash

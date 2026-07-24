@@ -82,7 +82,12 @@ function kitchenDraft() {
             pieceType: "vanity_top",
             measurementMode: "dimensions",
             lengthIn: 60,
-            depthIn: 22
+            depthIn: 22,
+            finishedEdge: {
+              frontEdgeLengthIn: 60,
+              totalFinishedEdgeLengthIn: 60,
+              approved: true
+            }
           }
         ]
       }

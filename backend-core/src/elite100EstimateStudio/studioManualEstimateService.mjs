@@ -324,7 +324,19 @@ export function createStudioManualEstimateService(deps) {
           estimateOrigin: MANUAL_ESTIMATE_ORIGIN,
           physicalScopeSource: MANUAL_ESTIMATE_ORIGIN
         },
-        { rooms: draftRooms, addOns: draftAddOns }
+        { rooms: draftRooms, addOns: draftAddOns },
+        { stampConfirmed: true }
+      );
+    } else {
+      // Re-normalize existing rooms and stamp confirmed open-edge quantities.
+      scope = applyNormalizedManualRooms(
+        {
+          ...scope,
+          estimateOrigin: MANUAL_ESTIMATE_ORIGIN,
+          physicalScopeSource: MANUAL_ESTIMATE_ORIGIN
+        },
+        { rooms: scope.rooms, addOns: scope.addOns },
+        { stampConfirmed: true }
       );
     }
 

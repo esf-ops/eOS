@@ -2024,7 +2024,8 @@ button.linkish {
   font-size: 0.95rem;
 }
 .manual-scope-backsplash,
-.manual-scope-cutouts {
+.manual-scope-cutouts,
+.manual-scope-open-edge {
   border: 1px solid var(--eos-border);
   border-radius: 8px;
   padding: 0.65rem 0.75rem;
@@ -2034,9 +2035,29 @@ button.linkish {
   gap: 0.55rem;
 }
 .manual-scope-backsplash legend,
-.manual-scope-cutouts legend {
+.manual-scope-cutouts legend,
+.manual-scope-open-edge legend {
   padding: 0 0.25rem;
   font-weight: 600;
+}
+.manual-scope-open-edge-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: center;
+  grid-column: 1 / span 99;
+}
+.manual-scope-open-edge-label {
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+.manual-scope-room-open-edge-total {
+  margin: 0.15rem 0;
+  font-size: 0.95rem;
+  grid-column: 1 / span 99;
+}
+.manual-scope-open-edge .eq-footnote {
+  grid-column: 1 / span 99;
 }
 .manual-scope-room-summary {
   margin-top: 0.5rem;
