@@ -349,6 +349,7 @@ Use this checklist when scaffolding any new protected eliteOS head. Completing a
 |----------|---------|
 | [`eliteOS-master-head-map.md`](./eliteOS-master-head-map.md) | Head inventory and platform rules |
 | [`FEATURE_DECISIONS.md`](./FEATURE_DECISIONS.md) | Dated decisions, rationale, revisit triggers |
+| [`audits/README.md`](./audits/README.md) | Studio end-to-end process/ownership audit (docs-only; cleanup recommendations) |
 | [`../quote-platform/`](../quote-platform/) | Quote engine, Monday setup, math test cases |
 | [`../EOS_ENV_VARS.md`](../EOS_ENV_VARS.md) | Environment variable reference |
 | [`slabos-slab-inventory-profit-engine-roadmap.md`](./slabos-slab-inventory-profit-engine-roadmap.md) | slabOS slab inventory phased roadmap — SlabCloud integration, showroom, SlabRoom, profit engine |
