@@ -6,6 +6,7 @@ import ReviewWorkspace from "./ReviewWorkspace";
 import EstimateQueuePage from "./estimateQueue/EstimateQueuePage";
 import EstimateCommandCenterPage from "./estimateQueue/EstimateCommandCenterPage";
 import EstimateTakeoffWorkspace from "./estimateQueue/EstimateTakeoffWorkspace";
+import LiveDigitalEstimatesPage from "./estimateQueue/LiveDigitalEstimatesPage";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
 
@@ -109,6 +110,10 @@ export default function StudioApp() {
     "command-center"
   );
   const [moreNavOpen, setMoreNavOpen] = useState(false);
+  const [publicationsMode, setPublicationsMode] = useState<"portfolio" | "publish-search">(
+    "portfolio"
+  );
+  const [preselectReviewRequestId, setPreselectReviewRequestId] = useState<string | null>(null);
   const [intakeCaseId, setIntakeCaseId] = useState<string | null>(null);
   const [estimateWorkspaceCaseId, setEstimateWorkspaceCaseId] = useState<string | null>(null);
   const [workspaceFocus, setWorkspaceFocus] = useState<
@@ -509,12 +514,13 @@ export default function StudioApp() {
         className={
           mainNav === "command-center" ||
           mainNav === "estimate-queue" ||
-          mainNav === "estimate-workspace"
+          mainNav === "estimate-workspace" ||
+          mainNav === "publications"
             ? "studio-shell studio-shell--wide"
             : "studio-shell"
         }
       >
-        {mainNav === "publications" ? (
+        {mainNav === "publications" && publicationsMode === "publish-search" ? (
           <div className="pilot-banner" data-testid="studio-publications-banner">
             Private Elite 100 Estimate Studio — publishes frozen Digital Estimates only. Does not
             recalculate or modify the source Internal Estimate.
@@ -547,10 +553,11 @@ export default function StudioApp() {
             data-testid="studio-nav-publications"
             onClick={() => {
               setMainNav("publications");
+              setPublicationsMode("portfolio");
               setMoreNavOpen(false);
             }}
           >
-            Publications
+            Live Digital Estimates
           </button>
           <button
             type="button"
@@ -653,6 +660,7 @@ export default function StudioApp() {
         {mainNav === "reviews" ? (
           <ReviewWorkspace
             token={sessionToken}
+            initialReviewRequestId={preselectReviewRequestId}
             onAuthFailure={() => {
               setSessionToken(null);
               setActionError("Session ended or access denied");
@@ -666,8 +674,41 @@ export default function StudioApp() {
           />
         ) : null}
 
-        {mainNav === "publications" ? (
+        {mainNav === "publications" && publicationsMode === "portfolio" ? (
+          <LiveDigitalEstimatesPage
+            authToken={sessionToken}
+            onOpenEstimate={(caseId, options) => {
+              setQueueReturnNav("command-center");
+              setEstimateWorkspaceCaseId(caseId);
+              setIntakeCaseId(caseId);
+              const target = String(options?.openTarget || "digital");
+              setWorkspaceFocus(
+                target === "scope" || target === "digital" || target === "review" || target === "takeoff"
+                  ? target
+                  : "digital"
+              );
+              setMainNav("estimate-workspace");
+            }}
+            onOpenReviewRequest={(reviewRequestId) => {
+              setPreselectReviewRequestId(reviewRequestId);
+              setMainNav("reviews");
+            }}
+            onOpenLegacyPublishSearch={() => setPublicationsMode("publish-search")}
+          />
+        ) : null}
+
+        {mainNav === "publications" && publicationsMode === "publish-search" ? (
         <div className="studio-grid">
+          <p className="muted">
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              data-testid="live-de-back-to-portfolio"
+              onClick={() => setPublicationsMode("portfolio")}
+            >
+              ← Back to Live Digital Estimates
+            </button>
+          </p>
           <section className="panel">
             <h2>Find Elite 100 estimate</h2>
             <div className="search-row">

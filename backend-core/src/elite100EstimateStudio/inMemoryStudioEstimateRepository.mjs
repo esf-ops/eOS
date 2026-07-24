@@ -35,6 +35,24 @@ export class InMemoryStudioEstimateRepository {
     return structuredClone(row);
   }
 
+  /**
+   * Batched portfolio lookup by estimate ids and/or intake case ids.
+   * @param {string} organizationId
+   * @param {{ ids?: string[], intakeCaseIds?: string[] }} keys
+   */
+  async listByIdsForPortfolio(organizationId, keys = {}) {
+    const org = normOrg(organizationId);
+    const idSet = new Set((keys.ids || []).map(String));
+    const caseSet = new Set((keys.intakeCaseIds || []).map(String));
+    return [...this.byId.values()]
+      .filter(
+        (r) =>
+          r.organizationId === org &&
+          (idSet.has(String(r.id)) || caseSet.has(String(r.intakeCaseId)))
+      )
+      .map((r) => structuredClone(r));
+  }
+
   async listByIntakeCase(organizationId, intakeCaseId) {
     const org = normOrg(organizationId);
     const caseId = String(intakeCaseId ?? "").trim();

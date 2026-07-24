@@ -109,6 +109,55 @@ export class SupabaseStudioEstimateRepository {
     return data?.[0] ? dbRowToStudioEstimate(data[0]) : null;
   }
 
+  /**
+   * Batched portfolio lookup — one or two queries, never per publication.
+   * @param {string} organizationId
+   * @param {{ ids?: string[], intakeCaseIds?: string[] }} keys
+   */
+  async listByIdsForPortfolio(organizationId, keys = {}) {
+    await this.assertReady();
+    const org = normOrg(organizationId);
+    const ids = [...new Set((keys.ids || []).map(String).filter(Boolean))].slice(0, 200);
+    const intakeCaseIds = [
+      ...new Set((keys.intakeCaseIds || []).map(String).filter(Boolean))
+    ].slice(0, 200);
+    /** @type {Map<string, object>} */
+    const byId = new Map();
+    if (ids.length) {
+      const { data, error } = await this.db
+        .from(TABLE)
+        .select("*")
+        .eq("organization_id", org)
+        .in("id", ids);
+      if (error) throw persistenceError("Failed to load studio estimates for portfolio", error);
+      for (const row of data || []) {
+        const est = dbRowToStudioEstimate(row);
+        byId.set(String(est.id), est);
+      }
+    }
+    if (intakeCaseIds.length) {
+      const { data, error } = await this.db
+        .from(TABLE)
+        .select("*")
+        .eq("organization_id", org)
+        .in("intake_case_id", intakeCaseIds)
+        .order("revision", { ascending: false });
+      if (error) {
+        throw persistenceError("Failed to load studio estimates for portfolio", error);
+      }
+      for (const row of data || []) {
+        const est = dbRowToStudioEstimate(row);
+        const caseKey = String(est.intakeCaseId || "");
+        const alreadyForCase = [...byId.values()].some(
+          (e) => String(e.intakeCaseId) === caseKey
+        );
+        if (alreadyForCase) continue;
+        byId.set(String(est.id), est);
+      }
+    }
+    return [...byId.values()];
+  }
+
   async listByIntakeCase(organizationId, intakeCaseId) {
     await this.assertReady();
     const org = normOrg(organizationId);

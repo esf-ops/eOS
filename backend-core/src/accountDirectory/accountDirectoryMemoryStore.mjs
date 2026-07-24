@@ -60,6 +60,20 @@ export function createAccountDirectoryMemoryStore() {
       return clone(assertOrg(accounts.get(accountId), organizationId));
     },
 
+    /**
+     * Batched account fetch — one logical AD lookup for portfolio grouping.
+     * @param {string} organizationId
+     * @param {string[]} accountIds
+     */
+    async getAccountsByIds(organizationId, accountIds) {
+      const out = [];
+      for (const id of accountIds || []) {
+        const row = assertOrg(accounts.get(String(id)), organizationId);
+        if (row) out.push(clone(row));
+      }
+      return out;
+    },
+
     async updateAccount(organizationId, accountId, patch, expectedRowVersion) {
       const current = assertOrg(accounts.get(accountId), organizationId);
       if (!current) return { ok: false, code: "not_found" };
