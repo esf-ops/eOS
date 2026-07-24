@@ -221,6 +221,7 @@ IDs are stable: `STUDIO-AUDIT-NNN`.
 | Remediation | Phase 0 golden path gate adds targeted E2E/smoke |
 | Suggested branch | `test/studio-golden-path-gate` |
 | SQL | no |
+| **Gate status (2026-07-24)** | **Deterministic regression coverage added** via `npm run eos:test:studio-golden-path-gate` (`studioGoldenPathGate.test.mjs` + UI contract). Proves multi-panel active-revision convergence after `createRevisionFrom`, historical publication precedence, and zero delivery on read/reopen paths. **True browser E2E remains deferred.** |
 
 ---
 

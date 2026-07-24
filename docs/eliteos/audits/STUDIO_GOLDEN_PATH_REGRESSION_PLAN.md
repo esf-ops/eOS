@@ -100,3 +100,55 @@ A cleanup PR that touches Studio estimating, publication, Takeoff import, or que
 `test/studio-golden-path-gate`
 
 Add a single npm script that runs the gate list above and documents the scenario IDs covered. Prefer consolidating existing tests over inventing new E2E first; add browser E2E only for scenarios 16, 21–24, and 35 if unit coverage remains insufficient.
+
+---
+
+## Implementation status (Phase 0 gate)
+
+| Field | Value |
+|-------|-------|
+| Gate script | `npm run eos:test:studio-golden-path-gate` |
+| Audited / base main | `f1d0a9d704c7581fa4b5b123c4cb700991f3a5db` (includes audit `93df10a`) |
+| Implementation commit | local commit on `test/studio-golden-path-gate` — see `git log -1 --oneline` |
+| Application behavior changed | **No** — tests, package script, and this status note only |
+
+### New tests added
+
+| File | Covers |
+|------|--------|
+| `backend-core/src/elite100EstimateStudio/studioGoldenPathGate.test.mjs` | Paths A–G: manual gating, Takeoff≠publish, revision-after-publish + multi-panel sync, metadata-only, transient contracts, zero delivery spies, org isolation |
+| `app-elite100-estimate-studio/src/estimateQueue/studioGoldenPathGate.ui.test.mjs` | Panel `onActiveEstimateChange` wiring, published reopen non-mutation, transient recovery, identity helper presence |
+
+### Existing suites included in the gate
+
+- `eos:test:studio-workspace-workflow`
+- `eos:test:studio-manual-estimate`
+- `eos:test:studio-project-details`
+- `eos:test:studio-manual-physical-scope-authority`
+- `eos:test:studio-manual-room-open-edge`
+- `eos:test:takeoff-approval-gate`
+- `eos:test:live-digital-estimates`
+- `eos:test:studio-review-requests-list`
+- `eos:test:studio-account-directory-delivery-safety`
+- `studioEstimateQueueWorkflow.test.mjs`
+- `studioCommandCenterViewModel.test.mjs`
+- `estimateCommandCenter.ui.test.mjs`
+- `app-elite100-estimate-studio` production build
+
+### Scenarios fully covered (deterministic, non-browser)
+
+1–16, 19, 21–25, 28–29, 31–34 (contracts), 36–42 (and delivery-safety coverage for 38–41 / QB labels).
+
+### Scenarios still requiring a future real-browser E2E
+
+| # | Scenario | Notes |
+|---|----------|-------|
+| 17–18 | Copy link / open customer view in a real browser | UI contracts + delivery spies cover non-mutation; full clipboard/window not exercised |
+| 20 | Open Review Request from Command Center click-path | List/API covered; full navigation click deferred |
+| 26–27, 30 | Live Takeoff job create/AI processing/fallback | Approval gate + Studio seed contracts; no live AI provider |
+| 35 | Stale GET race in running React tree | Source contracts + monotonic policy unit; true browser race deferred |
+| 43–44 | Live QB/Moraware writeback absence | Covered by consistency/delivery-safety suites; no live partner APIs |
+
+### AUDIT-014
+
+Deterministic regression coverage added for revise-after-publish multi-panel synchronization (old contradictory Manual Scope vs Pricing IDs fail the invariant; synchronized reconcile passes). **True browser E2E remains deferred.**
