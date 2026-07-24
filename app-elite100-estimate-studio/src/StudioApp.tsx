@@ -614,11 +614,17 @@ export default function StudioApp() {
               setEstimateWorkspaceCaseId(caseId);
               setIntakeCaseId(caseId);
               const target = String(options?.openTarget || "takeoff");
-              setWorkspaceFocus(
-                target === "scope" || target === "digital" || target === "review" || target === "takeoff"
-                  ? target
-                  : "takeoff"
-              );
+              // manual-scope → scope focus (Manual Scope editor + Pricing Setup)
+              const normalized =
+                target === "manual-scope"
+                  ? "scope"
+                  : target === "scope" ||
+                      target === "digital" ||
+                      target === "review" ||
+                      target === "takeoff"
+                    ? target
+                    : "takeoff";
+              setWorkspaceFocus(normalized);
               setMainNav("estimate-workspace");
             }}
           />
@@ -634,11 +640,16 @@ export default function StudioApp() {
               setEstimateWorkspaceCaseId(caseId);
               setIntakeCaseId(caseId);
               const target = String(options?.openTarget || "takeoff");
-              setWorkspaceFocus(
-                target === "scope" || target === "digital" || target === "review" || target === "takeoff"
-                  ? target
-                  : "takeoff"
-              );
+              const normalized =
+                target === "manual-scope"
+                  ? "scope"
+                  : target === "scope" ||
+                      target === "digital" ||
+                      target === "review" ||
+                      target === "takeoff"
+                    ? target
+                    : "takeoff";
+              setWorkspaceFocus(normalized);
               setMainNav("estimate-workspace");
             }}
           />

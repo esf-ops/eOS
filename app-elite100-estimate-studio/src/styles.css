@@ -1951,3 +1951,86 @@ button.linkish {
 .live-de-drawer-header h3 { margin: 0; font-size: 1.05rem; }
 .live-de-detail-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.35rem 0; }
 .live-de-events { margin: 0; padding-left: 1.1rem; font-size: 0.85rem; }
+
+/* Manual estimate creation */
+.ecc-source-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--eos-border);
+  border-radius: 4px;
+  color: var(--eos-ink-mid);
+  background: #f4f6f8;
+}
+.manual-estimate-wizard label,
+.manual-estimate-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.55rem 0;
+  font-size: 0.85rem;
+}
+.manual-estimate-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.manual-estimate-form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.manual-scope-editor {
+  border: 1px solid var(--eos-border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin: 0.75rem 0 1rem;
+  background: #fff;
+}
+.manual-scope-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.manual-scope-room {
+  border-top: 1px solid var(--eos-border);
+  padding: 0.75rem 0;
+  margin-top: 0.5rem;
+}
+.manual-scope-room-head,
+.manual-scope-piece {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin-bottom: 0.45rem;
+}
+.manual-scope-piece input[type="number"],
+.manual-scope-room-head input,
+.manual-scope-piece input[type="text"] {
+  min-width: 5rem;
+}
+.manual-scope-summary {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  background: #f7f9fb;
+  border-radius: 8px;
+}
+.manual-scope-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.manual-scope-cutouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+  border: 0;
+  padding: 0;
+}

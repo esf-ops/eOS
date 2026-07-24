@@ -66,6 +66,7 @@
     "eos:test:studio-account-directory-continuity": "node backend-core/src/elite100EstimateStudio/studioAccountDirectoryContinuity.test.mjs",
     "eos:test:studio-account-directory-delivery-safety": "node backend-core/src/elite100EstimateStudio/studioAccountDirectoryDeliverySafety.test.mjs",
     "eos:test:room-scoped-edge-pricing": "node backend-core/src/digitalEstimate/configuration/roomScopedEdgePricing.test.mjs && node backend-core/src/digitalEstimate/configuration/roomScopedEdgePricing.rootCause.test.mjs",
+    "eos:test:studio-manual-estimate": "node backend-core/src/elite100EstimateStudio/studioManualEstimate.test.mjs && node app-elite100-estimate-studio/src/estimateQueue/manualEstimate.ui.test.mjs",
     "eos:test:live-digital-estimates": "node backend-core/src/elite100EstimateStudio/liveDigitalEstimates.test.mjs && node backend-core/src/elite100EstimateStudio/liveDigitalEstimatesQuickbooksConsistency.test.mjs && node app-elite100-estimate-studio/src/estimateQueue/liveDigitalEstimates.ui.test.mjs",
     "eos:test:studio-review-requests-list": "node backend-core/src/elite100EstimateStudio/studioReviewRequestList.test.mjs && node backend-core/src/elite100EstimateStudio/studioReviewRequest.part3.test.mjs && node app-elite100-estimate-studio/src/milestone5.reviewRequest.ui.test.mjs",
     "eos:test:studio-review-requests-polish": "node backend-core/src/elite100EstimateStudio/reviewRequestStaffSafePresentation.test.mjs && node app-elite100-estimate-studio/src/milestone5.reviewRequest.ui.test.mjs",

@@ -90,6 +90,38 @@ export function deriveQueueWorkflowStatus(input = {}) {
   if (sold) return "Sold";
   if (CLOSED_CASE.has(caseStatus)) return "Closed";
 
+  const sourceType = String(input.sourceType || input.caseSourceType || "").toLowerCase();
+  const isManualStaff =
+    sourceType === "manual" ||
+    String(input.estimateOrigin || "").toLowerCase() === "manual_staff" ||
+    String(input.physicalScopeSource || "").toLowerCase() === "manual_staff";
+
+  // Manual estimates never use AI Takeoff / attachment failure vocabulary.
+  if (isManualStaff) {
+    if (
+      reviewOperatorStatus === "new" ||
+      reviewOperatorStatus === "in_review" ||
+      reviewOperatorStatus === "revision_required" ||
+      accepted
+    ) {
+      return "Customer submitted";
+    }
+    if (publicationStatus === "active") {
+      if (customerViewed || customerSelectionsSaved) return "Customer reviewing";
+      return "Published";
+    }
+    if (estimateStatus === "approved") return "Ready for approval";
+    if (
+      estimateStatus === "ready_to_price" ||
+      estimateStatus === "priced" ||
+      estimateStatus === "draft" ||
+      estimateStatus === "needs_takeoff_approval"
+    ) {
+      return "Scope in progress";
+    }
+    return "Scope in progress";
+  }
+
   if (
     FAILED_CASE.has(caseStatus) ||
     takeoffJobStatus === "failed" ||
@@ -234,6 +266,10 @@ export function deriveNeedsAttention(input = {}, workflowStatus = null) {
  * @returns {'takeoff'|'scope'|'digital'|'review'}
  */
 export function deriveQueueOpenTarget(input = {}) {
+  const sourceType = String(input.sourceType || input.caseSourceType || "").toLowerCase();
+  const isManualStaff =
+    sourceType === "manual" ||
+    String(input.estimateOrigin || "").toLowerCase() === "manual_staff";
   const workflow = deriveQueueWorkflowStatus(input);
   if (workflow === "Customer submitted") return "review";
   if (
@@ -244,6 +280,7 @@ export function deriveQueueOpenTarget(input = {}) {
     return "digital";
   }
   if (
+    isManualStaff ||
     workflow === "Scope in progress" ||
     workflow === "Needs estimator review" ||
     String(input.takeoffReviewStatus ?? "").toLowerCase() === "approved"

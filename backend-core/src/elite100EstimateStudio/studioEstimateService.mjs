@@ -38,6 +38,11 @@ export const TAKEOFF_DERIVED_ADDON_KEYS = Object.freeze([
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
 import { loadStudioPartnerAccount } from "./studioPartnerAccountSearch.mjs";
 import { applyStudioAccountDirectoryIdentity } from "./studioAccountDirectoryLookup.mjs";
+import {
+  MANUAL_ESTIMATE_ORIGIN,
+  isConfirmedManualPhysicalScope,
+  stripClientManualAuthority
+} from "./studioManualPhysicalScope.mjs";
 
 function rejectCallerAuthority(body) {
   if (!body || typeof body !== "object") return;
@@ -59,7 +64,13 @@ function rejectCallerAuthority(body) {
     "exactInternalTotal",
     "customerDisplayTotal",
     "totals",
-    "takeoffApproved"
+    "takeoffApproved",
+    "manualScopeConfirmed",
+    "manualScopeConfirmedAt",
+    "manualScopeConfirmedBy",
+    "manualScopeFingerprint",
+    "estimateOrigin",
+    "physicalScopeSource"
   ];
   for (const key of forbidden) {
     if (body[key] != null && body[key] !== "") {
@@ -82,6 +93,26 @@ function assertTakeoffApproved(workspace) {
     err.code = "needs_takeoff_approval";
     throw err;
   }
+}
+
+/**
+ * Physical-scope authority: approved Takeoff OR server-confirmed manual scope.
+ * @param {object} row
+ * @param {object|null} workspace
+ */
+function assertPhysicalScopeAuthorized(row, workspace) {
+  if (isConfirmedManualPhysicalScope(row?.scope) && !row?.takeoffJobId) {
+    return;
+  }
+  assertTakeoffApproved(workspace);
+}
+
+function isManualStaffEstimate(row) {
+  const s = row?.scope || {};
+  return (
+    s.estimateOrigin === MANUAL_ESTIMATE_ORIGIN ||
+    s.physicalScopeSource === MANUAL_ESTIMATE_ORIGIN
+  );
 }
 
 /**
@@ -538,6 +569,14 @@ export function createStudioEstimateService(deps = {}) {
   }
 
   async function refreshTakeoffGate(row, organizationId, actorUserId) {
+    // Confirmed manual estimates have no Takeoff job — do not force needs_takeoff_approval.
+    if (isConfirmedManualPhysicalScope(row?.scope) && !row.takeoffJobId) {
+      return row;
+    }
+    // Manual drafts without confirmation also skip Takeoff gate forcing when no job exists.
+    if (isManualStaffEstimate(row) && !row.takeoffJobId) {
+      return row;
+    }
     if (!row.takeoffJobId) {
       return repository.update(
         organizationId,
@@ -867,7 +906,8 @@ export function createStudioEstimateService(deps = {}) {
     async updateScope({ organizationId, estimateId, body, actorUserId }) {
       rejectCallerAuthority(body);
       const scopePatch = body?.scope && typeof body.scope === "object" ? body.scope : body;
-      const clean = { ...scopePatch };
+      // Strip client-controlled manual/takeoff authority — server owns these flags.
+      const clean = stripClientManualAuthority({ ...scopePatch });
       delete clean.organizationId;
       delete clean.actorUserId;
       delete clean.totals;
@@ -880,7 +920,28 @@ export function createStudioEstimateService(deps = {}) {
         throw err;
       }
 
+      const wasManual = isManualStaffEstimate(row);
       let nextScope = { ...row.scope, ...clean };
+      if (wasManual) {
+        nextScope.estimateOrigin = MANUAL_ESTIMATE_ORIGIN;
+        nextScope.physicalScopeSource = MANUAL_ESTIMATE_ORIGIN;
+        // Room/piece edits invalidate confirmation until explicit Confirm Manual Scope.
+        const roomsChanged =
+          "rooms" in clean ||
+          scopeFingerprint({ rooms: row.scope?.rooms }) !==
+            scopeFingerprint({ rooms: nextScope.rooms });
+        if (roomsChanged || "addOns" in clean) {
+          nextScope.manualScopeConfirmed = false;
+          nextScope.manualScopeConfirmedAt = null;
+          nextScope.manualScopeConfirmedBy = null;
+          nextScope.manualScopeFingerprint = null;
+        } else {
+          nextScope.manualScopeConfirmed = row.scope?.manualScopeConfirmed === true;
+          nextScope.manualScopeConfirmedAt = row.scope?.manualScopeConfirmedAt ?? null;
+          nextScope.manualScopeConfirmedBy = row.scope?.manualScopeConfirmedBy ?? null;
+          nextScope.manualScopeFingerprint = row.scope?.manualScopeFingerprint ?? null;
+        }
+      }
       if ("partnerAccountId" in clean) {
         const resolved = await resolveTrustedPartnerOnScope(organizationId, nextScope);
         Object.assign(nextScope, resolved.scope);
@@ -998,12 +1059,21 @@ export function createStudioEstimateService(deps = {}) {
         err.code = "estimate_not_found";
         throw err;
       }
+      if (isManualStaffEstimate(row) && !isConfirmedManualPhysicalScope(row.scope)) {
+        const err = new Error("Confirm manual scope before calculating");
+        err.statusCode = 409;
+        err.code = "manual_scope_not_confirmed";
+        throw err;
+      }
       row = await refreshTakeoffGate(row, organizationId, actorUserId);
-      const workspace = await loadWorkspace({
-        organizationId,
-        takeoffJobId: row.takeoffJobId
-      });
-      assertTakeoffApproved(workspace);
+      let workspace = null;
+      if (!(isConfirmedManualPhysicalScope(row.scope) && !row.takeoffJobId)) {
+        workspace = await loadWorkspace({
+          organizationId,
+          takeoffJobId: row.takeoffJobId
+        });
+      }
+      assertPhysicalScopeAuthorized(row, workspace);
 
       const resolved = await resolveTrustedPartnerOnScope(organizationId, row.scope);
       if (resolved.scope.partnerAccountId !== row.scope.partnerAccountId) {
@@ -1060,12 +1130,22 @@ export function createStudioEstimateService(deps = {}) {
         return safeEstimateView(row);
       }
 
+      if (isManualStaffEstimate(row) && !isConfirmedManualPhysicalScope(row.scope)) {
+        const err = new Error("Confirm manual scope before approving");
+        err.statusCode = 409;
+        err.code = "manual_scope_not_confirmed";
+        throw err;
+      }
+
       row = await refreshTakeoffGate(row, organizationId, actorUserId);
-      const workspace = await loadWorkspace({
-        organizationId,
-        takeoffJobId: row.takeoffJobId
-      });
-      assertTakeoffApproved(workspace);
+      let workspace = null;
+      if (!(isConfirmedManualPhysicalScope(row.scope) && !row.takeoffJobId)) {
+        workspace = await loadWorkspace({
+          organizationId,
+          takeoffJobId: row.takeoffJobId
+        });
+      }
+      assertPhysicalScopeAuthorized(row, workspace);
 
       if (!row.calculationSnapshot?.fingerprint) {
         const err = new Error("Calculate the estimate before approving");
