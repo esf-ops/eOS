@@ -455,6 +455,46 @@ button.linkish {
   min-width: 11rem;
 }
 
+.review-table th:last-child,
+.review-table td:last-child,
+.review-table-actions {
+  position: sticky;
+  right: 0;
+  background: #fff;
+  z-index: 1;
+  box-shadow: -6px 0 8px -6px rgba(15, 23, 42, 0.18);
+  white-space: nowrap;
+}
+
+.review-table th:last-child {
+  background: #fafbfd;
+  z-index: 2;
+}
+
+.review-table tr.is-selected td:last-child {
+  background: var(--eos-accent-soft);
+}
+
+.review-customer-open {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.review-customer-open:focus-visible {
+  outline: 2px solid var(--eos-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .review-table tr.is-selected {
   background: var(--eos-accent-soft);
 }
@@ -1853,6 +1893,10 @@ button.linkish {
   cursor: pointer;
   line-height: 1.2;
   white-space: nowrap;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
 }
 .live-de-action--neutral {
   background: #fff;

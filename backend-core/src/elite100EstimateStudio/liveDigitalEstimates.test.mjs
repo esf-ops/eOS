@@ -21,6 +21,8 @@ import {
   deriveLiveDigitalEstimateStatus,
   deriveNextAction
 } from "./liveDigitalEstimatesStatus.mjs";
+import { wrapDigitalEstimateAccessToken } from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
+import { createHash } from "node:crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../../..");
@@ -28,6 +30,10 @@ const ORG = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const AD_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const AD_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const NOW = new Date("2026-07-24T15:00:00.000Z");
+const LINK_ENV = {
+  DIGITAL_ESTIMATE_LINK_WRAP_KEY: "unit-test-wrap-key-aaaaaaaa",
+  DIGITAL_ESTIMATE_PUBLIC_BASE_URL: "https://digital.test.example"
+};
 
 function seedPublication(repo, {
   id,
@@ -298,11 +304,22 @@ async function buildHarness() {
     },
     amendmentRepository: amendmentRepo,
     accountDirectoryStore: adStore,
+    env: LINK_ENV,
     now: () => NOW,
     queryCounters: counters
   });
 
-  return { service, deRepo, adStore, accountA, accountB, counters };
+  // Recoverable wrap for pub-active-1 only (pub-active-2 intentionally missing → unavailable).
+  const rawToken = "sentinel-live-de-token-aaaaaaaaaaaa";
+  await deRepo.insertToken({
+    organization_id: ORG,
+    publication_id: "pub-active-1",
+    token_hash: createHash("sha256").update(rawToken).digest("hex"),
+    token_wrapped: wrapDigitalEstimateAccessToken(rawToken, LINK_ENV),
+    created_at: "2026-07-20T10:05:00.000Z"
+  });
+
+  return { service, deRepo, adStore, accountA, accountB, counters, rawToken };
 }
 
 console.log("\nliveDigitalEstimates.test.mjs\n");
@@ -430,10 +447,41 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
 
   // Side-effect free GET simulation — no publish/email helpers invoked
   const beforeEvents = deRepo._dump ? deRepo._dump().events.length : 0;
-  await service.getPortfolioDetail(ORG, "pub-active-1");
+  const detailOk = await service.getPortfolioDetail(ORG, "pub-active-1");
   const afterEvents = deRepo._dump ? deRepo._dump().events.length : 0;
   assert.equal(afterEvents, beforeEvents);
+  assert.equal(detailOk.linkAvailable, true);
+  assert.equal(detailOk.linkState, "available");
+  assert.ok(detailOk.customerUrl);
+  assert.match(detailOk.customerUrl, /\/e\/sentinel-live-de-token-aaaaaaaaaaaa/);
+  assert.equal(detailOk.linkUnavailableReason, null);
+  assert.doesNotMatch(
+    JSON.stringify(detailOk),
+    /token_hash|token_wrapped|tokenWrapped|rawToken|accessToken/
+  );
   console.log("ok: 20–21 list/detail produce zero publication/email/view/link-copied events");
+  console.log("ok: detail recovers staff-safe customerUrl via shared link authority");
+
+  const listRaw = JSON.stringify(active);
+  assert.doesNotMatch(listRaw, /https:\/\/digital\.test\.example\/e\//);
+  assert.equal(
+    active.publications.every((p) => !Object.prototype.hasOwnProperty.call(p, "customerUrl")),
+    true
+  );
+  console.log("ok: list DTO never includes customer URLs");
+
+  const missing = await service.getPortfolioDetail(ORG, "pub-active-2");
+  assert.equal(missing.linkAvailable, false);
+  assert.equal(missing.customerUrl, null);
+  assert.equal(missing.linkState, "unavailable");
+  assert.match(missing.linkUnavailableReason || "", /No recoverable customer link|Replace Link/i);
+  console.log("ok: missing recoverable metadata disables link without minting a token");
+
+  const revokedDetail = await service.getPortfolioDetail(ORG, "pub-revoked");
+  assert.equal(revokedDetail.customerUrl, null);
+  assert.equal(revokedDetail.linkAvailable, false);
+  assert.equal(revokedDetail.linkState, "revoked");
+  console.log("ok: revoked publication does not expose an active link");
 
   assert.equal(
     deriveNextAction({
@@ -477,6 +525,7 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
     "utf8"
   );
   assert.match(routes, /live-digital-estimates/);
+  assert.match(routes, /recoverStaffPublicationLinkMeta/);
   assert.doesNotMatch(
     routes.slice(
       routes.indexOf("live-digital-estimates"),
@@ -484,10 +533,23 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
     ),
     /publishDigitalEstimate\(|recordDigitalEstimateLinkCopied|sendEstimateEmail/
   );
+  const recovery = readFileSync(
+    path.join(root, "backend-core/src/digitalEstimate/staffPublicationLinkRecovery.mjs"),
+    "utf8"
+  );
+  assert.match(recovery, /recoverStaffPublicationLinkMeta/);
+  assert.match(recovery, /presentStaffLinkForDetail/);
+  assert.match(page, /extractStaffCustomerUrl/);
+  assert.match(page, /Link available/);
+  assert.match(page, /No recoverable customer link is stored/);
+  assert.doesNotMatch(page, /Link ready \(not opened automatically\)/);
+  assert.doesNotMatch(page, /Customer link is unavailable\. Use Replace link if needed/);
+  assert.match(page, /disabled=\{busy \|\| !customerUrl\}/);
   console.log("ok: 22–23 copy/replace/revoke require explicit click + confirm; 27 nav label");
   console.log("ok: 28 filters persist via sessionStorage");
   console.log("ok: 29 pagination bounded (limit max 50 in service)");
   console.log("ok: 30 empty/error/loading testids present");
+  console.log("ok: shared staff link recovery + consistent unavailable messaging");
 }
 
 console.log("\nliveDigitalEstimates.test.mjs: ok\n");

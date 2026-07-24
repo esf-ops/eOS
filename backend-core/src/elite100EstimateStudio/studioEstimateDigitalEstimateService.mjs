@@ -36,11 +36,7 @@ import {
   ensureStudioEstimatePublicationSource,
   mapStudioPublicationPersistenceError
 } from "./studioEstimatePublicationSource.mjs";
-import {
-  buildDigitalEstimateCustomerUrl,
-  buildLinkRecoveryDiagnostics,
-  unwrapDigitalEstimateAccessTokenDetailed
-} from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
+import { recoverStaffPublicationLinkMeta } from "../digitalEstimate/staffPublicationLinkRecovery.mjs";
 import {
   listElite100CustomerMaterials,
   getElite100CustomerMaterial,
@@ -330,120 +326,12 @@ export function createStudioEstimateDigitalEstimateService(deps) {
 
   /**
    * Recover stable customer URL for authorized Studio callers (never public).
+   * Uses the shared staff link recovery authority (same as Publications + Live DE).
    * @param {string} organizationId
    * @param {object} pub
    */
   async function linkMetaForPublication(organizationId, pub) {
-    if (!pub?.id) {
-      return {
-        customerUrl: null,
-        linkStatus: null,
-        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, { code: null })
-      };
-    }
-    if (pub.status === "revoked" || pub.revoked_at) {
-      return {
-        customerUrl: null,
-        linkStatus: "revoked",
-        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
-          code: "publication_revoked",
-          decryptSucceeded: false
-        })
-      };
-    }
-    if (pub.status === "superseded" || pub.superseded_at) {
-      return {
-        customerUrl: null,
-        linkStatus: "superseded",
-        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
-          code: "publication_superseded",
-          decryptSucceeded: false
-        })
-      };
-    }
-    if (pub.status !== "active") {
-      return {
-        customerUrl: null,
-        linkStatus: String(pub.status || "invalid"),
-        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
-          code: "publication_inactive",
-          decryptSucceeded: false
-        })
-      };
-    }
-    if (typeof deRepository.getActiveTokenForPublication !== "function") {
-      return {
-        customerUrl: null,
-        linkStatus: "recovery_error",
-        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
-          code: "active_token_lookup_unavailable",
-          decryptSucceeded: false
-        }),
-        linkError: {
-          code: "active_token_lookup_unavailable",
-          message: "Customer link recovery is unavailable on this Brain."
-        }
-      };
-    }
-    try {
-      const counts =
-        typeof deRepository.countTokensForPublication === "function"
-          ? await deRepository.countTokensForPublication(organizationId, pub.id)
-          : { activeTokenRows: null };
-      const tokenRow = await deRepository.getActiveTokenForPublication(organizationId, pub.id);
-      if (!tokenRow || tokenRow.revoked_at) {
-        return {
-          customerUrl: null,
-          linkStatus: "needs_replace",
-          linkDiagnostics: buildLinkRecoveryDiagnostics(env, tokenRow, {
-            activeTokenRows: counts.activeTokenRows,
-            decryptSucceeded: false,
-            code: "active_token_missing"
-          }),
-          linkError: {
-            code: "active_token_missing",
-            message: "No active customer link token. Use Replace Link to create one."
-          }
-        };
-      }
-      const unwrapped = unwrapDigitalEstimateAccessTokenDetailed(tokenRow.token_wrapped, env, {
-        tokenRow,
-        activeTokenRows: counts.activeTokenRows
-      });
-      if (!unwrapped.ok) {
-        // Never silently map decrypt/key failures to needs_replace.
-        const message =
-          unwrapped.code === "link_wrap_key_missing"
-            ? "Customer link recovery key is missing on Brain. Set DIGITAL_ESTIMATE_LINK_WRAP_KEY and redeploy."
-            : unwrapped.code === "token_wrapped_missing"
-              ? "Customer link is not recoverable yet. Use Replace Link once (requires DIGITAL_ESTIMATE_LINK_WRAP_KEY)."
-              : "Customer link could not be decrypted with the current wrap key. Verify DIGITAL_ESTIMATE_LINK_WRAP_KEY and Replace Link.";
-        return {
-          customerUrl: null,
-          linkStatus: "recovery_error",
-          linkDiagnostics: unwrapped.diagnostics,
-          linkError: { code: unwrapped.code, message }
-        };
-      }
-      return {
-        customerUrl: buildDigitalEstimateCustomerUrl(unwrapped.rawToken, env),
-        linkStatus: "active",
-        linkDiagnostics: unwrapped.diagnostics
-      };
-    } catch (e) {
-      return {
-        customerUrl: null,
-        linkStatus: "recovery_error",
-        linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
-          code: e?.code || "link_recovery_failed",
-          decryptSucceeded: false
-        }),
-        linkError: {
-          code: e?.code || "link_recovery_failed",
-          message: e?.message || "Unable to recover customer link."
-        }
-      };
-    }
+    return recoverStaffPublicationLinkMeta(deRepository, organizationId, pub, env);
   }
 
   async function staffPublicationViews(organizationId, pubs) {

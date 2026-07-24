@@ -2408,4 +2408,16 @@
 | **Tests** | `reviewRequestStaffSafePresentation.test.mjs`, Milestone 5 UI, existing Part 3 / list suites. |
 | **Impacted** | `ReviewWorkspace.tsx`, `reviewRequestStaffSafePresentation.mjs`, `studioReviewRequestService.mjs`, this entry. |
 
+### 170. Studio operations — Review open details + Live DE customer links (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/studio-operations-open-details-and-customer-links` |
+| **Review Requests** | Every row exposes **customer/project** and **Open details** as accessible buttons (mouse, Tab, Enter, Space). Both call the same read-only detail opener. Opening detail preserves filters, restores focus, and never starts/resolves review, revises, publishes, or emails. |
+| **Live DE customer URL** | Staff-recoverable `customerUrl` comes only from authorized detail recovery (`recoverStaffPublicationLinkMeta`) — the same authority as Publications workspace / Studio DE readiness. List endpoints never return customer URLs. Detail GET never mints or replaces a token. |
+| **Copy / Open / Replace** | Each requires an explicit click (Replace still confirmed). Missing recoverable wrap metadata disables Copy/Open and shows: “No recoverable customer link is stored… Replace link creates a new URL…”. Never show “link unavailable” and “link ready/available” together. |
+| **Legacy data** | Publications without persisted `token_wrapped` remain unrecovered until an explicit Replace link — no silent backfill/migration. |
+| **SQL** | None. |
+| **Impacted** | `ReviewWorkspace`, Live DE page/service, `staffPublicationLinkRecovery.mjs`, Publications + Studio DE link recovery call sites, this entry. |
+
 
