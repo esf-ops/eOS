@@ -20,6 +20,7 @@ import {
   normalizeEdgeProfileToken
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
 import { resolveRoomApprovedEligibleEdgeLf, assessLegacyProjectEdgeFallback } from "./studioRoomEdgeQuantity.mjs";
+import { validateProjectNameForPublication } from "./studioProjectDetails.mjs";
 
 function str(v) {
   if (v == null) return "";
@@ -813,12 +814,12 @@ export function assessStudioEstimatePublicationReadiness(input) {
       message: "Customer name is required before publishing."
     });
   }
-  if (!str(scope.projectName)) {
-    blockers.push({
-      code: "project_name_required",
-      field: "projectName",
-      message: "Project name is required before publishing."
-    });
+  const projectNameCheck = validateProjectNameForPublication(scope, {
+    estimateId: estimate.id,
+    intakeCaseId: estimate.intakeCaseId
+  });
+  if (!projectNameCheck.ok) {
+    blockers.push(projectNameCheck.blocker);
   }
 
   const unresolved = collectUnresolvedItems(scope);
@@ -904,7 +905,9 @@ export function assessStudioEstimatePublicationReadiness(input) {
   const blockingReasons = blockers.map((b) => ({
     code: b.code,
     field: b.field || null,
+    title: b.title || null,
     message: b.message,
+    action: b.action || null,
     ...(b.allowedRange ? { allowedRange: b.allowedRange } : {}),
     ...(b.detail ? { detail: b.detail } : {})
   }));
@@ -914,6 +917,8 @@ export function assessStudioEstimatePublicationReadiness(input) {
     message: eligible
       ? "Approved Studio estimate is ready for Digital Estimate publication"
       : blockers[0].message,
+    title: eligible ? null : blockers[0].title || null,
+    action: eligible ? null : blockers[0].action || null,
     field: eligible ? null : blockers[0].field || null,
     allowedRange: eligible ? null : blockers[0].allowedRange || null,
     blockers,

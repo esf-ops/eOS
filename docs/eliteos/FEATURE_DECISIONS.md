@@ -2466,4 +2466,19 @@
 | **SQL** | None — scope JSON fields only. |
 | **Impacted** | `studioManualPhysicalScope.mjs`, `studioRoomEdgeQuantity.mjs`, `studioScopeBilling.mjs`, publication adapter, Manual Scope editor, Pricing Setup panel, this entry. |
 
+### 174. Editable Studio project details (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/studio-editable-project-details` |
+| **Decision** | Project name may be omitted on draft create. Project details (name, jobsite address, internal notes) remain editable after creation via dedicated Project Details UI + `PATCH …/project-details`. |
+| **Publication** | Meaningful trimmed project name is required before Digital Estimate publish (`project_name_required` + `edit_project_details` action). Placeholders (Unknown, Untitled project, Test, Project, customer-name-alone, UUID) are rejected for customer-facing publication. |
+| **Staff display** | Blank names show **Project not named** (never Unknown / Untitled project). |
+| **Pricing** | Project metadata changes do not alter measured geometry, rates, or clear calculation solely because the name/address changed. |
+| **History** | Existing publications keep frozen project identity; live estimate updates apply to the next explicit publish/republish only. |
+| **AD** | Account Directory location remains separate from project/jobsite address (existing nonblank overwrite rule). |
+| **Delivery** | Save project details never publishes, emails, creates reviews, marks sold, or writes QB/Moraware. |
+| **SQL** | None. |
+| **Impacted** | `studioProjectDetails.mjs`, estimate service/routes, publication readiness, Command Center labels, Project Details panel, Digital Estimate blockers, this entry. |
+
 

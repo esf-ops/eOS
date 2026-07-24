@@ -1114,6 +1114,48 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
     }
   );
 
+  app.patch(
+    "/api/elite100-estimate-studio/estimates/:estimateId/project-details",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioEstimateService.updateProjectDetails({
+          organizationId,
+          estimateId: req.params.estimateId,
+          body: req.body && typeof req.body === "object" ? req.body : {},
+          actorUserId: req.user?.id ?? null
+        });
+        auditStudioEstimate("estimate.update_project_details", req, {
+          estimateId: result?.estimate?.id,
+          status: result?.estimate?.status,
+          revision: result?.estimate?.revision,
+          published: false,
+          notified: false
+        });
+        res.json({
+          ok: true,
+          estimate: result.estimate,
+          published: false,
+          notified: false,
+          calculationCleared: false,
+          revised: false
+        });
+      } catch (e) {
+        logStudio("patch project details failed", e, req);
+        res.status(Number(e?.statusCode) || 500).json({
+          ok: false,
+          error:
+            e?.statusCode && e.statusCode < 500 ? e.message : "Unable to update project details",
+          code: e?.code,
+          details: e?.details
+        });
+      }
+    }
+  );
+
   app.post(
     "/api/elite100-estimate-studio/estimates/:estimateId/refresh-from-takeoff",
     ...staffStack,

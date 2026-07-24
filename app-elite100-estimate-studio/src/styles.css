@@ -2089,3 +2089,63 @@ button.linkish {
   border: 0;
   padding: 0;
 }
+
+.project-details-panel {
+  border: 1px solid var(--eos-border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin: 0.75rem 0 1rem;
+  background: #fff;
+}
+.project-details-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.project-details-save-state {
+  font-size: 0.86rem;
+  color: var(--eos-muted, #667);
+  white-space: nowrap;
+}
+.project-details-summary dl {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.5rem 0 0.85rem;
+}
+.project-details-summary dt {
+  font-size: 0.8rem;
+  color: var(--eos-muted, #667);
+}
+.project-details-summary dd {
+  margin: 0.1rem 0 0;
+  font-weight: 600;
+}
+.project-details-form {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}
+.project-details-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+.project-details-form input,
+.project-details-form textarea {
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+}
+.project-details-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.eq-de-blockers li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}

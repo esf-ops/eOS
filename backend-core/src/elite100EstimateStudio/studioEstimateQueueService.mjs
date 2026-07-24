@@ -462,7 +462,7 @@ export function createStudioEstimateQueueService(deps = {}) {
     return stripForbidden({
       id: caseRow.id,
       customerName: customerName || "Unknown",
-      projectName: projectName || "Unknown",
+      projectName: projectName || null,
       accountLinked: Boolean(accountLinked),
       accountDirectoryLinked: Boolean(accountLinked),
       sourceType: sourceType || null,

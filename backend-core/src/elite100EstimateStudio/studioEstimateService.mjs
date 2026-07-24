@@ -43,6 +43,23 @@ import {
   isConfirmedManualPhysicalScope,
   stripClientManualAuthority
 } from "./studioManualPhysicalScope.mjs";
+import {
+  normalizeProjectDetailsDraft,
+  PROJECT_METADATA_SCOPE_KEYS
+} from "./studioProjectDetails.mjs";
+
+/**
+ * Fingerprint of pricing/geometry scope — ignores project metadata fields.
+ * @param {object|null|undefined} scope
+ */
+function pricingScopeFingerprint(scope) {
+  if (!scope || typeof scope !== "object") return scopeFingerprint(scope);
+  const copy = { ...scope };
+  for (const key of PROJECT_METADATA_SCOPE_KEYS) {
+    delete copy[key];
+  }
+  return scopeFingerprint(copy);
+}
 
 function rejectCallerAuthority(body) {
   if (!body || typeof body !== "object") return;
@@ -927,10 +944,14 @@ export function createStudioEstimateService(deps = {}) {
         nextScope.physicalScopeSource = MANUAL_ESTIMATE_ORIGIN;
         // Room/piece edits invalidate confirmation until explicit Confirm Manual Scope.
         const roomsChanged =
-          "rooms" in clean ||
+          "rooms" in clean &&
           scopeFingerprint({ rooms: row.scope?.rooms }) !==
             scopeFingerprint({ rooms: nextScope.rooms });
-        if (roomsChanged || "addOns" in clean) {
+        const addOnsChanged =
+          "addOns" in clean &&
+          scopeFingerprint({ addOns: row.scope?.addOns || {} }) !==
+            scopeFingerprint({ addOns: nextScope.addOns || {} });
+        if (roomsChanged || addOnsChanged) {
           nextScope.manualScopeConfirmed = false;
           nextScope.manualScopeConfirmedAt = null;
           nextScope.manualScopeConfirmedBy = null;
@@ -1022,10 +1043,16 @@ export function createStudioEstimateService(deps = {}) {
         l: identityColumns.accountDirectoryLocationId,
         s: identityColumns.customerIdentitySnapshot
       });
+      const identityChanged = priorIdentityFp !== nextIdentityFp;
+      const pricingScopeChanged =
+        pricingScopeFingerprint(row.scope) !== pricingScopeFingerprint(nextScope);
       const scopeChanged =
-        scopeFingerprint(row.scope) !== scopeFingerprint(nextScope) || priorIdentityFp !== nextIdentityFp;
+        scopeFingerprint(row.scope) !== scopeFingerprint(nextScope) || identityChanged;
+      // Project name/address/notes are metadata — must not clear calculation or force
+      // re-approval by themselves (FEATURE_DECISIONS §174).
+      const metadataOnly = !identityChanged && !pricingScopeChanged && scopeChanged;
 
-      if (wasApproved && scopeChanged) {
+      if (wasApproved && (pricingScopeChanged || identityChanged)) {
         row = await revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
           status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
           scope: nextScope,
@@ -1037,7 +1064,9 @@ export function createStudioEstimateService(deps = {}) {
 
       /** @type {Record<string, unknown>} */
       const patch = { scope: nextScope, ...identityColumns };
-      if (row.status === STUDIO_ESTIMATE_STATUSES.PRICED && scopeChanged) {
+      if (metadataOnly || (!pricingScopeChanged && !identityChanged)) {
+        // Preserve status, calculation, approval, and confirmation for metadata-only edits.
+      } else if (row.status === STUDIO_ESTIMATE_STATUSES.PRICED && pricingScopeChanged) {
         patch.status = STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE;
         patch.calculationSnapshot = null;
         patch.staleReason = "Scope changed — recalculate";
@@ -1050,6 +1079,79 @@ export function createStudioEstimateService(deps = {}) {
 
       row = await repository.update(organizationId, estimateId, patch, actorUserId);
       return safeEstimateView(row);
+    },
+
+    /**
+     * Update project metadata only (name/address/notes).
+     * Never publishes, never clears calculation for metadata-only edits,
+     * never creates intake/Takeoff duplicates.
+     */
+    async updateProjectDetails({ organizationId, estimateId, body, actorUserId }) {
+      rejectCallerAuthority(body);
+      const draft = normalizeProjectDetailsDraft(body?.project || body || {});
+      if (draft.errors.length) {
+        const err = new Error(draft.errors[0] || "Invalid project details");
+        err.statusCode = 422;
+        err.code = "project_details_invalid";
+        err.details = draft.errors;
+        throw err;
+      }
+
+      const row = await repository.getById(organizationId, estimateId);
+      if (!row) {
+        const err = new Error("Estimate not found");
+        err.statusCode = 404;
+        err.code = "estimate_not_found";
+        throw err;
+      }
+
+      /** @type {Record<string, unknown>} */
+      const metaPatch = {};
+      if (draft.touched.projectName) metaPatch.projectName = draft.projectName;
+      if (draft.touched.projectAddress) metaPatch.projectAddress = draft.projectAddress;
+      if (draft.touched.estimatorNotes && draft.estimatorNotes != null) {
+        metaPatch.estimatorNotes = draft.estimatorNotes;
+      }
+      if (!Object.keys(metaPatch).length) {
+        return {
+          ok: true,
+          estimate: safeEstimateView(row),
+          published: false,
+          notified: false,
+          calculationCleared: false,
+          revised: false
+        };
+      }
+
+      const nextScope = { ...row.scope, ...metaPatch };
+      // Preserve manual/takeoff authority flags exactly.
+      if (isManualStaffEstimate(row)) {
+        nextScope.estimateOrigin = MANUAL_ESTIMATE_ORIGIN;
+        nextScope.physicalScopeSource = MANUAL_ESTIMATE_ORIGIN;
+        nextScope.manualScopeConfirmed = row.scope?.manualScopeConfirmed === true;
+        nextScope.manualScopeConfirmedAt = row.scope?.manualScopeConfirmedAt ?? null;
+        nextScope.manualScopeConfirmedBy = row.scope?.manualScopeConfirmedBy ?? null;
+        nextScope.manualScopeFingerprint = row.scope?.manualScopeFingerprint ?? null;
+      }
+
+      const updated = await repository.update(
+        organizationId,
+        estimateId,
+        {
+          scope: nextScope
+          // Intentionally omit status / calculationSnapshot / staleReason / approval.
+        },
+        actorUserId
+      );
+
+      return {
+        ok: true,
+        estimate: safeEstimateView(updated),
+        published: false,
+        notified: false,
+        calculationCleared: false,
+        revised: false
+      };
     },
 
     async calculate({ organizationId, estimateId, actorUserId, body }) {

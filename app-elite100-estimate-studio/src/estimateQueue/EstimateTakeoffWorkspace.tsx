@@ -13,6 +13,7 @@ import type { QuoteIntakeCaseDto } from "../lib/quoteIntakeTypes";
 import { apiGet, ApiError } from "../lib/api";
 import EstimateScopePanel from "./EstimateScopePanel";
 import ManualPhysicalScopeEditor from "./ManualPhysicalScopeEditor";
+import ProjectDetailsPanel from "./ProjectDetailsPanel";
 
 type Props = {
   authToken: string;
@@ -84,6 +85,7 @@ export default function EstimateTakeoffWorkspace({
   const [takeoffFrameMounted, setTakeoffFrameMounted] = useState(
     () => !initialFocus || initialFocus === "takeoff"
   );
+  const [forceProjectEdit, setForceProjectEdit] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -470,6 +472,24 @@ export default function EstimateTakeoffWorkspace({
             ) : null}
           </section>
 
+          {state.estimateId ? (
+            <ProjectDetailsPanel
+              authToken={authToken}
+              caseId={caseId}
+              estimateId={state.estimateId}
+              refreshKey={state.scopeRefreshKey}
+              forceEdit={forceProjectEdit}
+              onForceEditConsumed={() => setForceProjectEdit(false)}
+              onSaved={() => {
+                setState((prev) =>
+                  prev.kind === "ready"
+                    ? { ...prev, scopeRefreshKey: prev.scopeRefreshKey + 1 }
+                    : prev
+                );
+              }}
+            />
+          ) : null}
+
           {state.manualMode && state.estimateId ? (
             <ManualPhysicalScopeEditor
               authToken={authToken}
@@ -552,6 +572,7 @@ export default function EstimateTakeoffWorkspace({
                   }
                 : undefined
             }
+            onEditProjectDetails={() => setForceProjectEdit(true)}
             customerHint={
               state.caseRow
                 ? String(state.caseRow.customerName || state.caseRow.customer || "")

@@ -389,7 +389,7 @@ export function toCommandCenterItem(row = {}, opts = {}) {
   const receivedAt = row.receivedAt || null;
   const stageEnteredAt = row.lastActivityAt || row.receivedAt || null;
   const customerLabel = String(row.customerName || "").trim() || "Unknown customer";
-  const projectLabel = String(row.projectName || "").trim() || "Untitled project";
+  const projectLabel = String(row.projectName || "").trim() || "Project not named";
   const assignedRaw = String(row.assignedEstimatorLabel || "").trim();
   // Never surface truncated UUID stubs ("User 902c8f2c…") in the Command Center.
   const assignedLooksLikeIdStub = /^user\s+[0-9a-f-]{6,}/i.test(assignedRaw);
@@ -440,7 +440,7 @@ export function toCommandCenterItem(row = {}, opts = {}) {
     },
     openTarget: action.nextActionRoute,
     needsCompletionHint:
-      customerLabel === "Unknown customer" || projectLabel === "Untitled project",
+      customerLabel === "Unknown customer" || projectLabel === "Project not named",
     classificationWarning: stageKey === "unclassified" ? "Record could not be classified confidently." : null
   };
 }
