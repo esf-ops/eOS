@@ -2498,4 +2498,20 @@
 | **Tests** | `studioWorkspaceWorkflow.test.mjs`, `studioWorkspaceSequencing.ui.test.mjs`. |
 | **Impacted** | `studioWorkspaceWorkflow.mjs`, estimate service workflow attachment, Estimate Workflow header, Takeoff workspace, Scope panel, Project Details panel, `api.ts` transient helpers, this entry. |
 
+### 176. Published Studio estimates reopen in publication management (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/studio-published-estimate-reopen-flow` |
+| **Decision** | When the **active revision** already has a **current active Digital Estimate publication** (and calculation/approval remain current), Studio reopens in **publication-management** state — not the estimate-creation wizard. |
+| **Customer link** | Existing recovered staff customer URL is available immediately (Open customer view / Copy customer link) **without** recalculation, reapproval, or republish. |
+| **Read-only reopen** | Opening, loading, and refreshing are **read-only** for publication: they never publish, replace, revoke, notify, create reviews, mark sold, or write QB/Moraware. |
+| **Completed stages** | Project details, Manual Scope/Takeoff, Pricing, Calculation, and Approval remain **complete** and may be collapsed when focusing publication management. |
+| **Edits after publish** | Price-affecting edits create/activate a **new revision** and keep the prior publication as **frozen historical** output. Explicit replace remains required for a new customer link. |
+| **Metadata** | Metadata-only edits do **not** stale pricing (see §174) and do not mutate the frozen publication. |
+| **Explicit delivery** | Replace publication and Revoke publication remain **explicit** secondary actions. |
+| **SQL** | None. |
+| **Tests** | `studioPublicationSummary.test.mjs`, extended `studioWorkspaceWorkflow.test.mjs`, `studioPublishedReopen.ui.test.mjs`. |
+| **Impacted** | `studioPublicationSummary.mjs`, workspace workflow, digital-estimate readiness/summary read, estimate GET attach, EstimatePublicationSummary UI, Takeoff workspace focus/collapse, Review openTarget, this entry. |
+
 

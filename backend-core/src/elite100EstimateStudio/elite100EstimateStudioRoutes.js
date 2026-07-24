@@ -1065,13 +1065,37 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
             partnerAccountId: estimate.scope.partnerAccountId
           });
         }
+        // Bounded read-only publication summary for reopen — never mutates.
+        let estimateWithPublication = estimate;
+        if (
+          estimate?.id &&
+          studioDigitalEstimateService &&
+          typeof studioDigitalEstimateService.getWorkspacePublicationSummary === "function"
+        ) {
+          try {
+            const pub = await studioDigitalEstimateService.getWorkspacePublicationSummary(
+              organizationId,
+              estimate.id
+            );
+            if (pub?.estimate) estimateWithPublication = pub.estimate;
+            else if (pub?.publicationSummary) {
+              estimateWithPublication = {
+                ...estimate,
+                publication: pub.publicationSummary,
+                workflow: undefined
+              };
+            }
+          } catch {
+            // Non-fatal: workspace still opens; DE panel can load publication later.
+          }
+        }
         auditStudioEstimate("estimate.get_or_create", req, {
-          estimateId: estimate?.id,
+          estimateId: estimateWithPublication?.id,
           intakeCaseId: req.params.caseId,
-          status: estimate?.status,
-          revision: estimate?.revision
+          status: estimateWithPublication?.status,
+          revision: estimateWithPublication?.revision
         });
-        res.json({ ok: true, estimate, partnerAccount });
+        res.json({ ok: true, estimate: estimateWithPublication, partnerAccount });
       } catch (e) {
         logStudio("get estimate failed", e, req);
         res.status(Number(e?.statusCode) || 500).json({

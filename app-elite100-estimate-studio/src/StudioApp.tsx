@@ -680,6 +680,7 @@ export default function StudioApp() {
               setQueueReturnNav("command-center");
               setEstimateWorkspaceCaseId(caseId);
               setIntakeCaseId(caseId);
+              setWorkspaceFocus("review");
               setMainNav("estimate-workspace");
             }}
           />

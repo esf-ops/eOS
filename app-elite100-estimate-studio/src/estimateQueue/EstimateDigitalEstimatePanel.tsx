@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, apiPost, ApiError, isAbortError } from "../lib/api";
+import { apiGet, apiPost, ApiError, isAbortError, isTransientHttpError, transientFailureMessage } from "../lib/api";
 import {
   FRIENDLY_CUSTOMER_CHOICES,
   buildCustomerChoiceConfiguration,
@@ -133,6 +133,9 @@ type Props = {
   estimateRevision?: number | null;
   estimateApproved: boolean;
   onEditProjectDetails?: () => void;
+  /** Lifted safe publication summary — read-only; never triggers mutations. */
+  onPublicationSummary?: (publication: Record<string, unknown> | null) => void;
+  onPublicationRefreshError?: (message: string | null) => void;
 };
 
 function formatStructuredPublishError(e: ApiError): {
@@ -190,7 +193,9 @@ export default function EstimateDigitalEstimatePanel({
   estimateId,
   estimateRevision,
   estimateApproved,
-  onEditProjectDetails
+  onEditProjectDetails,
+  onPublicationSummary,
+  onPublicationRefreshError
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [publishUiState, setPublishUiState] = useState<PublishUiState>("idle");
@@ -312,8 +317,16 @@ export default function EstimateDigitalEstimatePanel({
             pricingValidThrough?: string | null;
             estimatorNotes?: string | null;
           } | null;
+          publicationSummary?: Record<string, unknown> | null;
+          estimate?: { publication?: Record<string, unknown> | null };
         };
         if (signal?.aborted) return;
+        const summary =
+          body.publicationSummary ||
+          body.estimate?.publication ||
+          null;
+        onPublicationSummary?.(summary);
+        onPublicationRefreshError?.(null);
         setEligible(Boolean(body.readiness?.eligible));
         const nextBlockers = Array.isArray(body.readiness?.blockingReasons)
           ? body.readiness!.blockingReasons!
@@ -380,7 +393,19 @@ export default function EstimateDigitalEstimatePanel({
         }
       } catch (e) {
         if (isAbortError(e) || signal?.aborted) return;
+        if (isTransientHttpError(e)) {
+          // Preserve last confirmed publication state — do not clear active link.
+          onPublicationRefreshError?.(
+            "Publication status could not be refreshed. " + transientFailureMessage(e)
+          );
+          return;
+        }
         if (e instanceof ApiError) {
+          if (e.status === 401 || e.status === 403) {
+            setCustomerUrl(null);
+            setLinkStatus(null);
+            onPublicationSummary?.(null);
+          }
           const formatted = formatStructuredPublishError(e);
           setLoadError(formatted.message);
         } else {
@@ -388,7 +413,14 @@ export default function EstimateDigitalEstimatePanel({
         }
       }
     },
-    [authToken, estimateApproved, estimateId, readinessQuery]
+    [
+      authToken,
+      estimateApproved,
+      estimateId,
+      readinessQuery,
+      onPublicationSummary,
+      onPublicationRefreshError
+    ]
   );
 
   useEffect(() => {
@@ -580,7 +612,12 @@ export default function EstimateDigitalEstimatePanel({
   const publishing = publishUiState === "publishing" || busy;
 
   return (
-    <section className="eq-estimate-section" aria-label="Digital Estimate" data-testid="eq-digital-estimate">
+    <section
+      className="eq-estimate-section"
+      aria-label="Digital Estimate"
+      data-testid="estimate-digital-estimate-panel"
+    >
+      <div data-testid="eq-digital-estimate">
       <h2>E. Digital Estimate</h2>
       <p className="eq-muted" data-testid="eq-de-revision">
         Estimate revision {estimateRevision ?? "—"}
@@ -1121,6 +1158,7 @@ export default function EstimateDigitalEstimatePanel({
           </ul>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }

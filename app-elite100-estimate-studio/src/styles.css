@@ -898,9 +898,31 @@ button.linkish {
   margin: 4px 0 0;
   padding-left: 1.1rem;
 }
-.eq-workflow-current h3 {
-  margin: 2px 0 6px;
-  font-size: 1.15rem;
+.eq-publication-summary {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--eos-border, #d8dde6);
+  border-radius: 8px;
+  background: #f7faf7;
+}
+.eq-publication-summary-head h3 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+}
+.eq-publication-secondary {
+  opacity: 0.92;
+}
+.eq-completed-sections {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px dashed var(--eos-border, #d8dde6);
+  border-radius: 8px;
+}
+.eq-completed-sections ul {
+  margin: 4px 0 10px;
+  padding-left: 1.1rem;
 }
 .eq-attachment-row {
   display: flex; flex-wrap: wrap; gap: 4px 12px;

@@ -1,6 +1,6 @@
 /**
  * Studio estimate workspace workflow — one next action per active revision.
- * Pure derivation from estimate DTO + optional client dirty flags.
+ * Pure derivation from estimate DTO + optional client dirty flags + publication summary.
  * Never performs mutations or delivery actions.
  */
 
@@ -39,11 +39,13 @@ function isConfirmedManualPhysicalScope(scope) {
  *   projectNameReady: boolean,
  *   isManual: boolean,
  *   historicalApproval: null|{ revision: number|null, approvedAt: string|null, exactInternalTotal: number|null, label: string },
+ *   publication: object|null,
  *   display: {
  *     calculationLabel: string,
  *     approvalLabel: string,
  *     manualScopeLabel: string,
- *     statusBanner: string|null
+ *     statusBanner: string|null,
+ *     publicationLabel: string|null
  *   }
  * }} StudioWorkspaceWorkflow
  */
@@ -54,7 +56,8 @@ function isConfirmedManualPhysicalScope(scope) {
  *   manualScopeDirty?: boolean,
  *   pricingDirty?: boolean,
  *   projectDetailsDirty?: boolean,
- *   historicalApproval?: object|null
+ *   historicalApproval?: object|null,
+ *   publication?: object|null
  * }} [client]
  * @returns {StudioWorkspaceWorkflow}
  */
@@ -90,6 +93,19 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
   const manualScopeDirty = client.manualScopeDirty === true;
   const pricingDirty = client.pricingDirty === true;
   const superseded = status === STUDIO_ESTIMATE_STATUSES.SUPERSEDED;
+  const publication =
+    (client.publication && typeof client.publication === "object"
+      ? client.publication
+      : null) ||
+    (estimate?.publication && typeof estimate.publication === "object"
+      ? estimate.publication
+      : null) ||
+    (estimate?.publicationSummary && typeof estimate.publicationSummary === "object"
+      ? estimate.publicationSummary
+      : null);
+
+  const publicationActive = publication?.active === true;
+  const publicationHistorical = publication?.historical === true && !publicationActive;
 
   /** @type {string[]} */
   const completedSteps = [];
@@ -114,6 +130,7 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
   if (calculationCurrent) completedSteps.push("calculated");
   if (approvalCurrent) completedSteps.push("approved");
   if (projectNamePublishReady) completedSteps.push("project_named");
+  if (publicationActive) completedSteps.push("published");
 
   let nextRequiredAction = null;
   let nextRequiredActionLabel = null;
@@ -185,6 +202,10 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
         action: "calculate"
       });
     }
+    // Prior publication may exist but must not override a stale new revision.
+    if (publicationHistorical || publication?.publicationId) {
+      laterSteps.push("replace_publication");
+    }
   } else if (!approvalCurrent) {
     currentStage = "approval_required";
     nextRequiredAction = "approve";
@@ -211,6 +232,39 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
       message: nextRequiredActionDetail,
       action: "edit_project_details"
     });
+  } else if (publicationActive) {
+    // Current approved revision with an active publication — publication management.
+    currentStage = "published";
+    if (publication.reviewRequestOpen || publication.state === "customer_review_requested") {
+      nextRequiredAction = "review_customer_request";
+      nextRequiredActionLabel = "Review customer request";
+      nextRequiredActionDetail = "A customer review request is open for this publication.";
+      allowed.add("review_customer_request");
+    } else if (publication.state === "publication_link_unavailable") {
+      nextRequiredAction = "open_publication_details";
+      nextRequiredActionLabel = "View publication details";
+      nextRequiredActionDetail =
+        "The publication exists, but the staff customer link could not be recovered.";
+      allowed.add("open_publication_details");
+      allowed.add("refresh_status");
+    } else {
+      nextRequiredAction = "wait_for_customer";
+      nextRequiredActionLabel =
+        publication.statusLabel || "Published — waiting on customer";
+      nextRequiredActionDetail =
+        "This Digital Estimate is published. Open or copy the existing customer link — do not recalculate or republish unless you intentionally replace the publication.";
+      allowed.add("open_customer_view");
+      allowed.add("copy_customer_link");
+    }
+    allowed.add("open_publication_details");
+    allowed.add("view_scope");
+    allowed.add("view_pricing");
+    allowed.add("view_approval");
+    allowed.add("replace_publication");
+    allowed.add("revoke_publication");
+    allowed.add("configure_digital_estimate");
+    if (isManual) allowed.add("edit_manual_scope");
+    allowed.add("save_pricing");
   } else {
     currentStage = "ready_to_publish";
     nextRequiredAction = "configure_digital_estimate";
@@ -222,6 +276,9 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
     allowed.add("edit_project_details");
     if (isManual) allowed.add("edit_manual_scope");
     allowed.add("save_pricing");
+    if (publicationHistorical) {
+      laterSteps.push("replace_publication");
+    }
   }
 
   // Always allow refresh / project metadata edits that don't stale pricing.
@@ -266,6 +323,8 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
         ? "Manual scope confirmed"
         : "Manual scope not confirmed";
 
+  const publicationLabel = publication?.statusLabel || null;
+
   return {
     currentStage,
     nextRequiredAction,
@@ -285,13 +344,15 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
     projectNameReady,
     isManual,
     historicalApproval,
+    publication: publication || null,
     display: {
       calculationLabel,
       approvalLabel,
       manualScopeLabel,
       statusBanner: estimate?.staleReason
         ? String(estimate.staleReason)
-        : nextRequiredActionDetail
+        : publicationLabel || nextRequiredActionDetail,
+      publicationLabel
     }
   };
 }

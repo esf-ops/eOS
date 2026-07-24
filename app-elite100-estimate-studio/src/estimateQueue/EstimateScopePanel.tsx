@@ -223,6 +223,8 @@ type Props = {
   customerHint?: string;
   projectHint?: string;
   workflow?: WorkspaceWorkflow | null;
+  collapseCompleted?: boolean;
+  onExpandCompleted?: () => void;
   onEditManualScope?: () => void;
   onEditProjectDetails?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -233,6 +235,8 @@ type Props = {
     meta?: { revision?: number; previousRevisionSummary?: unknown }
   ) => void;
   onTransientFailure?: (err: unknown, retry?: (() => void) | null) => void;
+  onPublicationSummary?: (publication: Record<string, unknown> | null) => void;
+  onPublicationRefreshError?: (message: string | null) => void;
 };
 
 const MATERIAL_GROUPS = [
@@ -258,13 +262,17 @@ export default function EstimateScopePanel({
   customerHint = "",
   projectHint = "",
   workflow: workflowProp = null,
+  collapseCompleted = false,
+  onExpandCompleted,
   onEditManualScope,
   onEditProjectDetails,
   onDirtyChange,
   onBusyChange,
   onCanonicalEstimate,
   onActiveEstimateChange,
-  onTransientFailure
+  onTransientFailure,
+  onPublicationSummary,
+  onPublicationRefreshError
 }: Props) {
   const [estimate, setEstimate] = useState<StudioEstimate | null>(null);
   const [partnerAccount, setPartnerAccount] = useState<PartnerAccountOption | null>(null);
@@ -814,6 +822,26 @@ export default function EstimateScopePanel({
         </div>
       ) : null}
 
+      {collapseCompleted && !actionError && !dirty ? (
+        <section className="eq-estimate-section" data-testid="eq-scope-collapsed" aria-label="Completed pricing">
+          <h2>Pricing &amp; approval — complete</h2>
+          <p className="eq-muted">
+            Calculation and approval are current for revision {estimate.revision ?? 1}. Open details only
+            if you need to change scope or pricing.
+          </p>
+          <button
+            type="button"
+            className="eq-btn-ghost"
+            data-testid="eq-expand-pricing-sections"
+            onClick={() => onExpandCompleted?.()}
+          >
+            View pricing and approval details
+          </button>
+        </section>
+      ) : null}
+
+      {!(collapseCompleted && !actionError && !dirty) ? (
+      <>
       <section className="eq-estimate-section" aria-label="Takeoff gate">
         <h2>A. Takeoff</h2>
         <dl className="eq-status-dl" data-testid="eq-estimate-status-meta">
@@ -2192,13 +2220,18 @@ export default function EstimateScopePanel({
         </div>
       </section>
 
-      {approvalCurrent ? (
+      </>
+      ) : null}
+
+      {approvalCurrent || workflow?.currentStage === "published" || workflow?.publication?.active ? (
         <EstimateDigitalEstimatePanel
           authToken={authToken}
           estimateId={estimate.id}
           estimateRevision={estimate.revision ?? null}
           estimateApproved
           onEditProjectDetails={onEditProjectDetails}
+          onPublicationSummary={onPublicationSummary}
+          onPublicationRefreshError={onPublicationRefreshError}
         />
       ) : null}
     </div>
