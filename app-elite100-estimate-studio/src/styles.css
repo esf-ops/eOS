@@ -2004,15 +2004,49 @@ button.linkish {
 }
 .manual-scope-room-head,
 .manual-scope-piece {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.55rem 0.75rem;
+  align-items: end;
+  margin-bottom: 0.65rem;
+}
+.manual-scope-room-head label,
+.manual-scope-piece label,
+.manual-scope-backsplash label,
+.manual-scope-cutouts label {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  align-items: center;
-  margin-bottom: 0.45rem;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.86rem;
+}
+.manual-scope-subsection {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.95rem;
+}
+.manual-scope-backsplash,
+.manual-scope-cutouts {
+  border: 1px solid var(--eos-border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  margin: 0.65rem 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.55rem;
+}
+.manual-scope-backsplash legend,
+.manual-scope-cutouts legend {
+  padding: 0 0.25rem;
+  font-weight: 600;
+}
+.manual-scope-room-summary {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
 }
 .manual-scope-piece input[type="number"],
 .manual-scope-room-head input,
-.manual-scope-piece input[type="text"] {
+.manual-scope-piece input[type="text"],
+.manual-scope-backsplash input,
+.manual-scope-cutouts input {
   min-width: 5rem;
 }
 .manual-scope-summary {

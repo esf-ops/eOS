@@ -1,6 +1,6 @@
 /**
- * Manual physical scope editor — produces the same normalized room/piece shape
- * as Takeoff-seeded scope. Confirmation is a separate explicit API call.
+ * Manual physical scope editor — authoritative measured geometry for manual estimates.
+ * Confirmation is a separate explicit API call. Saving never publishes.
  */
 import React, { useEffect, useState } from "react";
 import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
@@ -18,12 +18,21 @@ type PieceDraft = {
   notes: string;
 };
 
+type BacksplashDraft = {
+  includeBacksplash: boolean;
+  backsplashHeightMode: "none" | "standard" | "custom" | "full_height";
+  backsplashMeasuredLengthIn: number;
+  backsplashHeightIn: number;
+  backsplashNotes: string;
+};
+
 type RoomDraft = {
   id: string;
   name: string;
   roomType: string;
   included: boolean;
   pieces: PieceDraft[];
+  backsplash: BacksplashDraft;
 };
 
 type Props = {
@@ -39,7 +48,6 @@ const PIECE_TYPES = [
   { value: "island", label: "Island" },
   { value: "vanity_top", label: "Vanity top (standard countertop pricing)" },
   { value: "bar_top", label: "Bar top" },
-  { value: "backsplash", label: "Backsplash" },
   { value: "waterfall", label: "Waterfall panel" },
   { value: "fireplace", label: "Fireplace piece" },
   { value: "shower", label: "Shower piece" },
@@ -47,8 +55,25 @@ const PIECE_TYPES = [
   { value: "other", label: "Other / manual piece" }
 ];
 
+const CUTOUT_FIELDS = [
+  { key: "qty-sink" as const, label: "Kitchen sink openings" },
+  { key: "qty-bar" as const, label: "Vanity / bar sink openings" },
+  { key: "qty-cook" as const, label: "Cooktop openings" },
+  { key: "qty-outlet" as const, label: "Electrical outlet openings" }
+];
+
 function rid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function emptyBacksplash(): BacksplashDraft {
+  return {
+    includeBacksplash: false,
+    backsplashHeightMode: "none",
+    backsplashMeasuredLengthIn: 0,
+    backsplashHeightIn: 4,
+    backsplashNotes: ""
+  };
 }
 
 function emptyPiece(): PieceDraft {
@@ -72,36 +97,69 @@ function emptyRoom(name = "Kitchen"): RoomDraft {
     name,
     roomType: name === "Kitchen" ? "Kitchen" : "Other",
     included: true,
-    pieces: [emptyPiece()]
+    pieces: [emptyPiece()],
+    backsplash: emptyBacksplash()
   };
+}
+
+function backsplashSqft(bs: BacksplashDraft): number {
+  if (!bs.includeBacksplash || bs.backsplashHeightMode === "none") return 0;
+  const L = Number(bs.backsplashMeasuredLengthIn) || 0;
+  const H =
+    bs.backsplashHeightMode === "standard"
+      ? Number(bs.backsplashHeightIn) > 0
+        ? Number(bs.backsplashHeightIn)
+        : 4
+      : Number(bs.backsplashHeightIn) || 0;
+  if (L <= 0 || H <= 0) return 0;
+  return Math.round(((L * H) / 144) * 100) / 100;
+}
+
+function pieceSqft(p: PieceDraft): number {
+  if (p.measurementMode === "direct_area") return Number(p.sqft) || 0;
+  const L = Number(p.lengthIn) || 0;
+  const D = Number(p.depthIn) || 0;
+  return L > 0 && D > 0 ? Math.round(((L * D) / 144) * 100) / 100 : 0;
 }
 
 function roomsFromScope(scope: Record<string, unknown> | null): RoomDraft[] {
   const rooms = Array.isArray(scope?.rooms) ? scope!.rooms : [];
   if (!rooms.length) return [emptyRoom()];
-  return rooms.map((r: any) => ({
-    id: String(r.id || rid("room")),
-    name: String(r.name || "Room"),
-    roomType: String(r.roomType || "Other"),
-    included: r.included !== false,
-    pieces: (Array.isArray(r.pieces) ? r.pieces : []).map((p: any) => {
-      const fe = p.finishedEdge || {};
-      const totalIn = Number(fe.totalFinishedEdgeLengthIn) || 0;
-      return {
-        id: String(p.id || rid("piece")),
-        name: String(p.name || "Piece"),
-        pieceType: String(p.pieceType || "counter"),
-        included: p.included !== false,
-        measurementMode:
-          p.measurementMode === "direct_area" || p.directAreaOverride ? "direct_area" : "dimensions",
-        lengthIn: Number(p.lengthIn) || 0,
-        depthIn: Number(p.depthIn) || 0,
-        sqft: Number(p.sqft) || 0,
-        finishedEdgeLf: totalIn ? Math.round((totalIn / 12) * 100) / 100 : 0,
-        notes: String(p.notes || "")
-      } as PieceDraft;
-    })
-  }));
+  return rooms.map((r: any) => {
+    const modeRaw = String(r.backsplashHeightMode || "none").toLowerCase();
+    const mode =
+      modeRaw === "standard" || modeRaw === "custom" || modeRaw === "full_height" ? modeRaw : "none";
+    return {
+      id: String(r.id || rid("room")),
+      name: String(r.name || "Room"),
+      roomType: String(r.roomType || "Other"),
+      included: r.included !== false,
+      pieces: (Array.isArray(r.pieces) ? r.pieces : []).map((p: any) => {
+        const fe = p.finishedEdge || {};
+        const totalIn = Number(fe.totalFinishedEdgeLengthIn) || 0;
+        return {
+          id: String(p.id || rid("piece")),
+          name: String(p.name || "Piece"),
+          pieceType: String(p.pieceType || "counter"),
+          included: p.included !== false,
+          measurementMode:
+            p.measurementMode === "direct_area" || p.directAreaOverride ? "direct_area" : "dimensions",
+          lengthIn: Number(p.lengthIn) || 0,
+          depthIn: Number(p.depthIn) || 0,
+          sqft: Number(p.sqft) || 0,
+          finishedEdgeLf: totalIn ? Math.round((totalIn / 12) * 100) / 100 : 0,
+          notes: String(p.notes || "")
+        } as PieceDraft;
+      }),
+      backsplash: {
+        includeBacksplash: r.includeBacksplash === true,
+        backsplashHeightMode: (r.includeBacksplash === true ? mode : "none") as BacksplashDraft["backsplashHeightMode"],
+        backsplashMeasuredLengthIn: Number(r.backsplashMeasuredLengthIn) || 0,
+        backsplashHeightIn: Number(r.backsplashHeightIn) || 4,
+        backsplashNotes: String(r.backsplashNotes || "")
+      }
+    };
+  });
 }
 
 function toApiRooms(rooms: RoomDraft[]) {
@@ -110,6 +168,14 @@ function toApiRooms(rooms: RoomDraft[]) {
     name: r.name,
     roomType: r.roomType,
     included: r.included,
+    includeBacksplash: r.backsplash.includeBacksplash && r.backsplash.backsplashHeightMode !== "none",
+    backsplashHeightMode: r.backsplash.includeBacksplash ? r.backsplash.backsplashHeightMode : "none",
+    backsplashMeasuredLengthIn: r.backsplash.backsplashMeasuredLengthIn,
+    backsplashHeightIn:
+      r.backsplash.backsplashHeightMode === "standard" && !(r.backsplash.backsplashHeightIn > 0)
+        ? 4
+        : r.backsplash.backsplashHeightIn,
+    backsplashNotes: r.backsplash.backsplashNotes,
     pieces: r.pieces.map((p) => ({
       id: p.id,
       name: p.name,
@@ -192,17 +258,6 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
   }, [dirty]);
 
   const includedRooms = rooms.filter((r) => r.included);
-  const includedPieces = includedRooms.flatMap((r) => r.pieces.filter((p) => p.included));
-  const totalSqft = includedPieces.reduce((s, p) => {
-    if (p.measurementMode === "direct_area") return s + (Number(p.sqft) || 0);
-    const L = Number(p.lengthIn) || 0;
-    const D = Number(p.depthIn) || 0;
-    return s + (L > 0 && D > 0 ? Math.round(((L * D) / 144) * 100) / 100 : 0);
-  }, 0);
-  const edgeByRoom = includedRooms.map((r) => ({
-    name: r.name,
-    lf: r.pieces.filter((p) => p.included).reduce((s, p) => s + (Number(p.finishedEdgeLf) || 0), 0)
-  }));
 
   async function saveDraft() {
     setSaveState("saving");
@@ -212,12 +267,7 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
       await apiPatch(
         `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/manual-scope`,
         authToken,
-        {
-          scope: {
-            rooms: toApiRooms(rooms),
-            addOns: cutouts
-          }
-        }
+        { scope: { rooms: toApiRooms(rooms), addOns: cutouts } }
       );
       setSaveState("saved");
       setConfirmed(false);
@@ -267,7 +317,11 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
   }
 
   if (loading) {
-    return <p className="muted" data-testid="manual-scope-loading">Loading manual scope…</p>;
+    return (
+      <p className="muted" data-testid="manual-scope-loading">
+        Loading manual scope…
+      </p>
+    );
   }
 
   return (
@@ -276,12 +330,23 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
         <div>
           <h3>Manual Scope</h3>
           <p className="muted">
-            Estimator-built physical scope. Same pricing engine as plan-based estimates. Saving never
-            publishes. Vanity pieces use standard countertop pricing (Vanity Program is a later phase).
+            Authoritative measured geometry for this estimate — rooms, pieces, finished edge,
+            backsplash, and openings. Pricing Setup consumes this after confirmation and does not
+            maintain a second measurement set.
           </p>
         </div>
         <p className="manual-scope-save-state" data-testid="manual-scope-save-state">
-          {confirmed ? "Manual scope confirmed" : dirty ? "Unsaved changes" : saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "failed" ? "Save failed" : "Ready"}
+          {confirmed
+            ? "Manual scope confirmed"
+            : dirty
+              ? "Unsaved changes"
+              : saveState === "saving"
+                ? "Saving…"
+                : saveState === "saved"
+                  ? "Saved"
+                  : saveState === "failed"
+                    ? "Save failed"
+                    : "Ready"}
         </p>
       </header>
 
@@ -298,200 +363,396 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
         </ul>
       ) : null}
 
-      {rooms.map((room, ri) => (
-        <article key={room.id} className="manual-scope-room" data-testid="manual-scope-room">
-          <div className="manual-scope-room-head">
-            <input
-              aria-label="Room name"
-              value={room.name}
-              onChange={(e) => {
-                const next = [...rooms];
-                next[ri] = { ...room, name: e.target.value };
-                markDirty(next);
-              }}
-            />
-            <select
-              aria-label="Room type"
-              value={room.roomType}
-              onChange={(e) => {
-                const next = [...rooms];
-                next[ri] = { ...room, roomType: e.target.value };
-                markDirty(next);
-              }}
-            >
-              {ROOM_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-            <label>
-              <input
-                type="checkbox"
-                checked={room.included}
-                onChange={(e) => {
-                  const next = [...rooms];
-                  next[ri] = { ...room, included: e.target.checked };
-                  markDirty(next);
-                }}
-              />{" "}
-              Included
-            </label>
-            <button
-              type="button"
-              className="eq-btn-secondary"
-              onClick={() => {
-                if (!window.confirm("Remove this room from the draft?")) return;
-                markDirty(rooms.filter((_, i) => i !== ri));
-              }}
-            >
-              Remove room
-            </button>
-          </div>
-
-          {room.pieces.map((piece, pi) => (
-            <div key={piece.id} className="manual-scope-piece" data-testid="manual-scope-piece">
-              <input
-                aria-label="Piece name"
-                value={piece.name}
-                onChange={(e) => {
-                  const next = [...rooms];
-                  const pieces = [...room.pieces];
-                  pieces[pi] = { ...piece, name: e.target.value };
-                  next[ri] = { ...room, pieces };
-                  markDirty(next);
-                }}
-              />
-              <select
-                aria-label="Piece type"
-                value={piece.pieceType}
-                onChange={(e) => {
-                  const next = [...rooms];
-                  const pieces = [...room.pieces];
-                  pieces[pi] = { ...piece, pieceType: e.target.value };
-                  next[ri] = { ...room, pieces };
-                  markDirty(next);
-                }}
-              >
-                {PIECE_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Measurement mode"
-                value={piece.measurementMode}
-                onChange={(e) => {
-                  const mode = e.target.value === "direct_area" ? "direct_area" : "dimensions";
-                  const next = [...rooms];
-                  const pieces = [...room.pieces];
-                  pieces[pi] = { ...piece, measurementMode: mode };
-                  next[ri] = { ...room, pieces };
-                  markDirty(next);
-                }}
-              >
-                <option value="dimensions">Dimensions</option>
-                <option value="direct_area">Direct area (estimator override)</option>
-              </select>
-              {piece.measurementMode === "dimensions" ? (
-                <>
-                  <label>
-                    Length (in)
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={piece.lengthIn || ""}
-                      onChange={(e) => {
-                        const next = [...rooms];
-                        const pieces = [...room.pieces];
-                        pieces[pi] = { ...piece, lengthIn: Number(e.target.value) || 0 };
-                        next[ri] = { ...room, pieces };
-                        markDirty(next);
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Depth (in)
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={piece.depthIn || ""}
-                      onChange={(e) => {
-                        const next = [...rooms];
-                        const pieces = [...room.pieces];
-                        pieces[pi] = { ...piece, depthIn: Number(e.target.value) || 0 };
-                        next[ri] = { ...room, pieces };
-                        markDirty(next);
-                      }}
-                    />
-                  </label>
-                </>
-              ) : (
-                <label>
-                  Approved SF
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={piece.sqft || ""}
-                    onChange={(e) => {
-                      const next = [...rooms];
-                      const pieces = [...room.pieces];
-                      pieces[pi] = { ...piece, sqft: Number(e.target.value) || 0 };
-                      next[ri] = { ...room, pieces };
-                      markDirty(next);
-                    }}
-                  />
-                </label>
-              )}
+      {rooms.map((room, ri) => {
+        const roomPieces = room.pieces.filter((p) => p.included);
+        const roomSf = roomPieces.reduce((s, p) => s + pieceSqft(p), 0);
+        const roomEdge = roomPieces.reduce((s, p) => s + (Number(p.finishedEdgeLf) || 0), 0);
+        const bsSf = backsplashSqft(room.backsplash);
+        return (
+          <article key={room.id} className="manual-scope-room" data-testid="manual-scope-room">
+            <div className="manual-scope-room-head">
               <label>
-                Finished edge LF
+                Room name
                 <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={piece.finishedEdgeLf || ""}
+                  value={room.name}
                   onChange={(e) => {
                     const next = [...rooms];
-                    const pieces = [...room.pieces];
-                    pieces[pi] = { ...piece, finishedEdgeLf: Number(e.target.value) || 0 };
-                    next[ri] = { ...room, pieces };
+                    next[ri] = { ...room, name: e.target.value };
                     markDirty(next);
                   }}
                 />
               </label>
               <label>
-                <input
-                  type="checkbox"
-                  checked={piece.included}
+                Room type
+                <select
+                  value={room.roomType}
                   onChange={(e) => {
                     const next = [...rooms];
-                    const pieces = [...room.pieces];
-                    pieces[pi] = { ...piece, included: e.target.checked };
-                    next[ri] = { ...room, pieces };
+                    next[ri] = { ...room, roomType: e.target.value };
+                    markDirty(next);
+                  }}
+                >
+                  {ROOM_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="eq-check">
+                <input
+                  type="checkbox"
+                  checked={room.included}
+                  onChange={(e) => {
+                    const next = [...rooms];
+                    next[ri] = { ...room, included: e.target.checked };
                     markDirty(next);
                   }}
                 />{" "}
                 Included
               </label>
+              <button
+                type="button"
+                className="eq-btn-secondary"
+                onClick={() => {
+                  if (!window.confirm("Remove this room from the draft?")) return;
+                  markDirty(rooms.filter((_, i) => i !== ri));
+                }}
+              >
+                Remove room
+              </button>
             </div>
-          ))}
-          <button
-            type="button"
-            className="eq-btn-secondary"
-            onClick={() => {
-              const next = [...rooms];
-              next[ri] = { ...room, pieces: [...room.pieces, emptyPiece()] };
-              markDirty(next);
-            }}
-          >
-            Add piece
-          </button>
-        </article>
-      ))}
+
+            <h4 className="manual-scope-subsection">Countertop pieces</h4>
+            {room.pieces.map((piece, pi) => (
+              <div key={piece.id} className="manual-scope-piece" data-testid="manual-scope-piece">
+                <label>
+                  Piece name
+                  <input
+                    value={piece.name}
+                    onChange={(e) => {
+                      const next = [...rooms];
+                      const pieces = [...room.pieces];
+                      pieces[pi] = { ...piece, name: e.target.value };
+                      next[ri] = { ...room, pieces };
+                      markDirty(next);
+                    }}
+                  />
+                </label>
+                <label>
+                  Type
+                  <select
+                    value={piece.pieceType}
+                    onChange={(e) => {
+                      const next = [...rooms];
+                      const pieces = [...room.pieces];
+                      pieces[pi] = { ...piece, pieceType: e.target.value };
+                      next[ri] = { ...room, pieces };
+                      markDirty(next);
+                    }}
+                  >
+                    {PIECE_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Measurement
+                  <select
+                    value={piece.measurementMode}
+                    onChange={(e) => {
+                      const next = [...rooms];
+                      const pieces = [...room.pieces];
+                      pieces[pi] = {
+                        ...piece,
+                        measurementMode: e.target.value as PieceDraft["measurementMode"]
+                      };
+                      next[ri] = { ...room, pieces };
+                      markDirty(next);
+                    }}
+                  >
+                    <option value="dimensions">Length × depth</option>
+                    <option value="direct_area">Direct area (SF)</option>
+                  </select>
+                </label>
+                {piece.measurementMode === "dimensions" ? (
+                  <>
+                    <label>
+                      Length (in)
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={piece.lengthIn || ""}
+                        onChange={(e) => {
+                          const next = [...rooms];
+                          const pieces = [...room.pieces];
+                          pieces[pi] = { ...piece, lengthIn: Number(e.target.value) || 0 };
+                          next[ri] = { ...room, pieces };
+                          markDirty(next);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Depth (in)
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={piece.depthIn || ""}
+                        onChange={(e) => {
+                          const next = [...rooms];
+                          const pieces = [...room.pieces];
+                          pieces[pi] = { ...piece, depthIn: Number(e.target.value) || 0 };
+                          next[ri] = { ...room, pieces };
+                          markDirty(next);
+                        }}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <label>
+                    Square footage
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={piece.sqft || ""}
+                      onChange={(e) => {
+                        const next = [...rooms];
+                        const pieces = [...room.pieces];
+                        pieces[pi] = { ...piece, sqft: Number(e.target.value) || 0 };
+                        next[ri] = { ...room, pieces };
+                        markDirty(next);
+                      }}
+                    />
+                  </label>
+                )}
+                <label>
+                  Finished edge (LF)
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={piece.finishedEdgeLf || ""}
+                    data-testid="manual-piece-finished-edge-lf"
+                    onChange={(e) => {
+                      const next = [...rooms];
+                      const pieces = [...room.pieces];
+                      pieces[pi] = { ...piece, finishedEdgeLf: Number(e.target.value) || 0 };
+                      next[ri] = { ...room, pieces };
+                      markDirty(next);
+                    }}
+                  />
+                </label>
+                <label className="eq-check">
+                  <input
+                    type="checkbox"
+                    checked={piece.included}
+                    onChange={(e) => {
+                      const next = [...rooms];
+                      const pieces = [...room.pieces];
+                      pieces[pi] = { ...piece, included: e.target.checked };
+                      next[ri] = { ...room, pieces };
+                      markDirty(next);
+                    }}
+                  />{" "}
+                  Included
+                </label>
+                <button
+                  type="button"
+                  className="eq-btn-secondary"
+                  onClick={() => {
+                    const next = [...rooms];
+                    next[ri] = { ...room, pieces: room.pieces.filter((_, i) => i !== pi) };
+                    markDirty(next);
+                  }}
+                >
+                  Remove piece
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              onClick={() => {
+                const next = [...rooms];
+                next[ri] = { ...room, pieces: [...room.pieces, emptyPiece()] };
+                markDirty(next);
+              }}
+            >
+              Add piece
+            </button>
+
+            <fieldset className="manual-scope-backsplash" data-testid="manual-scope-backsplash">
+              <legend>Backsplash</legend>
+              <label className="eq-check">
+                <input
+                  type="checkbox"
+                  checked={room.backsplash.includeBacksplash}
+                  onChange={(e) => {
+                    const next = [...rooms];
+                    const include = e.target.checked;
+                    next[ri] = {
+                      ...room,
+                      backsplash: {
+                        ...room.backsplash,
+                        includeBacksplash: include,
+                        backsplashHeightMode: include
+                          ? room.backsplash.backsplashHeightMode === "none"
+                            ? "standard"
+                            : room.backsplash.backsplashHeightMode
+                          : "none"
+                      }
+                    };
+                    markDirty(next);
+                  }}
+                />{" "}
+                Include backsplash
+              </label>
+              <label>
+                Type
+                <select
+                  value={
+                    room.backsplash.includeBacksplash
+                      ? room.backsplash.backsplashHeightMode
+                      : "none"
+                  }
+                  disabled={!room.backsplash.includeBacksplash}
+                  data-testid="manual-backsplash-mode"
+                  onChange={(e) => {
+                    const mode = e.target.value as BacksplashDraft["backsplashHeightMode"];
+                    const next = [...rooms];
+                    next[ri] = {
+                      ...room,
+                      backsplash: {
+                        ...room.backsplash,
+                        includeBacksplash: mode !== "none",
+                        backsplashHeightMode: mode,
+                        backsplashHeightIn:
+                          mode === "standard" && !(room.backsplash.backsplashHeightIn > 0)
+                            ? 4
+                            : room.backsplash.backsplashHeightIn
+                      }
+                    };
+                    markDirty(next);
+                  }}
+                >
+                  <option value="none">No backsplash</option>
+                  <option value="standard">Standard backsplash (4 in)</option>
+                  <option value="custom">Custom-height backsplash</option>
+                  <option value="full_height">Full-height backsplash</option>
+                </select>
+              </label>
+              <label>
+                Measured length (in)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={room.backsplash.backsplashMeasuredLengthIn || ""}
+                  disabled={!room.backsplash.includeBacksplash}
+                  data-testid="manual-backsplash-length"
+                  onChange={(e) => {
+                    const next = [...rooms];
+                    next[ri] = {
+                      ...room,
+                      backsplash: {
+                        ...room.backsplash,
+                        backsplashMeasuredLengthIn: Number(e.target.value) || 0
+                      }
+                    };
+                    markDirty(next);
+                  }}
+                />
+              </label>
+              <label>
+                Height (in)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={room.backsplash.backsplashHeightIn || ""}
+                  disabled={
+                    !room.backsplash.includeBacksplash ||
+                    room.backsplash.backsplashHeightMode === "none"
+                  }
+                  data-testid="manual-backsplash-height"
+                  onChange={(e) => {
+                    const h = Number(e.target.value) || 0;
+                    const next = [...rooms];
+                    next[ri] = {
+                      ...room,
+                      backsplash: {
+                        ...room.backsplash,
+                        backsplashHeightIn: h,
+                        backsplashHeightMode:
+                          h >= 48
+                            ? "full_height"
+                            : h > 4.5
+                              ? "custom"
+                              : room.backsplash.backsplashHeightMode === "full_height" ||
+                                  room.backsplash.backsplashHeightMode === "custom"
+                                ? room.backsplash.backsplashHeightMode
+                                : "standard"
+                      }
+                    };
+                    markDirty(next);
+                  }}
+                />
+              </label>
+              <p className="muted" data-testid="manual-backsplash-sqft">
+                Calculated: {bsSf.toFixed(2)} SF
+                {room.backsplash.includeBacksplash &&
+                room.backsplash.backsplashMeasuredLengthIn > 0
+                  ? ` (${room.backsplash.backsplashMeasuredLengthIn} in × ${
+                      room.backsplash.backsplashHeightMode === "standard" &&
+                      !(room.backsplash.backsplashHeightIn > 0)
+                        ? 4
+                        : room.backsplash.backsplashHeightIn
+                    } in)`
+                  : ""}
+              </p>
+              <label>
+                Estimator note
+                <input
+                  value={room.backsplash.backsplashNotes}
+                  disabled={!room.backsplash.includeBacksplash}
+                  onChange={(e) => {
+                    const next = [...rooms];
+                    next[ri] = {
+                      ...room,
+                      backsplash: { ...room.backsplash, backsplashNotes: e.target.value }
+                    };
+                    markDirty(next);
+                  }}
+                />
+              </label>
+            </fieldset>
+
+            <aside className="manual-scope-room-summary" data-testid="manual-scope-room-summary">
+              <strong>{room.name || "Room"}</strong>
+              <ul>
+                <li>Countertop: {roomSf.toFixed(2)} SF</li>
+                <li>Finished edge: {roomEdge.toFixed(2)} LF</li>
+                <li>
+                  Backsplash:{" "}
+                  {room.backsplash.includeBacksplash
+                    ? `${room.backsplash.backsplashMeasuredLengthIn || 0} in × ${
+                        room.backsplash.backsplashHeightMode === "standard" &&
+                        !(room.backsplash.backsplashHeightIn > 0)
+                          ? 4
+                          : room.backsplash.backsplashHeightIn || 0
+                      } in = ${bsSf.toFixed(2)} SF`
+                    : "none"}
+                </li>
+              </ul>
+            </aside>
+          </article>
+        );
+      })}
 
       <button
         type="button"
@@ -502,19 +763,23 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
         Add room
       </button>
 
-      <fieldset className="manual-scope-cutouts">
-        <legend>Cutout quantities (pricing keys)</legend>
-        {Object.entries(cutouts).map(([key, val]) => (
+      <fieldset className="manual-scope-cutouts" data-testid="manual-scope-openings">
+        <legend>Openings</legend>
+        <p className="muted">Physical opening counts for this estimate. Product model selection stays in Pricing Setup / Digital Estimate.</p>
+        {CUTOUT_FIELDS.map(({ key, label }) => (
           <label key={key}>
-            {key}
+            {label}
             <input
               type="number"
               min={0}
-              value={val}
+              step={1}
+              value={cutouts[key] || ""}
+              data-testid={`manual-opening-${key}`}
               onChange={(e) => {
-                setCutouts({ ...cutouts, [key]: Math.max(0, Math.floor(Number(e.target.value) || 0)) });
+                setCutouts((prev) => ({ ...prev, [key]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }));
                 setDirty(true);
                 setConfirmed(false);
+                setSaveState("idle");
               }}
             />
           </label>
@@ -523,17 +788,37 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
 
       <aside className="manual-scope-summary" data-testid="manual-scope-summary">
         <h4>Scope summary</h4>
-        <p>Rooms: {includedRooms.length}</p>
-        <p>Included pieces: {includedPieces.length}</p>
-        <p>Approved SF (approx): {totalSqft.toFixed(2)}</p>
         <ul>
-          {edgeByRoom.map((e) => (
-            <li key={e.name}>
-              {e.name} finished edge: {e.lf.toFixed(2)} LF
-            </li>
-          ))}
+          {includedRooms.map((r) => {
+            const sf = r.pieces.filter((p) => p.included).reduce((s, p) => s + pieceSqft(p), 0);
+            const edge = r.pieces.filter((p) => p.included).reduce((s, p) => s + (Number(p.finishedEdgeLf) || 0), 0);
+            const bs = backsplashSqft(r.backsplash);
+            return (
+              <li key={r.id}>
+                <strong>{r.name}</strong>
+                <ul>
+                  <li>Countertop: {sf.toFixed(2)} SF</li>
+                  <li>Finished edge: {edge.toFixed(2)} LF</li>
+                  <li>
+                    Backsplash:{" "}
+                    {r.backsplash.includeBacksplash
+                      ? `${r.backsplash.backsplashMeasuredLengthIn || 0} in × ${
+                          r.backsplash.backsplashHeightMode === "standard" &&
+                          !(r.backsplash.backsplashHeightIn > 0)
+                            ? 4
+                            : r.backsplash.backsplashHeightIn || 0
+                        } in = ${bs.toFixed(2)} SF`
+                      : "none"}
+                  </li>
+                </ul>
+              </li>
+            );
+          })}
+          <li>
+            Sink openings: {cutouts["qty-sink"]}; Vanity/bar: {cutouts["qty-bar"]}; Cooktop:{" "}
+            {cutouts["qty-cook"]}; Outlets: {cutouts["qty-outlet"]}
+          </li>
         </ul>
-        <p className="muted">Summary is for verification — not an alternate price calculator.</p>
       </aside>
 
       <div className="manual-scope-actions">
@@ -544,7 +829,7 @@ export default function ManualPhysicalScopeEditor({ authToken, caseId, estimateI
           disabled={saveState === "saving"}
           onClick={() => void saveDraft()}
         >
-          Save draft
+          Save Manual Scope
         </button>
         <button
           type="button"

@@ -8,6 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { STUDIO_SUPPORTED_ADDON_KEYS } from "./studioEstimateTypes.mjs";
+import { applyRoomBacksplashPatch } from "./studioRoomBacksplash.mjs";
 
 export const MANUAL_ESTIMATE_ORIGIN = "manual_staff";
 export const MANUAL_PHYSICAL_SCOPE_SOURCE = "manual_staff";
@@ -49,6 +50,21 @@ export const MANUAL_CUTOUT_ADDON_KEYS = Object.freeze([
   "qty-outlet"
 ]);
 
+/** Estimator-facing labels for cutout keys (never show raw keys as primary UI). */
+export const MANUAL_CUTOUT_LABELS = Object.freeze({
+  "qty-sink": "Kitchen sink openings",
+  "qty-bar": "Vanity / bar sink openings",
+  "qty-cook": "Cooktop openings",
+  "qty-outlet": "Electrical outlet openings"
+});
+
+export const MANUAL_BACKSPLASH_MODES = Object.freeze([
+  "none",
+  "standard",
+  "custom",
+  "full_height"
+]);
+
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
@@ -57,7 +73,7 @@ function sqftFromDimensions(lengthIn, depthIn) {
   const L = Number(lengthIn) || 0;
   const D = Number(depthIn) || 0;
   if (L <= 0 || D <= 0) return 0;
-  // Same conversion used by seedScopeFromTakeoffPayload.
+  // Same conversion used by seedScopeFromTakeoffPayload / applyRoomBacksplashPatch.
   return round2((L * D) / 144);
 }
 
@@ -216,6 +232,113 @@ export function normalizeManualPiece(piece, roomId) {
 }
 
 /**
+ * Normalize room-level backsplash geometry for manual physical scope.
+ * Uses the same length×height/144 conversion as Pricing Setup / Takeoff seed.
+ * @param {object} room
+ */
+export function normalizeManualRoomBacksplash(room) {
+  const modeRaw = String(room?.backsplashHeightMode || "").toLowerCase().trim();
+  let mode = MANUAL_BACKSPLASH_MODES.includes(modeRaw) ? modeRaw : "none";
+  const includeExplicit = room?.includeBacksplash;
+  const include =
+    includeExplicit === true ||
+    (includeExplicit !== false && mode !== "none" && Number(room?.backsplashMeasuredLengthIn) > 0);
+
+  if (!include || mode === "none") {
+    return {
+      includeBacksplash: false,
+      backsplashHeightMode: "none",
+      backsplashMeasuredLengthIn: Number(room?.backsplashMeasuredLengthIn) || 0,
+      backsplashHeightIn: Number(room?.backsplashHeightIn) || null,
+      backsplashSqft: 0,
+      backsplashSource: MANUAL_ESTIMATE_ORIGIN,
+      backsplashNotes: String(room?.backsplashNotes || "").slice(0, 2000)
+    };
+  }
+
+  let heightIn = Number(room?.backsplashHeightIn);
+  if (mode === "standard" && !(heightIn > 0)) heightIn = 4;
+  if (mode === "full_height" && !(heightIn > 0)) {
+    // Full-height without measured height: keep length; SF may be 0 until height entered.
+    heightIn = Number(room?.backsplashHeightIn) || 0;
+  }
+  if (heightIn >= 48) mode = "full_height";
+  else if (heightIn > 4.5 && mode === "standard") mode = "custom";
+
+  const patched = applyRoomBacksplashPatch(
+    {
+      includeBacksplash: true,
+      backsplashHeightMode: mode,
+      backsplashMeasuredLengthIn: Number(room?.backsplashMeasuredLengthIn) || 0,
+      backsplashHeightIn: heightIn > 0 ? heightIn : mode === "standard" ? 4 : heightIn,
+      backsplashSqft: room?.backsplashSqft,
+      backsplashSource: MANUAL_ESTIMATE_ORIGIN
+    },
+    {
+      includeBacksplash: true,
+      backsplashHeightMode: mode,
+      backsplashMeasuredLengthIn: Number(room?.backsplashMeasuredLengthIn) || 0,
+      backsplashHeightIn: heightIn > 0 ? heightIn : mode === "standard" ? 4 : heightIn
+    }
+  );
+
+  return {
+    includeBacksplash: true,
+    backsplashHeightMode: String(patched.backsplashHeightMode || mode),
+    backsplashMeasuredLengthIn: Number(patched.backsplashMeasuredLengthIn) || 0,
+    backsplashHeightIn: patched.backsplashHeightIn,
+    backsplashSqft: Number(patched.backsplashSqft) || 0,
+    backsplashSource: MANUAL_ESTIMATE_ORIGIN,
+    backsplashNotes: String(room?.backsplashNotes || "").slice(0, 2000)
+  };
+}
+
+/**
+ * Sum confirmed room finished-edge LF from piece geometry / room aggregates.
+ * Prefer piece finishedEdge totals; fall back to room.approvedFinishedEdgeLf.
+ * @param {object|null|undefined} scope
+ */
+export function sumManualConfirmedEdgeLf(scope) {
+  const rooms = Array.isArray(scope?.rooms) ? scope.rooms : [];
+  let total = 0;
+  for (const room of rooms) {
+    if (!room || room.included === false) continue;
+    const pieces = Array.isArray(room.pieces) ? room.pieces : [];
+    let roomLf = 0;
+    let fromPieces = false;
+    for (const p of pieces) {
+      if (!p || p.included === false) continue;
+      const totalIn = Number(p?.finishedEdge?.totalFinishedEdgeLengthIn);
+      if (Number.isFinite(totalIn) && totalIn > 0) {
+        roomLf += totalIn / 12;
+        fromPieces = true;
+      }
+    }
+    if (!fromPieces) {
+      roomLf = Number(room.approvedFinishedEdgeLf) || Number(room.edgeEligibleLinearFeet) || 0;
+    }
+    total += roomLf;
+  }
+  return round2(total);
+}
+
+/**
+ * Sync project-level edge LF fields from confirmed room/piece geometry so
+ * legacy Pricing Setup / pricing readers stay consistent without a second entry.
+ * @param {object} scope
+ */
+export function syncManualProjectEdgeFromRooms(scope) {
+  const lf = sumManualConfirmedEdgeLf(scope);
+  return {
+    ...scope,
+    edgeEligibleLinearFeet: lf,
+    // Keep edgeLinearFeet aligned with confirmed geometry so free-tier edge
+    // profiles cannot zero out physical LF used by customer upgrades.
+    edgeLinearFeet: lf
+  };
+}
+
+/**
  * Normalize rooms array from client draft into pricing-compatible rooms.
  * @param {unknown} roomsIn
  */
@@ -244,6 +367,7 @@ export function normalizeManualRooms(roomsIn) {
           0
         )
     );
+    const backsplash = normalizeManualRoomBacksplash(room);
     return {
       id,
       name,
@@ -253,7 +377,8 @@ export function normalizeManualRooms(roomsIn) {
       approvedFinishedEdgeLf: edgeLf,
       edgeEligibleLinearFeet: edgeLf,
       pieces,
-      notes: String(room?.notes || "").slice(0, 2000)
+      notes: String(room?.notes || "").slice(0, 2000),
+      ...backsplash
     };
   });
 }
@@ -292,11 +417,11 @@ export function applyNormalizedManualRooms(baseScope, draft) {
     ...(baseScope?.addOns && typeof baseScope.addOns === "object" ? baseScope.addOns : {}),
     ...normalizeManualAddOns(draft?.addOns)
   };
-  return {
+  return syncManualProjectEdgeFromRooms({
     ...baseScope,
     rooms,
     addOns
-  };
+  });
 }
 
 /**
@@ -316,6 +441,20 @@ export function validateManualScopeForConfirm(scope) {
   for (const room of rooms) {
     if (!String(room.name || "").trim()) {
       errors.push("Every room needs a name.");
+    }
+    if (room.includeBacksplash === true) {
+      const mode = String(room.backsplashHeightMode || "").toLowerCase();
+      if (mode === "none") {
+        errors.push(`Room "${room.name || room.id}" includes backsplash but mode is None.`);
+      }
+      if (!(Number(room.backsplashMeasuredLengthIn) > 0)) {
+        errors.push(`Room "${room.name || room.id}" needs measured backsplash length.`);
+      }
+      if (mode === "custom" || mode === "full_height") {
+        if (!(Number(room.backsplashHeightIn) > 0)) {
+          errors.push(`Room "${room.name || room.id}" needs backsplash height for ${mode} mode.`);
+        }
+      }
     }
     const pieces = Array.isArray(room.pieces) ? room.pieces.filter((p) => p && p.included !== false) : [];
     if (!pieces.length) {
@@ -360,6 +499,11 @@ export function manualScopeFingerprint(scope) {
       id: r.id,
       name: r.name,
       roomType: r.roomType,
+      includeBacksplash: r.includeBacksplash === true,
+      backsplashHeightMode: r.backsplashHeightMode || "none",
+      backsplashMeasuredLengthIn: r.backsplashMeasuredLengthIn ?? null,
+      backsplashHeightIn: r.backsplashHeightIn ?? null,
+      backsplashSqft: r.backsplashSqft ?? null,
       pieces: (Array.isArray(r.pieces) ? r.pieces : [])
         .filter((p) => p && p.included !== false)
         .map((p) => ({
