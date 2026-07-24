@@ -81,9 +81,19 @@ export function isStudioEstimateStatus(value) {
 export function emptyStudioEstimateScope() {
   return {
     customerName: "",
+    customerContactName: "",
+    customerEmail: "",
+    customerPhone: "",
     projectName: "",
     projectAddress: "",
+    /** Trusted partner pricing id (quote_partner_accounts) — never an Account Directory UUID. */
     partnerAccountId: null,
+    /** Live Account Directory refs (mirrored from studio_estimates columns). */
+    accountDirectoryAccountId: null,
+    accountDirectoryContactId: null,
+    accountDirectoryLocationId: null,
+    /** Frozen customer-safe identity snapshot (also stored as column). */
+    customerIdentitySnapshot: null,
     // New Studio estimates default to Wholesale. Saved scopes keep their basis.
     pricingBasis: "wholesale",
     materialGroup: "Group Promo",

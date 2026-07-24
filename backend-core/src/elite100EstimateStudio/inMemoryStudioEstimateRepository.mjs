@@ -122,6 +122,22 @@ export class InMemoryStudioEstimateRepository {
       status: input.status || STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
       revision: Number(current.revision || 1) + 1,
       scope: input.scope ?? current.scope,
+      accountDirectoryAccountId:
+        "accountDirectoryAccountId" in input
+          ? input.accountDirectoryAccountId
+          : current.accountDirectoryAccountId,
+      accountDirectoryContactId:
+        "accountDirectoryContactId" in input
+          ? input.accountDirectoryContactId
+          : current.accountDirectoryContactId,
+      accountDirectoryLocationId:
+        "accountDirectoryLocationId" in input
+          ? input.accountDirectoryLocationId
+          : current.accountDirectoryLocationId,
+      customerIdentitySnapshot:
+        "customerIdentitySnapshot" in input
+          ? input.customerIdentitySnapshot
+          : current.customerIdentitySnapshot,
       staleReason: input.staleReason ?? null,
       createdByUserId: actorUserId || current.createdByUserId
     });

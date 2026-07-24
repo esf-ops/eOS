@@ -816,7 +816,38 @@ button.linkish {
   margin: 2px 0 0;
   font-size: 0.9rem;
 }
-.eq-account-picker {
+.eq-account-directory {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+}
+.eq-ad-selected-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.eq-pill-muted { opacity: 0.85; }
+.eq-pill-ok { background: rgba(16, 122, 61, 0.12); color: #0c6e3a; }
+.eq-notice {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(180, 92, 12, 0.08);
+  border: 1px solid rgba(180, 92, 12, 0.2);
+  font-size: 0.85rem;
+}
+.eq-subsection-title {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5a6772;
+}
+
   grid-column: 1 / -1;
 }
 .eq-account-options {
