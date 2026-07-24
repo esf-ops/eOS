@@ -114,6 +114,16 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
         backsplashMeasuredLengthIn: r.backsplashMeasuredLengthIn ?? null,
         edgeLinearFeet:
           Number(r.edgeLinearFeet ?? r.edge_linear_feet ?? r.edgeFinalLf ?? r.edge_final_lf) || 0,
+        edgeQuantityAuthoritative:
+          r.edgeQuantityAuthoritative === true ||
+          r.edge_quantity_authoritative === true ||
+          // Legacy pubs: treat positive room LF as usable when present (already frozen).
+          (r.edgeQuantityAuthoritative == null &&
+            r.edge_quantity_authoritative == null &&
+            Number(r.edgeLinearFeet ?? r.edge_linear_feet ?? r.edgeFinalLf ?? 0) > 0),
+        edgeQuantitySource: r.edgeQuantitySource || r.edge_quantity_source || null,
+        edgeQuantityMissingReason:
+          r.edgeQuantityMissingReason || r.edge_quantity_missing_reason || null,
         baselineMaterialGroup: groupCode,
         baselineMaterialLabel: GROUP_CODE_DISPLAY_NAMES[groupCode] || String(groupRaw || ""),
         colorLabel: r.colorName || r.color_name || r.colorLabel || null,
@@ -467,13 +477,14 @@ export async function buildTrustedConfigurationContext(args) {
       null
   );
 
-  // Project-level governed open-edge LF (Studio freezes onto rooms; also keep
-  // an aggregate so premium edge option effects never fail for missing per-room LF).
+  // Sum of room-frozen open-edge LF (authoritative when rooms carry quantities).
+  // Do NOT seed project finalLf onto a room — that caused multi-room overcharges.
   let edgeLinearFeetTotal = rooms.reduce(
     (s, r) => s + (Number(r.edgeLinearFeet) || 0),
     0
   );
-  // Recover from additive project freeze fields when room rows predate per-room LF.
+  // Legacy publications may expose only a project aggregate without per-room LF.
+  // Preserve the aggregate for diagnostics; never manufacture per-room LF values.
   if (!(edgeLinearFeetTotal > 0)) {
     const fromIu =
       Number(
@@ -491,10 +502,11 @@ export async function buildTrustedConfigurationContext(args) {
     const recovered = fromIu > 0 ? fromIu : fromFabrication;
     if (recovered > 0) {
       edgeLinearFeetTotal = recovered;
-      // Seed the first countertop room so room-scoped option resolution finds LF.
-      const target = rooms.find((r) => Number(r.chargeableCounterSf) > 0) || rooms[0];
-      if (target && !(Number(target.edgeLinearFeet) > 0)) {
-        target.edgeLinearFeet = recovered;
+      // Legacy marker only — rooms stay without manufactured LF.
+      for (const r of rooms) {
+        if (r && r.edgeQuantityAuthoritative == null) {
+          r.edgeQuantityLegacyProjectAggregate = true;
+        }
       }
     }
   }

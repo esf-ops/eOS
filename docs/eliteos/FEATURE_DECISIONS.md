@@ -2141,10 +2141,25 @@
 | **Publication drop point (fixed)** | `studioEstimatePublicationAdapter.mjs` `buildCustomerSafeCalculationSnapshotCopy` previously froze rooms / `edge_linear_feet_total` but never froze per-profile option effects. Now freezes customer-safe `internal_ui.edge_option_effects` (profile, classification, originalSelection, available, reviewRequired, priceEffectCents, priceEffectLabel, roomKey/roomName). Never includes LF, rate, pricing basis, cost, margin, or internal IDs in those rows. |
 | **Runtime priority** | (1) frozen `edge_option_effects` → (2) trusted-context LF × rate for unpublished/preview / legacy pubs → (3) review-required only when no authoritative effect exists. Published Digital Estimates must not silently replace a frozen effect with a runtime recomputation. |
 | **Save** | Premium selection uses frozen `priceEffectCents` as one room Add-ons line (`Edge — {profile}`, qty 1, fixed absolute). No LF × rate in the frontend. Legacy pubs without freeze keep the prior LF × rate path. |
-| **Room ownership** | Temporary approved policy preserved: project-level priced open-edge LF (and therefore frozen effects’ `roomKey`) is assigned to the **first countertop room**. Digital Estimate must not re-guess ownership across rooms. |
+| **Room ownership** | **Superseded by §165.** Historical temporary policy assigned project-level priced open-edge LF to the first countertop room. New publications freeze per-room approved eligible LF instead. |
 | **Legacy** | Publications without `edge_option_effects` may still fall back to trusted-context calculation / “Elite will confirm…” when evidence is absent. Newly published revisions that contain calculated effects must not show review-required for those premium profiles. |
 | **SQL / env** | None. |
 | **Deployment surfaces** | `backend-core` (publication adapter, trusted context, public configuration). No manual deployment. |
+
+### 165. Digital Estimate room-scoped edge upgrade pricing (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/digital-estimate-room-edge-pricing` |
+| **Problem** | Customer upgraded edge on one room was priced using **project-wide** approved open-edge LF (`fabrication.edge.finalLf`), because `buildStudioEstimateRoomsForPublication` assigned that aggregate to the first countertop room (§150 temporary ownership). Kitchen 8 LF + Bath 12 LF → Kitchen Small Ogee charged 20 × rate. |
+| **Root cause** | `studioEstimatePublicationAdapter.mjs` `buildStudioEstimateRoomsForPublication` (`edgeAssigned` / `edgeLinearFeet = finalEdgeLf`) + `buildCustomerSafeEdgeOptionEffects(finalPricedEdgeLf=project)` + runtime fallbacks to `edgeLinearFeetTotal`. |
+| **Fix** | `resolveRoomApprovedEligibleEdgeLf` (approved piece finished-edge sum, else room-level persisted LF). Freeze per-room `edgeLinearFeet` + per-room `edge_option_effects`. Never substitute project `finalLf` for a room. Missing room LF → premium `review_required` (estimator confirm), not project total. |
+| **Legacy** | Existing publications remain frozen historically. Trusted context no longer seeds project aggregate onto rooms. Legacy frozen effects stay room-bound via `findFrozenEdgeOptionEffect(..., roomKey)`. |
+| **UI** | Edge control already room-scoped in Digital Estimate; pricing/labels corrected without project-global control. |
+| **SQL / env** | None. |
+| **Tests** | `eos:test:room-scoped-edge-pricing`, updated `publishCalculatedEdgeEffects` / `studioEdgeScope`. |
+| **Impacted** | `studioEstimatePublicationAdapter.mjs`, `studioRoomEdgeQuantity.mjs`, `studioEdgeAuthority.mjs`, `publicConfigurationService.mjs`, `configurationTrustedContext.mjs`, this entry. |
+| **Delivery safety** | No automatic publish, email, or notification. |
 
 ### 151. Digital Estimate atomic save + Studio publication readiness (2026-07-21)
 

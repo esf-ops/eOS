@@ -77,7 +77,26 @@ function studioEstimateFixture(overrides = {}) {
           included: true,
           countertopSqft: 40,
           backsplashSqft: 0,
-          pieces: []
+          pieces: [
+            {
+              id: "k-run",
+              name: "Kitchen run",
+              pieceType: "counter",
+              lengthIn: Math.round(LF * 12 * 100) / 100,
+              depthIn: 25.5,
+              sqft: 40,
+              included: true,
+              finishedEdge: {
+                frontEdgeLengthIn: Math.round(LF * 12 * 100) / 100,
+                leftExposedEdgeLengthIn: 0,
+                rightExposedEdgeLengthIn: 0,
+                otherExposedEdgeLengthIn: 0,
+                totalFinishedEdgeLengthIn: Math.round(LF * 12 * 100) / 100,
+                approved: true,
+                source: "estimator_confirmed"
+              }
+            }
+          ]
         },
         {
           id: "bath",
@@ -114,25 +133,26 @@ function studioEstimateFixture(overrides = {}) {
 {
   const header = buildSyntheticQuoteHeaderFromStudioEstimate(studioEstimateFixture());
   const effects = header.calculation_snapshot.internal_ui.edge_option_effects;
-  assert.ok(Array.isArray(effects) && effects.length === 8);
+  // Per-room effects: 8 profiles × 2 rooms
+  assert.ok(Array.isArray(effects) && effects.length === 16);
 
-  const eased = findFrozenEdgeOptionEffect(effects, "edge_eased");
+  const eased = findFrozenEdgeOptionEffect(effects, "edge_eased", "kitchen");
   assert.equal(eased.classification, "included");
   assert.equal(eased.originalSelection, true);
   assert.equal(eased.priceEffectCents, 0);
   assert.equal(eased.priceEffectLabel, "Original selection");
   assert.equal(eased.reviewRequired, false);
-  assert.equal(eased.roomKey, "kitchen", "temporary policy: first countertop room owns edge");
+  assert.equal(eased.roomKey, "kitchen");
 
   for (const free of FREE_EDGE_PROFILES.filter((p) => p.optionToken !== "edge_eased")) {
-    const row = findFrozenEdgeOptionEffect(effects, free.optionToken);
+    const row = findFrozenEdgeOptionEffect(effects, free.optionToken, "kitchen");
     assert.equal(row.priceEffectLabel, "Included");
     assert.equal(row.priceEffectCents, 0);
     assert.equal(row.reviewRequired, false);
   }
 
   for (const premium of PREMIUM_EDGE_PROFILES) {
-    const row = findFrozenEdgeOptionEffect(effects, premium.optionToken);
+    const row = findFrozenEdgeOptionEffect(effects, premium.optionToken, "kitchen");
     assert.equal(row.classification, "premium");
     assert.equal(row.priceEffectCents, EXPECTED_PREMIUM_CENTS);
     assert.match(row.priceEffectLabel, /^\+\$/);
@@ -142,7 +162,8 @@ function studioEstimateFixture(overrides = {}) {
 
   const rooms = buildStudioEstimateRoomsForPublication(studioEstimateFixture());
   assert.equal(rooms[0].edgeLinearFeet, LF);
-  assert.equal(rooms[1].edgeLinearFeet, 0, "second room must not duplicate project edge LF");
+  assert.equal(rooms[1].edgeLinearFeet, 0, "bath has no approved piece edge LF");
+  assert.equal(rooms[0].edgeQuantityAuthoritative, true);
 
   const frozenJson = JSON.stringify(effects);
   assert.equal(frozenJson.includes("ratePerLf"), false);
@@ -296,7 +317,7 @@ function studioEstimateFixture(overrides = {}) {
   const effects = buildSyntheticQuoteHeaderFromStudioEstimate(studioEstimateFixture())
     .calculation_snapshot.internal_ui.edge_option_effects;
   for (const premium of PREMIUM_EDGE_PROFILES) {
-    const frozen = findFrozenEdgeOptionEffect(effects, premium.optionToken);
+    const frozen = findFrozenEdgeOptionEffect(effects, premium.optionToken, "kitchen");
     const mapped = edgeEffectFromFrozenPublication(frozen);
     assert.equal(mapped.reviewRequired || mapped.customerPriceTreatment === "review_required", false);
     assert.notEqual(mapped.priceEffectLabel, "Elite will confirm this option and price.");

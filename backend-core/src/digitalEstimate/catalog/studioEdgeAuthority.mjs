@@ -317,18 +317,31 @@ export function buildCustomerSafeEdgeOptionEffects(args) {
 }
 
 /**
- * Lookup a frozen customer-safe edge effect by profile token.
+ * Lookup a frozen customer-safe edge effect by profile token (and optional room).
+ * When roomKey is provided and effects carry roomKey, never apply another room's
+ * frozen cents to this room (legacy project-owner effects stay room-bound).
+ *
  * @param {Array<object>|null|undefined} effects
  * @param {string} profileToken
+ * @param {string|null|undefined} [roomKey]
  */
-export function findFrozenEdgeOptionEffect(effects, profileToken) {
+export function findFrozenEdgeOptionEffect(effects, profileToken, roomKey = null) {
   const token = normalizeEdgeProfileToken(profileToken);
   if (!Array.isArray(effects) || !effects.length) return null;
-  return (
-    effects.find(
-      (e) => normalizeEdgeProfileToken(e?.profileKey || e?.profile) === token
-    ) || null
+  const matches = effects.filter(
+    (e) => normalizeEdgeProfileToken(e?.profileKey || e?.profile) === token
   );
+  if (!matches.length) return null;
+  const wantRoom =
+    roomKey != null && String(roomKey).trim() !== "" ? String(roomKey).trim() : null;
+  if (wantRoom) {
+    const byRoom = matches.find((e) => String(e?.roomKey || "").trim() === wantRoom);
+    if (byRoom) return byRoom;
+    // Effects are room-scoped elsewhere — do not leak another room's price.
+    const anyRoomScoped = matches.some((e) => String(e?.roomKey || "").trim() !== "");
+    if (anyRoomScoped) return null;
+  }
+  return matches[0] || null;
 }
 
 /**

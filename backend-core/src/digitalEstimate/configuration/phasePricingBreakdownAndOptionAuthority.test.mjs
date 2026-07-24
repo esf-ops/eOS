@@ -83,6 +83,8 @@ function studioEstimateFixture() {
           countertopSqft: 40,
           backsplashSqft: 8,
           backsplashHeightMode: "standard",
+          approvedFinishedEdgeLf: 10.13,
+          edgeEligibleLinearFeet: 10.13,
           pieces: [
             {
               id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
