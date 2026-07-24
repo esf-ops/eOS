@@ -2382,4 +2382,16 @@
 | **Tests** | Existing Live DE suite + QB consistency regression + UI hierarchy/drawer contracts. |
 | **Impacted** | `LiveDigitalEstimatesPage`, `liveDigitalEstimatesService`, `accountDirectoryQuickbooksLinkage`, AD store batch link APIs, this entry. |
 
+### 168. Studio Review Requests list failure (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/studio-review-requests-list-error` |
+| **Symptom** | Review Requests tab showed `Unable to list review requests` (HTTP 500) with an empty table despite existing org-scoped rows. |
+| **Root cause** | `createSupabaseAmendmentRepository` omitted Studio enrichment methods (`listAmendmentsForRequest`, etc.). With ≥1 review request, `studioReviewRequestService.list` threw `TypeError` during enrichment. Zero rows would have returned 200. |
+| **Fix** | Complete the Supabase amendment repository surface to match the memory repository methods used by Studio review list/detail/actions. Harden list null/status handling. Frontend empty state only when `200 + []` (not on error). |
+| **SQL** | Not required — tables already exist in production. |
+| **Tests** | `eos:test:studio-review-requests-list`, Part 3 + Milestone 5 UI. |
+| **Impacted** | `amendmentRepository.mjs`, `studioReviewRequestService.mjs`, `ReviewWorkspace.tsx`, this entry. |
+
 
