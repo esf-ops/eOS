@@ -65,104 +65,14 @@ import {
   createSupabaseAmendmentRepository
 } from "../digitalEstimate/configuration/amendmentRepository.mjs";
 import { isDigitalEstimateReviewRequestsEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
-import {
-  buildDigitalEstimateCustomerUrl,
-  buildLinkRecoveryDiagnostics,
-  unwrapDigitalEstimateAccessTokenDetailed
-} from "../digitalEstimate/digitalEstimateTokenWrap.mjs";
+import { recoverStaffPublicationLinkMeta } from "../digitalEstimate/staffPublicationLinkRecovery.mjs";
 import { createLiveDigitalEstimatesService } from "./liveDigitalEstimatesService.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
+/** Publications + Live DE share the same staff-safe link recovery authority. */
 async function staffLinkMetaForPublication(repository, organizationId, pub, env) {
-  if (!pub?.id) {
-    return {
-      customerUrl: null,
-      linkStatus: null,
-      linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, { code: null })
-    };
-  }
-  if (pub.status === "revoked" || pub.revoked_at) {
-    return { customerUrl: null, linkStatus: "revoked" };
-  }
-  if (pub.status === "superseded" || pub.superseded_at) {
-    return { customerUrl: null, linkStatus: "superseded" };
-  }
-  if (pub.status !== "active") {
-    return { customerUrl: null, linkStatus: String(pub.status || "invalid") };
-  }
-  if (typeof repository.getActiveTokenForPublication !== "function") {
-    return {
-      customerUrl: null,
-      linkStatus: "recovery_error",
-      linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
-        code: "active_token_lookup_unavailable",
-        decryptSucceeded: false
-      }),
-      linkError: {
-        code: "active_token_lookup_unavailable",
-        message: "Customer link recovery is unavailable on this Brain."
-      }
-    };
-  }
-  try {
-    const counts =
-      typeof repository.countTokensForPublication === "function"
-        ? await repository.countTokensForPublication(organizationId, pub.id)
-        : { activeTokenRows: null };
-    const tokenRow = await repository.getActiveTokenForPublication(organizationId, pub.id);
-    if (!tokenRow || tokenRow.revoked_at) {
-      return {
-        customerUrl: null,
-        linkStatus: "needs_replace",
-        linkDiagnostics: buildLinkRecoveryDiagnostics(env, tokenRow, {
-          activeTokenRows: counts.activeTokenRows,
-          decryptSucceeded: false,
-          code: "active_token_missing"
-        }),
-        linkError: {
-          code: "active_token_missing",
-          message: "No active customer link token. Use Replace Link to create one."
-        }
-      };
-    }
-    const unwrapped = unwrapDigitalEstimateAccessTokenDetailed(tokenRow.token_wrapped, env, {
-      tokenRow,
-      activeTokenRows: counts.activeTokenRows
-    });
-    if (!unwrapped.ok) {
-      const message =
-        unwrapped.code === "link_wrap_key_missing"
-          ? "Customer link recovery key is missing on Brain. Set DIGITAL_ESTIMATE_LINK_WRAP_KEY and redeploy."
-          : unwrapped.code === "token_wrapped_missing"
-            ? "Customer link is not recoverable yet. Use Replace Link once (requires DIGITAL_ESTIMATE_LINK_WRAP_KEY)."
-            : "Customer link could not be decrypted with the current wrap key. Verify DIGITAL_ESTIMATE_LINK_WRAP_KEY and Replace Link.";
-      return {
-        customerUrl: null,
-        linkStatus: "recovery_error",
-        linkDiagnostics: unwrapped.diagnostics,
-        linkError: { code: unwrapped.code, message }
-      };
-    }
-    return {
-      customerUrl: buildDigitalEstimateCustomerUrl(unwrapped.rawToken, env),
-      linkStatus: "active",
-      linkDiagnostics: unwrapped.diagnostics
-    };
-  } catch (e) {
-    return {
-      customerUrl: null,
-      linkStatus: "recovery_error",
-      linkDiagnostics: buildLinkRecoveryDiagnostics(env, null, {
-        code: e?.code || "link_recovery_failed",
-        decryptSucceeded: false
-      }),
-      linkError: {
-        code: e?.code || "link_recovery_failed",
-        message: e?.message || "Unable to recover customer link."
-      }
-    };
-  }
+  return recoverStaffPublicationLinkMeta(repository, organizationId, pub, env);
 }
 
 function logStudio(label, e, req) {
@@ -712,6 +622,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       amendmentRepository,
       accountDirectoryStore: deps.accountDirectoryStore || null,
       configurationRepository,
+      env,
       queryCounters: deps.liveDeQueryCounters || undefined
     });
 
@@ -739,7 +650,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
               deps.studioEstimateRepository || studioEstimateService.repository || null,
             amendmentRepository,
             accountDirectoryStore: adStore,
-            configurationRepository
+            configurationRepository,
+            env
           });
         const result = await service.listPortfolio({
           organizationId,
@@ -804,7 +716,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
               deps.studioEstimateRepository || studioEstimateService.repository || null,
             amendmentRepository,
             accountDirectoryStore: adStore,
-            configurationRepository
+            configurationRepository,
+            env
           });
         const result = await service.getPortfolioDetail(
           organizationId,

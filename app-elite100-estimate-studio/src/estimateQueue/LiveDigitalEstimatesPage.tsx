@@ -74,6 +74,24 @@ type Metrics = {
   totalActivePublishedValue: number;
 };
 
+const NO_RECOVERABLE_LINK_MESSAGE =
+  "No recoverable customer link is stored for this publication. Replace link creates a new URL and invalidates the previous URL.";
+
+/** Extract staff-safe customerUrl from Publications GET or Live DE detail DTOs. */
+function extractStaffCustomerUrl(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const root = body as Record<string, unknown>;
+  if (typeof root.customerUrl === "string" && root.customerUrl.trim()) {
+    return root.customerUrl.trim();
+  }
+  const publication = root.publication;
+  if (publication && typeof publication === "object") {
+    const nested = (publication as Record<string, unknown>).customerUrl;
+    if (typeof nested === "string" && nested.trim()) return nested.trim();
+  }
+  return null;
+}
+
 type Prefs = {
   q: string;
   status: string;
@@ -227,6 +245,8 @@ export default function LiveDigitalEstimatesPage({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [customerUrl, setCustomerUrl] = useState<string | null>(null);
+  const [linkState, setLinkState] = useState<string | null>(null);
+  const [linkUnavailableReason, setLinkUnavailableReason] = useState<string | null>(null);
   const [publishPanelOpen, setPublishPanelOpen] = useState(false);
   const drawerTitleId = useId();
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -294,6 +314,8 @@ export default function LiveDigitalEstimatesPage({
     setDetail(null);
     setDetailError(null);
     setCustomerUrl(null);
+    setLinkState(null);
+    setLinkUnavailableReason(null);
     setActionNotice(null);
     const el = triggerRef.current;
     triggerRef.current = null;
@@ -302,12 +324,33 @@ export default function LiveDigitalEstimatesPage({
     }
   }
 
+  function applyLinkFields(body: Record<string, unknown>) {
+    const url = extractStaffCustomerUrl(body);
+    setCustomerUrl(url);
+    const state =
+      typeof body.linkState === "string" && body.linkState
+        ? body.linkState
+        : url
+          ? "available"
+          : "unavailable";
+    setLinkState(state);
+    const reason =
+      typeof body.linkUnavailableReason === "string" && body.linkUnavailableReason
+        ? body.linkUnavailableReason
+        : url
+          ? null
+          : NO_RECOVERABLE_LINK_MESSAGE;
+    setLinkUnavailableReason(url ? null : reason);
+  }
+
   async function openDetail(publicationId: string, trigger?: HTMLElement | null) {
     if (!authToken) return;
     if (trigger) triggerRef.current = trigger;
     setSelectedId(publicationId);
     setDetail(null);
     setCustomerUrl(null);
+    setLinkState(null);
+    setLinkUnavailableReason(null);
     setDetailError(null);
     setDetailLoading(true);
     setActionNotice(null);
@@ -317,6 +360,7 @@ export default function LiveDigitalEstimatesPage({
         authToken
       )) as Record<string, unknown>;
       setDetail(body);
+      applyLinkFields(body);
     } catch (e) {
       setDetailError(e instanceof ApiError ? e.message : "Unable to load publication detail");
     } finally {
@@ -360,22 +404,33 @@ export default function LiveDigitalEstimatesPage({
     return () => root.removeEventListener("keydown", onTab);
   }, [selectedId, detailLoading, detail]);
 
+  async function resolveCustomerUrl(publicationId: string): Promise<string | null> {
+    if (customerUrl) return customerUrl;
+    if (!authToken) return null;
+    const body = await apiGet(
+      `/api/elite100-estimate-studio/publications/${encodeURIComponent(publicationId)}`,
+      authToken
+    );
+    return extractStaffCustomerUrl(body);
+  }
+
   async function openCustomerView(publicationId: string) {
     if (!authToken || busy) return;
     if (!window.confirm("Open the customer Digital Estimate view in a new tab?")) return;
     setBusy(true);
     setActionNotice(null);
     try {
-      const pub = (await apiGet(
-        `/api/elite100-estimate-studio/publications/${encodeURIComponent(publicationId)}`,
-        authToken
-      )) as { customerUrl?: string | null };
-      const url = pub.customerUrl || null;
+      const url = await resolveCustomerUrl(publicationId);
       if (!url) {
-        setActionNotice("Customer link is unavailable. Use Replace link if needed.");
+        setCustomerUrl(null);
+        setLinkState("unavailable");
+        setLinkUnavailableReason(NO_RECOVERABLE_LINK_MESSAGE);
+        setActionNotice(NO_RECOVERABLE_LINK_MESSAGE);
         return;
       }
       setCustomerUrl(url);
+      setLinkState("available");
+      setLinkUnavailableReason(null);
       window.open(url, "_blank", "noopener,noreferrer");
       setActionNotice("Customer view opened in a new tab.");
     } catch (e) {
@@ -391,16 +446,17 @@ export default function LiveDigitalEstimatesPage({
     setBusy(true);
     setActionNotice(null);
     try {
-      const pub = (await apiGet(
-        `/api/elite100-estimate-studio/publications/${encodeURIComponent(publicationId)}`,
-        authToken
-      )) as { customerUrl?: string | null };
-      const url = pub.customerUrl || null;
+      const url = await resolveCustomerUrl(publicationId);
       if (!url) {
-        setActionNotice("Customer link is unavailable. Use Replace link if needed.");
+        setCustomerUrl(null);
+        setLinkState("unavailable");
+        setLinkUnavailableReason(NO_RECOVERABLE_LINK_MESSAGE);
+        setActionNotice(NO_RECOVERABLE_LINK_MESSAGE);
         return;
       }
       setCustomerUrl(url);
+      setLinkState("available");
+      setLinkUnavailableReason(null);
       await navigator.clipboard.writeText(url);
       await apiPost(
         `/api/elite100-estimate-studio/publications/${encodeURIComponent(publicationId)}/events/link-copied`,
@@ -448,10 +504,14 @@ export default function LiveDigitalEstimatesPage({
         `/api/elite100-estimate-studio/publications/${encodeURIComponent(publicationId)}/replace-token`,
         authToken,
         { confirm: true }
-      )) as { customerUrl?: string | null };
-      setCustomerUrl(body.customerUrl || null);
-      setActionNotice("Customer link replaced.");
+      )) as Record<string, unknown>;
+      const url = extractStaffCustomerUrl(body);
+      setCustomerUrl(url);
+      setLinkState(url ? "available" : "unavailable");
+      setLinkUnavailableReason(url ? null : NO_RECOVERABLE_LINK_MESSAGE);
+      setActionNotice(url ? "Customer link replaced." : "Link replaced, but no recoverable URL was returned.");
       await loadList();
+      await openDetail(publicationId, triggerRef.current);
     } catch (e) {
       setActionNotice(e instanceof ApiError ? e.message : "Unable to replace link");
     } finally {
@@ -1085,8 +1145,16 @@ export default function LiveDigitalEstimatesPage({
                   </p>
                 ) : null}
                 {customerUrl ? (
-                  <p className="muted" data-testid="live-de-customer-url">
-                    Link ready (not opened automatically).
+                  <p className="muted" data-testid="live-de-link-state">
+                    Link available
+                  </p>
+                ) : linkState ? (
+                  <p className="muted" data-testid="live-de-link-state" role="status">
+                    {linkState === "revoked" || linkState === "superseded"
+                      ? linkUnavailableReason || "Link inactive."
+                      : linkState === "expired"
+                        ? linkUnavailableReason || "Link expired."
+                        : linkUnavailableReason || NO_RECOVERABLE_LINK_MESSAGE}
                   </p>
                 ) : null}
                 <div className="live-de-detail-actions">
@@ -1094,20 +1162,43 @@ export default function LiveDigitalEstimatesPage({
                     type="button"
                     className={actionClass("secondary")}
                     data-testid="live-de-copy-link"
-                    disabled={busy}
+                    disabled={busy || !customerUrl}
                     onClick={() => selectedId && void copyCustomerLink(selectedId)}
                   >
                     Copy customer link
                   </button>
-                  <button
-                    type="button"
-                    className={actionClass("secondary")}
-                    data-testid="live-de-open-customer-view"
-                    disabled={busy}
-                    onClick={() => selectedId && void openCustomerView(selectedId)}
-                  >
-                    Open customer view
-                  </button>
+                  {customerUrl ? (
+                    <a
+                      className={actionClass("secondary")}
+                      data-testid="live-de-open-customer-view"
+                      href={customerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-disabled={busy ? "true" : undefined}
+                      onClick={(e) => {
+                        if (busy) {
+                          e.preventDefault();
+                          return;
+                        }
+                        if (!window.confirm("Open the customer Digital Estimate view in a new tab?")) {
+                          e.preventDefault();
+                          return;
+                        }
+                        setActionNotice("Customer view opened in a new tab.");
+                      }}
+                    >
+                      Open customer view
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      className={actionClass("secondary")}
+                      data-testid="live-de-open-customer-view"
+                      disabled
+                    >
+                      Open customer view
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={actionClass("warning")}

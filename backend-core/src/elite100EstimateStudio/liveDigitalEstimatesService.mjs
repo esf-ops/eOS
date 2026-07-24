@@ -18,6 +18,10 @@ import {
   ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM,
   isAccountQuickbooksLinked
 } from "../accountDirectory/accountDirectoryQuickbooksLinkage.mjs";
+import {
+  presentStaffLinkForDetail,
+  recoverStaffPublicationLinkMeta
+} from "../digitalEstimate/staffPublicationLinkRecovery.mjs";
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 50;
@@ -115,6 +119,7 @@ export function extractPortfolioIdentityFromSnapshot(snap) {
  *   amendmentRepository?: object|null,
  *   accountDirectoryStore?: object|null,
  *   configurationRepository?: object|null,
+ *   env?: NodeJS.ProcessEnv|object,
  *   now?: () => Date,
  *   queryCounters?: { accountDirectoryFetches?: number, eventFetches?: number, reviewFetches?: number }
  * }} deps
@@ -125,6 +130,7 @@ export function createLiveDigitalEstimatesService(deps) {
   const amendmentRepo = deps.amendmentRepository || null;
   const adStore = deps.accountDirectoryStore || null;
   const configRepo = deps.configurationRepository || null;
+  const env = deps.env || process.env;
   const nowFn = deps.now || (() => new Date());
   const counters = deps.queryCounters || {
     accountDirectoryFetches: 0,
@@ -472,6 +478,23 @@ export function createLiveDigitalEstimatesService(deps) {
       actorType: e.actor_type || e.actorType,
       createdAt: e.created_at || e.createdAt
     }));
+    // Same staff-safe recovery as Publications workspace — read-only; never mint/replace.
+    const linkMeta = await recoverStaffPublicationLinkMeta(
+      deRepo,
+      organizationId,
+      pub || {
+        id: publicationId,
+        status: row.publicationStatus,
+        access_expires_at: row.accessExpiresAt,
+        revoked_at: null,
+        superseded_at: null
+      },
+      env
+    );
+    const linkPresentation = presentStaffLinkForDetail(linkMeta, {
+      accessExpiresAt: pub?.access_expires_at || row.accessExpiresAt,
+      now: nowFn()
+    });
     return {
       ok: true,
       publication: row,
@@ -500,9 +523,11 @@ export function createLiveDigitalEstimatesService(deps) {
         ? { id: row.reviewRequestId, status: row.reviewRequestStatus }
         : null,
       nextAction: row.nextAction,
-      // Explicit: detail load does not include customerUrl / tokens.
-      customerUrl: null,
-      note: "Use existing Copy link / Open customer view actions for link recovery."
+      customerUrl: linkPresentation.customerUrl,
+      linkAvailable: linkPresentation.linkAvailable,
+      linkState: linkPresentation.linkState,
+      linkUnavailableReason: linkPresentation.linkUnavailableReason,
+      linkStatus: linkMeta.linkStatus
     };
   }
 

@@ -186,6 +186,7 @@ export default function ReviewWorkspace({
 
   async function loadDetail(id: string, trigger?: HTMLElement | null) {
     if (trigger) triggerRef.current = trigger;
+    setSelectedId(id);
     setDetailLoading(true);
     setBusy(true);
     setError(null);
@@ -196,13 +197,13 @@ export default function ReviewWorkspace({
         `/api/elite100-estimate-studio/review-requests/${id}`,
         token
       )) as Record<string, unknown>;
-      setSelectedId(id);
       setDetail(body);
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         onAuthFailure();
         return;
       }
+      setDetail(null);
       setError(e instanceof ApiError ? e.message : "Unable to load review");
     } finally {
       setBusy(false);
@@ -432,9 +433,7 @@ export default function ReviewWorkspace({
                 <th scope="col">Delta</th>
                 <th scope="col">Estimate revision</th>
                 <th scope="col">Publication state</th>
-                <th scope="col">
-                  <span className="visually-hidden">Open details</span>
-                </th>
+                <th scope="col">Open details</th>
               </tr>
             </thead>
             <tbody>
@@ -445,10 +444,18 @@ export default function ReviewWorkspace({
                   data-testid="review-queue-row"
                 >
                   <td>
-                    <strong>
-                      {r.customerName || r.quoteNumber || "Customer"}
-                      {r.projectName ? ` · ${r.projectName}` : ""}
-                    </strong>
+                    <button
+                      type="button"
+                      className="review-customer-open"
+                      data-testid="review-open-customer"
+                      aria-label={`Open details for ${r.customerName || r.quoteNumber || "request"}`}
+                      onClick={(e) => void loadDetail(r.id, e.currentTarget)}
+                    >
+                      <strong>
+                        {r.customerName || r.quoteNumber || "Customer"}
+                        {r.projectName ? ` · ${r.projectName}` : ""}
+                      </strong>
+                    </button>
                     {r.quoteNumber ? (
                       <div className="muted review-secondary-meta">{r.quoteNumber}</div>
                     ) : null}
@@ -462,7 +469,7 @@ export default function ReviewWorkspace({
                   <td>{moneyDelta(r.displayDelta)}</td>
                   <td>{r.linkedEstimateRevision != null ? `R${r.linkedEstimateRevision}` : "—"}</td>
                   <td>{publicationLabel(r.publicationStatus)}</td>
-                  <td>
+                  <td className="review-table-actions">
                     <button
                       type="button"
                       className={actionClass("neutral")}
