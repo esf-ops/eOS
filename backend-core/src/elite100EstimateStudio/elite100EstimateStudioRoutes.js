@@ -69,6 +69,12 @@ import { recoverStaffPublicationLinkMeta } from "../digitalEstimate/staffPublica
 import { createLiveDigitalEstimatesService } from "./liveDigitalEstimatesService.mjs";
 import { createStudioManualEstimateService } from "./studioManualEstimateService.mjs";
 import { createQuoteIntakeRepository } from "../quoteIntake/quoteIntakeRepositoryFactory.mjs";
+import {
+  createStudioSharedInboxService,
+  sharedInboxSafeError
+} from "./studioSharedInboxService.mjs";
+import { bootstrapIntakeCasesAfterImport } from "../quoteIntake/intakeAutoBootstrapService.mjs";
+import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
@@ -657,6 +663,33 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       studioEstimateRepository:
         deps.studioEstimateRepository || studioEstimateService.repository,
       studioEstimateService
+    });
+
+  const studioSharedInboxService =
+    deps.studioSharedInboxService ||
+    createStudioSharedInboxService({
+      env,
+      quoteIntakeRepository,
+      studioEstimateQueueService,
+      graphClient: deps.graphClient || null,
+      graphFetchImpl: deps.graphFetchImpl || undefined,
+      getSupabase,
+      ensureStudioEstimate:
+        deps.ensureStudioEstimate ||
+        (async ({ organizationId, intakeCaseId, takeoffJobId, actorUserId }) =>
+          studioEstimateService.getOrCreateForCase({
+            organizationId,
+            intakeCaseId,
+            takeoffJobId,
+            actorUserId
+          })),
+      bootstrapIntakeCases:
+        deps.bootstrapIntakeCases ||
+        ((args) =>
+          bootstrapIntakeCasesAfterImport({
+            ...args,
+            openEstimate: deps.openEstimate || openEstimateForIntakeCase
+          }))
     });
 
   app.post(
@@ -1555,6 +1588,83 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to assign estimator",
           code: e?.code
         });
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/shared-inbox",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioSharedInboxService.listInbox({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          query: req.query || {}
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("shared inbox list failed", e, req);
+        const status = Number(e?.statusCode) || 503;
+        const safe = sharedInboxSafeError(e?.code, "Shared Inbox could not be refreshed.");
+        res.status(status).json(safe);
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/shared-inbox/:messageKey",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioSharedInboxService.getMessage({
+          organizationId,
+          messageKey: decodeURIComponent(String(req.params.messageKey || "")),
+          actorUserId: req.user?.id ?? null
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("shared inbox detail failed", e, req);
+        const status = Number(e?.statusCode) || 503;
+        const safe = sharedInboxSafeError(e?.code, "Unable to load message details.");
+        res.status(status).json(safe);
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/shared-inbox/:messageKey/import",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const idempotencyKey =
+          String(req.get("idempotency-key") || body.idempotencyKey || "").trim() || null;
+        const result = await studioSharedInboxService.importMessage({
+          organizationId,
+          messageKey: decodeURIComponent(String(req.params.messageKey || "")),
+          actorUserId: req.user?.id ?? null,
+          confirm: body.confirm === true || body.confirm === "true",
+          idempotencyKey
+        });
+        auditStudioEstimate("shared_inbox.import", req, {
+          intakeCaseId: result.intakeCaseId,
+          estimateId: result.estimateId,
+          status: result.alreadyImported ? "duplicate" : result.created ? "created" : "imported"
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("shared inbox import failed", e, req);
+        const status = Number(e?.statusCode) || 500;
+        const safe = sharedInboxSafeError(e?.code, "The request could not be imported.");
+        res.status(status).json(safe);
       }
     }
   );

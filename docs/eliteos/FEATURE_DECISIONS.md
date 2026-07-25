@@ -2532,4 +2532,24 @@
 | **Impacted** | Queue service, Command Center view-model, estimate/manual mutation services + routes, Takeoff/Studio postMessage helpers, identity display helper, Studio UI 409 recovery, this entry. |
 | **Audit findings** | AUDIT-001 (implemented), AUDIT-002 (implemented), AUDIT-005 (implemented), AUDIT-009/010 (partial — terminology/nav via adapter), identity Unknown (implemented display), AUDIT-014 (gate remains; browser E2E deferred). |
 
+### 178. Studio Shared Inbox Phase 1 — explicit quote-request intake (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `feature/studio-shared-inbox` |
+| **Decision** | **Shared Inbox** is the estimator-facing mailbox request workspace inside Elite 100 Estimate Studio. It answers “what new quote requests arrived, and what happened to each?” |
+| **Command Center retained** | **Command Center** remains the active-work queue (“what estimating work needs attention now?”). Shared Inbox does not replace Command Center or All Estimates. |
+| **Preview** | Mailbox preview / refresh / open-details are **read-only**. They never import, create estimates, start Takeoff, calculate, approve, publish, notify, or mutate Outlook. |
+| **Import** | Import is an **explicit** estimator action, org-scoped, and **idempotent** via existing mailbox dedupe (`graph_immutable_message_id` / `internet_message_id` / content hash). Retries and double-submit return the existing intake case. |
+| **Pipeline** | Reuses `previewQuoteIntakeMailbox` + `importQuoteIntakeMailboxMessages` — no second import pipeline. |
+| **Outlook** | No reply, forward, delete, move, mark read/unread, categorize, or folder changes. Graph access remains backend-only and read-oriented (existing Graph read-only guards). |
+| **Attachments** | Phase 1 shows **attachment metadata only**. No Graph attachment URLs in the browser. Secure plan viewing/download is a separate next phase. |
+| **Takeoff** | Shared Inbox does not broaden Takeoff initiation. Existing production import may still auto-bootstrap Takeoff when `QUOTE_INTAKE_AUTOMATIC_TAKEOFF` is enabled — documented, not expanded here. |
+| **Manual path** | Unsupported / no-PDF rows offer **Create manual estimate**, which still uses mailbox import to preserve message↔intake linkage (not a separate unlinked manual-create path). |
+| **Delivery safety** | Shared Inbox never publishes, calculates, approves, emails/notifies customers, marks sold, or creates QuickBooks/Moraware records. |
+| **SQL** | None. |
+| **Tests** | `eos:test:studio-shared-inbox` (+ golden-path gate unchanged). |
+| **Impacted** | `studioSharedInboxReadModel.mjs`, `studioSharedInboxService.mjs`, Studio routes, `SharedInboxPage.tsx`, Studio nav, this entry. |
+| **Deferred** | Secure plan viewer; All Estimates registry; Outlook compose; automatic email classification. |
+
 

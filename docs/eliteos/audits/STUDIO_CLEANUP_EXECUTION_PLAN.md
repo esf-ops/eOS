@@ -146,6 +146,7 @@
 | Branch | `feat/shared-inbox-workspace` |
 | Depends on | Phase 0–2 recommended |
 | Risk | Medium–High |
+| **Status (2026-07-24)** | **Phase 1 implemented** on `feature/studio-shared-inbox` — estimator Shared Inbox workspace over existing mailbox preview/import; explicit idempotent import; Command Center retained. Secure plan viewer and All Estimates remain deferred. |
 
 ---
 
