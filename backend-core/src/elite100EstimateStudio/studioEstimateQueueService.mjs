@@ -15,6 +15,12 @@ import {
   deriveQueueWorkflowStatus,
   workflowStatusesForFilter
 } from "./studioEstimateQueueWorkflow.mjs";
+import { buildStudioOperationalState } from "./studioOperationalStatus.mjs";
+import {
+  resolveCustomerDisplayLabel,
+  resolveEstimatorDisplayLabel,
+  resolveProjectDisplayLabel
+} from "./studioIdentityDisplay.mjs";
 
 const FORBIDDEN_LIST_KEYS = [
   "graphImmutableMessageId",
@@ -433,9 +439,36 @@ export function createStudioEstimateQueueService(deps = {}) {
     };
 
     const workflowStatus = deriveQueueWorkflowStatus(derivationInput);
-    const attention = deriveNeedsAttention(derivationInput, workflowStatus);
-    const openTarget = deriveQueueOpenTarget(derivationInput);
+    const operationalState = buildStudioOperationalState({
+      ...derivationInput,
+      workflowStatus,
+      customerIdentitySnapshot: scope?.customerIdentitySnapshot || null,
+      intakeCustomerName: caseRow.extracted_customer_name || caseRow.extractedCustomerName || null,
+      intakeProjectName: caseRow.extracted_project_name || caseRow.extractedProjectName || null,
+      senderDisplayName: null
+    });
+    const attention = {
+      needsAttention: operationalState.needsAttention,
+      reasons: operationalState.attentionReasons
+    };
+    const openTarget = operationalState.openTarget;
     const indicators = buildQueueIndicators(derivationInput, workflowStatus, attention);
+
+    const customerDisplay = resolveCustomerDisplayLabel({
+      customerIdentitySnapshot: scope?.customerIdentitySnapshot || null,
+      customerName,
+      intakeCustomerName: caseRow.extracted_customer_name || caseRow.extractedCustomerName || null,
+      senderDisplayName: null
+    });
+    const projectDisplay = resolveProjectDisplayLabel({
+      projectName,
+      intakeProjectName: caseRow.extracted_project_name || caseRow.extractedProjectName || null
+    });
+    const estimatorDisplay = resolveEstimatorDisplayLabel({
+      assignedEstimatorLabel: caseRow.assigned_estimator_user_id
+        ? `User ${String(caseRow.assigned_estimator_user_id).slice(0, 8)}…`
+        : "Unassigned"
+    });
 
     // Keep AI column aligned with authoritative workflow vocabulary (no "idle").
     const takeoffDisplay = isManualStaff
@@ -461,8 +494,9 @@ export function createStudioEstimateQueueService(deps = {}) {
 
     return stripForbidden({
       id: caseRow.id,
-      customerName: customerName || "Unknown",
-      projectName: projectName || null,
+      customerName: customerDisplay.label,
+      projectName: projectDisplay.label === "Project not named" ? projectName || null : projectDisplay.label,
+      projectLabel: projectDisplay.label,
       accountLinked: Boolean(accountLinked),
       accountDirectoryLinked: Boolean(accountLinked),
       sourceType: sourceType || null,
@@ -489,13 +523,13 @@ export function createStudioEstimateQueueService(deps = {}) {
       digitalEstimateStatus: publicationStatus || "none",
       customerReviewStatus: reviewOperatorStatus || "none",
       workflowStatus,
-      needsAttention: attention.needsAttention,
-      attentionReasons: attention.reasons,
+      operationalState,
+      needsAttention: operationalState.needsAttention,
+      attentionReasons: operationalState.attentionReasons,
+      primaryAction: operationalState.primaryAction,
       lastActivityAt,
       assignedEstimatorUserId: caseRow.assigned_estimator_user_id || caseRow.assignedEstimatorUserId || null,
-      assignedEstimatorLabel: caseRow.assigned_estimator_user_id
-        ? `User ${String(caseRow.assigned_estimator_user_id).slice(0, 8)}…`
-        : "Unassigned",
+      assignedEstimatorLabel: estimatorDisplay.label,
       priority: caseRow.priority || "normal",
       firstOpenedAt: caseRow.first_opened_at || caseRow.firstOpenedAt || null,
       lastOpenedAt: caseRow.last_opened_at || caseRow.lastOpenedAt || null,

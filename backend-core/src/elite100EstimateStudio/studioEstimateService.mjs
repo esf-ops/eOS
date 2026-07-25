@@ -48,6 +48,7 @@ import {
   PROJECT_METADATA_SCOPE_KEYS
 } from "./studioProjectDetails.mjs";
 import { buildStudioWorkspaceWorkflow } from "./studioWorkspaceWorkflow.mjs";
+import { loadActiveEstimateForMutation } from "./studioEstimateActiveRevisionGuard.mjs";
 
 /**
  * Structured mutation log — no PII, no scope dumps, no tokens.
@@ -962,13 +963,11 @@ export function createStudioEstimateService(deps = {}) {
     },
 
     async refreshScopeFromTakeoff({ organizationId, estimateId, actorUserId, force = false }) {
-      const row = await repository.getById(organizationId, estimateId);
-      if (!row) {
-        const err = new Error("Estimate not found");
-        err.statusCode = 404;
-        err.code = "estimate_not_found";
-        throw err;
-      }
+      const row = await loadActiveEstimateForMutation({
+        repository,
+        organizationId,
+        estimateId
+      });
       return refreshScopeFromTakeoff(row, organizationId, actorUserId, { force });
     },
 
@@ -981,13 +980,11 @@ export function createStudioEstimateService(deps = {}) {
       delete clean.actorUserId;
       delete clean.totals;
 
-      let row = await repository.getById(organizationId, estimateId);
-      if (!row) {
-        const err = new Error("Estimate not found");
-        err.statusCode = 404;
-        err.code = "estimate_not_found";
-        throw err;
-      }
+      let row = await loadActiveEstimateForMutation({
+        repository,
+        organizationId,
+        estimateId
+      });
 
       const wasManual = isManualStaffEstimate(row);
       let nextScope = { ...row.scope, ...clean };
@@ -1159,19 +1156,22 @@ export function createStudioEstimateService(deps = {}) {
         throw err;
       }
 
-      const row = await repository.getById(organizationId, estimateId);
-      if (!row) {
-        const err = new Error("Estimate not found");
-        err.statusCode = 404;
-        err.code = "estimate_not_found";
+      let row;
+      try {
+        row = await loadActiveEstimateForMutation({
+          repository,
+          organizationId,
+          estimateId
+        });
+      } catch (e) {
         logStudioMutation("update_project_details", {
           organizationId,
           estimateId,
           ok: false,
-          errorCode: "estimate_not_found",
+          errorCode: e?.code || "estimate_not_found",
           durationMs: Date.now() - started
         });
-        throw err;
+        throw e;
       }
       const statusBefore = row.status;
 
@@ -1245,19 +1245,22 @@ export function createStudioEstimateService(deps = {}) {
     async calculate({ organizationId, estimateId, actorUserId, body }) {
       const started = Date.now();
       rejectCallerAuthority(body);
-      let row = await repository.getById(organizationId, estimateId);
-      if (!row) {
-        const err = new Error("Estimate not found");
-        err.statusCode = 404;
-        err.code = "estimate_not_found";
+      let row;
+      try {
+        row = await loadActiveEstimateForMutation({
+          repository,
+          organizationId,
+          estimateId
+        });
+      } catch (e) {
         logStudioMutation("calculate", {
           organizationId,
           estimateId,
           ok: false,
-          errorCode: "estimate_not_found",
+          errorCode: e?.code || "estimate_not_found",
           durationMs: Date.now() - started
         });
-        throw err;
+        throw e;
       }
       const statusBefore = row.status;
       try {
@@ -1344,19 +1347,22 @@ export function createStudioEstimateService(deps = {}) {
         throw err;
       }
 
-      let row = await repository.getById(organizationId, estimateId);
-      if (!row) {
-        const err = new Error("Estimate not found");
-        err.statusCode = 404;
-        err.code = "estimate_not_found";
+      let row;
+      try {
+        row = await loadActiveEstimateForMutation({
+          repository,
+          organizationId,
+          estimateId
+        });
+      } catch (e) {
         logStudioMutation("approve", {
           organizationId,
           estimateId,
           ok: false,
-          errorCode: "estimate_not_found",
+          errorCode: e?.code || "estimate_not_found",
           durationMs: Date.now() - started
         });
-        throw err;
+        throw e;
       }
       const statusBefore = row.status;
 

@@ -13,6 +13,7 @@ import {
   deriveQueueOpenTarget,
   deriveQueueWorkflowStatus
 } from "./studioEstimateQueueWorkflow.mjs";
+import { operationalNextActionFromInput } from "./studioOperationalStatus.mjs";
 
 /** @typedef {'blocked'|'takeoff_failed'|'review_requested'|'pricing_stale'|'takeoff'|'pricing'|'ready_to_publish'|'customer'|'new'|'closed'|'unclassified'} CommandCenterStageKey */
 
@@ -208,94 +209,20 @@ export function attentionSeverity(reasons = [], workflowStatus = "") {
  * @param {{ openTarget?: string, workflowStatus?: string, needsAttention?: boolean, attentionReasons?: string[] }} row
  */
 export function nextActionFromRow(row = {}) {
-  const target = String(row.openTarget || deriveQueueOpenTarget(row) || "takeoff");
-  const workflow = String(row.workflowStatus || "");
-  const reasons = new Set(row.attentionReasons || []);
-  const sourceType = String(row.sourceType || "").toLowerCase();
-  const isManual =
-    sourceType === "manual" ||
-    String(row.estimateOrigin || "").toLowerCase() === "manual_staff" ||
-    String(row.sourceBadge || "").toLowerCase() === "manual";
-
-  if (workflow === "Takeoff failed" || reasons.has("failed")) {
+  // AUDIT-001: canonical operational adapter owns primary action + open target.
+  // Queue actions navigate only — they never calculate/approve/publish.
+  const op =
+    row.operationalState && typeof row.operationalState === "object"
+      ? row.operationalState
+      : null;
+  if (op?.key && op?.primaryAction && op?.openTarget) {
     return {
-      nextActionKey: "review_intake",
-      nextActionLabel: "Review request",
-      nextActionRoute: "takeoff"
+      nextActionKey: op.key,
+      nextActionLabel: op.primaryAction,
+      nextActionRoute: op.openTarget
     };
   }
-  if (target === "review" || workflow === "Customer submitted") {
-    return {
-      nextActionKey: "review_customer",
-      nextActionLabel: "Review customer changes",
-      nextActionRoute: "review"
-    };
-  }
-  if (target === "digital" || workflow === "Ready for approval" || workflow === "Published" || workflow === "Customer reviewing") {
-    if (reasons.has("approved_not_published") || workflow === "Ready for approval") {
-      return {
-        nextActionKey: "publish",
-        nextActionLabel: "Publish Estimate",
-        nextActionRoute: "digital"
-      };
-    }
-    return {
-      nextActionKey: "open_customer",
-      nextActionLabel: "Open customer estimate",
-      nextActionRoute: "digital"
-    };
-  }
-  if (isManual || target === "scope") {
-    if (isManual && !row.manualScopeConfirmed && workflow === "Scope in progress") {
-      return {
-        nextActionKey: "build_manual_scope",
-        nextActionLabel: "Build manual scope",
-        nextActionRoute: "scope"
-      };
-    }
-    if (reasons.has("estimate_stale")) {
-      return {
-        nextActionKey: "recalculate",
-        nextActionLabel: "Calculate Estimate",
-        nextActionRoute: "scope"
-      };
-    }
-    if (reasons.has("estimate_not_calculated") || workflow === "Scope in progress") {
-      return {
-        nextActionKey: isManual ? "complete_manual_pricing" : "complete_pricing",
-        nextActionLabel: isManual ? "Confirm manual scope" : "Complete Pricing",
-        nextActionRoute: "scope"
-      };
-    }
-    return {
-      nextActionKey: "open_pricing",
-      nextActionLabel: "Open Pricing Setup",
-      nextActionRoute: "scope"
-    };
-  }
-  if (
-    workflow === "Takeoff draft ready" ||
-    workflow === "Needs estimator review" ||
-    String(workflow).includes("AI findings")
-  ) {
-    return {
-      nextActionKey: "review_takeoff",
-      nextActionLabel: "Review Takeoff",
-      nextActionRoute: "takeoff"
-    };
-  }
-  if (workflow === "New") {
-    return {
-      nextActionKey: "review_request",
-      nextActionLabel: "Review request",
-      nextActionRoute: "takeoff"
-    };
-  }
-  return {
-    nextActionKey: "open_takeoff",
-    nextActionLabel: "Open Takeoff",
-    nextActionRoute: "takeoff"
-  };
+  return operationalNextActionFromInput(row);
 }
 
 /**
@@ -388,8 +315,11 @@ export function toCommandCenterItem(row = {}, opts = {}) {
   });
   const receivedAt = row.receivedAt || null;
   const stageEnteredAt = row.lastActivityAt || row.receivedAt || null;
-  const customerLabel = String(row.customerName || "").trim() || "Unknown customer";
-  const projectLabel = String(row.projectName || "").trim() || "Project not named";
+  const customerLabel =
+    String(row.customerName || "").trim() ||
+    "Customer not identified";
+  const projectLabel =
+    String(row.projectLabel || row.projectName || "").trim() || "Project not named";
   const assignedRaw = String(row.assignedEstimatorLabel || "").trim();
   // Never surface truncated UUID stubs ("User 902c8f2c…") in the Command Center.
   const assignedLooksLikeIdStub = /^user\s+[0-9a-f-]{6,}/i.test(assignedRaw);
@@ -440,7 +370,9 @@ export function toCommandCenterItem(row = {}, opts = {}) {
     },
     openTarget: action.nextActionRoute,
     needsCompletionHint:
-      customerLabel === "Unknown customer" || projectLabel === "Project not named",
+      customerLabel === "Customer not identified" ||
+      customerLabel === "Unknown customer" ||
+      projectLabel === "Project not named",
     classificationWarning: stageKey === "unclassified" ? "Record could not be classified confidently." : null
   };
 }

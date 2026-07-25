@@ -16,6 +16,7 @@ import {
   stripClientManualAuthority,
   validateManualScopeForConfirm
 } from "./studioManualPhysicalScope.mjs";
+import { loadActiveEstimateForMutation } from "./studioEstimateActiveRevisionGuard.mjs";
 
 function deError(message, code, statusCode) {
   const err = new Error(message);
@@ -236,8 +237,11 @@ export function createStudioManualEstimateService(deps) {
     actorUserId,
     body = {}
   }) {
-    const row = await estimateRepo.getById(organizationId, estimateId);
-    if (!row) throw deError("Estimate not found", "estimate_not_found", 404);
+    const row = await loadActiveEstimateForMutation({
+      repository: estimateRepo,
+      organizationId,
+      estimateId
+    });
     if (!isManualEstimateRow(row)) {
       throw deError("Not a manual estimate", "not_manual_estimate", 409);
     }
@@ -318,8 +322,11 @@ export function createStudioManualEstimateService(deps) {
     if (body?.confirm !== true) {
       throw deError("confirm: true is required", "confirm_required", 400);
     }
-    let row = await estimateRepo.getById(organizationId, estimateId);
-    if (!row) throw deError("Estimate not found", "estimate_not_found", 404);
+    let row = await loadActiveEstimateForMutation({
+      repository: estimateRepo,
+      organizationId,
+      estimateId
+    });
     if (!isManualEstimateRow(row)) {
       throw deError("Not a manual estimate", "not_manual_estimate", 409);
     }

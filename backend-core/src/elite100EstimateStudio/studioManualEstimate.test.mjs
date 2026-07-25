@@ -302,12 +302,14 @@ console.log("\nstudioManualEstimate.test.mjs\n");
     sourceBadge: "Manual",
     workflowStatus: "Scope in progress",
     openTarget: "scope",
-    manualScopeConfirmed: false
+    manualScopeConfirmed: false,
+    estimateStatus: "draft",
+    estimateOrigin: "manual_staff"
   });
-  assert.equal(action.nextActionKey, "build_manual_scope");
-  assert.match(action.nextActionLabel, /manual scope/i);
+  assert.match(action.nextActionKey, /needs_scope/);
+  assert.match(action.nextActionLabel, /Manual Scope/i);
   assert.notEqual(action.nextActionRoute, "takeoff");
-  console.log("ok: 11–13 Command Center Manual next action is Build manual scope");
+  console.log("ok: 11–13 Command Center Manual next action is Complete/Confirm Manual Scope");
 
   // Publication readiness skips takeoff for confirmed manual
   const readiness = assessStudioEstimatePublicationReadiness({

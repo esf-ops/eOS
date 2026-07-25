@@ -3,7 +3,17 @@
  * Confirmation is a separate explicit API call. Saving never publishes.
  */
 import React, { useEffect, useState } from "react";
-import { ApiError, apiGet, apiPatch, apiPost, isTransientHttpError, transientFailureMessage } from "../lib/api";
+import {
+  ApiError,
+  apiGet,
+  apiPatch,
+  apiPost,
+  isTransientHttpError,
+  transientFailureMessage,
+  isEstimateRevisionSupersededError,
+  estimateRevisionSupersededMessage,
+  activeEstimateIdFromSupersededError
+} from "../lib/api";
 
 type OpenEdgeMeasurementMode = "piece_sum" | "room_total";
 
@@ -373,6 +383,16 @@ export default function ManualPhysicalScopeEditor({
       setMessage("Manual scope saved. Confirm when the physical scope is complete.");
     } catch (e) {
       setSaveState("failed");
+      if (isEstimateRevisionSupersededError(e)) {
+        const next = activeEstimateIdFromSupersededError(e);
+        setMessage(estimateRevisionSupersededMessage());
+        if (next) {
+          // Switch id pointer only — do not auto-replay the stale payload.
+          setActiveId(next);
+          onActiveEstimateChange?.(next);
+        }
+        return;
+      }
       setMessage(isTransientHttpError(e) ? transientFailureMessage(e) : e instanceof ApiError ? e.message : "Save failed");
     }
   }
@@ -432,6 +452,15 @@ export default function ManualPhysicalScopeEditor({
       if (Array.isArray(result.details)) setErrors(result.details);
     } catch (e) {
       setSaveState("failed");
+      if (isEstimateRevisionSupersededError(e)) {
+        const next = activeEstimateIdFromSupersededError(e);
+        setMessage(estimateRevisionSupersededMessage());
+        if (next) {
+          setActiveId(next);
+          onActiveEstimateChange?.(next);
+        }
+        return;
+      }
       if (e instanceof ApiError && Array.isArray((e as any).details)) {
         setErrors((e as any).details);
       }

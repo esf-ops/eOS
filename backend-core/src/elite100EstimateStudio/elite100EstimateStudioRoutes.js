@@ -132,6 +132,24 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
     return { mounted: false, reason: "studio_flag_off" };
   }
 
+  /** Structured error JSON — includes activeEstimateId on superseded revision (AUDIT-002). */
+  function studioMutationErrorBody(e, fallbackMessage) {
+    const status = Number(e?.statusCode) || 500;
+    /** @type {Record<string, unknown>} */
+    const body = {
+      ok: false,
+      error: status < 500 ? e.message : fallbackMessage,
+      code: e?.code || undefined
+    };
+    if (e?.code === "estimate_revision_superseded") {
+      body.activeEstimateId = e.activeEstimateId || null;
+      body.requestedEstimateId = e.requestedEstimateId || null;
+      body.message = e.message;
+    }
+    if (e?.details != null) body.details = e.details;
+    return { status, body };
+  }
+
   const repository =
     deps.repository || createSupabaseDigitalEstimateRepository({ db: getSupabase() });
 
@@ -696,12 +714,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json(result);
       } catch (e) {
         logStudio("confirm manual scope failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to confirm manual scope",
-          code: e?.code,
-          details: e?.details || undefined
-        });
+        const { status, body } = studioMutationErrorBody(e, "Unable to confirm manual scope");
+        res.status(status).json(body);
       }
     }
   );
@@ -723,11 +737,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json({ ok: true, estimate });
       } catch (e) {
         logStudio("save manual scope failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to save manual scope",
-          code: e?.code
-        });
+        const { status, body } = studioMutationErrorBody(e, "Unable to save manual scope");
+        res.status(status).json(body);
       }
     }
   );
@@ -1129,11 +1140,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json({ ok: true, estimate });
       } catch (e) {
         logStudio("patch estimate failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to update estimate",
-          code: e?.code
-        });
+        const { status, body } = studioMutationErrorBody(e, "Unable to update estimate");
+        res.status(status).json(body);
       }
     }
   );
@@ -1169,13 +1177,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         });
       } catch (e) {
         logStudio("patch project details failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error:
-            e?.statusCode && e.statusCode < 500 ? e.message : "Unable to update project details",
-          code: e?.code,
-          details: e?.details
-        });
+        const { status, body } = studioMutationErrorBody(e, "Unable to update project details");
+        res.status(status).json(body);
       }
     }
   );
@@ -1204,12 +1207,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json({ ok: true, ...result });
       } catch (e) {
         logStudio("refresh from takeoff failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error:
-            e?.statusCode && e.statusCode < 500 ? e.message : "Unable to refresh from Takeoff",
-          code: e?.code
-        });
+        const { status, body } = studioMutationErrorBody(e, "Unable to refresh from Takeoff");
+        res.status(status).json(body);
       }
     }
   );
@@ -1236,12 +1235,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json({ ok: true, estimate });
       } catch (e) {
         logStudio("calculate estimate failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to calculate estimate",
-          code: e?.code,
-          details: e?.details
-        });
+        const { status, body } = studioMutationErrorBody(e, "Unable to calculate estimate");
+        res.status(status).json(body);
       }
     }
   );
@@ -1268,12 +1263,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json({ ok: true, estimate });
       } catch (e) {
         logStudio("approve estimate failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to approve estimate",
-          code: e?.code,
-          details: e?.details
-        });
+        const { status, body } = studioMutationErrorBody(e, "Unable to approve estimate");
+        res.status(status).json(body);
       }
     }
   );

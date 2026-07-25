@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   classifyQuoteIntakeError,
   createQuoteIntakeApiClient
@@ -21,6 +21,11 @@ import EstimateWorkflowHeader, { type WorkspaceWorkflow } from "./EstimateWorkfl
 import EstimatePublicationSummary, {
   type PublicationSummary
 } from "./EstimatePublicationSummary";
+import {
+  aiTakeoffHeadUrl,
+  isAllowedTakeoffMessageOrigin,
+  isValidTakeoffApprovedMessage
+} from "./takeoffPostMessageOrigins.mjs";
 
 type Props = {
   authToken: string;
@@ -51,30 +56,6 @@ type OpenState =
   | ReadyState
   | { kind: "error"; message: string; code?: string };
 
-function aiTakeoffHeadUrl(): string {
-  const raw = String(import.meta.env.VITE_HEAD_URL_AI_TAKEOFF ?? "").trim();
-  return raw.replace(/\/+$/, "") || "http://localhost:5186";
-}
-
-function isAllowedTakeoffMessageOrigin(origin: string): boolean {
-  try {
-    const allowed = new URL(aiTakeoffHeadUrl()).origin;
-    if (origin === allowed) return true;
-    // Local Vite / preview fallbacks when env points at hosted Takeoff.
-    if (
-      origin === "http://localhost:5186" ||
-      origin === "http://127.0.0.1:5186" ||
-      origin.endsWith(".eliteosfab.com") ||
-      origin.endsWith(".vercel.app")
-    ) {
-      return true;
-    }
-  } catch {
-    /* ignore */
-  }
-  return false;
-}
-
 /**
  * Linked Takeoff workspace — resolves/creates intake→takeoff link, then embeds
  * the existing production AI Takeoff review UI for that job id.
@@ -86,6 +67,7 @@ export default function EstimateTakeoffWorkspace({
   onBackToQueue
 }: Props) {
   const client = useMemo(() => createQuoteIntakeApiClient(), []);
+  const takeoffFrameRef = useRef<HTMLIFrameElement | null>(null);
   const [state, setState] = useState<OpenState>({ kind: "resolving" });
   // Unmount Takeoff iframe when opening Scope/Digital/Review so its /results/latest
   // poll cannot leak into Estimate Queue after navigation.
@@ -410,11 +392,13 @@ export default function EstimateTakeoffWorkspace({
   useEffect(() => {
     if (state.kind !== "ready" || state.manualMode || !state.takeoffJobId) return;
     function onMessage(event: MessageEvent) {
+      // AUDIT-005: exact origin allowlist — no *.vercel.app / *.eliteosfab.com wildcards.
       if (!isAllowedTakeoffMessageOrigin(String(event.origin || ""))) return;
-      const data = event.data;
-      if (!data || typeof data !== "object") return;
-      if (data.type !== "eliteos-takeoff-approved") return;
-      if (String(data.takeoffJobId ?? "") !== state.takeoffJobId) return;
+      const frameWin = takeoffFrameRef.current?.contentWindow;
+      if (frameWin && event.source && event.source !== frameWin) {
+        return;
+      }
+      if (!isValidTakeoffApprovedMessage(event.data, state.takeoffJobId || "")) return;
       setState((prev) => {
         if (prev.kind !== "ready") return prev;
         return {
@@ -738,11 +722,12 @@ export default function EstimateTakeoffWorkspace({
               <div className="eq-takeoff-frame-wrap">
                 {takeoffFrameMounted ? (
                   <iframe
+                    ref={takeoffFrameRef}
                     title="AI Takeoff review"
                     className="eq-takeoff-frame"
                     data-testid="eq-takeoff-iframe"
                     src={takeoffSrc ?? undefined}
-                    referrerPolicy="no-referrer"
+                    referrerPolicy="origin"
                   />
                 ) : (
                   <div className="eq-state" data-testid="eq-takeoff-iframe-paused">

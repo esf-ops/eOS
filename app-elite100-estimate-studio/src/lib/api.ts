@@ -21,6 +21,29 @@ export function isTransientHttpError(e: unknown): boolean {
   return e.status === 502 || e.status === 503 || e.status === 504;
 }
 
+/** Stale panel held a superseded estimate id (AUDIT-002). Do not auto-replay. */
+export function isEstimateRevisionSupersededError(e: unknown): boolean {
+  if (!(e instanceof ApiError) || e.status !== 409) return false;
+  const body = e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : null;
+  return (
+    body?.code === "estimate_revision_superseded" ||
+    (body?.details != null &&
+      typeof body.details === "object" &&
+      (body.details as { code?: string }).code === "estimate_revision_superseded")
+  );
+}
+
+export function estimateRevisionSupersededMessage(): string {
+  return "A newer estimate revision is active. Refresh the current revision before continuing. Your typed values were not applied to the new revision.";
+}
+
+export function activeEstimateIdFromSupersededError(e: unknown): string | null {
+  if (!(e instanceof ApiError)) return null;
+  const body = e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : null;
+  const id = body?.activeEstimateId;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
 export function transientFailureMessage(e: unknown): string {
   if (isTransientHttpError(e)) {
     return "Service temporarily unavailable. Your changes were not confirmed by the server. Nothing was published or sent. Retry this action after the service becomes available.";

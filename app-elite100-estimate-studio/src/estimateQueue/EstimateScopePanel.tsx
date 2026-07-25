@@ -5,7 +5,10 @@ import {
   apiPost,
   ApiError,
   isTransientHttpError,
-  transientFailureMessage
+  transientFailureMessage,
+  isEstimateRevisionSupersededError,
+  estimateRevisionSupersededMessage,
+  activeEstimateIdFromSupersededError
 } from "../lib/api";
 
 import EstimateDigitalEstimatePanel from "./EstimateDigitalEstimatePanel";
@@ -599,7 +602,11 @@ export default function EstimateScopePanel({
       markDirty(false);
       setActionNotice("Pricing Setup saved.");
     } catch (e) {
-      if (isTransientHttpError(e)) {
+      if (isEstimateRevisionSupersededError(e)) {
+        setActionError(estimateRevisionSupersededMessage());
+        const next = activeEstimateIdFromSupersededError(e);
+        if (next) onActiveEstimateChange?.(next);
+      } else if (isTransientHttpError(e)) {
         setActionError(transientFailureMessage(e));
         onTransientFailure?.(e, () => void saveDraft());
       } else {
@@ -675,7 +682,11 @@ export default function EstimateScopePanel({
       setActionNotice("Estimate calculated.");
     } catch (e) {
       // Preserve form + server state; never claim calculated on failure.
-      if (isTransientHttpError(e)) {
+      if (isEstimateRevisionSupersededError(e)) {
+        setActionError(estimateRevisionSupersededMessage());
+        const next = activeEstimateIdFromSupersededError(e);
+        if (next) onActiveEstimateChange?.(next);
+      } else if (isTransientHttpError(e)) {
         const msg = transientFailureMessage(e);
         setActionError(msg);
         onTransientFailure?.(e, () => void calculate());
@@ -710,7 +721,11 @@ export default function EstimateScopePanel({
       if (body.estimate) applyEstimate(body.estimate);
       setActionNotice("Estimate approved. Ready for a later Digital Estimate publication step.");
     } catch (e) {
-      if (isTransientHttpError(e)) {
+      if (isEstimateRevisionSupersededError(e)) {
+        setActionError(estimateRevisionSupersededMessage());
+        const next = activeEstimateIdFromSupersededError(e);
+        if (next) onActiveEstimateChange?.(next);
+      } else if (isTransientHttpError(e)) {
         setActionError(transientFailureMessage(e));
         onTransientFailure?.(e, () => void approve());
       } else {
