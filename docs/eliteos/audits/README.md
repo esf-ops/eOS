@@ -10,6 +10,8 @@ Evidence-backed documentation of the Elite 100 estimating, AI Takeoff, Digital E
 
 **No application behavior was changed in this audit.** Documentation files only.
 
+**Follow-up (2026-07-24):** Shared Inbox Phase 1 was implemented on `feature/studio-shared-inbox` (see FEATURE_DECISIONS §178). Secure plan viewing and All Estimates remain incomplete.
+
 ## Protected golden path
 
 Recent merged Studio fixes (ancestors of audited HEAD) include workflow sequencing (`3eaacdd`) and published-estimate reopen (`3942332`). The currently working production path is treated as protected.

@@ -7,6 +7,7 @@ import EstimateQueuePage from "./estimateQueue/EstimateQueuePage";
 import EstimateCommandCenterPage from "./estimateQueue/EstimateCommandCenterPage";
 import EstimateTakeoffWorkspace from "./estimateQueue/EstimateTakeoffWorkspace";
 import LiveDigitalEstimatesPage from "./estimateQueue/LiveDigitalEstimatesPage";
+import SharedInboxPage from "./estimateQueue/SharedInboxPage";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
 
@@ -100,15 +101,16 @@ export default function StudioApp() {
   const [studioConfigOk, setStudioConfigOk] = useState<boolean | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [mainNav, setMainNav] = useState<
+    | "shared-inbox"
     | "command-center"
     | "estimate-queue"
     | "publications"
     | "reviews"
     | "estimate-workspace"
   >("command-center");
-  const [queueReturnNav, setQueueReturnNav] = useState<"command-center" | "estimate-queue">(
-    "command-center"
-  );
+  const [queueReturnNav, setQueueReturnNav] = useState<
+    "shared-inbox" | "command-center" | "estimate-queue"
+  >("command-center");
   const [moreNavOpen, setMoreNavOpen] = useState(false);
   const [publicationsMode, setPublicationsMode] = useState<"portfolio" | "publish-search">(
     "portfolio"
@@ -512,6 +514,7 @@ export default function StudioApp() {
       />
       <main
         className={
+          mainNav === "shared-inbox" ||
           mainNav === "command-center" ||
           mainNav === "estimate-queue" ||
           mainNav === "estimate-workspace" ||
@@ -535,7 +538,28 @@ export default function StudioApp() {
           <button
             type="button"
             className={
-              mainNav === "command-center" || mainNav === "estimate-workspace" ? "active" : ""
+              mainNav === "shared-inbox" ||
+              (mainNav === "estimate-workspace" && queueReturnNav === "shared-inbox")
+                ? "active"
+                : ""
+            }
+            data-testid="studio-nav-shared-inbox"
+            onClick={() => {
+              setMainNav("shared-inbox");
+              setQueueReturnNav("shared-inbox");
+              setEstimateWorkspaceCaseId(null);
+              setMoreNavOpen(false);
+            }}
+          >
+            Shared Inbox
+          </button>
+          <button
+            type="button"
+            className={
+              mainNav === "command-center" ||
+              (mainNav === "estimate-workspace" && queueReturnNav === "command-center")
+                ? "active"
+                : ""
             }
             data-testid="studio-nav-command-center"
             onClick={() => {
@@ -602,6 +626,29 @@ export default function StudioApp() {
             ) : null}
           </div>
         </nav>
+
+        {mainNav === "shared-inbox" ? (
+          <SharedInboxPage
+            authToken={sessionToken}
+            onOpenEstimate={(caseId, options) => {
+              setQueueReturnNav("shared-inbox");
+              setEstimateWorkspaceCaseId(caseId);
+              setIntakeCaseId(caseId);
+              const target = String(options?.openTarget || "takeoff");
+              const normalized =
+                target === "manual-scope"
+                  ? "scope"
+                  : target === "scope" ||
+                      target === "digital" ||
+                      target === "review" ||
+                      target === "takeoff"
+                    ? target
+                    : "takeoff";
+              setWorkspaceFocus(normalized);
+              setMainNav("estimate-workspace");
+            }}
+          />
+        ) : null}
 
         {mainNav === "command-center" ? (
           <EstimateCommandCenterPage
