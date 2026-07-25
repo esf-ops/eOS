@@ -80,7 +80,7 @@ function row(extra = {}) {
   );
   assert.equal(failed.blocked, true);
   assert.ok(failed.blockedReason);
-  assert.equal(failed.nextActionLabel, "Review request");
+  assert.equal(failed.nextActionLabel, "Resolve Takeoff issue");
 
   const review = toCommandCenterItem(
     row({
@@ -108,13 +108,18 @@ function row(extra = {}) {
   );
   assert.equal(ready.stageKey, "ready_to_publish");
   assert.equal(ready.nextActionRoute, "digital");
-  assert.equal(ready.nextActionLabel, "Publish Estimate");
+  assert.equal(ready.nextActionLabel, "Configure Digital Estimate");
 
   const stale = nextActionFromRow(
     row({
       workflowStatus: "Scope in progress",
       openTarget: "scope",
-      attentionReasons: ["estimate_stale"]
+      attentionReasons: ["estimate_stale"],
+      staleReason: "Scope changed",
+      estimateStatus: "ready_to_price",
+      sourceType: "manual",
+      estimateOrigin: "manual_staff",
+      manualScopeConfirmed: true
     })
   );
   assert.equal(stale.nextActionRoute, "scope");

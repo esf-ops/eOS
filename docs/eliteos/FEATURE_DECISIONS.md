@@ -2514,4 +2514,22 @@
 | **Tests** | `studioPublicationSummary.test.mjs`, extended `studioWorkspaceWorkflow.test.mjs`, `studioPublishedReopen.ui.test.mjs`. |
 | **Impacted** | `studioPublicationSummary.mjs`, workspace workflow, digital-estimate readiness/summary read, estimate GET attach, EstimatePublicationSummary UI, Takeoff workspace focus/collapse, Review openTarget, this entry. |
 
+### 177. Studio core cleanup — operational adapter, revision guard, postMessage origins (2026-07-24)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-24 · `fix/studio-core-cleanup-and-guardrails` |
+| **Operational status** | Command Center / Estimate Queue derive **one backend operational read-model** (`buildStudioOperationalState`) for label, needs-attention, openTarget, and primary action. No persisted workflow enum / estimate-family table. |
+| **Studio workflow retained** | Estimate Studio continues to use the richer `buildStudioWorkspaceWorkflow` for per-revision action gating. |
+| **Queue actions** | Primary queue/Command Center actions **navigate only** (openTarget / focus). They do **not** calculate, approve, publish, replace, revoke, email, or notify. |
+| **Superseded mutations** | Active-workflow mutations targeting a **superseded** `studio_estimates` id return structured **409** `estimate_revision_superseded` with safe `activeEstimateId` / `requestedEstimateId`. No silent replay onto the active revision. |
+| **Publication / Review** | Publication replace/revoke and Review Request actions remain on their existing authorities — not blunt-blocked solely because a publication belongs to a prior revision. |
+| **Takeoff postMessage** | AI Takeoff ↔ Studio messaging uses **exact configured origins** only. `targetOrigin "*"` and blanket `*.vercel.app` / `*.eliteosfab.com` receiver rules are removed. Preview origins require explicit allowlist config. |
+| **Identity display** | Queue/Command Center customer/project/estimator labels use **display-only fallbacks** (`Customer not identified`, `Project not named`, `Unassigned`). Fallbacks never rewrite Account Directory, estimate snapshots, or publication snapshots. |
+| **Delivery** | Load, refresh, retry, queue open, link copy/open, and revision reconciliation never publish, replace, revoke, email, mark sold, or write QuickBooks/Moraware. |
+| **SQL** | None. |
+| **Tests** | `studioOperationalStatus.test.mjs`, `studioEstimateActiveRevisionGuard.test.mjs`, `studioIdentityDisplay.test.mjs`, `takeoffPostMessageOrigins.test.mjs`, plus `eos:test:studio-golden-path-gate`. |
+| **Impacted** | Queue service, Command Center view-model, estimate/manual mutation services + routes, Takeoff/Studio postMessage helpers, identity display helper, Studio UI 409 recovery, this entry. |
+| **Audit findings** | AUDIT-001 (implemented), AUDIT-002 (implemented), AUDIT-005 (implemented), AUDIT-009/010 (partial — terminology/nav via adapter), identity Unknown (implemented display), AUDIT-014 (gate remains; browser E2E deferred). |
+
 

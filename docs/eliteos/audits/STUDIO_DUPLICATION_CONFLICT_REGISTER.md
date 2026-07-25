@@ -21,6 +21,7 @@ IDs are stable: `STUDIO-AUDIT-NNN`.
 | SQL | no |
 | Safe before All Estimates | yes |
 | Safe before Shared Inbox | yes |
+| **Cleanup status (2026-07-24)** | **Implemented** via `buildStudioOperationalState` + Command Center `nextActionFromRow`. Verification: `studioOperationalStatus.test.mjs`, Command Center tests. |
 
 ---
 
@@ -39,6 +40,7 @@ IDs are stable: `STUDIO-AUDIT-NNN`.
 | Suggested branch | `fix/studio-superseded-mutation-guard` |
 | SQL | no |
 | Safe before All Estimates | yes |
+| **Cleanup status (2026-07-24)** | **Implemented** — `loadActiveEstimateForMutation` / 409 `estimate_revision_superseded` + frontend recovery (no auto-replay). Verification: `studioEstimateActiveRevisionGuard.test.mjs`. |
 
 ---
 
@@ -91,6 +93,7 @@ IDs are stable: `STUDIO-AUDIT-NNN`.
 | SQL | no |
 | Prerequisite | Golden path Takeoff approve E2E |
 | Safe before All Estimates | yes |
+| **Cleanup status (2026-07-24)** | **Implemented** — exact origin allowlist; `targetOrigin "*"` removed; wildcard subdomain acceptance removed. Verification: `takeoffPostMessageOrigins.test.mjs`. True browser E2E still deferred. |
 
 ---
 

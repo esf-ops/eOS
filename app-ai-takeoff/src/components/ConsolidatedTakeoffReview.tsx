@@ -135,8 +135,39 @@ function addRoom(result: any): any {
 
 function notifyParentApproved(takeoffJobId: string, payload: unknown) {
   try {
+    // AUDIT-005: never use targetOrigin "*". Skip when no exact Studio origin is known.
+    if (!window.parent || window.parent === window) return;
+    const env = (import.meta as unknown as { env?: Record<string, string> }).env || {};
+    const isDev = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV);
+    let targetOrigin: string | null = null;
+    try {
+      const configured = String(
+        env.VITE_HEAD_URL_ELITE100_ESTIMATE_STUDIO || env.VITE_HEAD_URL_ESTIMATE_STUDIO || ""
+      ).trim();
+      if (configured) targetOrigin = new URL(configured).origin;
+    } catch {
+      targetOrigin = null;
+    }
+    if (!targetOrigin) {
+      try {
+        if (document.referrer) targetOrigin = new URL(document.referrer).origin;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!targetOrigin && isDev) {
+      targetOrigin = "http://localhost:5191";
+    }
+    if (!targetOrigin) {
+      if (isDev) {
+        console.warn(
+          "[takeoff] skipped parent postMessage: configure VITE_HEAD_URL_ELITE100_ESTIMATE_STUDIO"
+        );
+      }
+      return;
+    }
     const p = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
-    window.parent?.postMessage(
+    window.parent.postMessage(
       {
         type: "eliteos-takeoff-approved",
         takeoffJobId,
@@ -146,7 +177,7 @@ function notifyParentApproved(takeoffJobId: string, payload: unknown) {
         estimateScopeRefreshRequired: true,
         payload
       },
-      "*"
+      targetOrigin
     );
   } catch {
     /* ignore */
