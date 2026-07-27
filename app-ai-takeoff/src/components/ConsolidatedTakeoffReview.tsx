@@ -49,7 +49,6 @@ import {
   flattenPieces,
   patchRun,
   patchRunGeometry,
-  patchRunFinishedEdge,
   renameRoom,
   reassignRun,
   sfFrom
