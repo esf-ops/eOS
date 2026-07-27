@@ -987,11 +987,11 @@ export default function EstimateScopePanel({
         </dl>
         {blocked ? (
           <div className="eq-state eq-state--warn" data-testid="eq-estimate-blocked">
-            Finish the Takeoff worksheet above, then click Approve Takeoff &amp; Build Estimate.
-            Scope unlocks automatically after approval.
+            AI Takeoff is still preparing the Scope draft. You can wait for the worksheet, or continue
+            editing Scope once rooms and pieces are available.
           </div>
         ) : (
-          <p className="eq-muted">Takeoff approved — add commercial scope and calculate below.</p>
+          <p className="eq-muted">Scope draft ready — define Customer Choices below.</p>
         )}
         {estimate.staleReason ? (
           <div className="eq-action-row" style={{ marginTop: 8 }}>
@@ -2378,11 +2378,31 @@ export default function EstimateScopePanel({
           />
         </label>
         <div className="eq-action-row">
-          <button type="button" className="eq-btn-secondary" disabled={busy || blocked || !dirty} onClick={() => void saveDraft()}>
+          <button
+            type="button"
+            className="eq-btn-secondary"
+            disabled={busy || blocked || !dirty}
+            data-testid="eq-save-pricing-draft"
+            onClick={() => void saveDraft()}
+          >
+            Save now
+          </button>
+          {dirty ? (
+            <span className="eq-muted" data-testid="eq-autosave-status">
+              Saving…
+            </span>
+          ) : (
+            <span className="eq-muted" data-testid="eq-autosave-status">
+              Saved
+            </span>
+          )}
+        </div>
+        <details className="eq-compat-advanced" data-testid="eq-compat-save-draft">
+          <summary>Advanced — Save Draft (compatibility)</summary>
+          <button type="button" className="eq-btn-ghost" disabled={busy || blocked || !dirty} onClick={() => void saveDraft()}>
             Save Draft
           </button>
-          {dirty ? <span className="eq-muted">Unsaved scope changes</span> : null}
-        </div>
+        </details>
       </section>
 
       <section className="eq-estimate-section" aria-label="Estimate summary">
@@ -2473,18 +2493,31 @@ export default function EstimateScopePanel({
         ) : null}
       </section>
 
-      <section className="eq-estimate-section" aria-label="Estimate approval">
-        <h2>D. Approval</h2>
+      <section className="eq-estimate-section" aria-label="Customer Choices &amp; pricing">
+        <h2>Customer Choices</h2>
+        <p className="eq-muted">
+          Define what the customer may select. Price updates automatically after saves. Publish is the
+          commercial approval — no separate Calculate or Approve clicks are required.
+        </p>
+        <p className="eq-muted" data-testid="eq-calc-status">
+          {busy
+            ? "Updating price…"
+            : estimate.calculation?.calculatedAt
+              ? "Price updated"
+              : pricingDirty
+                ? "Pricing needs attention"
+                : ""}
+        </p>
         {approvalCurrent && estimate.approval?.approvedAt ? (
           <p className="eq-muted" data-testid="eq-estimate-approved">
-            Approved {estimate.approval.approvedAt}
+            Last approved snapshot {estimate.approval.approvedAt}
             {estimate.approval.exactInternalTotal != null
               ? ` · $${Number(estimate.approval.exactInternalTotal).toFixed(2)}`
               : ""}
           </p>
         ) : (
           <p className="eq-muted" data-testid="eq-estimate-not-approved">
-            Not approved yet.
+            Ready for Review &amp; Publish when Scope and choices are complete.
           </p>
         )}
         {(workflow?.historicalApproval?.label || estimate.previousRevisionSummary?.label) &&
@@ -2496,7 +2529,7 @@ export default function EstimateScopePanel({
         ) : null}
         {!canCalculate && pricingDirty ? (
           <p className="eq-muted" data-testid="eq-calculate-blocked-dirty">
-            Save Pricing Setup before calculating.
+            Finish saving Customer Choices before publishing.
           </p>
         ) : null}
         {actionError ? (
@@ -2509,45 +2542,47 @@ export default function EstimateScopePanel({
             {actionNotice}
           </div>
         ) : null}
-        <div className="eq-action-row">
-          <button
-            type="button"
-            className="eq-btn-primary"
-            disabled={!canCalculate}
-            data-testid="eq-calculate-estimate"
-            onClick={() => void calculate()}
-          >
-            Calculate Estimate
-          </button>
-          <button
-            type="button"
-            className="eq-btn-secondary"
-            disabled={!canApprove || estimate.status !== "priced"}
-            data-testid="eq-approve-estimate"
-            onClick={() => void approve()}
-          >
-            Approve Estimate
-          </button>
-          <button type="button" className="eq-btn-ghost" disabled={busy} onClick={() => void load()}>
-            Refresh
-          </button>
-        </div>
+        <details className="eq-compat-advanced" data-testid="eq-compat-calc-approve">
+          <summary>Advanced — manual calculate / approve (compatibility)</summary>
+          <div className="eq-action-row">
+            <button
+              type="button"
+              className="eq-btn-primary"
+              disabled={!canCalculate}
+              data-testid="eq-calculate-estimate"
+              onClick={() => void calculate()}
+            >
+              Calculate Estimate
+            </button>
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              disabled={!canApprove || estimate.status !== "priced"}
+              data-testid="eq-approve-estimate"
+              onClick={() => void approve()}
+            >
+              Approve Estimate
+            </button>
+            <button type="button" className="eq-btn-ghost" disabled={busy} onClick={() => void load()}>
+              Refresh
+            </button>
+          </div>
+        </details>
       </section>
 
       </>
       ) : null}
 
-      {approvalCurrent || workflow?.currentStage === "published" || workflow?.publication?.active ? (
-        <EstimateDigitalEstimatePanel
+      <EstimateDigitalEstimatePanel
           authToken={authToken}
           estimateId={estimate.id}
           estimateRevision={estimate.revision ?? null}
-          estimateApproved
+          estimateApproved={true}
+          useSimplifiedPublish
           onEditProjectDetails={onEditProjectDetails}
           onPublicationSummary={onPublicationSummary}
           onPublicationRefreshError={onPublicationRefreshError}
         />
-      ) : null}
     </div>
   );
 }

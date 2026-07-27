@@ -109,10 +109,10 @@ export default function StudioApp() {
     | "publications"
     | "reviews"
     | "estimate-workspace"
-  >("command-center");
+  >("shared-inbox");
   const [queueReturnNav, setQueueReturnNav] = useState<
     "shared-inbox" | "command-center" | "all-estimates" | "estimate-queue"
-  >("command-center");
+  >("shared-inbox");
   const [moreNavOpen, setMoreNavOpen] = useState(false);
   const [publicationsMode, setPublicationsMode] = useState<"portfolio" | "publish-search">(
     "portfolio"
@@ -545,7 +545,7 @@ export default function StudioApp() {
                 ? "active"
                 : ""
             }
-            data-testid="studio-nav-shared-inbox"
+            data-testid="studio-nav-inbox"
             onClick={() => {
               setMainNav("shared-inbox");
               setQueueReturnNav("shared-inbox");
@@ -553,25 +553,7 @@ export default function StudioApp() {
               setMoreNavOpen(false);
             }}
           >
-            Shared Inbox
-          </button>
-          <button
-            type="button"
-            className={
-              mainNav === "command-center" ||
-              (mainNav === "estimate-workspace" && queueReturnNav === "command-center")
-                ? "active"
-                : ""
-            }
-            data-testid="studio-nav-command-center"
-            onClick={() => {
-              setMainNav("command-center");
-              setQueueReturnNav("command-center");
-              setEstimateWorkspaceCaseId(null);
-              setMoreNavOpen(false);
-            }}
-          >
-            Command Center
+            Inbox
           </button>
           <button
             type="button"
@@ -581,7 +563,7 @@ export default function StudioApp() {
                 ? "active"
                 : ""
             }
-            data-testid="studio-nav-all-estimates"
+            data-testid="studio-nav-estimates"
             onClick={() => {
               setMainNav("all-estimates");
               setQueueReturnNav("all-estimates");
@@ -589,35 +571,19 @@ export default function StudioApp() {
               setMoreNavOpen(false);
             }}
           >
-            All Estimates
-          </button>
-          <button
-            type="button"
-            className={mainNav === "publications" ? "active" : ""}
-            data-testid="studio-nav-publications"
-            onClick={() => {
-              setMainNav("publications");
-              setPublicationsMode("portfolio");
-              setMoreNavOpen(false);
-            }}
-          >
-            Live Digital Estimates
-          </button>
-          <button
-            type="button"
-            className={mainNav === "reviews" ? "active" : ""}
-            data-testid="studio-nav-review-requests"
-            onClick={() => {
-              setMainNav("reviews");
-              setMoreNavOpen(false);
-            }}
-          >
-            Review Requests
+            Estimates
           </button>
           <div className="studio-nav-more">
             <button
               type="button"
-              className={mainNav === "estimate-queue" ? "active" : ""}
+              className={
+                mainNav === "command-center" ||
+                mainNav === "publications" ||
+                mainNav === "reviews" ||
+                mainNav === "estimate-queue"
+                  ? "active"
+                  : ""
+              }
               data-testid="studio-nav-more"
               aria-expanded={moreNavOpen}
               aria-haspopup="menu"
@@ -627,6 +593,48 @@ export default function StudioApp() {
             </button>
             {moreNavOpen ? (
               <ul className="studio-nav-more-menu" role="menu" data-testid="studio-nav-more-menu">
+                <li role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="studio-nav-command-center"
+                    onClick={() => {
+                      setMainNav("command-center");
+                      setQueueReturnNav("command-center");
+                      setEstimateWorkspaceCaseId(null);
+                      setMoreNavOpen(false);
+                    }}
+                  >
+                    Command Center (compatibility)
+                  </button>
+                </li>
+                <li role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="studio-nav-publications"
+                    onClick={() => {
+                      setMainNav("publications");
+                      setPublicationsMode("portfolio");
+                      setMoreNavOpen(false);
+                    }}
+                  >
+                    Live Digital Estimates (compatibility)
+                  </button>
+                </li>
+                <li role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="studio-nav-review-requests"
+                    onClick={() => {
+                      setMainNav("reviews");
+                      setMoreNavOpen(false);
+                    }}
+                  >
+                    Review Requests (compatibility)
+                  </button>
+                </li>
                 <li role="none">
                   <button
                     type="button"

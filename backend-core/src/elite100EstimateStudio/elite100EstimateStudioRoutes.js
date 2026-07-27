@@ -80,6 +80,7 @@ import { resolveStudioLifecycleRepositoryForRoutes } from "./studioLifecycleRepo
 import { createStudioSoldReviewService } from "./studioSoldReviewService.mjs";
 import { createStudioAllEstimatesService } from "./studioAllEstimatesService.mjs";
 import { canMarkStudioEstimateSold } from "./studioSoldReviewService.mjs";
+import { createStudioSimplifiedWorkflowService } from "./studioSimplifiedWorkflow.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
@@ -706,6 +707,17 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       graphClient: deps.graphClient || null,
       graphFetchImpl: deps.graphFetchImpl || undefined,
       downloadStoredFile: deps.downloadStoredFile || undefined
+    });
+
+  const studioSimplifiedWorkflowService =
+    deps.studioSimplifiedWorkflowService ||
+    createStudioSimplifiedWorkflowService({
+      env,
+      sharedInboxService: studioSharedInboxService,
+      studioEstimateService,
+      manualEstimateService: studioManualEstimateService,
+      digitalEstimateService: studioDigitalEstimateService,
+      approveTakeoffJob: deps.approveTakeoffJob || null
     });
 
   function sendPlanViewerError(res, e, fallback) {
@@ -1511,6 +1523,57 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
     }
   );
 
+  /**
+   * One-step Publish — client flushes drafts; server auto confirm/calculate/approve then publish.
+   * Estimator commitment action. No email / sold / QB / Moraware.
+   */
+  app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/simplified-publish",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        if (!isDigitalEstimateApiEnabled(env) || !isDigitalEstimatePublishEnabled(env)) {
+          return res.status(404).json({
+            ok: false,
+            error: "Not found",
+            code: "digital_estimate_disabled"
+          });
+        }
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await studioSimplifiedWorkflowService.publishDigitalEstimate({
+          organizationId,
+          estimateId: req.params.estimateId,
+          actorUserId: req.user?.id ?? null,
+          body
+        });
+        auditStudioEstimate("estimate.simplified_publish", req, {
+          estimateId: req.params.estimateId,
+          status: result?.publication?.publication?.status || result?.publication?.status,
+          steps: result?.preparedSteps
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("studio simplified-publish failed", e, req);
+        if (e?.code === "scope_needs_attention" || Array.isArray(e?.issues)) {
+          return res.status(422).json({
+            ok: false,
+            error: e.message || "Scope needs attention",
+            code: e.code || "scope_needs_attention",
+            issues: e.issues || []
+          });
+        }
+        const { status, body } = studioPublishErrorPayload(
+          e,
+          "Unable to publish Digital Estimate"
+        );
+        res.status(status).json(body);
+      }
+    }
+  );
+
   // Existing revoke / replace-token / link-copied routes already cover Studio-backed pubs by id.
 
   function reviewServiceOr503(res) {
@@ -1701,6 +1764,69 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         const status = Number(e?.statusCode) || 500;
         const safe = sharedInboxSafeError(e?.code, "The request could not be imported.");
         res.status(status).json(safe);
+      }
+    }
+  );
+
+  /**
+   * Simplified Start Estimate — one idempotent action (import + ensure estimate).
+   * Compatibility: /import remains; estimators should use this route.
+   */
+  app.post(
+    "/api/elite100-estimate-studio/shared-inbox/:messageKey/start-estimate",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const idempotencyKey =
+          String(req.get("idempotency-key") || body.idempotencyKey || "").trim() || null;
+        const result = await studioSimplifiedWorkflowService.startEstimate({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          messageKey: decodeURIComponent(String(req.params.messageKey || "")),
+          idempotencyKey,
+          forceManual: body.forceManual === true
+        });
+        auditStudioEstimate("shared_inbox.start_estimate", req, {
+          intakeCaseId: result.intakeCaseId,
+          estimateId: result.estimateId,
+          status: result.reused ? "reused" : "started"
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("shared inbox start-estimate failed", e, req);
+        const status = Number(e?.statusCode) || 500;
+        const safe = sharedInboxSafeError(e?.code, "Unable to start the estimate.");
+        res.status(status).json(safe);
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/shared-inbox/:messageKey/mark-viewed",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioSimplifiedWorkflowService.markInboxViewed({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          messageKey: decodeURIComponent(String(req.params.messageKey || ""))
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("shared inbox mark-viewed failed", e, req);
+        const status = Number(e?.statusCode) || 500;
+        res.status(status).json({
+          ok: false,
+          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to mark viewed",
+          code: e?.code
+        });
       }
     }
   );

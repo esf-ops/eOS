@@ -21,28 +21,29 @@ const api = readFileSync(
 
 console.log("\nsharedInbox.ui.test.mjs\n");
 
-assert.match(app, /Shared Inbox/);
-assert.match(app, /studio-nav-shared-inbox/);
+assert.match(app, /Inbox/);
+assert.match(app, /studio-nav-inbox/);
 assert.match(app, /SharedInboxPage/);
-assert.ok(app.indexOf("Shared Inbox") < app.indexOf("Command Center"));
-console.log("ok: 42 Shared Inbox navigation is present (before Command Center)");
+assert.match(app, /Estimates/);
+assert.match(app, /studio-nav-estimates/);
+assert.ok(app.indexOf("studio-nav-inbox") < app.indexOf("studio-nav-estimates"));
+console.log("ok: 42 Inbox + Estimates primary navigation");
 
 assert.match(page, /shared-inbox-filter-\$\{f\.id\}/);
 assert.match(page, /id: "all"/);
 assert.match(page, /useState<\(typeof FILTERS\)\[number\]\["id"\]>\("all"\)/);
 console.log("ok: 43 default filter is All");
 
-assert.match(page, /newest first/);
 assert.match(api, /shared-inbox/);
-console.log("ok: 44 newest-first copy + API path");
+assert.match(api, /start-estimate/);
+console.log("ok: 44 newest-first copy + Start Estimate API path");
 
-assert.match(page, /Import and open|primaryAction\?\.label/);
+assert.match(page, /Start Estimate|primaryAction\?\.label/);
 assert.match(page, /data-action-key/);
-assert.match(page, /review_ai_takeoff|Review AI Takeoff/);
-assert.match(page, /view_progress|View progress/);
-assert.match(page, /Importing…/);
+assert.match(page, /startSharedInboxEstimate|resume_estimate/);
+assert.match(page, /Importing…|Starting…|importingKey/);
 assert.match(page, /importingKey/);
-console.log("ok: 45–51 primary actions + import disable while importing");
+console.log("ok: 45–51 primary actions + start disable while in flight");
 
 assert.match(page, /preserveOnTransient/);
 assert.match(page, /isTransientHttpError/);

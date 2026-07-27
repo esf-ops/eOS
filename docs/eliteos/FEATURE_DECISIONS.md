@@ -2678,3 +2678,20 @@
 | **SQL** | `backend-core/supabase/eliteos_studio_estimate_lifecycle_closeout_v1.sql` — **do not apply automatically**. |
 | **Tests** | `eos:test:estimate-lifecycle-closeout`. |
 | **Deferred** | Vanity Program; automatic QB/Moraware handoff; automatic customer email. |
+
+### 187. Elite 100 simplified estimating & publishing workflow (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `feature/elite100-simplified-estimating-workflow` |
+| **Decision** | Estimator product path is reduced to **Inbox → Start Estimate → Scope → Customer Choices → Review & Publish**. Top-level Studio navigation is **Inbox** and **Estimates** (Command Center / Live DE / Review Requests remain under More as compatibility). |
+| **AI Takeoff** | Prefills the same Scope workspace as a starting draft. Not a separate required business approval gate in the simplified path. Scope readiness is validation-derived (`Scope ready` / `Scope needs attention`). |
+| **Backsplash** | Physical **backsplash-eligible length** is Scope authority (room). Customer Choices only offer allowed backsplash types against that length. |
+| **Autosave** | Save Draft is not a required gate. Status vocabulary: Saving… / Saved / Save failed — Retry / Another user changed this estimate. Optimistic concurrency: stale responses and newer local edits are not applied; true multi-user 409s stay visible. |
+| **Calculation** | Remains server-authoritative. Manual Calculate is not required; Publish orchestrates calculate. Stale calculation tokens are ignored. |
+| **Publish** | **Publish Digital Estimate** is the estimator’s commercial approval. `POST …/simplified-publish` flushes client drafts (caller), validates Scope, auto-confirms manual scope when needed, calculates, approves (`confirm:true`), then publishes. Failure → no customer link / no partial commercial commit beyond a non-published priced snapshot. No email, auto-sold, QB, or Moraware. |
+| **Frozen option package** | Publication carries a customer-safe frozen option package summary (materials/edges/backsplash/products/defaults/price effects). Internal cost/margin/formulas omitted. |
+| **Commitments** | Only Publish, customer Accept, and Mark Sold require deliberate confirmation. |
+| **Legacy** | Internal Estimate and legacy Quote Library unchanged. No Studio → `quote_headers` authority writes. Compatibility `/import`, Calculate/Approve details remain for in-progress records. |
+| **SQL** | None. |
+| **Tests** | `eos:test:elite100-simplified-workflow`. |

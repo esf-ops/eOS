@@ -961,15 +961,17 @@ export default function EstimateTakeoffWorkspace({
                   </div>
                 )}
               </div>
-              <p className="eq-footnote">
-                Review the plan and edit the Takeoff worksheet above. Click{" "}
-                <strong>Approve Takeoff &amp; Build Estimate</strong> to seed Estimate Scope below.
+              <p className="eq-footnote" data-testid="eq-scope-prefill-hint">
+                AI Takeoff prefills this Scope workspace as a starting draft. Edit rooms, pieces, and
+                dimensions here — no separate Takeoff approval step is required. Scope readiness is
+                shown from validation.
               </p>
             </>
           ) : state.manualMode && !collapseCompleted ? (
-            <p className="eq-footnote">
-              After Confirm Manual Scope, use Pricing Setup / Calculate / Approve below. Publish remains
-              an explicit later action.
+            <p className="eq-footnote" data-testid="eq-manual-scope-hint">
+              Define fabrication Scope here. Changes autosave. Continue to Customer Choices, then
+              Publish Digital Estimate when ready — no separate Confirm Scope, Calculate, or Commercial
+              Approval clicks.
             </p>
           ) : null}
 

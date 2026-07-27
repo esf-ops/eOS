@@ -36,6 +36,7 @@ export async function fetchSharedInboxMessage(token, messageKey, opts = {}) {
 
 /**
  * Explicit import — confirm:true required. Idempotency-Key recommended.
+ * Compatibility route — prefer startSharedInboxEstimate for the simplified workflow.
  * @param {string} token
  * @param {string} messageKey
  * @param {{ idempotencyKey?: string }} [opts]
@@ -50,6 +51,55 @@ export async function importSharedInboxMessage(token, messageKey, opts = {}) {
     token,
     { confirm: true, idempotencyKey: opts.idempotencyKey || undefined },
     { headers }
+  );
+}
+
+/**
+ * One-click Start Estimate — idempotent import + ensure Studio estimate.
+ * @param {string} token
+ * @param {string} messageKey
+ * @param {{ idempotencyKey?: string, forceManual?: boolean }} [opts]
+ */
+export async function startSharedInboxEstimate(token, messageKey, opts = {}) {
+  const headers = {};
+  if (opts.idempotencyKey) {
+    headers["Idempotency-Key"] = String(opts.idempotencyKey);
+  }
+  return apiPost(
+    `/api/elite100-estimate-studio/shared-inbox/${encodeURIComponent(messageKey)}/start-estimate`,
+    token,
+    {
+      forceManual: opts.forceManual === true,
+      idempotencyKey: opts.idempotencyKey || undefined
+    },
+    { headers }
+  );
+}
+
+/**
+ * Mark inbox message viewed without starting an estimate.
+ * @param {string} token
+ * @param {string} messageKey
+ */
+export async function markSharedInboxViewed(token, messageKey) {
+  return apiPost(
+    `/api/elite100-estimate-studio/shared-inbox/${encodeURIComponent(messageKey)}/mark-viewed`,
+    token,
+    {}
+  );
+}
+
+/**
+ * One-step Publish Digital Estimate (simplified workflow).
+ * @param {string} token
+ * @param {string} estimateId
+ * @param {Record<string, unknown>} body
+ */
+export async function simplifiedPublishEstimate(token, estimateId, body = {}) {
+  return apiPost(
+    `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/simplified-publish`,
+    token,
+    { confirm: true, ...body }
   );
 }
 
