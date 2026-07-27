@@ -13,6 +13,7 @@ import {
   isTakeoffWorksheetDirty,
   nextExplicitMutationRevision,
   pieceRequiresExposedEdgeConfirmation,
+  reconcileSuccessfulTakeoffSave,
   saveTakeoffDraftExplicit
 } from "./takeoffExplicitSave.mjs";
 import { patchRunGeometry } from "./consolidatedWorksheetRows.mjs";
@@ -135,24 +136,86 @@ assert.equal(formatTakeoffSaveStatus("saving"), "Saving…");
 assert.equal(formatTakeoffSaveStatus("saved"), "Saved");
 assert.equal(formatTakeoffSaveStatus("conflict"), "Conflict — review latest draft");
 
-assert.equal(
-  isTakeoffWorksheetDirty({
-    localDraft: { a: 1 },
-    canonicalDraft: { a: 1 },
-    localExcludedRunIds: [],
-    canonicalExcludedRunIds: []
-  }),
-  false
-);
-assert.equal(
-  isTakeoffWorksheetDirty({
-    localDraft: { a: 2 },
-    canonicalDraft: { a: 1 },
-    localExcludedRunIds: [],
-    canonicalExcludedRunIds: []
-  }),
-  true
-);
+{
+  const clean = sampleDraft();
+  assert.equal(
+    isTakeoffWorksheetDirty({
+      localDraft: clean,
+      canonicalDraft: structuredClone(clean),
+      localExcludedRunIds: [],
+      canonicalExcludedRunIds: []
+    }),
+    false
+  );
+  const dirtyBs = applyLocalBacksplashToggle(
+    clean,
+    { roomId: "r1", areaId: "a1", runId: "c1" },
+    true,
+    56
+  );
+  assert.equal(
+    isTakeoffWorksheetDirty({
+      localDraft: dirtyBs,
+      canonicalDraft: clean,
+      localExcludedRunIds: [],
+      canonicalExcludedRunIds: []
+    }),
+    true,
+    "backsplash toggle must dirty the worksheet"
+  );
+  // false / null / undefined backsplash normalize equivalently
+  const a = structuredClone(clean);
+  const b = structuredClone(clean);
+  a.rooms[0].areas[0].runs[0].backsplashEligible = false;
+  delete b.rooms[0].areas[0].runs[0].backsplashEligible;
+  assert.equal(
+    isTakeoffWorksheetDirty({
+      localDraft: a,
+      canonicalDraft: b,
+      localExcludedRunIds: [],
+      canonicalExcludedRunIds: []
+    }),
+    false,
+    "false vs undefined backsplash must not appear dirty"
+  );
+}
+
+{
+  let posts = 0;
+  const clean = sampleDraft();
+  const noop = await saveTakeoffDraftExplicit({
+    saveCorrection: async () => {
+      posts += 1;
+      return { resultId: "x" };
+    },
+    takeoffResult: clean,
+    baseResultId: "base",
+    clientMutationRevision: 3,
+    reviewState: {},
+    canonicalDraft: clean,
+    skipIfUnchanged: true
+  });
+  assert.equal(posts, 0, "unchanged Save must not POST");
+  assert.equal(noop.unchanged, true);
+}
+
+{
+  const adopted = reconcileSuccessfulTakeoffSave({
+    response: {
+      resultId: "res-b",
+      clientMutationRevision: 49,
+      normalizedTakeoffJson: sampleDraft(),
+      savedAt: "t"
+    },
+    healDraft: (d) => d,
+    fallbackDraft: sampleDraft(),
+    excludedRunIds: ["x"]
+  });
+  assert.equal(adopted.resultId, "res-b");
+  assert.equal(adopted.clientMutationRevision, 49);
+  assert.ok(adopted.canonicalDraft);
+  assert.ok(adopted.canonicalExcludedRunIds.has("x"));
+}
 
 const afterLen = patchRunGeometry(
   sampleDraft(),
@@ -186,8 +249,10 @@ const trigger = readFileSync(
 const styles = readFileSync(join(root, "app-ai-takeoff/src/styles.css"), "utf8");
 
 assert.match(review, /saveTakeoffDraftExplicit/);
+assert.match(review, /reconcileSuccessfulTakeoffSave/);
 assert.match(review, /applyLocalBacksplashToggle/);
 assert.match(review, /applyLocalExposedEdgeConfirm/);
+assert.match(review, /isTakeoffWorksheetDirty/);
 assert.equal(/drainCorrectionQueue|scheduleSave|noteLocalDraftEdit/.test(review), false);
 assert.equal(/debounceMs/.test(review), false);
 assert.match(review, /Save the Takeoff draft before approval/);

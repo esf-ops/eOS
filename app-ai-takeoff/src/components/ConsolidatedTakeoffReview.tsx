@@ -60,6 +60,7 @@ import {
   isTakeoffWorksheetDirty,
   nextExplicitMutationRevision,
   pieceRequiresExposedEdgeConfirmation,
+  reconcileSuccessfulTakeoffSave,
   saveTakeoffDraftExplicit
 } from "../lib/takeoffExplicitSave.mjs";
 import ExposedSidesDialog from "./ExposedSidesDialog";
@@ -582,11 +583,23 @@ export default function ConsolidatedTakeoffReview() {
   /**
    * Save draft is the sole normal correction writer.
    * Double-click is coalesced by saveInFlightRef.
+   * Clean worksheets skip POST (client no-op → Saved).
    */
   const persistDraft = useCallback(async () => {
     if (!authToken || !takeoffJobId || !draftRef.current) return;
     if (saveInFlightRef.current) return;
     if (saveStatus === "conflict") return;
+    const dirty = isTakeoffWorksheetDirty({
+      localDraft: draftRef.current,
+      canonicalDraft: canonicalDraftRef.current,
+      localExcludedRunIds: excludedRef.current,
+      canonicalExcludedRunIds: canonicalExcludedRef.current
+    });
+    if (!dirty) {
+      setSaveStatus("saved");
+      window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
+      return;
+    }
     saveInFlightRef.current = true;
     setSaveStatus("saving");
     setSaveError(null);
@@ -599,21 +612,35 @@ export default function ConsolidatedTakeoffReview() {
         baseResultId: latestResultIdRef.current,
         clientMutationRevision: revision,
         reviewState: buildReviewState(),
-        correctionNotes: "Consolidated worksheet Save draft"
+        correctionNotes: "Consolidated worksheet Save draft",
+        canonicalDraft: canonicalDraftRef.current,
+        localExcludedRunIds: excludedRef.current,
+        canonicalExcludedRunIds: canonicalExcludedRef.current,
+        skipIfUnchanged: false
       });
-      latestLocalSaveAtRef.current = response.savedAt;
-      if (response.resultId) latestResultIdRef.current = response.resultId;
-      latestClientMutationRevisionRef.current = revision;
+      const adopted = reconcileSuccessfulTakeoffSave({
+        response,
+        healDraft: healTakeoffDraft,
+        fallbackDraft: snapshot,
+        excludedRunIds: excludedRef.current
+      });
+      // Atomic success reconciliation — draft, result id, revision, dirty baseline together.
+      if (!adopted.resultId) {
+        setSaveStatus("error");
+        setSaveError("The Takeoff draft could not be saved. Your edits remain on this screen.");
+        return;
+      }
+      latestResultIdRef.current = adopted.resultId;
+      if (adopted.clientMutationRevision != null) {
+        latestClientMutationRevisionRef.current = adopted.clientMutationRevision;
+      }
+      if (adopted.savedAt) latestLocalSaveAtRef.current = adopted.savedAt;
       lastServerResultVersionRef.current =
         resultVersionOf(response) ?? lastServerResultVersionRef.current;
-      const returned =
-        response.normalizedTakeoffJson != null
-          ? healTakeoffDraft(response.normalizedTakeoffJson)
-          : snapshot;
-      draftRef.current = returned;
-      setDraft(returned);
-      canonicalDraftRef.current = structuredClone(returned);
-      canonicalExcludedRef.current = new Set(excludedRef.current);
+      draftRef.current = adopted.draft;
+      setDraft(adopted.draft);
+      canonicalDraftRef.current = adopted.canonicalDraft;
+      canonicalExcludedRef.current = adopted.canonicalExcludedRunIds;
       setUnsavedEdgeRunIds(new Set());
       setNewerResultNotice(false);
       setAiPhase("ready");
@@ -628,18 +655,8 @@ export default function ConsolidatedTakeoffReview() {
       window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
     } catch (e) {
       if (e instanceof LabApiError && e.status === 409) {
-        const body =
-          e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : {};
-        if (typeof body.latestResultId === "string" && body.latestResultId) {
-          latestResultIdRef.current = body.latestResultId;
-        }
-        const serverRev = Number(body.latestClientMutationRevision);
-        if (Number.isSafeInteger(serverRev) && serverRev > 0) {
-          latestClientMutationRevisionRef.current = Math.max(
-            latestClientMutationRevisionRef.current,
-            serverRev
-          );
-        }
+        // Keep local draft + current baseResultId. Review latest draft reloads
+        // the server head; do not silently rebase and replay.
         setSaveStatus("conflict");
         setSaveError("The Takeoff draft changed while you were editing.");
         setDisplayStatus("Needs estimator review");
@@ -1820,7 +1837,16 @@ export default function ConsolidatedTakeoffReview() {
                 type="button"
                 className="ctr-btn-secondary"
                 data-testid="ctr-save-draft"
-                disabled={saveStatus === "saving" || saveStatus === "conflict"}
+                disabled={
+                  saveStatus === "saving" ||
+                  saveStatus === "conflict" ||
+                  !isTakeoffWorksheetDirty({
+                    localDraft: draft,
+                    canonicalDraft: canonicalDraftRef.current,
+                    localExcludedRunIds: excludedRunIds,
+                    canonicalExcludedRunIds: canonicalExcludedRef.current
+                  })
+                }
                 onClick={() => void persistDraft()}
               >
                 {saveStatus === "saving" ? "Saving…" : "Save draft"}

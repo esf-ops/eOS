@@ -4,20 +4,21 @@
  * Architecture (v4.5):
  *   Uses quote_takeoff_jobs and quote_takeoff_results as the durable source of truth.
  *   quote_takeoff_jobs.quote_id is nullable (confirmed via eliteos_quote_files_takeoff_storage.sql),
- *   enabling pre-quote AI Takeoff Lab flows.
+ *   enabling pre-quote AI Takeoff Lab / Studio / Shared Inbox flows.
  *
  *   createTakeoffWorkspace → inserts a real quote_takeoff_jobs row (quote_id = null)
- *   saveTakeoffResult      → inserts a real quote_takeoff_results row
- *   getTakeoffWorkspace    → reads from quote_takeoff_jobs + quote_files
- *   getLatestTakeoffResult → reads from quote_takeoff_results
+ *   saveTakeoffResult / saveTakeoffCorrection → insert a real quote_takeoff_results row
+ *   getLatestTakeoffResult → reads from quote_takeoff_results (+ result_summary pointer)
  *
- * NOTE on quote_takeoff_results.quote_id:
- *   The base schema has quote_id NOT NULL. The additive SQL does not explicitly
- *   DROP NOT NULL there. If that constraint is still in place, saveTakeoffResult
- *   will fall back to storing the full result JSON in quote_takeoff_jobs.result_summary
- *   and getLatestTakeoffResult will read it from there. To fully enable the real
- *   results table, run:
- *     ALTER TABLE public.quote_takeoff_results ALTER COLUMN quote_id DROP NOT NULL;
+ * Canonical result invariant:
+ *   Every successful Save/Approve resultId MUST be a physical quote_takeoff_results.id.
+ *   result_summary.resultRowId is a pointer/cache only — never a synthetic UUID.
+ *   Failed physical inserts return takeoff_result_persistence_failed (no summary promotion).
+ *
+ * quote_takeoff_results.quote_id:
+ *   May be null for Studio/intake Takeoffs (see eliteos_quote_takeoff_results_quote_id_nullable_v1.sql).
+ *   When the job has a legacy quote_id, it is copied onto the result row.
+ *   FK to quote_headers is retained for non-null values.
  *
  * Legacy v4 fallback (read-only):
  *   If getTakeoffWorkspace / getLatestTakeoffResult receives an ID that matches a
@@ -43,9 +44,11 @@ import {
   buildEstimatorConfirmedMeta,
   findPendingAiTakeoffResult,
   readAiHandlingMeta,
+  readResultMutationRevision,
   selectAuthoritativeTakeoffResult,
   summarizeAiFindingsPreview
 } from "./takeoffAuthoritativeResult.mjs";
+import { takeoffDraftsSemanticallyEqual } from "./takeoffDraftEquality.mjs";
 import {
   autoCompleteRoomReviewState,
   buildConsolidatedTakeoffSummary,
@@ -111,6 +114,58 @@ export function workspaceError(message, statusCode = 400) {
   e.statusCode = statusCode;
   e.isValidationError = statusCode < 500;
   return e;
+}
+
+/**
+ * Structured Save failure when a physical quote_takeoff_results row cannot be created.
+ * Never invents a synthetic resultId.
+ */
+export function takeoffResultPersistenceFailed(details = {}) {
+  console.warn(
+    "[takeoffWorkspace] takeoff_result_persistence_failed",
+    JSON.stringify({
+      takeoffJobId: details.takeoffJobId ?? null,
+      organizationId: details.organizationId ?? null,
+      attemptedBaseResultId: details.attemptedBaseResultId ?? null,
+      currentResultId: details.currentResultId ?? null,
+      mutationRevision: details.mutationRevision ?? null,
+      dbErrorCode: details.dbErrorCode ?? null,
+      quoteIdPresent: Boolean(details.quoteIdPresent),
+      errorCode: "takeoff_result_persistence_failed"
+    })
+  );
+  const err = workspaceError(
+    "The Takeoff draft could not be saved. Your edits remain on this screen.",
+    503
+  );
+  err.code = "takeoff_result_persistence_failed";
+  return err;
+}
+
+/**
+ * Approval / integrity failure when the canonical result is not a physical row.
+ */
+export function takeoffResultNotPersisted(details = {}) {
+  console.warn(
+    "[takeoffWorkspace] takeoff_result_not_persisted",
+    JSON.stringify({
+      takeoffJobId: details.takeoffJobId ?? null,
+      organizationId: details.organizationId ?? null,
+      claimedResultId: details.claimedResultId ?? null,
+      errorCode: "takeoff_result_not_persisted"
+    })
+  );
+  const err = workspaceError(
+    "The saved Takeoff result could not be verified. Refresh and save the draft before approval.",
+    422
+  );
+  err.code = "takeoff_result_not_persisted";
+  return err;
+}
+
+function resolveResultQuoteId(jobRow) {
+  const q = jobRow?.quote_id;
+  return q && isUuid(q) ? q : null;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -212,6 +267,51 @@ const RESULT_DETAIL_SELECT_COLS =
   "id,created_at,review_status,schema_version,normalized_takeoff_json," +
   "computed_measurements_json,validation_diagnostics_json,import_plan_json," +
   "raw_ai_result_json,reviewed_by_user_id,reviewed_at";
+
+/**
+ * Load a physical result row by id (org + job scoped). Returns null if missing.
+ */
+export async function loadPhysicalTakeoffResultRow(
+  supabase,
+  { organizationId, takeoffJobId, resultId }
+) {
+  if (!isUuid(resultId)) return null;
+  const { data, error } = await supabase
+    .from("quote_takeoff_results")
+    .select(RESULT_DETAIL_SELECT_COLS)
+    .eq("id", resultId)
+    .eq("takeoff_job_id", takeoffJobId)
+    .eq("organization_id", organizationId)
+    .limit(1);
+  if (error) {
+    throw Object.assign(new Error(`DB error loading takeoff result: ${error.message}`), {
+      statusCode: 503
+    });
+  }
+  return data?.[0] ?? null;
+}
+
+/**
+ * Assert resultId is a real quote_takeoff_results row for this job/org.
+ */
+export async function assertPhysicalTakeoffResult(
+  supabase,
+  { organizationId, takeoffJobId, resultId }
+) {
+  const row = await loadPhysicalTakeoffResultRow(supabase, {
+    organizationId,
+    takeoffJobId,
+    resultId
+  });
+  if (!row) {
+    throw takeoffResultNotPersisted({
+      organizationId,
+      takeoffJobId,
+      claimedResultId: resultId
+    });
+  }
+  return row;
+}
 
 /**
  * Authoritative latest result — estimator-confirmed / owned geometry outranks newer AI.
@@ -870,6 +970,7 @@ export async function saveTakeoffResult({
   const resultPayload = {
     organization_id: organizationId,
     takeoff_job_id: takeoffJobId,
+    quote_id: resolveResultQuoteId(jobRow),
     schema_version: schemaVersion,
     raw_ai_result_json: null,             // manual/lab source — no AI output
     normalized_takeoff_json: takeoffResult,
@@ -882,36 +983,31 @@ export async function saveTakeoffResult({
     reviewed_at: reviewStatus === "approved" ? now : null,
   };
 
-  // Attempt insert into quote_takeoff_results.
-  // Falls back to quote_takeoff_jobs.result_summary if quote_id NOT NULL still applies.
-  let resultRowId = null;
+  // Physical row required — never promote a synthetic or summary-only result.
   const { data: resultRows, error: resultInsertErr } = await supabase
     .from("quote_takeoff_results")
     .insert(resultPayload)
     .select();
 
-  if (!resultInsertErr && resultRows && resultRows.length > 0) {
-    resultRowId = resultRows[0].id;
-  } else if (resultInsertErr) {
-    const isNotNullViolation =
-      resultInsertErr.code === "23502" ||
-      String(resultInsertErr.message ?? "").includes("null value in column");
-    if (!isNotNullViolation) {
-      throw Object.assign(
-        new Error(`Failed to save takeoff result: ${resultInsertErr.message}`),
-        { statusCode: 503 }
-      );
-    }
-    // quote_id NOT NULL not yet relaxed — fall through to job-level storage.
-    console.warn(
-      "[takeoffWorkspace] quote_takeoff_results.quote_id NOT NULL blocked insert. " +
-      "Result stored in quote_takeoff_jobs.result_summary. " +
-      "Run: ALTER TABLE public.quote_takeoff_results ALTER COLUMN quote_id DROP NOT NULL;"
-    );
+  if (resultInsertErr || !resultRows?.length || !resultRows[0]?.id) {
+    throw takeoffResultPersistenceFailed({
+      takeoffJobId,
+      organizationId,
+      attemptedBaseResultId: null,
+      currentResultId: null,
+      mutationRevision: null,
+      dbErrorCode: resultInsertErr?.code ?? "insert_returned_empty",
+      quoteIdPresent: Boolean(resolveResultQuoteId(jobRow))
+    });
   }
 
-  // Always update quote_takeoff_jobs: status, review_status, result_summary.
-  // result_summary carries the full result as a fast-read fallback.
+  const resultRowId = resultRows[0].id;
+
+  const priorSummary =
+    jobRow.result_summary && typeof jobRow.result_summary === "object"
+      ? jobRow.result_summary
+      : {};
+
   await supabase
     .from("quote_takeoff_jobs")
     .update({
@@ -919,6 +1015,7 @@ export async function saveTakeoffResult({
       review_status: reviewStatus,
       updated_at: now,
       result_summary: {
+        ...priorSummary,
         ...summary,
         savedAt: now,
         schemaVersion,
@@ -927,7 +1024,8 @@ export async function saveTakeoffResult({
         computedMeasurementsJson: computed,
         validationDiagnosticsJson: validation,
         importPlanJson: importPlan,
-        resultRowId: resultRowId ?? null,
+        resultRowId,
+        summaryOnlyPromotion: false
       },
     })
     .eq("id", takeoffJobId)
@@ -936,6 +1034,7 @@ export async function saveTakeoffResult({
   return {
     ok: true,
     takeoffJobId,
+    resultId: resultRowId,
     savedAt: now,
     schemaVersion,
     reviewStatus,
@@ -1007,17 +1106,35 @@ export async function saveTakeoffCorrection({
   ) {
     throw workspaceError("clientMutationRevision must be a positive safe integer");
   }
-  const latestClientRevision = Number(
-    latestRow?.raw_ai_result_json?._meta?.clientMutationRevision ??
-      jobRow.result_summary?.clientMutationRevision ??
-      0
+  const summaryRevision = Number(jobRow.result_summary?.clientMutationRevision ?? 0);
+  const rowRevision = readResultMutationRevision(latestRow);
+  const latestClientRevision = Math.max(
+    Number.isSafeInteger(summaryRevision) ? summaryRevision : 0,
+    rowRevision
   );
-  const latestResultId = String(latestRow?.id ?? "").trim() || null;
+  const latestResultId =
+    String(latestRow?.id ?? "").trim() ||
+    String(jobRow.result_summary?.resultRowId ?? "").trim() ||
+    null;
+  const currentHeadResultId = latestResultId;
+
   if (
     baseResultId &&
     latestResultId &&
     String(baseResultId) !== latestResultId
   ) {
+    console.info(
+      "[takeoffWorkspace] stale_takeoff_correction",
+      JSON.stringify({
+        takeoffJobId,
+        requestedBaseResultId: String(baseResultId),
+        currentHeadResultId,
+        requestedMutationRevision: incomingRevision,
+        currentMutationRevision: latestClientRevision,
+        unchanged: false,
+        errorCode: "stale_takeoff_correction"
+      })
+    );
     const err = workspaceError(
       "The estimator draft changed after editing began; stale correction was ignored",
       409
@@ -1027,11 +1144,86 @@ export async function saveTakeoffCorrection({
     err.latestClientMutationRevision = latestClientRevision;
     throw err;
   }
+
+  // Idempotent no-op: current base + semantically equal draft → do not create a row.
+  // Stale base already 409'd above; content resembling an older state is fine when base is current.
+  const currentCanonicalDraft =
+    latestRow?.normalized_takeoff_json ??
+    jobRow.result_summary?.normalizedTakeoffJson ??
+    null;
+  if (
+    currentCanonicalDraft &&
+    takeoffDraftsSemanticallyEqual(takeoffResult, currentCanonicalDraft)
+  ) {
+    const unchangedRevision =
+      latestClientRevision > 0
+        ? latestClientRevision
+        : incomingRevision != null
+          ? incomingRevision
+          : 0;
+    console.info(
+      "[takeoffWorkspace] takeoff_correction_unchanged",
+      JSON.stringify({
+        takeoffJobId,
+        requestedBaseResultId: baseResultId ? String(baseResultId) : null,
+        currentHeadResultId,
+        requestedMutationRevision: incomingRevision,
+        currentMutationRevision: unchangedRevision,
+        createdResultId: null,
+        promotedResultId: currentHeadResultId,
+        unchanged: true
+      })
+    );
+    return {
+      ok: true,
+      unchanged: true,
+      takeoffJobId,
+      correctionId: null,
+      resultId: currentHeadResultId,
+      savedAt: latestRow?.created_at ?? jobRow.result_summary?.savedAt ?? new Date().toISOString(),
+      clientMutationRevision: unchangedRevision,
+      normalizedTakeoffJson: currentCanonicalDraft,
+      takeoffResult: currentCanonicalDraft,
+      schemaVersion:
+        latestRow?.schema_version ??
+        jobRow.result_summary?.schemaVersion ??
+        takeoffResult.schemaVersion ??
+        TAKEOFF_SCHEMA_VERSION,
+      reviewStatus: latestRow?.review_status ?? jobRow.review_status ?? "needs_review",
+      approvalStatus: "needs_review",
+      canApprove: computeCanApprove({
+        hasSavedResult: true,
+        validation,
+        qaGate: computeQaGateForResult(
+          currentCanonicalDraft,
+          computed,
+          validation,
+          latestRow?.raw_ai_result_json ?? null
+        ),
+        reviewStatus: latestRow?.review_status ?? jobRow.review_status ?? "needs_review"
+      }),
+      correction: null,
+      summary: buildResultSummary(currentCanonicalDraft, computed, validation, importPlan)
+    };
+  }
+
   if (
     incomingRevision != null &&
     Number.isSafeInteger(latestClientRevision) &&
     incomingRevision <= latestClientRevision
   ) {
+    console.info(
+      "[takeoffWorkspace] stale_takeoff_correction",
+      JSON.stringify({
+        takeoffJobId,
+        requestedBaseResultId: baseResultId ? String(baseResultId) : null,
+        currentHeadResultId,
+        requestedMutationRevision: incomingRevision,
+        currentMutationRevision: latestClientRevision,
+        unchanged: false,
+        errorCode: "stale_takeoff_correction"
+      })
+    );
     const err = workspaceError(
       "A newer estimator draft is already saved; stale correction was ignored",
       409
@@ -1118,6 +1310,7 @@ export async function saveTakeoffCorrection({
   const resultPayload = {
     organization_id: organizationId,
     takeoff_job_id: takeoffJobId,
+    quote_id: resolveResultQuoteId(jobRow),
     schema_version: schemaVersion,
     raw_ai_result_json: rawPayload,
     normalized_takeoff_json: takeoffResult,
@@ -1130,28 +1323,35 @@ export async function saveTakeoffCorrection({
     reviewed_at: null,
   };
 
-  let resultRowId = null;
   const { data: resultRows, error: resultInsertErr } = await supabase
     .from("quote_takeoff_results")
     .insert(resultPayload)
     .select();
 
-  if (!resultInsertErr && resultRows && resultRows.length > 0) {
-    resultRowId = resultRows[0].id;
-  } else if (resultInsertErr) {
-    const isNotNullViolation =
-      resultInsertErr.code === "23502" ||
-      String(resultInsertErr.message ?? "").includes("null value in column");
-    if (!isNotNullViolation) {
-      throw Object.assign(
-        new Error(`Failed to save takeoff correction: ${resultInsertErr.message}`),
-        { statusCode: 503 }
-      );
-    }
-    console.warn(
-      "[takeoffWorkspace] quote_takeoff_results.quote_id NOT NULL blocked correction insert."
-    );
+  if (resultInsertErr || !resultRows?.length || !resultRows[0]?.id) {
+    throw takeoffResultPersistenceFailed({
+      takeoffJobId,
+      organizationId,
+      attemptedBaseResultId: baseResultId,
+      currentResultId: latestResultId,
+      mutationRevision: incomingRevision,
+      dbErrorCode: resultInsertErr?.code ?? "insert_returned_empty",
+      quoteIdPresent: Boolean(resolveResultQuoteId(jobRow))
+    });
   }
+
+  const resultRowId = resultRows[0].id;
+  // Verify the inserted row is physically addressable before promoting the pointer.
+  await assertPhysicalTakeoffResult(supabase, {
+    organizationId,
+    takeoffJobId,
+    resultId: resultRowId
+  });
+
+  const priorSummary =
+    jobRow.result_summary && typeof jobRow.result_summary === "object"
+      ? jobRow.result_summary
+      : {};
 
   await supabase
     .from("quote_takeoff_jobs")
@@ -1160,6 +1360,7 @@ export async function saveTakeoffCorrection({
       review_status: "needs_review",
       updated_at: now,
       result_summary: {
+        ...priorSummary,
         ...summary,
         savedAt: now,
         schemaVersion,
@@ -1180,20 +1381,38 @@ export async function saveTakeoffCorrection({
         computedMeasurementsJson: computed,
         validationDiagnosticsJson: validation,
         importPlanJson: importPlan,
-        resultRowId: resultRowId ?? null,
+        resultRowId,
+        summaryOnlyPromotion: false
       },
     })
     .eq("id", takeoffJobId)
     .eq("organization_id", organizationId);
 
+  console.info(
+    "[takeoffWorkspace] takeoff_correction_saved",
+    JSON.stringify({
+      takeoffJobId,
+      requestedBaseResultId: baseResultId ? String(baseResultId) : null,
+      currentHeadResultId: latestResultId,
+      requestedMutationRevision: incomingRevision,
+      currentMutationRevision: incomingRevision,
+      createdResultId: resultRowId,
+      promotedResultId: resultRowId,
+      unchanged: false,
+      summaryOnlyPromotion: false
+    })
+  );
+
   return {
     ok: true,
+    unchanged: false,
     takeoffJobId,
     correctionId: correctionEntry.id,
     resultId: resultRowId,
     savedAt: now,
     clientMutationRevision: incomingRevision,
     normalizedTakeoffJson: takeoffResult,
+    takeoffResult,
     schemaVersion,
     reviewStatus: "needs_review",
     approvalStatus: "needs_review",
@@ -1504,8 +1723,27 @@ export async function approveTakeoffJob({
     : rs;
   const now = new Date().toISOString();
 
+  // Approval requires a physical current result — never a synthetic/summary-only id.
+  const claimedResultId = String(latestRow?.id ?? "").trim() || null;
+  if (!claimedResultId || !isUuid(claimedResultId)) {
+    throw takeoffResultNotPersisted({
+      organizationId,
+      takeoffJobId,
+      claimedResultId
+    });
+  }
+  const physicalRow = await assertPhysicalTakeoffResult(supabase, {
+    organizationId,
+    takeoffJobId,
+    resultId: claimedResultId
+  });
+
   const schemaVersion = resolvedResult.schemaVersion ?? TAKEOFF_SCHEMA_VERSION;
   const summary = buildResultSummary(resolvedResult, computed, validation, importPlan);
+  const priorSummary =
+    jobRow.result_summary && typeof jobRow.result_summary === "object"
+      ? jobRow.result_summary
+      : {};
   const approvedSnapshot = {
     approvedAt: now,
     approvedByUserId: userId ?? null,
@@ -1519,7 +1757,7 @@ export async function approveTakeoffJob({
     approvalGate,
     importPayload: buildTakeoffImportPayload({
       takeoffJobId,
-      takeoffResultId: latestRow?.id ?? null,
+      takeoffResultId: physicalRow.id,
       takeoffResult: resolvedResult,
       reviewState: effectiveReviewState,
       computed,
@@ -1539,42 +1777,16 @@ export async function approveTakeoffJob({
     }),
   };
 
-  if (latestRow?.id) {
-    const nextRaw = {
-      ...rawJson,
-      _meta: {
-        ...(rawJson._meta ?? {}),
-        approvedSnapshot,
-      },
-    };
-    const { error: updateErr } = await supabase
-      .from("quote_takeoff_results")
-      .update({
-        normalized_takeoff_json: resolvedResult,
-        computed_measurements_json: computed,
-        validation_diagnostics_json: validation,
-        import_plan_json: importPlan,
-        review_status: "approved",
-        needs_review: false,
-        reviewed_by_user_id: userId ?? null,
-        reviewed_at: now,
-        raw_ai_result_json: nextRaw,
-      })
-      .eq("id", latestRow.id)
-      .eq("organization_id", organizationId);
-
-    if (updateErr) {
-      throw Object.assign(
-        new Error(`Failed to approve takeoff result: ${updateErr.message}`),
-        { statusCode: 503 }
-      );
-    }
-  } else {
-    const insertPayload = {
-      organization_id: organizationId,
-      takeoff_job_id: takeoffJobId,
-      schema_version: schemaVersion,
-      raw_ai_result_json: { _meta: { approvedSnapshot } },
+  const nextRaw = {
+    ...rawJson,
+    _meta: {
+      ...(rawJson._meta ?? {}),
+      approvedSnapshot,
+    },
+  };
+  const { data: updatedRows, error: updateErr } = await supabase
+    .from("quote_takeoff_results")
+    .update({
       normalized_takeoff_json: resolvedResult,
       computed_measurements_json: computed,
       validation_diagnostics_json: validation,
@@ -1583,22 +1795,25 @@ export async function approveTakeoffJob({
       needs_review: false,
       reviewed_by_user_id: userId ?? null,
       reviewed_at: now,
-    };
-    const { error: insertErr } = await supabase
-      .from("quote_takeoff_results")
-      .insert(insertPayload)
-      .select();
-    if (insertErr) {
-      const isNotNullViolation =
-        insertErr.code === "23502" ||
-        String(insertErr.message ?? "").includes("null value in column");
-      if (!isNotNullViolation) {
-        throw Object.assign(
-          new Error(`Failed to approve takeoff result: ${insertErr.message}`),
-          { statusCode: 503 }
-        );
-      }
-    }
+      raw_ai_result_json: nextRaw,
+    })
+    .eq("id", physicalRow.id)
+    .eq("organization_id", organizationId)
+    .eq("takeoff_job_id", takeoffJobId)
+    .select("id");
+
+  if (updateErr) {
+    throw Object.assign(
+      new Error(`Failed to approve takeoff result: ${updateErr.message}`),
+      { statusCode: 503 }
+    );
+  }
+  if (!updatedRows?.length) {
+    throw takeoffResultNotPersisted({
+      organizationId,
+      takeoffJobId,
+      claimedResultId: physicalRow.id
+    });
   }
 
   await supabase
@@ -1608,6 +1823,7 @@ export async function approveTakeoffJob({
       review_status: "approved",
       updated_at: now,
       result_summary: {
+        ...priorSummary,
         ...summary,
         savedAt: now,
         schemaVersion,
@@ -1615,10 +1831,25 @@ export async function approveTakeoffJob({
         approvedAt: now,
         approvedByUserId: userId ?? null,
         qaGateStatus: qaGate?.status ?? null,
+        resultRowId: physicalRow.id,
+        clientMutationRevision:
+          priorSummary.clientMutationRevision ??
+          physicalRow.raw_ai_result_json?._meta?.clientMutationRevision ??
+          null,
+        lastCorrectionId: priorSummary.lastCorrectionId ?? null,
+        estimatorConfirmed: priorSummary.estimatorConfirmed ?? null,
+        reviewState: effectiveReviewState,
+        ...(priorSummary.lastMergedAiResultId
+          ? { lastMergedAiResultId: priorSummary.lastMergedAiResultId }
+          : {}),
+        ...(Array.isArray(priorSummary.dismissedAiResultIds)
+          ? { dismissedAiResultIds: priorSummary.dismissedAiResultIds }
+          : {}),
         normalizedTakeoffJson: resolvedResult,
         computedMeasurementsJson: computed,
         validationDiagnosticsJson: validation,
         importPlanJson: importPlan,
+        summaryOnlyPromotion: false
       },
     })
     .eq("id", takeoffJobId)
@@ -1627,7 +1858,7 @@ export async function approveTakeoffJob({
   return {
     ok: true,
     takeoffJobId,
-    approvedResultId: latestRow?.id ?? approvedSnapshot.importPayload?.takeoffResultId ?? null,
+    approvedResultId: physicalRow.id,
     approvedAt: now,
     approvedByUserId: userId ?? null,
     reviewStatus: "approved",
@@ -2089,20 +2320,23 @@ export async function getLatestTakeoffResult({
     ? summarizeAiFindingsPreview(pending.pendingAiDraft)
     : { rooms: [] };
 
+  const summaryRev = Number(jobRow.result_summary?.clientMutationRevision ?? 0);
+  const rowRev = Number(rawJson?._meta?.clientMutationRevision ?? 0);
+  const clientMutationRevision = Math.max(
+    Number.isSafeInteger(summaryRev) ? summaryRev : 0,
+    Number.isSafeInteger(rowRev) ? rowRev : 0
+  );
+
   return {
     takeoffJobId,
     savedAt: savedResult.created_at,
     schemaVersion: savedResult.schema_version,
     reviewStatus: savedResult.review_status ?? "needs_review",
-    clientMutationRevision:
-      Number(
-        rawJson?._meta?.clientMutationRevision ??
-          jobRow.result_summary?.clientMutationRevision ??
-          0
-      ) || 0,
+    clientMutationRevision,
     // Authoritative estimator draft for editing — never silently replaced by raw AI.
-    resultId: savedResult.id ?? null,
+    resultId: savedResult.id ?? jobRow.result_summary?.resultRowId ?? null,
     normalizedTakeoffJson: savedResult.normalized_takeoff_json,
+    takeoffResult: savedResult.normalized_takeoff_json,
     computedMeasurementsJson: freshComputed,
     validationDiagnosticsJson: savedResult.validation_diagnostics_json,
     importPlanJson: savedResult.import_plan_json,

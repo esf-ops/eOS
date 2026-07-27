@@ -178,11 +178,50 @@ export function resultSummaryLooksEstimatorOwned(summary) {
 }
 
 /**
+ * Mutation revision stored on a result row (0 when absent).
+ * @param {object|null|undefined} row
+ */
+export function readResultMutationRevision(row) {
+  const n = Number(row?.raw_ai_result_json?._meta?.clientMutationRevision ?? 0);
+  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+}
+
+/**
+ * True when job.result_summary is a newer estimator promotion than `row`.
+ * Used when a correction landed in result_summary (including quote_id insert fallback)
+ * but an older estimator table row would otherwise win.
+ *
+ * @param {object|null|undefined} summary
+ * @param {object|null|undefined} row
+ */
+export function resultSummaryIsNewerThanRow(summary, row) {
+  if (!summary || typeof summary !== "object" || !summary.normalizedTakeoffJson) return false;
+  if (!row) return true;
+  const summaryRev = Number(summary.clientMutationRevision ?? 0);
+  const rowRev = readResultMutationRevision(row);
+  const summaryRevSafe = Number.isSafeInteger(summaryRev) && summaryRev > 0 ? summaryRev : 0;
+  if (summaryRevSafe > rowRev) return true;
+  if (summaryRevSafe < rowRev) return false;
+  const summaryAt = Date.parse(String(summary.savedAt ?? "")) || 0;
+  const rowAt = Date.parse(String(row.created_at ?? "")) || 0;
+  if (summaryAt > rowAt) return true;
+  if (summaryAt < rowAt) return false;
+  // Same clock / revision: a correction pointer without a matching table row means
+  // the summary is the promoted head (insert-blocked path).
+  if (summary.lastCorrectionId) {
+    const pointed = summary.resultRowId != null ? String(summary.resultRowId) : "";
+    if (!pointed || pointed !== String(row.id ?? "")) return true;
+  }
+  return false;
+}
+
+/**
  * Build a synthetic result row from job.result_summary (quote_id insert fallback).
  * @param {object} summary
  */
 export function resultRowFromJobSummary(summary) {
   const confirmedAt = summary.savedAt || new Date().toISOString();
+  const revision = Number(summary.clientMutationRevision ?? 0);
   return {
     id: summary.resultRowId ?? null,
     schema_version: summary.schemaVersion ?? null,
@@ -205,19 +244,31 @@ export function resultRowFromJobSummary(summary) {
                 confirmedByUserId: null,
                 source: "job_result_summary"
               },
-        ...(summary.reviewState ? { reviewState: summary.reviewState } : {})
+        ...(Number.isSafeInteger(revision) && revision > 0
+          ? { clientMutationRevision: revision }
+          : {}),
+        ...(summary.reviewState ? { reviewState: summary.reviewState } : {}),
+        ...(summary.lastMergedAiResultId
+          ? { lastMergedAiResultId: summary.lastMergedAiResultId }
+          : {}),
+        ...(Array.isArray(summary.dismissedAiResultIds)
+          ? { dismissedAiResultIds: summary.dismissedAiResultIds }
+          : {})
       }
     }
   };
 }
 
 /**
- * Priority: approved → estimator-confirmed/saved draft → job summary estimator
- * fallback → latest AI/other.
+ * Priority: approved → promoted job.result_summary / resultRowId → estimator table
+ * draft → latest AI/other.
  *
  * Critically: a newer raw AI row must never displace an older estimator-confirmed row,
- * and job.result_summary after a correction must outrank a pure AI table row when the
- * correction insert was blocked (quote_id NOT NULL fallback).
+ * and a newer estimator-owned job.result_summary must outrank an older estimator table
+ * row (quote_id NOT NULL insert fallback / promotion pointer).
+ *
+ * Authority is job.result_summary.resultRowId + saved draft when present — not
+ * "latest created_at alone".
  *
  * @param {object[]} rows newest-first preferred
  * @param {{ jobResultSummary?: object|null }} [opts]
@@ -229,9 +280,11 @@ export function selectAuthoritativeTakeoffResult(rows, opts = {}) {
     opts.jobResultSummary && typeof opts.jobResultSummary === "object"
       ? opts.jobResultSummary
       : null;
+  const summaryEstimator =
+    Boolean(summary?.normalizedTakeoffJson) && resultSummaryLooksEstimatorOwned(summary);
 
   if (list.length === 0) {
-    if (summary?.normalizedTakeoffJson && resultSummaryLooksEstimatorOwned(summary)) {
+    if (summaryEstimator) {
       return { row: resultRowFromJobSummary(summary), source: "estimator_draft" };
     }
     if (summary?.normalizedTakeoffJson) {
@@ -243,11 +296,33 @@ export function selectAuthoritativeTakeoffResult(rows, opts = {}) {
   const approved = list.find((r) => isApprovedTakeoffResult(r));
   if (approved) return { row: approved, source: "approved" };
 
+  // Explicit promotion pointer: prefer the table row named by result_summary.
+  if (summary?.resultRowId != null) {
+    const promotedId = String(summary.resultRowId);
+    const promoted = list.find((r) => String(r?.id ?? "") === promotedId);
+    if (promoted) {
+      // A later summary-only correction (insert blocked) must still win.
+      if (summaryEstimator && resultSummaryIsNewerThanRow(summary, promoted)) {
+        return { row: resultRowFromJobSummary(summary), source: "estimator_draft" };
+      }
+      return {
+        row: promoted,
+        source: hasEstimatorSavedEdits(promoted) ? "estimator_draft" : "ai_draft"
+      };
+    }
+    // Pointer not in table (summary-only / synthetic concurrency token).
+    if (summaryEstimator) {
+      return { row: resultRowFromJobSummary(summary), source: "estimator_draft" };
+    }
+  }
+
   const estimator = list.find((r) => hasEstimatorSavedEdits(r));
+  if (summaryEstimator && (!estimator || resultSummaryIsNewerThanRow(summary, estimator))) {
+    return { row: resultRowFromJobSummary(summary), source: "estimator_draft" };
+  }
   if (estimator) return { row: estimator, source: "estimator_draft" };
 
-  // Table only has raw AI rows, but job.result_summary holds a successful correction.
-  if (summary?.normalizedTakeoffJson && resultSummaryLooksEstimatorOwned(summary)) {
+  if (summaryEstimator) {
     return { row: resultRowFromJobSummary(summary), source: "estimator_draft" };
   }
 
