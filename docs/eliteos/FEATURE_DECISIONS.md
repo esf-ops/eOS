@@ -2641,4 +2641,19 @@
 | **SQL applied** | No — user applies the migration manually before deploying the backend that requires physical inserts. |
 | **Tests** | `eos:test:takeoff-physical-result-persistence` (+ save-persistence, synthetic safety audit). |
 
+### 185. Studio commercial estimating parity — materials + commercial lines (2026-07-27)
 
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `feature/studio-estimating-parity` |
+| **Decision** | Elite 100 Estimate Studio uses one **canonical commercial line model** (`studio_commercial_lines_v1`) and **explicit material inheritance** for general estimating parity before Final Acceptance / Sold Job. |
+| **Material inheritance** | Precedence: **piece override** (`materialOverride` + `materialGroup`) → **room override** (`materialGroupOverride`) → **estimate default** (`scope.materialGroup`). Override intent is explicit; matching the parent group still counts as an override when the field/flag is set. Clearing the override restores inheritance. Multi-material SF is priced per resolved group; historical approved snapshots remain frozen. |
+| **Commercial roles** | `customer_charge`, `customer_charge_hidden_detail`, `discount`, `credit`, `internal_only`, `absorbed`, plus `legacy_hidden_customer_charge` for pre-parity `customerFacing:false` lines. |
+| **Customer total** | Includes customer charges, discounts, credits, and **legacy** hidden-name charges. **Excludes** new `internal_only` and `absorbed` roles. Material use tax remains **2% on material only**; percent discounts apply to material+tax+fabrication (pre-commercial) base. |
+| **Legacy absorption** | Pre-parity `customerFacing:false` lines still charge the customer without naming the line and continue to use `internal_custom_line_allocation_v1` stone absorption at publish. New internal/absorbed roles are **not** stone-absorbed. |
+| **Public filtering** | Digital Estimate / public commercial lines / customer print exclude internal notes, internal unit costs, internal-only and absorbed lines by **payload omission** (not CSS). Print snapshots use `version`/`header`/`display` for shared PDF parser compatibility. |
+| **Authority** | Server `calculateStudioEstimate` remains authoritative; Pricing Admin / calculator rate tables via existing `resolveStudioMaterialRatePerSf` + hardcoded edge/add-on fallbacks unchanged. **Vanity Program out of scope.** |
+| **Revision** | `createRevisionFrom` copies full `scope` (rooms, overrides, commercial lines). Recalc + reapprove required. |
+| **SQL** | None — additive JSON fields on `studio_estimates.scope_json`. |
+| **Tests** | `eos:test:studio-estimating-parity`. |
+| **Deferred** | Vanity Program; Final Acceptance; Sold Review; All Estimates UI; Quote Library merge. |

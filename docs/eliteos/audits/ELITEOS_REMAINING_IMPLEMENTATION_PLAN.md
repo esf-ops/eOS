@@ -106,3 +106,15 @@ Do **not** remove Quote Library or Internal Estimate until All Estimates + Sold 
 **If hosted P0 already passes:** **No next implementation branch.** Freeze and run the controlled pilot.
 
 **What must not be touched before pilot freeze:** Everything listed in the freeze section above — especially Vanity, Sold, All Estimates, and delivery-boundary automations.
+
+## Update (2026-07-27) — `feature/studio-estimating-parity`
+
+Completed on this branch (not Vanity/Acceptance/Sold/All Estimates):
+
+- Material inheritance (estimate → room → piece)
+- Canonical commercial lines (customer / discount / credit / internal_only / absorbed)
+- Customer vs internal totals + public payload/print filtering
+- Print snapshot schema compatible with shared PDF parser
+- Safe read model for future All Estimates consumers
+
+Next deferred product phases remain: Vanity Program, Final Acceptance, Sold Review, All Estimates UI.
