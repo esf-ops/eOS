@@ -1,11 +1,36 @@
 /**
  * Quote Library ↔ Studio read-model bridge.
- * Labels Studio vs Legacy. Does not fabricate quote_headers for Studio.
- * Studio remains calculation/revision authority.
+ * Additive discovery only. Does not fabricate quote_headers for Studio.
+ * Studio remains calculation/revision authority; Quote Library remains legacy authority.
  */
 
 import { buildAllEstimatesRow } from "./studioAllEstimatesService.mjs";
 import { deriveStudioLifecycleStatus, studioLifecycleStatusLabel } from "./studioLifecycleTypes.mjs";
+
+const STUDIO_BRIDGE_ID_PREFIX = "studio:";
+
+/**
+ * @param {unknown} id
+ */
+export function isStudioBridgeQuoteId(id) {
+  const s = String(id ?? "").trim();
+  return s.startsWith(STUDIO_BRIDGE_ID_PREFIX) || s.startsWith("studio_estimate:");
+}
+
+/**
+ * Reject Studio bridge ids on legacy Quote Library mutation routes.
+ * @param {unknown} id
+ */
+export function assertLegacyQuoteLibraryMutationId(id) {
+  if (isStudioBridgeQuoteId(id)) {
+    const err = new Error(
+      "Studio estimates cannot use Quote Library mutations. Open in Estimate Studio."
+    );
+    err.statusCode = 400;
+    err.code = "studio_bridge_mutation_forbidden";
+    throw err;
+  }
+}
 
 /**
  * Map a Studio All Estimates row into a Quote Library–compatible list row.
@@ -13,8 +38,9 @@ import { deriveStudioLifecycleStatus, studioLifecycleStatusLabel } from "./studi
  */
 export function studioEstimateToQuoteLibraryBridgeRow(allEstimatesRow) {
   const r = allEstimatesRow || {};
+  const estimateId = r.estimateId || null;
   return {
-    id: `studio:${r.estimateId}`,
+    id: `${STUDIO_BRIDGE_ID_PREFIX}${estimateId}`,
     source: "studio_estimate",
     source_label: "Studio Estimate",
     lineage: "studio",
@@ -29,7 +55,7 @@ export function studioEstimateToQuoteLibraryBridgeRow(allEstimatesRow) {
     created_at: r.createdAt,
     updated_at: r.updatedAt,
     estimate_family_id: r.estimateFamilyId || r.intakeCaseId,
-    estimate_id: r.estimateId,
+    estimate_id: estimateId,
     intake_case_id: r.intakeCaseId,
     revision: r.revision,
     lifecycle_status: r.lifecycleStatus,
@@ -43,9 +69,8 @@ export function studioEstimateToQuoteLibraryBridgeRow(allEstimatesRow) {
       label: "Open in Estimate Studio",
       href: `/elite100-estimate-studio?case=${encodeURIComponent(r.intakeCaseId || "")}`,
       intakeCaseId: r.intakeCaseId,
-      estimateId: r.estimateId
+      estimateId
     },
-    // Explicitly omit exactInternalTotal / handoff docs
     handoff_status: "none",
     moraware_doc_status: "none",
     quickbooks_doc_status: "none",
@@ -70,7 +95,8 @@ function mapLifecycleToQuoteStatusDisplay(lifecycleStatus) {
 }
 
 /**
- * Tag a legacy Quote Library list row.
+ * Additive labels for legacy rows when Studio bridge is included.
+ * Does not remove or rename existing legacy fields.
  */
 export function tagLegacyQuoteLibraryRow(row) {
   return {
@@ -89,27 +115,32 @@ export function tagLegacyQuoteLibraryRow(row) {
 
 /**
  * Merge legacy + Studio rows for discovery. Studio rows never invent quote_headers.
+ * When includeStudio is false, returns legacyRows unchanged (no tagging).
  * @param {object[]} legacyRows
  * @param {object[]} studioAllEstimatesRows
- * @param {{ includeStudio?: boolean, studioOnly?: boolean }} [opts]
+ * @param {{ includeStudio?: boolean, studioOnly?: boolean, labelLegacy?: boolean }} [opts]
  */
 export function mergeQuoteLibraryWithStudioBridge(
   legacyRows,
   studioAllEstimatesRows,
   opts = {}
 ) {
-  const includeStudio = opts.includeStudio !== false;
+  const includeStudio = opts.includeStudio === true;
   const studioOnly = opts.studioOnly === true;
+  const labelLegacy = opts.labelLegacy !== false;
+
+  if (!includeStudio) {
+    return [...(legacyRows || [])];
+  }
+
   const legacyTagged = studioOnly
     ? []
-    : (legacyRows || []).map((r) => tagLegacyQuoteLibraryRow(r));
-  const studioTagged = includeStudio
-    ? (studioAllEstimatesRows || []).map((r) =>
-        studioEstimateToQuoteLibraryBridgeRow(
-          r.source === "studio_estimate" ? r : buildAllEstimatesRow(r)
-        )
-      )
-    : [];
+    : (legacyRows || []).map((r) => (labelLegacy ? tagLegacyQuoteLibraryRow(r) : { ...r }));
+  const studioTagged = (studioAllEstimatesRows || []).map((r) =>
+    studioEstimateToQuoteLibraryBridgeRow(
+      r.source === "studio_estimate" ? r : buildAllEstimatesRow(r)
+    )
+  );
 
   const merged = [...legacyTagged, ...studioTagged];
   merged.sort((a, b) =>

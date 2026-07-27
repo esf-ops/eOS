@@ -271,10 +271,26 @@ CREATE TRIGGER trg_studio_lifecycle_events_no_update
   FOR EACH ROW EXECUTE FUNCTION public.studio_estimate_lifecycle_events_immutable();
 
 -- ---------------------------------------------------------------------------
--- RLS notes (Brain service-role remains primary write path for Studio):
---   Application routes enforce organization_id + staff/public auth.
---   Prefer enabling RLS with org policies when Studio tables move to
---   authenticated client reads; until then Brain-only access is required.
+-- RLS / access analysis (Brain service-role is the write path for Studio):
+--   - Public clients never receive service-role keys.
+--   - Final Acceptance / sold review / Mark Sold run only through backend-core routes
+--     that enforce organization_id + auth (public session or staff head access).
+--   - These tables are NOT exposed for direct authenticated-client writes.
+--   - Prefer enabling RLS with deny-all policies for anon/authenticated roles
+--     if PostgREST ever exposes these tables; until then Brain-only access.
+--   - Application uniqueness + triggers enforce immutability; RLS does not
+--     replace org checks in route handlers.
+--
+-- Public vs staff write boundaries:
+--   Public (session cookie): INSERT into studio_estimate_acceptances only via
+--     Final Acceptance service (customer_safe snapshot only).
+--   Staff: sold_reviews upsert, sold_snapshots insert, lifecycle event reads.
+--   Neither path writes quote_headers / QuickBooks / Moraware / email.
+--
+-- Compatibility:
+--   Additive only. Existing studio_estimates rows remain valid (lifecycle_* NULL).
+--   Does not alter quote_headers, Quote Library tables, Internal Estimate tables,
+--   or existing quote_publications rows.
 --
 -- Verification (manual):
 --   SELECT column_name FROM information_schema.columns
@@ -287,6 +303,15 @@ CREATE TRIGGER trg_studio_lifecycle_events_no_update
 --   SELECT conname FROM pg_constraint
 --    WHERE conrelid = 'public.studio_estimate_acceptances'::regclass
 --      AND contype = 'u';
+--   SELECT conname FROM pg_constraint
+--    WHERE conrelid = 'public.studio_estimate_sold_snapshots'::regclass
+--      AND contype = 'u';
+--
+-- Deployment order:
+--   1) Apply this SQL in Supabase SQL editor (manual).
+--   2) Confirm verification queries.
+--   3) Deploy backend that mounts Final Acceptance / sold-review routes.
+--   4) Smoke: accept → sold-review → mark sold on a pilot org.
 --
 -- Rollback guidance (destructive — only if no production rows):
 --   DROP TABLE IF EXISTS public.studio_estimate_lifecycle_events;
@@ -298,4 +323,5 @@ CREATE TRIGGER trg_studio_lifecycle_events_no_update
 --     DROP COLUMN IF EXISTS accepted_at,
 --     DROP COLUMN IF EXISTS sold_at,
 --     DROP COLUMN IF EXISTS archived_at;
+--   Limitation: cannot roll back once acceptance/sold rows exist without data loss.
 -- =============================================================================

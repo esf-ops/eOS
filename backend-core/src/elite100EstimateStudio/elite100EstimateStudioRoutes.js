@@ -76,23 +76,12 @@ import {
 import { createStudioSecurePlanViewerService } from "./studioSecurePlanViewer.mjs";
 import { bootstrapIntakeCasesAfterImport } from "../quoteIntake/intakeAutoBootstrapService.mjs";
 import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
-import { createInMemoryStudioLifecycleRepository } from "./studioLifecycleRepository.mjs";
+import { resolveStudioLifecycleRepositoryForRoutes } from "./studioLifecycleRepositoryFactory.mjs";
 import { createStudioSoldReviewService } from "./studioSoldReviewService.mjs";
 import { createStudioAllEstimatesService } from "./studioAllEstimatesService.mjs";
 import { canMarkStudioEstimateSold } from "./studioSoldReviewService.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
-
-/** Shared in-process lifecycle store until Supabase tables are applied. */
-let _studioLifecycleRepo = null;
-function getStudioLifecycleRepository(studioEstimateRepository) {
-  if (!_studioLifecycleRepo) {
-    _studioLifecycleRepo = createInMemoryStudioLifecycleRepository({
-      studioEstimateRepository
-    });
-  }
-  return _studioLifecycleRepo;
-}
 
 /** Publications + Live DE share the same staff-safe link recovery authority. */
 async function staffLinkMetaForPublication(repository, organizationId, pub, env) {
@@ -1978,9 +1967,52 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
   );
 
   // ── Lifecycle closeout: All Estimates / Sold Review / Mark Sold / Acceptance ──
-  const lifecycleRepository =
-    deps.lifecycleRepository ||
-    getStudioLifecycleRepository(studioEstimateService.repository);
+  let lifecycleRepository = deps.lifecycleRepository || null;
+  if (!lifecycleRepository) {
+    try {
+      lifecycleRepository = resolveStudioLifecycleRepositoryForRoutes({
+        env,
+        getSupabase,
+        studioEstimateRepository: studioEstimateService.repository
+      });
+    } catch (e) {
+      if (e?.code === "studio_lifecycle_persistence_unavailable") {
+        console.error(
+          "[elite100-estimate-studio] lifecycle persistence unavailable at mount",
+          e.code
+        );
+        lifecycleRepository = {
+          mode: "unavailable",
+          async getAcceptanceByPublication() {
+            throw e;
+          },
+          async getAcceptanceForEstimate() {
+            throw e;
+          },
+          async getSoldReviewForEstimate() {
+            throw e;
+          },
+          async upsertSoldReview() {
+            throw e;
+          },
+          async getSoldSnapshotForEstimate() {
+            throw e;
+          },
+          async createSoldSnapshot() {
+            throw e;
+          },
+          async listLifecycleEvents() {
+            throw e;
+          },
+          async createAcceptance() {
+            throw e;
+          }
+        };
+      } else {
+        throw e;
+      }
+    }
+  }
   const soldReviewService =
     deps.soldReviewService ||
     createStudioSoldReviewService({
@@ -1995,6 +2027,23 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       lifecycleRepository
     });
 
+  function lifecycleHttpError(e, fallbackMessage) {
+    const status = Number(e?.statusCode) || 500;
+    return {
+      status,
+      body: {
+        ok: false,
+        error:
+          e?.code === "studio_lifecycle_persistence_unavailable"
+            ? "Studio lifecycle persistence unavailable. Apply eliteos_studio_estimate_lifecycle_closeout_v1.sql."
+            : status < 500
+              ? e.message
+              : fallbackMessage,
+        code: e?.code || undefined
+      }
+    };
+  }
+
   app.get("/api/elite100-estimate-studio/all-estimates", ...staffStack, async (req, res) => {
     try {
       const organizationId = await orgIdFor(req);
@@ -2003,11 +2052,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       res.json(result);
     } catch (e) {
       logStudio("all estimates list failed", e, req);
-      res.status(Number(e?.statusCode) || 500).json({
-        ok: false,
-        error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to list estimates",
-        code: e?.code
-      });
+      const { status, body } = lifecycleHttpError(e, "Unable to list estimates");
+      res.status(status).json(body);
     }
   });
 
@@ -2025,11 +2071,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json(result);
       } catch (e) {
         logStudio("all estimates history failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load history",
-          code: e?.code
-        });
+        const { status, body } = lifecycleHttpError(e, "Unable to load history");
+        res.status(status).json(body);
       }
     }
   );
@@ -2062,11 +2105,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         });
       } catch (e) {
         logStudio("get acceptance failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load acceptance",
-          code: e?.code
-        });
+        const { status, body } = lifecycleHttpError(e, "Unable to load acceptance");
+        res.status(status).json(body);
       }
     }
   );
@@ -2088,11 +2128,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         });
       } catch (e) {
         logStudio("sold review get failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load sold review",
-          code: e?.code
-        });
+        const { status, body } = lifecycleHttpError(e, "Unable to load sold review");
+        res.status(status).json(body);
       }
     }
   );
@@ -2117,7 +2154,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json(result);
       } catch (e) {
         logStudio("sold review upsert failed", e, req);
-        const { status, body } = studioMutationErrorBody(e, "Unable to save sold review");
+        const { status, body } = lifecycleHttpError(e, "Unable to save sold review");
         res.status(status).json(body);
       }
     }
@@ -2142,7 +2179,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json(result);
       } catch (e) {
         logStudio("mark sold failed", e, req);
-        const { status, body } = studioMutationErrorBody(e, "Unable to mark sold");
+        const { status, body } = lifecycleHttpError(e, "Unable to mark sold");
         res.status(status).json(body);
       }
     }
@@ -2162,11 +2199,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json({ ok: true, soldSnapshot: sold });
       } catch (e) {
         logStudio("sold snapshot get failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load sold snapshot",
-          code: e?.code
-        });
+        const { status, body } = lifecycleHttpError(e, "Unable to load sold snapshot");
+        res.status(status).json(body);
       }
     }
   );
@@ -2184,11 +2218,8 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         res.json({ ok: true, events });
       } catch (e) {
         logStudio("lifecycle events failed", e, req);
-        res.status(Number(e?.statusCode) || 500).json({
-          ok: false,
-          error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to load events",
-          code: e?.code
-        });
+        const { status, body } = lifecycleHttpError(e, "Unable to load events");
+        res.status(status).json(body);
       }
     }
   );

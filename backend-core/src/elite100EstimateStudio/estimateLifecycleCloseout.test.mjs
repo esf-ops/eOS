@@ -656,7 +656,9 @@ function createHarness() {
     },
     { hasSoldSnapshot: true, soldSnapshot: { sold_at: "2026-02-03" } }
   );
-  const merged = mergeQuoteLibraryWithStudioBridge(legacy, [studioRow]);
+  const merged = mergeQuoteLibraryWithStudioBridge(legacy, [studioRow], {
+    includeStudio: true
+  });
   assert.equal(merged.length, 2);
   const studio = merged.find((r) => r.source === "studio_estimate");
   const leg = merged.find((r) => r.source === "legacy_quote");

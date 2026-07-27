@@ -1,6 +1,7 @@
 /**
  * Public Final Acceptance routes (session cookie + Origin).
  * Distinct from Review Request. No email / sold / QB / Moraware.
+ * Production persistence: Supabase only (no process-memory fallback).
  */
 
 import express from "express";
@@ -24,22 +25,11 @@ import {
 } from "../digitalEstimate/configuration/publicConfigurationSession.mjs";
 import { isDigitalEstimateReviewRequestRuntimeEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
 import { createStudioFinalAcceptanceService } from "./studioFinalAcceptanceService.mjs";
-import { createInMemoryStudioLifecycleRepository } from "./studioLifecycleRepository.mjs";
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
+import { resolveStudioLifecycleRepositoryForRoutes } from "./studioLifecycleRepositoryFactory.mjs";
 
 const jsonParser = express.json({ limit: "64kb" });
 const UNAVAILABLE = Object.freeze({ ok: false, error: "Estimate unavailable" });
-
-/** Process-local memory lifecycle repo when Supabase tables are not yet applied. */
-let sharedMemoryLifecycle = null;
-function getSharedMemoryLifecycle(studioEstimateRepository) {
-  if (!sharedMemoryLifecycle) {
-    sharedMemoryLifecycle = createInMemoryStudioLifecycleRepository({
-      studioEstimateRepository
-    });
-  }
-  return sharedMemoryLifecycle;
-}
 
 function setPublicSecurityHeaders(res) {
   res.set("Cache-Control", "no-store, private");
@@ -58,7 +48,9 @@ function publicError(res, e) {
   const status = Number(e?.statusCode) || 404;
   const code = e?.code || "not_found";
   let message = "We couldn’t record your acceptance. Please try again.";
-  if (
+  if (code === "studio_lifecycle_persistence_unavailable") {
+    message = "Acceptance is temporarily unavailable. Please contact Elite.";
+  } else if (
     code === "publication_revoked" ||
     code === "publication_expired" ||
     code === "publication_unavailable"
@@ -103,9 +95,7 @@ function rateLimitGate(req, res, env) {
  */
 export function maybeAttachStudioFinalAcceptanceRoutes(app, deps) {
   const env = deps.env ?? process.env;
-  // Reuse DE public runtime gate so acceptance only mounts where DE configure works.
   if (!isDigitalEstimateReviewRequestRuntimeEnabled(env) && !deps.lifecycleRepository) {
-    // Allow explicit test injection without flags
     if (!deps.forceMount) return { mounted: false, reason: "runtime_off" };
   }
   return attachStudioFinalAcceptanceRoutes(app, deps);
@@ -143,8 +133,40 @@ export function attachStudioFinalAcceptanceRoutes(app, deps) {
       getSupabase
     }).repository;
 
-  const lifecycleRepository =
-    deps.lifecycleRepository || getSharedMemoryLifecycle(studioEstimateRepository);
+  let lifecycleRepository;
+  try {
+    lifecycleRepository =
+      deps.lifecycleRepository ||
+      resolveStudioLifecycleRepositoryForRoutes({
+        env,
+        getSupabase,
+        studioEstimateRepository
+      });
+  } catch (e) {
+    if (e?.code === "studio_lifecycle_persistence_unavailable" && deps.forceMount) {
+      // Tests that force-mount without injection must still fail closed at request time.
+      lifecycleRepository = {
+        mode: "unavailable",
+        async getAcceptanceByPublication() {
+          throw e;
+        },
+        async createAcceptance() {
+          throw e;
+        },
+        async getAcceptanceForEstimate() {
+          throw e;
+        }
+      };
+    } else if (e?.code === "studio_lifecycle_persistence_unavailable") {
+      console.error(
+        "[studio-final-acceptance] lifecycle persistence unavailable at mount",
+        e.code
+      );
+      return { mounted: false, reason: "lifecycle_persistence_unavailable" };
+    } else {
+      throw e;
+    }
+  }
 
   if (!configurationRepository || !deRepository || !lifecycleRepository) {
     return { mounted: false, reason: "repository_unavailable" };
@@ -192,18 +214,41 @@ export function attachStudioFinalAcceptanceRoutes(app, deps) {
       if (!session) {
         return res.json({ ok: true, acceptance: null, code: "no_current_acceptance" });
       }
-      const acceptance = await service.getAcceptanceForPublication(
-        session.organization_id,
-        session.publication_id
-      );
-      return res.json({
-        ok: true,
-        acceptance,
-        configurationLocked: Boolean(acceptance),
-        code: acceptance ? "accepted" : "no_current_acceptance"
-      });
+      try {
+        const acceptance = await service.getAcceptanceForPublication(
+          session.organization_id,
+          session.publication_id
+        );
+        return res.json({
+          ok: true,
+          acceptance,
+          configurationLocked: Boolean(acceptance),
+          code: acceptance ? "accepted" : "no_current_acceptance"
+        });
+      } catch (persistErr) {
+        if (persistErr?.code === "studio_lifecycle_persistence_unavailable") {
+          // Do not show Accepted when persistence is unavailable
+          return res.status(503).json({
+            ok: false,
+            acceptance: null,
+            configurationLocked: false,
+            code: "studio_lifecycle_persistence_unavailable",
+            error: "Acceptance is temporarily unavailable. Please contact Elite."
+          });
+        }
+        throw persistErr;
+      }
     } catch (e) {
       logAccept("final acceptance get nonfatal", e, req);
+      if (e?.code === "studio_lifecycle_persistence_unavailable") {
+        return res.status(503).json({
+          ok: false,
+          acceptance: null,
+          configurationLocked: false,
+          code: "studio_lifecycle_persistence_unavailable",
+          error: "Acceptance is temporarily unavailable. Please contact Elite."
+        });
+      }
       return res.json({ ok: true, acceptance: null, code: "no_current_acceptance" });
     }
   });

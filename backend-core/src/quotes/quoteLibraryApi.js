@@ -37,7 +37,7 @@ import {
 } from "./quoteLibraryArchive.js";
 import {
   mergeQuoteLibraryWithStudioBridge,
-  tagLegacyQuoteLibraryRow
+  isStudioBridgeQuoteId
 } from "../elite100EstimateStudio/studioQuoteLibraryBridge.mjs";
 import { createStudioAllEstimatesService } from "../elite100EstimateStudio/studioAllEstimatesService.mjs";
 import { createStudioEstimateRepository } from "../elite100EstimateStudio/studioEstimateRepository.mjs";
@@ -370,6 +370,20 @@ export function attachQuoteLibraryRoutes(app, deps) {
   /** Partner users blocked before head check so 403 always uses partner_use_partner_routes. */
   const stack = [requireAuth(), rejectPartnerOnlyUser, requireHeadAccess("quote_library", { getSupabase })];
 
+  function rejectStudioBridgeIdParam(req, res) {
+    const id = pickStr(req.params.id);
+    if (isStudioBridgeQuoteId(id)) {
+      res.status(400).json({
+        ok: false,
+        error: "Studio estimates cannot use Quote Library mutations. Open in Estimate Studio.",
+        code: "studio_bridge_mutation_forbidden"
+      });
+      return true;
+    }
+    return false;
+  }
+
+
   app.get("/api/quote-library/quotes", ...stack, async (req, res) => {
     try {
       const db = getSupabase();
@@ -446,7 +460,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
       let mapped = (rows || []).map((r) => {
         const copy = { ...r, _monday_status: monMap.get(String(r.id)) };
-        return tagLegacyQuoteLibraryRow(mapListRow(copy, handoffMap));
+        return mapListRow(copy, handoffMap);
       });
 
       const hs = pickStr(req.query.handoff_status);
@@ -464,10 +478,10 @@ export function attachQuoteLibraryRoutes(app, deps) {
         mapped = sortRowsByDerivedAccount(mapped, dir);
       }
 
-      // Studio bridge — discovery only; does not create quote_headers.
-      const includeStudio =
-        pickStr(req.query.include_studio) !== "0" &&
-        pickStr(req.query.include_studio).toLowerCase() !== "false";
+      // Studio bridge — opt-in discovery only; does not create quote_headers.
+      // Default include_studio=false preserves exact legacy-only list shapes.
+      const includeStudioRaw = pickStr(req.query.include_studio).toLowerCase();
+      const includeStudio = includeStudioRaw === "1" || includeStudioRaw === "true";
       let studioBridgeRows = [];
       let studioBridgeWarning = null;
       if (includeStudio && orgId) {
@@ -489,9 +503,9 @@ export function attachQuoteLibraryRoutes(app, deps) {
           studioBridgeRows = studioList.rows || [];
           mapped = mergeQuoteLibraryWithStudioBridge(mapped, studioBridgeRows, {
             includeStudio: true,
-            studioOnly: pickStr(req.query.source) === "studio"
+            studioOnly: pickStr(req.query.source) === "studio",
+            labelLegacy: true
           });
-          // Re-apply limit after merge for first page discovery
           if (offset === 0) {
             mapped = mapped.slice(0, limit);
           }
@@ -502,7 +516,9 @@ export function attachQuoteLibraryRoutes(app, deps) {
         }
       }
 
-      const totalCount = Number(count ?? 0) + (studioBridgeRows.length || 0);
+      const totalCount = includeStudio
+        ? Number(count ?? 0) + (studioBridgeRows.length || 0)
+        : Number(count ?? 0);
       const showingFrom = totalCount > 0 && mapped.length > 0 ? offset + 1 : 0;
       const showingTo = mapped.length > 0 ? offset + mapped.length : 0;
       res.json({
@@ -537,6 +553,13 @@ export function attachQuoteLibraryRoutes(app, deps) {
   app.post("/api/quote-library/quotes/batch/archive", ...stack, jsonParser, async (req, res) => {
     try {
       const rawIds = Array.isArray(req.body?.quote_ids) ? req.body.quote_ids : [];
+      if (rawIds.some((x) => isStudioBridgeQuoteId(x))) {
+        return res.status(400).json({
+          ok: false,
+          error: "Studio estimates cannot use Quote Library mutations. Open in Estimate Studio.",
+          code: "studio_bridge_mutation_forbidden"
+        });
+      }
       const ids = [...new Set(rawIds.map((x) => pickStr(x)).filter(isUuid))].slice(0, 100);
       if (!ids.length) return res.status(400).json({ ok: false, error: "quote_ids required" });
       if (req.body?.confirm !== true) return res.status(400).json({ ok: false, error: "confirm: true required" });
@@ -979,6 +1002,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.post("/api/quote-library/quotes/:id/restore-as-revision", ...stack, jsonParser, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const restoreFromId = pickStr(req.params.id);
       if (!isUuid(restoreFromId)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();
@@ -1080,6 +1104,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.post("/api/quote-library/quotes/:id/archive", ...stack, jsonParser, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const id = pickStr(req.params.id);
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const confirm = Boolean(req.body?.confirm);
@@ -1154,6 +1179,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.patch("/api/quote-library/quotes/:id", ...stack, jsonParser, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const id = pickStr(req.params.id);
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();
@@ -1194,6 +1220,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.patch("/api/quote-library/quotes/:id/status", ...stack, jsonParser, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const id = pickStr(req.params.id);
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const next = pickStr(req.body?.status);
@@ -1248,6 +1275,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.patch("/api/quote-library/quotes/:id/assign", ...stack, jsonParser, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const id = pickStr(req.params.id);
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();
@@ -1271,6 +1299,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.post("/api/quote-library/quotes/:id/duplicate", ...stack, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const id = pickStr(req.params.id);
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();
@@ -1380,6 +1409,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.post("/api/quote-library/quotes/:id/mark-sold", ...stack, jsonParser, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const id = pickStr(req.params.id);
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();
@@ -1448,6 +1478,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.post("/api/quote-library/quotes/:id/generate-moraware-entry-doc", ...stack, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const id = pickStr(req.params.id);
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();
@@ -1467,6 +1498,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
   app.post("/api/quote-library/quotes/:id/generate-quickbooks-entry-doc", ...stack, async (req, res) => {
     try {
+      if (rejectStudioBridgeIdParam(req, res)) return;
       const id = pickStr(req.params.id);
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();

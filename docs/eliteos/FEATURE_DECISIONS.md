@@ -2671,8 +2671,10 @@
 | **Sold review** | Staff workspace + required checklist (account, project, scope, materials/options, total, terms, internal notes, no open Review Request, ready for handoff). Checklist persisted/auditable on `studio_estimate_sold_reviews`. |
 | **Mark Sold** | Privileged (`admin` / `super_admin` or `ELITE100_STUDIO_MARK_SOLD_ALLOWLIST`). Requires active acceptance + complete checklist + current revision. Idempotent immutable `studio_estimate_sold_snapshots`. Does **not** email, publish, create QB/Moraware, or fabricate `quote_headers`. |
 | **All Estimates** | Studio-backed registry (`GET /api/elite100-estimate-studio/all-estimates`). Command Center remains the action queue. |
-| **Quote Library bridge** | Read-model merge labels `Studio Estimate` vs `Legacy Quote`; Studio opens in Estimate Studio. Does not make Quote Library the Studio calculation authority. No fake `quote_headers` for Studio sold/acceptance. |
+| **Quote Library bridge** | Opt-in read-model merge (`include_studio=1`) labels `Studio Estimate` vs `Legacy Quote`; Studio opens in Estimate Studio. Default list remains legacy-only (unchanged shapes). Does not make Quote Library the Studio calculation authority. Studio bridge ids (`studio:…`) are rejected by legacy mutations. No fake `quote_headers` for Studio sold/acceptance. |
 | **Events** | Append-only `studio_estimate_lifecycle_events` (acceptance, sold review, marked sold, etc.). No public tokens/secrets in logs. |
+| **Persistence** | Production/hosted require Supabase tables from `eliteos_studio_estimate_lifecycle_closeout_v1.sql`. Missing tables → HTTP 503 `studio_lifecycle_persistence_unavailable` (no Accepted / no Mark Sold success / no memory fallback). Memory repository is tests-only via explicit injection/`allowMemory`. DB unique constraints are the idempotency authority. |
+| **Internal Estimate** | Unchanged. Legacy Quote Library remains authority for legacy quotes. |
 | **SQL** | `backend-core/supabase/eliteos_studio_estimate_lifecycle_closeout_v1.sql` — **do not apply automatically**. |
 | **Tests** | `eos:test:estimate-lifecycle-closeout`. |
 | **Deferred** | Vanity Program; automatic QB/Moraware handoff; automatic customer email. |
