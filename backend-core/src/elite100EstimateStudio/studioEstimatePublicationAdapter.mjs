@@ -21,6 +21,15 @@ import {
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
 import { resolveRoomApprovedEligibleEdgeLf, assessLegacyProjectEdgeFallback } from "./studioRoomEdgeQuantity.mjs";
 import { validateProjectNameForPublication } from "./studioProjectDetails.mjs";
+import {
+  commercialRoleIsPublicNamed,
+  commercialRoleUsesStoneAbsorption,
+  inferCommercialRole,
+  normalizeStudioCommercialLines,
+  toPublicCommercialLine
+} from "./studioCommercialLines.mjs";
+import { resolveRoomMaterialGroup } from "./studioMaterialInheritance.mjs";
+import { PRINT_SNAPSHOT_VERSION } from "../quoteDelivery/customerEstimatePrintSnapshot.js";
 
 function str(v) {
   if (v == null) return "";
@@ -280,7 +289,6 @@ function freezePiecesForPublication(pieces) {
  */
 export function buildStudioEstimateRoomsForPublication(estimate) {
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
-  const materialGroup = str(scope.materialGroup) || "Group Promo";
   const colorName = scope.colorTbd ? null : str(scope.colorName) || null;
   const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
   const edgeScope = resolveScopeEdgeLinearFeet(scope);
@@ -290,6 +298,8 @@ export function buildStudioEstimateRoomsForPublication(estimate) {
   // confirmed/approved open-edge quantity. Never assign project finalLf to
   // the first countertop room. Never divide project LF across rooms.
   return included.map((r, idx) => {
+      const roomMat = resolveRoomMaterialGroup(scope, r);
+      const materialGroup = roomMat.group;
       let roomEdge = resolveRoomApprovedEligibleEdgeLf(r);
       // Single-room legacy: project LF only when that room has no quantity.
       if (
@@ -389,49 +399,91 @@ export function buildStudioCustomLineItemsForPublication(estimate) {
     ? calc.fabrication.customLineItems
     : null;
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
-  const raw = fromCalc || (Array.isArray(scope.customLineItems) ? scope.customLineItems : []);
+  const raw = fromCalc || normalizeStudioCommercialLines(scope);
   return raw
     .map((line, i) => {
-      const name = str(line?.name);
+      const role = inferCommercialRole(line);
+      const name = str(line?.customerDescription || line?.name);
       if (!name) return null;
       const qty = Number(line?.quantity ?? 1) || 0;
       const unitPrice = Number(line?.unitPrice ?? 0) || 0;
+      const lineTotal =
+        line?.lineTotal != null
+          ? Number(line.lineTotal)
+          : Math.round(qty * unitPrice * 100) / 100;
+      // Stone absorption input: legacy hidden charges only (customerFacing false).
+      // New internal_only / absorbed never enter customer stone reconciliation.
+      const forAbsorption = commercialRoleUsesStoneAbsorption(role);
+      const publicNamed = commercialRoleIsPublicNamed(role);
       return {
         lineKey: str(line?.lineKey) || str(line?.id) || `studio-cli-${i + 1}`,
         name,
         category: str(line?.category) || "Other",
         quantity: qty,
         unit: str(line?.unit) || "ea",
-        lineTotal: Math.round(qty * unitPrice * 100) / 100,
-        customer_facing: line?.customerFacing !== false,
-        customerFacing: line?.customerFacing !== false,
-        roomId: str(line?.roomId),
-        roomName: str(line?.roomName)
+        lineTotal,
+        commercialRole: role,
+        customer_facing: publicNamed,
+        customerFacing: publicNamed,
+        /** @deprecated use commercialRole — kept for absorption policy consumers */
+        absorbIntoStone: forAbsorption,
+        roomId: str(line?.roomId) || null,
+        roomName: str(line?.roomName) || null
       };
     })
     .filter(Boolean);
 }
 
 /**
+ * Public-named commercial lines only (no internal/absorbed/legacy-hidden names).
+ * @param {object} estimate
+ */
+export function buildPublicStudioCommercialLines(estimate) {
+  return buildStudioCustomLineItemsForPublication(estimate)
+    .filter((l) => commercialRoleIsPublicNamed(l.commercialRole))
+    .map((l) => toPublicCommercialLine(l))
+    .filter(Boolean);
+}
+
+/**
  * Customer-safe print snapshot rooms / totals (no rates, markup, or wholesale).
- * Customer-facing custom lines appear EXPLICITLY as named rows in the customer
- * breakdown; internal-only lines never appear here (they are absorbed into
- * stone categories by the room pricing snapshot's allocation policy).
+ * Compatible with parseCustomerEstimatePrintSnapshot (version/header/display).
  * @param {object} estimate
  * @param {number} customerDisplayTotal
  */
 function buildPrintSnapshot(estimate, customerDisplayTotal) {
   const rooms = buildStudioEstimateRoomsForPublication(estimate);
-  const customLines = buildStudioCustomLineItemsForPublication(estimate);
-  const customerFacingRows = customLines
-    .filter((l) => l.customerFacing)
-    .map((l, i) => ({
-      key: `custom-line-${l.lineKey || i + 1}`,
-      label: l.roomName ? `${l.roomName} — ${l.name}` : l.name,
-      displayAmount: l.lineTotal
-    }));
+  const publicLines = buildPublicStudioCommercialLines(estimate);
+  const customerFacingRows = publicLines.map((l, i) => ({
+    key: `custom-line-${l.lineKey || i + 1}`,
+    label: l.roomName ? `${l.roomName} — ${l.name}` : l.name,
+    displayAmount: Math.round(Number(l.lineTotal) || 0)
+  }));
+  const finalRounded = Math.round(Number(customerDisplayTotal) || 0);
+  const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+  const summaryRows = [
+    ...customerFacingRows,
+    {
+      key: "project_total",
+      label: "Estimated project total",
+      displayAmount: finalRounded
+    }
+  ];
   return {
-    finalRounded: customerDisplayTotal,
+    version: PRINT_SNAPSHOT_VERSION,
+    finalRounded,
+    header: {
+      quoteNumber: studioEstimateQuoteNumber(estimate),
+      projectName: str(scope.projectName) || str(estimate?.projectName) || "Estimate",
+      customerName: str(scope.customerName) || str(estimate?.customerName) || "",
+      date: new Date().toISOString().slice(0, 10),
+      pricingValidThrough: null,
+      revision: Number(estimate?.revision) || 1
+    },
+    display: {
+      estimateSummaryRows: summaryRows
+    },
+    // Studio-extended fields (ignored by strict parser; used by Studio consumers)
     rooms: rooms.map((r) => {
       const lines = [];
       if (r.countertopSqft > 0) lines.push(`Countertop ${Math.round(r.countertopSqft)} sf`);
@@ -443,14 +495,7 @@ function buildPrintSnapshot(estimate, customerDisplayTotal) {
         summaryLines: lines
       };
     }),
-    summaryRows: [
-      ...customerFacingRows,
-      {
-        key: "project_total",
-        label: "Estimated project total",
-        displayAmount: customerDisplayTotal
-      }
-    ]
+    summaryRows
   };
 }
 
@@ -544,7 +589,11 @@ function buildCustomerSafeCalculationSnapshotCopy(calc, estimate, customerDispla
       // authority for published Digital Estimate option labels + save amounts.
       edge_option_effects: edgeOptionEffects,
       fabrication_add_ons: fabricationAddOns,
-      custom_line_items: buildStudioCustomLineItemsForPublication(estimate),
+      custom_line_items: buildStudioCustomLineItemsForPublication(estimate).filter(
+        (l) => l.customerFacing || l.absorbIntoStone
+      ),
+      // Explicit public-only commercial lines (no internal notes/costs).
+      public_commercial_lines: buildPublicStudioCommercialLines(estimate),
       customer_catalog_permissions:
         estimate?.scope?.customerCatalogPermissions &&
         typeof estimate.scope.customerCatalogPermissions === "object"

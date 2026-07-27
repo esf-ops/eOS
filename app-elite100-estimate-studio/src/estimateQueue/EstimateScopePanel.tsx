@@ -25,13 +25,28 @@ type CustomLineItem = {
   id?: string;
   name: string;
   description?: string;
+  customerDescription?: string;
+  internalDescription?: string;
   category?: string;
+  commercialRole?:
+    | "customer_charge"
+    | "customer_charge_hidden_detail"
+    | "discount"
+    | "credit"
+    | "internal_only"
+    | "absorbed"
+    | "legacy_hidden_customer_charge";
   quantity?: number;
   unit?: string;
   unitPrice?: number;
+  pricingMode?: "unit" | "fixed";
+  percentOfBase?: number | null;
   customerFacing?: boolean;
+  internalNotes?: string;
+  internalUnitCost?: number | null;
   roomId?: string | null;
   roomName?: string | null;
+  sortOrder?: number;
 };
 
 type CountertopScopeAdjustment = {
@@ -112,6 +127,8 @@ type StudioEstimate = {
       id: string;
       name: string;
       included?: boolean;
+      /** Explicit room material override; null/undefined = inherit estimate default. */
+      materialGroupOverride?: string | null;
       countertopSqft?: number;
       backsplashSqft?: number;
       backsplashHeightIn?: number | null;
@@ -126,6 +143,9 @@ type StudioEstimate = {
         name: string;
         included?: boolean;
         sqft?: number;
+        /** When true, piece.materialGroup is an explicit override. */
+        materialOverride?: boolean;
+        materialGroup?: string | null;
         finishedEdge?: { totalFinishedEdgeLengthIn?: number };
       }>;
       approvedFinishedEdgeLf?: number;
@@ -455,6 +475,27 @@ export default function EstimateScopePanel({
     markDirty(true);
   }
 
+  function patchPiece(roomId: string, pieceId: string, partial: Record<string, unknown>) {
+    setEstimate((prev) => {
+      if (!prev?.scope?.rooms) return prev;
+      return {
+        ...prev,
+        scope: {
+          ...prev.scope,
+          rooms: prev.scope.rooms.map((r) => {
+            if (r.id !== roomId) return r;
+            const pieces = Array.isArray(r.pieces) ? r.pieces : [];
+            return {
+              ...r,
+              pieces: pieces.map((p) => (p.id === pieceId ? { ...p, ...partial } : p))
+            };
+          })
+        }
+      };
+    });
+    markDirty(true);
+  }
+
   function patchCustomLine(index: number, partial: Partial<CustomLineItem>) {
     setEstimate((prev) => {
       if (!prev) return prev;
@@ -465,22 +506,58 @@ export default function EstimateScopePanel({
     markDirty(true);
   }
 
-  function addCustomLine() {
+  function addCustomLine(role: CustomLineItem["commercialRole"] = "customer_charge") {
     setEstimate((prev) => {
       if (!prev) return prev;
+      const id =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `cli-${Date.now()}`;
       const lines = [
         ...(prev.scope?.customLineItems || []),
         {
-          id: `cli-${Date.now()}`,
+          id,
+          lineKey: id,
           name: "",
-          description: "",
-          category: "Other",
+          customerDescription: "",
+          category:
+            role === "discount" || role === "credit" ? "Discount/Credit" : "Other",
+          commercialRole: role,
           quantity: 1,
           unit: "ea",
           unitPrice: 0,
-          customerFacing: true
+          pricingMode: "unit" as const,
+          customerFacing:
+            role === "internal_only" || role === "absorbed" ? false : true,
+          sortOrder: (prev.scope?.customLineItems || []).length
         }
       ];
+      return { ...prev, scope: { ...(prev.scope || {}), customLineItems: lines } };
+    });
+    markDirty(true);
+  }
+
+  function duplicateCustomLine(index: number) {
+    setEstimate((prev) => {
+      if (!prev) return prev;
+      const lines = [...(prev.scope?.customLineItems || [])];
+      const src = lines[index];
+      if (!src) return prev;
+      const id =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `cli-${Date.now()}`;
+      lines.splice(index + 1, 0, {
+        ...src,
+        id,
+        lineKey: id,
+        name: src.name ? `${src.name} (copy)` : "",
+        customerDescription: src.customerDescription
+          ? `${src.customerDescription} (copy)`
+          : src.name
+            ? `${src.name} (copy)`
+            : ""
+      });
       return { ...prev, scope: { ...(prev.scope || {}), customLineItems: lines } };
     });
     markDirty(true);
@@ -1146,10 +1223,11 @@ export default function EstimateScopePanel({
         <h3>Material</h3>
         <div className="eq-scope-grid">
           <label>
-            Material group
+            Estimate default material group
             <select
               value={scope.materialGroup || "Group Promo"}
               disabled={blocked}
+              data-testid="eq-material-group-default"
               onChange={(e) => patchScope({ materialGroup: e.target.value })}
             >
               {MATERIAL_GROUPS.map((g) => (
@@ -1177,6 +1255,100 @@ export default function EstimateScopePanel({
             Color TBD (warning)
           </label>
         </div>
+        <p className="eq-muted">
+          Inheritance: piece override → room override → estimate default. Clearing an override
+          restores inheritance; matching the parent group still counts as an override when set.
+        </p>
+        {(scope.rooms || []).filter((r) => r && r.included !== false).length > 0 ? (
+          <div className="eq-material-inheritance" data-testid="eq-material-inheritance">
+            {(scope.rooms || [])
+              .filter((r) => r && r.included !== false)
+              .map((room) => (
+                <div key={room.id} className="eq-material-room" data-testid="eq-material-room-row">
+                  <strong>{room.name || room.id}</strong>
+                  <label>
+                    Room material
+                    <select
+                      value={
+                        room.materialGroupOverride != null && room.materialGroupOverride !== ""
+                          ? room.materialGroupOverride
+                          : ""
+                      }
+                      disabled={blocked}
+                      data-testid="eq-room-material-override"
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        patchRoom(room.id, {
+                          materialGroupOverride: v ? v : null
+                        });
+                      }}
+                    >
+                      <option value="">Inherit estimate default ({scope.materialGroup || "Group Promo"})</option>
+                      {MATERIAL_GROUPS.map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <ul className="eq-material-piece-list">
+                    {(room.pieces || [])
+                      .filter((p) => p && p.included !== false)
+                      .map((piece) => (
+                        <li key={piece.id} data-testid="eq-material-piece-row">
+                          <span>{piece.name || piece.id}</span>
+                          <label className="eq-check">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(piece.materialOverride)}
+                              disabled={blocked}
+                              data-testid="eq-piece-material-override"
+                              onChange={(e) => {
+                                const on = e.target.checked;
+                                patchPiece(room.id, piece.id, {
+                                  materialOverride: on,
+                                  materialGroup: on
+                                    ? piece.materialGroup ||
+                                      room.materialGroupOverride ||
+                                      scope.materialGroup ||
+                                      "Group Promo"
+                                    : null
+                                });
+                              }}
+                            />
+                            Piece override
+                          </label>
+                          {piece.materialOverride ? (
+                            <select
+                              value={piece.materialGroup || "Group Promo"}
+                              disabled={blocked}
+                              data-testid="eq-piece-material-group"
+                              onChange={(e) =>
+                                patchPiece(room.id, piece.id, {
+                                  materialOverride: true,
+                                  materialGroup: e.target.value
+                                })
+                              }
+                            >
+                              {MATERIAL_GROUPS.map((g) => (
+                                <option key={g} value={g}>
+                                  {g}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="eq-muted">
+                              Inherits{" "}
+                              {room.materialGroupOverride || scope.materialGroup || "Group Promo"}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              ))}
+          </div>
+        ) : null}
 
         <h3>Approved physical scope</h3>
         {takeoffAuthority ? (
@@ -1708,31 +1880,84 @@ export default function EstimateScopePanel({
           </label>
         </div>
 
-        <h3>Custom line items</h3>
+        <h3>Commercial adjustments</h3>
         <p className="eq-muted">
-          Server-calculated extras. Internal-only lines never appear on the customer Digital Estimate.
+          Customer charges, discounts/credits, internal-only costs, and absorbed costs. Server
+          calculation is authoritative. Internal-only and absorbed amounts never appear on the
+          customer Digital Estimate or customer print.
         </p>
         <div className="eq-custom-lines" data-testid="eq-custom-lines">
           {(scope.customLineItems || []).length === 0 ? (
-            <p className="eq-muted">No custom lines yet.</p>
+            <p className="eq-muted">No commercial adjustment lines yet.</p>
           ) : (
             <ul className="eq-custom-line-list">
-              {(scope.customLineItems || []).map((line, index) => (
+              {(scope.customLineItems || []).map((line, index) => {
+                const role = line.commercialRole || "customer_charge";
+                return (
                 <li key={line.id || `cli-${index}`} data-testid="eq-custom-line-row">
                   <label>
-                    Description
-                    <input
-                      value={line.name || ""}
+                    Line purpose
+                    <select
+                      value={role}
                       disabled={blocked}
-                      onChange={(e) => patchCustomLine(index, { name: e.target.value })}
+                      data-testid="eq-custom-line-role"
+                      onChange={(e) => {
+                        const next = e.target.value as CustomLineItem["commercialRole"];
+                        patchCustomLine(index, {
+                          commercialRole: next,
+                          category:
+                            next === "discount" || next === "credit"
+                              ? "Discount/Credit"
+                              : line.category || "Other",
+                          customerFacing:
+                            next === "internal_only" || next === "absorbed" ? false : true
+                        });
+                      }}
+                    >
+                      <option value="customer_charge">Customer charge</option>
+                      <option value="customer_charge_hidden_detail">
+                        Customer charge (hide internal detail)
+                      </option>
+                      <option value="discount">Discount</option>
+                      <option value="credit">Credit</option>
+                      <option value="internal_only">Internal-only cost</option>
+                      <option value="absorbed">Absorbed cost</option>
+                    </select>
+                  </label>
+                  <label>
+                    Customer description
+                    <input
+                      value={line.customerDescription || line.name || ""}
+                      disabled={blocked}
+                      onChange={(e) =>
+                        patchCustomLine(index, {
+                          customerDescription: e.target.value,
+                          name: e.target.value
+                        })
+                      }
                       data-testid="eq-custom-line-name"
                     />
                   </label>
+                  {role === "customer_charge_hidden_detail" ||
+                  role === "internal_only" ||
+                  role === "absorbed" ? (
+                    <label>
+                      Internal notes
+                      <input
+                        value={line.internalNotes || ""}
+                        disabled={blocked}
+                        onChange={(e) =>
+                          patchCustomLine(index, { internalNotes: e.target.value })
+                        }
+                        data-testid="eq-custom-line-internal-notes"
+                      />
+                    </label>
+                  ) : null}
                   <label>
                     Category
                     <select
                       value={line.category || "Other"}
-                      disabled={blocked}
+                      disabled={blocked || role === "discount" || role === "credit"}
                       onChange={(e) => patchCustomLine(index, { category: e.target.value })}
                       data-testid="eq-custom-line-category"
                     >
@@ -1785,7 +2010,7 @@ export default function EstimateScopePanel({
                       min={0}
                       step={0.01}
                       value={line.quantity ?? 1}
-                      disabled={blocked}
+                      disabled={blocked || line.pricingMode === "fixed"}
                       onChange={(e) =>
                         patchCustomLine(index, { quantity: Number(e.target.value) || 0 })
                       }
@@ -1800,51 +2025,94 @@ export default function EstimateScopePanel({
                     />
                   </label>
                   <label>
-                    Unit price
+                    {role === "discount" || role === "credit" ? "Amount (positive)" : "Unit price"}
                     <input
                       type="number"
                       step={0.01}
-                      value={line.unitPrice ?? 0}
+                      value={Math.abs(Number(line.unitPrice) || 0)}
                       disabled={blocked}
                       onChange={(e) =>
-                        patchCustomLine(index, { unitPrice: Number(e.target.value) || 0 })
+                        patchCustomLine(index, {
+                          unitPrice: Number(e.target.value) || 0,
+                          pricingMode: "unit"
+                        })
                       }
                     />
-                  </label>
-                  <label className="eq-check">
-                    <input
-                      type="checkbox"
-                      checked={line.customerFacing !== false}
-                      disabled={blocked}
-                      onChange={(e) =>
-                        patchCustomLine(index, { customerFacing: e.target.checked })
-                      }
-                      data-testid="eq-custom-line-customer-visible"
-                    />
-                    Customer-visible
                   </label>
                   <button
                     type="button"
                     className="eq-btn-ghost"
                     disabled={blocked}
-                    onClick={() => removeCustomLine(index)}
+                    onClick={() => duplicateCustomLine(index)}
+                    data-testid="eq-custom-line-duplicate"
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    type="button"
+                    className="eq-btn-ghost"
+                    disabled={blocked}
+                    onClick={() => {
+                      if (window.confirm("Remove this commercial line?")) {
+                        removeCustomLine(index);
+                      }
+                    }}
                     data-testid="eq-custom-line-remove"
                   >
                     Remove
                   </button>
                 </li>
-              ))}
+              );
+              })}
             </ul>
           )}
-          <button
-            type="button"
-            className="eq-btn-secondary"
-            disabled={blocked}
-            onClick={() => addCustomLine()}
-            data-testid="eq-custom-line-add"
-          >
-            Add custom line
-          </button>
+          <div className="eq-action-row">
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              disabled={blocked}
+              onClick={() => addCustomLine("customer_charge")}
+              data-testid="eq-custom-line-add"
+            >
+              Add customer charge
+            </button>
+            <button
+              type="button"
+              className="eq-btn-ghost"
+              disabled={blocked}
+              onClick={() => addCustomLine("discount")}
+              data-testid="eq-discount-add"
+            >
+              Add discount
+            </button>
+            <button
+              type="button"
+              className="eq-btn-ghost"
+              disabled={blocked}
+              onClick={() => addCustomLine("credit")}
+              data-testid="eq-credit-add"
+            >
+              Add credit
+            </button>
+            <button
+              type="button"
+              className="eq-btn-ghost"
+              disabled={blocked}
+              onClick={() => addCustomLine("internal_only")}
+              data-testid="eq-internal-only-add"
+            >
+              Add internal-only cost
+            </button>
+            <button
+              type="button"
+              className="eq-btn-ghost"
+              disabled={blocked}
+              onClick={() => addCustomLine("absorbed")}
+              data-testid="eq-absorbed-add"
+            >
+              Add absorbed cost
+            </button>
+          </div>
         </div>
 
         <h3>Edge</h3>
@@ -2083,7 +2351,7 @@ export default function EstimateScopePanel({
           </div>
         )}
 
-        <h3>Commercial adjustments</h3>
+        <h3>Internal markup</h3>
         <div className="eq-scope-grid">
           <label>
             Internal markup % (authorized only)
@@ -2159,6 +2427,25 @@ export default function EstimateScopePanel({
               <dt>Account adjustment</dt>
               <dd>${Number(totals.accountAdjustment ?? 0).toFixed(2)}</dd>
             </div>
+            {Number((totals as Record<string, unknown>).internalOnlyCosts ?? 0) !== 0 ||
+            Number((totals as Record<string, unknown>).absorbedCosts ?? 0) !== 0 ? (
+              <>
+                <div>
+                  <dt>Internal-only costs</dt>
+                  <dd data-testid="eq-internal-only-total">
+                    $
+                    {Number((totals as Record<string, unknown>).internalOnlyCosts ?? 0).toFixed(2)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Absorbed costs</dt>
+                  <dd data-testid="eq-absorbed-total">
+                    $
+                    {Number((totals as Record<string, unknown>).absorbedCosts ?? 0).toFixed(2)}
+                  </dd>
+                </div>
+              </>
+            ) : null}
             <div>
               <dt>Internal markup</dt>
               <dd>${Number(totals.internalMarkupAmount ?? 0).toFixed(2)}</dd>
@@ -2170,8 +2457,10 @@ export default function EstimateScopePanel({
               </dd>
             </div>
             <div>
-              <dt>Future customer display total</dt>
-              <dd>${Number(totals.customerDisplayTotal ?? 0).toFixed(2)}</dd>
+              <dt>Customer total</dt>
+              <dd data-testid="eq-customer-display-total">
+                ${Number(totals.customerDisplayTotal ?? 0).toFixed(2)}
+              </dd>
             </div>
           </dl>
         )}

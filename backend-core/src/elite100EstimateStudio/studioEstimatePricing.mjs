@@ -4,7 +4,6 @@
 import { createHash } from "node:crypto";
 import {
   calculateQuote,
-  normalizeCustomLineItems,
   PROTOTYPE_ADDON_UNIT_PRICES,
   UPGRADED_EDGE_RATE_DIRECT_V2,
   UPGRADED_EDGE_RATE_WHOLESALE_V2
@@ -42,6 +41,15 @@ import {
   resolveEdgeProfileDefinition,
   resolvePremiumEdgeRatePerLf
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
+import {
+  STUDIO_COMMERCIAL_LINE_MODEL_VERSION,
+  calculateCommercialLineTotals,
+  normalizeStudioCommercialLines
+} from "./studioCommercialLines.mjs";
+import {
+  computeInheritedMaterialPricing,
+  resolveRoomMaterialGroup
+} from "./studioMaterialInheritance.mjs";
 
 /** D-edge / Dupont-style specialty — product brief $25/LF (matches Direct upgraded edge). */
 export const STUDIO_D_EDGE_RATE_PER_LF = UPGRADED_EDGE_RATE_DIRECT_V2;
@@ -116,6 +124,25 @@ export function assertScopeAuthority(scope, opts = {}) {
     err.statusCode = 400;
     err.code = "invalid_material_group";
     throw err;
+  }
+  for (const room of Array.isArray(scope?.rooms) ? scope.rooms : []) {
+    const ov = room?.materialGroupOverride;
+    if (ov != null && String(ov).trim() && !MATERIAL_GROUPS.includes(String(ov).trim())) {
+      const err = new Error("Unknown room material group override");
+      err.statusCode = 400;
+      err.code = "invalid_material_group";
+      throw err;
+    }
+    for (const piece of Array.isArray(room?.pieces) ? room.pieces : []) {
+      if (!piece?.materialOverride) continue;
+      const pg = String(piece?.materialGroup ?? "").trim();
+      if (pg && !MATERIAL_GROUPS.includes(pg)) {
+        const err = new Error("Unknown piece material group override");
+        err.statusCode = 400;
+        err.code = "invalid_material_group";
+        throw err;
+      }
+    }
   }
   // Governed estimator scope adjustments are audited pricing inputs — a
   // non-zero adjustment without a reason is not a valid pricing request.
@@ -212,7 +239,7 @@ export function scopeToCalculatorRooms(scope) {
         rawCountertopSqft: counterBilled.rawSf,
         rawBacksplashSqft: splashBilled.rawSf,
         backsplashHeightIn: splashPolicy.backsplashHeightIn,
-        materialGroup: scope.materialGroup || "Group Promo",
+        materialGroup: resolveRoomMaterialGroup(scope, r).group,
         notes: r.notes || "",
         addons: {},
         pieces: pieces.map((p) => ({
@@ -224,7 +251,9 @@ export function scopeToCalculatorRooms(scope) {
           sqft: p.sqft,
           billableSqft: ceilPiece(p),
           included: p.included !== false,
-          notes: p.notes || ""
+          notes: p.notes || "",
+          materialOverride: Boolean(p.materialOverride),
+          materialGroup: p.materialGroup || undefined
         }))
       };
     });
@@ -275,23 +304,7 @@ export async function calculateStudioEstimate(params) {
   const rooms = scopeToCalculatorRooms(scope);
   const addOns = scopeToAddOns(scope);
   const pricingBasis = scope.pricingBasis === "wholesale" ? "wholesale" : "direct";
-  const materialRate = resolveStudioMaterialRatePerSf({
-    materialGroup: scope.materialGroup || "Group Promo",
-    pricingBasis,
-    partnerAccountId: scope.partnerAccountId,
-    env
-  });
-
-  const customLineItems = normalizeCustomLineItems(scope).map((row) => ({
-    ...row,
-    unit: (() => {
-      const raw = Array.isArray(scope.customLineItems) ? scope.customLineItems : [];
-      const match = raw.find(
-        (r) => r && String(r.name ?? r.item_name ?? "").trim() === row.name
-      );
-      return match?.unit != null ? String(match.unit) : "ea";
-    })()
-  }));
+  const commercialLinesNormalized = normalizeStudioCommercialLines(scope);
 
   const calcImpl = params.calculateQuoteImpl || calculateQuote;
   const quoteResult = await calcImpl(
@@ -303,7 +316,18 @@ export async function calculateStudioEstimate(params) {
       internalMaterialBasis: pricingBasis === "wholesale" ? "wholesale" : "direct",
       rooms,
       addOns,
-      customLineItems,
+      // Parity path: pass signed unit prices; authoritative totals computed below.
+      customLineItems: commercialLinesNormalized.map((r) => ({
+        name: r.name,
+        description: r.description,
+        category: r.category,
+        quantity: r.quantity,
+        unitPrice: r.unitPrice,
+        customerFacing: r.customerFacing,
+        roomId: r.roomId,
+        roomName: r.roomName,
+        lineKey: r.lineKey
+      })),
       partnerAccountId: null,
       useTaxPercent: 0
     },
@@ -317,97 +341,42 @@ export async function calculateStudioEstimate(params) {
     throw err;
   }
 
-  // Recompute material on studio rate authority (covers Watts Promo override).
-  // Room rows already carry section-ceiled billed SF including governed room
-  // adjustments; the project-level adjustment is its own independent section.
+  // Recompute material with inheritance (estimate → room → piece).
   const scopeBilling = buildStudioScopeBilling(scope);
-  const chargeableCounter =
-    rooms.reduce((s, r) => s + (Number(r.countertopSqft) || 0), 0) +
-    scopeBilling.projectAdjustmentBilledSf;
-  const chargeableSplash = rooms.reduce((s, r) => s + (Number(r.backsplashSqft) || 0), 0);
+  const inherited = computeInheritedMaterialPricing({
+    scope,
+    pricingBasis,
+    partnerAccountId: scope.partnerAccountId,
+    env,
+    projectAdjustmentBilledSf: scopeBilling.projectAdjustmentBilledSf,
+    scopeBillingRooms: scopeBilling.rooms
+  });
 
-  // Invariant: the billed countertop scope displayed to the estimator and the
-  // billed countertop scope being priced must match exactly. Backsplash SF is
-  // a separately attributed category and must never inflate countertop scope.
-  assertBilledCountertopScopeReconciles(scopeBilling.billedCountertopSf, chargeableCounter);
+  const chargeableCounter = inherited.chargeableCounter;
+  const chargeableSplash = inherited.chargeableSplash;
 
-  const materialSf = round2(chargeableCounter + chargeableSplash);
-  const materialCountertopSubtotal = round2(chargeableCounter * materialRate.rate);
-  const materialBacksplashSubtotal = round2(chargeableSplash * materialRate.rate);
-  const materialSubtotal = round2(materialCountertopSubtotal + materialBacksplashSubtotal);
-  const materialUseTax = round2(materialSubtotal * 0.02);
+  const hasPieceMaterialOverride = (Array.isArray(scope.rooms) ? scope.rooms : []).some(
+    (r) =>
+      r &&
+      r.included !== false &&
+      Array.isArray(r.pieces) &&
+      r.pieces.some(
+        (p) => p && p.included !== false && Boolean(p.materialOverride ?? p.material_override)
+      )
+  );
+  // Section-billing reconciliation holds for room-level material pricing.
+  // Piece-level overrides price piece SF directly (may differ from room section ceil).
+  if (!hasPieceMaterialOverride) {
+    assertBilledCountertopScopeReconciles(scopeBilling.billedCountertopSf, chargeableCounter);
+  }
 
-  // Internal calculation evidence: every SF section contributing to the
-  // material subtotal, category-attributed. Never exposed publicly.
-  /** @type {Array<object>} */
-  const materialSections = [];
-  const sectionSourceType =
-    scopeBilling.pricingScopeSource === "takeoff" ? "takeoff_piece" : "manual_piece";
-  for (const row of scopeBilling.rooms) {
-    for (const s of row.sections) {
-      materialSections.push({
-        sourceType: sectionSourceType,
-        roomId: row.roomId,
-        roomName: row.roomName,
-        sourceId: s.key,
-        rawSf: s.rawSf,
-        billedSf: s.billableSf,
-        adjustmentSf: 0,
-        ratePerSf: materialRate.rate,
-        amountCents: Math.round(s.billableSf * materialRate.rate * 100),
-        category: "countertop"
-      });
-    }
-    for (const adj of row.adjustments) {
-      if (adj.adjustmentSf === 0) continue;
-      materialSections.push({
-        sourceType: "scope_adjustment",
-        roomId: row.roomId,
-        roomName: row.roomName,
-        sourceId: adj.id,
-        rawSf: adj.adjustmentSf,
-        billedSf: 0,
-        adjustmentSf: row.adjustmentBilledSf,
-        ratePerSf: materialRate.rate,
-        amountCents: Math.round(row.adjustmentBilledSf * materialRate.rate * 100),
-        category: "countertop"
-      });
-    }
-  }
-  if (scopeBilling.projectAdjustmentBilledSf !== 0) {
-    materialSections.push({
-      sourceType: "scope_adjustment",
-      roomId: null,
-      roomName: null,
-      sourceId: "project_adjustment",
-      rawSf: scopeBilling.adjustments
-        .filter((a) => a.adjustmentScope === "project")
-        .reduce((s, a) => s + a.adjustmentSf, 0),
-      billedSf: 0,
-      adjustmentSf: scopeBilling.projectAdjustmentBilledSf,
-      ratePerSf: materialRate.rate,
-      amountCents: Math.round(
-        scopeBilling.projectAdjustmentBilledSf * materialRate.rate * 100
-      ),
-      category: "countertop"
-    });
-  }
-  for (const r of rooms) {
-    const splashSf = Number(r.backsplashSqft) || 0;
-    if (splashSf <= 0) continue;
-    materialSections.push({
-      sourceType: "room_backsplash",
-      roomId: String(r.id ?? ""),
-      roomName: String(r.name ?? ""),
-      sourceId: "backsplash",
-      rawSf: Number(r.rawBacksplashSqft) || splashSf,
-      billedSf: splashSf,
-      adjustmentSf: 0,
-      ratePerSf: materialRate.rate,
-      amountCents: Math.round(splashSf * materialRate.rate * 100),
-      category: "backsplash"
-    });
-  }
+  const materialRate = inherited.primaryRate;
+  const materialSf = inherited.materialSf;
+  const materialCountertopSubtotal = inherited.materialCountertopSubtotal;
+  const materialBacksplashSubtotal = inherited.materialBacksplashSubtotal;
+  const materialSubtotal = inherited.materialSubtotal;
+  const materialUseTax = inherited.materialUseTax;
+  const materialSections = [...inherited.sections];
 
   let fabricationSubtotal = 0;
   for (const [key, qty] of Object.entries(addOns)) {
@@ -484,40 +453,68 @@ export async function calculateStudioEstimate(params) {
     fabricationSubtotal = round2(fabricationSubtotal + buildup * 20);
   }
 
-  let customLineItemsCustomerVisibleTotal = 0;
-  let customLineItemsInternalOnlyTotal = 0;
-  for (const row of customLineItems) {
-    const lineTotal = round2((Number(row.quantity) || 0) * (Number(row.unitPrice) || 0));
-    if (row.customerFacing) customLineItemsCustomerVisibleTotal = round2(
-      customLineItemsCustomerVisibleTotal + lineTotal
-    );
-    else customLineItemsInternalOnlyTotal = round2(customLineItemsInternalOnlyTotal + lineTotal);
-  }
-  const customLineItemsTotal = round2(
-    customLineItemsCustomerVisibleTotal + customLineItemsInternalOnlyTotal
+  // Percent discounts apply against material + fabrication (addons/edge/miter/buildup)
+  // before commercial lines — not against tax or account overlays.
+  const percentBase = round2(materialSubtotal + materialUseTax + fabricationSubtotal);
+  const commercial = calculateCommercialLineTotals(commercialLinesNormalized, percentBase);
+  const customLineItems = commercial.lines;
+
+  const customLineItemsCustomerVisibleTotal = commercial.customerVisibleTotal;
+  const customLineItemsInternalOnlyTotal = round2(
+    commercial.internalOnlyTotal + commercial.legacyHiddenCustomerTotal
   );
+  const customLineItemsAbsorbedTotal = commercial.absorbedTotal;
+  const customLineItemsTotal = commercial.fabricationCustomTotal;
   fabricationSubtotal = round2(fabricationSubtotal + customLineItemsTotal);
 
-  // Internal-only custom-line dollars are absorbed into customer-facing stone
-  // categories at publication — they are dollars, never SF. Record them in the
-  // evidence table with zero SF so they cannot masquerade as billed scope.
-  if (customLineItemsInternalOnlyTotal !== 0) {
+  // Legacy hidden customer charges (+ any residual) recorded for absorption evidence.
+  if (commercial.legacyHiddenCustomerTotal !== 0) {
     materialSections.push({
       sourceType: "internal_custom_line",
       roomId: null,
       roomName: null,
-      sourceId: "internal_only_custom_lines",
+      sourceId: "legacy_hidden_customer_charges",
       rawSf: 0,
       billedSf: 0,
       adjustmentSf: 0,
       ratePerSf: 0,
-      amountCents: Math.round(customLineItemsInternalOnlyTotal * 100),
+      amountCents: Math.round(commercial.legacyHiddenCustomerTotal * 100),
       category: "hidden_allocation"
+    });
+  }
+  if (commercial.internalOnlyTotal !== 0) {
+    materialSections.push({
+      sourceType: "internal_only_commercial_line",
+      roomId: null,
+      roomName: null,
+      sourceId: "internal_only_costs",
+      rawSf: 0,
+      billedSf: 0,
+      adjustmentSf: 0,
+      ratePerSf: 0,
+      amountCents: Math.round(commercial.internalOnlyTotal * 100),
+      category: "internal_only"
+    });
+  }
+  if (commercial.absorbedTotal !== 0) {
+    materialSections.push({
+      sourceType: "absorbed_commercial_line",
+      roomId: null,
+      roomName: null,
+      sourceId: "absorbed_costs",
+      rawSf: 0,
+      billedSf: 0,
+      adjustmentSf: 0,
+      ratePerSf: 0,
+      amountCents: Math.round(commercial.absorbedTotal * 100),
+      category: "absorbed"
     });
   }
 
   const cfg = readTrustedPartnerAccountConfig(env);
   const spahn = isSpahnTrustedPartner(scope.partnerAccountId, cfg);
+  // Customer path: material + tax + fabrication (incl. customer commercial lines /
+  // discounts / credits / legacy hidden charges). Excludes new internal_only + absorbed.
   const preAdjustment = round2(materialSubtotal + materialUseTax + fabricationSubtotal);
   const accountAdjustment = spahn
     ? round2(preAdjustment * (SPAHN_ESTIMATE_ADJUSTMENT_PERCENT / 100))
@@ -526,12 +523,15 @@ export async function calculateStudioEstimate(params) {
 
   const markupPercent = Number(scope.internalMarkupPercent ?? 0) || 0;
   const internalMarkupAmount = markupPercent > 0 ? round2(materialSubtotal * (markupPercent / 100)) : 0;
-  const exactInternalTotal = round2(afterAccount + internalMarkupAmount);
-  // Internal markup is never customer-facing. Internal-only custom lines ARE
-  // charged to the customer — their names are hidden and their dollars are
-  // absorbed into customer-facing stone categories at publication by the
-  // deterministic allocation policy (internal_custom_line_allocation_v1),
-  // so the customer total reconciles to the authoritative total exactly.
+  // Internal economics include internal_only + absorbed (never customer-facing).
+  const exactInternalTotal = round2(
+    afterAccount +
+      internalMarkupAmount +
+      commercial.internalOnlyTotal +
+      commercial.absorbedTotal
+  );
+  // Customer total never includes new internal_only or absorbed roles.
+  // Legacy customerFacing:false lines remain in afterAccount (historical absorption).
   const customerDisplayTotal = round2(afterAccount);
 
   // Governed adjustment audit (snapshotted with the calculation): billed SF
@@ -561,17 +561,22 @@ export async function calculateStudioEstimate(params) {
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
+        commercialLineModelVersion: STUDIO_COMMERCIAL_LINE_MODEL_VERSION,
         materialGroup: scope.materialGroup,
         pricingBasis,
         partnerAccountId: scope.partnerAccountId || null,
         materialSf,
+        materialByGroup: inherited.materialByGroup,
         materialRate: materialRate.rate,
         addOns,
         customLineItems: customLineItems.map((r) => ({
+          id: r.id,
           name: r.name,
           quantity: r.quantity,
           unitPrice: r.unitPrice,
+          percentOfBase: r.percentOfBase,
           customerFacing: r.customerFacing,
+          commercialRole: r.commercialRole,
           category: r.category,
           roomId: r.roomId || null
         })),
@@ -588,12 +593,20 @@ export async function calculateStudioEstimate(params) {
         miterLf,
         buildup,
         markupPercent,
-        rooms: rooms.map((r) => ({
+        rooms: (Array.isArray(scope.rooms) ? scope.rooms : []).map((r) => ({
           id: r.id,
+          materialGroupOverride: r.materialGroupOverride ?? null,
           countertopSqft: r.countertopSqft,
           backsplashSqft: r.backsplashSqft,
           includeBacksplash: r.includeBacksplash,
-          backsplashHeightIn: r.backsplashHeightIn
+          backsplashHeightIn: r.backsplashHeightIn,
+          pieces: (Array.isArray(r.pieces) ? r.pieces : []).map((p) => ({
+            id: p.id,
+            materialOverride: Boolean(p.materialOverride),
+            materialGroup: p.materialGroup || null,
+            sqft: p.sqft,
+            included: p.included !== false
+          }))
         }))
       })
     )
@@ -604,7 +617,8 @@ export async function calculateStudioEstimate(params) {
     fingerprint,
     calculatedAt: new Date().toISOString(),
     pricingEngine: "quoteCalculator+studioTrustedOverlays",
-    pricingVersion: 2,
+    pricingVersion: 3,
+    commercialLineModelVersion: STUDIO_COMMERCIAL_LINE_MODEL_VERSION,
     // Internal measured-vs-billed scope evidence (never public): exact measured
     // SF, independently section-ceiled billed SF, and governed adjustments with
     // their billed + cent effects at this calculation's rate.
@@ -633,6 +647,8 @@ export async function calculateStudioEstimate(params) {
       subtotal: materialSubtotal,
       countertopSubtotal: materialCountertopSubtotal,
       backsplashSubtotal: materialBacksplashSubtotal,
+      byGroup: inherited.materialByGroup,
+      roomSummaries: inherited.roomSummaries,
       // Internal-only section evidence (source/room/raw/billed/rate/category).
       sections: materialSections,
       useTaxPercent: 2,
@@ -645,7 +661,17 @@ export async function calculateStudioEstimate(params) {
       customLineItems,
       customLineItemsTotal,
       customLineItemsCustomerVisibleTotal,
-      customLineItemsInternalOnlyTotal
+      customLineItemsInternalOnlyTotal,
+      customLineItemsAbsorbedTotal,
+      customLineItemsLegacyHiddenTotal: commercial.legacyHiddenCustomerTotal,
+      commercialLines: {
+        modelVersion: STUDIO_COMMERCIAL_LINE_MODEL_VERSION,
+        customerVisibleTotal: commercial.customerVisibleTotal,
+        customerTotalContribution: commercial.customerTotalContribution,
+        internalOnlyTotal: commercial.internalOnlyTotal,
+        absorbedTotal: commercial.absorbedTotal,
+        legacyHiddenCustomerTotal: commercial.legacyHiddenCustomerTotal
+      }
     },
     account: {
       partnerAccountId: scope.partnerAccountId || null,
@@ -670,7 +696,10 @@ export async function calculateStudioEstimate(params) {
       materialUseTax,
       fabricationSubtotal,
       accountAdjustment,
-      internalMarkupAmount
+      internalMarkupAmount,
+      internalOnlyCosts: commercial.internalOnlyTotal,
+      absorbedCosts: commercial.absorbedTotal,
+      commercialCustomerContribution: commercial.customerTotalContribution
     },
     warnings,
     unresolvedItems: unresolved,
