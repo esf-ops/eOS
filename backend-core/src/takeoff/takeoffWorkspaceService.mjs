@@ -1023,6 +1023,8 @@ export async function saveTakeoffCorrection({
       409
     );
     err.code = "stale_takeoff_correction";
+    err.latestResultId = latestResultId;
+    err.latestClientMutationRevision = latestClientRevision;
     throw err;
   }
   if (
@@ -1035,6 +1037,8 @@ export async function saveTakeoffCorrection({
       409
     );
     err.code = "stale_takeoff_correction";
+    err.latestResultId = latestResultId;
+    err.latestClientMutationRevision = latestClientRevision;
     throw err;
   }
   const now = new Date().toISOString();

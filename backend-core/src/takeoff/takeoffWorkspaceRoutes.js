@@ -281,8 +281,19 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
       return res.status(201).json(result);
     } catch (e) {
       const status = e.statusCode ?? 500;
-      const code = status < 500 ? "validation_error" : "server_error";
-      return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+      const code =
+        e?.code || (status < 500 ? "validation_error" : "server_error");
+      return res.status(status).json({
+        ok: false,
+        error: String(e?.message ?? e),
+        code,
+        ...(e?.latestResultId
+          ? { latestResultId: e.latestResultId }
+          : {}),
+        ...(e?.latestClientMutationRevision != null
+          ? { latestClientMutationRevision: e.latestClientMutationRevision }
+          : {})
+      });
     }
   });
 

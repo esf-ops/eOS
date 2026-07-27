@@ -64,25 +64,25 @@ export function draftFinishedEdgeGeometry(piece) {
   const label = String(piece?.label || piece?.name || "").toLowerCase();
   const looksIsland = areaType === "island" || /\bisland\b/.test(label);
   const looksPeninsula = areaType === "peninsula" || /\bpeninsula\b/.test(label);
+  const looksVanity = areaType === "vanity" || /\bvanity\b/.test(label);
 
-  const frontExposed = piece?.frontExposed !== false;
-  const frontEdgeLengthIn = frontExposed ? lengthIn : 0;
+  const attachedSide = ["front", "back", "left", "right"].includes(
+    String(piece?.attachedSide || "").toLowerCase()
+  )
+    ? String(piece.attachedSide).toLowerCase()
+    : null;
 
-  // Default: wall runs do not price the back as finished edge.
+  let frontExposed = piece?.frontExposed !== false;
   let backExposed = piece?.backExposed === true;
-  if (looksIsland) backExposed = piece?.backExposed !== false;
-  if (looksPeninsula && piece?.backExposed == null) backExposed = false;
-  const otherExposedEdgeLengthIn = backExposed ? lengthIn : 0;
-
-  const leftExplicit =
+  let leftExplicit =
     piece?.leftExposed != null
       ? Boolean(piece.leftExposed)
       : piece?.sideSplashLeftEligible === true
-        ? false // side-splash-eligible end typically meets wall/cabinet
+        ? false
         : looksIsland || looksPeninsula
           ? true
           : false;
-  const rightExplicit =
+  let rightExplicit =
     piece?.rightExposed != null
       ? Boolean(piece.rightExposed)
       : piece?.sideSplashRightEligible === true
@@ -91,22 +91,62 @@ export function draftFinishedEdgeGeometry(piece) {
           ? true
           : false;
 
+  if (looksIsland) {
+    frontExposed = piece?.frontExposed !== false;
+    backExposed = piece?.backExposed !== false;
+    leftExplicit = piece?.leftExposed != null ? Boolean(piece.leftExposed) : true;
+    rightExplicit = piece?.rightExposed != null ? Boolean(piece.rightExposed) : true;
+  } else if (looksPeninsula && attachedSide) {
+    frontExposed = attachedSide !== "front";
+    backExposed = attachedSide !== "back";
+    leftExplicit = attachedSide !== "left";
+    rightExplicit = attachedSide !== "right";
+  } else if (looksPeninsula && piece?.backExposed == null) {
+    backExposed = false;
+  } else if (looksVanity) {
+    frontExposed = piece?.frontExposed !== false;
+    backExposed = piece?.backExposed === true;
+    leftExplicit = piece?.leftExposed === true;
+    rightExplicit = piece?.rightExposed === true;
+  }
+
+  const frontEdgeLengthIn = frontExposed ? lengthIn : 0;
+  const otherExposedEdgeLengthIn = backExposed ? lengthIn : 0;
   const leftExposedEdgeLengthIn = leftExplicit ? depthIn : 0;
   const rightExposedEdgeLengthIn = rightExplicit ? depthIn : 0;
 
-  const totalFinishedEdgeLengthIn = round2(
+  const qty = Math.max(1, Number(piece?.quantity) || 1);
+  const perUnit = round2(
     frontEdgeLengthIn +
       leftExposedEdgeLengthIn +
       rightExposedEdgeLengthIn +
       otherExposedEdgeLengthIn
   );
+  const totalFinishedEdgeLengthIn = round2(perUnit * qty);
 
   return {
     frontEdgeLengthIn: round2(frontEdgeLengthIn),
     leftExposedEdgeLengthIn: round2(leftExposedEdgeLengthIn),
     rightExposedEdgeLengthIn: round2(rightExposedEdgeLengthIn),
     otherExposedEdgeLengthIn: round2(otherExposedEdgeLengthIn),
+    backExposedEdgeLengthIn: round2(otherExposedEdgeLengthIn),
     totalFinishedEdgeLengthIn,
+    perUnitFinishedEdgeLengthIn: perUnit,
+    quantityApplied: qty,
+    exposedSides: {
+      front: frontExposed,
+      back: backExposed,
+      left: leftExplicit,
+      right: rightExplicit
+    },
+    pieceTopology: looksIsland
+      ? "island"
+      : looksPeninsula
+        ? "peninsula"
+        : looksVanity
+          ? "vanity"
+          : "wall_run",
+    attachedSide: looksPeninsula ? attachedSide : null,
     frontExposed,
     leftExposed: leftExplicit,
     rightExposed: rightExplicit,
@@ -135,9 +175,13 @@ export function resolvePieceFinishedEdgeGeometry(piece, opts = {}) {
     );
     const other = Math.max(
       0,
-      Number(raw.otherExposedEdgeLengthIn ?? raw.other_exposed_edge_length_in) || 0
+      Number(
+        raw.otherExposedEdgeLengthIn ??
+          raw.other_exposed_edge_length_in ??
+          raw.backExposedEdgeLengthIn
+      ) || 0
     );
-    let total = round2(front + left + right + other);
+    let perUnit = round2(front + left + right + other);
     const adj = Number(raw.adjustmentIn ?? raw.adjustment_in) || 0;
     if (adj !== 0) {
       if (!String(raw.adjustmentReason || raw.adjustment_reason || "").trim()) {
@@ -145,8 +189,13 @@ export function resolvePieceFinishedEdgeGeometry(piece, opts = {}) {
         err.code = "finished_edge_adjustment_reason_required";
         throw err;
       }
-      total = Math.max(0, round2(total + adj));
+      perUnit = Math.max(0, round2(perUnit + adj));
     }
+    const qty = Math.max(
+      1,
+      Number(raw.quantityApplied ?? raw.quantity_applied ?? piece?.quantity) || 1
+    );
+    const total = round2(perUnit * qty);
     const source = String(raw.source || "estimator_confirmed");
     const approved =
       raw.finishedEdgeConfirmed === true ||
@@ -154,16 +203,36 @@ export function resolvePieceFinishedEdgeGeometry(piece, opts = {}) {
       source === "estimator_confirmed" ||
       source === "manual" ||
       source === "previously_saved_manual";
+    const exposedSides =
+      raw.exposedSides && typeof raw.exposedSides === "object"
+        ? {
+            front: raw.exposedSides.front === true || front > 0,
+            back: raw.exposedSides.back === true || other > 0,
+            left: raw.exposedSides.left === true || left > 0,
+            right: raw.exposedSides.right === true || right > 0
+          }
+        : {
+            front: front > 0,
+            back: other > 0,
+            left: left > 0,
+            right: right > 0
+          };
     return {
       frontEdgeLengthIn: round2(front),
       leftExposedEdgeLengthIn: round2(left),
       rightExposedEdgeLengthIn: round2(right),
       otherExposedEdgeLengthIn: round2(other),
+      backExposedEdgeLengthIn: round2(other),
+      perUnitFinishedEdgeLengthIn: perUnit,
       totalFinishedEdgeLengthIn: total,
-      frontExposed: front > 0,
-      leftExposed: left > 0,
-      rightExposed: right > 0,
-      backExposed: other > 0,
+      quantityApplied: qty,
+      exposedSides,
+      pieceTopology: raw.pieceTopology || raw.topology || null,
+      attachedSide: raw.attachedSide ?? null,
+      frontExposed: exposedSides.front,
+      leftExposed: exposedSides.left,
+      rightExposed: exposedSides.right,
+      backExposed: exposedSides.back,
       finishedEdgeConfirmed: approved,
       approved,
       source,

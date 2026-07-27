@@ -66,6 +66,8 @@ export function sanitizeInboxText(value, max = BODY_PREVIEW_MAX) {
   s = s.replace(/&quot;/gi, '"');
   s = s.replace(/&#39;/gi, "'");
   s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+  // Common signature placeholders / debris (not a full signature parser).
+  s = s.replace(/\[(?:photo|icon|image|logo|cid:[^\]]+)\]/gi, " ");
   s = s.replace(/\s+/g, " ").trim();
   if (s.length > max) s = `${s.slice(0, max - 1)}…`;
   return s;

@@ -195,8 +195,13 @@ export function deriveConsolidatedWorksheetStatus(input = {}) {
   const review = String(input.reviewStatus ?? "").toLowerCase();
   const usable = Boolean(input.hasUsableGeometry);
   const pendingAi = Boolean(input.pendingAiAvailable);
+  const draftNeedsReview = Boolean(input.draftNeedsReview);
   if (job === "failed" || job === "error") return "Takeoff failed";
+  if (review === "approved" && draftNeedsReview) {
+    return "Previous Takeoff approved · Current draft needs estimator review";
+  }
   if (review === "approved") return "Approved";
+  if (review === "needs_review" && usable) return "Needs estimator review";
   if (job === "processing" || job === "pending" || job === "queued") {
     return usable
       ? "Takeoff processing · manual draft in progress"
