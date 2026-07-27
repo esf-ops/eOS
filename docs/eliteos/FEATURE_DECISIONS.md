@@ -2624,8 +2624,21 @@
 | **Unchanged Save** | Clean worksheet: Save disabled / client no-op (zero POST). Backend: current base + semantically equal draft → `{ ok: true, unchanged: true }` without a new result row or revision bump. Content returning to an earlier configuration (A→B→A-like→C) is valid; staleness is lineage/version, not content resemblance. |
 | **Concurrency** | Optimistic concurrency preserved. Real two-tab stale saves still **409**; local draft retained; no automatic replay. |
 | **Mutation revision** | Client sends expected next revision; server validates and returns confirmed revision; frontend adopts **server** value only after success. |
-| **SQL** | None — uses existing `quote_takeoff_jobs.result_summary` promotion pointer (+ synthetic `resultRowId` UUID when table insert is blocked). |
+| **SQL** | None — uses existing `quote_takeoff_jobs.result_summary` promotion pointer. **Superseded by §184:** synthetic `resultRowId` UUIDs are forbidden; physical rows required. |
 | **Tests** | `eos:test:takeoff-save-persistence` (+ explicit-save-dialog, correction-workspace, exposed-edges, Secure Plan Viewer, Shared Inbox, golden-path). |
-| **Deferred** | Customer Final Acceptance; Sold Review; dropping `quote_id` NOT NULL on results (optional later SQL). |
+| **Deferred** | Customer Final Acceptance; Sold Review. See §184 for nullable `quote_id` migration. |
+
+### 184. Physical Takeoff result rows required — synthetic IDs forbidden (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `fix/takeoff-save-persistence-and-canonical-reload` |
+| **Decision** | Every canonical editable or approved Takeoff `resultId` **must** be a physical `quote_takeoff_results.id`. `job.result_summary` is a **pointer/cache** (`resultRowId`, revision, draft snapshot) — never a substitute for a table row. |
+| **Synthetic IDs removed** | Generating/promoting a UUID after a failed result insert is forbidden. Insert failure returns `takeoff_result_persistence_failed` (503), leaves the local draft dirty, does not bump revision, does not move the current pointer, and blocks approval. |
+| **Path B — nullable `quote_id`** | Studio / AI Takeoff / Shared Inbox jobs legitimately lack `quote_headers`. Migration `eliteos_quote_takeoff_results_quote_id_nullable_v1.sql` drops NOT NULL on `quote_takeoff_results.quote_id` while retaining the FK for non-null legacy values. **Do not create fake quote_headers rows.** (Production already shows nullable + null `quote_id` on results; migration is for envs still enforcing NOT NULL.) |
+| **Approval** | Requires a verified physical current row; `UPDATE … RETURNING` / select must affect ≥1 row or approval fails with `takeoff_result_not_persisted`. Job is not marked approved on zero-row update. `result_summary` merge **preserves** `resultRowId`, `clientMutationRevision`, and correction lineage markers. |
+| **Scope seeding** | Uses the exact approved physical result ID / draft — never an older AI row after a silent summary overwrite. |
+| **SQL applied** | No — user applies the migration manually before deploying the backend that requires physical inserts. |
+| **Tests** | `eos:test:takeoff-physical-result-persistence` (+ save-persistence, synthetic safety audit). |
 
 

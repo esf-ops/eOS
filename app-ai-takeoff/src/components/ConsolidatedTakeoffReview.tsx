@@ -625,7 +625,12 @@ export default function ConsolidatedTakeoffReview() {
         excludedRunIds: excludedRef.current
       });
       // Atomic success reconciliation — draft, result id, revision, dirty baseline together.
-      if (adopted.resultId) latestResultIdRef.current = adopted.resultId;
+      if (!adopted.resultId) {
+        setSaveStatus("error");
+        setSaveError("The Takeoff draft could not be saved. Your edits remain on this screen.");
+        return;
+      }
+      latestResultIdRef.current = adopted.resultId;
       if (adopted.clientMutationRevision != null) {
         latestClientMutationRevisionRef.current = adopted.clientMutationRevision;
       }

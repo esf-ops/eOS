@@ -107,23 +107,25 @@ function makeMockSupabase({ jobRow, resultRows }) {
         return Promise.resolve({ data: filtered, error: null }).then(resolve, reject);
       },
       update(patch) {
-        const filtered = applyFilters(rows(), api._filters);
-        for (const row of filtered) Object.assign(row, patch);
-        return {
-          eq() {
-            return {
-              eq() {
-                return Promise.resolve({ data: filtered, error: null });
-              },
-              then(resolve, reject) {
-                return Promise.resolve({ data: filtered, error: null }).then(resolve, reject);
-              }
-            };
+        const filters = [];
+        const apply = () => {
+          const matched = applyFilters(rows(), filters);
+          for (const row of matched) Object.assign(row, patch);
+          return matched;
+        };
+        const chain = {
+          eq(col, val) {
+            filters.push([col, val]);
+            return chain;
+          },
+          select() {
+            return Promise.resolve({ data: apply(), error: null });
           },
           then(resolve, reject) {
-            return Promise.resolve({ data: filtered, error: null }).then(resolve, reject);
+            return Promise.resolve({ data: apply(), error: null }).then(resolve, reject);
           }
         };
+        return chain;
       },
       insert(payload) {
         const row = Array.isArray(payload) ? payload[0] : { ...payload };

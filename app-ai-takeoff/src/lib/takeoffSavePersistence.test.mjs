@@ -457,7 +457,7 @@ function assertAllBacksplash(takeoff, expected) {
   console.log("ok: A→B→A-like creates C without 409");
 }
 
-// ─── Summary-only promotion beats older estimator row (production defect) ────
+// ─── Insert failure must NOT synthesize a result ID ──────────────────────────
 {
   const oldEstimatorDraft = fivePieceDraft(false);
   const newDraft = fivePieceDraft(true);
@@ -471,9 +471,15 @@ function assertAllBacksplash(takeoff, expected) {
       }
     }
   });
+  const priorSummary = {
+    resultRowId: RESULT_A,
+    clientMutationRevision: 48,
+    lastCorrectionId: "old",
+    normalizedTakeoffJson: oldEstimatorDraft
+  };
   const capturedInserts = [];
   const { supabase, tableData } = makeMockSupabase({
-    jobRow: makeJobRow(),
+    jobRow: makeJobRow({ result_summary: priorSummary }),
     resultRows: [oldRow],
     resultInsertIds: [],
     insertError: {
@@ -483,47 +489,80 @@ function assertAllBacksplash(takeoff, expected) {
     capturedInserts
   });
 
-  const saved = await saveTakeoffCorrection({
-    supabase,
-    organizationId: ORG_ID,
-    userId: USER_ID,
-    takeoffJobId: JOB_ID,
-    takeoffResult: newDraft,
-    baseResultId: RESULT_A,
-    clientMutationRevision: 49
-  });
-  assert.equal(saved.ok, true);
-  assert.ok(saved.resultId, "synthetic promoted resultId returned");
-  assert.equal(capturedInserts.length, 0);
-  assert.equal(tableData.quote_takeoff_jobs[0].result_summary.clientMutationRevision, 49);
-  assertAllBacksplash(
-    tableData.quote_takeoff_jobs[0].result_summary.normalizedTakeoffJson,
-    true
+  await assert.rejects(
+    () =>
+      saveTakeoffCorrection({
+        supabase,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        takeoffJobId: JOB_ID,
+        takeoffResult: newDraft,
+        baseResultId: RESULT_A,
+        clientMutationRevision: 49
+      }),
+    (err) =>
+      err.statusCode === 503 && err.code === "takeoff_result_persistence_failed",
+    "insert failure must be structured Save failure"
   );
+  assert.equal(capturedInserts.length, 0);
+  assert.equal(
+    tableData.quote_takeoff_jobs[0].result_summary.resultRowId,
+    RESULT_A,
+    "current pointer must not change on insert failure"
+  );
+  assert.equal(
+    tableData.quote_takeoff_jobs[0].result_summary.clientMutationRevision,
+    48,
+    "revision must not increment on insert failure"
+  );
+  console.log("ok: insert failure → takeoff_result_persistence_failed; no synthetic ID");
+}
 
-  const reloaded = await getLatestTakeoffResult({
+// ─── Newer result_summary still beats older estimator row on reload ──────────
+{
+  const older = makeResultRow(RESULT_A, fivePieceDraft(false), {
+    created_at: "2026-07-21T10:00:00.000Z",
+    raw_ai_result_json: {
+      _corrections: [{ id: "old" }],
+      _meta: {
+        estimatorConfirmed: { confirmedAt: "2026-07-21T10:00:00.000Z" },
+        clientMutationRevision: 1
+      }
+    }
+  });
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow({
+      result_summary: {
+        resultRowId: RESULT_B,
+        clientMutationRevision: 2,
+        lastCorrectionId: "corr-new",
+        savedAt: "2026-07-21T12:00:00.000Z",
+        normalizedTakeoffJson: fivePieceDraft(true),
+        estimatorConfirmed: { confirmedAt: "2026-07-21T12:00:00.000Z" }
+      }
+    }),
+    resultRows: [
+      older,
+      makeResultRow(RESULT_B, fivePieceDraft(true), {
+        created_at: "2026-07-21T12:00:00.000Z",
+        raw_ai_result_json: {
+          _corrections: [{ id: "corr-new" }],
+          _meta: {
+            estimatorConfirmed: { confirmedAt: "2026-07-21T12:00:00.000Z" },
+            clientMutationRevision: 2
+          }
+        }
+      })
+    ]
+  });
+  const latest = await getLatestTakeoffResult({
     supabase,
     organizationId: ORG_ID,
     takeoffJobId: JOB_ID
   });
-  assert.equal(reloaded.resultId, saved.resultId);
-  assert.notEqual(reloaded.resultId, RESULT_A);
-  assertAllBacksplash(reloaded.normalizedTakeoffJson, true);
-  assert.equal(reloaded.clientMutationRevision, 49);
-
-  // Second save with adopted base must not 409
-  const next = await saveTakeoffCorrection({
-    supabase,
-    organizationId: ORG_ID,
-    userId: USER_ID,
-    takeoffJobId: JOB_ID,
-    takeoffResult: fivePieceDraft(false),
-    baseResultId: saved.resultId,
-    clientMutationRevision: 50
-  });
-  assert.equal(next.ok, true);
-  assert.equal(next.unchanged, false);
-  console.log("ok: summary-only promotion survives reload; no stale 409");
+  assert.equal(latest.resultId, RESULT_B);
+  assertAllBacksplash(latest.normalizedTakeoffJson, true);
+  console.log("ok: physical B via result_summary.resultRowId wins over older A");
 }
 
 // ─── Exposed edges + notes round-trip ───────────────────────────────────────

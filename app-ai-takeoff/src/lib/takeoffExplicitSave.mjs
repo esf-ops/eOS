@@ -177,6 +177,9 @@ export function isTakeoffWorksheetDirty(input) {
  * Atomically adopt a successful Save draft envelope into page refs/state values.
  * Prefer this over piecemeal ref updates that can observe an inconsistent mid-state.
  *
+ * Rejects success envelopes that lack a physical resultId (unless unchanged and
+ * baseResultId is already known — caller must still supply resultId).
+ *
  * @param {{
  *   response: {
  *     resultId?: string|null,
@@ -200,6 +203,13 @@ export function reconcileSuccessfulTakeoffSave(args) {
     response.resultId != null && String(response.resultId).trim()
       ? String(response.resultId)
       : null;
+  if (!resultId) {
+    const err = new Error(
+      "Save response missing physical resultId; draft was not persisted"
+    );
+    err.code = "takeoff_result_persistence_failed";
+    throw err;
+  }
   const serverRev = Number(response.clientMutationRevision);
   const revision =
     Number.isSafeInteger(serverRev) && serverRev > 0 ? serverRev : null;

@@ -183,9 +183,13 @@ function makeMockSupabase({
   function nextId(table) {
     const n = (insertCounts[table] ?? 0);
     insertCounts[table] = n + 1;
-    if (table === "quote_takeoff_jobs")    return n === 0 ? jobInsertId    : `mock-job-${n}`;
-    if (table === "quote_takeoff_results") return n === 0 ? resultInsertId : `mock-result-${n}`;
-    return `mock-${table}-${n}`;
+    if (table === "quote_takeoff_jobs")    return n === 0 ? jobInsertId    : `12222222-2222-4222-8222-22222222222${n}`;
+    if (table === "quote_takeoff_results") {
+      if (n === 0) return resultInsertId;
+      if (n === 1) return RESULT_ID_2;
+      return `a3333333-3333-4333-8333-${String(n).padStart(12, "0")}`;
+    }
+    return `b4444444-4444-4444-8444-${String(n).padStart(12, "0")}`;
   }
 
   function makeBuilder(table, opType, opData) {
@@ -202,7 +206,7 @@ function makeMockSupabase({
 
     const builder = {
       select() {
-        if (opType === "insert") wantsSelect = true;
+        if (opType === "insert" || opType === "update") wantsSelect = true;
         return builder;
       },
       eq(col, val) {
@@ -270,16 +274,22 @@ function makeMockSupabase({
         // UPDATE
         if (opType === "update") {
           if (updateError) return resolve({ error: updateError });
+          const matchedRows = [];
           if (tableData[table]) {
             tableData[table] = tableData[table].map((row) => {
               const matches = state.eqFilters.every(
                 ({ col, val }) => String(row[col] ?? "") === val
               );
-              return matches ? { ...row, ...opData } : row;
+              if (!matches) return row;
+              const next = { ...row, ...opData };
+              matchedRows.push(next);
+              return next;
             });
           }
           capturedUpdates.push({ table, fields: opData, eqFilters: [...state.eqFilters] });
-          return resolve({ error: null });
+          return resolve(
+            wantsSelect ? { data: matchedRows, error: null } : { error: null }
+          );
         }
 
         return resolve({ data: null, error: null });
@@ -1454,7 +1464,7 @@ function makeMockSupabase({
         userId: USER_ID,
         takeoffJobId: JOB_ID,
         takeoffResult: takeoff,
-        baseResultId: RESULT_ID_2,
+        baseResultId: "a9999999-9999-4999-8999-999999999999",
         clientMutationRevision: 3,
       }),
     (err) => err.statusCode === 409 && err.code === "stale_takeoff_correction",
