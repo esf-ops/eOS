@@ -6,6 +6,8 @@ import {
   isTransientHttpError,
   newImportIdempotencyKey
 } from "../lib/sharedInboxApi.mjs";
+import { fetchSharedInboxPlanContent } from "../lib/securePlanViewerApi.mjs";
+import PlanViewerModal from "./PlanViewerModal";
 
 export type SharedInboxPageProps = {
   authToken: string | null;
@@ -19,6 +21,7 @@ type InboxAttachment = {
   sizeBytes?: number | null;
   supportedForTakeoff?: boolean;
   supportedForImport?: boolean;
+  previewSupported?: boolean;
   support?: string;
 };
 
@@ -111,6 +114,13 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
   const [importingKey, setImportingKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
+  const [planViewer, setPlanViewer] = useState<{
+    messageKey: string;
+    attachmentKey: string;
+    filename: string;
+    contentType?: string | null;
+    sizeBytes?: number | null;
+  } | null>(null);
 
   const selected = items.find((r) => r.messageKey === selectedKey) || null;
 
@@ -461,25 +471,80 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                 <p className="eq-muted">No attachments</p>
               ) : (
                 <ul className="si-att-list" data-testid="shared-inbox-attachment-list">
-                  {(selected.attachments || []).map((a, idx) => (
-                    <li key={a.attachmentKey || `${a.filename}-${idx}`}>
-                      <span>{a.filename}</span>
-                      <span className="eq-muted">
-                        {a.supportedForTakeoff ? " · Supported for Takeoff" : " · Not supported for Takeoff"}
-                      </span>
-                    </li>
-                  ))}
+                  {(selected.attachments || []).map((a, idx) => {
+                    const canPreview =
+                      a.previewSupported === true ||
+                      a.supportedForTakeoff === true ||
+                      String(a.support || "") === "direct_pdf";
+                    return (
+                      <li key={a.attachmentKey || `${a.filename}-${idx}`}>
+                        <span>{a.filename}</span>
+                        <span className="eq-muted">
+                          {a.supportedForTakeoff
+                            ? " · Supported for Takeoff"
+                            : " · Not supported for Takeoff"}
+                        </span>
+                        {canPreview && a.attachmentKey ? (
+                          <button
+                            type="button"
+                            className="eq-btn-ghost eq-btn-small"
+                            data-testid="shared-inbox-view-plan"
+                            onClick={() =>
+                              setPlanViewer({
+                                messageKey: selected.messageKey,
+                                attachmentKey: String(a.attachmentKey),
+                                filename: a.filename,
+                                contentType: a.contentType,
+                                sizeBytes: a.sizeBytes
+                              })
+                            }
+                          >
+                            View plan
+                          </button>
+                        ) : (
+                          <span className="eq-muted" data-testid="shared-inbox-preview-unsupported">
+                            {" "}
+                            · Preview not supported
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
               <p className="eq-muted si-detail-note">
-                Secure plan viewing and download are not available in this phase. Attachment metadata
-                only.
+                Plans open in the secure Studio viewer. Viewing does not import the message or start
+                Takeoff.
               </p>
               {/* Outlook compose / folder / download controls are intentionally not present. */}
             </div>
           )}
         </aside>
       </div>
+
+      <PlanViewerModal
+        open={Boolean(planViewer)}
+        authToken={authToken}
+        filename={planViewer?.filename}
+        fileTypeLabel={planViewer?.contentType || undefined}
+        sizeLabel={
+          planViewer?.sizeBytes != null && Number.isFinite(planViewer.sizeBytes)
+            ? `${(Number(planViewer.sizeBytes) / (1024 * 1024)).toFixed(1)} MB`
+            : null
+        }
+        sourceContext="shared-inbox"
+        loadContent={async () => {
+          if (!authToken || !planViewer) {
+            throw new Error("Sign in required");
+          }
+          return fetchSharedInboxPlanContent(
+            authToken,
+            planViewer.messageKey,
+            planViewer.attachmentKey
+          );
+        }}
+        onClose={() => setPlanViewer(null)}
+      />
     </div>
   );
 }

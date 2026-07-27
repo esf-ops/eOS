@@ -105,6 +105,16 @@ function mapAttachment(att = {}) {
     sizeBytes: Number.isFinite(Number(att.sizeBytes)) ? Number(att.sizeBytes) : null,
     supportedForTakeoff,
     supportedForImport,
+    previewSupported: supportedForTakeoff || support === "direct_pdf"
+      ? true
+      : (() => {
+          const mime = String(att.mimeType || att.contentType || "").toLowerCase();
+          const name = String(att.name || att.filename || "").toLowerCase();
+          if (mime === "image/png" || /\.png$/i.test(name)) return true;
+          if (mime === "image/jpeg" || mime === "image/jpg" || /\.jpe?g$/i.test(name)) return true;
+          if (mime === "image/webp" || /\.webp$/i.test(name)) return true;
+          return false;
+        })(),
     support,
     kind: att.kind || null,
     isInline: Boolean(att.isInline),

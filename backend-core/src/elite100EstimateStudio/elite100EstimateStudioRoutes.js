@@ -73,6 +73,7 @@ import {
   createStudioSharedInboxService,
   sharedInboxSafeError
 } from "./studioSharedInboxService.mjs";
+import { createStudioSecurePlanViewerService } from "./studioSecurePlanViewer.mjs";
 import { bootstrapIntakeCasesAfterImport } from "../quoteIntake/intakeAutoBootstrapService.mjs";
 import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
 
@@ -691,6 +692,37 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
             openEstimate: deps.openEstimate || openEstimateForIntakeCase
           }))
     });
+
+  const studioSecurePlanViewerService =
+    deps.studioSecurePlanViewerService ||
+    createStudioSecurePlanViewerService({
+      env,
+      quoteIntakeRepository,
+      getSupabase,
+      graphClient: deps.graphClient || null,
+      graphFetchImpl: deps.graphFetchImpl || undefined,
+      downloadStoredFile: deps.downloadStoredFile || undefined
+    });
+
+  function sendPlanViewerError(res, e, fallback) {
+    const status = Number(e?.statusCode) || 500;
+    const code = String(e?.code || "attachment_content_unavailable");
+    const messages = {
+      attachment_not_found: "The attachment could not be found.",
+      attachment_content_unavailable:
+        "The attachment is known, but its contents are temporarily unavailable.",
+      attachment_preview_not_supported: "This file type cannot be previewed securely.",
+      attachment_too_large_for_preview: "This file is too large for the current secure viewer.",
+      attachment_type_mismatch: "The file contents do not match the expected type.",
+      mailbox_unavailable: "The mailbox could not be reached.",
+      plan_view_not_authorized: "You do not have access to this plan."
+    };
+    res.status(status).json({
+      ok: false,
+      error: messages[code] || e?.message || fallback,
+      code
+    });
+  }
 
   app.post(
     "/api/elite100-estimate-studio/manual-estimates",
@@ -1665,6 +1697,72 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         const status = Number(e?.statusCode) || 500;
         const safe = sharedInboxSafeError(e?.code, "The request could not be imported.");
         res.status(status).json(safe);
+      }
+    }
+  );
+
+  /** Secure plan viewer — bytes only; no Graph/storage URLs. Read-only. */
+  app.get(
+    "/api/elite100-estimate-studio/shared-inbox/:messageKey/attachments/:attachmentKey/content",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "private, no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioSecurePlanViewerService.getSharedInboxAttachmentContent({
+          organizationId,
+          messageKey: decodeURIComponent(String(req.params.messageKey || "")),
+          attachmentKey: decodeURIComponent(String(req.params.attachmentKey || ""))
+        });
+        for (const [k, v] of Object.entries(result.headers || {})) {
+          res.set(k, v);
+        }
+        res.status(200).end(result.bytes);
+      } catch (e) {
+        logStudio("shared inbox plan content failed", e, req);
+        sendPlanViewerError(res, e, "Unable to load plan.");
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/intake-cases/:caseId/source-plans",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioSecurePlanViewerService.listIntakeSourcePlans({
+          organizationId,
+          intakeCaseId: String(req.params.caseId || "")
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("source plans list failed", e, req);
+        sendPlanViewerError(res, e, "Unable to load source plans.");
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/intake-cases/:caseId/attachments/:attachmentId/content",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "private, no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioSecurePlanViewerService.getIntakeAttachmentContent({
+          organizationId,
+          intakeCaseId: String(req.params.caseId || ""),
+          attachmentId: decodeURIComponent(String(req.params.attachmentId || ""))
+        });
+        for (const [k, v] of Object.entries(result.headers || {})) {
+          res.set(k, v);
+        }
+        res.status(200).end(result.bytes);
+      } catch (e) {
+        logStudio("intake plan content failed", e, req);
+        sendPlanViewerError(res, e, "Unable to load plan.");
       }
     }
   );
