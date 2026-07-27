@@ -2599,4 +2599,19 @@
 | **Tests** | `eos:test:takeoff-correction-workspace` (+ exposed-edges, secure plan viewer, Shared Inbox, golden-path). |
 | **Deferred** | Customer Final Acceptance; portal-based popover framework; mobile-first Takeoff redesign. |
 
+### 182. Takeoff explicit Save draft + centered edge dialog (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `fix/takeoff-explicit-save-and-centered-edge-dialog` |
+| **Decision** | Takeoff worksheet editing is **local until explicit Save draft**. Field-level autosave and the correction coordinator drain/queue are removed. **Save draft** is the sole normal correction writer (exactly one POST per click; double-click coalesced). Optimistic concurrency remains on Save draft; real 409s preserve local draft and require **Review latest draft** (never auto-replayed). |
+| **Approve** | Requires a successfully saved clean draft (no unsaved/conflict). Approve does not call Save or the corrections endpoint. |
+| **Confirm exposed edges** | Updates local draft only (zero correction requests), closes the dialog immediately, shows `LF · unsaved` until Save draft succeeds. |
+| **Dialog** | In-cell/table popover removed. Exposed-edge editor is a **viewport-level modal** via `createPortal(..., document.body)` with `position: fixed; inset: 0` overlay — independent of worksheet horizontal scroll, plan visibility, and page scroll. |
+| **Layout** | Worksheet horizontal scroll is isolated to `.ctr-table-wrap` (initial `scrollLeft = 0`). Shared `--ctr-col-*` / `--ctr-worksheet-min-width` for 12 columns. Plan/worksheet stack at `max-width: 1200px`. Actions sit after the table. |
+| **Backsplash** | Independent of countertop exposed edges; local dirty only; does not invalidate confirmation or change edge LF. |
+| **Background results** | Newer server results while dirty show “A newer Takeoff result is available” + Review latest draft — no silent local overwrite. |
+| **SQL** | None. |
+| **Tests** | `eos:test:takeoff-explicit-save-dialog` (+ correction-workspace, exposed-edges, Secure Plan Viewer, Shared Inbox, golden-path). |
+
 

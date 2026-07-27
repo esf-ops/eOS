@@ -244,33 +244,41 @@ console.log("\ntakeoffExposedEdges.test.mjs\n");
 
 // --- UI / correction contracts ---
 {
-  const editor = readFileSync(
+  const trigger = readFileSync(
     join(root, "app-ai-takeoff/src/components/ExposedSidesEditor.tsx"),
+    "utf8"
+  );
+  const dialog = readFileSync(
+    join(root, "app-ai-takeoff/src/components/ExposedSidesDialog.tsx"),
     "utf8"
   );
   const review = readFileSync(
     join(root, "app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
     "utf8"
   );
-  assert.match(editor, /Confirm exposed edges/);
-  assert.match(editor, /ctr-confirm-exposed-edges/);
-  assert.match(editor, /ctr-edge-\$\{key\}-exposed/);
-  assert.match(editor, /\["back", "Back"/);
-  assert.match(editor, /Mark the physical sides that will be exposed/);
-  assert.match(editor, /Pricing Setup/);
-  assert.match(editor, /htmlFor=\{/);
-  assert.match(editor, /name=\{`exposed-side/);
-  assert.equal(/updateDraft|saveTakeoffCorrection|scheduleSave/.test(editor), false);
-  assert.match(review, /ExposedSidesEditor/);
+  assert.match(dialog, /Confirm exposed edges/);
+  assert.match(dialog, /ctr-confirm-exposed-edges/);
+  assert.match(dialog, /ctr-edge-\$\{key\}-exposed/);
+  assert.match(dialog, /\["back", "Back"/);
+  assert.match(dialog, /Mark the physical sides that will be exposed/);
+  assert.match(dialog, /Pricing Setup/);
+  assert.match(dialog, /htmlFor=\{/);
+  assert.match(dialog, /name=\{`exposed-side/);
+  assert.match(dialog, /createPortal/);
+  assert.match(dialog, /document\.body/);
+  assert.equal(/updateDraft|saveTakeoffCorrection|scheduleSave/.test(dialog), false);
+  assert.equal(/<details/.test(trigger), false);
+  assert.match(review, /ExposedSidesDialog/);
+  assert.match(review, /ExposedSidesTrigger|ExposedSidesEditor/);
   assert.match(review, /confirmExposedEdges/);
+  assert.match(review, /applyLocalExposedEdgeConfirm/);
   assert.match(review, /Exposed edges/);
   assert.equal(/Set edges/.test(review), false);
-  assert.match(review, /edgeConfirmSavingRunId/);
+  assert.equal(/edgeConfirmSavingRunId|drainCorrectionQueue|scheduleSave/.test(review), false);
   assert.match(review, /The Takeoff draft changed while you were editing/);
-  assert.match(review, /onReviewLatestDraft/);
-  assert.match(editor, /Review latest draft/);
-  assert.match(editor, /ctr-review-latest-draft/);
-  console.log("ok: 1–6/11/37–40/45 confirm-only UI + stale recovery contracts");
+  assert.match(review, /saveTakeoffDraftExplicit/);
+  assert.match(dialog, /Escape/);
+  console.log("ok: 1–6/11/37–40/45 confirm-only UI + explicit-save dialog contracts");
 }
 
 {
@@ -330,13 +338,14 @@ console.log("\ntakeoffExposedEdges.test.mjs\n");
 }
 
 {
-  // Zero side-effect contracts: confirm path uses corrections only
+  // Zero side-effect contracts: confirm is local-only (Save draft is separate)
   const review = readFileSync(
     join(root, "app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
     "utf8"
   );
   const confirmSlice = review.split("confirmExposedEdges")[1]?.slice(0, 1200) || "";
-  assert.match(confirmSlice, /persistDraftWithResult/);
+  assert.match(confirmSlice, /applyLocalExposedEdgeConfirm/);
+  assert.equal(/saveTakeoffCorrection|saveTakeoffDraftExplicit|persistDraftWithResult/.test(confirmSlice), false);
   assert.equal(/approveAndBuildEstimate|publish|markSold|quickbooks/i.test(confirmSlice), false);
   console.log("ok: 46–51 edge confirm does not calculate/approve/publish/notify/sold/QB");
 }

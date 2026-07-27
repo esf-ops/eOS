@@ -1,5 +1,5 @@
 /**
- * Exposed-edge UI contracts (source-level).
+ * Exposed-edge UI contracts — trigger + viewport dialog (no in-cell popover).
  * Run: node app-ai-takeoff/src/components/exposedSidesEditor.ui.test.mjs
  */
 import assert from "node:assert/strict";
@@ -9,34 +9,34 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "../../..");
-const editor = readFileSync(join(__dirname, "ExposedSidesEditor.tsx"), "utf8");
+const trigger = readFileSync(join(__dirname, "ExposedSidesEditor.tsx"), "utf8");
+const dialog = readFileSync(join(__dirname, "ExposedSidesDialog.tsx"), "utf8");
 const review = readFileSync(join(__dirname, "ConsolidatedTakeoffReview.tsx"), "utf8");
 
 console.log("\nexposedSidesEditor.ui.test.mjs\n");
 
-assert.match(editor, /onChange=\{\(e\) => \{\s*setSides/);
-assert.equal(/saveTakeoffCorrection|persistDraft|updateDraft/.test(editor), false);
-assert.match(editor, /onConfirm/);
-assert.match(editor, /disabled=\{disabled \|\| saving\}/);
-assert.match(editor, /Saving…/);
-assert.match(editor, /await onConfirm/);
-assert.match(editor, /ctr-cancel-exposed-edges/);
-assert.match(editor, /aria-expanded=\{open\}/);
-assert.match(review, /edgeConfirmSavingRunId === row\.runId/);
-assert.match(review, /correctionNotes: "Confirm exposed edges"/);
-assert.match(review, /drainCorrectionQueue/);
-console.log("ok: toggles are local-only; confirm serializes one correction; closes after success");
+assert.equal(/<details/.test(trigger), false);
+assert.equal(/saveTakeoffCorrection|persistDraft|updateDraft/.test(trigger), false);
+assert.match(trigger, /aria-expanded/);
+assert.match(trigger, /Set exposed sides|formatExposedSidesTriggerText/);
+console.log("ok: trigger is local button; no in-cell details popover");
 
-assert.match(editor, /ctr-edge-\$\{key\}-exposed/);
-assert.match(editor, /\["back", "Back"/);
-assert.match(editor, /ctr-edge-front-exposed|front.*exposed/i);
-assert.match(editor, /htmlFor=\{id\}/);
-assert.match(editor, /name=\{`exposed-side-\$\{row\.runId\}-\$\{key\}`\}/);
-console.log("ok: four sides + label/id/name accessibility");
+assert.match(dialog, /createPortal/);
+assert.match(dialog, /document\.body/);
+assert.match(dialog, /Confirm exposed edges/);
+assert.match(dialog, /ctr-edge-front-exposed|front.*exposed/i);
+assert.match(dialog, /htmlFor=\{id\}/);
+assert.match(dialog, /name=\{`exposed-side-\$\{row\.runId\}-\$\{key\}`\}/);
+assert.equal(/saveTakeoffCorrection|persistDraft/.test(dialog), false);
+console.log("ok: dialog portals to body; Confirm is local-only");
 
-assert.match(editor, /staleConflict/);
-assert.match(editor, /Review latest draft/);
-assert.equal(/automatically replay|retryCorrection/.test(editor), false);
-console.log("ok: 409 recovery is explicit; no auto-replay");
+assert.match(review, /applyLocalExposedEdgeConfirm/);
+assert.match(review, /ExposedSidesDialog/);
+assert.equal(/drainCorrectionQueue|scheduleSave/.test(review), false);
+assert.match(review, /saveTakeoffDraftExplicit/);
+console.log("ok: Confirm updates local draft; Save draft is sole writer");
+
+assert.match(dialog, /staleConflict|Review latest draft|Escape/);
+console.log("ok: Escape / cancel close without network");
 
 console.log("\nexposedSidesEditor.ui.test.mjs: ok\n");

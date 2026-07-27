@@ -49,25 +49,21 @@ import {
   flattenPieces,
   patchRun,
   patchRunGeometry,
-  patchRunFinishedEdge,
   renameRoom,
   reassignRun,
   sfFrom
 } from "../lib/consolidatedWorksheetRows.mjs";
 import {
-  applyCorrectionConflict,
-  applyCorrectionFailure,
-  applyCorrectionSuccess,
-  beginCorrectionSend,
-  canStartCorrectionSend,
-  clearConflictPause,
-  createTakeoffCorrectionCoordinatorState,
+  applyLocalBacksplashToggle,
+  applyLocalExposedEdgeConfirm,
   formatTakeoffSaveStatus,
-  noteLocalDraftEdit,
+  isTakeoffWorksheetDirty,
+  nextExplicitMutationRevision,
   pieceRequiresExposedEdgeConfirmation,
-  seedCoordinatorServerKeys
-} from "../lib/takeoffCorrectionCoordinator.mjs";
-import ExposedSidesEditor from "./ExposedSidesEditor";
+  saveTakeoffDraftExplicit
+} from "../lib/takeoffExplicitSave.mjs";
+import ExposedSidesDialog from "./ExposedSidesDialog";
+import ExposedSidesTrigger from "./ExposedSidesEditor";
 import {
   isTakeoffJobTerminal,
   resultVersionOf,
@@ -238,8 +234,6 @@ export default function ConsolidatedTakeoffReview() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [edgeConfirmSavingRunId, setEdgeConfirmSavingRunId] = useState<string | null>(null);
-  const [edgeStaleConflict, setEdgeStaleConflict] = useState(false);
   const [jobReviewStatus, setJobReviewStatus] = useState<string | null>(null);
   const [approveStatus, setApproveStatus] = useState<ApproveStatus>("idle");
   const [approveMsg, setApproveMsg] = useState<string | null>(null);
@@ -267,24 +261,30 @@ export default function ConsolidatedTakeoffReview() {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [planCollapsed, setPlanCollapsed] = useState(false);
   const [aiAppendNotice, setAiAppendNotice] = useState<string | null>(null);
+  const [edgeDialogRunId, setEdgeDialogRunId] = useState<string | null>(null);
+  const [unsavedEdgeRunIds, setUnsavedEdgeRunIds] = useState<Set<string>>(() => new Set());
+  const [newerResultNotice, setNewerResultNotice] = useState(false);
   const pendingServerTakeoffRef = useRef<any | null>(null);
   const pendingAiResultIdRef = useRef<string | null>(null);
   const autoMergeInFlightRef = useRef(false);
-  const saveTimer = useRef<number | null>(null);
   const draftRef = useRef(draft);
   const excludedRef = useRef(excludedRunIds);
   const deletedRoomIdsRef = useRef(deletedRoomIds);
   const deletedRunIdsRef = useRef(deletedRunIds);
   const saveStatusRef = useRef(saveStatus);
-  const coordinatorRef = useRef(createTakeoffCorrectionCoordinatorState());
-  const correctionGateRef = useRef<Promise<void>>(Promise.resolve());
+  const canonicalDraftRef = useRef<any | null>(null);
+  const canonicalExcludedRef = useRef<Set<string>>(new Set());
+  const saveInFlightRef = useRef(false);
   const latestResultIdRef = useRef<string | null>(null);
+  const latestClientMutationRevisionRef = useRef(0);
   const latestLocalSaveAtRef = useRef<string | null>(null);
   const lastServerResultVersionRef = useRef<string | null>(null);
   const loadSequenceRef = useRef(0);
   const appliedLoadSequenceRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
   const pollAbortRef = useRef<AbortController | null>(null);
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
+  const edgeTriggerFocusRef = useRef<string | null>(null);
   draftRef.current = draft;
   excludedRef.current = excludedRunIds;
   deletedRoomIdsRef.current = deletedRoomIds;
@@ -374,7 +374,13 @@ export default function ConsolidatedTakeoffReview() {
     const controller = new AbortController();
     loadAbortRef.current = controller;
     const requestSequence = ++loadSequenceRef.current;
-    const requestMutationRevision = coordinatorRef.current.localEditSequence;
+    const requestMutationRevision = latestClientMutationRevisionRef.current;
+    const localDirty = isTakeoffWorksheetDirty({
+      localDraft: draftRef.current,
+      canonicalDraft: canonicalDraftRef.current,
+      localExcludedRunIds: excludedRef.current,
+      canonicalExcludedRunIds: canonicalExcludedRef.current
+    });
     const job = (await labApiGet(
       `/api/takeoff-jobs/${encodeURIComponent(jobId)}`,
       token,
@@ -402,34 +408,30 @@ export default function ConsolidatedTakeoffReview() {
       opts?.discardLocal === true ||
       shouldAcceptServerDraft({
         requestMutationRevision,
-        currentMutationRevision: coordinatorRef.current.localEditSequence,
+        currentMutationRevision: latestClientMutationRevisionRef.current,
         requestSequence,
         latestAppliedSequence: appliedLoadSequenceRef.current,
         serverSavedAt: latest?.savedAt ?? null,
         latestLocalSaveAt: latestLocalSaveAtRef.current
       });
-    if (latest?.resultId) latestResultIdRef.current = String(latest.resultId);
-    const serverRevision = Number(latest?.clientMutationRevision) || 0;
-    coordinatorRef.current = seedCoordinatorServerKeys(coordinatorRef.current, {
-      resultId: latest?.resultId ? String(latest.resultId) : latestResultIdRef.current,
-      clientMutationRevision: serverRevision
-    });
-    // Preserve local edit sequence above server revision when discarding is not forced.
-    if (opts?.discardLocal) {
-      coordinatorRef.current = {
-        ...coordinatorRef.current,
-        localEditSequence: Math.max(coordinatorRef.current.localEditSequence, serverRevision)
-      };
-    } else {
-      coordinatorRef.current = {
-        ...coordinatorRef.current,
-        localEditSequence: Math.max(coordinatorRef.current.localEditSequence, serverRevision),
-        latestClientMutationRevision: Math.max(
-          coordinatorRef.current.latestClientMutationRevision,
-          serverRevision
-        )
-      };
+    const previousResultId = latestResultIdRef.current;
+    if (latest?.resultId) {
+      const incomingId = String(latest.resultId);
+      if (
+        localDirty &&
+        !opts?.discardLocal &&
+        previousResultId &&
+        incomingId !== previousResultId
+      ) {
+        setNewerResultNotice(true);
+      }
+      latestResultIdRef.current = incomingId;
     }
+    const serverRevision = Number(latest?.clientMutationRevision) || 0;
+    latestClientMutationRevisionRef.current = Math.max(
+      latestClientMutationRevisionRef.current,
+      serverRevision
+    );
     lastServerResultVersionRef.current =
       resultVersionOf(latest) ?? lastServerResultVersionRef.current;
 
@@ -453,7 +455,7 @@ export default function ConsolidatedTakeoffReview() {
       const rs = latest?.reviewState || {};
       hydrateReviewMeta(rs);
       // Self-heal missing/duplicated run ids and legacy area-level backsplash
-      // height → per-run eligibility (persists on next autosave).
+      // height → per-run eligibility (persists on next Save draft).
       const cleaned = healTakeoffDraft(
         applyDeletionTombstones(result, {
           deletedRoomIds: rs.deletedRoomIds ?? [],
@@ -463,6 +465,10 @@ export default function ConsolidatedTakeoffReview() {
       activeDraft = cleaned;
       draftRef.current = cleaned;
       setDraft(cleaned);
+      canonicalDraftRef.current = structuredClone(cleaned);
+      canonicalExcludedRef.current = new Set(excludedRef.current);
+      setUnsavedEdgeRunIds(new Set());
+      setSaveStatus("idle");
       appliedLoadSequenceRef.current = requestSequence;
       applyPendingAiFromLatest(latest);
     } else if (result && usableServer && dirty && !opts?.forceServer && localOwned) {
@@ -494,6 +500,10 @@ export default function ConsolidatedTakeoffReview() {
       activeDraft = cleaned;
       draftRef.current = cleaned;
       setDraft(cleaned);
+      canonicalDraftRef.current = structuredClone(cleaned);
+      canonicalExcludedRef.current = new Set(excludedRef.current);
+      setUnsavedEdgeRunIds(new Set());
+      setSaveStatus("idle");
       appliedLoadSequenceRef.current = requestSequence;
       applyPendingAiFromLatest(latest);
     } else if (result) {
@@ -533,25 +543,9 @@ export default function ConsolidatedTakeoffReview() {
     }
   }, [hydrateReviewMeta, unionLocalTombstones, applyPendingAiFromLatest]);
 
-  const applySaveUiFromCoordinator = useCallback(() => {
-    const status = coordinatorRef.current.saveUiStatus;
-    if (status === "dirty") setSaveStatus("dirty");
-    else if (status === "saving") setSaveStatus("saving");
-    else if (status === "saved") {
-      setSaveStatus("saved");
-      window.setTimeout(
-        () => setSaveStatus((s) => (s === "saved" ? "idle" : s)),
-        1200
-      );
-    } else if (status === "conflict") {
-      setSaveStatus("conflict");
-      setEdgeStaleConflict(true);
-      setSaveError("The Takeoff draft changed while you were editing.");
-    } else if (status === "error") {
-      setSaveStatus("error");
-    } else {
-      setSaveStatus("idle");
-    }
+  const markWorksheetDirty = useCallback(() => {
+    setSaveStatus("dirty");
+    setSaveError(null);
   }, []);
 
   const buildReviewState = useCallback(() => {
@@ -574,233 +568,122 @@ export default function ConsolidatedTakeoffReview() {
     };
   }, []);
 
-  /**
-   * Single job-level correction drain. Keys are read at send time; success updates
-   * coordinator keys before the next iteration so queued follow-ups never reuse
-   * a pre-response baseResultId (the prior 201/409 race).
-   */
-  const drainCorrectionQueue = useCallback(async () => {
-    if (!authToken || !takeoffJobId) return;
-    correctionGateRef.current = correctionGateRef.current
-      .catch(() => undefined)
-      .then(async () => {
-        while (canStartCorrectionSend(coordinatorRef.current)) {
-          const begun = beginCorrectionSend(coordinatorRef.current);
-          coordinatorRef.current = begun.state;
-          const send = begun.send;
-          if (!send) break;
-          applySaveUiFromCoordinator();
-          setSaveError(null);
-          try {
-            const ownership = collectManualOwnershipIds(send.draft);
-            const roomCompleteness: Record<string, boolean> = {};
-            for (const room of send.draft?.rooms ?? []) {
-              if (room?.id) roomCompleteness[room.id] = true;
-            }
-            const response = await saveTakeoffCorrection(authToken, takeoffJobId, {
-              takeoffResult: send.draft,
-              baseResultId: send.baseResultId,
-              clientMutationRevision: send.clientMutationRevision,
-              correctionNotes:
-                send.opts?.correctionNotes ?? "Consolidated worksheet autosave",
-              reviewState: {
-                excludedRunIds: [...excludedRef.current],
-                excludedRoomIds: [],
-                deletedRoomIds: [...deletedRoomIdsRef.current],
-                deletedRunIds: [...deletedRunIdsRef.current],
-                roomCompleteness,
-                flagResolutions: {},
-                referenceTotalAcks: {},
-                evidenceAcks: {},
-                manualRoomIds: ownership.manualRoomIds,
-                manualRunIds: ownership.manualRunIds
-              },
-              aiHandling: send.opts?.aiHandling ?? null
-            });
-            // Update concurrency keys BEFORE any follow-up beginCorrectionSend.
-            coordinatorRef.current = applyCorrectionSuccess(coordinatorRef.current, {
-              resultId: response.resultId,
-              clientMutationRevision: send.clientMutationRevision,
-              requestSequence: send.sequence
-            });
-            latestResultIdRef.current = coordinatorRef.current.latestResultId;
-            latestLocalSaveAtRef.current = response.savedAt;
-            lastServerResultVersionRef.current =
-              resultVersionOf(response) ?? lastServerResultVersionRef.current;
-            setAiPhase("ready");
-            setJobReviewStatus("needs_review");
-            setEdgeStaleConflict(false);
-            if (approveStatus === "approved") {
-              setApproveStatus("idle");
-              setDisplayStatus(
-                "Previous Takeoff approved · Current draft needs estimator review"
-              );
-            } else if (!coordinatorRef.current.pending) {
-              setDisplayStatus("Needs estimator review");
-            }
-            applySaveUiFromCoordinator();
-          } catch (e) {
-            if (e instanceof LabApiError && e.status === 409) {
-              const body =
-                e.body && typeof e.body === "object"
-                  ? (e.body as Record<string, unknown>)
-                  : {};
-              coordinatorRef.current = applyCorrectionConflict(
-                coordinatorRef.current,
-                {
-                  latestResultId:
-                    typeof body.latestResultId === "string" ? body.latestResultId : null,
-                  latestClientMutationRevision: Number(body.latestClientMutationRevision)
-                },
-                send
-              );
-              latestResultIdRef.current = coordinatorRef.current.latestResultId;
-              setDisplayStatus("Needs estimator review");
-              setJobReviewStatus("needs_review");
-              applySaveUiFromCoordinator();
-              throw e;
-            }
-            coordinatorRef.current = applyCorrectionFailure(coordinatorRef.current, send);
-            setSaveError(e instanceof LabApiError ? e.message : "Save failed");
-            applySaveUiFromCoordinator();
-            throw e;
-          }
-        }
-      });
-    return correctionGateRef.current;
-  }, [authToken, takeoffJobId, approveStatus, applySaveUiFromCoordinator]);
-
-  const scheduleSave = useCallback(
-    (debounceMs = 600) => {
-      if (coordinatorRef.current.conflictPaused) {
-        applySaveUiFromCoordinator();
-        return;
-      }
-      setSaveStatus("dirty");
-      if (saveTimer.current) window.clearTimeout(saveTimer.current);
-      if (debounceMs <= 0) {
-        void drainCorrectionQueue();
-        return;
-      }
-      saveTimer.current = window.setTimeout(() => {
-        void drainCorrectionQueue();
-      }, debounceMs);
-    },
-    [drainCorrectionQueue, applySaveUiFromCoordinator]
-  );
-
+  /** Local-only draft mutation — never POSTs corrections. */
   const updateDraft = useCallback(
-    (next: any, opts?: { debounceMs?: number; correctionNotes?: string }) => {
+    (next: any) => {
       const snapshot = structuredClone(next);
       draftRef.current = snapshot;
       setDraft(snapshot);
-      coordinatorRef.current = noteLocalDraftEdit(coordinatorRef.current, snapshot, {
-        correctionNotes: opts?.correctionNotes
-      });
-      applySaveUiFromCoordinator();
-      scheduleSave(opts?.debounceMs ?? 600);
+      markWorksheetDirty();
     },
-    [scheduleSave, applySaveUiFromCoordinator]
+    [markWorksheetDirty]
   );
 
-  const persistDraftWithResult = useCallback(
-    async (
-      takeoffResult: any,
-      opts?: {
-        aiHandling?: {
-          lastMergedAiResultId?: string | null;
-          dismissAiResultId?: string | null;
-          sourceResultId?: string | null;
-        } | null;
-        correctionNotes?: string;
-      }
-    ) => {
-      if (!authToken || !takeoffJobId || !takeoffResult) return;
-      if (saveTimer.current) window.clearTimeout(saveTimer.current);
-      const snapshot = structuredClone(takeoffResult);
-      draftRef.current = snapshot;
-      setDraft(snapshot);
-      coordinatorRef.current = noteLocalDraftEdit(coordinatorRef.current, snapshot, {
-        correctionNotes: opts?.correctionNotes,
-        aiHandling: opts?.aiHandling ?? null
-      });
-      applySaveUiFromCoordinator();
-      await drainCorrectionQueue();
-      if (coordinatorRef.current.conflictPaused || coordinatorRef.current.saveUiStatus === "error") {
-        throw new LabApiError(
-          coordinatorRef.current.saveUiStatus === "conflict"
-            ? "The Takeoff draft changed while you were editing."
-            : "Save failed",
-          coordinatorRef.current.saveUiStatus === "conflict" ? 409 : 500,
-          {}
-        );
-      }
-    },
-    [authToken, takeoffJobId, drainCorrectionQueue, applySaveUiFromCoordinator]
-  );
-
+  /**
+   * Save draft is the sole normal correction writer.
+   * Double-click is coalesced by saveInFlightRef.
+   */
   const persistDraft = useCallback(async () => {
     if (!authToken || !takeoffJobId || !draftRef.current) return;
-    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    if (saveInFlightRef.current) return;
+    if (saveStatus === "conflict") return;
+    saveInFlightRef.current = true;
+    setSaveStatus("saving");
+    setSaveError(null);
     const snapshot = structuredClone(draftRef.current);
-    coordinatorRef.current = noteLocalDraftEdit(coordinatorRef.current, snapshot, {
-      correctionNotes: "Consolidated worksheet Save draft"
-    });
-    applySaveUiFromCoordinator();
-    await drainCorrectionQueue();
-  }, [authToken, takeoffJobId, drainCorrectionQueue, applySaveUiFromCoordinator]);
-
-  const flushBeforeStructuralChange = useCallback(async () => {
-    if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    if (coordinatorRef.current.pending || coordinatorRef.current.inFlight) {
-      await drainCorrectionQueue();
-    }
-  }, [drainCorrectionQueue]);
-
-  const confirmExposedEdges = useCallback(
-    async (
-      row: PieceRow,
-      finishedEdgePayload: Record<string, unknown>
-    ) => {
-      if (!authToken || !takeoffJobId || edgeConfirmSavingRunId) {
-        throw new Error("Exposed-edge confirm already in progress");
+    const revision = nextExplicitMutationRevision(latestClientMutationRevisionRef.current);
+    try {
+      const response = await saveTakeoffDraftExplicit({
+        saveCorrection: (body) => saveTakeoffCorrection(authToken, takeoffJobId, body),
+        takeoffResult: snapshot,
+        baseResultId: latestResultIdRef.current,
+        clientMutationRevision: revision,
+        reviewState: buildReviewState(),
+        correctionNotes: "Consolidated worksheet Save draft"
+      });
+      latestLocalSaveAtRef.current = response.savedAt;
+      if (response.resultId) latestResultIdRef.current = response.resultId;
+      latestClientMutationRevisionRef.current = revision;
+      lastServerResultVersionRef.current =
+        resultVersionOf(response) ?? lastServerResultVersionRef.current;
+      const returned =
+        response.normalizedTakeoffJson != null
+          ? healTakeoffDraft(response.normalizedTakeoffJson)
+          : snapshot;
+      draftRef.current = returned;
+      setDraft(returned);
+      canonicalDraftRef.current = structuredClone(returned);
+      canonicalExcludedRef.current = new Set(excludedRef.current);
+      setUnsavedEdgeRunIds(new Set());
+      setNewerResultNotice(false);
+      setAiPhase("ready");
+      setJobReviewStatus("needs_review");
+      if (approveStatus === "approved") {
+        setApproveStatus("idle");
+        setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
+      } else {
+        setDisplayStatus("Needs estimator review");
       }
-      setEdgeConfirmSavingRunId(row.runId);
-      setEdgeStaleConflict(false);
-      setSaveError(null);
-      try {
-        const next = markRunEstimatorOwned(
-          patchRunFinishedEdge(
-            draftRef.current || createEmptyManualTakeoffDraft(),
-            { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
-            finishedEdgePayload
-          ),
-          row.roomId,
-          row.runId
-        );
-        await persistDraftWithResult(next, {
-          correctionNotes: "Confirm exposed edges"
-        });
-        if (jobReviewStatus === "approved" || approveStatus === "approved") {
-          setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
-        } else {
-          setDisplayStatus("Needs estimator review");
+      setSaveStatus("saved");
+      window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
+    } catch (e) {
+      if (e instanceof LabApiError && e.status === 409) {
+        const body =
+          e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : {};
+        if (typeof body.latestResultId === "string" && body.latestResultId) {
+          latestResultIdRef.current = body.latestResultId;
         }
-      } catch (e) {
-        throw e;
-      } finally {
-        setEdgeConfirmSavingRunId(null);
+        const serverRev = Number(body.latestClientMutationRevision);
+        if (Number.isSafeInteger(serverRev) && serverRev > 0) {
+          latestClientMutationRevisionRef.current = Math.max(
+            latestClientMutationRevisionRef.current,
+            serverRev
+          );
+        }
+        setSaveStatus("conflict");
+        setSaveError("The Takeoff draft changed while you were editing.");
+        setDisplayStatus("Needs estimator review");
+        setJobReviewStatus("needs_review");
+      } else {
+        setSaveStatus("error");
+        setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+      }
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  }, [authToken, takeoffJobId, buildReviewState, approveStatus, saveStatus]);
+
+  /** Confirm exposed edges — local draft only; zero correction requests. */
+  const confirmExposedEdges = useCallback(
+    (row: PieceRow, finishedEdgePayload: Record<string, unknown>) => {
+      const next = applyLocalExposedEdgeConfirm(
+        draftRef.current || createEmptyManualTakeoffDraft(),
+        { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+        finishedEdgePayload
+      );
+      updateDraft(next);
+      setUnsavedEdgeRunIds((prev) => {
+        const n = new Set(prev);
+        n.add(row.runId);
+        return n;
+      });
+      if (jobReviewStatus === "approved" || approveStatus === "approved") {
+        setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
+      } else {
+        setDisplayStatus("Needs estimator review");
       }
     },
-    [
-      authToken,
-      takeoffJobId,
-      edgeConfirmSavingRunId,
-      persistDraftWithResult,
-      jobReviewStatus,
-      approveStatus
-    ]
+    [updateDraft, jobReviewStatus, approveStatus]
   );
+
+  const closeEdgeDialog = useCallback(() => {
+    const triggerId = edgeTriggerFocusRef.current;
+    setEdgeDialogRunId(null);
+    edgeTriggerFocusRef.current = null;
+    window.requestAnimationFrame(() => {
+      if (triggerId) document.getElementById(triggerId)?.focus();
+    });
+  }, []);
 
   const handleAutoAppendAi = useCallback(async () => {
     if (!authToken || !takeoffJobId) return;
@@ -830,27 +713,20 @@ export default function ConsolidatedTakeoffReview() {
     // AI drafts can carry duplicate/placeholder run ids and legacy height-only
     // backsplash — heal identity + eligibility before persisting.
     const healed = healTakeoffDraft(merged);
-    await persistDraftWithResult(healed, {
-      correctionNotes: "Auto-append AI findings (non-destructive)",
-      aiHandling: pendingId
-        ? {
-            lastMergedAiResultId: pendingId,
-            sourceResultId: pendingId
-          }
-        : null
-    });
+    // Local merge only — Save draft is the sole correction writer.
+    updateDraft(healed);
     pendingServerTakeoffRef.current = null;
     pendingAiResultIdRef.current = null;
     setPendingAiResultId(null);
     setPendingAiMerge(false);
     setPendingAiPreview(preview);
     setAiAppendNotice(
-      "AI findings were added. Estimator-owned geometry and removals were preserved."
+      "AI findings were added locally. Save draft to persist. Estimator-owned geometry and removals were preserved."
     );
   }, [
     authToken,
     takeoffJobId,
-    persistDraftWithResult,
+    updateDraft,
     mergeTombstones,
     unionLocalTombstones
   ]);
@@ -882,10 +758,14 @@ export default function ConsolidatedTakeoffReview() {
     () => () => {
       loadAbortRef.current?.abort();
       pollAbortRef.current?.abort();
-      if (saveTimer.current) window.clearTimeout(saveTimer.current);
     },
     []
   );
+
+  // Keep worksheet table scrolled to the leftmost columns on job load.
+  useEffect(() => {
+    if (tableWrapRef.current) tableWrapRef.current.scrollLeft = 0;
+  }, [takeoffJobId]);
 
   // Poll job STATUS only while AI processing is genuinely non-terminal. The
   // full editable draft is fetched once when the result version changes — never
@@ -938,7 +818,17 @@ export default function ConsolidatedTakeoffReview() {
           setAiPhase("ready");
           const nextVersion = resultVersionOf(job);
           if (nextVersion && nextVersion !== lastServerResultVersionRef.current) {
-            await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
+            const dirtyLocal = isTakeoffWorksheetDirty({
+              localDraft: draftRef.current,
+              canonicalDraft: canonicalDraftRef.current,
+              localExcludedRunIds: excludedRef.current,
+              canonicalExcludedRunIds: canonicalExcludedRef.current
+            });
+            if (dirtyLocal || saveStatusRef.current === "dirty") {
+              setNewerResultNotice(true);
+            } else {
+              await loadWorkspace(authToken, takeoffJobId, { forceServer: false });
+            }
           }
           return;
         }
@@ -976,7 +866,6 @@ export default function ConsolidatedTakeoffReview() {
         );
         if (!ok) return;
       }
-      await flushBeforeStructuralChange();
       const pack = removeRoomFromTakeoff(draftRef.current || createEmptyManualTakeoffDraft(), roomId);
       setDeletedRoomIds((prev) => {
         const next = new Set(prev);
@@ -994,14 +883,13 @@ export default function ConsolidatedTakeoffReview() {
         excludedRef.current = next;
         return next;
       });
-      updateDraft(pack.takeoff, { debounceMs: 0 });
+      updateDraft(pack.takeoff);
     },
-    [updateDraft, flushBeforeStructuralChange]
+    [updateDraft]
   );
 
   const handleRemovePiece = useCallback(
     async (roomId: string, runId: string) => {
-      await flushBeforeStructuralChange();
       const pack = removePieceFromTakeoff(
         draftRef.current || createEmptyManualTakeoffDraft(),
         roomId,
@@ -1018,9 +906,9 @@ export default function ConsolidatedTakeoffReview() {
         excludedRef.current = next;
         return next;
       });
-      updateDraft(pack.takeoff, { debounceMs: 0 });
+      updateDraft(pack.takeoff);
     },
-    [updateDraft, flushBeforeStructuralChange]
+    [updateDraft]
   );
 
   const rows = useMemo<PieceRow[]>(
@@ -1075,6 +963,22 @@ export default function ConsolidatedTakeoffReview() {
     if (approveStatus === "approving" || approveStatus === "approved") return;
     if (blocking.length > 0) return;
 
+    const dirty =
+      isTakeoffWorksheetDirty({
+        localDraft: draftRef.current,
+        canonicalDraft: canonicalDraftRef.current,
+        localExcludedRunIds: excludedRef.current,
+        canonicalExcludedRunIds: canonicalExcludedRef.current
+      }) ||
+      saveStatus === "dirty" ||
+      saveStatus === "conflict" ||
+      unsavedEdgeRunIds.size > 0;
+    if (dirty || saveStatus === "saving") {
+      setApproveStatus("error");
+      setApproveMsg("Save the Takeoff draft before approval.");
+      return;
+    }
+
     const unconfirmedEdge = rows.filter(
       (r) =>
         pieceRequiresExposedEdgeConfirmation({
@@ -1091,11 +995,6 @@ export default function ConsolidatedTakeoffReview() {
         } before approving Takeoff.`
       );
       return;
-    }
-
-    if (saveTimer.current) {
-      window.clearTimeout(saveTimer.current);
-      await persistDraft();
     }
 
     const result = await runConsolidatedApproveClick({
@@ -1167,7 +1066,8 @@ export default function ConsolidatedTakeoffReview() {
     approveStatus,
     blocking.length,
     advisory.length,
-    persistDraft,
+    saveStatus,
+    unsavedEdgeRunIds,
     buildReviewState
   ]);
 
@@ -1241,26 +1141,36 @@ export default function ConsolidatedTakeoffReview() {
               </>
             ) : null}
             {saveError ? <span className="ctr-error"> — {saveError}</span> : null}
-            {saveStatus === "conflict" || edgeStaleConflict ? (
+            {saveStatus === "conflict" || newerResultNotice ? (
               <button
                 type="button"
                 className="ctr-btn-secondary"
                 data-testid="ctr-review-latest-draft-header"
                 style={{ marginLeft: 8 }}
                 onClick={() => {
-                  coordinatorRef.current = clearConflictPause(coordinatorRef.current);
-                  setEdgeStaleConflict(false);
                   setSaveError(null);
+                  setNewerResultNotice(false);
                   if (authToken && takeoffJobId) {
                     void loadWorkspace(authToken, takeoffJobId, {
                       forceServer: true,
-                      discardLocal: false
+                      discardLocal: true
+                    }).then(() => {
+                      canonicalDraftRef.current = structuredClone(draftRef.current);
+                      canonicalExcludedRef.current = new Set(excludedRef.current);
+                      setUnsavedEdgeRunIds(new Set());
+                      setSaveStatus("idle");
                     });
                   }
                 }}
               >
                 Review latest draft
               </button>
+            ) : null}
+            {newerResultNotice ? (
+              <span className="ctr-muted" data-testid="ctr-newer-result-notice">
+                {" "}
+                A newer Takeoff result is available.
+              </span>
             ) : null}
           </p>
         </div>
@@ -1357,7 +1267,7 @@ export default function ConsolidatedTakeoffReview() {
               should be left off.
             </p>
 
-            <div className="ctr-table-wrap">
+            <div className="ctr-table-wrap" ref={tableWrapRef} data-testid="ctr-table-wrap">
               <table className="ctr-table" data-testid="ctr-worksheet">
                 <thead>
                   <tr>
@@ -1605,35 +1515,15 @@ export default function ConsolidatedTakeoffReview() {
                             disabled={rowLocked}
                             onChange={(e) =>
                               updateDraft(
-                                markRunEstimatorOwned(
-                                  patchRun(
-                                    draft,
-                                    {
-                                      roomId: row.roomId,
-                                      areaId: row.areaId,
-                                      runId: row.runId
-                                    },
-                                    {
-                                      backsplashEligible: e.target.checked,
-                                      backsplashEligibilitySource: "estimator_confirmed",
-                                      backsplashEligibilityUpdatedAt: new Date().toISOString(),
-                                      backsplashEligibleLengthIn: e.target.checked
-                                        ? Number(row.lengthIn) || 0
-                                        : 0,
-                                      backsplashGeometry: {
-                                        backsplashEligible: e.target.checked,
-                                        backsplashEligibleLengthIn: e.target.checked
-                                          ? Number(row.lengthIn) || 0
-                                          : 0,
-                                        backsplashEdge: "back",
-                                        approved: true,
-                                        source: "estimator_confirmed",
-                                        approvalSource: "estimator_confirmed"
-                                      }
-                                    }
-                                  ),
-                                  row.roomId,
-                                  row.runId
+                                applyLocalBacksplashToggle(
+                                  draft,
+                                  {
+                                    roomId: row.roomId,
+                                    areaId: row.areaId,
+                                    runId: row.runId
+                                  },
+                                  e.target.checked,
+                                  row.lengthIn
                                 )
                               )
                             }
@@ -1644,19 +1534,18 @@ export default function ConsolidatedTakeoffReview() {
                         </label>
                       </td>
                       <td className="ctr-col-edge">
-                        <ExposedSidesEditor
-                          row={row}
+                        <ExposedSidesTrigger
+                          row={{
+                            ...row,
+                            localUnsavedEdge: unsavedEdgeRunIds.has(row.runId)
+                          }}
+                          triggerId={`ctr-edge-trigger-${row.runId}`}
+                          dialogId="ctr-exposed-edges-dialog"
+                          open={edgeDialogRunId === row.runId}
                           disabled={rowLocked}
-                          saving={edgeConfirmSavingRunId === row.runId}
-                          staleConflict={edgeStaleConflict}
-                          onConfirm={(payload) => confirmExposedEdges(row, payload)}
-                          onReviewLatestDraft={() => {
-                            coordinatorRef.current = clearConflictPause(coordinatorRef.current);
-                            setEdgeStaleConflict(false);
-                            setSaveError(null);
-                            if (authToken && takeoffJobId) {
-                              void loadWorkspace(authToken, takeoffJobId, { forceServer: true });
-                            }
+                          onOpen={() => {
+                            edgeTriggerFocusRef.current = `ctr-edge-trigger-${row.runId}`;
+                            setEdgeDialogRunId(row.runId);
                           }}
                         />
                       </td>
@@ -1678,16 +1567,7 @@ export default function ConsolidatedTakeoffReview() {
                                 excludedRef.current = next;
                                 return next;
                               });
-                              const snapshot = structuredClone(
-                                draftRef.current || createEmptyManualTakeoffDraft()
-                              );
-                              coordinatorRef.current = noteLocalDraftEdit(
-                                coordinatorRef.current,
-                                snapshot,
-                                { correctionNotes: "Include/exclude piece" }
-                              );
-                              applySaveUiFromCoordinator();
-                              scheduleSave(0);
+                              markWorksheetDirty();
                             }}
                           />
                           <span className="ctr-bs-toggle-label">
@@ -1913,13 +1793,10 @@ export default function ConsolidatedTakeoffReview() {
                 className="ctr-btn-secondary"
                 data-testid="ctr-add-room"
                 onClick={() => {
-                  void (async () => {
-                    await flushBeforeStructuralChange();
-                    const next = addRoom(draftRef.current || createEmptyManualTakeoffDraft());
-                    const newId = next.rooms?.[next.rooms.length - 1]?.id;
-                    if (newId) setSelectedRoomId(String(newId));
-                    updateDraft(next, { debounceMs: 0 });
-                  })();
+                  const next = addRoom(draftRef.current || createEmptyManualTakeoffDraft());
+                  const newId = next.rooms?.[next.rooms.length - 1]?.id;
+                  if (newId) setSelectedRoomId(String(newId));
+                  updateDraft(next);
                 }}
               >
                 Add room
@@ -1930,15 +1807,11 @@ export default function ConsolidatedTakeoffReview() {
                 data-testid="ctr-add-piece"
                 disabled={!selectedRoomId && !roomOptions[0]?.id}
                 onClick={() => {
-                  void (async () => {
-                    const roomId = selectedRoomId || roomOptions[0]?.id;
-                    if (!roomId) return;
-                    await flushBeforeStructuralChange();
-                    updateDraft(
-                      addPiece(draftRef.current || createEmptyManualTakeoffDraft(), roomId),
-                      { debounceMs: 0 }
-                    );
-                  })();
+                  const roomId = selectedRoomId || roomOptions[0]?.id;
+                  if (!roomId) return;
+                  updateDraft(
+                    addPiece(draftRef.current || createEmptyManualTakeoffDraft(), roomId)
+                  );
                 }}
               >
                 Add piece
@@ -1947,9 +1820,10 @@ export default function ConsolidatedTakeoffReview() {
                 type="button"
                 className="ctr-btn-secondary"
                 data-testid="ctr-save-draft"
+                disabled={saveStatus === "saving" || saveStatus === "conflict"}
                 onClick={() => void persistDraft()}
               >
-                Save draft
+                {saveStatus === "saving" ? "Saving…" : "Save draft"}
               </button>
               {aiPhase === "failed" ? (
                 <button
@@ -2022,7 +1896,11 @@ export default function ConsolidatedTakeoffReview() {
                   approveStatus === "approved" ||
                   displayStatus === "Takeoff failed" ||
                   !hasUsableTakeoffGeometry(draft) ||
-                  Boolean(blocking.length)
+                  Boolean(blocking.length) ||
+                  saveStatus === "dirty" ||
+                  saveStatus === "saving" ||
+                  saveStatus === "conflict" ||
+                  unsavedEdgeRunIds.size > 0
                 }
                 onClick={() => void handleApproveClick()}
               >
@@ -2041,6 +1919,26 @@ export default function ConsolidatedTakeoffReview() {
             ) : null}
           </main>
         </div>
+
+      <ExposedSidesDialog
+        open={Boolean(edgeDialogRunId)}
+        row={
+          edgeDialogRunId
+            ? (() => {
+                const r = rows.find((x) => x.runId === edgeDialogRunId);
+                return r ? { ...r, roomName: r.roomName } : null;
+              })()
+            : null
+        }
+        triggerId={edgeTriggerFocusRef.current}
+        onConfirm={(payload) => {
+          const r = rows.find((x) => x.runId === edgeDialogRunId);
+          if (r) confirmExposedEdges(r, payload);
+          closeEdgeDialog();
+        }}
+        onCancel={() => closeEdgeDialog()}
+      />
+
     </div>
   );
 }
