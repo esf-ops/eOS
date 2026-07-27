@@ -48,11 +48,25 @@ import {
 import {
   flattenPieces,
   patchRun,
+  patchRunGeometry,
   patchRunFinishedEdge,
   renameRoom,
   reassignRun,
   sfFrom
 } from "../lib/consolidatedWorksheetRows.mjs";
+import {
+  applyCorrectionConflict,
+  applyCorrectionFailure,
+  applyCorrectionSuccess,
+  beginCorrectionSend,
+  canStartCorrectionSend,
+  clearConflictPause,
+  createTakeoffCorrectionCoordinatorState,
+  formatTakeoffSaveStatus,
+  noteLocalDraftEdit,
+  pieceRequiresExposedEdgeConfirmation,
+  seedCoordinatorServerKeys
+} from "../lib/takeoffCorrectionCoordinator.mjs";
 import ExposedSidesEditor from "./ExposedSidesEditor";
 import {
   isTakeoffJobTerminal,
@@ -66,7 +80,7 @@ import TakeoffPlanPreviewPanel, {
   type PlanPreviewFileMeta
 } from "./TakeoffPlanPreviewPanel";
 
-type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error" | "conflict";
 type ApproveStatus = "idle" | "approving" | "approved" | "error";
 type AiPhase = "unknown" | "queued" | "processing" | "ready" | "failed" | "disabled";
 
@@ -115,6 +129,8 @@ type PieceRow = {
     right?: boolean;
   } | null;
   finishedEdge?: unknown;
+  pieceType?: string;
+  isBacksplash?: boolean;
   included: boolean;
   cutouts: CutoutEntry[];
   cutoutsSummary: string;
@@ -260,10 +276,8 @@ export default function ConsolidatedTakeoffReview() {
   const deletedRoomIdsRef = useRef(deletedRoomIds);
   const deletedRunIdsRef = useRef(deletedRunIds);
   const saveStatusRef = useRef(saveStatus);
-  const mutationRevisionRef = useRef(0);
-  const savedMutationRevisionRef = useRef(0);
-  const queuedMutationRevisionRef = useRef(0);
-  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const coordinatorRef = useRef(createTakeoffCorrectionCoordinatorState());
+  const correctionGateRef = useRef<Promise<void>>(Promise.resolve());
   const latestResultIdRef = useRef<string | null>(null);
   const latestLocalSaveAtRef = useRef<string | null>(null);
   const lastServerResultVersionRef = useRef<string | null>(null);
@@ -360,7 +374,7 @@ export default function ConsolidatedTakeoffReview() {
     const controller = new AbortController();
     loadAbortRef.current = controller;
     const requestSequence = ++loadSequenceRef.current;
-    const requestMutationRevision = mutationRevisionRef.current;
+    const requestMutationRevision = coordinatorRef.current.localEditSequence;
     const job = (await labApiGet(
       `/api/takeoff-jobs/${encodeURIComponent(jobId)}`,
       token,
@@ -388,7 +402,7 @@ export default function ConsolidatedTakeoffReview() {
       opts?.discardLocal === true ||
       shouldAcceptServerDraft({
         requestMutationRevision,
-        currentMutationRevision: mutationRevisionRef.current,
+        currentMutationRevision: coordinatorRef.current.localEditSequence,
         requestSequence,
         latestAppliedSequence: appliedLoadSequenceRef.current,
         serverSavedAt: latest?.savedAt ?? null,
@@ -396,11 +410,26 @@ export default function ConsolidatedTakeoffReview() {
       });
     if (latest?.resultId) latestResultIdRef.current = String(latest.resultId);
     const serverRevision = Number(latest?.clientMutationRevision) || 0;
-    savedMutationRevisionRef.current = Math.max(
-      savedMutationRevisionRef.current,
-      serverRevision
-    );
-    mutationRevisionRef.current = Math.max(mutationRevisionRef.current, serverRevision);
+    coordinatorRef.current = seedCoordinatorServerKeys(coordinatorRef.current, {
+      resultId: latest?.resultId ? String(latest.resultId) : latestResultIdRef.current,
+      clientMutationRevision: serverRevision
+    });
+    // Preserve local edit sequence above server revision when discarding is not forced.
+    if (opts?.discardLocal) {
+      coordinatorRef.current = {
+        ...coordinatorRef.current,
+        localEditSequence: Math.max(coordinatorRef.current.localEditSequence, serverRevision)
+      };
+    } else {
+      coordinatorRef.current = {
+        ...coordinatorRef.current,
+        localEditSequence: Math.max(coordinatorRef.current.localEditSequence, serverRevision),
+        latestClientMutationRevision: Math.max(
+          coordinatorRef.current.latestClientMutationRevision,
+          serverRevision
+        )
+      };
+    }
     lastServerResultVersionRef.current =
       resultVersionOf(latest) ?? lastServerResultVersionRef.current;
 
@@ -504,6 +533,176 @@ export default function ConsolidatedTakeoffReview() {
     }
   }, [hydrateReviewMeta, unionLocalTombstones, applyPendingAiFromLatest]);
 
+  const applySaveUiFromCoordinator = useCallback(() => {
+    const status = coordinatorRef.current.saveUiStatus;
+    if (status === "dirty") setSaveStatus("dirty");
+    else if (status === "saving") setSaveStatus("saving");
+    else if (status === "saved") {
+      setSaveStatus("saved");
+      window.setTimeout(
+        () => setSaveStatus((s) => (s === "saved" ? "idle" : s)),
+        1200
+      );
+    } else if (status === "conflict") {
+      setSaveStatus("conflict");
+      setEdgeStaleConflict(true);
+      setSaveError("The Takeoff draft changed while you were editing.");
+    } else if (status === "error") {
+      setSaveStatus("error");
+    } else {
+      setSaveStatus("idle");
+    }
+  }, []);
+
+  const buildReviewState = useCallback(() => {
+    const roomCompleteness: Record<string, boolean> = {};
+    for (const room of draftRef.current?.rooms ?? []) {
+      if (room?.id) roomCompleteness[room.id] = true;
+    }
+    const ownership = collectManualOwnershipIds(draftRef.current);
+    return {
+      excludedRunIds: [...excludedRef.current],
+      excludedRoomIds: [],
+      deletedRoomIds: [...deletedRoomIdsRef.current],
+      deletedRunIds: [...deletedRunIdsRef.current],
+      roomCompleteness,
+      flagResolutions: {},
+      referenceTotalAcks: {},
+      evidenceAcks: {},
+      manualRoomIds: ownership.manualRoomIds,
+      manualRunIds: ownership.manualRunIds
+    };
+  }, []);
+
+  /**
+   * Single job-level correction drain. Keys are read at send time; success updates
+   * coordinator keys before the next iteration so queued follow-ups never reuse
+   * a pre-response baseResultId (the prior 201/409 race).
+   */
+  const drainCorrectionQueue = useCallback(async () => {
+    if (!authToken || !takeoffJobId) return;
+    correctionGateRef.current = correctionGateRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        while (canStartCorrectionSend(coordinatorRef.current)) {
+          const begun = beginCorrectionSend(coordinatorRef.current);
+          coordinatorRef.current = begun.state;
+          const send = begun.send;
+          if (!send) break;
+          applySaveUiFromCoordinator();
+          setSaveError(null);
+          try {
+            const ownership = collectManualOwnershipIds(send.draft);
+            const roomCompleteness: Record<string, boolean> = {};
+            for (const room of send.draft?.rooms ?? []) {
+              if (room?.id) roomCompleteness[room.id] = true;
+            }
+            const response = await saveTakeoffCorrection(authToken, takeoffJobId, {
+              takeoffResult: send.draft,
+              baseResultId: send.baseResultId,
+              clientMutationRevision: send.clientMutationRevision,
+              correctionNotes:
+                send.opts?.correctionNotes ?? "Consolidated worksheet autosave",
+              reviewState: {
+                excludedRunIds: [...excludedRef.current],
+                excludedRoomIds: [],
+                deletedRoomIds: [...deletedRoomIdsRef.current],
+                deletedRunIds: [...deletedRunIdsRef.current],
+                roomCompleteness,
+                flagResolutions: {},
+                referenceTotalAcks: {},
+                evidenceAcks: {},
+                manualRoomIds: ownership.manualRoomIds,
+                manualRunIds: ownership.manualRunIds
+              },
+              aiHandling: send.opts?.aiHandling ?? null
+            });
+            // Update concurrency keys BEFORE any follow-up beginCorrectionSend.
+            coordinatorRef.current = applyCorrectionSuccess(coordinatorRef.current, {
+              resultId: response.resultId,
+              clientMutationRevision: send.clientMutationRevision,
+              requestSequence: send.sequence
+            });
+            latestResultIdRef.current = coordinatorRef.current.latestResultId;
+            latestLocalSaveAtRef.current = response.savedAt;
+            lastServerResultVersionRef.current =
+              resultVersionOf(response) ?? lastServerResultVersionRef.current;
+            setAiPhase("ready");
+            setJobReviewStatus("needs_review");
+            setEdgeStaleConflict(false);
+            if (approveStatus === "approved") {
+              setApproveStatus("idle");
+              setDisplayStatus(
+                "Previous Takeoff approved · Current draft needs estimator review"
+              );
+            } else if (!coordinatorRef.current.pending) {
+              setDisplayStatus("Needs estimator review");
+            }
+            applySaveUiFromCoordinator();
+          } catch (e) {
+            if (e instanceof LabApiError && e.status === 409) {
+              const body =
+                e.body && typeof e.body === "object"
+                  ? (e.body as Record<string, unknown>)
+                  : {};
+              coordinatorRef.current = applyCorrectionConflict(
+                coordinatorRef.current,
+                {
+                  latestResultId:
+                    typeof body.latestResultId === "string" ? body.latestResultId : null,
+                  latestClientMutationRevision: Number(body.latestClientMutationRevision)
+                },
+                send
+              );
+              latestResultIdRef.current = coordinatorRef.current.latestResultId;
+              setDisplayStatus("Needs estimator review");
+              setJobReviewStatus("needs_review");
+              applySaveUiFromCoordinator();
+              throw e;
+            }
+            coordinatorRef.current = applyCorrectionFailure(coordinatorRef.current, send);
+            setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+            applySaveUiFromCoordinator();
+            throw e;
+          }
+        }
+      });
+    return correctionGateRef.current;
+  }, [authToken, takeoffJobId, approveStatus, applySaveUiFromCoordinator]);
+
+  const scheduleSave = useCallback(
+    (debounceMs = 600) => {
+      if (coordinatorRef.current.conflictPaused) {
+        applySaveUiFromCoordinator();
+        return;
+      }
+      setSaveStatus("dirty");
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      if (debounceMs <= 0) {
+        void drainCorrectionQueue();
+        return;
+      }
+      saveTimer.current = window.setTimeout(() => {
+        void drainCorrectionQueue();
+      }, debounceMs);
+    },
+    [drainCorrectionQueue, applySaveUiFromCoordinator]
+  );
+
+  const updateDraft = useCallback(
+    (next: any, opts?: { debounceMs?: number; correctionNotes?: string }) => {
+      const snapshot = structuredClone(next);
+      draftRef.current = snapshot;
+      setDraft(snapshot);
+      coordinatorRef.current = noteLocalDraftEdit(coordinatorRef.current, snapshot, {
+        correctionNotes: opts?.correctionNotes
+      });
+      applySaveUiFromCoordinator();
+      scheduleSave(opts?.debounceMs ?? 600);
+    },
+    [scheduleSave, applySaveUiFromCoordinator]
+  );
+
   const persistDraftWithResult = useCallback(
     async (
       takeoffResult: any,
@@ -517,99 +716,90 @@ export default function ConsolidatedTakeoffReview() {
       }
     ) => {
       if (!authToken || !takeoffJobId || !takeoffResult) return;
+      if (saveTimer.current) window.clearTimeout(saveTimer.current);
       const snapshot = structuredClone(takeoffResult);
-      const revision = ++mutationRevisionRef.current;
-      queuedMutationRevisionRef.current = revision;
       draftRef.current = snapshot;
       setDraft(snapshot);
-      setSaveStatus("saving");
-      setSaveError(null);
-      try {
-        const ownership = collectManualOwnershipIds(snapshot);
-        const roomCompleteness: Record<string, boolean> = {};
-        for (const room of snapshot?.rooms ?? []) {
-          if (room?.id) roomCompleteness[room.id] = true;
-        }
-        const request = saveChainRef.current
-          .catch(() => undefined)
-          .then(() =>
-            saveTakeoffCorrection(authToken, takeoffJobId, {
-              takeoffResult: snapshot,
-              baseResultId: latestResultIdRef.current,
-              clientMutationRevision: revision,
-              correctionNotes: opts?.correctionNotes ?? "Consolidated worksheet autosave",
-              reviewState: {
-                excludedRunIds: [...excludedRef.current],
-                excludedRoomIds: [],
-                deletedRoomIds: [...deletedRoomIdsRef.current],
-                deletedRunIds: [...deletedRunIdsRef.current],
-                roomCompleteness,
-                flagResolutions: {},
-                referenceTotalAcks: {},
-                evidenceAcks: {},
-                manualRoomIds: ownership.manualRoomIds,
-                manualRunIds: ownership.manualRunIds
-              },
-              aiHandling: opts?.aiHandling ?? null
-            })
-          );
-        saveChainRef.current = request;
-        const response = await request;
-        savedMutationRevisionRef.current = Math.max(
-          savedMutationRevisionRef.current,
-          revision
+      coordinatorRef.current = noteLocalDraftEdit(coordinatorRef.current, snapshot, {
+        correctionNotes: opts?.correctionNotes,
+        aiHandling: opts?.aiHandling ?? null
+      });
+      applySaveUiFromCoordinator();
+      await drainCorrectionQueue();
+      if (coordinatorRef.current.conflictPaused || coordinatorRef.current.saveUiStatus === "error") {
+        throw new LabApiError(
+          coordinatorRef.current.saveUiStatus === "conflict"
+            ? "The Takeoff draft changed while you were editing."
+            : "Save failed",
+          coordinatorRef.current.saveUiStatus === "conflict" ? 409 : 500,
+          {}
         );
-        latestLocalSaveAtRef.current = response.savedAt;
-        if (response.resultId) latestResultIdRef.current = response.resultId;
-        lastServerResultVersionRef.current =
-          resultVersionOf(response) ?? lastServerResultVersionRef.current;
-        setAiPhase("ready");
-        setJobReviewStatus("needs_review");
-        setEdgeStaleConflict(false);
-        if (approveStatus === "approved") {
-          setApproveStatus("idle");
-          setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
-        }
-        if (revision === mutationRevisionRef.current) {
-          setSaveStatus("saved");
-          window.setTimeout(
-            () => setSaveStatus((s) => (s === "saved" ? "idle" : s)),
-            1200
-          );
-        }
-      } catch (e) {
-        if (revision === mutationRevisionRef.current) {
-          if (e instanceof LabApiError && e.status === 409) {
-            const body =
-              e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : {};
-            if (typeof body.latestResultId === "string" && body.latestResultId) {
-              latestResultIdRef.current = body.latestResultId;
-            }
-            const serverRev = Number(body.latestClientMutationRevision);
-            if (Number.isSafeInteger(serverRev) && serverRev > 0) {
-              savedMutationRevisionRef.current = Math.max(
-                savedMutationRevisionRef.current,
-                serverRev
-              );
-              queuedMutationRevisionRef.current = Math.max(
-                queuedMutationRevisionRef.current,
-                serverRev
-              );
-            }
-            setEdgeStaleConflict(true);
-            setSaveStatus("error");
-            setSaveError("The Takeoff draft changed while you were editing.");
-            setDisplayStatus("Needs estimator review");
-            setJobReviewStatus("needs_review");
-          } else {
-            setSaveStatus("error");
-            setSaveError(e instanceof LabApiError ? e.message : "Save failed");
-          }
-        }
-        throw e;
       }
     },
-    [authToken, takeoffJobId, approveStatus]
+    [authToken, takeoffJobId, drainCorrectionQueue, applySaveUiFromCoordinator]
+  );
+
+  const persistDraft = useCallback(async () => {
+    if (!authToken || !takeoffJobId || !draftRef.current) return;
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    const snapshot = structuredClone(draftRef.current);
+    coordinatorRef.current = noteLocalDraftEdit(coordinatorRef.current, snapshot, {
+      correctionNotes: "Consolidated worksheet Save draft"
+    });
+    applySaveUiFromCoordinator();
+    await drainCorrectionQueue();
+  }, [authToken, takeoffJobId, drainCorrectionQueue, applySaveUiFromCoordinator]);
+
+  const flushBeforeStructuralChange = useCallback(async () => {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    if (coordinatorRef.current.pending || coordinatorRef.current.inFlight) {
+      await drainCorrectionQueue();
+    }
+  }, [drainCorrectionQueue]);
+
+  const confirmExposedEdges = useCallback(
+    async (
+      row: PieceRow,
+      finishedEdgePayload: Record<string, unknown>
+    ) => {
+      if (!authToken || !takeoffJobId || edgeConfirmSavingRunId) {
+        throw new Error("Exposed-edge confirm already in progress");
+      }
+      setEdgeConfirmSavingRunId(row.runId);
+      setEdgeStaleConflict(false);
+      setSaveError(null);
+      try {
+        const next = markRunEstimatorOwned(
+          patchRunFinishedEdge(
+            draftRef.current || createEmptyManualTakeoffDraft(),
+            { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+            finishedEdgePayload
+          ),
+          row.roomId,
+          row.runId
+        );
+        await persistDraftWithResult(next, {
+          correctionNotes: "Confirm exposed edges"
+        });
+        if (jobReviewStatus === "approved" || approveStatus === "approved") {
+          setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
+        } else {
+          setDisplayStatus("Needs estimator review");
+        }
+      } catch (e) {
+        throw e;
+      } finally {
+        setEdgeConfirmSavingRunId(null);
+      }
+    },
+    [
+      authToken,
+      takeoffJobId,
+      edgeConfirmSavingRunId,
+      persistDraftWithResult,
+      jobReviewStatus,
+      approveStatus
+    ]
   );
 
   const handleAutoAppendAi = useCallback(async () => {
@@ -774,170 +964,10 @@ export default function ConsolidatedTakeoffReview() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [authToken, takeoffJobId, aiPhase, approveStatus, loadWorkspace]);
-  const buildReviewState = useCallback(() => {
-    const roomCompleteness: Record<string, boolean> = {};
-    for (const room of draftRef.current?.rooms ?? []) {
-      if (room?.id) roomCompleteness[room.id] = true;
-    }
-    const ownership = collectManualOwnershipIds(draftRef.current);
-    return {
-      excludedRunIds: [...excludedRef.current],
-      excludedRoomIds: [],
-      deletedRoomIds: [...deletedRoomIdsRef.current],
-      deletedRunIds: [...deletedRunIdsRef.current],
-      roomCompleteness,
-      flagResolutions: {},
-      referenceTotalAcks: {},
-      evidenceAcks: {},
-      manualRoomIds: ownership.manualRoomIds,
-      manualRunIds: ownership.manualRunIds
-    };
-  }, []);
 
-  const persistDraft = useCallback(async () => {
-    if (!authToken || !takeoffJobId || !draftRef.current) return;
-    const snapshot = structuredClone(draftRef.current);
-    const revision = mutationRevisionRef.current || ++mutationRevisionRef.current;
-    if (revision <= queuedMutationRevisionRef.current) return;
-    queuedMutationRevisionRef.current = revision;
-    setSaveStatus("saving");
-    setSaveError(null);
-    try {
-      const request = saveChainRef.current
-        .catch(() => undefined)
-        .then(() =>
-          saveTakeoffCorrection(authToken, takeoffJobId, {
-            takeoffResult: snapshot,
-            baseResultId: latestResultIdRef.current,
-            clientMutationRevision: revision,
-            reviewState: buildReviewState(),
-            correctionNotes: "Consolidated worksheet autosave"
-          })
-        );
-      saveChainRef.current = request;
-      const response = await request;
-      savedMutationRevisionRef.current = Math.max(
-        savedMutationRevisionRef.current,
-        revision
-      );
-      latestLocalSaveAtRef.current = response.savedAt;
-      if (response.resultId) latestResultIdRef.current = response.resultId;
-      lastServerResultVersionRef.current =
-        resultVersionOf(response) ?? lastServerResultVersionRef.current;
-      setAiPhase("ready");
-      setJobReviewStatus("needs_review");
-      setEdgeStaleConflict(false);
-      if (approveStatus === "approved") {
-        setApproveStatus("idle");
-        setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
-      } else if (revision === mutationRevisionRef.current) {
-        setDisplayStatus("Needs estimator review");
-      }
-      // Never apply response.normalizedTakeoffJson here. The optimistic draft
-      // may already contain newer edits than this serialized request.
-      if (revision === mutationRevisionRef.current) {
-        setSaveStatus("saved");
-        window.setTimeout(
-          () => setSaveStatus((s) => (s === "saved" ? "idle" : s)),
-          1200
-        );
-      }
-    } catch (e) {
-      if (revision === mutationRevisionRef.current) {
-        if (e instanceof LabApiError && e.status === 409) {
-          const body =
-            e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : {};
-          if (typeof body.latestResultId === "string" && body.latestResultId) {
-            latestResultIdRef.current = body.latestResultId;
-          }
-          const serverRev = Number(body.latestClientMutationRevision);
-          if (Number.isSafeInteger(serverRev) && serverRev > 0) {
-            savedMutationRevisionRef.current = Math.max(
-              savedMutationRevisionRef.current,
-              serverRev
-            );
-            queuedMutationRevisionRef.current = Math.max(
-              queuedMutationRevisionRef.current,
-              serverRev
-            );
-          }
-          setEdgeStaleConflict(true);
-          setSaveStatus("error");
-          setSaveError("The Takeoff draft changed while you were editing.");
-          setDisplayStatus("Needs estimator review");
-        } else {
-          setSaveStatus("error");
-          setSaveError(e instanceof LabApiError ? e.message : "Save failed");
-        }
-      }
-    }
-  }, [authToken, takeoffJobId, buildReviewState, approveStatus]);
-
-  const scheduleSave = useCallback(() => {
-    setSaveStatus("dirty");
-    if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => {
-      void persistDraft();
-    }, 600);
-  }, [persistDraft]);
-
-  const updateDraft = useCallback(
-    (next: any) => {
-      // Ref update is synchronous: the 600ms autosave always captures the same
-      // draft the checkbox rendered, even before React commits the state update.
-      draftRef.current = next;
-      mutationRevisionRef.current += 1;
-      setDraft(next);
-      scheduleSave();
-    },
-    [scheduleSave]
-  );
-
-  const confirmExposedEdges = useCallback(
-    async (
-      row: PieceRow,
-      finishedEdgePayload: Record<string, unknown>
-    ) => {
-      if (!authToken || !takeoffJobId || edgeConfirmSavingRunId) return;
-      setEdgeConfirmSavingRunId(row.runId);
-      setEdgeStaleConflict(false);
-      setSaveError(null);
-      try {
-        const next = markRunEstimatorOwned(
-          patchRunFinishedEdge(
-            draftRef.current || createEmptyManualTakeoffDraft(),
-            { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
-            finishedEdgePayload
-          ),
-          row.roomId,
-          row.runId
-        );
-        await persistDraftWithResult(next, {
-          correctionNotes: "Confirm exposed edges"
-        });
-        if (jobReviewStatus === "approved" || approveStatus === "approved") {
-          setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
-        } else {
-          setDisplayStatus("Needs estimator review");
-        }
-      } catch {
-        // persistDraftWithResult already set saveError / stale conflict UI
-      } finally {
-        setEdgeConfirmSavingRunId(null);
-      }
-    },
-    [
-      authToken,
-      takeoffJobId,
-      edgeConfirmSavingRunId,
-      persistDraftWithResult,
-      jobReviewStatus,
-      approveStatus
-    ]
-  );
 
   const handleRemoveRoom = useCallback(
-    (roomId: string, roomName: string, pieceCount: number) => {
+    async (roomId: string, roomName: string, pieceCount: number) => {
       if (pieceCount > 0) {
         const ok = window.confirm(
           `Remove room "${roomName}" and its ${pieceCount} piece${
@@ -946,6 +976,7 @@ export default function ConsolidatedTakeoffReview() {
         );
         if (!ok) return;
       }
+      await flushBeforeStructuralChange();
       const pack = removeRoomFromTakeoff(draftRef.current || createEmptyManualTakeoffDraft(), roomId);
       setDeletedRoomIds((prev) => {
         const next = new Set(prev);
@@ -960,15 +991,17 @@ export default function ConsolidatedTakeoffReview() {
       setExcludedRunIds((prev) => {
         const next = new Set(prev);
         for (const id of pack.deletedRunIds) next.delete(id);
+        excludedRef.current = next;
         return next;
       });
-      updateDraft(pack.takeoff);
+      updateDraft(pack.takeoff, { debounceMs: 0 });
     },
-    [updateDraft]
+    [updateDraft, flushBeforeStructuralChange]
   );
 
   const handleRemovePiece = useCallback(
-    (roomId: string, runId: string) => {
+    async (roomId: string, runId: string) => {
+      await flushBeforeStructuralChange();
       const pack = removePieceFromTakeoff(
         draftRef.current || createEmptyManualTakeoffDraft(),
         roomId,
@@ -982,11 +1015,12 @@ export default function ConsolidatedTakeoffReview() {
       setExcludedRunIds((prev) => {
         const next = new Set(prev);
         next.delete(runId);
+        excludedRef.current = next;
         return next;
       });
-      updateDraft(pack.takeoff);
+      updateDraft(pack.takeoff, { debounceMs: 0 });
     },
-    [updateDraft]
+    [updateDraft, flushBeforeStructuralChange]
   );
 
   const rows = useMemo<PieceRow[]>(
@@ -1041,13 +1075,20 @@ export default function ConsolidatedTakeoffReview() {
     if (approveStatus === "approving" || approveStatus === "approved") return;
     if (blocking.length > 0) return;
 
-    const unconfirmedEdge = rows.filter((r) => r.included && !r.finishedEdgeApproved);
+    const unconfirmedEdge = rows.filter(
+      (r) =>
+        pieceRequiresExposedEdgeConfirmation({
+          included: r.included,
+          pieceType: (r as PieceRow & { pieceType?: string }).pieceType,
+          isBacksplash: (r as PieceRow & { isBacksplash?: boolean }).isBacksplash
+        }) && !r.finishedEdgeApproved
+    );
     if (unconfirmedEdge.length > 0) {
       setApproveStatus("error");
       setApproveMsg(
-        `Confirm finished edges for ${unconfirmedEdge.length} piece${
+        `Confirm exposed edges for ${unconfirmedEdge.length} countertop piece${
           unconfirmedEdge.length === 1 ? "" : "s"
-        } before approving Takeoff (Backsplash ≠ finished edge).`
+        } before approving Takeoff.`
       );
       return;
     }
@@ -1194,10 +1235,33 @@ export default function ConsolidatedTakeoffReview() {
             {saveStatus !== "idle" ? (
               <>
                 {" · "}
-                <span data-testid="ctr-save-status">{saveStatus}</span>
+                <span data-testid="ctr-save-status">
+                  {formatTakeoffSaveStatus(saveStatus) || saveStatus}
+                </span>
               </>
             ) : null}
             {saveError ? <span className="ctr-error"> — {saveError}</span> : null}
+            {saveStatus === "conflict" || edgeStaleConflict ? (
+              <button
+                type="button"
+                className="ctr-btn-secondary"
+                data-testid="ctr-review-latest-draft-header"
+                style={{ marginLeft: 8 }}
+                onClick={() => {
+                  coordinatorRef.current = clearConflictPause(coordinatorRef.current);
+                  setEdgeStaleConflict(false);
+                  setSaveError(null);
+                  if (authToken && takeoffJobId) {
+                    void loadWorkspace(authToken, takeoffJobId, {
+                      forceServer: true,
+                      discardLocal: false
+                    });
+                  }
+                }}
+              >
+                Review latest draft
+              </button>
+            ) : null}
           </p>
         </div>
       </header>
@@ -1331,9 +1395,11 @@ export default function ConsolidatedTakeoffReview() {
                         data-room-id={section.id}
                         onClick={() => setSelectedRoomId(section.id)}
                       >
-                        <td colSpan={11}>
+                        <td colSpan={12}>
                           <div className="ctr-room-header">
                             <input
+                              id={`ctr-room-name-${section.id}`}
+                              name={`room-name-${section.id}`}
                               className="ctr-room-rename"
                               aria-label="Room name"
                               data-testid="ctr-room-name"
@@ -1385,7 +1451,7 @@ export default function ConsolidatedTakeoffReview() {
                           data-testid="ctr-room-empty"
                           data-room-id={section.id}
                         >
-                          <td colSpan={11} className="ctr-muted">
+                          <td colSpan={12} className="ctr-muted">
                             No pieces in this room yet.
                           </td>
                         </tr>
@@ -1408,6 +1474,8 @@ export default function ConsolidatedTakeoffReview() {
                     >
                       <td className="ctr-col-room">
                         <select
+                          id={`ctr-room-${row.runId}`}
+                          name={`room-${row.runId}`}
                           aria-label="Room"
                           value={row.roomId}
                           disabled={rowLocked}
@@ -1425,6 +1493,8 @@ export default function ConsolidatedTakeoffReview() {
                       </td>
                       <td className="ctr-col-piece">
                         <input
+                          id={`ctr-piece-${row.runId}`}
+                          name={`piece-${row.runId}`}
                           className="ctr-piece-name"
                           value={row.pieceName}
                           aria-label="Piece name"
@@ -1446,6 +1516,8 @@ export default function ConsolidatedTakeoffReview() {
                       </td>
                       <td className="ctr-col-dim">
                         <input
+                          id={`ctr-length-${row.runId}`}
+                          name={`length-${row.runId}`}
                           className="ctr-dim-input"
                           type="number"
                           step="0.1"
@@ -1456,7 +1528,7 @@ export default function ConsolidatedTakeoffReview() {
                             const lengthIn = Number(e.target.value) || 0;
                             updateDraft(
                               markRunEstimatorOwned(
-                                patchRun(
+                                patchRunGeometry(
                                   draft,
                                   { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
                                   { lengthIn, sf: sfFrom(lengthIn, row.depthIn) }
@@ -1470,6 +1542,8 @@ export default function ConsolidatedTakeoffReview() {
                       </td>
                       <td className="ctr-col-dim">
                         <input
+                          id={`ctr-depth-${row.runId}`}
+                          name={`depth-${row.runId}`}
                           className="ctr-dim-input"
                           type="number"
                           step="0.1"
@@ -1480,7 +1554,7 @@ export default function ConsolidatedTakeoffReview() {
                             const depthIn = Number(e.target.value) || 0;
                             updateDraft(
                               markRunEstimatorOwned(
-                                patchRun(
+                                patchRunGeometry(
                                   draft,
                                   { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
                                   { depthIn, sf: sfFrom(row.lengthIn, depthIn) }
@@ -1494,6 +1568,8 @@ export default function ConsolidatedTakeoffReview() {
                       </td>
                       <td className="ctr-col-qty">
                         <input
+                          id={`ctr-qty-${row.runId}`}
+                          name={`quantity-${row.runId}`}
                           className="ctr-dim-input"
                           type="number"
                           min={1}
@@ -1502,7 +1578,7 @@ export default function ConsolidatedTakeoffReview() {
                           data-testid="ctr-quantity"
                           onChange={(e) =>
                             updateDraft(
-                              patchRun(
+                              patchRunGeometry(
                                 draft,
                                 { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
                                 { quantity: Number(e.target.value) || 1 }
@@ -1518,6 +1594,7 @@ export default function ConsolidatedTakeoffReview() {
                         <label className="ctr-bs-toggle" htmlFor={bsId}>
                           <input
                             id={bsId}
+                            name={`backsplash-${row.runId}`}
                             type="checkbox"
                             checked={row.backsplashEligible}
                             aria-label="Include backsplash for this run"
@@ -1572,9 +1649,11 @@ export default function ConsolidatedTakeoffReview() {
                           disabled={rowLocked}
                           saving={edgeConfirmSavingRunId === row.runId}
                           staleConflict={edgeStaleConflict}
-                          onConfirm={(payload) => void confirmExposedEdges(row, payload)}
+                          onConfirm={(payload) => confirmExposedEdges(row, payload)}
                           onReviewLatestDraft={() => {
+                            coordinatorRef.current = clearConflictPause(coordinatorRef.current);
                             setEdgeStaleConflict(false);
+                            setSaveError(null);
                             if (authToken && takeoffJobId) {
                               void loadWorkspace(authToken, takeoffJobId, { forceServer: true });
                             }
@@ -1585,6 +1664,7 @@ export default function ConsolidatedTakeoffReview() {
                         <label htmlFor={inclId} className="ctr-bs-toggle">
                           <input
                             id={inclId}
+                            name={`include-${row.runId}`}
                             type="checkbox"
                             checked={row.included}
                             aria-label="Include piece"
@@ -1595,9 +1675,19 @@ export default function ConsolidatedTakeoffReview() {
                                 const next = new Set(prev);
                                 if (e.target.checked) next.delete(row.runId);
                                 else next.add(row.runId);
+                                excludedRef.current = next;
                                 return next;
                               });
-                              scheduleSave();
+                              const snapshot = structuredClone(
+                                draftRef.current || createEmptyManualTakeoffDraft()
+                              );
+                              coordinatorRef.current = noteLocalDraftEdit(
+                                coordinatorRef.current,
+                                snapshot,
+                                { correctionNotes: "Include/exclude piece" }
+                              );
+                              applySaveUiFromCoordinator();
+                              scheduleSave(0);
                             }}
                           />
                           <span className="ctr-bs-toggle-label">
@@ -1780,6 +1870,8 @@ export default function ConsolidatedTakeoffReview() {
                       </td>
                       <td className="ctr-col-notes">
                         <input
+                          id={`ctr-notes-${row.runId}`}
+                          name={`notes-${row.runId}`}
                           className="ctr-note-input"
                           value={row.note}
                           aria-label="Notes"
@@ -1821,10 +1913,13 @@ export default function ConsolidatedTakeoffReview() {
                 className="ctr-btn-secondary"
                 data-testid="ctr-add-room"
                 onClick={() => {
-                  const next = addRoom(draft || createEmptyManualTakeoffDraft());
-                  const newId = next.rooms?.[next.rooms.length - 1]?.id;
-                  if (newId) setSelectedRoomId(String(newId));
-                  updateDraft(next);
+                  void (async () => {
+                    await flushBeforeStructuralChange();
+                    const next = addRoom(draftRef.current || createEmptyManualTakeoffDraft());
+                    const newId = next.rooms?.[next.rooms.length - 1]?.id;
+                    if (newId) setSelectedRoomId(String(newId));
+                    updateDraft(next, { debounceMs: 0 });
+                  })();
                 }}
               >
                 Add room
@@ -1835,9 +1930,15 @@ export default function ConsolidatedTakeoffReview() {
                 data-testid="ctr-add-piece"
                 disabled={!selectedRoomId && !roomOptions[0]?.id}
                 onClick={() => {
-                  const roomId = selectedRoomId || roomOptions[0]?.id;
-                  if (!roomId) return;
-                  updateDraft(addPiece(draft || createEmptyManualTakeoffDraft(), roomId));
+                  void (async () => {
+                    const roomId = selectedRoomId || roomOptions[0]?.id;
+                    if (!roomId) return;
+                    await flushBeforeStructuralChange();
+                    updateDraft(
+                      addPiece(draftRef.current || createEmptyManualTakeoffDraft(), roomId),
+                      { debounceMs: 0 }
+                    );
+                  })();
                 }}
               >
                 Add piece

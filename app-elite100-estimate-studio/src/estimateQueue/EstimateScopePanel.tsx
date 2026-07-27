@@ -753,6 +753,16 @@ export default function EstimateScopePanel({
   }
 
   const blocked = estimate.status === "needs_takeoff_approval";
+  const estimateStatusLabel =
+    estimate.status === "needs_takeoff_approval"
+      ? "Takeoff worksheet needs review"
+      : estimate.status === "priced"
+        ? "Commercial estimate not approved"
+        : estimate.status === "approved"
+          ? "Commercial estimate approved"
+          : estimate.status === "draft" || estimate.status === "ready_to_calculate"
+            ? "Commercial estimate not calculated"
+            : String(estimate.status || "Unknown").replace(/_/g, " ");
   const scope = estimate.scope || {};
   const workflow = workflowProp || estimate.workflow || null;
   const pricingDirty = dirty;
@@ -866,7 +876,7 @@ export default function EstimateScopePanel({
           </div>
           <div>
             <dt>Estimate status</dt>
-            <dd data-testid="eq-estimate-status">{estimate.status}</dd>
+            <dd data-testid="eq-estimate-status">{estimateStatusLabel}</dd>
           </div>
           <div>
             <dt>Revision</dt>

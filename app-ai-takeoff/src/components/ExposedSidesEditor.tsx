@@ -1,8 +1,8 @@
 /**
  * Local-only exposed-sides editor. Checkbox toggles do not POST.
- * Confirm sends one correction via onConfirm.
+ * Confirm sends one correction via onConfirm; closes only after backend success.
  */
-import React, { useEffect, useId, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   PIECE_TOPOLOGIES,
   buildFinishedEdgeFromExposedSides,
@@ -43,6 +43,23 @@ export type ExposedSidesEditorProps = {
   onReviewLatestDraft?: () => void;
 };
 
+function sidesFromRow(row: ExposedSidesEditorProps["row"]) {
+  return row.exposedSides
+    ? {
+        front: row.exposedSides.front === true,
+        back: row.exposedSides.back === true,
+        left: row.exposedSides.left === true,
+        right: row.exposedSides.right === true
+      }
+    : mapLegacyExposedSides({
+        finishedEdge: row.finishedEdge,
+        frontExposed: row.frontExposed,
+        backExposed: row.backExposed,
+        leftExposed: row.leftExposed,
+        rightExposed: row.rightExposed
+      });
+}
+
 export default function ExposedSidesEditor({
   row,
   disabled = false,
@@ -52,55 +69,35 @@ export default function ExposedSidesEditor({
   onReviewLatestDraft
 }: ExposedSidesEditorProps) {
   const baseId = useId();
+  const panelId = `${baseId}-panel`;
+  const triggerId = `${baseId}-trigger`;
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const summaryRef = useRef<HTMLElement>(null);
   const suggestedTopology = suggestPieceTopology({
     label: row.pieceName,
     name: row.pieceName
   });
+  const [open, setOpen] = useState(false);
   const [topology, setTopology] = useState(
     () => row.pieceTopology || suggestedTopology || PIECE_TOPOLOGIES.CUSTOM
   );
   const [attachedSide, setAttachedSide] = useState<string>(
     () => String(row.attachedSide || "") || "left"
   );
-  const [sides, setSides] = useState(() =>
-    row.exposedSides
-      ? {
-          front: row.exposedSides.front === true,
-          back: row.exposedSides.back === true,
-          left: row.exposedSides.left === true,
-          right: row.exposedSides.right === true
-        }
-      : mapLegacyExposedSides({
-          finishedEdge: row.finishedEdge,
-          frontExposed: row.frontExposed,
-          backExposed: row.backExposed,
-          leftExposed: row.leftExposed,
-          rightExposed: row.rightExposed
-        })
-  );
+  const [sides, setSides] = useState(() => sidesFromRow(row));
   const [dirty, setDirty] = useState(false);
+
+  function resetFromCanonical() {
+    setTopology(row.pieceTopology || suggestedTopology || PIECE_TOPOLOGIES.CUSTOM);
+    setAttachedSide(String(row.attachedSide || "") || "left");
+    setSides(sidesFromRow(row));
+    setDirty(false);
+  }
 
   useEffect(() => {
     // Reset local editor when opening a different piece identity — not on every draft save.
-    setTopology(row.pieceTopology || suggestedTopology || PIECE_TOPOLOGIES.CUSTOM);
-    setAttachedSide(String(row.attachedSide || "") || "left");
-    setSides(
-      row.exposedSides
-        ? {
-            front: row.exposedSides.front === true,
-            back: row.exposedSides.back === true,
-            left: row.exposedSides.left === true,
-            right: row.exposedSides.right === true
-          }
-        : mapLegacyExposedSides({
-            finishedEdge: row.finishedEdge,
-            frontExposed: row.frontExposed,
-            backExposed: row.backExposed,
-            leftExposed: row.leftExposed,
-            rightExposed: row.rightExposed
-          })
-    );
-    setDirty(false);
+    resetFromCanonical();
+    setOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when piece changes
   }, [row.runId]);
 
@@ -128,22 +125,91 @@ export default function ExposedSidesEditor({
     setDirty(true);
   }
 
+  function closeWithoutSaving() {
+    if (saving) return;
+    resetFromCanonical();
+    setOpen(false);
+    if (detailsRef.current) detailsRef.current.open = false;
+    window.requestAnimationFrame(() => summaryRef.current?.focus());
+  }
+
+  async function handleConfirm() {
+    if (saving || disabled) return;
+    const payload = buildFinishedEdgeFromExposedSides({
+      lengthIn: row.lengthIn,
+      depthIn: row.depthIn,
+      quantity: row.quantity,
+      exposedSides: sides,
+      topology,
+      attachedSide: topology === PIECE_TOPOLOGIES.PENINSULA ? attachedSide : null,
+      confirm: true
+    });
+    try {
+      await onConfirm(payload);
+      setDirty(false);
+      setOpen(false);
+      if (detailsRef.current) detailsRef.current.open = false;
+      window.requestAnimationFrame(() => summaryRef.current?.focus());
+    } catch {
+      // Keep editor open; preserve selections. Parent sets conflict/error UI.
+    }
+  }
+
   const lengthIn = Number(row.lengthIn) || 0;
   const depthIn = Number(row.depthIn) || 0;
 
   return (
-    <details className="ctr-cutouts-pop" data-testid="ctr-exposed-edges">
-      <summary className="ctr-cutouts-summary" data-testid="ctr-exposed-edges-summary">
+    <details
+      ref={detailsRef}
+      className="ctr-cutouts-pop ctr-exposed-edges-pop"
+      data-testid="ctr-exposed-edges"
+      open={open}
+      onToggle={(e) => {
+        const nextOpen = (e.target as HTMLDetailsElement).open;
+        if (saving && !nextOpen) {
+          // Keep open while a confirm save is in flight.
+          if (detailsRef.current) detailsRef.current.open = true;
+          setOpen(true);
+          return;
+        }
+        if (!nextOpen && dirty && !saving) {
+          resetFromCanonical();
+        }
+        setOpen(nextOpen);
+      }}
+    >
+      <summary
+        ref={summaryRef}
+        id={triggerId}
+        className="ctr-cutouts-summary"
+        data-testid="ctr-exposed-edges-summary"
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={`Set exposed sides for ${row.pieceName}`}
+      >
         {row.finishedEdgeApproved
           ? `${((Number(row.finishedEdgeTotalIn) || 0) / 12).toFixed(2)} LF ✓`
           : row.finishedEdgeTotalIn != null
             ? `${((Number(row.finishedEdgeTotalIn) || 0) / 12).toFixed(2)} LF draft`
             : "Set exposed sides"}
       </summary>
-      <div className="ctr-cutouts-menu" data-testid="ctr-exposed-edges-editor">
+      <div
+        className="ctr-cutouts-menu ctr-exposed-edges-menu"
+        id={panelId}
+        role="group"
+        aria-label={`Exposed edges for ${row.pieceName}`}
+        data-testid="ctr-exposed-edges-editor"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            closeWithoutSaving();
+          }
+        }}
+      >
         <p className="ctr-muted" style={{ margin: "0 0 0.5rem", fontSize: 12 }}>
           Mark the physical sides that will be exposed. The edge profile is selected later in
-          Pricing Setup.
+          Pricing Setup. Backsplash is separate from countertop exposed edges.
         </p>
 
         <label className="ctr-field" htmlFor={`${baseId}-topology`} style={{ display: "block", marginBottom: 6 }}>
@@ -249,33 +315,31 @@ export default function ExposedSidesEditor({
           </div>
         ) : null}
 
-        <button
-          type="button"
-          className="ctr-btn-secondary"
-          data-testid="ctr-confirm-exposed-edges"
-          disabled={disabled || saving}
-          onClick={() => {
-            if (saving) return;
-            const payload = buildFinishedEdgeFromExposedSides({
-              lengthIn: row.lengthIn,
-              depthIn: row.depthIn,
-              quantity: row.quantity,
-              exposedSides: sides,
-              topology,
-              attachedSide: topology === PIECE_TOPOLOGIES.PENINSULA ? attachedSide : null,
-              confirm: true
-            });
-            void onConfirm(payload);
-            setDirty(false);
-          }}
-        >
-          {saving ? "Saving…" : "Confirm exposed edges"}
-        </button>
-        {dirty ? (
-          <span className="ctr-muted" style={{ marginLeft: 8, fontSize: 12 }}>
-            Unsaved side changes
-          </span>
-        ) : null}
+        <div className="ctr-exposed-edges-actions">
+          <button
+            type="button"
+            className="ctr-btn-secondary"
+            data-testid="ctr-confirm-exposed-edges"
+            disabled={disabled || saving}
+            onClick={() => void handleConfirm()}
+          >
+            {saving ? "Saving…" : "Confirm exposed edges"}
+          </button>
+          <button
+            type="button"
+            className="ctr-btn-secondary"
+            data-testid="ctr-cancel-exposed-edges"
+            disabled={saving}
+            onClick={() => closeWithoutSaving()}
+          >
+            Cancel
+          </button>
+          {dirty ? (
+            <span className="ctr-muted" style={{ marginLeft: 8, fontSize: 12 }}>
+              Unsaved side changes
+            </span>
+          ) : null}
+        </div>
       </div>
     </details>
   );
