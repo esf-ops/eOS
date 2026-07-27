@@ -1,6 +1,8 @@
 import { labelQuoteIntakePriority, labelQuoteIntakeStatus } from "./quoteIntakeStatusLabels.mjs";
+import { resolveCustomerDisplayLabel } from "../../../backend-core/src/elite100EstimateStudio/studioIdentityDisplay.mjs";
 
 const UNKNOWN = "Unknown";
+const CUSTOMER_FALLBACK = "Customer not identified";
 
 export function safeText(value, fallback = UNKNOWN) {
   if (value == null) return fallback;
@@ -9,12 +11,20 @@ export function safeText(value, fallback = UNKNOWN) {
 }
 
 export function caseCustomerProjectLabel(c) {
-  const customer = String(c?.customerName ?? c?.customer ?? "").trim();
+  const customer = resolveCustomerDisplayLabel({
+    customerName: c?.customerName ?? c?.customer,
+    intakeCustomerName: c?.customerName ?? c?.customer,
+    senderDisplayName: c?.senderName
+  }).label;
   const project = String(c?.projectName ?? c?.project ?? "").trim();
-  if (customer && project) return `${customer} · ${project}`;
-  if (customer) return customer;
+  const customerLabel =
+    !customer || customer === "Unknown" || customer === "Unknown customer"
+      ? CUSTOMER_FALLBACK
+      : customer;
+  if (customerLabel && project) return `${customerLabel} · ${project}`;
+  if (customerLabel && customerLabel !== CUSTOMER_FALLBACK) return customerLabel;
   if (project) return project;
-  return UNKNOWN;
+  return CUSTOMER_FALLBACK;
 }
 
 export function caseSenderLabel(c) {

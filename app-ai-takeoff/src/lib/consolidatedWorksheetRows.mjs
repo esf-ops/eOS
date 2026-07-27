@@ -64,8 +64,13 @@ export function flattenPieces(result, excludedRunIds) {
             run.finishedEdge?.finishedEdgeConfirmed === true ||
             run.finishedEdge?.approved === true,
           frontEdgeLengthIn: Number(run.finishedEdge?.frontEdgeLengthIn) || null,
-          leftExposed: run.leftExposed ?? run.finishedEdge?.leftExposed ?? null,
-          rightExposed: run.rightExposed ?? run.finishedEdge?.rightExposed ?? null,
+          leftExposed: run.leftExposed ?? run.finishedEdge?.leftExposed ?? run.finishedEdge?.exposedSides?.left ?? null,
+          rightExposed: run.rightExposed ?? run.finishedEdge?.rightExposed ?? run.finishedEdge?.exposedSides?.right ?? null,
+          backExposed: run.backExposed ?? run.finishedEdge?.backExposed ?? run.finishedEdge?.exposedSides?.back ?? null,
+          frontExposed: run.frontExposed ?? run.finishedEdge?.frontExposed ?? run.finishedEdge?.exposedSides?.front ?? null,
+          pieceTopology: run.pieceTopology ?? run.finishedEdge?.pieceTopology ?? null,
+          attachedSide: run.attachedSide ?? run.finishedEdge?.attachedSide ?? null,
+          exposedSides: run.finishedEdge?.exposedSides ?? null,
           included: !excludedRunIds.has(run.id),
           cutouts,
           cutoutsSummary: summarizeRunCutouts(cutouts),
@@ -209,38 +214,74 @@ export function patchRunBacksplashEligibility(result, locator, args) {
 
 /**
  * Persist estimator-approved finished-edge geometry on a run.
+ * Accepts legacy length fields and/or exposedSides + dimensions.
  */
 export function patchRunFinishedEdge(result, locator, finishedEdge) {
   const fe = finishedEdge && typeof finishedEdge === "object" ? finishedEdge : {};
   const front = Math.max(0, Number(fe.frontEdgeLengthIn) || 0);
   const left = Math.max(0, Number(fe.leftExposedEdgeLengthIn) || 0);
   const right = Math.max(0, Number(fe.rightExposedEdgeLengthIn) || 0);
-  const other = Math.max(0, Number(fe.otherExposedEdgeLengthIn) || 0);
+  const other = Math.max(
+    0,
+    Number(fe.otherExposedEdgeLengthIn ?? fe.backExposedEdgeLengthIn) || 0
+  );
   const adj = Number(fe.adjustmentIn) || 0;
   if (adj !== 0 && !String(fe.adjustmentReason || "").trim()) {
     throw Object.assign(new Error("Finished-edge adjustment requires a reason"), {
       code: "finished_edge_adjustment_reason_required"
     });
   }
-  const total = Math.max(0, Math.round((front + left + right + other + adj) * 100) / 100);
+  const qty = Math.max(1, Number(fe.quantityApplied) || Number(fe.quantity) || 1);
+  const perUnit = Math.max(0, round2(front + left + right + other));
+  const totalFromSides = Number.isFinite(Number(fe.totalFinishedEdgeLengthIn))
+    ? Math.max(0, round2(Number(fe.totalFinishedEdgeLengthIn)))
+    : round2(perUnit * qty + adj);
+  const total = Math.max(0, round2(totalFromSides));
+  const exposedSides =
+    fe.exposedSides && typeof fe.exposedSides === "object"
+      ? {
+          front: fe.exposedSides.front === true || front > 0,
+          back: fe.exposedSides.back === true || other > 0,
+          left: fe.exposedSides.left === true || left > 0,
+          right: fe.exposedSides.right === true || right > 0
+        }
+      : {
+          front: front > 0,
+          back: other > 0,
+          left: left > 0,
+          right: right > 0
+        };
+  const confirmed = fe.finishedEdgeConfirmed !== false && fe.approved !== false;
   return patchRun(result, locator, {
-    leftExposed: left > 0,
-    rightExposed: right > 0,
-    frontExposed: front > 0,
-    backExposed: other > 0,
+    leftExposed: exposedSides.left,
+    rightExposed: exposedSides.right,
+    frontExposed: exposedSides.front,
+    backExposed: exposedSides.back,
+    pieceTopology: fe.pieceTopology || fe.topology || null,
+    attachedSide: fe.attachedSide ?? null,
     finishedEdge: {
-      finishedEdgeConfirmed: true,
+      finishedEdgeConfirmed: confirmed,
       frontEdgeLengthIn: front,
       leftExposedEdgeLengthIn: left,
       rightExposedEdgeLengthIn: right,
       otherExposedEdgeLengthIn: other,
+      backExposedEdgeLengthIn: other,
       totalFinishedEdgeLengthIn: total,
-      approved: true,
-      source: "estimator_confirmed",
-      approvalSource: "estimator_confirmed",
-      approvedAt: new Date().toISOString(),
+      perUnitFinishedEdgeLengthIn: perUnit,
+      quantityApplied: qty,
+      exposedSides,
+      pieceTopology: fe.pieceTopology || fe.topology || null,
+      attachedSide: fe.attachedSide ?? null,
+      approved: confirmed,
+      source: fe.source || "estimator_confirmed",
+      approvalSource: fe.approvalSource || "estimator_confirmed",
+      approvedAt: fe.approvedAt || new Date().toISOString(),
       adjustmentIn: adj,
       adjustmentReason: fe.adjustmentReason || null
     }
   });
+}
+
+function round2(n) {
+  return Math.round(Number(n) * 100) / 100;
 }

@@ -2569,4 +2569,19 @@
 | **Tests** | `eos:test:studio-secure-plan-viewer` (+ Shared Inbox + golden-path gate). |
 | **Deferred** | Piece-to-page evidence navigation; Add Plans to Existing Estimate; malware scanning; permanent download UX; mailbox webhook/delta. |
 
+### 180. AI Takeoff exposed-edge geometry + correction conflicts (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `fix/ai-takeoff-exposed-edge-corrections` |
+| **Decision** | AI Takeoff owns **physical exposed-side evidence** (front/back/left/right) and physical LF. Pricing Setup remains the sole authority for commercial edge profile and price. |
+| **Four sides** | Rectangular pieces store `exposedSides` plus legacy length fields (`otherExposedEdgeLengthIn` = back). |
+| **Topology** | Helpers: wall_run, island (all four), peninsula (requires attached side → other three), vanity (front default; ends estimator-confirmed), custom (manual). Suggestions are not approved until Confirm. |
+| **LF** | `(sum of selected side inches × quantity) / 12`. Quantity applied exactly once. |
+| **Corrections** | Exposed-side checkbox toggles are **local only**. **Confirm exposed edges** sends one correction with current `baseResultId` / `clientMutationRevision`. Saves are serialized per job. Optimistic concurrency (`stale_takeoff_correction`) remains enabled; 409 returns latest result id/revision metadata for recovery without auto-replay. |
+| **Approval** | Approved Takeoff snapshots stay frozen; a later draft edit returns the job to needs_review and UI distinguishes previous approved vs current draft review. |
+| **Studio** | Room physical LF continues via existing `confirmedOpenEdgeLf` / approved piece finished-edge sum authority. Profile selection independent; Eased does not zero physical LF. |
+| **SQL** | None. |
+| **Tests** | `eos:test:takeoff-exposed-edges` (+ secure plan viewer, Shared Inbox, golden-path regressions). |
+
 

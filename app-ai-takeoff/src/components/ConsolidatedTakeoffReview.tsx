@@ -53,6 +53,7 @@ import {
   reassignRun,
   sfFrom
 } from "../lib/consolidatedWorksheetRows.mjs";
+import ExposedSidesEditor from "./ExposedSidesEditor";
 import {
   isTakeoffJobTerminal,
   resultVersionOf,
@@ -103,6 +104,17 @@ type PieceRow = {
   frontEdgeLengthIn?: number | null;
   leftExposed?: boolean | null;
   rightExposed?: boolean | null;
+  backExposed?: boolean | null;
+  frontExposed?: boolean | null;
+  pieceTopology?: string | null;
+  attachedSide?: string | null;
+  exposedSides?: {
+    front?: boolean;
+    back?: boolean;
+    left?: boolean;
+    right?: boolean;
+  } | null;
+  finishedEdge?: unknown;
   included: boolean;
   cutouts: CutoutEntry[];
   cutoutsSummary: string;
@@ -210,6 +222,9 @@ export default function ConsolidatedTakeoffReview() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [edgeConfirmSavingRunId, setEdgeConfirmSavingRunId] = useState<string | null>(null);
+  const [edgeStaleConflict, setEdgeStaleConflict] = useState(false);
+  const [jobReviewStatus, setJobReviewStatus] = useState<string | null>(null);
   const [approveStatus, setApproveStatus] = useState<ApproveStatus>("idle");
   const [approveMsg, setApproveMsg] = useState<string | null>(null);
   const [blocking, setBlocking] = useState<ApprovalBlockerItem[]>([]);
@@ -366,6 +381,7 @@ export default function ConsolidatedTakeoffReview() {
 
     const jobStatus = String(job?.status ?? "").toLowerCase();
     const reviewStatus = String(job?.reviewStatus ?? latest?.reviewStatus ?? "").toLowerCase();
+    setJobReviewStatus(reviewStatus || null);
     const usableServer = hasUsableTakeoffGeometry(result);
     const pendingAiAvailable = Boolean(latest?.pendingAiAvailable && latest?.pendingAiDraft);
     const acceptServerDraft =
@@ -469,7 +485,11 @@ export default function ConsolidatedTakeoffReview() {
         jobStatus,
         reviewStatus,
         hasUsableGeometry: hasUsableTakeoffGeometry(activeDraft) || usableServer,
-        pendingAiAvailable
+        pendingAiAvailable,
+        draftNeedsReview:
+          saveStatus === "dirty" ||
+          saveStatus === "error" ||
+          (reviewStatus === "needs_review" && usableServer)
       })
     );
 
@@ -544,6 +564,12 @@ export default function ConsolidatedTakeoffReview() {
         lastServerResultVersionRef.current =
           resultVersionOf(response) ?? lastServerResultVersionRef.current;
         setAiPhase("ready");
+        setJobReviewStatus("needs_review");
+        setEdgeStaleConflict(false);
+        if (approveStatus === "approved") {
+          setApproveStatus("idle");
+          setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
+        }
         if (revision === mutationRevisionRef.current) {
           setSaveStatus("saved");
           window.setTimeout(
@@ -553,13 +579,37 @@ export default function ConsolidatedTakeoffReview() {
         }
       } catch (e) {
         if (revision === mutationRevisionRef.current) {
-          setSaveStatus("error");
-          setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+          if (e instanceof LabApiError && e.status === 409) {
+            const body =
+              e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : {};
+            if (typeof body.latestResultId === "string" && body.latestResultId) {
+              latestResultIdRef.current = body.latestResultId;
+            }
+            const serverRev = Number(body.latestClientMutationRevision);
+            if (Number.isSafeInteger(serverRev) && serverRev > 0) {
+              savedMutationRevisionRef.current = Math.max(
+                savedMutationRevisionRef.current,
+                serverRev
+              );
+              queuedMutationRevisionRef.current = Math.max(
+                queuedMutationRevisionRef.current,
+                serverRev
+              );
+            }
+            setEdgeStaleConflict(true);
+            setSaveStatus("error");
+            setSaveError("The Takeoff draft changed while you were editing.");
+            setDisplayStatus("Needs estimator review");
+            setJobReviewStatus("needs_review");
+          } else {
+            setSaveStatus("error");
+            setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+          }
         }
         throw e;
       }
     },
-    [authToken, takeoffJobId]
+    [authToken, takeoffJobId, approveStatus]
   );
 
   const handleAutoAppendAi = useCallback(async () => {
@@ -775,6 +825,14 @@ export default function ConsolidatedTakeoffReview() {
       lastServerResultVersionRef.current =
         resultVersionOf(response) ?? lastServerResultVersionRef.current;
       setAiPhase("ready");
+      setJobReviewStatus("needs_review");
+      setEdgeStaleConflict(false);
+      if (approveStatus === "approved") {
+        setApproveStatus("idle");
+        setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
+      } else if (revision === mutationRevisionRef.current) {
+        setDisplayStatus("Needs estimator review");
+      }
       // Never apply response.normalizedTakeoffJson here. The optimistic draft
       // may already contain newer edits than this serialized request.
       if (revision === mutationRevisionRef.current) {
@@ -786,11 +844,34 @@ export default function ConsolidatedTakeoffReview() {
       }
     } catch (e) {
       if (revision === mutationRevisionRef.current) {
-        setSaveStatus("error");
-        setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+        if (e instanceof LabApiError && e.status === 409) {
+          const body =
+            e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : {};
+          if (typeof body.latestResultId === "string" && body.latestResultId) {
+            latestResultIdRef.current = body.latestResultId;
+          }
+          const serverRev = Number(body.latestClientMutationRevision);
+          if (Number.isSafeInteger(serverRev) && serverRev > 0) {
+            savedMutationRevisionRef.current = Math.max(
+              savedMutationRevisionRef.current,
+              serverRev
+            );
+            queuedMutationRevisionRef.current = Math.max(
+              queuedMutationRevisionRef.current,
+              serverRev
+            );
+          }
+          setEdgeStaleConflict(true);
+          setSaveStatus("error");
+          setSaveError("The Takeoff draft changed while you were editing.");
+          setDisplayStatus("Needs estimator review");
+        } else {
+          setSaveStatus("error");
+          setSaveError(e instanceof LabApiError ? e.message : "Save failed");
+        }
       }
     }
-  }, [authToken, takeoffJobId, buildReviewState]);
+  }, [authToken, takeoffJobId, buildReviewState, approveStatus]);
 
   const scheduleSave = useCallback(() => {
     setSaveStatus("dirty");
@@ -810,6 +891,49 @@ export default function ConsolidatedTakeoffReview() {
       scheduleSave();
     },
     [scheduleSave]
+  );
+
+  const confirmExposedEdges = useCallback(
+    async (
+      row: PieceRow,
+      finishedEdgePayload: Record<string, unknown>
+    ) => {
+      if (!authToken || !takeoffJobId || edgeConfirmSavingRunId) return;
+      setEdgeConfirmSavingRunId(row.runId);
+      setEdgeStaleConflict(false);
+      setSaveError(null);
+      try {
+        const next = markRunEstimatorOwned(
+          patchRunFinishedEdge(
+            draftRef.current || createEmptyManualTakeoffDraft(),
+            { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
+            finishedEdgePayload
+          ),
+          row.roomId,
+          row.runId
+        );
+        await persistDraftWithResult(next, {
+          correctionNotes: "Confirm exposed edges"
+        });
+        if (jobReviewStatus === "approved" || approveStatus === "approved") {
+          setDisplayStatus("Previous Takeoff approved · Current draft needs estimator review");
+        } else {
+          setDisplayStatus("Needs estimator review");
+        }
+      } catch {
+        // persistDraftWithResult already set saveError / stale conflict UI
+      } finally {
+        setEdgeConfirmSavingRunId(null);
+      }
+    },
+    [
+      authToken,
+      takeoffJobId,
+      edgeConfirmSavingRunId,
+      persistDraftWithResult,
+      jobReviewStatus,
+      approveStatus
+    ]
   );
 
   const handleRemoveRoom = useCallback(
@@ -1180,7 +1304,7 @@ export default function ConsolidatedTakeoffReview() {
                     <th className="ctr-col-qty">Quantity</th>
                     <th className="ctr-col-sf">Square feet</th>
                     <th className="ctr-col-bs">Backsplash</th>
-                    <th className="ctr-col-edge">Finished edge</th>
+                    <th className="ctr-col-edge">Exposed edges</th>
                     <th className="ctr-col-incl">Included</th>
                     <th className="ctr-col-cutouts">Cutouts</th>
                     <th className="ctr-col-notes">Notes</th>
@@ -1443,184 +1567,19 @@ export default function ConsolidatedTakeoffReview() {
                         </label>
                       </td>
                       <td className="ctr-col-edge">
-                        <details className="ctr-cutouts-pop" data-testid="ctr-finished-edge">
-                          <summary className="ctr-cutouts-summary">
-                            {row.finishedEdgeApproved
-                              ? `${((Number(row.finishedEdgeTotalIn) || 0) / 12).toFixed(2)} LF ✓`
-                              : row.finishedEdgeTotalIn != null
-                                ? `${((Number(row.finishedEdgeTotalIn) || 0) / 12).toFixed(2)} LF draft`
-                                : "Set edges"}
-                          </summary>
-                          <div className="ctr-cutouts-menu">
-                            <p className="ctr-muted" style={{ margin: "0 0 0.5rem", fontSize: 12 }}>
-                              Front defaults to full run length. Left/right use depth when
-                              exposed. Backsplash does not remove the front finished edge.
-                            </p>
-                            <label className="ctr-bs-toggle" style={{ display: "block", marginBottom: 4 }}>
-                              <input
-                                type="checkbox"
-                                defaultChecked={
-                                  row.frontEdgeLengthIn == null
-                                    ? true
-                                    : Number(row.frontEdgeLengthIn) > 0
-                                }
-                                disabled={rowLocked}
-                                data-testid="ctr-edge-front-exposed"
-                                onChange={(e) => {
-                                  const front = e.target.checked ? Number(row.lengthIn) || 0 : 0;
-                                  const left =
-                                    row.leftExposed === true ? Number(row.depthIn) || 0 : 0;
-                                  const right =
-                                    row.rightExposed === true ? Number(row.depthIn) || 0 : 0;
-                                  updateDraft(
-                                    markRunEstimatorOwned(
-                                      patchRunFinishedEdge(
-                                        draft,
-                                        {
-                                          roomId: row.roomId,
-                                          areaId: row.areaId,
-                                          runId: row.runId
-                                        },
-                                        {
-                                          frontEdgeLengthIn: front,
-                                          leftExposedEdgeLengthIn: left,
-                                          rightExposedEdgeLengthIn: right,
-                                          otherExposedEdgeLengthIn: 0,
-                                          adjustmentIn: 0
-                                        }
-                                      ),
-                                      row.roomId,
-                                      row.runId
-                                    )
-                                  );
-                                }}
-                              />
-                              <span className="ctr-bs-toggle-label">
-                                Front exposed ({Number(row.lengthIn) || 0} in)
-                              </span>
-                            </label>
-                            <label className="ctr-bs-toggle" style={{ display: "block", marginBottom: 4 }}>
-                              <input
-                                type="checkbox"
-                                checked={row.leftExposed === true}
-                                disabled={rowLocked}
-                                data-testid="ctr-edge-left-exposed"
-                                onChange={(e) => {
-                                  const front =
-                                    row.frontEdgeLengthIn != null
-                                      ? Number(row.frontEdgeLengthIn) || 0
-                                      : Number(row.lengthIn) || 0;
-                                  const left = e.target.checked ? Number(row.depthIn) || 0 : 0;
-                                  const right =
-                                    row.rightExposed === true ? Number(row.depthIn) || 0 : 0;
-                                  updateDraft(
-                                    markRunEstimatorOwned(
-                                      patchRunFinishedEdge(
-                                        draft,
-                                        {
-                                          roomId: row.roomId,
-                                          areaId: row.areaId,
-                                          runId: row.runId
-                                        },
-                                        {
-                                          frontEdgeLengthIn: front,
-                                          leftExposedEdgeLengthIn: left,
-                                          rightExposedEdgeLengthIn: right,
-                                          otherExposedEdgeLengthIn: 0,
-                                          adjustmentIn: 0
-                                        }
-                                      ),
-                                      row.roomId,
-                                      row.runId
-                                    )
-                                  );
-                                }}
-                              />
-                              <span className="ctr-bs-toggle-label">
-                                Left exposed ({Number(row.depthIn) || 0} in depth)
-                              </span>
-                            </label>
-                            <label className="ctr-bs-toggle" style={{ display: "block", marginBottom: 4 }}>
-                              <input
-                                type="checkbox"
-                                checked={row.rightExposed === true}
-                                disabled={rowLocked}
-                                data-testid="ctr-edge-right-exposed"
-                                onChange={(e) => {
-                                  const front =
-                                    row.frontEdgeLengthIn != null
-                                      ? Number(row.frontEdgeLengthIn) || 0
-                                      : Number(row.lengthIn) || 0;
-                                  const left =
-                                    row.leftExposed === true ? Number(row.depthIn) || 0 : 0;
-                                  const right = e.target.checked ? Number(row.depthIn) || 0 : 0;
-                                  updateDraft(
-                                    markRunEstimatorOwned(
-                                      patchRunFinishedEdge(
-                                        draft,
-                                        {
-                                          roomId: row.roomId,
-                                          areaId: row.areaId,
-                                          runId: row.runId
-                                        },
-                                        {
-                                          frontEdgeLengthIn: front,
-                                          leftExposedEdgeLengthIn: left,
-                                          rightExposedEdgeLengthIn: right,
-                                          otherExposedEdgeLengthIn: 0,
-                                          adjustmentIn: 0
-                                        }
-                                      ),
-                                      row.roomId,
-                                      row.runId
-                                    )
-                                  );
-                                }}
-                              />
-                              <span className="ctr-bs-toggle-label">
-                                Right / outer end ({Number(row.depthIn) || 0} in depth)
-                              </span>
-                            </label>
-                            <button
-                              type="button"
-                              className="ctr-btn-secondary"
-                              data-testid="ctr-confirm-finished-edge"
-                              disabled={rowLocked}
-                              onClick={() => {
-                                const front =
-                                  row.frontEdgeLengthIn != null
-                                    ? Number(row.frontEdgeLengthIn) || 0
-                                    : Number(row.lengthIn) || 0;
-                                const depth = Number(row.depthIn) || 0;
-                                const leftIn = row.leftExposed === true ? depth : 0;
-                                const rightIn = row.rightExposed === true ? depth : 0;
-                                updateDraft(
-                                  markRunEstimatorOwned(
-                                    patchRunFinishedEdge(
-                                      draft,
-                                      {
-                                        roomId: row.roomId,
-                                        areaId: row.areaId,
-                                        runId: row.runId
-                                      },
-                                      {
-                                        frontEdgeLengthIn: front || Number(row.lengthIn) || 0,
-                                        leftExposedEdgeLengthIn: leftIn,
-                                        rightExposedEdgeLengthIn: rightIn,
-                                        otherExposedEdgeLengthIn: 0,
-                                        adjustmentIn: 0
-                                      }
-                                    ),
-                                    row.roomId,
-                                    row.runId
-                                  )
-                                );
-                              }}
-                            >
-                              Confirm finished edge
-                            </button>
-                          </div>
-                        </details>
+                        <ExposedSidesEditor
+                          row={row}
+                          disabled={rowLocked}
+                          saving={edgeConfirmSavingRunId === row.runId}
+                          staleConflict={edgeStaleConflict}
+                          onConfirm={(payload) => void confirmExposedEdges(row, payload)}
+                          onReviewLatestDraft={() => {
+                            setEdgeStaleConflict(false);
+                            if (authToken && takeoffJobId) {
+                              void loadWorkspace(authToken, takeoffJobId, { forceServer: true });
+                            }
+                          }}
+                        />
                       </td>
                       <td className="ctr-col-incl">
                         <label htmlFor={inclId} className="ctr-bs-toggle">
