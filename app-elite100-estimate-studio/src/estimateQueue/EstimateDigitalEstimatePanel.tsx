@@ -135,6 +135,8 @@ type Props = {
   estimateApproved: boolean;
   /** When true, Publish orchestrates confirm/calculate/approve then publication. */
   useSimplifiedPublish?: boolean;
+  /** Flush pending draft autosaves before simplified publish. */
+  onBeforePublishFlush?: () => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>;
   onEditProjectDetails?: () => void;
   /** Lifted safe publication summary — read-only; never triggers mutations. */
   onPublicationSummary?: (publication: Record<string, unknown> | null) => void;
@@ -197,6 +199,7 @@ export default function EstimateDigitalEstimatePanel({
   estimateRevision,
   estimateApproved,
   useSimplifiedPublish = false,
+  onBeforePublishFlush,
   onEditProjectDetails,
   onPublicationSummary,
   onPublicationRefreshError
@@ -443,6 +446,19 @@ export default function EstimateDigitalEstimatePanel({
     setActionNotice("Publishing Digital Estimate…");
     setPublishDiagnostic(null);
     try {
+      if (useSimplifiedPublish && onBeforePublishFlush) {
+        const flush = await onBeforePublishFlush();
+        if (!flush.ok) {
+          setPublishUiState("failed");
+          setActionNotice(null);
+          setActionError(
+            flush.conflict
+              ? "Another user changed this estimate. Resolve the save conflict before publishing. No customer link was changed."
+              : "Save failed. Retry the draft save before publishing. No customer link was changed."
+          );
+          return;
+        }
+      }
       const publishPath = useSimplifiedPublish
         ? `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/simplified-publish`
         : `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/digital-estimate/publish`;

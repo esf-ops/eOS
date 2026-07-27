@@ -139,6 +139,57 @@ export default function EstimateTakeoffWorkspace({
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [publicationRefreshError, setPublicationRefreshError] = useState<string | null>(null);
   const [sectionsExpanded, setSectionsExpanded] = useState(false);
+  const [activeSection, setActiveSection] = useState<"scope" | "customer_choices" | "review_publish">(
+    () =>
+      initialFocus === "digital" || initialFocus === "review"
+        ? "review_publish"
+        : "scope"
+  );
+  const [sectionNavError, setSectionNavError] = useState<string | null>(null);
+  const [workspaceAutosaveLabel, setWorkspaceAutosaveLabel] = useState("");
+  const [workspaceCalcLabel, setWorkspaceCalcLabel] = useState("");
+  const flushManualRef = useRef<
+    (() => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>) | null
+  >(null);
+  const flushPricingRef = useRef<
+    (() => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>) | null
+  >(null);
+
+  async function flushAllPendingSaves(): Promise<{
+    ok: boolean;
+    conflict?: boolean;
+    failed?: boolean;
+  }> {
+    const results = await Promise.all([
+      flushManualRef.current?.() ?? Promise.resolve({ ok: true as const }),
+      flushPricingRef.current?.() ?? Promise.resolve({ ok: true as const })
+    ]);
+    if (results.some((r) => r.conflict)) {
+      return { ok: false, conflict: true };
+    }
+    if (results.some((r) => !r.ok || r.failed)) {
+      return { ok: false, failed: true };
+    }
+    return { ok: true };
+  }
+
+  async function navigateWorkspaceSection(next: "scope" | "customer_choices" | "review_publish") {
+    if (next === activeSection) return;
+    setSectionNavError(null);
+    const flush = await flushAllPendingSaves();
+    if (!flush.ok) {
+      setSectionNavError(
+        flush.conflict
+          ? "Another user changed this estimate. Resolve the save conflict before leaving this section."
+          : "Save failed. Retry the save before leaving this section."
+      );
+      return;
+    }
+    setActiveSection(next);
+    if (state.kind === "ready" && !state.manualMode) {
+      setTakeoffFrameMounted(next === "scope");
+    }
+  }
 
   const publicationSummary = useMemo((): PublicationSummary | null => {
     const fromEst =
@@ -225,21 +276,23 @@ export default function EstimateTakeoffWorkspace({
   }
 
   function onPrimaryWorkflowAction(action: string) {
-    if (action === "confirm_manual_scope" || action === "save_manual_scope" || action === "complete_manual_scope") {
-      document
-        .querySelector('[data-testid="manual-physical-scope-editor"]')
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (
+      action === "confirm_manual_scope" ||
+      action === "save_manual_scope" ||
+      action === "complete_manual_scope"
+    ) {
+      void navigateWorkspaceSection("scope");
       return;
     }
-    if (action === "save_pricing" || action === "complete_pricing" || action === "calculate" || action === "approve") {
-      document
-        .querySelector('[data-testid="estimate-scope-panel"]')
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      if (action === "calculate") {
-        (document.querySelector('[data-testid="eq-calculate-estimate"]') as HTMLButtonElement | null)?.click();
-      } else if (action === "approve") {
-        (document.querySelector('[data-testid="eq-approve-estimate"]') as HTMLButtonElement | null)?.click();
-      }
+    if (
+      action === "save_pricing" ||
+      action === "complete_pricing" ||
+      action === "calculate" ||
+      action === "approve"
+    ) {
+      void navigateWorkspaceSection(
+        action === "approve" || action === "calculate" ? "review_publish" : "customer_choices"
+      );
       return;
     }
     if (action === "add_project_name" || action === "edit_project_details") {
@@ -255,11 +308,7 @@ export default function EstimateTakeoffWorkspace({
       action === "publish" ||
       action === "review_customer_request"
     ) {
-      document
-        .querySelector(
-          '[data-testid="eq-publication-summary"], [data-testid="estimate-digital-estimate-panel"], [data-testid="eq-digital-estimate"]'
-        )
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      void navigateWorkspaceSection("review_publish");
       if (action === "open_customer_view" && publicationSummary?.customerUrl) {
         window.open(publicationSummary.customerUrl, "_blank", "noopener,noreferrer");
       }
@@ -813,14 +862,55 @@ export default function EstimateTakeoffWorkspace({
             ) : null}
           </section>
 
-          <EstimateWorkflowHeader
-            workflow={workspaceWorkflow}
-            transientError={transientError}
-            busy={workflowBusy}
-            onPrimaryAction={onPrimaryWorkflowAction}
-            onRefreshStatus={refreshStatus}
-            onRetry={pendingRetry}
-          />
+          <nav className="eq-section-tabs" data-testid="eq-section-tabs" aria-label="Estimate sections">
+            {(
+              [
+                ["scope", "Scope"],
+                ["customer_choices", "Customer Choices"],
+                ["review_publish", "Review & Publish"]
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={
+                  activeSection === id ? "eq-section-tab eq-section-tab--active" : "eq-section-tab"
+                }
+                data-testid={`eq-section-tab-${id}`}
+                aria-current={activeSection === id ? "page" : undefined}
+                onClick={() => void navigateWorkspaceSection(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+          {(workspaceAutosaveLabel || workspaceCalcLabel) && (
+            <div className="eq-workspace-status-bar" data-testid="eq-workspace-status-bar">
+              {workspaceAutosaveLabel ? (
+                <span data-testid="eq-workspace-autosave-status">{workspaceAutosaveLabel}</span>
+              ) : null}
+              {workspaceCalcLabel ? (
+                <span data-testid="eq-workspace-calc-status">{workspaceCalcLabel}</span>
+              ) : null}
+            </div>
+          )}
+          {sectionNavError ? (
+            <div className="eq-state eq-state--error" role="alert" data-testid="eq-section-nav-error">
+              {sectionNavError}
+            </div>
+          ) : null}
+
+          <details className="eq-compat-advanced" data-testid="eq-compat-workflow-header">
+            <summary>Advanced — Legacy workflow status</summary>
+            <EstimateWorkflowHeader
+              workflow={workspaceWorkflow}
+              transientError={transientError}
+              busy={workflowBusy}
+              onPrimaryAction={onPrimaryWorkflowAction}
+              onRefreshStatus={refreshStatus}
+              onRetry={pendingRetry}
+            />
+          </details>
 
           {publicationSummary &&
           (publicationSummary.active ||
@@ -849,10 +939,8 @@ export default function EstimateTakeoffWorkspace({
               <p className="eq-muted">Completed estimating stages</p>
               <ul>
                 <li>✓ Project details</li>
-                <li>✓ {state.manualMode ? "Manual scope" : "Takeoff"}</li>
-                <li>✓ Pricing Setup</li>
-                <li>✓ Calculation</li>
-                <li>✓ Approval</li>
+                <li>✓ Scope</li>
+                <li>✓ Customer Choices</li>
                 <li>✓ Digital Estimate published</li>
               </ul>
               <button
@@ -888,8 +976,12 @@ export default function EstimateTakeoffWorkspace({
               caseId={caseId}
               estimateId={state.estimateId}
               refreshKey={state.scopeRefreshKey}
+              hidden={activeSection !== "scope"}
               onDirtyChange={setManualDirty}
               onActiveEstimateChange={applyActiveEstimateChange}
+              onRegisterFlush={(flush) => {
+                flushManualRef.current = flush;
+              }}
               onConfirmed={() => {
                 setManualDirty(false);
                 setState((prev) =>
@@ -898,20 +990,18 @@ export default function EstimateTakeoffWorkspace({
                         ...prev,
                         displayStatus: "Manual scope confirmed",
                         scopeRefreshKey: prev.scopeRefreshKey + 1,
-                        handoffNotice: "Manual scope confirmed — continue with Pricing Setup."
+                        handoffNotice: "Manual scope confirmed — continue with Customer Choices."
                       }
                     : prev
                 );
-                window.setTimeout(() => {
-                  document
-                    .querySelector('[data-testid="estimate-scope-panel"]')
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, 80);
+                void navigateWorkspaceSection("customer_choices");
               }}
             />
           ) : null}
 
-          {!state.manualMode && (!collapseCompleted || sectionsExpanded || initialFocus === "takeoff") ? (
+          {!state.manualMode &&
+          (!collapseCompleted || sectionsExpanded || initialFocus === "takeoff") &&
+          activeSection === "scope" ? (
             <>
               {sourcePlans?.plans?.some((p) => p.attachmentId) ? (
                 <div className="eq-action-row" data-testid="eq-takeoff-view-source-plan-row">
@@ -967,7 +1057,7 @@ export default function EstimateTakeoffWorkspace({
                 shown from validation.
               </p>
             </>
-          ) : state.manualMode && !collapseCompleted ? (
+          ) : state.manualMode && !collapseCompleted && activeSection === "scope" ? (
             <p className="eq-footnote" data-testid="eq-manual-scope-hint">
               Define fabrication Scope here. Changes autosave. Continue to Customer Choices, then
               Publish Digital Estimate when ready — no separate Confirm Scope, Calculate, or Commercial
@@ -983,12 +1073,19 @@ export default function EstimateTakeoffWorkspace({
             refreshKey={state.scopeRefreshKey}
             workflow={workspaceWorkflow}
             collapseCompleted={collapseCompleted}
+            activeSection={activeSection}
             onExpandCompleted={() => setSectionsExpanded(true)}
             onDirtyChange={setPricingDirty}
             onBusyChange={setWorkflowBusy}
             onCanonicalEstimate={(est) => handleCanonicalEstimate(est as Record<string, unknown>)}
             onActiveEstimateChange={applyActiveEstimateChange}
             onTransientFailure={(err, retry) => handleTransientFailure(err, retry)}
+            onRegisterFlush={(flush) => {
+              flushPricingRef.current = flush;
+            }}
+            onAutosaveStatus={setWorkspaceAutosaveLabel}
+            onCalcStatus={setWorkspaceCalcLabel}
+            onBeforePublishFlush={flushAllPendingSaves}
             onPublicationSummary={(pub) => {
               if (!pub) return;
               setCanonicalEstimate((prev) =>
@@ -1002,12 +1099,12 @@ export default function EstimateTakeoffWorkspace({
             onEditManualScope={
               state.manualMode
                 ? () => {
+                    void navigateWorkspaceSection("scope");
                     setState((prev) =>
                       prev.kind === "ready"
                         ? {
                             ...prev,
-                            handoffNotice:
-                              "Edit Manual Scope — save and reconfirm before calculating again."
+                            handoffNotice: "Edit Scope — changes autosave before Customer Choices."
                           }
                         : prev
                     );

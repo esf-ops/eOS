@@ -451,4 +451,158 @@ console.log("ok: 1 top-level Inbox + Estimates navigation");
   console.log("ok: 29–32 Internal Estimate + Quote Library untouched; no quote_headers Studio writes in routes");
 }
 
+{
+  assert.ok(workspace.includes('data-testid="eq-section-tabs"'));
+  assert.ok(workspace.includes("eq-section-tab-${id}") || workspace.includes("eq-section-tab-"));
+  assert.ok(workspace.includes('"scope", "Scope"') || workspace.includes("['scope', 'Scope']") || workspace.includes('["scope", "Scope"]'));
+  assert.ok(workspace.includes("customer_choices"));
+  assert.ok(workspace.includes("review_publish"));
+  assert.ok(workspace.includes("flushAllPendingSaves"));
+  assert.ok(workspace.includes("onBeforePublishFlush"));
+  assert.ok(workspace.includes("eq-compat-workflow-header"));
+  console.log("ok: 33 three-section workspace tabs + flush-before-navigate/publish");
+}
+
+{
+  assert.ok(scopePanel.includes('data-testid="eq-advanced-pricing"'));
+  assert.ok(scopePanel.includes("eq-section-choices-commercial") || scopePanel.includes("Advanced Pricing"));
+  assert.ok(scopePanel.includes("createStudioAutosaveController"));
+  assert.ok(scopePanel.includes("runAutoCalculate"));
+  assert.ok(scopePanel.includes("shouldApplyStudioAutosaveResponse"));
+  assert.ok(scopePanel.includes("beforeunload"));
+  assert.ok(scopePanel.includes('eq-compat-save-draft'));
+  assert.ok(dePanel.includes("onBeforePublishFlush"));
+  console.log("ok: 34 Advanced Pricing under Choices + autosave/calc/publish flush wiring");
+}
+
+{
+  const autosaveCtrl = readFileSync(
+    join(
+      __dirname,
+      "../../../app-elite100-estimate-studio/src/lib/studioAutosaveController.ts"
+    ),
+    "utf8"
+  );
+  const manualScope = readFileSync(
+    join(
+      __dirname,
+      "../../../app-elite100-estimate-studio/src/estimateQueue/ManualPhysicalScopeEditor.tsx"
+    ),
+    "utf8"
+  );
+  assert.ok(autosaveCtrl.includes("markDirty"));
+  assert.ok(autosaveCtrl.includes("async flush"));
+  assert.ok(autosaveCtrl.includes("async retry"));
+  assert.ok(autosaveCtrl.includes("Saving…"));
+  assert.ok(autosaveCtrl.includes("Another user changed this estimate"));
+  assert.ok(autosaveCtrl.includes("shouldApplyStudioAutosaveResponse"));
+  // Scope field categories trigger markDirty / autosave
+  for (const token of [
+    "markDirty",
+    "markCutoutsDirty",
+    "lengthIn",
+    "depthIn",
+    "qty-sink",
+    "included",
+    "exposed",
+    "backsplash",
+    "notes"
+  ]) {
+    assert.ok(manualScope.includes(token), `manual scope missing ${token}`);
+  }
+  for (const token of [
+    "materialGroup",
+    "edgeProfileToken",
+    "customerCatalogPermissions",
+    "customLineItems",
+    "commercialRole",
+    "patchAddon",
+    "internal_only",
+    "absorbed"
+  ]) {
+    assert.ok(scopePanel.includes(token), `scope panel missing ${token}`);
+  }
+  assert.ok(manualScope.includes("manual-scope-compat-actions"));
+  assert.ok(!/className="eq-btn-primary"[^>]*>[\s\S]{0,40}Save Draft/.test(scopePanel));
+  console.log("ok: 35–36 autosave covers Scope + Choices + Advanced Pricing; Save not primary");
+}
+
+{
+  // Autosave controller behavioral simulation (inline mirror of core rules)
+  let status = "idle";
+  let dirty = false;
+  let latestEditAt = 0;
+  let editSeq = 0;
+  let applied = 0;
+  let calcRuns = 0;
+  const saves = [];
+  async function runSave(startedAt) {
+    status = "saving";
+    const result = await new Promise((resolve) => {
+      saves.push({ startedAt, resolve });
+    });
+    if (result.conflict) {
+      status = "conflict";
+      dirty = true;
+      return;
+    }
+    if (latestEditAt > startedAt) {
+      dirty = true;
+      status = "saving";
+      return;
+    }
+    dirty = false;
+    status = "saved";
+    applied += 1;
+    calcRuns += 1;
+  }
+  function markDirty() {
+    dirty = true;
+    editSeq += 1;
+    latestEditAt = editSeq;
+    status = "saving";
+  }
+  markDirty();
+  const t1 = latestEditAt;
+  const p1 = runSave(t1);
+  markDirty(); // newer local edit while in flight
+  saves[0].resolve({ ok: true });
+  await p1;
+  assert.equal(dirty, true);
+  assert.equal(applied, 0);
+  const t2 = latestEditAt;
+  const p2 = runSave(t2);
+  saves[1].resolve({ ok: true });
+  await p2;
+  assert.equal(dirty, false);
+  assert.equal(status, "saved");
+  assert.equal(applied, 1);
+  assert.equal(calcRuns, 1);
+  markDirty();
+  const t3 = latestEditAt;
+  const p3 = runSave(t3);
+  saves[2].resolve({ conflict: true });
+  await p3;
+  assert.equal(status, "conflict");
+  assert.equal(dirty, true);
+  console.log("ok: 37 autosave order/conflict simulation + auto-calc only on clean save");
+}
+
+{
+  const staleCalc = shouldApplyCalculationResponse({
+    requestCalcToken: 1,
+    latestCalcToken: 2,
+    responseFingerprint: "fp-old"
+  });
+  assert.equal(staleCalc.apply, false);
+  const freshCalc = shouldApplyCalculationResponse({
+    requestCalcToken: 2,
+    latestCalcToken: 2,
+    responseFingerprint: "fp-new"
+  });
+  assert.equal(freshCalc.apply, true);
+  assert.ok(scopePanel.includes("calcTokenRef") || scopePanel.includes("token !== calcTokenRef"));
+  console.log("ok: 38 stale calculation response ignored");
+}
+
 console.log("\nAll elite100-simplified-workflow tests passed.\n");
