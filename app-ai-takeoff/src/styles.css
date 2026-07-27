@@ -4546,6 +4546,18 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   padding: 12px;
   min-width: 0;
   isolation: isolate;
+  /* Canonical worksheet column track — header + body share these mins. */
+  --ctr-col-room: minmax(9rem, 11rem);
+  --ctr-col-piece: minmax(10rem, 14rem);
+  --ctr-col-dim: minmax(5rem, 6.5rem);
+  --ctr-col-qty: minmax(4rem, 5rem);
+  --ctr-col-sf: minmax(4.25rem, 5rem);
+  --ctr-col-bs: minmax(8.5rem, 10.5rem);
+  --ctr-col-edge: minmax(9.5rem, 12rem);
+  --ctr-col-incl: minmax(4.25rem, 5rem);
+  --ctr-col-cutouts: minmax(7.5rem, 9rem);
+  --ctr-col-notes: minmax(8rem, 12rem);
+  --ctr-col-actions: minmax(6.5rem, 8rem);
 }
 .ctr-summary { display: flex; flex-wrap: wrap; gap: 10px 16px; font-size: 0.85rem; margin-bottom: 10px; position: sticky; top: 0; background: var(--eos-surface); padding: 8px 0; z-index: 2; }
 .ctr-badge { padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; }
@@ -4558,6 +4570,13 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   border-radius: 8px;
   position: relative;
   z-index: 1;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+.ctr-table-wrap:has(.ctr-cutouts-pop[open]),
+.ctr-table-wrap:has(.ctr-exposed-edges-pop[open]) {
+  /* Popovers must not be clipped by the worksheet scrollport. */
+  overflow: visible;
 }
 .ctr-table {
   width: max-content;
@@ -4566,9 +4585,7 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   border-spacing: 0;
   font-size: 0.84rem;
   table-layout: auto;
-  /* Scroll room below the final row so the sticky action bar never has to sit
-     on top of the last row's Backsplash/Included/Cutouts controls. */
-  margin-bottom: 56px;
+  margin-bottom: 12px;
 }
 .ctr-table th, .ctr-table td {
   border-bottom: 1px solid var(--eos-line);
@@ -4629,13 +4646,14 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   outline: 2px solid var(--eos-accent, #2a6f97);
   outline-offset: 1px;
 }
-.ctr-col-room { min-width: 10rem; }
-.ctr-col-piece { min-width: 12rem; }
-.ctr-col-dim { min-width: 5.5rem; max-width: 7rem; }
-.ctr-col-qty { min-width: 4.25rem; max-width: 5rem; }
-.ctr-col-sf { min-width: 4.5rem; }
-.ctr-col-bs { min-width: 9.5rem; width: 10.5rem; }
-.ctr-col-incl { min-width: 4.5rem; text-align: center; }
+.ctr-col-room { min-width: 9rem; width: var(--ctr-col-room); }
+.ctr-col-piece { min-width: 10rem; width: var(--ctr-col-piece); }
+.ctr-col-dim { min-width: 5rem; max-width: 6.5rem; width: var(--ctr-col-dim); }
+.ctr-col-qty { min-width: 4rem; max-width: 5rem; width: var(--ctr-col-qty); }
+.ctr-col-sf { min-width: 4.25rem; width: var(--ctr-col-sf); color: var(--eos-ink-muted); }
+.ctr-col-bs { min-width: 8.5rem; width: var(--ctr-col-bs); }
+.ctr-col-edge { min-width: 9.5rem; width: var(--ctr-col-edge); white-space: nowrap; }
+.ctr-col-incl { min-width: 4.25rem; text-align: center; width: var(--ctr-col-incl); }
 .ctr-backsplash-help { margin: 0.35rem 0 0.75rem; font-size: 0.9rem; }
 .ctr-bs-toggle {
   display: inline-flex;
@@ -4653,9 +4671,14 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   white-space: nowrap;
   min-width: 0;
 }
-.ctr-col-cutouts { min-width: 8rem; }
-.ctr-col-notes { min-width: 12rem; }
-.ctr-col-actions { min-width: 7.5rem; white-space: nowrap; }
+.ctr-col-cutouts { min-width: 7.5rem; width: var(--ctr-col-cutouts); }
+.ctr-col-notes { min-width: 8rem; max-width: 12rem; width: var(--ctr-col-notes); }
+.ctr-col-actions { min-width: 6.5rem; white-space: nowrap; width: var(--ctr-col-actions); }
+.ctr-note-input {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ctr-col-bs,
 .ctr-col-incl,
 .ctr-col-cutouts,
@@ -4675,9 +4698,19 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   background: color-mix(in srgb, var(--eos-bg-soft) 88%, var(--eos-accent, #2a6f97) 12%);
   font-weight: 600;
   border-top: 2px solid var(--eos-line-strong, var(--eos-line));
+  padding-top: 6px;
+  padding-bottom: 6px;
+  height: auto;
+  min-height: 0;
 }
 .ctr-room--selected td { outline: 2px solid var(--eos-accent, #2a6f97); outline-offset: -2px; }
-.ctr-room-header { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.ctr-room-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  min-height: 0;
+}
 .ctr-room-add-piece { font-size: 0.75rem; padding: 2px 8px; }
 .ctr-remove { font-size: 0.75rem; padding: 2px 8px; text-decoration: underline; }
 .ctr-room-empty td {
@@ -4700,28 +4733,18 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-sf { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctr-row--excluded { opacity: 0.45; }
 .ctr-row--low { background: var(--eos-warn-soft); }
-/* Sticky bottom action bar. pointer-events none on the container so the
-   full-width strip (flex gaps + padding) can never intercept clicks meant for
-   the last worksheet row underneath it — only real children take clicks. */
+/* Action bar sits after the scrollable worksheet — never overlays piece rows. */
 .ctr-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   margin-top: 12px;
-  position: sticky;
-  bottom: 0;
-  background: transparent;
-  padding: 10px 0 4px;
-  pointer-events: none;
-}
-.ctr-actions > * {
-  pointer-events: auto;
-}
-.ctr-actions > .ctr-issues,
-.ctr-actions > .ctr-approve-msg,
-.ctr-actions > .ctr-approve-diag {
+  position: relative;
   background: var(--eos-surface);
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--eos-line);
+  z-index: 2;
 }
 .ctr-btn-primary { background: var(--eos-accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 600; cursor: pointer; }
 .ctr-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -4766,6 +4789,7 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   background: var(--eos-bg-soft);
   padding: 5px 8px;
   font-size: 0.8rem;
+  min-width: 7.5rem;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4781,8 +4805,11 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  z-index: 6;
+  z-index: 20;
   min-width: 15rem;
+  max-width: min(22rem, 90vw);
+  max-height: min(60vh, 28rem);
+  overflow: auto;
   display: grid;
   gap: 6px;
   background: var(--eos-surface, #fff);
@@ -4790,6 +4817,15 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
   padding: 10px 12px;
+}
+.ctr-exposed-edges-menu {
+  z-index: 30;
+}
+.ctr-exposed-edges-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 .ctr-cutouts-option {
   display: flex;

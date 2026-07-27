@@ -2584,4 +2584,19 @@
 | **SQL** | None. |
 | **Tests** | `eos:test:takeoff-exposed-edges` (+ secure plan viewer, Shared Inbox, golden-path regressions). |
 
+### 181. Takeoff correction queue + worksheet layout hotfix (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `fix/takeoff-correction-queue-and-workspace-layout` |
+| **Decision** | All Takeoff worksheet corrections for a job use **one serialized coordinator**. Concurrency keys (`baseResultId`, `clientMutationRevision`) are resolved at **send time**. Local edits coalesce to the newest full draft. Successful responses update server keys **before** any follow-up send (fixes self-generated 201/409 alternation). Real cross-tab stale writes still return `409 stale_takeoff_correction` and require **Review latest draft** — no auto-replay; local draft preserved. |
+| **Backsplash vs edges** | Backsplash eligibility/height is independent of countertop exposed edges. Backsplash edits do **not** invalidate confirmed exposed sides or change edge LF. Confirmation invalidates on length/depth/quantity/topology/attached side/side selection/scope type — not on notes, cutouts, or backsplash. Backsplash-only pieces (`pieceType: splash`) do not require countertop edge confirmation and contribute 0 countertop edge LF. When no splash piece exists, backsplash remains a property of the countertop run (documented). |
+| **Exposed-edge editor** | Confirm stays open while saving; closes and returns focus to the trigger only after backend success. 409/errors keep the editor open with selections preserved. Cancel/Escape discard local editor edits without POST. |
+| **Layout** | Header/body share one CSS custom-property column definition. Action controls sit after the scrollable worksheet (not sticky over rows). Open edge/cutout popovers lift worksheet overflow so menus are not clipped. Bounded notes/edge column widths. |
+| **Status copy** | Estimator-facing labels replace raw enums such as `needs_takeoff_approval` in primary UI (storage enums unchanged). |
+| **CSS build warning** | Orphaned `grid-column: 1 / -1;` after `.eq-subsection-title` in Studio `styles.css` removed (malformed leftover brace block). |
+| **SQL** | None. |
+| **Tests** | `eos:test:takeoff-correction-workspace` (+ exposed-edges, secure plan viewer, Shared Inbox, golden-path). |
+| **Deferred** | Customer Final Acceptance; portal-based popover framework; mobile-first Takeoff redesign. |
+
 

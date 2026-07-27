@@ -17,6 +17,10 @@ import {
   normalizeRunCutouts,
   summarizeRunCutouts
 } from "../../../backend-core/src/takeoff/takeoffCutoutScope.mjs";
+import {
+  applyRunPatchWithEdgeInvalidation,
+  invalidateFinishedEdgeConfirmation
+} from "./takeoffCorrectionCoordinator.mjs";
 
 /** Rounded square feet from length × depth inches. */
 export function sfFrom(lengthIn, depthIn) {
@@ -63,6 +67,8 @@ export function flattenPieces(result, excludedRunIds) {
           finishedEdgeApproved:
             run.finishedEdge?.finishedEdgeConfirmed === true ||
             run.finishedEdge?.approved === true,
+          pieceType: run.pieceType ?? (run.isBacksplash ? "splash" : "counter"),
+          isBacksplash: run.isBacksplash === true || run.pieceType === "splash",
           frontEdgeLengthIn: Number(run.finishedEdge?.frontEdgeLengthIn) || null,
           leftExposed: run.leftExposed ?? run.finishedEdge?.leftExposed ?? run.finishedEdge?.exposedSides?.left ?? null,
           rightExposed: run.rightExposed ?? run.finishedEdge?.rightExposed ?? run.finishedEdge?.exposedSides?.right ?? null,
@@ -96,8 +102,9 @@ export function flattenPieces(result, excludedRunIds) {
  * @param {{ roomId: string, areaId?: string|null, runId: string }} locator
  * @param {Record<string, unknown>} patch
  */
-export function patchRun(result, locator, patch) {
+export function patchRun(result, locator, patch, options = {}) {
   const { roomId, areaId, runId } = locator;
+  const invalidateEdge = options.invalidateEdge === true;
   return {
     ...result,
     rooms: (result.rooms ?? []).map((room) => {
@@ -108,15 +115,31 @@ export function patchRun(result, locator, patch) {
           if (areaId != null && area.id !== areaId) return area;
           return {
             ...area,
-            runs: (area.runs ?? []).map((run) =>
-              run.id === runId ? { ...run, ...patch } : run
-            )
+            runs: (area.runs ?? []).map((run) => {
+              if (run.id !== runId) return run;
+              if (invalidateEdge) {
+                return applyRunPatchWithEdgeInvalidation(run, patch, {
+                  invalidateEdge: true
+                });
+              }
+              return { ...run, ...patch };
+            })
           };
         })
       };
     })
   };
 }
+
+/**
+ * Patch length/depth/quantity (or topology) and clear exposed-edge confirmation.
+ * Backsplash / notes / cutouts must use plain patchRun instead.
+ */
+export function patchRunGeometry(result, locator, patch) {
+  return patchRun(result, locator, patch, { invalidateEdge: true });
+}
+
+export { invalidateFinishedEdgeConfirmation };
 
 /**
  * Rename a room. Intentionally room-wide: the room header renames the room

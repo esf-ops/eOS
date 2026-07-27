@@ -1146,9 +1146,6 @@ button.linkish {
   text-transform: uppercase;
   color: #5a6772;
 }
-
-  grid-column: 1 / -1;
-}
 .eq-account-options {
   display: flex;
   flex-wrap: wrap;

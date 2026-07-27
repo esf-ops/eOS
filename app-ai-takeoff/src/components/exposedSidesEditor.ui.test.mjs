@@ -19,9 +19,13 @@ assert.equal(/saveTakeoffCorrection|persistDraft|updateDraft/.test(editor), fals
 assert.match(editor, /onConfirm/);
 assert.match(editor, /disabled=\{disabled \|\| saving\}/);
 assert.match(editor, /Saving…/);
+assert.match(editor, /await onConfirm/);
+assert.match(editor, /ctr-cancel-exposed-edges/);
+assert.match(editor, /aria-expanded=\{open\}/);
 assert.match(review, /edgeConfirmSavingRunId === row\.runId/);
 assert.match(review, /correctionNotes: "Confirm exposed edges"/);
-console.log("ok: toggles are local-only; confirm serializes one correction");
+assert.match(review, /drainCorrectionQueue/);
+console.log("ok: toggles are local-only; confirm serializes one correction; closes after success");
 
 assert.match(editor, /ctr-edge-\$\{key\}-exposed/);
 assert.match(editor, /\["back", "Back"/);
