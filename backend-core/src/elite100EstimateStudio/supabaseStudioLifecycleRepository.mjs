@@ -33,6 +33,44 @@ function isUniqueViolation(error) {
   return code === "23505" || msg.includes("duplicate") || msg.includes("unique");
 }
 
+function isSoldReviewLockedError(error) {
+  const code = String(error?.code ?? "");
+  const msg = String(error?.message ?? "").toLowerCase();
+  return (
+    code === "25006" ||
+    msg.includes("locked after mark sold") ||
+    msg.includes("studio_estimate_sold_reviews is locked")
+  );
+}
+
+function isOrgMatchViolation(error) {
+  const code = String(error?.code ?? "");
+  const msg = String(error?.message ?? "").toLowerCase();
+  return (
+    code === "23514" ||
+    msg.includes("organization_id must match") ||
+    msg.includes("must match studio estimate") ||
+    msg.includes("must match publication") ||
+    msg.includes("must match acceptance") ||
+    msg.includes("must match sold")
+  );
+}
+
+function crossOrgReject() {
+  const e = new Error("Not found");
+  e.code = "not_found";
+  e.statusCode = 404;
+  return e;
+}
+
+function soldReviewLockedError(cause) {
+  const e = new Error("Sold review is locked after Mark Sold");
+  e.code = "sold_review_locked";
+  e.statusCode = 409;
+  e.cause = cause;
+  return e;
+}
+
 function isMissingTable(error) {
   const code = String(error?.code ?? "");
   const msg = String(error?.message ?? "").toLowerCase();
@@ -264,6 +302,9 @@ export function createSupabaseStudioLifecycleRepository(opts) {
           ready = false;
           throw persistenceUnavailable(undefined, error);
         }
+        if (isOrgMatchViolation(error)) {
+          throw crossOrgReject();
+        }
         logLifecyclePersist("create_acceptance_failed", {
           organizationId,
           estimateId: row.studio_estimate_id,
@@ -376,6 +417,12 @@ export function createSupabaseStudioLifecycleRepository(opts) {
           ready = false;
           throw persistenceUnavailable(undefined, error);
         }
+        if (isSoldReviewLockedError(error)) {
+          throw soldReviewLockedError(error);
+        }
+        if (isOrgMatchViolation(error)) {
+          throw crossOrgReject();
+        }
         logLifecyclePersist("upsert_sold_review_failed", {
           organizationId,
           estimateId,
@@ -481,6 +528,9 @@ export function createSupabaseStudioLifecycleRepository(opts) {
         if (isMissingTable(error)) {
           ready = false;
           throw persistenceUnavailable(undefined, error);
+        }
+        if (isOrgMatchViolation(error)) {
+          throw crossOrgReject();
         }
         logLifecyclePersist("create_sold_snapshot_failed", {
           organizationId,

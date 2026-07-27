@@ -227,7 +227,39 @@ console.log("\nestimateLifecyclePersistenceHardening.test.mjs\n");
   assert.ok(!/CREATE TABLE.*quote_headers/i.test(sql));
   assert.ok(sql.includes("studio_estimate_acceptances_immutable"));
   assert.ok(sql.includes("studio_estimate_sold_snapshots_immutable"));
-  console.log("ok: 13–15 SQL uniqueness + immutability; no quote_headers alteration");
+  assert.ok(sql.includes("studio_estimate_lifecycle_events_immutable"));
+  assert.ok(sql.includes("studio_estimate_sold_reviews_lock_after_sold"));
+  assert.ok(/BEGIN\s*;/.test(sql));
+  assert.ok(/COMMIT\s*;/.test(sql));
+  assert.ok(sql.includes("RAISE EXCEPTION"));
+  assert.ok(!/skip lifecycle closeout/i.test(sql));
+  assert.ok(sql.includes("ENABLE ROW LEVEL SECURITY"));
+  assert.ok(/REVOKE ALL ON TABLE public\.studio_estimate_acceptances FROM anon, authenticated/);
+  assert.ok(/REVOKE ALL ON TABLE public\.studio_estimate_sold_reviews FROM anon, authenticated/);
+  assert.ok(/REVOKE ALL ON TABLE public\.studio_estimate_sold_snapshots FROM anon, authenticated/);
+  assert.ok(/REVOKE ALL ON TABLE public\.studio_estimate_lifecycle_events FROM anon, authenticated/);
+  assert.ok(/GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\.studio_estimate_acceptances TO service_role/);
+  assert.ok(/GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\.studio_estimate_sold_reviews TO service_role/);
+  assert.ok(/GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\.studio_estimate_sold_snapshots TO service_role/);
+  assert.ok(/GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\.studio_estimate_lifecycle_events TO service_role/);
+  assert.equal(
+    [...sql.matchAll(/^\s*CREATE\s+POLICY\b/gim)].length,
+    0,
+    "migration must not create anon/authenticated policies"
+  );
+  assert.ok(sql.includes("studio_estimate_lifecycle_events_publication_id_fkey"));
+  assert.ok(sql.includes("studio_estimate_lifecycle_events_acceptance_id_fkey"));
+  assert.ok(sql.includes("studio_estimate_lifecycle_events_sold_snapshot_id_fkey"));
+  assert.ok(sql.includes("studio_estimate_acceptances_org_match"));
+  assert.ok(sql.includes("studio_estimate_sold_reviews_org_match"));
+  assert.ok(sql.includes("studio_estimate_sold_snapshots_org_match"));
+  assert.ok(sql.includes("studio_estimate_lifecycle_events_org_match"));
+  assert.ok(sql.includes("conrelid = 'public.studio_estimates'::regclass"));
+  assert.ok(sql.includes("relrowsecurity"));
+  assert.ok(sql.includes("relforcerowsecurity"));
+  assert.ok(sql.includes("pg_policies"));
+  assert.ok(/intake_case_id NOT NULL/.test(sql));
+  console.log("ok: 13–15 SQL uniqueness + RLS + txn + FKs + org triggers; no quote_headers");
 }
 
 // Route source: no memory fallback in production wiring
@@ -261,6 +293,152 @@ console.log("\nestimateLifecyclePersistenceHardening.test.mjs\n");
   assert.ok(qlSrc.includes("studio_bridge_mutation_forbidden"));
   assert.ok(qlSrc.includes('includeStudioRaw === "1"'));
   console.log("ok: 18 Quote Library mutations reject Studio bridge ids; include_studio opt-in");
+}
+
+// ── Sold-review lock after Mark Sold (memory mirrors DB trigger) ────────────
+
+{
+  const { emptySoldReviewChecklist } = await import("./studioLifecycleTypes.mjs");
+  const lifecycle = createInMemoryStudioLifecycleRepository();
+  const org = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const orgB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const estimateId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const publicationId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+
+  const { acceptance } = await lifecycle.createAcceptance({
+    organizationId: org,
+    intakeCaseId: "case-manual-1",
+    studioEstimateId: estimateId,
+    estimateRevision: 1,
+    publicationId,
+    customerSafeSnapshot: { total: 1 },
+    customerDisplayTotal: 100
+  });
+  assert.ok(acceptance.intake_case_id);
+
+  const before = await lifecycle.upsertSoldReview({
+    organizationId: org,
+    intakeCaseId: "case-manual-1",
+    studioEstimateId: estimateId,
+    acceptanceId: acceptance.id,
+    checklist: { ...emptySoldReviewChecklist(), customerAccountCorrect: true }
+  });
+  assert.equal(before.checklist_complete, false);
+  console.log("ok: 19 sold-review checklist update before Mark Sold succeeds");
+
+  const { soldSnapshot } = await lifecycle.createSoldSnapshot({
+    organizationId: org,
+    intakeCaseId: "case-manual-1",
+    studioEstimateId: estimateId,
+    estimateRevision: 1,
+    acceptanceId: acceptance.id,
+    soldReviewId: before.id,
+    checklistSnapshot: before.checklist_json,
+    soldSnapshot: { locked: true },
+    customerDisplayTotal: 100
+  });
+  const snapClone = structuredClone(soldSnapshot);
+
+  await assert.rejects(
+    () =>
+      lifecycle.upsertSoldReview({
+        organizationId: org,
+        intakeCaseId: "case-manual-1",
+        studioEstimateId: estimateId,
+        acceptanceId: acceptance.id,
+        checklist: { ...emptySoldReviewChecklist(), customerAccountCorrect: false }
+      }),
+    (e) => e.code === "sold_review_locked" && e.statusCode === 409
+  );
+  console.log("ok: 20 sold-review checklist update after Mark Sold fails");
+
+  await assert.rejects(
+    () => lifecycle.deleteSoldReview(org, estimateId),
+    (e) => e.code === "sold_review_locked"
+  );
+  console.log("ok: 21 sold-review delete after Mark Sold fails");
+
+  const snapAfter = await lifecycle.getSoldSnapshotForEstimate(org, estimateId);
+  assert.deepEqual(snapAfter.sold_snapshot_json, snapClone.sold_snapshot_json);
+  assert.equal(snapAfter.id, snapClone.id);
+  console.log("ok: 22 sold snapshot remains unchanged after lock attempts");
+
+  // Cross-org linkage rejected without leaking sibling existence details
+  await assert.rejects(
+    () =>
+      lifecycle.createAcceptance({
+        organizationId: orgB,
+        intakeCaseId: "case-x",
+        studioEstimateId: estimateId,
+        publicationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        estimateOrganizationId: org,
+        customerSafeSnapshot: {}
+      }),
+    (e) => e.code === "not_found" && e.statusCode === 404 && e.message === "Not found"
+  );
+  await assert.rejects(
+    () =>
+      lifecycle.upsertSoldReview({
+        organizationId: orgB,
+        intakeCaseId: "case-x",
+        studioEstimateId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        acceptanceId: acceptance.id,
+        checklist: emptySoldReviewChecklist()
+      }),
+    (e) => e.code === "not_found" && e.message === "Not found"
+  );
+  await assert.rejects(
+    () =>
+      lifecycle.createSoldSnapshot({
+        organizationId: orgB,
+        intakeCaseId: "case-x",
+        studioEstimateId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        acceptanceId: acceptance.id,
+        acceptanceOrganizationId: org,
+        soldSnapshot: {}
+      }),
+    (e) => e.code === "not_found"
+  );
+  console.log("ok: 23 cross-organization linkage rejected without existence leak");
+}
+
+// Manual estimate intake_case_id compatibility (schema + create path)
+{
+  const sql = readFileSync(
+    join(__dirname, "../../supabase/eliteos_studio_estimate_lifecycle_closeout_v1.sql"),
+    "utf8"
+  );
+  const studioEstSql = readFileSync(
+    join(__dirname, "../../supabase/eliteos_studio_estimates_v1.sql"),
+    "utf8"
+  );
+  const manualSrc = readFileSync(join(__dirname, "studioManualEstimateService.mjs"), "utf8");
+  assert.ok(studioEstSql.includes("intake_case_id text not null"));
+  assert.ok(/intake_case_id text NOT NULL/.test(sql));
+  assert.ok(manualSrc.includes("intakeCaseId: caseRow.id"));
+  assert.ok(manualSrc.includes("Unable to create manual intake case"));
+  assert.equal(/quote_headers/.test(manualSrc), false);
+  console.log("ok: 24 manual Studio estimates always carry intake_case_id; no fake quote_headers");
+}
+
+// Acceptance + sold snapshot + events immutability documented; service-role path supported
+{
+  const factorySrc = readFileSync(join(__dirname, "studioLifecycleRepositoryFactory.mjs"), "utf8");
+  const supabaseSrc = readFileSync(join(__dirname, "supabaseStudioLifecycleRepository.mjs"), "utf8");
+  assert.ok(factorySrc.includes("createSupabaseStudioLifecycleRepository"));
+  assert.ok(supabaseSrc.includes("service_role") || supabaseSrc.includes("from(ACCEPTANCES)"));
+  assert.ok(supabaseSrc.includes("sold_review_locked") || supabaseSrc.includes("isSoldReviewLockedError"));
+  assert.ok(supabaseSrc.includes("isOrgMatchViolation"));
+  console.log("ok: 25 service-role repository path + lock/org error mapping supported");
+}
+
+// Final Acceptance remains Brain-only (no direct table exposure in public routes)
+{
+  const acceptRoutes = readFileSync(join(__dirname, "studioFinalAcceptanceRoutes.js"), "utf8");
+  assert.ok(acceptRoutes.includes("resolveStudioLifecycleRepositoryForRoutes"));
+  assert.equal(/from\(["']studio_estimate_acceptances["']\)/.test(acceptRoutes), false);
+  assert.equal(/SUPABASE_ANON|createBrowserClient/.test(acceptRoutes), false);
+  console.log("ok: 26 public Final Acceptance writes only through backend-core");
 }
 
 console.log("\nAll estimate-lifecycle persistence hardening tests passed.\n");

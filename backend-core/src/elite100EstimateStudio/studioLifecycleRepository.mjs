@@ -78,6 +78,38 @@ export function createInMemoryStudioLifecycleRepository(opts = {}) {
     return structuredClone(full);
   }
 
+  /** Generic rejection — do not reveal whether the foreign record exists. */
+  function crossOrgReject() {
+    throw err("not_found", "Not found", 404);
+  }
+
+  function assertAcceptanceOrg(organizationId, acceptanceId) {
+    if (!acceptanceId) return null;
+    for (const row of acceptances.values()) {
+      if (row.id === String(acceptanceId)) {
+        if (row.organization_id !== normOrg(organizationId)) crossOrgReject();
+        return row;
+      }
+    }
+    crossOrgReject();
+  }
+
+  function assertSoldReviewUnlocked(organizationId, estimateId, reviewId = null) {
+    const org = normOrg(organizationId);
+    for (const snap of soldSnapshots.values()) {
+      if (
+        (reviewId && snap.sold_review_id === String(reviewId)) ||
+        (snap.organization_id === org && snap.studio_estimate_id === String(estimateId))
+      ) {
+        throw err(
+          "sold_review_locked",
+          "Sold review is locked after Mark Sold",
+          409
+        );
+      }
+    }
+  }
+
   return {
     mode: "memory",
 
@@ -129,6 +161,27 @@ export function createInMemoryStudioLifecycleRepository(opts = {}) {
       const publicationId = String(input.publicationId || "").trim();
       if (!organizationId || !publicationId) {
         throw err("invalid_acceptance", "organizationId and publicationId required");
+      }
+      // Optional cross-org guards when callers supply authoritative linked orgs
+      // (mirrors DB org-match triggers). Generic 404 — no existence leak.
+      if (
+        input.estimateOrganizationId != null &&
+        normOrg(input.estimateOrganizationId) !== organizationId
+      ) {
+        crossOrgReject();
+      }
+      if (
+        input.publicationOrganizationId != null &&
+        normOrg(input.publicationOrganizationId) !== organizationId
+      ) {
+        crossOrgReject();
+      }
+      if (studioEstimateRepository?.getById && input.studioEstimateId) {
+        const estimate = await studioEstimateRepository.getById(
+          organizationId,
+          input.studioEstimateId
+        );
+        if (!estimate) crossOrgReject();
       }
       return lockFor(pubKey(organizationId, publicationId)).runExclusive(async () => {
         const existing = acceptances.get(pubKey(organizationId, publicationId));
@@ -210,16 +263,25 @@ export function createInMemoryStudioLifecycleRepository(opts = {}) {
       const estimateId = String(input.studioEstimateId || "").trim();
       const key = `${organizationId}|sr:${estimateId}`;
       return lockFor(key).runExclusive(async () => {
+        const existing = soldReviews.get(key);
+        assertSoldReviewUnlocked(organizationId, estimateId, existing?.id || null);
+        const acceptanceId = String(input.acceptanceId || existing?.acceptance_id || "");
+        if (acceptanceId) assertAcceptanceOrg(organizationId, acceptanceId);
+        if (
+          input.acceptanceOrganizationId != null &&
+          normOrg(input.acceptanceOrganizationId) !== organizationId
+        ) {
+          crossOrgReject();
+        }
         const checklist = normalizeSoldReviewChecklist(input.checklist);
         const complete = isSoldReviewChecklistComplete(checklist);
         const now = new Date().toISOString();
-        const existing = soldReviews.get(key);
         const row = {
           id: existing?.id || randomUUID(),
           organization_id: organizationId,
           intake_case_id: String(input.intakeCaseId || existing?.intake_case_id || ""),
           studio_estimate_id: estimateId,
-          acceptance_id: String(input.acceptanceId || existing?.acceptance_id || ""),
+          acceptance_id: acceptanceId,
           checklist_json: checklist,
           checklist_complete: complete,
           notes: input.notes != null ? String(input.notes) : existing?.notes || null,
@@ -240,6 +302,22 @@ export function createInMemoryStudioLifecycleRepository(opts = {}) {
           metadata: { checklistComplete: complete }
         });
         return structuredClone(row);
+      });
+    },
+
+    /**
+     * Direct delete — blocked after Mark Sold (mirrors DB trigger).
+     */
+    async deleteSoldReview(organizationId, estimateId) {
+      const org = normOrg(organizationId);
+      const id = String(estimateId || "").trim();
+      const key = `${org}|sr:${id}`;
+      return lockFor(key).runExclusive(async () => {
+        const existing = soldReviews.get(key);
+        if (!existing) return { deleted: false };
+        assertSoldReviewUnlocked(org, id, existing.id);
+        soldReviews.delete(key);
+        return { deleted: true };
       });
     },
 
@@ -280,6 +358,25 @@ export function createInMemoryStudioLifecycleRepository(opts = {}) {
         );
         if (byAcceptance) {
           return { soldSnapshot: byAcceptance, created: false };
+        }
+        if (acceptanceId) assertAcceptanceOrg(organizationId, acceptanceId);
+        if (
+          input.acceptanceOrganizationId != null &&
+          normOrg(input.acceptanceOrganizationId) !== organizationId
+        ) {
+          crossOrgReject();
+        }
+        if (
+          input.estimateOrganizationId != null &&
+          normOrg(input.estimateOrganizationId) !== organizationId
+        ) {
+          crossOrgReject();
+        }
+        if (
+          input.soldReviewOrganizationId != null &&
+          normOrg(input.soldReviewOrganizationId) !== organizationId
+        ) {
+          crossOrgReject();
         }
         const now = new Date().toISOString();
         const row = {
