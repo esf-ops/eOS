@@ -9,6 +9,7 @@ import { maybeAttachDigitalEstimatePublicConfigurationRoutes } from "../digitalE
 import { maybeAttachDigitalEstimateReviewRequestRoutes } from "../digitalEstimate/configuration/reviewRequestRoutes.js";
 import { maybeAttachDigitalEstimateAmendmentRoutes } from "../digitalEstimate/configuration/amendmentRoutes.js";
 import { maybeAttachElite100EstimateStudioRoutes } from "../elite100EstimateStudio/elite100EstimateStudioRoutes.js";
+import { maybeAttachStudioFinalAcceptanceRoutes } from "../elite100EstimateStudio/studioFinalAcceptanceRoutes.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
 import { attachCustomQuoteRoutes } from "./customQuotesApi.js";
 import { attachPartnerQuoteRoutes } from "./partnerQuotesApi.js";
@@ -289,6 +290,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
   maybeAttachDigitalEstimateConfigurationRoutes(app, { requireAuth, getSupabase });
   maybeAttachDigitalEstimatePublicConfigurationRoutes(app, { requireAuth, getSupabase });
   maybeAttachDigitalEstimateReviewRequestRoutes(app, { requireAuth, getSupabase });
+  maybeAttachStudioFinalAcceptanceRoutes(app, { requireAuth, getSupabase });
   maybeAttachDigitalEstimateAmendmentRoutes(app, { requireAuth, getSupabase });
   attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachPricingAdminHeadApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });

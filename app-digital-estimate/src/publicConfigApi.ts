@@ -874,6 +874,117 @@ export async function fetchCurrentReviewRequest(): Promise<{
   }
 }
 
+export type CustomerFinalAcceptance = {
+  acceptanceId: string;
+  status: "accepted" | string;
+  statusLabel?: string;
+  acceptedAt?: string | null;
+  estimateRevision?: number | null;
+  customerDisplayTotal?: number | null;
+  termsVersion?: string | null;
+  notice?: string;
+  emailSent?: boolean;
+  markedSold?: boolean;
+};
+
+export async function submitFinalAcceptance(payload: {
+  confirm: true;
+  confirmation?: "accept_final_estimate";
+}): Promise<{
+  ok: boolean;
+  reused?: boolean;
+  acceptance: CustomerFinalAcceptance;
+  sideEffects?: {
+    emailSent?: boolean;
+    markedSold?: boolean;
+    quickbooksWritten?: boolean;
+    morawareWritten?: boolean;
+  };
+}> {
+  const base = apiBaseUrl();
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/public-digital-estimate/v2/final-acceptance`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    const err = new Error("Unable to accept estimate") as ConfigurationSaveError;
+    err.status = 0;
+    err.code = "network_failure";
+    err.lifecycleFatal = false;
+    throw err;
+  }
+  if (!res.ok) {
+    let body: { error?: string; code?: string; stage?: string; diagnosticCode?: string } | null =
+      null;
+    try {
+      body = (await res.json()) as {
+        error?: string;
+        code?: string;
+        stage?: string;
+        diagnosticCode?: string;
+      };
+    } catch {
+      body = null;
+    }
+    const classified = classifyConfigurationMutationError(res.status, body);
+    const err = new Error(classified.message || "Unable to accept estimate") as ConfigurationSaveError;
+    err.status = res.status;
+    err.code = classified.code;
+    err.stage = classified.stage;
+    err.diagnosticCode = classified.diagnosticCode;
+    err.lifecycleFatal = classified.lifecycleFatal;
+    throw err;
+  }
+  return (await res.json()) as {
+    ok: boolean;
+    reused?: boolean;
+    acceptance: CustomerFinalAcceptance;
+    sideEffects?: {
+      emailSent?: boolean;
+      markedSold?: boolean;
+      quickbooksWritten?: boolean;
+      morawareWritten?: boolean;
+    };
+  };
+}
+
+export async function fetchCurrentFinalAcceptance(): Promise<{
+  ok: boolean;
+  acceptance: CustomerFinalAcceptance | null;
+  configurationLocked?: boolean;
+}> {
+  const base = apiBaseUrl();
+  try {
+    const res = await fetch(`${base}/api/public-digital-estimate/v2/final-acceptance/current`, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      return { ok: true, acceptance: null, configurationLocked: false };
+    }
+    const body = (await res.json()) as {
+      ok?: boolean;
+      acceptance?: CustomerFinalAcceptance | null;
+      configurationLocked?: boolean;
+    };
+    return {
+      ok: true,
+      acceptance: body.acceptance ?? null,
+      configurationLocked: Boolean(body.configurationLocked || body.acceptance),
+    };
+  } catch {
+    return { ok: true, acceptance: null, configurationLocked: false };
+  }
+}
+
 export type PublicEstimateAccess = {
   status: "active" | "pricing_expired" | string;
   pricingValidThrough?: string | null;

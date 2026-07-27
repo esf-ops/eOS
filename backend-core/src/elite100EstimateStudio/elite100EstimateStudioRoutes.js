@@ -76,6 +76,10 @@ import {
 import { createStudioSecurePlanViewerService } from "./studioSecurePlanViewer.mjs";
 import { bootstrapIntakeCasesAfterImport } from "../quoteIntake/intakeAutoBootstrapService.mjs";
 import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
+import { resolveStudioLifecycleRepositoryForRoutes } from "./studioLifecycleRepositoryFactory.mjs";
+import { createStudioSoldReviewService } from "./studioSoldReviewService.mjs";
+import { createStudioAllEstimatesService } from "./studioAllEstimatesService.mjs";
+import { canMarkStudioEstimateSold } from "./studioSoldReviewService.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
@@ -1958,6 +1962,264 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           error: e?.statusCode && e.statusCode < 500 ? e.message : "Unable to republish",
           code: e?.code
         });
+      }
+    }
+  );
+
+  // ── Lifecycle closeout: All Estimates / Sold Review / Mark Sold / Acceptance ──
+  let lifecycleRepository = deps.lifecycleRepository || null;
+  if (!lifecycleRepository) {
+    try {
+      lifecycleRepository = resolveStudioLifecycleRepositoryForRoutes({
+        env,
+        getSupabase,
+        studioEstimateRepository: studioEstimateService.repository
+      });
+    } catch (e) {
+      if (e?.code === "studio_lifecycle_persistence_unavailable") {
+        console.error(
+          "[elite100-estimate-studio] lifecycle persistence unavailable at mount",
+          e.code
+        );
+        lifecycleRepository = {
+          mode: "unavailable",
+          async getAcceptanceByPublication() {
+            throw e;
+          },
+          async getAcceptanceForEstimate() {
+            throw e;
+          },
+          async getSoldReviewForEstimate() {
+            throw e;
+          },
+          async upsertSoldReview() {
+            throw e;
+          },
+          async getSoldSnapshotForEstimate() {
+            throw e;
+          },
+          async createSoldSnapshot() {
+            throw e;
+          },
+          async listLifecycleEvents() {
+            throw e;
+          },
+          async createAcceptance() {
+            throw e;
+          }
+        };
+      } else {
+        throw e;
+      }
+    }
+  }
+  const soldReviewService =
+    deps.soldReviewService ||
+    createStudioSoldReviewService({
+      env,
+      lifecycleRepository,
+      studioEstimateRepository: studioEstimateService.repository
+    });
+  const allEstimatesService =
+    deps.allEstimatesService ||
+    createStudioAllEstimatesService({
+      studioEstimateRepository: studioEstimateService.repository,
+      lifecycleRepository
+    });
+
+  function lifecycleHttpError(e, fallbackMessage) {
+    const status = Number(e?.statusCode) || 500;
+    return {
+      status,
+      body: {
+        ok: false,
+        error:
+          e?.code === "studio_lifecycle_persistence_unavailable"
+            ? "Studio lifecycle persistence unavailable. Apply eliteos_studio_estimate_lifecycle_closeout_v1.sql."
+            : status < 500
+              ? e.message
+              : fallbackMessage,
+        code: e?.code || undefined
+      }
+    };
+  }
+
+  app.get("/api/elite100-estimate-studio/all-estimates", ...staffStack, async (req, res) => {
+    try {
+      const organizationId = await orgIdFor(req);
+      const result = await allEstimatesService.listAllEstimates(organizationId, req.query || {});
+      res.set("Cache-Control", "no-store");
+      res.json(result);
+    } catch (e) {
+      logStudio("all estimates list failed", e, req);
+      const { status, body } = lifecycleHttpError(e, "Unable to list estimates");
+      res.status(status).json(body);
+    }
+  });
+
+  app.get(
+    "/api/elite100-estimate-studio/all-estimates/:estimateId/history",
+    ...staffStack,
+    async (req, res) => {
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await allEstimatesService.getEstimateHistory(
+          organizationId,
+          req.params.estimateId
+        );
+        res.set("Cache-Control", "no-store");
+        res.json(result);
+      } catch (e) {
+        logStudio("all estimates history failed", e, req);
+        const { status, body } = lifecycleHttpError(e, "Unable to load history");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/estimates/:estimateId/acceptance",
+    ...staffStack,
+    async (req, res) => {
+      try {
+        const organizationId = await orgIdFor(req);
+        const acceptance = await lifecycleRepository.getAcceptanceForEstimate(
+          organizationId,
+          req.params.estimateId
+        );
+        res.set("Cache-Control", "no-store");
+        res.json({
+          ok: true,
+          acceptance: acceptance
+            ? {
+                id: acceptance.id,
+                acceptedAt: acceptance.accepted_at,
+                estimateRevision: acceptance.estimate_revision,
+                publicationId: acceptance.publication_id,
+                customerDisplayTotal: acceptance.customer_display_total,
+                termsVersion: acceptance.terms_version,
+                customerSafeSnapshot: acceptance.customer_safe_snapshot_json,
+                configuration: acceptance.customer_configuration_json
+              }
+            : null
+        });
+      } catch (e) {
+        logStudio("get acceptance failed", e, req);
+        const { status, body } = lifecycleHttpError(e, "Unable to load acceptance");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/estimates/:estimateId/sold-review",
+    ...staffStack,
+    async (req, res) => {
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await soldReviewService.getSoldReviewWorkspace(
+          organizationId,
+          req.params.estimateId
+        );
+        res.set("Cache-Control", "no-store");
+        res.json({
+          ...result,
+          canMarkSold: canMarkStudioEstimateSold(req.user, env)
+        });
+      } catch (e) {
+        logStudio("sold review get failed", e, req);
+        const { status, body } = lifecycleHttpError(e, "Unable to load sold review");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.put(
+    "/api/elite100-estimate-studio/estimates/:estimateId/sold-review",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await soldReviewService.upsertSoldReviewChecklist({
+          organizationId,
+          estimateId: req.params.estimateId,
+          checklist: req.body?.checklist || {},
+          notes: req.body?.notes ?? null,
+          updatedByUserId: req.user?.id || null
+        });
+        auditStudioEstimate("sold_review_updated", req, {
+          estimateId: req.params.estimateId
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("sold review upsert failed", e, req);
+        const { status, body } = lifecycleHttpError(e, "Unable to save sold review");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/mark-sold",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await soldReviewService.markSold({
+          organizationId,
+          estimateId: req.params.estimateId,
+          actorUser: req.user,
+          acceptanceId: req.body?.acceptanceId || null
+        });
+        auditStudioEstimate("marked_sold", req, {
+          estimateId: req.params.estimateId
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("mark sold failed", e, req);
+        const { status, body } = lifecycleHttpError(e, "Unable to mark sold");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/estimates/:estimateId/sold-snapshot",
+    ...staffStack,
+    async (req, res) => {
+      try {
+        const organizationId = await orgIdFor(req);
+        const sold = await lifecycleRepository.getSoldSnapshotForEstimate(
+          organizationId,
+          req.params.estimateId
+        );
+        res.set("Cache-Control", "no-store");
+        res.json({ ok: true, soldSnapshot: sold });
+      } catch (e) {
+        logStudio("sold snapshot get failed", e, req);
+        const { status, body } = lifecycleHttpError(e, "Unable to load sold snapshot");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-estimate-studio/estimates/:estimateId/lifecycle-events",
+    ...staffStack,
+    async (req, res) => {
+      try {
+        const organizationId = await orgIdFor(req);
+        const events = await lifecycleRepository.listLifecycleEvents(organizationId, {
+          estimateId: req.params.estimateId
+        });
+        res.set("Cache-Control", "no-store");
+        res.json({ ok: true, events });
+      } catch (e) {
+        logStudio("lifecycle events failed", e, req);
+        const { status, body } = lifecycleHttpError(e, "Unable to load events");
+        res.status(status).json(body);
       }
     }
   );

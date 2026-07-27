@@ -117,4 +117,20 @@ Completed on this branch (not Vanity/Acceptance/Sold/All Estimates):
 - Print snapshot schema compatible with shared PDF parser
 - Safe read model for future All Estimates consumers
 
-Next deferred product phases remain: Vanity Program, Final Acceptance, Sold Review, All Estimates UI.
+## Update (2026-07-27) — `feature/estimate-lifecycle-closeout`
+
+Completed:
+
+- Customer Final Acceptance (immutable, idempotent; distinct from Review Request)
+- Post-acceptance configuration lock
+- Staff sold review checklist + privileged Mark Sold (immutable sold snapshot)
+- All Estimates Studio registry UI + API
+- Quote Library discovery bridge (Studio vs Legacy labels; no fake `quote_headers`)
+- Lifecycle events overlay + SQL migration (not auto-applied)
+
+Still deferred:
+
+- Vanity Program
+- Automatic QuickBooks / Moraware handoff
+- Automatic customer email
+- Removal of legacy Quote Library

@@ -5,6 +5,7 @@ import {
   buildCustomerChoiceConfiguration,
   inferFriendlyChoiceFlags
 } from "../../../backend-core/src/elite100EstimateStudio/studioCustomerChoiceOptions.mjs";
+import SoldReviewPanel from "./SoldReviewPanel";
 
 const PUBLISH_CLIENT_TIMEOUT_MS = 55_000;
 
@@ -1158,6 +1159,8 @@ export default function EstimateDigitalEstimatePanel({
           </ul>
         </div>
       ) : null}
+
+      <SoldReviewPanel authToken={authToken} estimateId={estimateId} />
       </div>
     </section>
   );

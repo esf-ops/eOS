@@ -2656,4 +2656,25 @@
 | **Revision** | `createRevisionFrom` copies full `scope` (rooms, overrides, commercial lines). Recalc + reapprove required. |
 | **SQL** | None — additive JSON fields on `studio_estimates.scope_json`. |
 | **Tests** | `eos:test:studio-estimating-parity`. |
-| **Deferred** | Vanity Program; Final Acceptance; Sold Review; All Estimates UI; Quote Library merge. |
+| **Deferred** | Vanity Program. Final Acceptance / Sold / All Estimates → see §186. |
+
+### 186. Studio estimate lifecycle closeout — Final Acceptance → Sold (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `feature/estimate-lifecycle-closeout` |
+| **Decision** | Complete the Studio operational lifecycle with **explicit Final Acceptance** (customer) and **explicit Mark Sold** (privileged staff), plus All Estimates registry and Quote Library discovery bridge. Every step remains manual-only; no automatic email, publish, sold, QuickBooks, or Moraware. |
+| **Lifecycle states** | Overlay on commercial `studio_estimates.status` + publication status: `draft`, `scope_confirmed`, `calculated`, `commercially_approved`, `published`, `changes_requested`, `accepted_awaiting_sold_review`, `sold`, `archived`. Publication status stays separate (`never_published` / active / replaced / revoked / expired). **Sold is never derived from acceptance alone.** |
+| **Final Acceptance** | Customer confirms current active Digital Estimate revision, selected configuration, shown customer total, and terms. Bound to valid public session + active publication. Rejects revoked/replaced/stale/invalid session. Idempotent per `(organization_id, publication_id)`. Creates immutable `studio_estimate_acceptances` customer-safe snapshot (no internal-only, absorbed, notes, margin). |
+| **Review Request ≠ Acceptance** | Review Request remains non-binding amendment intake. Acceptance is a distinct route/UI (`Approve Final Estimate`) with deliberate confirmation. |
+| **Post-acceptance lock** | Customer configuration becomes read-only; view/print allowed; Review Request blocked or redirected to staff contact. Publication is **not** auto-revoked. Staff changes require new revision → calculate → approve → publish → new acceptance. Old acceptance remains history. |
+| **Sold review** | Staff workspace + required checklist (account, project, scope, materials/options, total, terms, internal notes, no open Review Request, ready for handoff). Checklist persisted/auditable on `studio_estimate_sold_reviews`. |
+| **Mark Sold** | Privileged (`admin` / `super_admin` or `ELITE100_STUDIO_MARK_SOLD_ALLOWLIST`). Requires active acceptance + complete checklist + current revision. Idempotent immutable `studio_estimate_sold_snapshots`. Does **not** email, publish, create QB/Moraware, or fabricate `quote_headers`. |
+| **All Estimates** | Studio-backed registry (`GET /api/elite100-estimate-studio/all-estimates`). Command Center remains the action queue. |
+| **Quote Library bridge** | Opt-in read-model merge (`include_studio=1`) labels `Studio Estimate` vs `Legacy Quote`; Studio opens in Estimate Studio. Default list remains legacy-only (unchanged shapes). Does not make Quote Library the Studio calculation authority. Studio bridge ids (`studio:…`) are rejected by legacy mutations. No fake `quote_headers` for Studio sold/acceptance. |
+| **Events** | Append-only `studio_estimate_lifecycle_events` (acceptance, sold review, marked sold, etc.). No public tokens/secrets in logs. |
+| **Persistence** | Production/hosted require Supabase tables from `eliteos_studio_estimate_lifecycle_closeout_v1.sql`. Missing tables → HTTP 503 `studio_lifecycle_persistence_unavailable` (no Accepted / no Mark Sold success / no memory fallback). Memory repository is tests-only via explicit injection/`allowMemory`. DB unique constraints are the idempotency authority. |
+| **Internal Estimate** | Unchanged. Legacy Quote Library remains authority for legacy quotes. |
+| **SQL** | `backend-core/supabase/eliteos_studio_estimate_lifecycle_closeout_v1.sql` — **do not apply automatically**. |
+| **Tests** | `eos:test:estimate-lifecycle-closeout`. |
+| **Deferred** | Vanity Program; automatic QB/Moraware handoff; automatic customer email. |

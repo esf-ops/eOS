@@ -310,4 +310,66 @@ export class SupabaseStudioEstimateRepository {
       actorUserId
     );
   }
+
+  /**
+   * Active (non-superseded) estimates for All Estimates.
+   * Requires eliteos_studio_estimate_lifecycle_closeout_v1.sql for lifecycle columns (optional).
+   */
+  async listActiveForOrganization(organizationId, opts = {}) {
+    await this.assertReady();
+    const org = normOrg(organizationId);
+    let qb = this.db
+      .from(TABLE)
+      .select("*")
+      .eq("organization_id", org)
+      .neq("status", STUDIO_ESTIMATE_STATUSES.SUPERSEDED)
+      .order("updated_at", { ascending: false })
+      .limit(2000);
+    if (!opts.includeArchived) {
+      try {
+        qb = qb.is("archived_at", null);
+      } catch {
+        /* column may be absent until lifecycle migration */
+      }
+    }
+    const { data, error } = await qb;
+    if (error) {
+      if (isMissingTable(error)) throw persistenceError("studio_estimates unavailable", error);
+      throw persistenceError("Failed to list studio estimates", error);
+    }
+    return (data || []).map((r) => dbRowToStudioEstimate(r));
+  }
+
+  async patchLifecycle(organizationId, estimateId, patch = {}) {
+    await this.assertReady();
+    const org = normOrg(organizationId);
+    const id = String(estimateId ?? "").trim();
+    /** @type {Record<string, unknown>} */
+    const update = { updated_at: new Date().toISOString() };
+    if (patch.lifecycleStatus != null) update.lifecycle_status = patch.lifecycleStatus;
+    if (patch.acceptedAt != null) update.accepted_at = patch.acceptedAt;
+    if (patch.soldAt != null) update.sold_at = patch.soldAt;
+    if (patch.archivedAt !== undefined) update.archived_at = patch.archivedAt;
+    const { data, error } = await this.db
+      .from(TABLE)
+      .update(update)
+      .eq("organization_id", org)
+      .eq("id", id)
+      .select("*");
+    if (error) {
+      // Soft-fail when lifecycle columns not migrated yet
+      const msg = String(error.message || "").toLowerCase();
+      if (msg.includes("lifecycle_status") || msg.includes("accepted_at") || msg.includes("sold_at")) {
+        return this.getById(organizationId, id);
+      }
+      throw persistenceError("Failed to patch lifecycle", error);
+    }
+    if (!data?.[0]) {
+      const err = new Error("Estimate not found");
+      err.statusCode = 404;
+      err.code = "estimate_not_found";
+      throw err;
+    }
+    return dbRowToStudioEstimate(data[0]);
+  }
 }
