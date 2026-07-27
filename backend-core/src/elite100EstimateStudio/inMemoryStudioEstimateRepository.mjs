@@ -62,6 +62,51 @@ export class InMemoryStudioEstimateRepository {
       .map((r) => structuredClone(r));
   }
 
+  /**
+   * Active (non-superseded) estimates for All Estimates / Quote Library bridge.
+   * @param {string} organizationId
+   * @param {{ includeArchived?: boolean }} [opts]
+   */
+  async listActiveForOrganization(organizationId, opts = {}) {
+    const org = normOrg(organizationId);
+    return [...this.byId.values()]
+      .filter((r) => {
+        if (r.organizationId !== org) return false;
+        if (r.status === STUDIO_ESTIMATE_STATUSES.SUPERSEDED) return false;
+        if (!opts.includeArchived && r.archivedAt) return false;
+        return true;
+      })
+      .sort((a, b) =>
+        String(b.updatedAt || b.createdAt || "").localeCompare(
+          String(a.updatedAt || a.createdAt || "")
+        )
+      )
+      .map((r) => structuredClone(r));
+  }
+
+  /**
+   * Lifecycle closeout columns (accepted_at / sold_at / lifecycle_status).
+   */
+  async patchLifecycle(organizationId, estimateId, patch = {}) {
+    const row = this.byId.get(String(estimateId ?? "").trim());
+    if (!row || row.organizationId !== normOrg(organizationId)) {
+      const err = new Error("Estimate not found");
+      err.statusCode = 404;
+      err.code = "estimate_not_found";
+      throw err;
+    }
+    const next = {
+      ...row,
+      lifecycleStatus: patch.lifecycleStatus ?? row.lifecycleStatus ?? null,
+      acceptedAt: patch.acceptedAt ?? row.acceptedAt ?? null,
+      soldAt: patch.soldAt ?? row.soldAt ?? null,
+      archivedAt: patch.archivedAt !== undefined ? patch.archivedAt : row.archivedAt ?? null,
+      updatedAt: new Date().toISOString()
+    };
+    this.byId.set(row.id, next);
+    return structuredClone(next);
+  }
+
   async create(input) {
     const organizationId = normOrg(input.organizationId);
     const intakeCaseId = String(input.intakeCaseId ?? "").trim();

@@ -8,6 +8,7 @@ import EstimateCommandCenterPage from "./estimateQueue/EstimateCommandCenterPage
 import EstimateTakeoffWorkspace from "./estimateQueue/EstimateTakeoffWorkspace";
 import LiveDigitalEstimatesPage from "./estimateQueue/LiveDigitalEstimatesPage";
 import SharedInboxPage from "./estimateQueue/SharedInboxPage";
+import AllEstimatesPage from "./estimateQueue/AllEstimatesPage";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
 
@@ -103,13 +104,14 @@ export default function StudioApp() {
   const [mainNav, setMainNav] = useState<
     | "shared-inbox"
     | "command-center"
+    | "all-estimates"
     | "estimate-queue"
     | "publications"
     | "reviews"
     | "estimate-workspace"
   >("command-center");
   const [queueReturnNav, setQueueReturnNav] = useState<
-    "shared-inbox" | "command-center" | "estimate-queue"
+    "shared-inbox" | "command-center" | "all-estimates" | "estimate-queue"
   >("command-center");
   const [moreNavOpen, setMoreNavOpen] = useState(false);
   const [publicationsMode, setPublicationsMode] = useState<"portfolio" | "publish-search">(
@@ -573,6 +575,24 @@ export default function StudioApp() {
           </button>
           <button
             type="button"
+            className={
+              mainNav === "all-estimates" ||
+              (mainNav === "estimate-workspace" && queueReturnNav === "all-estimates")
+                ? "active"
+                : ""
+            }
+            data-testid="studio-nav-all-estimates"
+            onClick={() => {
+              setMainNav("all-estimates");
+              setQueueReturnNav("all-estimates");
+              setEstimateWorkspaceCaseId(null);
+              setMoreNavOpen(false);
+            }}
+          >
+            All Estimates
+          </button>
+          <button
+            type="button"
             className={mainNav === "publications" ? "active" : ""}
             data-testid="studio-nav-publications"
             onClick={() => {
@@ -671,6 +691,29 @@ export default function StudioApp() {
                       target === "takeoff"
                     ? target
                     : "takeoff";
+              setWorkspaceFocus(normalized);
+              setMainNav("estimate-workspace");
+            }}
+          />
+        ) : null}
+
+        {mainNav === "all-estimates" ? (
+          <AllEstimatesPage
+            authToken={sessionToken}
+            onOpenEstimate={(caseId, options) => {
+              setQueueReturnNav("all-estimates");
+              setEstimateWorkspaceCaseId(caseId);
+              setIntakeCaseId(caseId);
+              const target = String(options?.openTarget || "scope");
+              const normalized =
+                target === "manual-scope"
+                  ? "scope"
+                  : target === "scope" ||
+                      target === "digital" ||
+                      target === "review" ||
+                      target === "takeoff"
+                    ? target
+                    : "scope";
               setWorkspaceFocus(normalized);
               setMainNav("estimate-workspace");
             }}

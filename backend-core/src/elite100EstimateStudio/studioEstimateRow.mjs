@@ -228,7 +228,11 @@ export function dbRowToStudioEstimate(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     approvedAt: row.approved_at ?? null,
-    supersededAt: row.superseded_at ?? null
+    supersededAt: row.superseded_at ?? null,
+    lifecycleStatus: row.lifecycle_status ?? null,
+    acceptedAt: row.accepted_at ?? null,
+    soldAt: row.sold_at ?? null,
+    archivedAt: row.archived_at ?? null
   };
 }
 

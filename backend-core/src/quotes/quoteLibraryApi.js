@@ -35,6 +35,12 @@ import {
   softArchiveQuoteFamily,
   summarizeArchiveResults
 } from "./quoteLibraryArchive.js";
+import {
+  mergeQuoteLibraryWithStudioBridge,
+  tagLegacyQuoteLibraryRow
+} from "../elite100EstimateStudio/studioQuoteLibraryBridge.mjs";
+import { createStudioAllEstimatesService } from "../elite100EstimateStudio/studioAllEstimatesService.mjs";
+import { createStudioEstimateRepository } from "../elite100EstimateStudio/studioEstimateRepository.mjs";
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -440,7 +446,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
       let mapped = (rows || []).map((r) => {
         const copy = { ...r, _monday_status: monMap.get(String(r.id)) };
-        return mapListRow(copy, handoffMap);
+        return tagLegacyQuoteLibraryRow(mapListRow(copy, handoffMap));
       });
 
       const hs = pickStr(req.query.handoff_status);
@@ -458,7 +464,45 @@ export function attachQuoteLibraryRoutes(app, deps) {
         mapped = sortRowsByDerivedAccount(mapped, dir);
       }
 
-      const totalCount = Number(count ?? 0);
+      // Studio bridge — discovery only; does not create quote_headers.
+      const includeStudio =
+        pickStr(req.query.include_studio) !== "0" &&
+        pickStr(req.query.include_studio).toLowerCase() !== "false";
+      let studioBridgeRows = [];
+      let studioBridgeWarning = null;
+      if (includeStudio && orgId) {
+        try {
+          const { repository: studioRepo } = createStudioEstimateRepository({
+            env: process.env,
+            db,
+            getSupabase
+          });
+          const allEst = createStudioAllEstimatesService({
+            studioEstimateRepository: studioRepo
+          });
+          const studioList = await allEst.listAllEstimates(orgId, {
+            search: pickStr(req.query.search),
+            filter: pickStr(req.query.studio_lifecycle) || "all",
+            limit: Math.min(200, limit),
+            offset: 0
+          });
+          studioBridgeRows = studioList.rows || [];
+          mapped = mergeQuoteLibraryWithStudioBridge(mapped, studioBridgeRows, {
+            includeStudio: true,
+            studioOnly: pickStr(req.query.source) === "studio"
+          });
+          // Re-apply limit after merge for first page discovery
+          if (offset === 0) {
+            mapped = mapped.slice(0, limit);
+          }
+        } catch (bridgeErr) {
+          studioBridgeWarning =
+            "Studio estimate bridge unavailable — legacy Quote Library rows only.";
+          console.warn("[quote-library] studio bridge skipped", bridgeErr?.code || bridgeErr?.message);
+        }
+      }
+
+      const totalCount = Number(count ?? 0) + (studioBridgeRows.length || 0);
       const showingFrom = totalCount > 0 && mapped.length > 0 ? offset + 1 : 0;
       const showingTo = mapped.length > 0 ? offset + mapped.length : 0;
       res.json({
@@ -474,12 +518,16 @@ export function attachQuoteLibraryRoutes(app, deps) {
         showing_to: showingTo,
         latest_revision_only: latestOnly,
         include_archived: includeArchived,
-        warnings:
-          hs || view === "needs_handoff"
+        include_studio: includeStudio,
+        studio_bridge_count: studioBridgeRows.length,
+        warnings: [
+          ...(hs || view === "needs_handoff"
             ? [
                 "Handoff filters are applied after the current page is fetched; narrow by status/date/account for best results until handoff indexes are expanded."
               ]
-            : []
+            : []),
+          ...(studioBridgeWarning ? [studioBridgeWarning] : [])
+        ]
       });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
