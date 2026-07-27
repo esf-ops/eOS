@@ -78,7 +78,8 @@ console.log("ok: 60 primary actions navigate via Studio openTarget");
 
 assert.match(page, /create_manual_estimate|Create manual estimate/);
 assert.match(page, /View message details/);
-assert.match(page, /Secure plan viewing/);
-console.log("ok: detail panel + manual estimate action + secure viewer deferred note");
+assert.match(page, /View plan|secure Studio viewer/);
+assert.match(page, /Preview not supported|shared-inbox-preview-unsupported/);
+console.log("ok: detail panel + manual estimate action + secure plan viewer controls");
 
 console.log("\nsharedInbox.ui.test.mjs: ok\n");

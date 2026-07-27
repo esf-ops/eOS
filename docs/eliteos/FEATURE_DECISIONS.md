@@ -2543,13 +2543,30 @@
 | **Import** | Import is an **explicit** estimator action, org-scoped, and **idempotent** via existing mailbox dedupe (`graph_immutable_message_id` / `internet_message_id` / content hash). Retries and double-submit return the existing intake case. |
 | **Pipeline** | Reuses `previewQuoteIntakeMailbox` + `importQuoteIntakeMailboxMessages` — no second import pipeline. |
 | **Outlook** | No reply, forward, delete, move, mark read/unread, categorize, or folder changes. Graph access remains backend-only and read-oriented (existing Graph read-only guards). |
-| **Attachments** | Phase 1 shows **attachment metadata only**. No Graph attachment URLs in the browser. Secure plan viewing/download is a separate next phase. |
+| **Attachments** | Phase 1 showed **attachment metadata only**. Secure plan viewing is implemented in §179 (authenticated backend content routes; no Graph/storage URLs in the browser). |
 | **Takeoff** | Shared Inbox does not broaden Takeoff initiation. Existing production import may still auto-bootstrap Takeoff when `QUOTE_INTAKE_AUTOMATIC_TAKEOFF` is enabled — documented, not expanded here. |
 | **Manual path** | Unsupported / no-PDF rows offer **Create manual estimate**, which still uses mailbox import to preserve message↔intake linkage (not a separate unlinked manual-create path). |
 | **Delivery safety** | Shared Inbox never publishes, calculates, approves, emails/notifies customers, marks sold, or creates QuickBooks/Moraware records. |
 | **SQL** | None. |
 | **Tests** | `eos:test:studio-shared-inbox` (+ golden-path gate unchanged). |
 | **Impacted** | `studioSharedInboxReadModel.mjs`, `studioSharedInboxService.mjs`, Studio routes, `SharedInboxPage.tsx`, Studio nav, this entry. |
-| **Deferred** | Secure plan viewer; All Estimates registry; Outlook compose; automatic email classification. |
+| **Deferred** | All Estimates registry; Outlook compose; automatic email classification. Add Plans / piece-to-page evidence remain separate. |
+
+### 179. Secure Studio plan viewer Phase 1 (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `feature/studio-secure-plan-viewer` |
+| **Decision** | Quote-request **plan files** are viewed through **authenticated, organization-scoped backend content routes**. The browser receives bytes only (Blob URL). **Graph and storage credentials remain backend-only.** No permanent Graph or storage URL is exposed to the client. |
+| **Identity** | Shared Inbox uses `messageKey` + `attachmentKey` (Graph ImmutableIds already on the read model). Linked estimates use intake `caseId` + intake `attachmentId`. Server validates org ownership and attachment membership before returning bytes. |
+| **Byte source** | Prefer stored `quote_files` bytes when sha256 is present after Open Estimate ingest; otherwise backend-only Graph attachment GET. Viewing never redirects the browser to Graph or Storage. |
+| **Reuse** | Shared Inbox, Estimate Studio Source & Plan, and AI Takeoff “View source plan” share the same secure viewer. No parallel attachment ownership system. |
+| **Read-only** | Viewing does **not** import, create intake/estimate/revision, start or approve Takeoff, mutate Manual Scope, calculate, approve, publish, replace/revoke publication, create Review Requests, mark Outlook read/unread, move/delete/reply, send email/notifications, mark sold, or create QuickBooks/Moraware records. No automatic “viewed” mutation. |
+| **Types** | Phase 1: **PDF** plus validated **PNG / JPEG / WebP**. Unsupported attachments remain metadata-only (“Preview not supported”). Magic bytes + declared type/extension checks; SVG/HTML/Office not rendered. |
+| **Authority** | Source plan belongs to the **intake case** (and mailbox message linkage), not each price-only revision. Viewer is **not** the pricing or Takeoff source of truth. |
+| **Range** | Not implemented in Phase 1 — frontend fetches a bounded file and renders from a Blob URL (revoked on close/replace/401/403). |
+| **SQL** | None. |
+| **Tests** | `eos:test:studio-secure-plan-viewer` (+ Shared Inbox + golden-path gate). |
+| **Deferred** | Piece-to-page evidence navigation; Add Plans to Existing Estimate; malware scanning; permanent download UX; mailbox webhook/delta. |
 
 

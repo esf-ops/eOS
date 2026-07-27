@@ -10,7 +10,7 @@ Evidence-backed documentation of the Elite 100 estimating, AI Takeoff, Digital E
 
 **No application behavior was changed in this audit.** Documentation files only.
 
-**Follow-up (2026-07-24):** Shared Inbox Phase 1 was implemented on `feature/studio-shared-inbox` (see FEATURE_DECISIONS §178). Secure plan viewing and All Estimates remain incomplete.
+**Follow-up (2026-07-27):** Shared Inbox Phase 1 (§178) and Secure Plan Viewer Phase 1 (§179) are implemented. All Estimates, Add Plans, piece-to-page evidence, mailbox webhook/delta, and malware scanning remain incomplete.
 
 ## Protected golden path
 

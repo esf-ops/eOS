@@ -12,6 +12,11 @@ import { deriveEstimateTakeoffDisplayStatus } from "../lib/estimateTakeoffStatus
 import type { QuoteIntakeCaseDto } from "../lib/quoteIntakeTypes";
 import { apiGet, ApiError, transientFailureMessage } from "../lib/api";
 import {
+  fetchIntakePlanContent,
+  fetchIntakeSourcePlans
+} from "../lib/securePlanViewerApi.mjs";
+import PlanViewerModal from "./PlanViewerModal";
+import {
   buildStudioWorkspaceWorkflow
 } from "../../../backend-core/src/elite100EstimateStudio/studioWorkspaceWorkflow.mjs";
 import EstimateScopePanel from "./EstimateScopePanel";
@@ -56,6 +61,34 @@ type OpenState =
   | ReadyState
   | { kind: "error"; message: string; code?: string };
 
+function formatPlanBytes(n: number | null | undefined): string | null {
+  if (n == null || !Number.isFinite(n)) return null;
+  if (n < 1024) return `${Math.round(n)} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function planTypeLabel(contentType?: string | null, filename?: string | null): string {
+  const mime = String(contentType || "").toLowerCase();
+  const name = String(filename || "").toLowerCase();
+  if (mime.includes("pdf") || /\.pdf$/i.test(name)) return "PDF";
+  if (mime.includes("png") || /\.png$/i.test(name)) return "PNG";
+  if (mime.includes("jpeg") || mime.includes("jpg") || /\.jpe?g$/i.test(name)) return "JPEG";
+  if (mime.includes("webp") || /\.webp$/i.test(name)) return "WebP";
+  return mime || "File";
+}
+
+function formatReceivedAt(value?: string | null): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  });
+}
+
 /**
  * Linked Takeoff workspace — resolves/creates intake→takeoff link, then embeds
  * the existing production AI Takeoff review UI for that job id.
@@ -78,6 +111,26 @@ export default function EstimateTakeoffWorkspace({
   const [canonicalEstimate, setCanonicalEstimate] = useState<Record<string, unknown> | null>(null);
   const [manualDirty, setManualDirty] = useState(false);
   const [pricingDirty, setPricingDirty] = useState(false);
+  const [sourcePlans, setSourcePlans] = useState<{
+    sourceLabel: string;
+    receivedAt?: string | null;
+    noPlan: boolean;
+    plans: Array<{
+      attachmentId?: string | null;
+      filename: string;
+      contentType?: string | null;
+      sizeBytes?: number | null;
+      primary?: boolean;
+    }>;
+  } | null>(null);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [planViewerAtt, setPlanViewerAtt] = useState<{
+    attachmentId: string;
+    filename: string;
+    contentType?: string | null;
+    sizeBytes?: number | null;
+    sourceContext: "linked-estimate" | "ai-takeoff";
+  } | null>(null);
   const [previousRevisionSummary, setPreviousRevisionSummary] = useState<Record<string, unknown> | null>(
     null
   );
@@ -351,7 +404,58 @@ export default function EstimateTakeoffWorkspace({
     };
   }, [authToken, caseId, client]);
 
-  const manualMode = state.kind === "ready" ? state.manualMode : false;
+  const workspaceReady = state.kind === "ready";
+  const workspaceManual = state.kind === "ready" ? state.manualMode : false;
+
+  useEffect(() => {
+    if (!workspaceReady) {
+      setSourcePlans(null);
+      setSelectedPlanId(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = (await fetchIntakeSourcePlans(authToken, caseId)) as {
+          sourceLabel?: string;
+          receivedAt?: string | null;
+          noPlan?: boolean;
+          plans?: Array<{
+            attachmentId?: string | null;
+            filename: string;
+            contentType?: string | null;
+            sizeBytes?: number | null;
+            primary?: boolean;
+          }>;
+        };
+        if (cancelled) return;
+        const plans = Array.isArray(res.plans) ? res.plans : [];
+        setSourcePlans({
+          sourceLabel: String(res.sourceLabel || "Estimate request"),
+          receivedAt: res.receivedAt ?? null,
+          noPlan: Boolean(res.noPlan) || plans.length === 0,
+          plans
+        });
+        const primary = plans.find((p) => p.primary) || plans[0];
+        setSelectedPlanId(primary?.attachmentId ? String(primary.attachmentId) : null);
+      } catch {
+        if (!cancelled) {
+          setSourcePlans({
+            sourceLabel: workspaceManual ? "Manual estimate" : "Estimate request",
+            receivedAt: null,
+            noPlan: true,
+            plans: []
+          });
+          setSelectedPlanId(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, caseId, workspaceReady, workspaceManual]);
+
+  const manualMode = workspaceManual;
   useEffect(() => {
     if (state.kind !== "ready") return;
     const focus = initialFocus || "takeoff";
@@ -619,6 +723,96 @@ export default function EstimateTakeoffWorkspace({
             ) : null}
           </section>
 
+          <section className="eq-source-plan" aria-label="Source and plan" data-testid="eq-source-plan">
+            <div className="eq-source-plan-grid">
+              <div>
+                <div className="eq-muted">Source</div>
+                <div data-testid="eq-source-plan-source">
+                  {sourcePlans?.sourceLabel ||
+                    (state.manualMode ? "Manual estimate" : "Estimate request")}
+                </div>
+                {formatReceivedAt(sourcePlans?.receivedAt) ? (
+                  <div className="eq-muted" data-testid="eq-source-plan-received">
+                    Received {formatReceivedAt(sourcePlans?.receivedAt)}
+                  </div>
+                ) : null}
+              </div>
+              <div>
+                <div className="eq-muted">Plan</div>
+                {sourcePlans?.noPlan || !sourcePlans?.plans?.length ? (
+                  <div data-testid="eq-source-plan-empty">No plan attached</div>
+                ) : (
+                  <>
+                    {sourcePlans.plans.length > 1 ? (
+                      <label className="eq-source-plan-select">
+                        <span className="eq-muted">Additional plans</span>
+                        <select
+                          data-testid="eq-source-plan-select"
+                          value={selectedPlanId || ""}
+                          onChange={(e) => setSelectedPlanId(e.target.value || null)}
+                        >
+                          {sourcePlans.plans.map((p, idx) => (
+                            <option
+                              key={p.attachmentId || `${p.filename}-${idx}`}
+                              value={p.attachmentId || ""}
+                            >
+                              {p.primary ? `${p.filename} (primary)` : p.filename}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    {(() => {
+                      const plan =
+                        sourcePlans.plans.find((p) => String(p.attachmentId || "") === selectedPlanId) ||
+                        sourcePlans.plans.find((p) => p.primary) ||
+                        sourcePlans.plans[0];
+                      if (!plan) return null;
+                      const size = formatPlanBytes(plan.sizeBytes);
+                      const type = planTypeLabel(plan.contentType, plan.filename);
+                      return (
+                        <>
+                          <div className="eq-cell-primary" data-testid="eq-source-plan-filename">
+                            {plan.filename}
+                          </div>
+                          <div className="eq-muted" data-testid="eq-source-plan-meta">
+                            {type}
+                            {size ? ` · ${size}` : ""}
+                          </div>
+                          {plan.attachmentId ? (
+                            <button
+                              type="button"
+                              className="eq-btn-secondary eq-btn-small"
+                              data-testid="eq-view-plan"
+                              onClick={() =>
+                                setPlanViewerAtt({
+                                  attachmentId: String(plan.attachmentId),
+                                  filename: plan.filename,
+                                  contentType: plan.contentType,
+                                  sizeBytes: plan.sizeBytes,
+                                  sourceContext: "linked-estimate"
+                                })
+                              }
+                            >
+                              View plan
+                            </button>
+                          ) : (
+                            <span className="eq-muted">Preview not supported</span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+              </div>
+            </div>
+            {state.manualMode && (sourcePlans?.noPlan || !sourcePlans?.plans?.length) ? (
+              <p className="eq-muted eq-source-plan-note" data-testid="eq-source-plan-manual-ok">
+                Manual estimates without plans remain valid — Manual Scope is not blocked.
+              </p>
+            ) : null}
+          </section>
+
           <EstimateWorkflowHeader
             workflow={workspaceWorkflow}
             transientError={transientError}
@@ -719,6 +913,31 @@ export default function EstimateTakeoffWorkspace({
 
           {!state.manualMode && (!collapseCompleted || sectionsExpanded || initialFocus === "takeoff") ? (
             <>
+              {sourcePlans?.plans?.some((p) => p.attachmentId) ? (
+                <div className="eq-action-row" data-testid="eq-takeoff-view-source-plan-row">
+                  <button
+                    type="button"
+                    className="eq-btn-ghost eq-btn-small"
+                    data-testid="eq-takeoff-view-source-plan"
+                    onClick={() => {
+                      const plan =
+                        sourcePlans.plans.find((p) => String(p.attachmentId || "") === selectedPlanId) ||
+                        sourcePlans.plans.find((p) => p.primary) ||
+                        sourcePlans.plans[0];
+                      if (!plan?.attachmentId) return;
+                      setPlanViewerAtt({
+                        attachmentId: String(plan.attachmentId),
+                        filename: plan.filename,
+                        contentType: plan.contentType,
+                        sizeBytes: plan.sizeBytes,
+                        sourceContext: "ai-takeoff"
+                      });
+                    }}
+                  >
+                    View source plan
+                  </button>
+                </div>
+              ) : null}
               <div className="eq-takeoff-frame-wrap">
                 {takeoffFrameMounted ? (
                   <iframe
@@ -805,6 +1024,24 @@ export default function EstimateTakeoffWorkspace({
           />
         </>
       ) : null}
+
+      <PlanViewerModal
+        open={Boolean(planViewerAtt)}
+        authToken={authToken}
+        filename={planViewerAtt?.filename}
+        fileTypeLabel={
+          planViewerAtt
+            ? planTypeLabel(planViewerAtt.contentType, planViewerAtt.filename)
+            : undefined
+        }
+        sizeLabel={formatPlanBytes(planViewerAtt?.sizeBytes)}
+        sourceContext={planViewerAtt?.sourceContext || "linked-estimate"}
+        loadContent={async () => {
+          if (!planViewerAtt) throw new Error("Sign in required");
+          return fetchIntakePlanContent(authToken, caseId, planViewerAtt.attachmentId);
+        }}
+        onClose={() => setPlanViewerAtt(null)}
+      />
     </div>
   );
 }
