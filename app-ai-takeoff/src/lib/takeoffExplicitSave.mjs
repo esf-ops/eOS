@@ -3,12 +3,16 @@
  *
  * Persistence boundary:
  * - field / structural / Confirm exposed edges → local draft only
- * - Save draft → exactly one correction POST
+ * - Save draft → exactly one correction POST (skipped when clean)
  * - Approve Takeoff → approval only (requires clean saved draft)
  */
 
 import { markRunEstimatorOwned } from "./emptyManualTakeoffDraft.mjs";
 import { patchRun, patchRunFinishedEdge } from "./consolidatedWorksheetRows.mjs";
+import {
+  takeoffDraftCompareFingerprint,
+  takeoffDraftsSemanticallyEqual
+} from "../../../backend-core/src/takeoff/takeoffDraftEquality.mjs";
 
 /** @typedef {'idle'|'dirty'|'saving'|'saved'|'conflict'|'error'} SaveUiStatus */
 
@@ -133,6 +137,7 @@ export function applyLocalExposedEdgeConfirm(draft, locator, finishedEdgePayload
 
 /**
  * Next clientMutationRevision for an explicit Save draft.
+ * Request sends expected next revision; server remains authority on success.
  * @param {number} canonicalRevision
  */
 export function nextExplicitMutationRevision(canonicalRevision) {
@@ -141,10 +146,13 @@ export function nextExplicitMutationRevision(canonicalRevision) {
 }
 
 /**
- * Stable JSON for dirty comparison (sorts object keys shallowly via stringify of clone).
+ * Stable JSON for dirty comparison — semantic draft fingerprint.
  * @param {unknown} value
  */
 export function stableDraftFingerprint(value) {
+  if (value && typeof value === "object" && !Array.isArray(value) && Array.isArray(value.rooms)) {
+    return takeoffDraftCompareFingerprint(value);
+  }
   return JSON.stringify(value ?? null);
 }
 
@@ -161,15 +169,54 @@ export function stableDraftFingerprint(value) {
 export function isTakeoffWorksheetDirty(input) {
   const localEx = [...(input.localExcludedRunIds || [])].map(String).sort();
   const canonEx = [...(input.canonicalExcludedRunIds || [])].map(String).sort();
-  if (stableDraftFingerprint(localEx) !== stableDraftFingerprint(canonEx)) return true;
-  return (
-    stableDraftFingerprint(input.localDraft) !== stableDraftFingerprint(input.canonicalDraft)
-  );
+  if (JSON.stringify(localEx) !== JSON.stringify(canonEx)) return true;
+  return !takeoffDraftsSemanticallyEqual(input.localDraft, input.canonicalDraft);
 }
 
 /**
- * Sole correction writer for the worksheet. Calls saveCorrection exactly once.
- * Injectable for network-spy tests.
+ * Atomically adopt a successful Save draft envelope into page refs/state values.
+ * Prefer this over piecemeal ref updates that can observe an inconsistent mid-state.
+ *
+ * @param {{
+ *   response: {
+ *     resultId?: string|null,
+ *     clientMutationRevision?: number|null,
+ *     normalizedTakeoffJson?: object|null,
+ *     takeoffResult?: object|null,
+ *     savedAt?: string|null,
+ *     unchanged?: boolean
+ *   },
+ *   healDraft: (draft: object) => object,
+ *   fallbackDraft: object,
+ *   excludedRunIds: Iterable<string>
+ * }} args
+ */
+export function reconcileSuccessfulTakeoffSave(args) {
+  const response = args.response && typeof args.response === "object" ? args.response : {};
+  const rawDraft =
+    response.normalizedTakeoffJson ?? response.takeoffResult ?? args.fallbackDraft;
+  const healed = args.healDraft(rawDraft);
+  const resultId =
+    response.resultId != null && String(response.resultId).trim()
+      ? String(response.resultId)
+      : null;
+  const serverRev = Number(response.clientMutationRevision);
+  const revision =
+    Number.isSafeInteger(serverRev) && serverRev > 0 ? serverRev : null;
+  return {
+    draft: healed,
+    canonicalDraft: structuredClone(healed),
+    canonicalExcludedRunIds: new Set([...(args.excludedRunIds || [])].map(String)),
+    resultId,
+    clientMutationRevision: revision,
+    savedAt: response.savedAt ?? null,
+    unchanged: Boolean(response.unchanged)
+  };
+}
+
+/**
+ * Sole correction writer for the worksheet. Calls saveCorrection exactly once
+ * when dirty; returns a local unchanged envelope without POSTing when clean.
  *
  * @param {{
  *   saveCorrection: (body: object) => Promise<object>,
@@ -178,7 +225,11 @@ export function isTakeoffWorksheetDirty(input) {
  *   clientMutationRevision: number,
  *   reviewState: object,
  *   correctionNotes?: string,
- *   aiHandling?: object|null
+ *   aiHandling?: object|null,
+ *   skipIfUnchanged?: boolean,
+ *   canonicalDraft?: object|null,
+ *   localExcludedRunIds?: Iterable<string>,
+ *   canonicalExcludedRunIds?: Iterable<string>
  * }} args
  */
 export async function saveTakeoffDraftExplicit(args) {
@@ -187,6 +238,25 @@ export async function saveTakeoffDraftExplicit(args) {
   }
   if (!args.takeoffResult) {
     throw new Error("saveTakeoffDraftExplicit requires takeoffResult");
+  }
+  if (args.skipIfUnchanged === true) {
+    const dirty = isTakeoffWorksheetDirty({
+      localDraft: args.takeoffResult,
+      canonicalDraft: args.canonicalDraft ?? args.takeoffResult,
+      localExcludedRunIds: args.localExcludedRunIds,
+      canonicalExcludedRunIds: args.canonicalExcludedRunIds
+    });
+    if (!dirty) {
+      return {
+        ok: true,
+        unchanged: true,
+        resultId: args.baseResultId,
+        clientMutationRevision: args.clientMutationRevision,
+        normalizedTakeoffJson: args.takeoffResult,
+        takeoffResult: args.takeoffResult,
+        savedAt: null
+      };
+    }
   }
   return args.saveCorrection({
     takeoffResult: args.takeoffResult,

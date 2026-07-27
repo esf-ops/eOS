@@ -2614,4 +2614,18 @@
 | **SQL** | None. |
 | **Tests** | `eos:test:takeoff-explicit-save-dialog` (+ correction-workspace, exposed-edges, Secure Plan Viewer, Shared Inbox, golden-path). |
 
+### 183. Takeoff Save draft persistence + canonical result reload (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `fix/takeoff-save-persistence-and-canonical-reload` |
+| **Decision** | **Save draft** persists one complete canonical Takeoff result and promotes it as the **canonical current editable result** via `job.result_summary` (`resultRowId`, `clientMutationRevision`, `normalizedTakeoffJson`, `lastCorrectionId`). Success returns that envelope (`resultId`, `clientMutationRevision`, full `normalizedTakeoffJson` / `takeoffResult`). Frontend reconciliation adopts draft, result ID, server mutation revision, and dirty baseline **atomically**. Page reload (`getLatestTakeoffResult` / `selectAuthoritativeTakeoffResult`) uses the same authority — never silently falling back to the original AI result after a correction is current. |
+| **Root cause fixed** | When a correction insert was blocked (`quote_id` NOT NULL) or `result_summary` was newer than an older estimator table row, `selectAuthoritativeTakeoffResult` preferred the older table row. Reload dropped backsplash/edits; the client kept a stale `baseResultId` / revision skew → later **409** `stale_takeoff_correction`. |
+| **Unchanged Save** | Clean worksheet: Save disabled / client no-op (zero POST). Backend: current base + semantically equal draft → `{ ok: true, unchanged: true }` without a new result row or revision bump. Content returning to an earlier configuration (A→B→A-like→C) is valid; staleness is lineage/version, not content resemblance. |
+| **Concurrency** | Optimistic concurrency preserved. Real two-tab stale saves still **409**; local draft retained; no automatic replay. |
+| **Mutation revision** | Client sends expected next revision; server validates and returns confirmed revision; frontend adopts **server** value only after success. |
+| **SQL** | None — uses existing `quote_takeoff_jobs.result_summary` promotion pointer (+ synthetic `resultRowId` UUID when table insert is blocked). |
+| **Tests** | `eos:test:takeoff-save-persistence` (+ explicit-save-dialog, correction-workspace, exposed-edges, Secure Plan Viewer, Shared Inbox, golden-path). |
+| **Deferred** | Customer Final Acceptance; Sold Review; dropping `quote_id` NOT NULL on results (optional later SQL). |
+
 

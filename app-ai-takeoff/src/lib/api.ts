@@ -180,12 +180,14 @@ export async function listTakeoffJobs(
 
 export interface SaveTakeoffCorrectionResponse {
   ok: boolean;
+  unchanged?: boolean;
   takeoffJobId: string;
-  correctionId: string;
+  correctionId: string | null;
   savedAt: string;
   resultId?: string | null;
   clientMutationRevision?: number | null;
   normalizedTakeoffJson?: unknown;
+  takeoffResult?: unknown;
   reviewStatus: string;
   approvalStatus?: string;
   canApprove?: boolean;

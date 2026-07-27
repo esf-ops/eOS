@@ -196,6 +196,92 @@ function aiDraft() {
 }
 
 {
+  // Production defect: older estimator table row outranked a newer result_summary
+  // correction when quote_id insert fallback stored the draft only on the job.
+  const olderEstimator = {
+    id: "res-old-estimator",
+    created_at: "2026-07-19T10:00:00.000Z",
+    review_status: "needs_review",
+    normalized_takeoff_json: {
+      rooms: [
+        {
+          id: "room-1",
+          areas: [
+            {
+              id: "a1",
+              runs: [
+                {
+                  id: "run-1",
+                  lengthIn: 40,
+                  depthIn: 25,
+                  backsplashEligible: false,
+                  _manual: true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    raw_ai_result_json: {
+      _corrections: [{ id: "corr-old" }],
+      _meta: {
+        estimatorConfirmed: { confirmedAt: "2026-07-19T10:00:00.000Z" },
+        clientMutationRevision: 48
+      }
+    }
+  };
+  const summary = {
+    savedAt: "2026-07-19T12:00:00.000Z",
+    lastCorrectionId: "corr-new",
+    clientMutationRevision: 49,
+    resultRowId: "2390a976-fb1d-49dd-934d-0336dc321aeb",
+    normalizedTakeoffJson: {
+      rooms: [
+        {
+          id: "room-1",
+          areas: [
+            {
+              id: "a1",
+              runs: [
+                {
+                  id: "run-1",
+                  lengthIn: 40,
+                  depthIn: 25,
+                  backsplashEligible: true,
+                  backsplashEligibilitySource: "estimator_confirmed",
+                  _manual: true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    estimatorConfirmed: {
+      confirmedAt: "2026-07-19T12:00:00.000Z",
+      source: "estimator_save"
+    }
+  };
+  const picked = selectAuthoritativeTakeoffResult([olderEstimator], {
+    jobResultSummary: summary
+  });
+  assert.equal(picked.source, "estimator_draft");
+  assert.equal(picked.row.id, summary.resultRowId);
+  assert.equal(
+    picked.row.normalized_takeoff_json.rooms[0].areas[0].runs[0].backsplashEligible,
+    true,
+    "newer result_summary backsplash must win over older estimator table row"
+  );
+  assert.equal(
+    picked.row.raw_ai_result_json._meta.clientMutationRevision,
+    49,
+    "summary mutation revision must surface on synthetic row"
+  );
+  console.log("  ✓ newer result_summary outranks older estimator table row");
+}
+
+{
   const geometryOnly = {
     id: "res-geo",
     review_status: "needs_review",

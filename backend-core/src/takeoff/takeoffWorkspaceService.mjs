@@ -43,9 +43,11 @@ import {
   buildEstimatorConfirmedMeta,
   findPendingAiTakeoffResult,
   readAiHandlingMeta,
+  readResultMutationRevision,
   selectAuthoritativeTakeoffResult,
   summarizeAiFindingsPreview
 } from "./takeoffAuthoritativeResult.mjs";
+import { takeoffDraftsSemanticallyEqual } from "./takeoffDraftEquality.mjs";
 import {
   autoCompleteRoomReviewState,
   buildConsolidatedTakeoffSummary,
@@ -1007,17 +1009,35 @@ export async function saveTakeoffCorrection({
   ) {
     throw workspaceError("clientMutationRevision must be a positive safe integer");
   }
-  const latestClientRevision = Number(
-    latestRow?.raw_ai_result_json?._meta?.clientMutationRevision ??
-      jobRow.result_summary?.clientMutationRevision ??
-      0
+  const summaryRevision = Number(jobRow.result_summary?.clientMutationRevision ?? 0);
+  const rowRevision = readResultMutationRevision(latestRow);
+  const latestClientRevision = Math.max(
+    Number.isSafeInteger(summaryRevision) ? summaryRevision : 0,
+    rowRevision
   );
-  const latestResultId = String(latestRow?.id ?? "").trim() || null;
+  const latestResultId =
+    String(latestRow?.id ?? "").trim() ||
+    String(jobRow.result_summary?.resultRowId ?? "").trim() ||
+    null;
+  const currentHeadResultId = latestResultId;
+
   if (
     baseResultId &&
     latestResultId &&
     String(baseResultId) !== latestResultId
   ) {
+    console.info(
+      "[takeoffWorkspace] stale_takeoff_correction",
+      JSON.stringify({
+        takeoffJobId,
+        requestedBaseResultId: String(baseResultId),
+        currentHeadResultId,
+        requestedMutationRevision: incomingRevision,
+        currentMutationRevision: latestClientRevision,
+        unchanged: false,
+        errorCode: "stale_takeoff_correction"
+      })
+    );
     const err = workspaceError(
       "The estimator draft changed after editing began; stale correction was ignored",
       409
@@ -1027,11 +1047,86 @@ export async function saveTakeoffCorrection({
     err.latestClientMutationRevision = latestClientRevision;
     throw err;
   }
+
+  // Idempotent no-op: current base + semantically equal draft → do not create a row.
+  // Stale base already 409'd above; content resembling an older state is fine when base is current.
+  const currentCanonicalDraft =
+    latestRow?.normalized_takeoff_json ??
+    jobRow.result_summary?.normalizedTakeoffJson ??
+    null;
+  if (
+    currentCanonicalDraft &&
+    takeoffDraftsSemanticallyEqual(takeoffResult, currentCanonicalDraft)
+  ) {
+    const unchangedRevision =
+      latestClientRevision > 0
+        ? latestClientRevision
+        : incomingRevision != null
+          ? incomingRevision
+          : 0;
+    console.info(
+      "[takeoffWorkspace] takeoff_correction_unchanged",
+      JSON.stringify({
+        takeoffJobId,
+        requestedBaseResultId: baseResultId ? String(baseResultId) : null,
+        currentHeadResultId,
+        requestedMutationRevision: incomingRevision,
+        currentMutationRevision: unchangedRevision,
+        createdResultId: null,
+        promotedResultId: currentHeadResultId,
+        unchanged: true
+      })
+    );
+    return {
+      ok: true,
+      unchanged: true,
+      takeoffJobId,
+      correctionId: null,
+      resultId: currentHeadResultId,
+      savedAt: latestRow?.created_at ?? jobRow.result_summary?.savedAt ?? new Date().toISOString(),
+      clientMutationRevision: unchangedRevision,
+      normalizedTakeoffJson: currentCanonicalDraft,
+      takeoffResult: currentCanonicalDraft,
+      schemaVersion:
+        latestRow?.schema_version ??
+        jobRow.result_summary?.schemaVersion ??
+        takeoffResult.schemaVersion ??
+        TAKEOFF_SCHEMA_VERSION,
+      reviewStatus: latestRow?.review_status ?? jobRow.review_status ?? "needs_review",
+      approvalStatus: "needs_review",
+      canApprove: computeCanApprove({
+        hasSavedResult: true,
+        validation,
+        qaGate: computeQaGateForResult(
+          currentCanonicalDraft,
+          computed,
+          validation,
+          latestRow?.raw_ai_result_json ?? null
+        ),
+        reviewStatus: latestRow?.review_status ?? jobRow.review_status ?? "needs_review"
+      }),
+      correction: null,
+      summary: buildResultSummary(currentCanonicalDraft, computed, validation, importPlan)
+    };
+  }
+
   if (
     incomingRevision != null &&
     Number.isSafeInteger(latestClientRevision) &&
     incomingRevision <= latestClientRevision
   ) {
+    console.info(
+      "[takeoffWorkspace] stale_takeoff_correction",
+      JSON.stringify({
+        takeoffJobId,
+        requestedBaseResultId: baseResultId ? String(baseResultId) : null,
+        currentHeadResultId,
+        requestedMutationRevision: incomingRevision,
+        currentMutationRevision: latestClientRevision,
+        unchanged: false,
+        errorCode: "stale_takeoff_correction"
+      })
+    );
     const err = workspaceError(
       "A newer estimator draft is already saved; stale correction was ignored",
       409
@@ -1131,6 +1226,7 @@ export async function saveTakeoffCorrection({
   };
 
   let resultRowId = null;
+  let insertBlockedByQuoteId = false;
   const { data: resultRows, error: resultInsertErr } = await supabase
     .from("quote_takeoff_results")
     .insert(resultPayload)
@@ -1148,8 +1244,17 @@ export async function saveTakeoffCorrection({
         { statusCode: 503 }
       );
     }
+    // Promote a synthetic concurrency token in result_summary so reload + next
+    // Save share one canonical head without requiring SQL / table insert.
+    insertBlockedByQuoteId = true;
+    resultRowId = randomUUID();
     console.warn(
-      "[takeoffWorkspace] quote_takeoff_results.quote_id NOT NULL blocked correction insert."
+      "[takeoffWorkspace] quote_takeoff_results.quote_id NOT NULL blocked correction insert; promoting result_summary head.",
+      JSON.stringify({
+        takeoffJobId,
+        promotedResultId: resultRowId,
+        currentMutationRevision: incomingRevision
+      })
     );
   }
 
@@ -1181,19 +1286,37 @@ export async function saveTakeoffCorrection({
         validationDiagnosticsJson: validation,
         importPlanJson: importPlan,
         resultRowId: resultRowId ?? null,
+        ...(insertBlockedByQuoteId ? { summaryOnlyPromotion: true } : {})
       },
     })
     .eq("id", takeoffJobId)
     .eq("organization_id", organizationId);
 
+  console.info(
+    "[takeoffWorkspace] takeoff_correction_saved",
+    JSON.stringify({
+      takeoffJobId,
+      requestedBaseResultId: baseResultId ? String(baseResultId) : null,
+      currentHeadResultId: latestResultId,
+      requestedMutationRevision: incomingRevision,
+      currentMutationRevision: incomingRevision,
+      createdResultId: insertBlockedByQuoteId ? null : resultRowId,
+      promotedResultId: resultRowId,
+      unchanged: false,
+      summaryOnlyPromotion: insertBlockedByQuoteId
+    })
+  );
+
   return {
     ok: true,
+    unchanged: false,
     takeoffJobId,
     correctionId: correctionEntry.id,
     resultId: resultRowId,
     savedAt: now,
     clientMutationRevision: incomingRevision,
     normalizedTakeoffJson: takeoffResult,
+    takeoffResult,
     schemaVersion,
     reviewStatus: "needs_review",
     approvalStatus: "needs_review",
@@ -2089,20 +2212,23 @@ export async function getLatestTakeoffResult({
     ? summarizeAiFindingsPreview(pending.pendingAiDraft)
     : { rooms: [] };
 
+  const summaryRev = Number(jobRow.result_summary?.clientMutationRevision ?? 0);
+  const rowRev = Number(rawJson?._meta?.clientMutationRevision ?? 0);
+  const clientMutationRevision = Math.max(
+    Number.isSafeInteger(summaryRev) ? summaryRev : 0,
+    Number.isSafeInteger(rowRev) ? rowRev : 0
+  );
+
   return {
     takeoffJobId,
     savedAt: savedResult.created_at,
     schemaVersion: savedResult.schema_version,
     reviewStatus: savedResult.review_status ?? "needs_review",
-    clientMutationRevision:
-      Number(
-        rawJson?._meta?.clientMutationRevision ??
-          jobRow.result_summary?.clientMutationRevision ??
-          0
-      ) || 0,
+    clientMutationRevision,
     // Authoritative estimator draft for editing — never silently replaced by raw AI.
-    resultId: savedResult.id ?? null,
+    resultId: savedResult.id ?? jobRow.result_summary?.resultRowId ?? null,
     normalizedTakeoffJson: savedResult.normalized_takeoff_json,
+    takeoffResult: savedResult.normalized_takeoff_json,
     computedMeasurementsJson: freshComputed,
     validationDiagnosticsJson: savedResult.validation_diagnostics_json,
     importPlanJson: savedResult.import_plan_json,

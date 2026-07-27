@@ -1325,6 +1325,7 @@ function makeMockSupabase({
   });
 
   const fixture = buildSpec73Fixture();
+  fixture.rooms[0].areas[0].runs[0].notes = "Adjusted island run depth";
   const result = await saveTakeoffCorrection({
     supabase,
     organizationId: ORG_ID,
@@ -1336,6 +1337,7 @@ function makeMockSupabase({
   });
 
   assert.equal(result.ok, true);
+  assert.equal(result.unchanged, false);
   assert.ok(result.correctionId, "correctionId returned");
   assert.equal(result.reviewStatus, "needs_review", "correction resets review status");
   assert.equal(tableData.quote_takeoff_jobs[0].review_status, "needs_review");
