@@ -178,8 +178,10 @@ console.log("\nstudioSharedInbox.test.mjs\n");
     }
   });
   assert.equal(row.importState, SHARED_INBOX_STATES.NOT_IMPORTED);
-  assert.equal(row.primaryAction.key, "import_and_open");
+  assert.equal(row.primaryAction.key, "start_estimate");
+  assert.equal(row.primaryAction.label, "Start Estimate");
   assert.equal(row.primaryAction.mutates, true);
+  assert.equal(row.legacyPrimaryAction.key, "import_and_open");
   assert.equal(row.supportedAttachmentCount, 1);
   assert.equal(row.supportState, "supported");
   const json = JSON.stringify(row);
@@ -207,8 +209,9 @@ console.log("\nstudioSharedInbox.test.mjs\n");
     }
   });
   assert.equal(row.supportState, SHARED_INBOX_STATES.UNSUPPORTED_ATTACHMENT);
-  assert.equal(row.primaryAction.key, "create_manual_estimate");
-  console.log("ok: 2 unimported unsupported → Create manual estimate");
+  assert.equal(row.primaryAction.key, "start_estimate");
+  assert.equal(row.legacyPrimaryAction.key, "create_manual_estimate");
+  console.log("ok: 2 unimported unsupported → Start Estimate (manual path)");
 }
 
 {
@@ -247,7 +250,7 @@ console.log("\nstudioSharedInbox.test.mjs\n");
     }
   });
   assert.equal(row.importState, SHARED_INBOX_STATES.IMPORTED);
-  assert.equal(row.primaryAction.key, "open_estimate");
+  assert.equal(row.primaryAction.key, "resume_estimate");
   assert.equal(row.primaryAction.mutates, false);
   assert.equal(row.estimateId, "est-1");
   assert.equal(row.activeEstimateId, "est-1");
@@ -282,7 +285,8 @@ console.log("\nstudioSharedInbox.test.mjs\n");
     }
   });
   assert.equal(processing.importState, SHARED_INBOX_STATES.TAKEOFF_PROCESSING);
-  assert.equal(processing.primaryAction.key, "view_progress");
+  assert.equal(processing.primaryAction.key, "resume_estimate");
+  assert.equal(processing.legacyPrimaryAction.key, "view_progress");
   assert.equal(processing.aiTakeoff.state, "processing");
 
   const ready = buildSharedInboxRow({
@@ -309,7 +313,8 @@ console.log("\nstudioSharedInbox.test.mjs\n");
     }
   });
   assert.equal(ready.importState, SHARED_INBOX_STATES.TAKEOFF_READY);
-  assert.equal(ready.primaryAction.key, "review_ai_takeoff");
+  assert.equal(ready.primaryAction.key, "resume_estimate");
+  assert.equal(ready.legacyPrimaryAction.key, "review_ai_takeoff");
   assert.equal(ready.aiTakeoff.reviewReady, true);
 
   const failed = deriveAiTakeoffSummary({
@@ -335,7 +340,8 @@ console.log("\nstudioSharedInbox.test.mjs\n");
       importable: true
     }
   });
-  assert.equal(manual.primaryAction.key, "create_manual_estimate");
+  assert.equal(manual.primaryAction.key, "start_estimate");
+  assert.equal(manual.legacyPrimaryAction.key, "create_manual_estimate");
   assert.equal(deriveSupportState({ eligibilityHint: "importable_no_pdf", hasAttachments: false, attachments: [] }).supportState, SHARED_INBOX_STATES.UNSUPPORTED_ATTACHMENT);
   console.log("ok: 8 manual estimate path action");
 }
@@ -387,10 +393,11 @@ console.log("\nstudioSharedInbox.test.mjs\n");
   const supported = listed.items.find((i) => i.messageKey === "msg-supported-1");
   assert.ok(supported);
   assert.equal(supported.importState, SHARED_INBOX_STATES.NOT_IMPORTED);
-  assert.equal(supported.primaryAction.label, "Import and open");
+  assert.equal(supported.primaryAction.label, "Start Estimate");
   const unsupported = listed.items.find((i) => i.messageKey === "msg-unsupported-1");
   assert.ok(unsupported);
-  assert.equal(unsupported.primaryAction.key, "create_manual_estimate");
+  assert.equal(unsupported.primaryAction.key, "start_estimate");
+  assert.equal(unsupported.legacyPrimaryAction.key, "create_manual_estimate");
 
   const first = await svc.importMessage({
     organizationId: ORG,

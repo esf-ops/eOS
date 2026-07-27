@@ -3,6 +3,8 @@ import {
   classifySharedInboxError,
   fetchSharedInbox,
   importSharedInboxMessage,
+  startSharedInboxEstimate,
+  markSharedInboxViewed,
   isTransientHttpError,
   newImportIdempotencyKey
 } from "../lib/sharedInboxApi.mjs";
@@ -30,11 +32,15 @@ type PrimaryAction = {
   label: string;
   openTarget?: string;
   mutates?: boolean;
+  legacyKey?: string;
 };
 
 type InboxRow = {
   messageKey: string;
   receivedAt?: string | null;
+  viewed?: boolean;
+  estimateStatus?: string;
+  estimateStatusLabel?: string;
   sender?: { displayName?: string; safeAddressLabel?: string; emailPresent?: boolean };
   subject?: string;
   bodyPreview?: string;
@@ -57,10 +63,10 @@ type InboxRow = {
 
 const FILTERS = [
   { id: "all", label: "All" },
-  { id: "not_imported", label: "Not imported" },
-  { id: "imported", label: "Imported" },
-  { id: "needs_review", label: "Needs review" },
-  { id: "takeoff_ready", label: "AI Takeoff ready" }
+  { id: "not_imported", label: "Not started" },
+  { id: "imported", label: "In progress" },
+  { id: "needs_review", label: "Needs attention" },
+  { id: "takeoff_ready", label: "AI draft ready" }
 ] as const;
 
 function formatReceived(iso?: string | null): string {
@@ -77,24 +83,38 @@ function formatReceived(iso?: string | null): string {
 }
 
 function stateChip(row: InboxRow): { label: string; tone: string } {
+  const status = String((row as InboxRow & { estimateStatusLabel?: string }).estimateStatusLabel || "");
+  if (status) {
+    const tone =
+      status === "Sold"
+        ? "ok"
+        : status === "Accepted"
+          ? "accent"
+          : status === "Published"
+            ? "accent"
+            : status === "In Progress"
+              ? "warn"
+              : "neutral";
+    return { label: status, tone };
+  }
   switch (row.importState) {
     case "not_imported":
-      return { label: "Not imported", tone: "neutral" };
+      return { label: "Not Started", tone: "neutral" };
     case "import_failed":
-      return { label: "Import failed", tone: "danger" };
+      return { label: "Needs attention", tone: "danger" };
     case "takeoff_processing":
-      return { label: "Takeoff processing", tone: "warn" };
+      return { label: "In Progress", tone: "warn" };
     case "takeoff_ready":
-      return { label: "Takeoff ready", tone: "accent" };
+      return { label: "In Progress", tone: "accent" };
     case "needs_manual_review":
-      return { label: "Needs review", tone: "warn" };
+      return { label: "Needs attention", tone: "warn" };
     case "unsupported_attachment":
-      return { label: "Unsupported attachment", tone: "warn" };
+      return { label: "Needs attention", tone: "warn" };
     case "already_imported":
     case "imported":
-      return { label: "Imported", tone: "ok" };
+      return { label: "In Progress", tone: "ok" };
     default:
-      return { label: row.importState || "Not imported", tone: "neutral" };
+      return { label: "Not Started", tone: "neutral" };
   }
 }
 
@@ -173,26 +193,28 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
     const action = row.primaryAction;
     if (!action) return;
 
-    const navigates =
+    const resumes =
+      action.key === "resume_estimate" ||
       action.key === "open_estimate" ||
       action.key === "view_progress" ||
       action.key === "review_ai_takeoff" ||
       (action.key === "review_request" && row.intakeCaseId && !action.mutates);
 
-    if (navigates && row.intakeCaseId) {
-      onOpenEstimate(row.intakeCaseId, { openTarget: action.openTarget || "takeoff" });
+    if (resumes && row.intakeCaseId) {
+      onOpenEstimate(row.intakeCaseId, { openTarget: action.openTarget || "scope" });
       return;
     }
 
-    const needsImport =
+    const needsStart =
+      action.key === "start_estimate" ||
       action.key === "import_and_open" ||
       action.key === "retry_import" ||
       action.key === "create_manual_estimate" ||
       (action.key === "review_request" && action.mutates);
 
-    if (!needsImport) {
+    if (!needsStart) {
       if (row.intakeCaseId) {
-        onOpenEstimate(row.intakeCaseId, { openTarget: action.openTarget || "takeoff" });
+        onOpenEstimate(row.intakeCaseId, { openTarget: action.openTarget || "scope" });
       }
       return;
     }
@@ -200,30 +222,37 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
     if (!authToken || importingKey) return;
     setImportingKey(row.messageKey);
     try {
-      const result = (await importSharedInboxMessage(authToken, row.messageKey, {
-        idempotencyKey: newImportIdempotencyKey()
+      const forceManual =
+        action.key === "create_manual_estimate" ||
+        (action as PrimaryAction & { legacyKey?: string }).legacyKey === "create_manual_estimate";
+      const result = (await startSharedInboxEstimate(authToken, row.messageKey, {
+        idempotencyKey: newImportIdempotencyKey(),
+        forceManual
       })) as {
         ok?: boolean;
         intakeCaseId?: string | null;
+        estimateId?: string | null;
         alreadyImported?: boolean;
+        reused?: boolean;
         item?: InboxRow | null;
         primaryAction?: PrimaryAction;
+        openTarget?: string;
       };
 
-      // Refresh row from confirmed backend result — never optimistic success.
       await loadInbox({ preserveOnTransient: true });
 
       const caseId = result.intakeCaseId || result.item?.intakeCaseId || null;
       if (caseId) {
-        const openTarget =
-          result.item?.primaryAction?.openTarget ||
-          result.primaryAction?.openTarget ||
-          action.openTarget ||
-          "takeoff";
-        onOpenEstimate(caseId, { openTarget });
+        onOpenEstimate(caseId, {
+          openTarget:
+            result.openTarget ||
+            result.item?.primaryAction?.openTarget ||
+            action.openTarget ||
+            "scope"
+        });
       } else {
         setActionError(
-          "The import may have completed, but its result could not be confirmed. Refresh the inbox before retrying."
+          "The estimate may have started, but its result could not be confirmed. Refresh the inbox before retrying."
         );
       }
     } catch (e) {
@@ -242,10 +271,10 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
       <header className="eq-header">
         <div>
           <h1 className="eq-title" data-testid="shared-inbox-title">
-            Shared Inbox
+            Inbox
           </h1>
           <p className="eq-subtitle">
-            Quote requests received through the shared estimating mailbox.
+            Quote requests for estimating.
             {mailboxDisplay ? ` (${mailboxDisplay})` : ""}
           </p>
         </div>

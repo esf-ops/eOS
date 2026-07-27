@@ -1,8 +1,8 @@
 /**
  * Manual physical scope editor — authoritative measured geometry for manual estimates.
- * Confirmation is a separate explicit API call. Saving never publishes.
+ * Draft changes autosave. Confirmation is orchestrated by Publish (compatibility control retained).
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ApiError,
   apiGet,
@@ -14,6 +14,11 @@ import {
   estimateRevisionSupersededMessage,
   activeEstimateIdFromSupersededError
 } from "../lib/api";
+import {
+  createStudioAutosaveController,
+  STUDIO_AUTOSAVE_LABELS,
+  type StudioAutosaveStatus
+} from "../lib/studioAutosaveController";
 
 type OpenEdgeMeasurementMode = "piece_sum" | "room_total";
 
@@ -60,6 +65,10 @@ type Props = {
   /** Fired when save/confirm returns a different active estimate id (revision). */
   onActiveEstimateChange?: (estimateId: string, meta?: { revision?: number; previousRevisionSummary?: unknown }) => void;
   onDirtyChange?: (dirty: boolean) => void;
+  /** Register flush() for section navigation / Publish. */
+  onRegisterFlush?: (flush: (() => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>) | null) => void;
+  /** When true, hide primary editor (parent section tabs). */
+  hidden?: boolean;
 };
 
 const ROOM_TYPES = ["Kitchen", "Island", "Vanity", "Bar", "Laundry", "Fireplace", "Shower", "Other"];
@@ -280,17 +289,26 @@ export default function ManualPhysicalScopeEditor({
   refreshKey = 0,
   onConfirmed,
   onActiveEstimateChange,
-  onDirtyChange
+  onDirtyChange,
+  onRegisterFlush,
+  hidden = false
 }: Props) {
   const [rooms, setRooms] = useState<RoomDraft[]>([emptyRoom()]);
   const [cutouts, setCutouts] = useState({ "qty-sink": 0, "qty-cook": 0, "qty-outlet": 0, "qty-bar": 0 });
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const [saveState, setSaveState] = useState<StudioAutosaveStatus>("idle");
   const [confirmed, setConfirmed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState(estimateId);
+  const roomsRef = useRef(rooms);
+  const cutoutsRef = useRef(cutouts);
+  const activeIdRef = useRef(activeId);
+  const autosaveRef = useRef<ReturnType<typeof createStudioAutosaveController> | null>(null);
+  roomsRef.current = rooms;
+  cutoutsRef.current = cutouts;
+  activeIdRef.current = activeId;
 
   useEffect(() => {
     setActiveId(estimateId);
@@ -350,15 +368,14 @@ export default function ManualPhysicalScopeEditor({
 
   const includedRooms = rooms.filter((r) => r.included);
 
-  async function saveDraft() {
-    setSaveState("saving");
+  async function saveDraft(): Promise<{ ok: true } | { ok: false; conflict?: boolean }> {
     setMessage(null);
     setErrors([]);
     try {
       const body = (await apiPatch(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(activeId)}/manual-scope`,
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(activeIdRef.current)}/manual-scope`,
         authToken,
-        { scope: { rooms: toApiRooms(rooms), addOns: cutouts } }
+        { scope: { rooms: toApiRooms(roomsRef.current), addOns: cutoutsRef.current } }
       )) as {
         estimate?: {
           id?: string;
@@ -368,33 +385,67 @@ export default function ManualPhysicalScopeEditor({
           activeEstimateId?: string;
         };
       };
-      const nextId = body.estimate?.activeEstimateId || body.estimate?.id || activeId;
-      if (nextId && nextId !== activeId) {
+      const nextId = body.estimate?.activeEstimateId || body.estimate?.id || activeIdRef.current;
+      if (nextId && nextId !== activeIdRef.current) {
         setActiveId(nextId);
         onActiveEstimateChange?.(nextId, {
           revision: body.estimate?.revision,
           previousRevisionSummary: body.estimate?.previousRevisionSummary
         });
       }
-      setSaveState("saved");
       setConfirmed(false);
       setDirty(false);
       onDirtyChange?.(false);
-      setMessage("Manual scope saved. Confirm when the physical scope is complete.");
+      return { ok: true };
     } catch (e) {
-      setSaveState("failed");
       if (isEstimateRevisionSupersededError(e)) {
         const next = activeEstimateIdFromSupersededError(e);
         setMessage(estimateRevisionSupersededMessage());
+        setSaveState("conflict");
         if (next) {
-          // Switch id pointer only — do not auto-replay the stale payload.
           setActiveId(next);
           onActiveEstimateChange?.(next);
         }
-        return;
+        return { ok: false, conflict: true };
       }
-      setMessage(isTransientHttpError(e) ? transientFailureMessage(e) : e instanceof ApiError ? e.message : "Save failed");
+      setMessage(
+        isTransientHttpError(e) ? transientFailureMessage(e) : e instanceof ApiError ? e.message : "Save failed"
+      );
+      throw e;
     }
+  }
+
+  useEffect(() => {
+    const controller = createStudioAutosaveController({
+      debounceMs: 800,
+      save: () => saveDraft(),
+      onStatus: (s) => setSaveState(s)
+    });
+    autosaveRef.current = controller;
+    onRegisterFlush?.(() => controller.flush());
+    return () => {
+      controller.dispose();
+      autosaveRef.current = null;
+      onRegisterFlush?.(null);
+    };
+    // saveDraft closes over latest refs; recreate when auth/case identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, caseId, estimateId]);
+
+  function markDirty(next: RoomDraft[]) {
+    setRooms(next);
+    setDirty(true);
+    setConfirmed(false);
+    onDirtyChange?.(true);
+    autosaveRef.current?.markDirty();
+  }
+
+  function markCutoutsDirty(next: typeof cutouts) {
+    setCutouts(next);
+    setDirty(true);
+    setConfirmed(false);
+    onDirtyChange?.(true);
+    autosaveRef.current?.markDirty();
   }
 
   async function confirmScope() {
@@ -474,14 +525,6 @@ export default function ManualPhysicalScopeEditor({
     }
   }
 
-  function markDirty(next: RoomDraft[]) {
-    setRooms(next);
-    setDirty(true);
-    setConfirmed(false);
-    setSaveState("idle");
-    onDirtyChange?.(true);
-  }
-
   if (loading) {
     return (
       <p className="muted" data-testid="manual-scope-loading">
@@ -490,30 +533,33 @@ export default function ManualPhysicalScopeEditor({
     );
   }
 
+  if (hidden) {
+    return null;
+  }
+
   return (
     <section className="manual-scope-editor" data-testid="manual-physical-scope-editor">
       <header className="manual-scope-header">
         <div>
-          <h3>Manual Scope</h3>
+          <h3>Scope</h3>
           <p className="muted">
-            Authoritative measured geometry for this estimate — rooms, pieces, open edge LF,
-            backsplash, and openings. Pricing Setup consumes this after confirmation and does not
-            maintain a second measurement set. Open edge LF is independent of the base edge profile.
+            Define what we are fabricating — rooms, pieces, dimensions, exposed edges,
+            backsplash-eligible length, and openings. Changes save automatically.
           </p>
         </div>
-        <p className="manual-scope-save-state" data-testid="manual-scope-save-state">
-          {confirmed
-            ? "Manual scope confirmed"
-            : dirty
-              ? "Unsaved changes"
-              : saveState === "saving"
-                ? "Saving…"
-                : saveState === "saved"
-                  ? "Saved"
-                  : saveState === "failed"
-                    ? "Save failed"
-                    : "Ready"}
-        </p>
+        <div className="manual-scope-save-state" data-testid="manual-scope-save-state">
+          <span>{STUDIO_AUTOSAVE_LABELS[saveState] || (dirty ? "Saving…" : "Saved")}</span>
+          {saveState === "failed" ? (
+            <button
+              type="button"
+              className="eq-btn-ghost eq-btn-small"
+              data-testid="manual-scope-retry-save"
+              onClick={() => void autosaveRef.current?.retry()}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
       </header>
 
       {message ? (
@@ -1032,7 +1078,10 @@ export default function ManualPhysicalScopeEditor({
               value={cutouts[key] || ""}
               data-testid={`manual-opening-${key}`}
               onChange={(e) => {
-                setCutouts((prev) => ({ ...prev, [key]: Math.max(0, Math.floor(Number(e.target.value) || 0)) }));
+                markCutoutsDirty({
+                  ...cutouts,
+                  [key]: Math.max(0, Math.floor(Number(e.target.value) || 0))
+                });
                 setDirty(true);
                 setConfirmed(false);
                 setSaveState("idle");
@@ -1078,24 +1127,30 @@ export default function ManualPhysicalScopeEditor({
       </aside>
 
       <div className="manual-scope-actions">
-        <button
-          type="button"
-          className="eq-btn-secondary"
-          data-testid="manual-scope-save"
-          disabled={saveState === "saving" || !dirty}
-          onClick={() => void saveDraft()}
-        >
-          Save Manual Scope
-        </button>
-        <button
-          type="button"
-          className="eq-btn-primary"
-          data-testid="manual-scope-confirm"
-          disabled={saveState === "saving"}
-          onClick={() => void confirmScope()}
-        >
-          Confirm Manual Scope
-        </button>
+        <p className="muted" data-testid="manual-scope-autosave-hint">
+          Edits save automatically. Publish will validate Scope when you are ready.
+        </p>
+        <details className="eq-compat-advanced" data-testid="manual-scope-compat-actions">
+          <summary>Advanced — Legacy Scope actions</summary>
+          <button
+            type="button"
+            className="eq-btn-ghost"
+            data-testid="manual-scope-save"
+            disabled={saveState === "saving" || !dirty}
+            onClick={() => void autosaveRef.current?.flush()}
+          >
+            Save now
+          </button>
+          <button
+            type="button"
+            className="eq-btn-ghost"
+            data-testid="manual-scope-confirm"
+            disabled={saveState === "saving"}
+            onClick={() => void confirmScope()}
+          >
+            Confirm Manual Scope
+          </button>
+        </details>
       </div>
     </section>
   );

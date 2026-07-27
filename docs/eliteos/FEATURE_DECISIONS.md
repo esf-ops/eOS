@@ -2678,3 +2678,21 @@
 | **SQL** | `backend-core/supabase/eliteos_studio_estimate_lifecycle_closeout_v1.sql` — **do not apply automatically**. |
 | **Tests** | `eos:test:estimate-lifecycle-closeout`. |
 | **Deferred** | Vanity Program; automatic QB/Moraware handoff; automatic customer email. |
+
+### 187. Elite 100 simplified estimating & publishing workflow (2026-07-27)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-27 · `feature/elite100-simplified-estimating-workflow` |
+| **Decision** | Estimator product path is reduced to **Inbox → Start Estimate → Scope → Customer Choices → Review & Publish**. Top-level Studio navigation is **Inbox** and **Estimates** (Command Center / Live DE / Review Requests remain under More as compatibility). The individual estimate workspace uses three primary section tabs with the same labels. |
+| **AI Takeoff** | Prefills the same Scope workspace as a starting draft. Not a separate required business approval gate in the simplified path. Scope readiness is validation-derived (`Scope ready` / `Scope needs attention`). |
+| **Backsplash** | Physical **backsplash-eligible length** is Scope authority (room). Customer Choices only offer allowed backsplash types against that length. |
+| **Advanced Pricing** | Commercial lines (`studio_commercial_lines_v1`: charges, discounts, credits, internal-only, absorbed) live under **Customer Choices → Advanced Pricing** (collapsed). Not under Scope. Internal/absorbed never enter the public Digital Estimate. |
+| **Autosave** | Debounced draft autosave across Scope, Customer Choices, and Advanced Pricing. One write in flight; edit order preserved; stale responses rejected; conflict visible; Retry; flush before section navigation and before Publish; `beforeunload` when dirty. Save now / Save Draft only under Advanced troubleshooting. Status vocabulary: Saving… / Saved / Save failed — Retry / Another user changed this estimate. |
+| **Calculation** | Server-authoritative auto-calc after a clean draft save. Manual Calculate is not required on the normal path (compatibility under Advanced). Stale calculation tokens are ignored; last good price retained while updating. |
+| **Publish** | **Publish Digital Estimate** is the estimator’s commercial approval. Client flushes pending autosave first (rejects unresolved conflict). `POST …/simplified-publish` validates Scope, auto-confirms manual scope when needed, calculates, approves (`confirm:true`), then publishes. Failure → no customer link / no partial commercial commit beyond a non-published priced snapshot. No email, auto-sold, QB, or Moraware. |
+| **Frozen option package** | Publication carries a customer-safe frozen option package summary (materials/edges/backsplash/products/defaults/price effects). Internal cost/margin/formulas omitted. |
+| **Commitments** | Only Publish, customer Accept, and Mark Sold require deliberate confirmation. |
+| **Legacy** | Internal Estimate and legacy Quote Library unchanged. No Studio → `quote_headers` authority writes. Compatibility Import / Calculate / Approve / Confirm Scope / workflow header remain under Advanced / Legacy Compatibility. |
+| **SQL** | None. |
+| **Tests** | `eos:test:elite100-simplified-workflow`. |

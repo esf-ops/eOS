@@ -53,7 +53,9 @@ assert.ok(page.includes("Manage estimate requests from intake through customer a
 console.log("ok: publication banner only on Publications; CC uses subtitle");
 
 // 4. Primary navigation labels are readable employee-oriented labels
-assert.ok(app.includes(">Command Center<") || app.includes("Command Center\n"));
+assert.ok(app.includes(">Inbox<") || app.includes("\n            Inbox\n"));
+assert.ok(app.includes(">Estimates<") || app.includes("\n            Estimates\n"));
+assert.ok(app.includes("Command Center (compatibility)") || app.includes("Command Center"));
 assert.ok(app.includes("Live Digital Estimates"));
 assert.ok(app.includes("Review Requests"));
 assert.ok(css.includes(".studio-nav button"));
@@ -174,11 +176,13 @@ assert.ok(page.includes("nextActionRoute"));
 assert.ok(page.includes('openTarget: item.nextActionRoute'));
 console.log("ok: opening/filtering remains read-only (no approve/publish/assign)");
 
-// 23–24. Legacy accessible; default landing is Command Center after corrected UI
-assert.match(app, /useState<[\s\S]*?>\("command-center"\)/);
+// 23–24. Legacy accessible; default landing is Inbox (simplified workflow)
+assert.match(app, /useState<[\s\S]*?>\("shared-inbox"\)/);
 assert.ok(app.includes("EstimateCommandCenterPage"));
 assert.ok(app.includes('mainNav === "estimate-queue"'));
-console.log("ok: default landing is Command Center; legacy remains accessible");
+assert.ok(app.includes('data-testid="studio-nav-inbox"'));
+assert.ok(app.includes('data-testid="studio-nav-estimates"'));
+console.log("ok: default landing is Inbox; Estimates primary; Command Center under More");
 
 // Visual fixtures cover required scenarios
 assert.ok(toCommandCenterItem(ECC_VISUAL_FIXTURES.needsTakeoffReview).stageKey === "takeoff");

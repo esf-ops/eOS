@@ -20,6 +20,12 @@ import {
 } from "../../../backend-core/src/elite100EstimateStudio/studioScopeBilling.mjs";
 import { workflowAllowsAction } from "../../../backend-core/src/elite100EstimateStudio/studioWorkspaceWorkflow.mjs";
 import type { WorkspaceWorkflow } from "./EstimateWorkflowHeader";
+import {
+  createStudioAutosaveController,
+  STUDIO_AUTOSAVE_LABELS,
+  shouldApplyStudioAutosaveResponse,
+  type StudioAutosaveStatus
+} from "../lib/studioAutosaveController";
 
 type CustomLineItem = {
   id?: string;
@@ -260,6 +266,13 @@ type Props = {
   onTransientFailure?: (err: unknown, retry?: (() => void) | null) => void;
   onPublicationSummary?: (publication: Record<string, unknown> | null) => void;
   onPublicationRefreshError?: (message: string | null) => void;
+  /** Simplified workspace section. */
+  activeSection?: "scope" | "customer_choices" | "review_publish";
+  onRegisterFlush?: (flush: (() => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>) | null) => void;
+  onAutosaveStatus?: (status: string) => void;
+  onCalcStatus?: (status: string) => void;
+  /** Flush pending autosaves before Publish Digital Estimate. */
+  onBeforePublishFlush?: () => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>;
 };
 
 const MATERIAL_GROUPS = [
@@ -295,7 +308,12 @@ export default function EstimateScopePanel({
   onActiveEstimateChange,
   onTransientFailure,
   onPublicationSummary,
-  onPublicationRefreshError
+  onPublicationRefreshError,
+  activeSection = "customer_choices",
+  onRegisterFlush,
+  onAutosaveStatus,
+  onCalcStatus,
+  onBeforePublishFlush
 }: Props) {
   const [estimate, setEstimate] = useState<StudioEstimate | null>(null);
   const [partnerAccount, setPartnerAccount] = useState<PartnerAccountOption | null>(null);
@@ -305,6 +323,10 @@ export default function EstimateScopePanel({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [autosaveStatus, setAutosaveStatus] = useState<StudioAutosaveStatus>("idle");
+  const [calcStatus, setCalcStatus] = useState<"idle" | "updating" | "updated" | "needs_attention">(
+    "idle"
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   // Under Takeoff authority miter/build-up start as "Not identified in
@@ -312,15 +334,44 @@ export default function EstimateScopePanel({
   const [specialtyFabricationOpen, setSpecialtyFabricationOpen] = useState(false);
   const loadGenRef = useRef(0);
   const estimateRevisionRef = useRef(0);
+  const estimateRef = useRef<StudioEstimate | null>(null);
+  const autosaveRef = useRef<ReturnType<typeof createStudioAutosaveController> | null>(null);
+  const calcTokenRef = useRef(0);
+  const latestEditAtRef = useRef(0);
+  const showScope = activeSection === "scope";
+  const showChoices = activeSection === "customer_choices";
+  const showReview = activeSection === "review_publish";
 
   function markDirty(next = true) {
     setDirty(next);
     onDirtyChange?.(next);
+    if (next) {
+      latestEditAtRef.current = Date.now();
+      autosaveRef.current?.markDirty();
+    }
   }
 
   function setBusyTracked(next: boolean) {
     setBusy(next);
     onBusyChange?.(next);
+  }
+
+  function setAutosaveStatusTracked(next: StudioAutosaveStatus) {
+    setAutosaveStatus(next);
+    onAutosaveStatus?.(STUDIO_AUTOSAVE_LABELS[next] || next);
+  }
+
+  function setCalcStatusTracked(next: typeof calcStatus) {
+    setCalcStatus(next);
+    onCalcStatus?.(
+      next === "updating"
+        ? "Updating price…"
+        : next === "updated"
+          ? "Price updated"
+          : next === "needs_attention"
+            ? "Pricing needs attention"
+            : ""
+    );
   }
 
   function applyEstimate(est: StudioEstimate | null) {
@@ -331,6 +382,7 @@ export default function EstimateScopePanel({
     }
     estimateRevisionRef.current = Math.max(estimateRevisionRef.current, rev);
     setEstimate(est);
+    estimateRef.current = est;
     onCanonicalEstimate?.(est);
     if (est.id) {
       onActiveEstimateChange?.(est.id, {
@@ -664,35 +716,98 @@ export default function EstimateScopePanel({
     markDirty(true);
   }
 
-  async function saveDraft() {
-    if (!estimate?.id || !estimate.scope) return;
-    setBusyTracked(true);
+  async function saveDraft(): Promise<{ ok: true } | { ok: false; conflict?: boolean }> {
+    const current = estimateRef.current;
+    if (!current?.id || !current.scope) return { ok: true };
+    const requestStartedAt = latestEditAtRef.current;
+    const localRevision = Number(current.revision ?? 0) || 0;
     setActionError(null);
     try {
       const body = (await apiPatch(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimate.id)}`,
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(current.id)}`,
         authToken,
-        { scope: estimate.scope }
+        { scope: current.scope }
       )) as { estimate?: StudioEstimate };
+      const applyGate = shouldApplyStudioAutosaveResponse({
+        requestStartedAt,
+        latestEditAt: latestEditAtRef.current,
+        localRevision,
+        responseRevision: body.estimate?.revision ?? null
+      });
+      if (!applyGate.apply) {
+        // Keep newer local edits; do not replay stale server draft over them.
+        return { ok: true };
+      }
       if (body.estimate) applyEstimate(body.estimate);
-      else setEstimate(estimate);
       markDirty(false);
-      setActionNotice("Pricing Setup saved.");
+      return { ok: true };
     } catch (e) {
       if (isEstimateRevisionSupersededError(e)) {
         setActionError(estimateRevisionSupersededMessage());
+        setAutosaveStatusTracked("conflict");
         const next = activeEstimateIdFromSupersededError(e);
         if (next) onActiveEstimateChange?.(next);
-      } else if (isTransientHttpError(e)) {
+        return { ok: false, conflict: true };
+      }
+      if (isTransientHttpError(e)) {
         setActionError(transientFailureMessage(e));
-        onTransientFailure?.(e, () => void saveDraft());
+        onTransientFailure?.(e, () => void autosaveRef.current?.retry());
       } else {
         setActionError(e instanceof ApiError ? e.message : "Save failed");
       }
-    } finally {
-      setBusyTracked(false);
+      throw e;
     }
   }
+
+  async function runAutoCalculate() {
+    const current = estimateRef.current;
+    if (!current?.id || dirty) return;
+    const token = ++calcTokenRef.current;
+    setCalcStatusTracked("updating");
+    try {
+      const body = (await apiPost(
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(current.id)}/calculate`,
+        authToken,
+        {}
+      )) as { estimate?: StudioEstimate };
+      if (token !== calcTokenRef.current) return; // stale
+      if (body.estimate) applyEstimate(body.estimate);
+      setCalcStatusTracked("updated");
+    } catch (e) {
+      if (token !== calcTokenRef.current) return;
+      setCalcStatusTracked("needs_attention");
+      if (!(e instanceof ApiError && (e.status === 409 || e.status === 422))) {
+        /* keep last good price; surface soft status */
+      }
+    }
+  }
+
+  useEffect(() => {
+    const controller = createStudioAutosaveController({
+      debounceMs: 800,
+      save: () => saveDraft(),
+      onStatus: setAutosaveStatusTracked,
+      onSavedClean: () => {
+        void runAutoCalculate();
+      }
+    });
+    autosaveRef.current = controller;
+    onRegisterFlush?.(() => controller.flush());
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (controller.isDirty() || controller.isInFlight()) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      controller.dispose();
+      autosaveRef.current = null;
+      onRegisterFlush?.(null);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, caseId]);
 
   async function refreshFromTakeoff() {
     if (!estimate?.id) return;
@@ -913,6 +1028,20 @@ export default function EstimateScopePanel({
 
   return (
     <div className="eq-estimate-panel" data-testid="estimate-scope-panel">
+      <div className="eq-workspace-status-bar" data-testid="eq-workspace-status-bar">
+        <span data-testid="eq-autosave-status">
+          {STUDIO_AUTOSAVE_LABELS[autosaveStatus] || (dirty ? "Saving…" : "Saved")}
+        </span>
+        <span data-testid="eq-calc-status">
+          {calcStatus === "updating"
+            ? "Updating price…"
+            : calcStatus === "updated"
+              ? "Price updated"
+              : calcStatus === "needs_attention"
+                ? "Pricing needs attention"
+                : ""}
+        </span>
+      </div>
       {estimate.persistenceWarning ? (
         <div className="eq-state eq-state--warn" role="status">
           {estimate.persistenceWarning}
@@ -944,8 +1073,12 @@ export default function EstimateScopePanel({
 
       {!(collapseCompleted && !actionError && !dirty) ? (
       <>
-      <section className="eq-estimate-section" aria-label="Takeoff gate">
-        <h2>A. Takeoff</h2>
+      <section
+        className="eq-estimate-section"
+        aria-label="Takeoff gate"
+        hidden={!showScope}
+        data-testid="eq-section-scope-takeoff"
+      >
         <dl className="eq-status-dl" data-testid="eq-estimate-status-meta">
           <div>
             <dt>Takeoff</dt>
@@ -987,11 +1120,11 @@ export default function EstimateScopePanel({
         </dl>
         {blocked ? (
           <div className="eq-state eq-state--warn" data-testid="eq-estimate-blocked">
-            Finish the Takeoff worksheet above, then click Approve Takeoff &amp; Build Estimate.
-            Scope unlocks automatically after approval.
+            AI Takeoff is still preparing the Scope draft. You can wait for the worksheet, or continue
+            editing Scope once rooms and pieces are available.
           </div>
         ) : (
-          <p className="eq-muted">Takeoff approved — add commercial scope and calculate below.</p>
+          <p className="eq-muted">Scope draft ready — define Customer Choices below.</p>
         )}
         {estimate.staleReason ? (
           <div className="eq-action-row" style={{ marginTop: 8 }}>
@@ -1008,13 +1141,21 @@ export default function EstimateScopePanel({
         ) : null}
       </section>
 
-      <section className="eq-estimate-section" aria-label="Pricing setup">
-        <h2>B. Pricing Setup</h2>
+      <section
+        className="eq-estimate-section"
+        aria-label="Pricing setup"
+        hidden={showReview}
+        data-testid="eq-section-pricing-setup"
+      >
+        <h2>{showChoices ? "Customer Choices" : showScope ? "Scope details" : "Pricing Setup"}</h2>
         <p className="eq-muted">
-          {manualStaffAuthority
-            ? "Manual Scope confirms what physically exists. Pricing Setup chooses how Elite prices and sells it — customer, pricing basis, material, products, and adjustments."
-            : "Takeoff confirms what physically exists. Pricing Setup chooses how Elite prices and sells it — customer, pricing basis, material, products, and adjustments."}
+          {showScope
+            ? manualStaffAuthority
+              ? "Define rooms, pieces, dimensions, openings, and edges. Changes autosave."
+              : "Review and edit physical Scope from Takeoff. Changes autosave."
+            : "Choose materials, edges, catalogs, and Advanced Pricing. Changes autosave and price updates automatically."}
         </p>
+        <div hidden={!showScope} data-testid="eq-section-scope-body">
         {manualStaffAuthority ? (
           <div className="eq-state" data-testid="eq-confirmed-physical-scope">
             <h3>Confirmed physical scope</h3>
@@ -1076,6 +1217,8 @@ export default function EstimateScopePanel({
             </button>
           </div>
         ) : null}
+        </div>
+        <div hidden={!showChoices} data-testid="eq-section-choices-body">
         <h3>Customer and project</h3>
         <p className="eq-muted">
           Prefer the <strong>Project details</strong> section above for project name and jobsite
@@ -1350,6 +1493,8 @@ export default function EstimateScopePanel({
           </div>
         ) : null}
 
+        </div>
+        <div hidden={!showScope} data-testid="eq-section-scope-physical">
         <h3>Approved physical scope</h3>
         {takeoffAuthority ? (
           <div className="eq-approved-scope" data-testid="eq-approved-scope-summary">
@@ -1802,6 +1947,8 @@ export default function EstimateScopePanel({
           </>
         )}
 
+        </div>
+        <div hidden={!showChoices} data-testid="eq-section-choices-commercial">
         <h3>Customer-selectable catalogs</h3>
         <p className="eq-muted">
           Exact products (model, finish, SKU, governed price) resolve through the Digital
@@ -1880,7 +2027,9 @@ export default function EstimateScopePanel({
           </label>
         </div>
 
-        <h3>Commercial adjustments</h3>
+        <h3>Advanced Pricing</h3>
+        <details className="eq-advanced-pricing" data-testid="eq-advanced-pricing" open={false}>
+          <summary>Advanced Pricing — charges, discounts, credits, internal &amp; absorbed costs</summary>
         <p className="eq-muted">
           Customer charges, discounts/credits, internal-only costs, and absorbed costs. Server
           calculation is authoritative. Internal-only and absorbed amounts never appear on the
@@ -2114,6 +2263,7 @@ export default function EstimateScopePanel({
             </button>
           </div>
         </div>
+        </details>
 
         <h3>Edge</h3>
         <div className="eq-scope-grid">
@@ -2378,17 +2528,60 @@ export default function EstimateScopePanel({
           />
         </label>
         <div className="eq-action-row">
-          <button type="button" className="eq-btn-secondary" disabled={busy || blocked || !dirty} onClick={() => void saveDraft()}>
+          <span className="eq-muted" data-testid="eq-autosave-status">
+            {STUDIO_AUTOSAVE_LABELS[autosaveStatus] || (dirty ? "Saving…" : "Saved")}
+          </span>
+          <span className="eq-muted" data-testid="eq-calc-status-chip">
+            {calcStatus === "updating"
+              ? "Updating price…"
+              : calcStatus === "updated"
+                ? "Price updated"
+                : calcStatus === "needs_attention"
+                  ? "Pricing needs attention"
+                  : ""}
+          </span>
+          {autosaveStatus === "failed" ? (
+            <button
+              type="button"
+              className="eq-btn-ghost"
+              data-testid="eq-autosave-retry"
+              onClick={() => void autosaveRef.current?.retry()}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+        <details className="eq-compat-advanced" data-testid="eq-compat-save-draft">
+          <summary>Advanced — Save now / Save Draft (troubleshooting)</summary>
+          <button
+            type="button"
+            className="eq-btn-ghost"
+            disabled={busy || blocked || !dirty}
+            data-testid="eq-save-pricing-draft"
+            onClick={() => void autosaveRef.current?.flush()}
+          >
+            Save now
+          </button>
+          <button type="button" className="eq-btn-ghost" disabled={busy || blocked || !dirty} onClick={() => void saveDraft()}>
             Save Draft
           </button>
-          {dirty ? <span className="eq-muted">Unsaved scope changes</span> : null}
+        </details>
         </div>
       </section>
 
-      <section className="eq-estimate-section" aria-label="Estimate summary">
-        <h2>C. Estimate Summary</h2>
+      <section
+        className="eq-estimate-section"
+        aria-label="Estimate summary"
+        hidden={!showReview}
+        data-testid="eq-section-review-summary"
+      >
+        <h2>Review &amp; Publish</h2>
+        <p className="eq-muted">
+          Confirm Scope and Customer Choices, then Publish Digital Estimate. Price updates
+          automatically after saves — no separate Calculate or Approve step.
+        </p>
         {!totals ? (
-          <p className="eq-muted">Calculate to see the internal estimate summary.</p>
+          <p className="eq-muted">Price will appear here after Scope and Customer Choices are saved.</p>
         ) : (
           <dl className="eq-summary-dl" data-testid="eq-estimate-summary">
             <div>
@@ -2473,18 +2666,36 @@ export default function EstimateScopePanel({
         ) : null}
       </section>
 
-      <section className="eq-estimate-section" aria-label="Estimate approval">
-        <h2>D. Approval</h2>
+      <section
+        className="eq-estimate-section"
+        aria-label="Customer Choices &amp; pricing"
+        hidden={!showReview}
+        data-testid="eq-section-review-actions"
+      >
+        <h2>Publish readiness</h2>
+        <p className="eq-muted">
+          Define what the customer may select. Price updates automatically after saves. Publish is the
+          commercial approval — no separate Calculate or Approve clicks are required.
+        </p>
+        <p className="eq-muted" data-testid="eq-calc-status">
+          {busy
+            ? "Updating price…"
+            : estimate.calculation?.calculatedAt
+              ? "Price updated"
+              : pricingDirty
+                ? "Pricing needs attention"
+                : ""}
+        </p>
         {approvalCurrent && estimate.approval?.approvedAt ? (
           <p className="eq-muted" data-testid="eq-estimate-approved">
-            Approved {estimate.approval.approvedAt}
+            Last approved snapshot {estimate.approval.approvedAt}
             {estimate.approval.exactInternalTotal != null
               ? ` · $${Number(estimate.approval.exactInternalTotal).toFixed(2)}`
               : ""}
           </p>
         ) : (
           <p className="eq-muted" data-testid="eq-estimate-not-approved">
-            Not approved yet.
+            Ready for Review &amp; Publish when Scope and choices are complete.
           </p>
         )}
         {(workflow?.historicalApproval?.label || estimate.previousRevisionSummary?.label) &&
@@ -2496,7 +2707,7 @@ export default function EstimateScopePanel({
         ) : null}
         {!canCalculate && pricingDirty ? (
           <p className="eq-muted" data-testid="eq-calculate-blocked-dirty">
-            Save Pricing Setup before calculating.
+            Finish saving Customer Choices before publishing.
           </p>
         ) : null}
         {actionError ? (
@@ -2509,40 +2720,45 @@ export default function EstimateScopePanel({
             {actionNotice}
           </div>
         ) : null}
-        <div className="eq-action-row">
-          <button
-            type="button"
-            className="eq-btn-primary"
-            disabled={!canCalculate}
-            data-testid="eq-calculate-estimate"
-            onClick={() => void calculate()}
-          >
-            Calculate Estimate
-          </button>
-          <button
-            type="button"
-            className="eq-btn-secondary"
-            disabled={!canApprove || estimate.status !== "priced"}
-            data-testid="eq-approve-estimate"
-            onClick={() => void approve()}
-          >
-            Approve Estimate
-          </button>
-          <button type="button" className="eq-btn-ghost" disabled={busy} onClick={() => void load()}>
-            Refresh
-          </button>
-        </div>
+        <details className="eq-compat-advanced" data-testid="eq-compat-calc-approve">
+          <summary>Advanced — manual calculate / approve (compatibility)</summary>
+          <div className="eq-action-row">
+            <button
+              type="button"
+              className="eq-btn-primary"
+              disabled={!canCalculate}
+              data-testid="eq-calculate-estimate"
+              onClick={() => void calculate()}
+            >
+              Calculate Estimate
+            </button>
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              disabled={!canApprove || estimate.status !== "priced"}
+              data-testid="eq-approve-estimate"
+              onClick={() => void approve()}
+            >
+              Approve Estimate
+            </button>
+            <button type="button" className="eq-btn-ghost" disabled={busy} onClick={() => void load()}>
+              Refresh
+            </button>
+          </div>
+        </details>
       </section>
 
       </>
       ) : null}
 
-      {approvalCurrent || workflow?.currentStage === "published" || workflow?.publication?.active ? (
+      {showReview ? (
         <EstimateDigitalEstimatePanel
           authToken={authToken}
           estimateId={estimate.id}
           estimateRevision={estimate.revision ?? null}
-          estimateApproved
+          estimateApproved={true}
+          useSimplifiedPublish
+          onBeforePublishFlush={onBeforePublishFlush}
           onEditProjectDetails={onEditProjectDetails}
           onPublicationSummary={onPublicationSummary}
           onPublicationRefreshError={onPublicationRefreshError}

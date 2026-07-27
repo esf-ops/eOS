@@ -11,6 +11,11 @@ import {
   resolveEstimatorDisplayLabel,
   resolveProjectDisplayLabel
 } from "./studioIdentityDisplay.mjs";
+import {
+  deriveInboxEstimateStatus,
+  INBOX_ESTIMATE_STATUS_LABELS,
+  simplifyInboxPrimaryAction
+} from "./studioSimplifiedWorkflow.mjs";
 
 /** Deterministic inbox keys (backend authority). */
 export const SHARED_INBOX_STATES = Object.freeze({
@@ -378,9 +383,43 @@ export function buildSharedInboxRow(input = {}) {
     .join(" ")
     .toLowerCase();
 
+  const legacyPrimaryAction = {
+    key: primaryActionKey,
+    label: primaryActionLabel,
+    openTarget,
+    // Only explicit import-family actions mutate. Navigation actions never do.
+    mutates:
+      !alreadyImported &&
+      (primaryActionKey === "import_and_open" ||
+        primaryActionKey === "retry_import" ||
+        primaryActionKey === "create_manual_estimate" ||
+        primaryActionKey === "review_request")
+  };
+
+  const estimateStatus = deriveInboxEstimateStatus({
+    estimateId,
+    activeEstimateId,
+    studioEstimateId: estimateId,
+    lifecycleStatus: queueRow?.lifecycleStatus,
+    publicationStatus: queueRow?.digitalEstimateStatus,
+    hasActivePublication: Boolean(queueRow?.hasActivePublication),
+    hasAcceptance: Boolean(queueRow?.hasAcceptance),
+    hasSoldSnapshot: Boolean(queueRow?.hasSoldSnapshot),
+    acceptedAt: queueRow?.acceptedAt,
+    soldAt: queueRow?.soldAt
+  });
+
+  const viewed = Boolean(
+    input.viewed ?? preview.viewed ?? queueRow?.inboxViewed ?? queueRow?.viewed
+  );
+
   const row = {
     messageKey,
     receivedAt: preview.receivedDateTime || null,
+    viewed,
+    viewedAt: viewed
+      ? preview.viewedAt || queueRow?.inboxViewedAt || queueRow?.viewedAt || null
+      : null,
     sender: {
       displayName: senderDisplay,
       safeAddressLabel: preview.sender?.emailPresent
@@ -400,6 +439,8 @@ export function buildSharedInboxRow(input = {}) {
     intakeCaseId,
     estimateId,
     activeEstimateId,
+    estimateStatus,
+    estimateStatusLabel: INBOX_ESTIMATE_STATUS_LABELS[estimateStatus] || "Not Started",
     assignedEstimator: {
       userId: queueRow?.assignedEstimatorUserId || null,
       label: estimatorDisplay.label
@@ -419,18 +460,21 @@ export function buildSharedInboxRow(input = {}) {
           mutates: false
         }
       : null,
-    primaryAction: {
-      key: primaryActionKey,
-      label: primaryActionLabel,
-      openTarget,
-      // Only explicit import-family actions mutate. Navigation actions never do.
-      mutates:
-        !alreadyImported &&
-        (primaryActionKey === "import_and_open" ||
-          primaryActionKey === "retry_import" ||
-          primaryActionKey === "create_manual_estimate" ||
-          primaryActionKey === "review_request")
-    },
+    // Simplified estimator surface (Start / Resume). Legacy key kept for compatibility wrappers.
+    primaryAction: simplifyInboxPrimaryAction(legacyPrimaryAction, {
+      estimateId,
+      activeEstimateId,
+      intakeCaseId
+    }),
+    legacyPrimaryAction,
+    secondaryActions: [
+      {
+        key: "view_plans",
+        label: "View Plans",
+        openTarget: "plans",
+        mutates: false
+      }
+    ],
     filterBucket,
     eligibilityHint: preview.eligibilityHint || null,
     importable: Boolean(preview.importable) && !alreadyImported,
