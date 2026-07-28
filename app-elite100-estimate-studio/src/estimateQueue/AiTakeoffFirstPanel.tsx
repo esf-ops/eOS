@@ -12,6 +12,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   apiGet,
   apiPost,
+  apiPatch,
   ApiError,
   isAbortError,
   isTransientHttpError,
@@ -105,6 +106,7 @@ export default function AiTakeoffFirstPanel({
   const [handoffErrorCode, setHandoffErrorCode] = useState<string | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [detailsSavedNotice, setDetailsSavedNotice] = useState<string | null>(null);
   const [customerUrl, setCustomerUrl] = useState<string | null>(null);
   const [idempotencyKey] = useState(() =>
     typeof crypto !== "undefined" && crypto.randomUUID
@@ -300,11 +302,16 @@ export default function AiTakeoffFirstPanel({
     };
   }, [authToken, takeoffJobId, measurementsApproved, completeApprovalHandoff]);
 
-  async function saveProjectFields() {
-    if (!estimateId) return;
+  /**
+   * PATCH project details, then recalculate.
+   * @returns {Promise<boolean>} true on success; false on failure (error already shown).
+   */
+  async function saveProjectFields(): Promise<boolean> {
+    if (!estimateId) return false;
     setPublishError(null);
+    setDetailsSavedNotice(null);
     try {
-      const body = (await apiPost(
+      const body = (await apiPatch(
         `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/project-details`,
         authToken,
         { customerEmail, projectName }
@@ -316,10 +323,13 @@ export default function AiTakeoffFirstPanel({
         {}
       )) as Record<string, unknown>;
       applyEstimateView((priced.estimate as Record<string, unknown>) || priced);
+      setDetailsSavedNotice("Details saved.");
+      return true;
     } catch (e) {
       setPublishError(
         e instanceof ApiError ? e.message : "Unable to save project details"
       );
+      return false;
     }
   }
 
@@ -328,14 +338,15 @@ export default function AiTakeoffFirstPanel({
     setPublishBusy(true);
     setPublishError(null);
     try {
-      if (
+      const needsDetails =
         activeReview &&
         !activeReview.eligible &&
         activeReview.blockers.some(
           (b) => b.code === "customer_email_required" || b.code === "project_name_required"
-        )
-      ) {
-        await saveProjectFields();
+        );
+      if (needsDetails) {
+        const saved = await saveProjectFields();
+        if (!saved) return;
       }
       const body = (await apiPost(
         `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/simplified-publish`,
@@ -521,7 +532,10 @@ export default function AiTakeoffFirstPanel({
               <input
                 type="text"
                 value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
+                onChange={(e) => {
+                  setProjectName(e.target.value);
+                  setDetailsSavedNotice(null);
+                }}
                 data-testid="eq-ai-project-name"
               />
             </label>
@@ -532,7 +546,10 @@ export default function AiTakeoffFirstPanel({
               <input
                 type="email"
                 value={customerEmail}
-                onChange={(e) => setCustomerEmail(e.target.value)}
+                onChange={(e) => {
+                  setCustomerEmail(e.target.value);
+                  setDetailsSavedNotice(null);
+                }}
                 data-testid="eq-ai-customer-email"
               />
             </label>
@@ -545,6 +562,11 @@ export default function AiTakeoffFirstPanel({
           >
             Save details
           </button>
+          {detailsSavedNotice ? (
+            <p className="eq-muted" data-testid="eq-ai-details-saved" role="status">
+              {detailsSavedNotice}
+            </p>
+          ) : null}
         </div>
       )}
 
