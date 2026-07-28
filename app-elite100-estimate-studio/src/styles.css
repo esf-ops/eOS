@@ -988,6 +988,24 @@ button.linkish {
   border-radius: 10px;
   overflow: hidden;
   min-height: 70vh;
+  position: relative;
+}
+.eq-takeoff-frame-wrap--busy {
+  pointer-events: none;
+}
+.eq-takeoff-handoff-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #0f2a1f;
+  background: rgba(248, 250, 249, 0.92);
 }
 .eq-takeoff-frame {
   width: 100%;

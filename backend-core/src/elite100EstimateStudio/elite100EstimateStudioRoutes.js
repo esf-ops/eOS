@@ -159,6 +159,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       body.message = e.message;
     }
     if (e?.details != null) body.details = e.details;
+    if (e?.retryable === true) body.retryable = true;
     return { status, body };
   }
 

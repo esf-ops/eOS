@@ -2808,3 +2808,15 @@
 | **SQL / formulas** | None. No calculator, rate, tax, Graph, or AI extraction changes. |
 | **Tests** | `takeoffFirstWorkflow.ui.test.mjs`; updated presentation-flow / milestone2 / milestone7 / takeoffPostMessageOrigins / simplified-workflow source contracts for Takeoff-first AI. |
 
+
+### 194. Fix automatic Takeoff approval handoff (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `hotfix/takeoff-approval-handoff` (base: merged PR #100 / `ad7b8b8`) |
+| **Decision** | Narrow production defect: after **Approve Takeoff & Build Estimate**, Studio must automatically build the verified estimate without a browser refresh, and must never show a zero-value “Measurements approved” card when `refresh-from-takeoff` fails. |
+| **Backend 500 cause** | `refreshScopeFromTakeoff` rebuilt the import payload via `buildTakeoffImportPayload` **without** `ignoreApprovalGateBlockers: true`. Consolidated approval already passed hard blockers with that flag; re-running `evaluateTakeoffApprovalGate` then threw bare `VALIDATION_ERRORS` / QA blockers (no `statusCode`) → route mapped to **HTTP 500**. |
+| **Backend fix** | Load Takeoff workspace **once**; prefer frozen `latest.importPayload` from approval; otherwise rebuild with `ignoreApprovalGateBlockers: true` when already approved; map missing/lagging latest result to structured **409** `takeoff_result_not_ready` (`retryable: true`), never a generic 500. Approval requirement (`assertTakeoffApproved`) unchanged. |
+| **Frontend fix** | `AiTakeoffFirstPanel`: keep Takeoff iframe mounted during handoff with overlay “Measurements approved. Building verified estimate…”; set `measurementsApproved=true` only after refresh + calculate return a measured Scope; auto-retry retryable 409s; bounded status-poll fallback for missed postMessage; Retry button on permanent failure; never render zero-value approved summary on failure. |
+| **SQL / formulas** | None. |
+

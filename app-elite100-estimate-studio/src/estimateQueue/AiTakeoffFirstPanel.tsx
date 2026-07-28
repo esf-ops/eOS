@@ -2,8 +2,11 @@
  * Takeoff-first AI estimating surface.
  *
  * Before approval: mounts the existing production Takeoff Review iframe only
- * (single editable geometry workspace). After approval: compact summary +
- * Publish Digital Estimate — no Scope / Customer Choices / Review tabs.
+ * (single editable geometry workspace). After a *successful* handoff: compact
+ * summary + Publish Digital Estimate — no Scope / Customer Choices / Review tabs.
+ *
+ * measurementsApproved flips only after refresh-from-takeoff + calculate succeed.
+ * A failed handoff keeps the iframe mounted and never shows a zero-value card.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -21,6 +24,10 @@ import {
 } from "./takeoffPostMessageOrigins.mjs";
 
 const PUBLISH_CLIENT_TIMEOUT_MS = 55_000;
+const HANDOFF_RETRY_MAX_ATTEMPTS = 6;
+const HANDOFF_RETRY_BASE_MS = 400;
+const APPROVAL_FALLBACK_POLL_MS = 2_500;
+const APPROVAL_FALLBACK_MAX_MS = 45_000;
 
 type ApprovalSummary = {
   countertopSf?: number;
@@ -52,6 +59,52 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Transient approval/result consistency — safe to auto-retry briefly. */
+export function isRetryableHandoffError(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  if (e.status === 425) return true;
+  if (e.status !== 409 && e.status !== 404) return false;
+  const body = e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : null;
+  const code = String(body?.code || "");
+  if (body?.retryable === true) return true;
+  return (
+    code === "takeoff_result_not_ready" ||
+    code === "takeoff_result_missing" ||
+    code === "takeoff_unavailable"
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function measuredCountertopSfFromEstimate(est: Record<string, unknown>): number {
+  const calc = (est.calculation as Record<string, unknown> | undefined) || {};
+  const billing = (calc.scopeBilling as Record<string, unknown> | undefined) || {};
+  const fromBilling =
+    num(billing.measuredCountertopSf) || num(billing.billableCountertopSf);
+  if (fromBilling > 0) return fromBilling;
+  const scope = (est.scope as Record<string, unknown> | undefined) || {};
+  const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
+  return rooms.reduce((s, r) => {
+    const room = r && typeof r === "object" ? (r as Record<string, unknown>) : {};
+    return s + (num(room.countertopSqft) || 0);
+  }, 0);
+}
+
+function estimateHasMeasuredScope(est: Record<string, unknown> | null | undefined): boolean {
+  if (!est) return false;
+  const scope = (est.scope as Record<string, unknown> | undefined) || {};
+  const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
+  if (!rooms.length) return false;
+  const pieces = rooms.flatMap((r) => {
+    const room = r && typeof r === "object" ? (r as Record<string, unknown>) : {};
+    return Array.isArray(room.pieces) ? room.pieces : [];
+  });
+  if (!pieces.length) return false;
+  return measuredCountertopSfFromEstimate(est) > 0;
+}
+
 export default function AiTakeoffFirstPanel({
   authToken,
   caseId,
@@ -72,6 +125,7 @@ export default function AiTakeoffFirstPanel({
   const [projectName, setProjectName] = useState("");
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffError, setHandoffError] = useState<string | null>(null);
+  const [handoffErrorCode, setHandoffErrorCode] = useState<string | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [customerUrl, setCustomerUrl] = useState<string | null>(null);
@@ -81,6 +135,8 @@ export default function AiTakeoffFirstPanel({
       : `ai-tof-pub-${Date.now()}`
   );
   const handoffInFlightRef = useRef(false);
+  const handoffSucceededRef = useRef(false);
+  const pendingSummaryRef = useRef<ApprovalSummary | null>(null);
 
   const applyEstimateView = useCallback(
     (est: Record<string, unknown> | null | undefined) => {
@@ -99,28 +155,64 @@ export default function AiTakeoffFirstPanel({
       const billing = (calc?.scopeBilling as Record<string, unknown> | undefined) || {};
       const fab = (calc?.fabrication as Record<string, unknown> | undefined) || {};
       const edge = (fab?.edge as Record<string, unknown> | undefined) || {};
-      setSummary((prev) => ({
-        ...(prev || {}),
+      const pending = pendingSummaryRef.current;
+      setSummary({
+        ...(pending || {}),
         countertopSf:
           num(billing.measuredCountertopSf) ||
           num(billing.billableCountertopSf) ||
-          prev?.countertopSf ||
+          pending?.countertopSf ||
           0,
-        backsplashSf: num(billing.backsplashSf) || prev?.backsplashSf || 0,
-        edgeLf: num(edge.finalLf) || num(billing.edgeLf) || prev?.edgeLf || 0,
+        backsplashSf: num(billing.backsplashSf) || pending?.backsplashSf || 0,
+        edgeLf: num(edge.finalLf) || num(billing.edgeLf) || pending?.edgeLf || 0,
+        kitchenSinkCutouts: pending?.kitchenSinkCutouts,
+        vanityBarSinkCutouts: pending?.vanityBarSinkCutouts,
+        cooktopCutouts: pending?.cooktopCutouts,
+        outletCutouts: pending?.outletCutouts,
+        rooms: pending?.rooms,
+        includedPieces: pending?.includedPieces,
         customerDisplayTotal:
-          totals.customerDisplayTotal != null ? num(totals.customerDisplayTotal) : prev?.customerDisplayTotal ?? null
-      }));
+          totals.customerDisplayTotal != null
+            ? num(totals.customerDisplayTotal)
+            : pending?.customerDisplayTotal ?? null
+      });
     },
     [onEstimateReady]
   );
 
+  const refreshFromTakeoffWithRetry = useCallback(
+    async (estimateIdForRefresh: string) => {
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < HANDOFF_RETRY_MAX_ATTEMPTS; attempt += 1) {
+        try {
+          const body = (await apiPost(
+            `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateIdForRefresh)}/refresh-from-takeoff`,
+            authToken,
+            { force: true, confirm: true }
+          )) as { estimate?: Record<string, unknown>; preview?: Record<string, unknown> };
+          return body;
+        } catch (e) {
+          lastErr = e;
+          if (!isRetryableHandoffError(e) || attempt === HANDOFF_RETRY_MAX_ATTEMPTS - 1) {
+            throw e;
+          }
+          await sleep(HANDOFF_RETRY_BASE_MS * Math.pow(2, attempt));
+        }
+      }
+      throw lastErr instanceof Error ? lastErr : new Error("Unable to refresh from Takeoff");
+    },
+    [authToken]
+  );
+
   const completeApprovalHandoff = useCallback(
     async (payload: Record<string, unknown> | null) => {
+      if (handoffSucceededRef.current) return;
       if (handoffInFlightRef.current) return;
       handoffInFlightRef.current = true;
       setHandoffBusy(true);
       setHandoffError(null);
+      setHandoffErrorCode(null);
+      // Keep Takeoff mounted — never flip measurementsApproved until success.
       try {
         const nested =
           payload?.payload && typeof payload.payload === "object"
@@ -131,7 +223,7 @@ export default function AiTakeoffFirstPanel({
           (payload?.consolidatedSummary as ApprovalSummary | undefined) ||
           null;
         if (cs) {
-          setSummary({
+          pendingSummaryRef.current = {
             countertopSf: num(cs.countertopSf),
             backsplashSf: num(cs.backsplashSf),
             edgeLf: num((cs as { edgeLf?: number }).edgeLf),
@@ -141,9 +233,8 @@ export default function AiTakeoffFirstPanel({
             outletCutouts: num(cs.outletCutouts),
             rooms: num(cs.rooms),
             includedPieces: num(cs.includedPieces)
-          });
+          };
         }
-        setMeasurementsApproved(true);
 
         const created = (await apiGet(
           `/api/elite100-estimate-studio/intake-cases/${encodeURIComponent(caseId)}/estimate?takeoffJobId=${encodeURIComponent(takeoffJobId)}`,
@@ -156,11 +247,11 @@ export default function AiTakeoffFirstPanel({
         }
         setEstimateId(id);
 
-        await apiPost(
-          `/api/elite100-estimate-studio/estimates/${encodeURIComponent(id)}/refresh-from-takeoff`,
-          authToken,
-          { force: true, confirm: true }
-        );
+        const refreshed = await refreshFromTakeoffWithRetry(id);
+        const refreshedEst = refreshed.estimate;
+        if (!refreshedEst || !Array.isArray((refreshedEst.scope as { rooms?: unknown[] } | undefined)?.rooms)) {
+          throw new Error("Refresh from Takeoff did not return an updated estimate Scope");
+        }
 
         const priced = (await apiPost(
           `/api/elite100-estimate-studio/estimates/${encodeURIComponent(id)}/calculate`,
@@ -169,8 +260,21 @@ export default function AiTakeoffFirstPanel({
         )) as { estimate?: Record<string, unknown> } & Record<string, unknown>;
 
         const view = (priced.estimate || priced) as Record<string, unknown>;
+        if (!estimateHasMeasuredScope(view)) {
+          throw new Error(
+            "Verified estimate is missing measured Scope after Takeoff approval"
+          );
+        }
+
         applyEstimateView(view);
+        handoffSucceededRef.current = true;
+        setMeasurementsApproved(true);
       } catch (e) {
+        const body =
+          e instanceof ApiError && e.body && typeof e.body === "object"
+            ? (e.body as Record<string, unknown>)
+            : null;
+        setHandoffErrorCode(body?.code ? String(body.code) : null);
         setHandoffError(
           e instanceof ApiError
             ? e.message
@@ -178,12 +282,14 @@ export default function AiTakeoffFirstPanel({
               ? e.message
               : "Unable to build the verified estimate from approved Takeoff"
         );
+        // Keep iframe; never show zero-value approved summary.
+        setMeasurementsApproved(false);
       } finally {
         handoffInFlightRef.current = false;
         setHandoffBusy(false);
       }
     },
-    [authToken, caseId, takeoffJobId, applyEstimateView]
+    [authToken, caseId, takeoffJobId, applyEstimateView, refreshFromTakeoffWithRetry]
   );
 
   // postMessage from Takeoff Review → approval handoff (geometry authority).
@@ -203,27 +309,41 @@ export default function AiTakeoffFirstPanel({
     return () => window.removeEventListener("message", onMessage);
   }, [takeoffJobId, completeApprovalHandoff]);
 
-  // If Takeoff was already approved before this session, restore the compact card.
+  // Bounded fallback: recover a missed postMessage when the server already
+  // reports approved — never remount/rewrite the iframe src.
   useEffect(() => {
+    if (measurementsApproved || handoffSucceededRef.current) return;
     let cancelled = false;
-    (async () => {
+    const startedAt = Date.now();
+    let timer: number | null = null;
+
+    async function tick() {
+      if (cancelled || handoffSucceededRef.current || handoffInFlightRef.current) return;
+      if (Date.now() - startedAt > APPROVAL_FALLBACK_MAX_MS) return;
       try {
         const job = (await apiGet(
           `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
           authToken
         )) as { reviewStatus?: string };
-        if (cancelled) return;
+        if (cancelled || handoffSucceededRef.current) return;
         if (String(job.reviewStatus || "").toLowerCase() === "approved") {
           await completeApprovalHandoff({ reviewStatus: "approved" });
+          return;
         }
       } catch {
-        /* non-fatal */
+        /* non-fatal — keep polling until bound */
       }
-    })();
+      if (!cancelled && !handoffSucceededRef.current) {
+        timer = window.setTimeout(() => void tick(), APPROVAL_FALLBACK_POLL_MS);
+      }
+    }
+
+    timer = window.setTimeout(() => void tick(), APPROVAL_FALLBACK_POLL_MS);
     return () => {
       cancelled = true;
+      if (timer != null) window.clearTimeout(timer);
     };
-  }, [authToken, takeoffJobId]); // eslint-disable-line react-hooks/exhaustive-deps -- one-shot restore
+  }, [authToken, takeoffJobId, measurementsApproved, completeApprovalHandoff]);
 
   async function saveProjectFields() {
     if (!estimateId) return;
@@ -307,10 +427,16 @@ export default function AiTakeoffFirstPanel({
   }
 
   function editMeasurements() {
+    handoffSucceededRef.current = false;
     setMeasurementsApproved(false);
     setCustomerUrl(null);
     setPublishError(null);
     setHandoffError(null);
+    setHandoffErrorCode(null);
+  }
+
+  function retryHandoff() {
+    void completeApprovalHandoff({ reviewStatus: "approved" });
   }
 
   const needEmail = Boolean(
@@ -321,7 +447,9 @@ export default function AiTakeoffFirstPanel({
     activeReview?.blockers?.some((b) => b.code === "project_name_required") ||
       (!String(projectName || "").trim() && measurementsApproved)
   );
-  const eligible = activeReview ? activeReview.eligible : Boolean(estimateId && !needEmail && !needProject);
+  const eligible = activeReview
+    ? activeReview.eligible
+    : Boolean(estimateId && !needEmail && !needProject);
 
   if (!measurementsApproved) {
     return (
@@ -331,7 +459,41 @@ export default function AiTakeoffFirstPanel({
           measurements to build the verified estimate. Customer material and product choices happen
           in the Digital Estimate link after publish.
         </p>
-        <div className="eq-takeoff-frame-wrap">
+        {handoffError ? (
+          <div className="eq-state eq-state--error" role="alert" data-testid="eq-ai-handoff-error">
+            <strong>Could not build the verified estimate.</strong> {handoffError}
+            {handoffErrorCode ? (
+              <p className="eq-muted">Code: {handoffErrorCode}</p>
+            ) : null}
+            <div className="eq-action-row">
+              <button
+                type="button"
+                className="eq-btn-primary"
+                data-testid="eq-ai-retry-handoff"
+                disabled={handoffBusy}
+                onClick={retryHandoff}
+              >
+                Retry building estimate
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <div
+          className={
+            handoffBusy ? "eq-takeoff-frame-wrap eq-takeoff-frame-wrap--busy" : "eq-takeoff-frame-wrap"
+          }
+          data-testid="eq-takeoff-frame-wrap"
+        >
+          {handoffBusy ? (
+            <div
+              className="eq-takeoff-handoff-overlay"
+              data-testid="eq-takeoff-handoff-overlay"
+              role="status"
+              aria-live="polite"
+            >
+              Measurements approved. Building verified estimate…
+            </div>
+          ) : null}
           <iframe
             ref={takeoffFrameRef}
             title="AI Takeoff review"
@@ -339,6 +501,8 @@ export default function AiTakeoffFirstPanel({
             data-testid="eq-takeoff-iframe"
             src={takeoffSrc}
             referrerPolicy="origin"
+            // Keep mounted during handoff; overlay blocks further interaction.
+            style={handoffBusy ? { pointerEvents: "none" } : undefined}
           />
         </div>
       </section>
@@ -358,16 +522,6 @@ export default function AiTakeoffFirstPanel({
       aria-label="Measurements approved"
     >
       <h2>Measurements approved</h2>
-      {handoffBusy ? (
-        <p className="eq-muted" role="status">
-          Building verified estimate…
-        </p>
-      ) : null}
-      {handoffError ? (
-        <div className="eq-state eq-state--error" role="alert" data-testid="eq-ai-handoff-error">
-          {handoffError}
-        </div>
-      ) : null}
       <dl className="eq-summary-dl" data-testid="eq-ai-approved-summary">
         <div>
           <dt>Verified square footage</dt>

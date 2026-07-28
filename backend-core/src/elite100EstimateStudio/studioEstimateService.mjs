@@ -959,36 +959,92 @@ export function createStudioEstimateService(deps = {}) {
   }
 
   async function refreshScopeFromTakeoff(row, organizationId, actorUserId, { force = false } = {}) {
-    assertTakeoffApproved(
-      await loadWorkspace({ organizationId, takeoffJobId: row.takeoffJobId })
-    );
+    // One authoritative workspace snapshot for the whole operation — do not
+    // load twice (approval assert + import must agree on the same revision).
     const workspace = await loadWorkspace({
       organizationId,
       takeoffJobId: row.takeoffJobId
     });
-    const latest = await loadLatestResult({
-      organizationId,
-      takeoffJobId: row.takeoffJobId
-    });
-    const resultId = workspace?.latestResult?.id || latest?.id || null;
-    if (!latest?.normalizedTakeoffJson) {
+    assertTakeoffApproved(workspace);
+
+    let latest = null;
+    try {
+      latest = await loadLatestResult({
+        organizationId,
+        takeoffJobId: row.takeoffJobId
+      });
+    } catch (e) {
+      // Approval persistence and latest-result persistence can lag briefly.
+      // Never surface that as a generic 500 — frontend retries this code.
+      const status = Number(e?.statusCode) || 0;
+      if (status === 404 || status === 409 || status === 425) {
+        const err = new Error("Approved Takeoff result is not ready yet");
+        err.statusCode = 409;
+        err.code = "takeoff_result_not_ready";
+        err.retryable = true;
+        throw err;
+      }
+      throw e;
+    }
+
+    const resultId =
+      workspace?.latestResult?.id || latest?.id || latest?.resultId || null;
+    const normalized = latest?.normalizedTakeoffJson || null;
+    if (!normalized) {
       const err = new Error("Approved Takeoff result unavailable");
       err.statusCode = 409;
-      err.code = "takeoff_result_missing";
+      err.code = "takeoff_result_not_ready";
+      err.retryable = true;
       throw err;
     }
-    const payload = buildTakeoffImportPayload({
-      takeoffJobId: row.takeoffJobId,
-      takeoffResultId: resultId,
-      takeoffResult: latest.normalizedTakeoffJson,
-      reviewState: latest.reviewState || null,
-      computed: latest.computedMeasurementsJson || null,
-      validation: latest.validationDiagnosticsJson || null,
-      requireApproved: true,
-      reviewStatus: "approved",
-      approvedAt: workspace.approvedAt || null,
-      approvedBy: workspace.approvedByUserId || null
-    });
+
+    // Prefer the import payload frozen at consolidated approval time (built
+    // with ignoreApprovalGateBlockers). Rebuilding without that flag re-runs
+    // evaluateTakeoffApprovalGate and throws VALIDATION_ERRORS as a bare
+    // Error → HTTP 500 after a successful Approve Takeoff.
+    let payload =
+      latest?.importPayload &&
+      typeof latest.importPayload === "object" &&
+      Array.isArray(latest.importPayload.rooms) &&
+      latest.importPayload.rooms.length > 0
+        ? latest.importPayload
+        : null;
+
+    if (!payload) {
+      try {
+        payload = buildTakeoffImportPayload({
+          takeoffJobId: row.takeoffJobId,
+          takeoffResultId: resultId,
+          takeoffResult: normalized,
+          reviewState: latest.reviewState || null,
+          computed: latest.computedMeasurementsJson || null,
+          validation: latest.validationDiagnosticsJson || null,
+          requireApproved: true,
+          reviewStatus: "approved",
+          approvedAt: workspace.approvedAt || null,
+          approvedBy: workspace.approvedByUserId || null,
+          // Workspace is already approved — consolidated hard blockers passed.
+          // Do not re-throw legacy VALIDATION_ERRORS / QA_GATE as HTTP 500.
+          ignoreApprovalGateBlockers: true
+        });
+      } catch (e) {
+        const err = new Error(
+          e?.message || "Unable to build Scope from approved Takeoff"
+        );
+        err.statusCode = 409;
+        err.code = "takeoff_import_payload_failed";
+        err.details = { cause: String(e?.message || e) };
+        throw err;
+      }
+    }
+
+    if (!Array.isArray(payload.rooms) || payload.rooms.length === 0) {
+      const err = new Error("Approved Takeoff has no importable rooms");
+      err.statusCode = 409;
+      err.code = "takeoff_import_empty";
+      throw err;
+    }
+
     const nextScope = seedScopeFromTakeoffPayload(payload, {
       customerName: row.scope?.customerName,
       customerContactName: row.scope?.customerContactName,
