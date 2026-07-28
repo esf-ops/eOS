@@ -1949,44 +1949,51 @@ export default function EstimateScopePanel({
 
         </div>
         <div hidden={!showChoices} data-testid="eq-section-choices-commercial">
-        <h3>Customer-selectable catalogs</h3>
-        <p className="eq-muted">
-          Exact products (model, finish, SKU, governed price) resolve through the Digital
-          Estimate catalogs — never generic quantity fields here. Physical openings come from
-          the approved Takeoff.
+        <h3>Customer selections</h3>
+        <p className="eq-muted" data-testid="eq-customer-selections-summary">
+          The customer can choose active Elite 100 materials and currently supported catalog
+          options. Pricing is calculated from the approved Scope.
         </p>
-        <div className="eq-addon-grid" data-testid="eq-catalog-permissions">
-          {(
-            [
-              ["material", "Customer may select material / color"],
-              ["sink", "Customer may select sink"],
-              ["faucet", "Customer may select faucet"],
-              ["accessories", "Customer may select accessories"],
-              ["specialty", "Customer may select specialty items"],
-              ["edge", "Customer may select edge profile"],
-              ["backsplash", "Customer may select backsplash style"],
-              ["side_splash", "Customer may select side splash"]
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="eq-check">
-              <input
-                type="checkbox"
-                checked={scope.customerCatalogPermissions?.[key] !== false}
-                disabled={blocked}
-                data-testid={`eq-catalog-permission-${key}`}
-                onChange={(e) =>
-                  patchScope({
-                    customerCatalogPermissions: {
-                      ...(scope.customerCatalogPermissions || {}),
-                      [key]: e.target.checked
-                    }
-                  })
-                }
-              />
-              {label}
-            </label>
-          ))}
-        </div>
+        <details className="eq-compat-advanced" data-testid="eq-compat-catalog-permissions">
+          <summary>Advanced — per-category customer catalog permissions (compatibility)</summary>
+          <p className="eq-muted">
+            Exact products (model, finish, SKU, governed price) resolve through the Digital
+            Estimate catalogs — never generic quantity fields here. Physical openings come from
+            the approved Takeoff.
+          </p>
+          <div className="eq-addon-grid" data-testid="eq-catalog-permissions">
+            {(
+              [
+                ["material", "Customer may select material / color"],
+                ["sink", "Customer may select sink"],
+                ["faucet", "Customer may select faucet"],
+                ["accessories", "Customer may select accessories"],
+                ["specialty", "Customer may select specialty items"],
+                ["edge", "Customer may select edge profile"],
+                ["backsplash", "Customer may select backsplash style"],
+                ["side_splash", "Customer may select side splash"]
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="eq-check">
+                <input
+                  type="checkbox"
+                  checked={scope.customerCatalogPermissions?.[key] !== false}
+                  disabled={blocked}
+                  data-testid={`eq-catalog-permission-${key}`}
+                  onChange={(e) =>
+                    patchScope({
+                      customerCatalogPermissions: {
+                        ...(scope.customerCatalogPermissions || {}),
+                        [key]: e.target.checked
+                      }
+                    })
+                  }
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </details>
         {legacyGenericProductQty > 0 ? (
           <div className="eq-state eq-state--warn" data-testid="eq-legacy-product-qty-warning">
             This estimate carries legacy generic sink quantities (

@@ -9,6 +9,7 @@ import EstimateTakeoffWorkspace from "./estimateQueue/EstimateTakeoffWorkspace";
 import LiveDigitalEstimatesPage from "./estimateQueue/LiveDigitalEstimatesPage";
 import SharedInboxPage from "./estimateQueue/SharedInboxPage";
 import AllEstimatesPage from "./estimateQueue/AllEstimatesPage";
+import ManualEstimateWizard from "./estimateQueue/ManualEstimateWizard";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
 
@@ -114,6 +115,7 @@ export default function StudioApp() {
     "shared-inbox" | "command-center" | "all-estimates" | "estimate-queue"
   >("shared-inbox");
   const [moreNavOpen, setMoreNavOpen] = useState(false);
+  const [newEstimateOpen, setNewEstimateOpen] = useState(false);
   const [publicationsMode, setPublicationsMode] = useState<"portfolio" | "publish-search">(
     "portfolio"
   );
@@ -573,6 +575,15 @@ export default function StudioApp() {
           >
             Estimates
           </button>
+          <button
+            type="button"
+            className="eq-btn-primary studio-nav-new-estimate"
+            data-testid="studio-nav-new-estimate"
+            title="Create a new estimate — starts you directly in Scope"
+            onClick={() => setNewEstimateOpen(true)}
+          >
+            + New Estimate
+          </button>
           <div className="studio-nav-more">
             <button
               type="button"
@@ -998,6 +1009,24 @@ export default function StudioApp() {
         </div>
         ) : null}
       </main>
+
+      <ManualEstimateWizard
+        authToken={sessionToken}
+        open={newEstimateOpen}
+        skipChooser
+        onClose={() => setNewEstimateOpen(false)}
+        onCreated={({ intakeCaseId }) => {
+          // Standalone create never returns to Inbox/a legacy queue — it
+          // opens directly in Scope. "Back" from the workspace returns to
+          // whichever primary section (Inbox or Estimates) launched it.
+          setQueueReturnNav(mainNav === "all-estimates" ? "all-estimates" : "shared-inbox");
+          setEstimateWorkspaceCaseId(intakeCaseId);
+          setIntakeCaseId(intakeCaseId);
+          setWorkspaceFocus("scope");
+          setMainNav("estimate-workspace");
+          setNewEstimateOpen(false);
+        }}
+      />
     </div>
   );
 }
