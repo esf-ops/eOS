@@ -141,14 +141,6 @@ type Props = {
   /** Lifted safe publication summary — read-only; never triggers mutations. */
   onPublicationSummary?: (publication: Record<string, unknown> | null) => void;
   onPublicationRefreshError?: (message: string | null) => void;
-  /**
-   * Active-v4 Review & Publish readiness (studioActiveReviewReadiness.mjs) —
-   * real Scope/Configuration/calculation completeness, not legacy
-   * workflow-state gates. When present, this replaces the legacy
-   * server-computed eligible/blockers for display and Publish gating so an
-   * estimator never sees internal compatibility-approval wording.
-   */
-  activeReadinessOverride?: { eligible: boolean; blockers: Array<{ code?: string; message?: string }> } | null;
 };
 
 function formatStructuredPublishError(e: ApiError): {
@@ -198,8 +190,14 @@ function formatStructuredPublishError(e: ApiError): {
 }
 
 /**
- * Digital Estimate section — after Studio estimate approval.
- * Stable reusable customer URL for the active publication (recoverable after refresh).
+ * Digital Estimate section — legacy/historical-only Configuration-envelope
+ * publish workflow (Rooms locked for customer, per-category customer
+ * permission whitelist, estimator notes, Save Configuration). The parent
+ * (EstimateScopePanel) mounts this component only for historical
+ * pricingVersion 2/3 estimates; an active simplified estimate mounts
+ * ActiveReviewPublishPanel instead and never renders this component, not
+ * even collapsed. Stable reusable customer URL for the active publication
+ * (recoverable after refresh).
  */
 export default function EstimateDigitalEstimatePanel({
   authToken,
@@ -210,8 +208,7 @@ export default function EstimateDigitalEstimatePanel({
   onBeforePublishFlush,
   onEditProjectDetails,
   onPublicationSummary,
-  onPublicationRefreshError,
-  activeReadinessOverride = null
+  onPublicationRefreshError
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [publishUiState, setPublishUiState] = useState<PublishUiState>("idle");
@@ -655,17 +652,12 @@ export default function EstimateDigitalEstimatePanel({
 
   const linkReady = Boolean(customerUrl) && linkStatus === "active";
   const publishing = publishUiState === "publishing" || busy;
-  // Active-v4 flow: real Scope/Configuration/calculation completeness
-  // replaces the legacy server-computed workflow-state gate for display.
-  // Historical/compatibility callers that don't pass this prop keep the
-  // legacy-derived eligible/blockers exactly as before.
-  const effectiveEligible = activeReadinessOverride ? activeReadinessOverride.eligible : eligible;
-  const effectiveBlockers = activeReadinessOverride ? activeReadinessOverride.blockers : blockers;
-  const effectivePrimaryMessage = activeReadinessOverride
-    ? effectiveBlockers[0]
-      ? { code: effectiveBlockers[0].code, message: effectiveBlockers[0].message }
-      : null
-    : primaryMessage;
+  // Historical-only component — always the legacy server-computed
+  // eligible/blockers from this component's own readiness load(). Active-v4
+  // estimates never mount this component (see ActiveReviewPublishPanel).
+  const effectiveEligible = eligible;
+  const effectiveBlockers = blockers;
+  const effectivePrimaryMessage = primaryMessage;
 
   return (
     <section

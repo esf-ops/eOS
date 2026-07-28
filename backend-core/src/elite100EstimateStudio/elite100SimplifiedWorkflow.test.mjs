@@ -287,9 +287,19 @@ console.log("ok: 1 top-level Inbox + Estimates navigation");
             estimateOrigin: "manual_staff",
             physicalScopeSource: "manual_staff",
             manualScopeConfirmed: true,
+            customerEmail: "casey@example.test",
+            projectName: "Kitchen",
+            materialGroup: "Group Promo",
             manualPhysicalScope: {
               rooms: [{ pieces: [{ lengthIn: 96, depthIn: 25, quantity: 1 }] }]
-            }
+            },
+            rooms: [
+              {
+                id: "room-1",
+                included: true,
+                pieces: [{ id: "piece-1", included: true, lengthIn: 96, depthIn: 25 }]
+              }
+            ]
           },
           calculationSnapshot: { fingerprint: "fp1", totals: { customerDisplayTotal: 5000 } },
           approval: null

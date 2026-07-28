@@ -12,6 +12,7 @@
  */
 
 import { isSoldReviewChecklistComplete } from "./studioLifecycleTypes.mjs";
+import { deriveActiveReviewPublishReadiness } from "./studioActiveReviewReadiness.mjs";
 
 export const SIMPLIFIED_STUDIO_NAV = Object.freeze({
   INBOX: "inbox",
@@ -753,6 +754,26 @@ export function createStudioSimplifiedWorkflowService(deps) {
       body: {}
     });
     steps.push("calculated");
+
+    // Server-side Publish gate — the SAME active-v4 readiness authority the
+    // Review & Publish read model displays (studioEstimateService.
+    // safeEstimateView -> estimate.activeReview), re-derived here from the
+    // estimate this function just reloaded from the repository and just
+    // recalculated. The publish request body carries no Scope/Configuration/
+    // calculation fields, so nothing the browser sends can influence this
+    // check: a stale or tampered client-side readiness value can make the UI
+    // more conservative, never less. Never bypassable by client state.
+    const activeReadiness = deriveActiveReviewPublishReadiness(estimate);
+    if (!activeReadiness.eligible) {
+      const blocker = activeReadiness.blockers[0] || null;
+      const err = new Error(blocker?.message || "Estimate is not ready to publish");
+      err.statusCode = 422;
+      err.code = blocker?.code || "publish_not_eligible";
+      err.blockers = activeReadiness.blockers;
+      err.blockingReasons = activeReadiness.blockers;
+      throw err;
+    }
+    steps.push("active_readiness_verified");
 
     // Commercial approval is Publish's internal commitment — not a separate UI gate.
     estimate = await studioEstimateService.approve({

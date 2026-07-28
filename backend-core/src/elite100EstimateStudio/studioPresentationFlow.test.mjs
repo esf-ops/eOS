@@ -24,6 +24,7 @@ import { createStudioSimplifiedWorkflowService } from "./studioSimplifiedWorkflo
 import { STUDIO_ESTIMATE_STATUSES, emptyStudioEstimateScope } from "./studioEstimateTypes.mjs";
 import { MANUAL_ESTIMATE_ORIGIN } from "./studioManualPhysicalScope.mjs";
 import { buildStudioScopeBilling, resolveScopeEdgeLinearFeet } from "./studioScopeBilling.mjs";
+import { isActiveSimplifiedEstimate } from "./studioActiveReviewReadiness.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "../../..");
@@ -466,9 +467,22 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
 
 // ════════════════════════════════════════════════════════════════════════
 // 15. LEGACY COMPATIBILITY — historical pricingVersion 2/3 snapshots still
-// load unchanged (never recalculated, never relabeled).
+// load unchanged (never recalculated, never relabeled), and are classified
+// as historical (not active-v4) by the exact predicate the Review & Publish
+// mount point branches on — so they always resolve to the legacy read-only
+// EstimateDigitalEstimatePanel, never ActiveReviewPublishPanel.
 // ════════════════════════════════════════════════════════════════════════
 {
+  // isActiveSimplifiedEstimate() contract: only pricingVersion 2/3 are
+  // historical; everything else (4, unknown, or no calculation yet) is
+  // active-v4. A brand-new estimate has no calculation yet, so "no
+  // calculation exists" must never be misread as "historical".
+  assert.equal(isActiveSimplifiedEstimate({ pricingVersion: 2 }), false, "pricingVersion 2 is historical, not active-v4");
+  assert.equal(isActiveSimplifiedEstimate({ pricingVersion: 3 }), false, "pricingVersion 3 is historical, not active-v4");
+  assert.equal(isActiveSimplifiedEstimate({ pricingVersion: 4 }), true, "pricingVersion 4 is active-v4");
+  assert.equal(isActiveSimplifiedEstimate({ pricingVersion: null }), true, "no calculation yet (null pricingVersion) is active-v4, never historical");
+  assert.equal(isActiveSimplifiedEstimate({}), true, "a brand-new estimate with no pricingVersion field at all is active-v4");
+
   const repository = new InMemoryStudioEstimateRepository();
   const studio = noTakeoffService({ repository });
 
@@ -507,8 +521,13 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
     assert.equal(loaded.calculationSnapshot.fingerprint, c.fingerprint, `historical v${c.version} fingerprint is not recomputed on load`);
     assert.equal(loaded.calculation.totals.customerDisplayTotal, c.display, `historical v${c.version} frozen total is not recomputed on load`);
     assert.equal(loaded.pricingEngine, "studio-legacy", `historical v${c.version} engine surfaces as-is, not relabeled v1`);
+    // The exact server field EstimateScopePanel branches on to choose
+    // ActiveReviewPublishPanel vs. the legacy EstimateDigitalEstimatePanel —
+    // never the active-v4 readiness authority for a frozen historical row.
+    assert.equal(loaded.isActiveSimplifiedEstimate, false, `historical v${c.version} is never classified active-v4`);
+    assert.equal(loaded.activeReview, null, `historical v${c.version} never gets an active-v4 readiness verdict`);
   }
-  console.log("ok: 15 historical pricingVersion 2/3 snapshots still load unchanged");
+  console.log("ok: 15 historical pricingVersion 2/3 snapshots still load unchanged and always route to the legacy read-only component");
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -827,6 +846,271 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
   }
   console.log(
     "ok: 18 none of the 12 forbidden active-v4 legacy strings render in Scope / Customer Choices workspace / Review & Publish"
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 19. TAMPER-PROOF PUBLISH GATE — a browser cannot make an ineligible
+// active-v4 estimate publishable by sending a forged "eligible" readiness,
+// or any other Scope/Configuration/calculation-shaped field, in the
+// publish request body. The server re-derives activeReview only from its
+// own just-reloaded, just-recalculated estimate; the request body is never
+// consulted for readiness.
+// ════════════════════════════════════════════════════════════════════════
+{
+  const { studio, manual } = freshManualServices();
+  let publishCalls = 0;
+  const workflow = createStudioSimplifiedWorkflowService({
+    sharedInboxService: { async importMessage() { return {}; } },
+    studioEstimateService: studio,
+    manualEstimateService: manual,
+    digitalEstimateService: {
+      async publish() {
+        publishCalls += 1;
+        return { ok: true, customerUrl: "https://example.test/de/tamper-1" };
+      }
+    }
+  });
+
+  // Genuinely ineligible: a measured, included Kitchen countertop piece
+  // (so Scope itself is fine and calculation succeeds), but no customer
+  // email — one real, unambiguous publish blocker.
+  const created = await manual.createManualEstimate({
+    organizationId: ORG,
+    actorUserId: ACTOR,
+    idempotencyKey: "presentation-tamper-1",
+    body: { projectName: "Tamper Test Kitchen" }
+  });
+  await manual.saveManualScopeDraft({
+    organizationId: ORG,
+    estimateId: created.estimateId,
+    actorUserId: ACTOR,
+    body: { scope: validCountertopEdit({ lengthIn: 96, depthIn: 25.5 }) }
+  });
+
+  const attemptPublish = (body) =>
+    workflow.publishDigitalEstimate({
+      organizationId: ORG,
+      estimateId: created.estimateId,
+      actorUserId: ACTOR,
+      body
+    });
+
+  let plainError = null;
+  try {
+    await attemptPublish({ confirm: true });
+  } catch (e) {
+    plainError = e;
+  }
+  assert.ok(plainError, "publish rejects an estimate missing customer email");
+  assert.equal(plainError.statusCode, 422, "rejection is a 422, not a silent success");
+  assert.ok(Array.isArray(plainError.blockers) && plainError.blockers.length > 0, "rejection carries concrete blockers");
+  assert.equal(publishCalls, 0, "digitalEstimateService.publish is not invoked on the plain rejected attempt");
+
+  // A browser could send anything here — a stale cached "eligible: true"
+  // readiness object, a hand-forged Scope with a fake customerEmail, a
+  // fabricated calculation with a large total — none of it is Scope,
+  // Configuration, or calculation state the server trusts. Assert the
+  // rejection is byte-for-byte identical to the untampered attempt.
+  let tamperedError = null;
+  try {
+    await attemptPublish({
+      confirm: true,
+      activeReview: { eligible: true, blockers: [] },
+      isActiveSimplifiedEstimate: true,
+      scope: {
+        customerEmail: "forged@example.test",
+        projectName: "Forged Project",
+        materialGroup: "Group Promo",
+        rooms: [{ included: true, pieces: [{ included: true, lengthIn: 999, depthIn: 999 }] }]
+      },
+      calculation: { totals: { customerDisplayTotal: 999999 }, unresolvedItems: [] }
+    });
+  } catch (e) {
+    tamperedError = e;
+  }
+  assert.ok(tamperedError, "a forged client-side readiness/scope/calculation payload still cannot publish an ineligible estimate");
+  assert.equal(tamperedError.statusCode, 422, "forged payload still yields a 422, not success");
+  assert.deepEqual(
+    tamperedError.blockers,
+    plainError.blockers,
+    "the forged payload changes none of the server-derived blockers — the publish request body is never read for readiness"
+  );
+  assert.equal(
+    publishCalls,
+    0,
+    "digitalEstimateService.publish is never invoked when the server-derived estimate is ineligible, regardless of client payload"
+  );
+  console.log("ok: 19 a tampered/forged browser readiness payload cannot make an ineligible estimate publishable");
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 20. ONE SERVER AUTHORITY — the Review & Publish read endpoint
+// (studioEstimateService.safeEstimateView → estimate.activeReview) and the
+// publish orchestration (studioSimplifiedWorkflow.prepareEstimateForPublish)
+// import and call the exact same deriveActiveReviewPublishReadiness
+// function from studioActiveReviewReadiness.mjs, and therefore report
+// identical blockers for the same estimate — not two independently
+// maintained copies that could drift apart.
+// ════════════════════════════════════════════════════════════════════════
+{
+  const studioEstimateServiceSrc = readSrc("backend-core/src/elite100EstimateStudio/studioEstimateService.mjs");
+  const studioSimplifiedWorkflowSrc = readSrc("backend-core/src/elite100EstimateStudio/studioSimplifiedWorkflow.mjs");
+  const sharedAuthorityImport =
+    /import\s*\{[^}]*deriveActiveReviewPublishReadiness[^}]*\}\s*from\s*"\.\/studioActiveReviewReadiness\.mjs"/;
+  assert.match(
+    studioEstimateServiceSrc,
+    sharedAuthorityImport,
+    "studioEstimateService.mjs imports the shared readiness authority, not a local reimplementation"
+  );
+  assert.match(
+    studioSimplifiedWorkflowSrc,
+    sharedAuthorityImport,
+    "studioSimplifiedWorkflow.mjs imports the shared readiness authority, not a local reimplementation"
+  );
+
+  // Behavioral proof: the same estimate reports the same blockers from the
+  // read endpoint (activeReview) and from an actual rejected publish
+  // attempt. Scope is valid/measured and already calculated once (so both
+  // sides see a real calculationSnapshot) — the only remaining gap is
+  // customer email, so this isolates one unambiguous blocker.
+  const { studio, manual } = freshManualServices();
+  const workflow = createStudioSimplifiedWorkflowService({
+    sharedInboxService: { async importMessage() { return {}; } },
+    studioEstimateService: studio,
+    manualEstimateService: manual,
+    digitalEstimateService: {
+      async publish() {
+        throw new Error("must not be reached — estimate is not eligible");
+      }
+    }
+  });
+  const created = await manual.createManualEstimate({
+    organizationId: ORG,
+    actorUserId: ACTOR,
+    idempotencyKey: "presentation-same-authority-1",
+    body: { projectName: "Same Authority Kitchen" }
+  });
+  await manual.saveManualScopeDraft({
+    organizationId: ORG,
+    estimateId: created.estimateId,
+    actorUserId: ACTOR,
+    body: { scope: validCountertopEdit({ lengthIn: 96, depthIn: 25.5 }) }
+  });
+  await studio.calculate({ organizationId: ORG, estimateId: created.estimateId, actorUserId: ACTOR, body: {} });
+
+  const readView = await studio.getById(ORG, created.estimateId);
+  assert.equal(readView.isActiveSimplifiedEstimate, true, "a fresh manual estimate is active-v4, not historical");
+  assert.ok(readView.activeReview, "the read endpoint exposes activeReview for an active-v4 estimate");
+  assert.equal(readView.activeReview.eligible, false, "the read endpoint reports the estimate as not yet eligible (no customer email)");
+  assert.deepEqual(
+    readView.activeReview.blockers,
+    [{ code: "customer_email_required", message: "Customer email required" }],
+    "the read endpoint reports exactly the one real gap"
+  );
+
+  let publishError = null;
+  try {
+    await workflow.publishDigitalEstimate({
+      organizationId: ORG,
+      estimateId: created.estimateId,
+      actorUserId: ACTOR,
+      body: { confirm: true }
+    });
+  } catch (e) {
+    publishError = e;
+  }
+  assert.ok(publishError, "publish rejects the same estimate the read endpoint reported as ineligible");
+  assert.deepEqual(
+    publishError.blockers,
+    readView.activeReview.blockers,
+    "publish's rejection reason set is identical to what Review & Publish already displayed — one authority, not two"
+  );
+  console.log("ok: 20 the Review & Publish read endpoint and the publish orchestration call the same server readiness authority");
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 21. NO LEGACY MOUNT, EVEN COLLAPSED — for an active-v4 estimate, the
+// legacy Configuration envelope, "Rooms locked for customer", per-category
+// customer permission whitelist, legacy Save Configuration action, and the
+// legacy Takeoff/Calculation/Approval/Persistence status strip / approval
+// eligibility logic are never mounted — not even inside a collapsed
+// <details>. They exist only in the historical/legacy branch
+// (EstimateDigitalEstimatePanel), which the active branch never renders.
+// ════════════════════════════════════════════════════════════════════════
+{
+  // The legacy per-field status/calculation/approval/persistence readout
+  // and the legacy manual Calculate/Approve controls live in
+  // EstimateScopePanel.tsx itself (shared file), so they must be guarded by
+  // a runtime !isActiveSimplified conditional immediately around them —
+  // not merely present in the file (JSX conditionals don't delete source
+  // text, so a plain includes() check can't prove this).
+  const activeSimplifiedGuard = /\{!isActiveSimplified\s*\?\s*\(/;
+
+  const metaIdx = scopePanel.indexOf('data-testid="eq-compat-estimate-status-meta"');
+  assert.ok(metaIdx > -1, "the legacy Takeoff/Calculation/Approval/Persistence status strip markup still exists for historical compatibility");
+  assert.match(
+    scopePanel.slice(Math.max(0, metaIdx - 400), metaIdx),
+    activeSimplifiedGuard,
+    "the legacy status strip is gated behind !isActiveSimplified — never mounted for an active estimate, even collapsed"
+  );
+
+  const calcApproveIdx = scopePanel.indexOf('data-testid="eq-compat-calc-approve"');
+  assert.ok(calcApproveIdx > -1, "the legacy manual Calculate/Approve markup still exists for historical compatibility");
+  assert.match(
+    scopePanel.slice(Math.max(0, calcApproveIdx - 400), calcApproveIdx),
+    activeSimplifiedGuard,
+    "legacy manual Calculate/Approve (approval eligibility logic) is gated behind !isActiveSimplified — never mounted for an active estimate, even collapsed"
+  );
+
+  // The Review & Publish mount point is a hard branch, not one shared
+  // component with hidden legacy sections: the active branch mounts only
+  // ActiveReviewPublishPanel, the historical branch mounts only the legacy
+  // EstimateDigitalEstimatePanel (Configuration envelope, room-lock,
+  // per-category customer permission whitelist, Save Configuration).
+  const reviewBranchIdx = scopePanel.indexOf("!showReview ? null : isActiveSimplified ? (");
+  assert.ok(reviewBranchIdx > -1, "Review & Publish mount point branches on isActiveSimplified");
+  const reviewBranch = scopePanel.slice(reviewBranchIdx, reviewBranchIdx + 1500);
+  assert.ok(reviewBranch.includes("<ActiveReviewPublishPanel"), "the active branch mounts ActiveReviewPublishPanel");
+  assert.ok(
+    reviewBranch.includes("<EstimateDigitalEstimatePanel"),
+    "the historical branch mounts the legacy EstimateDigitalEstimatePanel — the two are mutually exclusive, never both mounted"
+  );
+
+  // ActiveReviewPublishPanel is a dedicated, isolated component — it must
+  // not contain any of these legacy-only concepts at all (not gated,
+  // structurally absent), unlike EstimateScopePanel.tsx above.
+  const activeReviewPublishPanelSrc = readSrc(
+    "app-elite100-estimate-studio/src/estimateQueue/ActiveReviewPublishPanel.tsx"
+  );
+  const legacyOnlyMarkers = [
+    "Rooms locked for customer",
+    "Customer may choose",
+    "eq-de-room-lock",
+    "eq-de-customer-choices",
+    "Save configuration",
+    "eq-compat-estimate-status-meta",
+    "eq-compat-calc-approve",
+    "eq-calculate-estimate",
+    "eq-approve-estimate",
+    "Configuration envelope"
+  ];
+  for (const marker of legacyOnlyMarkers) {
+    assert.equal(
+      activeReviewPublishPanelSrc.includes(marker),
+      false,
+      `ActiveReviewPublishPanel.tsx must not contain the legacy-only marker "${marker}"`
+    );
+  }
+
+  // Those same legacy-only markers remain available in the historical
+  // component — they were collapsed/relabeled, not deleted, so
+  // pricingVersion 2/3 estimators keep the compatibility controls they
+  // still depend on.
+  assert.ok(digitalEstimatePanel.includes("Rooms locked for customer"), "the historical panel still offers Rooms locked for customer");
+  assert.ok(digitalEstimatePanel.includes("eq-de-customer-choices"), "the historical panel still offers the per-category customer permission whitelist");
+  console.log(
+    "ok: 21 legacy Configuration/status/approval controls are never mounted (even collapsed) for an active-v4 estimate, and remain intact for historical estimates"
   );
 }
 

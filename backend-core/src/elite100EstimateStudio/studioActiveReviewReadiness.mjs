@@ -17,9 +17,58 @@
  * blockers; those are Publish's own internal compatibility orchestration, not
  * estimator-facing gates.
  *
+ * SERVER AUTHORITY (hotfix/studio-single-active-flow, correction pass):
+ * `deriveActiveReviewPublishReadiness` is the single source of truth for
+ * "is this estimate eligible to publish", called from exactly two backend
+ * call sites on server-loaded/just-recalculated data only:
+ *   1. studioEstimateService.safeEstimateView() — attaches `activeReview` to
+ *      every estimate read (GET estimate, GET .../digital-estimate, and the
+ *      return value of updateScope/calculate/approve), so the frontend has
+ *      something real to *display*.
+ *   2. studioSimplifiedWorkflow.prepareEstimateForPublish() — calls it again,
+ *      after its own fresh server-side recalculation, and hard-rejects
+ *      Publish when ineligible. This call cannot be influenced by anything
+ *      the browser sends (the publish request body carries no Scope/pricing
+ *      fields), so a stale or tampered client-side readiness value can only
+ *      ever make the Publish button *more* conservative in the UI — it can
+ *      never make an actually-ineligible estimate publishable.
+ * The frontend (ActiveReviewPublishPanel) only ever *displays* the
+ * server-returned `activeReview` — it must not call this function itself to
+ * decide Publish eligibility.
+ *
  * Pure module — browser-safe (no node:crypto), importable directly from the
- * Studio frontend (same pattern as studioScopeBilling.mjs).
+ * Studio frontend (same pattern as studioScopeBilling.mjs) for cases (like
+ * `isActiveSimplifiedEstimate`) that are safe to share because they are
+ * display/routing decisions, not eligibility decisions.
  */
+
+/**
+ * Historical/frozen pricingVersion stamps — pricingVersion 2/3 snapshots are
+ * frozen and must load unchanged, never recalculated or relabeled v4. Any
+ * other value (including null/undefined, i.e. no calculation yet) is an
+ * active-v4 estimate: a brand-new active estimate has no calculation yet, so
+ * "no calculation exists" must never be read as "historical" (see
+ * hotfix/studio-single-active-flow).
+ */
+export const HISTORICAL_PRICING_VERSIONS = Object.freeze([2, 3]);
+
+/**
+ * True when `estimate` is an active-v4 estimate (Scope → Customer Choices →
+ * Review & Publish), false when it is a frozen historical pricingVersion 2/3
+ * record. Pure/deterministic — safe to call server-side (as the authority)
+ * or client-side (purely to choose which read-only vs. editable component to
+ * mount; it never decides Publish eligibility).
+ * @param {{ pricingVersion?: number|null, calculationSnapshot?: { pricingVersion?: number|null }|null, calculation?: { pricingVersion?: number|null }|null }|null|undefined} estimate
+ */
+export function isActiveSimplifiedEstimate(estimate) {
+  const pv =
+    estimate?.pricingVersion ??
+    estimate?.calculationSnapshot?.pricingVersion ??
+    estimate?.calculation?.pricingVersion ??
+    null;
+  if (pv == null) return true;
+  return !HISTORICAL_PRICING_VERSIONS.includes(Number(pv));
+}
 
 /**
  * @param {object|null|undefined} scope

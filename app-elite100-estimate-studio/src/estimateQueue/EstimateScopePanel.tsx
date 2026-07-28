@@ -19,7 +19,7 @@ import {
   resolveScopeEdgeLinearFeet
 } from "../../../backend-core/src/elite100EstimateStudio/studioScopeBilling.mjs";
 import { workflowAllowsAction } from "../../../backend-core/src/elite100EstimateStudio/studioWorkspaceWorkflow.mjs";
-import { deriveActiveReviewPublishReadiness } from "../../../backend-core/src/elite100EstimateStudio/studioActiveReviewReadiness.mjs";
+import ActiveReviewPublishPanel from "./ActiveReviewPublishPanel";
 import type { WorkspaceWorkflow } from "./EstimateWorkflowHeader";
 import {
   createStudioAutosaveController,
@@ -122,6 +122,14 @@ type StudioEstimate = {
   calculationFingerprint?: string | null;
   pricingEngine?: string | null;
   pricingVersion?: number | null;
+  /** Server-computed (studioActiveReviewReadiness.mjs) — false only for frozen historical pricingVersion 2/3 rows. */
+  isActiveSimplifiedEstimate?: boolean;
+  /**
+   * Server-computed active-v4 Review & Publish readiness (studioEstimateService.
+   * safeEstimateView -> studioActiveReviewReadiness.deriveActiveReviewPublishReadiness).
+   * The ONLY authority for Publish eligibility — display it, never recompute it.
+   */
+  activeReview?: { eligible: boolean; blockers: Array<{ code?: string; message?: string }> } | null;
   approvedAt?: string | null;
   approvedByUserId?: string | null;
   scope?: {
@@ -996,10 +1004,15 @@ export default function EstimateScopePanel({
   const reviewSummary = (
     estimate.calculation as { reviewSummary?: StudioActiveReviewSummary } | undefined
   )?.reviewSummary;
-  const activeReadiness = deriveActiveReviewPublishReadiness({
-    scope,
-    calculation: estimate.calculation
-  });
+  // Active-vs-historical and Publish-eligibility are both server-computed
+  // (studioEstimateService.safeEstimateView -> studioActiveReviewReadiness.mjs).
+  // The frontend only displays estimate.activeReview — it must never derive
+  // its own eligible/blockers, since that would let stale/tampered browser
+  // state declare an estimate publishable. Absent the field (e.g. an older
+  // cached read), default to the active-v4 experience — historical status
+  // requires an explicit false, never inferred from missing data.
+  const isActiveSimplified = estimate.isActiveSimplifiedEstimate !== false;
+  const activeReadiness = estimate.activeReview || null;
   // Approved Takeoff = physical-scope authority. Manual quantity entry only
   // exists as a clearly-labeled fallback when no approved Takeoff seeded scope.
   // Authority follows physicalScopeSource alone — the summary is display data
@@ -1117,8 +1130,10 @@ export default function EstimateScopePanel({
         )}
         {/* Active-v4: the four-status bar (Source/Scope/Pricing/Publication) in the
             workspace header above is the one status display for the normal active
-            flow. This legacy per-field status/calculation/approval readout is kept
-            only for compatibility/troubleshooting, collapsed out of default view. */}
+            flow. This legacy per-field status/calculation/approval/persistence
+            readout is a historical/legacy-only compatibility control — it must
+            not mount at all (even collapsed) for an active simplified estimate. */}
+        {!isActiveSimplified ? (
         <details className="eq-compat-advanced" data-testid="eq-compat-estimate-status-meta">
           <summary>Advanced — legacy estimate status (compatibility)</summary>
           <dl className="eq-status-dl" data-testid="eq-estimate-status-meta">
@@ -1161,6 +1176,7 @@ export default function EstimateScopePanel({
             </div>
           </dl>
         </details>
+        ) : null}
         {estimate.staleReason ? (
           <div className="eq-action-row" style={{ marginTop: 8 }}>
             <button
@@ -2252,6 +2268,11 @@ export default function EstimateScopePanel({
             {actionNotice}
           </div>
         ) : null}
+        {/* Legacy approval eligibility logic (manual Calculate / Approve) is a
+            historical/legacy-only compatibility control — Publish orchestrates
+            calculate/approve internally for an active simplified estimate, so
+            this must not mount at all (even collapsed) when active. */}
+        {!isActiveSimplified ? (
         <details className="eq-compat-advanced" data-testid="eq-compat-calc-approve">
           <summary>Advanced — manual calculate / approve (compatibility)</summary>
           <div className="eq-action-row">
@@ -2278,12 +2299,29 @@ export default function EstimateScopePanel({
             </button>
           </div>
         </details>
+        ) : null}
       </section>
 
       </>
       ) : null}
 
-      {showReview ? (
+      {!showReview ? null : isActiveSimplified ? (
+        // Active-v4: a distinct, minimal panel — never the legacy historical
+        // Digital Estimate workflow and its compatibility-only controls.
+        // See ActiveReviewPublishPanel for exactly what it does and does not render.
+        <ActiveReviewPublishPanel
+          authToken={authToken}
+          estimateId={estimate.id}
+          estimateRevision={estimate.revision ?? null}
+          activeReview={activeReadiness}
+          onBeforePublishFlush={onBeforePublishFlush}
+          onEditProjectDetails={onEditProjectDetails}
+          onPublicationSummary={onPublicationSummary}
+          onPublicationRefreshError={onPublicationRefreshError}
+        />
+      ) : (
+        // Historical pricingVersion 2/3 — frozen record, legacy read-only /
+        // compatibility publish workflow only.
         <EstimateDigitalEstimatePanel
           authToken={authToken}
           estimateId={estimate.id}
@@ -2294,9 +2332,8 @@ export default function EstimateScopePanel({
           onEditProjectDetails={onEditProjectDetails}
           onPublicationSummary={onPublicationSummary}
           onPublicationRefreshError={onPublicationRefreshError}
-          activeReadinessOverride={activeReadiness}
         />
-      ) : null}
+      )}
     </div>
   );
 }

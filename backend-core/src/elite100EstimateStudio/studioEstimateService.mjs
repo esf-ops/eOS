@@ -52,6 +52,10 @@ import {
 } from "./studioProjectDetails.mjs";
 import { buildStudioWorkspaceWorkflow } from "./studioWorkspaceWorkflow.mjs";
 import { loadActiveEstimateForMutation } from "./studioEstimateActiveRevisionGuard.mjs";
+import {
+  deriveActiveReviewPublishReadiness,
+  isActiveSimplifiedEstimate
+} from "./studioActiveReviewReadiness.mjs";
 
 /**
  * Structured mutation log — no PII, no scope dumps, no tokens.
@@ -636,6 +640,19 @@ export function createStudioEstimateService(deps = {}) {
       historicalApproval: extras.previousRevisionSummary || null,
       publication: extras.publication || extras.publicationSummary || null
     });
+    // Single server authority for active-v4 Review & Publish readiness (see
+    // studioActiveReviewReadiness.mjs). Computed here — the one place every
+    // estimate read (GET estimate, GET .../digital-estimate, and the return
+    // value of updateScope/calculate/approve) is serialized — so the read
+    // surface and the publish orchestration (studioSimplifiedWorkflow.
+    // prepareEstimateForPublish, which calls the same function again on its
+    // own fresh recalculation) can never disagree. Never computed/exposed for
+    // historical pricingVersion 2/3 rows, which must not be treated as
+    // eligible/ineligible to (re)publish through this active-v4 authority.
+    base.isActiveSimplifiedEstimate = isActiveSimplifiedEstimate(base);
+    base.activeReview = base.isActiveSimplifiedEstimate
+      ? deriveActiveReviewPublishReadiness({ scope: base.scope, calculation: base.calculation })
+      : null;
     return base;
   }
 

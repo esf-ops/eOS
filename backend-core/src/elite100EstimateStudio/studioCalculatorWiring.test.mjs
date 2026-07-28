@@ -696,7 +696,11 @@ function noTakeoffService(overrides = {}) {
     organizationId: ORG,
     actorUserId: ACTOR,
     idempotencyKey: "wiring-publish-1",
-    body: { projectName: "Publish Wiring Kitchen", customerName: "Publish Test Co" }
+    body: {
+      projectName: "Publish Wiring Kitchen",
+      customerName: "Publish Test Co",
+      customerEmail: "publish-wiring@example.test"
+    }
   });
   await manual.saveManualScopeDraft({
     organizationId: ORG,
@@ -760,7 +764,11 @@ function noTakeoffService(overrides = {}) {
     organizationId: ORG,
     actorUserId: ACTOR,
     idempotencyKey: "wiring-publish-blocked-1",
-    body: { projectName: "Blocked Publish Kitchen", customerName: "Blocked Test Co" }
+    body: {
+      projectName: "Blocked Publish Kitchen",
+      customerName: "Blocked Test Co",
+      customerEmail: "blocked-publish@example.test"
+    }
   });
   await blockedManual.saveManualScopeDraft({
     organizationId: ORG,
@@ -807,7 +815,11 @@ function noTakeoffService(overrides = {}) {
     organizationId: ORG,
     actorUserId: ACTOR,
     idempotencyKey: "wiring-publish-warn-1",
-    body: { projectName: "Multi-room Kitchen", customerName: "Warn Test Co" }
+    body: {
+      projectName: "Multi-room Kitchen",
+      customerName: "Warn Test Co",
+      customerEmail: "warn-test@example.test"
+    }
   });
   await warnManual.saveManualScopeDraft({
     organizationId: ORG,
