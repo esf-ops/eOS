@@ -6,13 +6,17 @@
  * { scope, configuration } contract, then runs the new pricingVersion 4
  * calculator.
  *
- * ADDITIVE ONLY:
+ * WIRING (feature/elite100-studio-calculator-wiring):
  *  - studioEstimatePricing.mjs / calculateStudioEstimate (pricingVersion 3) is
- *    NOT modified and remains whatever route/UI currently calls it.
- *  - Nothing in this branch calls calculateElite100StudioEstimate() from any
- *    route, job, or UI — it exists so the new calculator can be exercised
- *    against real Studio scope shapes ahead of a separate, later wiring
- *    change. No estimator UI work or Digital Estimate wiring happens here.
+ *    NOT modified — it remains available for historical snapshots and any
+ *    caller that explicitly requests it.
+ *  - `calculateStudioEstimateV4` (below) is the default `calculateImpl` for
+ *    new/active Elite 100 Studio calculations (see studioEstimateService.mjs).
+ *    It wraps calculateElite100StudioEstimate()'s result into the same
+ *    calculationSnapshot shape calculateStudioEstimate produces (fingerprint,
+ *    totals.exactInternalTotal/customerDisplayTotal, fabrication.*, warnings,
+ *    unresolvedItems) so approval/publication/staleness code that reads that
+ *    shape works unmodified for both pricing versions.
  *
  * Legacy Studio blends estimator-owned physical facts and customer-owned
  * configuration into one JSON blob (e.g. `scope.materialGroup`,
@@ -61,6 +65,7 @@ import {
 import { resolveRoomMaterialGroup } from "./studioMaterialInheritance.mjs";
 import { resolveScopeEdgeLinearFeet } from "./studioScopeBilling.mjs";
 import { normalizeStudioCommercialLines } from "./studioCommercialLines.mjs";
+import { scopeFingerprint } from "./studioEstimatePricing.mjs";
 
 function isBacksplashPieceType(pieceType) {
   return String(pieceType ?? "").toLowerCase().includes("backsplash");
@@ -119,19 +124,25 @@ export function mapStudioScopeToElite100Scope(scope, opts = {}) {
             message: `Room "${room.name || roomId}" piece "${piece.id}": elite100RoomPricingCalculator prices material per room only — the piece-level material override is not applied (uses the room's resolved material group).`
           });
         }
-        // Studio prices pieces from the stored (possibly manually corrected)
-        // `sqft`, not a lengthIn×depthIn recomputation — directArea preserves
-        // that exact billing input (see billableCountertopFromRoom).
+        // Direct-area is an estimator-approved override (measurementMode
+        // "direct_area" / directAreaOverride true) — an absolute measured
+        // total, never multiplied by quantity (matches measuredPieceSqft()).
+        // Otherwise the new calculator is the SF authority: it derives
+        // lengthIn×depthIn÷144×quantity itself rather than trusting a
+        // browser/legacy-stored `sqft` value, per the canonical Scope contract.
+        const isDirectArea =
+          piece.measurementMode === "direct_area" || piece.directAreaOverride === true;
         const sqft = Number(piece.sqft);
+        const quantity = Math.max(1, Math.floor(Number(piece.quantity) || 1));
         return {
           id: String(piece.id ?? ""),
           name: piece.name || null,
           pieceType: piece.pieceType || "counter",
           lengthIn: Number(piece.lengthIn) || 0,
           depthIn: Number(piece.depthIn) || 0,
-          quantity: 1,
+          quantity,
           included: true,
-          directArea: Number.isFinite(sqft) && sqft > 0 ? sqft : undefined
+          directArea: isDirectArea && Number.isFinite(sqft) && sqft > 0 ? sqft : undefined
         };
       });
     const mappedRoom = {
@@ -429,5 +440,133 @@ export async function calculateElite100StudioEstimate(params) {
     ...result,
     warnings: [...mapped.warnings, ...result.warnings],
     adapterWarnings: mapped.warnings
+  };
+}
+
+/**
+ * Flatten the pricingVersion 4 result's estimate-level + every room's custom
+ * lines into the same shape studioEstimatePublicationAdapter.mjs reads from
+ * `calculationSnapshot.fabrication.customLineItems` (the field
+ * calculateStudioEstimate / studioEstimatePricing.mjs populates for
+ * pricingVersion 3), so publication needs no per-version branch.
+ * @param {Awaited<ReturnType<typeof calculateElite100Estimate>>} result
+ */
+function toV4StudioCustomLineItems(result) {
+  function toItem(l, roomName) {
+    return {
+      lineKey: l.id,
+      id: l.id,
+      name: l.description,
+      customerDescription: l.description,
+      category: "Other",
+      quantity: l.quantity,
+      unit: "ea",
+      unitPrice: l.unitPrice,
+      lineTotal: l.amount,
+      commercialRole: l.commercialRole,
+      customerFacing: l.publicNamed,
+      roomId: l.roomId,
+      roomName: roomName || null
+    };
+  }
+  const items = [];
+  const est = result.estimateCustomLines || {};
+  for (const l of [
+    ...(est.customerFacing || []),
+    ...(est.hiddenCustomerCharge || []),
+    ...(est.internalOnly || []),
+    ...(est.absorbed || [])
+  ]) {
+    items.push(toItem(l, null));
+  }
+  for (const room of result.rooms || []) {
+    for (const l of [
+      ...(room.customerFacingLines || []),
+      ...(room.hiddenCustomerChargeLines || []),
+      ...(room.internalOnlyLines || []),
+      ...(room.absorbedLines || [])
+    ]) {
+      items.push(toItem(l, room.roomName || null));
+    }
+  }
+  return items;
+}
+
+/**
+ * Run the pricingVersion 4 calculator against a Studio scope and wrap the
+ * result into the SAME calculationSnapshot shape calculateStudioEstimate
+ * (pricingVersion 3, studioEstimatePricing.mjs) produces — fingerprint (the
+ * identical scopeFingerprint() used by save/approve staleness checks),
+ * totals.exactInternalTotal / totals.customerDisplayTotal, fabrication.*,
+ * warnings, unresolvedItems — so studioEstimateService.mjs and
+ * studioEstimatePublicationAdapter.mjs can store, approve, and publish either
+ * pricing version with no shape branch.
+ *
+ * This is the default `calculateStudioEstimateImpl` for new/active Elite 100
+ * Studio estimates (see createStudioEstimateService()). Signature matches
+ * calculateStudioEstimate({ scope, actorUserId, env }) for drop-in use.
+ *
+ * @param {{
+ *   scope: object,
+ *   actorUserId?: string,
+ *   env?: NodeJS.ProcessEnv,
+ *   now?: Date,
+ *   roomAssignments?: Record<string, string>,
+ *   edgeRoomId?: string,
+ *   vanityProgramSelections?: object
+ * }} params
+ */
+export async function calculateStudioEstimateV4(params = {}) {
+  const { scope, env, now, ...opts } = params;
+  const result = await calculateElite100StudioEstimate({ scope, env, now, ...opts });
+
+  // One estimate-wide edge summary for legacy-shaped readers (advisory-only
+  // consumers: publication readiness warnings / customer-safe fallback token).
+  // Per-room detail (the pricing authority) is preserved in `elite100.rooms`.
+  const edgeScopeResult = resolveScopeEdgeLinearFeet(scope || {});
+  const edgeRoom =
+    (result.rooms || []).find((r) => Number(r?.edge?.amount) > 0) || result.rooms?.[0] || null;
+  const edgeAmountTotal = round2(
+    (result.rooms || []).reduce((s, r) => s + (Number(r?.edge?.amount) || 0), 0)
+  );
+
+  return {
+    ok: result.ok !== false,
+    fingerprint: scopeFingerprint(scope),
+    calculatedAt: result.calculatedAt,
+    pricingEngine: result.pricingEngine,
+    pricingVersion: result.pricingVersion,
+    pricingBasis: result.pricingBasis === "wholesale" ? "wholesale" : "direct",
+    fabrication: {
+      addOns: scope?.addOns && typeof scope.addOns === "object" ? { ...scope.addOns } : {},
+      edge: {
+        profileToken: edgeRoom?.edge?.profile || scope?.edgeProfileToken || "edge_eased",
+        profileLabel: edgeRoom?.edge?.profileLabel || null,
+        tier: edgeRoom?.edge?.tier || "free",
+        finalLf: edgeScopeResult.finalLf,
+        amount: edgeAmountTotal,
+        source: result.pricingEngine
+      },
+      customLineItems: toV4StudioCustomLineItems(result)
+    },
+    account: result.account,
+    totals: {
+      exactInternalTotal: result.totals?.exactInternalTotal,
+      customerDisplayTotal: result.totals?.displayTotal,
+      exactTotal: result.totals?.exactTotal,
+      roomTotalsSum: result.totals?.roomTotalsSum
+    },
+    warnings: result.warnings || [],
+    unresolvedItems: result.unresolved || [],
+    // Full pricingVersion 4 evidence (per-room breakdown, customer-safe
+    // projection, immutable pricing snapshot) — additive detail for Studio
+    // diagnostics/audit. Never required by v3-shaped consumers above.
+    elite100: {
+      rooms: result.rooms,
+      estimateCustomLines: result.estimateCustomLines,
+      customerFacing: result.customerFacing,
+      snapshot: result.snapshot,
+      adapterWarnings: result.adapterWarnings
+    }
   };
 }

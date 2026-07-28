@@ -2658,11 +2658,30 @@ export default function EstimateScopePanel({
           </dl>
         )}
         {(estimate.calculation?.warnings || []).length ? (
-          <ul className="eq-list">
+          <ul className="eq-list" data-testid="eq-calculation-warnings">
             {(estimate.calculation?.warnings || []).map((w, i) => (
               <li key={`${w.code}-${i}`}>{w.message || w.code}</li>
             ))}
           </ul>
+        ) : null}
+        {(estimate.calculation?.unresolvedItems || []).length ? (
+          <ul className="eq-list eq-list--attention" data-testid="eq-unresolved-items">
+            {(estimate.calculation?.unresolvedItems || []).map((u, i) => (
+              <li key={`${u.code}-${i}`}>{u.message || u.code}</li>
+            ))}
+          </ul>
+        ) : null}
+        {estimate.pricingEngine ? (
+          <details className="eq-compat-advanced" data-testid="eq-pricing-engine-diagnostic">
+            <summary>Advanced — pricing engine diagnostics</summary>
+            <p className="eq-footnote">
+              Engine: {estimate.pricingEngine}
+              {estimate.pricingVersion != null ? ` · pricing version ${estimate.pricingVersion}` : ""}
+              {estimate.calculationFingerprint
+                ? ` · fingerprint ${estimate.calculationFingerprint.slice(0, 12)}…`
+                : ""}
+            </p>
+          </details>
         ) : null}
       </section>
 

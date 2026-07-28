@@ -31,6 +31,8 @@ type PieceDraft = {
   lengthIn: number;
   depthIn: number;
   sqft: number;
+  /** Identical-piece count (default 1). Server derives lengthIn×depthIn÷144×quantity. */
+  quantity: number;
   /** Estimator-facing open-edge LF for this piece (piece_sum mode). */
   openEdgeLf: number;
   notes: string;
@@ -115,6 +117,7 @@ function emptyPiece(): PieceDraft {
     lengthIn: 0,
     depthIn: 25.5,
     sqft: 0,
+    quantity: 1,
     openEdgeLf: 0,
     notes: ""
   };
@@ -147,10 +150,14 @@ function backsplashSqft(bs: BacksplashDraft): number {
 }
 
 function pieceSqft(p: PieceDraft): number {
+  // Geometry preview only — the server independently derives measured/billed SF
+  // from lengthIn/depthIn/quantity (or the approved direct-area override) and
+  // remains authoritative regardless of this display calculation.
   if (p.measurementMode === "direct_area") return Number(p.sqft) || 0;
   const L = Number(p.lengthIn) || 0;
   const D = Number(p.depthIn) || 0;
-  return L > 0 && D > 0 ? Math.round(((L * D) / 144) * 100) / 100 : 0;
+  const Q = Math.max(1, Math.floor(Number(p.quantity) || 1));
+  return L > 0 && D > 0 ? Math.round(((L * D * Q) / 144) * 100) / 100 : 0;
 }
 
 function isEdgeEligiblePiece(p: PieceDraft): boolean {
@@ -198,6 +205,7 @@ function roomsFromScope(scope: Record<string, unknown> | null): RoomDraft[] {
         lengthIn: Number(p.lengthIn) || 0,
         depthIn: Number(p.depthIn) || 0,
         sqft: Number(p.sqft) || 0,
+        quantity: Math.max(1, Math.floor(Number(p.quantity) || 1)),
         openEdgeLf,
         notes: String(p.notes || "")
       } as PieceDraft;
@@ -255,6 +263,7 @@ function toApiRooms(rooms: RoomDraft[]) {
       lengthIn: p.lengthIn,
       depthIn: p.depthIn,
       sqft: p.sqft,
+      quantity: Math.max(1, Math.floor(Number(p.quantity) || 1)),
       notes: p.notes,
       finishedEdge:
         r.openEdgeMeasurementMode === "piece_sum" && (Number(p.openEdgeLf) || 0) >= 0
@@ -718,6 +727,24 @@ export default function ManualPhysicalScopeEditor({
                           const next = [...rooms];
                           const pieces = [...room.pieces];
                           pieces[pi] = { ...piece, depthIn: Number(e.target.value) || 0 };
+                          next[ri] = { ...room, pieces };
+                          markDirty(next);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Quantity
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={piece.quantity || 1}
+                        data-testid="manual-piece-quantity"
+                        onChange={(e) => {
+                          const next = [...rooms];
+                          const pieces = [...room.pieces];
+                          const parsed = Math.floor(Number(e.target.value));
+                          pieces[pi] = { ...piece, quantity: Number.isFinite(parsed) && parsed > 0 ? parsed : 1 };
                           next[ri] = { ...room, pieces };
                           markDirty(next);
                         }}
