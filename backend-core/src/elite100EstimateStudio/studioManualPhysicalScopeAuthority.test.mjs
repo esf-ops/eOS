@@ -313,14 +313,36 @@ console.log("\nstudioManualPhysicalScopeAuthority.test.mjs\n");
   assert.match(editor, /Room total open edge/);
   assert.match(editor, /Kitchen sink openings/);
   assert.doesNotMatch(editor, />qty-sink</);
-  assert.match(panel, /eq-confirmed-physical-scope/);
-  assert.match(panel, /eq-edit-manual-scope/);
-  assert.match(panel, /eq-confirmed-finished-edge/);
-  assert.match(panel, /Total open edge/);
-  assert.match(panel, /eq-confirmed-cutouts-readonly/);
+  // Single canonical Scope summary lives in ManualPhysicalScopeEditor (the
+  // editable authority) — finished-edge total and cutout/opening counts are
+  // derived there, not duplicated as a separate read-only block in
+  // EstimateScopePanel. See "Scope tab — single canonical view" consolidation.
+  assert.match(editor, /data-testid="manual-scope-summary"/, "canonical Scope summary aside exists in the editor");
+  assert.match(editor, /Total open edge/, "finished-edge total is derived in the canonical summary");
+  assert.match(editor, /Sink openings: \{cutouts\["qty-sink"\]\}/, "cutout/opening counts are derived in the canonical summary");
+  assert.doesNotMatch(
+    panel,
+    /eq-confirmed-physical-scope/,
+    "no duplicate read-only 'Confirmed physical scope' block in EstimateScopePanel"
+  );
+  assert.doesNotMatch(
+    panel,
+    /eq-confirmed-cutouts-readonly/,
+    "no duplicate cutouts/openings read model outside the canonical editor"
+  );
+  // eq-confirmed-finished-edge is a distinct, still-valid Customer Choices
+  // (pricing) display of the project-level open-edge LF sourced from the
+  // canonical Scope — not a Scope-tab duplicate. It must stay inside the
+  // Customer Choices section, not the Scope tab.
+  const commercialSectionIdx = panel.indexOf('data-testid="eq-section-choices-commercial"');
+  const confirmedFinishedEdgeIdx = panel.indexOf("eq-confirmed-finished-edge");
+  assert.ok(
+    commercialSectionIdx !== -1 && confirmedFinishedEdgeIdx > commercialSectionIdx,
+    "the project-level open-edge LF display lives inside Customer Choices, not a Scope-tab duplicate"
+  );
   assert.match(ad, /eq-ad-use-location-as-project-address/);
   assert.match(ad, /Never silently overwrite/);
-  console.log("ok: UI contracts for Manual Scope authority + AD address");
+  console.log("ok: UI contracts for Manual Scope authority + AD address (single canonical Scope summary, no duplicate read model)");
 }
 
 // sync helper

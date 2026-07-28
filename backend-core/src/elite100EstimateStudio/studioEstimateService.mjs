@@ -41,7 +41,10 @@ import { applyStudioAccountDirectoryIdentity } from "./studioAccountDirectoryLoo
 import {
   MANUAL_ESTIMATE_ORIGIN,
   isConfirmedManualPhysicalScope,
-  stripClientManualAuthority
+  stripClientManualAuthority,
+  validateManualScopeForConfirm,
+  manualScopeFingerprint,
+  applyNormalizedManualRooms
 } from "./studioManualPhysicalScope.mjs";
 import {
   normalizeProjectDetailsDraft,
@@ -49,6 +52,10 @@ import {
 } from "./studioProjectDetails.mjs";
 import { buildStudioWorkspaceWorkflow } from "./studioWorkspaceWorkflow.mjs";
 import { loadActiveEstimateForMutation } from "./studioEstimateActiveRevisionGuard.mjs";
+import {
+  deriveActiveReviewPublishReadiness,
+  isActiveSimplifiedEstimate
+} from "./studioActiveReviewReadiness.mjs";
 
 /**
  * Structured mutation log — no PII, no scope dumps, no tokens.
@@ -140,24 +147,94 @@ function assertTakeoffApproved(workspace) {
   }
 }
 
-/**
- * Physical-scope authority: approved Takeoff OR server-confirmed manual scope.
- * @param {object} row
- * @param {object|null} workspace
- */
-function assertPhysicalScopeAuthorized(row, workspace) {
-  if (isConfirmedManualPhysicalScope(row?.scope) && !row?.takeoffJobId) {
-    return;
-  }
-  assertTakeoffApproved(workspace);
-}
-
 function isManualStaffEstimate(row) {
   const s = row?.scope || {};
   return (
     s.estimateOrigin === MANUAL_ESTIMATE_ORIGIN ||
     s.physicalScopeSource === MANUAL_ESTIMATE_ORIGIN
   );
+}
+
+/**
+ * Active-v4 authority: calculation/approval must not require a separate
+ * "Confirm Scope" estimator click (see hotfix/studio-single-active-flow).
+ * When the canonical manual Scope already has server-validated measurable
+ * content, auto-confirm it here — from server-normalized content only, the
+ * same facts confirmManualScope() itself would use, never from client-
+ * supplied flags (rejectCallerAuthority already stripped those from body).
+ * When the Scope is not yet measurable, leaves the row untouched so the
+ * caller can report specific unresolved items instead of hard-blocking.
+ * @param {object} row
+ * @param {object} repository
+ * @param {string} organizationId
+ * @param {string|null} actorUserId
+ */
+async function autoConfirmManualScopeIfValid(row, repository, organizationId, actorUserId) {
+  if (!isManualStaffEstimate(row) || isConfirmedManualPhysicalScope(row.scope)) {
+    return row;
+  }
+  const normalizedScope = applyNormalizedManualRooms(
+    {
+      ...row.scope,
+      estimateOrigin: MANUAL_ESTIMATE_ORIGIN,
+      physicalScopeSource: MANUAL_ESTIMATE_ORIGIN
+    },
+    { rooms: row.scope?.rooms, addOns: row.scope?.addOns },
+    { stampConfirmed: true }
+  );
+  const issues = validateManualScopeForConfirm(normalizedScope);
+  if (issues.length) {
+    // Not yet measurable — calculate()/approve() report specifics instead.
+    return row;
+  }
+  const fingerprint = manualScopeFingerprint(normalizedScope);
+  return repository.update(
+    organizationId,
+    row.id,
+    {
+      scope: {
+        ...normalizedScope,
+        manualScopeConfirmed: true,
+        manualScopeConfirmedAt: new Date().toISOString(),
+        manualScopeConfirmedBy: actorUserId || null,
+        manualScopeFingerprint: fingerprint
+      },
+      status:
+        row.status === STUDIO_ESTIMATE_STATUSES.DRAFT
+          ? STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE
+          : row.status
+    },
+    actorUserId
+  );
+}
+
+/**
+ * Active-v4: translate Scope gaps into specific, actionable unresolved items
+ * instead of legacy confirm/approval errors (e.g. "material group required",
+ * "no included measured pieces"). Safe to call for manual or AI-assisted
+ * scope; returns [] once the Scope has genuinely measurable content.
+ * @param {object} scope
+ */
+function describeScopeCalculationGaps(scope) {
+  const rooms = Array.isArray(scope?.rooms) ? scope.rooms.filter((r) => r && r.included !== false) : [];
+  if (!rooms.length) {
+    return [{ code: "no_included_rooms", message: "Add at least one included room." }];
+  }
+  const includedPieces = rooms.flatMap((r) =>
+    Array.isArray(r.pieces) ? r.pieces.filter((p) => p && p.included !== false) : []
+  );
+  if (!includedPieces.length) {
+    return [{ code: "no_included_pieces", message: "No included countertop pieces." }];
+  }
+  const hasMeasuredPiece = includedPieces.some(
+    (p) => Number(p.sqft) > 0 || (Number(p.lengthIn) > 0 && Number(p.depthIn) > 0)
+  );
+  if (!hasMeasuredPiece) {
+    return [
+      { code: "no_measured_pieces", message: "No included measured pieces — enter dimensions or square footage." }
+    ];
+  }
+  return [];
 }
 
 /**
@@ -534,7 +611,8 @@ export function createStudioEstimateService(deps = {}) {
             warnings: row.calculationSnapshot.warnings,
             unresolvedItems: row.calculationSnapshot.unresolvedItems,
             pricingEngine: row.calculationSnapshot.pricingEngine,
-            pricingVersion: row.calculationSnapshot.pricingVersion
+            pricingVersion: row.calculationSnapshot.pricingVersion,
+            reviewSummary: row.calculationSnapshot.reviewSummary || null
           }
         : null,
       calculationSnapshot: row.calculationSnapshot || null,
@@ -562,6 +640,19 @@ export function createStudioEstimateService(deps = {}) {
       historicalApproval: extras.previousRevisionSummary || null,
       publication: extras.publication || extras.publicationSummary || null
     });
+    // Single server authority for active-v4 Review & Publish readiness (see
+    // studioActiveReviewReadiness.mjs). Computed here — the one place every
+    // estimate read (GET estimate, GET .../digital-estimate, and the return
+    // value of updateScope/calculate/approve) is serialized — so the read
+    // surface and the publish orchestration (studioSimplifiedWorkflow.
+    // prepareEstimateForPublish, which calls the same function again on its
+    // own fresh recalculation) can never disagree. Never computed/exposed for
+    // historical pricingVersion 2/3 rows, which must not be treated as
+    // eligible/ineligible to (re)publish through this active-v4 authority.
+    base.isActiveSimplifiedEstimate = isActiveSimplifiedEstimate(base);
+    base.activeReview = base.isActiveSimplifiedEstimate
+      ? deriveActiveReviewPublishReadiness({ scope: base.scope, calculation: base.calculation })
+      : null;
     return base;
   }
 
@@ -670,7 +761,18 @@ export function createStudioEstimateService(deps = {}) {
     }).catch(() => null);
     const resultId = workspace?.latestResult?.id || latest?.id || null;
 
-    if (reviewStatus !== "approved") {
+    // Active-v4: AI geometry is only the starting source for the canonical
+    // Scope — a separate "Approve Takeoff" click is no longer a required
+    // estimator gate for Scope to become usable/editable/priceable. Seed as
+    // soon as the Takeoff has actually produced rooms; reviewStatus is kept
+    // as an advisory signal on the scope (surfaced as a warning), never as a
+    // hard block. Only hard-stop when there is genuinely no usable result yet.
+    const hasUsableTakeoffResult = Boolean(
+      latest?.normalizedTakeoffJson &&
+        Array.isArray(latest.normalizedTakeoffJson.rooms) &&
+        latest.normalizedTakeoffJson.rooms.length
+    );
+    if (reviewStatus !== "approved" && !hasUsableTakeoffResult) {
       return repository.update(
         organizationId,
         row.id,
@@ -686,7 +788,11 @@ export function createStudioEstimateService(deps = {}) {
       );
     }
 
-    // Takeoff approved — seed scope once when empty.
+    // Seed scope once when empty. When the Takeoff is formally approved this
+    // uses the full approval-gated payload (cutouts/edge/backsplash geometry
+    // authority); otherwise it still builds the same payload without the
+    // approval requirement — genuine QA/evidence/validation blockers (never
+    // just an unreviewed status) still fall through to the raw-room fallback.
     let scope = row.scope || emptyStudioEstimateScope();
     const needsSeed = !Array.isArray(scope.rooms) || scope.rooms.length === 0;
     if (needsSeed && latest?.normalizedTakeoffJson) {
@@ -698,8 +804,8 @@ export function createStudioEstimateService(deps = {}) {
           reviewState: latest.reviewState || null,
           computed: latest.computedMeasurementsJson || null,
           validation: latest.validationDiagnosticsJson || null,
-          requireApproved: true,
-          reviewStatus: "approved",
+          requireApproved: reviewStatus === "approved",
+          reviewStatus: reviewStatus || "pending",
           approvedAt: workspace.approvedAt || null,
           approvedBy: workspace.approvedByUserId || null
         });
@@ -767,11 +873,16 @@ export function createStudioEstimateService(deps = {}) {
       }
     }
 
-    // Authority handoff healing: Takeoff is approved at this point, so any
-    // seeded rooms are takeoff-derived. Older estimates (and the raw fallback
-    // seed above) may lack physicalScopeSource/takeoffScopeSummary, which made
-    // Pricing Setup incorrectly show "Manual physical scope" — restore the
-    // authority metadata without touching the commercial scope.
+    // Advisory-only AI signal for the frontend (never a readiness gate) — the
+    // formal "approved" review status, or "pending" when still awaiting the
+    // estimator's own advisory review of AI-extracted geometry.
+    scope.aiTakeoffReviewStatus = reviewStatus || "pending";
+
+    // Authority handoff healing: any rooms seeded above are takeoff-derived
+    // (approved or AI-assisted-pending-review). Older estimates (and the raw
+    // fallback seed above) may lack physicalScopeSource/takeoffScopeSummary,
+    // which made Pricing Setup incorrectly show "Manual physical scope" —
+    // restore the authority metadata without touching the commercial scope.
     if (
       Array.isArray(scope.rooms) &&
       scope.rooms.length &&
@@ -1286,21 +1397,15 @@ export function createStudioEstimateService(deps = {}) {
       }
       const statusBefore = row.status;
       try {
-        if (isManualStaffEstimate(row) && !isConfirmedManualPhysicalScope(row.scope)) {
-          const err = new Error("Confirm manual scope before calculating");
-          err.statusCode = 409;
-          err.code = "manual_scope_not_confirmed";
-          throw err;
-        }
+        // Active-v4: autosave-driven calculation must not require a separate
+        // "Confirm Scope" or "Approve Takeoff" estimator click. Auto-confirm
+        // manual scope inline when it is already measurable; seed AI-assisted
+        // scope from whatever the Takeoff has produced so far (see
+        // refreshTakeoffGate). If the Scope genuinely isn't measurable yet,
+        // fall through and report specific unresolved items below instead of
+        // hard-blocking the calculation request.
+        row = await autoConfirmManualScopeIfValid(row, repository, organizationId, actorUserId);
         row = await refreshTakeoffGate(row, organizationId, actorUserId);
-        let workspace = null;
-        if (!(isConfirmedManualPhysicalScope(row.scope) && !row.takeoffJobId)) {
-          workspace = await loadWorkspace({
-            organizationId,
-            takeoffJobId: row.takeoffJobId
-          });
-        }
-        assertPhysicalScopeAuthorized(row, workspace);
 
         const resolved = await resolveTrustedPartnerOnScope(organizationId, row.scope);
         if (resolved.scope.partnerAccountId !== row.scope.partnerAccountId) {
@@ -1317,6 +1422,10 @@ export function createStudioEstimateService(deps = {}) {
           actorUserId,
           env
         });
+        const scopeGaps = describeScopeCalculationGaps(resolved.scope);
+        if (scopeGaps.length) {
+          calc.unresolvedItems = [...scopeGaps, ...(calc.unresolvedItems || [])];
+        }
 
         row = await repository.update(
           organizationId,
@@ -1407,27 +1516,25 @@ export function createStudioEstimateService(deps = {}) {
           return safeEstimateView(row);
         }
 
-        if (isManualStaffEstimate(row) && !isConfirmedManualPhysicalScope(row.scope)) {
-          const err = new Error("Confirm manual scope before approving");
-          err.statusCode = 409;
-          err.code = "manual_scope_not_confirmed";
-          throw err;
-        }
-
+        // Active-v4: internal compatibility confirm/approve is orchestrated by
+        // Publish (and this direct call), never a separate estimator gate —
+        // auto-confirm manual scope inline exactly as calculate() does.
+        row = await autoConfirmManualScopeIfValid(row, repository, organizationId, actorUserId);
         row = await refreshTakeoffGate(row, organizationId, actorUserId);
-        let workspace = null;
-        if (!(isConfirmedManualPhysicalScope(row.scope) && !row.takeoffJobId)) {
-          workspace = await loadWorkspace({
-            organizationId,
-            takeoffJobId: row.takeoffJobId
-          });
-        }
-        assertPhysicalScopeAuthorized(row, workspace);
 
         if (!row.calculationSnapshot?.fingerprint) {
           const err = new Error("Calculate the estimate before approving");
           err.statusCode = 409;
           err.code = "not_priced";
+          throw err;
+        }
+
+        const scopeGaps = describeScopeCalculationGaps(row.scope);
+        if (scopeGaps.length) {
+          const err = new Error(scopeGaps[0].message);
+          err.statusCode = 422;
+          err.code = scopeGaps[0].code;
+          err.details = scopeGaps;
           throw err;
         }
 

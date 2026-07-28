@@ -184,38 +184,36 @@ function approvedPayload() {
   console.log("  ✓ 26. approved backsplash runs map downstream");
 }
 
-// ── 27. manual quantity fields are hidden when Takeoff exists ─────────────────
+// ── 27. cutout/quantity fields live only in the canonical Scope editor ────────
+// Superseded by the Scope-tab consolidation (see phasePricingSetupSimplification.
+// ui.test.mjs and studioPresentationFlow.test.mjs): the old dual-branch
+// "Approved physical scope" / "Manual physical scope" read model (with its
+// own manual-cutout-grid fallback) is gone from EstimateScopePanel. The
+// canonical ManualPhysicalScopeEditor (mounted once, above this panel, for
+// both manual and AI-assisted estimates) is the single Scope editor +
+// summary; this panel only carries commercial (Customer Choices) fields plus
+// a hint pointing back at that canonical editor.
 {
-  assert.ok(panel.includes("B. Pricing Setup"), "27: panel renamed to Pricing Setup");
   assert.ok(
     panel.includes('scope.physicalScopeSource === "takeoff"'),
     "27: authority derived from seeded scope"
   );
-  // Manual cutout grid renders only in the fallback branch.
-  const authIdx = panel.indexOf("takeoffAuthority ? (");
-  assert.ok(authIdx > 0, "27: conditional rendering by authority");
-  assert.ok(panel.includes('data-testid="eq-derived-cutouts-note"'), "27: derived note shown");
-  assert.ok(panel.includes('data-testid="eq-manual-cutout-grid"'), "27: manual grid exists");
-  const noteIdx = panel.indexOf('data-testid="eq-derived-cutouts-note"');
-  const gridIdx = panel.indexOf('data-testid="eq-manual-cutout-grid"');
-  const between = panel.slice(noteIdx, gridIdx);
-  assert.ok(between.includes(") : ("), "27: note and manual grid are exclusive branches");
-  assert.ok(panel.includes('data-testid="eq-approved-scope-summary"'), "27: read-only summary");
-  console.log("  ✓ 27. manual quantity fields are hidden when Takeoff exists");
+  assert.ok(panel.includes("eq-scope-canonical-hint"), "27: single canonical-editor hint remains");
+  assert.equal(panel.includes("eq-manual-cutout-grid"), false, "27: old manual cutout-grid dual-branch removed");
+  assert.equal(panel.includes("eq-approved-scope-summary"), false, "27: old approved-scope read model removed");
+  console.log("  ✓ 27. cutout/quantity fields live only in the canonical Scope editor (no dual-branch read model)");
 }
 
-// ── 28. manual fallback works without Takeoff ─────────────────────────────────
+// ── 28. manual fallback (no Takeoff) still resolves through the same canonical editor ──
 {
   const manual = emptyStudioEstimateScope();
   assert.notEqual(manual.physicalScopeSource, "takeoff", "28: no authority marker");
   manual.addOns = { "qty-sink": 2, tearout: 1 };
   assert.deepEqual(scopeToAddOns(manual), { "qty-sink": 2, tearout: 1 });
-  assert.ok(panel.includes("Manual physical scope"), "28: labeled manual fallback");
-  assert.ok(
-    panel.includes('data-testid="eq-manual-scope-label"'),
-    "28: manual label testid present"
-  );
-  console.log("  ✓ 28. manual fallback works without Takeoff");
+  assert.equal(panel.includes("Manual physical scope"), false, "28: old manual-fallback label removed");
+  assert.equal(panel.includes('data-testid="eq-manual-scope-label"'), false, "28: old manual label testid removed");
+  assert.ok(panel.includes("eq-scope-canonical-hint"), "28: manual estimates use the same canonical-editor hint");
+  console.log("  ✓ 28. manual fallback (no Takeoff) still resolves through the same canonical editor");
 }
 
 // ── 29. Takeoff and manual paths never both charge ────────────────────────────
@@ -270,7 +268,8 @@ function approvedPayload() {
   const scope = seedScopeFromTakeoffPayload(approvedPayload(), base);
   assert.equal(scope.materialGroup, "Group C", "32: preserved material group");
   assert.equal(scope.colorName, "Calacatta", "32: preserved color");
-  const idx = panel.indexOf("Material group");
+  const idx = panel.indexOf("Estimate default material group");
+  assert.ok(idx !== -1, "32: Estimate default material group field exists");
   const block = panel.slice(idx, idx + 700);
   assert.ok(block.includes("disabled={blocked}"), "32: material editable outside blocked");
   assert.ok(!block.includes("takeoffAuthority"), "32: material not locked by takeoff");

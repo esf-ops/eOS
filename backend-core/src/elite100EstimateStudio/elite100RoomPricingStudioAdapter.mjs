@@ -71,6 +71,22 @@ function isBacksplashPieceType(pieceType) {
   return String(pieceType ?? "").toLowerCase().includes("backsplash");
 }
 
+/**
+ * Canonical Scope backsplash-selected test — shared by the Scope mapper
+ * (backsplashEligibleRunLengthIn fact) and the Configuration mapper
+ * (backsplash.selected choice) so both always agree on which rooms price
+ * backsplash from the exact same `room.includeBacksplash` / `backsplashSqft`
+ * canonical Scope fields (single source of truth; never two branches that
+ * can disagree).
+ * @param {{ includeBacksplash?: boolean|null, backsplashSqft?: unknown }} room
+ */
+function roomHasBacksplashSelected(room) {
+  return (
+    room?.includeBacksplash === true ||
+    (room?.includeBacksplash == null && Number(room?.backsplashSqft) > 0)
+  );
+}
+
 function isVanityRoomType(roomType) {
   return String(roomType ?? "").trim().toLowerCase() === "vanity";
 }
@@ -154,6 +170,16 @@ export function mapStudioScopeToElite100Scope(scope, opts = {}) {
     };
     if (roomId === edgeRoomId && edgeScopeResult.finalLf > 0) {
       mappedRoom.edgeFinishedLf = edgeScopeResult.finalLf;
+    }
+    // Canonical Scope backsplash run length (room.backsplashMeasuredLengthIn)
+    // — the physical fact the calculator needs alongside the Configuration
+    // mapper's backsplash.selected choice below to actually price backsplash
+    // (previously omitted here, so backsplash.selected always priced $0).
+    if (roomHasBacksplashSelected(room)) {
+      const backsplashRunLengthIn = Number(room.backsplashMeasuredLengthIn) || 0;
+      if (backsplashRunLengthIn > 0) {
+        mappedRoom.backsplashEligibleRunLengthIn = backsplashRunLengthIn;
+      }
     }
     return mappedRoom;
   });
@@ -261,7 +287,7 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
     const mat = resolveRoomMaterialGroup(src, room);
     const cfg = ensureRoom(roomId);
     cfg.materialGroup = mat.group;
-    if (room.includeBacksplash === true || (room.includeBacksplash == null && Number(room.backsplashSqft) > 0)) {
+    if (roomHasBacksplashSelected(room)) {
       const heightIn = Number(room.backsplashHeightIn) > 0 ? Number(room.backsplashHeightIn) : 4;
       cfg.backsplash = { selected: true, heightIn };
     }
@@ -516,6 +542,63 @@ function toV4StudioCustomLineItems(result) {
  *   vanityProgramSelections?: object
  * }} params
  */
+/**
+ * Active-v4 Review & Publish display aggregate — sums already-computed,
+ * authoritative per-room customer-facing line items (toCustomerSafeElite100RoomResult)
+ * into the few numbers the Review & Publish panel shows. Purely a display
+ * rollup of numbers the calculator already produced; it does not derive any
+ * new price and must never be treated as a second pricing path.
+ * @param {object} result calculateElite100StudioEstimate() output
+ */
+function buildActiveReviewSummary(result) {
+  const rooms = result?.customerFacing?.rooms || [];
+  const sumLineItemsLabeled = (label) =>
+    round2(
+      rooms.reduce(
+        (sum, room) =>
+          sum +
+          (room.lineItems || [])
+            .filter((li) => li.label === label)
+            .reduce((s, li) => s + (Number(li.amount) || 0), 0),
+        0
+      )
+    );
+  const fabricationLabelPrefixes = [
+    "Edge",
+    "Miter",
+    "Cutouts",
+    "Sinks",
+    "Products",
+    "Additional Trip",
+    "Waterfall",
+    "Side Splash"
+  ];
+  const fabricationTotal = round2(
+    rooms.reduce(
+      (sum, room) =>
+        sum +
+        (room.lineItems || [])
+          .filter((li) => fabricationLabelPrefixes.some((p) => String(li.label || "").startsWith(p)))
+          .reduce((s, li) => s + (Number(li.amount) || 0), 0),
+      0
+    )
+  );
+  const countertopMaterialGroups = Array.from(
+    new Set(rooms.map((r) => r.materialGroup).filter(Boolean))
+  );
+  const backsplashPresent = rooms.some((r) =>
+    (r.lineItems || []).some((li) => li.label === "Backsplash")
+  );
+  return {
+    countertopMaterialGroups,
+    countertopMaterialTotal: sumLineItemsLabeled("Countertop Material"),
+    materialTaxTotal: sumLineItemsLabeled("Material Use Tax"),
+    backsplashPresent,
+    backsplashTotal: sumLineItemsLabeled("Backsplash"),
+    fabricationTotal
+  };
+}
+
 export async function calculateStudioEstimateV4(params = {}) {
   const { scope, env, now, ...opts } = params;
   const result = await calculateElite100StudioEstimate({ scope, env, now, ...opts });
@@ -554,10 +637,14 @@ export async function calculateStudioEstimateV4(params = {}) {
       exactInternalTotal: result.totals?.exactInternalTotal,
       customerDisplayTotal: result.totals?.displayTotal,
       exactTotal: result.totals?.exactTotal,
-      roomTotalsSum: result.totals?.roomTotalsSum
+      roomTotalsSum: result.totals?.roomTotalsSum,
+      accountAdjustment: result.totals?.accountAdjustment
     },
     warnings: result.warnings || [],
     unresolvedItems: result.unresolved || [],
+    // Active-v4 Review & Publish display rollup (see buildActiveReviewSummary) —
+    // additive; existing v3-shaped / elite100.* consumers are unaffected.
+    reviewSummary: buildActiveReviewSummary(result),
     // Full pricingVersion 4 evidence (per-room breakdown, customer-safe
     // projection, immutable pricing snapshot) — additive detail for Studio
     // diagnostics/audit. Never required by v3-shaped consumers above.

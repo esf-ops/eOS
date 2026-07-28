@@ -71,6 +71,16 @@ type Props = {
   onRegisterFlush?: (flush: (() => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>) | null) => void;
   /** When true, hide primary editor (parent section tabs). */
   hidden?: boolean;
+  /**
+   * "manual" (default): saves through the manual-only /manual-scope + Confirm
+   * endpoints. "ai_assisted": same canonical rooms/pieces/dimensions/edges/
+   * backsplash/openings editor and Scope summary, but saves through the
+   * generic PATCH /estimates/:id (studioEstimateService.updateScope) contract
+   * — AI Takeoff geometry is only the starting source; estimator edits here
+   * are authoritative and there is no separate "Confirm" action (a formal
+   * Takeoff-approval click is never required for Scope to be usable/priceable).
+   */
+  scopeMode?: "manual" | "ai_assisted";
 };
 
 const ROOM_TYPES = ["Kitchen", "Island", "Vanity", "Bar", "Laundry", "Fireplace", "Shower", "Other"];
@@ -300,8 +310,10 @@ export default function ManualPhysicalScopeEditor({
   onActiveEstimateChange,
   onDirtyChange,
   onRegisterFlush,
-  hidden = false
+  hidden = false,
+  scopeMode = "manual"
 }: Props) {
+  const isAiAssisted = scopeMode === "ai_assisted";
   const [rooms, setRooms] = useState<RoomDraft[]>([emptyRoom()]);
   const [cutouts, setCutouts] = useState({ "qty-sink": 0, "qty-cook": 0, "qty-outlet": 0, "qty-bar": 0 });
   const [saveState, setSaveState] = useState<StudioAutosaveStatus>("idle");
@@ -382,7 +394,9 @@ export default function ManualPhysicalScopeEditor({
     setErrors([]);
     try {
       const body = (await apiPatch(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(activeIdRef.current)}/manual-scope`,
+        isAiAssisted
+          ? `/api/elite100-estimate-studio/estimates/${encodeURIComponent(activeIdRef.current)}`
+          : `/api/elite100-estimate-studio/estimates/${encodeURIComponent(activeIdRef.current)}/manual-scope`,
         authToken,
         { scope: { rooms: toApiRooms(roomsRef.current), addOns: cutoutsRef.current } }
       )) as {
@@ -507,7 +521,7 @@ export default function ManualPhysicalScopeEditor({
       setDirty(false);
       onDirtyChange?.(false);
       setSaveState("saved");
-      setMessage("Manual scope confirmed. Continue in Pricing Setup.");
+      setMessage("Scope confirmed. Continue to Customer Choices.");
       onConfirmed?.();
       if (Array.isArray(result.details)) setErrors(result.details);
     } catch (e) {
@@ -552,8 +566,9 @@ export default function ManualPhysicalScopeEditor({
         <div>
           <h3>Scope</h3>
           <p className="muted">
-            Define what we are fabricating — rooms, pieces, dimensions, exposed edges,
-            backsplash-eligible length, and openings. Changes save automatically.
+            {isAiAssisted
+              ? "AI Takeoff geometry starts this Scope. Edit rooms, pieces, dimensions, exposed edges, backsplash-eligible length, and openings directly — your edits are authoritative. Changes save automatically."
+              : "Define what we are fabricating — rooms, pieces, dimensions, exposed edges, backsplash-eligible length, and openings. Changes save automatically."}
           </p>
         </div>
         <div className="manual-scope-save-state" data-testid="manual-scope-save-state">
@@ -1094,7 +1109,7 @@ export default function ManualPhysicalScopeEditor({
 
       <fieldset className="manual-scope-cutouts" data-testid="manual-scope-openings">
         <legend>Openings</legend>
-        <p className="muted">Physical opening counts for this estimate. Product model selection stays in Pricing Setup / Digital Estimate.</p>
+        <p className="muted">Physical opening counts for this estimate. Product model selection stays in Customer Choices / Review &amp; Publish.</p>
         {CUTOUT_FIELDS.map(({ key, label }) => (
           <label key={key}>
             {label}
@@ -1168,15 +1183,17 @@ export default function ManualPhysicalScopeEditor({
           >
             Save now
           </button>
-          <button
-            type="button"
-            className="eq-btn-ghost"
-            data-testid="manual-scope-confirm"
-            disabled={saveState === "saving"}
-            onClick={() => void confirmScope()}
-          >
-            Confirm Manual Scope
-          </button>
+          {isAiAssisted ? null : (
+            <button
+              type="button"
+              className="eq-btn-ghost"
+              data-testid="manual-scope-confirm"
+              disabled={saveState === "saving"}
+              onClick={() => void confirmScope()}
+            >
+              Confirm Manual Scope
+            </button>
+          )}
         </details>
       </div>
     </section>

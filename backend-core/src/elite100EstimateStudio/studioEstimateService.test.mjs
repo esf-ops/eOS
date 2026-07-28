@@ -151,25 +151,37 @@ console.log("\nstudioEstimateService.test.mjs\n");
       })
   });
 
+  // Active-v4: AI geometry is only the starting source for the canonical
+  // Scope — a formal "Approve Takeoff" is no longer a required estimator
+  // gate. As soon as the Takeoff has produced usable rooms/pieces, Scope
+  // seeds and calculates immediately; reviewStatus is carried only as an
+  // advisory hint (scope.aiTakeoffReviewStatus), never as a hard block.
   const first = await service.getOrCreateForCase({
     organizationId: ORG_A,
     intakeCaseId: "case-1",
     takeoffJobId: "job-1",
     actorUserId: "user-1"
   });
-  assert.equal(first.status, STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL);
-
-  await assert.rejects(
-    () =>
-      service.calculate({
-        organizationId: ORG_A,
-        estimateId: first.id,
-        actorUserId: "user-1",
-        body: {}
-      }),
-    (e) => e.code === "needs_takeoff_approval"
+  assert.equal(first.status, STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE);
+  assert.ok(first.scope.rooms.length >= 1, "usable Takeoff rooms seed the canonical Scope pre-approval");
+  assert.equal(
+    first.scope.aiTakeoffReviewStatus,
+    "needs_review",
+    "AI review status is tracked as an advisory hint, not a gate"
   );
-  console.log("ok: cannot calculate before Takeoff approval");
+
+  const calculatedBeforeApproval = await service.calculate({
+    organizationId: ORG_A,
+    estimateId: first.id,
+    actorUserId: "user-1",
+    body: {}
+  });
+  assert.equal(calculatedBeforeApproval.status, STUDIO_ESTIMATE_STATUSES.PRICED);
+  assert.ok(
+    calculatedBeforeApproval.calculation?.totals?.exactInternalTotal > 0,
+    "AI-assisted Scope calculates before formal Takeoff approval"
+  );
+  console.log("ok: AI-assisted Scope seeds and calculates before formal Takeoff approval");
 
   takeoffApproved = true;
   const seeded = await service.getOrCreateForCase({
@@ -180,8 +192,11 @@ console.log("\nstudioEstimateService.test.mjs\n");
   });
   assert.equal(seeded.id, first.id);
   assert.ok(seeded.scope.rooms.length >= 1);
-  assert.equal(seeded.status, STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE);
-  console.log("ok: approved Takeoff seeds room scope; reopen returns same estimate");
+  // Already calculated pre-approval above — formal approval of the Takeoff
+  // does not reset or require redoing that live pricing.
+  assert.equal(seeded.status, STUDIO_ESTIMATE_STATUSES.PRICED);
+  assert.equal(seeded.scope.aiTakeoffReviewStatus, "approved");
+  console.log("ok: approved Takeoff keeps the same seeded estimate/scope (idempotent)");
 
   await assert.rejects(
     () =>

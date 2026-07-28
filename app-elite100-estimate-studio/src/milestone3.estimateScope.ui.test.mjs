@@ -15,6 +15,10 @@ const workspace = readFileSync(
 );
 const panel = readFileSync(join(root, "src/estimateQueue/EstimateScopePanel.tsx"), "utf8");
 const api = readFileSync(join(root, "src/lib/api.ts"), "utf8");
+const editor = readFileSync(
+  join(root, "src/estimateQueue/ManualPhysicalScopeEditor.tsx"),
+  "utf8"
+);
 
 assert.ok(workspace.includes("EstimateScopePanel"));
 assert.ok(panel.includes("eq-partner-account-picker"));
@@ -42,7 +46,11 @@ assert.ok(panel.includes("useSimplifiedPublish"));
 assert.ok(panel.includes("Publish Digital Estimate") || panel.includes("EstimateDigitalEstimatePanel"));
 assert.ok(api.includes("apiPatch"));
 assert.ok(panel.includes("eq-custom-lines"));
-assert.ok(panel.includes("eq-include-backsplash"));
+// Active-v4: per-piece "include backsplash" now lives only in the canonical
+// ManualPhysicalScopeEditor (manual-scope-backsplash) — EstimateScopePanel no
+// longer renders a second, independently-loaded backsplash editor.
+assert.ok(editor.includes("manual-scope-backsplash"));
+assert.doesNotMatch(panel, /eq-include-backsplash/);
 assert.ok(panel.includes("pricingBasis || \"wholesale\""));
 // Canonical edge profiles replaced the legacy Included/W/D choices.
 assert.ok(panel.includes("Edge profile (canonical)"));

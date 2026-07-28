@@ -382,32 +382,40 @@ console.log("\nstudioManualEstimate.test.mjs\n");
     body: { confirm: true }
   });
 
-  let blocked = false;
-  try {
-    // Unconfirm by saving again
-    await manual.saveManualScopeDraft({
-      organizationId: ORG,
-      estimateId: created.estimateId,
-      actorUserId: ACTOR,
-      body: { scope: kitchenDraft() }
-    });
-    await studio.calculate({
-      organizationId: ORG,
-      estimateId: created.estimateId,
-      actorUserId: ACTOR,
-      body: {}
-    });
-  } catch (e) {
-    blocked = e.code === "manual_scope_not_confirmed";
-  }
-  assert.equal(blocked, true);
-
-  await manual.confirmManualScope({
+  // Active-v4: re-saving a still-complete draft resets the cached confirm
+  // flag, but calculate() auto-confirms inline from the real (still-valid)
+  // scope content — no separate "Confirm Scope" click is required.
+  await manual.saveManualScopeDraft({
     organizationId: ORG,
     estimateId: created.estimateId,
     actorUserId: ACTOR,
-    body: { confirm: true }
+    body: { scope: kitchenDraft() }
   });
+  const rowAfterDraftResave = await estimates.getById(ORG, created.estimateId);
+  assert.equal(
+    isConfirmedManualPhysicalScope(rowAfterDraftResave.scope),
+    false,
+    "draft re-save resets the cached confirm flag"
+  );
+  const autoConfirmedPriced = await studio.calculate({
+    organizationId: ORG,
+    estimateId: created.estimateId,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  assert.equal(autoConfirmedPriced.status, "priced");
+  assert.equal(
+    (autoConfirmedPriced.calculation?.unresolvedItems || []).length,
+    0,
+    "complete scope calculates with no unresolved items"
+  );
+  const rowAfterAutoConfirm = await estimates.getById(ORG, created.estimateId);
+  assert.equal(
+    isConfirmedManualPhysicalScope(rowAfterAutoConfirm.scope),
+    true,
+    "calculate() auto-confirms a complete manual scope server-side"
+  );
+
   const priced = await studio.calculate({
     organizationId: ORG,
     estimateId: created.estimateId,
@@ -422,10 +430,14 @@ console.log("\nstudioManualEstimate.test.mjs\n");
     body: { confirm: true }
   });
   assert.equal(approved.status, "approved");
-  console.log("ok: 35–41 calculate/approve without takeoff; unconfirmed blocks calculate");
+  console.log("ok: 35–41 calculate/approve without takeoff; autosave-driven calculate auto-confirms complete scope");
 }
 
-// Client-forged confirmation flags must not bypass Takeoff / manual confirm gates
+// Client-forged authority flags are never trusted — only server-validated
+// scope CONTENT determines confirm/calculate readiness (active-v4: there is
+// no separate "Confirm Scope" estimator gate, so flags themselves are inert;
+// the security property is that forging them cannot fabricate completeness
+// or bypass server-side recomputation of confirm metadata).
 {
   const intake = new InMemoryQuoteIntakeRepository();
   const estimates = new InMemoryStudioEstimateRepository();
@@ -434,9 +446,14 @@ console.log("\nstudioManualEstimate.test.mjs\n");
     env: { ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1" },
     loadTakeoffWorkspace: async () => ({ reviewStatus: "pending" }),
     loadLatestTakeoffResult: async () => null,
-    calculateStudioEstimateImpl: async () => {
-      throw new Error("calculate must not run when physical scope unauthorized");
-    }
+    calculateStudioEstimateImpl: async () => ({
+      fingerprint: "calc-fp-forge",
+      pricingEngine: "sentinel",
+      pricingVersion: 1,
+      totals: { exactInternalTotal: 1000, customerDisplayTotal: 1200 },
+      fabrication: { edge: { finalLf: 10 } },
+      unresolvedItems: []
+    })
   });
   const manual = createStudioManualEstimateService({
     quoteIntakeRepository: intake,
@@ -471,20 +488,84 @@ console.log("\nstudioManualEstimate.test.mjs\n");
   assert.equal(forged.scope.manualScopeFingerprint, null);
   assert.equal(isConfirmedManualPhysicalScope(forged.scope), false);
 
-  let blockedForge = false;
-  try {
-    await studio.calculate({
-      organizationId: ORG,
-      estimateId: created.estimateId,
-      actorUserId: ACTOR,
-      body: {}
-    });
-  } catch (e) {
-    blockedForge = e.code === "manual_scope_not_confirmed";
-  }
-  assert.equal(blockedForge, true);
+  // The forged claims are inert either way — the underlying room/piece
+  // content here is genuinely complete, so calculate() auto-confirms from
+  // that real content and recomputes its own confirm metadata; the
+  // attacker-supplied fingerprint/actor are never persisted or trusted.
+  await studio.calculate({
+    organizationId: ORG,
+    estimateId: created.estimateId,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  const afterCalc = await estimates.getById(ORG, created.estimateId);
+  assert.equal(isConfirmedManualPhysicalScope(afterCalc.scope), true);
+  assert.notEqual(afterCalc.scope.manualScopeFingerprint, "forged-fp");
+  assert.notEqual(afterCalc.scope.manualScopeConfirmedBy, "attacker");
 
-  // Takeoff-backed row: forging manual_staff flags via updateScope cannot skip Takeoff
+  // Forging confirmation on a genuinely INCOMPLETE scope (no rooms) must not
+  // fabricate completeness — calculate() still runs gracefully (no legacy
+  // workflow error) but reports specific unresolved items instead of a price.
+  const emptyCreated = await manual.createManualEstimate({
+    organizationId: ORG,
+    actorUserId: ACTOR,
+    idempotencyKey: "idem-forge-empty-1",
+    body: { projectName: "Forge Empty Test" }
+  });
+  await studio.updateScope({
+    organizationId: ORG,
+    estimateId: emptyCreated.estimateId,
+    actorUserId: ACTOR,
+    body: {
+      scope: {
+        manualScopeConfirmed: true,
+        manualScopeConfirmedAt: "2099-01-01T00:00:00.000Z",
+        manualScopeFingerprint: "forged-empty-fp",
+        estimateOrigin: "manual_staff",
+        physicalScopeSource: "manual_staff",
+        rooms: []
+      }
+    }
+  });
+  const emptyPriced = await studio.calculate({
+    organizationId: ORG,
+    estimateId: emptyCreated.estimateId,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  assert.ok(
+    (emptyPriced.calculation?.unresolvedItems || []).length > 0,
+    "forged confirm flags on an empty scope still surface unresolved items, not a fabricated price"
+  );
+  const emptyRow = await estimates.getById(ORG, emptyCreated.estimateId);
+  assert.equal(
+    isConfirmedManualPhysicalScope(emptyRow.scope),
+    false,
+    "empty scope is never auto-confirmed regardless of forged flags"
+  );
+  console.log("ok: forged confirmation flags are inert — only real scope content is ever trusted");
+}
+
+// AI-assisted (Takeoff-linked) scope: estimator edits are authoritative, and
+// pricing readiness never depends on a formal "Approve Takeoff" action; only
+// genuinely manual-origin flags remain gated behind manual scope validation.
+{
+  const intake = new InMemoryQuoteIntakeRepository();
+  const estimates = new InMemoryStudioEstimateRepository();
+  const studio = createStudioEstimateService({
+    repository: estimates,
+    env: { ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1" },
+    loadTakeoffWorkspace: async () => ({ reviewStatus: "pending" }),
+    loadLatestTakeoffResult: async () => null,
+    calculateStudioEstimateImpl: async () => ({
+      fingerprint: "calc-fp-takeoff",
+      pricingEngine: "sentinel",
+      pricingVersion: 1,
+      totals: { exactInternalTotal: 500, customerDisplayTotal: 600 },
+      fabrication: { edge: { finalLf: 5 } },
+      unresolvedItems: []
+    })
+  });
   const takeoffCase = await intake.createCase({
     organizationId: ORG,
     sourceType: "graph_mailbox",
@@ -504,6 +585,10 @@ console.log("\nstudioManualEstimate.test.mjs\n");
       estimateOrigin: "email_ai_takeoff"
     }
   });
+  // Attempting to relabel a Takeoff-linked row as manual_staff via updateScope
+  // must not succeed — estimateOrigin/physicalScopeSource/confirm flags are
+  // always server-stripped — but the estimator's corrected room geometry
+  // itself IS the same canonical Scope contract and does persist.
   await studio.updateScope({
     organizationId: ORG,
     estimateId: takeoffRow.id,
@@ -520,20 +605,20 @@ console.log("\nstudioManualEstimate.test.mjs\n");
   const afterForgeTakeoff = await estimates.getById(ORG, takeoffRow.id);
   assert.notEqual(afterForgeTakeoff.scope.estimateOrigin, "manual_staff");
   assert.notEqual(afterForgeTakeoff.scope.manualScopeConfirmed, true);
-  let takeoffBlocked = false;
-  try {
-    await studio.calculate({
-      organizationId: ORG,
-      estimateId: takeoffRow.id,
-      actorUserId: ACTOR,
-      body: {}
-    });
-  } catch (e) {
-    takeoffBlocked =
-      e.code === "needs_takeoff_approval" || e.message?.includes("Takeoff");
-  }
-  assert.equal(takeoffBlocked, true);
-  console.log("ok: forged client confirmation does not bypass Takeoff/manual gates");
+  assert.equal(afterForgeTakeoff.scope.rooms.length, 2, "estimator-entered room geometry still persists");
+
+  // Active-v4: no formal "Approve Takeoff" is required for this estimator-
+  // entered geometry to calculate — the estimate is not blocked with a
+  // legacy workflow error.
+  const takeoffCalc = await studio.calculate({
+    organizationId: ORG,
+    estimateId: takeoffRow.id,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  assert.equal(takeoffCalc.status, "priced");
+  assert.equal(takeoffCalc.calculation.totals.exactInternalTotal, 500);
+  console.log("ok: AI-assisted Scope edits are authoritative without a formal Approve-Takeoff gate");
 }
 
 // Route / UI static safety
