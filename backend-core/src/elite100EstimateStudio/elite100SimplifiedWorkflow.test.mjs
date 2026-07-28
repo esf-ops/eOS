@@ -163,13 +163,15 @@ console.log("ok: 1 top-level Inbox + Estimates navigation");
     organizationId: "org",
     actorUserId: "u1",
     messageKey: "m1",
-    idempotencyKey: "k1"
+    idempotencyKey: "k1",
+    confirm: true
   });
   const b = await svc.startEstimate({
     organizationId: "org",
     actorUserId: "u1",
     messageKey: "m1",
-    idempotencyKey: "k1"
+    idempotencyKey: "k1",
+    confirm: true
   });
   assert.equal(a.estimateId, "est-1");
   assert.equal(b.estimateId, "est-1");

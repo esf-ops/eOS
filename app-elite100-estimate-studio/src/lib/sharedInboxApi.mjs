@@ -65,10 +65,14 @@ export async function startSharedInboxEstimate(token, messageKey, opts = {}) {
   if (opts.idempotencyKey) {
     headers["Idempotency-Key"] = String(opts.idempotencyKey);
   }
+  // confirm: true is required by the backend import guard
+  // (import_confirm_required). Clicking Start Estimate is the explicit
+  // confirmation — never weaken or bypass that server check.
   return apiPost(
     `/api/elite100-estimate-studio/shared-inbox/${encodeURIComponent(messageKey)}/start-estimate`,
     token,
     {
+      confirm: true,
       forceManual: opts.forceManual === true,
       idempotencyKey: opts.idempotencyKey || undefined
     },

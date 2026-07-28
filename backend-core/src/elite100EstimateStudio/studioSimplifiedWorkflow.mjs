@@ -605,18 +605,21 @@ export function createStudioSimplifiedWorkflowService(deps) {
 
   /**
    * One-click Start Estimate — idempotent import + estimate ensure.
+   * confirm must be true (Start Estimate click); the import guard is unchanged.
    */
   async function startEstimate({
     organizationId,
     actorUserId,
     messageKey,
     idempotencyKey = null,
-    forceManual = false
+    forceManual = false,
+    confirm = false
   }) {
     const imported = await sharedInboxService.importMessage({
       organizationId,
       actorUserId,
       messageKey,
+      confirm,
       idempotencyKey: idempotencyKey || `start-estimate:${organizationId}:${messageKey}`,
       forceManual: Boolean(forceManual)
     });

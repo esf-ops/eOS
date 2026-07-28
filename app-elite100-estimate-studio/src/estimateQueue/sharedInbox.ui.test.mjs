@@ -36,7 +36,12 @@ console.log("ok: 43 default filter is All");
 
 assert.match(api, /shared-inbox/);
 assert.match(api, /start-estimate/);
-console.log("ok: 44 newest-first copy + Start Estimate API path");
+assert.match(
+  api.slice(api.indexOf("startSharedInboxEstimate"), api.indexOf("markSharedInboxViewed")),
+  /confirm:\s*true/,
+  "Start Estimate sends confirm: true (import_confirm_required guard)"
+);
+console.log("ok: 44 newest-first copy + Start Estimate API path + confirm:true");
 
 assert.match(page, /Start Estimate|primaryAction\?\.label/);
 assert.match(page, /data-action-key/);
