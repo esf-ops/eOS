@@ -816,7 +816,7 @@ export function createPublicConfigurationService(deps) {
               : lifecycle === "revoked"
                 ? "This estimate link has been revoked."
                 : includeBaseline
-                  ? null
+                  ? "Customer options could not be loaded. Refresh this page to try again, or contact your estimator."
                   : "This estimate is unavailable.",
         estimate: includeBaseline ? baselineEstimate : null,
         configuration: null,

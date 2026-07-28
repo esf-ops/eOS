@@ -266,6 +266,97 @@ export function buildCustomerChoiceConfiguration(flags, legacyUnknownKeys = []) 
 }
 
 /**
+ * Default interactive configuration for Studio simplified-publish.
+ * Active Studio Digital Estimates must open ConfigurationView with permitted
+ * commercial choices — never a document-only / envelope-less publication.
+ *
+ * Explicit document mode remains available via enableConfiguration:false or
+ * configurationMode:"document" on the publish body.
+ */
+export const DEFAULT_SIMPLIFIED_PUBLISH_CHOICE_GROUPS = Object.freeze([
+  "material_color",
+  "edge",
+  "sink",
+  "faucet",
+  "backsplash",
+  "accessories",
+  "specialty",
+  "cooktop_cutout",
+  "side_splash"
+]);
+
+/**
+ * @returns {{
+ *   enableConfiguration: true,
+ *   configurationMode: "configure",
+ *   customerChoiceGroups: string[],
+ *   allowedOptionKeys: string[],
+ *   roomLocks: Array<{ roomKey: string, locked: boolean }>
+ * }}
+ */
+export function defaultSimplifiedPublishConfiguration() {
+  const flags = Object.fromEntries(
+    DEFAULT_SIMPLIFIED_PUBLISH_CHOICE_GROUPS.map((id) => [id, true])
+  );
+  const built = buildCustomerChoiceConfiguration(flags, []);
+  return {
+    enableConfiguration: true,
+    configurationMode: "configure",
+    customerChoiceGroups: built.customerChoiceGroups,
+    allowedOptionKeys: built.allowedOptionKeys,
+    // Approved physical measurements stay locked; commercial choices remain open.
+    roomLocks: [{ roomKey: "*", locked: true }]
+  };
+}
+
+/**
+ * Resolve the configuration object used by Studio simplified-publish.
+ * Missing / empty configuration → interactive defaults (not document-only).
+ *
+ * @param {object|null|undefined} bodyConfiguration
+ * @returns {object}
+ */
+export function resolveSimplifiedPublishConfiguration(bodyConfiguration) {
+  const cfg =
+    bodyConfiguration && typeof bodyConfiguration === "object" ? { ...bodyConfiguration } : {};
+  if (cfg.enableConfiguration === false || cfg.configurationMode === "document") {
+    return cfg;
+  }
+  const groups = Array.isArray(cfg.customerChoiceGroups) ? cfg.customerChoiceGroups : [];
+  const keys = Array.isArray(cfg.allowedOptionKeys) ? cfg.allowedOptionKeys : [];
+  const materialIds = Array.isArray(cfg.allowedMaterialIds) ? cfg.allowedMaterialIds : [];
+  const materialGroups = Array.isArray(cfg.allowedMaterialGroupCodes)
+    ? cfg.allowedMaterialGroupCodes
+    : Array.isArray(cfg.allowedMaterialGroups)
+      ? cfg.allowedMaterialGroups
+      : [];
+  const intendsConfigure =
+    cfg.enableConfiguration === true ||
+    cfg.configurationMode === "configure" ||
+    groups.length > 0 ||
+    keys.length > 0 ||
+    materialIds.length > 0 ||
+    materialGroups.length > 0;
+  if (intendsConfigure) {
+    return {
+      ...cfg,
+      enableConfiguration: true,
+      configurationMode: cfg.configurationMode || "configure"
+    };
+  }
+  const defaults = defaultSimplifiedPublishConfiguration();
+  return {
+    ...cfg,
+    ...defaults,
+    pricingValidThrough:
+      cfg.pricingValidThrough != null && String(cfg.pricingValidThrough).trim()
+        ? cfg.pricingValidThrough
+        : defaults.pricingValidThrough,
+    estimatorNotes: cfg.estimatorNotes != null ? cfg.estimatorNotes : defaults.estimatorNotes
+  };
+}
+
+/**
  * True when choiceGroups set contains a logical group (canonical or legacy).
  * @param {Set<string>|Iterable<string>} groups
  * @param {string} logicalId canonical or legacy
