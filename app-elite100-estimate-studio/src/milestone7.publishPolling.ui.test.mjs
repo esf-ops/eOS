@@ -40,9 +40,14 @@ assert.ok(workspace.includes("20_000"));
 assert.ok(workspace.includes("visibilitychange"));
 assert.ok(workspace.includes("ac.abort()"));
 assert.ok(!workspace.includes("2000)"), "must not use 2s takeoff poll");
-// Active Scope no longer mounts the Takeoff iframe — polling remains for AI status only.
+// Takeoff-first: iframe mounts via AiTakeoffFirstPanel; Studio poll is status-only.
 assert.equal(workspace.includes("takeoffFrameMounted"), false);
-assert.equal(workspace.includes('data-testid="eq-takeoff-iframe"'), false);
+assert.ok(workspace.includes("AiTakeoffFirstPanel"));
+assert.ok(
+  readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8").includes(
+    'data-testid="eq-takeoff-iframe"'
+  )
+);
 
 assert.ok(queue.includes("isAbortError"));
 assert.ok(queue.includes("AbortController"));
