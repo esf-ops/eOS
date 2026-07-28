@@ -20,7 +20,6 @@ import {
   normalizeEdgeProfileToken
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
 import { resolveRoomApprovedEligibleEdgeLf, assessLegacyProjectEdgeFallback } from "./studioRoomEdgeQuantity.mjs";
-import { validateProjectNameForPublication } from "./studioProjectDetails.mjs";
 import {
   commercialRoleIsPublicNamed,
   commercialRoleUsesStoneAbsorption,
@@ -120,6 +119,40 @@ export function studioEstimateQuoteNumber(estimate) {
   const caseId = str(estimate?.intakeCaseId) || str(estimate?.id);
   const short = caseId.replace(/-/g, "").slice(0, 8).toUpperCase();
   return `SE-${short}`;
+}
+
+/**
+ * Customer-safe display title for Digital Estimate publications.
+ * Prefer a real project name when present; otherwise plan filename → Studio
+ * quote number → "Digital Estimate". Never exposes a raw UUID.
+ *
+ * @param {object|null|undefined} estimate
+ * @returns {string}
+ */
+export function resolveCustomerFacingEstimateTitle(estimate) {
+  const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+  const candidates = [
+    str(scope.projectName),
+    str(estimate?.projectName),
+    str(scope.sourceFileName),
+    str(scope.planFileName),
+    str(scope.attachmentName),
+    str(scope.originalFilename),
+    str(estimate?.sourceFileName),
+    str(estimate?.attachmentName),
+    str(estimate?.planFileName),
+    str(estimate?.originalFilename)
+  ];
+  for (const c of candidates) {
+    if (!c) continue;
+    if (looksLikeUuid(c)) continue;
+    // Strip a bare UUID that appears as the entire title.
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(c)) continue;
+    return c;
+  }
+  const quote = studioEstimateQuoteNumber(estimate);
+  if (quote && !looksLikeUuid(quote)) return quote;
+  return "Digital Estimate";
 }
 
 /**
@@ -474,7 +507,7 @@ function buildPrintSnapshot(estimate, customerDisplayTotal) {
     finalRounded,
     header: {
       quoteNumber: studioEstimateQuoteNumber(estimate),
-      projectName: str(scope.projectName) || str(estimate?.projectName) || "Estimate",
+      projectName: resolveCustomerFacingEstimateTitle(estimate),
       customerName: str(scope.customerName) || str(estimate?.customerName) || "",
       date: new Date().toISOString().slice(0, 10),
       pricingValidThrough: null,
@@ -657,7 +690,9 @@ export function buildSyntheticQuoteHeaderFromStudioEstimate(estimate, opts = {})
     customer_name: customerName,
     customer_email: customerEmail,
     customer_phone: customerPhone,
-    project_name: str(scope.projectName) || null,
+    // Display title uses safe fallback when project metadata is blank; do not
+    // invent a fake customer identity for customer_name/email.
+    project_name: str(scope.projectName) || resolveCustomerFacingEstimateTitle(estimate),
     project_address: str(scope.projectAddress) || null,
     estimated_material_group: str(scope.materialGroup) || "Group Promo",
     // Trusted partner pricing id only — never Account Directory UUID.
@@ -856,20 +891,8 @@ export function assessStudioEstimatePublicationReadiness(input) {
   }
 
   const scope = estimate.scope && typeof estimate.scope === "object" ? estimate.scope : {};
-  if (!str(scope.customerName)) {
-    blockers.push({
-      code: "customer_name_required",
-      field: "customerName",
-      message: "Customer name is required before publishing."
-    });
-  }
-  const projectNameCheck = validateProjectNameForPublication(scope, {
-    estimateId: estimate.id,
-    intakeCaseId: estimate.intakeCaseId
-  });
-  if (!projectNameCheck.ok) {
-    blockers.push(projectNameCheck.blocker);
-  }
+  // Customer name / email / project name are optional metadata for publish.
+  // Do not block Digital Estimate publication on blank identity fields.
 
   const unresolved = collectUnresolvedItems(scope);
   if (unresolved.length && !scope.unresolvedManualReview) {

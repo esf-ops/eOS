@@ -24,7 +24,10 @@ import { createStudioSimplifiedWorkflowService } from "./studioSimplifiedWorkflo
 import { STUDIO_ESTIMATE_STATUSES, emptyStudioEstimateScope } from "./studioEstimateTypes.mjs";
 import { MANUAL_ESTIMATE_ORIGIN } from "./studioManualPhysicalScope.mjs";
 import { buildStudioScopeBilling, resolveScopeEdgeLinearFeet } from "./studioScopeBilling.mjs";
-import { isActiveSimplifiedEstimate } from "./studioActiveReviewReadiness.mjs";
+import {
+  deriveActiveReviewPublishReadiness,
+  isActiveSimplifiedEstimate
+} from "./studioActiveReviewReadiness.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "../../..");
@@ -1011,6 +1014,23 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
 // ════════════════════════════════════════════════════════════════════════
 {
   const { studio, manual } = freshManualServices();
+  // Force a genuine post-calc commercial blocker (identity remains optional).
+  // Publish always recalculates, so wrap calculate to re-apply the blocker on
+  // the returned estimate the same way an unresolved catalog price would.
+  const realCalculate = studio.calculate.bind(studio);
+  function withUnresolvedPricing(est) {
+    const unresolved = [{ code: "unresolved_commercial_item", message: "Sink price missing" }];
+    const totals = { ...(est.calculation?.totals || est.calculationSnapshot?.totals || {}), customerDisplayTotal: 0 };
+    const calc = { ...(est.calculation || est.calculationSnapshot || {}), unresolvedItems: unresolved, totals };
+    return {
+      ...est,
+      calculation: calc,
+      calculationSnapshot: calc,
+      activeReview: deriveActiveReviewPublishReadiness({ ...est, calculation: calc, calculationSnapshot: calc })
+    };
+  }
+  studio.calculate = async (args) => withUnresolvedPricing(await realCalculate(args));
+
   let publishCalls = 0;
   const workflow = createStudioSimplifiedWorkflowService({
     sharedInboxService: { async importMessage() { return {}; } },
@@ -1024,9 +1044,6 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
     }
   });
 
-  // Genuinely ineligible: a measured, included Kitchen countertop piece
-  // (so Scope itself is fine and calculation succeeds), but no customer
-  // email — one real, unambiguous publish blocker.
   const created = await manual.createManualEstimate({
     organizationId: ORG,
     actorUserId: ACTOR,
@@ -1054,16 +1071,15 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
   } catch (e) {
     plainError = e;
   }
-  assert.ok(plainError, "publish rejects an estimate missing customer email");
+  assert.ok(plainError, "publish rejects an estimate with unresolved pricing");
   assert.equal(plainError.statusCode, 422, "rejection is a 422, not a silent success");
   assert.ok(Array.isArray(plainError.blockers) && plainError.blockers.length > 0, "rejection carries concrete blockers");
+  assert.ok(
+    plainError.blockers.some((b) => b.code === "unresolved_commercial_item" || b.code === "product_price_unavailable"),
+    "blocker is unresolved pricing (identity is optional)"
+  );
   assert.equal(publishCalls, 0, "digitalEstimateService.publish is not invoked on the plain rejected attempt");
 
-  // A browser could send anything here — a stale cached "eligible: true"
-  // readiness object, a hand-forged Scope with a fake customerEmail, a
-  // fabricated calculation with a large total — none of it is Scope,
-  // Configuration, or calculation state the server trusts. Assert the
-  // rejection is byte-for-byte identical to the untampered attempt.
   let tamperedError = null;
   try {
     await attemptPublish({
@@ -1123,10 +1139,31 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
 
   // Behavioral proof: the same estimate reports the same blockers from the
   // read endpoint (activeReview) and from an actual rejected publish
-  // attempt. Scope is valid/measured and already calculated once (so both
-  // sides see a real calculationSnapshot) — the only remaining gap is
-  // customer email, so this isolates one unambiguous blocker.
+  // attempt. Scope is valid/measured and calculated — then an unresolved
+  // pricing item makes the estimate ineligible (identity remains optional).
   const { studio, manual } = freshManualServices();
+  const realCalculate = studio.calculate.bind(studio);
+  const realGetById = studio.getById.bind(studio);
+  function withUnresolvedPricing(est) {
+    const unresolved = [{ code: "unresolved_commercial_item", message: "Sink price missing" }];
+    const totals = { ...(est.calculation?.totals || est.calculationSnapshot?.totals || {}), customerDisplayTotal: 0 };
+    const calc = { ...(est.calculation || est.calculationSnapshot || {}), unresolvedItems: unresolved, totals };
+    const patched = { ...est, calculation: calc, calculationSnapshot: calc };
+    return {
+      ...patched,
+      activeReview: deriveActiveReviewPublishReadiness(patched)
+    };
+  }
+  let injectUnresolved = false;
+  studio.calculate = async (args) => {
+    const est = await realCalculate(args);
+    return injectUnresolved ? withUnresolvedPricing(est) : est;
+  };
+  studio.getById = async (org, id) => {
+    const est = await realGetById(org, id);
+    return injectUnresolved ? withUnresolvedPricing(est) : est;
+  };
+
   const workflow = createStudioSimplifiedWorkflowService({
     sharedInboxService: { async importMessage() { return {}; } },
     studioEstimateService: studio,
@@ -1154,12 +1191,21 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
   const readView = await studio.getById(ORG, created.estimateId);
   assert.equal(readView.isActiveSimplifiedEstimate, true, "a fresh manual estimate is active-v4, not historical");
   assert.ok(readView.activeReview, "the read endpoint exposes activeReview for an active-v4 estimate");
-  assert.equal(readView.activeReview.eligible, false, "the read endpoint reports the estimate as not yet eligible (no customer email)");
-  assert.deepEqual(
-    readView.activeReview.blockers,
-    [{ code: "customer_email_required", message: "Customer email required" }],
-    "the read endpoint reports exactly the one real gap"
+  // Identity is optional — with a valid Scope + calculation the estimate is eligible.
+  assert.equal(readView.activeReview.eligible, true, "identity is optional; measured Scope + calculation is enough");
+  assert.equal(
+    readView.activeReview.blockers.some((b) => b.code === "customer_email_required"),
+    false
   );
+  assert.equal(
+    readView.activeReview.blockers.some((b) => b.code === "project_name_required"),
+    false
+  );
+
+  injectUnresolved = true;
+  const ineligibleView = await studio.getById(ORG, created.estimateId);
+  assert.equal(ineligibleView.activeReview.eligible, false, "unresolved pricing makes the estimate ineligible");
+  assert.ok(ineligibleView.activeReview.blockers.length > 0);
 
   let publishError = null;
   try {
@@ -1175,7 +1221,7 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
   assert.ok(publishError, "publish rejects the same estimate the read endpoint reported as ineligible");
   assert.deepEqual(
     publishError.blockers,
-    readView.activeReview.blockers,
+    ineligibleView.activeReview.blockers,
     "publish's rejection reason set is identical to what Review & Publish already displayed — one authority, not two"
   );
   console.log("ok: 20 the Review & Publish read endpoint and the publish orchestration call the same server readiness authority");

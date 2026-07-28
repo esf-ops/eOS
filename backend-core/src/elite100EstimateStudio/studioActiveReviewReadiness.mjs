@@ -102,13 +102,6 @@ export function deriveActiveReviewPublishReadiness(estimate) {
   /** @type {Array<{ code: string, message: string }>} */
   const blockers = [];
 
-  if (!String(scope.customerEmail || "").trim()) {
-    blockers.push({ code: "customer_email_required", message: "Customer email required" });
-  }
-  if (!String(scope.projectName || "").trim()) {
-    blockers.push({ code: "project_name_required", message: "Project name required" });
-  }
-
   const coverage = scopePieceCoverage(scope);
   if (!coverage.hasIncludedRooms || !coverage.hasIncludedPieces) {
     blockers.push({ code: "no_included_pieces", message: "No included countertop pieces" });

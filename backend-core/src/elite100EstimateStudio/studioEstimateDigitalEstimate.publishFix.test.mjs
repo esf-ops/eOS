@@ -196,8 +196,9 @@ console.log("\nstudioEstimateDigitalEstimate.publishFix.test.mjs\n");
   });
   assert.equal(readiness.eligible, false);
   const codes = readiness.blockingReasons.map((b) => b.code);
-  assert.ok(codes.includes("customer_name_required"));
-  assert.ok(codes.includes("project_name_required"));
+  // Identity is optional — blank customer/project must NOT appear as blockers.
+  assert.equal(codes.includes("customer_name_required"), false);
+  assert.equal(codes.includes("project_name_required"), false);
   assert.ok(codes.includes("invalid_pricing_valid_through"));
 
   const { studioRepo, svc } = harness();
@@ -212,15 +213,15 @@ console.log("\nstudioEstimateDigitalEstimate.publishFix.test.mjs\n");
     .catch((e) => e);
   assert.equal(pubErr instanceof Error, true);
   assert.ok(
-    ["customer_name_required", "project_name_required", "invalid_pricing_valid_through"].includes(
-      pubErr.code
-    )
+    ["invalid_pricing_valid_through"].includes(pubErr.code) ||
+      (Array.isArray(pubErr.blockingReasons) &&
+        pubErr.blockingReasons.some((b) => b.code === "invalid_pricing_valid_through"))
   );
   assert.ok(Array.isArray(pubErr.blockingReasons) || Array.isArray(pubErr.blockers));
   console.log("ok: 1 readiness and publish share identical validation (same blocker codes)");
 }
 
-// 2. Blank required customer/project fields
+// 2. Blank customer/project identity is optional — not a publication blocker
 {
   const row = approvedEstimateRow({
     scope: { customerName: "  ", projectName: "", projectAddress: "" }
@@ -233,16 +234,11 @@ console.log("\nstudioEstimateDigitalEstimate.publishFix.test.mjs\n");
     configuration: { allowedOptionKeys: ["qty-sink"] },
     now: new Date("2026-07-18T12:00:00.000Z")
   });
-  assert.equal(r.eligible, false);
-  const customer = r.blockingReasons.find((b) => b.code === "customer_name_required");
-  const project = r.blockingReasons.find((b) => b.code === "project_name_required");
-  assert.equal(customer?.field, "customerName");
-  assert.equal(project?.field, "projectName");
-  assert.match(customer.message, /Customer name is required/i);
-  assert.match(project.message, /Add a project name before publishing/i);
-  assert.equal(project.action, "edit_project_details");
-  assert.equal(project.title, "Project name required");
-  console.log("ok: 2 blank customer/project block readiness with field + message");
+  const codes = r.blockingReasons.map((b) => b.code);
+  assert.equal(codes.includes("customer_name_required"), false);
+  assert.equal(codes.includes("project_name_required"), false);
+  assert.equal(r.eligible, true, "blank identity alone does not block publication");
+  console.log("ok: 2 blank customer/project identity is optional for publication");
 }
 
 // 3. Invalid catalog option key

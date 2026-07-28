@@ -5,7 +5,7 @@
  */
 
 import { STUDIO_ESTIMATE_STATUSES } from "./studioEstimateTypes.mjs";
-import { isBlankProjectName, validateProjectNameForPublication } from "./studioProjectDetails.mjs";
+import { isBlankProjectName } from "./studioProjectDetails.mjs";
 
 /** Keep browser-safe — do not import studioManualPhysicalScope (node:crypto). */
 const MANUAL_ESTIMATE_ORIGIN = "manual_staff";
@@ -83,12 +83,8 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
     status === STUDIO_ESTIMATE_STATUSES.APPROVED &&
     Boolean(estimate?.approval?.approvedAt || estimate?.approvedAt) &&
     !estimate?.staleReason;
+  // Project / customer identity is optional metadata — never a publish gate.
   const projectNameReady = !isBlankProjectName(scope.projectName);
-  const projectPub = validateProjectNameForPublication(scope, {
-    estimateId: estimate?.id,
-    intakeCaseId: estimate?.intakeCaseId
-  });
-  const projectNamePublishReady = projectPub.ok === true;
 
   const manualScopeDirty = client.manualScopeDirty === true;
   const pricingDirty = client.pricingDirty === true;
@@ -129,7 +125,7 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
 
   if (calculationCurrent) completedSteps.push("calculated");
   if (approvalCurrent) completedSteps.push("approved");
-  if (projectNamePublishReady) completedSteps.push("project_named");
+  if (projectNameReady) completedSteps.push("project_named");
   if (publicationActive) completedSteps.push("published");
 
   let nextRequiredAction = null;
@@ -216,22 +212,6 @@ export function buildStudioWorkspaceWorkflow(estimate, client = {}) {
     allowed.add("save_pricing");
     if (isManual) allowed.add("edit_manual_scope");
     laterSteps.push("publish");
-  } else if (!projectNamePublishReady) {
-    currentStage = "project_details_required";
-    nextRequiredAction = "add_project_name";
-    nextRequiredActionLabel = "Edit project details";
-    nextRequiredActionDetail =
-      projectPub.ok === false
-        ? projectPub.blocker.message
-        : "Add a project name before publishing this Digital Estimate.";
-    allowed.add("edit_project_details");
-    allowed.add("configure_digital_estimate");
-    laterSteps.push("publish");
-    blockers.push({
-      code: "project_name_required",
-      message: nextRequiredActionDetail,
-      action: "edit_project_details"
-    });
   } else if (publicationActive) {
     // Current approved revision with an active publication — publication management.
     currentStage = "published";

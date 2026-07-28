@@ -142,17 +142,19 @@ console.log("ok: 1–2 display label + disallowed names");
     repositoryMode: "memory",
     takeoffReviewStatus: "approved",
     env: { ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1" },
-    configuration: { pricingValidThrough: "2099-12-31" },
+    configuration: { pricingValidThrough: "" },
     now: new Date("2026-07-24T12:00:00.000Z")
   });
-  assert.equal(readinessBefore.eligible, false);
-  const projectBlocker = readinessBefore.blockingReasons.find(
-    (b) => b.code === "project_name_required"
+  assert.equal(
+    readinessBefore.blockingReasons.some((b) => b.code === "project_name_required"),
+    false,
+    "blank project name is not a publication blocker"
   );
-  assert.ok(projectBlocker);
-  assert.equal(projectBlocker.action, "edit_project_details");
-  assert.equal(projectBlocker.title, "Project name required");
-  console.log("ok: 12–14 blank name blocks publication with edit action");
+  assert.equal(
+    readinessBefore.blockingReasons.some((b) => b.code === "customer_name_required"),
+    false
+  );
+  console.log("ok: 12–14 blank identity does not block publication");
 
   const saved = await studio.updateProjectDetails({
     organizationId: ORG,
@@ -181,14 +183,15 @@ console.log("ok: 1–2 display label + disallowed names");
     repositoryMode: "memory",
     takeoffReviewStatus: "approved",
     env: { ELITE100_STUDIO_ESTIMATE_ALLOW_MEMORY_PUBLISH: "1" },
-    configuration: { pricingValidThrough: "2099-12-31" },
+    configuration: { pricingValidThrough: "" },
     now: new Date("2026-07-24T12:00:00.000Z")
   });
   assert.equal(
     readinessAfter.blockingReasons.some((b) => b.code === "project_name_required"),
     false
   );
-  console.log("ok: 15 adding valid name clears project_name_required");
+  assert.equal(row.scope.projectName, "Acme Kitchen Remodel");
+  console.log("ok: 15 existing project name is preserved when present");
 
   // Cross-org rejected
   let crossDenied = false;

@@ -2820,3 +2820,16 @@
 | **Frontend fix** | `AiTakeoffFirstPanel`: keep Takeoff iframe mounted during handoff with overlay “Measurements approved. Building verified estimate…”; set `measurementsApproved=true` only after refresh + calculate return a measured Scope; auto-retry retryable 409s; bounded status-poll fallback for missed postMessage; Retry button on permanent failure; never render zero-value approved summary on failure. |
 | **SQL / formulas** | None. |
 
+### 195. Digital Estimate identity is optional for publish (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `hotfix/make-digital-estimate-identity-optional` |
+| **Decision** | Publishing a secure Digital Estimate link must **not** require customer name, customer email, project name, or project address. Those fields are optional metadata. A recipient email is required only for an explicit future “Send by email” action — not for Publish, Copy Customer Link, Open Customer Preview, or republish. |
+| **Authoritative blockers** | Approved physical Scope, valid calculation, and unresolved pricing remain authoritative. Legitimate blockers include: no measured geometry / no included pieces, unresolved pricing items, required material-group / pricing-basis facts, and missing valid calculation. |
+| **Server** | `deriveActiveReviewPublishReadiness` no longer emits `customer_email_required` or `project_name_required`. Studio publication adapter no longer emits `customer_name_required` and does not call `validateProjectNameForPublication` as a blocking requirement for active Studio Digital Estimate publication. Blank `customerName` / `customerEmail` / `projectName` are accepted; no fake identity is invented. |
+| **Customer-facing title fallback** | `resolveCustomerFacingEstimateTitle`: real project name → plan filename → Studio quote number (`SE-…`) → `"Digital Estimate"`. Never exposes an internal UUID. Historical frozen v2/v3 publications continue loading unchanged. |
+| **Frontend** | `AiTakeoffFirstPanel` removes the “Required to publish” project/email form; does not call `/project-details` before publish; Publish enables from server `activeReview.eligible` only. Compact approved card: verified measurements, starting total, Edit measurements, Publish Digital Estimate (+ Copy/Open after publish). |
+| **SQL / formulas** | None. |
+| **Tests** | `studioIdentityOptionalPublish.test.mjs`, `aiTakeoffIdentityOptional.ui.test.mjs`; updated presentation-flow, publish-fix, project-details, workspace-workflow, and AI panel contracts. |
+

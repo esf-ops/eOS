@@ -12,7 +12,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   apiGet,
   apiPost,
-  apiPatch,
   ApiError,
   isAbortError,
   isTransientHttpError,
@@ -99,14 +98,11 @@ export default function AiTakeoffFirstPanel({
   const [estimateId, setEstimateId] = useState<string | null>(null);
   const [estimateRevision, setEstimateRevision] = useState<number | null>(null);
   const [activeReview, setActiveReview] = useState<ActiveReview | null>(null);
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [projectName, setProjectName] = useState("");
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffError, setHandoffError] = useState<string | null>(null);
   const [handoffErrorCode, setHandoffErrorCode] = useState<string | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [detailsSavedNotice, setDetailsSavedNotice] = useState<string | null>(null);
   const [customerUrl, setCustomerUrl] = useState<string | null>(null);
   const [idempotencyKey] = useState(() =>
     typeof crypto !== "undefined" && crypto.randomUUID
@@ -126,9 +122,6 @@ export default function AiTakeoffFirstPanel({
       if (est.revision != null) setEstimateRevision(Number(est.revision) || null);
       const ar = est.activeReview as ActiveReview | undefined;
       setActiveReview(ar && typeof ar === "object" ? ar : null);
-      const scope = (est.scope as Record<string, unknown> | undefined) || {};
-      setCustomerEmail(String(scope.customerEmail || ""));
-      setProjectName(String(scope.projectName || ""));
       // Authoritative mapping from refreshed/calculated estimate — pending
       // postMessage summary is only a final compatibility fallback.
       const next = buildApprovalSummaryFromEstimate(est, pendingSummaryRef.current);
@@ -302,52 +295,11 @@ export default function AiTakeoffFirstPanel({
     };
   }, [authToken, takeoffJobId, measurementsApproved, completeApprovalHandoff]);
 
-  /**
-   * PATCH project details, then recalculate.
-   * @returns {Promise<boolean>} true on success; false on failure (error already shown).
-   */
-  async function saveProjectFields(): Promise<boolean> {
-    if (!estimateId) return false;
-    setPublishError(null);
-    setDetailsSavedNotice(null);
-    try {
-      const body = (await apiPatch(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/project-details`,
-        authToken,
-        { customerEmail, projectName }
-      )) as { estimate?: Record<string, unknown> };
-      applyEstimateView(body.estimate || null);
-      const priced = (await apiPost(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/calculate`,
-        authToken,
-        {}
-      )) as Record<string, unknown>;
-      applyEstimateView((priced.estimate as Record<string, unknown>) || priced);
-      setDetailsSavedNotice("Details saved.");
-      return true;
-    } catch (e) {
-      setPublishError(
-        e instanceof ApiError ? e.message : "Unable to save project details"
-      );
-      return false;
-    }
-  }
-
   async function publish() {
     if (!estimateId || publishBusy) return;
     setPublishBusy(true);
     setPublishError(null);
     try {
-      const needsDetails =
-        activeReview &&
-        !activeReview.eligible &&
-        activeReview.blockers.some(
-          (b) => b.code === "customer_email_required" || b.code === "project_name_required"
-        );
-      if (needsDetails) {
-        const saved = await saveProjectFields();
-        if (!saved) return;
-      }
       const body = (await apiPost(
         `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/simplified-publish`,
         authToken,
@@ -405,17 +357,9 @@ export default function AiTakeoffFirstPanel({
     void completeApprovalHandoff({ reviewStatus: "approved" });
   }
 
-  const needEmail = Boolean(
-    activeReview?.blockers?.some((b) => b.code === "customer_email_required") ||
-      (!String(customerEmail || "").trim() && measurementsApproved)
-  );
-  const needProject = Boolean(
-    activeReview?.blockers?.some((b) => b.code === "project_name_required") ||
-      (!String(projectName || "").trim() && measurementsApproved)
-  );
-  const eligible = activeReview
-    ? activeReview.eligible
-    : Boolean(estimateId && !needEmail && !needProject);
+  // Publish eligibility is server-authoritative (activeReview). Identity fields
+  // are optional metadata and never gate Publish Digital Estimate.
+  const eligible = activeReview ? activeReview.eligible : Boolean(estimateId);
 
   if (!measurementsApproved) {
     return (
@@ -523,54 +467,7 @@ export default function AiTakeoffFirstPanel({
         ) : null}
       </dl>
 
-      {(needEmail || needProject) && (
-        <div className="eq-ai-publish-fields" data-testid="eq-ai-publish-required-fields">
-          <p className="eq-muted">Required to publish:</p>
-          {needProject ? (
-            <label>
-              Project name
-              <input
-                type="text"
-                value={projectName}
-                onChange={(e) => {
-                  setProjectName(e.target.value);
-                  setDetailsSavedNotice(null);
-                }}
-                data-testid="eq-ai-project-name"
-              />
-            </label>
-          ) : null}
-          {needEmail ? (
-            <label>
-              Customer email
-              <input
-                type="email"
-                value={customerEmail}
-                onChange={(e) => {
-                  setCustomerEmail(e.target.value);
-                  setDetailsSavedNotice(null);
-                }}
-                data-testid="eq-ai-customer-email"
-              />
-            </label>
-          ) : null}
-          <button
-            type="button"
-            className="eq-btn-secondary"
-            data-testid="eq-ai-save-project-fields"
-            onClick={() => void saveProjectFields()}
-          >
-            Save details
-          </button>
-          {detailsSavedNotice ? (
-            <p className="eq-muted" data-testid="eq-ai-details-saved" role="status">
-              {detailsSavedNotice}
-            </p>
-          ) : null}
-        </div>
-      )}
-
-      {activeReview && !activeReview.eligible && !(needEmail || needProject) ? (
+      {activeReview && !activeReview.eligible ? (
         <ul className="eq-list eq-list--attention" data-testid="eq-ai-publish-blockers">
           {activeReview.blockers.map((b, i) => (
             <li key={`${b.code || "b"}-${i}`}>{b.message || b.code}</li>
@@ -596,7 +493,7 @@ export default function AiTakeoffFirstPanel({
         <button
           type="button"
           className="eq-btn-primary"
-          disabled={publishBusy || handoffBusy || !estimateId || (!eligible && (needEmail || needProject))}
+          disabled={publishBusy || handoffBusy || !estimateId || !eligible}
           data-testid="eq-publish-digital-estimate"
           onClick={() => void publish()}
         >

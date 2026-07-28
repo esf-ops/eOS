@@ -107,7 +107,7 @@ function sentinelEstimate(overrides = {}) {
   console.log("  ✓ T5 priced + fingerprint → approve");
 }
 
-// 6. approved + blank project name → add_project_name
+// 6. approved + blank project name → still ready_to_publish (identity optional)
 {
   const wf = buildStudioWorkspaceWorkflow(
     sentinelEstimate({
@@ -120,10 +120,11 @@ function sentinelEstimate(overrides = {}) {
       approval: { approvedAt: "2026-07-24T13:00:00Z" }
     })
   );
-  assert.equal(wf.nextRequiredAction, "add_project_name");
-  assert.equal(wf.currentStage, "project_details_required");
-  assert.ok(wf.blockers.some((b) => b.code === "project_name_required"));
-  console.log("  ✓ T6 approved + blank project name → add_project_name");
+  assert.equal(wf.nextRequiredAction, "configure_digital_estimate");
+  assert.equal(wf.currentStage, "ready_to_publish");
+  assert.equal(wf.blockers.some((b) => b.code === "project_name_required"), false);
+  assert.ok(workflowAllowsAction(wf, "publish"));
+  console.log("  ✓ T6 approved + blank project name → ready_to_publish (identity optional)");
 }
 
 // 7. approved + valid project name → configure_digital_estimate / publish allowed
