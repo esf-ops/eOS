@@ -22,6 +22,10 @@ import {
   isAllowedTakeoffMessageOrigin,
   isValidTakeoffApprovedMessage
 } from "./takeoffPostMessageOrigins.mjs";
+import {
+  buildApprovalSummaryFromEstimate,
+  estimateHasMeasuredScope
+} from "./aiTakeoffApprovedSummary.mjs";
 
 const PUBLISH_CLIENT_TIMEOUT_MS = 55_000;
 const HANDOFF_RETRY_MAX_ATTEMPTS = 6;
@@ -78,33 +82,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function measuredCountertopSfFromEstimate(est: Record<string, unknown>): number {
-  const calc = (est.calculation as Record<string, unknown> | undefined) || {};
-  const billing = (calc.scopeBilling as Record<string, unknown> | undefined) || {};
-  const fromBilling =
-    num(billing.measuredCountertopSf) || num(billing.billableCountertopSf);
-  if (fromBilling > 0) return fromBilling;
-  const scope = (est.scope as Record<string, unknown> | undefined) || {};
-  const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
-  return rooms.reduce((s, r) => {
-    const room = r && typeof r === "object" ? (r as Record<string, unknown>) : {};
-    return s + (num(room.countertopSqft) || 0);
-  }, 0);
-}
-
-function estimateHasMeasuredScope(est: Record<string, unknown> | null | undefined): boolean {
-  if (!est) return false;
-  const scope = (est.scope as Record<string, unknown> | undefined) || {};
-  const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
-  if (!rooms.length) return false;
-  const pieces = rooms.flatMap((r) => {
-    const room = r && typeof r === "object" ? (r as Record<string, unknown>) : {};
-    return Array.isArray(room.pieces) ? room.pieces : [];
-  });
-  if (!pieces.length) return false;
-  return measuredCountertopSfFromEstimate(est) > 0;
-}
-
 export default function AiTakeoffFirstPanel({
   authToken,
   caseId,
@@ -150,32 +127,10 @@ export default function AiTakeoffFirstPanel({
       const scope = (est.scope as Record<string, unknown> | undefined) || {};
       setCustomerEmail(String(scope.customerEmail || ""));
       setProjectName(String(scope.projectName || ""));
-      const calc = (est.calculation as Record<string, unknown> | undefined) || null;
-      const totals = (calc?.totals as Record<string, unknown> | undefined) || {};
-      const billing = (calc?.scopeBilling as Record<string, unknown> | undefined) || {};
-      const fab = (calc?.fabrication as Record<string, unknown> | undefined) || {};
-      const edge = (fab?.edge as Record<string, unknown> | undefined) || {};
-      const pending = pendingSummaryRef.current;
-      setSummary({
-        ...(pending || {}),
-        countertopSf:
-          num(billing.measuredCountertopSf) ||
-          num(billing.billableCountertopSf) ||
-          pending?.countertopSf ||
-          0,
-        backsplashSf: num(billing.backsplashSf) || pending?.backsplashSf || 0,
-        edgeLf: num(edge.finalLf) || num(billing.edgeLf) || pending?.edgeLf || 0,
-        kitchenSinkCutouts: pending?.kitchenSinkCutouts,
-        vanityBarSinkCutouts: pending?.vanityBarSinkCutouts,
-        cooktopCutouts: pending?.cooktopCutouts,
-        outletCutouts: pending?.outletCutouts,
-        rooms: pending?.rooms,
-        includedPieces: pending?.includedPieces,
-        customerDisplayTotal:
-          totals.customerDisplayTotal != null
-            ? num(totals.customerDisplayTotal)
-            : pending?.customerDisplayTotal ?? null
-      });
+      // Authoritative mapping from refreshed/calculated estimate — pending
+      // postMessage summary is only a final compatibility fallback.
+      const next = buildApprovalSummaryFromEstimate(est, pendingSummaryRef.current);
+      if (next) setSummary(next);
     },
     [onEstimateReady]
   );
