@@ -38,9 +38,11 @@ assert.ok(api.includes("AbortController"));
 
 assert.ok(workspace.includes("20_000"));
 assert.ok(workspace.includes("visibilitychange"));
-assert.ok(workspace.includes("takeoffFrameMounted"));
 assert.ok(workspace.includes("ac.abort()"));
 assert.ok(!workspace.includes("2000)"), "must not use 2s takeoff poll");
+// Active Scope no longer mounts the Takeoff iframe — polling remains for AI status only.
+assert.equal(workspace.includes("takeoffFrameMounted"), false);
+assert.equal(workspace.includes('data-testid="eq-takeoff-iframe"'), false);
 
 assert.ok(queue.includes("isAbortError"));
 assert.ok(queue.includes("AbortController"));

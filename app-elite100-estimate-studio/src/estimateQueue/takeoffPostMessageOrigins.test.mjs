@@ -100,7 +100,10 @@ const workspace = readFileSync(
 );
 assert.doesNotMatch(workspace, /endsWith\(["']\.vercel\.app["']\)/);
 assert.doesNotMatch(workspace, /endsWith\(["']\.eliteosfab\.com["']\)/);
-assert.match(workspace, /isAllowedTakeoffMessageOrigin/);
-assert.match(workspace, /isValidTakeoffApprovedMessage/);
+// Active simplified Scope no longer mounts the Takeoff iframe / postMessage bridge.
+// Origin helpers remain available for the AI Takeoff head itself.
+assert.equal(workspace.includes("isAllowedTakeoffMessageOrigin"), false);
+assert.equal(workspace.includes("isValidTakeoffApprovedMessage"), false);
+assert.equal(workspace.includes('data-testid="eq-takeoff-iframe"'), false);
 
 console.log("\ntakeoffPostMessageOrigins.test.mjs — all passed\n");
