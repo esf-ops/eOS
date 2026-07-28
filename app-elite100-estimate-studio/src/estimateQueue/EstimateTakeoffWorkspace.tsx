@@ -27,6 +27,7 @@ import EstimateWorkflowHeader, { type WorkspaceWorkflow } from "./EstimateWorkfl
 import EstimatePublicationSummary, {
   type PublicationSummary
 } from "./EstimatePublicationSummary";
+import AiTakeoffFirstPanel from "./AiTakeoffFirstPanel";
 
 type Props = {
   authToken: string;
@@ -167,6 +168,8 @@ export default function EstimateTakeoffWorkspace({
 
   async function navigateWorkspaceSection(next: "scope" | "customer_choices" | "review_publish") {
     if (next === activeSection) return;
+    // AI Takeoff-first path has no section tabs — ignore.
+    if (state.kind === "ready" && !state.manualMode) return;
     setSectionNavError(null);
     const flush = await flushAllPendingSaves();
     if (!flush.ok) {
@@ -178,9 +181,6 @@ export default function EstimateTakeoffWorkspace({
       return;
     }
     setActiveSection(next);
-    if (state.kind === "ready" && !state.manualMode) {
-      setTakeoffFrameMounted(next === "scope");
-    }
   }
 
   const publicationSummary = useMemo((): PublicationSummary | null => {
@@ -391,7 +391,6 @@ export default function EstimateTakeoffWorkspace({
             scopeRefreshKey: 0,
             handoffNotice: null
           });
-          setTakeoffFrameMounted(false);
           return;
         }
 
@@ -516,6 +515,17 @@ export default function EstimateTakeoffWorkspace({
   const manualMode = workspaceManual;
   useEffect(() => {
     if (state.kind !== "ready") return;
+    // AI Takeoff-first: scroll to the Takeoff Review iframe or approved card.
+    if (!manualMode) {
+      window.setTimeout(() => {
+        document
+          .querySelector(
+            '[data-testid="eq-takeoff-iframe"], [data-testid="eq-ai-approved-measurements"]'
+          )
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 160);
+      return;
+    }
     const focus = initialFocus || "takeoff";
     window.setTimeout(() => {
       if (focus === "digital" || focus === "review" || publicationSummary?.active) {
@@ -526,7 +536,6 @@ export default function EstimateTakeoffWorkspace({
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
         return;
       }
-      // Active Scope (manual or AI-assisted) — one canonical editor only.
       document
         .querySelector(
           '[data-testid="manual-physical-scope-editor"], [data-testid="estimate-scope-panel"]'
@@ -535,12 +544,16 @@ export default function EstimateTakeoffWorkspace({
     }, 160);
   }, [state.kind, initialFocus, manualMode, publicationSummary?.active]);
 
-  // Background status poll while AI Takeoff is still running. Active Scope never
-  // mounts the editable Takeoff iframe and never requires an Approve Takeoff
-  // click — ManualPhysicalScopeEditor (ai_assisted) is the only editable geometry UI.
+  // Status-label poll only. NEVER remount the Takeoff iframe, NEVER bump
+  // scopeRefreshKey, NEVER replace rooms/pieces — the Takeoff Review draft is
+  // the sole editable geometry authority and must not be overwritten by polls.
   useEffect(() => {
     if (state.kind !== "ready" || state.manualMode || !state.takeoffJobId) return;
-    if (state.displayStatus === "Needs estimator review" || state.displayStatus === "Scope in progress") {
+    if (
+      state.displayStatus === "Needs estimator review" ||
+      state.displayStatus === "Measurements approved" ||
+      state.displayStatus === "Takeoff failed"
+    ) {
       return;
     }
     let cancelled = false;
@@ -569,43 +582,20 @@ export default function EstimateTakeoffWorkspace({
         errors = 0;
         const jobStatus = String(job.status ?? "").toLowerCase();
         const reviewStatus = String(job.reviewStatus ?? "").toLowerCase();
-        const terminal =
-          ["completed", "failed", "cancelled", "canceled"].includes(jobStatus) ||
-          reviewStatus === "approved" ||
-          reviewStatus === "needs_review";
-        // Refresh canonical Scope when findings are usable — never gate on a
-        // formal Takeoff-approval click (iframe is not mounted).
-        const findingsReady =
-          reviewStatus === "approved" ||
-          (jobStatus === "completed" && (reviewStatus === "needs_review" || reviewStatus === "approved"));
-        if (!findingsReady) {
-          const next = deriveEstimateTakeoffDisplayStatus({
-            takeoffJobId,
-            linkStatus: state.linkStatus,
-            jobStatus: job.status,
-            reviewStatus: job.reviewStatus
-          });
-          setState((prev) => {
-            if (prev.kind !== "ready" || prev.displayStatus === next) return prev;
-            return { ...prev, displayStatus: next };
-          });
-          if (!terminal) schedule(20_000);
-          return;
-        }
-        setState((prev) => {
-          if (prev.kind !== "ready" || prev.displayStatus === "Needs estimator review") return prev;
-          return {
-            ...prev,
-            displayStatus: "Needs estimator review",
-            scopeRefreshKey: prev.scopeRefreshKey + 1,
-            handoffNotice: "AI-assisted Scope is ready for estimator review."
-          };
+        const terminal = ["completed", "failed", "cancelled", "canceled"].includes(jobStatus);
+        const next = deriveEstimateTakeoffDisplayStatus({
+          takeoffJobId,
+          linkStatus: state.linkStatus,
+          jobStatus: job.status,
+          reviewStatus: job.reviewStatus
         });
-        window.setTimeout(() => {
-          document
-            .querySelector('[data-testid="manual-physical-scope-editor"]')
-            ?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 50);
+        // Labels only — never touch Scope, never remount iframe.
+        setState((prev) => {
+          if (prev.kind !== "ready" || prev.displayStatus === next) return prev;
+          return { ...prev, displayStatus: next };
+        });
+        if (reviewStatus === "approved") return;
+        if (!terminal) schedule(20_000);
       } catch {
         if (!cancelled && !ac.signal.aborted) {
           errors += 1;
@@ -633,7 +623,8 @@ export default function EstimateTakeoffWorkspace({
     authToken,
     state.kind === "ready" ? state.takeoffJobId : null,
     state.kind === "ready" ? state.displayStatus : null,
-    state.kind === "ready" ? state.linkStatus : null
+    state.kind === "ready" ? state.linkStatus : null,
+    state.kind === "ready" ? state.manualMode : null
   ]);
 
   return (
@@ -670,10 +661,98 @@ export default function EstimateTakeoffWorkspace({
         </div>
       ) : null}
 
-      {state.kind === "ready" ? (
+      {state.kind === "ready" && !state.manualMode && state.takeoffJobId ? (
         <>
-          {state.manualMode ? (
-            <div className="eq-state" role="status" data-testid="manual-estimate-badge">
+          {state.persistenceWarning ? (
+            <div className="eq-state eq-state--warn" role="status">
+              {state.persistenceWarning}
+            </div>
+          ) : null}
+          {(state.displayStatus === "Takeoff queued" ||
+            state.displayStatus === "Takeoff processing") && (
+            <div className="eq-state" role="status" data-testid="eq-ai-takeoff-processing-banner">
+              AI Takeoff is processing. Review and edit measurements in Takeoff Review below. AI
+              findings will appear when ready.
+            </div>
+          )}
+          {state.displayStatus === "Takeoff failed" ? (
+            <div className="eq-state eq-state--warn" role="status" data-testid="eq-ai-takeoff-failed-banner">
+              AI Takeoff failed. Retry AI Takeoff or continue from Shared Inbox with a manual estimate.
+            </div>
+          ) : null}
+          <section
+            className="eq-case-context"
+            aria-label="Customer project and plan"
+            data-testid="eq-ai-compact-header"
+          >
+            <div>
+              <div className="eq-cell-primary">
+                {state.caseRow ? caseCustomerProjectLabel(state.caseRow) : "Estimate case"}
+              </div>
+              <div className="eq-cell-meta">Case {caseId}</div>
+            </div>
+            <div>
+              <div className="eq-muted">Plan</div>
+              <div>{safeText(state.attachmentName, "plan.pdf")}</div>
+              {sourcePlans?.plans?.some((p) => p.attachmentId) ? (
+                <button
+                  type="button"
+                  className="eq-btn-ghost eq-btn-small"
+                  data-testid="eq-view-plan"
+                  onClick={() => {
+                    const plan =
+                      sourcePlans.plans.find((p) => String(p.attachmentId || "") === selectedPlanId) ||
+                      sourcePlans.plans.find((p) => p.primary) ||
+                      sourcePlans.plans[0];
+                    if (!plan?.attachmentId) return;
+                    setPlanViewerAtt({
+                      attachmentId: String(plan.attachmentId),
+                      filename: plan.filename,
+                      contentType: plan.contentType,
+                      sizeBytes: plan.sizeBytes,
+                      sourceContext: "ai-takeoff"
+                    });
+                  }}
+                >
+                  View plan
+                </button>
+              ) : null}
+            </div>
+            <div>
+              <div className="eq-muted">Takeoff status</div>
+              <div data-testid="eq-takeoff-display-status">
+                {state.displayStatus === "Takeoff queued" || state.displayStatus === "Takeoff processing"
+                  ? "AI Takeoff processing"
+                  : state.displayStatus}
+              </div>
+            </div>
+            <div>
+              <div className="eq-muted">Takeoff job</div>
+              <div>
+                <code data-testid="eq-linked-takeoff-job">{state.takeoffJobId}</code>
+              </div>
+            </div>
+          </section>
+          <AiTakeoffFirstPanel
+            authToken={authToken}
+            caseId={caseId}
+            takeoffJobId={state.takeoffJobId}
+            onEstimateReady={(est) => {
+              handleCanonicalEstimate(est);
+              const id = String(est.id || "").trim();
+              if (id) {
+                setState((prev) =>
+                  prev.kind === "ready" ? { ...prev, estimateId: id, displayStatus: "Measurements approved" } : prev
+                );
+              }
+            }}
+          />
+        </>
+      ) : null}
+
+      {state.kind === "ready" && state.manualMode ? (
+        <>
+          <div className="eq-state" role="status" data-testid="manual-estimate-badge">
               <strong>Manual Estimate</strong> — no email, plan, or AI Takeoff required.
               <p className="eq-muted" data-testid="manual-next-step-scope">
                 Next: build rooms and pieces below, then continue to Customer Choices — changes
@@ -687,7 +766,6 @@ export default function EstimateTakeoffWorkspace({
                 </p>
               ) : null}
             </div>
-          ) : null}
           {state.persistenceWarning ? (
             <div className="eq-state eq-state--warn" role="status">
               {state.persistenceWarning}
@@ -696,19 +774,6 @@ export default function EstimateTakeoffWorkspace({
           {state.handoffNotice ? (
             <div className="eq-state" role="status" data-testid="eq-takeoff-handoff-notice">
               {state.handoffNotice}
-            </div>
-          ) : null}
-          {!state.manualMode &&
-          (state.displayStatus === "Takeoff queued" ||
-            state.displayStatus === "Takeoff processing") ? (
-            <div className="eq-state" role="status" data-testid="eq-ai-takeoff-processing-banner">
-              AI Takeoff is processing. You may review and edit the Scope below. AI findings will be
-              added when ready.
-            </div>
-          ) : null}
-          {!state.manualMode && state.displayStatus === "Takeoff failed" ? (
-            <div className="eq-state eq-state--warn" role="status" data-testid="eq-ai-takeoff-failed-banner">
-              AI Takeoff failed. Retry AI Takeoff or continue manually.
             </div>
           ) : null}
           <section className="eq-case-context" aria-label="Case context">
@@ -728,29 +793,8 @@ export default function EstimateTakeoffWorkspace({
             </div>
             <div>
               <div className="eq-muted">Scope status</div>
-              <div data-testid="eq-takeoff-display-status">
-                {state.manualMode
-                  ? state.displayStatus
-                  : state.displayStatus === "Takeoff queued" || state.displayStatus === "Takeoff processing"
-                    ? "AI Takeoff processing"
-                    : state.displayStatus === "Needs estimator review" ||
-                        state.displayStatus === "Scope in progress"
-                      ? "AI-assisted Scope ready for estimator review"
-                      : state.displayStatus}
-              </div>
+              <div data-testid="eq-takeoff-display-status">{state.displayStatus}</div>
             </div>
-            {!state.manualMode ? (
-              <div>
-                <div className="eq-muted">Takeoff job</div>
-                <div>
-                  <code data-testid="eq-linked-takeoff-job">{state.takeoffJobId}</code>
-                  <span className="eq-muted">
-                    {" "}
-                    · {state.reused ? "reused link" : state.created ? "created" : "linked"}
-                  </span>
-                </div>
-              </div>
-            ) : null}
           </section>
 
           <section className="eq-source-plan" aria-label="Source and plan" data-testid="eq-source-plan">
@@ -987,64 +1031,7 @@ export default function EstimateTakeoffWorkspace({
             />
           ) : null}
 
-          {(!collapseCompleted || sectionsExpanded) && !state.manualMode && state.estimateId ? (
-            // Active-v4: AI Takeoff geometry only starts the canonical Scope —
-            // the same rooms/pieces/dimensions/edges/backsplash/openings editor
-            // used for manual estimates is authoritative here too, saved through
-            // the generic estimate PATCH contract (scopeMode="ai_assisted").
-            // Mounted unconditionally (like the manual editor) so autosave
-            // flush-on-Publish works even when a different tab is active.
-            <ManualPhysicalScopeEditor
-              authToken={authToken}
-              caseId={caseId}
-              estimateId={state.estimateId}
-              refreshKey={state.scopeRefreshKey}
-              hidden={activeSection !== "scope"}
-              scopeMode="ai_assisted"
-              onDirtyChange={setManualDirty}
-              onActiveEstimateChange={applyActiveEstimateChange}
-              onRegisterFlush={(flush) => {
-                flushManualRef.current = flush;
-              }}
-            />
-          ) : null}
-
-          {!state.manualMode &&
-          (!collapseCompleted || sectionsExpanded || initialFocus === "takeoff") &&
-          activeSection === "scope" ? (
-            <div data-testid="eq-ai-assisted-scope" className="eq-ai-assisted-scope">
-              {sourcePlans?.plans?.some((p) => p.attachmentId) ? (
-                <div className="eq-action-row" data-testid="eq-takeoff-view-source-plan-row">
-                  <button
-                    type="button"
-                    className="eq-btn-ghost eq-btn-small"
-                    data-testid="eq-takeoff-view-source-plan"
-                    onClick={() => {
-                      const plan =
-                        sourcePlans.plans.find((p) => String(p.attachmentId || "") === selectedPlanId) ||
-                        sourcePlans.plans.find((p) => p.primary) ||
-                        sourcePlans.plans[0];
-                      if (!plan?.attachmentId) return;
-                      setPlanViewerAtt({
-                        attachmentId: String(plan.attachmentId),
-                        filename: plan.filename,
-                        contentType: plan.contentType,
-                        sizeBytes: plan.sizeBytes,
-                        sourceContext: "ai-takeoff"
-                      });
-                    }}
-                  >
-                    View source plan
-                  </button>
-                </div>
-              ) : null}
-              <p className="eq-footnote" data-testid="eq-scope-prefill-hint">
-                AI created the starting Scope. Review and edit the rooms, pieces and measurements
-                below. Your saved changes are authoritative. No separate Takeoff approval step is
-                required.
-              </p>
-            </div>
-          ) : state.manualMode && !collapseCompleted && activeSection === "scope" ? (
+          {!collapseCompleted && activeSection === "scope" ? (
             <p className="eq-footnote" data-testid="eq-manual-scope-hint">
               Define fabrication Scope here. Changes autosave. Continue to Customer Choices, then
               Publish Digital Estimate when ready — no separate Confirm Scope, Calculate, or Commercial
@@ -1083,21 +1070,17 @@ export default function EstimateTakeoffWorkspace({
               setPublicationRefreshError(null);
             }}
             onPublicationRefreshError={(msg) => setPublicationRefreshError(msg)}
-            onEditManualScope={
-              state.manualMode
-                ? () => {
-                    void navigateWorkspaceSection("scope");
-                    setState((prev) =>
-                      prev.kind === "ready"
-                        ? {
-                            ...prev,
-                            handoffNotice: "Edit Scope — changes autosave before Customer Choices."
-                          }
-                        : prev
-                    );
-                  }
-                : undefined
-            }
+            onEditManualScope={() => {
+              void navigateWorkspaceSection("scope");
+              setState((prev) =>
+                prev.kind === "ready"
+                  ? {
+                      ...prev,
+                      handoffNotice: "Edit Scope — changes autosave before Customer Choices."
+                    }
+                  : prev
+              );
+            }}
             onEditProjectDetails={() => setForceProjectEdit(true)}
             customerHint={
               state.caseRow

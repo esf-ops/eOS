@@ -274,37 +274,36 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// 10/11. AI-assisted estimate opens the same editable Scope contract —
-// same workspace/panel, same updateScope() call, no separate primary-flow
-// Takeoff-approval button required.
+// 10/11. AI-assisted estimates use Takeoff Review as the sole editable
+// geometry workspace; approval builds the canonical Studio Scope (v4).
+// Manual estimates keep EstimateScopePanel + ManualPhysicalScopeEditor.
 // ════════════════════════════════════════════════════════════════════════
 {
-  const scopePanelRenders = workspace.match(/<EstimateScopePanel/g) || [];
-  assert.equal(scopePanelRenders.length, 1, "manual and AI-assisted estimates render through the same single EstimateScopePanel instance");
-  assert.ok(
-    workspace.includes("AI created the starting Scope") ||
-      workspace.includes("no separate Takeoff approval step is required"),
-    "AI-assisted Scope hint states AI created the starting Scope and no separate Takeoff-approval is required"
-  );
-  assert.equal(workspace.includes("Approve Takeoff & Build Estimate"), false, "no legacy Approve-Takeoff gate button text exists");
-  // Active AI Scope: one canonical editor only — never the editable Takeoff iframe.
+  const aiPanel = readSrc("app-elite100-estimate-studio/src/estimateQueue/AiTakeoffFirstPanel.tsx");
+  assert.ok(workspace.includes("AiTakeoffFirstPanel"), "AI branch mounts AiTakeoffFirstPanel");
+  assert.ok(aiPanel.includes('data-testid="eq-takeoff-iframe"'), "Takeoff Review iframe mounts for AI");
   assert.equal(
-    workspace.includes('data-testid="eq-takeoff-iframe"'),
-    false,
-    "eq-takeoff-iframe is not mounted for active simplified AI-assisted estimates"
-  );
-  assert.ok(
     workspace.includes('scopeMode="ai_assisted"'),
-    "ManualPhysicalScopeEditor mounts in ai_assisted mode for AI-assisted estimates"
+    false,
+    "ManualPhysicalScopeEditor ai_assisted mode is not used for AI estimates"
   );
+  const aiBranch = workspace.slice(
+    workspace.indexOf('state.kind === "ready" && !state.manualMode'),
+    workspace.indexOf('state.kind === "ready" && state.manualMode')
+  );
+  assert.equal(aiBranch.includes("ManualPhysicalScopeEditor"), false);
+  assert.equal(aiBranch.includes("EstimateScopePanel"), false);
+  assert.equal(aiBranch.includes("eq-section-tabs"), false);
   assert.ok(
-    workspace.includes("eq-takeoff-view-source-plan") || workspace.includes("eq-view-plan"),
+    workspace.includes("eq-takeoff-view-source-plan") ||
+      workspace.includes("eq-view-plan") ||
+      aiPanel.includes("eq-takeoff"),
     "source plan remains visible or accessible"
   );
   assert.equal(
     (workspace.match(/<ManualPhysicalScopeEditor/g) || []).length,
-    2,
-    "workspace mounts ManualPhysicalScopeEditor once for manual and once for AI-assisted (mutually exclusive by mode)"
+    1,
+    "workspace mounts ManualPhysicalScopeEditor once (manual estimates only)"
   );
 
   const importPayload = {
@@ -345,18 +344,17 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
     createdByUserId: ACTOR
   });
 
-  // Same updateScope() contract saveManualScopeDraft() delegates to for
-  // manual estimates — proves AI-assisted Scope is edited through the
-  // identical Studio persistence/autosave path, not a parallel one.
+  // Approved Takeoff snapshot becomes canonical Scope; estimator edits persist
+  // through updateScope (e.g. after Edit measurements → re-approve).
   const edited = { ...seeded, rooms: seeded.rooms.map((r) => ({ ...r, pieces: r.pieces.map((p) => ({ ...p, lengthIn: 110 })) })) };
   await studio.updateScope({ organizationId: ORG, estimateId: created.id, actorUserId: ACTOR, body: { scope: edited } });
   const afterEdit = await repository.getById(ORG, created.id);
-  assert.equal(afterEdit.scope.rooms[0].pieces[0].lengthIn, 110, "AI-assisted estimator dimension edit persists through updateScope()");
+  assert.equal(afterEdit.scope.rooms[0].pieces[0].lengthIn, 110, "Takeoff-derived Scope dimension edit persists through updateScope()");
 
   const recalculated = await studio.calculate({ organizationId: ORG, estimateId: created.id, actorUserId: ACTOR, body: {} });
   assert.equal(recalculated.calculation.pricingEngine, PRICING_ENGINE_V1, "AI-assisted Scope recalculates with the v1 engine");
   assert.equal(recalculated.calculation.pricingVersion, PRICING_VERSION_4, "AI-assisted Scope recalculates with pricingVersion 4");
-  console.log("ok: 10/11 AI-assisted Scope opens the same editable Scope contract; no separate Takeoff-approval button in the normal flow");
+  console.log("ok: 10/11 Takeoff-first AI workspace; approved Scope calculates pricingVersion 4");
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -834,29 +832,16 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// 17b. PRODUCTION AI KITCHEN — one editable geometry authority.
+// 17b. PRODUCTION AI KITCHEN — Takeoff Review is the editable geometry
+// authority; approved snapshot becomes canonical Studio Scope (v4).
 // Kitchen pieces (Sink wall 105×25.5, Range wall, Peninsula, Island, Desk).
-// Edit Sink wall 105 → 120; reload + calculator + Review see 120.
+// Edit Sink wall 105 → 120; calculator sees 120.
 // ════════════════════════════════════════════════════════════════════════
 {
-  const manualEditor = readSrc(
-    "app-elite100-estimate-studio/src/estimateQueue/ManualPhysicalScopeEditor.tsx"
-  );
-  // Exactly one Length (in) input template in the canonical editor — the Takeoff
-  // iframe (which had its own per-piece length fields) is not mounted.
-  const lengthLabels = manualEditor.split("Length (in)").length - 1;
-  assert.equal(
-    lengthLabels,
-    1,
-    "exactly one editable length input template exists for Sink wall (canonical editor only)"
-  );
-  assert.equal(
-    workspace.includes('data-testid="eq-takeoff-iframe"'),
-    false,
-    "17b: eq-takeoff-iframe is not mounted"
-  );
-  assert.ok(workspace.includes('scopeMode="ai_assisted"'), "17b: ai_assisted editor mounted");
-  assert.equal(workspace.includes("Approve Takeoff & Build Estimate"), false, "17b: Approve Takeoff not rendered");
+  const aiPanel = readSrc("app-elite100-estimate-studio/src/estimateQueue/AiTakeoffFirstPanel.tsx");
+  assert.ok(aiPanel.includes('data-testid="eq-takeoff-iframe"'), "17b: Takeoff Review iframe mounts");
+  assert.equal(workspace.includes('scopeMode="ai_assisted"'), false, "17b: ai_assisted editor not mounted");
+  assert.ok(aiPanel.includes("refresh-from-takeoff"), "17b: approval refreshes Scope from Takeoff");
 
   const importPayload = {
     takeoffJobId: "takeoff-job-kitchen-multi-1",
@@ -976,7 +961,7 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
   );
 
   console.log(
-    "ok: 17b multi-piece Kitchen — Sink wall 105→120 saves, reloads, drives v4 + Review; no Takeoff iframe"
+    "ok: 17b multi-piece Kitchen — Sink wall 105→120 drives v4 via Takeoff-approved canonical Scope"
   );
 }
 

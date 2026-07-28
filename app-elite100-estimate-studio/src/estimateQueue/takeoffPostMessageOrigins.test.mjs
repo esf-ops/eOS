@@ -100,10 +100,14 @@ const workspace = readFileSync(
 );
 assert.doesNotMatch(workspace, /endsWith\(["']\.vercel\.app["']\)/);
 assert.doesNotMatch(workspace, /endsWith\(["']\.eliteosfab\.com["']\)/);
-// Active simplified Scope no longer mounts the Takeoff iframe / postMessage bridge.
-// Origin helpers remain available for the AI Takeoff head itself.
-assert.equal(workspace.includes("isAllowedTakeoffMessageOrigin"), false);
-assert.equal(workspace.includes("isValidTakeoffApprovedMessage"), false);
-assert.equal(workspace.includes('data-testid="eq-takeoff-iframe"'), false);
+// Takeoff-first AI panel owns the iframe + postMessage bridge.
+const aiPanel = readFileSync(
+  join(root, "app-elite100-estimate-studio/src/estimateQueue/AiTakeoffFirstPanel.tsx"),
+  "utf8"
+);
+assert.ok(aiPanel.includes("isAllowedTakeoffMessageOrigin"));
+assert.ok(aiPanel.includes("isValidTakeoffApprovedMessage"));
+assert.ok(aiPanel.includes('data-testid="eq-takeoff-iframe"'));
+assert.ok(workspace.includes("AiTakeoffFirstPanel"));
 
 console.log("\ntakeoffPostMessageOrigins.test.mjs — all passed\n");

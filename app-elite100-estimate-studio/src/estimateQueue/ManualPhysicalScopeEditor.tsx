@@ -326,7 +326,9 @@ export default function ManualPhysicalScopeEditor({
   const roomsRef = useRef(rooms);
   const cutoutsRef = useRef(cutouts);
   const activeIdRef = useRef(activeId);
+  const dirtyRef = useRef(false);
   const autosaveRef = useRef<ReturnType<typeof createStudioAutosaveController> | null>(null);
+  dirtyRef.current = dirty;
   roomsRef.current = rooms;
   cutoutsRef.current = cutouts;
   activeIdRef.current = activeId;
@@ -338,6 +340,11 @@ export default function ManualPhysicalScopeEditor({
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      // Never overwrite unsaved estimator edits from a poll-driven refreshKey bump.
+      if (dirtyRef.current && refreshKey > 0) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         const body = (await apiGet(
@@ -345,6 +352,7 @@ export default function ManualPhysicalScopeEditor({
           authToken
         )) as { estimate?: { id?: string; scope?: Record<string, unknown> } };
         if (cancelled) return;
+        if (dirtyRef.current) return;
         const scope = body.estimate?.scope || null;
         if (body.estimate?.id) {
           setActiveId(body.estimate.id);

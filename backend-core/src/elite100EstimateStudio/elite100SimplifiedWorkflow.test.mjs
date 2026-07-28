@@ -194,8 +194,12 @@ console.log("ok: 1 top-level Inbox + Estimates navigation");
   assert.equal(deriveScopeReadiness({ scope: aiScope }).ready, true);
   assert.equal(deriveScopeReadiness({ scope: manualScope }).ready, true);
   assert.equal(deriveScopeReadiness({ scope: { rooms: [] } }).ready, false);
-  assert.ok(workspace.includes("eq-scope-prefill-hint") || workspace.includes("AI created the starting Scope"));
-  console.log("ok: 8–9 AI and manual share Scope readiness model");
+  assert.ok(
+    workspace.includes("AiTakeoffFirstPanel") ||
+      workspace.includes("eq-takeoff-first-hint") ||
+      workspace.includes("Takeoff Review")
+  );
+  console.log("ok: 8–9 AI Takeoff-first + manual Scope readiness model");
 }
 
 {
@@ -445,8 +449,13 @@ console.log("ok: 1 top-level Inbox + Estimates navigation");
 
 {
   assert.ok(dePanel.includes("simplified-publish") || dePanel.includes("useSimplifiedPublish"));
-  assert.ok(workspace.includes("no separate") || workspace.includes("AI created the starting Scope"));
-  // Obsolete gate labels must not be primary required buttons outside compatibility wrappers
+  assert.ok(
+    workspace.includes("AiTakeoffFirstPanel") ||
+      workspace.includes("no separate") ||
+      workspace.includes("Manual Estimate")
+  );
+  // Obsolete gate labels must not be primary required buttons in Studio chrome
+  // (Approve Takeoff lives in the Takeoff Review head, not Studio tabs).
   for (const label of ["Approve Takeoff & Build Estimate"]) {
     assert.equal(workspace.includes(`<strong>${label}</strong>`), false);
   }

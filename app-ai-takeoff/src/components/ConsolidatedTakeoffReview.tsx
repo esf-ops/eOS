@@ -771,6 +771,26 @@ export default function ConsolidatedTakeoffReview() {
     });
   }, [authToken, takeoffJobId, loadWorkspace]);
 
+  // Warn on browser navigation when the Takeoff draft has unsaved edits.
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      const dirty =
+        saveStatusRef.current === "dirty" ||
+        saveStatusRef.current === "saving" ||
+        isTakeoffWorksheetDirty({
+          localDraft: draftRef.current,
+          canonicalDraft: canonicalDraftRef.current,
+          localExcludedRunIds: excludedRef.current,
+          canonicalExcludedRunIds: canonicalExcludedRef.current
+        });
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
   useEffect(
     () => () => {
       loadAbortRef.current?.abort();
