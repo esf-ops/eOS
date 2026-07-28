@@ -1788,7 +1788,9 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           actorUserId: req.user?.id ?? null,
           messageKey: decodeURIComponent(String(req.params.messageKey || "")),
           idempotencyKey,
-          forceManual: body.forceManual === true
+          forceManual: body.forceManual === true,
+          // Pass through explicit confirmation — never auto-confirm server-side.
+          confirm: body.confirm === true || body.confirm === "true"
         });
         auditStudioEstimate("shared_inbox.start_estimate", req, {
           intakeCaseId: result.intakeCaseId,

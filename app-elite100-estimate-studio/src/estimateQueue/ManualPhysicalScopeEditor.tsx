@@ -567,7 +567,7 @@ export default function ManualPhysicalScopeEditor({
           <h3>Scope</h3>
           <p className="muted">
             {isAiAssisted
-              ? "AI Takeoff geometry starts this Scope. Edit rooms, pieces, dimensions, exposed edges, backsplash-eligible length, and openings directly — your edits are authoritative. Changes save automatically."
+              ? "AI created the starting Scope. Review and edit the rooms, pieces and measurements below. Your saved changes are authoritative. Changes save automatically."
               : "Define what we are fabricating — rooms, pieces, dimensions, exposed edges, backsplash-eligible length, and openings. Changes save automatically."}
           </p>
         </div>

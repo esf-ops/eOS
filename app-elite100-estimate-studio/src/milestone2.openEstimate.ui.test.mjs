@@ -21,11 +21,17 @@ const queue = readFileSync(join(root, "src/estimateQueue/EstimateQueuePage.tsx")
 assert.ok(app.includes("EstimateTakeoffWorkspace"));
 assert.equal(app.includes("EstimateWorkspacePlaceholder"), false);
 assert.ok(workspace.includes("openEstimate"));
-assert.ok(workspace.includes("eq-takeoff-iframe"));
+// Active simplified AI Scope: canonical ManualPhysicalScopeEditor only —
+// the editable Takeoff iframe is not mounted in the normal estimator workflow.
+assert.equal(
+  workspace.includes('data-testid="eq-takeoff-iframe"'),
+  false,
+  "eq-takeoff-iframe must not mount for active AI-assisted estimates"
+);
+assert.ok(workspace.includes('scopeMode="ai_assisted"'));
+assert.ok(workspace.includes("manual-physical-scope-editor") || workspace.includes("ManualPhysicalScopeEditor"));
 assert.ok(workspace.includes("takeoffJobId"));
-assert.ok(workspace.includes("consolidated=1"));
-assert.ok(workspace.includes("eliteos-takeoff-approved"));
-assert.ok(workspace.includes("isAllowedTakeoffMessageOrigin"));
+assert.equal(workspace.includes("Approve Takeoff & Build Estimate"), false);
 assert.ok(workspace.includes("eq-takeoff-handoff-notice") || workspace.includes("handoffNotice"));
 assert.ok(workspace.includes("scopeRefreshKey"));
 assert.ok(workspace.includes("schedule(20_000)"));

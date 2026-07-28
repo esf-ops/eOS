@@ -27,11 +27,6 @@ import EstimateWorkflowHeader, { type WorkspaceWorkflow } from "./EstimateWorkfl
 import EstimatePublicationSummary, {
   type PublicationSummary
 } from "./EstimatePublicationSummary";
-import {
-  aiTakeoffHeadUrl,
-  isAllowedTakeoffMessageOrigin,
-  isValidTakeoffApprovedMessage
-} from "./takeoffPostMessageOrigins.mjs";
 
 type Props = {
   authToken: string;
@@ -101,13 +96,7 @@ export default function EstimateTakeoffWorkspace({
   onBackToQueue
 }: Props) {
   const client = useMemo(() => createQuoteIntakeApiClient(), []);
-  const takeoffFrameRef = useRef<HTMLIFrameElement | null>(null);
   const [state, setState] = useState<OpenState>({ kind: "resolving" });
-  // Unmount Takeoff iframe when opening Scope/Digital/Review so its /results/latest
-  // poll cannot leak into Estimate Queue after navigation.
-  const [takeoffFrameMounted, setTakeoffFrameMounted] = useState(
-    () => !initialFocus || initialFocus === "takeoff"
-  );
   const [forceProjectEdit, setForceProjectEdit] = useState(false);
   const [canonicalEstimate, setCanonicalEstimate] = useState<Record<string, unknown> | null>(null);
   const [manualDirty, setManualDirty] = useState(false);
@@ -532,67 +521,23 @@ export default function EstimateTakeoffWorkspace({
       if (focus === "digital" || focus === "review" || publicationSummary?.active) {
         document
           .querySelector(
-            '[data-testid="eq-publication-summary"], [data-testid="estimate-digital-estimate-panel"], [data-testid="eq-digital-estimate"], [data-testid="estimate-scope-panel"]'
+            '[data-testid="eq-publication-summary"], [data-testid="estimate-digital-estimate-panel"], [data-testid="eq-digital-estimate"], [data-testid="eq-arp-root"], [data-testid="estimate-scope-panel"]'
           )
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
         return;
       }
-      if (manualMode && (focus === "scope" || focus === "takeoff")) {
-        document
-          .querySelector(
-            '[data-testid="manual-physical-scope-editor"], [data-testid="estimate-scope-panel"]'
-          )
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
-      if (focus === "scope") {
-        document
-          .querySelector('[data-testid="estimate-scope-panel"]')
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      } else {
-        document
-          .querySelector('[data-testid="eq-takeoff-iframe"]')
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      // Active Scope (manual or AI-assisted) — one canonical editor only.
+      document
+        .querySelector(
+          '[data-testid="manual-physical-scope-editor"], [data-testid="estimate-scope-panel"]'
+        )
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 160);
   }, [state.kind, initialFocus, manualMode, publicationSummary?.active]);
 
-  const takeoffSrc =
-    state.kind === "ready" && state.takeoffJobId
-      ? `${aiTakeoffHeadUrl()}/?takeoffJobId=${encodeURIComponent(state.takeoffJobId)}&consolidated=1`
-      : null;
-
-  useEffect(() => {
-    if (state.kind !== "ready" || state.manualMode || !state.takeoffJobId) return;
-    function onMessage(event: MessageEvent) {
-      // AUDIT-005: exact origin allowlist — no *.vercel.app / *.eliteosfab.com wildcards.
-      if (!isAllowedTakeoffMessageOrigin(String(event.origin || ""))) return;
-      const frameWin = takeoffFrameRef.current?.contentWindow;
-      if (frameWin && event.source && event.source !== frameWin) {
-        return;
-      }
-      if (!isValidTakeoffApprovedMessage(event.data, state.takeoffJobId || "")) return;
-      setState((prev) => {
-        if (prev.kind !== "ready") return prev;
-        return {
-          ...prev,
-          displayStatus: "Needs estimator review",
-          scopeRefreshKey: prev.scopeRefreshKey + 1,
-          handoffNotice: "Takeoff approved — Estimate Scope refreshed."
-        };
-      });
-      window.setTimeout(() => {
-        document
-          .querySelector('[data-testid="estimate-scope-panel"]')
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 50);
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [state.kind === "ready" ? state.takeoffJobId : null, state.kind === "ready" ? state.manualMode : null]);
-
-  // Fallback: if postMessage is missed, poll Takeoff review status and refresh scope.
-  // Event-driven prefer; slow poll only while AI is still running. Cleanup on unmount.
+  // Background status poll while AI Takeoff is still running. Active Scope never
+  // mounts the editable Takeoff iframe and never requires an Approve Takeoff
+  // click — ManualPhysicalScopeEditor (ai_assisted) is the only editable geometry UI.
   useEffect(() => {
     if (state.kind !== "ready" || state.manualMode || !state.takeoffJobId) return;
     if (state.displayStatus === "Needs estimator review" || state.displayStatus === "Scope in progress") {
@@ -626,8 +571,14 @@ export default function EstimateTakeoffWorkspace({
         const reviewStatus = String(job.reviewStatus ?? "").toLowerCase();
         const terminal =
           ["completed", "failed", "cancelled", "canceled"].includes(jobStatus) ||
-          reviewStatus === "approved";
-        if (String(job.reviewStatus ?? "").toLowerCase() !== "approved") {
+          reviewStatus === "approved" ||
+          reviewStatus === "needs_review";
+        // Refresh canonical Scope when findings are usable — never gate on a
+        // formal Takeoff-approval click (iframe is not mounted).
+        const findingsReady =
+          reviewStatus === "approved" ||
+          (jobStatus === "completed" && (reviewStatus === "needs_review" || reviewStatus === "approved"));
+        if (!findingsReady) {
           const next = deriveEstimateTakeoffDisplayStatus({
             takeoffJobId,
             linkStatus: state.linkStatus,
@@ -647,12 +598,12 @@ export default function EstimateTakeoffWorkspace({
             ...prev,
             displayStatus: "Needs estimator review",
             scopeRefreshKey: prev.scopeRefreshKey + 1,
-            handoffNotice: "Takeoff approved — Estimate Scope refreshed."
+            handoffNotice: "AI-assisted Scope is ready for estimator review."
           };
         });
         window.setTimeout(() => {
           document
-            .querySelector('[data-testid="estimate-scope-panel"]')
+            .querySelector('[data-testid="manual-physical-scope-editor"]')
             ?.scrollIntoView({ behavior: "smooth", block: "start" });
         }, 50);
       } catch {
@@ -751,7 +702,8 @@ export default function EstimateTakeoffWorkspace({
           (state.displayStatus === "Takeoff queued" ||
             state.displayStatus === "Takeoff processing") ? (
             <div className="eq-state" role="status" data-testid="eq-ai-takeoff-processing-banner">
-              AI Takeoff is processing. You may build or edit the takeoff now. AI findings will be added when ready.
+              AI Takeoff is processing. You may review and edit the Scope below. AI findings will be
+              added when ready.
             </div>
           ) : null}
           {!state.manualMode && state.displayStatus === "Takeoff failed" ? (
@@ -1060,7 +1012,7 @@ export default function EstimateTakeoffWorkspace({
           {!state.manualMode &&
           (!collapseCompleted || sectionsExpanded || initialFocus === "takeoff") &&
           activeSection === "scope" ? (
-            <>
+            <div data-testid="eq-ai-assisted-scope" className="eq-ai-assisted-scope">
               {sourcePlans?.plans?.some((p) => p.attachmentId) ? (
                 <div className="eq-action-row" data-testid="eq-takeoff-view-source-plan-row">
                   <button
@@ -1086,35 +1038,12 @@ export default function EstimateTakeoffWorkspace({
                   </button>
                 </div>
               ) : null}
-              <div className="eq-takeoff-frame-wrap">
-                {takeoffFrameMounted ? (
-                  <iframe
-                    ref={takeoffFrameRef}
-                    title="AI Takeoff review"
-                    className="eq-takeoff-frame"
-                    data-testid="eq-takeoff-iframe"
-                    src={takeoffSrc ?? undefined}
-                    referrerPolicy="origin"
-                  />
-                ) : (
-                  <div className="eq-state" data-testid="eq-takeoff-iframe-paused">
-                    <p>Takeoff worksheet is paused while you work Scope / Digital Estimate.</p>
-                    <button
-                      type="button"
-                      className="eq-btn-secondary"
-                      onClick={() => setTakeoffFrameMounted(true)}
-                    >
-                      Show Takeoff worksheet
-                    </button>
-                  </div>
-                )}
-              </div>
               <p className="eq-footnote" data-testid="eq-scope-prefill-hint">
-                AI Takeoff prefills this Scope workspace as a starting draft. Edit rooms, pieces, and
-                dimensions here — no separate Takeoff approval step is required. Scope readiness is
-                shown from validation.
+                AI created the starting Scope. Review and edit the rooms, pieces and measurements
+                below. Your saved changes are authoritative. No separate Takeoff approval step is
+                required.
               </p>
-            </>
+            </div>
           ) : state.manualMode && !collapseCompleted && activeSection === "scope" ? (
             <p className="eq-footnote" data-testid="eq-manual-scope-hint">
               Define fabrication Scope here. Changes autosave. Continue to Customer Choices, then

@@ -163,13 +163,15 @@ console.log("ok: 1 top-level Inbox + Estimates navigation");
     organizationId: "org",
     actorUserId: "u1",
     messageKey: "m1",
-    idempotencyKey: "k1"
+    idempotencyKey: "k1",
+    confirm: true
   });
   const b = await svc.startEstimate({
     organizationId: "org",
     actorUserId: "u1",
     messageKey: "m1",
-    idempotencyKey: "k1"
+    idempotencyKey: "k1",
+    confirm: true
   });
   assert.equal(a.estimateId, "est-1");
   assert.equal(b.estimateId, "est-1");
@@ -192,7 +194,7 @@ console.log("ok: 1 top-level Inbox + Estimates navigation");
   assert.equal(deriveScopeReadiness({ scope: aiScope }).ready, true);
   assert.equal(deriveScopeReadiness({ scope: manualScope }).ready, true);
   assert.equal(deriveScopeReadiness({ scope: { rooms: [] } }).ready, false);
-  assert.ok(workspace.includes("eq-scope-prefill-hint") || workspace.includes("starting draft"));
+  assert.ok(workspace.includes("eq-scope-prefill-hint") || workspace.includes("AI created the starting Scope"));
   console.log("ok: 8–9 AI and manual share Scope readiness model");
 }
 
@@ -443,7 +445,7 @@ console.log("ok: 1 top-level Inbox + Estimates navigation");
 
 {
   assert.ok(dePanel.includes("simplified-publish") || dePanel.includes("useSimplifiedPublish"));
-  assert.ok(workspace.includes("no separate") || workspace.includes("starting draft"));
+  assert.ok(workspace.includes("no separate") || workspace.includes("AI created the starting Scope"));
   // Obsolete gate labels must not be primary required buttons outside compatibility wrappers
   for (const label of ["Approve Takeoff & Build Estimate"]) {
     assert.equal(workspace.includes(`<strong>${label}</strong>`), false);

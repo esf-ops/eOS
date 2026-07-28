@@ -282,10 +282,30 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
   const scopePanelRenders = workspace.match(/<EstimateScopePanel/g) || [];
   assert.equal(scopePanelRenders.length, 1, "manual and AI-assisted estimates render through the same single EstimateScopePanel instance");
   assert.ok(
-    workspace.includes("no separate Takeoff approval step is required"),
-    "AI-assisted Scope hint states no separate Takeoff-approval button is required"
+    workspace.includes("AI created the starting Scope") ||
+      workspace.includes("no separate Takeoff approval step is required"),
+    "AI-assisted Scope hint states AI created the starting Scope and no separate Takeoff-approval is required"
   );
   assert.equal(workspace.includes("Approve Takeoff & Build Estimate"), false, "no legacy Approve-Takeoff gate button text exists");
+  // Active AI Scope: one canonical editor only — never the editable Takeoff iframe.
+  assert.equal(
+    workspace.includes('data-testid="eq-takeoff-iframe"'),
+    false,
+    "eq-takeoff-iframe is not mounted for active simplified AI-assisted estimates"
+  );
+  assert.ok(
+    workspace.includes('scopeMode="ai_assisted"'),
+    "ManualPhysicalScopeEditor mounts in ai_assisted mode for AI-assisted estimates"
+  );
+  assert.ok(
+    workspace.includes("eq-takeoff-view-source-plan") || workspace.includes("eq-view-plan"),
+    "source plan remains visible or accessible"
+  );
+  assert.equal(
+    (workspace.match(/<ManualPhysicalScopeEditor/g) || []).length,
+    2,
+    "workspace mounts ManualPhysicalScopeEditor once for manual and once for AI-assisted (mutually exclusive by mode)"
+  );
 
   const importPayload = {
     takeoffJobId: "takeoff-job-presentation-1",
@@ -810,6 +830,153 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
   assert.ok(totalAfter > totalBefore, "increasing the countertop dimension increases the v4 total");
   console.log(
     "ok: 17 AI-assisted canonical Scope recalculates a changed v4 total after one dimension edit, with no Takeoff-approval gate on calculation (debug/approval-request controls do not gate readiness)"
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 17b. PRODUCTION AI KITCHEN — one editable geometry authority.
+// Kitchen pieces (Sink wall 105×25.5, Range wall, Peninsula, Island, Desk).
+// Edit Sink wall 105 → 120; reload + calculator + Review see 120.
+// ════════════════════════════════════════════════════════════════════════
+{
+  const manualEditor = readSrc(
+    "app-elite100-estimate-studio/src/estimateQueue/ManualPhysicalScopeEditor.tsx"
+  );
+  // Exactly one Length (in) input template in the canonical editor — the Takeoff
+  // iframe (which had its own per-piece length fields) is not mounted.
+  const lengthLabels = manualEditor.split("Length (in)").length - 1;
+  assert.equal(
+    lengthLabels,
+    1,
+    "exactly one editable length input template exists for Sink wall (canonical editor only)"
+  );
+  assert.equal(
+    workspace.includes('data-testid="eq-takeoff-iframe"'),
+    false,
+    "17b: eq-takeoff-iframe is not mounted"
+  );
+  assert.ok(workspace.includes('scopeMode="ai_assisted"'), "17b: ai_assisted editor mounted");
+  assert.equal(workspace.includes("Approve Takeoff & Build Estimate"), false, "17b: Approve Takeoff not rendered");
+
+  const importPayload = {
+    takeoffJobId: "takeoff-job-kitchen-multi-1",
+    rooms: [
+      {
+        name: "Kitchen",
+        type: "Kitchen",
+        guidedShapeGroups: [
+          {
+            label: "Kitchen",
+            shapeType: "counter",
+            pieces: [
+              { label: "Sink wall", pieceType: "counter", lengthIn: 105, depthIn: 25.5 },
+              { label: "Range wall", pieceType: "counter", lengthIn: 58.5, depthIn: 23 },
+              { label: "Peninsula", pieceType: "counter", lengthIn: 86, depthIn: 36 },
+              { label: "Island top", pieceType: "counter", lengthIn: 56, depthIn: 27 },
+              { label: "Desk top", pieceType: "counter", lengthIn: 70, depthIn: 25.5 }
+            ]
+          }
+        ],
+        pieces: [
+          { name: "Sink wall", finishedEdge: { frontEdgeLengthIn: 105, totalFinishedEdgeLengthIn: 105, approved: true }, reviewStatus: "approved" },
+          { name: "Range wall", finishedEdge: { frontEdgeLengthIn: 58.5, totalFinishedEdgeLengthIn: 58.5, approved: true }, reviewStatus: "approved" },
+          { name: "Peninsula", finishedEdge: { frontEdgeLengthIn: 86, totalFinishedEdgeLengthIn: 86, approved: true }, reviewStatus: "approved" },
+          { name: "Island top", finishedEdge: { frontEdgeLengthIn: 56, totalFinishedEdgeLengthIn: 56, approved: true }, reviewStatus: "approved" },
+          { name: "Desk top", finishedEdge: { frontEdgeLengthIn: 70, totalFinishedEdgeLengthIn: 70, approved: true }, reviewStatus: "approved" }
+        ]
+      }
+    ]
+  };
+  const seeded = seedScopeFromTakeoffPayload(importPayload, {
+    projectName: "Multi Piece Kitchen",
+    customerName: "Multi Piece Co",
+    customerEmail: "multi@example.test",
+    materialGroup: "Group Promo"
+  });
+  const sink = seeded.rooms[0].pieces.find((p) => /sink/i.test(String(p.name || "")));
+  assert.ok(sink, "Sink wall piece seeded into canonical Scope");
+  assert.equal(Number(sink.lengthIn), 105, "Sink wall starts at 105");
+
+  const repository = new InMemoryStudioEstimateRepository();
+  const studio = createStudioEstimateService({
+    repository,
+    env: {},
+    loadTakeoffWorkspace: async () => ({ reviewStatus: "pending" }),
+    loadLatestTakeoffResult: async () => null
+  });
+  const created = await repository.create({
+    organizationId: ORG,
+    intakeCaseId: "intake-kitchen-multi-1",
+    takeoffJobId: "takeoff-job-kitchen-multi-1",
+    status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+    scope: seeded,
+    createdByUserId: ACTOR
+  });
+
+  const before = await studio.calculate({
+    organizationId: ORG,
+    estimateId: created.id,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  const totalBefore = Number(before.calculation.totals.customerDisplayTotal);
+  assert.ok(totalBefore > 0, "initial kitchen prices through v4");
+  assert.equal(before.calculation.pricingVersion, PRICING_VERSION_4);
+
+  // Edit Sink wall 105 → 120 via the same updateScope contract the canonical editor uses.
+  const rowBefore = await repository.getById(ORG, created.id);
+  const edited = {
+    ...rowBefore.scope,
+    rooms: rowBefore.scope.rooms.map((r) => ({
+      ...r,
+      pieces: r.pieces.map((p) =>
+        /sink/i.test(String(p.name || ""))
+          ? {
+              ...p,
+              lengthIn: 120,
+              sqft: Math.round(((120 * (Number(p.depthIn) || 25.5)) / 144) * 100) / 100
+            }
+          : p
+      )
+    }))
+  };
+  await studio.updateScope({
+    organizationId: ORG,
+    estimateId: created.id,
+    actorUserId: ACTOR,
+    body: { scope: edited }
+  });
+
+  const reloaded = await repository.getById(ORG, created.id);
+  const sinkAfter = reloaded.scope.rooms[0].pieces.find((p) => /sink/i.test(String(p.name || "")));
+  assert.equal(Number(sinkAfter.lengthIn), 120, "reload shows Sink wall = 120");
+  assert.equal(Number(sinkAfter.lengthIn), 120, "canonical Scope contains 120");
+
+  const after = await studio.calculate({
+    organizationId: ORG,
+    estimateId: created.id,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  assert.equal(after.calculation.pricingVersion, PRICING_VERSION_4, "pricingVersion 4 result");
+  const totalAfter = Number(after.calculation.totals.customerDisplayTotal);
+  assert.notEqual(totalAfter, totalBefore, "pricingVersion 4 result changes after Sink wall edit");
+  assert.ok(totalAfter > totalBefore, "longer Sink wall increases customer total");
+  assert.ok(after.calculation.reviewSummary, "Review & Publish receives the changed result (reviewSummary)");
+  assert.ok(
+    Number(after.calculation.reviewSummary.countertopMaterialTotal) > 0,
+    "Review & Publish countertop material reflects the recalculated Scope"
+  );
+  assert.equal(
+    Number((await repository.getById(ORG, created.id)).scope.rooms[0].pieces.find((p) =>
+      /sink/i.test(String(p.name || ""))
+    ).lengthIn),
+    120,
+    "calculator input Scope contains Sink wall length 120"
+  );
+
+  console.log(
+    "ok: 17b multi-piece Kitchen — Sink wall 105→120 saves, reloads, drives v4 + Review; no Takeoff iframe"
   );
 }
 
