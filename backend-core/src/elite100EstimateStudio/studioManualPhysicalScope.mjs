@@ -399,6 +399,11 @@ export function normalizeManualPiece(piece, roomId) {
   const mode = normalizeMeasurementMode(piece?.measurementMode);
   const lengthIn = Number(piece?.lengthIn) || 0;
   const depthIn = Number(piece?.depthIn) || 0;
+  // Estimator-owned physical count of identical pieces (default 1). Legacy Studio
+  // pricing (v3, sqft-based) never multiplies by quantity — only the pricingVersion 4
+  // calculator derives lengthIn×depthIn÷144×quantity, so this is safe to add here
+  // without changing v3 totals for any existing piece (always quantity 1 until edited).
+  const quantity = Math.max(1, Math.floor(Number(piece?.quantity) || 1));
   let sqft = 0;
   /** @type {Record<string, unknown>} */
   const out = {
@@ -407,6 +412,7 @@ export function normalizeManualPiece(piece, roomId) {
     pieceType,
     included,
     measurementMode: mode,
+    quantity,
     source: MANUAL_ESTIMATE_ORIGIN,
     roomId: roomId || null,
     notes: String(piece?.notes || "").slice(0, 2000)
@@ -843,6 +849,7 @@ export function manualScopeFingerprint(scope) {
           measurementMode: p.measurementMode,
           lengthIn: p.lengthIn ?? null,
           depthIn: p.depthIn ?? null,
+          quantity: Math.max(1, Math.floor(Number(p.quantity) || 1)),
           sqft: p.sqft ?? null,
           finishedEdge: p.finishedEdge || null,
           cutouts: p.cutouts || null

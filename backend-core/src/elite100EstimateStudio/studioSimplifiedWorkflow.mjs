@@ -611,12 +611,17 @@ export function createStudioSimplifiedWorkflowService(deps) {
       estimate?.scope?.physicalScopeSource === "manual_staff";
     const confirmed = Boolean(estimate?.scope?.manualScopeConfirmed);
     if (isManual && !confirmed && manualEstimateService?.confirmManualScope) {
-      estimate = await manualEstimateService.confirmManualScope({
+      await manualEstimateService.confirmManualScope({
         organizationId,
         estimateId,
         actorUserId,
-        body: {}
+        body: { confirm: true }
       });
+      // confirmManualScope() returns its own lightweight { estimate: safeManualView(...) }
+      // shape (no .scope) — reload the full safeEstimateView so the rest of this
+      // function (and the { estimate } returned to the caller) sees the same
+      // consistent shape as every other step.
+      estimate = await studioEstimateService.getById(organizationId, estimateId);
       steps.push("manual_scope_auto_confirmed");
     }
 

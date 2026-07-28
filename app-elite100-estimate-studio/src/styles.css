@@ -871,6 +871,7 @@ button.linkish {
 .eq-detail-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--eos-border); }
 .eq-detail-section h3 { margin: 0 0 8px; font-size: 0.86rem; }
 .eq-list { margin: 0; padding-left: 1.1rem; font-size: 0.84rem; }
+.eq-list--attention { color: #9a5a1f; }
 .eq-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .eq-timeline-time { font-size: 0.72rem; color: #7a8792; }
 .eq-pre {

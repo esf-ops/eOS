@@ -12,10 +12,10 @@ import {
   emptyStudioEstimateScope
 } from "./studioEstimateTypes.mjs";
 import {
-  calculateStudioEstimate,
   collectUnresolvedItems,
   scopeFingerprint
 } from "./studioEstimatePricing.mjs";
+import { calculateStudioEstimateV4 } from "./elite100RoomPricingStudioAdapter.mjs";
 import { deriveRoomBacksplashFromImportRoom } from "./studioRoomBacksplash.mjs";
 import {
   buildApprovedScopeSummary,
@@ -460,7 +460,11 @@ export function createStudioEstimateService(deps = {}) {
       return getLatestTakeoffResult({ supabase, organizationId, takeoffJobId });
     });
 
-  const calculateImpl = deps.calculateStudioEstimateImpl || calculateStudioEstimate;
+  // pricingVersion 4 (elite100-room-pricing-v1) is authoritative for every new
+  // Elite 100 Studio calculation. calculateStudioEstimate (pricingVersion 3,
+  // studioEstimatePricing.mjs) is retained unmodified for historical snapshots
+  // and any caller that deliberately injects it via calculateStudioEstimateImpl.
+  const calculateImpl = deps.calculateStudioEstimateImpl || calculateStudioEstimateV4;
   const loadPartnerAccount =
     deps.loadPartnerAccount ||
     (async ({ organizationId, partnerAccountId }) => {
@@ -942,6 +946,24 @@ export function createStudioEstimateService(deps = {}) {
     repositoryMode,
     repository,
     safeEstimateView,
+
+    /**
+     * Load the current active-revision read model by id (positional args,
+     * matching repository.getById). Used by the Publish orchestration
+     * (studioSimplifiedWorkflow.mjs's prepareEstimateForPublish) to load the
+     * estimate before running the same calculate()/approve() steps shown in
+     * Review & Publish. Rejects a superseded revision id with the same
+     * estimate_revision_superseded guard every other mutation uses, rather
+     * than silently operating on stale data.
+     */
+    async getById(organizationId, estimateId) {
+      const row = await loadActiveEstimateForMutation({
+        repository,
+        organizationId,
+        estimateId
+      });
+      return safeEstimateView(row);
+    },
 
     async getOrCreateForCase({ organizationId, intakeCaseId, takeoffJobId, actorUserId }) {
       let row = await ensureEstimate({

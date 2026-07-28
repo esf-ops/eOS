@@ -974,7 +974,23 @@ console.log("\nelite100RoomPricingCalculator.test.mjs\n");
         includeBacksplash: true,
         backsplashSqft: 4,
         backsplashHeightIn: 4,
-        pieces: [{ id: "piece-1", name: "Main run", pieceType: "counter", lengthIn: 120, depthIn: 25.2, sqft: 21, included: true }]
+        pieces: [
+          {
+            id: "piece-1",
+            name: "Main run",
+            pieceType: "counter",
+            measurementMode: "dimensions",
+            lengthIn: 120,
+            depthIn: 25.2,
+            // Stale/mismatched stored sqft — the canonical Scope contract requires the
+            // server-authoritative calculator to derive lengthIn×depthIn÷144×quantity for
+            // dimensions-mode pieces rather than trust a browser-supplied sqft value
+            // (120×25.2÷144 = 21, matching the stale value here only by coincidence).
+            sqft: 21,
+            quantity: 1,
+            included: true
+          }
+        ]
       }
     ],
     addOns: { "qty-sink": 1, "qty-cook": 1 },
@@ -984,7 +1000,14 @@ console.log("\nelite100RoomPricingCalculator.test.mjs\n");
   };
 
   const mapped = mapStudioEstimateToElite100Input(studioScope);
-  assert.equal(mapped.scope.rooms[0].pieces[0].directArea, 21, "adapter preserves Studio's stored piece.sqft as directArea");
+  assert.equal(
+    mapped.scope.rooms[0].pieces[0].directArea,
+    undefined,
+    "dimensions-mode piece: adapter does not pass stored sqft as directArea — calculator derives from lengthIn×depthIn×quantity"
+  );
+  assert.equal(mapped.scope.rooms[0].pieces[0].lengthIn, 120, "dimensions-mode piece: lengthIn passed through");
+  assert.equal(mapped.scope.rooms[0].pieces[0].depthIn, 25.2, "dimensions-mode piece: depthIn passed through");
+  assert.equal(mapped.scope.rooms[0].pieces[0].quantity, 1, "quantity defaults to 1");
   assert.equal(mapped.configuration.rooms["room-1"].materialGroup, "Group Promo");
   assert.equal(mapped.configuration.rooms["room-1"].edgeProfile, "edge_small_ogee");
 
@@ -1004,6 +1027,62 @@ console.log("\nelite100RoomPricingCalculator.test.mjs\n");
   );
 
   console.log("ok: Studio adapter translates a real Studio scope into the canonical contract and prices it under pricingVersion 4 without touching calculateStudioEstimate (v3)");
+}
+
+{
+  // Quantity end-to-end through the real Studio adapter (canonical Scope contract:
+  // measured area = lengthIn × depthIn ÷ 144 × quantity), and a direct_area-mode
+  // piece's estimator-approved override is preserved untouched by quantity.
+  const studioScope = {
+    materialGroup: "Group Promo",
+    pricingBasis: "direct",
+    rooms: [
+      {
+        id: "room-1",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        pieces: [
+          {
+            id: "piece-qty",
+            name: "Two identical runs",
+            pieceType: "counter",
+            measurementMode: "dimensions",
+            lengthIn: 60,
+            depthIn: 24,
+            quantity: 3,
+            included: true
+          },
+          {
+            id: "piece-direct",
+            name: "Irregular shape (estimator-approved override)",
+            pieceType: "counter",
+            measurementMode: "direct_area",
+            directAreaOverride: true,
+            quantity: 4,
+            sqft: 5,
+            included: true
+          }
+        ]
+      }
+    ],
+    addOns: {},
+    customLineItems: []
+  };
+
+  const mapped = mapStudioEstimateToElite100Input(studioScope);
+  const [qtyPiece, directPiece] = mapped.scope.rooms[0].pieces;
+  assert.equal(qtyPiece.quantity, 3, "dimensions-mode piece: quantity reaches the canonical Scope");
+  assert.equal(qtyPiece.directArea, undefined, "dimensions-mode piece: no directArea override");
+  assert.equal(directPiece.directArea, 5, "direct_area-mode piece: estimator-approved override preserved");
+  assert.equal(directPiece.quantity, 4, "direct_area-mode piece: quantity still carried (calculator ignores it for an absolute override)");
+
+  const result = await calculateElite100StudioEstimate({ scope: studioScope, env: {} });
+  const room = result.rooms[0];
+  // 60×24÷144×3 = 30 (quantity multiplies dimensions) + 5 (direct-area override, not ×4) = 35.
+  assert.equal(room.measuredCountertopSf, 35, "quantity multiplies dimensions-mode SF; direct-area override is an absolute total");
+  assert.equal(room.billedCountertopSf, 35);
+
+  console.log("ok: piece quantity reaches the pricingVersion 4 calculator through the real Studio adapter; direct-area override is not multiplied by quantity");
 }
 
 {
