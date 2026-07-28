@@ -13,6 +13,7 @@
 
 import { isSoldReviewChecklistComplete } from "./studioLifecycleTypes.mjs";
 import { deriveActiveReviewPublishReadiness } from "./studioActiveReviewReadiness.mjs";
+import { resolveSimplifiedPublishConfiguration } from "./studioCustomerChoiceOptions.mjs";
 
 export const SIMPLIFIED_STUDIO_NAV = Object.freeze({
   INBOX: "inbox",
@@ -813,19 +814,25 @@ export function createStudioSimplifiedWorkflowService(deps) {
       actorUserId
     });
 
+    // Simplified Studio publish is always interactive unless the caller
+    // explicitly requests document-only mode. Omitting configuration must
+    // not produce an envelope-less / static-only customer link.
+    const configuration = resolveSimplifiedPublishConfiguration(body?.configuration);
+
     const publication = await digitalEstimateService.publish({
       organizationId,
       estimateId,
       actorUserId,
       body: {
         ...body,
-        confirm: true
+        confirm: true,
+        configuration
       }
     });
 
     const frozenOptionPackage = buildFrozenCustomerOptionPackageSummary({
       estimate: prepared.estimate,
-      configuration: body?.configuration,
+      configuration,
       customerDisplayTotal:
         publication?.customerDisplayTotal ??
         prepared.estimate?.approval?.customerDisplayTotal ??

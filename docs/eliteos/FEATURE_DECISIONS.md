@@ -2833,3 +2833,14 @@
 | **SQL / formulas** | None. |
 | **Tests** | `studioIdentityOptionalPublish.test.mjs`, `aiTakeoffIdentityOptional.ui.test.mjs`; updated presentation-flow, publish-fix, project-details, workspace-workflow, and AI panel contracts. |
 
+### 196. Activate Studio Digital Estimate customer experience (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `hotfix/activate-studio-digital-estimate` |
+| **Defect** | Studio simplified-publish returned a customer URL whose v1 baseline rendered, but v2 session exchange returned `lifecycle=blocked` with no active configuration envelope (document-only). `App.tsx` then showed **“This estimate is unavailable.”** together with the frozen read-only estimate (totals disclosure: frozen at publication). |
+| **Root cause** | `AiTakeoffFirstPanel` / `ActiveReviewPublishPanel` call simplified-publish with `{ confirm }` only. Empty `configuration` made `configurationIntendsCustomerConfigure` false → publish skipped envelope activation (`document_only`). |
+| **Fix** | `resolveSimplifiedPublishConfiguration` defaults active Studio simplified-publish to interactive permitted choice groups (material/color, edge, sink, faucet, backsplash, accessories, specialty, cooktop, side splash) unless explicitly document-only. Public loader never pairs the generic unavailable banner with a loaded estimate; blocked/no-envelope baseline uses a retryable configuration message. |
+| **SQL** | None. |
+| **Tests** | `studioSimplifiedPublishActivatesDigitalEstimate.test.mjs` (+ existing configure-publish / availability contracts). |
+

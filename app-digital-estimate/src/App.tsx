@@ -259,17 +259,40 @@ export function App() {
   }
 
   if (estimate) {
-    const lifecycleNotice =
-      configState?.lifecycle && configState.lifecycle !== "active"
-        ? configState.message ||
-          (configState.lifecycle === "expired"
-            ? "Pricing expired. Contact your estimator for updated pricing."
-            : configState.lifecycle === "revoked"
-              ? "This estimate link has been revoked."
-              : configState.lifecycle === "superseded"
-                ? "A newer estimate is available. Contact your estimator."
-                : "This estimate is unavailable.")
-        : null;
+    const lifecycle = configState?.lifecycle || null;
+    const lifecycleIsNonActive = Boolean(lifecycle && lifecycle !== "active");
+    // Never show the generic unavailable banner beside a loaded estimate.
+    // Unavailable is reserved for invalid/revoked/archived tokens with no usable
+    // publication (UnavailableScreen). Non-active lifecycles with a baseline use
+    // specific status copy; missing configuration uses a retryable notice — never
+    // "This estimate is unavailable." + frozen success render.
+    let lifecycleNotice = null;
+    if (lifecycleIsNonActive) {
+      if (lifecycle === "expired") {
+        lifecycleNotice =
+          configState?.message ||
+          "Pricing expired. Contact your estimator for updated pricing.";
+      } else if (lifecycle === "revoked") {
+        lifecycleNotice = configState?.message || "This estimate link has been revoked.";
+      } else if (lifecycle === "superseded") {
+        lifecycleNotice =
+          configState?.message || "A newer estimate is available. Contact your estimator.";
+      } else if (configState?.message && !/estimate is unavailable/i.test(configState.message)) {
+        lifecycleNotice = configState.message;
+      } else if (fallbackReason === "configuration_absent" || !configState?.configuration) {
+        lifecycleNotice =
+          "Customer options could not be loaded. Refresh this page to try again, or contact your estimator.";
+      } else {
+        lifecycleNotice =
+          "This estimate is temporarily unavailable for configuration. Refresh to try again.";
+      }
+    } else if (
+      mode === "legacy" &&
+      (fallbackReason === "configuration_absent" || fallbackReason === "exchange_failed")
+    ) {
+      lifecycleNotice =
+        "Customer options could not be loaded. Refresh this page to try again, or contact your estimator.";
+    }
     const showDevFallback =
       isDevDiagnosticsEnabled() && Boolean(fallbackReason) && mode === "legacy";
     return (
