@@ -309,6 +309,88 @@ export function deriveScopeReadiness(estimate) {
   };
 }
 
+/** Active-v4 top workspace status — at most four plain display statuses. */
+export const WORKSPACE_STATUS_SOURCE = Object.freeze({
+  MANUAL: "Manual",
+  AI_ASSISTED: "AI-assisted"
+});
+
+export const WORKSPACE_STATUS_SCOPE = Object.freeze({
+  NEEDS_MEASUREMENTS: "Needs measurements",
+  READY: "Ready",
+  SAVED: "Saved"
+});
+
+export const WORKSPACE_STATUS_PRICING = Object.freeze({
+  WAITING: "Waiting for required choices",
+  UPDATING: "Updating",
+  UPDATED: "Updated",
+  NEEDS_ATTENTION: "Needs attention"
+});
+
+export const WORKSPACE_STATUS_PUBLICATION = Object.freeze({
+  NOT_PUBLISHED: "Not published",
+  PUBLISHED: "Published",
+  CUSTOMER_VIEWED: "Customer viewed",
+  CHANGES_REQUESTED: "Changes requested",
+  ACCEPTED: "Accepted",
+  SOLD: "Sold"
+});
+
+/**
+ * Derive the active-v4 top workspace status strip — display only, never a
+ * persistence state machine. Replaces legacy-heavy strings ("Takeoff queued",
+ * "Manual scope needs confirmation", "Commercial estimate not calculated",
+ * "Approval not approved") with four plain Source/Scope/Pricing/Publication
+ * statuses.
+ * @param {{
+ *   scope?: object|null,
+ *   calcStatus?: 'idle'|'updating'|'updated'|'needs_attention',
+ *   dirty?: boolean,
+ *   hasCalculation?: boolean
+ * }} estimate
+ * @param {{ state?: string|null, active?: boolean, historical?: boolean, reviewRequestOpen?: boolean, customerActivityState?: string|null } | null} publicationSummary
+ */
+export function deriveActiveWorkspaceStatus(estimate, publicationSummary = null) {
+  const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+  const isManual =
+    scope.physicalScopeSource === "manual_staff" || scope.estimateOrigin === "manual_staff";
+  const source = isManual ? WORKSPACE_STATUS_SOURCE.MANUAL : WORKSPACE_STATUS_SOURCE.AI_ASSISTED;
+
+  const readiness = deriveScopeReadiness(estimate);
+  let scopeStatus = WORKSPACE_STATUS_SCOPE.NEEDS_MEASUREMENTS;
+  if (readiness.ready) {
+    scopeStatus = estimate?.dirty ? WORKSPACE_STATUS_SCOPE.READY : WORKSPACE_STATUS_SCOPE.SAVED;
+  }
+
+  let pricing = WORKSPACE_STATUS_PRICING.WAITING;
+  const calcStatus = String(estimate?.calcStatus || "").toLowerCase();
+  if (calcStatus === "updating") pricing = WORKSPACE_STATUS_PRICING.UPDATING;
+  else if (calcStatus === "needs_attention") pricing = WORKSPACE_STATUS_PRICING.NEEDS_ATTENTION;
+  else if (calcStatus === "updated" || estimate?.hasCalculation) pricing = WORKSPACE_STATUS_PRICING.UPDATED;
+  else if (!readiness.ready) pricing = WORKSPACE_STATUS_PRICING.WAITING;
+
+  let publication = WORKSPACE_STATUS_PUBLICATION.NOT_PUBLISHED;
+  const pub = publicationSummary && typeof publicationSummary === "object" ? publicationSummary : {};
+  const pubState = String(pub.state || "").toLowerCase();
+  if (pub.reviewRequestOpen || pubState === "changes_requested") {
+    publication = WORKSPACE_STATUS_PUBLICATION.CHANGES_REQUESTED;
+  } else if (pubState === "sold") {
+    publication = WORKSPACE_STATUS_PUBLICATION.SOLD;
+  } else if (pubState === "accepted") {
+    publication = WORKSPACE_STATUS_PUBLICATION.ACCEPTED;
+  } else if (
+    String(pub.customerActivityState || "").toLowerCase() === "viewed" ||
+    String(pub.customerActivityState || "").toLowerCase() === "opened"
+  ) {
+    publication = WORKSPACE_STATUS_PUBLICATION.CUSTOMER_VIEWED;
+  } else if (pub.active || pubState === "active" || pubState === "published") {
+    publication = WORKSPACE_STATUS_PUBLICATION.PUBLISHED;
+  }
+
+  return { source, scope: scopeStatus, pricing, publication };
+}
+
 /**
  * Canonical backsplash-eligible length authority for Studio.
  * Physical length lives on Scope (room). Customer Choices only offer types.

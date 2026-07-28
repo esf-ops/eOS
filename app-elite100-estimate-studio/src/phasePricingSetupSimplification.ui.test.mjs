@@ -1,11 +1,18 @@
 /**
- * Pricing Setup scope + commercial simplification — UI wiring regression tests.
+ * Pricing Setup / Customer Choices commercial simplification — UI wiring
+ * regression tests.
  *
- * Authority model under test:
- *  - Approved Takeoff  → "Approved physical scope", read-only geometry,
- *    measured vs billed SF, governed estimator adjustments.
- *  - No approved Takeoff → "Manual physical scope" fallback editors.
- *  - Never both simultaneously.
+ * Active-v4 authority model under test:
+ *  - The canonical ManualPhysicalScopeEditor (mounted once, above this panel,
+ *    for both manual and AI-assisted estimates) is the single Scope editor +
+ *    summary. This panel must not render a second "Approved physical scope" /
+ *    "Manual physical scope" read model of the same rooms/pieces/edge/
+ *    backsplash facts (that dual-branch duplication is what caused the
+ *    "editor shows 46.25 SF, summary shows 0" regression).
+ *  - Customer/estimator-only commercial controls (Account Directory, trusted
+ *    partner, services, custom lines, specialty fabrication, internal markup,
+ *    notes, troubleshooting save) live in one collapsed "Advanced estimator
+ *    pricing" section, not scattered across the primary Customer Choices view.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -19,7 +26,7 @@ const panel = readFileSync(join(root, "src/estimateQueue/EstimateScopePanel.tsx"
 
 console.log("\nphasePricingSetupSimplification.ui.test.mjs\n");
 
-// 13. Approved Takeoff is recognized from physicalScopeSource alone (summary is
+// Approved Takeoff is recognized from physicalScopeSource alone (summary is
 // display data and must not flip authority back to manual).
 assert.ok(panel.includes('scope.physicalScopeSource === "takeoff"'));
 assert.equal(
@@ -29,53 +36,18 @@ assert.equal(
 );
 console.log("ok: authority = physicalScopeSource only (no summary-presence dependency)");
 
-// 14/15/16. Authority and manual fallback are the two arms of one conditional —
-// they can never render simultaneously.
-assert.ok(panel.includes("eq-approved-scope-label"));
-assert.ok(panel.includes("Approved physical scope."));
-assert.ok(panel.includes("eq-manual-scope-label"));
-assert.ok(panel.includes("Manual physical scope."));
-{
-  const approvedIdx = panel.indexOf("eq-approved-scope-summary");
-  const manualIdx = panel.indexOf("eq-manual-scope-label");
-  const between = panel.slice(approvedIdx, manualIdx);
-  assert.ok(
-    between.includes(") : ("),
-    "approved and manual scope blocks must be exclusive ternary arms"
-  );
-}
-console.log("ok: approved vs manual physical scope render as exclusive branches");
+// The old "Approved physical scope" / "Manual physical scope" dual-branch
+// read model is gone from active rendering — replaced by a single hint
+// pointing at the canonical editor mounted above this panel.
+assert.doesNotMatch(panel, /eq-approved-scope-label/);
+assert.doesNotMatch(panel, /Approved physical scope\./);
+assert.doesNotMatch(panel, /eq-manual-scope-label/);
+assert.doesNotMatch(panel, /eq-measured-billed-scope/);
+assert.doesNotMatch(panel, /eq-manual-cutout-grid/);
+assert.ok(panel.includes("eq-scope-canonical-hint"));
+console.log("ok: legacy approved/manual physical-scope dual branches removed; single canonical hint remains");
 
-// 2/5. Measured vs billed countertop scope with independent section count.
-assert.ok(panel.includes("eq-measured-billed-scope"));
-assert.ok(panel.includes("eq-measured-countertop-sf"));
-assert.ok(panel.includes("eq-billed-countertop-sf"));
-assert.ok(panel.includes("eq-independent-section-count"));
-assert.ok(panel.includes("Measured countertop scope"));
-assert.ok(panel.includes("Billed countertop scope"));
-assert.ok(panel.includes("Independent pricing sections"));
-// Display mirrors the same pure module backend pricing uses — no frontend math fork.
-assert.ok(panel.includes("buildStudioScopeBilling"));
-assert.ok(panel.includes("studioScopeBilling.mjs"));
-console.log("ok: measured vs billed scope summary is rendered from the shared governed module");
-
-// 3. Estimator SF adjustment: room-scoped input + required reason.
-assert.ok(panel.includes("eq-room-sf-adjustment"));
-assert.ok(panel.includes("eq-room-sf-adjustment-reason"));
-assert.ok(panel.includes("patchCountertopAdjustment"));
-console.log("ok: governed room SF adjustment inputs (value + reason) exist");
-
-// 17. Manual cutout quantity fields render only in the no-Takeoff fallback branch.
-assert.ok(panel.includes("eq-manual-cutout-grid"));
-assert.ok(panel.includes("eq-derived-cutouts-note"));
-{
-  const gridIdx = panel.indexOf("eq-manual-cutout-grid");
-  const noteIdx = panel.indexOf("eq-derived-cutouts-note");
-  assert.ok(noteIdx < gridIdx, "derived note (authority arm) must precede manual grid (fallback arm)");
-}
-console.log("ok: manual cutout quantities are fallback-only; authority shows derived summary");
-
-// 18. Generic sink product quantity fields are gone from Pricing Setup.
+// Generic sink product quantity fields are gone from Customer Choices.
 assert.equal(panel.includes("ESF stainless kitchen sink"), false);
 assert.equal(panel.includes("Rectangular vanity sink"), false);
 assert.equal(panel.includes("Oval vanity sink"), false);
@@ -85,33 +57,61 @@ assert.ok(panel.includes("eq-legacy-product-qty-warning"));
 assert.ok(panel.includes("eq-clear-legacy-product-qty"));
 console.log("ok: generic sink quantity fields removed; legacy values surface as a clearable warning");
 
-// 8. Customer-selectable catalog permissions + estimator services section.
+// Customer selections summary replaces the old per-category checkbox
+// whitelist as the normal-view content; the checkbox whitelist itself is
+// compatibility-only (collapsed, not part of the customer-facing summary).
+assert.ok(panel.includes("eq-customer-selections-summary"));
+assert.ok(panel.includes("Customer selections"));
+assert.ok(panel.includes("The customer can choose active Elite 100 materials"));
+assert.ok(panel.includes("eq-compat-catalog-permissions"));
 assert.ok(panel.includes("eq-catalog-permissions"));
 assert.ok(panel.includes("eq-catalog-permission-${key}"));
 for (const key of ["sink", "faucet", "accessories", "specialty", "edge", "backsplash"]) {
   assert.ok(panel.includes(`["${key}",`), `missing catalog permission key ${key}`);
 }
 assert.ok(panel.includes("customerCatalogPermissions"));
-assert.ok(panel.includes("eq-service-grid"));
-assert.ok(panel.includes("Tear-out"));
-console.log("ok: catalog permissions + services section replace the zero-filled product row");
+console.log("ok: concise Customer selections summary is primary; catalog checkbox whitelist is compatibility-only");
 
-// 20/21. Backsplash scope is a read-only Takeoff summary under authority;
-// customer chooses the height mode later in the Digital Estimate.
-assert.ok(panel.includes("eq-backsplash-scope-summary"));
-assert.ok(panel.includes("Backsplash-approved runs:"));
-assert.ok(panel.includes("Source: Approved Takeoff"));
-assert.ok(panel.includes("eq-room-backsplash-readonly"));
-assert.ok(panel.includes("customer chooses No / 4-inch / custom / full height later"));
-// Editable geometry fields remain only in the manual fallback arm.
+// Advanced estimator pricing: Account Directory, trusted partner, services,
+// custom lines, specialty fabrication, internal markup, notes, and
+// troubleshooting save controls are collapsed into one section.
+assert.ok(panel.includes('data-testid="eq-advanced-estimator-pricing"'));
+assert.ok(panel.includes("Advanced estimator pricing"));
 {
-  const readonlyIdx = panel.indexOf("eq-room-backsplash-readonly");
-  const editorIdx = panel.indexOf('data-testid="eq-backsplash-height-mode"');
-  assert.ok(readonlyIdx !== -1 && editorIdx !== -1 && readonlyIdx < editorIdx);
+  const advIdx = panel.indexOf('data-testid="eq-advanced-estimator-pricing"');
+  // The Advanced section itself contains a nested details (Advanced Pricing —
+  // charges/discounts/credits); bound the search past that nested block's own
+  // close so we capture the full outer section, not just the inner one.
+  const saveDraftIdx = panel.indexOf("eq-compat-save-draft", advIdx);
+  const advCloseIdx = panel.indexOf("</details>", saveDraftIdx);
+  assert.ok(
+    advIdx !== -1 && saveDraftIdx !== -1 && advCloseIdx !== -1,
+    "Advanced estimator pricing details must open and close around save controls"
+  );
+  const advBody = panel.slice(advIdx, advCloseIdx);
+  for (const marker of [
+    "StudioAccountDirectoryPanel",
+    "eq-partner-account-search",
+    "eq-service-grid",
+    "Tear-out",
+    "eq-custom-lines",
+    "eq-specialty-not-identified",
+    "Internal markup",
+    "Estimator notes",
+    "eq-compat-save-draft"
+  ]) {
+    assert.ok(advBody.includes(marker), `Advanced estimator pricing section missing ${marker}`);
+  }
 }
-console.log("ok: backsplash scope read-only under authority; editors are manual fallback only");
+console.log("ok: Account Directory/trusted partner/services/custom lines/specialty/markup/notes/save are one collapsed Advanced section");
 
-// 22-25. Canonical edge profiles; legacy W/D options are gone.
+// Canonical edge profiles (visible, not buried in Advanced); legacy W/D
+// options are gone.
+{
+  const advIdx = panel.indexOf('data-testid="eq-advanced-estimator-pricing"');
+  const edgeIdx = panel.indexOf("eq-edge-profile");
+  assert.ok(edgeIdx !== -1 && edgeIdx < advIdx, "Edge profile must render before/outside the collapsed Advanced section");
+}
 assert.ok(panel.includes("eq-edge-profile"));
 assert.ok(panel.includes("Edge profile (canonical)"));
 assert.equal(panel.includes("W edge"), false);
@@ -120,9 +120,9 @@ assert.equal(panel.includes("Included edges (eased)"), false);
 for (const label of ["Eased", "Large Eased", "Full Bullnose", "Large Ogee", "Bevel", "Small Ogee", "Crescent", "Knife"]) {
   assert.ok(panel.includes(`label: "${label}"`), `missing canonical profile ${label}`);
 }
-console.log("ok: canonical included + premium edge profiles; W/D removed");
+console.log("ok: canonical included + premium edge profiles render outside Advanced; W/D removed");
 
-// 10. Finished-edge display + governed adjustment; estimator never retypes Edge LF.
+// Finished-edge display + governed adjustment; estimator never retypes Edge LF.
 assert.ok(panel.includes("eq-edge-derived-lf"));
 assert.ok(panel.includes("eq-finished-edge-override"));
 assert.ok(panel.includes("eq-edge-adjustment"));
@@ -133,20 +133,19 @@ assert.ok(panel.includes("independent of backsplash"));
 assert.ok(panel.includes("resolveScopeEdgeLinearFeet"));
 console.log("ok: approved finished-edge LF + estimator adjustment + final priced edge are wired");
 
-// 12. Miter/build-up: "Not identified in approved scope" + explicit specialty action.
+// Miter/build-up: "Not identified in approved scope" + explicit specialty action.
 assert.ok(panel.includes("eq-specialty-not-identified"));
 assert.ok(panel.includes("Not identified in approved scope"));
 assert.ok(panel.includes("eq-add-specialty-fabrication"));
 assert.ok(panel.includes("Add specialty fabrication"));
 console.log("ok: miter/build-up gated behind explicit specialty-fabrication action under authority");
 
-// 13/14 (custom lines). Ownership + stone categories on custom lines.
+// Custom lines carry ownership (room/project) and category.
 assert.ok(panel.includes("eq-custom-line-room"));
 assert.ok(panel.includes("eq-custom-line-category"));
 assert.ok(panel.includes('"Countertop"'));
 assert.ok(panel.includes('"Backsplash"'));
-assert.ok(panel.includes("eq-custom-line-customer-visible"));
-console.log("ok: custom lines carry ownership (room/project), category, and customer visibility");
+console.log("ok: custom lines carry ownership (room/project) and category");
 
 // Guardrail: the panel never computes authoritative pricing locally.
 assert.equal(panel.includes("materialSubtotal ="), false);

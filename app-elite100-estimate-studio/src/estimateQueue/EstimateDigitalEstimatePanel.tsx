@@ -141,6 +141,14 @@ type Props = {
   /** Lifted safe publication summary — read-only; never triggers mutations. */
   onPublicationSummary?: (publication: Record<string, unknown> | null) => void;
   onPublicationRefreshError?: (message: string | null) => void;
+  /**
+   * Active-v4 Review & Publish readiness (studioActiveReviewReadiness.mjs) —
+   * real Scope/Configuration/calculation completeness, not legacy
+   * workflow-state gates. When present, this replaces the legacy
+   * server-computed eligible/blockers for display and Publish gating so an
+   * estimator never sees internal compatibility-approval wording.
+   */
+  activeReadinessOverride?: { eligible: boolean; blockers: Array<{ code?: string; message?: string }> } | null;
 };
 
 function formatStructuredPublishError(e: ApiError): {
@@ -202,7 +210,8 @@ export default function EstimateDigitalEstimatePanel({
   onBeforePublishFlush,
   onEditProjectDetails,
   onPublicationSummary,
-  onPublicationRefreshError
+  onPublicationRefreshError,
+  activeReadinessOverride = null
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [publishUiState, setPublishUiState] = useState<PublishUiState>("idle");
@@ -646,6 +655,17 @@ export default function EstimateDigitalEstimatePanel({
 
   const linkReady = Boolean(customerUrl) && linkStatus === "active";
   const publishing = publishUiState === "publishing" || busy;
+  // Active-v4 flow: real Scope/Configuration/calculation completeness
+  // replaces the legacy server-computed workflow-state gate for display.
+  // Historical/compatibility callers that don't pass this prop keep the
+  // legacy-derived eligible/blockers exactly as before.
+  const effectiveEligible = activeReadinessOverride ? activeReadinessOverride.eligible : eligible;
+  const effectiveBlockers = activeReadinessOverride ? activeReadinessOverride.blockers : blockers;
+  const effectivePrimaryMessage = activeReadinessOverride
+    ? effectiveBlockers[0]
+      ? { code: effectiveBlockers[0].code, message: effectiveBlockers[0].message }
+      : null
+    : primaryMessage;
 
   return (
     <section
@@ -654,7 +674,6 @@ export default function EstimateDigitalEstimatePanel({
       data-testid="estimate-digital-estimate-panel"
     >
       <div data-testid="eq-digital-estimate">
-      <h2>E. Digital Estimate</h2>
       <p className="eq-muted" data-testid="eq-de-revision">
         Estimate revision {estimateRevision ?? "—"}
       </p>
@@ -666,25 +685,25 @@ export default function EstimateDigitalEstimatePanel({
       ) : null}
 
       <p data-testid="eq-de-eligibility">
-        {eligible ? (
+        {effectiveEligible ? (
           <strong>Eligible to publish</strong>
         ) : (
           <span className="eq-muted">Blocked — resolve readiness issues before publish</span>
         )}
       </p>
-      {primaryMessage?.message ? (
+      {effectivePrimaryMessage?.message ? (
         <p
           className="eq-de-primary-message"
           data-testid="eq-de-primary-message"
           data-approval-status={approvalStatus || ""}
           data-publication-config-status={publicationConfigStatus || ""}
         >
-          {primaryMessage.message}
+          {effectivePrimaryMessage.message}
         </p>
       ) : null}
-      {blockers.length ? (
+      {effectiveBlockers.length ? (
         <ul className="eq-de-blockers" data-testid="eq-de-blockers">
-          {blockers
+          {effectiveBlockers
             .filter((b) => {
               if (
                 approvalStatus === "approved_current" &&
@@ -953,7 +972,8 @@ export default function EstimateDigitalEstimatePanel({
         </p>
       )}
 
-      <h3>Configuration envelope</h3>
+      <details className="eq-compat-advanced" data-testid="eq-de-config-envelope-compat">
+      <summary>Advanced estimator pricing — publication configuration (compatibility)</summary>
       <div className="eq-de-config-grid">
         <label>
           Rooms locked for customer
@@ -1055,6 +1075,7 @@ export default function EstimateDigitalEstimatePanel({
         Included material and allowed colors default from the approved Studio estimate and server
         catalog. Unsupported options (Blanco, waterfall, popup outlet, faucets) cannot be offered.
       </p>
+      </details>
 
       {actionError ? (
         <div className="eq-state eq-state--error" role="alert" data-testid="eq-de-publish-error">
@@ -1093,7 +1114,7 @@ export default function EstimateDigitalEstimatePanel({
         <button
           type="button"
           className="eq-btn-primary"
-          disabled={publishing || !eligible}
+          disabled={publishing || !effectiveEligible}
           data-testid="eq-publish-digital-estimate"
           onClick={() => {
             setConfigSaveState(configurationDirty || Boolean(customerUrl) ? "saving" : "saving");
@@ -1114,7 +1135,7 @@ export default function EstimateDigitalEstimatePanel({
           <button
             type="button"
             className="eq-btn-secondary"
-            disabled={publishing || !eligible}
+            disabled={publishing || !effectiveEligible}
             data-testid="eq-save-configuration"
             onClick={() => {
               setConfigSaveState("saving");

@@ -19,6 +19,7 @@ import {
   resolveScopeEdgeLinearFeet
 } from "../../../backend-core/src/elite100EstimateStudio/studioScopeBilling.mjs";
 import { workflowAllowsAction } from "../../../backend-core/src/elite100EstimateStudio/studioWorkspaceWorkflow.mjs";
+import { deriveActiveReviewPublishReadiness } from "../../../backend-core/src/elite100EstimateStudio/studioActiveReviewReadiness.mjs";
 import type { WorkspaceWorkflow } from "./EstimateWorkflowHeader";
 import {
   createStudioAutosaveController,
@@ -26,6 +27,16 @@ import {
   shouldApplyStudioAutosaveResponse,
   type StudioAutosaveStatus
 } from "../lib/studioAutosaveController";
+
+/** Active-v4 Review & Publish display rollup — see elite100RoomPricingStudioAdapter.mjs buildActiveReviewSummary. */
+type StudioActiveReviewSummary = {
+  countertopMaterialGroups?: string[];
+  countertopMaterialTotal?: number;
+  materialTaxTotal?: number;
+  backsplashPresent?: boolean;
+  backsplashTotal?: number;
+  fabricationTotal?: number;
+};
 
 type CustomLineItem = {
   id?: string;
@@ -219,6 +230,9 @@ type StudioEstimate = {
     warnings?: Array<{ code?: string; message?: string }>;
     unresolvedItems?: Array<{ code?: string; message?: string }>;
     calculatedAt?: string;
+    pricingEngine?: string | null;
+    pricingVersion?: number | null;
+    reviewSummary?: StudioActiveReviewSummary | null;
   } | null;
   approval?: {
     approvedAt?: string;
@@ -271,6 +285,8 @@ type Props = {
   onRegisterFlush?: (flush: (() => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>) | null) => void;
   onAutosaveStatus?: (status: string) => void;
   onCalcStatus?: (status: string) => void;
+  /** Raw pricing-status enum for the top workspace Source/Scope/Pricing/Publication strip. */
+  onCalcStatusRaw?: (status: "idle" | "updating" | "updated" | "needs_attention") => void;
   /** Flush pending autosaves before Publish Digital Estimate. */
   onBeforePublishFlush?: () => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>;
 };
@@ -313,6 +329,7 @@ export default function EstimateScopePanel({
   onRegisterFlush,
   onAutosaveStatus,
   onCalcStatus,
+  onCalcStatusRaw,
   onBeforePublishFlush
 }: Props) {
   const [estimate, setEstimate] = useState<StudioEstimate | null>(null);
@@ -363,6 +380,7 @@ export default function EstimateScopePanel({
 
   function setCalcStatusTracked(next: typeof calcStatus) {
     setCalcStatus(next);
+    onCalcStatusRaw?.(next);
     onCalcStatus?.(
       next === "updating"
         ? "Updating price…"
@@ -945,15 +963,18 @@ export default function EstimateScopePanel({
   }
 
   const blocked = estimate.status === "needs_takeoff_approval";
+  // Compatibility-only label (rendered inside the collapsed legacy details
+  // block above) — the normal active-v4 status is the four-status bar
+  // (Source/Scope/Pricing/Publication) in the workspace header, not this text.
   const estimateStatusLabel =
     estimate.status === "needs_takeoff_approval"
-      ? "Takeoff worksheet needs review"
+      ? "Awaiting Takeoff data"
       : estimate.status === "priced"
-        ? "Commercial estimate not approved"
+        ? "Priced — legacy approval pending"
         : estimate.status === "approved"
-          ? "Commercial estimate approved"
+          ? "Legacy approval recorded"
           : estimate.status === "draft" || estimate.status === "ready_to_calculate"
-            ? "Commercial estimate not calculated"
+            ? "Not yet calculated"
             : String(estimate.status || "Unknown").replace(/_/g, " ");
   const scope = estimate.scope || {};
   const workflow = workflowProp || estimate.workflow || null;
@@ -972,6 +993,13 @@ export default function EstimateScopePanel({
   const approvalCurrent = workflow?.approvalCurrent === true;
   const calculationCurrent = workflow?.calculationCurrent === true;
   const totals = estimate.calculation?.totals;
+  const reviewSummary = (
+    estimate.calculation as { reviewSummary?: StudioActiveReviewSummary } | undefined
+  )?.reviewSummary;
+  const activeReadiness = deriveActiveReviewPublishReadiness({
+    scope,
+    calculation: estimate.calculation
+  });
   // Approved Takeoff = physical-scope authority. Manual quantity entry only
   // exists as a clearly-labeled fallback when no approved Takeoff seeded scope.
   // Authority follows physicalScopeSource alone — the summary is display data
@@ -1079,45 +1107,6 @@ export default function EstimateScopePanel({
         hidden={!showScope}
         data-testid="eq-section-scope-takeoff"
       >
-        <dl className="eq-status-dl" data-testid="eq-estimate-status-meta">
-          <div>
-            <dt>Takeoff</dt>
-            <dd>{takeoffDisplayStatus}</dd>
-          </div>
-          <div>
-            <dt>Estimate status</dt>
-            <dd data-testid="eq-estimate-status">{estimateStatusLabel}</dd>
-          </div>
-          <div>
-            <dt>Revision</dt>
-            <dd data-testid="eq-estimate-revision">{estimate.revision ?? 1}</dd>
-          </div>
-          <div>
-            <dt>Calculation</dt>
-            <dd data-testid="eq-calculation-label">
-              {workflow?.display?.calculationLabel ||
-                (calculationCurrent
-                  ? `Calculated ${estimate.calculation?.calculatedAt || ""}`.trim()
-                  : "Not calculated")}
-            </dd>
-          </div>
-          <div>
-            <dt>Approval</dt>
-            <dd data-testid="eq-approval-label">
-              {workflow?.display?.approvalLabel ||
-                (approvalCurrent
-                  ? `Approved ${estimate.approval?.approvedAt || estimate.approvedAt || ""}`.trim()
-                  : "Not approved")}
-            </dd>
-          </div>
-          <div>
-            <dt>Persistence</dt>
-            <dd data-testid="eq-estimate-repo-mode">
-              {estimate.repositoryMode || "unknown"}
-              {estimate.updatedAt ? ` · saved ${estimate.updatedAt}` : dirty ? " · unsaved draft" : ""}
-            </dd>
-          </div>
-        </dl>
         {blocked ? (
           <div className="eq-state eq-state--warn" data-testid="eq-estimate-blocked">
             AI Takeoff is still preparing the Scope draft. You can wait for the worksheet, or continue
@@ -1126,6 +1115,52 @@ export default function EstimateScopePanel({
         ) : (
           <p className="eq-muted">Scope draft ready — define Customer Choices below.</p>
         )}
+        {/* Active-v4: the four-status bar (Source/Scope/Pricing/Publication) in the
+            workspace header above is the one status display for the normal active
+            flow. This legacy per-field status/calculation/approval readout is kept
+            only for compatibility/troubleshooting, collapsed out of default view. */}
+        <details className="eq-compat-advanced" data-testid="eq-compat-estimate-status-meta">
+          <summary>Advanced — legacy estimate status (compatibility)</summary>
+          <dl className="eq-status-dl" data-testid="eq-estimate-status-meta">
+            <div>
+              <dt>Takeoff</dt>
+              <dd>{takeoffDisplayStatus}</dd>
+            </div>
+            <div>
+              <dt>Estimate status</dt>
+              <dd data-testid="eq-estimate-status">{estimateStatusLabel}</dd>
+            </div>
+            <div>
+              <dt>Revision</dt>
+              <dd data-testid="eq-estimate-revision">{estimate.revision ?? 1}</dd>
+            </div>
+            <div>
+              <dt>Calculation</dt>
+              <dd data-testid="eq-calculation-label">
+                {workflow?.display?.calculationLabel ||
+                  (calculationCurrent
+                    ? `Calculated ${estimate.calculation?.calculatedAt || ""}`.trim()
+                    : "Not calculated")}
+              </dd>
+            </div>
+            <div>
+              <dt>Approval</dt>
+              <dd data-testid="eq-approval-label">
+                {workflow?.display?.approvalLabel ||
+                  (approvalCurrent
+                    ? `Approved ${estimate.approval?.approvedAt || estimate.approvedAt || ""}`.trim()
+                    : "Not approved")}
+              </dd>
+            </div>
+            <div>
+              <dt>Persistence</dt>
+              <dd data-testid="eq-estimate-repo-mode">
+                {estimate.repositoryMode || "unknown"}
+                {estimate.updatedAt ? ` · saved ${estimate.updatedAt}` : dirty ? " · unsaved draft" : ""}
+              </dd>
+            </div>
+          </dl>
+        </details>
         {estimate.staleReason ? (
           <div className="eq-action-row" style={{ marginTop: 8 }}>
             <button
@@ -1157,65 +1192,14 @@ export default function EstimateScopePanel({
         </p>
         <div hidden={!showScope} data-testid="eq-section-scope-body">
         {manualStaffAuthority ? (
-          <div className="eq-state" data-testid="eq-confirmed-physical-scope">
-            <h3>Confirmed physical scope</h3>
-            {!manualScopeConfirmed ? (
-              <p className="eq-muted" data-testid="eq-manual-scope-unconfirmed">
-                Manual Scope is not confirmed yet. Confirm rooms, open edge LF, backsplash, and
-                openings above before calculating.
-              </p>
-            ) : null}
-            <ul>
-              {(scope.rooms || [])
-                .filter((r) => r.included !== false)
-                .map((r) => {
-                  const edgeLf =
-                    Number((r as any).confirmedOpenEdgeLf) ||
-                    Number(r.approvedFinishedEdgeLf) ||
-                    Number(r.edgeEligibleLinearFeet) ||
-                    (r.pieces || []).reduce((s, p) => {
-                      const totalIn = Number(p.finishedEdge?.totalFinishedEdgeLengthIn) || 0;
-                      return s + (totalIn > 0 ? totalIn / 12 : 0);
-                    }, 0);
-                  return (
-                    <li key={r.id}>
-                      <strong>{r.name}</strong>
-                      <ul>
-                        <li>Countertop: {Number(r.countertopSqft ?? 0).toFixed(2)} SF</li>
-                        <li>Total open edge: {edgeLf.toFixed(2)} LF</li>
-                        <li>
-                          Backsplash:{" "}
-                          {r.includeBacksplash
-                            ? `${Number(r.backsplashMeasuredLengthIn ?? 0)} in × ${Number(r.backsplashHeightIn ?? 0)} in = ${Number(r.backsplashSqft ?? 0).toFixed(2)} SF`
-                            : "none"}
-                        </li>
-                      </ul>
-                    </li>
-                  );
-                })}
-              <li>
-                Openings — sink: {Number(scope.addOns?.["qty-sink"] ?? 0)}; vanity/bar:{" "}
-                {Number(scope.addOns?.["qty-bar"] ?? 0)}; cooktop:{" "}
-                {Number(scope.addOns?.["qty-cook"] ?? 0)}; outlet:{" "}
-                {Number(scope.addOns?.["qty-outlet"] ?? 0)}
-              </li>
-            </ul>
-            <button
-              type="button"
-              className="eq-btn-secondary"
-              data-testid="eq-edit-manual-scope"
-              onClick={() => {
-                onEditManualScope?.();
-                window.setTimeout(() => {
-                  document
-                    .querySelector('[data-testid="manual-physical-scope-editor"]')
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, 40);
-              }}
-            >
-              Edit Manual Scope
-            </button>
-          </div>
+          // Active-v4: the canonical ManualPhysicalScopeEditor (mounted above,
+          // in EstimateTakeoffWorkspace) is the single Scope editor + summary.
+          // Do not render a second, independently-loaded scope read model here
+          // — it can go stale relative to the editor's live autosaved values.
+          <p className="eq-muted" data-testid="eq-scope-canonical-hint">
+            Scope is defined above in the physical Scope editor. Changes there autosave and are
+            used for this Scope summary, Customer Choices, and Review &amp; Publish.
+          </p>
         ) : null}
         </div>
         <div hidden={!showChoices} data-testid="eq-section-choices-body">
@@ -1225,27 +1209,6 @@ export default function EstimateScopePanel({
           address. Fields here stay in sync and do not change measured scope or pricing when only
           metadata changes.
         </p>
-        {authToken ? (
-          <StudioAccountDirectoryPanel
-            sessionToken={authToken}
-            blocked={blocked}
-            scope={{
-              customerName: scope.customerName,
-              customerContactName: scope.customerContactName,
-              customerEmail: scope.customerEmail,
-              customerPhone: scope.customerPhone,
-              projectAddress: scope.projectAddress,
-              accountDirectoryAccountId: scope.accountDirectoryAccountId,
-              accountDirectoryContactId: scope.accountDirectoryContactId,
-              accountDirectoryLocationId: scope.accountDirectoryLocationId,
-              customerIdentitySnapshot: scope.customerIdentitySnapshot as
-                | import("./StudioAccountDirectoryPanel").StudioCustomerIdentitySnapshot
-                | null
-                | undefined
-            }}
-            patchScope={(patch) => patchScope(patch)}
-          />
-        ) : null}
         <div className="eq-scope-grid">
           <label>
             Customer / company
@@ -1296,57 +1259,6 @@ export default function EstimateScopePanel({
               onChange={(e) => patchScope({ projectAddress: e.target.value })}
             />
           </label>
-          <label>
-            Trusted partner account
-            <input
-              type="search"
-              value={accountQuery}
-              disabled={blocked}
-              placeholder="Search trusted partner accounts by name"
-              data-testid="eq-partner-account-search"
-              onChange={(e) => setAccountQuery(e.target.value)}
-              autoComplete="off"
-            />
-          </label>
-          <div className="eq-account-picker" data-testid="eq-partner-account-picker">
-            <p className="eq-muted">
-              Selected:{" "}
-              <strong data-testid="eq-partner-account-selected">
-                {partnerAccount?.displayName ||
-                  (scope.partnerAccountId ? "Account selected" : "None")}
-              </strong>
-              {accountSearchBusy ? " · searching…" : ""}
-            </p>
-            <div className="eq-account-options">
-              <button
-                type="button"
-                className="eq-btn-ghost"
-                disabled={blocked || !scope.partnerAccountId}
-                onClick={() => selectPartnerAccount(null)}
-              >
-                Clear trusted partner
-              </button>
-              {accountOptions.map((opt) => (
-                <button
-                  key={opt.partnerAccountId}
-                  type="button"
-                  className={
-                    scope.partnerAccountId === opt.partnerAccountId
-                      ? "eq-btn-secondary"
-                      : "eq-btn-ghost"
-                  }
-                  disabled={blocked}
-                  onClick={() => selectPartnerAccount(opt)}
-                >
-                  {opt.displayName}
-                </button>
-              ))}
-            </div>
-            <p className="eq-footnote">
-              Trusted partner pricing uses partnerAccountId membership only (Watts/Spahn). Selecting
-              an Account Directory account never grants trusted partner pricing by name.
-            </p>
-          </div>
         </div>
         <h3>Pricing basis</h3>
         <div className="eq-scope-grid">
@@ -1495,458 +1407,16 @@ export default function EstimateScopePanel({
 
         </div>
         <div hidden={!showScope} data-testid="eq-section-scope-physical">
-        <h3>Approved physical scope</h3>
-        {takeoffAuthority ? (
-          <div className="eq-approved-scope" data-testid="eq-approved-scope-summary">
-            <p className="eq-muted" data-testid="eq-approved-scope-label">
-              <strong>Approved physical scope.</strong> Read-only summary from the approved
-              Takeoff. To change physical scope, review the Takeoff above and re-approve —
-              quantities below are derived, never retyped.
-            </p>
-            <dl className="eq-status-dl" data-testid="eq-measured-billed-scope">
-              <div>
-                <dt>Measured countertop scope</dt>
-                <dd data-testid="eq-measured-countertop-sf">
-                  {scopeBilling.measuredCountertopSf.toFixed(2)} SF
-                </dd>
-              </div>
-              <div>
-                <dt>Billed countertop scope</dt>
-                <dd data-testid="eq-billed-countertop-sf">
-                  {scopeBilling.billedCountertopSf} SF
-                </dd>
-              </div>
-              <div>
-                <dt>Independent pricing sections</dt>
-                <dd data-testid="eq-independent-section-count">
-                  {scopeBilling.independentSectionCount}
-                </dd>
-              </div>
-            </dl>
-            <p className="eq-footnote">
-              Each independently priced section rounds its raw SF up on its own, then billed
-              sections are summed — the measured total is never rounded as one number. Estimator
-              SF adjustments (below, per room) are governed sections that round independently.
-            </p>
-            <div className="eq-scope-grid">
-              <label>
-                Project-level SF adjustment (±, explicit)
-                <input
-                  type="number"
-                  step={0.01}
-                  value={projectAdjustment?.adjustmentSf ?? 0}
-                  disabled={blocked}
-                  data-testid="eq-project-sf-adjustment"
-                  onChange={(e) =>
-                    patchCountertopAdjustment(null, {
-                      adjustmentSf: Number(e.target.value) || 0
-                    })
-                  }
-                />
-              </label>
-              <label>
-                Project adjustment reason{" "}
-                {(projectAdjustment?.adjustmentSf ?? 0) !== 0 ? "(required)" : ""}
-                <input
-                  value={projectAdjustment?.adjustmentReason ?? ""}
-                  disabled={blocked}
-                  data-testid="eq-project-sf-adjustment-reason"
-                  placeholder="Use room adjustments where applicable"
-                  onChange={(e) =>
-                    patchCountertopAdjustment(null, { adjustmentReason: e.target.value })
-                  }
-                />
-              </label>
-            </div>
-            {scopeSummary ? (
-            <ul className="eq-approved-scope-list">
-              <li>{Number(scopeSummary.pieceCount ?? 0)} countertop pieces</li>
-              <li>
-                {Number(scopeSummary.kitchenSinkCutouts ?? 0)} kitchen sink opening
-                {Number(scopeSummary.kitchenSinkCutouts ?? 0) === 1 ? "" : "s"}
-              </li>
-              <li>
-                {Number(scopeSummary.vanityBarSinkCutouts ?? 0)} vanity/bar sink opening
-                {Number(scopeSummary.vanityBarSinkCutouts ?? 0) === 1 ? "" : "s"}
-              </li>
-              <li>
-                {Number(scopeSummary.cooktopCutouts ?? 0)} cooktop opening
-                {Number(scopeSummary.cooktopCutouts ?? 0) === 1 ? "" : "s"}
-              </li>
-              <li>
-                {Number(scopeSummary.electricalOutletCutouts ?? 0)} electrical outlet opening
-                {Number(scopeSummary.electricalOutletCutouts ?? 0) === 1 ? "" : "s"}
-              </li>
-              <li>
-                {Number(scopeSummary.popUpOutletCutouts ?? 0)} pop-up outlet opening
-                {Number(scopeSummary.popUpOutletCutouts ?? 0) === 1 ? "" : "s"}
-              </li>
-              <li data-testid="eq-backsplash-scope-summary">
-                Backsplash-approved runs:{" "}
-                {Number(scopeSummary.backsplashEligibleRunCount ?? 0)} · Approved eligible
-                length:{" "}
-                {(Number(scopeSummary.eligibleBacksplashLengthIn ?? 0) / 12).toFixed(2)} LF (
-                {Number(scopeSummary.eligibleBacksplashLengthIn ?? 0).toFixed(2)} in) ·{" "}
-                Source: Approved Takeoff
-              </li>
-              <li data-testid="eq-finished-edge-scope-summary">
-                {scopeSummary.edgeGeometryConfirmationRequired
-                  ? `Finished edge suggestions: ${Number(scopeSummary.suggestedFinishedEdgeLf ?? 0).toFixed(2)} LF — confirm per-piece edges in Takeoff before publish`
-                  : `Approved finished edge total: ${Number(scopeSummary.approvedFinishedEdgeLf ?? edgeScope.derivedLf ?? 0).toFixed(2)} LF`}
-                {scopeSummary.edgeScopeSource
-                  ? ` · Source: ${scopeSummary.edgeScopeSource}`
-                  : ""}
-              </li>
-              {Array.isArray(scopeSummary.finishedEdgeByPiece) &&
-              scopeSummary.finishedEdgeByPiece.length > 0 ? (
-                <li data-testid="eq-finished-edge-by-piece">
-                  Finished edge by piece:
-                  <ul className="eq-scope-piece-list">
-                    {(scopeSummary.finishedEdgeByPiece as Array<Record<string, unknown>>).map(
-                      (p, i) => {
-                        const parts: string[] = [];
-                        const front = Number(p.frontEdgeLengthIn) || 0;
-                        const left = Number(p.leftExposedEdgeLengthIn) || 0;
-                        const right = Number(p.rightExposedEdgeLengthIn) || 0;
-                        const other = Number(p.otherExposedEdgeLengthIn) || 0;
-                        if (front > 0) parts.push(`front ${(front / 12).toFixed(2)} LF`);
-                        if (left > 0) parts.push(`left ${(left / 12).toFixed(2)} LF`);
-                        if (right > 0) parts.push(`right ${(right / 12).toFixed(2)} LF`);
-                        if (other > 0) parts.push(`other ${(other / 12).toFixed(2)} LF`);
-                        const name = String(p.pieceName || p.pieceId || `Piece ${i + 1}`);
-                        const status = p.approved === true ? "" : " (suggested)";
-                        return (
-                          <li key={String(p.pieceId || i)}>
-                            {name}: {parts.length ? parts.join("; ") : "no exposed edge"}
-                            {status}
-                          </li>
-                        );
-                      }
-                    )}
-                  </ul>
-                </li>
-              ) : null}
-            </ul>
-            ) : null}
-            {Number(scopeSummary?.popUpOutletCutouts ?? 0) > 0 ||
-            Number(scopeSummary?.otherCutouts ?? 0) > 0 ? (
-              <div className="eq-state eq-state--warn" data-testid="eq-scope-review-cutouts">
-                Needs estimator review (not auto-priced):{" "}
-                {[
-                  Number(scopeSummary?.popUpOutletCutouts ?? 0) > 0
-                    ? `${scopeSummary?.popUpOutletCutouts} pop-up outlet`
-                    : null,
-                  Number(scopeSummary?.otherCutouts ?? 0) > 0
-                    ? `${scopeSummary?.otherCutouts} other cutout${Number(scopeSummary?.otherCutouts ?? 0) === 1 ? "" : "s"}`
-                    : null
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-                {(scopeSummary?.reviewCutouts || [])
-                  .filter((c) => c.note)
-                  .map((c, i) => (
-                    <span key={i}> · {c.roomName ? `${c.roomName}: ` : ""}{c.note}</span>
-                  ))}
-                {" "}Add a custom line or price manually below.
-              </div>
-            ) : null}
-            <div className="eq-action-row">
-              <button
-                type="button"
-                className="eq-btn-secondary"
-                data-testid="eq-review-takeoff"
-                disabled={busy}
-                onClick={() => void refreshFromTakeoff()}
-              >
-                Review Takeoff / re-sync scope
-              </button>
-            </div>
-          </div>
-        ) : (
-          <p className="eq-muted" data-testid="eq-manual-scope-label">
-            <strong>Manual physical scope.</strong> No approved Takeoff scope on this estimate —
-            enter measured rooms and fabrication quantities manually below.
-          </p>
-        )}
-
-        <h3>Rooms / measured scope</h3>
-        {(scope.rooms || []).length === 0 ? (
-          <p className="eq-muted">
-            No approved measured scope yet. Build or review the Takeoff above, then approve it to
-            seed pricing scope.
-          </p>
-        ) : (
-          <ul className="eq-room-list">
-            {(scope.rooms || []).map((room) => (
-              <li key={room.id}>
-                <label className="eq-check">
-                  <input
-                    type="checkbox"
-                    checked={room.included !== false}
-                    disabled={blocked}
-                    onChange={(e) => patchRoom(room.id, { included: e.target.checked })}
-                  />
-                  <strong>{room.name}</strong>
-                </label>
-                <div className="eq-room-fields">
-                  {takeoffAuthority ? (
-                    <p className="eq-muted" data-testid="eq-room-countertop-readonly">
-                      Countertop measured: {Number(room.countertopSqft ?? 0).toFixed(2)} SF ·
-                      billed:{" "}
-                      {scopeBilling.rooms.find((r) => r.roomId === String(room.id))
-                        ?.billedWithAdjustmentsSf ?? 0}{" "}
-                      SF (from approved Takeoff)
-                    </p>
-                  ) : (
-                    <label>
-                      Countertop square feet
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        value={room.countertopSqft ?? 0}
-                        disabled={blocked || room.included === false}
-                        onChange={(e) => patchRoom(room.id, { countertopSqft: Number(e.target.value) })}
-                      />
-                    </label>
-                  )}
-                  {takeoffAuthority && room.included !== false ? (
-                    <>
-                      <label>
-                        Estimator SF adjustment (±)
-                        <input
-                          type="number"
-                          step={0.01}
-                          value={roomAdjustmentFor(String(room.id))?.adjustmentSf ?? 0}
-                          disabled={blocked}
-                          data-testid="eq-room-sf-adjustment"
-                          data-room-id={room.id}
-                          onChange={(e) =>
-                            patchCountertopAdjustment(String(room.id), {
-                              adjustmentSf: Number(e.target.value) || 0
-                            })
-                          }
-                        />
-                      </label>
-                      <label>
-                        Adjustment reason{" "}
-                        {(roomAdjustmentFor(String(room.id))?.adjustmentSf ?? 0) !== 0
-                          ? "(required)"
-                          : ""}
-                        <input
-                          value={roomAdjustmentFor(String(room.id))?.adjustmentReason ?? ""}
-                          disabled={blocked}
-                          data-testid="eq-room-sf-adjustment-reason"
-                          data-room-id={room.id}
-                          placeholder="e.g. field-verified overhang not in Takeoff"
-                          onChange={(e) =>
-                            patchCountertopAdjustment(String(room.id), {
-                              adjustmentReason: e.target.value
-                            })
-                          }
-                        />
-                      </label>
-                    </>
-                  ) : null}
-                </div>
-                {takeoffAuthority ? (
-                  <p
-                    className="eq-muted"
-                    data-testid="eq-room-backsplash-readonly"
-                    data-room-id={room.id}
-                  >
-                    Backsplash:{" "}
-                    {room.includeBacksplash
-                      ? `${room.eligibleRunCount != null ? `${room.eligibleRunCount} eligible run${Number(room.eligibleRunCount) === 1 ? "" : "s"} · ` : ""}${Number(room.backsplashMeasuredLengthIn ?? 0).toFixed(1)} in eligible length — customer chooses No / 4-inch / custom / full height later`
-                      : "no eligible runs (from approved Takeoff)"}
-                  </p>
-                ) : manualStaffAuthority ? (
-                  <p
-                    className="eq-muted"
-                    data-testid="eq-room-backsplash-readonly"
-                    data-room-id={room.id}
-                  >
-                    Backsplash (confirmed Manual Scope):{" "}
-                    {room.includeBacksplash
-                      ? `${Number(room.backsplashMeasuredLengthIn ?? 0).toFixed(1)} in × ${Number(room.backsplashHeightIn ?? 0).toFixed(1)} in = ${Number(room.backsplashSqft ?? 0).toFixed(2)} SF (${room.backsplashHeightMode || "standard"})`
-                      : "none"}
-                  </p>
-                ) : (
-                <div
-                  className="eq-room-backsplash"
-                  data-testid="eq-room-backsplash"
-                  data-room-id={room.id}
-                >
-                  <label className="eq-check">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(room.includeBacksplash)}
-                      disabled={blocked || room.included === false}
-                      onChange={(e) =>
-                        patchRoom(room.id, { includeBacksplash: e.target.checked })
-                      }
-                      data-testid="eq-include-backsplash"
-                    />
-                    Include backsplash
-                  </label>
-                  <div className="eq-room-fields">
-                    <label>
-                      Backsplash height mode
-                      <select
-                        value={room.backsplashHeightMode || (room.includeBacksplash ? "standard" : "none")}
-                        disabled={blocked || room.included === false || !room.includeBacksplash}
-                        onChange={(e) => {
-                          const mode = e.target.value;
-                          patchRoom(room.id, {
-                            backsplashHeightMode: mode,
-                            ...(mode === "standard" && !room.backsplashHeightIn
-                              ? { backsplashHeightIn: 4 }
-                              : {})
-                          });
-                        }}
-                        data-testid="eq-backsplash-height-mode"
-                      >
-                        <option value="none">None</option>
-                        <option value="standard">Standard (4 in)</option>
-                        <option value="custom">Custom height</option>
-                        <option value="full_height">Full-height / tall</option>
-                      </select>
-                    </label>
-                    <label>
-                      Backsplash height (in)
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.5}
-                        value={room.backsplashHeightIn ?? ""}
-                        disabled={blocked || room.included === false || !room.includeBacksplash}
-                        onChange={(e) =>
-                          patchRoom(room.id, {
-                            backsplashHeightIn: Number(e.target.value) || 0,
-                            backsplashHeightMode:
-                              Number(e.target.value) >= 48
-                                ? "full_height"
-                                : Number(e.target.value) > 4.5
-                                  ? "custom"
-                                  : "standard"
-                          })
-                        }
-                        data-testid="eq-backsplash-height"
-                      />
-                    </label>
-                    <label>
-                      Measured backsplash length (in)
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.1}
-                        value={room.backsplashMeasuredLengthIn ?? ""}
-                        disabled={blocked || room.included === false || !room.includeBacksplash}
-                        onChange={(e) =>
-                          patchRoom(room.id, {
-                            backsplashMeasuredLengthIn: Number(e.target.value) || 0
-                          })
-                        }
-                        data-testid="eq-backsplash-length"
-                      />
-                    </label>
-                    <label>
-                      Backsplash square feet
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        value={room.backsplashSqft ?? 0}
-                        disabled={blocked || room.included === false || !room.includeBacksplash}
-                        onChange={(e) =>
-                          patchRoom(room.id, { backsplashSqft: Number(e.target.value) })
-                        }
-                        data-testid="eq-backsplash-sqft"
-                      />
-                    </label>
-                  </div>
-                  <p className="eq-footnote">
-                    Countertop SF: {Number(room.countertopSqft ?? 0).toFixed(2)} · Backsplash SF:{" "}
-                    {room.includeBacksplash ? Number(room.backsplashSqft ?? 0).toFixed(2) : "0.00"} ·
-                    Height:{" "}
-                    {room.includeBacksplash
-                      ? `${room.backsplashHeightIn ?? "—"} in (${room.backsplashHeightMode || "standard"})`
-                      : "not included"}
-                    {room.backsplashSource ? ` · Source: ${room.backsplashSource}` : ""}
-                  </p>
-                </div>
-                )}
-                {(room.pieces || []).length ? (
-                  <div className="eq-piece-list">
-                    {(room.pieces || []).map((p) => (
-                      <label key={p.id} className="eq-check">
-                        <input
-                          type="checkbox"
-                          checked={p.included !== false}
-                          disabled={blocked || room.included === false}
-                          onChange={(e) => {
-                            const pieces = (room.pieces || []).map((x) =>
-                              x.id === p.id ? { ...x, included: e.target.checked } : x
-                            );
-                            patchRoom(room.id, { pieces });
-                          }}
-                        />
-                        {p.name} ({p.sqft ?? 0} SF)
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {takeoffAuthority ? (
-          <p className="eq-muted" data-testid="eq-derived-cutouts-note">
-            Cutout quantities (kitchen sink, vanity/bar sink, cooktop, electrical outlet) are
-            derived from the approved Takeoff scope above — no manual re-entry.
-          </p>
-        ) : manualStaffAuthority ? (
-          <div data-testid="eq-confirmed-cutouts-readonly">
-            <h3>Confirmed openings (Manual Scope)</h3>
-            <ul className="eq-muted">
-              <li>Kitchen sink openings: {Number(scope.addOns?.["qty-sink"] ?? 0)}</li>
-              <li>Vanity / bar sink openings: {Number(scope.addOns?.["qty-bar"] ?? 0)}</li>
-              <li>Cooktop openings: {Number(scope.addOns?.["qty-cook"] ?? 0)}</li>
-              <li>Electrical outlet openings: {Number(scope.addOns?.["qty-outlet"] ?? 0)}</li>
-            </ul>
-            <p className="eq-footnote">
-              Edit openings in Manual Scope. Product model selection remains below.
-            </p>
-          </div>
-        ) : (
-          <>
-            <h3>Manual physical scope — cutout quantities</h3>
-            <div className="eq-addon-grid" data-testid="eq-manual-cutout-grid">
-              {(
-                [
-                  ["qty-sink", "Kitchen sink openings"],
-                  ["qty-bar", "Vanity / bar sink openings"],
-                  ["qty-cook", "Cooktop openings"],
-                  ["qty-outlet", "Electrical outlet openings"]
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key}>
-                  {label}
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={scope.addOns?.[key] ?? 0}
-                    disabled={blocked}
-                    onChange={(e) => patchAddon(key, Math.max(0, Number(e.target.value) || 0))}
-                  />
-                </label>
-              ))}
-            </div>
-          </>
-        )}
-
+        {/*
+         * Active-v4: the canonical Scope editor (ManualPhysicalScopeEditor,
+         * mounted above for both manual and AI-assisted estimates) is the
+         * single place rooms, pieces, dimensions, edges, backsplash, and
+         * openings are entered and summarized. This panel must not render a
+         * second, independently-loaded read model of the same facts — that
+         * was the source of the "editor shows 46.25 SF, summary shows 0"
+         * regression (this view loaded scope on its own schedule and could
+         * be stale relative to the editor's live autosaved values).
+         */}
         </div>
         <div hidden={!showChoices} data-testid="eq-section-choices-commercial">
         <h3>Customer selections</h3>
@@ -2014,6 +1484,251 @@ export default function EstimateScopePanel({
             </button>
           </div>
         ) : null}
+
+        <h3>Edge</h3>
+        <div className="eq-scope-grid">
+          <label>
+            Edge profile (canonical)
+            <select
+              value={activeEdgeProfileToken}
+              disabled={blocked}
+              data-testid="eq-edge-profile"
+              onChange={(e) =>
+                // Canonical token is the authority; legacy edgeMode is cleared
+                // so old W/D tokens can never resurface on this estimate.
+                patchScope({ edgeProfileToken: e.target.value, edgeMode: null })
+              }
+            >
+              <optgroup label="Included">
+                {CANONICAL_EDGE_PROFILES.filter((p) => p.tier === "free").map((p) => (
+                  <option key={p.token} value={p.token}>
+                    {p.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Premium">
+                {CANONICAL_EDGE_PROFILES.filter((p) => p.tier === "premium").map((p) => (
+                  <option key={p.token} value={p.token}>
+                    {p.label} (premium)
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </label>
+          {takeoffAuthority ? (
+            <>
+              <label>
+                Approved finished edge from Takeoff (LF)
+                <input
+                  type="number"
+                  value={
+                    Number(
+                      scope.takeoffScopeSummary?.approvedFinishedEdgeLf ??
+                        edgeScope.takeoffApprovedLf ??
+                        edgeScope.derivedLf ??
+                        0
+                    )
+                  }
+                  readOnly
+                  disabled
+                  data-testid="eq-edge-derived-lf"
+                />
+              </label>
+              <label>
+                Estimator finished-edge override (LF)
+                <input
+                  type="number"
+                  step={0.01}
+                  min={0}
+                  value={
+                    scope.finishedEdgeOverride?.finalLf == null
+                      ? ""
+                      : scope.finishedEdgeOverride.finalLf
+                  }
+                  disabled={blocked}
+                  placeholder="Blank = use Takeoff total"
+                  data-testid="eq-finished-edge-override"
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw === "") {
+                      patchFinishedEdgeOverride({ finalLf: null });
+                      return;
+                    }
+                    patchFinishedEdgeOverride({ finalLf: Number(raw) });
+                  }}
+                />
+              </label>
+              <label>
+                Override reason{" "}
+                {scope.finishedEdgeOverride?.finalLf != null ? "(required)" : ""}
+                <input
+                  value={scope.finishedEdgeOverride?.reason ?? ""}
+                  disabled={blocked}
+                  data-testid="eq-finished-edge-override-reason"
+                  placeholder="Required when override LF is set"
+                  onChange={(e) => patchFinishedEdgeOverride({ reason: e.target.value })}
+                />
+              </label>
+              <label>
+                Estimator edge adjustment (± LF)
+                <input
+                  type="number"
+                  step={0.01}
+                  value={scope.edgeScopeAdjustment?.adjustmentLf ?? 0}
+                  disabled={blocked || Boolean(scope.finishedEdgeOverride?.finalLf != null)}
+                  data-testid="eq-edge-adjustment"
+                  onChange={(e) =>
+                    patchEdgeAdjustment({ adjustmentLf: Number(e.target.value) || 0 })
+                  }
+                />
+              </label>
+              <label>
+                Edge adjustment reason{" "}
+                {(scope.edgeScopeAdjustment?.adjustmentLf ?? 0) !== 0 ? "(required)" : ""}
+                <input
+                  value={scope.edgeScopeAdjustment?.adjustmentReason ?? ""}
+                  disabled={blocked || Boolean(scope.finishedEdgeOverride?.finalLf != null)}
+                  data-testid="eq-edge-adjustment-reason"
+                  placeholder="Legacy ± LF when no absolute override"
+                  onChange={(e) => patchEdgeAdjustment({ adjustmentReason: e.target.value })}
+                />
+              </label>
+              <label>
+                Final priced finished edge (LF)
+                <input
+                  type="number"
+                  value={edgeScope.finalLf}
+                  readOnly
+                  disabled
+                  data-testid="eq-edge-final-lf"
+                />
+              </label>
+            </>
+          ) : manualStaffAuthority ? (
+            // Active-v4: per-room open-edge LF is already shown in the canonical
+            // Scope editor's room summary above — only the project-level derived
+            // total (used for pricing) belongs here, not a second per-room list.
+            <div data-testid="eq-confirmed-finished-edge">
+              <p className="eq-footnote">
+                Physical open-edge LF comes from Scope and is independent of the base edge profile
+                (Eased, etc.). Customer premium-edge options use these LF values.
+              </p>
+              <p className="eq-muted" data-testid="eq-edge-final-lf-display">
+                Project open edge (from Scope): {edgeScope.finalLf.toFixed(2)} LF
+              </p>
+            </div>
+          ) : (
+            <label>
+              Edge LF (manual)
+              <input
+                type="number"
+                min={0}
+                value={scope.edgeLinearFeet ?? 0}
+                disabled={blocked || (activeEdgeProfile ? activeEdgeProfile.tier === "free" : false)}
+                onChange={(e) => patchScope({ edgeLinearFeet: Number(e.target.value) })}
+              />
+            </label>
+          )}
+        </div>
+        {takeoffAuthority ? (
+          <p className="eq-footnote" data-testid="eq-edge-source-note">
+            Source:{" "}
+            {edgeScope.overrideActive
+              ? "estimator finished-edge override"
+              : "sum of estimator-approved per-piece finished edges"}{" "}
+            ({edgeScope.source}). Finished-edge LF is independent of backsplash mode.
+            {edgeScope.overrideActive
+              ? " Absolute override replaces the Takeoff total for pricing."
+              : " Use an absolute override or ± LF adjustment with a reason when field geometry differs."}
+            {edgeScope.confirmationRequired
+              ? " Confirmation required in Takeoff (or set an override) before Digital Estimate publication."
+              : ""}
+          </p>
+        ) : null}
+
+        <details className="eq-compat-advanced" data-testid="eq-advanced-estimator-pricing">
+          <summary>Advanced estimator pricing</summary>
+          <p className="eq-muted">
+            Account linking, trusted partner pricing, services, custom charges/discounts/credits,
+            internal-only and absorbed costs, specialty fabrication, internal markup, estimator
+            notes, and troubleshooting save controls. Collapsed by default — backend behavior is
+            unchanged.
+          </p>
+          {authToken ? (
+            <StudioAccountDirectoryPanel
+              sessionToken={authToken}
+              blocked={blocked}
+              scope={{
+                customerName: scope.customerName,
+                customerContactName: scope.customerContactName,
+                customerEmail: scope.customerEmail,
+                customerPhone: scope.customerPhone,
+                projectAddress: scope.projectAddress,
+                accountDirectoryAccountId: scope.accountDirectoryAccountId,
+                accountDirectoryContactId: scope.accountDirectoryContactId,
+                accountDirectoryLocationId: scope.accountDirectoryLocationId,
+                customerIdentitySnapshot: scope.customerIdentitySnapshot as
+                  | import("./StudioAccountDirectoryPanel").StudioCustomerIdentitySnapshot
+                  | null
+                  | undefined
+              }}
+              patchScope={(patch) => patchScope(patch)}
+            />
+          ) : null}
+          <div className="eq-scope-grid">
+            <label>
+              Trusted partner account
+              <input
+                type="search"
+                value={accountQuery}
+                disabled={blocked}
+                placeholder="Search trusted partner accounts by name"
+                data-testid="eq-partner-account-search"
+                onChange={(e) => setAccountQuery(e.target.value)}
+                autoComplete="off"
+              />
+            </label>
+            <div className="eq-account-picker" data-testid="eq-partner-account-picker">
+              <p className="eq-muted">
+                Selected:{" "}
+                <strong data-testid="eq-partner-account-selected">
+                  {partnerAccount?.displayName ||
+                    (scope.partnerAccountId ? "Account selected" : "None")}
+                </strong>
+                {accountSearchBusy ? " · searching…" : ""}
+              </p>
+              <div className="eq-account-options">
+                <button
+                  type="button"
+                  className="eq-btn-ghost"
+                  disabled={blocked || !scope.partnerAccountId}
+                  onClick={() => selectPartnerAccount(null)}
+                >
+                  Clear trusted partner
+                </button>
+                {accountOptions.map((opt) => (
+                  <button
+                    key={opt.partnerAccountId}
+                    type="button"
+                    className={
+                      scope.partnerAccountId === opt.partnerAccountId
+                        ? "eq-btn-secondary"
+                        : "eq-btn-ghost"
+                    }
+                    disabled={blocked}
+                    onClick={() => selectPartnerAccount(opt)}
+                  >
+                    {opt.displayName}
+                  </button>
+                ))}
+              </div>
+              <p className="eq-footnote">
+                Trusted partner pricing uses partnerAccountId membership only (Watts/Spahn).
+                Selecting an Account Directory account never grants trusted partner pricing by
+                name.
+              </p>
+            </div>
+          </div>
 
         <h3>Services</h3>
         <p className="eq-muted">
@@ -2272,186 +1987,6 @@ export default function EstimateScopePanel({
         </div>
         </details>
 
-        <h3>Edge</h3>
-        <div className="eq-scope-grid">
-          <label>
-            Edge profile (canonical)
-            <select
-              value={activeEdgeProfileToken}
-              disabled={blocked}
-              data-testid="eq-edge-profile"
-              onChange={(e) =>
-                // Canonical token is the authority; legacy edgeMode is cleared
-                // so old W/D tokens can never resurface on this estimate.
-                patchScope({ edgeProfileToken: e.target.value, edgeMode: null })
-              }
-            >
-              <optgroup label="Included">
-                {CANONICAL_EDGE_PROFILES.filter((p) => p.tier === "free").map((p) => (
-                  <option key={p.token} value={p.token}>
-                    {p.label}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Premium">
-                {CANONICAL_EDGE_PROFILES.filter((p) => p.tier === "premium").map((p) => (
-                  <option key={p.token} value={p.token}>
-                    {p.label} (premium)
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </label>
-          {takeoffAuthority ? (
-            <>
-              <label>
-                Approved finished edge from Takeoff (LF)
-                <input
-                  type="number"
-                  value={
-                    Number(
-                      scope.takeoffScopeSummary?.approvedFinishedEdgeLf ??
-                        edgeScope.takeoffApprovedLf ??
-                        edgeScope.derivedLf ??
-                        0
-                    )
-                  }
-                  readOnly
-                  disabled
-                  data-testid="eq-edge-derived-lf"
-                />
-              </label>
-              <label>
-                Estimator finished-edge override (LF)
-                <input
-                  type="number"
-                  step={0.01}
-                  min={0}
-                  value={
-                    scope.finishedEdgeOverride?.finalLf == null
-                      ? ""
-                      : scope.finishedEdgeOverride.finalLf
-                  }
-                  disabled={blocked}
-                  placeholder="Blank = use Takeoff total"
-                  data-testid="eq-finished-edge-override"
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    if (raw === "") {
-                      patchFinishedEdgeOverride({ finalLf: null });
-                      return;
-                    }
-                    patchFinishedEdgeOverride({ finalLf: Number(raw) });
-                  }}
-                />
-              </label>
-              <label>
-                Override reason{" "}
-                {scope.finishedEdgeOverride?.finalLf != null ? "(required)" : ""}
-                <input
-                  value={scope.finishedEdgeOverride?.reason ?? ""}
-                  disabled={blocked}
-                  data-testid="eq-finished-edge-override-reason"
-                  placeholder="Required when override LF is set"
-                  onChange={(e) => patchFinishedEdgeOverride({ reason: e.target.value })}
-                />
-              </label>
-              <label>
-                Estimator edge adjustment (± LF)
-                <input
-                  type="number"
-                  step={0.01}
-                  value={scope.edgeScopeAdjustment?.adjustmentLf ?? 0}
-                  disabled={blocked || Boolean(scope.finishedEdgeOverride?.finalLf != null)}
-                  data-testid="eq-edge-adjustment"
-                  onChange={(e) =>
-                    patchEdgeAdjustment({ adjustmentLf: Number(e.target.value) || 0 })
-                  }
-                />
-              </label>
-              <label>
-                Edge adjustment reason{" "}
-                {(scope.edgeScopeAdjustment?.adjustmentLf ?? 0) !== 0 ? "(required)" : ""}
-                <input
-                  value={scope.edgeScopeAdjustment?.adjustmentReason ?? ""}
-                  disabled={blocked || Boolean(scope.finishedEdgeOverride?.finalLf != null)}
-                  data-testid="eq-edge-adjustment-reason"
-                  placeholder="Legacy ± LF when no absolute override"
-                  onChange={(e) => patchEdgeAdjustment({ adjustmentReason: e.target.value })}
-                />
-              </label>
-              <label>
-                Final priced finished edge (LF)
-                <input
-                  type="number"
-                  value={edgeScope.finalLf}
-                  readOnly
-                  disabled
-                  data-testid="eq-edge-final-lf"
-                />
-              </label>
-            </>
-          ) : manualStaffAuthority ? (
-            <div data-testid="eq-confirmed-finished-edge">
-              <h4>Confirmed open edge</h4>
-              <ul>
-                {(scope.rooms || [])
-                  .filter((r) => r.included !== false)
-                  .map((r) => {
-                    const lf =
-                      Number((r as any).confirmedOpenEdgeLf) ||
-                      Number((r as any).approvedFinishedEdgeLf) ||
-                      Number((r as any).edgeEligibleLinearFeet) ||
-                      (r.pieces || [])
-                        .filter((p) => p.included !== false)
-                        .reduce((s, p: any) => {
-                          const totalIn = Number(p?.finishedEdge?.totalFinishedEdgeLengthIn) || 0;
-                          return s + (totalIn > 0 ? totalIn / 12 : 0);
-                        }, 0);
-                    return (
-                      <li key={r.id} data-testid="eq-confirmed-room-open-edge">
-                        {r.name}: {lf.toFixed(2)} LF
-                      </li>
-                    );
-                  })}
-              </ul>
-              <p className="eq-footnote">
-                Physical open-edge LF comes from Manual Scope and is independent of the base edge
-                profile (Eased, etc.). Customer premium-edge options use these room LF values.
-              </p>
-              <p className="eq-muted" data-testid="eq-edge-final-lf-display">
-                Project open edge (derived): {edgeScope.finalLf.toFixed(2)} LF
-              </p>
-            </div>
-          ) : (
-            <label>
-              Edge LF (manual)
-              <input
-                type="number"
-                min={0}
-                value={scope.edgeLinearFeet ?? 0}
-                disabled={blocked || (activeEdgeProfile ? activeEdgeProfile.tier === "free" : false)}
-                onChange={(e) => patchScope({ edgeLinearFeet: Number(e.target.value) })}
-              />
-            </label>
-          )}
-        </div>
-        {takeoffAuthority ? (
-          <p className="eq-footnote" data-testid="eq-edge-source-note">
-            Source:{" "}
-            {edgeScope.overrideActive
-              ? "estimator finished-edge override"
-              : "sum of estimator-approved per-piece finished edges"}{" "}
-            ({edgeScope.source}). Finished-edge LF is independent of backsplash mode.
-            {edgeScope.overrideActive
-              ? " Absolute override replaces the Takeoff total for pricing."
-              : " Use an absolute override or ± LF adjustment with a reason when field geometry differs."}
-            {edgeScope.confirmationRequired
-              ? " Confirmation required in Takeoff (or set an override) before Digital Estimate publication."
-              : ""}
-          </p>
-        ) : null}
-
         <h3>Specialty fabrication (miter / build-up)</h3>
         {takeoffAuthority && !specialtyFabricationOpen && !scope.miterHeightKey && !(Number(scope.buildupSqft) > 0) ? (
           <div data-testid="eq-specialty-not-identified">
@@ -2534,6 +2069,22 @@ export default function EstimateScopePanel({
             onChange={(e) => patchScope({ estimatorNotes: e.target.value })}
           />
         </label>
+        <div className="eq-action-row" data-testid="eq-compat-save-draft">
+          <button
+            type="button"
+            className="eq-btn-ghost"
+            disabled={busy || blocked || !dirty}
+            data-testid="eq-save-pricing-draft"
+            onClick={() => void autosaveRef.current?.flush()}
+          >
+            Save now (troubleshooting)
+          </button>
+          <button type="button" className="eq-btn-ghost" disabled={busy || blocked || !dirty} onClick={() => void saveDraft()}>
+            Save Draft (troubleshooting)
+          </button>
+        </div>
+        </details>
+
         <div className="eq-action-row">
           <span className="eq-muted" data-testid="eq-autosave-status">
             {STUDIO_AUTOSAVE_LABELS[autosaveStatus] || (dirty ? "Saving…" : "Saved")}
@@ -2558,21 +2109,6 @@ export default function EstimateScopePanel({
             </button>
           ) : null}
         </div>
-        <details className="eq-compat-advanced" data-testid="eq-compat-save-draft">
-          <summary>Advanced — Save now / Save Draft (troubleshooting)</summary>
-          <button
-            type="button"
-            className="eq-btn-ghost"
-            disabled={busy || blocked || !dirty}
-            data-testid="eq-save-pricing-draft"
-            onClick={() => void autosaveRef.current?.flush()}
-          >
-            Save now
-          </button>
-          <button type="button" className="eq-btn-ghost" disabled={busy || blocked || !dirty} onClick={() => void saveDraft()}>
-            Save Draft
-          </button>
-        </details>
         </div>
       </section>
 
@@ -2584,44 +2120,48 @@ export default function EstimateScopePanel({
       >
         <h2>Review &amp; Publish</h2>
         <p className="eq-muted">
-          Confirm Scope and Customer Choices, then Publish Digital Estimate. Price updates
-          automatically after saves — no separate Calculate or Approve step.
+          Price updates automatically after Scope and Customer Choices are saved — no separate Calculate or Approve clicks are required.
         </p>
-        {!totals ? (
-          <p className="eq-muted">Price will appear here after Scope and Customer Choices are saved.</p>
-        ) : (
+        <p className="eq-muted" data-testid="eq-calc-status">
+          {calcStatus === "updating"
+            ? "Updating price…"
+            : calcStatus === "updated"
+              ? "Price updated"
+              : calcStatus === "needs_attention"
+                ? "Pricing needs attention"
+                : "Price will appear here after Scope and Customer Choices are saved."}
+        </p>
+        {!totals ? null : (
           <dl className="eq-summary-dl" data-testid="eq-estimate-summary">
             <div>
               <dt>Countertop material</dt>
               <dd data-testid="eq-material-countertop-subtotal">
-                ${Number(
-                  (totals as Record<string, unknown>).materialCountertopSubtotal ??
-                    totals.materialSubtotal ??
-                    0,
-                ).toFixed(2)}
+                {reviewSummary?.countertopMaterialGroups?.length
+                  ? reviewSummary.countertopMaterialGroups.join(", ")
+                  : scope.materialGroup || "—"}{" "}
+                · $
+                {Number(reviewSummary?.countertopMaterialTotal ?? 0).toFixed(2)}
               </dd>
             </div>
-            {Number((totals as Record<string, unknown>).materialBacksplashSubtotal ?? 0) > 0 ? (
-              <div>
-                <dt>Backsplash material</dt>
-                <dd data-testid="eq-material-backsplash-subtotal">
-                  ${Number(
-                    (totals as Record<string, unknown>).materialBacksplashSubtotal ?? 0,
-                  ).toFixed(2)}
-                </dd>
-              </div>
-            ) : null}
             <div>
-              <dt>Material subtotal</dt>
-              <dd>${Number(totals.materialSubtotal ?? 0).toFixed(2)}</dd>
+              <dt>Backsplash material</dt>
+              <dd data-testid="eq-material-backsplash-subtotal">
+                {reviewSummary?.backsplashPresent
+                  ? `${
+                      reviewSummary?.countertopMaterialGroups?.length
+                        ? reviewSummary.countertopMaterialGroups.join(", ")
+                        : scope.materialGroup || "—"
+                    } · $${Number(reviewSummary?.backsplashTotal ?? 0).toFixed(2)}`
+                  : "None"}
+              </dd>
             </div>
             <div>
-              <dt>Material use tax (2%)</dt>
-              <dd>${Number(totals.materialUseTax ?? 0).toFixed(2)}</dd>
+              <dt>Material use tax</dt>
+              <dd>${Number(reviewSummary?.materialTaxTotal ?? 0).toFixed(2)}</dd>
             </div>
             <div>
               <dt>Fabrication / add-ons</dt>
-              <dd>${Number(totals.fabricationSubtotal ?? 0).toFixed(2)}</dd>
+              <dd>${Number(reviewSummary?.fabricationTotal ?? 0).toFixed(2)}</dd>
             </div>
             <div>
               <dt>Account adjustment</dt>
@@ -2690,40 +2230,6 @@ export default function EstimateScopePanel({
             </p>
           </details>
         ) : null}
-      </section>
-
-      <section
-        className="eq-estimate-section"
-        aria-label="Customer Choices &amp; pricing"
-        hidden={!showReview}
-        data-testid="eq-section-review-actions"
-      >
-        <h2>Publish readiness</h2>
-        <p className="eq-muted">
-          Define what the customer may select. Price updates automatically after saves. Publish is the
-          commercial approval — no separate Calculate or Approve clicks are required.
-        </p>
-        <p className="eq-muted" data-testid="eq-calc-status">
-          {busy
-            ? "Updating price…"
-            : estimate.calculation?.calculatedAt
-              ? "Price updated"
-              : pricingDirty
-                ? "Pricing needs attention"
-                : ""}
-        </p>
-        {approvalCurrent && estimate.approval?.approvedAt ? (
-          <p className="eq-muted" data-testid="eq-estimate-approved">
-            Last approved snapshot {estimate.approval.approvedAt}
-            {estimate.approval.exactInternalTotal != null
-              ? ` · $${Number(estimate.approval.exactInternalTotal).toFixed(2)}`
-              : ""}
-          </p>
-        ) : (
-          <p className="eq-muted" data-testid="eq-estimate-not-approved">
-            Ready for Review &amp; Publish when Scope and choices are complete.
-          </p>
-        )}
         {(workflow?.historicalApproval?.label || estimate.previousRevisionSummary?.label) &&
         !approvalCurrent ? (
           <p className="eq-footnote" data-testid="eq-historical-approval">
@@ -2788,6 +2294,7 @@ export default function EstimateScopePanel({
           onEditProjectDetails={onEditProjectDetails}
           onPublicationSummary={onPublicationSummary}
           onPublicationRefreshError={onPublicationRefreshError}
+          activeReadinessOverride={activeReadiness}
         />
       ) : null}
     </div>

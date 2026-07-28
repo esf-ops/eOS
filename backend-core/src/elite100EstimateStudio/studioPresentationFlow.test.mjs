@@ -23,6 +23,7 @@ import { createStudioManualEstimateService } from "./studioManualEstimateService
 import { createStudioSimplifiedWorkflowService } from "./studioSimplifiedWorkflow.mjs";
 import { STUDIO_ESTIMATE_STATUSES, emptyStudioEstimateScope } from "./studioEstimateTypes.mjs";
 import { MANUAL_ESTIMATE_ORIGIN } from "./studioManualPhysicalScope.mjs";
+import { buildStudioScopeBilling, resolveScopeEdgeLinearFeet } from "./studioScopeBilling.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "../../..");
@@ -34,6 +35,7 @@ const studioApp = readSrc("app-elite100-estimate-studio/src/StudioApp.tsx");
 const wizard = readSrc("app-elite100-estimate-studio/src/estimateQueue/ManualEstimateWizard.tsx");
 const scopePanel = readSrc("app-elite100-estimate-studio/src/estimateQueue/EstimateScopePanel.tsx");
 const workspace = readSrc("app-elite100-estimate-studio/src/estimateQueue/EstimateTakeoffWorkspace.tsx");
+const digitalEstimatePanel = readSrc("app-elite100-estimate-studio/src/estimateQueue/EstimateDigitalEstimatePanel.tsx");
 
 const ORG = "33333333-3333-4333-8333-333333333333";
 const ACTOR = "44444444-4444-4444-8444-444444444444";
@@ -507,6 +509,325 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
     assert.equal(loaded.pricingEngine, "studio-legacy", `historical v${c.version} engine surfaces as-is, not relabeled v1`);
   }
   console.log("ok: 15 historical pricingVersion 2/3 snapshots still load unchanged");
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 16. THE 46.25-SF REGRESSION — the exact bug-report canonical Scope
+// (sink run + island + two open-edge runs + backsplash + one kitchen sink
+// opening) autosaves, reloads, and calculates as ONE source of truth with
+// no explicit Confirm Manual Scope / Calculate / Approve click, and the
+// same fingerprint/total is what Publish freezes.
+// ════════════════════════════════════════════════════════════════════════
+{
+  const { repository, studio, manual } = freshManualServices();
+  const created = await manual.createManualEstimate({
+    organizationId: ORG,
+    actorUserId: ACTOR,
+    idempotencyKey: "presentation-regression-46-25-1",
+    body: {
+      customerName: "Regression Test Co",
+      customerEmail: "regression@example.test",
+      projectName: "Regression Kitchen"
+    }
+  });
+
+  // Kitchen: Sink run 120x25.5 qty 1, Island 60x60 qty 1, open edges 10+20 LF,
+  // backsplash 120in x 4in, one kitchen sink opening.
+  const regressionScope = {
+    rooms: [
+      {
+        id: "room-kitchen-regression",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        included: true,
+        openEdgeMeasurementMode: "piece_sum",
+        includeBacksplash: true,
+        backsplashHeightMode: "standard",
+        backsplashMeasuredLengthIn: 120,
+        backsplashHeightIn: 4,
+        pieces: [
+          {
+            id: "piece-sink-run",
+            name: "Sink run",
+            pieceType: "counter",
+            included: true,
+            measurementMode: "dimensions",
+            lengthIn: 120,
+            depthIn: 25.5,
+            quantity: 1,
+            finishedEdge: { frontEdgeLengthIn: 120, totalFinishedEdgeLengthIn: 120, approved: true }
+          },
+          {
+            id: "piece-island",
+            name: "Island",
+            pieceType: "counter",
+            included: true,
+            measurementMode: "dimensions",
+            lengthIn: 60,
+            depthIn: 60,
+            quantity: 1,
+            finishedEdge: { frontEdgeLengthIn: 240, totalFinishedEdgeLengthIn: 240, approved: true }
+          }
+        ]
+      }
+    ],
+    addOns: { "qty-sink": 1 }
+  };
+
+  await manual.saveManualScopeDraft({
+    organizationId: ORG,
+    estimateId: created.estimateId,
+    actorUserId: ACTOR,
+    body: { scope: regressionScope }
+  });
+
+  // Reload from the repository (not the in-memory write echo) — proves the
+  // canonical editor's saved values are what a fresh read returns too.
+  const row = await repository.getById(ORG, created.estimateId);
+  assert.equal(row.scope.rooms[0].pieces[0].lengthIn, 120, "Sink run length persists at 120in");
+  assert.equal(row.scope.rooms[0].pieces[0].depthIn, 25.5, "Sink run depth persists at 25.5in");
+  assert.equal(row.scope.rooms[0].pieces[1].lengthIn, 60, "Island length persists at 60in");
+  assert.equal(row.scope.rooms[0].pieces[1].depthIn, 60, "Island depth persists at 60in");
+  assert.equal(row.scope.addOns["qty-sink"], 1, "one kitchen sink opening persists");
+
+  // One canonical Scope billing computation — the same aggregate the Scope
+  // summary reads from; no second/competing SF or LF read path.
+  const billing = buildStudioScopeBilling(row.scope);
+  assert.equal(
+    billing.measuredCountertopSf,
+    46.25,
+    "canonical Scope measures 46.25 SF countertop (21.25 sink run + 25 island), matching the regression report"
+  );
+
+  const edge = resolveScopeEdgeLinearFeet(row.scope);
+  assert.equal(edge.finalLf, 30, "canonical Scope measures 30 LF open edge (10 sink run + 20 island)");
+
+  assert.equal(
+    row.scope.rooms[0].backsplashSqft,
+    3.33,
+    "canonical Scope measures 3.33 SF backsplash (120in x 4in / 144)"
+  );
+  console.log(
+    "ok: 16a the regression Scope (sink run + island + backsplash + sink opening) autosaves/reloads as 46.25 SF / 30 LF / 3.33 SF / 1 sink opening from one canonical read path"
+  );
+
+  // No explicit Confirm Manual Scope / Calculate Estimate / Approve Estimate
+  // click precedes this — calculate() alone drives the full v4 pipeline.
+  const priced = await studio.calculate({
+    organizationId: ORG,
+    estimateId: created.estimateId,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  assert.equal(
+    priced.calculation.pricingEngine,
+    PRICING_ENGINE_V1,
+    "regression Scope calculates with the v1 engine with no prior Confirm/Approve click"
+  );
+  assert.equal(
+    priced.calculation.pricingVersion,
+    PRICING_VERSION_4,
+    "regression Scope calculates with pricingVersion 4 with no prior Confirm/Approve click"
+  );
+  assert.ok(
+    Number(priced.calculation.totals.customerDisplayTotal) > 0,
+    "regression Scope produces a non-zero customer display total"
+  );
+  assert.ok(priced.calculation.reviewSummary, "v4 calculation returns a Review & Publish reviewSummary aggregate");
+  assert.ok(
+    Number(priced.calculation.reviewSummary.countertopMaterialTotal) > 0,
+    "reviewSummary countertop material total is computed from the same 46.25 SF Scope"
+  );
+  assert.ok(
+    priced.calculation.reviewSummary.backsplashPresent,
+    "reviewSummary reports backsplash present, matching the canonical Scope"
+  );
+  assert.ok(
+    Number(priced.calculation.reviewSummary.backsplashTotal) > 0,
+    "reviewSummary backsplash total is computed from the same 3.33 SF backsplash Scope"
+  );
+  console.log(
+    "ok: 16b the regression Scope calculates through elite100-room-pricing-v1 / pricingVersion 4 and populates Review & Publish reviewSummary — no Confirm/Calculate/Approve click required"
+  );
+
+  // Publish freezes exactly this fingerprint/total — same source of truth
+  // that fed the on-screen Review & Publish numbers above.
+  const workflow = createStudioSimplifiedWorkflowService({
+    sharedInboxService: { async importMessage() { return {}; } },
+    studioEstimateService: studio,
+    manualEstimateService: manual,
+    digitalEstimateService: {
+      async publish(args) {
+        const est = studio.safeEstimateView(await repository.getById(ORG, args.estimateId));
+        return {
+          ok: true,
+          customerUrl: "https://example.test/de/presentation-regression-1",
+          customerDisplayTotal: est.calculation.totals.customerDisplayTotal,
+          calculationFingerprint: est.calculationFingerprint
+        };
+      }
+    }
+  });
+  const published = await workflow.publishDigitalEstimate({
+    organizationId: ORG,
+    estimateId: created.estimateId,
+    actorUserId: ACTOR,
+    body: { confirm: true }
+  });
+  const finalRow = await repository.getById(ORG, created.estimateId);
+  assert.equal(
+    published.publication.customerDisplayTotal,
+    finalRow.approval.customerDisplayTotal,
+    "published total for the regression Scope equals the approved v4 total"
+  );
+  assert.equal(
+    published.publication.calculationFingerprint,
+    finalRow.approval.calculationFingerprint,
+    "published fingerprint for the regression Scope equals the approved v4 fingerprint"
+  );
+  assert.equal(finalRow.calculationSnapshot.pricingEngine, PRICING_ENGINE_V1, "frozen regression snapshot records the v1 engine");
+  assert.equal(finalRow.calculationSnapshot.pricingVersion, PRICING_VERSION_4, "frozen regression snapshot records pricingVersion 4");
+  console.log("ok: 16c Publish uses the same fingerprint/total the regression Scope calculated — one source of truth end-to-end");
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 17. AI-ASSISTED DIMENSION EDIT — editing one dimension on the same
+// canonical Scope changes the v4 result, and calculation is never gated on
+// a formal Takeoff-approval status once usable rooms/pieces exist.
+// ════════════════════════════════════════════════════════════════════════
+{
+  const importPayload = {
+    takeoffJobId: "takeoff-job-presentation-regression-1",
+    rooms: [
+      {
+        name: "Kitchen",
+        type: "Kitchen",
+        guidedShapeGroups: [
+          {
+            label: "Main Run",
+            shapeType: "counter",
+            pieces: [{ label: "Main Run", pieceType: "counter", lengthIn: 90, depthIn: 25.5 }]
+          }
+        ],
+        pieces: [
+          {
+            name: "Main Run",
+            finishedEdge: { frontEdgeLengthIn: 90, totalFinishedEdgeLengthIn: 90, approved: true },
+            reviewStatus: "approved"
+          }
+        ]
+      }
+    ]
+  };
+  const seeded = seedScopeFromTakeoffPayload(importPayload, {
+    projectName: "AI Regression Kitchen",
+    customerName: "AI Regression Co"
+  });
+
+  const repository = new InMemoryStudioEstimateRepository();
+  // reviewStatus is deliberately "pending" (never formally approved) — proves
+  // calculation is not gated on Takeoff approval once usable rooms/pieces exist.
+  const studio = createStudioEstimateService({
+    repository,
+    env: {},
+    loadTakeoffWorkspace: async () => ({ reviewStatus: "pending" }),
+    loadLatestTakeoffResult: async () => ({
+      id: "takeoff-result-regression-1",
+      normalizedTakeoffJson: {
+        rooms: [{ id: "room-1", name: "Kitchen", areas: [{ runs: [{ id: "run-1", label: "Main Run", lengthIn: 90, depthIn: 25.5 }] }] }]
+      }
+    })
+  });
+  const created = await repository.create({
+    organizationId: ORG,
+    intakeCaseId: "intake-presentation-regression-ai-1",
+    takeoffJobId: "takeoff-job-presentation-regression-1",
+    status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+    scope: seeded,
+    createdByUserId: ACTOR
+  });
+
+  const before = await studio.calculate({ organizationId: ORG, estimateId: created.id, actorUserId: ACTOR, body: {} });
+  assert.equal(
+    before.calculation.pricingEngine,
+    PRICING_ENGINE_V1,
+    "AI-assisted Scope calculates with the v1 engine while Takeoff review is still pending (never approved)"
+  );
+  assert.equal(
+    before.calculation.pricingVersion,
+    PRICING_VERSION_4,
+    "AI-assisted Scope calculates with pricingVersion 4 while Takeoff review is still pending (never approved)"
+  );
+  const totalBefore = Number(before.calculation.totals.customerDisplayTotal);
+  assert.ok(totalBefore > 0, "AI-assisted Scope produces a non-zero total before the estimator's dimension edit");
+
+  // Same updateScope() contract saveManualScopeDraft() delegates to — the
+  // canonical editor generalized for AI-assisted Scope, not a parallel path.
+  const rowBefore = await repository.getById(ORG, created.id);
+  const edited = {
+    ...rowBefore.scope,
+    rooms: rowBefore.scope.rooms.map((r) => ({
+      ...r,
+      pieces: r.pieces.map((p) => ({
+        ...p,
+        lengthIn: 150,
+        sqft: Math.round(((150 * (Number(p.depthIn) || 25.5)) / 144) * 100) / 100
+      }))
+    }))
+  };
+  await studio.updateScope({ organizationId: ORG, estimateId: created.id, actorUserId: ACTOR, body: { scope: edited } });
+  const afterEdit = await repository.getById(ORG, created.id);
+  assert.equal(
+    afterEdit.scope.rooms[0].pieces[0].lengthIn,
+    150,
+    "estimator dimension edit on AI-assisted Scope persists through the same canonical editor contract"
+  );
+
+  const after = await studio.calculate({ organizationId: ORG, estimateId: created.id, actorUserId: ACTOR, body: {} });
+  assert.equal(after.calculation.pricingEngine, PRICING_ENGINE_V1, "AI-assisted Scope recalculates with the v1 engine after the edit");
+  assert.equal(after.calculation.pricingVersion, PRICING_VERSION_4, "AI-assisted Scope recalculates with pricingVersion 4 after the edit");
+  const totalAfter = Number(after.calculation.totals.customerDisplayTotal);
+  assert.notEqual(totalAfter, totalBefore, "v4 result changes after the estimator edits one dimension on the AI-assisted canonical Scope");
+  assert.ok(totalAfter > totalBefore, "increasing the countertop dimension increases the v4 total");
+  console.log(
+    "ok: 17 AI-assisted canonical Scope recalculates a changed v4 total after one dimension edit, with no Takeoff-approval gate on calculation (debug/approval-request controls do not gate readiness)"
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 18. FORBIDDEN ACTIVE-V4 STRINGS — none of the legacy workflow-state
+// phrases from the presentation acceptance test render anywhere in the
+// three active-flow surfaces (Scope/Customer Choices workspace, takeoff
+// workspace chrome, Review & Publish panel).
+// ════════════════════════════════════════════════════════════════════════
+{
+  const forbiddenStrings = [
+    "Confirmed physical scope",
+    "Approved physical scope",
+    "Manual scope needs confirmation",
+    "Approve Takeoff & Build Estimate",
+    "Last approval request",
+    "Calculate the estimate before approving and publishing",
+    "Approve the Studio estimate before publishing",
+    "Current Takeoff must be approved",
+    "Configuration envelope",
+    "estimator-approved Elite 100 colors",
+    "estimator-approved backsplash",
+    "E. Digital Estimate"
+  ];
+  const surfaces = [
+    ["EstimateScopePanel.tsx", scopePanel],
+    ["EstimateTakeoffWorkspace.tsx", workspace],
+    ["EstimateDigitalEstimatePanel.tsx", digitalEstimatePanel]
+  ];
+  for (const phrase of forbiddenStrings) {
+    for (const [fileName, src] of surfaces) {
+      assert.equal(src.includes(phrase), false, `forbidden active-v4 string "${phrase}" must not render in ${fileName}`);
+    }
+  }
+  console.log(
+    "ok: 18 none of the 12 forbidden active-v4 legacy strings render in Scope / Customer Choices workspace / Review & Publish"
+  );
 }
 
 // ════════════════════════════════════════════════════════════════════════

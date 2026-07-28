@@ -19,6 +19,7 @@ import PlanViewerModal from "./PlanViewerModal";
 import {
   buildStudioWorkspaceWorkflow
 } from "../../../backend-core/src/elite100EstimateStudio/studioWorkspaceWorkflow.mjs";
+import { deriveActiveWorkspaceStatus } from "../../../backend-core/src/elite100EstimateStudio/studioSimplifiedWorkflow.mjs";
 import EstimateScopePanel from "./EstimateScopePanel";
 import ManualPhysicalScopeEditor from "./ManualPhysicalScopeEditor";
 import ProjectDetailsPanel from "./ProjectDetailsPanel";
@@ -147,7 +148,9 @@ export default function EstimateTakeoffWorkspace({
   );
   const [sectionNavError, setSectionNavError] = useState<string | null>(null);
   const [workspaceAutosaveLabel, setWorkspaceAutosaveLabel] = useState("");
-  const [workspaceCalcLabel, setWorkspaceCalcLabel] = useState("");
+  const [calcStatusRaw, setCalcStatusRaw] = useState<
+    "idle" | "updating" | "updated" | "needs_attention"
+  >("idle");
   const flushManualRef = useRef<
     (() => Promise<{ ok: boolean; conflict?: boolean; failed?: boolean }>) | null
   >(null);
@@ -199,6 +202,23 @@ export default function EstimateTakeoffWorkspace({
         null);
     return fromEst && typeof fromEst === "object" ? fromEst : null;
   }, [canonicalEstimate]);
+
+  /** Active-v4 top workspace status — plain Source/Scope/Pricing/Publication only. */
+  const activeWorkspaceStatus = useMemo(
+    () =>
+      deriveActiveWorkspaceStatus(
+        {
+          scope: (canonicalEstimate?.scope as Record<string, unknown> | null) || null,
+          calcStatus: calcStatusRaw,
+          dirty: manualDirty || pricingDirty,
+          hasCalculation: Boolean(
+            (canonicalEstimate?.calculation as { calculatedAt?: string } | undefined)?.calculatedAt
+          )
+        },
+        publicationSummary
+      ),
+    [canonicalEstimate, calcStatusRaw, manualDirty, pricingDirty, publicationSummary]
+  );
 
   const workspaceWorkflow = useMemo((): WorkspaceWorkflow | null => {
     if (!canonicalEstimate) return null;
@@ -378,7 +398,7 @@ export default function EstimateTakeoffWorkspace({
             attachmentName: "No plan attachment",
             persistenceWarning: null,
             caseRow,
-            displayStatus: confirmed ? "Manual scope confirmed" : "Manual scope needs confirmation",
+            displayStatus: confirmed ? "Scope saved" : "Scope in progress",
             scopeRefreshKey: 0,
             handoffNotice: null
           });
@@ -705,8 +725,8 @@ export default function EstimateTakeoffWorkspace({
             <div className="eq-state" role="status" data-testid="manual-estimate-badge">
               <strong>Manual Estimate</strong> — no email, plan, or AI Takeoff required.
               <p className="eq-muted" data-testid="manual-next-step-scope">
-                Next: build rooms and pieces below, then <strong>Confirm Manual Scope</strong> before
-                Pricing Setup.
+                Next: build rooms and pieces below, then continue to Customer Choices — changes
+                autosave.
               </p>
               {!state.accountDirectoryLinked ? (
                 <p className="eq-muted" data-testid="manual-next-step-customer">
@@ -755,8 +775,17 @@ export default function EstimateTakeoffWorkspace({
               <div>{state.manualMode ? "Manual" : safeText(state.attachmentName, "plan.pdf")}</div>
             </div>
             <div>
-              <div className="eq-muted">{state.manualMode ? "Scope status" : "Takeoff status"}</div>
-              <div data-testid="eq-takeoff-display-status">{state.displayStatus}</div>
+              <div className="eq-muted">Scope status</div>
+              <div data-testid="eq-takeoff-display-status">
+                {state.manualMode
+                  ? state.displayStatus
+                  : state.displayStatus === "Takeoff queued" || state.displayStatus === "Takeoff processing"
+                    ? "AI Takeoff processing"
+                    : state.displayStatus === "Needs estimator review" ||
+                        state.displayStatus === "Scope in progress"
+                      ? "AI-assisted Scope ready for estimator review"
+                      : state.displayStatus}
+              </div>
             </div>
             {!state.manualMode ? (
               <div>
@@ -884,16 +913,23 @@ export default function EstimateTakeoffWorkspace({
               </button>
             ))}
           </nav>
-          {(workspaceAutosaveLabel || workspaceCalcLabel) && (
-            <div className="eq-workspace-status-bar" data-testid="eq-workspace-status-bar">
-              {workspaceAutosaveLabel ? (
-                <span data-testid="eq-workspace-autosave-status">{workspaceAutosaveLabel}</span>
-              ) : null}
-              {workspaceCalcLabel ? (
-                <span data-testid="eq-workspace-calc-status">{workspaceCalcLabel}</span>
-              ) : null}
-            </div>
-          )}
+          <div className="eq-workspace-status-bar" data-testid="eq-workspace-status-bar">
+            <span data-testid="eq-workspace-status-source">
+              Source: {activeWorkspaceStatus.source}
+            </span>
+            <span data-testid="eq-workspace-status-scope">Scope: {activeWorkspaceStatus.scope}</span>
+            <span data-testid="eq-workspace-status-pricing">
+              Pricing: {activeWorkspaceStatus.pricing}
+            </span>
+            <span data-testid="eq-workspace-status-publication">
+              Publication: {activeWorkspaceStatus.publication}
+            </span>
+            {workspaceAutosaveLabel ? (
+              <span className="eq-muted" data-testid="eq-workspace-autosave-status">
+                {workspaceAutosaveLabel}
+              </span>
+            ) : null}
+          </div>
           {sectionNavError ? (
             <div className="eq-state eq-state--error" role="alert" data-testid="eq-section-nav-error">
               {sectionNavError}
@@ -988,13 +1024,35 @@ export default function EstimateTakeoffWorkspace({
                   prev.kind === "ready"
                     ? {
                         ...prev,
-                        displayStatus: "Manual scope confirmed",
+                        displayStatus: "Scope saved",
                         scopeRefreshKey: prev.scopeRefreshKey + 1,
-                        handoffNotice: "Manual scope confirmed — continue with Customer Choices."
+                        handoffNotice: "Scope saved — continue with Customer Choices."
                       }
                     : prev
                 );
                 void navigateWorkspaceSection("customer_choices");
+              }}
+            />
+          ) : null}
+
+          {(!collapseCompleted || sectionsExpanded) && !state.manualMode && state.estimateId ? (
+            // Active-v4: AI Takeoff geometry only starts the canonical Scope —
+            // the same rooms/pieces/dimensions/edges/backsplash/openings editor
+            // used for manual estimates is authoritative here too, saved through
+            // the generic estimate PATCH contract (scopeMode="ai_assisted").
+            // Mounted unconditionally (like the manual editor) so autosave
+            // flush-on-Publish works even when a different tab is active.
+            <ManualPhysicalScopeEditor
+              authToken={authToken}
+              caseId={caseId}
+              estimateId={state.estimateId}
+              refreshKey={state.scopeRefreshKey}
+              hidden={activeSection !== "scope"}
+              scopeMode="ai_assisted"
+              onDirtyChange={setManualDirty}
+              onActiveEstimateChange={applyActiveEstimateChange}
+              onRegisterFlush={(flush) => {
+                flushManualRef.current = flush;
               }}
             />
           ) : null}
@@ -1084,7 +1142,7 @@ export default function EstimateTakeoffWorkspace({
               flushPricingRef.current = flush;
             }}
             onAutosaveStatus={setWorkspaceAutosaveLabel}
-            onCalcStatus={setWorkspaceCalcLabel}
+            onCalcStatusRaw={setCalcStatusRaw}
             onBeforePublishFlush={flushAllPendingSaves}
             onPublicationSummary={(pub) => {
               if (!pub) return;

@@ -39,10 +39,16 @@ assert.match(workspace, /sourceType === "manual"/);
 assert.match(workspace, /manual-next-step-scope/);
 assert.match(workspace, /manual-next-step-customer/);
 const panel = readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/EstimateScopePanel.tsx"), "utf8");
-assert.match(panel, /eq-confirmed-physical-scope/);
-assert.match(panel, /eq-edit-manual-scope/);
-assert.match(panel, /Total open edge/);
-assert.match(panel, /Confirmed open edge/);
+// Active-v4: the canonical ManualPhysicalScopeEditor (rendered above this
+// panel) is the single Scope editor + summary — EstimateScopePanel must not
+// render a second, independently-loaded read model of the same rooms/edge/
+// backsplash facts (that duplication caused the "editor shows 46.25 SF,
+// summary shows 0" regression).
+assert.doesNotMatch(panel, /eq-confirmed-physical-scope/);
+assert.doesNotMatch(panel, /eq-section-scope-physical"[\s\S]{0,200}Approved physical scope/);
+assert.match(panel, /eq-scope-canonical-hint/);
+assert.match(editor, /Total open edge/);
+assert.match(editor, /manual-scope-summary/);
 assert.match(wizard, /setIdemKey\(newIdempotencyKey\(\)\)/);
 assert.match(wizard, /\[open\]/);
 const app = readFileSync(join(root, "app-elite100-estimate-studio/src/StudioApp.tsx"), "utf8");
