@@ -239,6 +239,8 @@ console.log("\nelite100RoomPricingCalculator.test.mjs\n");
 
 {
   // Per-piece finished edge LF + per-piece profile override.
+  // (also REGRESSION CASE 4: included Eased + upgraded Knife -> only Knife LF
+  // charged, and the customer-facing label must be "Knife", never "Eased".)
   const { scope, configuration } = oneRoomInput({
     pieces: [
       { id: "p1", pieceType: "counter", lengthIn: 120, depthIn: 25, quantity: 1, finishedEdgeLf: 8 },
@@ -251,7 +253,99 @@ console.log("\nelite100RoomPricingCalculator.test.mjs\n");
   assert.equal(edge.amount, 60, "only p2 (4 LF knife) should be charged: 4 * 15 = 60");
   assert.equal(edge.byPiece.find((p) => p.pieceId === "p1").amount, 0);
   assert.equal(edge.byPiece.find((p) => p.pieceId === "p2").amount, 60);
-  console.log("ok: per-piece finished-edge LF and per-piece profile override price independently");
+  assert.equal(edge.profileLabel, "Knife", "label must describe the actually-charged profile, not the room's included Eased default");
+  assert.notEqual(edge.profileLabel, "Eased");
+  const customerSafe = toCustomerSafeElite100RoomResult(result.rooms[0]);
+  assert.ok(customerSafe.lineItems.some((l) => l.label === "Edge — Knife" && l.amount === 60));
+  console.log("ok: per-piece finished-edge LF and per-piece profile override price independently; included Eased + upgraded Knife labels as Knife, not Eased");
+}
+
+// -------------------------------------------------------------------------
+// BUG FIX REGRESSION: customer-facing edge label must describe the actually
+// priced profile, never an unset/mismatched room-level default, when the
+// charge was computed per-piece (byPiece).
+// -------------------------------------------------------------------------
+{
+  // Case 1: per-piece Knife override, NO room-level edgeProfile set at all
+  // (the exact reported bug — the room default silently falls back to Eased).
+  const { scope, configuration } = oneRoomInput({
+    pieces: [{ id: "p1", pieceType: "counter", lengthIn: 120, depthIn: 25, quantity: 1, finishedEdgeLf: 8 }],
+    roomConfig: { pieceEdgeProfiles: { p1: "edge_knife" } }
+  });
+  const result = await calculateElite100Estimate({ scope, configuration });
+  const edge = result.rooms[0].edge;
+  assert.equal(edge.amount, 120, "8 LF * $15 = 120 (amount must be unaffected by the label fix)");
+  assert.equal(edge.profileLabel, "Knife");
+  assert.notEqual(edge.profileLabel, "Eased", "must never label from the unset room-level default");
+  const customerSafe = toCustomerSafeElite100RoomResult(result.rooms[0]);
+  assert.ok(customerSafe.lineItems.some((l) => l.label === "Edge — Knife" && l.amount === 120));
+  assert.ok(!customerSafe.lineItems.some((l) => /eased/i.test(l.label)), "no stray Eased edge line");
+  console.log("ok: per-piece Knife override with no room-level profile labels as Knife, not Eased");
+}
+
+{
+  // Case 2: two pieces both using Crescent -> one combined "Crescent" label,
+  // not "mixed", since only one distinct profile was actually charged.
+  const { scope, configuration } = oneRoomInput({
+    pieces: [
+      { id: "p1", pieceType: "counter", lengthIn: 60, depthIn: 25, quantity: 1, finishedEdgeLf: 5 },
+      { id: "p2", pieceType: "counter", lengthIn: 60, depthIn: 25, quantity: 1, finishedEdgeLf: 3 }
+    ],
+    roomConfig: { pieceEdgeProfiles: { p1: "edge_crescent", p2: "edge_crescent" } }
+  });
+  const result = await calculateElite100Estimate({ scope, configuration });
+  const edge = result.rooms[0].edge;
+  assert.equal(edge.amount, 120, "(5 + 3) LF * $15 = 120");
+  assert.equal(edge.profileLabel, "Crescent");
+  const customerSafe = toCustomerSafeElite100RoomResult(result.rooms[0]);
+  assert.ok(customerSafe.lineItems.some((l) => l.label === "Edge — Crescent" && l.amount === 120));
+  console.log("ok: two pieces both using Crescent combine into a single accurate Crescent label");
+}
+
+{
+  // Case 3: two different upgraded profiles (Small Ogee + Knife) -> amount is
+  // still the exact sum of both, but the label must be a truthful "Mixed
+  // profiles" rather than arbitrarily naming one of them.
+  const { scope, configuration } = oneRoomInput({
+    pieces: [
+      { id: "p1", pieceType: "counter", lengthIn: 60, depthIn: 25, quantity: 1, finishedEdgeLf: 5 },
+      { id: "p2", pieceType: "counter", lengthIn: 60, depthIn: 25, quantity: 1, finishedEdgeLf: 3 }
+    ],
+    roomConfig: { pieceEdgeProfiles: { p1: "edge_small_ogee", p2: "edge_knife" } }
+  });
+  const result = await calculateElite100Estimate({ scope, configuration });
+  const edge = result.rooms[0].edge;
+  assert.equal(edge.amount, 120, "(5 + 3) LF * $15 = 120 -- sum of both profiles, unaffected by the label fix");
+  assert.equal(edge.profileLabel, "Mixed profiles");
+  assert.notEqual(edge.profileLabel, "Small Ogee");
+  assert.notEqual(edge.profileLabel, "Knife");
+  const customerSafe = toCustomerSafeElite100RoomResult(result.rooms[0]);
+  assert.ok(customerSafe.lineItems.some((l) => l.label === "Edge — Mixed profiles" && l.amount === 120));
+  console.log("ok: Small Ogee + Knife on different pieces reports the exact combined amount under a truthful Mixed profiles label");
+}
+
+{
+  // Case 5 (customer-safe leak check): the per-piece / mixed-profile label fix
+  // must not introduce any new exposure of LF, rate, pricing basis, W/D
+  // tokens, or internal calculation fields into the customer-safe result.
+  const { scope, configuration } = oneRoomInput({
+    pricingBasis: "wholesale",
+    pieces: [
+      { id: "p1", pieceType: "counter", lengthIn: 60, depthIn: 25, quantity: 1, finishedEdgeLf: 5 },
+      { id: "p2", pieceType: "counter", lengthIn: 60, depthIn: 25, quantity: 1, finishedEdgeLf: 3 }
+    ],
+    roomConfig: { pieceEdgeProfiles: { p1: "edge_small_ogee", p2: "edge_knife" } }
+  });
+  const result = await calculateElite100Estimate({ scope, configuration });
+  const customerSafe = toCustomerSafeElite100RoomResult(result.rooms[0]);
+  const serialized = JSON.stringify(customerSafe);
+  assert.ok(!/\bw_edge\b|\bd_edge\b/i.test(serialized), "no legacy W/D edge tokens");
+  assert.ok(!/wholesale/i.test(serialized), "no pricing-basis leak");
+  assert.ok(!/finishedEdgeLf|ratePerLf|byPiece|rateSource/i.test(serialized), "no internal edge calculation fields");
+  assert.ok(!/\b15\b/.test(serialized), "no raw $/LF rate leak (edge line must carry only the rolled-up dollar amount)");
+  const edgeLine = customerSafe.lineItems.find((l) => l.label.startsWith("Edge"));
+  assert.deepEqual(Object.keys(edgeLine).sort(), ["amount", "label"], "edge line item must only ever carry label + amount");
+  console.log("ok: customer-safe result for a per-piece mixed-profile room exposes only label + amount, no LF/rate/basis/internal fields");
 }
 
 // =========================================================================

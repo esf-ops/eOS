@@ -527,10 +527,31 @@ function calculateElite100RoomEdge({ room, roomConfig, counterPieces, bundled })
     totalLf = round2(totalLf + lf);
     byPiece.push({ pieceId: piece.id ?? null, profile: token, tier: premium ? "premium" : "free", lf, ratePerLf: rate, amount: pieceAmount });
   }
+  // The room's `defaultToken` is only a fallback seed for per-piece resolution — it is
+  // NOT the label authority once per-piece results exist. The customer-facing identity
+  // must instead describe what was actually charged: the distinct set of premium
+  // profiles among `byPiece`. A per-piece Knife override must never surface as the
+  // room's unset/mismatched default (e.g. "Eased") just because no room-wide
+  // `edgeProfile` was set.
+  const chargedProfiles = Array.from(new Set(byPiece.filter((p) => p.tier === "premium").map((p) => p.profile)));
+  let resolvedProfile = defaultToken;
+  let resolvedLabel = edgeProfileDisplayLabel(defaultToken);
+  let resolvedTier = "free";
+  if (chargedProfiles.length === 1) {
+    resolvedProfile = chargedProfiles[0];
+    resolvedLabel = edgeProfileDisplayLabel(chargedProfiles[0]);
+    resolvedTier = "premium";
+  } else if (chargedProfiles.length > 1) {
+    // Multiple distinct upgraded profiles were actually charged — name that
+    // truthfully rather than arbitrarily picking one of them.
+    resolvedProfile = null;
+    resolvedLabel = "Mixed profiles";
+    resolvedTier = "mixed";
+  }
   return {
-    profile: defaultToken,
-    profileLabel: edgeProfileDisplayLabel(defaultToken),
-    tier: "mixed",
+    profile: resolvedProfile,
+    profileLabel: resolvedLabel,
+    tier: resolvedTier,
     lf: totalLf,
     ratePerLf: ELITE100_UPGRADED_EDGE_RATE_PER_LF,
     amount,
