@@ -115,6 +115,7 @@ export function createStudioManualEstimateService(deps) {
       customerPhone: body.customerPhone,
       projectName: body.projectName,
       projectAddress: body.projectAddress,
+      pricingBasis: body.pricingBasis,
       estimatorNotes: body.estimatorNotes || body.internalNotes,
       accountDirectoryAccountId: body.accountDirectoryAccountId || null,
       accountDirectoryContactId: body.accountDirectoryContactId || null,

@@ -10,6 +10,16 @@ export type ManualEstimateWizardProps = {
   open: boolean;
   onClose: () => void;
   onCreated: (result: { intakeCaseId: string; estimateId: string; openTarget?: string }) => void;
+  /**
+   * Skip the "Start without plans / Start from plans" chooser and open
+   * straight into the manual-create form. Used by the primary header
+   * "+ New Estimate" action, which must be a single focused form (Customer
+   * name, Email, Phone, Project name, Jobsite address, Pricing basis) with
+   * only Cancel / Create Estimate — never a multi-step wizard. The Command
+   * Center's legacy "New Estimate" launcher keeps the chooser by omitting
+   * this prop.
+   */
+  skipChooser?: boolean;
 };
 
 type Mode = "chooser" | "manual" | "plans";
@@ -25,15 +35,19 @@ export default function ManualEstimateWizard({
   authToken,
   open,
   onClose,
-  onCreated
+  onCreated,
+  skipChooser = false
 }: ManualEstimateWizardProps) {
   const titleId = useId();
-  const [mode, setMode] = useState<Mode>("chooser");
+  const [mode, setMode] = useState<Mode>(skipChooser ? "manual" : "chooser");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [projectName, setProjectName] = useState("");
   const [projectAddress, setProjectAddress] = useState("");
+  const [pricingBasis, setPricingBasis] = useState<"wholesale" | "direct">("wholesale");
   const [internalNotes, setInternalNotes] = useState("");
   // Fresh key each time the launcher opens so intentional New Estimate creates
   // are never collapsed by a prior session's Idempotency-Key. Retries within
@@ -43,19 +57,25 @@ export default function ManualEstimateWizard({
   useEffect(() => {
     if (!open) return;
     setIdemKey(newIdempotencyKey());
-    setMode("chooser");
+    setMode(skipChooser ? "manual" : "chooser");
     setError(null);
     setBusy(false);
     setCustomerName("");
+    setCustomerEmail("");
+    setCustomerPhone("");
     setProjectName("");
     setProjectAddress("");
+    setPricingBasis("wholesale");
     setInternalNotes("");
+    // skipChooser is fixed per mount site (StudioApp vs. Command Center) —
+    // intentionally excluded so this only re-runs on open/close.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
 
   function resetAndClose() {
-    setMode("chooser");
+    setMode(skipChooser ? "manual" : "chooser");
     setError(null);
     setBusy(false);
     onClose();
@@ -72,8 +92,11 @@ export default function ManualEstimateWizard({
         {
           idempotencyKey: idemKey,
           customerName: customerName.trim() || undefined,
+          customerEmail: customerEmail.trim() || undefined,
+          customerPhone: customerPhone.trim() || undefined,
           projectName: projectName.trim() || undefined,
           projectAddress: projectAddress.trim() || undefined,
+          pricingBasis,
           internalNotes: internalNotes.trim() || undefined
         },
         { headers: { "Idempotency-Key": idemKey } }
@@ -123,7 +146,7 @@ export default function ManualEstimateWizard({
             disabled={busy}
             onClick={resetAndClose}
           >
-            Close
+            Cancel
           </button>
         </header>
 
@@ -186,8 +209,8 @@ export default function ManualEstimateWizard({
             }}
           >
             <p className="muted">
-              Step 1 — Customer and project. You can link Account Directory details after the draft
-              opens. Creating this draft never publishes or notifies a customer.
+              Customer name and project name are enough to start — everything below stays editable
+              after the estimate opens. Creating this estimate never publishes or notifies a customer.
             </p>
             <label>
               Customer name
@@ -199,6 +222,26 @@ export default function ManualEstimateWizard({
               />
             </label>
             <label>
+              Email
+              <input
+                type="email"
+                value={customerEmail}
+                onChange={(e) => setCustomerEmail(e.target.value)}
+                data-testid="new-estimate-customer-email"
+                autoComplete="email"
+              />
+            </label>
+            <label>
+              Phone
+              <input
+                type="tel"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                data-testid="new-estimate-customer-phone"
+                autoComplete="tel"
+              />
+            </label>
+            <label>
               Project name
               <input
                 value={projectName}
@@ -207,12 +250,23 @@ export default function ManualEstimateWizard({
               />
             </label>
             <label>
-              Project / jobsite address
+              Jobsite address
               <input
                 value={projectAddress}
                 onChange={(e) => setProjectAddress(e.target.value)}
                 data-testid="new-estimate-project-address"
               />
+            </label>
+            <label>
+              Pricing basis
+              <select
+                value={pricingBasis}
+                onChange={(e) => setPricingBasis(e.target.value === "direct" ? "direct" : "wholesale")}
+                data-testid="new-estimate-pricing-basis"
+              >
+                <option value="wholesale">Wholesale</option>
+                <option value="direct">Direct / Retail</option>
+              </select>
             </label>
             <label>
               Internal notes
@@ -224,16 +278,22 @@ export default function ManualEstimateWizard({
               />
             </label>
             <div className="manual-estimate-form-actions">
-              <button type="button" className="eq-btn-secondary" disabled={busy} onClick={() => setMode("chooser")}>
-                Back
-              </button>
+              {!skipChooser ? (
+                <button type="button" className="eq-btn-secondary" disabled={busy} onClick={() => setMode("chooser")}>
+                  Back
+                </button>
+              ) : (
+                <button type="button" className="eq-btn-secondary" disabled={busy} onClick={resetAndClose}>
+                  Cancel
+                </button>
+              )}
               <button
                 type="submit"
                 className="eq-btn-primary"
                 disabled={busy}
                 data-testid="new-estimate-create"
               >
-                {busy ? "Creating…" : "Create draft"}
+                {busy ? "Creating…" : "Create Estimate"}
               </button>
             </div>
           </form>

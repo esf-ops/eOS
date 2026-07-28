@@ -356,6 +356,7 @@ export function manualCreateRequestFingerprint(body = {}) {
     customerPhone: String(body.customerPhone || "").trim().slice(0, 80),
     projectName: String(body.projectName || "").trim().slice(0, 200),
     projectAddress: String(body.projectAddress || "").trim().slice(0, 400),
+    pricingBasis: normalizeManualPricingBasis(body.pricingBasis),
     estimatorNotes: String(body.estimatorNotes || body.internalNotes || "").trim().slice(0, 4000),
     accountDirectoryAccountId: body.accountDirectoryAccountId
       ? String(body.accountDirectoryAccountId).trim()
@@ -876,6 +877,42 @@ export function isConfirmedManualPhysicalScope(scope) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {'wholesale'|'direct'}
+ */
+export function normalizeManualPricingBasis(value) {
+  return String(value || "").trim().toLowerCase() === "direct" ? "direct" : "wholesale";
+}
+
+/**
+ * Default starter room for a brand-new standalone manual estimate — one
+ * Kitchen room with one included countertop piece (quantity 1, blank
+ * dimensions) so the estimator opens directly into an editable Scope
+ * instead of an empty room list. Built through the same normalizer used
+ * for every subsequent manual scope save, so shape/ids are identical.
+ */
+function buildDefaultManualRooms() {
+  return normalizeManualRooms([
+    {
+      id: "room-kitchen-1",
+      name: "Kitchen",
+      roomType: "Kitchen",
+      included: true,
+      pieces: [
+        {
+          id: "piece-countertop-1",
+          name: "Countertop",
+          pieceType: "counter",
+          included: true,
+          measurementMode: MANUAL_MEASUREMENT_MODES.DIMENSIONS,
+          quantity: 1
+        }
+      ]
+    }
+  ]);
+}
+
+/**
  * Initial scope for a newly created manual estimate (server-authored authority).
  * @param {object} [projectFields]
  */
@@ -892,11 +929,13 @@ export function buildInitialManualScope(projectFields = {}) {
     accountDirectoryContactId: projectFields.accountDirectoryContactId || null,
     accountDirectoryLocationId: projectFields.accountDirectoryLocationId || null,
     customerIdentitySnapshot: projectFields.customerIdentitySnapshot || null,
-    pricingBasis: "wholesale",
+    pricingBasis: normalizeManualPricingBasis(projectFields.pricingBasis),
     materialGroup: "Group Promo",
     colorName: "",
     colorTbd: false,
-    rooms: [],
+    // Standalone create always starts with one Kitchen room + one included
+    // countertop piece (qty 1) so Scope opens editable, never empty.
+    rooms: buildDefaultManualRooms(),
     addOns: {},
     customLineItems: [],
     edgeProfileToken: "edge_eased",
