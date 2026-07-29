@@ -20,11 +20,10 @@ console.log("\naiTakeoffApprovalHandoff.ui.test.mjs\n");
   assert.ok(panel.includes('data-testid="eq-ai-approved-measurements"'));
   assert.ok(panel.includes("handoffSucceededRef"));
   assert.ok(panel.includes("handoffInFlightRef"));
-  // Iframe stays mounted for draft/approving stages (including busy/error).
-  const takeoffSurface = panel.slice(
-    panel.indexOf('data-testid="eq-ai-takeoff-surface"'),
-    panel.indexOf('stage === "published"')
-  );
+  // Persistent Takeoff surface always mounts iframe; approved card is a sibling stage view.
+  const surfaceStart = panel.indexOf('data-testid="eq-ai-takeoff-surface"');
+  const surfaceEnd = panel.indexOf("showPublishedCard", surfaceStart);
+  const takeoffSurface = panel.slice(surfaceStart, surfaceEnd > 0 ? surfaceEnd : surfaceStart + 2500);
   assert.ok(takeoffSurface.includes('data-testid="eq-takeoff-iframe"'));
   assert.ok(takeoffSurface.includes("eq-ai-retry-handoff"));
   assert.ok(takeoffSurface.includes("eq-takeoff-handoff-overlay"));
@@ -33,7 +32,8 @@ console.log("\naiTakeoffApprovalHandoff.ui.test.mjs\n");
     false,
     "approved card is not rendered inside takeoff surface"
   );
-  assert.ok(panel.includes('showTakeoff'));
+  assert.ok(panel.includes('data-testid="eq-ai-takeoff-surface"'));
+  assert.ok(panel.includes("takeoffMode"));
   console.log("ok: 1 iframe remains mounted during handoff; approved card gated");
 }
 
@@ -45,14 +45,15 @@ console.log("\naiTakeoffApprovalHandoff.ui.test.mjs\n");
 }
 
 {
-  // Missed postMessage recovered via bounded status poll — no iframe remount.
+  // Missed postMessage recovered via bounded status poll.
+  // Mode changes remount the iframe via key; draft polls must not rewrite src.
   assert.ok(panel.includes("APPROVAL_FALLBACK_POLL_MS"));
   assert.ok(panel.includes("APPROVAL_FALLBACK_MAX_MS"));
   assert.ok(panel.includes('/api/takeoff-jobs/'));
   assert.equal((panel.match(/setTakeoffSrc/g) || []).length, 0);
   assert.ok(panel.includes("aiTakeoffHeadUrl()"));
-  assert.ok(panel.includes("const [takeoffSrc] = useState"));
-  console.log("ok: 3 missed postMessage fallback; stable iframe src");
+  assert.ok(panel.includes("const takeoffSrc = useMemo"));
+  console.log("ok: 3 missed postMessage fallback; mode-aware takeoff src");
 }
 
 {

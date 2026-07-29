@@ -1,15 +1,13 @@
 /**
  * AiEstimatorWorkspace — single active AI-assisted estimator experience.
  *
- * Mounts one primary surface from deriveAiEstimatorStage:
- *   processing/draft/revision_draft/approving → Takeoff Review iframe
- *   approved → ApprovedMeasurementsCard
- *   published → PublishedEstimateCard
+ * PersistentTakeoffSection (Takeoff iframe) stays mounted for every stage.
+ * Stage cards (approved / published) render below; mode switches editable ↔ readonly.
  *
  * Does not mount ManualPhysicalScopeEditor, EstimateScopePanel, tabs,
  * EstimateWorkflowHeader, EstimateDigitalEstimatePanel, or Customer Choices.
  */
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiGet,
   apiPost,
@@ -322,7 +320,7 @@ export function ApprovedMeasurementsCard(props: {
           </div>
         </div>
       ) : null}
-      <div className="eq-action-row eq-ai-sticky-actions">
+      <div className="eq-action-row eq-ai-stage-actions">
         <button
           type="button"
           className="eq-btn-ghost"
@@ -400,7 +398,7 @@ export function PublishedEstimateCard(props: {
 
       <VerifiedRoomScope rooms={rooms} compact defaultExpanded={false} />
 
-      <div className="eq-action-row eq-ai-sticky-actions">
+      <div className="eq-action-row eq-ai-stage-actions">
         <a
           className="eq-btn-primary"
           href={props.customerUrl}
@@ -454,9 +452,8 @@ export default function AiEstimatorWorkspace({
   onEstimateReady
 }: Props) {
   const takeoffFrameRef = useRef<HTMLIFrameElement | null>(null);
-  const [takeoffSrc] = useState(
-    () => `${aiTakeoffHeadUrl()}/?takeoffJobId=${encodeURIComponent(takeoffJobId)}&consolidated=1`
-  );
+  const [takeoffCollapsed, setTakeoffCollapsed] = useState(false);
+  const [takeoffRemountKey, setTakeoffRemountKey] = useState(0);
   const [measurementsApproved, setMeasurementsApproved] = useState(false);
   const [editingRevision, setEditingRevision] = useState(false);
   const [aiSummary, setAiSummary] = useState<AiSummary | null>(null);
@@ -815,6 +812,8 @@ export default function AiEstimatorWorkspace({
       handoffSucceededRef.current = false;
       setMeasurementsApproved(false);
       setEditingRevision(true);
+      setTakeoffCollapsed(false);
+      setTakeoffRemountKey((k) => k + 1);
       // Keep customerUrl + publishedRevision so Publish Revised can appear after re-approval.
     } catch (e) {
       if (!isAbortError(e)) {
@@ -823,6 +822,7 @@ export default function AiEstimatorWorkspace({
         handoffSucceededRef.current = false;
         setMeasurementsApproved(false);
         setEditingRevision(true);
+        setTakeoffRemountKey((k) => k + 1);
       }
     }
   }
@@ -837,6 +837,57 @@ export default function AiEstimatorWorkspace({
         ? `Editing measurement revision R${estimateRevision} · Based on published revision R${publishedRevision}`
         : `Editing measurement revision R${estimateRevision}`
       : null;
+
+  const takeoffMode =
+    stage === "processing" ||
+    stage === "draft" ||
+    stage === "revision_draft" ||
+    stage === "approving"
+      ? "editable"
+      : "readonly";
+
+  const takeoffHeading = (() => {
+    const rev = estimateRevision != null ? `R${estimateRevision}` : "—";
+    if (stage === "published") {
+      return `Published measurements — Revision ${
+        publishedRevision != null ? `R${publishedRevision}` : rev
+      }`;
+    }
+    if (stage === "approved" || stage === "publishing") {
+      return `Approved Takeoff — Revision ${rev}`;
+    }
+    if (stage === "revision_draft") {
+      return `AI Takeoff Review — editing revision ${rev}`;
+    }
+    return "AI Takeoff Review";
+  })();
+
+  const takeoffSrc = useMemo(() => {
+    const params = new URLSearchParams({
+      takeoffJobId: String(takeoffJobId),
+      consolidated: "1",
+      mode: takeoffMode
+    });
+    if (estimateRevision != null) params.set("revisionNumber", String(estimateRevision));
+    if (publishedRevision != null) {
+      params.set("publishedRevisionNumber", String(publishedRevision));
+    }
+    if (stage === "revision_draft") params.set("isRevisionDraft", "1");
+    if (takeoffMode === "readonly") {
+      params.set(
+        "approvalStatus",
+        stage === "published" ? "published" : "approved"
+      );
+    }
+    return `${aiTakeoffHeadUrl()}/?${params.toString()}`;
+  }, [
+    takeoffJobId,
+    takeoffMode,
+    estimateRevision,
+    publishedRevision,
+    stage,
+    takeoffRemountKey
+  ]);
 
   const headerNode = header ? (
     <CompactEstimateHeader
@@ -853,12 +904,6 @@ export default function AiEstimatorWorkspace({
     </div>
   ) : null;
 
-  const showTakeoff =
-    stage === "processing" ||
-    stage === "draft" ||
-    stage === "revision_draft" ||
-    stage === "approving";
-
   const publishRevised = shouldOfferPublishRevised({
     publishedRevision,
     estimateRevision,
@@ -868,6 +913,10 @@ export default function AiEstimatorWorkspace({
     ? "Publish Revised Estimate"
     : "Publish Digital Estimate";
   const eligible = activeReview ? activeReview.eligible : Boolean(estimateId);
+
+  const showApprovedCard =
+    (stage === "approved" || stage === "publishing") && measurementsApproved;
+  const showPublishedCard = stage === "published" && Boolean(customerUrl);
 
   return (
     <section className="eq-ai-estimator-workspace" data-testid="eq-ai-estimator-workspace">
@@ -879,77 +928,109 @@ export default function AiEstimatorWorkspace({
         </div>
       ) : null}
 
-      {showTakeoff ? (
-        <div className="eq-ai-takeoff-layout" data-testid="eq-ai-takeoff-surface">
-          <div className="eq-ai-takeoff-layout__intro">
+      <div
+        className="eq-ai-takeoff-layout eq-ai-persistent-takeoff"
+        data-testid="eq-ai-takeoff-surface"
+        data-takeoff-mode={takeoffMode}
+      >
+        <div className="eq-ai-takeoff-layout__intro">
+          <div className="eq-ai-takeoff-heading-row">
             <h2 className="eq-ai-section-title" data-testid="eq-ai-takeoff-review-heading">
-              {stage === "revision_draft" ? "AI Takeoff Review — revision" : "AI Takeoff Review"}
+              {takeoffHeading}
             </h2>
+            <button
+              type="button"
+              className="eq-btn-ghost"
+              data-testid="eq-ai-takeoff-collapse"
+              aria-expanded={!takeoffCollapsed}
+              onClick={() => setTakeoffCollapsed((v) => !v)}
+            >
+              {takeoffCollapsed ? "Expand Takeoff" : "Collapse"}
+            </button>
+          </div>
+          {takeoffMode === "readonly" &&
+          publishedRevision != null &&
+          estimateRevision != null &&
+          estimateRevision > publishedRevision ? (
+            <p className="eq-footnote" data-testid="eq-ai-takeoff-dual-revision-notice">
+              Viewing approved measurements R{estimateRevision}. Current customer publication: R
+              {publishedRevision}.
+            </p>
+          ) : null}
+          {takeoffMode === "editable" ? (
             <p className="eq-footnote" data-testid="eq-takeoff-first-hint">
               Review and correct AI measurements in Takeoff Review below. Use Save Draft, then
               Approve Measurements to build the verified estimate. Customer material and product
               choices happen in the Digital Estimate link after publish.
             </p>
+          ) : (
+            <p className="eq-footnote" data-testid="eq-takeoff-readonly-hint">
+              Approved measurements stay visible here for inspection. Use Edit Measurements below
+              to open a new editable revision.
+            </p>
+          )}
+        </div>
+        {stage === "revision_draft" ? (
+          <MeasurementRevisionComparison
+            comparison={aiSummary?.comparison || null}
+            dirtyLocal={false}
+          />
+        ) : null}
+        {handoffError ? (
+          <div className="eq-state eq-state--error" role="alert" data-testid="eq-ai-handoff-error">
+            <strong>{handoffError}</strong>
+            <div className="eq-action-row">
+              <button
+                type="button"
+                className="eq-btn-primary"
+                data-testid="eq-ai-retry-handoff"
+                disabled={handoffBusy}
+                onClick={retryHandoff}
+              >
+                Retry building estimate
+              </button>
+            </div>
           </div>
-          {stage === "revision_draft" ? (
-            <MeasurementRevisionComparison
-              comparison={aiSummary?.comparison || null}
-              dirtyLocal={false}
-            />
-          ) : null}
-          {handoffError ? (
-            <div className="eq-state eq-state--error" role="alert" data-testid="eq-ai-handoff-error">
-              <strong>{handoffError}</strong>
-              <div className="eq-action-row">
-                <button
-                  type="button"
-                  className="eq-btn-primary"
-                  data-testid="eq-ai-retry-handoff"
-                  disabled={handoffBusy}
-                  onClick={retryHandoff}
-                >
-                  Retry building estimate
-                </button>
-              </div>
+        ) : null}
+        <div
+          className={
+            handoffBusy
+              ? "eq-takeoff-frame-wrap eq-takeoff-frame-wrap--busy"
+              : "eq-takeoff-frame-wrap"
+          }
+          data-testid="eq-takeoff-frame-wrap"
+          hidden={takeoffCollapsed}
+        >
+          {handoffBusy ? (
+            <div
+              className="eq-takeoff-handoff-overlay"
+              data-testid="eq-takeoff-handoff-overlay"
+              role="status"
+              aria-live="polite"
+            >
+              Measurements approved. Building verified estimate…
             </div>
           ) : null}
-          <div
-            className={
-              handoffBusy
-                ? "eq-takeoff-frame-wrap eq-takeoff-frame-wrap--busy"
-                : "eq-takeoff-frame-wrap"
-            }
-            data-testid="eq-takeoff-frame-wrap"
-          >
-            {handoffBusy ? (
-              <div
-                className="eq-takeoff-handoff-overlay"
-                data-testid="eq-takeoff-handoff-overlay"
-                role="status"
-                aria-live="polite"
-              >
-                Measurements approved. Building verified estimate…
-              </div>
-            ) : null}
-            <iframe
-              ref={takeoffFrameRef}
-              title="AI Takeoff review"
-              className="eq-takeoff-frame"
-              data-testid="eq-takeoff-iframe"
-              src={takeoffSrc}
-              referrerPolicy="origin"
-              style={handoffBusy ? { pointerEvents: "none" } : undefined}
-            />
-          </div>
+          <iframe
+            key={`takeoff-${takeoffRemountKey}-${takeoffMode}`}
+            ref={takeoffFrameRef}
+            title="AI Takeoff review"
+            className="eq-takeoff-frame"
+            data-testid="eq-takeoff-iframe"
+            data-mode={takeoffMode}
+            src={takeoffSrc}
+            referrerPolicy="origin"
+            style={handoffBusy ? { pointerEvents: "none" } : undefined}
+          />
         </div>
-      ) : null}
+      </div>
 
-      {stage === "published" && customerUrl ? (
+      {showPublishedCard ? (
         <PublishedEstimateCard
           aiSummary={aiSummary}
           estimateRevision={estimateRevision}
           publishedRevision={publishedRevision}
-          customerUrl={customerUrl}
+          customerUrl={customerUrl as string}
           onEdit={() => void editMeasurements()}
           onCopy={() => void copyLink()}
           showPublishRevised={publishRevised}
@@ -958,7 +1039,7 @@ export default function AiEstimatorWorkspace({
         />
       ) : null}
 
-      {(stage === "approved" || stage === "publishing") && measurementsApproved ? (
+      {showApprovedCard ? (
         <ApprovedMeasurementsCard
           aiSummary={aiSummary}
           estimateRevision={estimateRevision}

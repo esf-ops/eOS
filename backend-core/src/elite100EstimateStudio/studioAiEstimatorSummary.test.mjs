@@ -92,12 +92,16 @@ const kitchenEstimate = {
   assert.equal(rooms[0].openingsByType.kitchenSink, 1);
   assert.equal(rooms[0].openingsByType.cooktop, 1);
   assert.equal(rooms[0].openingsByType.outlet, 1);
+  // FHB pieces are backsplash — not countertop
+  assert.equal(rooms[0].countertopSf, 36.92);
+  assert.equal(rooms[0].backsplashSf, 5.79);
   console.log("ok: room-by-room verified scope from Scope");
 }
 
 {
   const summary = buildAiEstimatorSummary({ estimate: kitchenEstimate });
-  assert.equal(summary.measurements.countertopSf, 46.25);
+  assert.equal(summary.measurements.countertopSf, 36.92);
+  assert.equal(summary.measurements.backsplashSf, 5.79);
   assert.equal(summary.measurements.openingsByType.kitchenSink, 1);
   assert.ok(summary.pricing.customerSafeGroups.length >= 1);
   assert.equal(summary.pricing.customerDisplayTotal, 5120);

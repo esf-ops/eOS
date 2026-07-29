@@ -225,6 +225,34 @@ export default function ConsolidatedTakeoffReview() {
     }
   }, []);
 
+  const urlWorkspace = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const modeRaw = String(params.get("mode") || "").toLowerCase();
+      const mode =
+        modeRaw === "readonly"
+          ? "readonly"
+          : modeRaw === "editable"
+            ? "editable"
+            : "auto";
+      return {
+        mode: mode as "editable" | "readonly" | "auto",
+        revisionNumber: params.get("revisionNumber"),
+        publishedRevisionNumber: params.get("publishedRevisionNumber"),
+        approvalStatus: params.get("approvalStatus"),
+        isRevisionDraft: params.get("isRevisionDraft") === "1"
+      };
+    } catch {
+      return {
+        mode: "auto" as const,
+        revisionNumber: null,
+        publishedRevisionNumber: null,
+        approvalStatus: null,
+        isRevisionDraft: false
+      };
+    }
+  }, []);
+
   const [draft, setDraft] = useState<any | null>(() => createEmptyManualTakeoffDraft());
   const [excludedRunIds, setExcludedRunIds] = useState<Set<string>>(new Set());
   const [deletedRoomIds, setDeletedRoomIds] = useState<Set<string>>(new Set());
@@ -569,23 +597,26 @@ export default function ConsolidatedTakeoffReview() {
     };
   }, []);
 
-  /** Local-only draft mutation — never POSTs corrections. */
+  /** Local-only draft mutation — never POSTs corrections. No-op in readonly mode. */
   const updateDraft = useCallback(
     (next: any) => {
+      if (urlWorkspace.mode === "readonly") return;
       const snapshot = structuredClone(next);
       draftRef.current = snapshot;
       setDraft(snapshot);
       markWorksheetDirty();
     },
-    [markWorksheetDirty]
+    [markWorksheetDirty, urlWorkspace.mode]
   );
 
   /**
    * Save draft is the sole normal correction writer.
    * Double-click is coalesced by saveInFlightRef.
    * Clean worksheets skip POST (client no-op → Saved).
+   * Readonly mode never mutates.
    */
   const persistDraft = useCallback(async () => {
+    if (urlWorkspace.mode === "readonly") return;
     if (!authToken || !takeoffJobId || !draftRef.current) return;
     if (saveInFlightRef.current) return;
     if (saveStatus === "conflict") return;
@@ -668,11 +699,12 @@ export default function ConsolidatedTakeoffReview() {
     } finally {
       saveInFlightRef.current = false;
     }
-  }, [authToken, takeoffJobId, buildReviewState, approveStatus, saveStatus]);
+  }, [authToken, takeoffJobId, buildReviewState, approveStatus, saveStatus, urlWorkspace.mode]);
 
   /** Confirm exposed edges — local draft only; zero correction requests. */
   const confirmExposedEdges = useCallback(
     (row: PieceRow, finishedEdgePayload: Record<string, unknown>) => {
+      if (urlWorkspace.mode === "readonly") return;
       const next = applyLocalExposedEdgeConfirm(
         draftRef.current || createEmptyManualTakeoffDraft(),
         { roomId: row.roomId, areaId: row.areaId, runId: row.runId },
@@ -690,7 +722,7 @@ export default function ConsolidatedTakeoffReview() {
         setDisplayStatus("Needs estimator review");
       }
     },
-    [updateDraft, jobReviewStatus, approveStatus]
+    [updateDraft, jobReviewStatus, approveStatus, urlWorkspace.mode]
   );
 
   const closeEdgeDialog = useCallback(() => {
@@ -996,6 +1028,7 @@ export default function ConsolidatedTakeoffReview() {
   }, [rows, roomOptions.length, blocking, advisory]);
 
   const handleApproveClick = useCallback(async () => {
+    if (urlWorkspace.mode === "readonly") return;
     if (!authToken || !takeoffJobId || !draft) return;
     if (approveStatus === "approving" || approveStatus === "approved") return;
     if (blocking.length > 0) return;
@@ -1105,7 +1138,8 @@ export default function ConsolidatedTakeoffReview() {
     advisory.length,
     saveStatus,
     unsavedEdgeRunIds,
-    buildReviewState
+    buildReviewState,
+    urlWorkspace.mode
   ]);
 
   const signIn = async (e: React.FormEvent) => {
@@ -1162,14 +1196,56 @@ export default function ConsolidatedTakeoffReview() {
     );
   }
 
+  const isReadonly =
+    urlWorkspace.mode === "readonly" ||
+    (urlWorkspace.mode === "auto" &&
+      (jobReviewStatus === "approved" || approveStatus === "approved"));
+
+  const readonlyTitle = (() => {
+    const rev = urlWorkspace.revisionNumber
+      ? `Revision R${urlWorkspace.revisionNumber}`
+      : null;
+    if (urlWorkspace.approvalStatus === "published") {
+      return rev ? `Published measurements — ${rev}` : "Published measurements";
+    }
+    if (isReadonly) {
+      return rev ? `Approved Takeoff — ${rev}` : "Approved Takeoff";
+    }
+    if (urlWorkspace.isRevisionDraft && urlWorkspace.revisionNumber) {
+      return `Editing measurement revision R${urlWorkspace.revisionNumber}`;
+    }
+    return "Takeoff review";
+  })();
+
   return (
-    <div className="ctr-shell" data-testid="consolidated-takeoff-review">
+    <div
+      className="ctr-shell"
+      data-testid="consolidated-takeoff-review"
+      data-mode={isReadonly ? "readonly" : "editable"}
+    >
       <header className="ctr-header">
         <div>
-          <h1>Takeoff review</h1>
+          <h1 data-testid="ctr-workspace-title">{readonlyTitle}</h1>
+          {isReadonly &&
+          urlWorkspace.publishedRevisionNumber &&
+          urlWorkspace.revisionNumber &&
+          String(urlWorkspace.revisionNumber) !== String(urlWorkspace.publishedRevisionNumber) ? (
+            <p className="ctr-muted" data-testid="ctr-dual-revision-notice">
+              Viewing approved measurements R{urlWorkspace.revisionNumber}. Current customer
+              publication: R{urlWorkspace.publishedRevisionNumber}.
+            </p>
+          ) : null}
           <p className="ctr-muted">
-            Status: <strong data-testid="ctr-status">{displayStatus}</strong>
-            {saveStatus !== "idle" ? (
+            {isReadonly ? (
+              <>
+                Mode: <strong data-testid="ctr-status">Read-only</strong>
+              </>
+            ) : (
+              <>
+                Status: <strong data-testid="ctr-status">{displayStatus}</strong>
+              </>
+            )}
+            {!isReadonly && saveStatus !== "idle" ? (
               <>
                 {" · "}
                 <span data-testid="ctr-save-status">
@@ -1351,6 +1427,8 @@ export default function ConsolidatedTakeoffReview() {
                               aria-label="Room name"
                               data-testid="ctr-room-name"
                               value={section.name}
+                              readOnly={isReadonly}
+                              disabled={isReadonly}
                               onChange={(e) =>
                                 updateDraft(renameRoom(draft, section.id, e.target.value))
                               }
@@ -1367,6 +1445,7 @@ export default function ConsolidatedTakeoffReview() {
                               type="button"
                               className="ctr-btn-secondary ctr-room-add-piece"
                               data-testid="ctr-room-add-piece"
+                              hidden={isReadonly}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedRoomId(section.id);
@@ -1408,7 +1487,7 @@ export default function ConsolidatedTakeoffReview() {
                         const bsId = `ctr-bs-${rowControlKey}`;
                         const inclId = `ctr-incl-${rowControlKey}`;
                         const cutId = `ctr-cutouts-${rowControlKey}`;
-                        const rowLocked = approveStatus === "approved";
+                        const rowLocked = isReadonly || approveStatus === "approved";
                         return (
                     <tr
                       key={row.key}
@@ -1805,6 +1884,7 @@ export default function ConsolidatedTakeoffReview() {
                         />
                       </td>
                       <td className="ctr-col-actions">
+                        {!isReadonly ? (
                         <button
                           type="button"
                           className="ctr-btn-secondary ctr-remove"
@@ -1814,6 +1894,7 @@ export default function ConsolidatedTakeoffReview() {
                         >
                           Remove piece
                         </button>
+                        ) : null}
                       </td>
                     </tr>
                         );
@@ -1825,6 +1906,8 @@ export default function ConsolidatedTakeoffReview() {
             </div>
 
             <div className="ctr-actions">
+              {!isReadonly ? (
+                <>
               <button
                 type="button"
                 className="ctr-btn-secondary"
@@ -1891,15 +1974,17 @@ export default function ConsolidatedTakeoffReview() {
                   {retryBusy ? "Retrying…" : "Retry AI Takeoff"}
                 </button>
               ) : null}
+                </>
+              ) : null}
 
-              {blocking.length ? (
+              {!isReadonly && blocking.length ? (
                 <ul className="ctr-issues ctr-issues--block" data-testid="ctr-blocking">
                   {blocking.map((b) => (
                     <li key={`${b.code}-${b.path}`}>{b.message}</li>
                   ))}
                 </ul>
               ) : null}
-              {advisory.length ? (
+              {!isReadonly && advisory.length ? (
                 <ul className="ctr-issues ctr-issues--warn" data-testid="ctr-advisory">
                   {advisory.map((b) => (
                     <li key={`${b.code}-${b.path}`}>{b.message}</li>
@@ -1907,7 +1992,7 @@ export default function ConsolidatedTakeoffReview() {
                 </ul>
               ) : null}
 
-              {approveMsg ? (
+              {!isReadonly && approveMsg ? (
                 <p
                   className={
                     approveStatus === "error" ? "ctr-approve-msg ctr-approve-msg--error" : "ctr-approve-msg"
@@ -1918,7 +2003,7 @@ export default function ConsolidatedTakeoffReview() {
                 </p>
               ) : null}
 
-              {approvalDiag ? (
+              {!isReadonly && approvalDiag ? (
                 <div className="ctr-approve-diag" data-testid="ctr-approve-diag">
                   <div className="ctr-approve-diag-title">Last approval request</div>
                   <ul>
@@ -1933,6 +2018,7 @@ export default function ConsolidatedTakeoffReview() {
                 </div>
               ) : null}
 
+              {!isReadonly ? (
               <button
                 type="button"
                 className="ctr-btn-primary"
@@ -1956,6 +2042,7 @@ export default function ConsolidatedTakeoffReview() {
                   blockingCount: blocking.length
                 })}
               </button>
+              ) : null}
             </div>
             {summary ? (
               <p className="ctr-muted" data-testid="ctr-server-summary">

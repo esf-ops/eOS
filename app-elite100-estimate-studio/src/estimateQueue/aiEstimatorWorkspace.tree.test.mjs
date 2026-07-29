@@ -47,10 +47,12 @@ assert.equal(readViews.includes("calculate"), false);
 // Mount order contracts in AiEstimatorWorkspace render
 const renderTail = workspaceSrc.slice(workspaceSrc.lastIndexOf("return ("));
 assert.ok(renderTail.includes("headerNode"));
-assert.ok(renderTail.includes("showTakeoff"));
+assert.ok(renderTail.includes("eq-ai-takeoff-surface"));
+assert.ok(renderTail.includes("takeoffMode"));
 assert.ok(renderTail.includes("<PublishedEstimateCard"));
 assert.ok(renderTail.includes("<ApprovedMeasurementsCard"));
 assert.ok(renderTail.includes("eq-takeoff-iframe"));
+assert.equal(renderTail.includes("const showTakeoff"), false);
 
 assert.match(
   takeoffWs,

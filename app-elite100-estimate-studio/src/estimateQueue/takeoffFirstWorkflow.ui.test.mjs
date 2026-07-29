@@ -48,7 +48,10 @@ console.log("\ntakeoffFirstWorkflow.ui.test.mjs\n");
   assert.ok(panelAlias.includes("AiEstimatorWorkspace"), "AiTakeoffFirstPanel aliases AiEstimatorWorkspace");
   assert.ok(panel.includes('data-testid="eq-takeoff-iframe"'), "Takeoff Review iframe mounts");
   assert.ok(panel.includes("aiTakeoffHeadUrl"), "iframe uses production Takeoff head URL");
-  assert.ok(panel.includes("consolidated=1"), "iframe opens consolidated Takeoff Review");
+  assert.ok(
+    panel.includes('consolidated=1') || panel.includes('consolidated: "1"'),
+    "iframe opens consolidated Takeoff Review"
+  );
   assert.match(
     workspace,
     /state\.kind === "ready" && !state\.manualMode[\s\S]*?<AiEstimatorWorkspace/,
