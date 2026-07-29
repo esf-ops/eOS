@@ -830,6 +830,24 @@ export function createStudioSimplifiedWorkflowService(deps) {
       }
     });
 
+    // Only after successful R(n) publish: supersede older estimate revisions.
+    // Failed publish must leave prior published revision + customer link intact.
+    if (
+      publication &&
+      !publication.error &&
+      typeof studioEstimateService.supersedeOlderRevisionsAfterPublish === "function"
+    ) {
+      try {
+        await studioEstimateService.supersedeOlderRevisionsAfterPublish({
+          organizationId,
+          estimateId,
+          actorUserId
+        });
+      } catch {
+        /* publication already succeeded — do not fail the publish response */
+      }
+    }
+
     const frozenOptionPackage = buildFrozenCustomerOptionPackageSummary({
       estimate: prepared.estimate,
       configuration,

@@ -96,11 +96,13 @@ export function productMatchesRoomType(productRooms, roomType) {
  * @param {string|null|undefined} roomDisplayName
  */
 export function cutoutDisplayLabelForRoom(roomType, roomDisplayName) {
-  const name = String(roomDisplayName || "").trim();
   const t = String(roomType || "");
-  let cutout = "Sink cutout";
-  if (t === "bar_prep") cutout = "Bar/prep sink cutout";
-  else if (t === "vanity" || t === "vanity_bath") cutout = "Vanity sink cutout";
-  else if (t === "laundry_utility") cutout = "Laundry sink cutout";
-  return name ? `${name} — ${cutout}` : cutout;
+  if (t === "bar_prep") return "Vanity/bar sink cutout";
+  if (t === "vanity" || t === "vanity_bath") return "Vanity/bar sink cutout";
+  if (t === "laundry_utility") return "Vanity/bar sink cutout";
+  // Kitchen (and unknown kitchen-like rooms): one canonical kitchen sink label.
+  // roomDisplayName is intentionally unused — room-prefixed aliases caused
+  // duplicate customer-visible lines alongside frozen fabrication labels.
+  void roomDisplayName;
+  return "Kitchen sink cutout";
 }

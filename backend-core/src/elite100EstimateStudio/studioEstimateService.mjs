@@ -1657,8 +1657,8 @@ export function createStudioEstimateService(deps = {}) {
 
     /**
      * Open a measurement revision for an approved/published Studio estimate.
-     * Preserves the prior approved row (superseded) and returns a new draft
-     * revision that keeps the same Takeoff job + last approved Scope preload.
+     * Creates R(n+1) as a draft sibling while R(n) remains the active published
+     * revision (status unchanged) until R(n+1) successfully publishes.
      * Confirm required. No SQL / pricing formula changes.
      */
     async openMeasurementRevision({ organizationId, estimateId, actorUserId, body = {} }) {
@@ -1686,12 +1686,14 @@ export function createStudioEstimateService(deps = {}) {
           ok: true,
           reused: true,
           estimate: safeEstimateView(row),
-          previousRevisionSummary: null
+          previousRevisionSummary: null,
+          priorEstimate: null
         };
       }
       const priorSnapshot = {
         id: row.id,
         revision: row.revision,
+        status: row.status,
         scope: row.scope,
         calculation: row.calculationSnapshot
           ? {
@@ -1705,25 +1707,69 @@ export function createStudioEstimateService(deps = {}) {
           : null,
         approval: row.approval
       };
-      const next = await revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
-        status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
-        scope: row.scope,
-        takeoffJobId: row.takeoffJobId,
-        sourceTakeoffResultId: row.sourceTakeoffResultId,
-        staleReason: "Measurement revision opened from approved estimate"
-      });
-      const prevSummary = next.__previousRevisionSummary || null;
-      delete next.__previousRevisionSummary;
+      const previousRevisionSummary = {
+        revision: Number(row.revision) || 1,
+        estimateId: row.id,
+        approvedAt: row.approval?.approvedAt || row.approvedAt || null,
+        exactInternalTotal:
+          row.approval?.exactInternalTotal ??
+          row.calculationSnapshot?.totals?.exactInternalTotal ??
+          null,
+        label: `Previous published/approved revision R${Number(row.revision) || 1} remains active until this revision publishes`
+      };
+
+      let next;
+      if (typeof repository.createSiblingRevisionFrom === "function") {
+        next = await repository.createSiblingRevisionFrom(
+          organizationId,
+          row.id,
+          {
+            status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+            scope: row.scope,
+            takeoffJobId: row.takeoffJobId,
+            sourceTakeoffResultId: row.sourceTakeoffResultId,
+            staleReason: "Measurement revision opened — prior published revision stays active until publish"
+          },
+          actorUserId
+        );
+      } else {
+        // Legacy repos: fall back to createRevisionFrom (supersedes immediately).
+        next = await revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
+          status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+          scope: row.scope,
+          takeoffJobId: row.takeoffJobId,
+          sourceTakeoffResultId: row.sourceTakeoffResultId,
+          staleReason: "Measurement revision opened from approved estimate"
+        });
+        delete next.__previousRevisionSummary;
+      }
+
       return {
         ok: true,
         reused: false,
         estimate: safeEstimateView(next, {
-          previousRevisionSummary: prevSummary,
+          previousRevisionSummary,
           priorEstimate: priorSnapshot
         }),
-        previousRevisionSummary: prevSummary,
+        previousRevisionSummary,
         priorEstimate: priorSnapshot
       };
+    },
+
+    /**
+     * After a successful Digital Estimate publish, supersede older estimate
+     * revisions in the intake-case family. No-op when repository lacks the helper.
+     */
+    async supersedeOlderRevisionsAfterPublish({ organizationId, estimateId, actorUserId }) {
+      if (typeof repository.supersedeOlderRevisionsInFamily !== "function") {
+        return { superseded: [] };
+      }
+      const superseded = await repository.supersedeOlderRevisionsInFamily(
+        organizationId,
+        estimateId,
+        actorUserId
+      );
+      return { superseded };
     }
   };
 }

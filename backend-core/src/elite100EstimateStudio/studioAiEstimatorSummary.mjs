@@ -4,6 +4,8 @@
  * Never invents customer activity or authoritative prices.
  */
 
+import { dedupeCustomerSafeCutoutLines } from "./customerSafeCutoutPresentation.mjs";
+
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -141,14 +143,39 @@ export function buildCustomerSafePriceGroups(estimate) {
   push("countertop", "Countertop material", review.countertopMaterialTotal);
   push("backsplash", "Backsplash", review.backsplashTotal);
   push("tax", "Material use tax", review.materialTaxTotal);
-  push("fabrication", "Edges, cutouts & fabrication", review.fabricationTotal);
 
-  // Prefer elite100 per-room lineItems when present (more specific).
+  // Prefer typed cutout lines from reviewSummary when present.
+  const cutoutLines = Array.isArray(review.cutoutLines) ? review.cutoutLines : [];
+  for (const line of cutoutLines) {
+    push(
+      String(line.label || "cutout")
+        .toLowerCase()
+        .replace(/\s+/g, "_")
+        .slice(0, 40),
+      String(line.label || "Cutout"),
+      line.amount
+    );
+  }
+
+  // Remaining fabrication (edges, sinks, products, etc.) after typed cutouts.
+  const cutoutSum = round2(cutoutLines.reduce((s, l) => s + (Number(l.amount) || 0), 0));
+  const fabRemainder = round2((Number(review.fabricationTotal) || 0) - cutoutSum);
+  if (fabRemainder > 0) {
+    push("fabrication", "Edges & fabrication", fabRemainder);
+  } else if (!cutoutLines.length) {
+    push("fabrication", "Edges, cutouts & fabrication", review.fabricationTotal);
+  }
+
+  // Prefer elite100 / customerFacing per-room lineItems when present (more specific).
   const eliteRooms = Array.isArray(calc.elite100?.rooms)
     ? calc.elite100.rooms
-    : Array.isArray(estimate?.calculationSnapshot?.elite100?.rooms)
-      ? estimate.calculationSnapshot.elite100.rooms
-      : [];
+    : Array.isArray(estimate?.calculationSnapshot?.elite100?.customerFacing?.rooms)
+      ? estimate.calculationSnapshot.elite100.customerFacing.rooms
+      : Array.isArray(estimate?.calculationSnapshot?.elite100?.rooms)
+        ? estimate.calculationSnapshot.elite100.rooms
+        : Array.isArray(calc.customerFacing?.rooms)
+          ? calc.customerFacing.rooms
+          : [];
   if (eliteRooms.length) {
     const byLabel = new Map();
     for (const room of eliteRooms) {
@@ -159,25 +186,27 @@ export function buildCustomerSafePriceGroups(estimate) {
       }
     }
     if (byLabel.size) {
-      return [...byLabel.entries()]
+      const raw = [...byLabel.entries()]
         .filter(([, amount]) => amount !== 0)
         .map(([label, amount]) => ({
           key: label.toLowerCase().replace(/\s+/g, "_").slice(0, 40),
           label,
           amount
         }));
+      return dedupeCustomerSafeCutoutLines(raw, { amountUnit: "dollars" });
     }
   }
 
+  const deduped = dedupeCustomerSafeCutoutLines(groups, { amountUnit: "dollars" });
   const total = num(totals.customerDisplayTotal);
-  const grouped = round2(groups.reduce((s, g) => s + g.amount, 0));
-  if (total > 0 && groups.length && Math.abs(total - grouped) > 0.5) {
-    push("other", "Other / adjustments", total - grouped);
+  const grouped = round2(deduped.reduce((s, g) => s + g.amount, 0));
+  if (total > 0 && deduped.length && Math.abs(total - grouped) > 0.5) {
+    deduped.push({ key: "other", label: "Other / adjustments", amount: round2(total - grouped) });
   }
-  if (!groups.length && total > 0) {
-    push("total", "Starting estimate total", total);
+  if (!deduped.length && total > 0) {
+    deduped.push({ key: "total", label: "Starting estimate total", amount: total });
   }
-  return groups;
+  return deduped;
 }
 
 /**

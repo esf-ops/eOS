@@ -76,10 +76,11 @@ import {
   normalizeEdgeProfileToken
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
 import { getCatalogMeta, getProductById } from "../digitalEstimate/catalog/esfPlumbingCatalog.mjs";
+import { customerSafeCutoutLinesFromCharges } from "./customerSafeCutoutPresentation.mjs";
 import {
-  readTrustedPartnerAccountConfig,
   isSpahnTrustedPartner,
   isWattsTrustedPartner,
+  readTrustedPartnerAccountConfig,
   SPAHN_ESTIMATE_ADJUSTMENT_PERCENT,
   WATTS_PROMO_RATE_PER_SF
 } from "./studioEstimateTrustedAccounts.mjs";
@@ -1045,7 +1046,11 @@ export function toCustomerSafeElite100RoomResult(room) {
   if (waterfallTotal > 0) lineItems.push({ label: "Waterfall", amount: waterfallTotal });
   if (room.edge?.amount > 0) lineItems.push({ label: `Edge — ${room.edge.profileLabel}`, amount: room.edge.amount });
   if (room.standaloneMiter?.amount > 0) lineItems.push({ label: "Miter", amount: room.standaloneMiter.amount });
-  if (room.cutoutsTotal > 0) lineItems.push({ label: "Cutouts", amount: room.cutoutsTotal });
+  // Typed cutout lines (same charges as cutoutsTotal) — never a second aggregate "Cutouts"
+  // line that aliases room-specific configuration labels.
+  for (const cut of customerSafeCutoutLinesFromCharges(room.cutouts)) {
+    lineItems.push(cut);
+  }
   if (room.sinkProductsTotal > 0) lineItems.push({ label: "Sinks", amount: room.sinkProductsTotal });
   if (room.productsTotal > 0) lineItems.push({ label: "Products", amount: room.productsTotal });
   if (room.nonProgramTripAmount > 0) lineItems.push({ label: "Additional Trip", amount: room.nonProgramTripAmount });

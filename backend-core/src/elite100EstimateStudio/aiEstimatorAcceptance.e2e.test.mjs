@@ -284,7 +284,8 @@ console.log("\naiEstimatorAcceptance.e2e.test.mjs\n");
   assert.equal(opened.priorEstimate.revision, 1);
   assert.ok(opened.estimate.aiEstimatorSummary?.comparison, "comparison on revision draft");
   const prior = await studioRepo.getById(ORG, row.id);
-  assert.equal(prior.status, STUDIO_ESTIMATE_STATUSES.SUPERSEDED);
+  assert.notEqual(prior.status, STUDIO_ESTIMATE_STATUSES.SUPERSEDED, "R1 not superseded while R2 drafts");
+  assert.ok(prior.approval, "R1 approval preserved");
 
   // Change sink 96 → 120 and persist (save draft / reload)
   const revScope = {

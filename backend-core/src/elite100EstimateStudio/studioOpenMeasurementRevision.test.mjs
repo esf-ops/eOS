@@ -76,7 +76,8 @@ assert.ok(opened.priorEstimate, "priorEstimate snapshot returned");
 assert.ok(opened.estimate.aiEstimatorSummary, "aiEstimatorSummary on revision draft");
 
 const prior = await repo.getById(ORG, created.id);
-assert.equal(prior.status, STUDIO_ESTIMATE_STATUSES.SUPERSEDED, "R1 preserved as superseded");
+assert.notEqual(prior.status, STUDIO_ESTIMATE_STATUSES.SUPERSEDED, "R1 stays active until R2 publishes");
+assert.equal(prior.status, STUDIO_ESTIMATE_STATUSES.APPROVED, "R1 remains approved/published while R2 drafts");
 assert.equal(prior.approval?.customerDisplayTotal, 4200);
 
 const again = await studio.openMeasurementRevision({

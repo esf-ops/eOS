@@ -356,7 +356,8 @@ export function PublicationActivitySummary(props: {
         </p>
         {props.hasNewerApprovedRevision ? (
           <p data-testid="eq-ai-newer-approved">
-            Approved revision R{props.newerApprovedRevision} is ready to publish
+            Approved revision R{props.newerApprovedRevision} is ready to publish. Current customer
+            link still serves published R{props.currentPublishedRevision} until publish succeeds.
           </p>
         ) : (
           <p data-testid="eq-ai-no-newer-revision">No newer measurement revision</p>

@@ -2864,3 +2864,13 @@
 | **SQL** | None. |
 | **Impacted** | `studioAiEstimatorSummary.mjs`, `studioEstimateService.safeEstimateView`, `AiEstimatorWorkspace.tsx`, `AiEstimatorReadViews.tsx`. |
 | **Revisit trigger** | Public DE shows both a configuration sink-cutout option line and a fabrication Cutouts line that double the customer total; then fix calculator or publish snapshot grouping with a proven defect. |
+
+### 199. Measurement revision publish lifecycle + cutout display aliases (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `fix/consolidate-ai-estimator-workflow` |
+| **Decision** | Opening a measurement revision creates a sibling draft (R2) **without** superseding the prior approved/published estimate row (R1). R1 remains the active customer publication target through R2 draft and R2 approval. Only a **successful** R2 Digital Estimate publish supersedes older family estimate rows. Failed R2 publish leaves R1 + its customer link intact. Customer-visible cutout labels are canonical (`Kitchen sink cutout`, `Vanity/bar sink cutout`, `Cooktop cutout`, `Electrical outlet cutout`); alias pairs are collapsed in customer-safe projections without changing calculator amounts. |
+| **Why** | Premature supersede at Edit Measurements broke the “R1 stays live until R2 publish” product contract. Duplicate cutout labels were display aliases, not double charges. |
+| **SQL** | None. |
+| **Impacted** | `createSiblingRevisionFrom` / `supersedeOlderRevisionsInFamily`, `openMeasurementRevision`, simplified-publish post-success supersede, `customerSafeCutoutPresentation.mjs`, customer-safe room lineItems, DE projection dedupe. |

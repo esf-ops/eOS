@@ -567,6 +567,10 @@ function buildActiveReviewSummary(result) {
     "Edge",
     "Miter",
     "Cutouts",
+    "Kitchen sink cutout",
+    "Vanity/bar sink cutout",
+    "Cooktop cutout",
+    "Electrical outlet cutout",
     "Sinks",
     "Products",
     "Additional Trip",
@@ -595,7 +599,21 @@ function buildActiveReviewSummary(result) {
     materialTaxTotal: sumLineItemsLabeled("Material Use Tax"),
     backsplashPresent,
     backsplashTotal: sumLineItemsLabeled("Backsplash"),
-    fabricationTotal
+    fabricationTotal,
+    // Typed cutout charges for estimator display (same dollars as in fabricationTotal).
+    cutoutLines: (() => {
+      const byLabel = new Map();
+      for (const room of rooms) {
+        for (const li of room.lineItems || []) {
+          const label = String(li.label || "");
+          if (!/cutout/i.test(label)) continue;
+          byLabel.set(label, round2((byLabel.get(label) || 0) + (Number(li.amount) || 0)));
+        }
+      }
+      return [...byLabel.entries()]
+        .filter(([, amount]) => amount > 0)
+        .map(([label, amount]) => ({ label, amount }));
+    })()
   };
 }
 

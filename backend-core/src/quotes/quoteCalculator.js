@@ -72,10 +72,10 @@ export const PROTOTYPE_TIER_PRICE_PER_SQFT = Object.freeze({
 
 /** Prototype add-on unit prices (legacy global ids). */
 export const PROTOTYPE_ADDON_UNIT_PRICES = Object.freeze({
-  "qty-sink": { name: "Kitchen Sink Cutouts", price: 200 },
-  "qty-bar": { name: "Vanity/Bar Sink Cutouts", price: 100 },
-  "qty-cook": { name: "Cooktop Cutouts", price: 150 },
-  "qty-outlet": { name: "Electrical Outlet Cutouts", price: 30 },
+  "qty-sink": { name: "Kitchen sink cutout", price: 200 },
+  "qty-bar": { name: "Vanity/bar sink cutout", price: 100 },
+  "qty-cook": { name: "Cooktop cutout", price: 150 },
+  "qty-outlet": { name: "Electrical outlet cutout", price: 30 },
   "qty-ss": { name: "ESF Stainless Kitchen Sink", price: 160 },
   "qty-blanco": { name: "Stock Blanco Sink", price: 450 },
   "qty-v-rect": { name: "ESF Rectangular Vanity Sink", price: 55 },
