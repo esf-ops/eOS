@@ -61,14 +61,14 @@ console.log("\npersistentLiveEstimateWorkspace.contract.test.mjs\n");
     ),
     "utf8"
   );
-  assert.match(commercial, /Additional Lines/);
+  assert.match(commercial, /Estimate Options/);
   assert.match(commercial, /Add line/);
   assert.match(commercial, /Add Tear Out/);
   assert.match(commercial, /Save now/);
   assert.equal(commercial.includes("Add Crane $350"), false);
   assert.equal(commercial.includes('data-testid="eq-add-crane"'), false);
   assert.equal(commercial.includes("Add internal-only"), false);
-  console.log("ok: Additional Lines simplification");
+  console.log("ok: Estimate Options simplification");
 }
 
 {

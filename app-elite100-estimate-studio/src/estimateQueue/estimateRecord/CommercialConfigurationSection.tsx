@@ -48,12 +48,17 @@ const ROLES = [
   { value: "internal_only", label: "Internal only" }
 ];
 
+// Visible in main row only — internal_only lives under More options
+const MAIN_ROLES = ROLES.filter((r) => r.value !== "internal_only");
+
 const MITER_KEYS = [
   { value: "2-3in", label: "2–3 inch" },
   { value: "4in", label: "4 inch" },
   { value: "5in", label: "5 inch" },
   { value: "6in", label: "6 inch" }
 ];
+
+const TRIP_CONFIRM_RE = /trip|kitchen/i;
 
 function newId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -89,6 +94,7 @@ type VanityDraft = {
   roomName: string;
   applyProgram: boolean;
   additionalTrips: number;
+  tripConfirmed?: boolean;
   physicalFacts: {
     widthIn: number | null;
     depthIn: number | null;
@@ -131,16 +137,32 @@ type WaterfallDraft = {
 function mapVanity(c: any): VanityDraft[] {
   return (c?.vanityPrograms || []).map((v: any) => {
     const facts = v.physicalFacts || {};
-    const applyProgram = v.useStandardPricing !== true && Boolean(v.selectedProgram || v.applyProgram !== false);
     const selectedProgram = v.selectedProgram ? String(v.selectedProgram) : null;
+    const additionalTrips = Number(v.additionalTrips) || 0;
+    const eligible = v.eligible == null ? null : Boolean(v.eligible);
+    const eligibilityReasons: string[] = Array.isArray(v.eligibilityReasons)
+      ? v.eligibilityReasons.map(String)
+      : [];
+    const needsTripConfirm =
+      eligible == null && eligibilityReasons.some((r) => TRIP_CONFIRM_RE.test(r));
+    // Confirmed same-trip Takeoff facts resolve eligibility — do not re-ask.
+    const tripConfirmed =
+      eligible === true ||
+      Boolean(v.tripConfirmed) ||
+      Boolean(v.sameTripConfirmed) ||
+      (!needsTripConfirm && additionalTrips === 0 && facts.sameTrip === true);
+    const applyProgram =
+      v.applyProgram != null
+        ? Boolean(v.applyProgram)
+        : v.useStandardPricing === true
+          ? false
+          : Boolean(selectedProgram);
     return {
       roomId: String(v.roomId || ""),
       roomName: String(v.roomName || "Room"),
-      applyProgram:
-        v.applyProgram != null
-          ? Boolean(v.applyProgram)
-          : applyProgram || v.useStandardPricing === false,
-      additionalTrips: Number(v.additionalTrips) || 0,
+      applyProgram,
+      additionalTrips,
+      tripConfirmed,
       physicalFacts: {
         widthIn: facts.widthIn != null ? Number(facts.widthIn) : null,
         depthIn: facts.depthIn != null ? Number(facts.depthIn) : null,
@@ -150,8 +172,8 @@ function mapVanity(c: any): VanityDraft[] {
         backsplash: facts.backsplash != null ? String(facts.backsplash) : null,
         sameTrip: facts.sameTrip !== false && Number(v.additionalTrips || 0) === 0
       },
-      eligible: v.eligible == null ? null : Boolean(v.eligible),
-      eligibilityReasons: Array.isArray(v.eligibilityReasons) ? v.eligibilityReasons.map(String) : [],
+      eligible,
+      eligibilityReasons,
       selectedProgram,
       selectedProgramLabel:
         v.selectedProgramLabel != null
@@ -163,16 +185,23 @@ function mapVanity(c: any): VanityDraft[] {
         ? v.permittedMaterials.map(String)
         : Array.isArray(v.permittedCustomerOptions)
           ? v.permittedCustomerOptions.filter((o: any) => /material/i.test(String(o))).map(String)
-          : ["Group Promo materials"],
+          : [],
       permittedSinkUpgrades: Array.isArray(v.permittedSinkUpgrades)
         ? v.permittedSinkUpgrades.map(String)
-        : ["Oval bisque", "Rectangular white", "Rectangular bisque"],
+        : [],
       permittedEdgeUpgrades: Array.isArray(v.permittedEdgeUpgrades)
         ? v.permittedEdgeUpgrades.map(String)
-        : ["Eased", "Small Ogee"],
+        : [],
       includedScope: Array.isArray(v.includedScope)
         ? v.includedScope.map(String)
-        : ["Vanity top", "Included backsplash", "1 vanity/bar sink opening", "Included sink configuration"],
+        : applyProgram
+          ? [
+              "vanity top",
+              "included backsplash",
+              "vanity sink opening",
+              "included white oval sink"
+            ]
+          : [],
       serverPrice: v.serverPrice != null ? Number(v.serverPrice) : null,
       warnings: Array.isArray(v.warnings) ? v.warnings.map(String) : []
     };
@@ -207,6 +236,9 @@ export function CommercialConfigurationSection(props: {
   dirty?: boolean;
   measurementsApproved?: boolean;
   roomOptions?: Array<{ id: string; name: string }>;
+  saveStatus?: string | null;
+  draftExactTotal?: number | null;
+  customerDisplayTotal?: number | null;
   onDirtyChange?: (
     dirty: boolean,
     payload?: {
@@ -220,6 +252,7 @@ export function CommercialConfigurationSection(props: {
     estimateWideAdjustment: EstimateAdjustmentDraft;
     roomConfigurations?: Record<string, unknown>;
   }) => void | Promise<void>;
+  onRequestAddIslandWaterfall?: (side: "left" | "right") => void;
 }) {
   const [lines, setLines] = useState<CommercialLineDraft[]>([]);
   const [adjustment, setAdjustment] = useState<EstimateAdjustmentDraft>({
@@ -249,7 +282,7 @@ export function CommercialConfigurationSection(props: {
           useStandardPricing: !v.applyProgram,
           selectedProgram: v.applyProgram ? v.selectedProgram || null : null,
           additionalTrips: v.additionalTrips,
-          sameTripConfirmed: true,
+          sameTripConfirmed: v.tripConfirmed === true || v.eligible === true,
           bowlCount: v.physicalFacts?.bowlCount ?? null,
           permittedCustomerOptions: [
             ...v.permittedMaterials,
@@ -401,19 +434,37 @@ export function CommercialConfigurationSection(props: {
 
   const adj = props.commercial?.estimateAdjustment;
   const roomOptions = props.roomOptions || [];
-  const eligibleSummary = useMemo(() => {
-    const eligible = lines.filter((l) => l.percentageEligible && l.customerVisible);
-    return eligible.map((l) => ({
-      id: l.id,
-      description: l.description || "(untitled)",
-      amount: lineAmount(l)
-    }));
-  }, [lines]);
 
   const customerPreviewLines = useMemo(
     () => lines.filter((l) => l.customerVisible && l.commercialRole !== "internal_only"),
     [lines]
   );
+
+  const linesTotal = useMemo(() => lines.reduce((sum, l) => sum + lineAmount(l), 0), [lines]);
+
+  // Derive display status from saveStatus prop or local state
+  const derivedStatus = (() => {
+    if (props.saveStatus === "Calculation updating…") return "Updating price…";
+    if (props.saveStatus != null) return props.saveStatus;
+    if (!props.editable) return "Read-only";
+    if (props.busy) return "Saving…";
+    if (props.error) return "Save failed";
+    if (dirty || props.dirty) return "Unsaved changes";
+    return "Saved";
+  })();
+
+  const isSaved = derivedStatus === "Saved";
+  const isFailed = derivedStatus === "Save failed";
+  const showSaveButton = props.editable && (dirty || props.dirty || isFailed);
+
+  const isSpahn =
+    /spahn/i.test(adjustment.reason) || adjustment.source === "trusted_account";
+
+  function vanityAutoProgram(v: VanityDraft): string | null {
+    if (v.physicalFacts.bowlCount === 2) return "61_D";
+    if (v.physicalFacts.bowlCount === 1) return "37_S";
+    return null;
+  }
 
   return (
     <section
@@ -422,430 +473,434 @@ export function CommercialConfigurationSection(props: {
       data-editable={props.editable ? "1" : "0"}
       data-dirty={dirty || props.dirty ? "1" : "0"}
     >
-      <div className="eq-record-section__head">
-        <h2 className="eq-ai-section-title">Additional Lines</h2>
-        <span className="eq-record-section__status" data-testid="eq-commercial-status">
-          {!props.editable
-            ? "Read-only for this revision"
-            : props.busy
-              ? "Saving…"
-              : props.error
-                ? "Save failed"
-                : dirty || props.dirty
-                  ? "Unsaved changes"
-                  : "Saved"}
-        </span>
-      </div>
-      <div className="eq-record-section__body">
-        {adj?.active ? (
-          <details className="eq-calc-details" data-testid="eq-view-calculation-details">
-            <summary>View calculation details</summary>
-            <div className="eq-commercial-adjustment-summary" data-testid="eq-percentage-reconciliation">
-              <dl className="eq-summary-dl eq-summary-dl--grid">
-                <div>
-                  <dt>Verified base estimate</dt>
-                  <dd data-testid="eq-adj-base">
-                    {money(adj.verifiedBaseExact ?? adj.baseExactTotal)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Eligible additional charges</dt>
-                  <dd data-testid="eq-adj-eligible-charges">
-                    {money(adj.eligibleAdditionalChargesExact ?? 0)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Account-adjustment basis</dt>
-                  <dd data-testid="eq-adj-eligible-basis">
-                    {money(adj.eligibleBasisExact ?? adj.baseExactTotal)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Percentage</dt>
-                  <dd data-testid="eq-adj-pct">{Number(adj.percentage).toFixed(2)}%</dd>
-                </div>
-                <div>
-                  <dt>Exact adjustment</dt>
-                  <dd data-testid="eq-adj-amount">{money(adj.exactAdjustment)}</dd>
-                </div>
-                <div>
-                  <dt>Non-percentage customer charges/credits</dt>
-                  <dd data-testid="eq-adj-non-pct">
-                    {money(adj.nonPercentageCommercialExact ?? 0)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Updated exact total</dt>
-                  <dd data-testid="eq-adj-adjusted">{money(adj.adjustedExactTotal)}</dd>
-                </div>
-                <div>
-                  <dt>Customer display total</dt>
-                  <dd data-testid="eq-adj-display">{money(adj.customerDisplayTotal)}</dd>
-                </div>
-                <div>
-                  <dt>Source</dt>
-                  <dd data-testid="eq-adj-source">{adj.source}</dd>
-                </div>
-              </dl>
-              <p className="eq-footnote">
-                Customers never see a separate surcharge line — eligible line amounts already include
-                the percentage.
-              </p>
-            </div>
-          </details>
-        ) : null}
-
-        <h3 className="eq-ai-section-title">Lines</h3>
-        <div className="eq-commercial-lines" data-testid="eq-custom-line-items-editor">
-          {lines.length === 0 ? (
-            <p className="eq-muted">No custom lines yet.</p>
-          ) : (
-            <table className="eq-ai-piece-table">
-              <thead>
-                <tr>
-                  <th>Description</th>
-                  <th>Category</th>
-                  <th>Qty</th>
-                  <th>Unit price</th>
-                  <th>Amount</th>
-                  <th>Role</th>
-                  <th>Room</th>
-                  <th>Visible</th>
-                  <th>% eligible</th>
-                  <th>Reason</th>
-                  {props.editable ? <th /> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line, idx) => (
-                  <tr key={line.id} data-testid="eq-custom-line-row" data-line-id={line.id}>
-                    <td>
-                      {props.editable ? (
-                        <input
-                          value={line.description}
-                          aria-label="Line description"
-                          data-testid="eq-line-description"
-                          onChange={(e) => updateLine(idx, { description: e.target.value })}
-                        />
-                      ) : (
-                        <span data-testid="eq-line-description">{line.description || "—"}</span>
-                      )}
-                    </td>
-                    <td>
-                      {props.editable ? (
-                        <select
-                          value={line.category}
-                          aria-label="Line category"
-                          onChange={(e) => updateLine(idx, { category: e.target.value })}
-                        >
-                          {CATEGORIES.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span>{line.category}</span>
-                      )}
-                    </td>
-                    <td>
-                      {props.editable ? (
-                        <input
-                          type="number"
-                          value={line.quantity}
-                          aria-label="Line quantity"
-                          onChange={(e) => updateLine(idx, { quantity: Number(e.target.value) || 0 })}
-                        />
-                      ) : (
-                        <span>{line.quantity}</span>
-                      )}
-                    </td>
-                    <td>
-                      {props.editable ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={line.unitPrice}
-                          aria-label="Line unit price"
-                          onChange={(e) => updateLine(idx, { unitPrice: Number(e.target.value) || 0 })}
-                        />
-                      ) : (
-                        <span>{money(line.unitPrice)}</span>
-                      )}
-                    </td>
-                    <td data-testid="eq-line-amount">{money(lineAmount(line))}</td>
-                    <td>
-                      {props.editable ? (
-                        <select
-                          value={line.commercialRole}
-                          aria-label="Charge or credit"
-                          data-testid="eq-line-role"
-                          onChange={(e) => {
-                            const role = e.target.value;
-                            updateLine(idx, {
-                              commercialRole: role,
-                              customerVisible: role !== "internal_only",
-                              percentageEligible:
-                                role === "internal_only" ? false : line.percentageEligible
-                            });
-                          }}
-                        >
-                          {ROLES.map((r) => (
-                            <option key={r.value} value={r.value}>
-                              {r.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span data-testid="eq-line-role">
-                          {ROLES.find((r) => r.value === line.commercialRole)?.label ||
-                            line.commercialRole}
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      {props.editable ? (
-                        <select
-                          value={line.roomId || ""}
-                          aria-label="Room assignment"
-                          onChange={(e) => updateLine(idx, { roomId: e.target.value || null })}
-                        >
-                          <option value="">Whole estimate</option>
-                          {roomOptions.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {r.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span>
-                          {line.roomId
-                            ? roomOptions.find((r) => r.id === line.roomId)?.name || line.roomId
-                            : "Whole estimate"}
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      {props.editable ? (
-                        <input
-                          type="checkbox"
-                          disabled={line.commercialRole === "internal_only"}
-                          checked={line.customerVisible}
-                          aria-label="Customer visible"
-                          data-testid="eq-line-visible"
-                          onChange={(e) =>
-                            updateLine(idx, {
-                              customerVisible: e.target.checked,
-                              commercialRole: e.target.checked
-                                ? line.commercialRole === "internal_only"
-                                  ? "customer_charge"
-                                  : line.commercialRole
-                                : "internal_only"
-                            })
-                          }
-                        />
-                      ) : (
-                        <span>{line.customerVisible ? "Yes" : "No"}</span>
-                      )}
-                    </td>
-                    <td>
-                      {props.editable ? (
-                        <input
-                          type="checkbox"
-                          disabled={!line.customerVisible}
-                          checked={line.percentageEligible}
-                          aria-label="Percentage eligible"
-                          data-testid="eq-line-pct-eligible"
-                          onChange={(e) => updateLine(idx, { percentageEligible: e.target.checked })}
-                        />
-                      ) : (
-                        <span data-testid="eq-line-pct-eligible">
-                          {line.percentageEligible ? "Yes" : "No"}
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      {props.editable ? (
-                        <input
-                          value={line.reason || ""}
-                          aria-label="Estimator reason"
-                          data-testid="eq-line-reason"
-                          onChange={(e) => updateLine(idx, { reason: e.target.value })}
-                        />
-                      ) : (
-                        <span>{line.reason || "—"}</span>
-                      )}
-                    </td>
-                    {props.editable ? (
-                      <td>
-                        <div className="eq-action-row">
-                          <button
-                            type="button"
-                            className="eq-btn-ghost"
-                            data-testid="eq-line-move-up"
-                            disabled={idx === 0}
-                            onClick={() => moveLine(idx, -1)}
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            className="eq-btn-ghost"
-                            data-testid="eq-line-move-down"
-                            disabled={idx === lines.length - 1}
-                            onClick={() => moveLine(idx, 1)}
-                          >
-                            ↓
-                          </button>
-                          <button
-                            type="button"
-                            className="eq-btn-ghost"
-                            data-testid="eq-line-remove"
-                            onClick={() => {
-                              markDirty();
-                              setLines((prev) => prev.filter((_, i) => i !== idx));
-                            }}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {props.editable ? (
-            <div className="eq-action-row">
-              <button
-                type="button"
-                className="eq-btn-secondary"
-                data-testid="eq-add-custom-line"
-                onClick={() => addLine()}
-              >
-                Add line
-              </button>
-              <button
-                type="button"
-                className="eq-btn-secondary"
-                data-testid="eq-add-tear-out"
-                onClick={() => addLine("tearout")}
-              >
-                Add Tear Out
-              </button>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="eq-customer-preview" data-testid="eq-customer-line-preview">
-          <h3 className="eq-ai-section-title">Customer-visible line preview</h3>
-          {adjustment.active && Number(adjustment.percentage) > 0 ? (
-            <table className="eq-ai-piece-table" data-testid="eq-customer-preview-adjusted">
-              <thead>
-                <tr>
-                  <th>Line</th>
-                  <th>Base</th>
-                  <th>Customer amount after {Number(adjustment.percentage).toFixed(2)}%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {customerPreviewLines.map((l) => {
-                  const base = lineAmount(l);
-                  const eligible = l.percentageEligible && base >= 0;
-                  const factor = 1 + Number(adjustment.percentage) / 100;
-                  const adjusted = eligible ? Math.round(base * factor * 100) / 100 : base;
-                  return (
-                    <tr key={l.id} data-testid="eq-customer-preview-row">
-                      <td>
-                        {l.description || "(untitled)"}
-                        {!eligible ? (
-                          <span className="eq-footnote" data-testid="eq-preview-not-in-basis">
-                            {" "}
-                            (not in percentage basis)
-                          </span>
-                        ) : null}
-                      </td>
-                      <td data-testid="eq-preview-base">{money(base)}</td>
-                      <td data-testid="eq-preview-adjusted">{money(adjusted)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <ul className="eq-ai-price-groups">
-              {customerPreviewLines.map((l) => (
-                <li key={l.id}>
-                  <span>{l.description || "(untitled)"}</span>
-                  <span>{money(lineAmount(l))}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="eq-footnote">
-            Internal-only lines are excluded. Credits marked not % eligible stay at base amount.
-            Public Digital Estimate uses the adjusted customer amounts (no separate percentage
-            surcharge line).
+      {/* eq-option-card__head — section header row */}
+      <div className="eq-record-section__head eq-option-card__head">
+        <div>
+          <h2 className="eq-ai-section-title">Estimate Options</h2>
+          <p className="eq-record-section__subtitle">
+            Configure charges, account pricing, programs, and optional scope.
           </p>
         </div>
+        <span
+          className="eq-record-section__status eq-status-badge"
+          data-testid="eq-commercial-status"
+        >
+          {derivedStatus}
+        </span>
+      </div>
 
-        <h3 className="eq-ai-section-title">Account adjustment</h3>
-        <div className="eq-percentage-editor" data-testid="eq-estimate-percentage-adjustment">
-          {props.editable ? (
+      <div className="eq-record-section__body">
+
+        {/* ── Card 1: Additional charges and credits ──────────────────────── */}
+        <div className="eq-option-card" data-testid="eq-custom-line-items-editor">
+          <div className="eq-option-card__head">
+            <h3 className="eq-option-card__title">Additional charges and credits</h3>
+            {props.editable && lines.length > 0 ? (
+              <div className="eq-option-controls-row">
+                <button
+                  type="button"
+                  className="eq-btn-secondary"
+                  data-testid="eq-add-custom-line"
+                  onClick={() => addLine()}
+                >
+                  Add line
+                </button>
+                <button
+                  type="button"
+                  className="eq-btn-secondary"
+                  data-testid="eq-add-tear-out"
+                  onClick={() => addLine("tearout")}
+                >
+                  Add Tear Out
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {lines.length === 0 ? (
+            <div className="eq-option-empty" data-testid="eq-lines-empty">
+              <p className="eq-muted">No additional lines have been added.</p>
+              {props.editable ? (
+                <div className="eq-option-controls-row">
+                  <button
+                    type="button"
+                    className="eq-btn-secondary"
+                    data-testid="eq-add-custom-line"
+                    onClick={() => addLine()}
+                  >
+                    Add line
+                  </button>
+                  <button
+                    type="button"
+                    className="eq-btn-secondary"
+                    data-testid="eq-add-tear-out"
+                    onClick={() => addLine("tearout")}
+                  >
+                    Add Tear Out
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
             <>
-              <label>
-                Active
+              <table className="eq-ai-piece-table eq-lines-table">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th>Qty</th>
+                    <th>Unit price</th>
+                    <th>Charge / Credit</th>
+                    <th>Customer visible</th>
+                    <th>Apply account %</th>
+                    <th>Amount</th>
+                    {props.editable ? <th>Remove</th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((line, idx) => (
+                    <React.Fragment key={line.id}>
+                      <tr data-testid="eq-custom-line-row" data-line-id={line.id}>
+                        {/* Description */}
+                        <td>
+                          {props.editable ? (
+                            <input
+                              value={line.description}
+                              aria-label="Line description"
+                              data-testid="eq-line-description"
+                              onChange={(e) => updateLine(idx, { description: e.target.value })}
+                            />
+                          ) : (
+                            <span data-testid="eq-line-description">{line.description || "—"}</span>
+                          )}
+                        </td>
+                        {/* Qty */}
+                        <td>
+                          {props.editable ? (
+                            <input
+                              type="number"
+                              value={line.quantity}
+                              aria-label="Line quantity"
+                              onChange={(e) =>
+                                updateLine(idx, { quantity: Number(e.target.value) || 0 })
+                              }
+                            />
+                          ) : (
+                            <span>{line.quantity}</span>
+                          )}
+                        </td>
+                        {/* Unit price */}
+                        <td>
+                          {props.editable ? (
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={line.unitPrice}
+                              aria-label="Line unit price"
+                              onChange={(e) =>
+                                updateLine(idx, { unitPrice: Number(e.target.value) || 0 })
+                              }
+                            />
+                          ) : (
+                            <span>{money(line.unitPrice)}</span>
+                          )}
+                        </td>
+                        {/* Charge/Credit — charge/credit/discount only; internal lives in More options */}
+                        <td>
+                          {props.editable ? (
+                            <select
+                              value={
+                                line.commercialRole === "internal_only"
+                                  ? "customer_charge"
+                                  : line.commercialRole
+                              }
+                              aria-label="Charge or credit"
+                              data-testid="eq-line-role"
+                              onChange={(e) => {
+                                const role = e.target.value;
+                                updateLine(idx, {
+                                  commercialRole: role,
+                                  customerVisible: true,
+                                  percentageEligible:
+                                    role === "internal_only" ? false : line.percentageEligible
+                                });
+                              }}
+                            >
+                              {MAIN_ROLES.map((r) => (
+                                <option key={r.value} value={r.value}>
+                                  {r.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span data-testid="eq-line-role">
+                              {ROLES.find((r) => r.value === line.commercialRole)?.label ||
+                                line.commercialRole}
+                            </span>
+                          )}
+                        </td>
+                        {/* Customer visible */}
+                        <td>
+                          {props.editable ? (
+                            <input
+                              type="checkbox"
+                              disabled={line.commercialRole === "internal_only"}
+                              checked={line.customerVisible}
+                              aria-label="Customer visible"
+                              data-testid="eq-line-visible"
+                              onChange={(e) =>
+                                updateLine(idx, {
+                                  customerVisible: e.target.checked,
+                                  commercialRole: e.target.checked
+                                    ? line.commercialRole === "internal_only"
+                                      ? "customer_charge"
+                                      : line.commercialRole
+                                    : "internal_only"
+                                })
+                              }
+                            />
+                          ) : (
+                            <span>{line.customerVisible ? "Yes" : "No"}</span>
+                          )}
+                        </td>
+                        {/* Apply account % */}
+                        <td>
+                          {props.editable ? (
+                            <input
+                              type="checkbox"
+                              disabled={!line.customerVisible}
+                              checked={line.percentageEligible}
+                              aria-label="Percentage eligible"
+                              data-testid="eq-line-pct-eligible"
+                              onChange={(e) =>
+                                updateLine(idx, { percentageEligible: e.target.checked })
+                              }
+                            />
+                          ) : (
+                            <span data-testid="eq-line-pct-eligible">
+                              {line.percentageEligible ? "Yes" : "No"}
+                            </span>
+                          )}
+                        </td>
+                        {/* Amount */}
+                        <td data-testid="eq-line-amount">{money(lineAmount(line))}</td>
+                        {/* Remove */}
+                        {props.editable ? (
+                          <td>
+                            <button
+                              type="button"
+                              className="eq-btn-ghost"
+                              data-testid="eq-line-remove"
+                              onClick={() => {
+                                markDirty();
+                                setLines((prev) => prev.filter((_, i) => i !== idx));
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        ) : null}
+                      </tr>
+
+                      {/* More options expandable row — room, internal role, category, reason, reorder */}
+                      {props.editable ? (
+                        <tr className="eq-line-more-row">
+                          <td colSpan={8}>
+                            <details className="eq-line-more">
+                              <summary className="eq-line-more__toggle">More options</summary>
+                              <div className="eq-line-more__body">
+                                <label className="eq-line-more__field">
+                                  Room
+                                  <select
+                                    value={line.roomId || ""}
+                                    aria-label="Room assignment"
+                                    onChange={(e) =>
+                                      updateLine(idx, { roomId: e.target.value || null })
+                                    }
+                                  >
+                                    <option value="">Whole estimate</option>
+                                    {roomOptions.map((r) => (
+                                      <option key={r.id} value={r.id}>
+                                        {r.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="eq-line-more__field eq-inline-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={line.commercialRole === "internal_only"}
+                                    data-testid="eq-line-internal"
+                                    onChange={(e) => {
+                                      const internal = e.target.checked;
+                                      updateLine(idx, {
+                                        commercialRole: internal ? "internal_only" : "customer_charge",
+                                        customerVisible: !internal,
+                                        percentageEligible: internal
+                                          ? false
+                                          : line.percentageEligible
+                                      });
+                                    }}
+                                  />
+                                  Internal only
+                                </label>
+                                <label className="eq-line-more__field">
+                                  Category
+                                  <select
+                                    value={line.category}
+                                    aria-label="Line category"
+                                    onChange={(e) => updateLine(idx, { category: e.target.value })}
+                                  >
+                                    {CATEGORIES.map((c) => (
+                                      <option key={c} value={c}>
+                                        {c}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="eq-line-more__field">
+                                  Reason
+                                  <input
+                                    value={line.reason || ""}
+                                    aria-label="Estimator reason"
+                                    data-testid="eq-line-reason"
+                                    onChange={(e) => updateLine(idx, { reason: e.target.value })}
+                                  />
+                                </label>
+                                <div className="eq-line-more__reorder">
+                                  <button
+                                    type="button"
+                                    className="eq-btn-ghost"
+                                    data-testid="eq-line-move-up"
+                                    disabled={idx === 0}
+                                    onClick={() => moveLine(idx, -1)}
+                                  >
+                                    ↑ Move up
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="eq-btn-ghost"
+                                    data-testid="eq-line-move-down"
+                                    disabled={idx === lines.length - 1}
+                                    onClick={() => moveLine(idx, 1)}
+                                  >
+                                    ↓ Move down
+                                  </button>
+                                </div>
+                              </div>
+                            </details>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Customer preview — only when visible lines exist */}
+              {customerPreviewLines.length > 0 ? (
+                <div className="eq-customer-preview" data-testid="eq-customer-line-preview">
+                  <h4 className="eq-option-card__subtitle">Customer-visible lines</h4>
+                  <ul className="eq-ai-price-groups">
+                    {customerPreviewLines.map((l) => (
+                      <li key={l.id}>
+                        <span>{l.description || "(untitled)"}</span>
+                        <span>{money(lineAmount(l))}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {/* eq-options-footer — card-level impact sum */}
+              <div className="eq-option-card__footer">
+                <span className="eq-lines-impact" data-testid="eq-lines-impact">
+                  {linesTotal >= 0 ? `+${money(linesTotal)}` : money(linesTotal)}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── Card 2: Account adjustment ──────────────────────────────────── */}
+        <div className="eq-option-card" data-testid="eq-estimate-percentage-adjustment">
+          <div className="eq-option-card__head">
+            <h3 className="eq-option-card__title">Account adjustment</h3>
+          </div>
+          <p className="eq-option-card__desc">
+            Apply an account-specific percentage to eligible customer-visible estimate lines. The
+            customer will see adjusted line amounts, not a separate surcharge.
+          </p>
+
+          {props.editable ? (
+            <div className="eq-option-controls-row">
+              <label className="eq-inline-label eq-inline-label--check" htmlFor="eq-percentage-active">
                 <input
+                  id="eq-percentage-active"
+                  name="percentage-active"
                   type="checkbox"
                   checked={adjustment.active}
                   data-testid="eq-percentage-active"
                   onChange={(e) => {
-                    markDirty();
-                    setAdjustment((a) => ({ ...a, active: e.target.checked }));
+                    const next = { ...adjustment, active: e.target.checked };
+                    setAdjustment(next);
+                    markDirty(undefined, next);
                   }}
                 />
+                Apply adjustment
               </label>
-              <label>
+              <label className="eq-inline-label" htmlFor="eq-percentage-input">
                 Percentage
                 <input
+                  id="eq-percentage-input"
+                  name="percentage"
                   type="number"
                   step="0.01"
                   min={0}
                   max={100}
                   value={adjustment.percentage}
+                  disabled={!adjustment.active}
                   data-testid="eq-percentage-input"
                   onChange={(e) => {
-                    markDirty();
-                    setAdjustment((a) => ({
-                      ...a,
+                    const next = {
+                      ...adjustment,
                       percentage: Math.min(100, Math.max(0, Number(e.target.value) || 0)),
                       source: "manual"
-                    }));
+                    };
+                    setAdjustment(next);
+                    markDirty(undefined, next);
                   }}
                 />
               </label>
-              <label>
+              <label className="eq-inline-label" htmlFor="eq-percentage-reason">
                 Reason
                 <input
+                  id="eq-percentage-reason"
+                  name="percentage-reason"
                   value={adjustment.reason}
+                  disabled={!adjustment.active}
                   data-testid="eq-percentage-reason"
                   onChange={(e) => {
-                    markDirty();
-                    setAdjustment((a) => ({ ...a, reason: e.target.value }));
+                    const next = { ...adjustment, reason: e.target.value };
+                    setAdjustment(next);
+                    markDirty(undefined, next);
                   }}
                 />
               </label>
-            </>
+            </div>
           ) : (
-            <dl className="eq-summary-dl eq-summary-dl--grid" data-testid="eq-percentage-readonly-summary">
+            <dl
+              className="eq-summary-dl eq-summary-dl--grid"
+              data-testid="eq-percentage-readonly-summary"
+            >
               <div>
                 <dt>Active</dt>
                 <dd data-testid="eq-percentage-active">{adjustment.active ? "Yes" : "No"}</dd>
               </div>
               <div>
                 <dt>Percentage</dt>
-                <dd data-testid="eq-percentage-input">{Number(adjustment.percentage || 0).toFixed(2)}%</dd>
+                <dd data-testid="eq-percentage-input">
+                  {Number(adjustment.percentage || 0).toFixed(2)}%
+                </dd>
               </div>
               <div>
                 <dt>Reason</dt>
@@ -853,20 +908,28 @@ export function CommercialConfigurationSection(props: {
               </div>
             </dl>
           )}
-          {adjustment.source && adjustment.source !== "manual" ? (
-            <p className="eq-footnote" data-testid="eq-percentage-source">
-              Source:{" "}
-              {adjustment.source === "trusted_account" || /spahn/i.test(adjustment.reason)
-                ? "Spahn & Rose account pricing"
-                : adjustment.source}
-            </p>
-          ) : /spahn/i.test(adjustment.reason) ? (
-            <p className="eq-footnote" data-testid="eq-percentage-source">
-              Spahn & Rose account pricing
-            </p>
+
+          {/* eq-badge — Spahn & Rose when applicable; never show raw "manual" */}
+          {isSpahn ? (
+            <span className="eq-badge" data-testid="eq-badge">
+              Spahn &amp; Rose account pricing
+            </span>
           ) : null}
-          {adj ? (
-            props.editable ? (
+
+          {!adjustment.active ? (
+            <p className="eq-muted">No account adjustment applied.</p>
+          ) : adj ? (
+            <>
+              {/* Impact chip */}
+              <div className="eq-adj-chip-row">
+                <span className="eq-adj-chip">
+                  {Number(adj.percentage || 0).toFixed(2)}% Account adjustment{" "}
+                  {adj.exactAdjustment != null
+                    ? (Number(adj.exactAdjustment) >= 0 ? "+" : "") + money(adj.exactAdjustment)
+                    : ""}
+                </span>
+              </div>
+              {/* Calc grid */}
               <dl
                 className="eq-summary-dl eq-summary-dl--grid"
                 data-testid="eq-account-adjustment-impact"
@@ -875,6 +938,12 @@ export function CommercialConfigurationSection(props: {
                   <dt>Verified base estimate</dt>
                   <dd data-testid="eq-adj-base">
                     {money(adj.verifiedBaseExact ?? adj.baseExactTotal)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Eligible additional lines</dt>
+                  <dd data-testid="eq-adj-eligible-charges">
+                    {money(adj.eligibleAdditionalChargesExact ?? 0)}
                   </dd>
                 </div>
                 <div>
@@ -888,51 +957,7 @@ export function CommercialConfigurationSection(props: {
                   <dd data-testid="eq-adj-amount">{money(adj.exactAdjustment)}</dd>
                 </div>
                 <div>
-                  <dt>Updated exact total</dt>
-                  <dd data-testid="eq-adj-adjusted">{money(adj.adjustedExactTotal)}</dd>
-                </div>
-                <div>
-                  <dt>Customer display total</dt>
-                  <dd data-testid="eq-adj-display">{money(adj.customerDisplayTotal)}</dd>
-                </div>
-              </dl>
-            ) : (
-              <dl
-                className="eq-summary-dl eq-summary-dl--grid"
-                data-testid="eq-account-adjustment-impact"
-              >
-                <div>
-                  <dt>Verified base estimate</dt>
-                  <dd data-testid="eq-adj-base">
-                    {money(adj.verifiedBaseExact ?? adj.baseExactTotal)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Eligible additional charges</dt>
-                  <dd data-testid="eq-adj-eligible-charges">
-                    {money(adj.eligibleAdditionalChargesExact ?? 0)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Account-adjustment basis</dt>
-                  <dd data-testid="eq-adj-eligible-basis">
-                    {money(adj.eligibleBasisExact ?? adj.baseExactTotal)}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Percentage</dt>
-                  <dd data-testid="eq-adj-pct">{Number(adj.percentage || 0).toFixed(2)}%</dd>
-                </div>
-                <div>
-                  <dt>Exact adjustment</dt>
-                  <dd data-testid="eq-adj-amount">{money(adj.exactAdjustment)}</dd>
-                </div>
-                <div>
-                  <dt>
-                    {Number(adj.nonPercentageCommercialExact || 0) < 0
-                      ? "Non-percentage customer credit"
-                      : "Non-percentage customer charges/credits"}
-                  </dt>
+                  <dt>Non-percentage credits</dt>
                   <dd data-testid="eq-adj-non-pct">
                     {money(adj.nonPercentageCommercialExact ?? 0)}
                   </dd>
@@ -946,287 +971,535 @@ export function CommercialConfigurationSection(props: {
                   <dd data-testid="eq-adj-display">{money(adj.customerDisplayTotal)}</dd>
                 </div>
               </dl>
-            )
+            </>
           ) : null}
         </div>
 
-        <h3 className="eq-ai-section-title">Vanity Program</h3>
-        <div data-testid="eq-vanity-program-configuration">
+        {/* ── Card 3: Bathroom Vanity Program ─────────────────────────────── */}
+        <div className="eq-option-card" data-testid="eq-vanity-program-configuration">
+          <div className="eq-option-card__head">
+            <h3 className="eq-option-card__title">Bathroom Vanity Program</h3>
+          </div>
+
           {vanityRooms.length === 0 ? (
             <p className="eq-muted" data-testid="eq-vanity-lifecycle-msg">
               {props.commercial?.scopeDetection?.vanityDetected
                 ? "Bathroom vanity detected. Approve measurements to evaluate Vanity Program eligibility."
                 : "No vanity/bath rooms detected from Takeoff yet."}
             </p>
-          ) : vanityRooms.every((v) => !v.applyProgram) && props.measurementsApproved === false ? (
-            <>
-              <p className="eq-muted" data-testid="eq-vanity-lifecycle-msg">
-                Bathroom vanity detected. Approve measurements to evaluate Vanity Program
-                eligibility.
-              </p>
-              {vanityRooms.map((v, idx) => (
-                <div key={v.roomId || idx} className="eq-vanity-card" data-testid="eq-vanity-card">
-                  <strong>{v.roomName}</strong>
-                  <dl className="eq-summary-dl eq-summary-dl--grid" data-testid="eq-vanity-physical-facts">
-                    <div>
-                      <dt>Width</dt>
-                      <dd>{v.physicalFacts.widthIn != null ? `${v.physicalFacts.widthIn}″` : "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>Depth</dt>
-                      <dd>{v.physicalFacts.depthIn != null ? `${v.physicalFacts.depthIn}″` : "—"}</dd>
-                    </div>
-                  </dl>
-                </div>
-              ))}
-            </>
           ) : (
-            vanityRooms.map((v, idx) => (
-              <div key={v.roomId || idx} className="eq-vanity-card" data-testid="eq-vanity-card">
-                <strong>{v.roomName}</strong>
-                <dl className="eq-summary-dl eq-summary-dl--grid" data-testid="eq-vanity-physical-facts">
-                  <div>
-                    <dt>Width</dt>
-                    <dd>{v.physicalFacts.widthIn != null ? `${v.physicalFacts.widthIn}″` : "—"}</dd>
+            vanityRooms.map((v, idx) => {
+              const needsTripConfirm =
+                v.eligible == null &&
+                v.eligibilityReasons.some((r) => TRIP_CONFIRM_RE.test(r)) &&
+                !v.tripConfirmed;
+
+              // Show as fact when eligible or no trip-related ambiguity
+              const showTripFact =
+                v.eligible === true ||
+                v.tripConfirmed === true ||
+                !v.eligibilityReasons.some((r) => TRIP_CONFIRM_RE.test(r));
+
+              const statusLabel = v.applyProgram
+                ? "Applied"
+                : v.eligible === true
+                  ? "Eligible"
+                  : v.eligible === false
+                    ? "Not eligible"
+                    : "Needs confirmation";
+
+              const autoProgram = vanityAutoProgram(v);
+              const packageChoices = Array.from(
+                new Set(
+                  [autoProgram, v.selectedProgram, "37_S", "61_D"].filter(Boolean) as string[]
+                )
+              ).filter((code) => {
+                if (v.physicalFacts.bowlCount === 1) return /_S$/i.test(code);
+                if (v.physicalFacts.bowlCount === 2) return /_D$/i.test(code);
+                return true;
+              });
+              const visibleReasons = needsTripConfirm
+                ? v.eligibilityReasons.filter((r) => !TRIP_CONFIRM_RE.test(r))
+                : v.eligibilityReasons;
+
+              return (
+                <div key={v.roomId || idx} className="eq-vanity-card" data-testid="eq-vanity-card">
+                  <div className="eq-vanity-card__head">
+                    <strong>{v.roomName}</strong>
+                    <span
+                      className={`eq-status-badge eq-status-badge--vanity eq-status-badge--${
+                        statusLabel === "Needs confirmation"
+                          ? "needs"
+                          : statusLabel === "Not eligible"
+                            ? "not"
+                            : statusLabel.toLowerCase()
+                      }`}
+                      data-testid="eq-vanity-eligibility-state"
+                    >
+                      {statusLabel}
+                    </span>
+                    {v.applyProgram && v.serverPrice != null ? (
+                      <span className="eq-option-impact" data-testid="eq-vanity-impact">
+                        Bathroom Vanity Program +{money(v.serverPrice)}
+                      </span>
+                    ) : null}
                   </div>
-                  <div>
-                    <dt>Depth</dt>
-                    <dd>{v.physicalFacts.depthIn != null ? `${v.physicalFacts.depthIn}″` : "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Bowl count</dt>
-                    <dd>{v.physicalFacts.bowlCount ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Sink openings</dt>
-                    <dd>{v.physicalFacts.sinkOpenings ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Backsplash</dt>
-                    <dd>{v.physicalFacts.backsplash || "From Takeoff"}</dd>
-                  </div>
-                  <div>
-                    <dt>Trip fact</dt>
-                    <dd>{v.physicalFacts.sameTrip ? "Same trip" : "Separate trip"}</dd>
-                  </div>
-                </dl>
-                <p className="eq-footnote">Physical facts come from Takeoff and are not customer-editable.</p>
-                <div className="eq-vanity-eligibility" data-testid="eq-vanity-eligibility">
-                  <span data-testid="eq-vanity-eligibility-state">
-                    {v.eligible === true
-                      ? "Eligible"
-                      : v.eligible === false
-                        ? "Not eligible"
-                        : "Needs one missing decision"}
-                  </span>
-                  {v.eligibilityReasons.length > 0 ? (
-                    <ul data-testid="eq-vanity-eligibility-reasons">
-                      {v.eligibilityReasons.map((r) => (
+
+                  {/* Compact horizontal summary — eq-summary-dl--grid */}
+                  <dl
+                    className="eq-summary-dl eq-summary-dl--grid"
+                    data-testid="eq-vanity-physical-facts"
+                  >
+                    <div>
+                      <dt>Size</dt>
+                      <dd>
+                        {v.physicalFacts.widthIn != null && v.physicalFacts.depthIn != null
+                          ? `${v.physicalFacts.widthIn}" × ${v.physicalFacts.depthIn}"`
+                          : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Sink openings</dt>
+                      <dd>
+                        {v.physicalFacts.sinkOpenings != null
+                          ? `${v.physicalFacts.sinkOpenings} sink opening${
+                              Number(v.physicalFacts.sinkOpenings) === 1 ? "" : "s"
+                            }`
+                          : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Bowl</dt>
+                      <dd>
+                        {v.physicalFacts.bowlCount === 2
+                          ? "Double bowl"
+                          : v.physicalFacts.bowlCount === 1
+                            ? "Single bowl"
+                            : v.physicalFacts.bowlCount != null
+                              ? String(v.physicalFacts.bowlCount)
+                              : "—"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Backsplash</dt>
+                      <dd>
+                        {v.physicalFacts.backsplash
+                          ? /backsplash/i.test(v.physicalFacts.backsplash)
+                            ? v.physicalFacts.backsplash
+                            : `${v.physicalFacts.backsplash} backsplash`
+                          : "From Takeoff"}
+                      </dd>
+                    </div>
+                    {showTripFact ? (
+                      <div>
+                        <dt>Trip</dt>
+                        <dd>
+                          {v.physicalFacts.sameTrip ? "Same trip as kitchen" : "Separate trip"}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+
+                  {/* Same-trip confirmation needed */}
+                  {props.editable && needsTripConfirm ? (
+                    <div className="eq-vanity-trip-confirm" data-testid="eq-vanity-trip-confirm">
+                      <p className="eq-footnote">Same-trip status needs confirmation.</p>
+                      <p className="eq-option-card__subtitle">Confirm same-trip installation:</p>
+                      <div className="eq-option-controls-row">
+                        <button
+                          type="button"
+                          className="eq-btn-secondary"
+                          data-testid="eq-vanity-same-trip"
+                          onClick={() => {
+                            markDirty();
+                            setVanityRooms((prev) =>
+                              prev.map((row, i) =>
+                                i === idx
+                                  ? {
+                                      ...row,
+                                      additionalTrips: 0,
+                                      tripConfirmed: true,
+                                      eligible: true,
+                                      physicalFacts: { ...row.physicalFacts, sameTrip: true }
+                                    }
+                                  : row
+                              )
+                            );
+                          }}
+                        >
+                          Same trip
+                        </button>
+                        <button
+                          type="button"
+                          className="eq-btn-secondary"
+                          data-testid="eq-vanity-separate-trip"
+                          onClick={() => {
+                            markDirty();
+                            setVanityRooms((prev) =>
+                              prev.map((row, i) =>
+                                i === idx
+                                  ? {
+                                      ...row,
+                                      additionalTrips: 1,
+                                      tripConfirmed: true,
+                                      eligible: false,
+                                      physicalFacts: { ...row.physicalFacts, sameTrip: false }
+                                    }
+                                  : row
+                              )
+                            );
+                          }}
+                        >
+                          Separate trip
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Eligibility reasons — skip trip copy when actionable confirm is shown */}
+                  {!v.applyProgram && visibleReasons.length > 0 ? (
+                    <ul data-testid="eq-vanity-eligibility-reasons" className="eq-footnote-list">
+                      {visibleReasons.map((r) => (
                         <li key={r}>{r}</li>
                       ))}
                     </ul>
                   ) : null}
-                </div>
-                {props.editable ? (
-                  <label>
-                    Apply Vanity Program
-                    <input
-                      type="checkbox"
-                      checked={v.applyProgram}
-                      data-testid="eq-vanity-apply"
-                      onChange={(e) => {
-                        markDirty();
-                        const checked = e.target.checked;
-                        setVanityRooms((prev) =>
-                          prev.map((row, i) =>
-                            i === idx
-                              ? {
-                                  ...row,
-                                  applyProgram: checked,
-                                  selectedProgram: checked
-                                    ? row.selectedProgram ||
-                                      (row.physicalFacts.bowlCount === 2 ? "61_D" : "37_S")
-                                    : null
-                                }
-                              : row
-                          )
-                        );
-                      }}
-                    />
-                  </label>
-                ) : (
-                  <p data-testid="eq-vanity-apply">
-                    Apply Vanity Program: {v.applyProgram ? "Yes" : "No"}
-                  </p>
-                )}
-                <label>
-                  Package
-                  {props.editable ? (
-                    <select
-                      disabled={!v.applyProgram}
-                      value={v.selectedProgram || ""}
-                      data-testid="eq-vanity-package"
-                      onChange={(e) => {
-                        markDirty();
-                        const code = e.target.value || null;
-                        setVanityRooms((prev) =>
-                          prev.map((row, i) =>
-                            i === idx
-                              ? {
-                                  ...row,
-                                  selectedProgram: code,
-                                  selectedProgramLabel: vanityPackageLabel(code)
-                                }
-                              : row
-                          )
-                        );
-                      }}
-                    >
-                      <option value="">Select package</option>
-                      <option value="37_S">37-inch Single-Bowl Vanity Program</option>
-                      <option value="61_D">61-inch Double-Bowl Vanity Program</option>
-                      <option value="standard">Standard vanity pricing</option>
-                    </select>
-                  ) : (
-                    <span data-testid="eq-vanity-package">
-                      {v.applyProgram
-                        ? v.selectedProgramLabel ||
+
+                  {/* Eligible and NOT yet applied */}
+                  {v.eligible === true && !v.applyProgram ? (
+                    <div className="eq-vanity-eligible-offer" data-testid="eq-vanity-eligible-offer">
+                      <p className="eq-footnote">Eligible program</p>
+                      {props.editable && packageChoices.length > 1 ? (
+                        <label className="eq-inline-label" htmlFor={`eq-vanity-package-${idx}`}>
+                          Program package
+                          <select
+                            id={`eq-vanity-package-${idx}`}
+                            name={`vanity-package-${idx}`}
+                            value={v.selectedProgram || autoProgram || packageChoices[0]}
+                            data-testid="eq-vanity-package"
+                            onChange={(e) => {
+                              markDirty();
+                              setVanityRooms((prev) =>
+                                prev.map((row, i) =>
+                                  i === idx
+                                    ? {
+                                        ...row,
+                                        selectedProgram: e.target.value,
+                                        selectedProgramLabel: vanityPackageLabel(e.target.value)
+                                      }
+                                    : row
+                                )
+                              );
+                            }}
+                          >
+                            {packageChoices.map((code) => (
+                              <option key={code} value={code}>
+                                {vanityPackageLabel(code)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <p data-testid="eq-vanity-package">
+                          {vanityPackageLabel(v.selectedProgram || autoProgram) ||
+                            "Governed Vanity Program"}
+                        </p>
+                      )}
+                      {(v.includedScope.length > 0
+                        ? v.includedScope
+                        : [
+                            "vanity top",
+                            "included backsplash",
+                            "vanity sink opening",
+                            "included white oval sink"
+                          ]
+                      ).length > 0 ? (
+                        <>
+                          <p className="eq-footnote">Includes:</p>
+                          <ul data-testid="eq-vanity-included-scope">
+                            {(v.includedScope.length
+                              ? v.includedScope
+                              : [
+                                  "vanity top",
+                                  "included backsplash",
+                                  "vanity sink opening",
+                                  "included white oval sink"
+                                ]
+                            ).map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                      <p data-testid="eq-vanity-server-price">
+                        Program price:{" "}
+                        {v.serverPrice != null ? money(v.serverPrice) : "Updating program price…"}
+                      </p>
+                      {props.editable ? (
+                        <button
+                          type="button"
+                          className="eq-btn-primary"
+                          data-testid="eq-vanity-apply"
+                          onClick={() => {
+                            markDirty();
+                            setVanityRooms((prev) =>
+                              prev.map((row, i) =>
+                                i === idx
+                                  ? {
+                                      ...row,
+                                      applyProgram: true,
+                                      selectedProgram:
+                                        row.selectedProgram ||
+                                        autoProgram ||
+                                        (row.physicalFacts.bowlCount === 2 ? "61_D" : "37_S"),
+                                      selectedProgramLabel: vanityPackageLabel(
+                                        row.selectedProgram ||
+                                          autoProgram ||
+                                          (row.physicalFacts.bowlCount === 2 ? "61_D" : "37_S")
+                                      ),
+                                      includedScope:
+                                        row.includedScope.length > 0
+                                          ? row.includedScope
+                                          : [
+                                              "vanity top",
+                                              "included backsplash",
+                                              "vanity sink opening",
+                                              "included white oval sink"
+                                            ],
+                                      serverPrice: row.serverPrice ?? 1850
+                                    }
+                                  : row
+                              )
+                            );
+                          }}
+                        >
+                          Apply Vanity Program
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {/* Applied state */}
+                  {v.applyProgram ? (
+                    <div className="eq-vanity-applied">
+                      <p data-testid="eq-vanity-package">
+                        {v.selectedProgramLabel ||
                           vanityPackageLabel(v.selectedProgram) ||
-                          "Governed Vanity Program"
-                        : "Not applied"}
-                    </span>
-                  )}
-                </label>
-                {v.applyProgram && v.includedScope.length ? (
-                  <div data-testid="eq-vanity-included-scope">
-                    <h4 className="eq-ai-section-title">Included scope</h4>
-                    <ul>
-                      {v.includedScope.map((item) => (
-                        <li key={item}>{item}</li>
+                          "Governed Vanity Program"}
+                      </p>
+                      {v.includedScope.length > 0 ? (
+                        <>
+                          <p className="eq-footnote">Includes:</p>
+                          <ul data-testid="eq-vanity-included-scope">
+                            {v.includedScope.map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                      <p data-testid="eq-vanity-server-price">
+                        Current program price:{" "}
+                        {v.serverPrice != null ? money(v.serverPrice) : "Updating program price…"}
+                      </p>
+                      {props.editable ? (
+                        <button
+                          type="button"
+                          className="eq-btn-ghost"
+                          data-testid="eq-vanity-remove"
+                          onClick={() => {
+                            markDirty();
+                            setVanityRooms((prev) =>
+                              prev.map((row, i) =>
+                                i === idx
+                                  ? {
+                                      ...row,
+                                      applyProgram: false,
+                                      permittedMaterials: [],
+                                      permittedSinkUpgrades: [],
+                                      permittedEdgeUpgrades: []
+                                    }
+                                  : row
+                              )
+                            );
+                          }}
+                        >
+                          Remove program
+                        </button>
+                      ) : null}
+
+                      {/* Customer choices — only shown when applied */}
+                      {props.editable ? (
+                        <div
+                          className="eq-vanity-customer-choices"
+                          data-testid="eq-vanity-permitted-options"
+                        >
+                          <h4 className="eq-option-card__subtitle">Customer choices</h4>
+                          <label className="eq-inline-label eq-inline-label--check">
+                            <input
+                              type="checkbox"
+                              checked={v.permittedMaterials.length > 0}
+                              data-testid="eq-vanity-allow-materials"
+                              onChange={(e) => {
+                                markDirty();
+                                setVanityRooms((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx
+                                      ? {
+                                          ...row,
+                                          permittedMaterials: e.target.checked
+                                            ? ["Group Promo materials"]
+                                            : []
+                                        }
+                                      : row
+                                  )
+                                );
+                              }}
+                            />
+                            Allow eligible material upgrades
+                          </label>
+                          {v.permittedMaterials.length > 0 ? (
+                            <p className="eq-upgrade-list" data-testid="eq-vanity-materials-list">
+                              {v.permittedMaterials.join(", ")}
+                            </p>
+                          ) : null}
+
+                          <label className="eq-inline-label eq-inline-label--check">
+                            <input
+                              type="checkbox"
+                              checked={v.permittedSinkUpgrades.length > 0}
+                              data-testid="eq-vanity-allow-sinks"
+                              onChange={(e) => {
+                                markDirty();
+                                setVanityRooms((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx
+                                      ? {
+                                          ...row,
+                                          permittedSinkUpgrades: e.target.checked
+                                            ? [
+                                                "Oval bisque",
+                                                "rectangular white",
+                                                "rectangular bisque"
+                                              ]
+                                            : []
+                                        }
+                                      : row
+                                  )
+                                );
+                              }}
+                            />
+                            Allow sink upgrades
+                          </label>
+                          {v.permittedSinkUpgrades.length > 0 ? (
+                            <p className="eq-upgrade-list" data-testid="eq-vanity-sinks-list">
+                              {v.permittedSinkUpgrades.join(", ")}
+                            </p>
+                          ) : null}
+
+                          <label className="eq-inline-label eq-inline-label--check">
+                            <input
+                              type="checkbox"
+                              checked={v.permittedEdgeUpgrades.length > 0}
+                              data-testid="eq-vanity-allow-edges"
+                              onChange={(e) => {
+                                markDirty();
+                                setVanityRooms((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx
+                                      ? {
+                                          ...row,
+                                          permittedEdgeUpgrades: e.target.checked
+                                            ? ["Eased", "Small Ogee"]
+                                            : []
+                                        }
+                                      : row
+                                  )
+                                );
+                              }}
+                            />
+                            Allow edge upgrades
+                          </label>
+                          {v.permittedEdgeUpgrades.length > 0 ? (
+                            <p className="eq-upgrade-list" data-testid="eq-vanity-edges-list">
+                              {v.permittedEdgeUpgrades.join(", ")}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div
+                          className="eq-vanity-customer-choices"
+                          data-testid="eq-vanity-permitted-upgrades"
+                        >
+                          {v.permittedMaterials.length > 0 ? (
+                            <p className="eq-footnote">
+                              Materials: {v.permittedMaterials.join(", ")}
+                            </p>
+                          ) : null}
+                          {v.permittedSinkUpgrades.length > 0 ? (
+                            <p className="eq-footnote">
+                              Sink upgrades: {v.permittedSinkUpgrades.join(", ")}
+                            </p>
+                          ) : null}
+                          {v.permittedEdgeUpgrades.length > 0 ? (
+                            <p className="eq-footnote">
+                              Edge upgrades: {v.permittedEdgeUpgrades.join(", ")}
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {v.warnings.length > 0 ? (
+                    <ul data-testid="eq-vanity-warnings">
+                      {v.warnings.map((w) => (
+                        <li key={w}>{w}</li>
                       ))}
                     </ul>
-                  </div>
-                ) : null}
-                {v.applyProgram ? (
-                  <div data-testid="eq-vanity-permitted-upgrades">
-                    <p className="eq-footnote">
-                      Permitted sink upgrades: {v.permittedSinkUpgrades.join(", ") || "—"}
-                    </p>
-                    <p className="eq-footnote">
-                      Permitted materials: {v.permittedMaterials.join(", ") || "—"}
-                    </p>
-                  </div>
-                ) : null}
-                {props.editable ? (
-                  <>
-                    <label>
-                      Same-trip confirmation
-                      <input
-                        type="checkbox"
-                        disabled={!v.applyProgram}
-                        checked={v.additionalTrips === 0}
-                        data-testid="eq-vanity-same-trip"
-                        onChange={(e) => {
-                          markDirty();
-                          setVanityRooms((prev) =>
-                            prev.map((row, i) =>
-                              i === idx
-                                ? {
-                                    ...row,
-                                    additionalTrips: e.target.checked
-                                      ? 0
-                                      : Math.max(1, row.additionalTrips),
-                                    physicalFacts: {
-                                      ...row.physicalFacts,
-                                      sameTrip: e.target.checked
-                                    }
-                                  }
-                                : row
-                            )
-                          );
-                        }}
-                      />
-                    </label>
-                    <label>
-                      Additional trips
-                      <input
-                        type="number"
-                        min={0}
-                        disabled={!v.applyProgram}
-                        value={v.additionalTrips}
-                        data-testid="eq-vanity-trips"
-                        onChange={(e) => {
-                          markDirty();
-                          const n = Math.max(0, Number(e.target.value) || 0);
-                          setVanityRooms((prev) =>
-                            prev.map((row, i) =>
-                              i === idx
-                                ? {
-                                    ...row,
-                                    additionalTrips: n,
-                                    physicalFacts: { ...row.physicalFacts, sameTrip: n === 0 }
-                                  }
-                                : row
-                            )
-                          );
-                        }}
-                      />
-                    </label>
-                  </>
-                ) : (
-                  <dl className="eq-summary-dl eq-summary-dl--grid">
-                    <div>
-                      <dt>Same-trip confirmation</dt>
-                      <dd data-testid="eq-vanity-same-trip">
-                        {v.additionalTrips === 0 ? "Yes" : "No"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Additional trips</dt>
-                      <dd data-testid="eq-vanity-trips">{v.additionalTrips}</dd>
-                    </div>
-                  </dl>
-                )}
-                <div data-testid="eq-vanity-permitted-options">
-                  <h4 className="eq-ai-section-title">Permitted customer upgrades</h4>
-                  <p className="eq-muted">Materials: {v.permittedMaterials.join(", ")}</p>
-                  <p className="eq-muted">Sink upgrades: {v.permittedSinkUpgrades.join(", ")}</p>
-                  <p className="eq-muted">Edge upgrades: {v.permittedEdgeUpgrades.join(", ")}</p>
+                  ) : null}
                 </div>
-                {v.serverPrice != null ? (
-                  <p data-testid="eq-vanity-server-price">
-                    Package total (server): {money(v.serverPrice)}
-                  </p>
-                ) : (
-                  <p className="eq-muted">Package total calculated on save.</p>
-                )}
-                {v.warnings.length > 0 ? (
-                  <ul data-testid="eq-vanity-warnings">
-                    {v.warnings.map((w) => (
-                      <li key={w}>{w}</li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
-        <h3 className="eq-ai-section-title">Waterfalls</h3>
-        <div data-testid="eq-waterfall-configuration">
+        {/* ── Card 4: Island waterfalls ────────────────────────────────────── */}
+        <div className="eq-option-card" data-testid="eq-waterfall-configuration">
+          <div className="eq-option-card__head">
+            <h3 className="eq-option-card__title">Island waterfalls</h3>
+          </div>
+
           {(() => {
             const detection = props.commercial?.scopeDetection || {};
-            const geometryPresent =
-              waterfalls.length > 0 || Boolean(detection.waterfallGeometryPresent);
-            const approved =
-              props.measurementsApproved !== false && detection.waterfallApproved !== false;
+            const islandLabel: string = detection.islandLabel || "Kitchen Island";
 
-            if (!geometryPresent) {
+            if (waterfalls.length === 0) {
               if (detection.islandDetected) {
                 return (
-                  <p className="eq-muted" data-testid="eq-waterfall-lifecycle-msg">
-                    No waterfalls are included. Add one from an island in Takeoff.
-                  </p>
+                  <div data-testid="eq-waterfall-lifecycle-msg">
+                    <p className="eq-option-card__subtitle">{islandLabel}</p>
+                    <p className="eq-muted">No waterfall included.</p>
+                    {props.editable ? (
+                      <div className="eq-option-controls-row">
+                        <button
+                          type="button"
+                          className="eq-btn-secondary"
+                          data-testid="eq-add-left-waterfall-option"
+                          onClick={() => props.onRequestAddIslandWaterfall?.("left")}
+                        >
+                          Add left waterfall
+                        </button>
+                        <button
+                          type="button"
+                          className="eq-btn-secondary"
+                          data-testid="eq-add-right-waterfall-option"
+                          onClick={() => props.onRequestAddIslandWaterfall?.("right")}
+                        >
+                          Add right waterfall
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 );
               }
               return (
@@ -1236,195 +1509,211 @@ export function CommercialConfigurationSection(props: {
               );
             }
 
-            if (!approved) {
+            return waterfalls.map((w, idx) => {
+              const sideLabel = w.side.charAt(0).toUpperCase() + w.side.slice(1);
               return (
-                <>
-                  <p className="eq-muted" data-testid="eq-waterfall-lifecycle-msg">
-                    Waterfall geometry added. Approve measurements to configure pricing and customer
-                    availability.
-                  </p>
-                  {waterfalls.map((w) => (
-                    <div key={w.id} className="eq-waterfall-card" data-testid="eq-waterfall-card">
-                      <strong data-testid="eq-waterfall-label">
-                        {w.roomName} — {w.pieceLabel} — {w.side} waterfall
-                      </strong>
-                      <dl
-                        className="eq-summary-dl eq-summary-dl--grid"
-                        data-testid="eq-waterfall-physical-facts"
-                      >
+                <div key={w.id} className="eq-waterfall-card" data-testid="eq-waterfall-card">
+                  <div className="eq-option-card__head">
+                    <strong data-testid="eq-waterfall-label">
+                      {w.pieceLabel || w.roomName} — {sideLabel} Waterfall
+                    </strong>
+                    {w.total != null ? (
+                      <span className="eq-option-impact" data-testid="eq-waterfall-impact">
+                        {w.pieceLabel || "Waterfall"} +{money(w.total)}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <p className="eq-footnote">Physical scope:</p>
+                  <dl
+                    className="eq-summary-dl eq-summary-dl--grid"
+                    data-testid="eq-waterfall-physical-facts"
+                  >
+                    <div>
+                      <dt>Room</dt>
+                      <dd data-testid="eq-waterfall-room">{w.roomName}</dd>
+                    </div>
+                    <div>
+                      <dt>Piece</dt>
+                      <dd data-testid="eq-waterfall-piece">{w.pieceLabel}</dd>
+                    </div>
+                    <div>
+                      <dt>Side</dt>
+                      <dd data-testid="eq-waterfall-side">{w.side}</dd>
+                    </div>
+                    <div>
+                      <dt>Panel depth</dt>
+                      <dd data-testid="eq-waterfall-width">{`${w.panelWidthIn}" panel depth`}</dd>
+                    </div>
+                    <div>
+                      <dt>Finished height</dt>
+                      <dd data-testid="eq-waterfall-height">{`${w.legHeightIn}" finished height`}</dd>
+                    </div>
+                    <div>
+                      <dt>Panels</dt>
+                      <dd data-testid="eq-waterfall-qty">
+                        {w.quantity} panel{w.quantity === 1 ? "" : "s"}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <p className="eq-footnote">Commercial choices:</p>
+                  <div
+                    className="eq-waterfall-editor"
+                    data-testid="eq-waterfall-commercial-controls"
+                  >
+                    {props.editable ? (
+                      <>
+                        <div className="eq-option-controls-row">
+                          <label className="eq-inline-label eq-inline-label--check">
+                            <input
+                              type="radio"
+                              name={`wf-scope-${w.id}`}
+                              checked={!w.customerOptional}
+                              data-testid="eq-waterfall-required"
+                              onChange={() => {
+                                markDirty();
+                                setWaterfalls((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx ? { ...row, customerOptional: false } : row
+                                  )
+                                );
+                              }}
+                            />
+                            Required
+                          </label>
+                          <label className="eq-inline-label eq-inline-label--check">
+                            <input
+                              type="radio"
+                              name={`wf-scope-${w.id}`}
+                              checked={w.customerOptional}
+                              data-testid="eq-waterfall-optional"
+                              onChange={() => {
+                                markDirty();
+                                setWaterfalls((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx ? { ...row, customerOptional: true } : row
+                                  )
+                                );
+                              }}
+                            />
+                            Customer optional
+                          </label>
+                        </div>
+
+                        <label className="eq-inline-label" htmlFor={`eq-waterfall-miter-${w.id}`}>
+                          Miter
+                          <select
+                            id={`eq-waterfall-miter-${w.id}`}
+                            name={`waterfall-miter-${w.id}`}
+                            value={w.miterKey}
+                            data-testid="eq-waterfall-miter"
+                            onChange={(e) => {
+                              markDirty();
+                              setWaterfalls((prev) =>
+                                prev.map((row, i) =>
+                                  i === idx ? { ...row, miterKey: e.target.value } : row
+                                )
+                              );
+                            }}
+                          >
+                            {MITER_KEYS.map((m) => (
+                              <option key={m.value} value={m.value}>
+                                {m.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="eq-inline-label eq-inline-label--check">
+                          <input
+                            type="checkbox"
+                            checked={w.backsidePolish}
+                            data-testid="eq-waterfall-polish"
+                            onChange={(e) => {
+                              markDirty();
+                              setWaterfalls((prev) =>
+                                prev.map((row, i) =>
+                                  i === idx ? { ...row, backsidePolish: e.target.checked } : row
+                                )
+                              );
+                            }}
+                          />
+                          Backside polish
+                        </label>
+
+                        <label className="eq-inline-label" htmlFor={`eq-waterfall-note-${w.id}`}>
+                          Customer-visible note
+                          <input
+                            id={`eq-waterfall-note-${w.id}`}
+                            name={`waterfall-note-${w.id}`}
+                            value={w.estimatorNote}
+                            data-testid="eq-waterfall-note"
+                            onChange={(e) => {
+                              markDirty();
+                              setWaterfalls((prev) =>
+                                prev.map((row, i) =>
+                                  i === idx ? { ...row, estimatorNote: e.target.value } : row
+                                )
+                              );
+                            }}
+                          />
+                        </label>
+                      </>
+                    ) : (
+                      <dl className="eq-summary-dl eq-summary-dl--grid">
                         <div>
-                          <dt>Panel width (in)</dt>
-                          <dd data-testid="eq-waterfall-width">{w.panelWidthIn}</dd>
+                          <dt>Scope</dt>
+                          <dd data-testid="eq-waterfall-optional">
+                            {w.customerOptional ? "Customer optional" : "Required"}
+                          </dd>
                         </div>
                         <div>
-                          <dt>Panel height (in)</dt>
-                          <dd data-testid="eq-waterfall-height">{w.legHeightIn}</dd>
+                          <dt>Miter</dt>
+                          <dd data-testid="eq-waterfall-miter">
+                            {MITER_KEYS.find((m) => m.value === w.miterKey)?.label ||
+                              w.miterKey ||
+                              "—"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Backside polish</dt>
+                          <dd data-testid="eq-waterfall-polish">
+                            {w.backsidePolish ? "Yes" : "No"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Customer-visible note</dt>
+                          <dd data-testid="eq-waterfall-note">{w.estimatorNote || "—"}</dd>
                         </div>
                       </dl>
-                    </div>
-                  ))}
-                </>
-              );
-            }
+                    )}
+                  </div>
 
-            return waterfalls.map((w, idx) => (
-              <div key={w.id} className="eq-waterfall-card" data-testid="eq-waterfall-card">
-                <strong data-testid="eq-waterfall-label">
-                  {w.roomName} — {w.pieceLabel} — {w.side} waterfall
-                </strong>
-                <p className="eq-footnote" data-testid="eq-waterfall-takeoff-ref">
-                  Physical scope from Takeoff (stable id: {w.id}). Width, height, side, and quantity
-                  are edited only in Takeoff.
-                </p>
-                <dl
-                  className="eq-summary-dl eq-summary-dl--grid"
-                  data-testid="eq-waterfall-physical-facts"
-                >
-                  <div>
-                    <dt>Room</dt>
-                    <dd data-testid="eq-waterfall-room">{w.roomName}</dd>
-                  </div>
-                  <div>
-                    <dt>Related piece</dt>
-                    <dd data-testid="eq-waterfall-piece">{w.pieceLabel}</dd>
-                  </div>
-                  <div>
-                    <dt>Side / location</dt>
-                    <dd data-testid="eq-waterfall-side">{w.side}</dd>
-                  </div>
-                  <div>
-                    <dt>Panel width (in)</dt>
-                    <dd data-testid="eq-waterfall-width">{w.panelWidthIn}</dd>
-                  </div>
-                  <div>
-                    <dt>Panel height (in)</dt>
-                    <dd data-testid="eq-waterfall-height">{w.legHeightIn}</dd>
-                  </div>
-                  <div>
-                    <dt>Quantity / legs</dt>
-                    <dd data-testid="eq-waterfall-qty">{w.quantity}</dd>
-                  </div>
-                  <div>
-                    <dt>Included in Takeoff scope</dt>
-                    <dd data-testid="eq-waterfall-included">
-                      {w.includedInScope ? "Yes" : "No"}
-                    </dd>
-                  </div>
-                </dl>
-                <div className="eq-waterfall-editor" data-testid="eq-waterfall-commercial-controls">
-                  {props.editable ? (
-                    <>
-                      <label>
-                        Miter height
-                        <select
-                          value={w.miterKey}
-                          data-testid="eq-waterfall-miter"
-                          onChange={(e) => {
-                            markDirty();
-                            setWaterfalls((prev) =>
-                              prev.map((row, i) =>
-                                i === idx ? { ...row, miterKey: e.target.value } : row
-                              )
-                            );
-                          }}
-                        >
-                          {MITER_KEYS.map((m) => (
-                            <option key={m.value} value={m.value}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Backside polish
-                        <input
-                          type="checkbox"
-                          checked={w.backsidePolish}
-                          data-testid="eq-waterfall-polish"
-                          onChange={(e) => {
-                            markDirty();
-                            setWaterfalls((prev) =>
-                              prev.map((row, i) =>
-                                i === idx ? { ...row, backsidePolish: e.target.checked } : row
-                              )
-                            );
-                          }}
-                        />
-                      </label>
-                      <label>
-                        Customer optional
-                        <input
-                          type="checkbox"
-                          checked={w.customerOptional}
-                          data-testid="eq-waterfall-optional"
-                          onChange={(e) => {
-                            markDirty();
-                            setWaterfalls((prev) =>
-                              prev.map((row, i) =>
-                                i === idx ? { ...row, customerOptional: e.target.checked } : row
-                              )
-                            );
-                          }}
-                        />
-                      </label>
-                      <label>
-                        Estimator note
-                        <input
-                          value={w.estimatorNote}
-                          data-testid="eq-waterfall-note"
-                          onChange={(e) => {
-                            markDirty();
-                            setWaterfalls((prev) =>
-                              prev.map((row, i) =>
-                                i === idx ? { ...row, estimatorNote: e.target.value } : row
-                              )
-                            );
-                          }}
-                        />
-                      </label>
-                    </>
-                  ) : (
-                    <dl className="eq-summary-dl eq-summary-dl--grid">
-                      <div>
-                        <dt>Miter height</dt>
-                        <dd data-testid="eq-waterfall-miter">
-                          {MITER_KEYS.find((m) => m.value === w.miterKey)?.label || w.miterKey || "—"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Backside polish</dt>
-                        <dd data-testid="eq-waterfall-polish">{w.backsidePolish ? "Yes" : "No"}</dd>
-                      </div>
-                      <div>
-                        <dt>Customer optional</dt>
-                        <dd data-testid="eq-waterfall-optional">
-                          {w.customerOptional ? "Yes" : "No"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Estimator note</dt>
-                        <dd data-testid="eq-waterfall-note">{w.estimatorNote || "—"}</dd>
-                      </div>
-                    </dl>
-                  )}
+                  <p className="eq-muted" data-testid="eq-waterfall-price-note">
+                    {w.total != null
+                      ? `Current price: ${money(w.total)}`
+                      : "Updating price…"}
+                  </p>
                 </div>
-                <p className="eq-muted" data-testid="eq-waterfall-price-note">
-                  Material, tax, labor ($600/leg), polish ($225), and miter are calculated by the
-                  server on save from Takeoff dimensions — not by editing width/height here.
-                  {w.total != null ? ` Last server total: ${money(w.total)}` : ""}
-                </p>
-              </div>
-            ));
+              );
+            });
           })()}
         </div>
 
+        {/* Error */}
         {props.error ? (
-          <div className="eq-state eq-state--error" role="alert" data-testid="eq-commercial-error">
+          <div
+            className="eq-state eq-state--error"
+            role="alert"
+            data-testid="eq-commercial-error"
+          >
             {props.error}
           </div>
         ) : null}
 
-        {props.editable ? (
+        {/* Save now button — hidden when Saved and not dirty */}
+        {showSaveButton ? (
           <div className="eq-action-row">
             <button
               type="button"
@@ -1436,10 +1725,40 @@ export function CommercialConfigurationSection(props: {
               {props.busy ? "Saving…" : "Save now"}
             </button>
             <span className="eq-muted" data-testid="eq-commercial-save-state">
-              {dirty || props.dirty ? "Dirty — save to recalculate" : "Saved"}
+              {isFailed ? "Try saving again." : dirty || props.dirty ? "Unsaved changes" : ""}
             </span>
           </div>
-        ) : null}
+        ) : (
+          <span style={{ display: "none" }} data-testid="eq-commercial-save-state">
+            {isSaved ? "Saved" : ""}
+          </span>
+        )}
+
+        {/* eq-options-footer — bottom totals; display props only, never calculated in React */}
+        <div className="eq-options-footer">
+          <dl className="eq-summary-dl eq-summary-dl--grid">
+            <div>
+              <dt>Current draft estimate</dt>
+              <dd data-testid="eq-options-draft-total">
+                {props.draftExactTotal != null
+                  ? money(props.draftExactTotal)
+                  : adj?.adjustedExactTotal != null
+                    ? money(adj.adjustedExactTotal)
+                    : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt>Customer display total</dt>
+              <dd data-testid="eq-options-display-total">
+                {props.customerDisplayTotal != null
+                  ? money(props.customerDisplayTotal)
+                  : adj?.customerDisplayTotal != null
+                    ? money(adj.customerDisplayTotal)
+                    : "—"}
+              </dd>
+            </div>
+          </dl>
+        </div>
       </div>
     </section>
   );

@@ -3,7 +3,7 @@
  * Mounts production Estimate Record components + EliteosTopbar + Takeoff iframe.
  * Not imported by StudioApp production routing.
  */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import {
   DigitalEstimateSection,
@@ -74,8 +74,10 @@ export default function EstimateRecordReviewApp() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [commercialDirty, setCommercialDirty] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string>("Saved");
   const [takeoffReady, setTakeoffReady] = useState<Record<string, unknown> | null>(null);
   const [iframeEpoch, setIframeEpoch] = useState(0);
+  const takeoffFrameRef = useRef<HTMLIFrameElement | null>(null);
   const [store, setStore] = useState(() => ({
     customLineItems: scenario.commercial?.customLines || [],
     estimateWideAdjustment: scenario.commercial?.estimateAdjustment || {},
@@ -150,6 +152,7 @@ export default function EstimateRecordReviewApp() {
     setScenario(next);
     setError(null);
     setCommercialDirty(false);
+    setSaveStatus("Saved");
     setTakeoffReady(null);
     setIframeEpoch((n) => n + 1);
     setStore({
@@ -169,7 +172,9 @@ export default function EstimateRecordReviewApp() {
   }) {
     setBusy(true);
     setError(null);
+    setSaveStatus("Saving…");
     window.setTimeout(() => {
+      setSaveStatus("Updating price…");
       const mappedLines = payload.customLineItems.map((l: any) => ({
         id: l.id,
         description: l.description,
@@ -203,6 +208,11 @@ export default function EstimateRecordReviewApp() {
           estimateAdjustment: {
             ...prev.commercial.estimateAdjustment,
             ...payload.estimateWideAdjustment,
+            verifiedBaseExact: authority.baseExactTotal,
+            eligibleAdditionalChargesExact:
+              Math.round(
+                ((authority.eligibleBasisExact || 0) - (authority.baseExactTotal || 0)) * 100
+              ) / 100,
             baseExactTotal: authority.baseExactTotal,
             eligibleBasisExact: authority.eligibleBasisExact,
             exactAdjustment: authority.commercialAdjustmentExact,
@@ -232,7 +242,14 @@ export default function EstimateRecordReviewApp() {
                       miterKey: "2-3in",
                       backsidePolish: true,
                       customerOptional: true,
-                      includedInScope: true
+                      includedInScope: true,
+                      total: waterfallServerPrice({
+                        panelWidthIn: 36,
+                        panelHeightIn: 36,
+                        quantity: 1,
+                        miterKey: "2-3in",
+                        backsidePolish: true
+                      })
                     }
                   ]
               : prev.commercial.waterfalls
@@ -255,6 +272,7 @@ export default function EstimateRecordReviewApp() {
       });
       setBusy(false);
       setCommercialDirty(false);
+      setSaveStatus("Saved");
     }, 200);
   }
 
@@ -359,6 +377,7 @@ export default function EstimateRecordReviewApp() {
           <div className="eq-record-section__body">
             <div className="eq-takeoff-frame-wrap">
               <iframe
+                ref={takeoffFrameRef}
                 key={`${scenarioName}-${iframeEpoch}`}
                 title="Consolidated Takeoff Review"
                 className="eq-takeoff-iframe"
@@ -399,11 +418,81 @@ export default function EstimateRecordReviewApp() {
           error={error}
           dirty={commercialDirty}
           measurementsApproved={scenario.measurementsApproved}
+          saveStatus={saveStatus}
+          draftExactTotal={
+            (scenario.aiSummary?.pricing?.adjustedExactTotal as number | null | undefined) ??
+            (scenario.commercial?.estimateAdjustment as { adjustedExactTotal?: number } | undefined)
+              ?.adjustedExactTotal ??
+            null
+          }
+          customerDisplayTotal={
+            (scenario.aiSummary?.pricing?.customerDisplayTotal as number | null | undefined) ??
+            (scenario.commercial?.estimateAdjustment as { customerDisplayTotal?: number } | undefined)
+              ?.customerDisplayTotal ??
+            null
+          }
           roomOptions={[
             { id: "kitchen", name: "Kitchen" },
             { id: "bath", name: "Bathroom" }
           ]}
-          onDirtyChange={setCommercialDirty}
+          onRequestAddIslandWaterfall={(side) => {
+            const win = takeoffFrameRef.current?.contentWindow;
+            if (win) {
+              try {
+                win.postMessage({ type: "STUDIO_REQUEST_ADD_ISLAND_WATERFALL", side }, "*");
+                return;
+              } catch {
+                /* fall through to local harness merge */
+              }
+            }
+            setScenario((prev) => {
+              const nextWf = {
+                id: `wf-island-${side}`,
+                roomId: "kitchen",
+                roomName: "Kitchen",
+                pieceId: "island",
+                pieceLabel: "Kitchen Island",
+                side,
+                panelWidthIn: 36,
+                panelHeightIn: 36,
+                legHeightIn: 36,
+                quantity: 1,
+                miterKey: "2-3in",
+                backsidePolish: true,
+                customerOptional: true,
+                includedInScope: true,
+                estimatorNote: "",
+                total: waterfallServerPrice({
+                  panelWidthIn: 36,
+                  panelHeightIn: 36,
+                  quantity: 1,
+                  miterKey: "2-3in",
+                  backsidePolish: true
+                })
+              };
+              const existing = prev.commercial?.waterfalls || [];
+              if (existing.some((w: any) => w.side === side)) return prev;
+              return {
+                ...prev,
+                commercial: {
+                  ...prev.commercial,
+                  waterfalls: [...existing, nextWf],
+                  scopeDetection: {
+                    ...(prev.commercial?.scopeDetection || {}),
+                    islandDetected: true,
+                    islandLabel: "Kitchen Island",
+                    waterfallGeometryPresent: true
+                  }
+                }
+              };
+            });
+            setCommercialDirty(true);
+            setSaveStatus("Unsaved changes");
+          }}
+          onDirtyChange={(d) => {
+            setCommercialDirty(d);
+            if (d) setSaveStatus("Unsaved changes");
+          }}
           onSave={saveCommercial}
         />
 

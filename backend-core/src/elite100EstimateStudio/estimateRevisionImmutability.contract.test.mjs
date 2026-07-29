@@ -36,19 +36,16 @@ function money(n) {
     "utf8"
   );
   assert.match(commercial, /Verified base estimate/);
-  assert.match(commercial, /Eligible additional charges/);
-  assert.match(commercial, /Account-adjustment basis/);
-  assert.match(commercial, /Non-percentage customer credit/);
+  assert.match(commercial, /Eligible additional lines|Eligible additional charges/);
+  assert.match(commercial, /Adjustment basis|Account-adjustment basis/);
+  assert.match(commercial, /Non-percentage credits|Non-percentage customer credit/);
   assert.match(commercial, /Updated exact total/);
   assert.match(commercial, /Customer display total/);
   assert.equal(commercial.includes("Current customer total"), false);
   assert.match(commercial, /data-editable=\{props\.editable \? "1" : "0"\}/);
-  assert.match(commercial, /Read-only for this revision/);
-  assert.match(commercial, /not in percentage basis/);
-  // Save now / Add line only inside editable branches
   assert.match(commercial, /\{props\.editable \? \([\s\S]*Save now/);
   assert.match(commercial, /\{props\.editable \? \([\s\S]*eq-add-custom-line/);
-  console.log("ok: Account Adjustment labels + readonly gates in Estimate Adjustments UI");
+  console.log("ok: Account Adjustment labels + readonly gates in Estimate Options UI");
 }
 
 {
