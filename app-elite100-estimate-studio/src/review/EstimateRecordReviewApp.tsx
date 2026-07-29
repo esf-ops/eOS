@@ -286,10 +286,9 @@ export default function EstimateRecordReviewApp() {
   }
 
   const commercialEditable =
-    scenario.stage === "approved" ||
     scenario.stage === "revision_draft" ||
     scenario.stage === "draft" ||
-    (scenario.stage === "published" && scenarioName === "r2");
+    (!scenario.measurementsApproved && scenario.stage !== "approved" && scenario.stage !== "published");
 
   return (
     <div className="shell eq-shell" data-testid="estimate-record-review-harness" data-scenario={scenarioName}>
@@ -375,10 +374,10 @@ export default function EstimateRecordReviewApp() {
                 <button
                   type="button"
                   className="eq-btn-secondary"
-                  data-testid="eq-create-measurement-revision"
+                  data-testid="eq-edit-estimate"
                   onClick={() => switchScenario("r2")}
                 >
-                  Create Measurement Revision
+                  Edit Estimate
                 </button>
               </div>
             )}

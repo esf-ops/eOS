@@ -1365,7 +1365,7 @@ export default function ConsolidatedTakeoffReview() {
       return rev ? `Approved Takeoff — ${rev}` : "Approved Takeoff";
     }
     if (urlWorkspace.isRevisionDraft && urlWorkspace.revisionNumber) {
-      return `Editing measurement revision R${urlWorkspace.revisionNumber}`;
+      return `Editing Revision R${urlWorkspace.revisionNumber}`;
     }
     return "Takeoff review";
   })();
@@ -2188,47 +2188,100 @@ export default function ConsolidatedTakeoffReview() {
                 );
               })()}
               {!isReadonly ? (
-                <button
-                  type="button"
-                  className="ctr-btn-secondary"
-                  data-testid="ctr-add-waterfall-panel"
-                  onClick={() => {
-                    const next = structuredClone(draftRef.current || createEmptyManualTakeoffDraft());
-                    let targetRun: any = null;
-                    for (const room of next.rooms || []) {
-                      for (const area of room.areas || []) {
-                        for (const run of area.runs || []) {
-                          if (/island/i.test(String(run.label || ""))) {
-                            targetRun = run;
-                            break;
-                          }
-                        }
-                      }
-                    }
-                    if (!targetRun) return;
-                    const panels = Array.isArray(targetRun.waterfallPanels)
-                      ? targetRun.waterfallPanels
-                      : [];
-                    if (panels.some((p: any) => p.side === "left")) return;
-                    panels.push({
-                      id: `wf-${targetRun.id}-left`,
-                      side: "left",
-                      panelWidthIn: Number(targetRun.depthIn) || 36,
-                      panelHeightIn: 36,
-                      quantity: 1,
-                      included: true
-                    });
-                    targetRun.waterfallPanels = panels;
-                    targetRun.waterfallSegmentLengthsIn = {
-                      ...(targetRun.waterfallSegmentLengthsIn || {}),
-                      left: 36
-                    };
-                    targetRun.notes = `${targetRun.label} — Left waterfall (Takeoff physical scope)`;
-                    updateDraft(next);
-                  }}
-                >
-                  Add Kitchen Island left waterfall
-                </button>
+                <div className="ctr-waterfall-island-actions" data-testid="ctr-island-waterfall-actions">
+                  {(draft?.rooms || []).flatMap((room: any) =>
+                    (room.areas || []).flatMap((area: any) =>
+                      (area.runs || [])
+                        .filter((run: any) => /island/i.test(String(run.label || "")))
+                        .map((run: any) => {
+                          const panels = Array.isArray(run.waterfallPanels) ? run.waterfallPanels : [];
+                          const hasLeft = panels.some((p: any) => p.side === "left");
+                          const hasRight = panels.some((p: any) => p.side === "right");
+                          return (
+                            <div key={run.id} className="ctr-island-waterfall-row" data-testid="ctr-island-waterfall-row">
+                              <strong>{run.label}</strong>
+                              {!hasLeft ? (
+                                <button
+                                  type="button"
+                                  className="ctr-btn-secondary"
+                                  data-testid="ctr-add-left-waterfall"
+                                  onClick={() => {
+                                    const next = structuredClone(
+                                      draftRef.current || createEmptyManualTakeoffDraft()
+                                    );
+                                    for (const r of next.rooms || []) {
+                                      for (const a of r.areas || []) {
+                                        for (const piece of a.runs || []) {
+                                          if (String(piece.id) !== String(run.id)) continue;
+                                          const list = Array.isArray(piece.waterfallPanels)
+                                            ? piece.waterfallPanels
+                                            : [];
+                                          list.push({
+                                            id: `wf-${piece.id}-left`,
+                                            side: "left",
+                                            panelWidthIn: Number(piece.depthIn) || 36,
+                                            panelHeightIn: 36,
+                                            quantity: 1,
+                                            included: true
+                                          });
+                                          piece.waterfallPanels = list;
+                                          piece.waterfallSegmentLengthsIn = {
+                                            ...(piece.waterfallSegmentLengthsIn || {}),
+                                            left: 36
+                                          };
+                                        }
+                                      }
+                                    }
+                                    updateDraft(next);
+                                  }}
+                                >
+                                  Add left waterfall
+                                </button>
+                              ) : null}
+                              {!hasRight ? (
+                                <button
+                                  type="button"
+                                  className="ctr-btn-secondary"
+                                  data-testid="ctr-add-right-waterfall"
+                                  onClick={() => {
+                                    const next = structuredClone(
+                                      draftRef.current || createEmptyManualTakeoffDraft()
+                                    );
+                                    for (const r of next.rooms || []) {
+                                      for (const a of r.areas || []) {
+                                        for (const piece of a.runs || []) {
+                                          if (String(piece.id) !== String(run.id)) continue;
+                                          const list = Array.isArray(piece.waterfallPanels)
+                                            ? piece.waterfallPanels
+                                            : [];
+                                          list.push({
+                                            id: `wf-${piece.id}-right`,
+                                            side: "right",
+                                            panelWidthIn: Number(piece.depthIn) || 36,
+                                            panelHeightIn: 36,
+                                            quantity: 1,
+                                            included: true
+                                          });
+                                          piece.waterfallPanels = list;
+                                          piece.waterfallSegmentLengthsIn = {
+                                            ...(piece.waterfallSegmentLengthsIn || {}),
+                                            right: 36
+                                          };
+                                        }
+                                      }
+                                    }
+                                    updateDraft(next);
+                                  }}
+                                >
+                                  Add right waterfall
+                                </button>
+                              ) : null}
+                            </div>
+                          );
+                        })
+                    )
+                  )}
+                </div>
               ) : null}
             </section>
 

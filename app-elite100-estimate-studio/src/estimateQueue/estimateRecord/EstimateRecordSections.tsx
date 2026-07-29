@@ -317,10 +317,10 @@ export function DigitalEstimateSection(props: {
             <button
               type="button"
               className="eq-btn-ghost"
-              data-testid="eq-ai-edit-measurements"
+              data-testid="eq-edit-estimate"
               onClick={props.onCreateRevision}
             >
-              Create Measurement Revision
+              Edit Estimate
             </button>
           </div>
         </div>
@@ -373,10 +373,10 @@ export function DigitalEstimateSection(props: {
             <button
               type="button"
               className="eq-btn-ghost"
-              data-testid="eq-ai-edit-measurements"
+              data-testid="eq-edit-estimate"
               onClick={props.onCreateRevision}
             >
-              Create Measurement Revision
+              Edit Estimate
             </button>
             {props.showPublishRevised ? (
               <button

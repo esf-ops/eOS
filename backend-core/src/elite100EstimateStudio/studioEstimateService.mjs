@@ -1202,6 +1202,44 @@ export function createStudioEstimateService(deps = {}) {
         estimateId
       });
 
+      // Approved / published / superseded / historical snapshots are immutable.
+      // Estimators must use Edit Estimate (openMeasurementRevision) first.
+      const frozenStatus = String(row.status || "").toLowerCase();
+      const isPublishedSnapshot = Boolean(
+        row.publication?.active ||
+          row.publication?.customerUrl ||
+          row.publishedAt ||
+          row.published_at
+      );
+      const isHistoricalSnapshot =
+        frozenStatus === "historical" ||
+        Boolean(row.historical === true || row.isHistorical === true);
+      if (
+        frozenStatus === STUDIO_ESTIMATE_STATUSES.APPROVED ||
+        frozenStatus === STUDIO_ESTIMATE_STATUSES.SUPERSEDED ||
+        isPublishedSnapshot ||
+        isHistoricalSnapshot ||
+        (row.approval &&
+          frozenStatus !== STUDIO_ESTIMATE_STATUSES.DRAFT &&
+          frozenStatus !== STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE &&
+          frozenStatus !== STUDIO_ESTIMATE_STATUSES.PRICED &&
+          frozenStatus !== STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL)
+      ) {
+        const err = new Error(
+          "This estimate revision is not editable. Use Edit Estimate to open a draft revision."
+        );
+        err.statusCode = 409;
+        err.code = "estimate_revision_not_editable";
+        err.details = {
+          code: "estimate_revision_not_editable",
+          message: err.message,
+          estimateId: row.id,
+          revision: row.revision,
+          status: row.status
+        };
+        throw err;
+      }
+
       const wasManual = isManualStaffEstimate(row);
       let nextScope = { ...row.scope, ...clean };
       if (wasManual) {

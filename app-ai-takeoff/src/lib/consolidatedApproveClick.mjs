@@ -47,7 +47,7 @@ export function advisoryConfirmDialogMessage(advisoryCount) {
 export function approveButtonLabel(input) {
   if (input.approveStatus === "approving") return "Approving…";
   if (input.approveStatus === "approved") return "Approved";
-  if (input.isRevisionDraft) return "Approve Revised Measurements";
+  if (input.isRevisionDraft) return "Approve Revised Estimate";
   if (
     (Number(input.blockingCount) || 0) === 0 &&
     (Number(input.advisoryCount) || 0) > 0
@@ -55,7 +55,7 @@ export function approveButtonLabel(input) {
     const n = Number(input.advisoryCount) || 0;
     return `Approve with ${n} advisory warning${n === 1 ? "" : "s"}`;
   }
-  return "Approve Takeoff & Build Estimate";
+  return "Approve Estimate";
 }
 
 /**

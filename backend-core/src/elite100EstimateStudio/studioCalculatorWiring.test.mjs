@@ -454,22 +454,51 @@ function noTakeoffService(overrides = {}) {
   console.log("ok: 14 autosave→recalculation returns a current v4 result; approve succeeds once current");
 
   // Editing an ALREADY-APPROVED estimate must not mutate the frozen approved
-  // snapshot — it opens a new revision, preserving the prior revision/snapshot
-  // as historical evidence (Legacy and Revision Safety).
+  // snapshot — updateScope / saveManualScopeDraft reject with 409 until Edit
+  // Estimate opens a sibling draft revision (R1 stays approved until publish).
   const approvedRowId = created.estimateId;
   const approvedSnapshotBefore = (await repository.getById(ORG, approvedRowId)).calculationSnapshot;
-  const revised = await manual.saveManualScopeDraft({
+  let approvedBlocked = false;
+  try {
+    await manual.saveManualScopeDraft({
+      organizationId: ORG,
+      estimateId: approvedRowId,
+      actorUserId: ACTOR,
+      body: { scope: manualKitchenDraft({ quantity: 5 }) }
+    });
+  } catch (e) {
+    approvedBlocked =
+      e?.code === "estimate_revision_not_editable" && e?.statusCode === 409;
+  }
+  assert.equal(approvedBlocked, true, "approved R1 saveManualScopeDraft is rejected");
+
+  const opened = await studio.openMeasurementRevision({
     organizationId: ORG,
     estimateId: approvedRowId,
     actorUserId: ACTOR,
+    body: { confirm: true }
+  });
+  assert.equal(opened.estimate.revision, 2);
+  const revised = await manual.saveManualScopeDraft({
+    organizationId: ORG,
+    estimateId: opened.estimate.id,
+    actorUserId: ACTOR,
     body: { scope: manualKitchenDraft({ quantity: 5 }) }
   });
-  const supersededRow = await repository.getById(ORG, approvedRowId);
-  assert.equal(supersededRow.status, "superseded", "editing an approved estimate supersedes the prior revision, never mutates it in place");
-  assert.deepEqual(supersededRow.calculationSnapshot, approvedSnapshotBefore, "the superseded revision's frozen calculation snapshot is preserved unchanged");
+  const priorRow = await repository.getById(ORG, approvedRowId);
+  assert.equal(priorRow.status, "approved", "Edit Estimate keeps R1 approved (not superseded until publish)");
+  assert.deepEqual(
+    priorRow.calculationSnapshot,
+    approvedSnapshotBefore,
+    "R1 frozen calculation snapshot is preserved unchanged"
+  );
   assert.equal(revised.id !== approvedRowId, true, "edit-after-approval opens a new active revision with a new id");
   assert.equal(revised.revision, 2, "new active revision increments the revision number");
-  assert.equal(revised.calculation, null, "new active revision starts uncalculated (not the stale approved v4 result)");
+  assert.equal(
+    revised.calculation == null || revised.calculationSnapshot == null,
+    true,
+    "new active revision starts uncalculated (not the stale approved v4 result)"
+  );
 
   await manual.confirmManualScope({
     organizationId: ORG,

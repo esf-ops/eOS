@@ -133,7 +133,7 @@ assert.match(await page.locator('[data-testid="eq-waterfall-height"]').first().i
 assert.equal(await page.locator('input[data-testid="eq-waterfall-width"]').count(), 0);
 assert.ok(await page.locator('[data-testid="eq-de-r1-remains-active"]').count() >= 1);
 const approveLabel = await remountFrame.locator('[data-testid="ctr-approve-build"]').innerText();
-assert.match(approveLabel, /Approve Revised Measurements/i);
+assert.match(approveLabel, /Approve Revised Estimate/i);
 console.log('ok: R2 Takeoff edit/save/remount + commercial mirrors Takeoff dims');
 
 console.log('interaction: approved waterfall commercial options');
@@ -150,7 +150,7 @@ console.log('interaction: draft vanity/waterfall lifecycle messaging');
 await page.goto(studio('draft'), { waitUntil: 'networkidle', timeout: 120000 });
 await page.waitForSelector('[data-testid="eq-vanity-lifecycle-msg"]');
 assert.match(await page.locator('[data-testid="eq-vanity-lifecycle-msg"]').innerText(), /Bathroom vanity detected\\. Approve measurements/i);
-assert.match(await page.locator('[data-testid="eq-waterfall-lifecycle-msg"]').innerText(), /Kitchen Island detected\\. Add waterfall panel geometry in Takeoff/i);
+assert.match(await page.locator('[data-testid="eq-waterfall-lifecycle-msg"]').innerText(), /No waterfalls are included\\. Add one from an island in Takeoff/i);
 console.log('ok: pre-approval lifecycle messaging');
 
 console.log('interaction: revision history cards + comparison');

@@ -208,19 +208,24 @@ console.log("ok: 1–2 display label + disallowed names");
   assert.equal(crossDenied, true);
   console.log("ok: 11 cross-organization update rejected");
 
-  // Metadata-only via updateScope also preserves approval (partial patch).
-  const viaScope = await studio.updateScope({
-    organizationId: ORG,
-    estimateId: created.estimateId,
-    actorUserId: ACTOR,
-    body: { scope: { projectName: "Acme Kitchen Remodel v2" } }
-  });
-  assert.equal(viaScope.status, STUDIO_ESTIMATE_STATUSES.APPROVED);
-  assert.ok(viaScope.calculation || viaScope.calculationFingerprint);
+  // Approved revisions are immutable via updateScope — Edit Estimate first.
+  let scopeRejected = false;
+  try {
+    await studio.updateScope({
+      organizationId: ORG,
+      estimateId: created.estimateId,
+      actorUserId: ACTOR,
+      body: { scope: { projectName: "Acme Kitchen Remodel v2" } }
+    });
+  } catch (e) {
+    scopeRejected =
+      e?.code === "estimate_revision_not_editable" && e?.statusCode === 409;
+  }
+  assert.equal(scopeRejected, true);
   row = await estimates.getById(ORG, created.estimateId);
-  assert.equal(row.scope.projectName, "Acme Kitchen Remodel v2");
+  assert.equal(row.scope.projectName, "Acme Kitchen Remodel");
   assert.equal(row.status, STUDIO_ESTIMATE_STATUSES.APPROVED);
-  console.log("ok: updateScope metadata-only preserves approval + calculation");
+  console.log("ok: updateScope rejects approved revision with estimate_revision_not_editable");
 }
 
 {
