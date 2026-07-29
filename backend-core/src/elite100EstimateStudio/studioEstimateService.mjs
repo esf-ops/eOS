@@ -57,6 +57,7 @@ import {
   isActiveSimplifiedEstimate
 } from "./studioActiveReviewReadiness.mjs";
 import { buildAiEstimatorSummary } from "./studioAiEstimatorSummary.mjs";
+import { buildCommercialConfiguration } from "./studioCommercialConfiguration.mjs";
 
 /**
  * Structured mutation log — no PII, no scope dumps, no tokens.
@@ -675,6 +676,9 @@ export function createStudioEstimateService(deps = {}) {
       priorEstimate: extras.priorEstimate || null,
       publicationSummary: extras.publication || extras.publicationSummary || null,
       digitalEstimateRead: extras.digitalEstimateRead || null
+    });
+    base.commercialConfiguration = buildCommercialConfiguration(base, {
+      env: deps.env ?? process.env
     });
     return base;
   }

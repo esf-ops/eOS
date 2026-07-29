@@ -1,0 +1,162 @@
+/**
+ * Parent ↔ Takeoff readiness contract for Consolidated Takeoff Review.
+ * Used by Estimate Record iframe embedding and local review harnesses.
+ */
+
+export const TAKEOFF_REVIEW_READY = "TAKEOFF_REVIEW_READY";
+export const TAKEOFF_REVIEW_DRAFT_SAVED = "TAKEOFF_REVIEW_DRAFT_SAVED";
+export const TAKEOFF_WATERFALL_CHANGED = "TAKEOFF_WATERFALL_CHANGED";
+
+/**
+ * @param {object} draft
+ * @returns {{ roomCount: number, pieceCount: number, waterfalls: Array<object> }}
+ */
+export function summarizeTakeoffDraftForReady(draft) {
+  const rooms = Array.isArray(draft?.rooms) ? draft.rooms : [];
+  let pieceCount = 0;
+  /** @type {Array<object>} */
+  const waterfalls = [];
+  for (const room of rooms) {
+    for (const area of Array.isArray(room.areas) ? room.areas : []) {
+      for (const run of Array.isArray(area.runs) ? area.runs : []) {
+        if (!run || run.included === false) continue;
+        pieceCount += 1;
+        const panels = Array.isArray(run.waterfallPanels) ? run.waterfallPanels : [];
+        if (panels.length) {
+          for (const p of panels) {
+            waterfalls.push({
+              id: String(p.id || `${run.id}-${p.side || "left"}`),
+              roomId: String(room.id || ""),
+              roomName: String(room.name || "Room"),
+              pieceId: String(run.id || ""),
+              pieceLabel: String(run.label || "Piece"),
+              side: String(p.side || "left"),
+              panelWidthIn: Number(p.panelWidthIn) || Number(run.depthIn) || 0,
+              panelHeightIn: Number(p.panelHeightIn) || 0,
+              quantity: Number(p.quantity) || 1,
+              includedInScope: p.included !== false
+            });
+          }
+        } else if (run.waterfallSegmentLengthsIn && typeof run.waterfallSegmentLengthsIn === "object") {
+          for (const [side, height] of Object.entries(run.waterfallSegmentLengthsIn)) {
+            const h = Number(height);
+            if (!(h > 0)) continue;
+            waterfalls.push({
+              id: `${run.id}-${side}`,
+              roomId: String(room.id || ""),
+              roomName: String(room.name || "Room"),
+              pieceId: String(run.id || ""),
+              pieceLabel: String(run.label || "Piece"),
+              side: String(side),
+              panelWidthIn: Number(run.depthIn) || 36,
+              panelHeightIn: h,
+              quantity: 1,
+              includedInScope: true
+            });
+          }
+        }
+      }
+    }
+  }
+  return { roomCount: rooms.length, pieceCount, waterfalls };
+}
+
+/**
+ * Resolve postMessage target origin for parent Estimate Studio.
+ * @param {{ localReview?: boolean }} [opts]
+ */
+export function resolveTakeoffParentOrigin(opts = {}) {
+  try {
+    const env = (typeof import.meta !== "undefined" && import.meta.env) || {};
+    const configured = String(
+      env.VITE_HEAD_URL_ELITE100_ESTIMATE_STUDIO || env.VITE_HEAD_URL_ESTIMATE_STUDIO || ""
+    ).trim();
+    if (configured) return new URL(configured).origin;
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof document !== "undefined" && document.referrer) {
+      return new URL(document.referrer).origin;
+    }
+  } catch {
+    /* ignore */
+  }
+  if (opts.localReview) return "*";
+  try {
+    const isDev = Boolean(import.meta?.env?.DEV);
+    if (isDev) return "http://localhost:5191";
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * @param {string} type
+ * @param {object} payload
+ * @param {{ localReview?: boolean, takeoffJobId?: string|null }} [opts]
+ */
+export function postTakeoffParentMessage(type, payload, opts = {}) {
+  try {
+    if (typeof window === "undefined" || !window.parent || window.parent === window) return false;
+    const origin = resolveTakeoffParentOrigin({ localReview: opts.localReview });
+    if (!origin) return false;
+    window.parent.postMessage(
+      {
+        type,
+        source: "consolidated-review",
+        takeoffJobId: opts.takeoffJobId || null,
+        ...payload
+      },
+      origin
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function localReviewStorageKey(takeoffJobId, revisionNumber) {
+  return `eliteos-local-review-takeoff:${String(takeoffJobId || "job")}:r${String(revisionNumber || "1")}`;
+}
+
+export function loadLocalReviewDraft(takeoffJobId, revisionNumber) {
+  try {
+    const raw = sessionStorage.getItem(localReviewStorageKey(takeoffJobId, revisionNumber));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export function saveLocalReviewDraft(takeoffJobId, revisionNumber, draft) {
+  try {
+    sessionStorage.setItem(
+      localReviewStorageKey(takeoffJobId, revisionNumber),
+      JSON.stringify(draft)
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Server-style waterfall price from physical dims + commercial options (review/tests). */
+export function estimateWaterfallServerPrice(args = {}) {
+  const width = Number(args.panelWidthIn) || 0;
+  const height = Number(args.panelHeightIn) || 0;
+  const qty = Math.max(1, Number(args.quantity) || 1);
+  const miterKey = String(args.miterKey || "2-3in");
+  const polish = Boolean(args.backsidePolish);
+  const miterRates = { "2-3in": 65, "4in": 70, "5in": 75, "6in": 80 };
+  const measuredSf = Math.round(((width * height) / 144) * 100) / 100;
+  const billedSf = Math.ceil(measuredSf);
+  const material = billedSf * 45; // illustrative room rate for review only
+  const labor = 600 * qty;
+  const polishAmt = polish ? 225 * qty : 0;
+  const miterLf = Math.round((height / 12) * 100) / 100;
+  const miter = Math.round(miterLf * (miterRates[miterKey] || 65) * 100) / 100;
+  return Math.round((material + labor + polishAmt + miter) * 100) / 100;
+}

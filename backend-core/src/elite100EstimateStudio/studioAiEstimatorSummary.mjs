@@ -7,6 +7,10 @@
 import { dedupeCustomerSafeCutoutLines } from "./customerSafeCutoutPresentation.mjs";
 import { isBacksplashPiece } from "./estimatorPieceClassification.mjs";
 import { partitionEstimatorWarnings } from "./estimatorWarningSafety.mjs";
+import {
+  distributeEstimateWideAdjustment,
+  resolveEffectiveEstimateWideAdjustment
+} from "./studioEstimateWideAdjustment.mjs";
 
 function num(v) {
   const n = Number(v);
@@ -47,18 +51,63 @@ function openingsFromScope(scope) {
   };
 }
 
+function openingsFromCutouts(room) {
+  let kitchenSink = 0;
+  let vanityBarSink = 0;
+  let cooktop = 0;
+  let outlet = 0;
+  for (const piece of Array.isArray(room?.pieces) ? room.pieces : []) {
+    if (!piece || piece.included === false) continue;
+    for (const c of Array.isArray(piece.cutouts) ? piece.cutouts : []) {
+      if (!c) continue;
+      const type = str(c.type || c.cutoutType).toLowerCase();
+      const qty = num(c.quantity) || 1;
+      if (type === "kitchen_sink" || type === "kitchensink") kitchenSink += qty;
+      else if (type === "vanity_bar_sink" || type === "vanity_sink" || type === "bar_sink")
+        vanityBarSink += qty;
+      else if (type === "cooktop") cooktop += qty;
+      else if (type === "outlet") outlet += qty;
+    }
+  }
+  return { kitchenSink, vanityBarSink, cooktop, outlet };
+}
+
 function openingsFromRoom(room) {
-  // Prefer room-level add-ons if present; else derive from piece cutouts when available.
+  // Prefer room-level add-ons when any typed count is present; else piece cutouts.
   const addOns = room?.addOns && typeof room.addOns === "object" ? room.addOns : null;
   if (addOns) {
-    return {
+    const fromAddOns = {
       kitchenSink: num(addOns["qty-sink"]),
       vanityBarSink: num(addOns["qty-bar"]),
       cooktop: num(addOns["qty-cook"]),
       outlet: num(addOns["qty-outlet"])
     };
+    if (
+      fromAddOns.kitchenSink +
+        fromAddOns.vanityBarSink +
+        fromAddOns.cooktop +
+        fromAddOns.outlet >
+      0
+    ) {
+      return fromAddOns;
+    }
   }
-  return { kitchenSink: 0, vanityBarSink: 0, cooktop: 0, outlet: 0 };
+  const typed = room?.openingsByType && typeof room.openingsByType === "object" ? room.openingsByType : null;
+  if (typed) {
+    const fromTyped = {
+      kitchenSink: num(typed.kitchenSink ?? typed.kitchen_sink),
+      vanityBarSink: num(typed.vanityBarSink ?? typed.vanity_bar_sink),
+      cooktop: num(typed.cooktop),
+      outlet: num(typed.outlet)
+    };
+    if (
+      fromTyped.kitchenSink + fromTyped.vanityBarSink + fromTyped.cooktop + fromTyped.outlet >
+      0
+    ) {
+      return fromTyped;
+    }
+  }
+  return openingsFromCutouts(room);
 }
 
 /**
@@ -134,6 +183,8 @@ export function buildVerifiedRoomsFromEstimate(estimate) {
 
 /**
  * Customer-safe starting price groups from calculation reviewSummary + fabrication.
+ * When an estimate-wide % is active, eligible line amounts are scaled in place
+ * (no separate surcharge line).
  * @param {object|null|undefined} estimate
  * @returns {Array<{ key: string, label: string, amount: number }>}
  */
@@ -141,12 +192,13 @@ export function buildCustomerSafePriceGroups(estimate) {
   const calc = estimate?.calculation || estimate?.calculationSnapshot || {};
   const review = calc.reviewSummary && typeof calc.reviewSummary === "object" ? calc.reviewSummary : {};
   const totals = calc.totals && typeof calc.totals === "object" ? calc.totals : {};
-  /** @type {Array<{ key: string, label: string, amount: number }>} */
+  const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+  /** @type {Array<{ key: string, label: string, amount: number, percentageEligible?: boolean }>} */
   const groups = [];
-  const push = (key, label, amount) => {
+  const push = (key, label, amount, percentageEligible = true) => {
     const a = round2(amount);
     if (a === 0) return;
-    groups.push({ key, label, amount: a });
+    groups.push({ key, label, amount: a, percentageEligible });
   };
   push("countertop", "Countertop material", review.countertopMaterialTotal);
   push("backsplash", "Backsplash", review.backsplashTotal);
@@ -174,6 +226,34 @@ export function buildCustomerSafePriceGroups(estimate) {
     push("fabrication", "Edges, cutouts & fabrication", review.fabricationTotal);
   }
 
+  // Customer-visible commercial lines (Tear Out, etc.) — light read, no node:crypto.
+  const rawCustom = Array.isArray(scope.customLineItems)
+    ? scope.customLineItems
+    : Array.isArray(scope.customLines)
+      ? scope.customLines
+      : [];
+  for (const line of rawCustom) {
+    if (!line || typeof line !== "object") continue;
+    const role = str(line.commercialRole || line.commercial_role);
+    if (role === "internal_only" || role === "absorbed") continue;
+    const customerFacing =
+      line.customerFacing === true ||
+      line.customer_facing === true ||
+      role === "customer_charge" ||
+      role === "discount";
+    if (!customerFacing) continue;
+    const qty = num(line.quantity) || 1;
+    const unit = num(line.unitPrice ?? line.unit_price);
+    const amount = line.lineTotal != null ? num(line.lineTotal) : round2(qty * unit);
+    if (!amount) continue;
+    push(
+      `custom_${String(line.id || line.name || "line").slice(0, 24)}`,
+      str(line.customerDescription || line.customer_description || line.name) || "Custom line",
+      amount,
+      line.percentageEligible !== false && line.percentage_eligible !== false
+    );
+  }
+
   // Prefer elite100 / customerFacing per-room lineItems when present (more specific).
   const eliteRooms = Array.isArray(calc.elite100?.rooms)
     ? calc.elite100.rooms
@@ -184,6 +264,7 @@ export function buildCustomerSafePriceGroups(estimate) {
         : Array.isArray(calc.customerFacing?.rooms)
           ? calc.customerFacing.rooms
           : [];
+  let baseGroups;
   if (eliteRooms.length) {
     const byLabel = new Map();
     for (const room of eliteRooms) {
@@ -199,22 +280,61 @@ export function buildCustomerSafePriceGroups(estimate) {
         .map(([label, amount]) => ({
           key: label.toLowerCase().replace(/\s+/g, "_").slice(0, 40),
           label,
-          amount
+          amount,
+          percentageEligible: true
         }));
-      return dedupeCustomerSafeCutoutLines(raw, { amountUnit: "dollars" });
+      // Merge commercial custom lines not already present.
+      for (const g of groups.filter((x) => String(x.key).startsWith("custom_"))) {
+        raw.push(g);
+      }
+      baseGroups = dedupeCustomerSafeCutoutLines(raw, { amountUnit: "dollars" });
     }
   }
+  if (!baseGroups) {
+    baseGroups = dedupeCustomerSafeCutoutLines(groups, { amountUnit: "dollars" });
+  }
 
-  const deduped = dedupeCustomerSafeCutoutLines(groups, { amountUnit: "dollars" });
+  const resolved = resolveEffectiveEstimateWideAdjustment({
+    scopeAdjustment: scope.estimateWideAdjustment,
+    partnerAccountId: scope.partnerAccountId || calc.account?.partnerAccountId
+  });
+  let deduped = baseGroups;
+  if (resolved.active && resolved.percentage > 0) {
+    const distributed = distributeEstimateWideAdjustment({
+      percentage: resolved.percentage,
+      lines: baseGroups.map((g) => ({
+        id: g.key,
+        amountExact: g.amount,
+        percentageEligible: g.percentageEligible !== false
+      }))
+    });
+    const byId = new Map(distributed.lines.map((l) => [l.id, l]));
+    deduped = baseGroups.map((g) => {
+      const adj = byId.get(g.key);
+      return {
+        key: g.key,
+        label: g.label,
+        amount: adj ? round2(adj.adjustedExact) : g.amount
+      };
+    });
+  }
+
   const total = num(totals.customerDisplayTotal);
   const grouped = round2(deduped.reduce((s, g) => s + g.amount, 0));
-  if (total > 0 && deduped.length && Math.abs(total - grouped) > 0.5) {
+  // Do not invent a "percentage surcharge" reconciling line when adjustment is active —
+  // display total uses nearest-$10 rounding and may differ from exact adjusted sum.
+  if (
+    !resolved.active &&
+    total > 0 &&
+    deduped.length &&
+    Math.abs(total - grouped) > 0.5
+  ) {
     deduped.push({ key: "other", label: "Other / adjustments", amount: round2(total - grouped) });
   }
   if (!deduped.length && total > 0) {
     deduped.push({ key: "total", label: "Starting estimate total", amount: total });
   }
-  return deduped;
+  return deduped.map(({ key, label, amount }) => ({ key, label, amount }));
 }
 
 /**
@@ -371,7 +491,29 @@ export function buildAiEstimatorSummary(args = {}) {
   const calc = estimate.calculation || estimate.calculationSnapshot || {};
   const totals = calc.totals && typeof calc.totals === "object" ? calc.totals : {};
   const rooms = buildVerifiedRoomsFromEstimate(estimate);
-  const openings = openingsFromScope(scope);
+  // When room-level openings sum to zero but estimate-level addOns exist, keep estimate totals.
+  // Prefer summing room openings when they are populated (multi-room attribution).
+  const roomOpeningsSum = rooms.reduce(
+    (acc, r) => {
+      const o = r.openingsByType || {};
+      return {
+        kitchenSink: acc.kitchenSink + num(o.kitchenSink),
+        vanityBarSink: acc.vanityBarSink + num(o.vanityBarSink),
+        cooktop: acc.cooktop + num(o.cooktop),
+        outlet: acc.outlet + num(o.outlet)
+      };
+    },
+    { kitchenSink: 0, vanityBarSink: 0, cooktop: 0, outlet: 0 }
+  );
+  const roomOpeningsTotal =
+    roomOpeningsSum.kitchenSink +
+    roomOpeningsSum.vanityBarSink +
+    roomOpeningsSum.cooktop +
+    roomOpeningsSum.outlet;
+  const openings =
+    roomOpeningsTotal > 0
+      ? { ...roomOpeningsSum, total: roomOpeningsTotal }
+      : openingsFromScope(scope);
   const countertopSf = round2(rooms.reduce((s, r) => s + r.countertopSf, 0));
   const backsplashSf = round2(rooms.reduce((s, r) => s + r.backsplashSf, 0));
   const exposedEdgeLf = round2(
@@ -388,8 +530,32 @@ export function buildAiEstimatorSummary(args = {}) {
         ? num(deRead.publicationSummary.revision)
         : null;
   const currentRevision = num(estimate.revision) || 1;
+  const accountAdjustment = num(totals.accountAdjustment);
+  const exactTotal = totals.exactTotal != null ? num(totals.exactTotal) : null;
+  const baseExactTotal =
+    totals.baseExactTotal != null
+      ? num(totals.baseExactTotal)
+      : exactTotal != null
+        ? round2(exactTotal - accountAdjustment)
+        : null;
+  const commercialAdjustmentExact =
+    totals.commercialAdjustmentExact != null
+      ? num(totals.commercialAdjustmentExact)
+      : accountAdjustment || null;
+  const adjustedExactTotal =
+    totals.adjustedExactTotal != null
+      ? num(totals.adjustedExactTotal)
+      : exactTotal;
   const customerDisplayTotal =
     totals.customerDisplayTotal != null ? num(totals.customerDisplayTotal) : null;
+  const customerConfiguredExactTotal =
+    totals.customerConfiguredExactTotal != null
+      ? num(totals.customerConfiguredExactTotal)
+      : adjustedExactTotal;
+  const customerConfiguredDisplayTotal =
+    totals.customerConfiguredDisplayTotal != null
+      ? num(totals.customerConfiguredDisplayTotal)
+      : customerDisplayTotal;
 
   const reviewRequests = Array.isArray(deRead?.reviewRequests) ? deRead.reviewRequests : [];
   const openReview = reviewRequests.find((r) => r && r.open !== false && !r.resolvedAt) || null;
@@ -431,7 +597,13 @@ export function buildAiEstimatorSummary(args = {}) {
     },
     rooms,
     pricing: {
+      baseExactTotal,
+      commercialAdjustmentExact,
+      adjustedExactTotal,
       customerDisplayTotal,
+      customerConfiguredExactTotal,
+      customerConfiguredDisplayTotal,
+      exactTotal: adjustedExactTotal ?? exactTotal,
       customerSafeGroups: buildCustomerSafePriceGroups(estimate),
       unresolvedItems: unresolved.map((u) => ({
         code: str(u?.code) || null,

@@ -17,20 +17,22 @@ console.log("\naiTakeoffApprovalHandoff.ui.test.mjs\n");
   assert.ok(panel.includes('data-testid="eq-takeoff-handoff-overlay"'));
   assert.ok(panel.includes("Measurements approved. Building verified estimate"));
   assert.ok(panel.includes('data-testid="eq-ai-retry-handoff"'));
-  assert.ok(panel.includes('data-testid="eq-ai-approved-measurements"'));
+  assert.ok(
+    panel.includes("VerifiedEstimateSection") || panel.includes('data-testid="eq-ai-approved-measurements"')
+  );
   assert.ok(panel.includes("handoffSucceededRef"));
   assert.ok(panel.includes("handoffInFlightRef"));
-  // Persistent Takeoff surface always mounts iframe; approved card is a sibling stage view.
+  // Persistent Takeoff surface always mounts iframe; verified/digital sections are siblings.
   const surfaceStart = panel.indexOf('data-testid="eq-ai-takeoff-surface"');
-  const surfaceEnd = panel.indexOf("showPublishedCard", surfaceStart);
-  const takeoffSurface = panel.slice(surfaceStart, surfaceEnd > 0 ? surfaceEnd : surfaceStart + 2500);
+  const surfaceEnd = panel.indexOf("<VerifiedEstimateSection", surfaceStart);
+  const takeoffSurface = panel.slice(surfaceStart, surfaceEnd > 0 ? surfaceEnd : surfaceStart + 3500);
   assert.ok(takeoffSurface.includes('data-testid="eq-takeoff-iframe"'));
   assert.ok(takeoffSurface.includes("eq-ai-retry-handoff"));
   assert.ok(takeoffSurface.includes("eq-takeoff-handoff-overlay"));
   assert.equal(
-    takeoffSurface.includes('data-testid="eq-ai-approved-measurements"'),
+    takeoffSurface.includes("VerifiedEstimateSection"),
     false,
-    "approved card is not rendered inside takeoff surface"
+    "verified section is not rendered inside takeoff surface"
   );
   assert.ok(panel.includes('data-testid="eq-ai-takeoff-surface"'));
   assert.ok(panel.includes("takeoffMode"));

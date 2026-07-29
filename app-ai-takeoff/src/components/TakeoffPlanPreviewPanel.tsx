@@ -26,7 +26,7 @@ type PreviewMode = "image" | "pdf" | "external";
 function resolvePreviewMode(file: PlanPreviewFileMeta): PreviewMode {
   const mime = String(file.mimeType ?? "").toLowerCase();
   const name = file.originalFilename.toLowerCase();
-  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("image/") || name.endsWith(".svg")) return "image";
   if (mime === "application/pdf" || name.endsWith(".pdf")) return "pdf";
   return "external";
 }
@@ -51,6 +51,27 @@ export default function TakeoffPlanPreviewPanel({
       setSignedUrl(null);
       setError(null);
       setLoading(false);
+      return;
+    }
+
+    // Local review harness — deterministic SVG plan, no download-url API.
+    if (file.quoteFileId === "local-review-plan" || token === "local-review-token") {
+      const svg = encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+          <rect width="640" height="480" fill="#f4f7f5"/>
+          <rect x="40" y="40" width="360" height="280" fill="none" stroke="#1a4d38" stroke-width="3"/>
+          <text x="60" y="80" font-family="IBM Plex Sans,sans-serif" font-size="18" fill="#14241c">Munsterman Plan</text>
+          <text x="60" y="110" font-family="IBM Plex Sans,sans-serif" font-size="13" fill="#5a6b63">Kitchen U-shape · Bathroom vanity</text>
+          <rect x="80" y="140" width="120" height="40" fill="#d7e2dc"/>
+          <rect x="80" y="200" width="200" height="36" fill="#d7e2dc"/>
+          <rect x="280" y="140" width="80" height="160" fill="#c5d6cc"/>
+          <rect x="420" y="80" width="160" height="70" fill="#e8f0eb" stroke="#1a4d38"/>
+          <text x="440" y="120" font-family="IBM Plex Sans,sans-serif" font-size="12" fill="#14241c">Vanity 37×22.5</text>
+        </svg>`
+      );
+      setSignedUrl(`data:image/svg+xml;charset=utf-8,${svg}`);
+      setLoading(false);
+      setError(null);
       return;
     }
 
