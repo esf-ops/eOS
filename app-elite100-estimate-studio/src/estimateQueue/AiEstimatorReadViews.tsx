@@ -360,7 +360,7 @@ export function PublicationActivitySummary(props: {
             link still serves published R{props.currentPublishedRevision} until publish succeeds.
           </p>
         ) : (
-          <p data-testid="eq-ai-no-newer-revision">No newer measurement revision</p>
+          <p data-testid="eq-ai-no-newer-revision">No newer estimate revision</p>
         )}
       </div>
     </section>

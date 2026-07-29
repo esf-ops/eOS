@@ -394,14 +394,41 @@ async function seedAndExerciseIdentityActions() {
     assert.equal(approved.status, "approved");
     assertZeroNetwork(tripwire, "approval");
 
-    // Revision via identity change after approval
-    const revised = await service.updateScope({
+    // Approved R1 is immutable via updateScope — open Edit Estimate (R2) first.
+    let approvedBlocked = false;
+    try {
+      await service.updateScope({
+        organizationId: ORG,
+        estimateId: approved.id,
+        actorUserId: ACTOR,
+        body: {
+          scope: {
+            ...approved.scope,
+            customerContactName: "Updated Contact"
+          }
+        }
+      });
+    } catch (e) {
+      approvedBlocked =
+        e?.code === "estimate_revision_not_editable" && e?.statusCode === 409;
+    }
+    assert.equal(approvedBlocked, true, "approved R1 updateScope blocked");
+    assertZeroNetwork(tripwire, "approved updateScope rejected");
+
+    const opened = await service.openMeasurementRevision({
       organizationId: ORG,
       estimateId: approved.id,
       actorUserId: ACTOR,
+      body: { confirm: true }
+    });
+    assert.equal(opened.ok, true);
+    const revised = await service.updateScope({
+      organizationId: ORG,
+      estimateId: opened.estimate.id,
+      actorUserId: ACTOR,
       body: {
         scope: {
-          ...approved.scope,
+          ...opened.estimate.scope,
           customerContactName: "Updated Contact",
           refreshCustomerIdentity: true,
           customerIdentitySnapshot: {
@@ -412,8 +439,8 @@ async function seedAndExerciseIdentityActions() {
         }
       }
     });
-    assert.ok(revised.status === "ready_to_price" || revised.revision >= approved.revision);
-    assertZeroNetwork(tripwire, "revision after identity change");
+    assert.ok(revised.revision >= approved.revision);
+    assertZeroNetwork(tripwire, "revision after identity change on draft R2");
 
     // Takeoff refresh — exercise the service path; fixture may still hit gate/shape errors,
     // but publication/email tripwires must remain zero either way.

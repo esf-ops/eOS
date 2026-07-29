@@ -1365,7 +1365,7 @@ export default function ConsolidatedTakeoffReview() {
       return rev ? `Approved Takeoff — ${rev}` : "Approved Takeoff";
     }
     if (urlWorkspace.isRevisionDraft && urlWorkspace.revisionNumber) {
-      return `Editing measurement revision R${urlWorkspace.revisionNumber}`;
+      return `Editing Revision R${urlWorkspace.revisionNumber}`;
     }
     return "Takeoff review";
   })();

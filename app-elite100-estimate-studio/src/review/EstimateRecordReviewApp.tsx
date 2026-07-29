@@ -286,10 +286,9 @@ export default function EstimateRecordReviewApp() {
   }
 
   const commercialEditable =
-    scenario.stage === "approved" ||
     scenario.stage === "revision_draft" ||
     scenario.stage === "draft" ||
-    (scenario.stage === "published" && scenarioName === "r2");
+    (!scenario.measurementsApproved && scenario.stage !== "approved" && scenario.stage !== "published");
 
   return (
     <div className="shell eq-shell" data-testid="estimate-record-review-harness" data-scenario={scenarioName}>

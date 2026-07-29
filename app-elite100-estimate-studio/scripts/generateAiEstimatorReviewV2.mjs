@@ -191,12 +191,12 @@ const revisedApprovedHtml = page(
 );
 
 const revisionDraftShell = page(
-  "Editing measurement revision R2 (Takeoff limitation)",
+  "Editing Revision R2 (Takeoff limitation)",
   header.replace(
     "eq-ai-compact-header",
     "eq-ai-compact-header"
   ) +
-    `<div class="eq-ai-revision-banner" style="font-weight:650">Editing measurement revision R2 · Based on published revision R1</div>` +
+    `<div class="eq-ai-revision-banner" style="font-weight:650">Editing Revision R2 · Based on published revision R1</div>` +
     renderToStaticMarkup(
       React.createElement(MeasurementRevisionComparison, {
         comparison: summaryR2.comparison

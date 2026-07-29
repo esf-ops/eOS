@@ -337,8 +337,12 @@ function buildCommercial(authority, editable, waterfalls = [], scopeDetection = 
       percentage: authority.percentage,
       reason: "Spahn & Rose account pricing",
       source: "manual",
-      baseExactTotal: authority.baseExactTotal,
+      verifiedBaseExact: authority.baseExactTotal,
+      eligibleAdditionalChargesExact: round2(
+        (authority.eligibleBasisExact || 0) - (authority.baseExactTotal || 0)
+      ),
       eligibleBasisExact: authority.eligibleBasisExact,
+      baseExactTotal: authority.baseExactTotal,
       exactAdjustment: authority.commercialAdjustmentExact,
       nonPercentageCommercialExact: authority.nonPercentageCommercialExact,
       adjustedExactTotal: authority.adjustedExactTotal,
@@ -524,7 +528,7 @@ export function buildScenario(name) {
     };
   }
 
-  const commercial = buildCommercial(authority, true);
+  const commercial = buildCommercial(authority, false);
   const aiSummary = buildAiSummary(geo, authority);
 
   if (name === "approved" || name === "commercial") {
@@ -636,7 +640,7 @@ export function buildScenario(name) {
       estimateRevision: 2,
       publishedRevision: 1,
       customerUrl: REVIEW_CUSTOMER_URL,
-      commercial: buildCommercial(r2Authority, true, waterfalls, {
+      commercial: buildCommercial(r2Authority, !r2Approved, waterfalls, {
         vanityDetected: true,
         vanityApproved: r2Approved,
         islandDetected: true,
@@ -699,7 +703,7 @@ export function buildScenario(name) {
           changedItemCount: 4,
           summary: r2Approved
             ? "R2 approved — R1 remains published until R2 publication succeeds."
-            : "Editing measurement revision R2 — R1 remains published until R2 is successfully published."
+            : "Editing Revision R2 — R1 remains published until R2 is successfully published."
         }
       ],
       comparison: {
@@ -718,8 +722,8 @@ export function buildScenario(name) {
       publishEligible: r2Approved,
       showPublishRevised: r2Approved,
       revisionBanner: r2Approved
-        ? "R2 measurements approved. R1 remains the active customer publication until R2 is published."
-        : "Editing measurement revision R2. Based on approved revision R1. R1 remains published until R2 is successfully published."
+        ? "R2 estimate approved. R1 remains the active customer publication until R2 is published."
+        : "Editing Revision R2. Based on approved revision R1. R1 remains published until R2 is successfully published."
     };
   }
 

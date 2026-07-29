@@ -39,17 +39,15 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
       estimate?.publication?.customerUrl ||
       estimate?.approval
   );
-  // Before first publish: commercial editable on approved draft.
-  // After publish: only on a newer draft revision (no approval yet / ready_to_price).
+  // Draft revisions only — approved/published snapshots are immutable.
+  // Estimators must use Edit Estimate (open-measurement-revision) first.
   const status = str(estimate?.status).toLowerCase();
   const editable =
     opts.editable != null
       ? Boolean(opts.editable)
-      : !estimate?.approval ||
-        status === "ready_to_price" ||
-        status === "draft" ||
-        status === "priced" ||
-        status === "needs_takeoff_approval";
+      : !estimate?.approval &&
+        status !== "approved" &&
+        status !== "superseded";
 
   const customLines = normalizeStudioCommercialLines(scope).map((line) => ({
     id: line.id,
@@ -90,13 +88,48 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
     adjustedExact = round2(baseExact + exactAdjustment);
   }
 
+  const visibleCustom = customLines.filter((l) => l.customerVisible && !l.internalOnly);
+  const eligibleExtrasExact = round2(
+    visibleCustom
+      .filter((l) => l.percentageEligible && l.amountExact >= 0)
+      .reduce((s, l) => s + num(l.amountExact), 0)
+  );
+  const nonPercentageCommercialExact = round2(
+    visibleCustom
+      .filter((l) => !l.percentageEligible || l.amountExact < 0)
+      .reduce((s, l) => s + num(l.amountExact), 0)
+  );
+  const verifiedBaseExact =
+    num(totals.roomTotalsSum) ||
+    round2(baseExact - eligibleExtrasExact - Math.max(0, nonPercentageCommercialExact)) ||
+    round2(baseExact);
+  const eligibleBasisExact = round2(
+    num(totals.estimateWideAdjustment?.eligibleBasisExact) ||
+      verifiedBaseExact + eligibleExtrasExact
+  );
+  // When calculator applied % to full preAccount, prefer distributed eligible-basis math for display.
+  if (resolved.active && eligibleBasisExact > 0) {
+    const fromEligible = computeEstimateWideAdjustmentAmount(
+      eligibleBasisExact,
+      resolved.percentage
+    );
+    if (fromEligible > 0) {
+      exactAdjustment = fromEligible;
+      adjustedExact = round2(eligibleBasisExact + exactAdjustment + nonPercentageCommercialExact);
+    }
+  }
+
   const estimateAdjustment = {
     active: resolved.active,
     percentage: resolved.percentage,
     reason: resolved.reason,
     source: resolved.source,
-    baseExactTotal: round2(baseExact),
+    verifiedBaseExact: round2(verifiedBaseExact),
+    eligibleAdditionalChargesExact: round2(eligibleExtrasExact),
+    eligibleBasisExact: round2(eligibleBasisExact),
+    baseExactTotal: round2(verifiedBaseExact),
     exactAdjustment: round2(exactAdjustment),
+    nonPercentageCommercialExact: round2(nonPercentageCommercialExact),
     adjustedExactTotal: round2(adjustedExact),
     customerDisplayTotal:
       totals.customerDisplayTotal != null
