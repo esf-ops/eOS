@@ -102,12 +102,12 @@ assert.doesNotMatch(workspace, /endsWith\(["']\.vercel\.app["']\)/);
 assert.doesNotMatch(workspace, /endsWith\(["']\.eliteosfab\.com["']\)/);
 // Takeoff-first AI panel owns the iframe + postMessage bridge.
 const aiPanel = readFileSync(
-  join(root, "app-elite100-estimate-studio/src/estimateQueue/AiTakeoffFirstPanel.tsx"),
+  join(root, "app-elite100-estimate-studio/src/estimateQueue/AiEstimatorWorkspace.tsx"),
   "utf8"
 );
 assert.ok(aiPanel.includes("isAllowedTakeoffMessageOrigin"));
 assert.ok(aiPanel.includes("isValidTakeoffApprovedMessage"));
 assert.ok(aiPanel.includes('data-testid="eq-takeoff-iframe"'));
-assert.ok(workspace.includes("AiTakeoffFirstPanel"));
+assert.ok(workspace.includes("AiEstimatorWorkspace"));
 
 console.log("\ntakeoffPostMessageOrigins.test.mjs — all passed\n");

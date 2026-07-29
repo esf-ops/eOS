@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const panel = readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8");
+const panel = readFileSync(join(root, "src/estimateQueue/AiEstimatorWorkspace.tsx"), "utf8");
 const api = readFileSync(join(root, "src/lib/api.ts"), "utf8");
 const projectPanel = readFileSync(join(root, "src/estimateQueue/ProjectDetailsPanel.tsx"), "utf8");
 

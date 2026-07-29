@@ -24,7 +24,8 @@ const workspace = readFileSync(
   join(root, "src/estimateQueue/EstimateTakeoffWorkspace.tsx"),
   "utf8"
 );
-const panel = readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8");
+const panel = readFileSync(join(root, "src/estimateQueue/AiEstimatorWorkspace.tsx"), "utf8");
+const panelAlias = readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8");
 const takeoffReview = readFileSync(
   join(root, "../app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
   "utf8"
@@ -43,14 +44,15 @@ console.log("\ntakeoffFirstWorkflow.ui.test.mjs\n");
 
 // ── 1. Single editable geometry workspace for AI ──────────────────────────
 {
-  assert.ok(workspace.includes("AiTakeoffFirstPanel"), "AI branch mounts AiTakeoffFirstPanel");
+  assert.ok(workspace.includes("AiEstimatorWorkspace"), "AI branch mounts AiEstimatorWorkspace");
+  assert.ok(panelAlias.includes("AiEstimatorWorkspace"), "AiTakeoffFirstPanel aliases AiEstimatorWorkspace");
   assert.ok(panel.includes('data-testid="eq-takeoff-iframe"'), "Takeoff Review iframe mounts");
   assert.ok(panel.includes("aiTakeoffHeadUrl"), "iframe uses production Takeoff head URL");
   assert.ok(panel.includes("consolidated=1"), "iframe opens consolidated Takeoff Review");
   assert.match(
     workspace,
-    /state\.kind === "ready" && !state\.manualMode[\s\S]*?<AiTakeoffFirstPanel/,
-    "AI ready branch renders AiTakeoffFirstPanel"
+    /state\.kind === "ready" && !state\.manualMode[\s\S]*?<AiEstimatorWorkspace/,
+    "AI ready branch renders AiEstimatorWorkspace"
   );
   const aiBranch = workspace.slice(
     workspace.indexOf('state.kind === "ready" && !state.manualMode'),
@@ -76,6 +78,8 @@ console.log("\ntakeoffFirstWorkflow.ui.test.mjs\n");
     false,
     "EstimateWorkflowHeader does not render for AI"
   );
+  assert.equal(aiBranch.includes("eq-linked-takeoff-job"), false, "raw Takeoff job id not shown");
+  assert.equal(/Case \{caseId\}/.test(aiBranch), false, "intake case UUID not shown in AI header");
   assert.ok(
     workspace.includes('state.kind === "ready" && state.manualMode'),
     "manual estimates keep a separate branch"
@@ -127,7 +131,7 @@ console.log("\ntakeoffFirstWorkflow.ui.test.mjs\n");
   assert.ok(panel.includes('data-testid="eq-publish-digital-estimate"'));
   assert.ok(panel.includes('data-testid="eq-copy-customer-link"'));
   assert.ok(panel.includes('data-testid="eq-open-customer-preview"'));
-  assert.ok(panel.includes("Edit measurements"));
+  assert.ok(panel.includes("Edit Measurements") || panel.includes("Edit measurements"));
   assert.equal(panel.includes("eq-section-tab"), false);
   assert.equal(panel.includes('data-testid="eq-section-tabs"'), false);
   assert.equal(panel.includes("CustomerChoicesEstimatorPanel"), false);

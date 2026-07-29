@@ -27,7 +27,7 @@ import EstimateWorkflowHeader, { type WorkspaceWorkflow } from "./EstimateWorkfl
 import EstimatePublicationSummary, {
   type PublicationSummary
 } from "./EstimatePublicationSummary";
-import AiTakeoffFirstPanel from "./AiTakeoffFirstPanel";
+import AiEstimatorWorkspace from "./AiEstimatorWorkspace";
 
 type Props = {
   authToken: string;
@@ -629,19 +629,21 @@ export default function EstimateTakeoffWorkspace({
 
   return (
     <div className="eq-workspace" data-testid="estimate-takeoff-workspace">
-      <header className="eq-header">
-        <div>
-          <h1 className="eq-title">Estimate workspace</h1>
-          <p className="eq-subtitle">
-            Linked production AI Takeoff review for this Estimate Queue case.
-          </p>
-        </div>
-        <div className="eq-header-actions">
-          <button type="button" className="eq-btn-secondary" onClick={onBackToQueue}>
-            Back to Estimate Queue
-          </button>
-        </div>
-      </header>
+      {!(state.kind === "ready" && !state.manualMode && state.takeoffJobId) ? (
+        <header className="eq-header">
+          <div>
+            <h1 className="eq-title">Estimate workspace</h1>
+            <p className="eq-subtitle">
+              Linked production AI Takeoff review for this Estimate Queue case.
+            </p>
+          </div>
+          <div className="eq-header-actions">
+            <button type="button" className="eq-btn-secondary" onClick={onBackToQueue}>
+              Back to Estimate Queue
+            </button>
+          </div>
+        </header>
+      ) : null}
 
       {state.kind === "resolving" ? (
         <div className="eq-state" role="status" data-testid="eq-open-resolving">
@@ -652,7 +654,6 @@ export default function EstimateTakeoffWorkspace({
       {state.kind === "error" ? (
         <div className="eq-state eq-state--error" role="alert" data-testid="eq-open-error">
           <strong>Could not open estimate.</strong> {state.message}
-          {state.code ? <p className="eq-muted">Code: {state.code}</p> : null}
           <div className="eq-action-row">
             <button type="button" className="eq-btn-secondary" onClick={onBackToQueue}>
               Back to Estimate Queue
@@ -680,26 +681,17 @@ export default function EstimateTakeoffWorkspace({
               AI Takeoff failed. Retry AI Takeoff or continue from Shared Inbox with a manual estimate.
             </div>
           ) : null}
-          <section
-            className="eq-case-context"
-            aria-label="Customer project and plan"
-            data-testid="eq-ai-compact-header"
-          >
-            <div>
-              <div className="eq-cell-primary">
-                {state.caseRow ? caseCustomerProjectLabel(state.caseRow) : "Estimate case"}
-              </div>
-              <div className="eq-cell-meta">Case {caseId}</div>
-            </div>
-            <div>
-              <div className="eq-muted">Plan</div>
-              <div>{safeText(state.attachmentName, "plan.pdf")}</div>
-              {sourcePlans?.plans?.some((p) => p.attachmentId) ? (
-                <button
-                  type="button"
-                  className="eq-btn-ghost eq-btn-small"
-                  data-testid="eq-view-plan"
-                  onClick={() => {
+          <AiEstimatorWorkspace
+            authToken={authToken}
+            caseId={caseId}
+            takeoffJobId={state.takeoffJobId}
+            takeoffDisplayStatus={state.displayStatus}
+            header={{
+              title: state.caseRow ? caseCustomerProjectLabel(state.caseRow) : safeText(state.attachmentName, "Digital Estimate"),
+              planFilename: safeText(state.attachmentName, "plan.pdf"),
+              onBackToQueue,
+              onViewPlan: sourcePlans?.plans?.some((p) => p.attachmentId)
+                ? () => {
                     const plan =
                       sourcePlans.plans.find((p) => String(p.attachmentId || "") === selectedPlanId) ||
                       sourcePlans.plans.find((p) => p.primary) ||
@@ -712,37 +704,17 @@ export default function EstimateTakeoffWorkspace({
                       sizeBytes: plan.sizeBytes,
                       sourceContext: "ai-takeoff"
                     });
-                  }}
-                >
-                  View plan
-                </button>
-              ) : null}
-            </div>
-            <div>
-              <div className="eq-muted">Takeoff status</div>
-              <div data-testid="eq-takeoff-display-status">
-                {state.displayStatus === "Takeoff queued" || state.displayStatus === "Takeoff processing"
-                  ? "AI Takeoff processing"
-                  : state.displayStatus}
-              </div>
-            </div>
-            <div>
-              <div className="eq-muted">Takeoff job</div>
-              <div>
-                <code data-testid="eq-linked-takeoff-job">{state.takeoffJobId}</code>
-              </div>
-            </div>
-          </section>
-          <AiTakeoffFirstPanel
-            authToken={authToken}
-            caseId={caseId}
-            takeoffJobId={state.takeoffJobId}
+                  }
+                : null
+            }}
             onEstimateReady={(est) => {
               handleCanonicalEstimate(est);
               const id = String(est.id || "").trim();
               if (id) {
                 setState((prev) =>
-                  prev.kind === "ready" ? { ...prev, estimateId: id, displayStatus: "Measurements approved" } : prev
+                  prev.kind === "ready"
+                    ? { ...prev, estimateId: id, displayStatus: "Measurements approved" }
+                    : prev
                 );
               }
             }}

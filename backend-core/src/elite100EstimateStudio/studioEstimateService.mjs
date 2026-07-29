@@ -1645,6 +1645,55 @@ export function createStudioEstimateService(deps = {}) {
         });
         throw e;
       }
+    },
+
+    /**
+     * Open a measurement revision for an approved/published Studio estimate.
+     * Preserves the prior approved row (superseded) and returns a new draft
+     * revision that keeps the same Takeoff job + last approved Scope preload.
+     * Confirm required. No SQL / pricing formula changes.
+     */
+    async openMeasurementRevision({ organizationId, estimateId, actorUserId, body = {} }) {
+      if (body?.confirm !== true && body?.confirm !== "true") {
+        const err = new Error("Confirm Edit Measurements to open a revision");
+        err.statusCode = 400;
+        err.code = "confirm_required";
+        throw err;
+      }
+      const row = await repository.getById(organizationId, estimateId);
+      if (!row) {
+        const err = new Error("Estimate not found");
+        err.statusCode = 404;
+        err.code = "estimate_not_found";
+        throw err;
+      }
+      const status = String(row.status || "").toLowerCase();
+      const alreadyDraft =
+        !row.approval &&
+        (status === STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE ||
+          status === STUDIO_ESTIMATE_STATUSES.DRAFT ||
+          status === STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL);
+      if (alreadyDraft) {
+        return {
+          ok: true,
+          reused: true,
+          estimate: safeEstimateView(row),
+          previousRevisionSummary: null
+        };
+      }
+      const next = await revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
+        status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+        scope: row.scope,
+        takeoffJobId: row.takeoffJobId,
+        sourceTakeoffResultId: row.sourceTakeoffResultId,
+        staleReason: "Measurement revision opened from approved estimate"
+      });
+      return {
+        ok: true,
+        reused: false,
+        estimate: safeEstimateView(next),
+        previousRevisionSummary: next.__previousRevisionSummary || null
+      };
     }
   };
 }

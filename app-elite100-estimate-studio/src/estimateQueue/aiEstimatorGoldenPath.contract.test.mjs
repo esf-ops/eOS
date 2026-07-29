@@ -48,7 +48,7 @@ console.log("\naiEstimatorGoldenPath.contract.test.mjs\n");
 
 const sharedInboxApi = readStudio("src/lib/sharedInboxApi.mjs");
 const workspace = readStudio("src/estimateQueue/EstimateTakeoffWorkspace.tsx");
-const panel = readStudio("src/estimateQueue/AiTakeoffFirstPanel.tsx");
+const panel = readStudio("src/estimateQueue/AiEstimatorWorkspace.tsx");
 const takeoffReview = readRepo("app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx");
 const simplifiedWorkflow = readRepo(
   "backend-core/src/elite100EstimateStudio/studioSimplifiedWorkflow.mjs"

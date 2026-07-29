@@ -282,8 +282,8 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
 // Manual estimates keep EstimateScopePanel + ManualPhysicalScopeEditor.
 // ════════════════════════════════════════════════════════════════════════
 {
-  const aiPanel = readSrc("app-elite100-estimate-studio/src/estimateQueue/AiTakeoffFirstPanel.tsx");
-  assert.ok(workspace.includes("AiTakeoffFirstPanel"), "AI branch mounts AiTakeoffFirstPanel");
+  const aiPanel = readSrc("app-elite100-estimate-studio/src/estimateQueue/AiEstimatorWorkspace.tsx");
+  assert.ok(workspace.includes("AiEstimatorWorkspace"), "AI branch mounts AiEstimatorWorkspace");
   assert.ok(aiPanel.includes('data-testid="eq-takeoff-iframe"'), "Takeoff Review iframe mounts for AI");
   assert.equal(
     workspace.includes('scopeMode="ai_assisted"'),
@@ -841,7 +841,7 @@ function validCountertopEdit({ lengthIn = 96, depthIn = 25.5, quantity } = {}) {
 // Edit Sink wall 105 → 120; calculator sees 120.
 // ════════════════════════════════════════════════════════════════════════
 {
-  const aiPanel = readSrc("app-elite100-estimate-studio/src/estimateQueue/AiTakeoffFirstPanel.tsx");
+  const aiPanel = readSrc("app-elite100-estimate-studio/src/estimateQueue/AiEstimatorWorkspace.tsx");
   assert.ok(aiPanel.includes('data-testid="eq-takeoff-iframe"'), "17b: Takeoff Review iframe mounts");
   assert.equal(workspace.includes('scopeMode="ai_assisted"'), false, "17b: ai_assisted editor not mounted");
   assert.ok(aiPanel.includes("refresh-from-takeoff"), "17b: approval refreshes Scope from Takeoff");

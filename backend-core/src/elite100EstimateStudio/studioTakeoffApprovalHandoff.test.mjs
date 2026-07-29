@@ -396,7 +396,7 @@ function legacyBlockingValidation() {
 
 {
   const panel = readFileSync(
-    join(root, "app-elite100-estimate-studio/src/estimateQueue/AiTakeoffFirstPanel.tsx"),
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/AiEstimatorWorkspace.tsx"),
     "utf8"
   );
   assert.ok(panel.includes("setMeasurementsApproved(true)"));

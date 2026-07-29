@@ -44,7 +44,7 @@ assert.ok(!workspace.includes("2000)"), "must not use 2s takeoff poll");
 assert.equal(workspace.includes("takeoffFrameMounted"), false);
 assert.ok(workspace.includes("AiTakeoffFirstPanel"));
 assert.ok(
-  readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8").includes(
+  readFileSync(join(root, "src/estimateQueue/AiEstimatorWorkspace.tsx"), "utf8").includes(
     'data-testid="eq-takeoff-iframe"'
   )
 );

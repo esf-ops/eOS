@@ -42,3 +42,7 @@ debug/slabsmith/source-samples/
 _local/
 
 local-imports/
+
+# Local review artifacts (screenshots, fixtures)
+.local/review/
+

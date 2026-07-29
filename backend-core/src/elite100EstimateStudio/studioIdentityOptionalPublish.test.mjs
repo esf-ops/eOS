@@ -233,7 +233,7 @@ function blankIdentityScope(overrides = {}) {
 
 {
   const panel = readFileSync(
-    join(root, "app-elite100-estimate-studio/src/estimateQueue/AiTakeoffFirstPanel.tsx"),
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/AiEstimatorWorkspace.tsx"),
     "utf8"
   );
   assert.equal(panel.includes("eq-ai-publish-required-fields"), false, "10 no project/email form");

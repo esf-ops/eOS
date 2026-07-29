@@ -2844,3 +2844,12 @@
 | **SQL** | None. |
 | **Tests** | `studioSimplifiedPublishActivatesDigitalEstimate.test.mjs` (+ existing configure-publish / availability contracts). |
 
+### 197. Consolidate active AI estimator workflow (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `fix/consolidate-ai-estimator-workflow` |
+| **Decision** | Active AI-assisted estimates mount one `AiEstimatorWorkspace` driven by `deriveAiEstimatorStage`. Processing/draft/revision_draft use the existing Takeoff Review iframe; approved/published use compact cards. No Scope/Customer Choices/Review tabs, ManualPhysicalScopeEditor, or EstimateDigitalEstimatePanel on the AI path. Edit Measurements opens `open-measurement-revision` (createRevisionFrom) so R1 is preserved and R2 preloads prior geometry. |
+| **Protected path** | Shared Inbox → Takeoff → approval handoff → v4 calculate → simplified-publish (interactive envelope) → public configure — contracts locked in `aiEstimatorGoldenPath.contract.test.mjs`. |
+| **SQL** | None. |
+| **Tests** | Golden-path lock, stage derivation, openMeasurementRevision, workspace tree, acceptance e2e (initial + revision). |

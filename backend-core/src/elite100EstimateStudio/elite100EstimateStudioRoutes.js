@@ -1295,6 +1295,39 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
     }
   );
 
+  /**
+   * Open measurement revision — preserves prior approved revision, returns new draft.
+   */
+  app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/open-measurement-revision",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await studioEstimateService.openMeasurementRevision({
+          organizationId,
+          estimateId: req.params.estimateId,
+          actorUserId: req.user?.id ?? null,
+          body
+        });
+        auditStudioEstimate("estimate.open_measurement_revision", req, {
+          estimateId: req.params.estimateId,
+          nextEstimateId: result?.estimate?.id,
+          revision: result?.estimate?.revision,
+          reused: result?.reused
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("open measurement revision failed", e, req);
+        const { status, body } = studioMutationErrorBody(e, "Unable to open measurement revision");
+        res.status(status).json(body);
+      }
+    }
+  );
+
   app.post(
     "/api/elite100-estimate-studio/estimates/:estimateId/calculate",
     ...staffStack,

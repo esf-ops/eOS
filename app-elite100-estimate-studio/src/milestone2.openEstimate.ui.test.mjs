@@ -26,7 +26,7 @@ assert.ok(workspace.includes("openEstimate"));
 assert.ok(workspace.includes("AiTakeoffFirstPanel"));
 assert.ok(
   workspace.includes('data-testid="eq-takeoff-iframe"') ||
-    readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8").includes(
+    readFileSync(join(root, "src/estimateQueue/AiEstimatorWorkspace.tsx"), "utf8").includes(
       'data-testid="eq-takeoff-iframe"'
     )
 );
