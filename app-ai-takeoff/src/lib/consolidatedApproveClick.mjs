@@ -47,6 +47,7 @@ export function advisoryConfirmDialogMessage(advisoryCount) {
 export function approveButtonLabel(input) {
   if (input.approveStatus === "approving") return "Approving…";
   if (input.approveStatus === "approved") return "Approved";
+  if (input.isRevisionDraft) return "Approve Revised Measurements";
   if (
     (Number(input.blockingCount) || 0) === 0 &&
     (Number(input.advisoryCount) || 0) > 0

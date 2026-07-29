@@ -115,20 +115,43 @@ await page.locator('[data-testid="eq-vanity-apply"]').check({ force: true }).cat
 assert.ok(await page.locator('[data-testid="eq-vanity-physical-facts"]').count());
 console.log('ok: custom lines, tear out 750, percentage recalc, vanity label, no internal leak');
 
-console.log('interaction: waterfall editor + R1/R2 DE state');
+console.log('interaction: waterfall Takeoff ownership + R1/R2 DE state');
 await page.goto(studio('r2'), { waitUntil: 'networkidle', timeout: 120000 });
-await page.waitForSelector('[data-testid="eq-waterfall-card"]');
-assert.match(await page.locator('[data-testid="eq-waterfall-label"]').innerText(), /Kitchen.*Left waterfall/i);
-await page.waitForSelector('[data-testid="eq-de-r1-remains-active"]');
-assert.match(await page.locator('[data-testid="eq-de-r1-remains-active"]').innerText(), /R1 remains active while R2/i);
-assert.ok(await page.locator('[data-testid="eq-open-customer-preview"]').count() >= 1);
-await page.fill('[data-testid="eq-waterfall-width"]', '36');
-await page.fill('[data-testid="eq-waterfall-height"]', '36');
+await page.waitForFunction(() => window.__takeoffReviewReady?.type === 'TAKEOFF_REVIEW_READY' && Number(window.__takeoffReviewReady.revisionNumber) === 2, null, { timeout: 45000 });
+const frame = page.frameLocator('[data-testid="eq-takeoff-iframe"]');
+await frame.locator('[data-testid="ctr-waterfall-panel"]').first().waitFor({ timeout: 15000 });
+await frame.locator('[data-testid="ctr-waterfall-height"]').fill('42');
+await frame.locator('[data-testid="ctr-save-draft"]').click();
+await page.waitForTimeout(400);
+await page.locator('[data-testid="eq-review-remount-takeoff"]').evaluate((el) => (el).click());
+await page.waitForFunction(() => window.__takeoffReviewReady?.type === 'TAKEOFF_REVIEW_READY' && Number(window.__takeoffReviewReady.revisionNumber) === 2, null, { timeout: 45000 });
+const remountFrame = page.frameLocator('[data-testid="eq-takeoff-iframe"]');
+const heightAfter = await remountFrame.locator('[data-testid="ctr-waterfall-height"]').inputValue();
+assert.equal(heightAfter, '42', 'R2 Takeoff save/remount must restore waterfall height');
+await page.waitForSelector('[data-testid="eq-waterfall-height"]');
+assert.match(await page.locator('[data-testid="eq-waterfall-height"]').first().innerText(), /42/);
+assert.equal(await page.locator('input[data-testid="eq-waterfall-width"]').count(), 0);
+assert.ok(await page.locator('[data-testid="eq-de-r1-remains-active"]').count() >= 1);
+const approveLabel = await remountFrame.locator('[data-testid="ctr-approve-build"]').innerText();
+assert.match(approveLabel, /Approve Revised Measurements/i);
+console.log('ok: R2 Takeoff edit/save/remount + commercial mirrors Takeoff dims');
+
+console.log('interaction: approved waterfall commercial options');
+await page.goto(studio('r2-approved'), { waitUntil: 'networkidle', timeout: 120000 });
+await page.waitForSelector('[data-testid="eq-waterfall-commercial-controls"]');
 await page.check('[data-testid="eq-waterfall-polish"]');
 await page.check('[data-testid="eq-waterfall-optional"]');
+await page.selectOption('[data-testid="eq-waterfall-miter"]', '4in');
 await page.click('[data-testid="eq-save-commercial-changes"]');
 await page.waitForTimeout(250);
-console.log('ok: waterfall geometry controls save + R1 active while R2 draft');
+console.log('ok: commercial owns miter/polish/optional; dims stay Takeoff-owned');
+
+console.log('interaction: draft vanity/waterfall lifecycle messaging');
+await page.goto(studio('draft'), { waitUntil: 'networkidle', timeout: 120000 });
+await page.waitForSelector('[data-testid="eq-vanity-lifecycle-msg"]');
+assert.match(await page.locator('[data-testid="eq-vanity-lifecycle-msg"]').innerText(), /Bathroom vanity detected\\. Approve measurements/i);
+assert.match(await page.locator('[data-testid="eq-waterfall-lifecycle-msg"]').innerText(), /Kitchen Island detected\\. Add waterfall panel geometry in Takeoff/i);
+console.log('ok: pre-approval lifecycle messaging');
 
 console.log('interaction: revision history cards + comparison');
 await page.goto(studio('revision-history'), { waitUntil: 'networkidle', timeout: 120000 });
@@ -197,8 +220,8 @@ console.log('\\nAll Estimate Record interaction proofs passed.\\n');
 `;
 
 const { writeFileSync, unlinkSync, mkdirSync } = await import("node:fs");
-mkdirSync(join(root, ".local/review/estimate-record-commercial-controls-v3"), { recursive: true });
-const tmp = join(root, ".local/review/estimate-record-commercial-controls-v3/_interaction.mjs");
+mkdirSync(join(root, ".local/review/estimate-record-commercial-controls-v4"), { recursive: true });
+const tmp = join(root, ".local/review/estimate-record-commercial-controls-v4/_interaction.mjs");
 writeFileSync(tmp, code.replace(
   "import { chromium } from 'playwright';",
   "import { chromium } from '" + join(root, ".local/pw-tools/node_modules/playwright/index.mjs").replace(/\\/g, "/") + "';"

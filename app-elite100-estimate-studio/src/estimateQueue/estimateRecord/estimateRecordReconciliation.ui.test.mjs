@@ -86,8 +86,8 @@ console.log("\nestimateRecordReconciliation.ui.test.mjs\n");
 
 {
   const shot = readFileSync(join(root, "scripts/runEstimateRecordVisualProof.mjs"), "utf8");
-  assert.match(shot, /estimate-record-commercial-controls-v3/);
-  assert.match(shot, /waitTakeoffReady/);
+  assert.match(shot, /estimate-record-commercial-controls-v4/);
+  assert.match(shot, /TAKEOFF_REVIEW_READY|waitTakeoffReady/);
   assert.match(shot, /Kitchen Island/);
   assert.match(shot, /refusing screenshot/);
   assert.match(shot, /position:\s*static\s*!important/);

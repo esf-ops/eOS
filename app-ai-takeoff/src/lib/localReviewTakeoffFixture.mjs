@@ -75,7 +75,17 @@ export function buildLocalReviewTakeoffDraft(opts = {}) {
         for (const run of area.runs || []) {
           if (String(run.label) !== "Kitchen Island") continue;
           run.waterfallSegmentLengthsIn = { left: 36 };
-          run.notes = "Left waterfall panel approved";
+          run.waterfallPanels = [
+            {
+              id: "wf-island-left",
+              side: "left",
+              panelWidthIn: Number(run.depthIn) || 36,
+              panelHeightIn: 36,
+              quantity: 1,
+              included: true
+            }
+          ];
+          run.notes = "Kitchen Island — Left waterfall (Takeoff physical scope)";
         }
       }
     }

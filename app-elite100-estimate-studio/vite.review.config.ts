@@ -17,7 +17,17 @@ export default defineConfig({
   server: {
     port: 5199,
     strictPort: true,
-    fs: { allow: [repoRoot] }
+    fs: { allow: [repoRoot] },
+    // Same-origin proxy so Playwright/Chromium can capture Takeoff iframe pixels
+    // (cross-origin iframes render blank in page screenshots under site isolation).
+    proxy: {
+      "/__takeoff": {
+        target: "http://127.0.0.1:5186",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/__takeoff/, "") || "/",
+        ws: true
+      }
+    }
   },
   resolve: {
     alias: {

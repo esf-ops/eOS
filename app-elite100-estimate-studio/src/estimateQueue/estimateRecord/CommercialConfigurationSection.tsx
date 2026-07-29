@@ -205,6 +205,7 @@ export function CommercialConfigurationSection(props: {
   busy: boolean;
   error: string | null;
   dirty?: boolean;
+  measurementsApproved?: boolean;
   roomOptions?: Array<{ id: string; name: string }>;
   onDirtyChange?: (dirty: boolean) => void;
   onSave: (payload: {
@@ -845,7 +846,33 @@ export function CommercialConfigurationSection(props: {
         <h3 className="eq-ai-section-title">Vanity Program</h3>
         <div data-testid="eq-vanity-program-configuration">
           {vanityRooms.length === 0 ? (
-            <p className="eq-muted">No vanity/bath rooms detected from Takeoff yet.</p>
+            <p className="eq-muted" data-testid="eq-vanity-lifecycle-msg">
+              {props.commercial?.scopeDetection?.vanityDetected
+                ? "Bathroom vanity detected. Approve measurements to evaluate Vanity Program eligibility."
+                : "No vanity/bath rooms detected from Takeoff yet."}
+            </p>
+          ) : vanityRooms.every((v) => !v.applyProgram) && props.measurementsApproved === false ? (
+            <>
+              <p className="eq-muted" data-testid="eq-vanity-lifecycle-msg">
+                Bathroom vanity detected. Approve measurements to evaluate Vanity Program
+                eligibility.
+              </p>
+              {vanityRooms.map((v, idx) => (
+                <div key={v.roomId || idx} className="eq-vanity-card" data-testid="eq-vanity-card">
+                  <strong>{v.roomName}</strong>
+                  <dl className="eq-summary-dl eq-summary-dl--grid" data-testid="eq-vanity-physical-facts">
+                    <div>
+                      <dt>Width</dt>
+                      <dd>{v.physicalFacts.widthIn != null ? `${v.physicalFacts.widthIn}″` : "—"}</dd>
+                    </div>
+                    <div>
+                      <dt>Depth</dt>
+                      <dd>{v.physicalFacts.depthIn != null ? `${v.physicalFacts.depthIn}″` : "—"}</dd>
+                    </div>
+                  </dl>
+                </div>
+              ))}
+            </>
           ) : (
             vanityRooms.map((v, idx) => (
               <div key={v.roomId || idx} className="eq-vanity-card" data-testid="eq-vanity-card">
@@ -1023,111 +1050,106 @@ export function CommercialConfigurationSection(props: {
 
         <h3 className="eq-ai-section-title">Waterfalls</h3>
         <div data-testid="eq-waterfall-configuration">
-          {waterfalls.length === 0 ? (
-            <p className="eq-muted">
-              No approved waterfall geometry. Add waterfall facts on an editable measurement revision,
-              then configure required vs customer-optional here.
-            </p>
-          ) : (
-            waterfalls.map((w, idx) => (
+          {(() => {
+            const detection = props.commercial?.scopeDetection || {};
+            const geometryPresent =
+              waterfalls.length > 0 || Boolean(detection.waterfallGeometryPresent);
+            const approved =
+              props.measurementsApproved !== false && detection.waterfallApproved !== false;
+
+            if (!geometryPresent) {
+              if (detection.islandDetected) {
+                return (
+                  <p className="eq-muted" data-testid="eq-waterfall-lifecycle-msg">
+                    Kitchen Island detected. Add waterfall panel geometry in Takeoff if this estimate
+                    includes or may offer a waterfall.
+                  </p>
+                );
+              }
+              return (
+                <p className="eq-muted" data-testid="eq-waterfall-lifecycle-msg">
+                  No approved waterfall geometry. Add waterfall panel geometry in Takeoff on an
+                  editable measurement revision, then configure required vs customer-optional here.
+                </p>
+              );
+            }
+
+            if (!approved) {
+              return (
+                <>
+                  <p className="eq-muted" data-testid="eq-waterfall-lifecycle-msg">
+                    Waterfall geometry added. Approve measurements to configure pricing and customer
+                    availability.
+                  </p>
+                  {waterfalls.map((w) => (
+                    <div key={w.id} className="eq-waterfall-card" data-testid="eq-waterfall-card">
+                      <strong data-testid="eq-waterfall-label">
+                        {w.roomName} — {w.pieceLabel} — {w.side} waterfall
+                      </strong>
+                      <dl
+                        className="eq-summary-dl eq-summary-dl--grid"
+                        data-testid="eq-waterfall-physical-facts"
+                      >
+                        <div>
+                          <dt>Panel width (in)</dt>
+                          <dd data-testid="eq-waterfall-width">{w.panelWidthIn}</dd>
+                        </div>
+                        <div>
+                          <dt>Panel height (in)</dt>
+                          <dd data-testid="eq-waterfall-height">{w.legHeightIn}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                  ))}
+                </>
+              );
+            }
+
+            return waterfalls.map((w, idx) => (
               <div key={w.id} className="eq-waterfall-card" data-testid="eq-waterfall-card">
                 <strong data-testid="eq-waterfall-label">
-                  {w.roomName} — {w.side} waterfall
+                  {w.roomName} — {w.pieceLabel} — {w.side} waterfall
                 </strong>
-                <div className="eq-waterfall-editor">
-                  <label>
-                    Room
-                    <input disabled value={w.roomName} readOnly />
-                  </label>
-                  <label>
-                    Related piece
-                    <input
-                      disabled={!props.editable}
-                      value={w.pieceLabel}
-                      data-testid="eq-waterfall-piece"
-                      onChange={(e) => {
-                        markDirty();
-                        setWaterfalls((prev) =>
-                          prev.map((row, i) =>
-                            i === idx
-                              ? { ...row, pieceLabel: e.target.value, pieceId: e.target.value }
-                              : row
-                          )
-                        );
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Side / location
-                    <select
-                      disabled={!props.editable}
-                      value={w.side}
-                      data-testid="eq-waterfall-side"
-                      onChange={(e) => {
-                        markDirty();
-                        setWaterfalls((prev) =>
-                          prev.map((row, i) => (i === idx ? { ...row, side: e.target.value } : row))
-                        );
-                      }}
-                    >
-                      <option value="left">Left</option>
-                      <option value="right">Right</option>
-                      <option value="both">Both</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </label>
-                  <label>
-                    Panel width (in)
-                    <input
-                      type="number"
-                      disabled={!props.editable}
-                      value={w.panelWidthIn}
-                      data-testid="eq-waterfall-width"
-                      onChange={(e) => {
-                        markDirty();
-                        setWaterfalls((prev) =>
-                          prev.map((row, i) =>
-                            i === idx ? { ...row, panelWidthIn: Number(e.target.value) || 0 } : row
-                          )
-                        );
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Panel height (in)
-                    <input
-                      type="number"
-                      disabled={!props.editable}
-                      value={w.legHeightIn}
-                      data-testid="eq-waterfall-height"
-                      onChange={(e) => {
-                        markDirty();
-                        setWaterfalls((prev) =>
-                          prev.map((row, i) =>
-                            i === idx ? { ...row, legHeightIn: Number(e.target.value) || 0 } : row
-                          )
-                        );
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Quantity / legs
-                    <input
-                      type="number"
-                      min={1}
-                      disabled={!props.editable}
-                      value={w.quantity}
-                      data-testid="eq-waterfall-qty"
-                      onChange={(e) => {
-                        markDirty();
-                        setWaterfalls((prev) =>
-                          prev.map((row, i) =>
-                            i === idx ? { ...row, quantity: Math.max(1, Number(e.target.value) || 1) } : row
-                          )
-                        );
-                      }}
-                    />
-                  </label>
+                <p className="eq-footnote" data-testid="eq-waterfall-takeoff-ref">
+                  Physical scope from Takeoff (stable id: {w.id}). Width, height, side, and quantity
+                  are edited only in the measurement revision.
+                </p>
+                <dl
+                  className="eq-summary-dl eq-summary-dl--grid"
+                  data-testid="eq-waterfall-physical-facts"
+                >
+                  <div>
+                    <dt>Room</dt>
+                    <dd data-testid="eq-waterfall-room">{w.roomName}</dd>
+                  </div>
+                  <div>
+                    <dt>Related piece</dt>
+                    <dd data-testid="eq-waterfall-piece">{w.pieceLabel}</dd>
+                  </div>
+                  <div>
+                    <dt>Side / location</dt>
+                    <dd data-testid="eq-waterfall-side">{w.side}</dd>
+                  </div>
+                  <div>
+                    <dt>Panel width (in)</dt>
+                    <dd data-testid="eq-waterfall-width">{w.panelWidthIn}</dd>
+                  </div>
+                  <div>
+                    <dt>Panel height (in)</dt>
+                    <dd data-testid="eq-waterfall-height">{w.legHeightIn}</dd>
+                  </div>
+                  <div>
+                    <dt>Quantity / legs</dt>
+                    <dd data-testid="eq-waterfall-qty">{w.quantity}</dd>
+                  </div>
+                  <div>
+                    <dt>Included in Takeoff scope</dt>
+                    <dd data-testid="eq-waterfall-included">
+                      {w.includedInScope ? "Yes" : "No"}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="eq-waterfall-editor" data-testid="eq-waterfall-commercial-controls">
                   <label>
                     Miter height
                     <select
@@ -1183,23 +1205,6 @@ export function CommercialConfigurationSection(props: {
                     />
                   </label>
                   <label>
-                    Include in approved scope
-                    <input
-                      type="checkbox"
-                      disabled={!props.editable}
-                      checked={w.includedInScope}
-                      data-testid="eq-waterfall-included"
-                      onChange={(e) => {
-                        markDirty();
-                        setWaterfalls((prev) =>
-                          prev.map((row, i) =>
-                            i === idx ? { ...row, includedInScope: e.target.checked } : row
-                          )
-                        );
-                      }}
-                    />
-                  </label>
-                  <label>
                     Estimator note
                     <input
                       disabled={!props.editable}
@@ -1218,44 +1223,12 @@ export function CommercialConfigurationSection(props: {
                 </div>
                 <p className="eq-muted" data-testid="eq-waterfall-price-note">
                   Material, tax, labor ($600/leg), polish ($225), and miter are calculated by the
-                  server on save — not in the browser.
+                  server on save from Takeoff dimensions — not by editing width/height here.
                   {w.total != null ? ` Last server total: ${money(w.total)}` : ""}
                 </p>
               </div>
-            ))
-          )}
-          {props.editable ? (
-            <button
-              type="button"
-              className="eq-btn-secondary"
-              data-testid="eq-add-waterfall"
-              onClick={() => {
-                markDirty();
-                setWaterfalls((prev) => [
-                  ...prev,
-                  {
-                    id: newId(),
-                    roomId: roomOptions[0]?.id || vanityRooms[0]?.roomId || "kitchen",
-                    roomName: roomOptions[0]?.name || "Kitchen",
-                    pieceId: "island",
-                    pieceLabel: "Kitchen Island",
-                    side: "left",
-                    panelWidthIn: 36,
-                    legHeightIn: 36,
-                    quantity: 1,
-                    backsidePolish: true,
-                    customerOptional: true,
-                    includedInScope: true,
-                    miterKey: "2-3in",
-                    estimatorNote: "",
-                    total: null
-                  }
-                ]);
-              }}
-            >
-              Add waterfall configuration
-            </button>
-          ) : null}
+            ));
+          })()}
         </div>
 
         {props.error ? (

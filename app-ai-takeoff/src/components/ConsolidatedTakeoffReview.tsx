@@ -27,6 +27,15 @@ import {
 } from "../lib/emptyManualTakeoffDraft.mjs";
 import { buildLocalReviewTakeoffDraft } from "../lib/localReviewTakeoffFixture.mjs";
 import {
+  TAKEOFF_REVIEW_READY,
+  TAKEOFF_REVIEW_DRAFT_SAVED,
+  TAKEOFF_WATERFALL_CHANGED,
+  summarizeTakeoffDraftForReady,
+  postTakeoffParentMessage,
+  loadLocalReviewDraft,
+  saveLocalReviewDraft
+} from "../lib/takeoffReviewReadyContract.mjs";
+import {
   applyDeletionTombstones,
   ensureUniqueTakeoffIdentity,
   hasEstimatorOwnedGeometry,
@@ -365,15 +374,17 @@ export default function ConsolidatedTakeoffReview() {
 
   useEffect(() => {
     if (localReview) {
-      const withWf =
-        new URLSearchParams(window.location.search).get("withWaterfall") === "1";
-      const sinkLen = Number(
-        new URLSearchParams(window.location.search).get("sinkWallLengthIn") || ""
-      );
-      const seeded = buildLocalReviewTakeoffDraft({
-        withWaterfall: withWf,
-        sinkWallLengthIn: Number.isFinite(sinkLen) && sinkLen > 0 ? sinkLen : undefined
-      });
+      const params = new URLSearchParams(window.location.search);
+      const withWf = params.get("withWaterfall") === "1";
+      const sinkLen = Number(params.get("sinkWallLengthIn") || "");
+      const revisionNumber = params.get("revisionNumber") || "1";
+      const persisted = loadLocalReviewDraft(takeoffJobId, revisionNumber);
+      const seeded =
+        persisted ||
+        buildLocalReviewTakeoffDraft({
+          withWaterfall: withWf,
+          sinkWallLengthIn: Number.isFinite(sinkLen) && sinkLen > 0 ? sinkLen : undefined
+        });
       setDraft(seeded);
       draftRef.current = seeded;
       canonicalDraftRef.current = structuredClone(seeded);
@@ -398,7 +409,32 @@ export default function ConsolidatedTakeoffReview() {
         mimeType: "image/svg+xml",
         status: "ready"
       });
-      return;
+      const summary = summarizeTakeoffDraftForReady(seeded);
+      const readyPayload = {
+        revisionNumber: Number(revisionNumber) || 1,
+        mode:
+          urlWorkspace.mode === "readonly" ||
+          urlWorkspace.approvalStatus === "approved"
+            ? "readonly"
+            : "editable",
+        roomCount: summary.roomCount,
+        pieceCount: summary.pieceCount,
+        savedState: "saved",
+        waterfalls: summary.waterfalls,
+        isRevisionDraft: urlWorkspace.isRevisionDraft
+      };
+      const emitReady = () =>
+        postTakeoffParentMessage(TAKEOFF_REVIEW_READY, readyPayload, {
+          localReview: true,
+          takeoffJobId
+        });
+      emitReady();
+      const t1 = window.setTimeout(emitReady, 100);
+      const t2 = window.setTimeout(emitReady, 500);
+      return () => {
+        window.clearTimeout(t1);
+        window.clearTimeout(t2);
+      };
     }
     const supabase = getSupabase();
     if (!supabase) {
@@ -418,7 +454,7 @@ export default function ConsolidatedTakeoffReview() {
       alive = false;
       sub?.subscription?.unsubscribe?.();
     };
-  }, [localReview, urlWorkspace.approvalStatus, urlWorkspace.mode]);
+  }, [localReview, urlWorkspace.approvalStatus, urlWorkspace.mode, urlWorkspace.isRevisionDraft, takeoffJobId]);
 
   const applyPendingAiFromLatest = useCallback((latest: any) => {
     if (latest?.pendingAiAvailable && latest?.pendingAiDraft) {
@@ -671,8 +707,29 @@ export default function ConsolidatedTakeoffReview() {
       await new Promise((r) => setTimeout(r, 120));
       canonicalDraftRef.current = structuredClone(draftRef.current);
       canonicalExcludedRef.current = new Set(excludedRef.current);
+      const revisionNumber =
+        new URLSearchParams(window.location.search).get("revisionNumber") || "1";
+      saveLocalReviewDraft(takeoffJobId, revisionNumber, draftRef.current);
       setSaveStatus("saved");
       setSaveError(null);
+      const summary = summarizeTakeoffDraftForReady(draftRef.current);
+      postTakeoffParentMessage(
+        TAKEOFF_REVIEW_DRAFT_SAVED,
+        {
+          revisionNumber: Number(revisionNumber) || 1,
+          mode: "editable",
+          roomCount: summary.roomCount,
+          pieceCount: summary.pieceCount,
+          savedState: "saved",
+          waterfalls: summary.waterfalls
+        },
+        { localReview: true, takeoffJobId }
+      );
+      postTakeoffParentMessage(
+        TAKEOFF_WATERFALL_CHANGED,
+        { waterfalls: summary.waterfalls },
+        { localReview: true, takeoffJobId }
+      );
       return;
     }
     if (!authToken || !takeoffJobId || !draftRef.current) return;
@@ -1098,14 +1155,31 @@ export default function ConsolidatedTakeoffReview() {
       setApproveStatus("approved");
       setJobReviewStatus("approved");
       setApproveMsg("Local review: measurements approved (fixture).");
+      const summary = summarizeTakeoffDraftForReady(draftRef.current);
+      const countertopSf = Number(
+        (draftRef.current?.rooms || []).reduce((sum: number, room: any) => {
+          for (const area of room.areas || []) {
+            for (const run of area.runs || []) {
+              if (run?.included === false) continue;
+              const len = Number(run.lengthIn) || 0;
+              const depth = Number(run.depthIn) || 0;
+              const qty = Number(run.quantity) || 1;
+              if (len > 0 && depth > 0) sum += (len * depth * qty) / 144;
+            }
+          }
+          return sum;
+        }, 0)
+      );
       notifyParentApproved(takeoffJobId, {
         ok: true,
         localReview: true,
         estimateId: "local-review-estimate",
         summary: {
-          countertopSf: 59.08,
+          countertopSf: Math.round(countertopSf * 100) / 100,
           backsplashSf: 8.75,
-          exposedEdgeLf: 26.25
+          exposedEdgeLf: 26.25,
+          pieceCount: summary.pieceCount,
+          waterfalls: summary.waterfalls
         }
       });
       return;
@@ -1984,6 +2058,180 @@ export default function ConsolidatedTakeoffReview() {
               </table>
             </div>
 
+            <section
+              className="ctr-waterfall-physical"
+              data-testid="ctr-waterfall-physical-scope"
+              aria-label="Waterfall physical scope"
+            >
+              <h2 className="ctr-section-title">Waterfall panels (Takeoff physical scope)</h2>
+              {(() => {
+                const summary = summarizeTakeoffDraftForReady(draft);
+                if (!summary.waterfalls.length) {
+                  return (
+                    <p className="ctr-muted" data-testid="ctr-waterfall-empty">
+                      No waterfall panel geometry yet. On an island piece, add a left/right
+                      waterfall panel here when this estimate includes or may offer a waterfall.
+                    </p>
+                  );
+                }
+                return (
+                  <ul className="ctr-waterfall-list">
+                    {summary.waterfalls.map((wf) => (
+                      <li
+                        key={wf.id}
+                        className="ctr-waterfall-card"
+                        data-testid="ctr-waterfall-panel"
+                        data-waterfall-id={wf.id}
+                      >
+                        <strong data-testid="ctr-waterfall-label">
+                          {wf.pieceLabel} — {String(wf.side).charAt(0).toUpperCase() + String(wf.side).slice(1)}{" "}
+                          waterfall
+                        </strong>
+                        <dl className="ctr-waterfall-facts">
+                          <div>
+                            <dt>Room</dt>
+                            <dd>{wf.roomName}</dd>
+                          </div>
+                          <div>
+                            <dt>Related piece</dt>
+                            <dd>{wf.pieceLabel}</dd>
+                          </div>
+                          <div>
+                            <dt>Side</dt>
+                            <dd>{wf.side}</dd>
+                          </div>
+                          <div>
+                            <dt>Panel width (in)</dt>
+                            <dd>
+                              <input
+                                type="number"
+                                data-testid="ctr-waterfall-width"
+                                disabled={isReadonly}
+                                value={wf.panelWidthIn}
+                                onChange={(e) => {
+                                  const nextW = Number(e.target.value) || 0;
+                                  const next = structuredClone(draftRef.current);
+                                  for (const room of next.rooms || []) {
+                                    for (const area of room.areas || []) {
+                                      for (const run of area.runs || []) {
+                                        if (String(run.id) !== String(wf.pieceId)) continue;
+                                        run.waterfallPanels = (run.waterfallPanels || []).map(
+                                          (p: any) =>
+                                            String(p.id) === String(wf.id) ||
+                                            String(p.side) === String(wf.side)
+                                              ? { ...p, panelWidthIn: nextW }
+                                              : p
+                                        );
+                                        run.waterfallSegmentLengthsIn = {
+                                          ...(run.waterfallSegmentLengthsIn || {}),
+                                          [wf.side]:
+                                            run.waterfallPanels.find(
+                                              (p: any) => String(p.side) === String(wf.side)
+                                            )?.panelHeightIn ||
+                                            run.waterfallSegmentLengthsIn?.[wf.side] ||
+                                            36
+                                        };
+                                      }
+                                    }
+                                  }
+                                  updateDraft(next);
+                                }}
+                              />
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Panel height (in)</dt>
+                            <dd>
+                              <input
+                                type="number"
+                                data-testid="ctr-waterfall-height"
+                                disabled={isReadonly}
+                                value={wf.panelHeightIn}
+                                onChange={(e) => {
+                                  const nextH = Number(e.target.value) || 0;
+                                  const next = structuredClone(draftRef.current);
+                                  for (const room of next.rooms || []) {
+                                    for (const area of room.areas || []) {
+                                      for (const run of area.runs || []) {
+                                        if (String(run.id) !== String(wf.pieceId)) continue;
+                                        run.waterfallPanels = (run.waterfallPanels || []).map(
+                                          (p: any) =>
+                                            String(p.id) === String(wf.id) ||
+                                            String(p.side) === String(wf.side)
+                                              ? { ...p, panelHeightIn: nextH }
+                                              : p
+                                        );
+                                        run.waterfallSegmentLengthsIn = {
+                                          ...(run.waterfallSegmentLengthsIn || {}),
+                                          [wf.side]: nextH
+                                        };
+                                      }
+                                    }
+                                  }
+                                  updateDraft(next);
+                                }}
+                              />
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Quantity</dt>
+                            <dd data-testid="ctr-waterfall-qty">{wf.quantity}</dd>
+                          </div>
+                          <div>
+                            <dt>Included</dt>
+                            <dd>{wf.includedInScope ? "Yes" : "No"}</dd>
+                          </div>
+                        </dl>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              })()}
+              {!isReadonly ? (
+                <button
+                  type="button"
+                  className="ctr-btn-secondary"
+                  data-testid="ctr-add-waterfall-panel"
+                  onClick={() => {
+                    const next = structuredClone(draftRef.current || createEmptyManualTakeoffDraft());
+                    let targetRun: any = null;
+                    for (const room of next.rooms || []) {
+                      for (const area of room.areas || []) {
+                        for (const run of area.runs || []) {
+                          if (/island/i.test(String(run.label || ""))) {
+                            targetRun = run;
+                            break;
+                          }
+                        }
+                      }
+                    }
+                    if (!targetRun) return;
+                    const panels = Array.isArray(targetRun.waterfallPanels)
+                      ? targetRun.waterfallPanels
+                      : [];
+                    if (panels.some((p: any) => p.side === "left")) return;
+                    panels.push({
+                      id: `wf-${targetRun.id}-left`,
+                      side: "left",
+                      panelWidthIn: Number(targetRun.depthIn) || 36,
+                      panelHeightIn: 36,
+                      quantity: 1,
+                      included: true
+                    });
+                    targetRun.waterfallPanels = panels;
+                    targetRun.waterfallSegmentLengthsIn = {
+                      ...(targetRun.waterfallSegmentLengthsIn || {}),
+                      left: 36
+                    };
+                    targetRun.notes = `${targetRun.label} — Left waterfall (Takeoff physical scope)`;
+                    updateDraft(next);
+                  }}
+                >
+                  Add Kitchen Island left waterfall
+                </button>
+              ) : null}
+            </section>
+
             <div className="ctr-actions">
               {!isReadonly ? (
                 <>
@@ -2022,12 +2270,13 @@ export default function ConsolidatedTakeoffReview() {
                 disabled={
                   saveStatus === "saving" ||
                   saveStatus === "conflict" ||
-                  !isTakeoffWorksheetDirty({
-                    localDraft: draft,
-                    canonicalDraft: canonicalDraftRef.current,
-                    localExcludedRunIds: excludedRunIds,
-                    canonicalExcludedRunIds: canonicalExcludedRef.current
-                  })
+                  (!localReview &&
+                    !isTakeoffWorksheetDirty({
+                      localDraft: draft,
+                      canonicalDraft: canonicalDraftRef.current,
+                      localExcludedRunIds: excludedRunIds,
+                      canonicalExcludedRunIds: canonicalExcludedRef.current
+                    }))
                 }
                 onClick={() => void persistDraft()}
               >
@@ -2118,7 +2367,8 @@ export default function ConsolidatedTakeoffReview() {
                 {approveButtonLabel({
                   approveStatus,
                   advisoryCount: advisory.length,
-                  blockingCount: blocking.length
+                  blockingCount: blocking.length,
+                  isRevisionDraft: urlWorkspace.isRevisionDraft
                 })}
               </button>
               ) : null}

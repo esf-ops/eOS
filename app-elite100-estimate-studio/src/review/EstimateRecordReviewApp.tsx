@@ -3,7 +3,7 @@
  * Mounts production Estimate Record components + EliteosTopbar + Takeoff iframe.
  * Not imported by StudioApp production routing.
  */
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import {
   DigitalEstimateSection,
@@ -23,6 +23,14 @@ function takeoffBaseUrl(): string {
   } catch {
     /* ignore */
   }
+  // Prefer same-origin Vite proxy so review screenshots include iframe pixels.
+  try {
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return `${window.location.origin}/__takeoff`;
+    }
+  } catch {
+    /* ignore */
+  }
   return "http://127.0.0.1:5186";
 }
 
@@ -34,6 +42,30 @@ function scenarioFromQuery(): string {
   }
 }
 
+function waterfallServerPrice(w: {
+  panelWidthIn?: number;
+  panelHeightIn?: number;
+  legHeightIn?: number;
+  quantity?: number;
+  miterKey?: string;
+  backsidePolish?: boolean;
+}) {
+  const width = Number(w.panelWidthIn) || 0;
+  const height = Number(w.panelHeightIn ?? w.legHeightIn) || 0;
+  const qty = Math.max(1, Number(w.quantity) || 1);
+  const miterKey = String(w.miterKey || "2-3in");
+  const polish = Boolean(w.backsidePolish);
+  const miterRates: Record<string, number> = { "2-3in": 65, "4in": 70, "5in": 75, "6in": 80 };
+  const measuredSf = Math.round(((width * height) / 144) * 100) / 100;
+  const billedSf = Math.ceil(measuredSf);
+  const material = billedSf * 45;
+  const labor = 600 * qty;
+  const polishAmt = polish ? 225 * qty : 0;
+  const miterLf = Math.round((height / 12) * 100) / 100;
+  const miter = Math.round(miterLf * (miterRates[miterKey] || 65) * 100) / 100;
+  return Math.round((material + labor + polishAmt + miter) * 100) / 100;
+}
+
 export default function EstimateRecordReviewApp() {
   const initial = scenarioFromQuery();
   const [scenarioName, setScenarioName] = useState(initial);
@@ -42,6 +74,8 @@ export default function EstimateRecordReviewApp() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [commercialDirty, setCommercialDirty] = useState(false);
+  const [takeoffReady, setTakeoffReady] = useState<Record<string, unknown> | null>(null);
+  const [iframeEpoch, setIframeEpoch] = useState(0);
   const [store, setStore] = useState(() => ({
     customLineItems: scenario.commercial?.customLines || [],
     estimateWideAdjustment: scenario.commercial?.estimateAdjustment || {},
@@ -49,8 +83,66 @@ export default function EstimateRecordReviewApp() {
   }));
 
   const takeoffSrc = useMemo(() => {
-    return `${takeoffBaseUrl()}/?consolidated=1&${scenario.takeoffQuery}`;
-  }, [scenario.takeoffQuery]);
+    return `${takeoffBaseUrl()}/?consolidated=1&${scenario.takeoffQuery}&_e=${iframeEpoch}`;
+  }, [scenario.takeoffQuery, iframeEpoch]);
+
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      const data = ev.data;
+      if (!data || typeof data !== "object") return;
+      if (data.source !== "consolidated-review") return;
+      const expectedRev = Number(scenario.estimateRevision) || 1;
+      if (data.type === "TAKEOFF_REVIEW_READY") {
+        if (data.revisionNumber != null && Number(data.revisionNumber) !== expectedRev) return;
+        setTakeoffReady(data);
+        (window as any).__takeoffReviewReady = data;
+        return;
+      }
+      if (data.type === "TAKEOFF_REVIEW_DRAFT_SAVED" || data.type === "TAKEOFF_WATERFALL_CHANGED") {
+        const incoming = Array.isArray(data.waterfalls) ? data.waterfalls : [];
+        if (!incoming.length) return;
+        setScenario((prev) => {
+          const prevWfs = prev.commercial?.waterfalls || [];
+          const merged = incoming.map((wf: any) => {
+            const existing = prevWfs.find((p: any) => String(p.id) === String(wf.id)) || {};
+            const next = {
+              ...existing,
+              id: wf.id,
+              roomId: wf.roomId,
+              roomName: wf.roomName,
+              pieceId: wf.pieceId,
+              pieceLabel: wf.pieceLabel,
+              side: wf.side,
+              panelWidthIn: wf.panelWidthIn,
+              panelHeightIn: wf.panelHeightIn,
+              legHeightIn: wf.panelHeightIn,
+              quantity: wf.quantity,
+              includedInScope: wf.includedInScope !== false,
+              miterKey: existing.miterKey || "2-3in",
+              backsidePolish: existing.backsidePolish !== false,
+              customerOptional: existing.customerOptional !== false,
+              estimatorNote: existing.estimatorNote || ""
+            };
+            return { ...next, total: waterfallServerPrice(next) };
+          });
+          return {
+            ...prev,
+            commercial: {
+              ...prev.commercial,
+              waterfalls: merged,
+              scopeDetection: {
+                ...(prev.commercial?.scopeDetection || {}),
+                islandDetected: true,
+                waterfallGeometryPresent: true
+              }
+            }
+          };
+        });
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [scenario.estimateRevision]);
 
   function switchScenario(name: string) {
     const next = buildScenario(name);
@@ -58,6 +150,8 @@ export default function EstimateRecordReviewApp() {
     setScenario(next);
     setError(null);
     setCommercialDirty(false);
+    setTakeoffReady(null);
+    setIframeEpoch((n) => n + 1);
     setStore({
       customLineItems: next.commercial?.customLines || [],
       estimateWideAdjustment: next.commercial?.estimateAdjustment || {},
@@ -266,9 +360,13 @@ export default function EstimateRecordReviewApp() {
           <div className="eq-record-section__body">
             <div className="eq-takeoff-frame-wrap">
               <iframe
+                key={`${scenarioName}-${iframeEpoch}`}
                 title="Consolidated Takeoff Review"
                 className="eq-takeoff-iframe"
                 data-testid="eq-takeoff-iframe"
+                data-takeoff-ready={takeoffReady ? "1" : "0"}
+                data-takeoff-revision={String(takeoffReady?.revisionNumber ?? "")}
+                data-takeoff-mode={String(takeoffReady?.mode ?? "")}
                 src={takeoffSrc}
               />
             </div>
@@ -301,6 +399,7 @@ export default function EstimateRecordReviewApp() {
           busy={busy}
           error={error}
           dirty={commercialDirty}
+          measurementsApproved={scenario.measurementsApproved}
           roomOptions={[
             { id: "kitchen", name: "Kitchen" },
             { id: "bath", name: "Bathroom" }
@@ -343,8 +442,19 @@ export default function EstimateRecordReviewApp() {
         />
 
         <pre className="eq-review-store" data-testid="eq-review-store" hidden>
-          {JSON.stringify(store)}
+          {JSON.stringify({ store, takeoffReady })}
         </pre>
+        <button
+          type="button"
+          hidden
+          data-testid="eq-review-remount-takeoff"
+          onClick={() => {
+            setTakeoffReady(null);
+            setIframeEpoch((n) => n + 1);
+          }}
+        >
+          Remount Takeoff
+        </button>
       </main>
     </div>
   );

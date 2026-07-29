@@ -327,7 +327,7 @@ function buildVerifiedRooms(geo) {
   ];
 }
 
-function buildCommercial(authority, editable, waterfalls = []) {
+function buildCommercial(authority, editable, waterfalls = [], scopeDetection = null) {
   return {
     editable,
     revisionNumber: 1,
@@ -380,6 +380,13 @@ function buildCommercial(authority, editable, waterfalls = []) {
       }
     ],
     waterfalls,
+    scopeDetection: scopeDetection || {
+      vanityDetected: true,
+      vanityApproved: true,
+      islandDetected: true,
+      waterfallGeometryPresent: waterfalls.length > 0,
+      waterfallApproved: waterfalls.length > 0
+    },
     published: !editable
   };
 }
@@ -446,8 +453,40 @@ export function buildScenario(name) {
           adjustedExactTotal: 0,
           customerDisplayTotal: null
         },
-        vanityPrograms: [],
+        vanityPrograms: [
+          {
+            roomId: "bath",
+            roomName: "Bathroom",
+            applyProgram: false,
+            useStandardPricing: true,
+            selectedProgram: null,
+            physicalFacts: {
+              widthIn: 37,
+              depthIn: 22.5,
+              quantity: 1,
+              bowlCount: 1,
+              sinkOpenings: 1,
+              backsplash: "37 × 4″",
+              sameTrip: true
+            },
+            eligible: null,
+            eligibilityReasons: [],
+            serverPrice: null,
+            warnings: [],
+            permittedMaterials: [],
+            permittedSinkUpgrades: [],
+            permittedEdgeUpgrades: [],
+            includedScope: []
+          }
+        ],
         waterfalls: [],
+        scopeDetection: {
+          vanityDetected: true,
+          vanityApproved: false,
+          islandDetected: true,
+          waterfallGeometryPresent: false,
+          waterfallApproved: false
+        },
         published: false
       },
       aiSummary: {
@@ -563,7 +602,7 @@ export function buildScenario(name) {
     const published = buildScenario("published");
     const waterfalls = [
       {
-        id: "wf-left",
+        id: "wf-island-left",
         roomId: "kitchen",
         roomName: "Kitchen",
         pieceId: "island",
@@ -576,7 +615,8 @@ export function buildScenario(name) {
         backsidePolish: true,
         customerOptional: true,
         includedInScope: true,
-        total: null
+        // labor 600 + polish 225 + miter (36/12)*65=195 + material ceil(9)*45=405 → 1425
+        total: 1425
       }
     ];
     const r2Approved = name === "r2-approved";
@@ -596,7 +636,13 @@ export function buildScenario(name) {
       estimateRevision: 2,
       publishedRevision: 1,
       customerUrl: REVIEW_CUSTOMER_URL,
-      commercial: buildCommercial(r2Authority, true, waterfalls),
+      commercial: buildCommercial(r2Authority, true, waterfalls, {
+        vanityDetected: true,
+        vanityApproved: r2Approved,
+        islandDetected: true,
+        waterfallGeometryPresent: true,
+        waterfallApproved: r2Approved
+      }),
       authority: {
         ...r2Authority,
         adjustedExactTotal: r2Exact,
