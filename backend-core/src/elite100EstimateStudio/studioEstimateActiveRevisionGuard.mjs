@@ -57,18 +57,25 @@ export async function assertActiveEstimateRevision({ repository, organizationId,
     err.code = "estimate_not_found";
     throw err;
   }
-  if (!isSupersededEstimateRow(row)) {
-    return row;
-  }
   let active = null;
   try {
     active = await repository.getActiveByIntakeCase(organizationId, row.intakeCaseId);
   } catch {
     active = null;
   }
-  // Never leak an active id from another org — getActiveByIntakeCase is org-scoped.
   const activeEstimateId =
     active && String(active.organizationId) === String(row.organizationId) ? active.id : null;
+
+  // Prior published/approved rows may remain non-superseded while a newer
+  // measurement revision is open — they must not accept estimator mutations.
+  const newerSiblingActive =
+    active &&
+    active.id !== row.id &&
+    Number(active.revision || 1) > Number(row.revision || 1);
+
+  if (!isSupersededEstimateRow(row) && !newerSiblingActive) {
+    return row;
+  }
   throw createEstimateRevisionSupersededError({
     requestedEstimateId: row.id,
     activeEstimateId

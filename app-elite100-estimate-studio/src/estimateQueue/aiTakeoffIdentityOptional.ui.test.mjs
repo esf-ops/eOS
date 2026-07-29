@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const panel = readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8");
+const panel = readFileSync(join(root, "src/estimateQueue/AiEstimatorWorkspace.tsx"), "utf8");
 
 console.log("\naiTakeoffIdentityOptional.ui.test.mjs\n");
 
@@ -23,8 +23,11 @@ assert.ok(panel.includes("eq-publish-digital-estimate"));
 assert.ok(panel.includes("eq-copy-customer-link"));
 assert.ok(panel.includes("eq-open-customer-preview"));
 assert.ok(panel.includes("eq-ai-approved-measurements"));
-assert.ok(panel.includes("Edit measurements"));
-assert.match(panel, /disabled=\{publishBusy \|\| handoffBusy \|\| !estimateId \|\| !eligible\}/);
+assert.ok(panel.includes("Edit Measurements") || panel.includes("Edit measurements"));
+assert.match(
+  panel,
+  /disabled=\{props\.publishBusy \|\| !props\.estimateId \|\| !props\.eligible\}|disabled=\{publishBusy \|\| !estimateId \|\| !eligible\}/
+);
 assert.ok(
   panel.includes("activeReview ? activeReview.eligible") ||
     panel.includes("activeReview.eligible")

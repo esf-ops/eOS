@@ -21,7 +21,7 @@ import {
 } from "./aiTakeoffApprovedSummary.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const panel = readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8");
+const panel = readFileSync(join(root, "src/estimateQueue/AiEstimatorWorkspace.tsx"), "utf8");
 
 console.log("\naiTakeoffApprovedSummary.test.mjs\n");
 
@@ -193,7 +193,7 @@ function recoveryEstimate() {
     false,
     "applyEstimateView no longer hard-codes billing-only countertop mapping"
   );
-  assert.ok(panel.includes("AiTakeoffFirstPanel"));
+  assert.ok(panel.includes("AiEstimatorWorkspace") || panel.includes("export default function AiEstimatorWorkspace"));
   assert.ok(panel.includes("eq-takeoff-iframe") || panel.includes("eq-ai-approved-measurements"));
   console.log("ok: 4 panel wires authoritative summary helper; Takeoff-first unchanged");
 }

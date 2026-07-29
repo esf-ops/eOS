@@ -2844,3 +2844,33 @@
 | **SQL** | None. |
 | **Tests** | `studioSimplifiedPublishActivatesDigitalEstimate.test.mjs` (+ existing configure-publish / availability contracts). |
 
+### 197. Consolidate active AI estimator workflow (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `fix/consolidate-ai-estimator-workflow` |
+| **Decision** | Active AI-assisted estimates mount one `AiEstimatorWorkspace` driven by `deriveAiEstimatorStage`. Processing/draft/revision_draft use the existing Takeoff Review iframe; approved/published use compact cards. No Scope/Customer Choices/Review tabs, ManualPhysicalScopeEditor, or EstimateDigitalEstimatePanel on the AI path. Edit Measurements opens `open-measurement-revision` (createRevisionFrom) so R1 is preserved and R2 preloads prior geometry. |
+| **Protected path** | Shared Inbox → Takeoff → approval handoff → v4 calculate → simplified-publish (interactive envelope) → public configure — contracts locked in `aiEstimatorGoldenPath.contract.test.mjs`. |
+| **SQL** | None. |
+| **Tests** | Golden-path lock, stage derivation, openMeasurementRevision, workspace tree, acceptance e2e (initial + revision). |
+
+### 198. AI estimator operational depth (derived summary + verification surfaces) (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `fix/consolidate-ai-estimator-workflow` |
+| **Decision** | Keep the single-stage AI workspace. Add a derived `estimate.aiEstimatorSummary` read model (no SQL / no duplicate persistence) and display-only verification components: room-by-room scope, typed openings, customer-safe starting price groups, publication activity from existing safe publication summary, and R1↔R2 measurement comparison. Draft/revision continue to mount the real Takeoff Review iframe (`consolidated=1`). Cutout regression proves one kitchen sink → one $200 charge and one vanity/bar → one $100 charge in the customer-impact total; duplicate labels on the public Digital Estimate (if any) are treated as display grouping until a calculator double-charge is proven. |
+| **Why** | Consolidation removed competing tabs but left approved/published cards too shallow for real estimating work. Depth belongs inside the existing stages, not new workflow branches. |
+| **SQL** | None. |
+| **Impacted** | `studioAiEstimatorSummary.mjs`, `studioEstimateService.safeEstimateView`, `AiEstimatorWorkspace.tsx`, `AiEstimatorReadViews.tsx`. |
+| **Revisit trigger** | Public DE shows both a configuration sink-cutout option line and a fabrication Cutouts line that double the customer total; then fix calculator or publish snapshot grouping with a proven defect. |
+
+### 199. Measurement revision publish lifecycle + cutout display aliases (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `fix/consolidate-ai-estimator-workflow` |
+| **Decision** | Opening a measurement revision creates a sibling draft (R2) **without** superseding the prior approved/published estimate row (R1). R1 remains the active customer publication target through R2 draft and R2 approval. Only a **successful** R2 Digital Estimate publish supersedes older family estimate rows. Failed R2 publish leaves R1 + its customer link intact. Customer-visible cutout labels are canonical (`Kitchen sink cutout`, `Vanity/bar sink cutout`, `Cooktop cutout`, `Electrical outlet cutout`); alias pairs are collapsed in customer-safe projections without changing calculator amounts. |
+| **Why** | Premature supersede at Edit Measurements broke the “R1 stays live until R2 publish” product contract. Duplicate cutout labels were display aliases, not double charges. |
+| **SQL** | None. |
+| **Impacted** | `createSiblingRevisionFrom` / `supersedeOlderRevisionsInFamily`, `openMeasurementRevision`, simplified-publish post-success supersede, `customerSafeCutoutPresentation.mjs`, customer-safe room lineItems, DE projection dedupe. |

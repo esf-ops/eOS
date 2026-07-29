@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const panel = readFileSync(join(root, "src/estimateQueue/AiTakeoffFirstPanel.tsx"), "utf8");
+const panel = readFileSync(join(root, "src/estimateQueue/AiEstimatorWorkspace.tsx"), "utf8");
 
 console.log("\naiTakeoffApprovalHandoff.ui.test.mjs\n");
 
@@ -20,19 +20,20 @@ console.log("\naiTakeoffApprovalHandoff.ui.test.mjs\n");
   assert.ok(panel.includes('data-testid="eq-ai-approved-measurements"'));
   assert.ok(panel.includes("handoffSucceededRef"));
   assert.ok(panel.includes("handoffInFlightRef"));
-  // Iframe stays mounted while !measurementsApproved (including busy/error).
-  const preApproved = panel.slice(
-    panel.indexOf("if (!measurementsApproved)"),
-    panel.indexOf("const openings =")
+  // Iframe stays mounted for draft/approving stages (including busy/error).
+  const takeoffSurface = panel.slice(
+    panel.indexOf('data-testid="eq-ai-takeoff-surface"'),
+    panel.indexOf('stage === "published"')
   );
-  assert.ok(preApproved.includes('data-testid="eq-takeoff-iframe"'));
-  assert.ok(preApproved.includes("eq-ai-retry-handoff"));
-  assert.ok(preApproved.includes("eq-takeoff-handoff-overlay"));
+  assert.ok(takeoffSurface.includes('data-testid="eq-takeoff-iframe"'));
+  assert.ok(takeoffSurface.includes("eq-ai-retry-handoff"));
+  assert.ok(takeoffSurface.includes("eq-takeoff-handoff-overlay"));
   assert.equal(
-    preApproved.includes('data-testid="eq-ai-approved-measurements"'),
+    takeoffSurface.includes('data-testid="eq-ai-approved-measurements"'),
     false,
-    "approved card is not rendered before successful handoff"
+    "approved card is not rendered inside takeoff surface"
   );
+  assert.ok(panel.includes('showTakeoff'));
   console.log("ok: 1 iframe remains mounted during handoff; approved card gated");
 }
 

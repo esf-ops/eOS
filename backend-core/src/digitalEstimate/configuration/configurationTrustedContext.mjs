@@ -192,7 +192,7 @@ export function serverApprovedOptionCatalog() {
     {
       optionKey: "qty-sink",
       groupKey: "cutouts",
-      displayLabel: "Kitchen Sink Cutouts",
+      displayLabel: "Kitchen sink cutout",
       pricingMode: "per_each",
       sellPrice: 200,
       availabilityState: "active",
@@ -204,7 +204,7 @@ export function serverApprovedOptionCatalog() {
     {
       optionKey: "qty-bar",
       groupKey: "cutouts",
-      displayLabel: "Vanity/Bar Sink Cutouts",
+      displayLabel: "Vanity/bar sink cutout",
       pricingMode: "per_each",
       sellPrice: 100,
       availabilityState: "active",
@@ -216,7 +216,7 @@ export function serverApprovedOptionCatalog() {
     {
       optionKey: "qty-cook",
       groupKey: "cutouts",
-      displayLabel: "Cooktop Cutouts",
+      displayLabel: "Cooktop cutout",
       pricingMode: "per_each",
       sellPrice: 150,
       availabilityState: "active",
@@ -228,7 +228,7 @@ export function serverApprovedOptionCatalog() {
     {
       optionKey: "qty-outlet",
       groupKey: "cutouts",
-      displayLabel: "Electrical Outlet Cutouts",
+      displayLabel: "Electrical outlet cutout",
       pricingMode: "per_each",
       sellPrice: 30,
       availabilityState: "active",

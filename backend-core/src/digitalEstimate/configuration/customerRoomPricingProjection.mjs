@@ -67,6 +67,7 @@ import { parseProductOptionKey } from "../catalog/digitalEstimateProductOptions.
 import { edgeProfileDisplayLabel } from "../catalog/studioEdgeAuthority.mjs";
 import { BACKSPLASH_REVIEW_CODES } from "./backsplashPricingAuthority.mjs";
 import { sanitizeChangesSelectionLabel, isForbiddenSelectionLabel } from "./selectionAuthority.mjs";
+import { dedupeCustomerSafeCutoutLines } from "../../elite100EstimateStudio/customerSafeCutoutPresentation.mjs";
 
 function edgeProfileDisplayLabelFromOption(displayLabel, optionKey) {
   const fromKey = String(optionKey || "").split(":").slice(2).join(":");
@@ -565,7 +566,13 @@ export function buildUpdatedRoomPricingProjection(args) {
     assertConfiguredBacksplashNoneIsZero(room);
     const backsplashForTotal = room.backsplashAmountCents ?? 0;
     const roomTotalCents = room.countertopAmountCents + backsplashForTotal + room.addOnsAmountCents;
-    return { ...room, roomTotalCents };
+    return {
+      ...room,
+      customerFacingLines: dedupeCustomerSafeCutoutLines(room.customerFacingLines || [], {
+        amountUnit: "cents"
+      }),
+      roomTotalCents
+    };
   });
 
   const allCustomLines = Array.isArray(internal.customLines) ? internal.customLines : [];
@@ -679,13 +686,16 @@ export function buildOriginalRoomPricingProjectionFromSnapshot(snapshot) {
     // Frozen explicit customer-facing custom lines (v2 snapshots). Internal-only
     // allocations are already absorbed inside the frozen stone amounts and are
     // never re-exposed here.
-    customerFacingLines: (Array.isArray(r?.customerFacingLines) ? r.customerFacingLines : [])
-      .filter((l) => l && l.customerVisible !== false)
-      .map((l) => ({
-        category: String(l.category || "custom"),
-        label: String(l.label || "Item"),
-        amountCents: Math.trunc(Number(l.amountCents) || 0)
-      })),
+    customerFacingLines: dedupeCustomerSafeCutoutLines(
+      (Array.isArray(r?.customerFacingLines) ? r.customerFacingLines : [])
+        .filter((l) => l && l.customerVisible !== false)
+        .map((l) => ({
+          category: String(l.category || "custom"),
+          label: String(l.label || "Item"),
+          amountCents: Math.trunc(Number(l.amountCents) || 0)
+        })),
+      { amountUnit: "cents" }
+    ),
     reviewRequiredItems: [],
     attributionStatus: r?.pricingSourceVersion || "published_allocation_v1"
   }));

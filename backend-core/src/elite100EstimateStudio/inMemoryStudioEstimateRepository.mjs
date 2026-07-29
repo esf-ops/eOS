@@ -206,6 +206,81 @@ export class InMemoryStudioEstimateRepository {
     });
   }
 
+  /**
+   * Open a newer measurement revision without superseding the prior published/
+   * approved row. Prior remains active for the customer link until the newer
+   * revision successfully publishes (see supersedeOlderRevisionsInFamily).
+   */
+  async createSiblingRevisionFrom(organizationId, estimateId, input, actorUserId = null) {
+    const current = await this.getById(organizationId, estimateId);
+    if (!current) {
+      const err = new Error("Estimate not found");
+      err.statusCode = 404;
+      err.code = "estimate_not_found";
+      throw err;
+    }
+    const row = buildStudioEstimateRow({
+      id: randomUUID(),
+      organizationId: normOrg(organizationId),
+      intakeCaseId: current.intakeCaseId,
+      takeoffJobId: input.takeoffJobId ?? current.takeoffJobId,
+      sourceTakeoffResultId: input.sourceTakeoffResultId ?? current.sourceTakeoffResultId,
+      status: input.status || STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+      revision: Number(current.revision || 1) + 1,
+      scope: input.scope ?? current.scope,
+      accountDirectoryAccountId:
+        "accountDirectoryAccountId" in input
+          ? input.accountDirectoryAccountId
+          : current.accountDirectoryAccountId,
+      accountDirectoryContactId:
+        "accountDirectoryContactId" in input
+          ? input.accountDirectoryContactId
+          : current.accountDirectoryContactId,
+      accountDirectoryLocationId:
+        "accountDirectoryLocationId" in input
+          ? input.accountDirectoryLocationId
+          : current.accountDirectoryLocationId,
+      customerIdentitySnapshot:
+        "customerIdentitySnapshot" in input
+          ? input.customerIdentitySnapshot
+          : current.customerIdentitySnapshot,
+      staleReason: input.staleReason ?? null,
+      calculationSnapshot: null,
+      approval: null,
+      createdByUserId: actorUserId || current.createdByUserId,
+      updatedByUserId: actorUserId || current.createdByUserId
+    });
+    this.byId.set(row.id, row);
+    this.activeByCase.set(this.caseKey(organizationId, current.intakeCaseId), row.id);
+    return structuredClone(row);
+  }
+
+  /**
+   * After a newer revision publishes successfully, mark older family rows superseded.
+   */
+  async supersedeOlderRevisionsInFamily(organizationId, publishedEstimateId, actorUserId = null) {
+    const published = await this.getById(organizationId, publishedEstimateId);
+    if (!published) return [];
+    const siblings = await this.listByIntakeCase(organizationId, published.intakeCaseId);
+    const publishedRev = Number(published.revision) || 1;
+    /** @type {object[]} */
+    const superseded = [];
+    for (const sibling of siblings) {
+      if (!sibling || sibling.id === published.id) continue;
+      if (String(sibling.status || "").toLowerCase() === STUDIO_ESTIMATE_STATUSES.SUPERSEDED) continue;
+      if ((Number(sibling.revision) || 1) >= publishedRev) continue;
+      superseded.push(
+        await this.update(
+          organizationId,
+          sibling.id,
+          { status: STUDIO_ESTIMATE_STATUSES.SUPERSEDED },
+          actorUserId
+        )
+      );
+    }
+    return superseded;
+  }
+
   async supersedeActive(organizationId, intakeCaseId, actorUserId = null) {
     const current = await this.getActiveByIntakeCase(organizationId, intakeCaseId);
     if (!current) return null;

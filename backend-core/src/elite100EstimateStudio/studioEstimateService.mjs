@@ -56,6 +56,7 @@ import {
   deriveActiveReviewPublishReadiness,
   isActiveSimplifiedEstimate
 } from "./studioActiveReviewReadiness.mjs";
+import { buildAiEstimatorSummary } from "./studioAiEstimatorSummary.mjs";
 
 /**
  * Structured mutation log — no PII, no scope dumps, no tokens.
@@ -653,6 +654,13 @@ export function createStudioEstimateService(deps = {}) {
     base.activeReview = base.isActiveSimplifiedEstimate
       ? deriveActiveReviewPublishReadiness({ scope: base.scope, calculation: base.calculation })
       : null;
+    // Derived display-only read model for AiEstimatorWorkspace (no persistence).
+    base.aiEstimatorSummary = buildAiEstimatorSummary({
+      estimate: base,
+      priorEstimate: extras.priorEstimate || null,
+      publicationSummary: extras.publication || extras.publicationSummary || null,
+      digitalEstimateRead: extras.digitalEstimateRead || null
+    });
     return base;
   }
 
@@ -1645,6 +1653,123 @@ export function createStudioEstimateService(deps = {}) {
         });
         throw e;
       }
+    },
+
+    /**
+     * Open a measurement revision for an approved/published Studio estimate.
+     * Creates R(n+1) as a draft sibling while R(n) remains the active published
+     * revision (status unchanged) until R(n+1) successfully publishes.
+     * Confirm required. No SQL / pricing formula changes.
+     */
+    async openMeasurementRevision({ organizationId, estimateId, actorUserId, body = {} }) {
+      if (body?.confirm !== true && body?.confirm !== "true") {
+        const err = new Error("Confirm Edit Measurements to open a revision");
+        err.statusCode = 400;
+        err.code = "confirm_required";
+        throw err;
+      }
+      const row = await repository.getById(organizationId, estimateId);
+      if (!row) {
+        const err = new Error("Estimate not found");
+        err.statusCode = 404;
+        err.code = "estimate_not_found";
+        throw err;
+      }
+      const status = String(row.status || "").toLowerCase();
+      const alreadyDraft =
+        !row.approval &&
+        (status === STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE ||
+          status === STUDIO_ESTIMATE_STATUSES.DRAFT ||
+          status === STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL);
+      if (alreadyDraft) {
+        return {
+          ok: true,
+          reused: true,
+          estimate: safeEstimateView(row),
+          previousRevisionSummary: null,
+          priorEstimate: null
+        };
+      }
+      const priorSnapshot = {
+        id: row.id,
+        revision: row.revision,
+        status: row.status,
+        scope: row.scope,
+        calculation: row.calculationSnapshot
+          ? {
+              totals: row.calculationSnapshot.totals,
+              scopeBilling: row.calculationSnapshot.scopeBilling || null,
+              fabrication: row.calculationSnapshot.fabrication,
+              reviewSummary: row.calculationSnapshot.reviewSummary || null,
+              warnings: row.calculationSnapshot.warnings,
+              unresolvedItems: row.calculationSnapshot.unresolvedItems
+            }
+          : null,
+        approval: row.approval
+      };
+      const previousRevisionSummary = {
+        revision: Number(row.revision) || 1,
+        estimateId: row.id,
+        approvedAt: row.approval?.approvedAt || row.approvedAt || null,
+        exactInternalTotal:
+          row.approval?.exactInternalTotal ??
+          row.calculationSnapshot?.totals?.exactInternalTotal ??
+          null,
+        label: `Previous published/approved revision R${Number(row.revision) || 1} remains active until this revision publishes`
+      };
+
+      let next;
+      if (typeof repository.createSiblingRevisionFrom === "function") {
+        next = await repository.createSiblingRevisionFrom(
+          organizationId,
+          row.id,
+          {
+            status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+            scope: row.scope,
+            takeoffJobId: row.takeoffJobId,
+            sourceTakeoffResultId: row.sourceTakeoffResultId,
+            staleReason: "Measurement revision opened — prior published revision stays active until publish"
+          },
+          actorUserId
+        );
+      } else {
+        // Legacy repos: fall back to createRevisionFrom (supersedes immediately).
+        next = await revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
+          status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+          scope: row.scope,
+          takeoffJobId: row.takeoffJobId,
+          sourceTakeoffResultId: row.sourceTakeoffResultId,
+          staleReason: "Measurement revision opened from approved estimate"
+        });
+        delete next.__previousRevisionSummary;
+      }
+
+      return {
+        ok: true,
+        reused: false,
+        estimate: safeEstimateView(next, {
+          previousRevisionSummary,
+          priorEstimate: priorSnapshot
+        }),
+        previousRevisionSummary,
+        priorEstimate: priorSnapshot
+      };
+    },
+
+    /**
+     * After a successful Digital Estimate publish, supersede older estimate
+     * revisions in the intake-case family. No-op when repository lacks the helper.
+     */
+    async supersedeOlderRevisionsAfterPublish({ organizationId, estimateId, actorUserId }) {
+      if (typeof repository.supersedeOlderRevisionsInFamily !== "function") {
+        return { superseded: [] };
+      }
+      const superseded = await repository.supersedeOlderRevisionsInFamily(
+        organizationId,
+        estimateId,
+        actorUserId
+      );
+      return { superseded };
     }
   };
 }

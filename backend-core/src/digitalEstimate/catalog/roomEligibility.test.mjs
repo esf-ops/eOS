@@ -99,9 +99,9 @@ console.log("ok: kitchen/coffee/reception filtering", {
   reception: receptionEsf.length
 });
 
-assert.equal(cutoutDisplayLabelForRoom("kitchen", "Kitchen"), "Kitchen — Sink cutout");
-assert.equal(cutoutDisplayLabelForRoom("bar_prep", "Coffee Bar"), "Coffee Bar — Bar/prep sink cutout");
-assert.equal(cutoutDisplayLabelForRoom("vanity", "Master Bath"), "Master Bath — Vanity sink cutout");
+assert.equal(cutoutDisplayLabelForRoom("kitchen", "Kitchen"), "Kitchen sink cutout");
+assert.equal(cutoutDisplayLabelForRoom("bar_prep", "Coffee Bar"), "Vanity/bar sink cutout");
+assert.equal(cutoutDisplayLabelForRoom("vanity", "Master Bath"), "Vanity/bar sink cutout");
 console.log("ok: room-specific cutout labels");
 
 const meta = getCatalogMeta();
