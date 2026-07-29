@@ -2770,3 +2770,64 @@ button.linkish {
   .si-row-actions { flex-direction: row; flex-wrap: wrap; }
   .si-detail { position: static; }
 }
+
+/* Estimate Record commercial / revision depth */
+.eq-revision-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.eq-revision-card {
+  border: 1px solid var(--eos-border, #d5ddd8);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+}
+.eq-revision-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.eq-vanity-card,
+.eq-waterfall-card {
+  border: 1px solid var(--eos-border, #d5ddd8);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+  background: #f7f9f8;
+}
+.eq-waterfall-editor,
+.eq-percentage-editor {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+.eq-waterfall-editor label,
+.eq-percentage-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+.eq-customer-preview {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--eos-border, #d5ddd8);
+  border-radius: 8px;
+}
+.eq-commercial-lines .eq-ai-piece-table input,
+.eq-commercial-lines .eq-ai-piece-table select {
+  width: 100%;
+  min-width: 4rem;
+  font: inherit;
+}
+.eq-takeoff-iframe {
+  width: 100%;
+  min-height: 640px;
+  border: 1px solid var(--eos-border, #d5ddd8);
+  border-radius: 8px;
+  background: #fff;
+}

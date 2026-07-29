@@ -58,9 +58,27 @@ console.log("\nestimateRecord.ui.test.mjs\n");
     );
   }
   assert.ok(commercial.includes("Add Tear Out") || commercial.includes("tearout"));
+  assert.ok(commercial.includes("eq-line-amount"));
+  assert.ok(commercial.includes("eq-line-role"));
+  assert.ok(commercial.includes("eq-line-move-up"));
+  assert.ok(commercial.includes("eq-waterfall-width"));
+  assert.ok(commercial.includes("eq-vanity-physical-facts"));
+  assert.ok(commercial.includes("eq-view-snapshot"));
   assert.ok(sections.includes('type="button"'));
   assert.ok(sections.includes("e.preventDefault()"));
   console.log("ok: commercial + digital estimate controls present; publish is type=button");
+}
+
+{
+  const harness = readFileSync(
+    join(root, "src/review/EstimateRecordReviewApp.tsx"),
+    "utf8"
+  );
+  assert.ok(harness.includes("EliteosTopbar"));
+  assert.ok(harness.includes("CommercialConfigurationSection"));
+  assert.ok(harness.includes("eq-takeoff-iframe"));
+  assert.equal(harness.includes("[Takeoff iframe"), false);
+  console.log("ok: review harness mounts production components + topbar + Takeoff iframe");
 }
 
 {

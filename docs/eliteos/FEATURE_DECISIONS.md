@@ -2896,3 +2896,4 @@
 | **SQL** | None. |
 | **Impacted** | `AiEstimatorWorkspace.tsx`, `estimateRecord/*`, `studioEstimateWideAdjustment.mjs`, `studioCommercialConfiguration.mjs`, `elite100RoomPricingCalculator.mjs` adjustment path, `ConsolidatedTakeoffReview` beforeunload. |
 | **Protected** | Takeoff persistence, approval rules, v4 formulas/rates, simplified-publish authority, public DE layout, historical v2/v3, manual estimates, SQL. |
+| **Visual proof** | Static HTML fixtures retired. Local-only review harnesses mount production components (`review-estimate-record.html`, Takeoff `?localReview=1`, DE `review-digital-estimate.html`) under `.local/review/estimate-record-commercial-controls-v2/`. Not production routes. |

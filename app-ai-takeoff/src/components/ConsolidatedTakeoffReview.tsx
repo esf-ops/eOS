@@ -25,6 +25,7 @@ import {
   hasUsableTakeoffGeometry,
   markRunEstimatorOwned
 } from "../lib/emptyManualTakeoffDraft.mjs";
+import { buildLocalReviewTakeoffDraft } from "../lib/localReviewTakeoffFixture.mjs";
 import {
   applyDeletionTombstones,
   ensureUniqueTakeoffIdentity,
@@ -219,9 +220,21 @@ export default function ConsolidatedTakeoffReview() {
 
   const takeoffJobId = useMemo(() => {
     try {
-      return new URLSearchParams(window.location.search).get("takeoffJobId");
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get("takeoffJobId");
+      if (id) return id;
+      if (params.get("localReview") === "1") return "local-review-takeoff";
+      return null;
     } catch {
       return null;
+    }
+  }, []);
+
+  const localReview = useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("localReview") === "1";
+    } catch {
+      return false;
     }
   }, []);
 
@@ -351,6 +364,42 @@ export default function ConsolidatedTakeoffReview() {
   }, []);
 
   useEffect(() => {
+    if (localReview) {
+      const withWf =
+        new URLSearchParams(window.location.search).get("withWaterfall") === "1";
+      const sinkLen = Number(
+        new URLSearchParams(window.location.search).get("sinkWallLengthIn") || ""
+      );
+      const seeded = buildLocalReviewTakeoffDraft({
+        withWaterfall: withWf,
+        sinkWallLengthIn: Number.isFinite(sinkLen) && sinkLen > 0 ? sinkLen : undefined
+      });
+      setDraft(seeded);
+      draftRef.current = seeded;
+      canonicalDraftRef.current = structuredClone(seeded);
+      setAuthToken("local-review-token");
+      setAuthChecked(true);
+      setDisplayStatus("Local review fixture");
+      setAiPhase("ready");
+      setJobReviewStatus(
+        urlWorkspace.approvalStatus === "approved" || urlWorkspace.mode === "readonly"
+          ? "approved"
+          : "draft"
+      );
+      setApproveStatus(
+        urlWorkspace.approvalStatus === "approved" || urlWorkspace.mode === "readonly"
+          ? "approved"
+          : "idle"
+      );
+      setSaveStatus("saved");
+      setPlanFile({
+        quoteFileId: "local-review-plan",
+        originalFilename: "Munsterman Plan.svg",
+        mimeType: "image/svg+xml",
+        status: "ready"
+      });
+      return;
+    }
     const supabase = getSupabase();
     if (!supabase) {
       setAuthChecked(true);
@@ -369,7 +418,7 @@ export default function ConsolidatedTakeoffReview() {
       alive = false;
       sub?.subscription?.unsubscribe?.();
     };
-  }, []);
+  }, [localReview, urlWorkspace.approvalStatus, urlWorkspace.mode]);
 
   const applyPendingAiFromLatest = useCallback((latest: any) => {
     if (latest?.pendingAiAvailable && latest?.pendingAiDraft) {
@@ -617,6 +666,15 @@ export default function ConsolidatedTakeoffReview() {
    */
   const persistDraft = useCallback(async () => {
     if (urlWorkspace.mode === "readonly") return;
+    if (localReview) {
+      setSaveStatus("saving");
+      await new Promise((r) => setTimeout(r, 120));
+      canonicalDraftRef.current = structuredClone(draftRef.current);
+      canonicalExcludedRef.current = new Set(excludedRef.current);
+      setSaveStatus("saved");
+      setSaveError(null);
+      return;
+    }
     if (!authToken || !takeoffJobId || !draftRef.current) return;
     if (saveInFlightRef.current) return;
     if (saveStatus === "conflict") return;
@@ -796,12 +854,13 @@ export default function ConsolidatedTakeoffReview() {
   }, [pendingAiMerge, authToken, takeoffJobId, handleAutoAppendAi]);
 
   useEffect(() => {
+    if (localReview) return;
     if (!authToken || !takeoffJobId) return;
     void loadWorkspace(authToken, takeoffJobId).catch((e) => {
       if (e instanceof DOMException && e.name === "AbortError") return;
       setLoadError(e instanceof LabApiError ? e.message : "Unable to load Takeoff");
     });
-  }, [authToken, takeoffJobId, loadWorkspace]);
+  }, [authToken, takeoffJobId, loadWorkspace, localReview]);
 
   // Warn on browser navigation when the Takeoff draft has unsaved edits.
   // Readonly mode never warns — publish remounts must not trip beforeunload.
@@ -1033,6 +1092,24 @@ export default function ConsolidatedTakeoffReview() {
     if (urlWorkspace.mode === "readonly") return;
     if (!authToken || !takeoffJobId || !draft) return;
     if (approveStatus === "approving" || approveStatus === "approved") return;
+    if (localReview) {
+      setApproveStatus("approving");
+      await new Promise((r) => setTimeout(r, 150));
+      setApproveStatus("approved");
+      setJobReviewStatus("approved");
+      setApproveMsg("Local review: measurements approved (fixture).");
+      notifyParentApproved(takeoffJobId, {
+        ok: true,
+        localReview: true,
+        estimateId: "local-review-estimate",
+        summary: {
+          countertopSf: 59.08,
+          backsplashSf: 8.75,
+          exposedEdgeLf: 26.25
+        }
+      });
+      return;
+    }
     if (blocking.length > 0) return;
 
     const dirty =
