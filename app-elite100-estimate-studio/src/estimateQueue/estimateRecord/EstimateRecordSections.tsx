@@ -129,21 +129,23 @@ export function CollapsibleRecordSection(props: {
 
 export function VerifiedEstimateSection(props: {
   waiting: boolean;
+  draftMode?: boolean;
   aiSummary: any;
   estimateRevision: number | null;
   publishedRevision: number | null;
   activeReview: { eligible: boolean; blockers: Array<{ code?: string; message?: string }> } | null;
+  calculationStatus?: string | null;
 }) {
   if (props.waiting) {
     return (
       <CollapsibleRecordSection
         testId="eq-verified-estimate-section"
-        title="Verified Estimate"
-        status="Waiting for approved measurements"
+        title="Live Estimate"
+        status="Waiting for measurements"
         defaultExpanded
       >
         <p className="eq-muted" data-testid="eq-verified-waiting">
-          Approve measurements in Takeoff Review to populate verified scope and pricing.
+          Measurements will appear here as soon as Takeoff has scope.
         </p>
       </CollapsibleRecordSection>
     );
@@ -152,13 +154,22 @@ export function VerifiedEstimateSection(props: {
   const m = s?.measurements;
   const rooms = (s?.rooms || []) as VerifiedRoom[];
   const pricing = s?.pricing || {};
+  const draft = Boolean(props.draftMode);
+  const statusLabel = draft
+    ? props.calculationStatus || "Draft estimate"
+    : `Frozen R${props.estimateRevision ?? "—"}`;
   return (
     <CollapsibleRecordSection
       testId="eq-verified-estimate-section"
-      title="Verified Estimate"
-      status={`Revision R${props.estimateRevision ?? "—"}`}
+      title="Live Estimate"
+      status={statusLabel}
       defaultExpanded
     >
+      {draft ? (
+        <p className="eq-footnote" data-testid="eq-live-estimate-draft-label">
+          Draft estimate — totals update as you edit. Approval freezes this revision.
+        </p>
+      ) : null}
       <VerifiedMeasurementTotals
         countertopSf={num(m?.countertopSf)}
         backsplashSf={num(m?.backsplashSf)}
@@ -172,7 +183,9 @@ export function VerifiedEstimateSection(props: {
         data-testid="eq-verified-authority-totals"
         aria-label="Authoritative totals"
       >
-        <h3 className="eq-ai-section-title">Authoritative totals</h3>
+        <h3 className="eq-ai-section-title">
+          {draft ? "Draft estimate total" : "Authoritative totals"}
+        </h3>
         <dl className="eq-summary-dl eq-summary-dl--grid">
           <div>
             <dt>Verified base estimate</dt>
@@ -185,7 +198,7 @@ export function VerifiedEstimateSection(props: {
             </dd>
           </div>
           <div>
-            <dt>Current estimator total</dt>
+            <dt>{draft ? "Draft exact total" : "Current estimator total"}</dt>
             <dd data-testid="eq-verified-adjusted-exact">{money(pricing.adjustedExactTotal)}</dd>
           </div>
           <div>
