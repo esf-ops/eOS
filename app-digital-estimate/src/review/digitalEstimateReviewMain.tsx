@@ -8,6 +8,9 @@ import {
 } from "./digitalEstimateReviewFixtures";
 import "../lovable-theme.css";
 import "../styles.css";
+import "@quote-lib/customerEstimate/customerEstimateDocument.css";
+import "@quote-lib/customerEstimate/customerEstimateDocumentPrint.css";
+import "../digitalEstimatePrint.css";
 
 function DigitalEstimateReviewApp() {
   const [state, setState] = useState<ConfigurationState>(() => buildDigitalEstimateFixtureState());
@@ -20,6 +23,7 @@ function DigitalEstimateReviewApp() {
   return (
     <div data-testid="de-review-harness" data-local-review="1">
       <div
+        className="de-screen-only"
         style={{
           background: "#13241c",
           color: "#e8f0eb",

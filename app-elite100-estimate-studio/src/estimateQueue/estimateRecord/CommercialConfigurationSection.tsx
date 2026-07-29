@@ -64,6 +64,18 @@ function money(n: number): string {
   return `$${Number(n || 0).toFixed(2)}`;
 }
 
+function vanityPackageLabel(code: string | null | undefined): string {
+  const raw = String(code || "").trim();
+  const m = raw.match(/^(\d+)_([SD])$/i);
+  if (!m) {
+    if (/vanity program/i.test(raw)) return raw;
+    if (raw === "standard") return "Standard vanity pricing";
+    return raw || "Governed Vanity Program";
+  }
+  const bowl = m[2].toUpperCase() === "D" ? "Double" : "Single";
+  return `${m[1]}-inch ${bowl}-Bowl Vanity Program`;
+}
+
 function lineAmount(line: CommercialLineDraft): number {
   const raw = (Number(line.quantity) || 0) * (Number(line.unitPrice) || 0);
   if (line.commercialRole === "credit" || line.commercialRole === "discount") {
@@ -89,9 +101,11 @@ type VanityDraft = {
   eligible: boolean | null;
   eligibilityReasons: string[];
   selectedProgram: string | null;
+  selectedProgramLabel: string | null;
   permittedMaterials: string[];
   permittedSinkUpgrades: string[];
   permittedEdgeUpgrades: string[];
+  includedScope: string[];
   serverPrice: number | null;
   warnings: string[];
 };
@@ -118,10 +132,14 @@ function mapVanity(c: any): VanityDraft[] {
   return (c?.vanityPrograms || []).map((v: any) => {
     const facts = v.physicalFacts || {};
     const applyProgram = v.useStandardPricing !== true && Boolean(v.selectedProgram || v.applyProgram !== false);
+    const selectedProgram = v.selectedProgram ? String(v.selectedProgram) : null;
     return {
       roomId: String(v.roomId || ""),
       roomName: String(v.roomName || "Room"),
-      applyProgram: v.applyProgram != null ? Boolean(v.applyProgram) : applyProgram || v.useStandardPricing === false,
+      applyProgram:
+        v.applyProgram != null
+          ? Boolean(v.applyProgram)
+          : applyProgram || v.useStandardPricing === false,
       additionalTrips: Number(v.additionalTrips) || 0,
       physicalFacts: {
         widthIn: facts.widthIn != null ? Number(facts.widthIn) : null,
@@ -134,12 +152,27 @@ function mapVanity(c: any): VanityDraft[] {
       },
       eligible: v.eligible == null ? null : Boolean(v.eligible),
       eligibilityReasons: Array.isArray(v.eligibilityReasons) ? v.eligibilityReasons.map(String) : [],
-      selectedProgram: v.selectedProgram ? String(v.selectedProgram) : null,
-      permittedMaterials: Array.isArray(v.permittedCustomerOptions)
-        ? v.permittedCustomerOptions.filter((o: any) => /material/i.test(String(o))).map(String)
-        : ["Group Promo materials"],
-      permittedSinkUpgrades: ["Oval bisque", "Rectangular white", "Rectangular bisque"],
-      permittedEdgeUpgrades: ["Eased", "Small Ogee"],
+      selectedProgram,
+      selectedProgramLabel:
+        v.selectedProgramLabel != null
+          ? String(v.selectedProgramLabel)
+          : selectedProgram
+            ? vanityPackageLabel(selectedProgram)
+            : null,
+      permittedMaterials: Array.isArray(v.permittedMaterials)
+        ? v.permittedMaterials.map(String)
+        : Array.isArray(v.permittedCustomerOptions)
+          ? v.permittedCustomerOptions.filter((o: any) => /material/i.test(String(o))).map(String)
+          : ["Group Promo materials"],
+      permittedSinkUpgrades: Array.isArray(v.permittedSinkUpgrades)
+        ? v.permittedSinkUpgrades.map(String)
+        : ["Oval bisque", "Rectangular white", "Rectangular bisque"],
+      permittedEdgeUpgrades: Array.isArray(v.permittedEdgeUpgrades)
+        ? v.permittedEdgeUpgrades.map(String)
+        : ["Eased", "Small Ogee"],
+      includedScope: Array.isArray(v.includedScope)
+        ? v.includedScope.map(String)
+        : ["Vanity top", "Included backsplash", "1 vanity/bar sink opening", "Included sink configuration"],
       serverPrice: v.serverPrice != null ? Number(v.serverPrice) : null,
       warnings: Array.isArray(v.warnings) ? v.warnings.map(String) : []
     };
@@ -431,8 +464,14 @@ export function CommercialConfigurationSection(props: {
                 <dd data-testid="eq-adj-pct">{Number(adj.percentage).toFixed(2)}%</dd>
               </div>
               <div>
-                <dt>Exact adjustment</dt>
+                <dt>Exact percentage adjustment</dt>
                 <dd data-testid="eq-adj-amount">{money(adj.exactAdjustment)}</dd>
+              </div>
+              <div>
+                <dt>Non-percentage commercial changes</dt>
+                <dd data-testid="eq-adj-non-pct">
+                  {money(adj.nonPercentageCommercialExact ?? 0)}
+                </dd>
               </div>
               <div>
                 <dt>Adjusted exact total</dt>
@@ -689,15 +728,45 @@ export function CommercialConfigurationSection(props: {
 
         <div className="eq-customer-preview" data-testid="eq-customer-line-preview">
           <h3 className="eq-ai-section-title">Customer-visible line preview</h3>
-          <ul className="eq-ai-price-groups">
-            {customerPreviewLines.map((l) => (
-              <li key={l.id}>
-                <span>{l.description || "(untitled)"}</span>
-                <span>{money(lineAmount(l))}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="eq-footnote">Internal-only lines are excluded from this preview.</p>
+          {adjustment.active && Number(adjustment.percentage) > 0 ? (
+            <table className="eq-ai-piece-table" data-testid="eq-customer-preview-adjusted">
+              <thead>
+                <tr>
+                  <th>Line</th>
+                  <th>Base</th>
+                  <th>Customer amount after {Number(adjustment.percentage).toFixed(2)}%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customerPreviewLines.map((l) => {
+                  const base = lineAmount(l);
+                  const eligible = l.percentageEligible && base >= 0;
+                  const factor = 1 + Number(adjustment.percentage) / 100;
+                  const adjusted = eligible ? Math.round(base * factor * 100) / 100 : base;
+                  return (
+                    <tr key={l.id} data-testid="eq-customer-preview-row">
+                      <td>{l.description || "(untitled)"}</td>
+                      <td data-testid="eq-preview-base">{money(base)}</td>
+                      <td data-testid="eq-preview-adjusted">{money(adjusted)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <ul className="eq-ai-price-groups">
+              {customerPreviewLines.map((l) => (
+                <li key={l.id}>
+                  <span>{l.description || "(untitled)"}</span>
+                  <span>{money(lineAmount(l))}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="eq-footnote">
+            Internal-only lines are excluded. Public Digital Estimate uses the adjusted customer
+            amounts (no separate percentage surcharge line).
+          </p>
         </div>
 
         <h3 className="eq-ai-section-title">Estimate-wide percentage</h3>
@@ -849,10 +918,36 @@ export function CommercialConfigurationSection(props: {
                   Selected package
                   <input
                     readOnly
-                    value={v.applyProgram ? v.selectedProgram || "Governed Vanity Program" : "Not applied"}
+                    value={
+                      v.applyProgram
+                        ? v.selectedProgramLabel ||
+                          vanityPackageLabel(v.selectedProgram) ||
+                          "Governed Vanity Program"
+                        : "Not applied"
+                    }
                     data-testid="eq-vanity-package"
                   />
                 </label>
+                {v.applyProgram && v.includedScope.length ? (
+                  <div data-testid="eq-vanity-included-scope">
+                    <h4 className="eq-ai-section-title">Included scope</h4>
+                    <ul>
+                      {v.includedScope.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {v.applyProgram ? (
+                  <div data-testid="eq-vanity-permitted-upgrades">
+                    <p className="eq-footnote">
+                      Permitted sink upgrades: {v.permittedSinkUpgrades.join(", ") || "—"}
+                    </p>
+                    <p className="eq-footnote">
+                      Permitted materials: {v.permittedMaterials.join(", ") || "—"}
+                    </p>
+                  </div>
+                ) : null}
                 <label>
                   Same-trip confirmation
                   <input

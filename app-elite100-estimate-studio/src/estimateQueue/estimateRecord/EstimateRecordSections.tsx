@@ -151,6 +151,7 @@ export function VerifiedEstimateSection(props: {
   const s = props.aiSummary;
   const m = s?.measurements;
   const rooms = (s?.rooms || []) as VerifiedRoom[];
+  const pricing = s?.pricing || {};
   return (
     <CollapsibleRecordSection
       testId="eq-verified-estimate-section"
@@ -163,21 +164,50 @@ export function VerifiedEstimateSection(props: {
         backsplashSf={num(m?.backsplashSf)}
         exposedEdgeLf={num(m?.exposedEdgeLf)}
         openingsByType={m?.openingsByType || {}}
-        startingTotal={s?.pricing?.customerDisplayTotal ?? null}
+        startingTotal={pricing.customerDisplayTotal ?? null}
         revision={props.estimateRevision}
       />
+      <section
+        className="eq-ai-authority-totals"
+        data-testid="eq-verified-authority-totals"
+        aria-label="Authoritative totals"
+      >
+        <h3 className="eq-ai-section-title">Authoritative totals</h3>
+        <dl className="eq-summary-dl eq-summary-dl--grid">
+          <div>
+            <dt>Verified base estimate</dt>
+            <dd data-testid="eq-verified-base-exact">{money(pricing.baseExactTotal)}</dd>
+          </div>
+          <div>
+            <dt>Commercial adjustments</dt>
+            <dd data-testid="eq-verified-commercial-adj">
+              {money(pricing.commercialAdjustmentExact)}
+            </dd>
+          </div>
+          <div>
+            <dt>Current estimator total</dt>
+            <dd data-testid="eq-verified-adjusted-exact">{money(pricing.adjustedExactTotal)}</dd>
+          </div>
+          <div>
+            <dt>Customer display total</dt>
+            <dd data-testid="eq-verified-customer-display">
+              {money(pricing.customerDisplayTotal)}
+            </dd>
+          </div>
+        </dl>
+      </section>
       <VerifiedRoomScope rooms={rooms} defaultExpanded />
       <StartingPriceBreakdown
-        groups={s?.pricing?.customerSafeGroups || []}
-        startingTotal={s?.pricing?.customerDisplayTotal ?? null}
+        groups={pricing.customerSafeGroups || []}
+        startingTotal={pricing.customerDisplayTotal ?? null}
       />
       <EstimatorWarnings
-        warnings={s?.pricing?.warnings}
-        unresolvedItems={s?.pricing?.unresolvedItems}
+        warnings={pricing.warnings}
+        unresolvedItems={pricing.unresolvedItems}
         blockers={
           props.activeReview && !props.activeReview.eligible
             ? props.activeReview.blockers
-            : s?.pricing?.activeReviewBlockers
+            : pricing.activeReviewBlockers
         }
       />
       {s?.comparison ? <MeasurementRevisionComparison comparison={s.comparison} /> : null}
@@ -203,10 +233,22 @@ export function DigitalEstimateSection(props: {
   onCreateRevision: () => void;
 }) {
   const pub = props.aiSummary?.publication;
+  const hasActivePublication = Boolean(props.customerUrl);
+  const editingNewerDraft =
+    hasActivePublication &&
+    props.publishedRevision != null &&
+    props.estimateRevision != null &&
+    props.estimateRevision > props.publishedRevision;
+
   let status = "Waiting for approved measurements";
   if (props.stage === "published" && props.customerUrl) status = "Published";
-  else if (props.measurementsApproved) status = "Ready to publish";
+  else if (editingNewerDraft && props.measurementsApproved) {
+    status = `R${props.publishedRevision} published · R${props.estimateRevision} ready`;
+  } else if (editingNewerDraft) {
+    status = `R${props.publishedRevision} published · R${props.estimateRevision} draft`;
+  } else if (props.measurementsApproved) status = "Ready to publish";
   else if (props.stage === "publishing") status = "Publishing…";
+  else if (hasActivePublication) status = "Published";
 
   return (
     <CollapsibleRecordSection
@@ -215,7 +257,33 @@ export function DigitalEstimateSection(props: {
       status={status}
       defaultExpanded
     >
-      {!props.measurementsApproved ? (
+      {editingNewerDraft ? (
+        <div className="eq-de-dual-revision" data-testid="eq-de-r1-active-r2-draft">
+          <p data-testid="eq-de-active-publication-banner">
+            Current customer publication: R{props.publishedRevision} · Published
+            {props.customerUrl ? " · customer link and activity remain available" : ""}.
+          </p>
+          <p data-testid="eq-de-new-revision-banner">
+            New estimator revision: R{props.estimateRevision}{" "}
+            {props.measurementsApproved ? "Approved" : "Draft"}
+            {props.measurementsApproved
+              ? " — eligible for revised publication when ready."
+              : " — not yet eligible for revised publication."}
+          </p>
+          <p className="eq-footnote" data-testid="eq-de-r1-remains-active">
+            R{props.publishedRevision} remains active while R{props.estimateRevision} is being
+            edited.
+          </p>
+        </div>
+      ) : null}
+
+      {!props.measurementsApproved && !hasActivePublication ? (
+        <p className="eq-muted" data-testid="eq-de-waiting">
+          Publish becomes available after measurements are approved.
+        </p>
+      ) : null}
+
+      {!props.measurementsApproved && hasActivePublication && !editingNewerDraft ? (
         <p className="eq-muted" data-testid="eq-de-waiting">
           Publish becomes available after measurements are approved.
         </p>
@@ -264,7 +332,13 @@ export function DigitalEstimateSection(props: {
             publishedRevision={props.publishedRevision}
             publishedAt={pub?.publishedAt ?? null}
             pricingValidThrough={pub?.pricingValidThrough ?? null}
-            startingTotal={props.aiSummary?.pricing?.customerDisplayTotal ?? null}
+            startingTotal={
+              editingNewerDraft
+                ? props.aiSummary?.publication?.publishedDisplayTotal ??
+                  props.aiSummary?.pricing?.customerDisplayTotal ??
+                  null
+                : props.aiSummary?.pricing?.customerDisplayTotal ?? null
+            }
             customerActivityLabel={pub?.customerActivityLabel ?? null}
             customerActivityState={pub?.customerActivityState ?? null}
             lastCustomerActivityAt={pub?.lastCustomerActivityAt ?? null}
@@ -318,8 +392,21 @@ export function DigitalEstimateSection(props: {
               >
                 {props.publishBusy ? "Publishing…" : "Publish Revised Estimate"}
               </button>
+            ) : editingNewerDraft && !props.measurementsApproved ? (
+              <p className="eq-muted" data-testid="eq-de-r2-awaits-approval">
+                R{props.estimateRevision} publication waits for measurement approval.
+              </p>
             ) : null}
           </div>
+          {props.publishError ? (
+            <div
+              className="eq-state eq-state--error"
+              role="alert"
+              data-testid="eq-ai-publish-revised-error"
+            >
+              {props.publishError}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </CollapsibleRecordSection>

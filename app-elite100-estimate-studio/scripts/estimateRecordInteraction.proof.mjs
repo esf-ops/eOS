@@ -76,12 +76,17 @@ const studio = (s) => 'http://127.0.0.1:5199/review-estimate-record.html?scenari
 console.log('interaction: commercial custom lines + percentage');
 await page.goto(studio('commercial'), { waitUntil: 'networkidle', timeout: 120000 });
 await page.waitForSelector('[data-testid="eq-custom-line-items-editor"]');
+assert.match(await page.locator('[data-testid="eq-adj-base"]').innerText(), /4,122|4122/);
+assert.match(await page.locator('[data-testid="eq-adj-eligible-basis"]').innerText(), /5,222|5222/);
+assert.match(await page.locator('[data-testid="eq-adj-amount"]').innerText(), /156\\.66/);
+assert.match(await page.locator('[data-testid="eq-adj-display"]').innerText(), /5,280|5280/);
+const pkg = await page.locator('[data-testid="eq-vanity-package"]').inputValue();
+assert.match(pkg, /37-inch Single-Bowl Vanity Program/i);
+assert.equal(/37_S/.test(pkg), false);
 const rowsBefore = await page.locator('[data-testid="eq-custom-line-row"]').count();
 assert.ok(rowsBefore >= 4, 'fixture should include Tear Out, Crane, credit, internal');
 await page.click('[data-testid="eq-add-tear-out"]');
 assert.equal(await page.locator('[data-testid="eq-custom-line-row"]').count(), rowsBefore + 1);
-const tearUnit = page.locator('[data-testid="eq-custom-line-row"]').last().locator('input[aria-label="Line unit price"]');
-// After add tear out, last may be tear; also check any row with 750
 const vals = await page.locator('input[aria-label="Line unit price"]').evaluateAll((els) => els.map((e) => e.value));
 assert.ok(vals.includes('750'), 'Tear Out $750 unit price present: ' + vals.join(','));
 await page.click('[data-testid="eq-add-custom-line"]');
@@ -91,27 +96,39 @@ await page.fill('[data-testid="eq-percentage-reason"]', 'Spahn & Rose account pr
 await page.click('[data-testid="eq-save-commercial-changes"]');
 await page.waitForTimeout(300);
 assert.equal(await page.getAttribute('[data-testid="eq-commercial-configuration-section"]', 'data-dirty'), '0');
-assert.match(await page.locator('[data-testid="eq-adj-base"]').innerText(), /4,872|4872/);
-assert.match(await page.locator('[data-testid="eq-adj-amount"]').innerText(), /146\\.16/);
-assert.match(await page.locator('[data-testid="eq-adj-display"]').innerText(), /5,020|5020/);
+// Save must recalculate from complete state (Tear Out×2 + Crane + credit) — not stale tearout-only 4872/146.16/5020
+const baseAfter = await page.locator('[data-testid="eq-adj-base"]').innerText();
+const eligibleAfter = await page.locator('[data-testid="eq-adj-eligible-basis"]').innerText();
+const adjAfter = await page.locator('[data-testid="eq-adj-amount"]').innerText();
+const displayAfter = await page.locator('[data-testid="eq-adj-display"]').innerText();
+assert.match(baseAfter, /4,122|4122/);
+assert.match(eligibleAfter, /5,972|5972/);
+assert.equal(/146\\.16/.test(adjAfter) && /5,020|5020/.test(displayAfter), false, 'must not keep stale tearout-only reconciliation');
+assert.match(adjAfter, /179\\.16/);
+assert.match(displayAfter, /6,050|6050/);
 const preview = await page.locator('[data-testid="eq-customer-line-preview"]').innerText();
 assert.equal(/Internal material hold/i.test(preview), false, 'internal-only must not leak to customer preview');
 assert.match(preview, /Tear Out|Crane|Courtesy credit/);
+assert.match(preview, /Base|Customer amount after/i);
+assert.match(preview, /772\\.50|772.50/);
 await page.locator('[data-testid="eq-vanity-apply"]').check({ force: true }).catch(()=>{});
 assert.ok(await page.locator('[data-testid="eq-vanity-physical-facts"]').count());
-console.log('ok: custom lines, tear out 750, percentage, vanity controls, no internal leak');
+console.log('ok: custom lines, tear out 750, percentage recalc, vanity label, no internal leak');
 
-console.log('interaction: waterfall editor');
+console.log('interaction: waterfall editor + R1/R2 DE state');
 await page.goto(studio('r2'), { waitUntil: 'networkidle', timeout: 120000 });
 await page.waitForSelector('[data-testid="eq-waterfall-card"]');
 assert.match(await page.locator('[data-testid="eq-waterfall-label"]').innerText(), /Kitchen.*Left waterfall/i);
+await page.waitForSelector('[data-testid="eq-de-r1-remains-active"]');
+assert.match(await page.locator('[data-testid="eq-de-r1-remains-active"]').innerText(), /R1 remains active while R2/i);
+assert.ok(await page.locator('[data-testid="eq-open-customer-preview"]').count() >= 1);
 await page.fill('[data-testid="eq-waterfall-width"]', '36');
 await page.fill('[data-testid="eq-waterfall-height"]', '36');
 await page.check('[data-testid="eq-waterfall-polish"]');
 await page.check('[data-testid="eq-waterfall-optional"]');
 await page.click('[data-testid="eq-save-commercial-changes"]');
 await page.waitForTimeout(250);
-console.log('ok: waterfall geometry controls save');
+console.log('ok: waterfall geometry controls save + R1 active while R2 draft');
 
 console.log('interaction: revision history cards + comparison');
 await page.goto(studio('revision-history'), { waitUntil: 'networkidle', timeout: 120000 });
@@ -128,6 +145,9 @@ console.log('ok: revision cards + comparison');
 
 console.log('interaction: inline publish (no navigation)');
 await page.goto(studio('approved'), { waitUntil: 'networkidle', timeout: 120000 });
+const sf = await page.locator('[data-testid="eq-ai-verified-sf"]').innerText();
+assert.match(sf, /83\\.08/);
+assert.ok((await page.getByText('Kitchen Island').count()) >= 1);
 const urlBefore = page.url();
 let beforeunloadFired = false;
 page.on('dialog', async (d) => { beforeunloadFired = true; await d.dismiss(); });
@@ -135,7 +155,7 @@ await page.click('[data-testid="eq-publish-digital-estimate"]');
 await page.waitForSelector('[data-testid="eq-ai-published-estimate"]', { timeout: 5000 });
 assert.equal(page.url().split('#')[0], urlBefore.split('#')[0]);
 assert.equal(beforeunloadFired, false);
-console.log('ok: inline publish, no beforeunload');
+console.log('ok: inline publish, no beforeunload, 83.08 SF + Kitchen Island');
 
 console.log('interaction: customer Digital Estimate vanity + waterfall');
 await page.goto('http://127.0.0.1:5193/review-digital-estimate.html', { waitUntil: 'networkidle', timeout: 120000 });
@@ -143,6 +163,15 @@ await page.waitForSelector('[data-testid="de-review-harness"]');
 const body = await page.locator('body').innerText();
 assert.match(body, /Munsterman|Kitchen|Bathroom/i);
 assert.equal(/surcharge|3% surcharge/i.test(body), false);
+assert.equal(/0 approved sinks/i.test(body), false);
+assert.match(body, /37-inch Single-Bowl Vanity Program|Vanity Program applied|Included vanity sink/i);
+const printVisible = await page.locator('.de-print-root').evaluateAll((nodes) =>
+  nodes.some((n) => {
+    const s = getComputedStyle(n);
+    return s.display !== 'none' && s.visibility !== 'hidden';
+  })
+);
+assert.equal(printVisible, false, 'print document must be hidden on screen');
 
 await page.locator('[data-testid="de-open-specialty-modal"]').first().click({ force: true });
 await page.waitForSelector('[data-testid="de-specialty-modal"]', { timeout: 5000 });
@@ -157,7 +186,7 @@ await page.waitForTimeout(600);
 await page.locator('[data-testid="de-open-sink-modal"]').first().click({ force: true });
 await page.waitForTimeout(500);
 assert.ok(
-  (await page.getByText(/Rectangular white sink upgrade|sink upgrade/i).count()) >= 1 ||
+  (await page.getByText(/Rectangular white sink upgrade|Included vanity sink|sink upgrade/i).count()) >= 1 ||
     (await page.locator('[data-testid="de-sink-modal"], [data-testid*="sink"]').count()) >= 1,
   'vanity/sink upgrade UI must render'
 );
@@ -167,8 +196,9 @@ await browser.close();
 console.log('\\nAll Estimate Record interaction proofs passed.\\n');
 `;
 
-const { writeFileSync, unlinkSync } = await import("node:fs");
-const tmp = join(root, ".local/review/estimate-record-commercial-controls-v2/_interaction.mjs");
+const { writeFileSync, unlinkSync, mkdirSync } = await import("node:fs");
+mkdirSync(join(root, ".local/review/estimate-record-commercial-controls-v3"), { recursive: true });
+const tmp = join(root, ".local/review/estimate-record-commercial-controls-v3/_interaction.mjs");
 writeFileSync(tmp, code.replace(
   "import { chromium } from 'playwright';",
   "import { chromium } from '" + join(root, ".local/pw-tools/node_modules/playwright/index.mjs").replace(/\\/g, "/") + "';"

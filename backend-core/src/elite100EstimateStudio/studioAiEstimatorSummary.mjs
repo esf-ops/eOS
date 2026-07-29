@@ -51,18 +51,63 @@ function openingsFromScope(scope) {
   };
 }
 
+function openingsFromCutouts(room) {
+  let kitchenSink = 0;
+  let vanityBarSink = 0;
+  let cooktop = 0;
+  let outlet = 0;
+  for (const piece of Array.isArray(room?.pieces) ? room.pieces : []) {
+    if (!piece || piece.included === false) continue;
+    for (const c of Array.isArray(piece.cutouts) ? piece.cutouts : []) {
+      if (!c) continue;
+      const type = str(c.type || c.cutoutType).toLowerCase();
+      const qty = num(c.quantity) || 1;
+      if (type === "kitchen_sink" || type === "kitchensink") kitchenSink += qty;
+      else if (type === "vanity_bar_sink" || type === "vanity_sink" || type === "bar_sink")
+        vanityBarSink += qty;
+      else if (type === "cooktop") cooktop += qty;
+      else if (type === "outlet") outlet += qty;
+    }
+  }
+  return { kitchenSink, vanityBarSink, cooktop, outlet };
+}
+
 function openingsFromRoom(room) {
-  // Prefer room-level add-ons if present; else derive from piece cutouts when available.
+  // Prefer room-level add-ons when any typed count is present; else piece cutouts.
   const addOns = room?.addOns && typeof room.addOns === "object" ? room.addOns : null;
   if (addOns) {
-    return {
+    const fromAddOns = {
       kitchenSink: num(addOns["qty-sink"]),
       vanityBarSink: num(addOns["qty-bar"]),
       cooktop: num(addOns["qty-cook"]),
       outlet: num(addOns["qty-outlet"])
     };
+    if (
+      fromAddOns.kitchenSink +
+        fromAddOns.vanityBarSink +
+        fromAddOns.cooktop +
+        fromAddOns.outlet >
+      0
+    ) {
+      return fromAddOns;
+    }
   }
-  return { kitchenSink: 0, vanityBarSink: 0, cooktop: 0, outlet: 0 };
+  const typed = room?.openingsByType && typeof room.openingsByType === "object" ? room.openingsByType : null;
+  if (typed) {
+    const fromTyped = {
+      kitchenSink: num(typed.kitchenSink ?? typed.kitchen_sink),
+      vanityBarSink: num(typed.vanityBarSink ?? typed.vanity_bar_sink),
+      cooktop: num(typed.cooktop),
+      outlet: num(typed.outlet)
+    };
+    if (
+      fromTyped.kitchenSink + fromTyped.vanityBarSink + fromTyped.cooktop + fromTyped.outlet >
+      0
+    ) {
+      return fromTyped;
+    }
+  }
+  return openingsFromCutouts(room);
 }
 
 /**
@@ -446,7 +491,29 @@ export function buildAiEstimatorSummary(args = {}) {
   const calc = estimate.calculation || estimate.calculationSnapshot || {};
   const totals = calc.totals && typeof calc.totals === "object" ? calc.totals : {};
   const rooms = buildVerifiedRoomsFromEstimate(estimate);
-  const openings = openingsFromScope(scope);
+  // When room-level openings sum to zero but estimate-level addOns exist, keep estimate totals.
+  // Prefer summing room openings when they are populated (multi-room attribution).
+  const roomOpeningsSum = rooms.reduce(
+    (acc, r) => {
+      const o = r.openingsByType || {};
+      return {
+        kitchenSink: acc.kitchenSink + num(o.kitchenSink),
+        vanityBarSink: acc.vanityBarSink + num(o.vanityBarSink),
+        cooktop: acc.cooktop + num(o.cooktop),
+        outlet: acc.outlet + num(o.outlet)
+      };
+    },
+    { kitchenSink: 0, vanityBarSink: 0, cooktop: 0, outlet: 0 }
+  );
+  const roomOpeningsTotal =
+    roomOpeningsSum.kitchenSink +
+    roomOpeningsSum.vanityBarSink +
+    roomOpeningsSum.cooktop +
+    roomOpeningsSum.outlet;
+  const openings =
+    roomOpeningsTotal > 0
+      ? { ...roomOpeningsSum, total: roomOpeningsTotal }
+      : openingsFromScope(scope);
   const countertopSf = round2(rooms.reduce((s, r) => s + r.countertopSf, 0));
   const backsplashSf = round2(rooms.reduce((s, r) => s + r.backsplashSf, 0));
   const exposedEdgeLf = round2(
@@ -463,8 +530,32 @@ export function buildAiEstimatorSummary(args = {}) {
         ? num(deRead.publicationSummary.revision)
         : null;
   const currentRevision = num(estimate.revision) || 1;
+  const accountAdjustment = num(totals.accountAdjustment);
+  const exactTotal = totals.exactTotal != null ? num(totals.exactTotal) : null;
+  const baseExactTotal =
+    totals.baseExactTotal != null
+      ? num(totals.baseExactTotal)
+      : exactTotal != null
+        ? round2(exactTotal - accountAdjustment)
+        : null;
+  const commercialAdjustmentExact =
+    totals.commercialAdjustmentExact != null
+      ? num(totals.commercialAdjustmentExact)
+      : accountAdjustment || null;
+  const adjustedExactTotal =
+    totals.adjustedExactTotal != null
+      ? num(totals.adjustedExactTotal)
+      : exactTotal;
   const customerDisplayTotal =
     totals.customerDisplayTotal != null ? num(totals.customerDisplayTotal) : null;
+  const customerConfiguredExactTotal =
+    totals.customerConfiguredExactTotal != null
+      ? num(totals.customerConfiguredExactTotal)
+      : adjustedExactTotal;
+  const customerConfiguredDisplayTotal =
+    totals.customerConfiguredDisplayTotal != null
+      ? num(totals.customerConfiguredDisplayTotal)
+      : customerDisplayTotal;
 
   const reviewRequests = Array.isArray(deRead?.reviewRequests) ? deRead.reviewRequests : [];
   const openReview = reviewRequests.find((r) => r && r.open !== false && !r.resolvedAt) || null;
@@ -506,7 +597,13 @@ export function buildAiEstimatorSummary(args = {}) {
     },
     rooms,
     pricing: {
+      baseExactTotal,
+      commercialAdjustmentExact,
+      adjustedExactTotal,
       customerDisplayTotal,
+      customerConfiguredExactTotal,
+      customerConfiguredDisplayTotal,
+      exactTotal: adjustedExactTotal ?? exactTotal,
       customerSafeGroups: buildCustomerSafePriceGroups(estimate),
       unresolvedItems: unresolved.map((u) => ({
         code: str(u?.code) || null,

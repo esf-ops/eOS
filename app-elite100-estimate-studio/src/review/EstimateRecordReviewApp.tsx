@@ -14,7 +14,7 @@ import {
   CommercialConfigurationSection,
   EstimateRevisionHistory
 } from "../estimateQueue/estimateRecord/CommercialConfigurationSection";
-import { buildScenario, REVIEW_CUSTOMER_URL } from "./munstermanFixtures.mjs";
+import { buildScenario, REVIEW_CUSTOMER_URL, recalculateCommercialAuthority } from "./munstermanFixtures.mjs";
 
 function takeoffBaseUrl(): string {
   try {
@@ -76,6 +76,26 @@ export default function EstimateRecordReviewApp() {
     setBusy(true);
     setError(null);
     window.setTimeout(() => {
+      const mappedLines = payload.customLineItems.map((l: any) => ({
+        id: l.id,
+        description: l.description,
+        category: l.category,
+        quantity: l.quantity,
+        unitPriceExact: l.unitPrice,
+        amountExact: (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0),
+        customerVisible: l.customerVisible,
+        internalOnly: l.commercialRole === "internal_only",
+        percentageEligible: l.percentageEligible,
+        commercialRole: l.commercialRole,
+        roomId: l.roomId,
+        reason: l.reason
+      }));
+      const authority = recalculateCommercialAuthority({
+        customLines: mappedLines,
+        percentage: Number(payload.estimateWideAdjustment?.percentage) || 0,
+        active: payload.estimateWideAdjustment?.active !== false,
+        vanityApplied: true
+      });
       setStore((s) => ({
         ...s,
         customLineItems: payload.customLineItems,
@@ -85,28 +105,17 @@ export default function EstimateRecordReviewApp() {
       setScenario((prev) => {
         const commercial = {
           ...prev.commercial,
-          customLines: payload.customLineItems.map((l: any) => ({
-            id: l.id,
-            description: l.description,
-            category: l.category,
-            quantity: l.quantity,
-            unitPriceExact: l.unitPrice,
-            amountExact: (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0),
-            customerVisible: l.customerVisible,
-            internalOnly: l.commercialRole === "internal_only",
-            percentageEligible: l.percentageEligible,
-            commercialRole: l.commercialRole,
-            roomId: l.roomId,
-            reason: l.reason
-          })),
+          customLines: mappedLines,
           estimateAdjustment: {
             ...prev.commercial.estimateAdjustment,
             ...payload.estimateWideAdjustment,
-            baseExactTotal: 4872,
-            eligibleBasisExact: 4872,
-            exactAdjustment: 146.16,
-            adjustedExactTotal: 5018.16,
-            customerDisplayTotal: 5020
+            baseExactTotal: authority.baseExactTotal,
+            eligibleBasisExact: authority.eligibleBasisExact,
+            exactAdjustment: authority.commercialAdjustmentExact,
+            nonPercentageCommercialExact: authority.nonPercentageCommercialExact,
+            adjustedExactTotal: authority.adjustedExactTotal,
+            customerDisplayTotal: authority.customerDisplayTotal,
+            presentation: "distributed"
           },
           waterfalls:
             payload.roomConfigurations &&
@@ -134,7 +143,21 @@ export default function EstimateRecordReviewApp() {
                   ]
               : prev.commercial.waterfalls
         };
-        return { ...prev, commercial };
+        const aiSummary = {
+          ...prev.aiSummary,
+          pricing: {
+            ...prev.aiSummary.pricing,
+            baseExactTotal: authority.baseExactTotal,
+            commercialAdjustmentExact: authority.commercialAdjustmentExact,
+            adjustedExactTotal: authority.adjustedExactTotal,
+            customerDisplayTotal: authority.customerDisplayTotal,
+            customerConfiguredExactTotal: authority.customerConfiguredExactTotal,
+            customerConfiguredDisplayTotal: authority.customerConfiguredDisplayTotal,
+            exactTotal: authority.adjustedExactTotal,
+            customerSafeGroups: authority.customerSafeGroups
+          }
+        };
+        return { ...prev, commercial, aiSummary, authority };
       });
       setBusy(false);
       setCommercialDirty(false);
@@ -298,7 +321,7 @@ export default function EstimateRecordReviewApp() {
           publishLabel="Publish Digital Estimate"
           eligible={scenario.publishEligible}
           estimateId="local-review-estimate"
-          showPublishRevised={false}
+          showPublishRevised={Boolean(scenario.showPublishRevised)}
           onPublish={publish}
           onCopy={() => {
             void navigator.clipboard?.writeText(scenario.customerUrl || REVIEW_CUSTOMER_URL);

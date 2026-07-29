@@ -1,12 +1,30 @@
 /**
  * Local-only Digital Estimate review fixture state + fetch mock.
  * Mounts production ConfigurationView — never used by production App routing.
+ * Totals/openings/SF must match the studio coherent Estimate Record family.
  */
 import type { ConfigurationState } from "../publicConfigApi";
 
-const BASE = 5020;
-const WATERFALL_DELTA = 980; // includes 3% distributed into authoritative total
+/** Must match studio munstermanFixtures recalculateCommercialAuthority defaults. */
+const BASE = 5280;
+const WATERFALL_DELTA = 980;
 const VANITY_UPGRADE_DELTA = 25;
+const VANITY_LABEL = "37-inch Single-Bowl Vanity Program";
+const EXPECTED_COUNTERTOP_SF = 83.08;
+const KITCHEN_SF = 77.3;
+const BATH_SF = 5.78;
+
+const ADJUSTED_LINES = [
+  { label: "Countertop Material", amount: 1545 },
+  { label: "Material Use Tax", amount: 74.16 },
+  { label: "Backsplash", amount: 360.5 },
+  { label: "Kitchen sink cutout", amount: 206 },
+  { label: "Cooktop cutout", amount: 154.5 },
+  { label: "Bathroom Vanity Program", amount: 1905.5 },
+  { label: "Tear Out", amount: 772.5 },
+  { label: "Crane", amount: 360.5 },
+  { label: "Courtesy credit", amount: -100 }
+];
 
 export function buildDigitalEstimateFixtureState(): ConfigurationState {
   return {
@@ -21,17 +39,7 @@ export function buildDigitalEstimateFixtureState(): ConfigurationState {
         projectName: "Munsterman Plan",
         projectAddress: "Local review"
       },
-      lineItems: [
-        { label: "Countertop Material", amount: 3244.5 },
-        { label: "Material Use Tax", amount: 74.16 },
-        { label: "Backsplash", amount: 463.5 },
-        { label: "Kitchen sink cutout", amount: 206 },
-        { label: "Vanity/bar sink cutout", amount: 103 },
-        { label: "Cooktop cutout", amount: 154.5 },
-        { label: "Tear Out", amount: 772.5 },
-        { label: "Crane", amount: 360.5 },
-        { label: "Bathroom Vanity Program", amount: 1850 }
-      ]
+      lineItems: ADJUSTED_LINES
     } as any,
     session: {
       id: "local-review-session",
@@ -43,7 +51,7 @@ export function buildDigitalEstimateFixtureState(): ConfigurationState {
       envelopeId: "local-env",
       envelopeVersion: 1,
       pricingValidThrough: "2026-08-28",
-      lockedScopeNotice: "Physical measurements are locked. Choose only permitted upgrades.",
+      lockedScopeNotice: `${VANITY_LABEL} applied. Physical width, depth, and bowl count are locked. One approved vanity sink is included. Choose only permitted upgrades.`,
       sourceProject: {
         customerName: "Munsterman",
         projectName: "Munsterman Plan"
@@ -72,7 +80,15 @@ export function buildDigitalEstimateFixtureState(): ConfigurationState {
           measurementStatus: "locked",
           countertopIncluded: true,
           backsplashIncluded: true,
-          customerMayEditLabel: false
+          customerMayEditLabel: false,
+          vanityProgramApplied: true,
+          vanityProgramLabel: VANITY_LABEL,
+          approvedSinkOpenings: 1,
+          physicalFactsLocked: {
+            widthIn: 37,
+            depthIn: 22.5,
+            bowlCount: 1
+          }
         }
       ],
       groups: [
@@ -91,9 +107,28 @@ export function buildDigitalEstimateFixtureState(): ConfigurationState {
           customerPriceTreatment: "included",
           minQty: 0,
           maxQty: 1,
-          defaultQty: 0,
+          defaultQty: 1,
           selectable: true,
+          includedInBaseline: true,
+          selected: true,
           role: "material",
+          visibleDelta: 0
+        },
+        {
+          optionKey: "sink:bath:included-vanity",
+          displayLabel: "Included vanity sink (program)",
+          groupKey: "sink",
+          roomKey: "bath",
+          availabilityState: "available",
+          customerPriceTreatment: "included",
+          minQty: 0,
+          maxQty: 1,
+          defaultQty: 1,
+          selectable: true,
+          includedInBaseline: true,
+          selected: true,
+          role: "sink",
+          sourceKind: "esf",
           visibleDelta: 0
         },
         {
@@ -108,6 +143,7 @@ export function buildDigitalEstimateFixtureState(): ConfigurationState {
           defaultQty: 0,
           selectable: true,
           role: "sink",
+          sourceKind: "esf",
           visibleDelta: VANITY_UPGRADE_DELTA,
           priceEffectLabel: `+$${VANITY_UPGRADE_DELTA}`,
           priceEffectCents: VANITY_UPGRADE_DELTA * 100
@@ -160,8 +196,25 @@ export function buildDigitalEstimateFixtureState(): ConfigurationState {
         }
       ] as any,
       products: [],
+      productDrafts: {
+        bath: {
+          sink: {
+            source: "esf",
+            optionKey: "sink:bath:included-vanity",
+            productId: null,
+            variantId: null,
+            manufacturer: "Program",
+            model: "Included",
+            finish: "",
+            notes: "One approved vanity sink included with Vanity Program",
+            displayLabel: "Included vanity sink (program)"
+          }
+        }
+      },
       currentSelections: {
+        "mat-promo-calacatta": 1,
         "edge-eased-bath": 1,
+        "sink:bath:included-vanity": 1,
         "wf-kitchen-island-left": 0,
         "vanity-sink-rect-white": 0
       },
@@ -171,13 +224,23 @@ export function buildDigitalEstimateFixtureState(): ConfigurationState {
         displayDelta: 0,
         pricingValidThrough: "2026-08-28",
         rooms: [
-          { roomKey: "kitchen", displayName: "Kitchen", chargeableCounterSf: 52 },
-          { roomKey: "bath", displayName: "Bathroom", chargeableCounterSf: 7.08 }
+          { roomKey: "kitchen", displayName: "Kitchen", chargeableCounterSf: KITCHEN_SF },
+          { roomKey: "bath", displayName: "Bathroom", chargeableCounterSf: BATH_SF }
         ],
         totals: {
           baselineDisplayTotal: BASE,
           configuredDisplayTotal: BASE,
           displayDelta: 0
+        },
+        lineItems: ADJUSTED_LINES,
+        estimateWideAdjustmentApplied: true,
+        percentage: 3,
+        countertopSf: EXPECTED_COUNTERTOP_SF,
+        openingsByType: {
+          kitchenSink: 1,
+          vanityBarSink: 1,
+          cooktop: 1,
+          outlet: 0
         }
       },
       baselineDisplayTotal: BASE
@@ -195,34 +258,32 @@ function calcFromSelections(selections: Record<string, number>) {
     displayDelta: total - BASE,
     pricingValidThrough: "2026-08-28",
     rooms: [
-      { roomKey: "kitchen", displayName: "Kitchen", chargeableCounterSf: 52 },
-      { roomKey: "bath", displayName: "Bathroom", chargeableCounterSf: 7.08 }
+      { roomKey: "kitchen", displayName: "Kitchen", chargeableCounterSf: KITCHEN_SF },
+      { roomKey: "bath", displayName: "Bathroom", chargeableCounterSf: BATH_SF }
     ],
     totals: {
       baselineDisplayTotal: BASE,
       configuredDisplayTotal: total,
       displayDelta: total - BASE
     },
-    // Prove 3% is baked into authoritative totals — no surcharge line.
     estimateWideAdjustmentApplied: true,
     percentage: 3,
     lineItems: [
-      { label: "Countertop Material", amount: 3244.5 },
-      { label: "Material Use Tax", amount: 74.16 },
-      { label: "Backsplash", amount: 463.5 },
-      { label: "Kitchen sink cutout", amount: 206 },
-      { label: "Vanity/bar sink cutout", amount: 103 },
-      { label: "Cooktop cutout", amount: 154.5 },
-      { label: "Tear Out", amount: 772.5 },
-      { label: "Crane", amount: 360.5 },
-      { label: "Bathroom Vanity Program", amount: 1850 },
+      ...ADJUSTED_LINES,
       ...((selections["wf-kitchen-island-left"] || 0) > 0
         ? [{ label: "Kitchen Island — Left waterfall", amount: WATERFALL_DELTA }]
         : []),
       ...((selections["vanity-sink-rect-white"] || 0) > 0
         ? [{ label: "Rectangular white sink upgrade", amount: VANITY_UPGRADE_DELTA }]
         : [])
-    ]
+    ],
+    countertopSf: EXPECTED_COUNTERTOP_SF,
+    openingsByType: {
+      kitchenSink: 1,
+      vanityBarSink: 1,
+      cooktop: 1,
+      outlet: 0
+    }
   };
 }
 
@@ -231,7 +292,9 @@ export function installDigitalEstimateReviewFetchMock() {
   const original = window.fetch.bind(window);
   let rowVersion = 1;
   (window as any).__deReviewSelections = {
+    "mat-promo-calacatta": 1,
     "edge-eased-bath": 1,
+    "sink:bath:included-vanity": 1,
     "wf-kitchen-island-left": 0,
     "vanity-sink-rect-white": 0
   };
@@ -256,6 +319,12 @@ export function installDigitalEstimateReviewFetchMock() {
       if (!Object.keys(selections).length) {
         Object.assign(selections, (window as any).__deReviewSelections);
       }
+      if (
+        (selections["vanity-sink-rect-white"] || 0) === 0 &&
+        (selections["sink:bath:included-vanity"] || 0) === 0
+      ) {
+        selections["sink:bath:included-vanity"] = 1;
+      }
       (window as any).__deReviewSelections = selections;
       rowVersion += 1;
       const calculation = calcFromSelections(selections);
@@ -279,23 +348,6 @@ export function installDigitalEstimateReviewFetchMock() {
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
-    }
-
-    if (url.includes("/final-acceptance")) {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          finalAcceptance: { id: "fa-1", acceptedAt: new Date().toISOString() }
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    if (url.includes("/session") || url.includes("/configuration")) {
-      return new Response(JSON.stringify(buildDigitalEstimateFixtureState()), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      });
     }
 
     return new Response(JSON.stringify({ ok: true }), {

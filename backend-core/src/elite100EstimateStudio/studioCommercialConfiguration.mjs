@@ -107,6 +107,37 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
   };
 
   const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
+  function vanityPackageLabel(code) {
+    const raw = str(code);
+    const m = raw.match(/^(\d+)_([SD])$/i);
+    if (!m) {
+      if (/vanity program/i.test(raw) || raw === "standard") {
+        return raw === "standard" ? "Standard vanity pricing" : raw || "Governed Vanity Program";
+      }
+      return raw || "Governed Vanity Program";
+    }
+    const bowl = m[2].toUpperCase() === "D" ? "Double" : "Single";
+    return `${m[1]}-inch ${bowl}-Bowl Vanity Program`;
+  }
+
+  function vanitySinkOpenings(room) {
+    const fromAddOn = num(room.addOns?.["qty-bar"]);
+    if (fromAddOn > 0) return fromAddOn;
+    let fromCutouts = 0;
+    for (const piece of Array.isArray(room.pieces) ? room.pieces : []) {
+      if (!piece || piece.included === false) continue;
+      for (const c of Array.isArray(piece.cutouts) ? piece.cutouts : []) {
+        const type = str(c?.type || c?.cutoutType).toLowerCase();
+        if (type === "vanity_bar_sink" || type === "vanity_sink" || type === "bar_sink") {
+          fromCutouts += num(c.quantity) || 1;
+        }
+      }
+    }
+    if (fromCutouts > 0) return fromCutouts;
+    const typed = room.openingsByType?.vanityBarSink ?? room.openingsByType?.vanity_bar_sink;
+    return num(typed) || null;
+  }
+
   const vanityPrograms = rooms
     .filter((r) => r && /vanity|bath/i.test(str(r.name) + str(r.roomType)))
     .map((room) => {
@@ -114,6 +145,12 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
       const vanityPiece =
         pieces.find((p) => /vanity/i.test(str(p.name) + str(p.pieceType))) || pieces[0] || null;
       const cfg = room.vanityProgram || scope.roomConfigurations?.[room.id]?.vanityProgram || {};
+      const selectedProgram =
+        cfg.useStandardPricing === true
+          ? "standard"
+          : cfg.selectedProgram
+            ? str(cfg.selectedProgram)
+            : null;
       return {
         roomId: str(room.id) || null,
         roomName: str(room.name) || "Room",
@@ -122,18 +159,30 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
           depthIn: vanityPiece ? num(vanityPiece.depthIn) : null,
           quantity: vanityPiece ? num(vanityPiece.quantity) || 1 : 0,
           bowlCount: num(cfg.bowlCount) || null,
-          sinkOpenings: num(room.addOns?.["qty-bar"]) || null
+          sinkOpenings: vanitySinkOpenings(room),
+          backsplash: cfg.backsplashLabel || null,
+          sameTrip: cfg.additionalTrips == null || Number(cfg.additionalTrips) === 0
         },
         eligible: cfg.useStandardPricing === true ? null : null,
-        eligibilityReasons: [],
-        selectedProgram: cfg.useStandardPricing === true ? "standard" : null,
+        eligibilityReasons: Array.isArray(cfg.eligibilityReasons) ? cfg.eligibilityReasons : [],
+        selectedProgram,
+        selectedProgramLabel: selectedProgram ? vanityPackageLabel(selectedProgram) : null,
+        applyProgram: Boolean(selectedProgram && selectedProgram !== "standard"),
         sameTrip: cfg.additionalTrips == null || Number(cfg.additionalTrips) === 0,
         additionalTrips: num(cfg.additionalTrips) || 0,
         permittedCustomerOptions: Array.isArray(cfg.permittedCustomerOptions)
           ? cfg.permittedCustomerOptions
           : [],
-        serverPrice: null,
-        warnings: [],
+        permittedMaterials: Array.isArray(cfg.permittedMaterials) ? cfg.permittedMaterials : [],
+        permittedSinkUpgrades: Array.isArray(cfg.permittedSinkUpgrades)
+          ? cfg.permittedSinkUpgrades
+          : [],
+        permittedEdgeUpgrades: Array.isArray(cfg.permittedEdgeUpgrades)
+          ? cfg.permittedEdgeUpgrades
+          : [],
+        includedScope: Array.isArray(cfg.includedScope) ? cfg.includedScope : [],
+        serverPrice: cfg.serverPrice != null ? num(cfg.serverPrice) : null,
+        warnings: Array.isArray(cfg.warnings) ? cfg.warnings : [],
         useStandardPricing: cfg.useStandardPricing === true
       };
     });
