@@ -43,6 +43,6 @@ _local/
 
 local-imports/
 
-# Local review artifacts (screenshots, fixtures)
-.local/review/
+# Local review artifacts / tooling (screenshots, fixtures, playwright cache)
+.local/
 
