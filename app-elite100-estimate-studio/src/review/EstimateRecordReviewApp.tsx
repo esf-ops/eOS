@@ -375,10 +375,10 @@ export default function EstimateRecordReviewApp() {
                 <button
                   type="button"
                   className="eq-btn-secondary"
-                  data-testid="eq-create-measurement-revision"
+                  data-testid="eq-edit-estimate"
                   onClick={() => switchScenario("r2")}
                 >
-                  Create Measurement Revision
+                  Edit Estimate
                 </button>
               </div>
             )}

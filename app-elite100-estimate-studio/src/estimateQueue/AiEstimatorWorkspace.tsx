@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   apiGet,
   apiPost,
+  apiPatch,
   ApiError,
   isAbortError,
   isTransientHttpError,
@@ -483,6 +484,9 @@ export default function AiEstimatorWorkspace({
   const [editError, setEditError] = useState<string | null>(null);
   const [commercialBusy, setCommercialBusy] = useState(false);
   const [commercialError, setCommercialError] = useState<string | null>(null);
+  const [commercialDirty, setCommercialDirty] = useState(false);
+  const [takeoffDirty, setTakeoffDirty] = useState(false);
+  const [revisionSaveStatus, setRevisionSaveStatus] = useState<string | null>(null);
   const [commercialConfig, setCommercialConfig] = useState<Record<string, unknown> | null>(null);
   const [revisionHistory, setRevisionHistory] = useState<
     Array<{
@@ -835,10 +839,11 @@ export default function AiEstimatorWorkspace({
     }
   }
 
-  async function editMeasurements() {
+  async function editEstimate() {
     setEditError(null);
     setPublishError(null);
     setHandoffError(null);
+    setRevisionSaveStatus(null);
     if (!estimateId) {
       handoffSucceededRef.current = false;
       setMeasurementsApproved(false);
@@ -864,13 +869,14 @@ export default function AiEstimatorWorkspace({
       handoffSucceededRef.current = false;
       setMeasurementsApproved(false);
       setEditingRevision(true);
+      setCommercialDirty(false);
+      setTakeoffDirty(false);
       setTakeoffCollapsed(false);
       setTakeoffRemountKey((k) => k + 1);
       // Keep customerUrl + publishedRevision so Publish Revised can appear after re-approval.
     } catch (e) {
       if (!isAbortError(e)) {
-        setEditError("Your measurement changes were not saved. Try Save Draft again.");
-        // Fall back to local remount of Takeoff without advancing published state incorrectly.
+        setEditError("Your estimate revision could not be opened. Try again.");
         handoffSucceededRef.current = false;
         setMeasurementsApproved(false);
         setEditingRevision(true);
@@ -931,9 +937,12 @@ export default function AiEstimatorWorkspace({
     estimateWideAdjustment: Record<string, unknown>;
     roomConfigurations?: Record<string, unknown>;
   }) {
-    if (!estimateId) return;
+    if (!estimateId) {
+      throw new Error("Estimate is not ready to save adjustments");
+    }
     setCommercialBusy(true);
     setCommercialError(null);
+    setRevisionSaveStatus("Saving…");
     try {
       const customLineItems = payload.customLineItems.map((l) => ({
         id: l.id,
@@ -958,8 +967,9 @@ export default function AiEstimatorWorkspace({
       if (payload.roomConfigurations) {
         scopePatch.roomConfigurations = payload.roomConfigurations;
       }
-      const updated = (await apiPost(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}/scope`,
+      // Production-supported path: PATCH estimate (updateScope), not POST …/scope.
+      const updated = (await apiPatch(
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateId)}`,
         authToken,
         { scope: scopePatch }
       )) as { estimate?: Record<string, unknown> };
@@ -970,12 +980,20 @@ export default function AiEstimatorWorkspace({
       )) as { estimate?: Record<string, unknown> };
       const est = calculated.estimate || updated.estimate;
       if (est) applyEstimateView(est);
+      setCommercialDirty(false);
+      setRevisionSaveStatus("Saved");
     } catch (e) {
       if (!isAbortError(e)) {
-        setCommercialError(
-          e instanceof ApiError ? e.message : "Unable to save commercial changes"
-        );
+        const technical =
+          e instanceof ApiError
+            ? `status=${e.status} ${String(e.message || "").slice(0, 200)}`
+            : String(e);
+        console.error("[estimate-record] adjustment save failed", technical);
+        setCommercialError("Your estimate adjustments were not saved. Try again.");
+        setRevisionSaveStatus("Save failed");
+        setCommercialDirty(true);
       }
+      throw e;
     } finally {
       setCommercialBusy(false);
     }
@@ -984,20 +1002,20 @@ export default function AiEstimatorWorkspace({
   const revisionBanner =
     editingRevision && estimateRevision != null
       ? publishedRevision != null
-        ? `Editing measurement revision R${estimateRevision}. Based on approved revision R${publishedRevision}. R${publishedRevision} remains published until R${estimateRevision} is successfully published.`
-        : `Editing measurement revision R${estimateRevision}`
+        ? `Editing Revision R${estimateRevision}. Based on published R${publishedRevision}. R${publishedRevision} remains active until R${estimateRevision} is successfully published.`
+        : `Editing Revision R${estimateRevision}. Based on approved R${Math.max(1, (estimateRevision || 1) - 1) || 1}. Do not mutate the approved snapshot directly.`
       : null;
 
   const measurementStatusLabel =
     stage === "processing"
       ? "Takeoff processing"
       : stage === "approving"
-        ? "Approving measurements"
+        ? "Approving estimate"
         : measurementsApproved
-          ? "Measurements approved"
+          ? "Estimate approved"
           : stage === "revision_draft"
-            ? "Editing measurement revision"
-            : "Measurements draft";
+            ? "Editing estimate revision"
+            : "Estimate draft";
 
   const publicationStatusLabel =
     stage === "published"
@@ -1007,6 +1025,18 @@ export default function AiEstimatorWorkspace({
         : measurementsApproved
           ? "Ready to publish"
           : "Not published";
+
+  const adjustmentsEditable =
+    Boolean(estimateId) &&
+    stage !== "processing" &&
+    stage !== "approving" &&
+    !measurementsApproved;
+
+  const aggregatedSaveStatus =
+    revisionSaveStatus ||
+    (commercialDirty || takeoffDirty
+      ? "Unsaved changes"
+      : header?.draftSaveStatus || null);
 
   const headerNode = (
     <EstimateRecordHeader
@@ -1018,7 +1048,7 @@ export default function AiEstimatorWorkspace({
       publicationStatus={publicationStatusLabel}
       customerActivityLabel={aiSummary?.publication?.customerActivityLabel || null}
       revisionBanner={revisionBanner || header?.revisionBanner || null}
-      draftSaveStatus={header?.draftSaveStatus || null}
+      draftSaveStatus={aggregatedSaveStatus}
       onViewPlan={header?.onViewPlan}
       onBackToQueue={header?.onBackToQueue}
     />
@@ -1079,12 +1109,12 @@ export default function AiEstimatorWorkspace({
           ) : null}
           {takeoffMode === "editable" ? (
             <p className="eq-footnote" data-testid="eq-takeoff-first-hint">
-              Review and correct AI measurements. Use Save Draft, then Approve Measurements.
+              Review and correct measurements. Save Draft, then Approve Estimate when ready.
             </p>
           ) : (
             <p className="eq-footnote" data-testid="eq-takeoff-readonly-hint">
-              Approved measurements stay visible. Use Create Measurement Revision to open an
-              editable sibling revision.
+              This revision is read-only. Use Edit Estimate to open an editable draft without
+              changing the approved or published snapshot.
             </p>
           )}
           {takeoffMode === "readonly" ? (
@@ -1092,10 +1122,10 @@ export default function AiEstimatorWorkspace({
               <button
                 type="button"
                 className="eq-btn-secondary"
-                data-testid="eq-create-measurement-revision"
-                onClick={() => void editMeasurements()}
+                data-testid="eq-edit-estimate"
+                onClick={() => void editEstimate()}
               >
-                Create Measurement Revision
+                Edit Estimate
               </button>
             </div>
           ) : null}
@@ -1164,20 +1194,19 @@ export default function AiEstimatorWorkspace({
       />
 
       <CommercialConfigurationSection
-        editable={
-          Boolean(estimateId) &&
-          stage !== "processing" &&
-          stage !== "approving" &&
-          (!customerUrl ||
-            editingRevision ||
-            (estimateRevision != null &&
-              publishedRevision != null &&
-              estimateRevision > publishedRevision))
-        }
+        editable={adjustmentsEditable}
         commercial={commercialConfig}
         busy={commercialBusy}
         error={commercialError}
-        onSave={(payload) => void saveCommercial(payload)}
+        dirty={commercialDirty}
+        measurementsApproved={measurementsApproved}
+        onDirtyChange={(d) => {
+          setCommercialDirty(d);
+          if (d) setRevisionSaveStatus("Unsaved changes");
+        }}
+        onSave={async (payload) => {
+          await saveCommercial(payload);
+        }}
       />
 
       <DigitalEstimateSection
@@ -1190,12 +1219,12 @@ export default function AiEstimatorWorkspace({
         publishBusy={publishBusy}
         publishError={publishError}
         publishLabel={publishLabel}
-        eligible={eligible}
+        eligible={eligible && !commercialDirty && revisionSaveStatus !== "Save failed"}
         estimateId={estimateId}
         showPublishRevised={publishRevised}
         onPublish={() => void publish()}
         onCopy={() => void copyLink()}
-        onCreateRevision={() => void editMeasurements()}
+        onCreateRevision={() => void editEstimate()}
       />
 
       <EstimateRevisionHistory

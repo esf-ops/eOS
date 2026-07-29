@@ -212,7 +212,7 @@ export function CommercialConfigurationSection(props: {
     customLineItems: CommercialLineDraft[];
     estimateWideAdjustment: EstimateAdjustmentDraft;
     roomConfigurations?: Record<string, unknown>;
-  }) => void;
+  }) => void | Promise<void>;
 }) {
   const [lines, setLines] = useState<CommercialLineDraft[]>([]);
   const [adjustment, setAdjustment] = useState<EstimateAdjustmentDraft>({
@@ -364,7 +364,7 @@ export function CommercialConfigurationSection(props: {
     ]);
   }
 
-  function save() {
+  async function save() {
     const roomConfigurations: Record<string, unknown> = {};
     for (const v of vanityRooms) {
       if (!v.roomId) continue;
@@ -403,13 +403,19 @@ export function CommercialConfigurationSection(props: {
       });
       roomConfigurations[w.roomId] = { ...prev, waterfalls: existing };
     }
-    props.onSave({
-      customLineItems: lines,
-      estimateWideAdjustment: adjustment,
-      roomConfigurations
-    });
-    setDirty(false);
-    props.onDirtyChange?.(false);
+    try {
+      await props.onSave({
+        customLineItems: lines,
+        estimateWideAdjustment: adjustment,
+        roomConfigurations
+      });
+      setDirty(false);
+      props.onDirtyChange?.(false);
+    } catch {
+      // Parent owns the error message; remain dirty so Saved cannot appear after failure.
+      setDirty(true);
+      props.onDirtyChange?.(true);
+    }
   }
 
   const adj = props.commercial?.estimateAdjustment;
@@ -438,11 +444,15 @@ export function CommercialConfigurationSection(props: {
       <div className="eq-record-section__head">
         <h2 className="eq-ai-section-title">Commercial Configuration</h2>
         <span className="eq-record-section__status" data-testid="eq-commercial-status">
-          {props.editable
-            ? dirty || props.dirty
-              ? "Unsaved changes"
-              : "Editable"
-            : "Read-only for this revision"}
+          {!props.editable
+            ? "Read-only for this revision"
+            : props.busy
+              ? "Saving…"
+              : props.error
+                ? "Save failed"
+                : dirty || props.dirty
+                  ? "Unsaved changes"
+                  : "Saved"}
         </span>
       </div>
       <div className="eq-record-section__body">

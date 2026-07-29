@@ -50,7 +50,7 @@ console.log("\nestimateRecord.ui.test.mjs\n");
     "eq-waterfall-configuration",
     "eq-save-commercial-changes",
     "eq-publish-digital-estimate",
-    "eq-create-measurement-revision"
+    "eq-edit-estimate"
   ]) {
     assert.ok(
       workspace.includes(id) || sections.includes(id) || commercial.includes(id),
