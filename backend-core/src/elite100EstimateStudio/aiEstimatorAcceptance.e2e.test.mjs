@@ -20,6 +20,7 @@ import { STUDIO_ESTIMATE_STATUSES } from "./studioEstimateTypes.mjs";
 import { decideConfigurationView } from "../../../app-digital-estimate/src/configurationBootstrap.ts";
 import { deriveAiEstimatorStage, shouldOfferPublishRevised } from "../../../app-elite100-estimate-studio/src/estimateQueue/deriveAiEstimatorStage.mjs";
 import { buildApprovalSummaryFromEstimate, estimateHasMeasuredScope } from "../../../app-elite100-estimate-studio/src/estimateQueue/aiTakeoffApprovedSummary.mjs";
+import { buildAiEstimatorSummary } from "./studioAiEstimatorSummary.mjs";
 
 const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ACTOR = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
@@ -171,6 +172,13 @@ console.log("\naiEstimatorAcceptance.e2e.test.mjs\n");
     revision: 1,
     scope: {
       ...seeded,
+      addOns: {
+        ...(seeded.addOns || {}),
+        "qty-sink": 1,
+        "qty-cook": 1,
+        "qty-outlet": 1,
+        "qty-bar": 0
+      },
       customerName: "",
       customerEmail: "",
       projectName: "",
@@ -200,6 +208,22 @@ console.log("\naiEstimatorAcceptance.e2e.test.mjs\n");
   const summary = buildApprovalSummaryFromEstimate(priced);
   assert.ok(summary && summary.countertopSf > 0, "non-zero approved card");
   assert.ok(Number(summary.customerDisplayTotal) > 0, "positive starting total");
+  assert.ok(priced.aiEstimatorSummary, "aiEstimatorSummary attached");
+  assert.ok(priced.aiEstimatorSummary.rooms?.length >= 1, "room-by-room scope");
+  assert.equal(priced.aiEstimatorSummary.measurements.openingsByType.kitchenSink, 1);
+  assert.equal(priced.aiEstimatorSummary.measurements.openingsByType.cooktop, 1);
+  assert.equal(priced.aiEstimatorSummary.measurements.openingsByType.outlet, 1);
+  assert.ok(
+    priced.aiEstimatorSummary.pricing.customerSafeGroups?.length >= 1,
+    "customer-safe price groups"
+  );
+  // No duplicate kitchen sink cutout in authoritative cutout charge path
+  const cutoutsTotal =
+    priced.calculationSnapshot?.elite100?.rooms?.[0]?.cutouts?.kitchenSinkCharge ??
+    priced.calculation?.elite100?.rooms?.[0]?.cutouts?.kitchenSinkCharge;
+  if (cutoutsTotal != null) {
+    assert.equal(Number(cutoutsTotal), 200);
+  }
 
   assert.equal(
     deriveAiEstimatorStage({ measurementsApproved: true, estimateRevision: 1 }),
@@ -256,6 +280,9 @@ console.log("\naiEstimatorAcceptance.e2e.test.mjs\n");
     body: { confirm: true }
   });
   assert.equal(opened.estimate.revision, 2);
+  assert.ok(opened.priorEstimate, "priorEstimate returned for comparison");
+  assert.equal(opened.priorEstimate.revision, 1);
+  assert.ok(opened.estimate.aiEstimatorSummary?.comparison, "comparison on revision draft");
   const prior = await studioRepo.getById(ORG, row.id);
   assert.equal(prior.status, STUDIO_ESTIMATE_STATUSES.SUPERSEDED);
 
@@ -293,6 +320,14 @@ console.log("\naiEstimatorAcceptance.e2e.test.mjs\n");
   assert.equal(priced2.revision, 2);
   const summary2 = buildApprovalSummaryFromEstimate(priced2);
   assert.ok(summary2.countertopSf > summary.countertopSf || summary2.customerDisplayTotal !== summary.customerDisplayTotal);
+  const cmp = buildAiEstimatorSummary({
+    estimate: priced2,
+    priorEstimate: opened.priorEstimate
+  }).comparison;
+  assert.ok(
+    cmp?.changedItems?.some((c) => c.from === 96 && c.to === 120),
+    "comparison shows 96 → 120"
+  );
 
   assert.equal(
     shouldOfferPublishRevised({

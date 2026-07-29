@@ -27,7 +27,22 @@ assert.ok(workspaceSrc.includes('data-testid="eq-ai-compact-header"'));
 assert.ok(workspaceSrc.includes('data-testid="eq-ai-takeoff-surface"'));
 assert.ok(workspaceSrc.includes('data-testid="eq-ai-approved-measurements"'));
 assert.ok(workspaceSrc.includes('data-testid="eq-ai-published-estimate"'));
-assert.ok(workspaceSrc.includes('data-testid="eq-takeoff-iframe"'));
+assert.ok(workspaceSrc.includes("VerifiedMeasurementTotals"));
+assert.ok(workspaceSrc.includes("VerifiedRoomScope"));
+assert.ok(workspaceSrc.includes("StartingPriceBreakdown"));
+assert.ok(workspaceSrc.includes("PublicationActivitySummary"));
+assert.ok(workspaceSrc.includes("MeasurementRevisionComparison"));
+assert.ok(workspaceSrc.includes("eq-takeoff-iframe"));
+
+const readViews = readFileSync(join(root, "AiEstimatorReadViews.tsx"), "utf8");
+assert.ok(readViews.includes("export function VerifiedMeasurementTotals"));
+assert.ok(readViews.includes("export function VerifiedRoomScope"));
+assert.ok(readViews.includes("export function StartingPriceBreakdown"));
+assert.ok(readViews.includes("export function PublicationActivitySummary"));
+assert.ok(readViews.includes("export function MeasurementRevisionComparison"));
+// Display-only — no Scope mutation / pricing formulas
+assert.equal(readViews.includes("apiPost"), false);
+assert.equal(readViews.includes("calculate"), false);
 
 // Mount order contracts in AiEstimatorWorkspace render
 const renderTail = workspaceSrc.slice(workspaceSrc.lastIndexOf("return ("));
@@ -102,8 +117,45 @@ try {
   assert.ok(html.includes("View plan"));
   const approved = renderToStaticMarkup(
     React.createElement(mod.ApprovedMeasurementsCard, {
-      summary: { countertopSf: 46.25, backsplashSf: 3.33, edgeLf: 26.25, customerDisplayTotal: 5120 },
+      aiSummary: {
+        measurements: {
+          countertopSf: 46.25,
+          backsplashSf: 3.33,
+          exposedEdgeLf: 26.25,
+          openingsByType: { kitchenSink: 1, vanityBarSink: 0, cooktop: 1, outlet: 1 }
+        },
+        rooms: [
+          {
+            name: "Kitchen",
+            countertopSf: 46.25,
+            backsplashSf: 3.33,
+            exposedEdgeLf: 26.25,
+            openingsByType: { kitchenSink: 1, cooktop: 1, outlet: 1 },
+            pieces: [
+              {
+                name: "Cooktop wall",
+                type: "counter",
+                lengthIn: 112.5,
+                depthIn: 25.5,
+                quantity: 1,
+                squareFeet: 19.92
+              }
+            ]
+          }
+        ],
+        pricing: {
+          customerDisplayTotal: 5120,
+          customerSafeGroups: [{ key: "countertop", label: "Countertop material", amount: 4000 }],
+          warnings: [],
+          unresolvedItems: [],
+          activeReviewBlockers: []
+        },
+        revision: { current: 1, published: null, hasNewerApprovedRevision: false },
+        publication: {},
+        comparison: null
+      },
       estimateRevision: 1,
+      publishedRevision: null,
       activeReview: { eligible: true, blockers: [] },
       publishBusy: false,
       publishError: null,
@@ -115,16 +167,37 @@ try {
     })
   );
   assert.ok(approved.includes('data-testid="eq-ai-approved-measurements"'));
+  assert.ok(approved.includes('data-testid="eq-ai-verified-measurement-totals"'));
+  assert.ok(approved.includes('data-testid="eq-ai-verified-room-scope"'));
+  assert.ok(approved.includes('data-testid="eq-ai-starting-price-breakdown"'));
   const published = renderToStaticMarkup(
     React.createElement(mod.PublishedEstimateCard, {
-      summary: { countertopSf: 46.25, customerDisplayTotal: 5120 },
+      aiSummary: {
+        measurements: {
+          countertopSf: 46.25,
+          backsplashSf: 3.33,
+          exposedEdgeLf: 26.25,
+          openingsByType: { kitchenSink: 1, vanityBarSink: 0, cooktop: 1, outlet: 1 }
+        },
+        rooms: [],
+        pricing: { customerDisplayTotal: 5120, customerSafeGroups: [], warnings: [], unresolvedItems: [] },
+        revision: { current: 1, published: 1, hasNewerApprovedRevision: false },
+        publication: {
+          publishedAt: "2026-07-28T12:00:00.000Z",
+          customerActivityLabel: "Not viewed",
+          customerActivityState: "waiting"
+        },
+        comparison: null
+      },
       estimateRevision: 1,
+      publishedRevision: 1,
       customerUrl: "https://digital.example/e/tok",
       onEdit: () => {},
       onCopy: () => {}
     })
   );
   assert.ok(published.includes('data-testid="eq-ai-published-estimate"'));
+  assert.ok(published.includes('data-testid="eq-ai-publication-activity-summary"'));
   assert.equal(published.includes("Re-publish"), false);
   rendered = true;
   console.log("ok: rendered CompactEstimateHeader / Approved / Published cards");

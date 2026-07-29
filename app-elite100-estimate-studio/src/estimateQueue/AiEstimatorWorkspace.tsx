@@ -31,6 +31,16 @@ import {
   deriveAiEstimatorStage,
   shouldOfferPublishRevised
 } from "./deriveAiEstimatorStage.mjs";
+import { buildAiEstimatorSummary } from "../../../backend-core/src/elite100EstimateStudio/studioAiEstimatorSummary.mjs";
+import {
+  EstimatorWarnings,
+  MeasurementRevisionComparison,
+  PublicationActivitySummary,
+  StartingPriceBreakdown,
+  VerifiedMeasurementTotals,
+  VerifiedRoomScope,
+  type VerifiedRoom
+} from "./AiEstimatorReadViews";
 
 const PUBLISH_CLIENT_TIMEOUT_MS = 55_000;
 const HANDOFF_RETRY_MAX_ATTEMPTS = 6;
@@ -56,12 +66,15 @@ type ActiveReview = {
   blockers: Array<{ code?: string; message?: string }>;
 };
 
+type AiSummary = ReturnType<typeof buildAiEstimatorSummary>;
+
 export type CompactHeaderModel = {
   title: string;
   planFilename: string;
   onViewPlan?: (() => void) | null;
   onBackToQueue?: (() => void) | null;
   revisionBanner?: string | null;
+  draftSaveStatus?: string | null;
 };
 
 type Props = {
@@ -97,13 +110,31 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function openingsTotal(summary: ApprovalSummary | null): number {
-  return (
-    num(summary?.kitchenSinkCutouts) +
-    num(summary?.vanityBarSinkCutouts) +
-    num(summary?.cooktopCutouts) +
-    num(summary?.outletCutouts)
-  );
+function summarizeFromEstimate(
+  est: Record<string, unknown> | null | undefined,
+  prior: Record<string, unknown> | null,
+  publication: Record<string, unknown> | null,
+  deRead: Record<string, unknown> | null
+): AiSummary | null {
+  if (!est) return null;
+  const attached = est.aiEstimatorSummary as AiSummary | undefined;
+  if (attached && typeof attached === "object" && Array.isArray(attached.rooms)) {
+    if (prior && !attached.comparison) {
+      return buildAiEstimatorSummary({
+        estimate: est,
+        priorEstimate: prior,
+        publicationSummary: publication,
+        digitalEstimateRead: deRead
+      });
+    }
+    return attached;
+  }
+  return buildAiEstimatorSummary({
+    estimate: est,
+    priorEstimate: prior,
+    publicationSummary: publication,
+    digitalEstimateRead: deRead
+  });
 }
 
 export function CompactEstimateHeader({
@@ -111,7 +142,8 @@ export function CompactEstimateHeader({
   planFilename,
   onViewPlan,
   onBackToQueue,
-  revisionBanner
+  revisionBanner,
+  draftSaveStatus
 }: CompactHeaderModel) {
   return (
     <header className="eq-ai-compact-header" data-testid="eq-ai-compact-header" aria-label="Estimate">
@@ -125,6 +157,11 @@ export function CompactEstimateHeader({
         {revisionBanner ? (
           <div className="eq-ai-revision-banner" data-testid="eq-ai-revision-banner" role="status">
             {revisionBanner}
+          </div>
+        ) : null}
+        {draftSaveStatus ? (
+          <div className="eq-cell-meta" data-testid="eq-ai-draft-save-status" role="status">
+            {draftSaveStatus}
           </div>
         ) : null}
       </div>
@@ -154,54 +191,10 @@ export function CompactEstimateHeader({
   );
 }
 
-function MeasurementSummaryDl({
-  summary,
-  estimateRevision
-}: {
-  summary: ApprovalSummary | null;
-  estimateRevision: number | null;
-}) {
-  return (
-    <dl className="eq-summary-dl" data-testid="eq-ai-approved-summary">
-      <div>
-        <dt>Verified square footage</dt>
-        <dd data-testid="eq-ai-verified-sf">{num(summary?.countertopSf).toFixed(2)} SF</dd>
-      </div>
-      <div>
-        <dt>Verified backsplash</dt>
-        <dd data-testid="eq-ai-verified-backsplash-sf">
-          {num(summary?.backsplashSf).toFixed(2)} SF
-        </dd>
-      </div>
-      <div>
-        <dt>Verified exposed edge</dt>
-        <dd data-testid="eq-ai-verified-edge-lf">{num(summary?.edgeLf).toFixed(2)} LF</dd>
-      </div>
-      <div>
-        <dt>Openings</dt>
-        <dd data-testid="eq-ai-verified-openings">{openingsTotal(summary)}</dd>
-      </div>
-      <div>
-        <dt>Starting estimate total</dt>
-        <dd data-testid="eq-ai-starting-total">
-          {summary?.customerDisplayTotal != null
-            ? `$${num(summary.customerDisplayTotal).toFixed(2)}`
-            : "—"}
-        </dd>
-      </div>
-      {estimateRevision != null ? (
-        <div>
-          <dt>Estimate revision</dt>
-          <dd data-testid="eq-ai-estimate-revision">R{estimateRevision}</dd>
-        </div>
-      ) : null}
-    </dl>
-  );
-}
-
 export function ApprovedMeasurementsCard(props: {
-  summary: ApprovalSummary | null;
+  aiSummary: AiSummary | null;
   estimateRevision: number | null;
+  publishedRevision: number | null;
   activeReview: ActiveReview | null;
   publishBusy: boolean;
   publishError: string | null;
@@ -211,21 +204,108 @@ export function ApprovedMeasurementsCard(props: {
   onEdit: () => void;
   onPublish: () => void;
 }) {
+  const s = props.aiSummary;
+  const m = s?.measurements;
+  const openings = m?.openingsByType || {};
+  const rooms = (s?.rooms || []) as VerifiedRoom[];
+  const isRevised =
+    props.publishedRevision != null &&
+    props.estimateRevision != null &&
+    props.estimateRevision > props.publishedRevision;
+  const comparison = s?.comparison;
+
   return (
     <section
-      className="eq-ai-approved-card"
+      className="eq-ai-approved-card eq-ai-approved-card--deep"
       data-testid="eq-ai-approved-measurements"
       aria-label="Measurements approved"
     >
-      <h2>Measurements approved</h2>
-      <MeasurementSummaryDl summary={props.summary} estimateRevision={props.estimateRevision} />
-      {props.activeReview && !props.activeReview.eligible ? (
-        <ul className="eq-list eq-list--attention" data-testid="eq-ai-publish-blockers">
-          {props.activeReview.blockers.map((b, i) => (
-            <li key={`${b.code || "b"}-${i}`}>{b.message || b.code}</li>
-          ))}
-        </ul>
+      <h2 data-testid="eq-ai-approved-heading">
+        Measurements approved — Revision R{props.estimateRevision ?? "—"}
+      </h2>
+      {isRevised ? (
+        <p className="eq-muted" data-testid="eq-ai-previous-published-revision">
+          Previous published revision: R{props.publishedRevision}
+        </p>
       ) : null}
+
+      {isRevised && comparison ? (
+        <section className="eq-ai-revised-totals" data-testid="eq-ai-revised-totals">
+          <h3 className="eq-ai-section-title">Revised totals</h3>
+          <dl className="eq-summary-dl eq-summary-dl--grid">
+            <div>
+              <dt>Previous countertop SF</dt>
+              <dd>{num(comparison.previousCountertopSf).toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt>Revised countertop SF</dt>
+              <dd>{num(comparison.revisedCountertopSf).toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt>SF difference</dt>
+              <dd>
+                {(
+                  num(comparison.revisedCountertopSf) - num(comparison.previousCountertopSf)
+                ).toFixed(2)}
+              </dd>
+            </div>
+            <div>
+              <dt>Previous starting total</dt>
+              <dd>
+                {comparison.previousTotal != null
+                  ? `$${num(comparison.previousTotal).toFixed(2)}`
+                  : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt>Revised starting total</dt>
+              <dd>
+                {comparison.revisedTotal != null
+                  ? `$${num(comparison.revisedTotal).toFixed(2)}`
+                  : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt>Price difference</dt>
+              <dd>
+                {comparison.difference != null
+                  ? `${num(comparison.difference) >= 0 ? "+" : ""}$${num(
+                      comparison.difference
+                    ).toFixed(2)}`
+                  : "—"}
+              </dd>
+            </div>
+          </dl>
+          <MeasurementRevisionComparison comparison={comparison} />
+        </section>
+      ) : null}
+
+      <VerifiedMeasurementTotals
+        countertopSf={num(m?.countertopSf)}
+        backsplashSf={num(m?.backsplashSf)}
+        exposedEdgeLf={num(m?.exposedEdgeLf)}
+        openingsByType={openings}
+        startingTotal={s?.pricing?.customerDisplayTotal ?? null}
+        revision={props.estimateRevision}
+      />
+
+      <VerifiedRoomScope rooms={rooms} defaultExpanded />
+
+      <StartingPriceBreakdown
+        groups={s?.pricing?.customerSafeGroups || []}
+        startingTotal={s?.pricing?.customerDisplayTotal ?? null}
+      />
+
+      <EstimatorWarnings
+        warnings={s?.pricing?.warnings}
+        unresolvedItems={s?.pricing?.unresolvedItems}
+        blockers={
+          props.activeReview && !props.activeReview.eligible
+            ? props.activeReview.blockers
+            : s?.pricing?.activeReviewBlockers
+        }
+      />
+
       {props.publishError ? (
         <div className="eq-state eq-state--error" role="alert" data-testid="eq-ai-publish-error">
           {props.publishError}
@@ -242,7 +322,7 @@ export function ApprovedMeasurementsCard(props: {
           </div>
         </div>
       ) : null}
-      <div className="eq-action-row">
+      <div className="eq-action-row eq-ai-sticky-actions">
         <button
           type="button"
           className="eq-btn-ghost"
@@ -266,21 +346,61 @@ export function ApprovedMeasurementsCard(props: {
 }
 
 export function PublishedEstimateCard(props: {
-  summary: ApprovalSummary | null;
+  aiSummary: AiSummary | null;
   estimateRevision: number | null;
+  publishedRevision: number | null;
   customerUrl: string;
   onEdit: () => void;
   onCopy: () => void;
+  onPublishRevised?: (() => void) | null;
+  showPublishRevised?: boolean;
+  publishBusy?: boolean;
 }) {
+  const s = props.aiSummary;
+  const m = s?.measurements;
+  const pub = s?.publication;
+  const rooms = (s?.rooms || []) as VerifiedRoom[];
+  const hasNewer = Boolean(s?.revision?.hasNewerApprovedRevision || props.showPublishRevised);
+
   return (
     <section
-      className="eq-ai-approved-card"
+      className="eq-ai-approved-card eq-ai-approved-card--deep"
       data-testid="eq-ai-published-estimate"
       aria-label="Digital Estimate published"
     >
-      <h2>Digital Estimate published</h2>
-      <MeasurementSummaryDl summary={props.summary} estimateRevision={props.estimateRevision} />
-      <div className="eq-action-row">
+      <h2 data-testid="eq-ai-published-heading">
+        Digital Estimate published — Revision R
+        {props.publishedRevision ?? props.estimateRevision ?? "—"}
+      </h2>
+
+      <PublicationActivitySummary
+        publishedRevision={props.publishedRevision}
+        publishedAt={pub?.publishedAt ?? null}
+        pricingValidThrough={pub?.pricingValidThrough ?? null}
+        startingTotal={s?.pricing?.customerDisplayTotal ?? null}
+        customerActivityLabel={pub?.customerActivityLabel ?? null}
+        customerActivityState={pub?.customerActivityState ?? null}
+        lastCustomerActivityAt={pub?.lastCustomerActivityAt ?? null}
+        customerConfiguredTotal={pub?.customerConfiguredTotal ?? null}
+        customerDifference={pub?.customerDifference ?? null}
+        reviewRequested={Boolean(pub?.reviewRequested)}
+        currentPublishedRevision={props.publishedRevision}
+        hasNewerApprovedRevision={hasNewer}
+        newerApprovedRevision={hasNewer ? props.estimateRevision : null}
+      />
+
+      <VerifiedMeasurementTotals
+        countertopSf={num(m?.countertopSf)}
+        backsplashSf={num(m?.backsplashSf)}
+        exposedEdgeLf={num(m?.exposedEdgeLf)}
+        openingsByType={m?.openingsByType || {}}
+        startingTotal={s?.pricing?.customerDisplayTotal ?? null}
+        revision={props.publishedRevision ?? props.estimateRevision}
+      />
+
+      <VerifiedRoomScope rooms={rooms} compact defaultExpanded={false} />
+
+      <div className="eq-action-row eq-ai-sticky-actions">
         <a
           className="eq-btn-primary"
           href={props.customerUrl}
@@ -306,6 +426,17 @@ export function PublishedEstimateCard(props: {
         >
           Edit Measurements
         </button>
+        {hasNewer && props.onPublishRevised ? (
+          <button
+            type="button"
+            className="eq-btn-primary"
+            data-testid="eq-publish-revised-estimate"
+            disabled={props.publishBusy}
+            onClick={props.onPublishRevised}
+          >
+            {props.publishBusy ? "Publishing…" : "Publish Revised Estimate"}
+          </button>
+        ) : null}
       </div>
       <p className="eq-muted" data-testid="eq-ai-customer-url">
         {props.customerUrl}
@@ -328,7 +459,12 @@ export default function AiEstimatorWorkspace({
   );
   const [measurementsApproved, setMeasurementsApproved] = useState(false);
   const [editingRevision, setEditingRevision] = useState(false);
-  const [summary, setSummary] = useState<ApprovalSummary | null>(null);
+  const [aiSummary, setAiSummary] = useState<AiSummary | null>(null);
+  const [priorEstimate, setPriorEstimate] = useState<Record<string, unknown> | null>(null);
+  const [publicationSummary, setPublicationSummary] = useState<Record<string, unknown> | null>(
+    null
+  );
+  const [deRead, setDeRead] = useState<Record<string, unknown> | null>(null);
   const [estimateId, setEstimateId] = useState<string | null>(null);
   const [estimateRevision, setEstimateRevision] = useState<number | null>(null);
   const [publishedRevision, setPublishedRevision] = useState<number | null>(null);
@@ -360,7 +496,10 @@ export default function AiEstimatorWorkspace({
   });
 
   const applyEstimateView = useCallback(
-    (est: Record<string, unknown> | null | undefined) => {
+    (
+      est: Record<string, unknown> | null | undefined,
+      opts?: { prior?: Record<string, unknown> | null; publication?: Record<string, unknown> | null }
+    ) => {
       if (!est) return;
       onEstimateReady?.(est);
       const id = String(est.id || "").trim();
@@ -369,9 +508,75 @@ export default function AiEstimatorWorkspace({
       const ar = est.activeReview as ActiveReview | undefined;
       setActiveReview(ar && typeof ar === "object" ? ar : null);
       const next = buildApprovalSummaryFromEstimate(est, pendingSummaryRef.current);
-      if (next) setSummary(next);
+      if (next) pendingSummaryRef.current = next;
+      const prior = opts?.prior !== undefined ? opts.prior : priorEstimate;
+      const publication =
+        opts?.publication !== undefined ? opts.publication : publicationSummary;
+      if (opts?.prior !== undefined) setPriorEstimate(opts.prior);
+      if (opts?.publication !== undefined) setPublicationSummary(opts.publication);
+      setAiSummary(summarizeFromEstimate(est, prior || null, publication || null, deRead));
     },
-    [onEstimateReady]
+    [onEstimateReady, priorEstimate, publicationSummary, deRead]
+  );
+
+  const refreshPublicationActivity = useCallback(
+    async (id: string) => {
+      try {
+        const body = (await apiGet(
+          `/api/elite100-estimate-studio/estimates/${encodeURIComponent(id)}/digital-estimate`,
+          authToken
+        )) as Record<string, unknown>;
+        setDeRead(body);
+        const pub =
+          (body.publicationSummary as Record<string, unknown> | undefined) ||
+          (body.publication as Record<string, unknown> | undefined) ||
+          null;
+        if (pub) setPublicationSummary(pub);
+        const url =
+          String(
+            (pub as { customerUrl?: string } | null)?.customerUrl ||
+              (body.activePublication as { customerUrl?: string } | undefined)?.customerUrl ||
+              ""
+          ).trim() || null;
+        if (url) setCustomerUrl(url);
+        const rev =
+          (pub as { revision?: number } | null)?.revision ??
+          (body.activePublication as { revisionNumber?: number } | undefined)?.revisionNumber;
+        if (rev != null) setPublishedRevision(Number(rev) || null);
+        setAiSummary((prev) => {
+          if (!prev) return prev;
+          const rebuilt = buildAiEstimatorSummary({
+            estimate: {
+              revision: estimateRevision,
+              calculation: {
+                totals: { customerDisplayTotal: prev.pricing.customerDisplayTotal }
+              },
+              scope: { rooms: [] },
+              aiEstimatorSummary: prev
+            },
+            priorEstimate,
+            publicationSummary: pub,
+            digitalEstimateRead: body
+          });
+          return {
+            ...prev,
+            publication: rebuilt.publication,
+            revision: {
+              ...prev.revision,
+              published: Number(rev) || prev.revision.published,
+              hasNewerApprovedRevision:
+                rev != null &&
+                estimateRevision != null &&
+                estimateRevision > Number(rev) &&
+                measurementsApproved
+            }
+          };
+        });
+      } catch {
+        /* non-fatal */
+      }
+    },
+    [authToken, estimateRevision, measurementsApproved, priorEstimate]
   );
 
   const refreshFromTakeoffWithRetry = useCallback(
@@ -460,7 +665,7 @@ export default function AiEstimatorWorkspace({
           );
         }
 
-        applyEstimateView(view);
+        applyEstimateView(view, { prior: priorEstimate });
         handoffSucceededRef.current = true;
         setEditingRevision(false);
         setMeasurementsApproved(true);
@@ -480,6 +685,7 @@ export default function AiEstimatorWorkspace({
       authToken,
       caseId,
       estimateId,
+      priorEstimate,
       refreshFromTakeoffWithRetry,
       takeoffJobId
     ]
@@ -554,6 +760,7 @@ export default function AiEstimatorWorkspace({
             ? crypto.randomUUID()
             : `ai-ws-pub-${Date.now()}`
         );
+        await refreshPublicationActivity(estimateId);
       } else {
         setPublishError("The Digital Estimate could not be published.");
       }
@@ -597,10 +804,13 @@ export default function AiEstimatorWorkspace({
       )) as {
         estimate?: Record<string, unknown>;
         reused?: boolean;
+        previousRevisionSummary?: Record<string, unknown> | null;
+        priorEstimate?: Record<string, unknown> | null;
       };
       const next = body.estimate;
+      const prior = body.priorEstimate || null;
       if (next) {
-        applyEstimateView(next);
+        applyEstimateView(next, { prior });
       }
       handoffSucceededRef.current = false;
       setMeasurementsApproved(false);
@@ -621,19 +831,11 @@ export default function AiEstimatorWorkspace({
     void completeApprovalHandoff({ reviewStatus: "approved" });
   }
 
-  const eligible = activeReview ? activeReview.eligible : Boolean(estimateId);
-  const publishRevised = shouldOfferPublishRevised({
-    publishedRevision,
-    estimateRevision,
-    measurementsApproved
-  });
-  const publishLabel = publishRevised
-    ? "Publish Revised Estimate"
-    : "Publish Digital Estimate";
-
   const revisionBanner =
     editingRevision && estimateRevision != null
-      ? `Editing measurement revision R${estimateRevision}`
+      ? publishedRevision != null
+        ? `Editing measurement revision R${estimateRevision} · Based on published revision R${publishedRevision}`
+        : `Editing measurement revision R${estimateRevision}`
       : null;
 
   const headerNode = header ? (
@@ -643,6 +845,7 @@ export default function AiEstimatorWorkspace({
       onViewPlan={header.onViewPlan}
       onBackToQueue={header.onBackToQueue}
       revisionBanner={revisionBanner || header.revisionBanner}
+      draftSaveStatus={header.draftSaveStatus || null}
     />
   ) : revisionBanner ? (
     <div className="eq-ai-revision-banner" data-testid="eq-ai-revision-banner" role="status">
@@ -656,6 +859,16 @@ export default function AiEstimatorWorkspace({
     stage === "revision_draft" ||
     stage === "approving";
 
+  const publishRevised = shouldOfferPublishRevised({
+    publishedRevision,
+    estimateRevision,
+    measurementsApproved
+  });
+  const publishLabel = publishRevised
+    ? "Publish Revised Estimate"
+    : "Publish Digital Estimate";
+  const eligible = activeReview ? activeReview.eligible : Boolean(estimateId);
+
   return (
     <section className="eq-ai-estimator-workspace" data-testid="eq-ai-estimator-workspace">
       {headerNode}
@@ -667,12 +880,23 @@ export default function AiEstimatorWorkspace({
       ) : null}
 
       {showTakeoff ? (
-        <div data-testid="eq-ai-takeoff-surface">
-          <p className="eq-footnote" data-testid="eq-takeoff-first-hint">
-            Review and correct AI measurements in Takeoff Review below. Save draft, then approve
-            measurements to build the verified estimate. Customer material and product choices happen
-            in the Digital Estimate link after publish.
-          </p>
+        <div className="eq-ai-takeoff-layout" data-testid="eq-ai-takeoff-surface">
+          <div className="eq-ai-takeoff-layout__intro">
+            <h2 className="eq-ai-section-title" data-testid="eq-ai-takeoff-review-heading">
+              {stage === "revision_draft" ? "AI Takeoff Review — revision" : "AI Takeoff Review"}
+            </h2>
+            <p className="eq-footnote" data-testid="eq-takeoff-first-hint">
+              Review and correct AI measurements in Takeoff Review below. Use Save Draft, then
+              Approve Measurements to build the verified estimate. Customer material and product
+              choices happen in the Digital Estimate link after publish.
+            </p>
+          </div>
+          {stage === "revision_draft" ? (
+            <MeasurementRevisionComparison
+              comparison={aiSummary?.comparison || null}
+              dirtyLocal={false}
+            />
+          ) : null}
           {handoffError ? (
             <div className="eq-state eq-state--error" role="alert" data-testid="eq-ai-handoff-error">
               <strong>{handoffError}</strong>
@@ -722,18 +946,23 @@ export default function AiEstimatorWorkspace({
 
       {stage === "published" && customerUrl ? (
         <PublishedEstimateCard
-          summary={summary}
+          aiSummary={aiSummary}
           estimateRevision={estimateRevision}
+          publishedRevision={publishedRevision}
           customerUrl={customerUrl}
           onEdit={() => void editMeasurements()}
           onCopy={() => void copyLink()}
+          showPublishRevised={publishRevised}
+          onPublishRevised={() => void publish()}
+          publishBusy={publishBusy}
         />
       ) : null}
 
       {(stage === "approved" || stage === "publishing") && measurementsApproved ? (
         <ApprovedMeasurementsCard
-          summary={summary}
+          aiSummary={aiSummary}
           estimateRevision={estimateRevision}
+          publishedRevision={publishedRevision}
           activeReview={activeReview}
           publishBusy={publishBusy}
           publishError={publishError}

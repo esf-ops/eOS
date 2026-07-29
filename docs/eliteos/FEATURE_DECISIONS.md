@@ -2853,3 +2853,14 @@
 | **Protected path** | Shared Inbox → Takeoff → approval handoff → v4 calculate → simplified-publish (interactive envelope) → public configure — contracts locked in `aiEstimatorGoldenPath.contract.test.mjs`. |
 | **SQL** | None. |
 | **Tests** | Golden-path lock, stage derivation, openMeasurementRevision, workspace tree, acceptance e2e (initial + revision). |
+
+### 198. AI estimator operational depth (derived summary + verification surfaces) (2026-07-28)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-28 · `fix/consolidate-ai-estimator-workflow` |
+| **Decision** | Keep the single-stage AI workspace. Add a derived `estimate.aiEstimatorSummary` read model (no SQL / no duplicate persistence) and display-only verification components: room-by-room scope, typed openings, customer-safe starting price groups, publication activity from existing safe publication summary, and R1↔R2 measurement comparison. Draft/revision continue to mount the real Takeoff Review iframe (`consolidated=1`). Cutout regression proves one kitchen sink → one $200 charge and one vanity/bar → one $100 charge in the customer-impact total; duplicate labels on the public Digital Estimate (if any) are treated as display grouping until a calculator double-charge is proven. |
+| **Why** | Consolidation removed competing tabs but left approved/published cards too shallow for real estimating work. Depth belongs inside the existing stages, not new workflow branches. |
+| **SQL** | None. |
+| **Impacted** | `studioAiEstimatorSummary.mjs`, `studioEstimateService.safeEstimateView`, `AiEstimatorWorkspace.tsx`, `AiEstimatorReadViews.tsx`. |
+| **Revisit trigger** | Public DE shows both a configuration sink-cutout option line and a fabrication Cutouts line that double the customer total; then fix calculator or publish snapshot grouping with a proven defect. |

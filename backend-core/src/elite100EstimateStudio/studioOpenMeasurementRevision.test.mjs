@@ -72,6 +72,8 @@ assert.equal(opened.estimate.revision, 2);
 assert.equal(opened.estimate.status, STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE);
 assert.equal(opened.estimate.takeoffJobId, TAKEOFF);
 assert.equal(opened.estimate.scope.rooms[0].pieces[0].lengthIn, 96, "preload prior dimensions");
+assert.ok(opened.priorEstimate, "priorEstimate snapshot returned");
+assert.ok(opened.estimate.aiEstimatorSummary, "aiEstimatorSummary on revision draft");
 
 const prior = await repo.getById(ORG, created.id);
 assert.equal(prior.status, STUDIO_ESTIMATE_STATUSES.SUPERSEDED, "R1 preserved as superseded");

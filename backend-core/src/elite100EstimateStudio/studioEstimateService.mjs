@@ -56,6 +56,7 @@ import {
   deriveActiveReviewPublishReadiness,
   isActiveSimplifiedEstimate
 } from "./studioActiveReviewReadiness.mjs";
+import { buildAiEstimatorSummary } from "./studioAiEstimatorSummary.mjs";
 
 /**
  * Structured mutation log — no PII, no scope dumps, no tokens.
@@ -653,6 +654,13 @@ export function createStudioEstimateService(deps = {}) {
     base.activeReview = base.isActiveSimplifiedEstimate
       ? deriveActiveReviewPublishReadiness({ scope: base.scope, calculation: base.calculation })
       : null;
+    // Derived display-only read model for AiEstimatorWorkspace (no persistence).
+    base.aiEstimatorSummary = buildAiEstimatorSummary({
+      estimate: base,
+      priorEstimate: extras.priorEstimate || null,
+      publicationSummary: extras.publication || extras.publicationSummary || null,
+      digitalEstimateRead: extras.digitalEstimateRead || null
+    });
     return base;
   }
 
@@ -1681,6 +1689,22 @@ export function createStudioEstimateService(deps = {}) {
           previousRevisionSummary: null
         };
       }
+      const priorSnapshot = {
+        id: row.id,
+        revision: row.revision,
+        scope: row.scope,
+        calculation: row.calculationSnapshot
+          ? {
+              totals: row.calculationSnapshot.totals,
+              scopeBilling: row.calculationSnapshot.scopeBilling || null,
+              fabrication: row.calculationSnapshot.fabrication,
+              reviewSummary: row.calculationSnapshot.reviewSummary || null,
+              warnings: row.calculationSnapshot.warnings,
+              unresolvedItems: row.calculationSnapshot.unresolvedItems
+            }
+          : null,
+        approval: row.approval
+      };
       const next = await revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
         status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
         scope: row.scope,
@@ -1688,11 +1712,17 @@ export function createStudioEstimateService(deps = {}) {
         sourceTakeoffResultId: row.sourceTakeoffResultId,
         staleReason: "Measurement revision opened from approved estimate"
       });
+      const prevSummary = next.__previousRevisionSummary || null;
+      delete next.__previousRevisionSummary;
       return {
         ok: true,
         reused: false,
-        estimate: safeEstimateView(next),
-        previousRevisionSummary: next.__previousRevisionSummary || null
+        estimate: safeEstimateView(next, {
+          previousRevisionSummary: prevSummary,
+          priorEstimate: priorSnapshot
+        }),
+        previousRevisionSummary: prevSummary,
+        priorEstimate: priorSnapshot
       };
     }
   };
