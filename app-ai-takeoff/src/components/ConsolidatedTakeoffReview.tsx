@@ -694,6 +694,48 @@ export default function ConsolidatedTakeoffReview() {
     [markWorksheetDirty, urlWorkspace.mode]
   );
 
+  // Estimate Options → Takeoff: add left/right waterfall on first eligible island.
+  useEffect(() => {
+    function onStudioMessage(ev: MessageEvent) {
+      const data = ev.data;
+      if (!data || typeof data !== "object") return;
+      if (data.type !== "STUDIO_REQUEST_ADD_ISLAND_WATERFALL") return;
+      if (urlWorkspace.mode === "readonly") return;
+      const side = data.side === "right" ? "right" : "left";
+      const next = structuredClone(draftRef.current || createEmptyManualTakeoffDraft());
+      let added = false;
+      for (const r of next.rooms || []) {
+        for (const a of r.areas || []) {
+          for (const piece of a.runs || []) {
+            if (!/island/i.test(String(piece.label || ""))) continue;
+            const list = Array.isArray(piece.waterfallPanels) ? piece.waterfallPanels : [];
+            if (list.some((p: any) => p.side === side)) continue;
+            list.push({
+              id: `wf-${piece.id}-${side}`,
+              side,
+              panelWidthIn: Number(piece.depthIn) || 36,
+              panelHeightIn: 36,
+              quantity: 1,
+              included: true
+            });
+            piece.waterfallPanels = list;
+            piece.waterfallSegmentLengthsIn = {
+              ...(piece.waterfallSegmentLengthsIn || {}),
+              [side]: 36
+            };
+            added = true;
+            break;
+          }
+          if (added) break;
+        }
+        if (added) break;
+      }
+      if (added) updateDraft(next);
+    }
+    window.addEventListener("message", onStudioMessage);
+    return () => window.removeEventListener("message", onStudioMessage);
+  }, [updateDraft, urlWorkspace.mode]);
+
   /**
    * Save draft is the sole normal correction writer.
    * Double-click is coalesced by saveInFlightRef.

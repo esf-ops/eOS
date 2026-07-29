@@ -1224,6 +1224,31 @@ export default function AiEstimatorWorkspace({
         error={commercialError}
         dirty={commercialDirty}
         measurementsApproved={measurementsApproved}
+        saveStatus={revisionSaveStatus}
+        draftExactTotal={
+          (aiSummary?.pricing?.adjustedExactTotal as number | null | undefined) ??
+          (commercialConfig?.estimateAdjustment as { adjustedExactTotal?: number } | undefined)
+            ?.adjustedExactTotal ??
+          null
+        }
+        customerDisplayTotal={
+          (aiSummary?.pricing?.customerDisplayTotal as number | null | undefined) ??
+          (commercialConfig?.estimateAdjustment as { customerDisplayTotal?: number } | undefined)
+            ?.customerDisplayTotal ??
+          null
+        }
+        onRequestAddIslandWaterfall={(side) => {
+          const win = takeoffFrameRef.current?.contentWindow;
+          if (!win) return;
+          try {
+            win.postMessage(
+              { type: "STUDIO_REQUEST_ADD_ISLAND_WATERFALL", side },
+              "*"
+            );
+          } catch {
+            /* cross-origin / unavailable */
+          }
+        }}
         onDirtyChange={(d, payload) => {
           setCommercialDirty(d);
           if (d) {

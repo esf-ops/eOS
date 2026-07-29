@@ -336,7 +336,7 @@ function buildCommercial(authority, editable, waterfalls = [], scopeDetection = 
       active: authority.percentage > 0,
       percentage: authority.percentage,
       reason: "Spahn & Rose account pricing",
-      source: "manual",
+      source: "trusted_account",
       verifiedBaseExact: authority.baseExactTotal,
       eligibleAdditionalChargesExact: round2(
         (authority.eligibleBasisExact || 0) - (authority.baseExactTotal || 0)
@@ -388,6 +388,7 @@ function buildCommercial(authority, editable, waterfalls = [], scopeDetection = 
       vanityDetected: true,
       vanityApproved: true,
       islandDetected: true,
+      islandLabel: "Kitchen Island",
       waterfallGeometryPresent: waterfalls.length > 0,
       waterfallApproved: waterfalls.length > 0
     },
@@ -464,6 +465,7 @@ export function buildScenario(name) {
             applyProgram: false,
             useStandardPricing: true,
             selectedProgram: null,
+            selectedProgramLabel: null,
             physicalFacts: {
               widthIn: 37,
               depthIn: 22.5,
@@ -473,14 +475,21 @@ export function buildScenario(name) {
               backsplash: "37 × 4″",
               sameTrip: true
             },
-            eligible: null,
-            eligibilityReasons: [],
-            serverPrice: null,
+            eligible: true,
+            eligibilityReasons: ["37″ × 22.5″ single bowl", "Same trip confirmed in Takeoff"],
+            tripConfirmed: true,
+            sameTripConfirmed: true,
+            serverPrice: 1850,
             warnings: [],
             permittedMaterials: [],
             permittedSinkUpgrades: [],
             permittedEdgeUpgrades: [],
-            includedScope: []
+            includedScope: [
+              "vanity top",
+              "included backsplash",
+              "vanity sink opening",
+              "included white oval sink"
+            ]
           }
         ],
         waterfalls: [],
@@ -488,6 +497,7 @@ export function buildScenario(name) {
           vanityDetected: true,
           vanityApproved: false,
           islandDetected: true,
+          islandLabel: "Kitchen Island",
           waterfallGeometryPresent: false,
           waterfallApproved: false
         },
@@ -528,29 +538,32 @@ export function buildScenario(name) {
     };
   }
 
-  const commercial = buildCommercial(authority, false);
   const aiSummary = buildAiSummary(geo, authority);
 
   if (name === "approved" || name === "commercial") {
+    const editableCommercial = name === "commercial";
     return {
       name,
-      stage: "approved",
+      stage: editableCommercial ? "revision_draft" : "approved",
       measurementsApproved: true,
       estimateRevision: 1,
       publishedRevision: null,
       customerUrl: null,
-      commercial,
+      commercial: buildCommercial(authority, editableCommercial),
       aiSummary,
       authority,
-      takeoffMode: "readonly",
-      takeoffQuery:
-        "localReview=1&mode=readonly&approvalStatus=approved&takeoffJobId=local-review-takeoff&revisionNumber=1",
+      takeoffMode: editableCommercial ? "editable" : "readonly",
+      takeoffQuery: editableCommercial
+        ? "localReview=1&mode=editable&takeoffJobId=local-review-takeoff&revisionNumber=1"
+        : "localReview=1&mode=readonly&approvalStatus=approved&takeoffJobId=local-review-takeoff&revisionNumber=1",
       revisions: [
         {
           revision: 1,
-          status: "approved",
+          status: editableCommercial ? "draft" : "approved",
           createdAt: formatEstimatorDate("2026-07-29T13:00:00.000Z"),
-          approvedAt: formatEstimatorDate("2026-07-29T14:00:00.000Z"),
+          approvedAt: editableCommercial
+            ? null
+            : formatEstimatorDate("2026-07-29T14:00:00.000Z"),
           countertopSf: geo.countertopSf,
           backsplashSf: BACKSPLASH_SF,
           edgeLf: EDGE_LF,
@@ -565,7 +578,7 @@ export function buildScenario(name) {
         }
       ],
       comparison: null,
-      publishEligible: true
+      publishEligible: !editableCommercial
     };
   }
 
@@ -590,6 +603,9 @@ export function buildScenario(name) {
       publishedRevision: 1,
       aiSummary: { ...base.aiSummary, publication },
       commercial: { ...base.commercial, editable: false, published: true },
+      takeoffMode: "readonly",
+      takeoffQuery:
+        "localReview=1&mode=readonly&approvalStatus=approved&takeoffJobId=local-review-takeoff&revisionNumber=1",
       revisions: [
         {
           ...base.revisions[0],

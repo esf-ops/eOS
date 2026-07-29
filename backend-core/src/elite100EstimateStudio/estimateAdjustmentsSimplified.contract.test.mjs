@@ -20,21 +20,20 @@ console.log("\nestimateAdjustmentsSimplified.contract.test.mjs\n");
     ),
     "utf8"
   );
-  assert.match(commercial, /Additional Lines|Estimate Adjustments/);
-  assert.match(commercial, /Additional charges and credits|Lines/);
+  assert.match(commercial, /Estimate Options/);
+  assert.match(commercial, /Additional charges and credits/);
   assert.match(commercial, /Account adjustment/);
-  assert.match(commercial, /View calculation details/);
+  assert.match(commercial, /No account adjustment applied|eq-account-adjustment-impact/);
   assert.match(commercial, /Add item|Add line/);
   assert.match(commercial, /Add Tear Out/);
   assert.equal(commercial.includes("Add Crane $350"), false);
   assert.equal(commercial.includes('data-testid="eq-add-crane"'), false);
-  assert.match(commercial, /Needs one missing decision/);
-  assert.match(commercial, /<select[\s\S]*data-testid="eq-vanity-package"/);
+  assert.match(commercial, /Same-trip status needs confirmation|Eligible program|Apply Vanity Program/);
+  assert.match(commercial, /data-testid="eq-vanity-package"/);
   assert.equal(commercial.includes("Eligibility: Review required"), false);
-  assert.equal(commercial.includes("Add Crane $350"), false);
-  assert.equal(commercial.includes('data-testid="eq-add-crane"'), false);
-  assert.match(commercial, /No waterfalls are included\. Add one from an island in Takeoff\./);
-  console.log("ok: Estimate Adjustments labels + no Crane preset + vanity select");
+  assert.equal(commercial.includes("Needs one missing decision"), false);
+  assert.match(commercial, /Add left waterfall|No waterfall included/);
+  console.log("ok: Estimate Options labels + no Crane preset + vanity guided apply");
 }
 
 {
@@ -58,6 +57,7 @@ console.log("\nestimateAdjustmentsSimplified.contract.test.mjs\n");
   assert.match(takeoff, /ctr-add-right-waterfall/);
   assert.match(takeoff, /Add left waterfall/);
   assert.match(takeoff, /Add right waterfall/);
+  assert.match(takeoff, /STUDIO_REQUEST_ADD_ISLAND_WATERFALL/);
   console.log("ok: contextual island waterfall actions");
 }
 
