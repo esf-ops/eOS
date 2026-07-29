@@ -4,9 +4,25 @@
  * summary is only a final compatibility fallback.
  */
 
+import { isBacksplashPiece } from "../../../backend-core/src/elite100EstimateStudio/estimatorPieceClassification.mjs";
+
 function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function pieceSf(piece) {
+  const p = piece && typeof piece === "object" ? piece : {};
+  if (num(p.sqft) > 0) return round2(num(p.sqft));
+  const len = num(p.lengthIn);
+  const depth = num(p.depthIn);
+  const qty = num(p.quantity) || 1;
+  if (len > 0 && depth > 0) return round2((len * depth * qty) / 144);
+  return 0;
 }
 
 function scopeOf(est) {
@@ -22,6 +38,8 @@ function calcOf(est) {
 }
 
 /**
+ * Countertop SF for display — never includes splash/fhb pieces.
+ * Prefers calculator measuredCountertopSf when present; otherwise sums counter pieces.
  * @param {Record<string, unknown>} est
  * @returns {number}
  */
@@ -30,10 +48,28 @@ export function measuredCountertopSfFromEstimate(est) {
   const billing =
     calc.scopeBilling && typeof calc.scopeBilling === "object" ? calc.scopeBilling : {};
   const fromBilling = num(billing.measuredCountertopSf) || num(billing.billableCountertopSf);
-  if (fromBilling > 0) return fromBilling;
+  // Prefer billing only when piece-derived total agrees within 0.02, or pieces are empty.
   const rooms = Array.isArray(scopeOf(est).rooms) ? scopeOf(est).rooms : [];
+  const fromPieces = round2(
+    rooms.reduce((s, r) => {
+      const room = r && typeof r === "object" ? r : {};
+      if (room.included === false) return s;
+      const pieces = Array.isArray(room.pieces) ? room.pieces : [];
+      return (
+        s +
+        pieces
+          .filter((p) => p && p.included !== false && !isBacksplashPiece(p))
+          .reduce((ps, p) => ps + pieceSf(p), 0)
+      );
+    }, 0)
+  );
+  if (fromPieces > 0) return fromPieces;
+  if (fromBilling > 0) return fromBilling;
+  // Last resort: room.countertopSqft may historically include splash — avoid when pieces exist.
   return rooms.reduce((s, r) => {
     const room = r && typeof r === "object" ? r : {};
+    const pieces = Array.isArray(room.pieces) ? room.pieces : [];
+    if (pieces.length) return s;
     return s + (num(room.countertopSqft) || 0);
   }, 0);
 }

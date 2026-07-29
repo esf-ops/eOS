@@ -29,6 +29,7 @@ import {
   listTakeoffJobs,
   saveTakeoffResult,
   saveTakeoffCorrection,
+  reopenTakeoffJobForMeasurementRevision,
   approveTakeoffJob,
   approveAndBuildEstimate,
   getLatestTakeoffResult,
@@ -1336,35 +1337,60 @@ function makeMockSupabase({
 
   const fixture = buildSpec73Fixture();
   fixture.rooms[0].areas[0].runs[0].notes = "Adjusted island run depth";
+  let blocked = null;
+  try {
+    await saveTakeoffCorrection({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+      takeoffResult: fixture,
+      correctionNotes: "Adjusted island run depth",
+      baseResultId: RESULT_ID,
+    });
+  } catch (e) {
+    blocked = e;
+  }
+  assert.ok(blocked, "approved Takeoff must reject correction");
+  assert.equal(blocked.code, "takeoff_already_approved");
+  assert.equal(blocked.statusCode, 409);
+  assert.equal(tableData.quote_takeoff_jobs[0].review_status, "approved");
+  assert.equal(capturedInserts.length, 0, "no correction row when approved");
+  console.log("ok: saveTakeoffCorrection — approved job rejected (takeoff_already_approved)");
+}
+
+{
+  const capturedInserts = [];
+  const { supabase, tableData } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow({ review_status: "approved" }),
+    resultRows: [makeResultRow()],
+    capturedInserts,
+  });
+  const reopen = await reopenTakeoffJobForMeasurementRevision({
+    supabase,
+    organizationId: ORG_ID,
+    takeoffJobId: JOB_ID,
+    userId: USER_ID
+  });
+  assert.equal(reopen.ok, true);
+  assert.equal(reopen.alreadyEditable, false);
+  assert.equal(tableData.quote_takeoff_jobs[0].review_status, "needs_review");
+
+  const fixture = buildSpec73Fixture();
+  fixture.rooms[0].areas[0].runs[0].notes = "Revision draft edit";
   const result = await saveTakeoffCorrection({
     supabase,
     organizationId: ORG_ID,
     userId: USER_ID,
     takeoffJobId: JOB_ID,
     takeoffResult: fixture,
-    correctionNotes: "Adjusted island run depth",
+    correctionNotes: "Revision draft edit",
     baseResultId: RESULT_ID,
   });
-
   assert.equal(result.ok, true);
-  assert.equal(result.unchanged, false);
-  assert.ok(result.correctionId, "correctionId returned");
-  assert.equal(result.reviewStatus, "needs_review", "correction resets review status");
-  assert.equal(tableData.quote_takeoff_jobs[0].review_status, "needs_review");
-
-  const correctionInsert = capturedInserts.find(
-    (i) =>
-      i.table === "quote_takeoff_results" &&
-      Array.isArray(i.rows[0]?.raw_ai_result_json?._corrections) &&
-      i.rows[0].raw_ai_result_json._corrections.length === 1
-  );
-  assert.ok(correctionInsert, "correction row inserted with _corrections audit");
-  assert.equal(
-    correctionInsert.rows[0].raw_ai_result_json._corrections[0].notes,
-    "Adjusted island run depth"
-  );
-  assert.ok(!("storagePath" in result), "storage_path not exposed");
-  console.log("ok: saveTakeoffCorrection — audit metadata stored");
+  assert.equal(result.reviewStatus, "needs_review");
+  console.log("ok: saveTakeoffCorrection — allowed after reopenTakeoffJobForMeasurementRevision");
 }
 
 // Explicit per-run backsplash booleans round-trip through correction storage.

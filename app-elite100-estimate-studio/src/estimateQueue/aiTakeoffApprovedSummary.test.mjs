@@ -85,7 +85,8 @@ function recoveryEstimate() {
 {
   const est = recoveryEstimate();
   assert.equal(estimateHasMeasuredScope(est), true);
-  assert.equal(measuredCountertopSfFromEstimate(est), 48.45);
+  // Piece-derived CT (never trust inflated room.countertopSqft when pieces exist)
+  assert.equal(measuredCountertopSfFromEstimate(est), 36.92);
   assert.equal(measuredBacksplashSfFromEstimate(est, null), 5.79);
   assert.equal(measuredEdgeLfFromEstimate(est, null), 26.25);
   assert.equal(openingsFromEstimate(est, null).total, 4);
@@ -93,7 +94,7 @@ function recoveryEstimate() {
   // No consolidatedSummary / pending — polling recovery path.
   const summary = buildApprovalSummaryFromEstimate(est, null);
   assert.ok(summary);
-  assert.equal(summary.countertopSf, 48.45);
+  assert.equal(summary.countertopSf, 36.92);
   assert.equal(summary.backsplashSf, 5.79);
   assert.equal(summary.edgeLf, 26.25);
   assert.equal(
@@ -111,14 +112,14 @@ function recoveryEstimate() {
   );
 
   // Card display strings match the required presentation.
-  assert.equal(`${summary.countertopSf.toFixed(2)} SF`, "48.45 SF");
+  assert.equal(`${summary.countertopSf.toFixed(2)} SF`, "36.92 SF");
   assert.equal(`${summary.backsplashSf.toFixed(2)} SF`, "5.79 SF");
   assert.equal(`${summary.edgeLf.toFixed(2)} LF`, "26.25 LF");
   assert.equal(
     `$${Number(summary.customerDisplayTotal).toFixed(2)}`,
     "$4130.00"
   );
-  console.log("ok: 1 polling recovery maps Scope → 48.45 / 5.79 / 26.25 / 4 / $4130");
+  console.log("ok: 1 polling recovery maps Scope pieces → 36.92 / 5.79 / 26.25 / 4 / $4130");
 }
 
 {
@@ -164,18 +165,18 @@ function recoveryEstimate() {
 }
 
 {
-  // Prefer calculation.scopeBilling when present.
+  // Piece-derived countertop wins over scopeBilling when pieces exist (avoids inflated CT).
   const est = recoveryEstimate();
   est.calculation.scopeBilling = {
     measuredCountertopSf: 50,
     backsplashSf: 6,
     edgeLf: 30
   };
-  assert.equal(measuredCountertopSfFromEstimate(est), 50);
+  assert.equal(measuredCountertopSfFromEstimate(est), 36.92);
   assert.equal(measuredBacksplashSfFromEstimate(est, null), 6);
   // fabrication.edge.finalLf still wins over billing.edgeLf when present.
   assert.equal(measuredEdgeLfFromEstimate(est, null), 26.25);
-  console.log("ok: 3 calculation scopeBilling preferred when present");
+  console.log("ok: 3 piece-derived CT preferred over inflated billing when pieces exist");
 }
 
 {

@@ -5,6 +5,8 @@
  */
 
 import { dedupeCustomerSafeCutoutLines } from "./customerSafeCutoutPresentation.mjs";
+import { isBacksplashPiece } from "./estimatorPieceClassification.mjs";
+import { partitionEstimatorWarnings } from "./estimatorWarningSafety.mjs";
 
 function num(v) {
   const n = Number(v);
@@ -61,6 +63,8 @@ function openingsFromRoom(room) {
 
 /**
  * Build room-by-room verified scope from estimate.scope (server authority).
+ * countertopSf = included counter/vanity tops only (never splash/fhb).
+ * backsplashSf = included splash/fhb only.
  * @param {object|null|undefined} estimate
  */
 export function buildVerifiedRoomsFromEstimate(estimate) {
@@ -69,7 +73,8 @@ export function buildVerifiedRoomsFromEstimate(estimate) {
   const built = rooms
     .filter((r) => r && r.included !== false)
     .map((room) => {
-      const pieces = (Array.isArray(room.pieces) ? room.pieces : [])
+      const rawPieces = Array.isArray(room.pieces) ? room.pieces : [];
+      const pieces = rawPieces
         .filter((p) => p && p.included !== false)
         .map((p) => ({
           id: str(p.id) || null,
@@ -79,20 +84,22 @@ export function buildVerifiedRoomsFromEstimate(estimate) {
           depthIn: num(p.depthIn) || null,
           quantity: num(p.quantity) || 1,
           squareFeet: pieceSf(p),
-          included: p.included !== false
+          included: p.included !== false,
+          isBacksplash: isBacksplashPiece(p)
         }));
-      const countertopSf = round2(
-        num(room.countertopSqft) ||
-          pieces
-            .filter((p) => !/backsplash/i.test(p.type) && !/backsplash/i.test(p.name))
-            .reduce((s, p) => s + p.squareFeet, 0)
-      );
-      const backsplashSf = round2(num(room.backsplashSqft));
+      const counterPieces = pieces.filter((p) => !p.isBacksplash);
+      const splashPieces = pieces.filter((p) => p.isBacksplash);
+      // Always derive countertop from counter pieces — never trust room.countertopSqft,
+      // which historically summed splash/fhb into the countertop field.
+      const countertopSf = round2(counterPieces.reduce((s, p) => s + p.squareFeet, 0));
+      const fromSplashPieces = round2(splashPieces.reduce((s, p) => s + p.squareFeet, 0));
+      const roomBacksplashField = round2(num(room.backsplashSqft));
+      const backsplashSf = roomBacksplashField > 0 ? roomBacksplashField : fromSplashPieces;
       const exposedEdgeLf = round2(
         num(room.edgeEligibleLinearFeet) ||
           num(room.finishedEdgeLf) ||
           pieces.reduce((s, p) => {
-            const fe = room.pieces?.find((x) => str(x.id) === p.id)?.finishedEdge;
+            const fe = rawPieces.find((x) => str(x.id) === p.id)?.finishedEdge;
             return s + (num(fe?.totalFinishedEdgeLengthIn) || num(fe?.frontEdgeLengthIn) || 0) / 12;
           }, 0)
       );
@@ -101,6 +108,7 @@ export function buildVerifiedRoomsFromEstimate(estimate) {
         name: str(room.name) || "Room",
         countertopSf,
         backsplashSf,
+        totalBillableStoneSf: round2(countertopSf + backsplashSf),
         exposedEdgeLf: round2(exposedEdgeLf),
         openingsByType: openingsFromRoom(room),
         pieces
@@ -397,6 +405,7 @@ export function buildAiEstimatorSummary(args = {}) {
 
   const unresolved = Array.isArray(calc.unresolvedItems) ? calc.unresolvedItems : [];
   const warnings = Array.isArray(calc.warnings) ? calc.warnings : [];
+  const { estimatorWarnings, internalDiagnostics } = partitionEstimatorWarnings(warnings);
   const activeReview = estimate.activeReview || null;
 
   const comparison =
@@ -416,6 +425,7 @@ export function buildAiEstimatorSummary(args = {}) {
     measurements: {
       countertopSf,
       backsplashSf,
+      totalBillableStoneSf: round2(countertopSf + backsplashSf),
       exposedEdgeLf,
       openingsByType: openings
     },
@@ -427,10 +437,9 @@ export function buildAiEstimatorSummary(args = {}) {
         code: str(u?.code) || null,
         message: str(u?.message) || "Unresolved item"
       })),
-      warnings: warnings.map((w) => ({
-        code: str(w?.code) || null,
-        message: str(typeof w === "string" ? w : w?.message) || "Warning"
-      })),
+      // Normal estimator UI — estimatorWarnings only (never raw adapter diagnostics).
+      warnings: estimatorWarnings,
+      estimatorWarnings,
       activeReviewBlockers: Array.isArray(activeReview?.blockers)
         ? activeReview.blockers.map((b) => ({
             code: str(b?.code) || null,
@@ -438,6 +447,8 @@ export function buildAiEstimatorSummary(args = {}) {
           }))
         : []
     },
+    // Internal diagnostics stay off the normal UI path (tests/logs only).
+    internalDiagnostics,
     publication: {
       isPublished: Boolean(pub?.active || pub?.customerUrl || deRead?.activePublication),
       publishedAt: pub?.publishedAt || deRead?.activePublication?.publishedAt || null,

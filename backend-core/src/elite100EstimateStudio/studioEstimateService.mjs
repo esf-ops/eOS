@@ -2,7 +2,7 @@
  * Elite 100 Studio estimate service — Takeoff gate, scope, calculate, approve.
  */
 import { createHash } from "node:crypto";
-import { getLatestTakeoffResult, getTakeoffWorkspace } from "../takeoff/takeoffWorkspaceService.mjs";
+import { getLatestTakeoffResult, getTakeoffWorkspace, reopenTakeoffJobForMeasurementRevision } from "../takeoff/takeoffWorkspaceService.mjs";
 import {
   buildTakeoffImportPayload,
   takeoffImportPayloadToRoomDrafts
@@ -536,6 +536,21 @@ export function createStudioEstimateService(deps = {}) {
       const supabase = deps.getSupabase?.();
       if (!supabase) return null;
       return getLatestTakeoffResult({ supabase, organizationId, takeoffJobId });
+    });
+
+  const reopenTakeoffForRevision =
+    deps.reopenTakeoffForRevision ||
+    (async ({ organizationId, takeoffJobId, actorUserId }) => {
+      const supabase = deps.getSupabase?.();
+      if (!supabase || !takeoffJobId) {
+        return { ok: true, skipped: true };
+      }
+      return reopenTakeoffJobForMeasurementRevision({
+        supabase,
+        organizationId,
+        takeoffJobId,
+        userId: actorUserId ?? null
+      });
     });
 
   // pricingVersion 4 (elite100-room-pricing-v1) is authoritative for every new
@@ -1742,6 +1757,14 @@ export function createStudioEstimateService(deps = {}) {
           staleReason: "Measurement revision opened from approved estimate"
         });
         delete next.__previousRevisionSummary;
+      }
+
+      if (next?.takeoffJobId) {
+        await reopenTakeoffForRevision({
+          organizationId,
+          takeoffJobId: next.takeoffJobId,
+          actorUserId
+        });
       }
 
       return {

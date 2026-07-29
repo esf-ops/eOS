@@ -2874,3 +2874,14 @@
 | **Why** | Premature supersede at Edit Measurements broke the “R1 stays live until R2 publish” product contract. Duplicate cutout labels were display aliases, not double charges. |
 | **SQL** | None. |
 | **Impacted** | `createSiblingRevisionFrom` / `supersedeOlderRevisionsInFamily`, `openMeasurementRevision`, simplified-publish post-success supersede, `customerSafeCutoutPresentation.mjs`, customer-safe room lineItems, DE projection dedupe. |
+
+### 200. Persistent AI Takeoff Review + countertop SF semantics (2026-07-29)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-29 · `hotfix/persistent-ai-takeoff-review` |
+| **Decision** | AI Takeoff Review stays mounted for every normal estimator stage (`editable` vs `readonly` mode). Approved/published stages show verified/publication cards **below** Takeoff — never replace it. `countertopSf` display totals exclude splash/fhb pieces; `backsplashSf` is splash-only; combined quantity is `totalBillableStoneSf` only when needed. Calculator adapter diagnostics (`opts.*`, internal room IDs, `qty-*` keys) are `internalDiagnostics` and must not appear in normal estimator UI warnings. Approved Takeoff cannot be mutated via save until Edit Measurements reopens the job (`reopenTakeoffJobForMeasurementRevision`). |
+| **Why** | Production after PR #102 unmounted Takeoff after approval, inflated “countertop SF” by including backsplash, and surfaced adapter plumbing as estimator warnings. |
+| **SQL** | None. |
+| **Impacted** | `AiEstimatorWorkspace.tsx`, `ConsolidatedTakeoffReview.tsx`, `studioAiEstimatorSummary.mjs`, `estimatorWarningSafety.mjs`, `takeoffWorkspaceService.saveTakeoffCorrection` / `reopenTakeoffJobForMeasurementRevision`, `openMeasurementRevision`. |
+| **Protected** | pricingVersion 4 formulas, material/tax/edge/waterfall/cutout rates, Vanity Program, trusted-account pricing, simplified-publish, public DE layout, historical v2/v3, SQL. |

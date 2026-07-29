@@ -1195,11 +1195,21 @@ button.linkish {
   font-size: 0.9rem;
   color: #8a5a00;
 }
-.eq-ai-sticky-actions {
-  position: sticky;
-  bottom: 0;
+.eq-ai-sticky-actions,
+.eq-ai-stage-actions {
+  position: static;
+  bottom: auto;
   padding-top: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 28%);
+  background: transparent;
+}
+.eq-ai-takeoff-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.eq-ai-persistent-takeoff {
+  margin-bottom: 16px;
 }
 .eq-ai-warnings {
   padding: 10px 12px;

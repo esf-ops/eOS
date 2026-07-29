@@ -1043,10 +1043,69 @@ export async function saveTakeoffResult({
 }
 
 /**
+ * Reopen an approved Takeoff job so Edit Measurements can mutate a new draft.
+ * Keeps prior approved result rows; only flips job review_status to needs_review.
+ * No-op when the job is already editable.
+ */
+export async function reopenTakeoffJobForMeasurementRevision({
+  supabase,
+  organizationId,
+  takeoffJobId,
+  userId = null
+}) {
+  if (!isUuid(organizationId)) {
+    throw workspaceError("organizationId must be a valid UUID");
+  }
+  if (!isUuid(takeoffJobId)) {
+    throw workspaceError("takeoffJobId must be a valid UUID");
+  }
+  const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  if (!jobRow) {
+    throw workspaceError("Takeoff job not found", 404);
+  }
+  const status = String(jobRow.review_status ?? "needs_review").toLowerCase();
+  if (status !== "approved") {
+    return {
+      ok: true,
+      alreadyEditable: true,
+      reviewStatus: jobRow.review_status ?? "needs_review"
+    };
+  }
+  const now = new Date().toISOString();
+  const priorSummary =
+    jobRow.result_summary && typeof jobRow.result_summary === "object"
+      ? jobRow.result_summary
+      : {};
+  const { error } = await supabase
+    .from("quote_takeoff_jobs")
+    .update({
+      review_status: "needs_review",
+      updated_at: now,
+      result_summary: {
+        ...priorSummary,
+        reviewStatus: "needs_review",
+        editableRevisionOpenedAt: now,
+        editableRevisionOpenedByUserId: userId ?? null,
+        priorApprovedAt: priorSummary.approvedAt ?? null,
+        priorApprovedByUserId: priorSummary.approvedByUserId ?? null
+      }
+    })
+    .eq("id", takeoffJobId)
+    .eq("organization_id", organizationId);
+  if (error) {
+    throw Object.assign(new Error(`Failed to reopen Takeoff for revision: ${error.message}`), {
+      statusCode: 503
+    });
+  }
+  return { ok: true, alreadyEditable: false, reviewStatus: "needs_review" };
+}
+
+/**
  * Save estimator corrections with an audit payload appended to result metadata.
  *
  * Inserts a new quote_takeoff_results row and resets job approval to needs_review.
  * Corrections are stored in raw_ai_result_json._corrections (no dedicated table).
+ * Approved jobs are rejected until reopenTakeoffJobForMeasurementRevision runs.
  *
  * @param {{ supabase: object, organizationId: string, userId: string|null, takeoffJobId: string, takeoffResult: object, correctionNotes?: string|null, baseResultId?: string|null }} params
  */
@@ -1081,6 +1140,16 @@ export async function saveTakeoffCorrection({
   const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
   if (!jobRow) {
     throw workspaceError("Takeoff job not found", 404);
+  }
+
+  // Approved Takeoff is immutable until Edit Measurements reopens an editable revision.
+  if (String(jobRow.review_status ?? "").toLowerCase() === "approved") {
+    const err = workspaceError(
+      "Approved Takeoff measurements cannot be changed. Open Edit Measurements to start a new editable revision.",
+      409
+    );
+    err.code = "takeoff_already_approved";
+    throw err;
   }
 
   let computed, validation, importPlan;
