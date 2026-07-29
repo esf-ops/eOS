@@ -1296,6 +1296,44 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
   );
 
   /**
+   * Idempotent editable draft acquisition — transparent fork from approved/published.
+   */
+  app.post(
+    "/api/elite100-estimate-studio/estimates/:estimateId/ensure-editable-draft",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await studioEstimateService.ensureEditableEstimateDraft({
+          organizationId,
+          estimateId: req.params.estimateId,
+          basedOnRevisionId: body.basedOnRevisionId || req.params.estimateId,
+          actorUserId: req.user?.id ?? null,
+          body
+        });
+        auditStudioEstimate("estimate.ensure_editable_draft", req, {
+          estimateId: req.params.estimateId,
+          nextEstimateId: result?.estimate?.id,
+          revision: result?.estimate?.revision,
+          reused: result?.reused,
+          created: result?.created
+        });
+        res.json(result);
+      } catch (e) {
+        logStudio("ensure editable draft failed", e, req);
+        const { status, body } = studioMutationErrorBody(
+          e,
+          "We couldn't start an editable draft. Your published estimate was not changed."
+        );
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  /**
    * Open measurement revision — preserves prior approved revision, returns new draft.
    */
   app.post(

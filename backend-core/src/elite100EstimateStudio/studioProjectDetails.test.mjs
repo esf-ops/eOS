@@ -215,7 +215,7 @@ console.log("ok: 1–2 display label + disallowed names");
       organizationId: ORG,
       estimateId: created.estimateId,
       actorUserId: ACTOR,
-      body: { scope: { projectName: "Acme Kitchen Remodel v2" } }
+      body: { forbidAutoFork: true, scope: { projectName: "Acme Kitchen Remodel v2" } }
     });
   } catch (e) {
     scopeRejected =

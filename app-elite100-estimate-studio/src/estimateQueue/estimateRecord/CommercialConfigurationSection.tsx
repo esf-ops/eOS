@@ -207,7 +207,14 @@ export function CommercialConfigurationSection(props: {
   dirty?: boolean;
   measurementsApproved?: boolean;
   roomOptions?: Array<{ id: string; name: string }>;
-  onDirtyChange?: (dirty: boolean) => void;
+  onDirtyChange?: (
+    dirty: boolean,
+    payload?: {
+      customLineItems: CommercialLineDraft[];
+      estimateWideAdjustment: EstimateAdjustmentDraft;
+      roomConfigurations?: Record<string, unknown>;
+    }
+  ) => void;
   onSave: (payload: {
     customLineItems: CommercialLineDraft[];
     estimateWideAdjustment: EstimateAdjustmentDraft;
@@ -225,9 +232,76 @@ export function CommercialConfigurationSection(props: {
   const [waterfalls, setWaterfalls] = useState<WaterfallDraft[]>([]);
   const [dirty, setDirty] = useState(false);
 
-  function markDirty() {
+  function buildPayload(
+    nextLines = lines,
+    nextAdj = adjustment,
+    nextVanity = vanityRooms,
+    nextWaterfalls = waterfalls
+  ) {
+    const roomConfigurations: Record<string, unknown> = {};
+    for (const v of nextVanity) {
+      if (!v.roomId) continue;
+      roomConfigurations[v.roomId] = {
+        ...(typeof roomConfigurations[v.roomId] === "object"
+          ? (roomConfigurations[v.roomId] as object)
+          : {}),
+        vanityProgram: {
+          useStandardPricing: !v.applyProgram,
+          selectedProgram: v.applyProgram ? v.selectedProgram || null : null,
+          additionalTrips: v.additionalTrips,
+          sameTripConfirmed: true,
+          bowlCount: v.physicalFacts?.bowlCount ?? null,
+          permittedCustomerOptions: [
+            ...v.permittedMaterials,
+            ...v.permittedSinkUpgrades,
+            ...v.permittedEdgeUpgrades
+          ],
+          permittedMaterials: v.permittedMaterials,
+          permittedSinkUpgrades: v.permittedSinkUpgrades,
+          permittedEdgeUpgrades: v.permittedEdgeUpgrades
+        }
+      };
+    }
+    for (const w of nextWaterfalls) {
+      if (!w.roomId) continue;
+      const prev = (roomConfigurations[w.roomId] as Record<string, unknown>) || {};
+      const existing = Array.isArray(prev.waterfalls) ? [...(prev.waterfalls as object[])] : [];
+      existing.push({
+        id: w.id,
+        targetPieceId: w.pieceId || undefined,
+        side: w.side,
+        panelWidthIn: w.panelWidthIn,
+        legHeightIn: w.legHeightIn,
+        quantity: w.quantity,
+        backsidePolish: w.backsidePolish,
+        customerOptional: w.customerOptional,
+        includedInScope: w.includedInScope,
+        miterKey: w.miterKey,
+        estimatorNote: w.estimatorNote
+      });
+      roomConfigurations[w.roomId] = { ...prev, waterfalls: existing };
+    }
+    return {
+      customLineItems: nextLines,
+      estimateWideAdjustment: nextAdj,
+      roomConfigurations
+    };
+  }
+
+  function markDirty(
+    nextLines?: CommercialLineDraft[],
+    nextAdj?: EstimateAdjustmentDraft,
+    nextVanity?: VanityDraft[],
+    nextWaterfalls?: WaterfallDraft[]
+  ) {
     setDirty(true);
-    props.onDirtyChange?.(true);
+    const payload = buildPayload(
+      nextLines ?? lines,
+      nextAdj ?? adjustment,
+      nextVanity ?? vanityRooms,
+      nextWaterfalls ?? waterfalls
+    );
+    props.onDirtyChange?.(true, payload);
   }
 
   useEffect(() => {
@@ -261,8 +335,11 @@ export function CommercialConfigurationSection(props: {
   }, [props.commercial]);
 
   function updateLine(idx: number, patch: Partial<CommercialLineDraft>) {
-    markDirty();
-    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+    setLines((prev) => {
+      const next = prev.map((l, i) => (i === idx ? { ...l, ...patch } : l));
+      markDirty(next);
+      return next;
+    });
   }
 
   function moveLine(idx: number, dir: -1 | 1) {
@@ -278,149 +355,47 @@ export function CommercialConfigurationSection(props: {
     });
   }
 
-  function addLine(preset?: "tearout" | "crane" | "credit" | "internal") {
-    markDirty();
-    if (preset === "tearout") {
-      setLines((prev) => [
-        ...prev,
-        {
-          id: newId(),
-          description: "Tear Out",
-          category: "Tear-out",
-          quantity: 1,
-          unitPrice: TEAR_OUT_DEFAULT,
-          customerVisible: true,
-          percentageEligible: true,
-          commercialRole: "customer_charge",
-          reason: "Tear Out preset"
-        }
-      ]);
-      return;
-    }
-    if (preset === "crane") {
-      setLines((prev) => [
-        ...prev,
-        {
-          id: newId(),
-          description: "Crane",
-          category: "Crane",
-          quantity: 1,
-          unitPrice: 350,
-          customerVisible: true,
-          percentageEligible: true,
-          commercialRole: "customer_charge",
-          reason: "Job-site crane"
-        }
-      ]);
-      return;
-    }
-    if (preset === "credit") {
-      setLines((prev) => [
-        ...prev,
-        {
-          id: newId(),
-          description: "Courtesy credit",
-          category: "Discount/Credit",
-          quantity: 1,
-          unitPrice: 100,
-          customerVisible: true,
-          percentageEligible: false,
-          commercialRole: "credit",
-          reason: "Estimator credit"
-        }
-      ]);
-      return;
-    }
-    if (preset === "internal") {
-      setLines((prev) => [
-        ...prev,
-        {
-          id: newId(),
-          description: "Internal material hold",
-          category: "Other",
-          quantity: 1,
-          unitPrice: 200,
-          customerVisible: false,
-          percentageEligible: false,
-          commercialRole: "internal_only",
-          reason: "Internal only — never customer-named"
-        }
-      ]);
-      return;
-    }
-    setLines((prev) => [
-      ...prev,
-      {
-        id: newId(),
-        description: "",
-        category: "Service",
-        quantity: 1,
-        unitPrice: 0,
-        customerVisible: true,
-        percentageEligible: true,
-        commercialRole: "customer_charge",
-        reason: ""
-      }
-    ]);
+  function addLine(preset?: "tearout") {
+    setLines((prev) => {
+      const row: CommercialLineDraft =
+        preset === "tearout"
+          ? {
+              id: newId(),
+              description: "Tear Out",
+              category: "Tear-out",
+              quantity: 1,
+              unitPrice: TEAR_OUT_DEFAULT,
+              customerVisible: true,
+              percentageEligible: true,
+              commercialRole: "customer_charge",
+              reason: "Tear Out"
+            }
+          : {
+              id: newId(),
+              description: "",
+              category: "Service",
+              quantity: 1,
+              unitPrice: 0,
+              customerVisible: true,
+              percentageEligible: true,
+              commercialRole: "customer_charge",
+              reason: ""
+            };
+      const next = [...prev, row];
+      markDirty(next);
+      return next;
+    });
   }
 
   async function save() {
-    const roomConfigurations: Record<string, unknown> = {};
-    for (const v of vanityRooms) {
-      if (!v.roomId) continue;
-      roomConfigurations[v.roomId] = {
-        ...(typeof roomConfigurations[v.roomId] === "object"
-          ? (roomConfigurations[v.roomId] as object)
-          : {}),
-        vanityProgram: {
-          // useStandardPricing true opts OUT of Vanity Program.
-          useStandardPricing: !v.applyProgram,
-          selectedProgram: v.applyProgram ? v.selectedProgram || null : null,
-          additionalTrips: v.additionalTrips,
-          sameTripConfirmed: true,
-          bowlCount: v.physicalFacts?.bowlCount ?? null,
-          permittedCustomerOptions: [
-            ...v.permittedMaterials,
-            ...v.permittedSinkUpgrades,
-            ...v.permittedEdgeUpgrades
-          ],
-          permittedMaterials: v.permittedMaterials,
-          permittedSinkUpgrades: v.permittedSinkUpgrades,
-          permittedEdgeUpgrades: v.permittedEdgeUpgrades
-        }
-      };
-    }
-    for (const w of waterfalls) {
-      if (!w.roomId) continue;
-      const prev = (roomConfigurations[w.roomId] as Record<string, unknown>) || {};
-      const existing = Array.isArray(prev.waterfalls) ? [...(prev.waterfalls as object[])] : [];
-      existing.push({
-        id: w.id,
-        targetPieceId: w.pieceId || undefined,
-        side: w.side,
-        panelWidthIn: w.panelWidthIn,
-        legHeightIn: w.legHeightIn,
-        quantity: w.quantity,
-        backsidePolish: w.backsidePolish,
-        customerOptional: w.customerOptional,
-        includedInScope: w.includedInScope,
-        miterKey: w.miterKey,
-        estimatorNote: w.estimatorNote
-      });
-      roomConfigurations[w.roomId] = { ...prev, waterfalls: existing };
-    }
     try {
-      await props.onSave({
-        customLineItems: lines,
-        estimateWideAdjustment: adjustment,
-        roomConfigurations
-      });
+      await props.onSave(buildPayload());
       setDirty(false);
       props.onDirtyChange?.(false);
     } catch {
       // Parent owns the error message; remain dirty so Saved cannot appear after failure.
       setDirty(true);
-      props.onDirtyChange?.(true);
+      props.onDirtyChange?.(true, buildPayload());
     }
   }
 
@@ -448,7 +423,7 @@ export function CommercialConfigurationSection(props: {
       data-dirty={dirty || props.dirty ? "1" : "0"}
     >
       <div className="eq-record-section__head">
-        <h2 className="eq-ai-section-title">Estimate Adjustments</h2>
+        <h2 className="eq-ai-section-title">Additional Lines</h2>
         <span className="eq-record-section__status" data-testid="eq-commercial-status">
           {!props.editable
             ? "Read-only for this revision"
@@ -520,7 +495,7 @@ export function CommercialConfigurationSection(props: {
           </details>
         ) : null}
 
-        <h3 className="eq-ai-section-title">Additional charges and credits</h3>
+        <h3 className="eq-ai-section-title">Lines</h3>
         <div className="eq-commercial-lines" data-testid="eq-custom-line-items-editor">
           {lines.length === 0 ? (
             <p className="eq-muted">No custom lines yet.</p>
@@ -749,7 +724,7 @@ export function CommercialConfigurationSection(props: {
                 data-testid="eq-add-custom-line"
                 onClick={() => addLine()}
               >
-                Add item
+                Add line
               </button>
               <button
                 type="button"
@@ -758,14 +733,6 @@ export function CommercialConfigurationSection(props: {
                 onClick={() => addLine("tearout")}
               >
                 Add Tear Out
-              </button>
-              <button
-                type="button"
-                className="eq-btn-ghost"
-                data-testid="eq-add-internal"
-                onClick={() => addLine("internal")}
-              >
-                Add internal-only
               </button>
             </div>
           ) : null}
@@ -1466,7 +1433,7 @@ export function CommercialConfigurationSection(props: {
               disabled={props.busy}
               onClick={save}
             >
-              {props.busy ? "Saving…" : "Save Draft"}
+              {props.busy ? "Saving…" : "Save now"}
             </button>
             <span className="eq-muted" data-testid="eq-commercial-save-state">
               {dirty || props.dirty ? "Dirty — save to recalculate" : "Saved"}
