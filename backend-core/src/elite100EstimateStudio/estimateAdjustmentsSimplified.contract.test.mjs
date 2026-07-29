@@ -20,11 +20,11 @@ console.log("\nestimateAdjustmentsSimplified.contract.test.mjs\n");
     ),
     "utf8"
   );
-  assert.match(commercial, /Estimate Adjustments/);
-  assert.match(commercial, /Additional charges and credits/);
+  assert.match(commercial, /Additional Lines|Estimate Adjustments/);
+  assert.match(commercial, /Additional charges and credits|Lines/);
   assert.match(commercial, /Account adjustment/);
   assert.match(commercial, /View calculation details/);
-  assert.match(commercial, /Add item/);
+  assert.match(commercial, /Add item|Add line/);
   assert.match(commercial, /Add Tear Out/);
   assert.equal(commercial.includes("Add Crane $350"), false);
   assert.equal(commercial.includes('data-testid="eq-add-crane"'), false);

@@ -2909,3 +2909,13 @@
 | **Why** | Production 404 on commercial save; competing measurement/commercial revision UX; false Saved+Failed; implementation-oriented commercial UI; approved R1 still looked commercially editable in review; Account Adjustment labels made correct math look wrong ($156.66 vs $4,122). |
 | **SQL** | None. |
 | **Protected** | v4 rates/formulas, public DE design (except unified revision payload), trusted-account consolidation, historical v2/v3, manual estimates. |
+
+### 203. Persistent live Estimate Workspace (2026-07-29)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-29 · `hotfix/persistent-live-estimate-workspace` |
+| **Decision** | The AI estimator is one persistent, live-calculating workspace. Takeoff iframe mount/src stays stable across draft save, calculate, approve, publish, and status polling (`data-stable-mount`). Editing an approved/published revision calls idempotent **`ensureEditableEstimateDraft`** (route `POST …/ensure-editable-draft`); `updateScope` transparently auto-forks to that sibling draft (`forbidAutoFork` keeps hard 409 for tests). Takeoff reopen is soft-fail — draft creation must not lock the estimator into an empty Takeoff. Approval is not required to calculate. One unified autosave/calculate state (Unsaved / Saving / Calculation updating / Saved / Save failed) with mutation-sequence stale-response ignore. **Live Estimate** always shows draft or frozen totals. **Additional Lines** uses Add line / Add Tear Out (crane is an ordinary line). R1 remains customer-active until R2 publish succeeds. |
+| **Why** | Production revision-open failures remounted Takeoff into empty/processing, locked estimators between R1 and R2, and kept pricing/adjustments fragmented behind stage gates. |
+| **SQL** | None. |
+| **Protected** | v4 rates/formulas, tax, rounding, trusted-account semantics, public calculation/selection authority, historical v2/v3, manual estimates. |
