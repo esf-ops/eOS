@@ -804,8 +804,10 @@ export default function ConsolidatedTakeoffReview() {
   }, [authToken, takeoffJobId, loadWorkspace]);
 
   // Warn on browser navigation when the Takeoff draft has unsaved edits.
+  // Readonly mode never warns — publish remounts must not trip beforeunload.
   useEffect(() => {
     function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (urlWorkspace.mode === "readonly") return;
       const dirty =
         saveStatusRef.current === "dirty" ||
         saveStatusRef.current === "saving" ||
@@ -821,7 +823,7 @@ export default function ConsolidatedTakeoffReview() {
     }
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, []);
+  }, [urlWorkspace.mode]);
 
   useEffect(
     () => () => {
