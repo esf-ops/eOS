@@ -1,0 +1,130 @@
+/**
+ * Local-only screenshots for unified estimate revision (not committed).
+ * Run with review servers:
+ *   node app-elite100-estimate-studio/scripts/runUnifiedEstimateRevisionProof.mjs --start-servers
+ */
+import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { setTimeout as sleep } from "node:timers/promises";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
+const outDir = join(root, ".local/review/unified-estimate-revision");
+const pwEntry = join(root, ".local/pw-tools/node_modules/playwright/index.mjs");
+mkdirSync(outDir, { recursive: true });
+
+const procs = [];
+function killAll() {
+  for (const p of procs) {
+    try {
+      p.kill("SIGTERM");
+    } catch {
+      /* ignore */
+    }
+  }
+}
+process.on("exit", killAll);
+
+async function waitForUrl(url) {
+  for (let i = 0; i < 80; i++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok || res.status === 404) return;
+    } catch {
+      /* retry */
+    }
+    await sleep(400);
+  }
+  throw new Error(`Timeout ${url}`);
+}
+
+if (process.argv.includes("--start-servers")) {
+  function start(cwd, args) {
+    const p = spawn("npx", args, { cwd, stdio: "ignore", env: process.env });
+    procs.push(p);
+  }
+  start(join(root, "app-ai-takeoff"), ["vite", "--host", "127.0.0.1", "--port", "5186", "--strictPort"]);
+  start(join(root, "app-elite100-estimate-studio"), [
+    "vite",
+    "--config",
+    "vite.review.config.ts",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "5199",
+    "--strictPort"
+  ]);
+  start(join(root, "app-digital-estimate"), ["vite", "--host", "127.0.0.1", "--port", "5193", "--strictPort"]);
+  await waitForUrl("http://127.0.0.1:5199/review-estimate-record.html");
+  await waitForUrl("http://127.0.0.1:5186/");
+  await waitForUrl("http://127.0.0.1:5193/review-digital-estimate.html");
+}
+
+const { chromium } = await import(pathToFileURL(pwEntry).href);
+const browser = await chromium.launch({
+  headless: true,
+  args: ["--disable-site-isolation-trials", "--disable-features=IsolateOrigins,site-per-process"]
+});
+const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+const studio = (s) =>
+  `http://127.0.0.1:5199/review-estimate-record.html?scenario=${s}&takeoffOrigin=${encodeURIComponent("http://127.0.0.1:5186")}`;
+
+async function shot(name, url, prep) {
+  await page.goto(url, { waitUntil: "networkidle", timeout: 120000 });
+  if (prep) await prep(page);
+  await page.addStyleTag({
+    content: `[data-testid="eq-review-devbar"],[data-testid="de-review-devbar"]{display:none!important}`
+  });
+  await page.screenshot({ path: join(outDir, `${name}.png`), fullPage: true });
+  console.log("wrote", name);
+}
+
+try {
+  await shot("01-approved-r1-edit-estimate", studio("approved"), async (p) => {
+    await p.waitForSelector('[data-testid="eq-edit-estimate"]');
+  });
+  await shot("02-editable-r2-takeoff-adjustments", studio("r2"), async (p) => {
+    await p.waitForFunction(
+      () => window.__takeoffReviewReady?.type === "TAKEOFF_REVIEW_READY",
+      null,
+      { timeout: 45000 }
+    ).catch(() => {});
+    await p.waitForSelector('[data-testid="eq-commercial-configuration-section"]');
+  });
+  await shot("03-account-adjustment-3pct", studio("commercial"), async (p) => {
+    await p.waitForSelector('[data-testid="eq-estimate-percentage-adjustment"]');
+    await p.locator('[data-testid="eq-estimate-percentage-adjustment"]').scrollIntoViewIfNeeded();
+  });
+  await shot("04-vanity-single-bowl-card", studio("commercial"), async (p) => {
+    await p.waitForSelector('[data-testid="eq-vanity-card"]');
+    await p.locator('[data-testid="eq-vanity-card"]').first().scrollIntoViewIfNeeded();
+  });
+  await shot("05-island-add-waterfall-actions", studio("r2"), async (p) => {
+    await p.waitForFunction(
+      () => window.__takeoffReviewReady?.type === "TAKEOFF_REVIEW_READY",
+      null,
+      { timeout: 45000 }
+    ).catch(() => {});
+    const frame = p.frameLocator('[data-testid="eq-takeoff-iframe"]');
+    await frame.locator('[data-testid="ctr-island-waterfall-actions"], [data-testid="ctr-waterfall-panel"]').first().waitFor({ timeout: 20000 }).catch(() => {});
+  });
+  await shot("06-waterfall-commercial-options", studio("r2-approved"), async (p) => {
+    await p.waitForSelector('[data-testid="eq-waterfall-commercial-controls"], [data-testid="eq-waterfall-card"]');
+    await p.locator('[data-testid="eq-waterfall-configuration"]').scrollIntoViewIfNeeded();
+  });
+  await shot("07-published-r1-draft-r2", studio("revision-history"), async (p) => {
+    await p.waitForSelector('[data-testid="eq-revision-history-section"], [data-testid="eq-de-r1-remains-active"]');
+  });
+  writeFileSync(
+    join(outDir, "README.md"),
+    `# Unified estimate revision — local proof\n\nNot committed. Generated by runUnifiedEstimateRevisionProof.mjs.\n`
+  );
+  console.log("Done →", outDir);
+} catch (err) {
+  console.error(err);
+  process.exitCode = 1;
+} finally {
+  await browser.close();
+  killAll();
+}

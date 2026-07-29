@@ -53,10 +53,10 @@ console.log("\nestimateRecordR2Takeoff.contract.test.mjs\n");
 {
   assert.equal(
     approveButtonLabel({ approveStatus: "idle", advisoryCount: 0, blockingCount: 0, isRevisionDraft: true }),
-    "Approve Revised Measurements"
+    "Approve Revised Estimate"
   );
   assert.equal(localReviewStorageKey("local-review-takeoff", 2), "eliteos-local-review-takeoff:local-review-takeoff:r2");
-  console.log("ok: Approve Revised Measurements + storage key");
+  console.log("ok: Approve Revised Estimate + storage key");
 }
 
 {
@@ -72,9 +72,8 @@ console.log("\nestimateRecordR2Takeoff.contract.test.mjs\n");
     ),
     "utf8"
   );
+  assert.match(commercialSrc, /No waterfalls are included\. Add one from an island in Takeoff/);
   assert.match(commercialSrc, /Bathroom vanity detected\. Approve measurements/);
-  assert.match(commercialSrc, /Kitchen Island detected\. Add waterfall panel geometry in Takeoff/);
-  assert.match(commercialSrc, /Waterfall geometry added\. Approve measurements/);
   assert.match(commercialSrc, /eq-waterfall-physical-facts/);
   assert.match(commercialSrc, /Physical scope from Takeoff/);
   assert.equal(commercialSrc.includes('data-testid="eq-add-waterfall"'), false);

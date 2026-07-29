@@ -375,12 +375,18 @@ export function CommercialConfigurationSection(props: {
         vanityProgram: {
           // useStandardPricing true opts OUT of Vanity Program.
           useStandardPricing: !v.applyProgram,
+          selectedProgram: v.applyProgram ? v.selectedProgram || null : null,
           additionalTrips: v.additionalTrips,
+          sameTripConfirmed: true,
+          bowlCount: v.physicalFacts?.bowlCount ?? null,
           permittedCustomerOptions: [
             ...v.permittedMaterials,
             ...v.permittedSinkUpgrades,
             ...v.permittedEdgeUpgrades
-          ]
+          ],
+          permittedMaterials: v.permittedMaterials,
+          permittedSinkUpgrades: v.permittedSinkUpgrades,
+          permittedEdgeUpgrades: v.permittedEdgeUpgrades
         }
       };
     }
@@ -442,7 +448,7 @@ export function CommercialConfigurationSection(props: {
       data-dirty={dirty || props.dirty ? "1" : "0"}
     >
       <div className="eq-record-section__head">
-        <h2 className="eq-ai-section-title">Commercial Configuration</h2>
+        <h2 className="eq-ai-section-title">Estimate Adjustments</h2>
         <span className="eq-record-section__status" data-testid="eq-commercial-status">
           {!props.editable
             ? "Read-only for this revision"
@@ -457,58 +463,56 @@ export function CommercialConfigurationSection(props: {
       </div>
       <div className="eq-record-section__body">
         {adj?.active ? (
-          <div className="eq-commercial-adjustment-summary" data-testid="eq-percentage-reconciliation">
-            <h3 className="eq-ai-section-title">Estimate-wide percentage (internal)</h3>
-            <dl className="eq-summary-dl eq-summary-dl--grid">
-              <div>
-                <dt>Base exact total</dt>
-                <dd data-testid="eq-adj-base">{money(adj.baseExactTotal)}</dd>
-              </div>
-              <div>
-                <dt>Eligible basis</dt>
-                <dd data-testid="eq-adj-eligible-basis">
-                  {money(adj.eligibleBasisExact ?? adj.baseExactTotal)}
-                </dd>
-              </div>
-              <div>
-                <dt>Percentage</dt>
-                <dd data-testid="eq-adj-pct">{Number(adj.percentage).toFixed(2)}%</dd>
-              </div>
-              <div>
-                <dt>Exact percentage adjustment</dt>
-                <dd data-testid="eq-adj-amount">{money(adj.exactAdjustment)}</dd>
-              </div>
-              <div>
-                <dt>Non-percentage commercial changes</dt>
-                <dd data-testid="eq-adj-non-pct">
-                  {money(adj.nonPercentageCommercialExact ?? 0)}
-                </dd>
-              </div>
-              <div>
-                <dt>Adjusted exact total</dt>
-                <dd data-testid="eq-adj-adjusted">{money(adj.adjustedExactTotal)}</dd>
-              </div>
-              <div>
-                <dt>Customer display total</dt>
-                <dd data-testid="eq-adj-display">{money(adj.customerDisplayTotal)}</dd>
-              </div>
-              <div>
-                <dt>Source</dt>
-                <dd data-testid="eq-adj-source">{adj.source}</dd>
-              </div>
-              <div>
-                <dt>Presentation</dt>
-                <dd data-testid="eq-adj-presentation">Distributed across eligible lines</dd>
-              </div>
-            </dl>
-            <p className="eq-footnote">
-              Customers never see a separate surcharge or markup line — eligible line amounts already
-              include the percentage.
-            </p>
-          </div>
+          <details className="eq-calc-details" data-testid="eq-view-calculation-details">
+            <summary>View calculation details</summary>
+            <div className="eq-commercial-adjustment-summary" data-testid="eq-percentage-reconciliation">
+              <dl className="eq-summary-dl eq-summary-dl--grid">
+                <div>
+                  <dt>Base exact total</dt>
+                  <dd data-testid="eq-adj-base">{money(adj.baseExactTotal)}</dd>
+                </div>
+                <div>
+                  <dt>Eligible basis</dt>
+                  <dd data-testid="eq-adj-eligible-basis">
+                    {money(adj.eligibleBasisExact ?? adj.baseExactTotal)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Percentage</dt>
+                  <dd data-testid="eq-adj-pct">{Number(adj.percentage).toFixed(2)}%</dd>
+                </div>
+                <div>
+                  <dt>Exact percentage adjustment</dt>
+                  <dd data-testid="eq-adj-amount">{money(adj.exactAdjustment)}</dd>
+                </div>
+                <div>
+                  <dt>Non-percentage commercial changes</dt>
+                  <dd data-testid="eq-adj-non-pct">
+                    {money(adj.nonPercentageCommercialExact ?? 0)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Adjusted exact total</dt>
+                  <dd data-testid="eq-adj-adjusted">{money(adj.adjustedExactTotal)}</dd>
+                </div>
+                <div>
+                  <dt>Customer display total</dt>
+                  <dd data-testid="eq-adj-display">{money(adj.customerDisplayTotal)}</dd>
+                </div>
+                <div>
+                  <dt>Source</dt>
+                  <dd data-testid="eq-adj-source">{adj.source}</dd>
+                </div>
+              </dl>
+              <p className="eq-footnote">
+                Customers never see a separate surcharge line — eligible line amounts already include
+                the percentage.
+              </p>
+            </div>
+          </details>
         ) : null}
 
-        <h3 className="eq-ai-section-title">Custom line items</h3>
+        <h3 className="eq-ai-section-title">Additional charges and credits</h3>
         <div className="eq-commercial-lines" data-testid="eq-custom-line-items-editor">
           {lines.length === 0 ? (
             <p className="eq-muted">No custom lines yet.</p>
@@ -699,7 +703,7 @@ export function CommercialConfigurationSection(props: {
                 data-testid="eq-add-custom-line"
                 onClick={() => addLine()}
               >
-                Add custom line
+                Add item
               </button>
               <button
                 type="button"
@@ -708,22 +712,6 @@ export function CommercialConfigurationSection(props: {
                 onClick={() => addLine("tearout")}
               >
                 Add Tear Out
-              </button>
-              <button
-                type="button"
-                className="eq-btn-secondary"
-                data-testid="eq-add-crane"
-                onClick={() => addLine("crane")}
-              >
-                Add Crane $350
-              </button>
-              <button
-                type="button"
-                className="eq-btn-ghost"
-                data-testid="eq-add-credit"
-                onClick={() => addLine("credit")}
-              >
-                Add credit
               </button>
               <button
                 type="button"
@@ -780,7 +768,7 @@ export function CommercialConfigurationSection(props: {
           </p>
         </div>
 
-        <h3 className="eq-ai-section-title">Estimate-wide percentage</h3>
+        <h3 className="eq-ai-section-title">Account adjustment</h3>
         <div className="eq-percentage-editor" data-testid="eq-estimate-percentage-adjustment">
           <label>
             Active
@@ -827,29 +815,38 @@ export function CommercialConfigurationSection(props: {
               }}
             />
           </label>
-          <label>
-            Source
-            <input
-              readOnly
-              value={adjustment.source}
-              data-testid="eq-percentage-source"
-            />
-          </label>
-          <p className="eq-muted" data-testid="eq-percentage-presentation">
-            Presentation: distributed (same factor on each eligible line)
-          </p>
-          {eligibleSummary.length > 0 ? (
-            <div data-testid="eq-percentage-eligible-summary">
-              <h4 className="eq-ai-section-title">Eligible lines</h4>
-              <ul className="eq-ai-price-groups">
-                {eligibleSummary.map((l) => (
-                  <li key={l.id}>
-                    <span>{l.description}</span>
-                    <span>{money(l.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+          {adjustment.source && adjustment.source !== "manual" ? (
+            <p className="eq-footnote" data-testid="eq-percentage-source">
+              Source: {adjustment.source === "trusted_account" || /spahn/i.test(adjustment.reason)
+                ? "Spahn & Rose account pricing"
+                : adjustment.source}
+            </p>
+          ) : /spahn/i.test(adjustment.reason) ? (
+            <p className="eq-footnote" data-testid="eq-percentage-source">
+              Spahn & Rose account pricing
+            </p>
+          ) : null}
+          {adj ? (
+            <dl className="eq-summary-dl eq-summary-dl--grid" data-testid="eq-account-adjustment-impact">
+              <div>
+                <dt>Current customer total</dt>
+                <dd data-testid="eq-adj-base">{money(adj.baseExactTotal)}</dd>
+              </div>
+              <div>
+                <dt>Adjustment</dt>
+                <dd data-testid="eq-adj-amount">
+                  {Number(adj.percentage).toFixed(2)}% = {money(adj.exactAdjustment)}
+                </dd>
+              </div>
+              <div>
+                <dt>Updated exact total</dt>
+                <dd data-testid="eq-adj-adjusted">{money(adj.adjustedExactTotal)}</dd>
+              </div>
+              <div>
+                <dt>Customer display total</dt>
+                <dd data-testid="eq-adj-display">{money(adj.customerDisplayTotal)}</dd>
+              </div>
+            </dl>
           ) : null}
         </div>
 
@@ -915,12 +912,15 @@ export function CommercialConfigurationSection(props: {
                 </dl>
                 <p className="eq-footnote">Physical facts come from Takeoff and are not customer-editable.</p>
                 <div className="eq-vanity-eligibility" data-testid="eq-vanity-eligibility">
-                  <span>
-                    Eligibility:{" "}
-                    {v.eligible == null ? "Review required" : v.eligible ? "Eligible" : "Not eligible"}
+                  <span data-testid="eq-vanity-eligibility-state">
+                    {v.eligible === true
+                      ? "Eligible"
+                      : v.eligible === false
+                        ? "Not eligible"
+                        : "Needs one missing decision"}
                   </span>
                   {v.eligibilityReasons.length > 0 ? (
-                    <ul>
+                    <ul data-testid="eq-vanity-eligibility-reasons">
                       {v.eligibilityReasons.map((r) => (
                         <li key={r}>{r}</li>
                       ))}
@@ -943,7 +943,10 @@ export function CommercialConfigurationSection(props: {
                             ? {
                                 ...row,
                                 applyProgram: checked,
-                                selectedProgram: checked ? row.selectedProgram || "standard" : null
+                                selectedProgram: checked
+                                  ? row.selectedProgram ||
+                                    (row.physicalFacts.bowlCount === 2 ? "61_D" : "37_S")
+                                  : null
                               }
                             : row
                         )
@@ -952,18 +955,32 @@ export function CommercialConfigurationSection(props: {
                   />
                 </label>
                 <label>
-                  Selected package
-                  <input
-                    readOnly
-                    value={
-                      v.applyProgram
-                        ? v.selectedProgramLabel ||
-                          vanityPackageLabel(v.selectedProgram) ||
-                          "Governed Vanity Program"
-                        : "Not applied"
-                    }
+                  Package
+                  <select
+                    disabled={!props.editable || !v.applyProgram}
+                    value={v.selectedProgram || ""}
                     data-testid="eq-vanity-package"
-                  />
+                    onChange={(e) => {
+                      markDirty();
+                      const code = e.target.value || null;
+                      setVanityRooms((prev) =>
+                        prev.map((row, i) =>
+                          i === idx
+                            ? {
+                                ...row,
+                                selectedProgram: code,
+                                selectedProgramLabel: vanityPackageLabel(code)
+                              }
+                            : row
+                        )
+                      );
+                    }}
+                  >
+                    <option value="">Select package</option>
+                    <option value="37_S">37-inch Single-Bowl Vanity Program</option>
+                    <option value="61_D">61-inch Double-Bowl Vanity Program</option>
+                    <option value="standard">Standard vanity pricing</option>
+                  </select>
                 </label>
                 {v.applyProgram && v.includedScope.length ? (
                   <div data-testid="eq-vanity-included-scope">
@@ -1071,15 +1088,13 @@ export function CommercialConfigurationSection(props: {
               if (detection.islandDetected) {
                 return (
                   <p className="eq-muted" data-testid="eq-waterfall-lifecycle-msg">
-                    Kitchen Island detected. Add waterfall panel geometry in Takeoff if this estimate
-                    includes or may offer a waterfall.
+                    No waterfalls are included. Add one from an island in Takeoff.
                   </p>
                 );
               }
               return (
                 <p className="eq-muted" data-testid="eq-waterfall-lifecycle-msg">
-                  No approved waterfall geometry. Add waterfall panel geometry in Takeoff on an
-                  editable measurement revision, then configure required vs customer-optional here.
+                  No waterfalls are included. Add one from an island in Takeoff.
                 </p>
               );
             }
@@ -1256,7 +1271,7 @@ export function CommercialConfigurationSection(props: {
               disabled={props.busy}
               onClick={save}
             >
-              {props.busy ? "Saving…" : "Save commercial changes"}
+              {props.busy ? "Saving…" : "Save Draft"}
             </button>
             <span className="eq-muted" data-testid="eq-commercial-save-state">
               {dirty || props.dirty ? "Dirty — save to recalculate" : "Saved"}

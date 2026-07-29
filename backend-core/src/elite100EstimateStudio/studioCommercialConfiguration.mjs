@@ -151,22 +151,51 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
           : cfg.selectedProgram
             ? str(cfg.selectedProgram)
             : null;
+      const sinkOpenings = vanitySinkOpenings(room);
+      const derivedBowl =
+        sinkOpenings === 1 ? 1 : sinkOpenings === 2 ? 2 : num(cfg.bowlCount) || null;
+      const widthIn = vanityPiece ? num(vanityPiece.lengthIn) : null;
+      let resolvedProgram = selectedProgram;
+      if (!resolvedProgram && derivedBowl === 1 && widthIn >= 36 && widthIn <= 38) {
+        resolvedProgram = "37_S";
+      } else if (!resolvedProgram && derivedBowl === 2 && widthIn >= 60 && widthIn <= 62) {
+        resolvedProgram = "61_D";
+      }
       return {
         roomId: str(room.id) || null,
         roomName: str(room.name) || "Room",
         physicalFacts: {
-          widthIn: vanityPiece ? num(vanityPiece.lengthIn) : null,
+          widthIn,
           depthIn: vanityPiece ? num(vanityPiece.depthIn) : null,
           quantity: vanityPiece ? num(vanityPiece.quantity) || 1 : 0,
-          bowlCount: num(cfg.bowlCount) || null,
-          sinkOpenings: vanitySinkOpenings(room),
+          bowlCount: derivedBowl,
+          sinkOpenings,
           backsplash: cfg.backsplashLabel || null,
           sameTrip: cfg.additionalTrips == null || Number(cfg.additionalTrips) === 0
         },
-        eligible: cfg.useStandardPricing === true ? null : null,
-        eligibilityReasons: Array.isArray(cfg.eligibilityReasons) ? cfg.eligibilityReasons : [],
-        selectedProgram,
-        selectedProgramLabel: selectedProgram ? vanityPackageLabel(selectedProgram) : null,
+        eligible:
+          cfg.eligible === true
+            ? true
+            : cfg.eligible === false
+              ? false
+              : derivedBowl != null && widthIn != null
+                ? cfg.sameTripConfirmed === true
+                  ? true
+                  : null
+                : false,
+        eligibilityReasons: (() => {
+          const reasons = Array.isArray(cfg.eligibilityReasons) ? [...cfg.eligibilityReasons] : [];
+          if (derivedBowl != null && widthIn != null && cfg.sameTripConfirmed !== true) {
+            if (!reasons.some((r) => /templated and installed with the kitchen/i.test(String(r)))) {
+              reasons.push(
+                "Confirm whether the vanity will be templated and installed with the kitchen."
+              );
+            }
+          }
+          return reasons;
+        })(),
+        selectedProgram: resolvedProgram,
+        selectedProgramLabel: resolvedProgram ? vanityPackageLabel(resolvedProgram) : null,
         applyProgram: Boolean(selectedProgram && selectedProgram !== "standard"),
         sameTrip: cfg.additionalTrips == null || Number(cfg.additionalTrips) === 0,
         additionalTrips: num(cfg.additionalTrips) || 0,
@@ -202,6 +231,13 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
         roomId: str(room.id) || null,
         roomName: str(room.name) || "Room",
         pieceId: str(wf.targetPieceId || wf.pieceId) || null,
+        pieceLabel: (() => {
+          const pid = str(wf.targetPieceId || wf.pieceId);
+          const piece = (Array.isArray(room.pieces) ? room.pieces : []).find(
+            (p) => str(p?.id) === pid
+          );
+          return str(wf.pieceLabel || piece?.name) || "Island";
+        })(),
         side: str(wf.side) || "custom",
         panelWidthIn: num(wf.panelWidthIn) || null,
         panelHeightIn: num(wf.legHeightIn || wf.panelHeightIn) || null,

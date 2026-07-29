@@ -105,8 +105,8 @@ async function waitTakeoffReady(p, opts = {}) {
     await frame.locator('[data-testid="ctr-save-draft"]').waitFor({ timeout: 10000 });
     await frame.locator('[data-testid="ctr-approve-build"]').waitFor({ timeout: 10000 });
     const approveLabel = await frame.locator('[data-testid="ctr-approve-build"]').innerText();
-    if (opts.requireRevisedApprove && !/Approve Revised Measurements/i.test(approveLabel)) {
-      throw new Error(`Expected Approve Revised Measurements, got ${approveLabel}`);
+    if (opts.requireRevisedApprove && !/Approve Revised Estimate/i.test(approveLabel)) {
+      throw new Error(`Expected Approve Revised Estimate, got ${approveLabel}`);
     }
   }
   if (opts.requireWaterfall) {
