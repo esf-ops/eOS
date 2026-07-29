@@ -25,7 +25,7 @@ console.log("\nestimateRevisionUnified.contract.test.mjs\n");
   );
   assert.match(
     workspace,
-    /apiPatch\(\s*`\/api\/elite100-estimate-studio\/estimates\/\$\{encodeURIComponent\(estimateId\)\}`/
+    /apiPatch\(\s*`\/api\/elite100-estimate-studio\/estimates\/\$\{encodeURIComponent\((estimateId|targetId|calcId)\)\}`/
   );
   assert.equal(
     workspace.includes("/estimates/${encodeURIComponent(estimateId)}/scope"),
@@ -33,9 +33,9 @@ console.log("\nestimateRevisionUnified.contract.test.mjs\n");
     "must not POST obsolete …/scope path"
   );
   assert.match(workspace, /Your estimate adjustments were not saved\. Try again\./);
-  assert.match(workspace, /eq-edit-estimate/);
+  assert.match(workspace, /eq-edit-estimate|ensure-editable-draft/);
   assert.equal(workspace.includes("Create Measurement Revision"), false);
-  assert.match(workspace, /editEstimate/);
+  assert.match(workspace, /editEstimate|ensureEditableDraft/);
   assert.match(workspace, /setRevisionSaveStatus\("Saved"\)/);
   assert.match(workspace, /setRevisionSaveStatus\("Save failed"\)/);
   console.log("ok: production commercial-save route + Edit Estimate + save-status truth");

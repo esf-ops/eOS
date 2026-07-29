@@ -453,40 +453,33 @@ function noTakeoffService(overrides = {}) {
   assert.equal(approved2.approval.calculationFingerprint, calc2.calculationFingerprint);
   console.log("ok: 14 autosave→recalculation returns a current v4 result; approve succeeds once current");
 
-  // Editing an ALREADY-APPROVED estimate must not mutate the frozen approved
-  // snapshot — updateScope / saveManualScopeDraft reject with 409 until Edit
-  // Estimate opens a sibling draft revision (R1 stays approved until publish).
+  // Editing an ALREADY-APPROVED estimate transparently forks to a sibling draft
+  // (R1 stays approved until publish). Direct mutation of R1 is rejected only
+  // when forbidAutoFork is set.
   const approvedRowId = created.estimateId;
   const approvedSnapshotBefore = (await repository.getById(ORG, approvedRowId)).calculationSnapshot;
   let approvedBlocked = false;
   try {
-    await manual.saveManualScopeDraft({
+    await studio.updateScope({
       organizationId: ORG,
       estimateId: approvedRowId,
       actorUserId: ACTOR,
-      body: { scope: manualKitchenDraft({ quantity: 5 }) }
+      body: { forbidAutoFork: true, scope: manualKitchenDraft({ quantity: 5 }) }
     });
   } catch (e) {
     approvedBlocked =
       e?.code === "estimate_revision_not_editable" && e?.statusCode === 409;
   }
-  assert.equal(approvedBlocked, true, "approved R1 saveManualScopeDraft is rejected");
+  assert.equal(approvedBlocked, true, "approved R1 updateScope rejected when auto-fork forbidden");
 
-  const opened = await studio.openMeasurementRevision({
-    organizationId: ORG,
-    estimateId: approvedRowId,
-    actorUserId: ACTOR,
-    body: { confirm: true }
-  });
-  assert.equal(opened.estimate.revision, 2);
   const revised = await manual.saveManualScopeDraft({
     organizationId: ORG,
-    estimateId: opened.estimate.id,
+    estimateId: approvedRowId,
     actorUserId: ACTOR,
     body: { scope: manualKitchenDraft({ quantity: 5 }) }
   });
   const priorRow = await repository.getById(ORG, approvedRowId);
-  assert.equal(priorRow.status, "approved", "Edit Estimate keeps R1 approved (not superseded until publish)");
+  assert.equal(priorRow.status, "approved", "transparent draft keeps R1 approved (not superseded until publish)");
   assert.deepEqual(
     priorRow.calculationSnapshot,
     approvedSnapshotBefore,

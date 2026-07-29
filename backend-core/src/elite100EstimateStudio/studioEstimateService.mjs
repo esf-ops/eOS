@@ -1196,14 +1196,19 @@ export function createStudioEstimateService(deps = {}) {
       delete clean.actorUserId;
       delete clean.totals;
 
-      let row = await loadActiveEstimateForMutation({
-        repository,
-        organizationId,
-        estimateId
-      });
+      // Load by id first so approved/published R1 can transparently fork to an
+      // editable sibling even when a newer draft is already the active revision.
+      let row = await repository.getById(organizationId, estimateId);
+      if (!row) {
+        const err = new Error("Estimate not found");
+        err.statusCode = 404;
+        err.code = "estimate_not_found";
+        throw err;
+      }
 
       // Approved / published / superseded / historical snapshots are immutable.
-      // Estimators must use Edit Estimate (openMeasurementRevision) first.
+      // Transparently acquire (or reuse) an editable sibling draft and continue
+      // the mutation on that draft — never mutate the frozen source revision.
       const frozenStatus = String(row.status || "").toLowerCase();
       const isPublishedSnapshot = Boolean(
         row.publication?.active ||
@@ -1214,7 +1219,7 @@ export function createStudioEstimateService(deps = {}) {
       const isHistoricalSnapshot =
         frozenStatus === "historical" ||
         Boolean(row.historical === true || row.isHistorical === true);
-      if (
+      const isFrozenRevision =
         frozenStatus === STUDIO_ESTIMATE_STATUSES.APPROVED ||
         frozenStatus === STUDIO_ESTIMATE_STATUSES.SUPERSEDED ||
         isPublishedSnapshot ||
@@ -1223,21 +1228,52 @@ export function createStudioEstimateService(deps = {}) {
           frozenStatus !== STUDIO_ESTIMATE_STATUSES.DRAFT &&
           frozenStatus !== STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE &&
           frozenStatus !== STUDIO_ESTIMATE_STATUSES.PRICED &&
-          frozenStatus !== STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL)
-      ) {
-        const err = new Error(
-          "This estimate revision is not editable. Use Edit Estimate to open a draft revision."
-        );
-        err.statusCode = 409;
-        err.code = "estimate_revision_not_editable";
-        err.details = {
-          code: "estimate_revision_not_editable",
-          message: err.message,
+          frozenStatus !== STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL);
+      let forkedFromId = null;
+      if (isFrozenRevision) {
+        if (body?.forbidAutoFork === true) {
+          const err = new Error(
+            "This estimate revision is not editable. An editable draft is required."
+          );
+          err.statusCode = 409;
+          err.code = "estimate_revision_not_editable";
+          err.details = {
+            code: "estimate_revision_not_editable",
+            message: err.message,
+            estimateId: row.id,
+            revision: row.revision,
+            status: row.status
+          };
+          throw err;
+        }
+        const ensured = await this.ensureEditableEstimateDraft({
+          organizationId,
           estimateId: row.id,
-          revision: row.revision,
-          status: row.status
-        };
-        throw err;
+          basedOnRevisionId: row.id,
+          actorUserId,
+          body: { confirm: true }
+        });
+        const draftId = ensured?.estimate?.id;
+        if (!draftId || draftId === row.id) {
+          const err = new Error(
+            "We couldn’t start an editable draft. Your published estimate was not changed."
+          );
+          err.statusCode = 409;
+          err.code = "editable_draft_unavailable";
+          throw err;
+        }
+        forkedFromId = row.id;
+        row = await loadActiveEstimateForMutation({
+          repository,
+          organizationId,
+          estimateId: draftId
+        });
+      } else {
+        row = await loadActiveEstimateForMutation({
+          repository,
+          organizationId,
+          estimateId: row.id
+        });
       }
 
       const wasManual = isManualStaffEstimate(row);
@@ -1382,8 +1418,13 @@ export function createStudioEstimateService(deps = {}) {
         patch.status = STUDIO_ESTIMATE_STATUSES.DRAFT;
       }
 
-      row = await repository.update(organizationId, estimateId, patch, actorUserId);
-      return safeEstimateView(row);
+      row = await repository.update(organizationId, row.id, patch, actorUserId);
+      const view = safeEstimateView(row);
+      if (forkedFromId) {
+        view.forkedFromEstimateId = forkedFromId;
+        view.transparentDraft = true;
+      }
+      return view;
     },
 
     /**
@@ -1713,40 +1754,105 @@ export function createStudioEstimateService(deps = {}) {
     },
 
     /**
-     * Open a measurement revision for an approved/published Studio estimate.
-     * Creates R(n+1) as a draft sibling while R(n) remains the active published
-     * revision (status unchanged) until R(n+1) successfully publishes.
-     * Confirm required. No SQL / pricing formula changes.
+     * Idempotent: return the current editable draft for an estimate family.
+     * If the target is already editable, return it. If a sibling draft already
+     * exists, return it. Otherwise create exactly one sibling from the
+     * approved/published revision without mutating the source.
+     * Takeoff reopen is best-effort — draft creation must not fail into an
+     * empty Takeoff / locked estimator state.
      */
-    async openMeasurementRevision({ organizationId, estimateId, actorUserId, body = {} }) {
-      if (body?.confirm !== true && body?.confirm !== "true") {
-        const err = new Error("Confirm Edit Measurements to open a revision");
-        err.statusCode = 400;
-        err.code = "confirm_required";
-        throw err;
-      }
-      const row = await repository.getById(organizationId, estimateId);
+    async ensureEditableEstimateDraft({
+      organizationId,
+      estimateId,
+      basedOnRevisionId = null,
+      actorUserId,
+      body = {}
+    }) {
+      const sourceId = String(basedOnRevisionId || estimateId || "").trim();
+      const row = await repository.getById(organizationId, sourceId);
       if (!row) {
         const err = new Error("Estimate not found");
         err.statusCode = 404;
         err.code = "estimate_not_found";
         throw err;
       }
-      const status = String(row.status || "").toLowerCase();
-      const alreadyDraft =
-        !row.approval &&
-        (status === STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE ||
-          status === STUDIO_ESTIMATE_STATUSES.DRAFT ||
-          status === STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL);
-      if (alreadyDraft) {
+
+      function isEditableDraft(candidate) {
+        if (!candidate || candidate.approval) return false;
+        const st = String(candidate.status || "").toLowerCase();
+        return (
+          st === STUDIO_ESTIMATE_STATUSES.DRAFT ||
+          st === STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE ||
+          st === STUDIO_ESTIMATE_STATUSES.PRICED ||
+          st === STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL
+        );
+      }
+
+      if (isEditableDraft(row)) {
         return {
           ok: true,
           reused: true,
+          created: false,
           estimate: safeEstimateView(row),
           previousRevisionSummary: null,
-          priorEstimate: null
+          priorEstimate: null,
+          basedOnRevisionId: null
         };
       }
+
+      // Prefer an existing editable sibling (same intake case, higher or equal
+      // revision among drafts) so repeated calls are idempotent.
+      let existingDraft = null;
+      if (typeof repository.listByIntakeCase === "function" && row.intakeCaseId) {
+        const siblings = await repository.listByIntakeCase(organizationId, row.intakeCaseId);
+        const drafts = (siblings || [])
+          .filter((s) => s && s.id !== row.id && isEditableDraft(s))
+          .sort((a, b) => Number(b.revision || 1) - Number(a.revision || 1));
+        existingDraft = drafts[0] || null;
+      }
+      if (!existingDraft && typeof repository.getActiveByIntakeCase === "function" && row.intakeCaseId) {
+        const active = await repository.getActiveByIntakeCase(organizationId, row.intakeCaseId);
+        if (active && active.id !== row.id && isEditableDraft(active)) {
+          existingDraft = active;
+        }
+      }
+      if (existingDraft) {
+        return {
+          ok: true,
+          reused: true,
+          created: false,
+          estimate: safeEstimateView(existingDraft),
+          previousRevisionSummary: {
+            revision: Number(row.revision) || 1,
+            estimateId: row.id,
+            approvedAt: row.approval?.approvedAt || row.approvedAt || null,
+            exactInternalTotal:
+              row.approval?.exactInternalTotal ??
+              row.calculationSnapshot?.totals?.exactInternalTotal ??
+              null,
+            label: `Draft R${Number(existingDraft.revision) || 2} based on published/approved R${Number(row.revision) || 1}`
+          },
+          priorEstimate: {
+            id: row.id,
+            revision: row.revision,
+            status: row.status,
+            scope: row.scope,
+            calculation: row.calculationSnapshot
+              ? {
+                  totals: row.calculationSnapshot.totals,
+                  scopeBilling: row.calculationSnapshot.scopeBilling || null,
+                  fabrication: row.calculationSnapshot.fabrication,
+                  reviewSummary: row.calculationSnapshot.reviewSummary || null,
+                  warnings: row.calculationSnapshot.warnings,
+                  unresolvedItems: row.calculationSnapshot.unresolvedItems
+                }
+              : null,
+            approval: row.approval
+          },
+          basedOnRevisionId: row.id
+        };
+      }
+
       const priorSnapshot = {
         id: row.id,
         revision: row.revision,
@@ -1772,7 +1878,7 @@ export function createStudioEstimateService(deps = {}) {
           row.approval?.exactInternalTotal ??
           row.calculationSnapshot?.totals?.exactInternalTotal ??
           null,
-        label: `Previous published/approved revision R${Number(row.revision) || 1} remains active until this revision publishes`
+        label: `Draft based on published/approved R${Number(row.revision) || 1} — R${Number(row.revision) || 1} remains active until publish`
       };
 
       let next;
@@ -1785,40 +1891,77 @@ export function createStudioEstimateService(deps = {}) {
             scope: row.scope,
             takeoffJobId: row.takeoffJobId,
             sourceTakeoffResultId: row.sourceTakeoffResultId,
-            staleReason: "Measurement revision opened — prior published revision stays active until publish"
+            staleReason:
+              "Editable draft opened — prior published/approved revision stays active until publish"
           },
           actorUserId
         );
       } else {
-        // Legacy repos: fall back to createRevisionFrom (supersedes immediately).
         next = await revisePreservingApprovedSnapshot(row, organizationId, actorUserId, {
           status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
           scope: row.scope,
           takeoffJobId: row.takeoffJobId,
           sourceTakeoffResultId: row.sourceTakeoffResultId,
-          staleReason: "Measurement revision opened from approved estimate"
+          staleReason: "Editable draft opened from approved estimate"
         });
         delete next.__previousRevisionSummary;
       }
 
+      // Soft reopen — never fail draft acquisition into an empty Takeoff lockout.
       if (next?.takeoffJobId) {
-        await reopenTakeoffForRevision({
-          organizationId,
-          takeoffJobId: next.takeoffJobId,
-          actorUserId
-        });
+        try {
+          await reopenTakeoffForRevision({
+            organizationId,
+            takeoffJobId: next.takeoffJobId,
+            actorUserId
+          });
+        } catch (e) {
+          console.warn(
+            JSON.stringify({
+              msg: "ensure_editable_draft_takeoff_reopen_soft_fail",
+              organizationId,
+              estimateId: next.id,
+              takeoffJobId: next.takeoffJobId,
+              errorCode: e?.code || "takeoff_reopen_failed",
+              message: String(e?.message || e).slice(0, 200)
+            })
+          );
+        }
       }
 
       return {
         ok: true,
         reused: false,
+        created: true,
         estimate: safeEstimateView(next, {
           previousRevisionSummary,
           priorEstimate: priorSnapshot
         }),
         previousRevisionSummary,
-        priorEstimate: priorSnapshot
+        priorEstimate: priorSnapshot,
+        basedOnRevisionId: row.id
       };
+    },
+
+    /**
+     * Open a measurement revision for an approved/published Studio estimate.
+     * Prefer ensureEditableEstimateDraft for new callers — this remains the
+     * confirm-gated route used by Edit Estimate / legacy clients.
+     */
+    async openMeasurementRevision({ organizationId, estimateId, actorUserId, body = {} }) {
+      if (body?.confirm !== true && body?.confirm !== "true") {
+        const err = new Error("Confirm Edit Measurements to open a revision");
+        err.statusCode = 400;
+        err.code = "confirm_required";
+        throw err;
+      }
+      return this.ensureEditableEstimateDraft({
+        organizationId,
+        estimateId,
+        basedOnRevisionId: body?.basedOnRevisionId || null,
+        actorUserId,
+        body
+      });
     },
 
     /**

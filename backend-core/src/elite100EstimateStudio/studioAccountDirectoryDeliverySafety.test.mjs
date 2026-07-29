@@ -402,6 +402,7 @@ async function seedAndExerciseIdentityActions() {
         estimateId: approved.id,
         actorUserId: ACTOR,
         body: {
+          forbidAutoFork: true,
           scope: {
             ...approved.scope,
             customerContactName: "Updated Contact"
@@ -412,7 +413,7 @@ async function seedAndExerciseIdentityActions() {
       approvedBlocked =
         e?.code === "estimate_revision_not_editable" && e?.statusCode === 409;
     }
-    assert.equal(approvedBlocked, true, "approved R1 updateScope blocked");
+    assert.equal(approvedBlocked, true, "approved R1 updateScope blocked when auto-fork forbidden");
     assertZeroNetwork(tripwire, "approved updateScope rejected");
 
     const opened = await service.openMeasurementRevision({

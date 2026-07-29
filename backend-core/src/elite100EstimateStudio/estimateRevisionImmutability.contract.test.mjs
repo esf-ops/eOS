@@ -45,8 +45,8 @@ function money(n) {
   assert.match(commercial, /data-editable=\{props\.editable \? "1" : "0"\}/);
   assert.match(commercial, /Read-only for this revision/);
   assert.match(commercial, /not in percentage basis/);
-  // Save Draft / Add item only inside editable branches
-  assert.match(commercial, /\{props\.editable \? \([\s\S]*Save Draft/);
+  // Save now / Add line only inside editable branches
+  assert.match(commercial, /\{props\.editable \? \([\s\S]*Save now/);
   assert.match(commercial, /\{props\.editable \? \([\s\S]*eq-add-custom-line/);
   console.log("ok: Account Adjustment labels + readonly gates in Estimate Adjustments UI");
 }
@@ -260,6 +260,7 @@ function money(n) {
       estimateId: created.id,
       actorUserId: ACTOR,
       body: {
+        forbidAutoFork: true,
         scope: {
           estimateWideAdjustment: {
             active: true,
@@ -274,7 +275,7 @@ function money(n) {
     approvedRejected =
       e?.code === "estimate_revision_not_editable" && e?.statusCode === 409;
   }
-  assert.equal(approvedRejected, true, "approved R1 rejected");
+  assert.equal(approvedRejected, true, "approved R1 rejected when auto-fork forbidden");
 
   // Published snapshot (approval + publication marker) also rejected
   const stored = repo.byId.get(created.id);
@@ -287,13 +288,13 @@ function money(n) {
       organizationId: ORG,
       estimateId: created.id,
       actorUserId: ACTOR,
-      body: { scope: { projectName: "mutated" } }
+      body: { forbidAutoFork: true, scope: { projectName: "mutated" } }
     });
   } catch (e) {
     publishedRejected =
       e?.code === "estimate_revision_not_editable" && e?.statusCode === 409;
   }
-  assert.equal(publishedRejected, true, "published R1 rejected");
+  assert.equal(publishedRejected, true, "published R1 rejected when auto-fork forbidden");
 
   const opened = await studio.openMeasurementRevision({
     organizationId: ORG,
