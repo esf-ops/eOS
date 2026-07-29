@@ -84,6 +84,10 @@ import {
   SPAHN_ESTIMATE_ADJUSTMENT_PERCENT,
   WATTS_PROMO_RATE_PER_SF
 } from "./studioEstimateTrustedAccounts.mjs";
+import {
+  resolveEffectiveEstimateWideAdjustment,
+  computeEstimateWideAdjustmentAmount
+} from "./studioEstimateWideAdjustment.mjs";
 import { MATERIAL_GROUPS } from "./studioEstimateTypes.mjs";
 import {
   STUDIO_COMMERCIAL_ROLES,
@@ -1155,7 +1159,16 @@ export async function calculateElite100Estimate(args = {}) {
   const cfg = readTrustedPartnerAccountConfig(pricingContext.env);
   const wattsTrusted = isWattsTrustedPartner(scope.partnerAccountId, cfg);
   const spahnTrusted = isSpahnTrustedPartner(scope.partnerAccountId, cfg);
-  const accountAdjustment = spahnTrusted ? round2(preAccountTotal * (SPAHN_ESTIMATE_ADJUSTMENT_PERCENT / 100)) : 0;
+
+  // One adjustment path: manual estimate-wide % or Spahn trusted 3% (never both).
+  const resolvedAdjustment = resolveEffectiveEstimateWideAdjustment({
+    scopeAdjustment: scope.estimateWideAdjustment,
+    partnerAccountId: scope.partnerAccountId,
+    env: pricingContext.env
+  });
+  const accountAdjustment = resolvedAdjustment.active
+    ? computeEstimateWideAdjustmentAmount(preAccountTotal, resolvedAdjustment.percentage)
+    : 0;
 
   const exactTotal = round2(preAccountTotal + accountAdjustment);
   const displayTotal = roundPublicEstimateToNearestTen(exactTotal);
@@ -1172,7 +1185,18 @@ export async function calculateElite100Estimate(args = {}) {
     displayTotal,
     exactInternalTotal,
     internalOnlyTotal: estimateInternalOnlyTotal,
-    absorbedTotal: estimateAbsorbedTotal
+    absorbedTotal: estimateAbsorbedTotal,
+    estimateWideAdjustment: resolvedAdjustment.active
+      ? {
+          percentage: resolvedAdjustment.percentage,
+          reason: resolvedAdjustment.reason,
+          source: resolvedAdjustment.source,
+          baseExactTotal: preAccountTotal,
+          exactAdjustment: accountAdjustment,
+          adjustedExactTotal: exactTotal,
+          customerDisplayTotal: displayTotal
+        }
+      : null
   };
 
   const snapshot = buildElite100PricingSnapshot({
@@ -1211,8 +1235,13 @@ export async function calculateElite100Estimate(args = {}) {
     account: {
       partnerAccountId: scope.partnerAccountId ?? null,
       wattsTrusted,
-      spahnTrusted,
-      spahnAdjustmentPercent: spahnTrusted ? SPAHN_ESTIMATE_ADJUSTMENT_PERCENT : 0,
+      spahnTrusted: Boolean(resolvedAdjustment.spahnTrusted || spahnTrusted),
+      spahnAdjustmentPercent:
+        resolvedAdjustment.source === "trusted_account_rule"
+          ? resolvedAdjustment.percentage
+          : spahnTrusted
+            ? SPAHN_ESTIMATE_ADJUSTMENT_PERCENT
+            : 0,
       accountAdjustment
     },
     totals,

@@ -199,6 +199,10 @@ export function normalizeStudioCommercialLine(row, index = 0) {
         : null,
     roomId: str(row.roomId || row.room_id) || null,
     roomName: str(row.roomName || row.room_name) || null,
+    percentageEligible:
+      row.percentageEligible === false || row.percentage_eligible === false
+        ? false
+        : true,
     sortOrder:
       row.sortOrder != null && Number.isFinite(Number(row.sortOrder))
         ? Number(row.sortOrder)
