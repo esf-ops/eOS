@@ -2885,3 +2885,14 @@
 | **SQL** | None. |
 | **Impacted** | `AiEstimatorWorkspace.tsx`, `ConsolidatedTakeoffReview.tsx`, `studioAiEstimatorSummary.mjs`, `estimatorWarningSafety.mjs`, `takeoffWorkspaceService.saveTakeoffCorrection` / `reopenTakeoffJobForMeasurementRevision`, `openMeasurementRevision`. |
 | **Protected** | pricingVersion 4 formulas, material/tax/edge/waterfall/cutout rates, Vanity Program, trusted-account pricing, simplified-publish, public DE layout, historical v2/v3, SQL. |
+
+### 201. Persistent Estimate Record + commercial controls (2026-07-29)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-29 · `feature/estimate-record-commercial-controls` |
+| **Decision** | The active AI estimator page is one **Estimate Record** with six always-mounted sections: Header, AI Takeoff Review, Verified Estimate, Commercial Configuration, Digital Estimate, Revision History. Stage changes editability and content — it does not remove sections. Custom lines are restored via existing `studioCommercialLines` / scope `customLineItems`. Estimate-wide percentage adjustment is server-authoritative and **distributed** across eligible customer-impact lines (same factor, not equal dollars); customers never see a separate surcharge line. Spahn trusted-account 3% consolidates into this single adjustment path (no stack with an identical manual 3%). Vanity Program remains estimator-qualified with Takeoff physical facts; waterfalls require approved geometry and use unchanged v4 rates ($600/leg, $225 polish, miter 65/70/75/80). Publish is inline (`type="button"`, no navigation); Takeoff `beforeunload` is suppressed in readonly mode. |
+| **Why** | Post-consolidation UX still felt like a wizard; commercial tools (custom lines, %, Vanity, waterfall) and Digital Estimate status were missing from the persistent record; publish could trip Leave site? via Takeoff dirty beforeunload. |
+| **SQL** | None. |
+| **Impacted** | `AiEstimatorWorkspace.tsx`, `estimateRecord/*`, `studioEstimateWideAdjustment.mjs`, `studioCommercialConfiguration.mjs`, `elite100RoomPricingCalculator.mjs` adjustment path, `ConsolidatedTakeoffReview` beforeunload. |
+| **Protected** | Takeoff persistence, approval rules, v4 formulas/rates, simplified-publish authority, public DE layout, historical v2/v3, manual estimates, SQL. |
