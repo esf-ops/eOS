@@ -242,7 +242,16 @@ const fakeCalc = {
     studioDigitalEstimateService: {
       async publish() {
         strictPublishCalls += 1;
-        return { ok: true, publication: { id: "pub-1", status: "active" }, customerUrl: "https://example.test/de/x" };
+        return {
+          ok: true,
+          publication: { id: "pub-1", status: "active" },
+          customerUrl: "https://example.test/de/x",
+          envelope: { configured: true },
+          publishedConfiguration: {
+            customerChoiceGroups: ["material_color", "sink"],
+            allowedOptionKeys: ["qty-sink"]
+          }
+        };
       }
     },
     lifecycleRepository: null

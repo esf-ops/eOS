@@ -216,7 +216,8 @@ export function attachElite100StudioV2Routes(app, deps) {
         const organizationId = await orgIdFor(req);
         const result = await studioV2.getWorkingDraft({
           organizationId,
-          intakeCaseId: req.params.caseId
+          intakeCaseId: req.params.caseId,
+          actorUserId: req.user?.id ?? null
         });
         auditStudioV2("working_draft.get", req, {
           intakeCaseId: req.params.caseId,
@@ -307,6 +308,33 @@ export function attachElite100StudioV2Routes(app, deps) {
       } catch (e) {
         logStudioV2("working-draft options patch failed", e, req);
         const { status, body } = studioV2ErrorBody(e, "Unable to save estimate options");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.patch(
+    "/api/elite100-studio-v2/cases/:caseId/working-draft/pricing",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioV2.patchWorkingDraftPricing({
+          organizationId,
+          intakeCaseId: req.params.caseId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        auditStudioV2("working_draft.pricing_patch", req, {
+          intakeCaseId: req.params.caseId,
+          estimateId: result.estimateId || null
+        });
+        res.json(result);
+      } catch (e) {
+        logStudioV2("working-draft pricing patch failed", e, req);
+        const { status, body } = studioV2ErrorBody(e, "Unable to save pricing settings");
         res.status(status).json(body);
       }
     }

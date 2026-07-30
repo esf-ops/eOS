@@ -660,7 +660,8 @@ async function createApproved(repo, extra = {}) {
   assert.ok(shell.includes("Studio V2 · Test Mode") || shell.includes("STUDIO V2 WORKSPACE"));
   assert.ok(shell.includes('data-testid="studio-v2-workflow-status"'));
   assert.ok(shell.includes('data-testid="studio-v2-calc-pricing-basis"'));
-  assert.ok(shell.includes("Pricing basis / price group editing will be added in the next slice."));
+  assert.ok(shell.includes("StudioV2PricingControlsPanel") || shell.includes("working-draft/pricing"));
+  assert.ok(!shell.includes("Pricing basis / price group editing will be added in the next slice."));
   assert.ok(panel.includes('data-testid="studio-v2-internal-collapsed"'));
   assert.ok(panel.includes("Internal cost notes — does not affect customer price"));
   assert.ok(panel.includes("Hidden customer-impacting adjustments"));

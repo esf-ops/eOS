@@ -43,6 +43,7 @@ type Props = {
   calcStale: boolean;
   scopeDirty: boolean;
   optionsDirty: boolean;
+  pricingDirty?: boolean;
   busy: boolean;
   error?: string | null;
   notice?: string | null;
@@ -68,6 +69,7 @@ export default function StudioV2ApprovalPanel(props: Props) {
     calcStale,
     scopeDirty,
     optionsDirty,
+    pricingDirty = false,
     busy,
     error,
     notice,
@@ -96,6 +98,12 @@ export default function StudioV2ApprovalPanel(props: Props) {
         message: "Unsaved estimate option changes — save options before approving."
       });
     }
+    if (pricingDirty) {
+      list.push({
+        code: "unsaved_pricing",
+        message: "Unsaved pricing changes — save pricing before approving."
+      });
+    }
     if (calcStale) {
       list.push({
         code: "calculation_stale",
@@ -109,7 +117,7 @@ export default function StudioV2ApprovalPanel(props: Props) {
       });
     }
     return list;
-  }, [scopeDirty, optionsDirty, calcStale, calcAvailable, alreadyApproved]);
+  }, [scopeDirty, optionsDirty, pricingDirty, calcStale, calcAvailable, alreadyApproved]);
 
   const backendBlockers = Array.isArray(readiness?.blockers) ? readiness.blockers : [];
   const allBlockers = [...localBlockers, ...backendBlockers.filter((b) => {
@@ -127,6 +135,7 @@ export default function StudioV2ApprovalPanel(props: Props) {
     !alreadyApproved &&
     !scopeDirty &&
     !optionsDirty &&
+    !pricingDirty &&
     !calcStale &&
     Boolean(calcAvailable) &&
     backendAllowed &&
@@ -139,17 +148,19 @@ export default function StudioV2ApprovalPanel(props: Props) {
       ? "Save scope before approving."
       : optionsDirty
         ? "Save options before approving."
-        : calcStale
-          ? "Recalculate before approving."
-          : !calcAvailable
-            ? "Calculate before approving."
-            : !backendAllowed
-              ? readiness?.message || "Backend readiness does not allow approval yet."
-              : !confirmed
-                ? "Check the confirmation box before approving."
-                : busy
-                  ? "Approval in progress…"
-                  : null;
+        : pricingDirty
+          ? "Save pricing before approving."
+          : calcStale
+            ? "Recalculate before approving."
+            : !calcAvailable
+              ? "Calculate before approving."
+              : !backendAllowed
+                ? readiness?.message || "Backend readiness does not allow approval yet."
+                : !confirmed
+                  ? "Check the confirmation box before approving."
+                  : busy
+                    ? "Approval in progress…"
+                    : null;
 
   return (
     <section className="studio-v2-panel" data-testid="studio-v2-approval">

@@ -22,6 +22,11 @@ import StudioV2EstimateOptionsPanel, {
   emptyEditableOptions,
   type StudioV2EditableOptions
 } from "./StudioV2EstimateOptionsPanel";
+import StudioV2PricingControlsPanel, {
+  cloneEditablePricing,
+  emptyEditablePricing,
+  type StudioV2EditablePricing
+} from "./StudioV2PricingControlsPanel";
 import StudioV2ApprovalPanel, {
   type StudioV2ApprovalReadiness,
   type StudioV2ApprovedSummary
@@ -107,8 +112,10 @@ type WorkingDraftResponse = {
   scopeSummary?: ScopeSummary;
   editableScope?: StudioV2EditableScope;
   editableOptions?: StudioV2EditableOptions;
+  editablePricing?: StudioV2EditablePricing;
   scopeEditable?: boolean;
   optionsEditable?: boolean;
+  pricingEditable?: boolean;
   scopeEditability?: { editable?: boolean; code?: string | null; message?: string | null };
   lastCalculation?: CalculationResult;
   approvalReadiness?: StudioV2ApprovalReadiness;
@@ -206,6 +213,8 @@ export default function StudioV2EstimatorShell(props: {
   const [scopeDirty, setScopeDirty] = useState(false);
   const [optionsDraft, setOptionsDraft] = useState<StudioV2EditableOptions>(emptyEditableOptions());
   const [optionsDirty, setOptionsDirty] = useState(false);
+  const [pricingDraft, setPricingDraft] = useState<StudioV2EditablePricing>(emptyEditablePricing());
+  const [pricingDirty, setPricingDirty] = useState(false);
   const [calcStale, setCalcStale] = useState(false);
   const [calcStaleReason, setCalcStaleReason] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -216,6 +225,8 @@ export default function StudioV2EstimatorShell(props: {
   const [scopeSaveNotice, setScopeSaveNotice] = useState<string | null>(null);
   const [optionsSaveError, setOptionsSaveError] = useState<string | null>(null);
   const [optionsSaveNotice, setOptionsSaveNotice] = useState<string | null>(null);
+  const [pricingSaveError, setPricingSaveError] = useState<string | null>(null);
+  const [pricingSaveNotice, setPricingSaveNotice] = useState<string | null>(null);
   const [approveError, setApproveError] = useState<string | null>(null);
   const [approveNotice, setApproveNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -223,6 +234,7 @@ export default function StudioV2EstimatorShell(props: {
   const [publishBusy, setPublishBusy] = useState(false);
   const [scopeSaveBusy, setScopeSaveBusy] = useState(false);
   const [optionsSaveBusy, setOptionsSaveBusy] = useState(false);
+  const [pricingSaveBusy, setPricingSaveBusy] = useState(false);
   const [approveBusy, setApproveBusy] = useState(false);
 
   const hydrateFromDraft = useCallback((draftBody: WorkingDraftResponse) => {
@@ -233,14 +245,21 @@ export default function StudioV2EstimatorShell(props: {
     setScopeDirty(false);
     setOptionsDraft(cloneEditableOptions(draftBody?.editableOptions));
     setOptionsDirty(false);
+    setPricingDraft(cloneEditablePricing(draftBody?.editablePricing));
+    setPricingDirty(false);
     setCalcStale(false);
     setCalcStaleReason(null);
     setScopeSaveError(null);
     setOptionsSaveError(null);
+    setPricingSaveError(null);
   }, []);
 
   const load = useCallback(
-    async (opts?: { preserveDirtyScope?: boolean; preserveDirtyOptions?: boolean }) => {
+    async (opts?: {
+      preserveDirtyScope?: boolean;
+      preserveDirtyOptions?: boolean;
+      preserveDirtyPricing?: boolean;
+    }) => {
       setBusy(true);
       setLoadError(null);
       try {
@@ -264,7 +283,9 @@ export default function StudioV2EstimatorShell(props: {
           }) as Promise<CustomerActivityResponse | null>
         ]);
         const preserveDirty =
-          (opts?.preserveDirtyScope && scopeDirty) || (opts?.preserveDirtyOptions && optionsDirty);
+          (opts?.preserveDirtyScope && scopeDirty) ||
+          (opts?.preserveDirtyOptions && optionsDirty) ||
+          (opts?.preserveDirtyPricing && pricingDirty);
         if (preserveDirty) {
           setDraft(draftBody);
           setCalcResult(draftBody?.lastCalculation || null);
@@ -275,6 +296,10 @@ export default function StudioV2EstimatorShell(props: {
           if (!(opts?.preserveDirtyOptions && optionsDirty)) {
             setOptionsDraft(cloneEditableOptions(draftBody?.editableOptions));
             setOptionsDirty(false);
+          }
+          if (!(opts?.preserveDirtyPricing && pricingDirty)) {
+            setPricingDraft(cloneEditablePricing(draftBody?.editablePricing));
+            setPricingDirty(false);
           }
         } else {
           hydrateFromDraft(draftBody);
@@ -288,7 +313,7 @@ export default function StudioV2EstimatorShell(props: {
         setBusy(false);
       }
     },
-    [authToken, caseId, hydrateFromDraft, scopeDirty, optionsDirty]
+    [authToken, caseId, hydrateFromDraft, scopeDirty, optionsDirty, pricingDirty]
   );
 
   useEffect(() => {
@@ -313,6 +338,15 @@ export default function StudioV2EstimatorShell(props: {
     setCalcStaleReason("Estimate options changed — recalculate to update total.");
     setOptionsSaveNotice(null);
     setOptionsSaveError(null);
+  }
+
+  function onPricingChange(next: StudioV2EditablePricing) {
+    setPricingDraft(next);
+    setPricingDirty(true);
+    setCalcStale(true);
+    setCalcStaleReason("Pricing settings changed — recalculate to update total.");
+    setPricingSaveNotice(null);
+    setPricingSaveError(null);
   }
 
   async function runSaveScope() {
@@ -451,6 +485,92 @@ export default function StudioV2EstimatorShell(props: {
     }
   }
 
+  async function runSavePricing() {
+    if (!(draft?.pricingEditable ?? draft?.scopeEditable)) {
+      setPricingSaveError(draft?.scopeEditability?.message || "Pricing controls are read-only.");
+      return;
+    }
+    setPricingSaveBusy(true);
+    setPricingSaveError(null);
+    setPricingSaveNotice(null);
+    try {
+      const body = (await apiPatch(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft/pricing`,
+        authToken,
+        {
+          pricing: {
+            pricingBasis: pricingDraft.pricingBasis,
+            materialGroup: pricingDraft.materialGroup,
+            estimateWideAdjustment: pricingDraft.estimateWideAdjustment
+              ? {
+                  active: Boolean(pricingDraft.estimateWideAdjustment.active),
+                  percentage: Number(pricingDraft.estimateWideAdjustment.percentage) || 0,
+                  reason: pricingDraft.estimateWideAdjustment.reason || "",
+                  source: "manual"
+                }
+              : undefined,
+            ...(pricingDraft.internalMarkupEditable
+              ? { internalMarkupPercent: Number(pricingDraft.internalMarkupPercent) || 0 }
+              : {})
+          },
+          clientMutationId: `v2-pricing-${Date.now()}`,
+          expectedRevision: draft.revision ?? draft.projectHeader?.revision ?? undefined
+        }
+      )) as {
+        ok?: boolean;
+        editablePricing?: StudioV2EditablePricing;
+        projectHeader?: ProjectHeader;
+        lastCalculation?: CalculationResult;
+        revision?: number;
+        status?: string;
+      };
+      setDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              editablePricing: body.editablePricing || prev.editablePricing,
+              lastCalculation: body.lastCalculation || prev.lastCalculation,
+              revision: body.revision ?? prev.revision,
+              status: body.status || prev.status,
+              projectHeader: body.projectHeader
+                ? { ...prev.projectHeader, ...body.projectHeader, currentTotal: null }
+                : prev.projectHeader
+                  ? {
+                      ...prev.projectHeader,
+                      revision: body.revision ?? prev.projectHeader.revision,
+                      status: body.status || prev.projectHeader.status,
+                      pricingBasis: pricingDraft.pricingBasis || prev.projectHeader.pricingBasis,
+                      materialGroup: pricingDraft.materialGroup || prev.projectHeader.materialGroup,
+                      currentTotal: null
+                    }
+                  : prev.projectHeader
+            }
+          : prev
+      );
+      setPricingDraft(cloneEditablePricing(body.editablePricing || pricingDraft));
+      setPricingDirty(false);
+      setCalcStale(true);
+      setCalcStaleReason("Pricing settings changed — recalculate to update total.");
+      setCalcResult(body.lastCalculation || { available: false, total: null });
+      setPricingSaveNotice("Pricing settings saved. Recalculate to update total.");
+      const draftBody = (await apiGet(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft`,
+        authToken
+      )) as WorkingDraftResponse;
+      setDraft(draftBody);
+      if (!scopeDirty) setScopeDraft(cloneEditableScope(draftBody.editableScope));
+      if (!optionsDirty) setOptionsDraft(cloneEditableOptions(draftBody.editableOptions));
+      setPricingDraft(cloneEditablePricing(draftBody.editablePricing || body.editablePricing));
+      setPricingDirty(false);
+      setCalcStale(true);
+      setCalcStaleReason("Pricing settings changed — recalculate to update total.");
+    } catch (e) {
+      setPricingSaveError(errorMessage(e));
+    } finally {
+      setPricingSaveBusy(false);
+    }
+  }
+
   async function runCalculate() {
     if (scopeDirty) {
       setCalcError("Save Scope first before calculating.");
@@ -458,6 +578,10 @@ export default function StudioV2EstimatorShell(props: {
     }
     if (optionsDirty) {
       setCalcError("Save Options first before calculating.");
+      return;
+    }
+    if (pricingDirty) {
+      setCalcError("Save Pricing first before calculating.");
       return;
     }
     setCalcBusy(true);
@@ -484,6 +608,9 @@ export default function StudioV2EstimatorShell(props: {
       if (!optionsDirty) {
         setOptionsDraft(cloneEditableOptions(draftBody.editableOptions));
       }
+      if (!pricingDirty) {
+        setPricingDraft(cloneEditablePricing(draftBody.editablePricing));
+      }
       // Keep local form fields — do not rehydrate from calculation response while dirty.
     } catch (e) {
       setCalcError(errorMessage(e));
@@ -493,8 +620,8 @@ export default function StudioV2EstimatorShell(props: {
   }
 
   async function runApprove(args: { confirmed: true; approvalNote?: string }) {
-    if (scopeDirty || optionsDirty) {
-      setApproveError("Save scope and options before approving.");
+    if (scopeDirty || optionsDirty || pricingDirty) {
+      setApproveError("Save scope, options, and pricing before approving.");
       return;
     }
     if (calcStale || !calcResult?.available) {
@@ -697,6 +824,10 @@ export default function StudioV2EstimatorShell(props: {
                 <span>Options</span>
                 <strong>{optionsDirty ? "unsaved" : "clean"}</strong>
               </li>
+              <li data-testid="studio-v2-status-pricing">
+                <span>Pricing</span>
+                <strong>{pricingDirty ? "unsaved" : "clean"}</strong>
+              </li>
               <li data-testid="studio-v2-status-calculation">
                 <span>Calculation</span>
                 <strong>{calcStatusLabel}</strong>
@@ -756,13 +887,26 @@ export default function StudioV2EstimatorShell(props: {
                 </dd>
               </div>
             </dl>
-            <p
-              className="studio-v2-placeholder"
-              data-testid="studio-v2-pricing-basis-placeholder"
-            >
-              Pricing basis / price group editing will be added in the next slice.
-            </p>
           </section>
+
+          <StudioV2PricingControlsPanel
+            value={pricingDraft}
+            readOnly={!(draft.pricingEditable ?? draft.scopeEditable) || draft.code === "unsupported_origin" || approved}
+            readOnlyMessage={
+              approved
+                ? "Pricing controls are read-only on approved estimates."
+                : draft.scopeEditability?.message ||
+                  (draft.code === "unsupported_origin"
+                    ? draft.message
+                    : "Pricing controls cannot be edited on this estimate.")
+            }
+            dirty={pricingDirty}
+            saveBusy={pricingSaveBusy}
+            saveError={pricingSaveError}
+            saveNotice={pricingSaveNotice}
+            onChange={onPricingChange}
+            onSave={() => void runSavePricing()}
+          />
 
           <StudioV2TakeoffImportPanel
             authToken={authToken}
@@ -853,8 +997,10 @@ export default function StudioV2EstimatorShell(props: {
                   draft.code === "unsupported_origin" ||
                   scopeDirty ||
                   optionsDirty ||
+                  pricingDirty ||
                   scopeSaveBusy ||
-                  optionsSaveBusy
+                  optionsSaveBusy ||
+                  pricingSaveBusy
                 }
                 onClick={() => void runCalculate()}
                 data-testid="studio-v2-calculate"
@@ -872,7 +1018,12 @@ export default function StudioV2EstimatorShell(props: {
                 Save Options first before calculating.
               </p>
             ) : null}
-            {calcStale && !scopeDirty && !optionsDirty ? (
+            {pricingDirty ? (
+              <p className="studio-v2-dirty" data-testid="studio-v2-calc-requires-pricing-save">
+                Save Pricing first before calculating.
+              </p>
+            ) : null}
+            {calcStale && !scopeDirty && !optionsDirty && !pricingDirty ? (
               <p className="studio-v2-stale" data-testid="studio-v2-calc-stale">
                 {calcStaleReason || "Scope changed — recalculate to update total."}
               </p>
@@ -989,6 +1140,7 @@ export default function StudioV2EstimatorShell(props: {
             calcStale={calcStale}
             scopeDirty={scopeDirty}
             optionsDirty={optionsDirty}
+            pricingDirty={pricingDirty}
             busy={approveBusy}
             error={approveError}
             notice={approveNotice}
