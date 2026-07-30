@@ -3309,3 +3309,32 @@ button.linkish {
   background: #fff;
   width: 100%;
 }
+
+/* Studio V2 Slice E — Approval */
+.studio-v2-approval-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  color: var(--eos-ink-mid);
+}
+.studio-v2-approval-confirm input {
+  margin-top: 0.2rem;
+}
+.studio-v2-approval-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--eos-ink-muted);
+}
+.studio-v2-approval-note input {
+  font: inherit;
+  color: var(--eos-ink);
+  border: 1px solid var(--eos-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  background: #fff;
+}

@@ -1,12 +1,14 @@
 /**
- * Elite 100 Studio V2 — additive working-draft / calculate / publish / scope / options / takeoff-import wrappers.
+ * Elite 100 Studio V2 — additive working-draft / calculate / publish / scope / options / approve wrappers.
  *
  * Hard rules:
  * - Does not create estimates or acquire drafts.
  * - Does not call ensure-editable-draft, open-measurement-revision, or simplified-publish.
  * - Calculate wraps calculateStudioEstimateV4 without refresh-from-takeoff or scope mutation.
- * - Scope / options PATCH / takeoff apply persist via repository.update only (not V1 updateScope / refresh-from-takeoff).
+ * - Scope / options PATCH / takeoff apply / approve persist via repository.update only.
+ * - Does not call V1 studioEstimateService.approve (refreshTakeoffGate side effects).
  * - Publish is strict (approved only) via existing digital-estimate publish service.
+ * - Approval never publishes.
  */
 
 import { calculateStudioEstimateV4 } from "./elite100RoomPricingStudioAdapter.mjs";
@@ -48,6 +50,11 @@ import {
   buildStudioV2EditableOptions,
   normalizeStudioV2OptionsPatch
 } from "./studioV2EstimateOptions.mjs";
+import {
+  assessStudioV2ApprovalReadiness,
+  buildStudioV2ApprovalPayload,
+  buildStudioV2ApprovedSummary
+} from "./studioV2Approval.mjs";
 import {
   buildSafeStudioPublicationSummary,
   isCurrentActivePublicationForEstimate,
@@ -302,6 +309,8 @@ export function createStudioV2Service(deps = {}) {
           message: studioV2UserMessage(STUDIO_V2_ERROR_CODES.NO_ESTIMATE)
         },
         lastCalculation: buildStudioV2CalculationResult(null),
+        approvalReadiness: assessStudioV2ApprovalReadiness(null),
+        approvedSummary: buildStudioV2ApprovedSummary(null),
         approvedPublished: {
           approved: false,
           approvedAt: null,
@@ -334,6 +343,8 @@ export function createStudioV2Service(deps = {}) {
         takeoffImportNeeded: needsStudioV2TakeoffImport(row),
         takeoffJobId: row.takeoffJobId || null,
         lastCalculation: buildStudioV2CalculationResult(estimate),
+        approvalReadiness: assessStudioV2ApprovalReadiness(row),
+        approvedSummary: buildStudioV2ApprovedSummary(estimate),
         approvedPublished: buildApprovedPublishedPointers(estimate, null),
         publicationSummary: buildSafeStudioPublicationSummary({ estimate }),
         originType: resolveStudioV2OriginType(estimate),
@@ -363,6 +374,8 @@ export function createStudioV2Service(deps = {}) {
       takeoffImportNeeded: needsStudioV2TakeoffImport(row),
       takeoffJobId: row.takeoffJobId || null,
       lastCalculation: buildStudioV2CalculationResult(estimateWithPub),
+      approvalReadiness: assessStudioV2ApprovalReadiness(row),
+      approvedSummary: buildStudioV2ApprovedSummary(estimateWithPub),
       approvedPublished: buildApprovedPublishedPointers(estimateWithPub, pubBundle),
       publicationSummary: pubBundle.publicationSummary,
       originType: resolveStudioV2OriginType(estimateWithPub),
@@ -780,6 +793,134 @@ export function createStudioV2Service(deps = {}) {
   }
 
   /**
+   * POST working-draft/approve — freeze Working Draft into approved snapshot.
+   * Persists via repository.update with V1-compatible approval payload.
+   * Never calls V1 approve (refreshTakeoffGate), ensure-editable-draft,
+   * open-measurement-revision, refresh-from-takeoff, simplified-publish, or publish.
+   */
+  async function approveWorkingDraft({
+    organizationId,
+    intakeCaseId,
+    actorUserId,
+    body
+  }) {
+    const row = await loadActiveEstimateOrNull(organizationId, intakeCaseId);
+    if (!row) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_ESTIMATE);
+    }
+    if (isStudioV2OriginUnsupported(row)) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNSUPPORTED_ORIGIN);
+    }
+
+    const confirmed = body?.confirmed === true || body?.confirm === true;
+    if (!confirmed) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "confirmed: true is required to approve.",
+        statusCode: 400,
+        details: { field: "confirmed" }
+      });
+    }
+
+    const expectedRevision =
+      body?.expectedRevision != null ? Number(body.expectedRevision) : null;
+    if (
+      expectedRevision != null &&
+      Number.isFinite(expectedRevision) &&
+      Number(row.revision) !== expectedRevision
+    ) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION, {
+        message: "This working draft changed. Reload before approving.",
+        details: {
+          estimateId: row.id,
+          revision: row.revision,
+          expectedRevision
+        }
+      });
+    }
+
+    const readiness = assessStudioV2ApprovalReadiness(row);
+    if (!readiness.allowed) {
+      const code =
+        readiness.code === "approved_snapshot_readonly"
+          ? STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY
+          : readiness.code === "superseded_revision"
+            ? STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION
+            : readiness.code === "not_priced"
+              ? STUDIO_V2_ERROR_CODES.NOT_PRICED
+              : readiness.code === "calculation_stale"
+                ? STUDIO_V2_ERROR_CODES.CALCULATION_STALE
+                : readiness.code === "approval_blocked"
+                  ? STUDIO_V2_ERROR_CODES.APPROVAL_BLOCKED
+                  : readiness.code === "no_estimate"
+                    ? STUDIO_V2_ERROR_CODES.NO_ESTIMATE
+                    : STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED;
+      throw createStudioV2Error(code, {
+        message: readiness.message || undefined,
+        blockers: readiness.blockers,
+        details: {
+          estimateId: row.id,
+          status: row.status,
+          revision: row.revision,
+          blockers: readiness.blockers
+        }
+      });
+    }
+
+    const approvalNote =
+      typeof body?.approvalNote === "string" ? body.approvalNote.trim().slice(0, 500) : "";
+    const approval = buildStudioV2ApprovalPayload(row, {
+      actorUserId: actorUserId || null,
+      approvalNote: approvalNote || null
+    });
+
+    const updated = await repository.update(
+      organizationId,
+      row.id,
+      {
+        status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+        approval,
+        staleReason: null
+      },
+      actorUserId || null
+    );
+
+    const estimate = safeView(updated);
+    const pubBundle = await loadPublicationBundle(organizationId, estimate);
+    const estimateWithPub = safeView(updated, { publication: pubBundle.publicationSummary });
+    const clientMutationId =
+      typeof body?.clientMutationId === "string" ? body.clientMutationId.trim().slice(0, 120) : null;
+
+    return {
+      ok: true,
+      caseId: String(intakeCaseId),
+      estimateId: estimate.id,
+      status: estimate.status,
+      revision: estimate.revision,
+      approvedAt: approval.approvedAt,
+      approvedBy: approval.approvedByUserId,
+      calculation: buildStudioV2CalculationResult(estimateWithPub),
+      approvedSummary: buildStudioV2ApprovedSummary(estimateWithPub),
+      approvalReadiness: assessStudioV2ApprovalReadiness(updated),
+      scopeEditable: false,
+      optionsEditable: false,
+      scopeEditability: assessStudioV2ScopeEditability(updated),
+      approvedPublished: buildApprovedPublishedPointers(estimateWithPub, pubBundle),
+      publication: pubBundle.publicationSummary,
+      publicationSummary: pubBundle.publicationSummary,
+      clientMutationId,
+      sideEffects: {
+        ensureEditableDraft: false,
+        refreshFromTakeoff: false,
+        openMeasurementRevision: false,
+        autoFork: false,
+        v1Approve: false,
+        publish: false,
+        simplifiedPublish: false
+      }
+    };
+  }
+
+  /**
    * POST calculate — v4 only; no ensure-editable-draft; no refresh-from-takeoff.
    */
   async function calculateWorkingDraft({ organizationId, intakeCaseId, actorUserId }) {
@@ -1008,6 +1149,7 @@ export function createStudioV2Service(deps = {}) {
     getWorkingDraft,
     patchWorkingDraftScope,
     patchWorkingDraftOptions,
+    approveWorkingDraft,
     previewTakeoffImport,
     applyTakeoffImport,
     calculateWorkingDraft,
