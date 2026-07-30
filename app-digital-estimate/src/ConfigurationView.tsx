@@ -44,11 +44,13 @@ import {
   type ConfigurationSaveError,
   type ConfigurationState,
   type ConfigProduct,
+  type CustomerConfigurationFoundation,
   type CustomerFinalAcceptance,
   type CustomerReviewRequest,
   type ProductDraft,
   type RoomProductDrafts,
 } from "./publicConfigApi";
+import CustomerConfigurationFoundationPanel from "./CustomerConfigurationFoundationPanel";
 
 type Props = {
   state: ConfigurationState;
@@ -1919,6 +1921,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     Record<string, BacksplashDraft>
   >(() => ({ ...(config?.backsplashDrafts || {}) }));
   const [projectNote, setProjectNote] = useState(config?.projectNote || "");
+  const [customerConfiguration, setCustomerConfiguration] =
+    useState<CustomerConfigurationFoundation | null>(
+      config?.customerConfiguration || null,
+    );
   const [latestCalc, setLatestCalc] = useState(config?.latestCalculation ?? null);
   /** Last server-confirmed calculation — authoritative Your estimate source. */
   const [savedCalc, setSavedCalc] = useState(config?.latestCalculation ?? null);
@@ -1956,6 +1962,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const roomLabelsRef = useRef(roomLabels);
   const roomNotesRef = useRef(roomNotes);
   const projectNoteRef = useRef(projectNote);
+  const customerConfigurationRef = useRef(customerConfiguration);
 
   useEffect(() => {
     rowVersionRef.current = rowVersion;
@@ -1981,6 +1988,9 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   useEffect(() => {
     projectNoteRef.current = projectNote;
   }, [projectNote]);
+  useEffect(() => {
+    customerConfigurationRef.current = customerConfiguration;
+  }, [customerConfiguration]);
 
   useEffect(() => {
     hydrateReadyRef.current = true;
@@ -2184,6 +2194,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     };
 
     try {
+      const effectiveCustomerConfiguration = customerConfigurationRef.current;
       const result = await saveConfigurationSelections({
         items,
         expectedRowVersion: rowVersionRef.current,
@@ -2194,6 +2205,9 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         projectNote: effectiveProjectNote,
         customerProductDrafts: effectiveProductDrafts,
         backsplashDrafts: effectiveBacksplashDrafts,
+        ...(effectiveCustomerConfiguration
+          ? { customerConfiguration: effectiveCustomerConfiguration }
+          : {}),
       });
       if (seq !== requestSeq.n) {
         finishFlight();
@@ -2219,6 +2233,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         setBacksplashDrafts(result.backsplashDrafts);
         setSavedBacksplashDrafts(result.backsplashDrafts);
       }
+      if (result.customerConfiguration) {
+        setCustomerConfiguration(result.customerConfiguration);
+        customerConfigurationRef.current = result.customerConfiguration;
+      }
       setQty(effectiveQty);
       setSavedQty(effectiveQty);
       qtyRef.current = effectiveQty;
@@ -2241,6 +2259,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               customerProductDrafts:
                 result.customerProductDrafts || result.productDrafts || effectiveProductDrafts,
               backsplashDrafts: result.backsplashDrafts || effectiveBacksplashDrafts,
+              customerConfiguration:
+                result.customerConfiguration ||
+                effectiveCustomerConfiguration ||
+                state.configuration.customerConfiguration ||
+                null,
               missingInformationRequirements:
                 result.missingInformationRequirements ||
                 state.configuration.missingInformationRequirements,
@@ -3129,6 +3152,19 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                 onEdgeChange={(optionKey) => selectChoice(optionKey, "edge", room.id)}
               />
             ))}
+
+            <CustomerConfigurationFoundationPanel
+              value={customerConfiguration || config?.customerConfiguration || null}
+              busy={saveState === "saving" || configurationLocked}
+              onSave={async (next) => {
+                setCustomerConfiguration(next);
+                customerConfigurationRef.current = next;
+                const row = await saveFnRef.current();
+                if (row == null) {
+                  throw new Error("Unable to save selections right now.");
+                }
+              }}
+            />
 
             <div className="rounded-2xl border border-border bg-background p-6">
               <label className="text-xs uppercase tracking-widest text-muted-foreground">

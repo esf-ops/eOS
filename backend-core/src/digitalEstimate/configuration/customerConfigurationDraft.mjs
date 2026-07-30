@@ -3,6 +3,11 @@
  * Never mutates CRM/source records — session selection payload only.
  */
 
+import {
+  CUSTOMER_CONFIGURATION_FOUNDATION_KEY,
+  sanitizeCustomerConfigurationFoundation
+} from "./customerConfigurationFoundation.mjs";
+
 export const CUSTOMER_INFO_DRAFT_KEY = "__customerInfoDraft";
 export const ROOM_LABEL_DRAFT_KEY = "__roomLabelDrafts";
 export const ROOM_NOTES_DRAFT_KEY = "__roomNotes";
@@ -10,6 +15,7 @@ export const PROJECT_NOTE_DRAFT_KEY = "__projectNote";
 export const CUSTOMER_PRODUCT_DRAFTS_KEY = "__customerProductDrafts";
 export const BACKSPLASH_DRAFTS_KEY = "__backsplashDrafts";
 export const SIDE_SPLASH_DRAFTS_KEY = "__sideSplashDrafts";
+export { CUSTOMER_CONFIGURATION_FOUNDATION_KEY };
 
 const INFO_FIELDS = ["customerName", "projectName", "phone", "email", "projectAddress"];
 const NOTE_MAX = 2000;
@@ -22,7 +28,8 @@ const META_KEYS = new Set([
   PROJECT_NOTE_DRAFT_KEY,
   CUSTOMER_PRODUCT_DRAFTS_KEY,
   BACKSPLASH_DRAFTS_KEY,
-  SIDE_SPLASH_DRAFTS_KEY
+  SIDE_SPLASH_DRAFTS_KEY,
+  CUSTOMER_CONFIGURATION_FOUNDATION_KEY
 ]);
 
 function sanitizePlainText(raw, maxLen) {
@@ -214,6 +221,18 @@ export function splitSelectionPayloadMeta(payload) {
     if (META_KEYS.has(key) || String(key).startsWith("__")) continue;
     quantities[key] = Number(value) || 0;
   }
+  let customerConfiguration = null;
+  if (src[CUSTOMER_CONFIGURATION_FOUNDATION_KEY] != null) {
+    try {
+      customerConfiguration = sanitizeCustomerConfigurationFoundation(
+        src[CUSTOMER_CONFIGURATION_FOUNDATION_KEY],
+        { rejectForbidden: false }
+      );
+    } catch {
+      customerConfiguration = null;
+    }
+  }
+
   return {
     quantities,
     customerInfoDraft: sanitizeCustomerInfoDraft(src[CUSTOMER_INFO_DRAFT_KEY]),
@@ -222,7 +241,8 @@ export function splitSelectionPayloadMeta(payload) {
     projectNote: sanitizeProjectNoteDraft(src[PROJECT_NOTE_DRAFT_KEY]) || null,
     customerProductDrafts: sanitizeCustomerProductDrafts(src[CUSTOMER_PRODUCT_DRAFTS_KEY]),
     backsplashDrafts: sanitizeBacksplashDrafts(src[BACKSPLASH_DRAFTS_KEY]),
-    sideSplashDrafts: sanitizeSideSplashDrafts(src[SIDE_SPLASH_DRAFTS_KEY])
+    sideSplashDrafts: sanitizeSideSplashDrafts(src[SIDE_SPLASH_DRAFTS_KEY]),
+    customerConfiguration
   };
 }
 
@@ -235,7 +255,8 @@ export function splitSelectionPayloadMeta(payload) {
  *   projectNote?: string|null,
  *   customerProductDrafts?: object|null,
  *   backsplashDrafts?: object|null,
- *   sideSplashDrafts?: object|null
+ *   sideSplashDrafts?: object|null,
+ *   customerConfiguration?: object|null
  * }} [meta]
  */
 export function mergeSelectionPayloadMeta(quantities, meta = {}) {
@@ -255,6 +276,12 @@ export function mergeSelectionPayloadMeta(quantities, meta = {}) {
   if (Object.keys(backsplashDrafts).length) out[BACKSPLASH_DRAFTS_KEY] = backsplashDrafts;
   const sideSplashDrafts = sanitizeSideSplashDrafts(meta.sideSplashDrafts);
   if (Object.keys(sideSplashDrafts).length) out[SIDE_SPLASH_DRAFTS_KEY] = sideSplashDrafts;
+  if (meta.customerConfiguration != null) {
+    out[CUSTOMER_CONFIGURATION_FOUNDATION_KEY] = sanitizeCustomerConfigurationFoundation(
+      meta.customerConfiguration,
+      { rejectForbidden: true, lastSavedAt: meta.customerConfiguration?.lastSavedAt ?? null }
+    );
+  }
   return out;
 }
 

@@ -3149,3 +3149,15 @@
 | **Protected** | Pricing math, V1 workflow/shell max-width, DE, schema, business controls. |
 | **Revisit trigger** | Ultrawide (>1800px) feedback; further column prioritization if needed. |
 
+### 223. Digital Estimate — Customer Configuration Foundation (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/digital-estimate-customer-configuration-foundation` |
+| **Decision** | Add a customer-safe **configuration foundation** layer on Digital Estimate interactive sessions: `selection_payload_json.__customerConfigurationFoundation` stores selections (material/edge/backsplash preference) vs scope change requests (openings, waterfall placeholders, notes). Public read model exposes summaries + `requiresEstimatorReview`. Saves extend existing `PUT /api/public-digital-estimate/v2/selections`. Rejects internal fields. Never mutates approved Studio/publication snapshots. No browser pricing, no sold conversion, no final acceptance changes, no schema migration. |
+| **Why** | Studio V2 can publish interactive DE links; customers need a durable selection/request layer before catalog/waterfall/sold slices. |
+| **SQL** | None (JSON meta-key on existing selections). |
+| **Impacted** | `customerConfigurationFoundation.mjs`, `customerConfigurationDraft.mjs`, `publicConfigurationService.mjs`, `publicConfigApi.ts`, `CustomerConfigurationFoundationPanel.tsx`, `ConfigurationView.tsx`, foundation test, this doc. |
+| **Protected** | Approved snapshot, Studio V2 workflow, calculator math, Product Catalog, Vanity Program, Waterfall pricing, sold handoff, V1. |
+| **Revisit trigger** | Wire Product Catalog / priced waterfall; enable `canSubmitForFinalReview`; dedicated activity event type if telemetry needs it. |
+
