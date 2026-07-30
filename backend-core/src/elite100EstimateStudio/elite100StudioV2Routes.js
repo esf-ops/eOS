@@ -202,7 +202,9 @@ export function attachElite100StudioV2Routes(app, deps) {
       repository: deps.estimateRepository || studioEstimateService.repository,
       studioEstimateService,
       studioDigitalEstimateService,
-      lifecycleRepository
+      lifecycleRepository,
+      loadTakeoffWorkspace: deps.loadTakeoffWorkspace,
+      loadLatestTakeoffResult: deps.loadLatestTakeoffResult
     });
 
   app.get(
@@ -278,6 +280,57 @@ export function attachElite100StudioV2Routes(app, deps) {
       } catch (e) {
         logStudioV2("working-draft scope patch failed", e, req);
         const { status, body } = studioV2ErrorBody(e, "Unable to save scope");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.get(
+    "/api/elite100-studio-v2/cases/:caseId/takeoff-import-preview",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioV2.previewTakeoffImport({
+          organizationId,
+          intakeCaseId: req.params.caseId
+        });
+        auditStudioV2("takeoff_import.preview", req, {
+          intakeCaseId: req.params.caseId,
+          estimateId: null
+        });
+        res.json(result);
+      } catch (e) {
+        logStudioV2("takeoff-import preview failed", e, req);
+        const { status, body } = studioV2ErrorBody(e, "Unable to preview Takeoff import");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-studio-v2/cases/:caseId/takeoff-import-apply",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioV2.applyTakeoffImport({
+          organizationId,
+          intakeCaseId: req.params.caseId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        auditStudioV2("takeoff_import.apply", req, {
+          intakeCaseId: req.params.caseId,
+          estimateId: result.estimateId || null
+        });
+        res.json(result);
+      } catch (e) {
+        logStudioV2("takeoff-import apply failed", e, req);
+        const { status, body } = studioV2ErrorBody(e, "Unable to apply Takeoff import");
         res.status(status).json(body);
       }
     }

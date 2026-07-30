@@ -52,23 +52,27 @@ export function resolveStudioV2OriginType(estimate) {
 }
 
 /**
- * Slice A refuses origins that would require V1 orchestration side effects
- * (empty AI scope that only becomes usable after refresh-from-takeoff).
- * Manual and AI scopes with rooms are supported read-only.
+ * True when V2 cannot operate on this origin without unavailable orchestration.
+ * Empty AI takeoff scopes are no longer unsupported — Slice C provides explicit import.
  *
  * @param {object|null|undefined} estimate
  */
 export function isStudioV2OriginUnsupported(estimate) {
   if (!estimate) return false;
-  const origin = resolveStudioV2OriginType(estimate);
+  // Reserved for future truly unsupported shapes. Empty AI takeoff is importable via Slice C.
+  void estimate;
+  return false;
+}
+
+/**
+ * Working Draft has a takeoff job but no rooms yet — import panel should lead.
+ * @param {object|null|undefined} estimate
+ */
+export function needsStudioV2TakeoffImport(estimate) {
+  if (!estimate?.takeoffJobId) return false;
   const scope = estimate.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
-  const hasRooms = rooms.some((r) => r && r.included !== false);
-  // AI takeoff job present but no seeded rooms → would need refresh-from-takeoff.
-  if (origin === "ai_takeoff" && estimate.takeoffJobId && !hasRooms) {
-    return true;
-  }
-  return false;
+  return !rooms.some((r) => r && r.included !== false);
 }
 
 /**

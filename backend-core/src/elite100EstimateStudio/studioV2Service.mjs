@@ -1,11 +1,11 @@
 /**
- * Elite 100 Studio V2 — additive working-draft / calculate / publish / scope wrappers.
+ * Elite 100 Studio V2 — additive working-draft / calculate / publish / scope / takeoff-import wrappers.
  *
  * Hard rules:
  * - Does not create estimates or acquire drafts.
  * - Does not call ensure-editable-draft, open-measurement-revision, or simplified-publish.
  * - Calculate wraps calculateStudioEstimateV4 without refresh-from-takeoff or scope mutation.
- * - Scope PATCH persists via repository.update only (not V1 updateScope auto-fork path).
+ * - Scope PATCH / takeoff apply persist via repository.update only (not V1 updateScope / refresh-from-takeoff).
  * - Publish is strict (approved only) via existing digital-estimate publish service.
  */
 
@@ -13,6 +13,10 @@ import { calculateStudioEstimateV4 } from "./elite100RoomPricingStudioAdapter.mj
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
 import { createStudioEstimateService } from "./studioEstimateService.mjs";
 import { STUDIO_ESTIMATE_STATUSES } from "./studioEstimateTypes.mjs";
+import {
+  getLatestTakeoffResult,
+  getTakeoffWorkspace
+} from "../takeoff/takeoffWorkspaceService.mjs";
 import {
   createStudioV2Error,
   mapPublishBlockerCode,
@@ -26,6 +30,7 @@ import {
   buildStudioV2ScopeSummary,
   isStudioV2CalculationPersistable,
   isStudioV2OriginUnsupported,
+  needsStudioV2TakeoffImport,
   resolveStudioV2OriginType
 } from "./studioV2WorkingDraft.mjs";
 import {
@@ -33,6 +38,12 @@ import {
   buildStudioV2EditableScope,
   normalizeStudioV2ScopePatch
 } from "./studioV2ScopeEditor.mjs";
+import {
+  buildStudioV2TakeoffImportPreviewDto,
+  currentScopeIsEmpty,
+  mapTakeoffPayloadToStudioV2Scope,
+  resolveStudioV2TakeoffImportPayload
+} from "./studioV2TakeoffImport.mjs";
 import {
   buildSafeStudioPublicationSummary,
   isCurrentActivePublicationForEstimate,
@@ -48,7 +59,9 @@ import {
  *   studioEstimateService?: any,
  *   studioDigitalEstimateService?: any,
  *   lifecycleRepository?: any,
- *   calculateStudioEstimateImpl?: Function
+ *   calculateStudioEstimateImpl?: Function,
+ *   loadTakeoffWorkspace?: Function,
+ *   loadLatestTakeoffResult?: Function
  * }} [deps]
  */
 export function createStudioV2Service(deps = {}) {
@@ -76,11 +89,78 @@ export function createStudioV2Service(deps = {}) {
   const studioDigitalEstimateService = deps.studioDigitalEstimateService || null;
   const lifecycleRepository = deps.lifecycleRepository || null;
 
+  const loadWorkspace =
+    deps.loadTakeoffWorkspace ||
+    (async ({ organizationId, takeoffJobId }) => {
+      const supabase = deps.getSupabase?.();
+      if (!supabase) {
+        const err = new Error("Takeoff workspace unavailable");
+        err.statusCode = 503;
+        err.code = STUDIO_V2_ERROR_CODES.UNAVAILABLE;
+        throw err;
+      }
+      return getTakeoffWorkspace({ supabase, organizationId, takeoffJobId });
+    });
+
+  const loadLatestResult =
+    deps.loadLatestTakeoffResult ||
+    (async ({ organizationId, takeoffJobId }) => {
+      const supabase = deps.getSupabase?.();
+      if (!supabase) return null;
+      return getLatestTakeoffResult({ supabase, organizationId, takeoffJobId });
+    });
+
   function safeView(row, extras = {}) {
     if (typeof studioEstimateService.safeEstimateView === "function") {
       return studioEstimateService.safeEstimateView(row, extras);
     }
     return row;
+  }
+
+  function assertEditableWorkingDraft(row) {
+    const editability = assessStudioV2ScopeEditability(row);
+    if (!editability.editable) {
+      const code =
+        editability.code === "approved_snapshot_readonly"
+          ? STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY
+          : editability.code === "superseded_revision"
+            ? STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION
+            : STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED;
+      throw createStudioV2Error(code, {
+        message: editability.message || undefined,
+        details: { estimateId: row.id, status: row.status, revision: row.revision }
+      });
+    }
+    return editability;
+  }
+
+  async function loadTakeoffSources(row) {
+    const takeoffJobId = row.takeoffJobId ? String(row.takeoffJobId).trim() : "";
+    if (!takeoffJobId) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_TAKEOFF_AVAILABLE);
+    }
+    let workspace = null;
+    let latest = null;
+    try {
+      workspace = await loadWorkspace({
+        organizationId: row.organizationId,
+        takeoffJobId
+      });
+    } catch (e) {
+      if (e?.statusCode === 404 || e?.code === "takeoff_unavailable") {
+        throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_TAKEOFF_AVAILABLE);
+      }
+      throw e;
+    }
+    try {
+      latest = await loadLatestResult({
+        organizationId: row.organizationId,
+        takeoffJobId
+      });
+    } catch {
+      latest = null;
+    }
+    return { takeoffJobId, workspace, latest };
   }
 
   /**
@@ -243,6 +323,8 @@ export function createStudioV2Service(deps = {}) {
         editableScope: buildStudioV2EditableScope(estimate),
         scopeEditable: false,
         scopeEditability: editability,
+        takeoffImportNeeded: needsStudioV2TakeoffImport(row),
+        takeoffJobId: row.takeoffJobId || null,
         lastCalculation: buildStudioV2CalculationResult(estimate),
         approvedPublished: buildApprovedPublishedPointers(estimate, null),
         publicationSummary: buildSafeStudioPublicationSummary({ estimate }),
@@ -268,6 +350,8 @@ export function createStudioV2Service(deps = {}) {
       editableScope: buildStudioV2EditableScope(estimateWithPub),
       scopeEditable: editability.editable,
       scopeEditability: editability,
+      takeoffImportNeeded: needsStudioV2TakeoffImport(row),
+      takeoffJobId: row.takeoffJobId || null,
       lastCalculation: buildStudioV2CalculationResult(estimateWithPub),
       approvedPublished: buildApprovedPublishedPointers(estimateWithPub, pubBundle),
       publicationSummary: pubBundle.publicationSummary,
@@ -276,6 +360,181 @@ export function createStudioV2Service(deps = {}) {
       status: estimateWithPub.status,
       revision: estimateWithPub.revision,
       updatedAt: estimateWithPub.updatedAt || null
+    };
+  }
+
+  /**
+   * GET takeoff-import-preview — read-only mapped scope. Never mutates.
+   */
+  async function previewTakeoffImport({ organizationId, intakeCaseId }) {
+    const row = await loadActiveEstimateOrNull(organizationId, intakeCaseId);
+    if (!row) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_ESTIMATE);
+    }
+    if (isStudioV2OriginUnsupported(row)) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNSUPPORTED_ORIGIN);
+    }
+
+    const { takeoffJobId, workspace, latest } = await loadTakeoffSources(row);
+    const resolved = resolveStudioV2TakeoffImportPayload({
+      takeoffJobId,
+      workspace,
+      latest
+    });
+    if (!resolved.ok) {
+      throw createStudioV2Error(resolved.code, { message: resolved.message });
+    }
+
+    let mappedScope;
+    try {
+      mappedScope = mapTakeoffPayloadToStudioV2Scope(resolved.payload, row.scope);
+    } catch (e) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.TAKEOFF_MAPPING_FAILED, {
+        message: e?.message || undefined
+      });
+    }
+
+    const estimate = safeView(row);
+    return buildStudioV2TakeoffImportPreviewDto({
+      estimate,
+      mappedScope,
+      reviewStatus: resolved.reviewStatus,
+      takeoffJobId,
+      resultId: resolved.resultId
+    });
+  }
+
+  /**
+   * POST takeoff-import-apply — explicit estimator import into Working Draft.
+   * Never calls refresh-from-takeoff / ensure-editable-draft / approve / publish.
+   */
+  async function applyTakeoffImport({ organizationId, intakeCaseId, actorUserId, body }) {
+    const row = await loadActiveEstimateOrNull(organizationId, intakeCaseId);
+    if (!row) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_ESTIMATE);
+    }
+    if (isStudioV2OriginUnsupported(row)) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNSUPPORTED_ORIGIN);
+    }
+    assertEditableWorkingDraft(row);
+
+    const mode = String(body?.mode || "").trim();
+    const confirmed = body?.confirmed === true || body?.confirmed === "true";
+    if (!confirmed) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "Explicit confirmation is required to apply Takeoff import.",
+        details: { issues: [{ field: "confirmed", message: "confirmed: true is required" }] }
+      });
+    }
+    if (mode !== "replace_empty" && mode !== "replace_all") {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "Import mode must be replace_empty or replace_all.",
+        details: { issues: [{ field: "mode", message: "Invalid mode" }] }
+      });
+    }
+
+    const scopeEmpty = currentScopeIsEmpty(row.scope);
+    if (!scopeEmpty && mode !== "replace_all") {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED, {
+        details: {
+          currentScopeEmpty: false,
+          allowedModes: ["replace_all"]
+        }
+      });
+    }
+    if (scopeEmpty && mode === "replace_empty") {
+      // ok
+    } else if (mode === "replace_all" && confirmed) {
+      // ok
+    } else if (!scopeEmpty && mode === "replace_empty") {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED);
+    }
+
+    const { takeoffJobId, workspace, latest } = await loadTakeoffSources(row);
+    const resolved = resolveStudioV2TakeoffImportPayload({
+      takeoffJobId,
+      workspace,
+      latest
+    });
+    if (!resolved.ok) {
+      throw createStudioV2Error(resolved.code, { message: resolved.message });
+    }
+
+    let mappedScope;
+    try {
+      mappedScope = mapTakeoffPayloadToStudioV2Scope(resolved.payload, row.scope);
+    } catch (e) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.TAKEOFF_MAPPING_FAILED, {
+        message: e?.message || undefined
+      });
+    }
+
+    if (!Array.isArray(mappedScope.rooms) || mappedScope.rooms.length === 0) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.TAKEOFF_MAPPING_FAILED, {
+        message: "Takeoff mapped to an empty scope."
+      });
+    }
+
+    // Preserve server identity authority markers from the existing scope.
+    mappedScope.estimateOrigin =
+      row.scope?.estimateOrigin || mappedScope.estimateOrigin || "email_ai_takeoff";
+    mappedScope.physicalScopeSource = "takeoff";
+
+    const statusBefore = String(row.status || "").toLowerCase();
+    /** @type {Record<string, unknown>} */
+    const patch = {
+      scope: mappedScope,
+      sourceTakeoffResultId: resolved.resultId || row.sourceTakeoffResultId || null,
+      staleReason: "Scope changed — recalculate"
+    };
+    if (statusBefore === STUDIO_ESTIMATE_STATUSES.PRICED) {
+      patch.status = STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE;
+      patch.calculationSnapshot = null;
+    } else if (statusBefore !== STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL) {
+      patch.status = STUDIO_ESTIMATE_STATUSES.DRAFT;
+    } else {
+      // Empty takeoff drafts often sit in needs_takeoff_approval — after import,
+      // scope is present so move to draft for estimator review/calculate.
+      patch.status = STUDIO_ESTIMATE_STATUSES.DRAFT;
+    }
+
+    const updated = await repository.update(
+      organizationId,
+      row.id,
+      patch,
+      actorUserId || null
+    );
+    const estimate = safeView(updated);
+    const clientMutationId =
+      typeof body?.clientMutationId === "string" ? body.clientMutationId.trim().slice(0, 120) : null;
+
+    return {
+      ok: true,
+      caseId: String(intakeCaseId),
+      estimateId: estimate.id,
+      revision: estimate.revision,
+      status: estimate.status,
+      mode,
+      takeoffJobId,
+      resultId: resolved.resultId,
+      scopeSummary: buildStudioV2ScopeSummary(estimate),
+      editableScope: buildStudioV2EditableScope(estimate),
+      scopeEditable: true,
+      takeoffImportNeeded: false,
+      updatedAt: estimate.updatedAt || null,
+      clientMutationId,
+      lastCalculation: buildStudioV2CalculationResult(estimate),
+      warnings: [
+        "Takeoff scope applied to Working Draft. Recalculate to update total."
+      ],
+      sideEffects: {
+        ensureEditableDraft: false,
+        refreshFromTakeoff: false,
+        autoFork: false,
+        updateScope: false,
+        approve: false,
+        publish: false
+      }
     };
   }
 
@@ -622,6 +881,8 @@ export function createStudioV2Service(deps = {}) {
   return {
     getWorkingDraft,
     patchWorkingDraftScope,
+    previewTakeoffImport,
+    applyTakeoffImport,
     calculateWorkingDraft,
     publishApproved,
     getCustomerActivity,
@@ -630,7 +891,9 @@ export function createStudioV2Service(deps = {}) {
       calculateImpl,
       repository,
       studioEstimateService,
-      studioDigitalEstimateService
+      studioDigitalEstimateService,
+      loadWorkspace,
+      loadLatestResult
     }
   };
 }

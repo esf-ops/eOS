@@ -3254,3 +3254,21 @@ button.linkish {
 .eq-btn-ghost:hover {
   color: var(--eos-accent);
 }
+
+/* Studio V2 Slice C — Takeoff import */
+.studio-v2-takeoff-preview {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.studio-v2-takeoff-confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+  color: var(--eos-ink-mid);
+}
+.studio-v2-takeoff-confirm input {
+  margin-top: 0.2rem;
+}
