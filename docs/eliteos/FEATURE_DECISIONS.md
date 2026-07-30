@@ -3005,3 +3005,15 @@
 | **Protected** | Calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, Slice A–D contracts, publish-after-approve orchestration (Slice A publish remains separate). |
 | **Revisit trigger** | Create-revision / edit-after-approval flow; richer approval readiness from DE readiness service. |
 
+### 211. Elite 100 Studio V2 Slice F — strict Digital Estimate publish (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-strict-publish` |
+| **Decision** | Studio V2 hardens **Approved Snapshot → Published Digital Estimate** via existing `POST /api/elite100-studio-v2/approved/:estimateId/publish`. Requires `confirmed: true` (also accepts legacy `confirm: true`), approved status, calculation fingerprint, and non-stale approval. Calls only `studioDigitalEstimateService.publish` with a sanitized **link-only** body — strips autoApprove/autoCalculate/simplified/email hooks. Never calls simplified-publish, ensure-editable-draft, open-measurement-revision, refresh-from-takeoff, auto-approve, or auto-calculate. Approval and publish remain separate UI panels (`StudioV2ApprovalPanel` + `StudioV2PublishPanel`). |
+| **Why** | Publish must attach only to an approved immutable snapshot without resurrecting V1 one-click approve+publish orchestration. |
+| **SQL** | None. |
+| **Impacted** | `studioV2Publish.mjs`, `studioV2Service.mjs`, `StudioV2PublishPanel.tsx`, `StudioV2EstimatorShell.tsx`, `studioV2SliceF.test.mjs`. |
+| **Protected** | Calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, Slice A–E contracts, customer acceptance/sold handoff. |
+| **Revisit trigger** | Email/notification delivery slice; replace-link UX; acceptance/sold handoff. |
+

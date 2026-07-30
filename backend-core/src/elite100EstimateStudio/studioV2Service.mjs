@@ -8,7 +8,7 @@
  * - Scope / options PATCH / takeoff apply / approve persist via repository.update only.
  * - Does not call V1 studioEstimateService.approve (refreshTakeoffGate side effects).
  * - Publish is strict (approved only) via existing digital-estimate publish service.
- * - Approval never publishes.
+ * - Approval never publishes. Publish never auto-approves / auto-calculates.
  */
 
 import { calculateStudioEstimateV4 } from "./elite100RoomPricingStudioAdapter.mjs";
@@ -55,6 +55,11 @@ import {
   buildStudioV2ApprovalPayload,
   buildStudioV2ApprovedSummary
 } from "./studioV2Approval.mjs";
+import {
+  assessStudioV2PublishReadiness,
+  buildStudioV2PublicationResult,
+  sanitizeStudioV2PublishBody
+} from "./studioV2Publish.mjs";
 import {
   buildSafeStudioPublicationSummary,
   isCurrentActivePublicationForEstimate,
@@ -311,6 +316,7 @@ export function createStudioV2Service(deps = {}) {
         lastCalculation: buildStudioV2CalculationResult(null),
         approvalReadiness: assessStudioV2ApprovalReadiness(null),
         approvedSummary: buildStudioV2ApprovedSummary(null),
+        publishReadiness: assessStudioV2PublishReadiness(null),
         approvedPublished: {
           approved: false,
           approvedAt: null,
@@ -345,6 +351,7 @@ export function createStudioV2Service(deps = {}) {
         lastCalculation: buildStudioV2CalculationResult(estimate),
         approvalReadiness: assessStudioV2ApprovalReadiness(row),
         approvedSummary: buildStudioV2ApprovedSummary(estimate),
+        publishReadiness: assessStudioV2PublishReadiness(row),
         approvedPublished: buildApprovedPublishedPointers(estimate, null),
         publicationSummary: buildSafeStudioPublicationSummary({ estimate }),
         originType: resolveStudioV2OriginType(estimate),
@@ -376,6 +383,7 @@ export function createStudioV2Service(deps = {}) {
       lastCalculation: buildStudioV2CalculationResult(estimateWithPub),
       approvalReadiness: assessStudioV2ApprovalReadiness(row),
       approvedSummary: buildStudioV2ApprovedSummary(estimateWithPub),
+      publishReadiness: assessStudioV2PublishReadiness(row),
       approvedPublished: buildApprovedPublishedPointers(estimateWithPub, pubBundle),
       publicationSummary: pubBundle.publicationSummary,
       originType: resolveStudioV2OriginType(estimateWithPub),
@@ -987,12 +995,23 @@ export function createStudioV2Service(deps = {}) {
   }
 
   /**
-   * POST publish — strict approved publish only. Never simplified-publish.
+   * POST publish — strict approved → Digital Estimate only.
+   * Never simplified-publish / auto-approve / auto-calculate / ensure-editable-draft /
+   * open-measurement-revision / refresh-from-takeoff / scope mutation.
    */
   async function publishApproved({ organizationId, estimateId, actorUserId, body }) {
     if (!studioDigitalEstimateService || typeof studioDigitalEstimateService.publish !== "function") {
       throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNAVAILABLE, {
         message: "Digital Estimate publish is unavailable."
+      });
+    }
+
+    const sanitized = sanitizeStudioV2PublishBody(body);
+    if (!sanitized.confirmed) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "confirmed: true is required to publish.",
+        statusCode: 400,
+        details: { field: "confirmed" }
       });
     }
 
@@ -1005,48 +1024,110 @@ export function createStudioV2Service(deps = {}) {
       });
     }
 
-    const status = String(row.status || "").toLowerCase();
-    if (status === STUDIO_ESTIMATE_STATUSES.SUPERSEDED) {
-      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION, {
-        details: { estimateId: row.id }
+    const readiness = assessStudioV2PublishReadiness(row);
+    if (!readiness.allowed) {
+      const code =
+        readiness.code === "approve_required"
+          ? STUDIO_V2_ERROR_CODES.APPROVE_REQUIRED
+          : readiness.code === "superseded_revision"
+            ? STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION
+            : readiness.code === "not_priced"
+              ? STUDIO_V2_ERROR_CODES.NOT_PRICED
+              : readiness.code === "calculation_stale"
+                ? STUDIO_V2_ERROR_CODES.CALCULATION_STALE
+                : readiness.code === "no_estimate"
+                  ? STUDIO_V2_ERROR_CODES.NO_ESTIMATE
+                  : STUDIO_V2_ERROR_CODES.PUBLISH_BLOCKED;
+      throw createStudioV2Error(code, {
+        message: readiness.message || undefined,
+        blockers: readiness.blockers,
+        details: { estimateId: row.id, status: row.status, blockers: readiness.blockers }
       });
     }
-    if (status !== STUDIO_ESTIMATE_STATUSES.APPROVED) {
-      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.APPROVE_REQUIRED);
-    }
-
-    const confirmBody = {
-      ...(body && typeof body === "object" ? body : {}),
-      confirm: true
-    };
-    // Strip simplified-publish orchestration hooks if a client sends them.
-    delete confirmBody.autoConfirm;
-    delete confirmBody.autoCalculate;
-    delete confirmBody.autoApprove;
-    delete confirmBody.simplified;
 
     try {
       const result = await studioDigitalEstimateService.publish({
         organizationId,
         estimateId: row.id,
         actorUserId: actorUserId || null,
-        body: confirmBody
+        body: sanitized.body
       });
+
+      const estimate = safeView(row);
+      const publication = buildStudioV2PublicationResult(result, estimate);
+      const pubBundle = await loadPublicationBundle(organizationId, estimate);
+      const publications = Array.isArray(pubBundle.publications) ? pubBundle.publications : [];
+      const classified = publications.map((p) => {
+        const active = isCurrentActivePublicationForEstimate(estimate, p);
+        const historical = !active && isHistoricalPublicationForEstimate(estimate, p);
+        const norm = normalizePublicationStatus(p);
+        return {
+          publicationId: p.id || p.publicationId || null,
+          status: norm,
+          active,
+          historical,
+          revision: Number(p.revisionNumber ?? p.revision_number ?? p.revision) || null,
+          publishedAt: p.publishedAt || p.published_at || null,
+          customerUrl: typeof p.customerUrl === "string" ? p.customerUrl : null
+        };
+      });
+
+      const activeFromResult = {
+        publicationId: publication.publicationId,
+        status: publication.status,
+        active: true,
+        historical: false,
+        publishedAt: publication.publishedAt,
+        customerUrl: publication.customerUrl
+      };
+      const activePublication =
+        classified.find((p) => p.active) ||
+        (publication.publicationId || publication.customerUrl ? activeFromResult : null);
+
+      const clientMutationId =
+        typeof body?.clientMutationId === "string"
+          ? body.clientMutationId.trim().slice(0, 120)
+          : null;
+
       return {
         ok: true,
-        publication: result?.publication || null,
-        customerUrl: result?.customerUrl || result?.publication?.customerUrl || null,
-        linkStatus: result?.linkStatus || result?.publication?.linkStatus || null,
-        reused: Boolean(result?.reused),
-        staffNotice: result?.staffNotice || null,
+        caseId: row.intakeCaseId || null,
+        estimateId: row.id,
+        revision: row.revision,
+        status: row.status,
+        publication: {
+          publicationId: publication.publicationId,
+          status: publication.status,
+          active: publication.active,
+          customerUrl: publication.customerUrl,
+          publishedAt: publication.publishedAt,
+          linkStatus: publication.linkStatus
+        },
+        customerUrl: publication.customerUrl,
+        linkStatus: publication.linkStatus,
+        reused: publication.reused,
+        staffNotice: publication.staffNotice,
+        publicationSummary: pubBundle.publicationSummary || publication.summary,
+        activePublication,
+        historicalPublications: classified.filter((p) => p.historical),
+        publishReadiness: { ...readiness, published: Boolean(activePublication) },
+        clientMutationId,
         sideEffects: {
           simplifiedPublish: false,
           autoConfirm: false,
           autoCalculate: false,
-          autoApprove: false
+          autoApprove: false,
+          ensureEditableDraft: false,
+          refreshFromTakeoff: false,
+          openMeasurementRevision: false,
+          calculate: false,
+          approve: false,
+          scopeMutated: false,
+          optionsMutated: false
         }
       };
     } catch (e) {
+      if (e?.code && Object.values(STUDIO_V2_ERROR_CODES).includes(e.code)) throw e;
       const rawCode = e?.code || null;
       const mapped = mapPublishBlockerCode(rawCode);
       if (mapped === STUDIO_V2_ERROR_CODES.APPROVE_REQUIRED) {
