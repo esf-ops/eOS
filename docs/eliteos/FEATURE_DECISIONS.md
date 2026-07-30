@@ -3053,3 +3053,15 @@
 | **Protected** | Calculator math, V1 workflow, simplified-publish, email/sold/acceptance, DE public contracts. |
 | **Revisit trigger** | Replace-link UX; email delivery. |
 
+### 215. Elite 100 Studio V2 Slice H — pricing basis / price group controls (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-pricing-controls` |
+| **Decision** | Studio V2 adds **Pricing Controls** via `PATCH /api/elite100-studio-v2/cases/:caseId/working-draft/pricing`. Persists `scope.pricingBasis` (`wholesale` / `direct` / `retail`), `scope.materialGroup` (Promo/A–F/Remnant → canonical `Group *` / `Remnant`), optional manual `estimateWideAdjustment`, and authorized `internalMarkupPercent`. Account-derived adjustments remain read-only. Persistence uses **repository.update** only; priced drafts demote to `ready_to_price` and clear `calculationSnapshot` with `staleReason: "Pricing settings changed — recalculate"`. UI panel sits after Project Header; dirty pricing blocks Calculate / Approve. Does not change calculator math or Digital Estimate repricing. |
+| **Why** | Estimators need explicit pricing context control before calculate/approve/publish without resurrecting V1 orchestration. |
+| **SQL** | None. |
+| **Impacted** | `studioV2Pricing.mjs`, `studioV2Service.mjs`, `elite100StudioV2Routes.js`, `StudioV2PricingControlsPanel.tsx`, `StudioV2EstimatorShell.tsx`, `StudioV2ApprovalPanel.tsx`, `studioV2SliceH.test.mjs`. |
+| **Protected** | Calculator math, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, DE public/repricing, catalog/vanity/waterfall/revision/sold. |
+| **Revisit trigger** | Per-room material overrides; broader markup UX; customer DE repricing. |
+

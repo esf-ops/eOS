@@ -3420,3 +3420,13 @@ button.linkish {
   flex-direction: column;
   gap: 0.55rem;
 }
+.studio-v2-panel select {
+  font: inherit;
+  color: var(--eos-ink);
+  border: 1px solid var(--eos-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  background: #fff;
+  width: 100%;
+  max-width: 16rem;
+}
