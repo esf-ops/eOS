@@ -2968,3 +2968,16 @@
 | **Protected** | V1 Studio behavior, calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, Slice A publish/calculate contracts. |
 | **Revisit trigger** | Slice C Takeoff import/re-import; autosave; approval in V2. |
 
+
+### 208. Elite 100 Studio V2 Slice C — controlled AI Takeoff import (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-takeoff-import` |
+| **Decision** | Studio V2 adds explicit **Preview / Apply Takeoff Import** (`GET/POST /api/elite100-studio-v2/cases/:caseId/takeoff-import-*`). Uses existing `buildTakeoffImportPayload` + `seedScopeFromTakeoffPayload` mappers. **Never** calls V1 `refresh-from-takeoff` or `ensure-editable-draft`. Empty AI Working Drafts are no longer permanently `unsupported_origin` — estimators import via confirmed `replace_empty` / `replace_all`. Non-empty drafts require `replace_all` + `confirmed: true`. Dirty local scope blocks import in the UI until Save/Discard. |
+| **Why** | AI Takeoff must seed Studio V2 Working Draft without resurrecting automatic refresh-from-takeoff side effects. |
+| **SQL** | None. |
+| **Impacted** | `studioV2TakeoffImport.mjs`, `studioV2Service.mjs`, `studioV2WorkingDraft.mjs`, `studioV2Errors.mjs`, `elite100StudioV2Routes.js`, `StudioV2TakeoffImportPanel.tsx`, `StudioV2EstimatorShell.tsx`, `studioV2SliceC.test.mjs`. |
+| **Protected** | Calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, Slice A/B contracts. |
+| **Revisit trigger** | Merge-mode import (additive rooms); live Takeoff embed; approval in V2. |
+

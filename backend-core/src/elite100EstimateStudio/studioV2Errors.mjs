@@ -18,7 +18,15 @@ export const STUDIO_V2_ERROR_CODES = Object.freeze({
   /** Slice B — approved/published/frozen snapshot cannot be mutated. */
   APPROVED_SNAPSHOT_READONLY: "approved_snapshot_readonly",
   /** Slice B — scope payload failed validation. */
-  VALIDATION_FAILED: "validation_failed"
+  VALIDATION_FAILED: "validation_failed",
+  /** Slice C — no takeoff job / result for this case. */
+  NO_TAKEOFF_AVAILABLE: "no_takeoff_available",
+  /** Slice C — takeoff exists but is not approved/ready to import. */
+  TAKEOFF_NOT_READY: "takeoff_not_ready",
+  /** Slice C — mapper could not build rooms from takeoff. */
+  TAKEOFF_MAPPING_FAILED: "takeoff_mapping_failed",
+  /** Slice C — existing Working Draft scope requires explicit replace_all. */
+  EXISTING_SCOPE_CONFIRMATION_REQUIRED: "existing_scope_confirmation_required"
 });
 
 const USER_MESSAGES = Object.freeze({
@@ -38,7 +46,16 @@ const USER_MESSAGES = Object.freeze({
     "An editable working draft is required before scope can be saved.",
   [STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY]:
     "This approved or published estimate is read-only. Scope cannot be changed here.",
-  [STUDIO_V2_ERROR_CODES.VALIDATION_FAILED]: "Scope changes could not be saved. Check the fields and try again."
+  [STUDIO_V2_ERROR_CODES.VALIDATION_FAILED]:
+    "Scope changes could not be saved. Check the fields and try again.",
+  [STUDIO_V2_ERROR_CODES.NO_TAKEOFF_AVAILABLE]:
+    "No AI Takeoff is available for this case.",
+  [STUDIO_V2_ERROR_CODES.TAKEOFF_NOT_READY]:
+    "AI Takeoff must be reviewed and approved before importing into Studio V2.",
+  [STUDIO_V2_ERROR_CODES.TAKEOFF_MAPPING_FAILED]:
+    "Unable to map AI Takeoff into Studio scope. Nothing was changed.",
+  [STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED]:
+    "This Working Draft already has scope. Confirm replace_all to overwrite it with Takeoff."
 });
 
 /**
@@ -71,6 +88,7 @@ export function createStudioV2Error(code, opts = {}) {
 function defaultStatusForCode(code) {
   switch (code) {
     case STUDIO_V2_ERROR_CODES.NO_ESTIMATE:
+    case STUDIO_V2_ERROR_CODES.NO_TAKEOFF_AVAILABLE:
       return 404;
     case STUDIO_V2_ERROR_CODES.FORBIDDEN:
       return 403;
@@ -80,11 +98,14 @@ function defaultStatusForCode(code) {
     case STUDIO_V2_ERROR_CODES.NOT_PRICED:
     case STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED:
     case STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY:
+    case STUDIO_V2_ERROR_CODES.TAKEOFF_NOT_READY:
+    case STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED:
       return 409;
     case STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION:
       return 409;
     case STUDIO_V2_ERROR_CODES.CALCULATE_FAILED:
     case STUDIO_V2_ERROR_CODES.VALIDATION_FAILED:
+    case STUDIO_V2_ERROR_CODES.TAKEOFF_MAPPING_FAILED:
       return 422;
     default:
       return 503;

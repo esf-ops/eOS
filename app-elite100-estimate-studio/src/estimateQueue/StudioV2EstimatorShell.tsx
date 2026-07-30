@@ -16,6 +16,7 @@ import StudioV2ScopeEditor, {
   emptyEditableScope,
   type StudioV2EditableScope
 } from "./StudioV2ScopeEditor";
+import StudioV2TakeoffImportPanel from "./StudioV2TakeoffImportPanel";
 
 type ProjectHeader = {
   accountName?: string | null;
@@ -99,6 +100,8 @@ type WorkingDraftResponse = {
   estimateId?: string | null;
   originType?: string | null;
   revision?: number | null;
+  takeoffImportNeeded?: boolean;
+  takeoffJobId?: string | null;
 };
 
 type CustomerActivityResponse = {
@@ -373,10 +376,11 @@ export default function StudioV2EstimatorShell(props: {
           ← Back
         </button>
         <div className="studio-v2-shell__title-block">
-          <p className="studio-v2-shell__eyebrow">Studio V2 · Slice B Working Draft</p>
+          <p className="studio-v2-shell__eyebrow">Studio V2 · Slice C Takeoff Import</p>
           <h1>Estimator command shell</h1>
           <p className="muted">
-            Edit physical scope on the Working Draft. V1 remains the default workflow.
+            Edit physical scope and import approved AI Takeoff into the Working Draft. V1 remains
+            the default workflow.
           </p>
         </div>
         {onOpenV1 ? (
@@ -459,6 +463,49 @@ export default function StudioV2EstimatorShell(props: {
               </div>
             </dl>
           </section>
+
+          <StudioV2TakeoffImportPanel
+            authToken={authToken}
+            caseId={caseId}
+            takeoffJobId={draft.takeoffJobId}
+            takeoffImportNeeded={Boolean(draft.takeoffImportNeeded)}
+            scopeDirty={scopeDirty}
+            currentScopeEmpty={Boolean(scope?.empty || !scopeDraft.rooms.length)}
+            onApplied={(result) => {
+              setScopeDraft(cloneEditableScope(result.editableScope));
+              setScopeDirty(false);
+              setCalcStale(true);
+              setCalcResult(
+                (result.lastCalculation as CalculationResult) || {
+                  available: false,
+                  total: null
+                }
+              );
+              setDraft((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      scopeSummary: (result.scopeSummary as ScopeSummary) || prev.scopeSummary,
+                      editableScope: result.editableScope || prev.editableScope,
+                      lastCalculation:
+                        (result.lastCalculation as CalculationResult) || prev.lastCalculation,
+                      revision: result.revision ?? prev.revision,
+                      status: result.status || prev.status,
+                      takeoffImportNeeded: false,
+                      projectHeader: prev.projectHeader
+                        ? {
+                            ...prev.projectHeader,
+                            revision: result.revision ?? prev.projectHeader.revision,
+                            status: result.status || prev.projectHeader.status,
+                            currentTotal: null
+                          }
+                        : prev.projectHeader
+                    }
+                  : prev
+              );
+              setScopeSaveNotice("Takeoff scope applied. Recalculate to update total.");
+            }}
+          />
 
           <StudioV2ScopeEditor
             value={scopeDraft}
