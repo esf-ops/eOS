@@ -135,6 +135,7 @@ export function VerifiedEstimateSection(props: {
   publishedRevision: number | null;
   activeReview: { eligible: boolean; blockers: Array<{ code?: string; message?: string }> } | null;
   calculationStatus?: string | null;
+  lastCalculatedAt?: string | null;
 }) {
   if (props.waiting) {
     return (
@@ -168,6 +169,16 @@ export function VerifiedEstimateSection(props: {
       {draft ? (
         <p className="eq-footnote" data-testid="eq-live-estimate-draft-label">
           Draft estimate — totals update as you edit. Approval freezes this revision.
+        </p>
+      ) : (
+        <p className="eq-footnote" data-testid="eq-live-estimate-approved-label">
+          Approved Estimate — R{props.estimateRevision ?? "—"} is frozen. Editing starts the next
+          revision automatically.
+        </p>
+      )}
+      {props.lastCalculatedAt ? (
+        <p className="eq-footnote" data-testid="eq-live-estimate-calculated-at">
+          Last calculated {props.lastCalculatedAt}
         </p>
       ) : null}
       <VerifiedMeasurementTotals
@@ -253,7 +264,7 @@ export function DigitalEstimateSection(props: {
     props.estimateRevision != null &&
     props.estimateRevision > props.publishedRevision;
 
-  let status = "Waiting for approved measurements";
+  let status = "Not published";
   if (props.stage === "published" && props.customerUrl) status = "Published";
   else if (editingNewerDraft && props.measurementsApproved) {
     status = `R${props.publishedRevision} published · R${props.estimateRevision} ready`;

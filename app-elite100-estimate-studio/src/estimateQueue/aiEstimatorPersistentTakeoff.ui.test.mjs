@@ -19,7 +19,14 @@ console.log("\naiEstimatorPersistentTakeoff.ui.test.mjs\n");
 {
   assert.ok(workspace.includes("eq-ai-persistent-takeoff") || workspace.includes("eq-ai-takeoff-surface"));
   assert.ok(workspace.includes('data-takeoff-mode={takeoffMode}'));
-  assert.ok(workspace.includes('mode: takeoffMode'));
+  // The iframe src must never carry stage-derived mode: that rebuilt the iframe
+  // on every approval/publication transition. Mode now only drives badges.
+  assert.equal(workspace.includes("mode: takeoffMode"), false, "iframe src must not depend on stage");
+  assert.ok(workspace.includes('mode: "editable"'));
+  assert.ok(
+    /const takeoffSrc = useMemo\([\s\S]*?\}, \[takeoffJobId\]\);/.test(workspace),
+    "takeoff src depends on takeoffJobId only"
+  );
   assert.equal(workspace.includes("const showTakeoff ="), false, "Takeoff must not be stage-gated away");
   assert.ok(workspace.includes("Approved Takeoff — Revision"));
   assert.ok(workspace.includes("Published measurements — Revision"));
