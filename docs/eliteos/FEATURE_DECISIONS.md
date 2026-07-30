@@ -3137,3 +3137,15 @@
 | **Protected** | Pricing math / calculators, V1 workflow, DE, save/approve/publish, V1 workspace imports, schema. |
 | **Revisit trigger** | Wire secure plan preview; optional room-level edge LF control if estimators still need it in the compact header. |
 
+### 222. Elite 100 Studio V2 — Scope Review Layout CSS Hardening (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-scope-css-hardening` |
+| **Decision** | Frontend/CSS-only widen of Studio V2 shell (`studio-shell--v2` → max-width 1720px) and Scope Review workbench grid retune so dense piece controls stop clipping. Right detail panel stays sticky at a fixed ~250–280px from 1280px+; stacks below on narrower viewports. V1 shell widths unchanged. |
+| **Why** | 1280px shell + ~320px side rail left the piece grid below its min width, forcing squeeze/clip even on desktop. |
+| **SQL** | None. |
+| **Impacted** | `styles.css`, `StudioApp.tsx` (V2 shell class), `studioV2SliceI.test.mjs`, this doc. |
+| **Protected** | Pricing math, V1 workflow/shell max-width, DE, schema, business controls. |
+| **Revisit trigger** | Ultrawide (>1800px) feedback; further column prioritization if needed. |
+

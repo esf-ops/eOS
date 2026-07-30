@@ -62,6 +62,17 @@ body {
   max-width: 1280px;
 }
 
+/* Studio V2 Scope Review workbench — use more desktop width without changing V1. */
+.studio-shell--v2 {
+  max-width: min(1720px, 100%);
+}
+@media (min-width: 1400px) {
+  .studio-shell--v2 {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
 .pilot-banner {
   margin: 0.75rem 0 1.25rem;
   padding: 0.65rem 0.9rem;
@@ -3298,28 +3309,45 @@ button.linkish {
 .studio-v2-piece-card__check input {
   width: auto !important;
 }
+.studio-v2-scope-editor.studio-v2-panel {
+  /* Give the dense piece grid more usable width inside the card. */
+  padding-left: 0.85rem;
+  padding-right: 0.85rem;
+}
 .studio-v2-scope-review {
   display: grid;
-  gap: 1rem;
+  gap: 0.85rem;
   grid-template-columns: minmax(0, 1fr);
   margin-top: 0.75rem;
 }
 .studio-v2-scope-review--workbench {
   align-items: start;
+  width: 100%;
 }
-@media (min-width: 1100px) {
-  .studio-v2-scope-review,
+/* Stack detail panel under the table until there is real room for both. */
+@media (min-width: 1280px) {
   .studio-v2-scope-review--workbench {
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
-    align-items: start;
+    grid-template-columns: minmax(0, 1fr) 250px;
+    gap: 0.85rem 1rem;
+  }
+}
+@media (min-width: 1560px) {
+  .studio-v2-scope-review--workbench {
+    grid-template-columns: minmax(0, 1fr) 280px;
   }
 }
 .studio-v2-workbench-panel {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  position: sticky;
-  top: 0.75rem;
+  min-width: 0;
+}
+@media (min-width: 1280px) {
+  .studio-v2-workbench-panel {
+    position: sticky;
+    top: 0.75rem;
+    width: 100%;
+  }
 }
 .studio-v2-scope-checklist,
 .studio-v2-selected-piece,
@@ -3410,49 +3438,75 @@ button.linkish {
   border: 0;
 }
 .studio-v2-room-card--compact {
-  padding: 0.65rem 0.75rem 0.8rem;
+  padding: 0.6rem 0.7rem 0.7rem;
+}
+.studio-v2-room-card--compact .studio-v2-room-card__head {
+  grid-template-columns: minmax(10rem, 1.5fr) minmax(7rem, 0.85fr) minmax(6.5rem, 0.7fr) auto auto;
+  gap: 0.45rem 0.65rem;
+  align-items: end;
+  margin-bottom: 0.55rem;
 }
 .studio-v2-room-card__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem 0.55rem;
+  gap: 0.3rem 0.5rem;
   font-size: 0.8rem;
   color: var(--eos-ink-mid);
-  align-self: end;
-  padding-bottom: 0.35rem;
+  align-self: center;
+  padding-bottom: 0.15rem;
+}
+.studio-v2-room-card--compact [data-testid="studio-v2-add-piece"] {
+  margin-top: 0.15rem;
 }
 .studio-v2-piece-workbench {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  margin-bottom: 0.55rem;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 0.15rem;
 }
 .studio-v2-piece-workbench__header,
 .studio-v2-piece-row__grid {
   display: grid;
+  /*
+    Fixed mins for L/D/Qty/Geo so number fields never clip.
+    Flexible mins for SF mode / splash / edges / profile / cutouts.
+    Horizontal scroll only when the card is narrower than ~1180px.
+  */
   grid-template-columns:
-    2.25rem minmax(7.5rem, 1.2fr) 3.6rem 3.6rem 3.1rem 3.6rem minmax(6.5rem, 0.9fr)
-    minmax(7rem, 1fr) minmax(6.5rem, 1fr) minmax(6.5rem, 0.9fr) minmax(5.5rem, 0.9fr)
-    minmax(4.5rem, 0.7fr);
-  gap: 0.35rem 0.4rem;
+    2.1rem
+    minmax(8.5rem, 1.35fr)
+    4.5rem
+    4.5rem
+    3.75rem
+    4.25rem
+    minmax(8rem, 0.95fr)
+    minmax(8rem, 1fr)
+    minmax(7.5rem, 1.05fr)
+    minmax(8rem, 0.95fr)
+    minmax(6.5rem, 0.9fr)
+    minmax(4.75rem, 0.55fr);
+  gap: 0.3rem 0.45rem;
   align-items: start;
-  min-width: 980px;
+  min-width: 1180px;
+  width: 100%;
 }
 .studio-v2-piece-workbench__header {
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--eos-ink-muted);
-  padding: 0 0.15rem 0.2rem;
+  padding: 0 0.2rem 0.25rem;
   border-bottom: 1px solid var(--eos-line);
 }
 .studio-v2-piece-row {
   border: 1px solid var(--eos-line);
   border-radius: 8px;
-  padding: 0.4rem 0.45rem;
+  padding: 0.4rem 0.5rem;
   background: #fff;
   cursor: pointer;
 }
@@ -3513,6 +3567,7 @@ button.linkish {
   font-size: 0.86rem;
   font-weight: 600;
   padding-top: 0.35rem;
+  font-variant-numeric: tabular-nums;
 }
 .studio-v2-piece-row input[type="number"],
 .studio-v2-piece-row input[type="text"],
@@ -3522,14 +3577,34 @@ button.linkish {
   color: var(--eos-ink);
   border: 1px solid var(--eos-border);
   border-radius: 6px;
-  padding: 0.28rem 0.35rem;
+  padding: 0.3rem 0.4rem;
   background: #fff;
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+}
+.studio-v2-piece-row__field input[type="number"] {
+  /* Avoid spinner/value clipping in dense L/D/Qty cells. */
+  min-width: 4.25rem;
+  padding-right: 0.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.studio-v2-piece-row select {
+  text-overflow: ellipsis;
 }
 .studio-v2-piece-row select.is-upgraded {
   border-color: #b45309;
   background: #fffbeb;
+}
+.studio-v2-piece-row .studio-v2-edge-trigger,
+.studio-v2-piece-row .studio-v2-cutouts-cell > .eq-btn-secondary {
+  width: 100%;
+  max-width: none;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.3;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.4rem;
 }
 .studio-v2-piece-row__splash,
 .studio-v2-piece-row__profile,
@@ -3538,6 +3613,13 @@ button.linkish {
   flex-direction: column;
   gap: 0.25rem;
   align-items: stretch;
+}
+.studio-v2-piece-row__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding-top: 0.1rem;
 }
 .studio-v2-piece-row__actions details summary {
   cursor: pointer;
