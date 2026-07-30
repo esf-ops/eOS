@@ -30,7 +30,7 @@ export const HOME_COPY = {
 /** Idle timeout before returning to the attract/home screen (ms). */
 export const IDLE_TIMEOUT_MS = (() => {
   const raw = Number(import.meta.env.VITE_KIOSK_IDLE_MS);
-  return Number.isFinite(raw) && raw >= 15000 ? raw : 120_000; // default 2 min
+  return Number.isFinite(raw) && raw >= 15000 ? raw : 15 * 60 * 1000; // default 15 min
 })();
 
 /** Public base URL used to build deep links + the visualizer handoff QR. */
