@@ -213,7 +213,8 @@ export default function StudioV2PricingControlsPanel(props: Props) {
 
       <div className="studio-v2-options-section" data-testid="studio-v2-account-pricing-note">
         <h3>Account pricing rule</h3>
-        {adj?.active ? (
+        {adj?.active &&
+        (adj.source === "trusted_account_rule" || adj.spahnTrusted) ? (
           <dl className="studio-v2-dl">
             <div>
               <dt>Percentage</dt>
@@ -225,11 +226,7 @@ export default function StudioV2PricingControlsPanel(props: Props) {
             </div>
             <div>
               <dt>Source</dt>
-              <dd>
-                {adj.source === "trusted_account_rule"
-                  ? "Account-derived (read-only)"
-                  : adj.source || "manual"}
-              </dd>
+              <dd>Account-derived (read-only)</dd>
             </div>
           </dl>
         ) : (

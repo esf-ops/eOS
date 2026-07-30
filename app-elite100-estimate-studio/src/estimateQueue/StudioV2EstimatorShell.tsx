@@ -81,6 +81,8 @@ type ScopeSummary = {
 type PricingBreakdown = {
   pricingBasis?: string | null;
   priceGroup?: string | null;
+  selectedPricingBasis?: string | null;
+  selectedPriceGroup?: string | null;
   materialRatePerSf?: number | null;
   materialRatePerSfNote?: string | null;
   measuredSf?: number | null;
@@ -90,6 +92,7 @@ type PricingBreakdown = {
   customerFacingAdjustments?: number | null;
   hiddenCustomerImpactingAdjustments?: number | null;
   roomCount?: number | null;
+  calculatedFieldsAvailable?: boolean;
 };
 
 type CalculationResult = {
@@ -102,6 +105,59 @@ type CalculationResult = {
   pricingVersion?: number | null;
   pricingBreakdown?: PricingBreakdown | null;
 };
+
+/** Prefer the calc result that retains measured/billed SF and material rate. */
+function preferRicherCalculation(
+  primary: CalculationResult | null | undefined,
+  fallback: CalculationResult | null | undefined
+): CalculationResult | null {
+  const a = primary || null;
+  const b = fallback || null;
+  if (!a) return b;
+  if (!b) return a;
+  const score = (c: CalculationResult | null) => {
+    if (!c?.available) return 0;
+    const pb = c.pricingBreakdown;
+    let s = 1;
+    if (pb?.measuredSf != null) s += 4;
+    if (pb?.billedSf != null) s += 4;
+    if (pb?.materialRatePerSf != null) s += 3;
+    if (pb?.materialSubtotal != null) s += 2;
+    if (pb?.materialUseTax != null) s += 1;
+    return s;
+  };
+  return score(a) >= score(b) ? a : b;
+}
+
+function displayPricingContext(
+  pb: PricingBreakdown | null | undefined,
+  pricingDraft: StudioV2EditablePricing | null | undefined,
+  field: "basis" | "group"
+): string {
+  if (field === "basis") {
+    return (
+      pb?.selectedPricingBasis ||
+      pb?.pricingBasis ||
+      pricingDraft?.pricingBasis ||
+      "not calculated yet"
+    );
+  }
+  return (
+    pb?.selectedPriceGroup ||
+    pb?.priceGroup ||
+    pricingDraft?.materialGroup ||
+    "not calculated yet"
+  );
+}
+
+function displayCalculatedMetric(
+  value: number | null | undefined,
+  format: (n: number) => string,
+  emptyLabel = "not calculated yet"
+): string {
+  if (value == null || !Number.isFinite(Number(value))) return emptyLabel;
+  return format(Number(value));
+}
 
 type WorkingDraftResponse = {
   ok?: boolean;
@@ -564,6 +620,11 @@ export default function StudioV2EstimatorShell(props: {
       setPricingDirty(false);
       setCalcStale(true);
       setCalcStaleReason("Pricing settings changed — recalculate to update total.");
+      // After save, calculation remains stale even if a prior snapshot still exists.
+      setCalcResult(draftBody.lastCalculation || body.lastCalculation || {
+        available: false,
+        total: null
+      });
     } catch (e) {
       setPricingSaveError(errorMessage(e));
     } finally {
@@ -573,14 +634,17 @@ export default function StudioV2EstimatorShell(props: {
 
   async function runCalculate() {
     if (scopeDirty) {
+      setCalcBusy(false);
       setCalcError("Save Scope first before calculating.");
       return;
     }
     if (optionsDirty) {
+      setCalcBusy(false);
       setCalcError("Save Options first before calculating.");
       return;
     }
     if (pricingDirty) {
+      setCalcBusy(false);
       setCalcError("Save Pricing first before calculating.");
       return;
     }
@@ -592,7 +656,8 @@ export default function StudioV2EstimatorShell(props: {
         authToken,
         {}
       )) as { calculation?: CalculationResult; ok?: boolean };
-      setCalcResult(body.calculation || null);
+      const calcFromPost = body.calculation || null;
+      setCalcResult(calcFromPost);
       setCalcStale(false);
       setCalcStaleReason(null);
       // Reload draft metadata without clobbering unsaved local option/scope edits.
@@ -601,7 +666,13 @@ export default function StudioV2EstimatorShell(props: {
         authToken
       )) as WorkingDraftResponse;
       setDraft(draftBody);
-      setCalcResult(draftBody.lastCalculation || body.calculation || null);
+      // Prefer the richer of POST calculate vs GET working-draft so refresh cannot
+      // wipe measured/billed SF or material rate when the read model is briefly weak.
+      setCalcResult(
+        preferRicherCalculation(draftBody.lastCalculation, calcFromPost) || calcFromPost
+      );
+      setCalcStale(false);
+      setCalcStaleReason(null);
       if (!scopeDirty) {
         setScopeDraft(cloneEditableScope(draftBody.editableScope));
       }
@@ -611,9 +682,9 @@ export default function StudioV2EstimatorShell(props: {
       if (!pricingDirty) {
         setPricingDraft(cloneEditablePricing(draftBody.editablePricing));
       }
-      // Keep local form fields — do not rehydrate from calculation response while dirty.
     } catch (e) {
       setCalcError(errorMessage(e));
+      setCalcBusy(false);
     } finally {
       setCalcBusy(false);
     }
@@ -752,12 +823,18 @@ export default function StudioV2EstimatorShell(props: {
     Boolean(draft?.approvedPublished?.published) ||
     Boolean(draft?.publicationSummary?.active) ||
     String(draft?.publicationSummary?.state || "").toLowerCase().includes("published");
-  const calcStatusLabel = !calcResult?.available
-    ? "not priced"
-    : calcStale
-      ? "stale"
+  const calcStatusLabel = calcStale
+    ? "stale"
+    : !calcResult?.available
+      ? "not priced"
       : "current";
   const pb = calcResult?.pricingBreakdown;
+  const displayBasis = displayPricingContext(pb, pricingDraft, "basis");
+  const displayGroup = displayPricingContext(pb, pricingDraft, "group");
+  const rateDisplay =
+    pb?.materialRatePerSf != null
+      ? `${money(pb.materialRatePerSf)} / SF`
+      : pb?.materialRatePerSfNote || "not calculated yet";
 
   return (
     <div className="studio-v2-shell" data-testid="studio-v2-estimator-shell">
@@ -1044,60 +1121,50 @@ export default function StudioV2EstimatorShell(props: {
               </div>
               <div>
                 <dt>Pricing basis</dt>
-                <dd data-testid="studio-v2-calc-pricing-basis">
-                  {pb?.pricingBasis || "not available"}
-                </dd>
+                <dd data-testid="studio-v2-calc-pricing-basis">{displayBasis}</dd>
               </div>
               <div>
                 <dt>Price group</dt>
-                <dd data-testid="studio-v2-calc-price-group">{pb?.priceGroup || "not available"}</dd>
+                <dd data-testid="studio-v2-calc-price-group">{displayGroup}</dd>
               </div>
               <div>
                 <dt>Material rate</dt>
-                <dd data-testid="studio-v2-calc-material-rate">
-                  {pb?.materialRatePerSf != null
-                    ? `${money(pb.materialRatePerSf)} / SF`
-                    : pb?.materialRatePerSfNote || "not available"}
-                </dd>
+                <dd data-testid="studio-v2-calc-material-rate">{rateDisplay}</dd>
               </div>
               <div>
                 <dt>Measured SF</dt>
                 <dd data-testid="studio-v2-calc-measured-sf">
-                  {pb?.measuredSf != null ? pb.measuredSf.toFixed(1) : "not available"}
+                  {displayCalculatedMetric(pb?.measuredSf, (n) => n.toFixed(1))}
                 </dd>
               </div>
               <div>
                 <dt>Billed SF</dt>
                 <dd data-testid="studio-v2-calc-billed-sf">
-                  {pb?.billedSf != null ? pb.billedSf.toFixed(1) : "not available"}
+                  {displayCalculatedMetric(pb?.billedSf, (n) => n.toFixed(1))}
                 </dd>
               </div>
               <div>
                 <dt>Material subtotal</dt>
                 <dd data-testid="studio-v2-calc-material-subtotal">
-                  {pb?.materialSubtotal != null ? money(pb.materialSubtotal) : "not available"}
+                  {displayCalculatedMetric(pb?.materialSubtotal, (n) => money(n))}
                 </dd>
               </div>
               <div>
                 <dt>Material use tax</dt>
                 <dd data-testid="studio-v2-calc-material-use-tax">
-                  {pb?.materialUseTax != null ? money(pb.materialUseTax) : "not available"}
+                  {displayCalculatedMetric(pb?.materialUseTax, (n) => money(n))}
                 </dd>
               </div>
               <div>
                 <dt>Customer-facing adjustments</dt>
                 <dd data-testid="studio-v2-calc-customer-adj">
-                  {pb?.customerFacingAdjustments != null
-                    ? money(pb.customerFacingAdjustments)
-                    : "not available"}
+                  {displayCalculatedMetric(pb?.customerFacingAdjustments, (n) => money(n))}
                 </dd>
               </div>
               <div>
                 <dt>Hidden customer-impacting adjustments</dt>
                 <dd data-testid="studio-v2-calc-hidden-adj">
-                  {pb?.hiddenCustomerImpactingAdjustments != null
-                    ? money(pb.hiddenCustomerImpactingAdjustments)
-                    : "not available"}
+                  {displayCalculatedMetric(pb?.hiddenCustomerImpactingAdjustments, (n) => money(n))}
                 </dd>
               </div>
             </dl>

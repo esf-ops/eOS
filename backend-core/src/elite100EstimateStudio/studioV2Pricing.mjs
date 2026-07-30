@@ -103,11 +103,23 @@ export function buildStudioV2EditablePricing(estimate, opts = {}) {
     materialGroup: group,
     materialGroupLabel: studioV2MaterialGroupLabel(group),
     accountAdjustment: {
-      active: effective.active === true,
-      percentage: effective.percentage || 0,
-      reason: effective.reason || "",
-      source: effective.source || "manual",
-      readOnly: effective.source === "trusted_account_rule" || effective.spahnTrusted === true,
+      // Only surface account-derived rules here — manual EWA lives under estimateWideAdjustment.
+      active:
+        effective.active === true &&
+        (effective.source === "trusted_account_rule" || effective.spahnTrusted === true),
+      percentage:
+        effective.source === "trusted_account_rule" || effective.spahnTrusted === true
+          ? effective.percentage || 0
+          : 0,
+      reason:
+        effective.source === "trusted_account_rule" || effective.spahnTrusted === true
+          ? effective.reason || ""
+          : "",
+      source:
+        effective.source === "trusted_account_rule" || effective.spahnTrusted === true
+          ? effective.source || "trusted_account_rule"
+          : null,
+      readOnly: true,
       available: true,
       spahnTrusted: Boolean(effective.spahnTrusted)
     },

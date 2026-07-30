@@ -348,4 +348,202 @@ const fakeCalc = {
   console.log("ok: frontend/source contracts for Pricing Controls");
 }
 
+{
+  // QA hardening: working-draft read model prefers calculationSnapshot elite100
+  // over staff-safe calculation that omits room SF/rates (SF flicker root cause).
+  const { buildStudioV2CalculationResult } = await import("./studioV2WorkingDraft.mjs");
+  const { buildStudioV2EditableOptions } = await import("./studioV2EstimateOptions.mjs");
+  const { buildStudioV2EditablePricing } = await import("./studioV2Pricing.mjs");
+
+  const fullSnap = {
+    fingerprint: "snap-full",
+    calculatedAt: "2026-07-30T19:00:00.000Z",
+    pricingVersion: 4,
+    pricingBasis: "wholesale",
+    totals: {
+      exactTotal: 6980,
+      customerDisplayTotal: 6980,
+      accountAdjustment: 209.4
+    },
+    reviewSummary: {
+      countertopMaterialTotal: 5000,
+      materialTaxTotal: 300,
+      countertopMaterialGroups: ["Group Promo"],
+      totalBillableStoneSf: 42
+    },
+    scopeBilling: { billableStoneSf: 42 },
+    elite100: {
+      rooms: [
+        {
+          materialGroup: "Group Promo",
+          materialRatePerSf: 55,
+          measuredCountertopSf: 40,
+          billedCountertopSf: 42
+        }
+      ]
+    },
+    fabrication: { customLineItems: [] }
+  };
+  const strippedSafeView = {
+    fingerprint: fullSnap.fingerprint,
+    calculatedAt: fullSnap.calculatedAt,
+    totals: fullSnap.totals,
+    scopeBilling: fullSnap.scopeBilling,
+    fabrication: fullSnap.fabrication,
+    reviewSummary: fullSnap.reviewSummary,
+    pricingVersion: 4
+    // intentionally no elite100
+  };
+
+  const calcFromPost = buildStudioV2CalculationResult(
+    {
+      scope: baseScope({
+        pricingBasis: "wholesale",
+        materialGroup: "Group Promo",
+        estimateWideAdjustment: {
+          active: true,
+          percentage: 3,
+          reason: "s&r",
+          source: "manual"
+        }
+      }),
+      calculation: strippedSafeView,
+      calculationSnapshot: fullSnap
+    },
+    fullSnap
+  );
+  const calcFromGet = buildStudioV2CalculationResult({
+    scope: baseScope({
+      pricingBasis: "wholesale",
+      materialGroup: "Group Promo",
+      estimateWideAdjustment: {
+        active: true,
+        percentage: 3,
+        reason: "s&r",
+        source: "manual"
+      }
+    }),
+    calculation: strippedSafeView,
+    calculationSnapshot: fullSnap
+  });
+
+  assert.equal(calcFromPost.pricingBreakdown.measuredSf, 40);
+  assert.equal(calcFromPost.pricingBreakdown.billedSf, 42);
+  assert.equal(calcFromPost.pricingBreakdown.materialRatePerSf, 55);
+  assert.equal(calcFromPost.pricingBreakdown.materialSubtotal, 5000);
+  assert.equal(calcFromPost.pricingBreakdown.materialUseTax, 300);
+  assert.equal(calcFromGet.pricingBreakdown.measuredSf, 40);
+  assert.equal(calcFromGet.pricingBreakdown.billedSf, 42);
+  assert.equal(calcFromGet.pricingBreakdown.materialRatePerSf, 55);
+  assert.equal(calcFromGet.pricingBreakdown.materialSubtotal, 5000);
+  assert.equal(calcFromGet.pricingBreakdown.materialUseTax, 300);
+  assert.equal(calcFromGet.pricingBreakdown.selectedPricingBasis, "wholesale");
+  assert.equal(calcFromGet.pricingBreakdown.selectedPriceGroup, "Group Promo");
+  console.log("ok: calculate + working-draft expose consistent pricingBreakdown SF/rate");
+
+  // Stale snapshot still exposes selected basis/group from scope
+  const staleOnlyScope = buildStudioV2CalculationResult({
+    scope: baseScope({ pricingBasis: "direct", materialGroup: "Group D" }),
+    calculation: null,
+    calculationSnapshot: null
+  });
+  assert.equal(staleOnlyScope.available, false);
+  assert.equal(staleOnlyScope.pricingBreakdown.selectedPricingBasis, "direct");
+  assert.equal(staleOnlyScope.pricingBreakdown.selectedPriceGroup, "Group D");
+  assert.equal(staleOnlyScope.pricingBreakdown.materialRatePerSf, null);
+  assert.equal(staleOnlyScope.pricingBreakdown.measuredSf, null);
+  console.log("ok: selected basis/group visible when calculation unavailable");
+
+  // Manual estimate-wide adjustment is not labeled as account pricing rule
+  const opts = buildStudioV2EditableOptions({
+    scope: baseScope({
+      estimateWideAdjustment: {
+        active: true,
+        percentage: 3,
+        reason: "s&r",
+        source: "manual"
+      }
+    }),
+    calculationSnapshot: fullSnap
+  });
+  assert.equal(opts.accountAdjustment.active, true);
+  assert.equal(opts.accountAdjustment.source, "manual");
+  assert.equal(opts.accountAdjustment.kind, "estimate_wide_adjustment");
+  assert.equal(opts.accountAdjustment.amountExact, 209.4);
+  assert.equal(opts.accountAdjustment.amountKnown, true);
+
+  const optsNoAmount = buildStudioV2EditableOptions({
+    scope: baseScope({
+      estimateWideAdjustment: {
+        active: true,
+        percentage: 3,
+        reason: "s&r",
+        source: "manual"
+      }
+    }),
+    calculation: { totals: {} },
+    calculationSnapshot: null
+  });
+  assert.equal(optsNoAmount.accountAdjustment.amountKnown, false);
+  assert.equal(optsNoAmount.accountAdjustment.amountExact, null);
+
+  const pricingDto = buildStudioV2EditablePricing(
+    {
+      scope: baseScope({
+        estimateWideAdjustment: {
+          active: true,
+          percentage: 3,
+          reason: "s&r",
+          source: "manual"
+        }
+      })
+    },
+    { actorUserId: ACTOR, env: {} }
+  );
+  assert.equal(pricingDto.accountAdjustment.active, false);
+  assert.equal(pricingDto.estimateWideAdjustment.active, true);
+  assert.equal(pricingDto.estimateWideAdjustment.source, "manual");
+  console.log("ok: manual EWA not labeled as account adjustment; amountKnown gated");
+}
+
+{
+  // Frontend contracts for QA hardening UX
+  const shell = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2EstimatorShell.tsx"),
+    "utf8"
+  );
+  const optionsPanel = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2EstimateOptionsPanel.tsx"),
+    "utf8"
+  );
+  const pricingPanel = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2PricingControlsPanel.tsx"),
+    "utf8"
+  );
+  const approval = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2ApprovalPanel.tsx"),
+    "utf8"
+  );
+
+  assert.ok(shell.includes("preferRicherCalculation"));
+  assert.ok(shell.includes('calcStale\n    ? "stale"') || shell.includes('calcStale ? "stale"'));
+  assert.ok(shell.includes("not calculated yet"));
+  assert.ok(shell.includes("setCalcBusy(false)"));
+  assert.ok(shell.includes("preferRicherCalculation(draftBody.lastCalculation"));
+  assert.ok(optionsPanel.includes("Estimate-wide adjustment"));
+  assert.ok(optionsPanel.includes("applied in calculation"));
+  assert.ok(!optionsPanel.includes("<h3>Account adjustment</h3>"));
+  assert.ok(pricingPanel.includes("No active account pricing rule on this estimate."));
+  assert.ok(pricingPanel.includes('adj.source === "trusted_account_rule"'));
+  assert.ok(approval.includes("unsaved_pricing"));
+  assert.ok(approval.includes("calculation_stale"));
+  assert.ok(shell.includes("pricingDirty"));
+  assert.ok(shell.includes("Save Pricing first before calculating."));
+  assert.ok(!shell.includes("ensure-editable-draft"));
+  assert.ok(!shell.includes("refresh-from-takeoff"));
+  assert.ok(!shell.includes("simplified-publish"));
+  assert.ok(!/from\s+["'].*AiEstimatorWorkspace["']/.test(shell));
+  console.log("ok: QA hardening frontend status/label/loading contracts");
+}
+
 console.log("\nAll Studio V2 Slice H tests passed.\n");

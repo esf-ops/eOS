@@ -239,10 +239,13 @@ export function buildStudioV2ProjectHeader(estimate) {
  * @param {object|null|undefined} [calcOverride]
  */
 export function buildStudioV2CalculationResult(estimate, calcOverride = null) {
+  // Prefer full calculationSnapshot over staff-safe `calculation` views that omit
+  // elite100 room fields (measured/billed SF, material rates). Safe views still
+  // expose totals/reviewSummary but lack pricingBreakdown SF/rate inputs.
   const calc =
     calcOverride ||
-    estimate?.calculation ||
     estimate?.calculationSnapshot ||
+    estimate?.calculation ||
     null;
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   if (!calc || typeof calc !== "object") {
@@ -254,7 +257,7 @@ export function buildStudioV2CalculationResult(estimate, calcOverride = null) {
       unresolvedItems: [],
       calculatedAt: null,
       pricingVersion: null,
-      pricingBreakdown: null
+      pricingBreakdown: buildStudioV2PricingBreakdown(estimate, null, scope)
     };
   }
   const totals = calc.totals && typeof calc.totals === "object" ? calc.totals : {};
@@ -294,8 +297,16 @@ export function buildStudioV2CalculationResult(estimate, calcOverride = null) {
  * @param {object} scope
  */
 function buildStudioV2PricingBreakdown(estimate, calc, scope) {
-  const review = calc.reviewSummary && typeof calc.reviewSummary === "object" ? calc.reviewSummary : {};
-  const rooms = Array.isArray(calc.elite100?.rooms) ? calc.elite100.rooms : [];
+  const safeCalc = calc && typeof calc === "object" ? calc : {};
+  const review =
+    safeCalc.reviewSummary && typeof safeCalc.reviewSummary === "object"
+      ? safeCalc.reviewSummary
+      : {};
+  const billing =
+    safeCalc.scopeBilling && typeof safeCalc.scopeBilling === "object"
+      ? safeCalc.scopeBilling
+      : {};
+  const rooms = Array.isArray(safeCalc.elite100?.rooms) ? safeCalc.elite100.rooms : [];
   const scopeSummaryRooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
   const firstRoom = rooms[0] || null;
   const rates = rooms
@@ -310,8 +321,25 @@ function buildStudioV2PricingBreakdown(estimate, calc, scope) {
     (s, r) => s + (Number(r?.billedCountertopSf) || 0),
     0
   );
-  const custom = Array.isArray(calc.fabrication?.customLineItems)
-    ? calc.fabrication.customLineItems
+  // Scope-derived measured SF is geometry, not invented pricing math.
+  const measuredFromScope = scopeSummaryRooms.reduce((s, r) => {
+    if (!r || r.included === false) return s;
+    return s + (Number(r.countertopSf) || 0) + (Number(r.backsplashSf) || 0);
+  }, 0);
+  const billedFromBilling =
+    billing.billableStoneSf ??
+    billing.totalBillableStoneSf ??
+    review.totalBillableStoneSf ??
+    null;
+  const hasPersistedCalc = Boolean(
+    safeCalc.calculatedAt ||
+      safeCalc.fingerprint ||
+      safeCalc.elite100 ||
+      safeCalc.reviewSummary ||
+      (safeCalc.totals && typeof safeCalc.totals === "object" && Object.keys(safeCalc.totals).length)
+  );
+  const custom = Array.isArray(safeCalc.fabrication?.customLineItems)
+    ? safeCalc.fabrication.customLineItems
     : Array.isArray(scope.customLineItems)
       ? scope.customLineItems
       : [];
@@ -342,24 +370,50 @@ function buildStudioV2PricingBreakdown(estimate, calc, scope) {
       customerFacingAdj += amount;
     }
   }
-  const priceGroup =
+  // Selected pricing context always comes from Working Draft scope so stale
+  // snapshots still show the estimator's current basis/group choice.
+  const selectedPricingBasis = str(scope.pricingBasis) || null;
+  const selectedPriceGroup = str(scope.materialGroup) || null;
+  const calculatedPriceGroup =
     str(firstRoom?.materialGroup) ||
     (Array.isArray(review.countertopMaterialGroups) && review.countertopMaterialGroups[0]
       ? str(review.countertopMaterialGroups[0])
       : "") ||
-    str(scope.materialGroup) ||
     null;
+  const measuredSf =
+    measuredFromRooms > 0
+      ? Math.round(measuredFromRooms * 100) / 100
+      : hasPersistedCalc && measuredFromScope > 0
+        ? Math.round(measuredFromScope * 100) / 100
+        : null;
+  const billedSf =
+    billedFromRooms > 0
+      ? Math.round(billedFromRooms * 100) / 100
+      : hasPersistedCalc &&
+          billedFromBilling != null &&
+          Number.isFinite(Number(billedFromBilling))
+        ? Math.round(Number(billedFromBilling) * 100) / 100
+        : null;
+  const hasCalculatedFields = hasPersistedCalc && Boolean(
+    rooms.length > 0 ||
+      review.countertopMaterialTotal != null ||
+      uniqueRates.length > 0 ||
+      Object.keys(safeCalc.totals || {}).length > 0
+  );
   return {
-    pricingBasis: str(calc.pricingBasis || scope.pricingBasis) || null,
-    priceGroup: priceGroup || null,
+    pricingBasis: selectedPricingBasis || str(safeCalc.pricingBasis) || null,
+    priceGroup: selectedPriceGroup || calculatedPriceGroup || null,
+    selectedPricingBasis,
+    selectedPriceGroup,
     materialRatePerSf: uniqueRates.length === 1 ? uniqueRates[0] : null,
     materialRatePerSfNote:
-      uniqueRates.length > 1 ? "Multiple rates across rooms" : null,
-    measuredSf:
-      measuredFromRooms > 0
-        ? Math.round(measuredFromRooms * 100) / 100
-        : null,
-    billedSf: billedFromRooms > 0 ? Math.round(billedFromRooms * 100) / 100 : null,
+      uniqueRates.length > 1
+        ? "Multiple rates across rooms"
+        : uniqueRates.length === 0 && hasCalculatedFields
+          ? null
+          : null,
+    measuredSf,
+    billedSf,
     materialSubtotal:
       review.countertopMaterialTotal != null && Number.isFinite(Number(review.countertopMaterialTotal))
         ? Number(review.countertopMaterialTotal)
@@ -368,9 +422,14 @@ function buildStudioV2PricingBreakdown(estimate, calc, scope) {
       review.materialTaxTotal != null && Number.isFinite(Number(review.materialTaxTotal))
         ? Number(review.materialTaxTotal)
         : null,
-    customerFacingAdjustments: Math.round(customerFacingAdj * 100) / 100,
-    hiddenCustomerImpactingAdjustments: Math.round(hiddenAdj * 100) / 100,
-    roomCount: rooms.length || scopeSummaryRooms.length || 0
+    customerFacingAdjustments: hasPersistedCalc
+      ? Math.round(customerFacingAdj * 100) / 100
+      : null,
+    hiddenCustomerImpactingAdjustments: hasPersistedCalc
+      ? Math.round(hiddenAdj * 100) / 100
+      : null,
+    roomCount: rooms.length || scopeSummaryRooms.length || 0,
+    calculatedFieldsAvailable: hasCalculatedFields
   };
 }
 
