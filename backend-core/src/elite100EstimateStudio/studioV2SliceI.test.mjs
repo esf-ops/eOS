@@ -524,12 +524,20 @@ const fakeCalc = {
 
   assert.ok(editor.includes('data-testid="studio-v2-piece-table"'));
   assert.ok(editor.includes('data-testid="studio-v2-piece-row"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-length"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-depth"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-quantity"'));
   assert.ok(editor.includes('data-testid="studio-v2-piece-geometry-sf"'));
   assert.ok(editor.includes('data-testid="studio-v2-piece-sf-mode"'));
   assert.ok(editor.includes('data-testid="studio-v2-piece-sf-mode-select"'));
   assert.ok(editor.includes('data-testid="studio-v2-set-exposed-sides"'));
   assert.ok(editor.includes('data-testid="studio-v2-exposed-summary"'));
   assert.ok(editor.includes('data-testid="studio-v2-exposed-sides-modal"'));
+  assert.ok(editor.includes("Front — ${lengthLabel}\""));
+  assert.ok(editor.includes("Back — ${lengthLabel}\""));
+  assert.ok(editor.includes("Left — ${depthLabel}\""));
+  assert.ok(editor.includes("Right — ${depthLabel}\""));
+  assert.ok(editor.includes('data-testid="studio-v2-side-diagram"'));
   assert.ok(editor.includes('data-testid="studio-v2-cutouts"'));
   assert.ok(editor.includes('data-testid="studio-v2-cutouts-summary"'));
   assert.ok(editor.includes('data-testid="studio-v2-cutouts-menu"'));
@@ -541,17 +549,28 @@ const fakeCalc = {
   assert.ok(editor.includes('data-excluded={excluded ? "true" : "false"}'));
   assert.ok(editor.includes("Approved estimate is read-only."));
   assert.ok(editor.includes('data-testid="studio-v2-plan-preview"'));
+  assert.ok(editor.includes('data-testid="studio-v2-workbench-panel"'));
+  assert.ok(editor.includes('data-testid="studio-v2-scope-checklist"'));
+  assert.ok(editor.includes('data-testid="studio-v2-selected-piece"'));
   assert.ok(
     editor.includes("Plan preview will be added when V2 intake/attachment links are wired.")
   );
   assert.ok(editor.includes('data-testid="studio-v2-scope-readonly"'));
+  assert.ok(editor.includes("Legacy openings"));
+  assert.ok(
+    editor.includes("Legacy openings are kept for older estimates. Prefer piece-level cutouts.")
+  );
+  assert.ok(editor.includes('className="studio-v2-legacy-openings"'));
+  assert.ok(editor.includes("studio-v2-piece-workbench"));
   assert.ok(editor.includes("STUDIO_V2_EDGE_PROFILES"));
   assert.ok(editor.includes("not priced yet"));
   assert.ok(editor.includes("readOnly"));
-  assert.ok(editor.includes("studio-v2-piece-review"));
   assert.ok(helpers.includes("geometrySfFromDimensions"));
   assert.ok(helpers.includes("no countertop SF while included"));
-  assert.ok(styles.includes(".studio-v2-piece-review.is-excluded"));
+  assert.ok(helpers.includes("scopeReviewChecklist"));
+  assert.ok(styles.includes(".studio-v2-piece-row.is-excluded"));
+  assert.ok(styles.includes(".studio-v2-workbench-panel"));
+  assert.ok(styles.includes(".studio-v2-legacy-openings"));
   assert.ok(!/from\s+["'].*AiEstimatorWorkspace["']/.test(editor));
   assert.ok(!/from\s+["'].*EstimateTakeoffWorkspace["']/.test(editor));
   assert.ok(!/from\s+["'].*TakeoffReviewWorkbench["']/.test(editor));
@@ -565,7 +584,17 @@ const fakeCalc = {
   assert.ok(adapter.includes("hasPieceOpenings"));
   assert.ok(studioApp.includes("EstimateTakeoffWorkspace"));
   assert.ok(studioApp.includes("studioV2Preview"));
-  console.log("ok: frontend/source contracts for Slice I / scope review UI polish");
+  // Dimensions must be in the main row (not only behind a collapsed details summary).
+  const lengthIdx = editor.indexOf('data-testid="studio-v2-piece-length"');
+  const detailsIdx = editor.indexOf('data-testid="studio-v2-piece-notes"');
+  assert.ok(lengthIdx > 0 && detailsIdx > 0 && lengthIdx < detailsIdx);
+  // Legacy openings must not be the primary/default expanded block above piece review.
+  const openingsIdx = editor.indexOf('data-testid="studio-v2-openings"');
+  const pieceTableIdx = editor.indexOf('data-testid="studio-v2-piece-table"');
+  assert.ok(pieceTableIdx > 0 && openingsIdx > pieceTableIdx);
+  // Legacy openings <details> must not force open by default.
+  assert.ok(!/data-testid="studio-v2-openings"[^>]*\sopen(=|\s|>)/.test(editor));
+  console.log("ok: frontend/source contracts for Slice I / scope review layout refinement");
 }
 
 console.log("\nAll Studio V2 Slice I tests passed.\n");

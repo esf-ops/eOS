@@ -162,3 +162,68 @@ export function backsplashNeedsRunLength(piece: {
     !(Number(piece.backsplashEligibleLengthIn) > 0)
   );
 }
+
+/** Included pieces that still need exposed-sides review. */
+export function needsExposedSides(piece: {
+  included?: boolean;
+  exposedSides?: ExposedSides | null;
+  finishedEdgeLf?: number | null;
+  exposedSidesSummary?: string | null;
+}): boolean {
+  if (piece.included === false) return false;
+  if (piece.exposedSides) return false;
+  if (piece.exposedSidesSummary && piece.exposedSidesSummary !== "Set exposed sides") {
+    return false;
+  }
+  if (piece.finishedEdgeLf != null && Number(piece.finishedEdgeLf) > 0) return false;
+  return true;
+}
+
+export function formatInches(n: number): string {
+  const v = Number(n) || 0;
+  return Number.isInteger(v) ? `${v}` : v.toFixed(1).replace(/\.0$/, "");
+}
+
+/** Aggregate scope-review checklist counts (display only). */
+export function scopeReviewChecklist(rooms: Array<{
+  included?: boolean;
+  pieces: Array<{
+    included?: boolean;
+    lengthIn?: number;
+    depthIn?: number;
+    quantity?: number;
+    includeBacksplash?: boolean;
+    backsplashEligibleLengthIn?: number | null;
+    exposedSides?: ExposedSides | null;
+    finishedEdgeLf?: number | null;
+    exposedSidesSummary?: string | null;
+  }>;
+}>): {
+  includedPieces: number;
+  totalGeometrySf: number;
+  needingExposedSides: number;
+  backsplashWarnings: Array<{ roomName?: string; pieceName?: string; label: string }>;
+} {
+  let includedPieces = 0;
+  let totalGeometrySf = 0;
+  let needingExposedSides = 0;
+  const backsplashWarnings: Array<{ roomName?: string; pieceName?: string; label: string }> = [];
+
+  for (const room of rooms) {
+    if (room.included === false) continue;
+    for (const piece of room.pieces) {
+      if (piece.included === false) continue;
+      includedPieces += 1;
+      const geo = geometrySfFromDimensions(piece);
+      if (geo != null) totalGeometrySf = round2(totalGeometrySf + geo);
+      if (needsExposedSides(piece)) needingExposedSides += 1;
+      if (backsplashNeedsRunLength(piece)) {
+        backsplashWarnings.push({
+          label: "Backsplash selected, but no run length is available."
+        });
+      }
+    }
+  }
+
+  return { includedPieces, totalGeometrySf, needingExposedSides, backsplashWarnings };
+}

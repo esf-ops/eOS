@@ -1,5 +1,5 @@
 /**
- * Studio V2 scope review editor — compact piece review with clear SF / edge / cutout status.
+ * Studio V2 scope review editor — dense workbench layout with piece selection panel.
  * Does not import V1 / AI Takeoff Review workspace components.
  */
 import React, { useEffect, useId, useRef, useState } from "react";
@@ -8,14 +8,20 @@ import {
   backsplashNeedsRunLength,
   buildFinishedEdgeFromExposedSides,
   calculateExposedEdgeInches,
+  countertopSfModeLabel,
   cutoutsSummary,
   defaultExposedSidesForTopology,
   displayCountertopSf,
   edgeProfileLabel,
   exposedSummaryText,
   formatExposedSidesSummary,
+  formatInches,
+  geometrySfFromDimensions,
+  needsExposedSides,
   normalizeExposedSides,
   PIECE_TOPOLOGIES,
+  round2,
+  scopeReviewChecklist,
   suggestPieceTopology,
   type ExposedSides
 } from "./studioV2ScopeReviewHelpers";
@@ -172,6 +178,22 @@ function summarizeOpenings(rooms: StudioV2EditableRoom[]) {
   return { fromPieces, kitchenSink, vanityBarSink, cooktop, outlet };
 }
 
+function roomStats(room: StudioV2EditableRoom) {
+  let includedCount = 0;
+  let geometrySf = 0;
+  let splashWarn = 0;
+  let needEdges = 0;
+  for (const piece of room.pieces) {
+    if (piece.included === false) continue;
+    includedCount += 1;
+    const geo = geometrySfFromDimensions(piece);
+    if (geo != null) geometrySf = round2(geometrySf + geo);
+    if (backsplashNeedsRunLength(piece)) splashWarn += 1;
+    if (needsExposedSides(piece)) needEdges += 1;
+  }
+  return { includedCount, geometrySf, splashWarn, needEdges };
+}
+
 type Props = {
   value: StudioV2EditableScope;
   readOnly: boolean;
@@ -182,13 +204,11 @@ type Props = {
   saveNotice?: string | null;
   onChange: (next: StudioV2EditableScope) => void;
   onSave: () => void;
-  /** Optional plan preview URL if V2 shell can supply one; otherwise placeholder. */
   planPreviewUrl?: string | null;
   planPreviewLabel?: string | null;
 };
 
-type EdgeModalTarget = { roomId: string; pieceId: string } | null;
-type CutoutsTarget = { roomId: string; pieceId: string } | null;
+type PieceTarget = { roomId: string; pieceId: string } | null;
 
 function ExposedSidesModal(props: {
   open: boolean;
@@ -232,6 +252,8 @@ function ExposedSidesModal(props: {
 
   if (!open || typeof document === "undefined") return null;
 
+  const lengthLabel = formatInches(piece.lengthIn);
+  const depthLabel = formatInches(piece.depthIn);
   const calc = calculateExposedEdgeInches(
     { lengthIn: piece.lengthIn, depthIn: piece.depthIn, quantity: piece.quantity },
     sides
@@ -261,6 +283,13 @@ function ExposedSidesModal(props: {
     });
   }
 
+  const sideDefs = [
+    { key: "front" as const, label: `Front — ${lengthLabel}"`, dim: "length" },
+    { key: "back" as const, label: `Back — ${lengthLabel}"`, dim: "length" },
+    { key: "left" as const, label: `Left — ${depthLabel}"`, dim: "depth" },
+    { key: "right" as const, label: `Right — ${depthLabel}"`, dim: "depth" }
+  ];
+
   return createPortal(
     <div
       className="studio-v2-modal-backdrop"
@@ -279,15 +308,47 @@ function ExposedSidesModal(props: {
       >
         <header>
           <h3 id={`${baseId}-title`}>Set exposed sides</h3>
-          <p className="muted">
-            {roomName} · {piece.name} · {piece.lengthIn}″ × {piece.depthIn}″ · qty {piece.quantity}
+          <p className="muted" data-testid="studio-v2-exposed-sides-piece-meta">
+            {roomName} · {piece.name}
           </p>
+          <dl className="studio-v2-exposed-dims" data-testid="studio-v2-exposed-sides-dims">
+            <div>
+              <dt>Length</dt>
+              <dd>{lengthLabel}"</dd>
+            </div>
+            <div>
+              <dt>Depth</dt>
+              <dd>{depthLabel}"</dd>
+            </div>
+            <div>
+              <dt>Qty</dt>
+              <dd>{piece.quantity || 1}</dd>
+            </div>
+          </dl>
         </header>
         <div className="studio-v2-modal__body">
           <p className="muted">
             Mark physical sides that will be finished. Edge profile is chosen on the piece row.
             Geometry LF only — pricing stays on the server.
           </p>
+
+          <div className="studio-v2-side-diagram" data-testid="studio-v2-side-diagram" aria-hidden="true">
+            <div className="studio-v2-side-diagram__back">Back {lengthLabel}"</div>
+            <div className="studio-v2-side-diagram__mid">
+              <span>Left {depthLabel}"</span>
+              <span className="studio-v2-side-diagram__piece">{piece.name || "Piece"}</span>
+              <span>Right {depthLabel}"</span>
+            </div>
+            <div className="studio-v2-side-diagram__front">Front {lengthLabel}"</div>
+          </div>
+
+          <ul className="studio-v2-side-ref" data-testid="studio-v2-side-ref">
+            <li>Front = length = {lengthLabel}"</li>
+            <li>Back = length = {lengthLabel}"</li>
+            <li>Left = depth = {depthLabel}"</li>
+            <li>Right = depth = {depthLabel}"</li>
+          </ul>
+
           <label>
             <span>Piece type</span>
             <select
@@ -303,14 +364,7 @@ function ExposedSidesModal(props: {
             </select>
           </label>
           <div className="studio-v2-exposed-sides-grid" data-testid="studio-v2-exposed-sides-grid">
-            {(
-              [
-                ["front", "Front (= length)"],
-                ["back", "Back (= length)"],
-                ["left", "Left (= depth)"],
-                ["right", "Right (= depth)"]
-              ] as const
-            ).map(([key, label]) => (
+            {sideDefs.map(({ key, label }) => (
               <label key={key} className="studio-v2-check-row">
                 <input
                   type="checkbox"
@@ -324,7 +378,8 @@ function ExposedSidesModal(props: {
             ))}
           </div>
           <p className="studio-v2-modal__summary" data-testid="studio-v2-exposed-sides-summary">
-            {summary}
+            Selected total: {Number(calc.totalLf || 0).toFixed(2)} LF
+            {summary && summary !== "Set exposed sides" ? ` · ${summary}` : ""}
           </p>
         </div>
         <footer className="studio-v2-modal__footer">
@@ -350,7 +405,6 @@ function ExposedSidesModal(props: {
 
 function CutoutsPopover(props: {
   open: boolean;
-  anchorId: string;
   piece: StudioV2EditablePiece;
   readOnly: boolean;
   onClose: () => void;
@@ -492,8 +546,170 @@ function CutoutsPopover(props: {
   );
 }
 
-function formatDims(piece: StudioV2EditablePiece): string {
-  return `${piece.lengthIn || 0}″ × ${piece.depthIn || 0}″ × ${piece.quantity || 1}`;
+function ScopeWorkbenchPanel(props: {
+  checklist: ReturnType<typeof scopeReviewChecklist>;
+  selected: { room: StudioV2EditableRoom; piece: StudioV2EditablePiece } | null;
+  planPreviewUrl: string | null;
+  planPreviewLabel: string | null;
+  onSelectWarningPiece?: (roomId: string, pieceId: string) => void;
+  rooms: StudioV2EditableRoom[];
+}) {
+  const { checklist, selected, planPreviewUrl, planPreviewLabel, rooms } = props;
+  const selectedSf = selected ? displayCountertopSf(selected.piece) : null;
+  const selectedProfile = selected
+    ? edgeProfileLabel(selected.piece.edgeProfileToken, STUDIO_V2_EDGE_PROFILES)
+    : null;
+
+  const warningPieces: Array<{
+    roomId: string;
+    pieceId: string;
+    roomName: string;
+    pieceName: string;
+  }> = [];
+  for (const room of rooms) {
+    if (room.included === false) continue;
+    for (const piece of room.pieces) {
+      if (piece.included === false) continue;
+      if (backsplashNeedsRunLength(piece)) {
+        warningPieces.push({
+          roomId: room.id,
+          pieceId: piece.id,
+          roomName: room.name,
+          pieceName: piece.name
+        });
+      }
+    }
+  }
+
+  return (
+    <aside className="studio-v2-workbench-panel" data-testid="studio-v2-workbench-panel">
+      {selected ? (
+        <div className="studio-v2-selected-piece" data-testid="studio-v2-selected-piece">
+          <h3>Selected piece</h3>
+          <p className="studio-v2-selected-piece__name">{selected.piece.name}</p>
+          <p className="muted">
+            {selected.room.name} · {selected.room.roomType}
+          </p>
+          <dl className="studio-v2-selected-piece__dl">
+            <div>
+              <dt>Included</dt>
+              <dd>
+                {selected.piece.included === false ? "Excluded from quote" : "Included in quote"}
+              </dd>
+            </div>
+            <div>
+              <dt>Dimensions</dt>
+              <dd data-testid="studio-v2-selected-dims">
+                {formatInches(selected.piece.lengthIn)}" × {formatInches(selected.piece.depthIn)}" ×{" "}
+                {selected.piece.quantity || 1}
+              </dd>
+            </div>
+            <div>
+              <dt>Geometry SF</dt>
+              <dd>
+                {selectedSf?.geometrySf != null ? `${selectedSf.geometrySf.toFixed(2)} SF` : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt>Countertop SF</dt>
+              <dd>
+                {selectedSf
+                  ? countertopSfModeLabel(selectedSf.mode)
+                  : "—"}
+                {selectedSf?.mode === "direct" && selectedSf.countedSf != null
+                  ? ` · ${selectedSf.countedSf.toFixed(2)} SF`
+                  : ""}
+              </dd>
+            </div>
+            <div>
+              <dt>Backsplash</dt>
+              <dd>
+                {selected.piece.includeBacksplash
+                  ? selected.piece.backsplashEligibleLengthIn
+                    ? `Include · ${formatInches(Number(selected.piece.backsplashEligibleLengthIn))}" run`
+                    : "Include · no run length"
+                  : "No backsplash"}
+              </dd>
+            </div>
+            <div>
+              <dt>Finished edges</dt>
+              <dd>{exposedSummaryText(selected.piece)}</dd>
+            </div>
+            <div>
+              <dt>Edge profile</dt>
+              <dd>
+                {selectedProfile?.label || "Estimate default"}
+                {selectedProfile?.upgraded ? " · Upgraded" : ""}
+              </dd>
+            </div>
+            <div>
+              <dt>Cutouts</dt>
+              <dd>{cutoutsSummary(selected.piece)}</dd>
+            </div>
+            {selected.piece.notes ? (
+              <div>
+                <dt>Notes</dt>
+                <dd>{selected.piece.notes}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
+      ) : (
+        <div className="studio-v2-scope-checklist" data-testid="studio-v2-scope-checklist">
+          <h3>Scope review checklist</h3>
+          <ul>
+            <li data-testid="studio-v2-checklist-included">
+              Included pieces: <strong>{checklist.includedPieces}</strong>
+            </li>
+            <li data-testid="studio-v2-checklist-geometry">
+              Included geometry SF: <strong>{checklist.totalGeometrySf.toFixed(2)}</strong>
+            </li>
+            <li data-testid="studio-v2-checklist-edges">
+              Need exposed sides: <strong>{checklist.needingExposedSides}</strong>
+            </li>
+            <li data-testid="studio-v2-checklist-splash">
+              Backsplash run warnings: <strong>{checklist.backsplashWarnings.length}</strong>
+            </li>
+          </ul>
+          {warningPieces.length > 0 ? (
+            <div className="studio-v2-scope-checklist__warns">
+              <p className="studio-v2-inline-warn">
+                Backsplash selected, but no run length is available.
+              </p>
+              <ul>
+                {warningPieces.map((w) => (
+                  <li key={`${w.roomId}-${w.pieceId}`}>
+                    <button
+                      type="button"
+                      className="eq-btn-ghost studio-v2-inline-action"
+                      onClick={() => props.onSelectWarningPiece?.(w.roomId, w.pieceId)}
+                    >
+                      {w.roomName} · {w.pieceName}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      <div className="studio-v2-plan-preview" data-testid="studio-v2-plan-preview">
+        <h3>Plan preview</h3>
+        {planPreviewUrl ? (
+          <iframe
+            title={planPreviewLabel || "Plan preview"}
+            src={planPreviewUrl}
+            className="studio-v2-plan-preview__frame"
+          />
+        ) : (
+          <p className="muted" data-testid="studio-v2-plan-preview-placeholder">
+            Plan preview will be added when V2 intake/attachment links are wired.
+          </p>
+        )}
+      </div>
+    </aside>
+  );
 }
 
 export default function StudioV2ScopeEditor(props: Props) {
@@ -511,8 +727,9 @@ export default function StudioV2ScopeEditor(props: Props) {
     planPreviewLabel = null
   } = props;
 
-  const [edgeTarget, setEdgeTarget] = useState<EdgeModalTarget>(null);
-  const [cutoutsTarget, setCutoutsTarget] = useState<CutoutsTarget>(null);
+  const [edgeTarget, setEdgeTarget] = useState<PieceTarget>(null);
+  const [cutoutsTarget, setCutoutsTarget] = useState<PieceTarget>(null);
+  const [selected, setSelected] = useState<PieceTarget>(null);
 
   const openingSummary = summarizeOpenings(value.rooms);
   const openingsFromPieces = openingSummary.fromPieces;
@@ -524,6 +741,15 @@ export default function StudioV2ScopeEditor(props: Props) {
         outlet: openingSummary.outlet
       }
     : value.openings;
+
+  const checklist = scopeReviewChecklist(value.rooms);
+
+  let selectedPair: { room: StudioV2EditableRoom; piece: StudioV2EditablePiece } | null = null;
+  if (selected) {
+    const room = value.rooms.find((r) => r.id === selected.roomId);
+    const piece = room?.pieces.find((p) => p.id === selected.pieceId);
+    if (room && piece) selectedPair = { room, piece };
+  }
 
   function commitRooms(rooms: StudioV2EditableRoom[]) {
     const summary = summarizeOpenings(rooms);
@@ -575,6 +801,7 @@ export default function StudioV2ScopeEditor(props: Props) {
   }
 
   function removeRoom(roomId: string) {
+    if (selected?.roomId === roomId) setSelected(null);
     commitRooms(value.rooms.filter((r) => r.id !== roomId));
   }
 
@@ -589,6 +816,7 @@ export default function StudioV2ScopeEditor(props: Props) {
   }
 
   function removePiece(roomId: string, pieceId: string) {
+    if (selected?.roomId === roomId && selected?.pieceId === pieceId) setSelected(null);
     commitRooms(
       value.rooms.map((r) =>
         r.id !== roomId ? r : { ...r, pieces: r.pieces.filter((p) => p.id !== pieceId) }
@@ -607,14 +835,16 @@ export default function StudioV2ScopeEditor(props: Props) {
     value.rooms
       .find((r) => r.id === cutoutsTarget.roomId)
       ?.pieces.find((p) => p.id === cutoutsTarget.pieceId);
+
   return (
     <section className="studio-v2-panel studio-v2-scope-editor" data-testid="studio-v2-scope-editor">
       <div className="studio-v2-panel__head">
         <div>
           <h2>Working Draft scope</h2>
           <p className="muted studio-v2-scope-editor__hint">
-            Review each piece: include/exclude, countertop SF, backsplash, finished edges, edge
-            profile, and cutouts. Pricing stays on the server after Calculate.
+            Dense piece review workbench — dimensions, SF, backsplash, edges, and cutouts stay
+            visible. Select a piece for the detail panel. Pricing stays on the server after
+            Calculate.
           </p>
         </div>
         {!readOnly ? (
@@ -651,49 +881,8 @@ export default function StudioV2ScopeEditor(props: Props) {
         </div>
       ) : null}
 
-      <div className="studio-v2-scope-review" data-testid="studio-v2-scope-review">
+      <div className="studio-v2-scope-review studio-v2-scope-review--workbench" data-testid="studio-v2-scope-review">
         <div className="studio-v2-scope-review__main">
-          <div className="studio-v2-openings" data-testid="studio-v2-openings">
-            <h3>Openings summary</h3>
-            <p className="muted studio-v2-scope-editor__hint">
-              {openingsFromPieces
-                ? "Totals from piece cutouts."
-                : "Legacy project totals — prefer Cutouts on each piece."}
-            </p>
-            <div className="studio-v2-openings__grid">
-              {(
-                [
-                  ["kitchenSink", "Kitchen sinks"],
-                  ["vanityBarSink", "Vanity / bar sinks"],
-                  ["cooktop", "Cooktops"],
-                  ["outlet", "Outlets"]
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key}>
-                  <span>{label}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    disabled={readOnly || openingsFromPieces}
-                    value={displayOpenings[key]}
-                    onChange={(e) =>
-                      onChange({
-                        ...value,
-                        openings: {
-                          ...value.openings,
-                          [key]: Math.max(0, Math.floor(numInput(e.target.value)))
-                        },
-                        openingsSource: "estimate"
-                      })
-                    }
-                    data-testid={`studio-v2-opening-${key}`}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-
           <div className="studio-v2-scope-editor__rooms">
             {value.rooms.length === 0 ? (
               <p className="muted" data-testid="studio-v2-scope-empty">
@@ -701,162 +890,241 @@ export default function StudioV2ScopeEditor(props: Props) {
               </p>
             ) : null}
 
-            {value.rooms.map((room) => (
-              <article key={room.id} className="studio-v2-room-card" data-testid="studio-v2-room-card">
-                <div className="studio-v2-room-card__head">
-                  <label>
-                    <span>Room name</span>
-                    <input
-                      type="text"
-                      disabled={readOnly}
-                      value={room.name}
-                      onChange={(e) => updateRoom(room.id, { name: e.target.value })}
-                      data-testid="studio-v2-room-name"
-                    />
-                  </label>
-                  <label>
-                    <span>Room type</span>
-                    <select
-                      disabled={readOnly}
-                      value={room.roomType || "Other"}
-                      onChange={(e) => updateRoom(room.id, { roomType: e.target.value })}
-                      data-testid="studio-v2-room-type"
-                    >
-                      {!STUDIO_V2_ROOM_TYPES.includes(
-                        room.roomType as (typeof STUDIO_V2_ROOM_TYPES)[number]
-                      ) ? (
-                        <option value={room.roomType}>{room.roomType}</option>
-                      ) : null}
-                      {STUDIO_V2_ROOM_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>Room edge LF</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      disabled={readOnly}
-                      value={room.edgeEligibleLinearFeet ?? ""}
-                      onChange={(e) =>
-                        updateRoom(room.id, {
-                          edgeEligibleLinearFeet:
-                            e.target.value.trim() === "" ? null : numInput(e.target.value)
-                        })
-                      }
-                      data-testid="studio-v2-room-edge-lf"
-                    />
-                  </label>
-                  <label>
-                    <span>Backsplash SF</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.1"
-                      disabled={readOnly}
-                      value={room.backsplashSqft ?? ""}
-                      onChange={(e) =>
-                        updateRoom(room.id, {
-                          backsplashSqft:
-                            e.target.value.trim() === "" ? null : numInput(e.target.value)
-                        })
-                      }
-                      data-testid="studio-v2-room-backsplash-sf"
-                    />
-                  </label>
-                  {!readOnly ? (
-                    <button
-                      type="button"
-                      className="eq-btn-secondary"
-                      onClick={() => removeRoom(room.id)}
-                      data-testid="studio-v2-remove-room"
-                    >
-                      Remove room
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="studio-v2-piece-review-list" data-testid="studio-v2-piece-table">
-                  {room.pieces.map((piece) => {
-                    const cutId = `cutouts-${room.id}-${piece.id}`;
-                    const excluded = piece.included === false;
-                    const sf = displayCountertopSf(piece);
-                    const profile = edgeProfileLabel(piece.edgeProfileToken, STUDIO_V2_EDGE_PROFILES);
-                    const splashWarn = backsplashNeedsRunLength(piece);
-                    const edgeSummary = exposedSummaryText(piece);
-                    const splashLf =
-                      piece.backsplashEligibleLengthIn != null &&
-                      Number(piece.backsplashEligibleLengthIn) > 0
-                        ? `${Number(piece.backsplashEligibleLengthIn).toFixed(1)}″ run`
-                        : null;
-                    return (
-                      <div
-                        key={piece.id}
-                        className={`studio-v2-piece-review${excluded ? " is-excluded" : ""}${
-                          readOnly ? " is-readonly" : ""
-                        }`}
-                        data-testid="studio-v2-piece-row"
-                        data-excluded={excluded ? "true" : "false"}
+            {value.rooms.map((room) => {
+              const stats = roomStats(room);
+              return (
+                <article
+                  key={room.id}
+                  className="studio-v2-room-card studio-v2-room-card--compact"
+                  data-testid="studio-v2-room-card"
+                >
+                  <div className="studio-v2-room-card__head">
+                    <label>
+                      <span>Room name</span>
+                      <input
+                        type="text"
+                        disabled={readOnly}
+                        value={room.name}
+                        onChange={(e) => updateRoom(room.id, { name: e.target.value })}
+                        data-testid="studio-v2-room-name"
+                      />
+                    </label>
+                    <label>
+                      <span>Room type</span>
+                      <select
+                        disabled={readOnly}
+                        value={room.roomType || "Other"}
+                        onChange={(e) => updateRoom(room.id, { roomType: e.target.value })}
+                        data-testid="studio-v2-room-type"
                       >
-                        <div className="studio-v2-piece-review__head">
-                          <label className="studio-v2-piece-review__include">
-                            <input
-                              type="checkbox"
-                              disabled={readOnly}
-                              checked={piece.included !== false}
-                              onChange={(e) =>
-                                updatePiece(room.id, piece.id, { included: e.target.checked })
-                              }
-                              data-testid="studio-v2-piece-included"
-                              aria-label={`Include ${piece.name} in quote`}
-                            />
-                            <span>{excluded ? "Excluded from quote" : "Included in quote"}</span>
-                          </label>
-                          <input
-                            type="text"
-                            className="studio-v2-piece-review__name"
-                            disabled={readOnly}
-                            value={piece.name}
-                            onChange={(e) =>
-                              updatePiece(room.id, piece.id, { name: e.target.value })
-                            }
-                            data-testid="studio-v2-piece-label"
-                            aria-label="Piece name"
-                          />
-                          {!readOnly ? (
-                            <button
-                              type="button"
-                              className="eq-btn-ghost"
-                              onClick={() => removePiece(room.id, piece.id)}
-                              data-testid="studio-v2-remove-piece"
-                            >
-                              Remove
-                            </button>
-                          ) : null}
-                        </div>
+                        {!STUDIO_V2_ROOM_TYPES.includes(
+                          room.roomType as (typeof STUDIO_V2_ROOM_TYPES)[number]
+                        ) ? (
+                          <option value={room.roomType}>{room.roomType}</option>
+                        ) : null}
+                        {STUDIO_V2_ROOM_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>Backsplash SF</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        disabled={readOnly}
+                        value={room.backsplashSqft ?? ""}
+                        onChange={(e) =>
+                          updateRoom(room.id, {
+                            backsplashSqft:
+                              e.target.value.trim() === "" ? null : numInput(e.target.value)
+                          })
+                        }
+                        data-testid="studio-v2-room-backsplash-sf"
+                      />
+                    </label>
+                    <div className="studio-v2-room-card__meta" data-testid="studio-v2-room-meta">
+                      <span>
+                        {stats.includedCount} piece{stats.includedCount === 1 ? "" : "s"}
+                      </span>
+                      <span>{stats.geometrySf.toFixed(2)} SF</span>
+                      {stats.splashWarn > 0 ? (
+                        <span className="studio-v2-badge studio-v2-badge--accent">
+                          Splash warn ×{stats.splashWarn}
+                        </span>
+                      ) : null}
+                      {stats.needEdges > 0 ? (
+                        <span className="studio-v2-badge studio-v2-badge--muted">
+                          Edges needed ×{stats.needEdges}
+                        </span>
+                      ) : null}
+                    </div>
+                    {!readOnly ? (
+                      <button
+                        type="button"
+                        className="eq-btn-secondary"
+                        onClick={() => removeRoom(room.id)}
+                        data-testid="studio-v2-remove-room"
+                      >
+                        Remove room
+                      </button>
+                    ) : null}
+                  </div>
 
-                        <dl className="studio-v2-piece-review__summary">
-                          <div>
-                            <dt>Dimensions</dt>
-                            <dd data-testid="studio-v2-piece-dims">{formatDims(piece)}</dd>
-                          </div>
-                          <div>
-                            <dt>Geometry SF</dt>
-                            <dd data-testid="studio-v2-piece-geometry-sf">
-                              {sf.geometrySf != null ? `${sf.geometrySf.toFixed(2)} SF` : "—"}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Countertop SF</dt>
-                            <dd data-testid="studio-v2-piece-sf-mode">
+                  <div
+                    className="studio-v2-piece-workbench"
+                    data-testid="studio-v2-piece-table"
+                    role="table"
+                    aria-label={`Pieces in ${room.name}`}
+                  >
+                    <div className="studio-v2-piece-workbench__header" role="row">
+                      <span>Incl</span>
+                      <span>Piece</span>
+                      <span>L</span>
+                      <span>D</span>
+                      <span>Qty</span>
+                      <span>Geo SF</span>
+                      <span>SF mode</span>
+                      <span>Backsplash</span>
+                      <span>Finished edges</span>
+                      <span>Edge profile</span>
+                      <span>Cutouts</span>
+                      <span className="studio-v2-sr-only">Actions</span>
+                    </div>
+
+                    {room.pieces.map((piece) => {
+                      const cutId = `cutouts-${room.id}-${piece.id}`;
+                      const excluded = piece.included === false;
+                      const sf = displayCountertopSf(piece);
+                      const profile = edgeProfileLabel(
+                        piece.edgeProfileToken,
+                        STUDIO_V2_EDGE_PROFILES
+                      );
+                      const splashWarn = backsplashNeedsRunLength(piece);
+                      const edgeSummary = exposedSummaryText(piece);
+                      const isSelected =
+                        selected?.roomId === room.id && selected?.pieceId === piece.id;
+
+                      return (
+                        <div
+                          key={piece.id}
+                          className={`studio-v2-piece-row${excluded ? " is-excluded" : ""}${
+                            readOnly ? " is-readonly" : ""
+                          }${isSelected ? " is-selected" : ""}`}
+                          data-testid="studio-v2-piece-row"
+                          data-excluded={excluded ? "true" : "false"}
+                          role="row"
+                          onClick={() => setSelected({ roomId: room.id, pieceId: piece.id })}
+                          onFocusCapture={() =>
+                            setSelected({ roomId: room.id, pieceId: piece.id })
+                          }
+                        >
+                          <div className="studio-v2-piece-row__grid">
+                            <label className="studio-v2-piece-row__include">
+                              <input
+                                type="checkbox"
+                                disabled={readOnly}
+                                checked={piece.included !== false}
+                                onChange={(e) =>
+                                  updatePiece(room.id, piece.id, { included: e.target.checked })
+                                }
+                                data-testid="studio-v2-piece-included"
+                                aria-label={`Include ${piece.name} in quote`}
+                              />
+                              <span className="studio-v2-sr-only">
+                                {excluded ? "Excluded from quote" : "Included in quote"}
+                              </span>
+                            </label>
+
+                            <div className="studio-v2-piece-row__name-wrap">
+                              <input
+                                type="text"
+                                className="studio-v2-piece-row__name"
+                                disabled={readOnly}
+                                value={piece.name}
+                                onChange={(e) =>
+                                  updatePiece(room.id, piece.id, { name: e.target.value })
+                                }
+                                data-testid="studio-v2-piece-label"
+                                aria-label="Piece name"
+                              />
                               {excluded ? (
                                 <span className="studio-v2-badge studio-v2-badge--muted">
                                   Excluded from quote
                                 </span>
+                              ) : null}
+                            </div>
+
+                            <label className="studio-v2-piece-row__field">
+                              <span className="studio-v2-piece-row__mobile-label">L</span>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.1"
+                                disabled={readOnly}
+                                value={piece.lengthIn}
+                                onChange={(e) =>
+                                  updatePiece(room.id, piece.id, {
+                                    lengthIn: numInput(e.target.value)
+                                  })
+                                }
+                                data-testid="studio-v2-piece-length"
+                                aria-label={`Length inches for ${piece.name}`}
+                              />
+                            </label>
+
+                            <label className="studio-v2-piece-row__field">
+                              <span className="studio-v2-piece-row__mobile-label">D</span>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.1"
+                                disabled={readOnly}
+                                value={piece.depthIn}
+                                onChange={(e) =>
+                                  updatePiece(room.id, piece.id, {
+                                    depthIn: numInput(e.target.value)
+                                  })
+                                }
+                                data-testid="studio-v2-piece-depth"
+                                aria-label={`Depth inches for ${piece.name}`}
+                              />
+                            </label>
+
+                            <label className="studio-v2-piece-row__field">
+                              <span className="studio-v2-piece-row__mobile-label">Qty</span>
+                              <input
+                                type="number"
+                                min={1}
+                                step={1}
+                                disabled={readOnly}
+                                value={piece.quantity}
+                                onChange={(e) =>
+                                  updatePiece(room.id, piece.id, {
+                                    quantity: Math.max(
+                                      1,
+                                      Math.floor(numInput(e.target.value) || 1)
+                                    )
+                                  })
+                                }
+                                data-testid="studio-v2-piece-quantity"
+                                aria-label={`Quantity for ${piece.name}`}
+                              />
+                            </label>
+
+                            <div
+                              className="studio-v2-piece-row__geo"
+                              data-testid="studio-v2-piece-geometry-sf"
+                            >
+                              {sf.geometrySf != null ? sf.geometrySf.toFixed(2) : "—"}
+                            </div>
+
+                            <div data-testid="studio-v2-piece-sf-mode">
+                              {excluded ? (
+                                <span className="studio-v2-badge studio-v2-badge--muted">Excluded</span>
                               ) : (
                                 <div className="studio-v2-sf-mode">
                                   <select
@@ -902,20 +1170,12 @@ export default function StudioV2ScopeEditor(props: Props) {
                                       data-testid="studio-v2-piece-direct-sf"
                                       aria-label="Direct square footage"
                                     />
-                                  ) : (
-                                    <span className="studio-v2-piece-review__hint">
-                                      {sf.countedSf != null
-                                        ? `${sf.countedSf.toFixed(2)} SF counted`
-                                        : "Enter L × D"}
-                                    </span>
-                                  )}
+                                  ) : null}
                                 </div>
                               )}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Backsplash</dt>
-                            <dd>
+                            </div>
+
+                            <div className="studio-v2-piece-row__splash">
                               <select
                                 disabled={readOnly || excluded}
                                 value={piece.includeBacksplash ? "include" : "none"}
@@ -930,17 +1190,30 @@ export default function StudioV2ScopeEditor(props: Props) {
                                   });
                                 }}
                                 data-testid="studio-v2-piece-backsplash"
+                                aria-label={`Backsplash for ${piece.name}`}
                               >
                                 <option value="none">No backsplash</option>
                                 <option value="include">Include</option>
                               </select>
                               {piece.includeBacksplash ? (
-                                <span
-                                  className="studio-v2-piece-review__hint"
-                                  data-testid="studio-v2-piece-splash-status"
-                                >
-                                  {splashLf || "No run length"}
-                                </span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.1"
+                                  disabled={readOnly || excluded}
+                                  value={piece.backsplashEligibleLengthIn ?? ""}
+                                  onChange={(e) =>
+                                    updatePiece(room.id, piece.id, {
+                                      backsplashEligibleLengthIn:
+                                        e.target.value.trim() === ""
+                                          ? null
+                                          : numInput(e.target.value)
+                                    })
+                                  }
+                                  data-testid="studio-v2-piece-splash-lf"
+                                  aria-label={`Splash run inches for ${piece.name}`}
+                                  placeholder="Run in"
+                                />
                               ) : null}
                               {splashWarn ? (
                                 <p
@@ -954,11 +1227,12 @@ export default function StudioV2ScopeEditor(props: Props) {
                                       <button
                                         type="button"
                                         className="eq-btn-ghost studio-v2-inline-action"
-                                        onClick={() =>
+                                        onClick={(e) => {
+                                          e.stopPropagation();
                                           updatePiece(room.id, piece.id, {
                                             backsplashEligibleLengthIn: piece.lengthIn
-                                          })
-                                        }
+                                          });
+                                        }}
                                         data-testid="studio-v2-use-piece-length"
                                       >
                                         Use piece length
@@ -967,35 +1241,26 @@ export default function StudioV2ScopeEditor(props: Props) {
                                   ) : null}
                                 </p>
                               ) : null}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Finished edges</dt>
-                            <dd>
+                            </div>
+
+                            <div>
                               <button
                                 type="button"
                                 className="eq-btn-secondary studio-v2-edge-trigger"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setCutoutsTarget(null);
+                                  setSelected({ roomId: room.id, pieceId: piece.id });
                                   setEdgeTarget({ roomId: room.id, pieceId: piece.id });
                                 }}
                                 data-testid="studio-v2-set-exposed-sides"
                                 aria-label={`Set exposed sides for ${piece.name}`}
                               >
-                                <span data-testid="studio-v2-exposed-summary">
-                                  {edgeSummary}
-                                </span>
-                                {edgeSummary !== "Set exposed sides" ? (
-                                  <span className="studio-v2-piece-review__action-hint">
-                                    Set exposed sides
-                                  </span>
-                                ) : null}
+                                <span data-testid="studio-v2-exposed-summary">{edgeSummary}</span>
                               </button>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Edge profile</dt>
-                            <dd>
+                            </div>
+
+                            <div className="studio-v2-piece-row__profile">
                               <select
                                 disabled={readOnly || excluded}
                                 value={piece.edgeProfileToken || ""}
@@ -1026,17 +1291,17 @@ export default function StudioV2ScopeEditor(props: Props) {
                                   Upgraded
                                 </span>
                               ) : null}
-                            </dd>
-                          </div>
-                          <div className="studio-v2-cutouts-cell">
-                            <dt>Cutouts</dt>
-                            <dd>
+                            </div>
+
+                            <div className="studio-v2-cutouts-cell">
                               <button
                                 type="button"
                                 className="eq-btn-secondary"
                                 id={cutId}
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setEdgeTarget(null);
+                                  setSelected({ roomId: room.id, pieceId: piece.id });
                                   setCutoutsTarget(
                                     cutoutsTarget?.pieceId === piece.id
                                       ? null
@@ -1049,140 +1314,79 @@ export default function StudioV2ScopeEditor(props: Props) {
                                 <span data-testid="studio-v2-cutouts-summary">
                                   {cutoutsSummary(piece)}
                                 </span>
-                                <span className="studio-v2-piece-review__action-hint">
-                                  Edit cutouts
-                                </span>
                               </button>
                               {cutoutsTarget?.roomId === room.id &&
                               cutoutsTarget?.pieceId === piece.id &&
                               cutoutsPiece ? (
                                 <CutoutsPopover
                                   open
-                                  anchorId={cutId}
                                   piece={cutoutsPiece}
                                   readOnly={readOnly}
                                   onClose={() => setCutoutsTarget(null)}
                                   onChange={(patch) => updatePiece(room.id, piece.id, patch)}
                                 />
                               ) : null}
-                            </dd>
-                          </div>
-                        </dl>
-
-                        <div className="studio-v2-piece-review__advanced">
-                          <details>
-                            <summary data-testid="studio-v2-piece-notes">
-                              Edit dimensions &amp; details
-                            </summary>
-                            <div className="studio-v2-piece-review__dims-grid">
-                              <label>
-                                <span>Length in</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step="0.1"
-                                  disabled={readOnly}
-                                  value={piece.lengthIn}
-                                  onChange={(e) =>
-                                    updatePiece(room.id, piece.id, {
-                                      lengthIn: numInput(e.target.value)
-                                    })
-                                  }
-                                  data-testid="studio-v2-piece-length"
-                                />
-                              </label>
-                              <label>
-                                <span>Depth in</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step="0.1"
-                                  disabled={readOnly}
-                                  value={piece.depthIn}
-                                  onChange={(e) =>
-                                    updatePiece(room.id, piece.id, {
-                                      depthIn: numInput(e.target.value)
-                                    })
-                                  }
-                                  data-testid="studio-v2-piece-depth"
-                                />
-                              </label>
-                              <label>
-                                <span>Qty</span>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  step={1}
-                                  disabled={readOnly}
-                                  value={piece.quantity}
-                                  onChange={(e) =>
-                                    updatePiece(room.id, piece.id, {
-                                      quantity: Math.max(
-                                        1,
-                                        Math.floor(numInput(e.target.value) || 1)
-                                      )
-                                    })
-                                  }
-                                  data-testid="studio-v2-piece-quantity"
-                                />
-                              </label>
-                              <label>
-                                <span>Splash LF</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step="0.1"
-                                  disabled={readOnly || !piece.includeBacksplash}
-                                  value={piece.backsplashEligibleLengthIn ?? ""}
-                                  onChange={(e) =>
-                                    updatePiece(room.id, piece.id, {
-                                      backsplashEligibleLengthIn:
-                                        e.target.value.trim() === ""
-                                          ? null
-                                          : numInput(e.target.value)
-                                    })
-                                  }
-                                  data-testid="studio-v2-piece-splash-lf"
-                                />
-                              </label>
                             </div>
-                            <label className="studio-v2-piece-review__notes">
-                              <span>Notes</span>
-                              <textarea
-                                disabled={readOnly}
-                                value={piece.notes || ""}
-                                onChange={(e) =>
-                                  updatePiece(room.id, piece.id, {
-                                    notes: e.target.value || null
-                                  })
-                                }
-                                rows={2}
-                                data-testid="studio-v2-piece-notes-input"
-                              />
-                            </label>
-                            <p className="muted studio-v2-piece-review__scope-only">
-                              Scope-only / not priced yet: pop-up outlets, side splash, other cutout
-                              notes.
-                            </p>
-                          </details>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
 
-                {!readOnly ? (
-                  <button
-                    type="button"
-                    className="eq-btn-secondary"
-                    onClick={() => addPiece(room.id)}
-                    data-testid="studio-v2-add-piece"
-                  >
-                    Add piece
-                  </button>
-                ) : null}
-              </article>
-            ))}
+                            <div className="studio-v2-piece-row__actions">
+                              <details>
+                                <summary data-testid="studio-v2-piece-notes">Details</summary>
+                                <label className="studio-v2-piece-review__notes">
+                                  <span>Notes</span>
+                                  <textarea
+                                    disabled={readOnly}
+                                    value={piece.notes || ""}
+                                    onChange={(e) =>
+                                      updatePiece(room.id, piece.id, {
+                                        notes: e.target.value || null
+                                      })
+                                    }
+                                    rows={2}
+                                    data-testid="studio-v2-piece-notes-input"
+                                  />
+                                </label>
+                                <p className="muted studio-v2-piece-review__scope-only">
+                                  Scope-only / not priced yet: pop-up outlets, side splash, other
+                                  cutout notes.
+                                </p>
+                              </details>
+                              {!readOnly ? (
+                                <button
+                                  type="button"
+                                  className="eq-btn-ghost"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removePiece(room.id, piece.id);
+                                  }}
+                                  data-testid="studio-v2-remove-piece"
+                                >
+                                  Remove
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                          <span className="studio-v2-sr-only" data-testid="studio-v2-piece-dims">
+                            {formatInches(piece.lengthIn)}" × {formatInches(piece.depthIn)}" ×{" "}
+                            {piece.quantity || 1}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      className="eq-btn-secondary"
+                      onClick={() => addPiece(room.id)}
+                      data-testid="studio-v2-add-piece"
+                    >
+                      Add piece
+                    </button>
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
 
           {!readOnly ? (
@@ -1195,22 +1399,56 @@ export default function StudioV2ScopeEditor(props: Props) {
               Add room
             </button>
           ) : null}
+
+          <details className="studio-v2-legacy-openings" data-testid="studio-v2-openings">
+            <summary>Legacy openings</summary>
+            <p className="muted studio-v2-scope-editor__hint">
+              Legacy openings are kept for older estimates. Prefer piece-level cutouts.
+              {openingsFromPieces ? " Showing totals from piece cutouts." : ""}
+            </p>
+            <div className="studio-v2-openings__grid">
+              {(
+                [
+                  ["kitchenSink", "Kitchen sinks"],
+                  ["vanityBarSink", "Vanity / bar sinks"],
+                  ["cooktop", "Cooktops"],
+                  ["outlet", "Outlets"]
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key}>
+                  <span>{label}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    disabled={readOnly || openingsFromPieces}
+                    value={displayOpenings[key]}
+                    onChange={(e) =>
+                      onChange({
+                        ...value,
+                        openings: {
+                          ...value.openings,
+                          [key]: Math.max(0, Math.floor(numInput(e.target.value)))
+                        },
+                        openingsSource: "estimate"
+                      })
+                    }
+                    data-testid={`studio-v2-opening-${key}`}
+                  />
+                </label>
+              ))}
+            </div>
+          </details>
         </div>
 
-        <aside className="studio-v2-plan-preview" data-testid="studio-v2-plan-preview">
-          <h3>Plan preview</h3>
-          {planPreviewUrl ? (
-            <iframe
-              title={planPreviewLabel || "Plan preview"}
-              src={planPreviewUrl}
-              className="studio-v2-plan-preview__frame"
-            />
-          ) : (
-            <p className="muted" data-testid="studio-v2-plan-preview-placeholder">
-              Plan preview will be added when V2 intake/attachment links are wired.
-            </p>
-          )}
-        </aside>
+        <ScopeWorkbenchPanel
+          checklist={checklist}
+          selected={selectedPair}
+          rooms={value.rooms}
+          planPreviewUrl={planPreviewUrl}
+          planPreviewLabel={planPreviewLabel}
+          onSelectWarningPiece={(roomId, pieceId) => setSelected({ roomId, pieceId })}
+        />
       </div>
 
       {edgeTarget && edgePiece && edgeRoom ? (

@@ -3125,3 +3125,15 @@
 | **Protected** | Pricing math / calculators, V1 workflow, DE, save/approve/publish, V1 workspace imports, schema. |
 | **Revisit trigger** | Product asks for included pieces that never count toward countertop SF; wire plan preview attachments. |
 
+### 221. Elite 100 Studio V2 — Scope Review Layout Refinement (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-scope-layout-refinement` |
+| **Decision** | Frontend-only workbench layout for Studio V2 Scope Review: dense piece rows with L/D/Qty visible by default; sticky right panel for selected-piece details / scope checklist / warnings / plan-preview placeholder; legacy openings collapsed under “Legacy openings”; exposed-sides modal shows actual length/depth inches on labels plus a simple text diagram. No pricing, schema, or V1 workflow changes. |
+| **Why** | Prior polish answered estimator questions but used too much vertical space and left the right rail empty. |
+| **SQL** | None. |
+| **Impacted** | `StudioV2ScopeEditor.tsx`, `studioV2ScopeReviewHelpers.ts`, `styles.css`, `studioV2SliceI.test.mjs`, this doc. |
+| **Protected** | Pricing math / calculators, V1 workflow, DE, save/approve/publish, V1 workspace imports, schema. |
+| **Revisit trigger** | Wire secure plan preview; optional room-level edge LF control if estimators still need it in the compact header. |
+
