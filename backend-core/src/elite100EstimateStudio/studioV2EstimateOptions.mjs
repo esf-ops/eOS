@@ -45,7 +45,8 @@ function parseAmountDollars(raw, field) {
  */
 export function buildStudioV2EditableOptions(estimate) {
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
-  const calc = estimate?.calculation || estimate?.calculationSnapshot || {};
+  // Prefer full snapshot so accountAdjustment.amountExact matches calculate totals.
+  const calc = estimate?.calculationSnapshot || estimate?.calculation || {};
   const totals = calc.totals && typeof calc.totals === "object" ? calc.totals : {};
   const lines = normalizeStudioCommercialLines(scope);
 
@@ -104,12 +105,20 @@ export function buildStudioV2EditableOptions(estimate) {
 
   const adj = normalizeEstimateWideAdjustment(scope.estimateWideAdjustment);
   const accountAdjAmount = Number(totals.accountAdjustment);
+  const amountKnown =
+    totals.accountAdjustment != null && Number.isFinite(accountAdjAmount);
+  const isTrustedAccount =
+    adj.source === "trusted_account_rule" || adj.spahnTrusted === true;
+  // Keep legacy `accountAdjustment` key for API stability, but mark kind so UI
+  // does not label manual estimate-wide adjustments as account rules.
   const accountAdjustment = {
     active: adj.active === true,
     percentage: adj.percentage || 0,
     reason: adj.reason || "",
     source: adj.source || "manual",
-    amountExact: Number.isFinite(accountAdjAmount) ? accountAdjAmount : null,
+    kind: isTrustedAccount ? "account_pricing_rule" : "estimate_wide_adjustment",
+    amountExact: amountKnown ? accountAdjAmount : null,
+    amountKnown,
     readOnly: true,
     available: true
   };

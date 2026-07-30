@@ -3065,3 +3065,15 @@
 | **Protected** | Calculator math, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, DE public/repricing, catalog/vanity/waterfall/revision/sold. |
 | **Revisit trigger** | Per-room material overrides; broader markup UX; customer DE repricing. |
 
+### 216. Elite 100 Studio V2 Slice H QA — pricing status + SF persistence (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-pricing-controls-qa-hardening` |
+| **Decision** | Working Draft `lastCalculation.pricingBreakdown` prefers **`calculationSnapshot`** (full calc including `elite100`) over the staff-safe stripped `calculation` view. Manual estimate-wide adjustments are labeled separately from account pricing rules; `$0.00` is not shown when dollar impact is unknown. UI status: Pricing Unsaved → Clean+Calculation Stale after save → Current after Calculate. Selected basis/group remain visible when calc is stale; rates/SF show “not calculated yet” until backend fields exist. Calculate loading always clears. No calculator/V4 math or DE repricing changes. |
+| **Why** | Production QA: SF/rate flickered to “not available” after Calculate because GET working-draft preferred a stripped calc without `elite100`; Options panel mislabeled manual EWA as Account adjustment with `$0.00`. |
+| **SQL** | None. |
+| **Impacted** | `studioV2WorkingDraft.mjs`, `studioV2EstimateOptions.mjs`, `studioV2Pricing.mjs`, `StudioV2EstimatorShell.tsx`, `StudioV2EstimateOptionsPanel.tsx`, `StudioV2PricingControlsPanel.tsx`, `studioV2SliceH.test.mjs`. |
+| **Protected** | Calculator math, V1 workflow, DE repricing, schema, ensure-editable-draft / refresh-from-takeoff / simplified-publish. |
+| **Revisit trigger** | Include `elite100` summary fields in staff-safe calculation view; richer adjustment dollar display. |
+

@@ -41,7 +41,9 @@ export type StudioV2EditableOptions = {
     percentage?: number;
     reason?: string;
     source?: string;
+    kind?: "account_pricing_rule" | "estimate_wide_adjustment" | string;
     amountExact?: number | null;
+    amountKnown?: boolean;
     readOnly?: boolean;
     available?: boolean;
   };
@@ -620,8 +622,23 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
         )}
       </div>
 
-      <div className="studio-v2-options-section" data-testid="studio-v2-account-adjustment">
-        <h3>Account adjustment</h3>
+      <div
+        className="studio-v2-options-section"
+        data-testid={
+          adj?.active &&
+          (adj.kind === "estimate_wide_adjustment" || adj.source === "manual")
+            ? "studio-v2-estimate-wide-adjustment-summary"
+            : "studio-v2-account-adjustment"
+        }
+      >
+        <h3>
+          {adj?.active &&
+          (adj.kind === "account_pricing_rule" || adj.source === "trusted_account_rule")
+            ? "Account pricing rule"
+            : adj?.active
+              ? "Estimate-wide adjustment"
+              : "Account pricing rule / estimate-wide adjustment"}
+        </h3>
         {adj?.active ? (
           <dl className="studio-v2-dl">
             <div>
@@ -632,19 +649,38 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
               <dt>Reason</dt>
               <dd>{adj.reason || "—"}</dd>
             </div>
-            <div>
-              <dt>Amount</dt>
-              <dd>{money(adj.amountExact)}</dd>
-            </div>
+            {adj.amountKnown === true &&
+            adj.amountExact != null &&
+            !(Number(adj.amountExact) === 0 && Number(adj.percentage) > 0) ? (
+              <div>
+                <dt>Amount</dt>
+                <dd data-testid="studio-v2-adjustment-amount">{money(adj.amountExact)}</dd>
+              </div>
+            ) : adj.active && Number(adj.percentage) > 0 ? (
+              <div>
+                <dt>Amount</dt>
+                <dd data-testid="studio-v2-adjustment-amount">applied in calculation</dd>
+              </div>
+            ) : null}
             <div>
               <dt>Source</dt>
-              <dd>{adj.source || "—"}</dd>
+              <dd>
+                {adj.source === "trusted_account_rule"
+                  ? "Account-derived (read-only)"
+                  : adj.source === "manual"
+                    ? "manual"
+                    : adj.source || "—"}
+              </dd>
             </div>
           </dl>
         ) : (
-          <p className="eq-muted">No account adjustment applied on this estimate.</p>
+          <p className="eq-muted">No account or estimate-wide adjustment applied on this estimate.</p>
         )}
-        <p className="eq-muted">Read-only in Studio V2 (applied by backend account rules).</p>
+        <p className="eq-muted">
+          {adj?.source === "trusted_account_rule"
+            ? "Account-derived rules are read-only in Studio V2."
+            : "Manual estimate-wide adjustments are edited in Pricing Controls. Dollar impact appears after Calculate when the backend returns it."}
+        </p>
       </div>
 
       <div className="studio-v2-options-section" data-testid="studio-v2-waterfall-placeholder">
