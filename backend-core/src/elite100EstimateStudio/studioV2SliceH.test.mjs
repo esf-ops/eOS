@@ -546,4 +546,209 @@ const fakeCalc = {
   console.log("ok: QA hardening frontend status/label/loading contracts");
 }
 
+{
+  // Estimate-wide adjustment must reach the calculator via Studio→Elite100 scope mapping
+  // and change the server total (production bug: adapter dropped estimateWideAdjustment).
+  const {
+    mapStudioScopeToElite100Scope,
+    calculateStudioEstimateV4
+  } = await import("./elite100RoomPricingStudioAdapter.mjs");
+
+  const pricedScope = baseScope({
+    pricingBasis: "wholesale",
+    materialGroup: "Group Promo",
+    edgeLinearFeet: 20,
+    edgeMode: "included",
+    edgeProfileToken: "edge_eased",
+    rooms: [
+      {
+        id: "kitchen",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        included: true,
+        pieces: [
+          {
+            id: "run-1",
+            name: "Main run",
+            pieceType: "counter",
+            included: true,
+            measurementMode: "dimensions",
+            lengthIn: 120,
+            depthIn: 25.5,
+            quantity: 1,
+            sqft: 21.25
+          }
+        ]
+      }
+    ]
+  });
+
+  const mappedWithAdj = mapStudioScopeToElite100Scope({
+    ...pricedScope,
+    estimateWideAdjustment: {
+      active: true,
+      percentage: 10,
+      reason: "s&r",
+      source: "manual"
+    }
+  });
+  assert.equal(mappedWithAdj.scope.estimateWideAdjustment.active, true);
+  assert.equal(mappedWithAdj.scope.estimateWideAdjustment.percentage, 10);
+  assert.equal(mappedWithAdj.scope.estimateWideAdjustment.reason, "s&r");
+  assert.equal(mappedWithAdj.scope.estimateWideAdjustment.source, "manual");
+
+  const baselineV4 = await calculateStudioEstimateV4({ scope: pricedScope, env: {} });
+  const adjustedV4 = await calculateStudioEstimateV4({
+    scope: {
+      ...pricedScope,
+      estimateWideAdjustment: {
+        active: true,
+        percentage: 10,
+        reason: "s&r",
+        source: "manual"
+      }
+    },
+    env: {}
+  });
+  assert.ok(Number(baselineV4.totals.exactTotal) > 0, "baseline total must be positive");
+  assert.ok(
+    Number(adjustedV4.totals.exactTotal) > Number(baselineV4.totals.exactTotal),
+    `10% adjustment must increase exactTotal (baseline=${baselineV4.totals.exactTotal}, adjusted=${adjustedV4.totals.exactTotal})`
+  );
+  assert.ok(
+    Number(adjustedV4.totals.accountAdjustment) > 0,
+    "calculator must return positive accountAdjustment amount"
+  );
+  assert.equal(adjustedV4.totals.estimateWideAdjustment?.percentage, 10);
+  assert.ok(Number(adjustedV4.totals.estimateWideAdjustment?.exactAdjustment) > 0);
+
+  const repo = new InMemoryStudioEstimateRepository();
+  await repo.create({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    createdByUserId: ACTOR,
+    status: STUDIO_ESTIMATE_STATUSES.DRAFT,
+    revision: 1,
+    scope: pricedScope
+  });
+  const v2 = createStudioV2Service({
+    repository: repo,
+    env: {},
+    // Real V4 path — proves Working Draft calculate honors persisted adjustment.
+    studioEstimateService: {
+      async ensureEditableEstimateDraft() {
+        throw new Error("must not call ensureEditableEstimateDraft");
+      },
+      async refreshScopeFromTakeoff() {
+        throw new Error("must not call refreshScopeFromTakeoff");
+      },
+      async updateScope() {
+        throw new Error("must not call updateScope");
+      }
+    }
+  });
+
+  const baseline = await v2.calculateWorkingDraft({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  const baselineTotal = Number(baseline.calculation.total);
+  assert.ok(baselineTotal > 0);
+
+  const patched = await v2.patchWorkingDraftPricing({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    actorUserId: ACTOR,
+    body: {
+      pricing: {
+        estimateWideAdjustment: {
+          active: true,
+          percentage: 10,
+          reason: "s&r",
+          source: "manual"
+        }
+      }
+    }
+  });
+  assert.equal(patched.editablePricing.estimateWideAdjustment.active, true);
+  assert.equal(patched.editablePricing.estimateWideAdjustment.percentage, 10);
+  assert.equal(patched.editablePricing.estimateWideAdjustment.reason, "s&r");
+  const storedAfterPatch = await repo.getById(ORG, patched.estimateId);
+  assert.equal(storedAfterPatch.scope.estimateWideAdjustment.active, true);
+  assert.equal(storedAfterPatch.scope.estimateWideAdjustment.percentage, 10);
+  assert.equal(storedAfterPatch.scope.estimateWideAdjustment.source, "manual");
+
+  const withAdj = await v2.calculateWorkingDraft({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  const adjustedTotal = Number(withAdj.calculation.total);
+  assert.ok(
+    adjustedTotal > baselineTotal,
+    `Working Draft calculate with 10% EWA must raise total (baseline=${baselineTotal}, adjusted=${adjustedTotal})`
+  );
+  assert.ok(
+    Number(withAdj.calculation.pricingBreakdown?.estimateWideAdjustmentAmount) > 0,
+    "pricingBreakdown must surface real adjustment amount (not fake $0.00)"
+  );
+  assert.notEqual(
+    withAdj.calculation.pricingBreakdown?.estimateWideAdjustmentAmount,
+    0
+  );
+
+  const draft = await v2.getWorkingDraft({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    actorUserId: ACTOR
+  });
+  assert.ok(
+    Number(draft.lastCalculation?.pricingBreakdown?.estimateWideAdjustmentAmount) > 0
+  );
+  assert.equal(draft.editableOptions?.accountAdjustment?.kind, "estimate_wide_adjustment");
+  assert.equal(draft.editableOptions?.accountAdjustment?.amountKnown, true);
+  assert.ok(Number(draft.editableOptions?.accountAdjustment?.amountExact) > 0);
+
+  await v2.patchWorkingDraftPricing({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    actorUserId: ACTOR,
+    body: {
+      pricing: {
+        estimateWideAdjustment: {
+          active: false,
+          percentage: 0,
+          reason: "",
+          source: "manual"
+        }
+      }
+    }
+  });
+  const cleared = await v2.calculateWorkingDraft({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    actorUserId: ACTOR,
+    body: {}
+  });
+  assert.equal(
+    Number(cleared.calculation.total),
+    baselineTotal,
+    "removing adjustment must restore baseline total after recalculate"
+  );
+  assert.ok(
+    cleared.calculation.pricingBreakdown?.estimateWideAdjustmentAmount == null ||
+      Number(cleared.calculation.pricingBreakdown.estimateWideAdjustmentAmount) === 0
+  );
+
+  const adapterSrc = readFileSync(join(__dirname, "elite100RoomPricingStudioAdapter.mjs"), "utf8");
+  assert.ok(adapterSrc.includes("estimateWideAdjustment: normalizeEstimateWideAdjustment"));
+  assert.ok(!adapterSrc.includes("ensureEditableEstimateDraft("));
+  console.log(
+    `ok: estimate-wide adjustment wiring (baseline=${baselineTotal}, +10%=${adjustedTotal}, cleared=${cleared.calculation.total})`
+  );
+}
+
 console.log("\nAll Studio V2 Slice H tests passed.\n");

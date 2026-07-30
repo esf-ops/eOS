@@ -400,6 +400,22 @@ function buildStudioV2PricingBreakdown(estimate, calc, scope) {
       uniqueRates.length > 0 ||
       Object.keys(safeCalc.totals || {}).length > 0
   );
+  const totals =
+    safeCalc.totals && typeof safeCalc.totals === "object" ? safeCalc.totals : {};
+  const ewaDetail =
+    totals.estimateWideAdjustment && typeof totals.estimateWideAdjustment === "object"
+      ? totals.estimateWideAdjustment
+      : null;
+  const accountAdjRaw = totals.accountAdjustment;
+  const estimateWideAdjustmentAmount =
+    ewaDetail?.exactAdjustment != null && Number.isFinite(Number(ewaDetail.exactAdjustment))
+      ? Number(ewaDetail.exactAdjustment)
+      : accountAdjRaw != null && Number.isFinite(Number(accountAdjRaw))
+        ? Number(accountAdjRaw)
+        : null;
+  const scopeAdj = scope.estimateWideAdjustment && typeof scope.estimateWideAdjustment === "object"
+    ? scope.estimateWideAdjustment
+    : null;
   return {
     pricingBasis: selectedPricingBasis || str(safeCalc.pricingBasis) || null,
     priceGroup: selectedPriceGroup || calculatedPriceGroup || null,
@@ -428,6 +444,20 @@ function buildStudioV2PricingBreakdown(estimate, calc, scope) {
     hiddenCustomerImpactingAdjustments: hasPersistedCalc
       ? Math.round(hiddenAdj * 100) / 100
       : null,
+    estimateWideAdjustmentAmount:
+      estimateWideAdjustmentAmount != null
+        ? Math.round(estimateWideAdjustmentAmount * 100) / 100
+        : null,
+    estimateWideAdjustmentPercentage:
+      ewaDetail?.percentage != null && Number.isFinite(Number(ewaDetail.percentage))
+        ? Number(ewaDetail.percentage)
+        : scopeAdj?.active
+          ? Number(scopeAdj.percentage) || null
+          : null,
+    estimateWideAdjustmentReason:
+      str(ewaDetail?.reason) || (scopeAdj?.active ? str(scopeAdj.reason) : null) || null,
+    estimateWideAdjustmentSource:
+      str(ewaDetail?.source) || (scopeAdj?.active ? str(scopeAdj.source) : null) || null,
     roomCount: rooms.length || scopeSummaryRooms.length || 0,
     calculatedFieldsAvailable: hasCalculatedFields
   };
