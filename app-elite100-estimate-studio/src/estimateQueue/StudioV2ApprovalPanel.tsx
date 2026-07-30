@@ -1,6 +1,7 @@
 /**
  * Studio V2 Slice E — Working Draft approval into immutable snapshot.
  * Calls POST /api/elite100-studio-v2/.../working-draft/approve only.
+ * Create-revision is a separate confirmed action after approval.
  * Does not import ActiveReviewPublishPanel or EstimateDigitalEstimatePanel.
  * Does not publish.
  */
@@ -22,6 +23,18 @@ export type StudioV2ApprovalReadiness = {
   priced?: boolean;
 };
 
+export type StudioV2RevisionAffordance = {
+  canCreateRevision?: boolean;
+  createRevisionLabel?: string | null;
+  createRevisionHint?: string | null;
+  confirmationLabel?: string | null;
+  currentRevision?: number | null;
+  basedOnEstimateId?: string | null;
+  basedOnRevision?: number | null;
+  priorPublished?: boolean;
+  customerLinkNote?: string | null;
+};
+
 export type StudioV2ApprovedSummary = {
   approved?: boolean;
   estimateId?: string | null;
@@ -30,12 +43,14 @@ export type StudioV2ApprovedSummary = {
   approvedAt?: string | null;
   approvedBy?: string | null;
   customerDisplayTotal?: number | null;
-  revisionEditPlaceholder?: string | null;
+  canCreateRevision?: boolean;
+  revisionAffordance?: StudioV2RevisionAffordance | null;
 };
 
 type Props = {
   readiness: StudioV2ApprovalReadiness | null | undefined;
   approvedSummary: StudioV2ApprovedSummary | null | undefined;
+  revisionAffordance?: StudioV2RevisionAffordance | null | undefined;
   status?: string | null;
   revision?: number | null;
   calcTotal?: number | null;
@@ -45,9 +60,16 @@ type Props = {
   optionsDirty: boolean;
   pricingDirty?: boolean;
   busy: boolean;
+  revisionBusy?: boolean;
   error?: string | null;
   notice?: string | null;
+  revisionError?: string | null;
+  revisionNotice?: string | null;
   onApprove: (args: { confirmed: true; approvalNote?: string }) => void | Promise<void>;
+  onCreateRevision?: (args: {
+    confirmed: true;
+    reason?: string;
+  }) => void | Promise<void>;
 };
 
 function money(n: number | null | undefined): string {
@@ -62,6 +84,7 @@ export default function StudioV2ApprovalPanel(props: Props) {
   const {
     readiness,
     approvedSummary,
+    revisionAffordance: revisionAffordanceProp,
     status,
     revision,
     calcTotal,
@@ -71,16 +94,30 @@ export default function StudioV2ApprovalPanel(props: Props) {
     optionsDirty,
     pricingDirty = false,
     busy,
+    revisionBusy = false,
     error,
     notice,
-    onApprove
+    revisionError,
+    revisionNotice,
+    onApprove,
+    onCreateRevision
   } = props;
 
   const [confirmed, setConfirmed] = useState(false);
   const [approvalNote, setApprovalNote] = useState("");
+  const [revisionConfirmed, setRevisionConfirmed] = useState(false);
+  const [revisionReason, setRevisionReason] = useState("");
 
   const alreadyApproved = Boolean(
     approvedSummary?.approved || String(status || "").toLowerCase() === "approved"
+  );
+
+  const revisionAffordance =
+    revisionAffordanceProp || approvedSummary?.revisionAffordance || null;
+  const canCreateRevision = Boolean(
+    alreadyApproved &&
+      (revisionAffordance?.canCreateRevision || approvedSummary?.canCreateRevision) &&
+      typeof onCreateRevision === "function"
   );
 
   const localBlockers = useMemo(() => {
@@ -162,6 +199,9 @@ export default function StudioV2ApprovalPanel(props: Props) {
                     ? "Approval in progress…"
                     : null;
 
+  const canSubmitRevision =
+    canCreateRevision && revisionConfirmed && !revisionBusy && !busy;
+
   return (
     <section className="studio-v2-panel" data-testid="studio-v2-approval">
       <div className="studio-v2-panel__head">
@@ -233,10 +273,81 @@ export default function StudioV2ApprovalPanel(props: Props) {
           <p className="studio-v2-notice" data-testid="studio-v2-approved-notice">
             This estimate is approved and read-only.
           </p>
-          <p className="eq-muted" data-testid="studio-v2-revision-placeholder">
-            {approvedSummary?.revisionEditPlaceholder ||
-              "Create revision/edit flow will be added in a later slice."}
-          </p>
+
+          {canCreateRevision ? (
+            <div className="studio-v2-revision-create" data-testid="studio-v2-revision-create">
+              <p className="eq-muted" data-testid="studio-v2-revision-hint">
+                {revisionAffordance?.createRevisionHint ||
+                  "This approved estimate is frozen for history. Create a new revision to make changes."}
+              </p>
+
+              {revisionAffordance?.priorPublished || revisionAffordance?.customerLinkNote ? (
+                <p className="eq-muted" data-testid="studio-v2-revision-publish-note">
+                  {revisionAffordance?.customerLinkNote ||
+                    "Customer link remains on the last published revision until this revision is approved and republished."}
+                </p>
+              ) : null}
+
+              <label className="studio-v2-approval-note">
+                <span>Reason for revision (optional)</span>
+                <input
+                  type="text"
+                  value={revisionReason}
+                  disabled={revisionBusy}
+                  onChange={(e) => setRevisionReason(e.target.value)}
+                  maxLength={500}
+                  data-testid="studio-v2-revision-reason"
+                />
+              </label>
+
+              <label
+                className="studio-v2-approval-confirm"
+                data-testid="studio-v2-revision-confirm"
+              >
+                <input
+                  type="checkbox"
+                  checked={revisionConfirmed}
+                  disabled={revisionBusy}
+                  onChange={(e) => setRevisionConfirmed(e.target.checked)}
+                />
+                <span>
+                  {revisionAffordance?.confirmationLabel ||
+                    "I understand this will create a new editable revision and keep the approved version unchanged."}
+                </span>
+              </label>
+
+              <button
+                type="button"
+                className={`eq-btn-primary studio-v2-revision-btn${
+                  canSubmitRevision ? "" : " is-disabled"
+                }`}
+                disabled={!canSubmitRevision}
+                aria-disabled={!canSubmitRevision}
+                title={
+                  !revisionConfirmed
+                    ? "Confirm before creating a revision."
+                    : revisionBusy
+                      ? "Creating revision…"
+                      : "Create editable revision"
+                }
+                onClick={() =>
+                  void onCreateRevision?.({
+                    confirmed: true,
+                    reason: revisionReason.trim() || undefined
+                  })
+                }
+                data-testid="studio-v2-create-revision"
+              >
+                {revisionBusy
+                  ? "Creating revision…"
+                  : revisionAffordance?.createRevisionLabel || "Create editable revision"}
+              </button>
+            </div>
+          ) : (
+            <p className="eq-muted" data-testid="studio-v2-revision-unavailable">
+              Create revision is not available for this estimate.
+            </p>
+          )}
         </>
       ) : (
         <>
@@ -283,6 +394,16 @@ export default function StudioV2ApprovalPanel(props: Props) {
       {notice ? (
         <p className="studio-v2-notice" data-testid="studio-v2-approval-success">
           {notice}
+        </p>
+      ) : null}
+      {revisionError ? (
+        <div className="error-box" data-testid="studio-v2-revision-error" role="alert">
+          {revisionError}
+        </div>
+      ) : null}
+      {revisionNotice ? (
+        <p className="studio-v2-notice" data-testid="studio-v2-revision-success">
+          {revisionNotice}
         </p>
       ) : null}
     </section>

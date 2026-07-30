@@ -3173,3 +3173,15 @@
 | **Protected** | V1 takeoff gate, approve/stale gates, interactive envelope, no simplified-publish / auto-approve / auto-calculate, no silent takeoff re-apply over estimator scope. |
 | **Revisit trigger** | Takeoff History UI (read-only import/reference/comparison); if a future unified publish path needs the same authority flag outside V2. |
 
+### 225. Studio V2 — approved-estimate revision / edit flow (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/studio-v2-approved-estimate-revision-flow` |
+| **Decision** | After approval, Studio V2 estimates stay frozen. Estimators open changes via `POST /api/elite100-studio-v2/cases/:caseId/approved/:estimateId/create-revision` (`confirmed: true`, optional reason). Implementation is **V2-native**: `repository.createSiblingRevisionFrom` copies scope/pricing/options into R+1 `ready_to_price`, clears approval + calculation snapshot, does **not** supersede R1, does **not** call `ensureEditableEstimateDraft` / `openMeasurementRevision` / Takeoff reopen / refresh-from-takeoff / publish / auto-approve / auto-calculate. Active Working Draft becomes the new sibling (highest non-superseded revision). Customer Digital Estimate link stays on the last published revision until R2 is approved and republished. UI replaces the Slice E placeholder with confirmed **Create editable revision**. |
+| **Why** | Approved snapshots must remain immutable history; estimators still need a real post-approval edit path without V1 auto-fork/takeoff side effects. |
+| **SQL** | `backend-core/supabase/eliteos_studio_estimates_sibling_revisions_v1.sql` — **required before production use**: drops `uq_studio_estimates_one_active_per_case` (blocked sibling inserts) and adds non-unique `idx_studio_estimates_active_by_case`. Same sibling contract as FEATURE_DECISIONS §199; in-memory tests never enforced the unique index. |
+| **Impacted** | `studioV2Revision.mjs`, `studioV2Service.mjs`, `studioV2Approval.mjs`, `studioV2Errors.mjs`, `elite100StudioV2Routes.js`, `StudioV2ApprovalPanel.tsx`, `StudioV2EstimatorShell.tsx`, `studioV2RevisionFlow.test.mjs`, sibling-revisions SQL, this doc. |
+| **Protected** | Pricing math / calculators, V1 workflow, DE customer repricing, Product Catalog / Waterfall / Vanity / sold / intake / acceptance, auto-publish / auto-approve / auto-calculate, approved snapshot mutation. |
+| **Revisit trigger** | Apply sibling-revisions SQL to production; optional explicit `parent_estimate_id` column; revision history UI list. |
+

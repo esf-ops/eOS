@@ -29,7 +29,8 @@ import StudioV2PricingControlsPanel, {
 } from "./StudioV2PricingControlsPanel";
 import StudioV2ApprovalPanel, {
   type StudioV2ApprovalReadiness,
-  type StudioV2ApprovedSummary
+  type StudioV2ApprovedSummary,
+  type StudioV2RevisionAffordance
 } from "./StudioV2ApprovalPanel";
 import StudioV2PublishPanel, {
   type StudioV2PublishReadiness,
@@ -180,6 +181,7 @@ type WorkingDraftResponse = {
   lastCalculation?: CalculationResult;
   approvalReadiness?: StudioV2ApprovalReadiness;
   approvedSummary?: StudioV2ApprovedSummary;
+  revisionAffordance?: StudioV2RevisionAffordance;
   publishReadiness?: StudioV2PublishReadiness;
   approvedPublished?: {
     approved?: boolean;
@@ -289,6 +291,8 @@ export default function StudioV2EstimatorShell(props: {
   const [pricingSaveNotice, setPricingSaveNotice] = useState<string | null>(null);
   const [approveError, setApproveError] = useState<string | null>(null);
   const [approveNotice, setApproveNotice] = useState<string | null>(null);
+  const [revisionError, setRevisionError] = useState<string | null>(null);
+  const [revisionNotice, setRevisionNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [calcBusy, setCalcBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
@@ -296,6 +300,7 @@ export default function StudioV2EstimatorShell(props: {
   const [optionsSaveBusy, setOptionsSaveBusy] = useState(false);
   const [pricingSaveBusy, setPricingSaveBusy] = useState(false);
   const [approveBusy, setApproveBusy] = useState(false);
+  const [revisionBusy, setRevisionBusy] = useState(false);
 
   const hydrateFromDraft = useCallback((draftBody: WorkingDraftResponse) => {
     setDraft(draftBody);
@@ -735,6 +740,62 @@ export default function StudioV2EstimatorShell(props: {
       setApproveError(errorMessage(e));
     } finally {
       setApproveBusy(false);
+    }
+  }
+
+  async function runCreateRevision(args: { confirmed: true; reason?: string }) {
+    const estimateId =
+      draft?.estimateId ||
+      draft?.approvedSummary?.estimateId ||
+      draft?.projectHeader?.estimateId;
+    if (!estimateId) {
+      setRevisionError("No approved estimate is available to revise.");
+      return;
+    }
+    if (!args?.confirmed) {
+      setRevisionError("Confirm before creating a revision.");
+      return;
+    }
+    setRevisionBusy(true);
+    setRevisionError(null);
+    setRevisionNotice(null);
+    try {
+      const body = (await apiPost(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/approved/${encodeURIComponent(estimateId)}/create-revision`,
+        authToken,
+        {
+          confirmed: true,
+          reason: args.reason,
+          clientMutationId: `v2-revision-${Date.now()}`
+        }
+      )) as {
+        ok?: boolean;
+        revision?: number | null;
+        revisionSummary?: {
+          message?: string | null;
+          newRevision?: number | null;
+          customerLinkNote?: string | null;
+        };
+      };
+      const rev = body.revisionSummary?.newRevision ?? body.revision;
+      const baseMsg =
+        body.revisionSummary?.message ||
+        (rev != null
+          ? `Revision R${rev} created. Make changes, recalculate, approve, then republish.`
+          : "Editable revision created. Make changes, recalculate, approve, then republish.");
+      const linkNote = body.revisionSummary?.customerLinkNote
+        ? ` ${body.revisionSummary.customerLinkNote}`
+        : "";
+      setRevisionNotice(`${baseMsg}${linkNote}`);
+      setApproveNotice(null);
+      setApproveError(null);
+      setCalcStale(true);
+      setCalcStaleReason("Editable revision opened — recalculate before approving.");
+      await load();
+    } catch (e) {
+      setRevisionError(errorMessage(e));
+    } finally {
+      setRevisionBusy(false);
     }
   }
 
@@ -1228,6 +1289,7 @@ export default function StudioV2EstimatorShell(props: {
           <StudioV2ApprovalPanel
             readiness={draft.approvalReadiness}
             approvedSummary={draft.approvedSummary}
+            revisionAffordance={draft.revisionAffordance || draft.approvedSummary?.revisionAffordance}
             status={draft.status || header?.status}
             revision={draft.revision ?? header?.revision}
             calcTotal={calcResult?.total ?? draft.approvedSummary?.customerDisplayTotal}
@@ -1237,9 +1299,13 @@ export default function StudioV2EstimatorShell(props: {
             optionsDirty={optionsDirty}
             pricingDirty={pricingDirty}
             busy={approveBusy}
+            revisionBusy={revisionBusy}
             error={approveError}
             notice={approveNotice}
+            revisionError={revisionError}
+            revisionNotice={revisionNotice}
             onApprove={(args) => void runApprove(args)}
+            onCreateRevision={(args) => void runCreateRevision(args)}
           />
 
           <StudioV2PublishPanel

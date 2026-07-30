@@ -445,6 +445,34 @@ export function attachElite100StudioV2Routes(app, deps) {
     }
   );
 
+  app.post(
+    "/api/elite100-studio-v2/cases/:caseId/approved/:estimateId/create-revision",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioV2.createRevisionFromApproved({
+          organizationId,
+          intakeCaseId: req.params.caseId,
+          estimateId: req.params.estimateId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        auditStudioV2("approved.create_revision", req, {
+          intakeCaseId: req.params.caseId,
+          estimateId: result.estimateId || null
+        });
+        res.json(result);
+      } catch (e) {
+        logStudioV2("approved create-revision failed", e, req);
+        const { status, body } = studioV2ErrorBody(e, "Unable to create editable revision");
+        res.status(status).json(body);
+      }
+    }
+  );
+
   app.get(
     "/api/elite100-studio-v2/cases/:caseId/customer-activity",
     ...staffStack,
