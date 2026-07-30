@@ -1,11 +1,11 @@
 /**
- * Elite 100 Studio V2 — additive working-draft / calculate / publish / scope / takeoff-import wrappers.
+ * Elite 100 Studio V2 — additive working-draft / calculate / publish / scope / options / takeoff-import wrappers.
  *
  * Hard rules:
  * - Does not create estimates or acquire drafts.
  * - Does not call ensure-editable-draft, open-measurement-revision, or simplified-publish.
  * - Calculate wraps calculateStudioEstimateV4 without refresh-from-takeoff or scope mutation.
- * - Scope PATCH / takeoff apply persist via repository.update only (not V1 updateScope / refresh-from-takeoff).
+ * - Scope / options PATCH / takeoff apply persist via repository.update only (not V1 updateScope / refresh-from-takeoff).
  * - Publish is strict (approved only) via existing digital-estimate publish service.
  */
 
@@ -44,6 +44,10 @@ import {
   mapTakeoffPayloadToStudioV2Scope,
   resolveStudioV2TakeoffImportPayload
 } from "./studioV2TakeoffImport.mjs";
+import {
+  buildStudioV2EditableOptions,
+  normalizeStudioV2OptionsPatch
+} from "./studioV2EstimateOptions.mjs";
 import {
   buildSafeStudioPublicationSummary,
   isCurrentActivePublicationForEstimate,
@@ -289,7 +293,9 @@ export function createStudioV2Service(deps = {}) {
         projectHeader: buildStudioV2ProjectHeader(null),
         scopeSummary: buildStudioV2ScopeSummary(null),
         editableScope: buildStudioV2EditableScope(null),
+        editableOptions: buildStudioV2EditableOptions(null),
         scopeEditable: false,
+        optionsEditable: false,
         scopeEditability: {
           editable: false,
           code: STUDIO_V2_ERROR_CODES.NO_ESTIMATE,
@@ -321,7 +327,9 @@ export function createStudioV2Service(deps = {}) {
         projectHeader: buildStudioV2ProjectHeader(estimate),
         scopeSummary: buildStudioV2ScopeSummary(estimate),
         editableScope: buildStudioV2EditableScope(estimate),
+        editableOptions: buildStudioV2EditableOptions(estimate),
         scopeEditable: false,
+        optionsEditable: false,
         scopeEditability: editability,
         takeoffImportNeeded: needsStudioV2TakeoffImport(row),
         takeoffJobId: row.takeoffJobId || null,
@@ -348,7 +356,9 @@ export function createStudioV2Service(deps = {}) {
       projectHeader: buildStudioV2ProjectHeader(estimateWithPub),
       scopeSummary: buildStudioV2ScopeSummary(estimateWithPub),
       editableScope: buildStudioV2EditableScope(estimateWithPub),
+      editableOptions: buildStudioV2EditableOptions(estimateWithPub),
       scopeEditable: editability.editable,
+      optionsEditable: editability.editable,
       scopeEditability: editability,
       takeoffImportNeeded: needsStudioV2TakeoffImport(row),
       takeoffJobId: row.takeoffJobId || null,
@@ -654,6 +664,122 @@ export function createStudioV2Service(deps = {}) {
   }
 
   /**
+   * PATCH working-draft options — estimator commercial lines only.
+   * Persists scope.customLineItems via repository.update. Never auto-forks /
+   * ensure-editable-draft / refresh-from-takeoff / approve / publish.
+   */
+  async function patchWorkingDraftOptions({
+    organizationId,
+    intakeCaseId,
+    actorUserId,
+    body
+  }) {
+    const row = await loadActiveEstimateOrNull(organizationId, intakeCaseId);
+    if (!row) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_ESTIMATE);
+    }
+    if (isStudioV2OriginUnsupported(row)) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNSUPPORTED_ORIGIN);
+    }
+
+    const editability = assessStudioV2ScopeEditability(row);
+    if (!editability.editable) {
+      const code =
+        editability.code === "approved_snapshot_readonly"
+          ? STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY
+          : editability.code === "superseded_revision"
+            ? STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION
+            : STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED;
+      throw createStudioV2Error(code, {
+        message: editability.message || undefined,
+        details: { estimateId: row.id, status: row.status, revision: row.revision }
+      });
+    }
+
+    const expectedRevision =
+      body?.expectedRevision != null ? Number(body.expectedRevision) : null;
+    if (
+      expectedRevision != null &&
+      Number.isFinite(expectedRevision) &&
+      Number(row.revision) !== expectedRevision
+    ) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION, {
+        message: "This working draft changed. Reload before saving options.",
+        details: {
+          estimateId: row.id,
+          revision: row.revision,
+          expectedRevision
+        }
+      });
+    }
+
+    const optionsPayload =
+      body?.options && typeof body.options === "object"
+        ? body.options
+        : body && typeof body === "object"
+          ? body
+          : {};
+    const normalized = normalizeStudioV2OptionsPatch({
+      existingScope: row.scope && typeof row.scope === "object" ? row.scope : {},
+      options: optionsPayload
+    });
+    if (!normalized.ok) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "Estimate options could not be saved. Check the fields and try again.",
+        details: { issues: normalized.issues },
+        statusCode: 422
+      });
+    }
+
+    const statusBefore = String(row.status || "").toLowerCase();
+    /** @type {Record<string, unknown>} */
+    const patch = {
+      scope: normalized.scope,
+      staleReason: "Estimate options changed — recalculate"
+    };
+    if (statusBefore === STUDIO_ESTIMATE_STATUSES.PRICED) {
+      patch.status = STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE;
+      patch.calculationSnapshot = null;
+    } else if (statusBefore !== STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL) {
+      patch.status = STUDIO_ESTIMATE_STATUSES.DRAFT;
+    }
+
+    const updated = await repository.update(
+      organizationId,
+      row.id,
+      patch,
+      actorUserId || null
+    );
+    const estimate = safeView(updated);
+    const clientMutationId =
+      typeof body?.clientMutationId === "string" ? body.clientMutationId.trim().slice(0, 120) : null;
+
+    return {
+      ok: true,
+      caseId: String(intakeCaseId),
+      estimateId: estimate.id,
+      revision: estimate.revision,
+      status: estimate.status,
+      editableOptions: buildStudioV2EditableOptions(estimate),
+      optionsEditable: true,
+      scopeSummary: buildStudioV2ScopeSummary(estimate),
+      updatedAt: estimate.updatedAt || null,
+      clientMutationId,
+      warnings: normalized.warnings || [],
+      lastCalculation: buildStudioV2CalculationResult(estimate),
+      sideEffects: {
+        ensureEditableDraft: false,
+        refreshFromTakeoff: false,
+        openMeasurementRevision: false,
+        autoFork: false,
+        updateScope: false,
+        approve: false,
+        publish: false
+      }
+    };
+  }
+
+  /**
    * POST calculate — v4 only; no ensure-editable-draft; no refresh-from-takeoff.
    */
   async function calculateWorkingDraft({ organizationId, intakeCaseId, actorUserId }) {
@@ -881,6 +1007,7 @@ export function createStudioV2Service(deps = {}) {
   return {
     getWorkingDraft,
     patchWorkingDraftScope,
+    patchWorkingDraftOptions,
     previewTakeoffImport,
     applyTakeoffImport,
     calculateWorkingDraft,

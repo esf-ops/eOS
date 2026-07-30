@@ -43,11 +43,11 @@ const USER_MESSAGES = Object.freeze({
   [STUDIO_V2_ERROR_CODES.FORBIDDEN]: "You do not have access to this estimate.",
   [STUDIO_V2_ERROR_CODES.UNAVAILABLE]: "Studio V2 is temporarily unavailable.",
   [STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED]:
-    "An editable working draft is required before scope can be saved.",
+    "An editable working draft is required before changes can be saved.",
   [STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY]:
-    "This approved or published estimate is read-only. Scope cannot be changed here.",
+    "This approved or published estimate is read-only. Changes cannot be saved here.",
   [STUDIO_V2_ERROR_CODES.VALIDATION_FAILED]:
-    "Scope changes could not be saved. Check the fields and try again.",
+    "Changes could not be saved. Check the fields and try again.",
   [STUDIO_V2_ERROR_CODES.NO_TAKEOFF_AVAILABLE]:
     "No AI Takeoff is available for this case.",
   [STUDIO_V2_ERROR_CODES.TAKEOFF_NOT_READY]:

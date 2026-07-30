@@ -1,5 +1,5 @@
 /**
- * Elite 100 Studio V2 — estimator command shell (Slice A + Slice B scope editor).
+ * Elite 100 Studio V2 — estimator command shell (Slices A–D).
  *
  * Intentionally does NOT import:
  * - AiEstimatorWorkspace
@@ -17,6 +17,11 @@ import StudioV2ScopeEditor, {
   type StudioV2EditableScope
 } from "./StudioV2ScopeEditor";
 import StudioV2TakeoffImportPanel from "./StudioV2TakeoffImportPanel";
+import StudioV2EstimateOptionsPanel, {
+  cloneEditableOptions,
+  emptyEditableOptions,
+  type StudioV2EditableOptions
+} from "./StudioV2EstimateOptionsPanel";
 
 type ProjectHeader = {
   accountName?: string | null;
@@ -78,7 +83,9 @@ type WorkingDraftResponse = {
   projectHeader?: ProjectHeader;
   scopeSummary?: ScopeSummary;
   editableScope?: StudioV2EditableScope;
+  editableOptions?: StudioV2EditableOptions;
   scopeEditable?: boolean;
+  optionsEditable?: boolean;
   scopeEditability?: { editable?: boolean; code?: string | null; message?: string | null };
   lastCalculation?: CalculationResult;
   approvedPublished?: {
@@ -159,17 +166,23 @@ export default function StudioV2EstimatorShell(props: {
   const [calcResult, setCalcResult] = useState<CalculationResult | null>(null);
   const [scopeDraft, setScopeDraft] = useState<StudioV2EditableScope>(emptyEditableScope());
   const [scopeDirty, setScopeDirty] = useState(false);
+  const [optionsDraft, setOptionsDraft] = useState<StudioV2EditableOptions>(emptyEditableOptions());
+  const [optionsDirty, setOptionsDirty] = useState(false);
   const [calcStale, setCalcStale] = useState(false);
+  const [calcStaleReason, setCalcStaleReason] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishNotice, setPublishNotice] = useState<string | null>(null);
   const [scopeSaveError, setScopeSaveError] = useState<string | null>(null);
   const [scopeSaveNotice, setScopeSaveNotice] = useState<string | null>(null);
+  const [optionsSaveError, setOptionsSaveError] = useState<string | null>(null);
+  const [optionsSaveNotice, setOptionsSaveNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [calcBusy, setCalcBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
   const [scopeSaveBusy, setScopeSaveBusy] = useState(false);
+  const [optionsSaveBusy, setOptionsSaveBusy] = useState(false);
 
   const hydrateFromDraft = useCallback((draftBody: WorkingDraftResponse) => {
     setDraft(draftBody);
@@ -177,12 +190,16 @@ export default function StudioV2EstimatorShell(props: {
     // Never overwrite local editable fields from a calculate-only refresh while dirty.
     setScopeDraft(cloneEditableScope(draftBody?.editableScope));
     setScopeDirty(false);
+    setOptionsDraft(cloneEditableOptions(draftBody?.editableOptions));
+    setOptionsDirty(false);
     setCalcStale(false);
+    setCalcStaleReason(null);
     setScopeSaveError(null);
+    setOptionsSaveError(null);
   }, []);
 
   const load = useCallback(
-    async (opts?: { preserveDirtyScope?: boolean }) => {
+    async (opts?: { preserveDirtyScope?: boolean; preserveDirtyOptions?: boolean }) => {
       setBusy(true);
       setLoadError(null);
       try {
@@ -205,9 +222,19 @@ export default function StudioV2EstimatorShell(props: {
             throw e;
           }) as Promise<CustomerActivityResponse | null>
         ]);
-        if (opts?.preserveDirtyScope && scopeDirty) {
+        const preserveDirty =
+          (opts?.preserveDirtyScope && scopeDirty) || (opts?.preserveDirtyOptions && optionsDirty);
+        if (preserveDirty) {
           setDraft(draftBody);
           setCalcResult(draftBody?.lastCalculation || null);
+          if (!(opts?.preserveDirtyScope && scopeDirty)) {
+            setScopeDraft(cloneEditableScope(draftBody?.editableScope));
+            setScopeDirty(false);
+          }
+          if (!(opts?.preserveDirtyOptions && optionsDirty)) {
+            setOptionsDraft(cloneEditableOptions(draftBody?.editableOptions));
+            setOptionsDirty(false);
+          }
         } else {
           hydrateFromDraft(draftBody);
         }
@@ -220,7 +247,7 @@ export default function StudioV2EstimatorShell(props: {
         setBusy(false);
       }
     },
-    [authToken, caseId, hydrateFromDraft, scopeDirty]
+    [authToken, caseId, hydrateFromDraft, scopeDirty, optionsDirty]
   );
 
   useEffect(() => {
@@ -233,8 +260,18 @@ export default function StudioV2EstimatorShell(props: {
     setScopeDraft(next);
     setScopeDirty(true);
     setCalcStale(true);
+    setCalcStaleReason("Scope changed — recalculate to update total.");
     setScopeSaveNotice(null);
     setScopeSaveError(null);
+  }
+
+  function onOptionsChange(next: StudioV2EditableOptions) {
+    setOptionsDraft(next);
+    setOptionsDirty(true);
+    setCalcStale(true);
+    setCalcStaleReason("Estimate options changed — recalculate to update total.");
+    setOptionsSaveNotice(null);
+    setOptionsSaveError(null);
   }
 
   async function runSaveScope() {
@@ -289,6 +326,7 @@ export default function StudioV2EstimatorShell(props: {
       setScopeDraft(cloneEditableScope(body.editableScope || scopeDraft));
       setScopeDirty(false);
       setCalcStale(true);
+      setCalcStaleReason("Scope changed — recalculate to update total.");
       setCalcResult(body.lastCalculation || { available: false, total: null });
       setScopeSaveNotice("Scope saved. Recalculate to update total.");
     } catch (e) {
@@ -298,9 +336,87 @@ export default function StudioV2EstimatorShell(props: {
     }
   }
 
+  async function runSaveOptions() {
+    if (!(draft?.optionsEditable ?? draft?.scopeEditable)) {
+      setOptionsSaveError(draft?.scopeEditability?.message || "Estimate options are read-only.");
+      return;
+    }
+    setOptionsSaveBusy(true);
+    setOptionsSaveError(null);
+    setOptionsSaveNotice(null);
+    try {
+      const body = (await apiPatch(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft/options`,
+        authToken,
+        {
+          options: {
+            customerLines: optionsDraft.customerLines,
+            discounts: [],
+            internalLines: optionsDraft.internalLines,
+            hiddenCustomerImpactingLines: optionsDraft.hiddenCustomerImpactingLines
+          },
+          clientMutationId: `v2-options-${Date.now()}`,
+          expectedRevision: draft.revision ?? draft.projectHeader?.revision ?? undefined
+        }
+      )) as {
+        ok?: boolean;
+        editableOptions?: StudioV2EditableOptions;
+        lastCalculation?: CalculationResult;
+        revision?: number;
+        status?: string;
+      };
+      setDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              editableOptions: body.editableOptions || prev.editableOptions,
+              lastCalculation: body.lastCalculation || prev.lastCalculation,
+              revision: body.revision ?? prev.revision,
+              status: body.status || prev.status,
+              projectHeader: prev.projectHeader
+                ? {
+                    ...prev.projectHeader,
+                    revision: body.revision ?? prev.projectHeader.revision,
+                    status: body.status || prev.projectHeader.status,
+                    currentTotal: null
+                  }
+                : prev.projectHeader
+            }
+          : prev
+      );
+      setOptionsDraft(cloneEditableOptions(body.editableOptions || optionsDraft));
+      setOptionsDirty(false);
+      setCalcStale(true);
+      setCalcStaleReason("Estimate options changed — recalculate to update total.");
+      setCalcResult(body.lastCalculation || { available: false, total: null });
+      setOptionsSaveNotice("Estimate options changed — recalculate to update total.");
+      // Refresh working-draft metadata without clearing calc-stale / options notice.
+      const draftBody = (await apiGet(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft`,
+        authToken
+      )) as WorkingDraftResponse;
+      setDraft(draftBody);
+      if (!scopeDirty) {
+        setScopeDraft(cloneEditableScope(draftBody.editableScope));
+      }
+      setOptionsDraft(cloneEditableOptions(draftBody.editableOptions || body.editableOptions));
+      setOptionsDirty(false);
+      setCalcStale(true);
+      setCalcStaleReason("Estimate options changed — recalculate to update total.");
+    } catch (e) {
+      setOptionsSaveError(errorMessage(e));
+    } finally {
+      setOptionsSaveBusy(false);
+    }
+  }
+
   async function runCalculate() {
     if (scopeDirty) {
       setCalcError("Save Scope first before calculating.");
+      return;
+    }
+    if (optionsDirty) {
+      setCalcError("Save Options first before calculating.");
       return;
     }
     setCalcBusy(true);
@@ -313,14 +429,21 @@ export default function StudioV2EstimatorShell(props: {
       )) as { calculation?: CalculationResult; ok?: boolean };
       setCalcResult(body.calculation || null);
       setCalcStale(false);
-      // Reload draft metadata without clobbering the editor form from calculate.
+      setCalcStaleReason(null);
+      // Reload draft metadata without clobbering unsaved local option/scope edits.
       const draftBody = (await apiGet(
         `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft`,
         authToken
       )) as WorkingDraftResponse;
       setDraft(draftBody);
       setCalcResult(draftBody.lastCalculation || body.calculation || null);
-      // Keep local form fields — do not rehydrate from calculation response.
+      if (!scopeDirty) {
+        setScopeDraft(cloneEditableScope(draftBody.editableScope));
+      }
+      if (!optionsDirty) {
+        setOptionsDraft(cloneEditableOptions(draftBody.editableOptions));
+      }
+      // Keep local form fields — do not rehydrate from calculation response while dirty.
     } catch (e) {
       setCalcError(errorMessage(e));
     } finally {
@@ -475,6 +598,7 @@ export default function StudioV2EstimatorShell(props: {
               setScopeDraft(cloneEditableScope(result.editableScope));
               setScopeDirty(false);
               setCalcStale(true);
+              setCalcStaleReason("Scope changed — recalculate to update total.");
               setCalcResult(
                 (result.lastCalculation as CalculationResult) || {
                   available: false,
@@ -524,6 +648,23 @@ export default function StudioV2EstimatorShell(props: {
             onSave={() => void runSaveScope()}
           />
 
+          <StudioV2EstimateOptionsPanel
+            value={optionsDraft}
+            readOnly={!(draft.optionsEditable ?? draft.scopeEditable) || draft.code === "unsupported_origin"}
+            readOnlyMessage={
+              draft.scopeEditability?.message ||
+              (draft.code === "unsupported_origin"
+                ? draft.message
+                : "Estimate options cannot be edited on this estimate.")
+            }
+            dirty={optionsDirty}
+            saveBusy={optionsSaveBusy}
+            saveError={optionsSaveError}
+            saveNotice={optionsSaveNotice}
+            onChange={onOptionsChange}
+            onSave={() => void runSaveOptions()}
+          />
+
           <section className="studio-v2-panel" data-testid="studio-v2-calculation">
             <div className="studio-v2-panel__head">
               <h2>Calculation result</h2>
@@ -531,7 +672,12 @@ export default function StudioV2EstimatorShell(props: {
                 type="button"
                 className="eq-btn-primary"
                 disabled={
-                  calcBusy || draft.code === "unsupported_origin" || scopeDirty || scopeSaveBusy
+                  calcBusy ||
+                  draft.code === "unsupported_origin" ||
+                  scopeDirty ||
+                  optionsDirty ||
+                  scopeSaveBusy ||
+                  optionsSaveBusy
                 }
                 onClick={() => void runCalculate()}
                 data-testid="studio-v2-calculate"
@@ -544,9 +690,14 @@ export default function StudioV2EstimatorShell(props: {
                 Save Scope first before calculating.
               </p>
             ) : null}
-            {calcStale && !scopeDirty ? (
+            {optionsDirty ? (
+              <p className="studio-v2-dirty" data-testid="studio-v2-calc-requires-options-save">
+                Save Options first before calculating.
+              </p>
+            ) : null}
+            {calcStale && !scopeDirty && !optionsDirty ? (
               <p className="studio-v2-stale" data-testid="studio-v2-calc-stale">
-                Scope changed — recalculate to update total.
+                {calcStaleReason || "Scope changed — recalculate to update total."}
               </p>
             ) : null}
             {calcError ? (

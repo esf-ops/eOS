@@ -2981,3 +2981,15 @@
 | **Protected** | Calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, Slice A/B contracts. |
 | **Revisit trigger** | Merge-mode import (additive rooms); live Takeoff embed; approval in V2. |
 
+### 209. Elite 100 Studio V2 Slice D — estimate options / commercial foundation (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-estimate-options` |
+| **Decision** | Studio V2 adds estimator-owned **Estimate Options** via `PATCH /api/elite100-studio-v2/cases/:caseId/working-draft/options`. Persists to canonical `scope.customLineItems` using `studioCommercialLines` roles (`customer_charge`, `credit`/`discount`, `internal_only`, `legacy_hidden_customer_charge`). Persistence uses **repository.update** only — never V1 `updateScope`, `ensure-editable-draft`, refresh-from-takeoff, approve, or publish. Account adjustment is **read-only** display. Waterfall / Vanity Program editors are placeholders (“Not yet available in V2”) rather than inventing unsafe controls. Explicit **Save Options**; dirty options block Calculate; calc must not overwrite unsaved option edits. |
+| **Why** | Physical scope (Working Draft), customer configuration (Digital Estimate), and estimator commercial decisions must stay separated without reusing broken V1 commercial orchestration (`CommercialConfigurationSection`). |
+| **SQL** | None. |
+| **Impacted** | `studioV2EstimateOptions.mjs`, `studioV2Service.mjs`, `studioV2Errors.mjs`, `elite100StudioV2Routes.js`, `StudioV2EstimateOptionsPanel.tsx`, `StudioV2EstimatorShell.tsx`, `studioV2SliceD.test.mjs`. |
+| **Protected** | Calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace / `CommercialConfigurationSection`, Slice A–C contracts. |
+| **Revisit trigger** | Safe waterfall/vanity editors; percent-discount UX; account-adjustment write path; approval in V2. |
+
