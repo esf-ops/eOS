@@ -91,6 +91,10 @@ type PricingBreakdown = {
   materialUseTax?: number | null;
   customerFacingAdjustments?: number | null;
   hiddenCustomerImpactingAdjustments?: number | null;
+  estimateWideAdjustmentAmount?: number | null;
+  estimateWideAdjustmentPercentage?: number | null;
+  estimateWideAdjustmentReason?: string | null;
+  estimateWideAdjustmentSource?: string | null;
   roomCount?: number | null;
   calculatedFieldsAvailable?: boolean;
 };
@@ -1153,6 +1157,30 @@ export default function StudioV2EstimatorShell(props: {
                 <dt>Material use tax</dt>
                 <dd data-testid="studio-v2-calc-material-use-tax">
                   {displayCalculatedMetric(pb?.materialUseTax, (n) => money(n))}
+                </dd>
+              </div>
+              <div>
+                <dt>Estimate-wide adjustment</dt>
+                <dd data-testid="studio-v2-calc-ewa">
+                  {pb?.estimateWideAdjustmentAmount != null &&
+                  Number.isFinite(Number(pb.estimateWideAdjustmentAmount)) &&
+                  !(
+                    Number(pb.estimateWideAdjustmentAmount) === 0 &&
+                    Number(pb.estimateWideAdjustmentPercentage) > 0
+                  )
+                    ? `${money(pb.estimateWideAdjustmentAmount)}${
+                        pb.estimateWideAdjustmentPercentage != null
+                          ? ` (${pb.estimateWideAdjustmentPercentage}%)`
+                          : ""
+                      }${
+                        pb.estimateWideAdjustmentReason
+                          ? ` · ${pb.estimateWideAdjustmentReason}`
+                          : ""
+                      }`
+                    : pb?.estimateWideAdjustmentPercentage != null &&
+                        Number(pb.estimateWideAdjustmentPercentage) > 0
+                      ? `applied in calculation (${pb.estimateWideAdjustmentPercentage}%)`
+                      : "none"}
                 </dd>
               </div>
               <div>

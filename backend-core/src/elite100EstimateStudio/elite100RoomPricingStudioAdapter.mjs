@@ -65,6 +65,7 @@ import {
 import { resolveRoomMaterialGroup } from "./studioMaterialInheritance.mjs";
 import { resolveScopeEdgeLinearFeet } from "./studioScopeBilling.mjs";
 import { normalizeStudioCommercialLines } from "./studioCommercialLines.mjs";
+import { normalizeEstimateWideAdjustment } from "./studioEstimateWideAdjustment.mjs";
 import { scopeFingerprint } from "./studioEstimatePricing.mjs";
 
 function isBacksplashPieceType(pieceType) {
@@ -241,6 +242,9 @@ export function mapStudioScopeToElite100Scope(scope, opts = {}) {
       accountId: src.accountDirectoryAccountId || null,
       partnerAccountId: src.partnerAccountId || null,
       pricingBasis: src.pricingBasis === "wholesale" ? "wholesale" : "direct_retail",
+      // Estimator-owned commercial adjustment — calculator already honors this field.
+      // Must be forwarded; dropping it silently zeroes accountAdjustment on every V4 calc.
+      estimateWideAdjustment: normalizeEstimateWideAdjustment(src.estimateWideAdjustment),
       rooms,
       customLines
     },
@@ -679,7 +683,9 @@ export async function calculateStudioEstimateV4(params = {}) {
       customerDisplayTotal: result.totals?.displayTotal,
       exactTotal: result.totals?.exactTotal,
       roomTotalsSum: result.totals?.roomTotalsSum,
-      accountAdjustment: result.totals?.accountAdjustment
+      accountAdjustment: result.totals?.accountAdjustment,
+      // Safe estimator-facing detail already produced by the calculator (no new math).
+      estimateWideAdjustment: result.totals?.estimateWideAdjustment || null
     },
     warnings: result.warnings || [],
     unresolvedItems: result.unresolved || [],

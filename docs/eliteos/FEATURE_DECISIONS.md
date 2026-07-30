@@ -3077,3 +3077,15 @@
 | **Protected** | Calculator math, V1 workflow, DE repricing, schema, ensure-editable-draft / refresh-from-takeoff / simplified-publish. |
 | **Revisit trigger** | Include `elite100` summary fields in staff-safe calculation view; richer adjustment dollar display. |
 
+### 217. Elite 100 Studio V2 — estimate-wide adjustment calculator wiring (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-estimate-wide-adjustment-wiring` |
+| **Decision** | `mapStudioScopeToElite100Scope` now forwards `scope.estimateWideAdjustment` (normalized) into the Elite 100 calculator input. The calculator already applied estimate-wide % via `resolveEffectiveEstimateWideAdjustment`; the Studio→V4 adapter had been dropping the field, so saved V2 adjustments never changed totals. `calculateStudioEstimateV4` also passes through `totals.estimateWideAdjustment` for estimator-safe display. No calculator math changes. |
+| **Why** | Production: Retail/Promo ~$10,860 and Wholesale/Promo ~$6,980 unchanged at 0%/3%/10% EWA — adjustment saved/displayed but not honored on Calculate. |
+| **SQL** | None. |
+| **Impacted** | `elite100RoomPricingStudioAdapter.mjs`, `studioV2WorkingDraft.mjs`, `studioV2EstimateOptions.mjs`, `StudioV2EstimatorShell.tsx`, `studioV2SliceH.test.mjs`. |
+| **Protected** | `elite100RoomPricingCalculator` math, V1 workflow UX, DE repricing, schema, forbidden orchestration calls. |
+| **Revisit trigger** | Per-line distributed adjustment preview in V2; customer-facing DE adjustment labels. |
+

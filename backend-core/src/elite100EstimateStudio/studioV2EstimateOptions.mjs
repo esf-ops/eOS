@@ -104,9 +104,17 @@ export function buildStudioV2EditableOptions(estimate) {
   }
 
   const adj = normalizeEstimateWideAdjustment(scope.estimateWideAdjustment);
-  const accountAdjAmount = Number(totals.accountAdjustment);
+  const ewaDetail =
+    totals.estimateWideAdjustment && typeof totals.estimateWideAdjustment === "object"
+      ? totals.estimateWideAdjustment
+      : null;
+  const accountAdjAmount =
+    ewaDetail?.exactAdjustment != null && Number.isFinite(Number(ewaDetail.exactAdjustment))
+      ? Number(ewaDetail.exactAdjustment)
+      : Number(totals.accountAdjustment);
   const amountKnown =
-    totals.accountAdjustment != null && Number.isFinite(accountAdjAmount);
+    (ewaDetail?.exactAdjustment != null && Number.isFinite(Number(ewaDetail.exactAdjustment))) ||
+    (totals.accountAdjustment != null && Number.isFinite(Number(totals.accountAdjustment)));
   const isTrustedAccount =
     adj.source === "trusted_account_rule" || adj.spahnTrusted === true;
   // Keep legacy `accountAdjustment` key for API stability, but mark kind so UI
