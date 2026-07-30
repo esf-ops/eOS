@@ -14,7 +14,10 @@ console.log("\naiTakeoffApprovalHandoff.ui.test.mjs\n");
 
 {
   assert.ok(panel.includes('data-testid="eq-takeoff-iframe"'));
-  assert.ok(panel.includes('data-testid="eq-takeoff-handoff-overlay"'));
+  // The handoff overlay obscured a populated Takeoff during ordinary calculation.
+  // It is replaced by a small inline status above the frame.
+  assert.equal(panel.includes("eq-takeoff-handoff-overlay"), false, "no obscuring overlay");
+  assert.ok(panel.includes('data-testid="eq-takeoff-inline-status"'));
   assert.ok(panel.includes("Measurements approved. Building verified estimate"));
   assert.ok(panel.includes('data-testid="eq-ai-retry-handoff"'));
   assert.ok(
@@ -28,7 +31,7 @@ console.log("\naiTakeoffApprovalHandoff.ui.test.mjs\n");
   const takeoffSurface = panel.slice(surfaceStart, surfaceEnd > 0 ? surfaceEnd : surfaceStart + 3500);
   assert.ok(takeoffSurface.includes('data-testid="eq-takeoff-iframe"'));
   assert.ok(takeoffSurface.includes("eq-ai-retry-handoff"));
-  assert.ok(takeoffSurface.includes("eq-takeoff-handoff-overlay"));
+  assert.ok(takeoffSurface.includes("eq-takeoff-inline-status"));
   assert.equal(
     takeoffSurface.includes("VerifiedEstimateSection"),
     false,

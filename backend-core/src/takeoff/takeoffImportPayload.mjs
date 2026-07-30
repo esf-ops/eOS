@@ -49,6 +49,53 @@ function resolvePieceType(run) {
   return "counter";
 }
 
+/**
+ * Island waterfall panels as structured physical facts.
+ * Accepts the explicit panel list and the legacy per-side height map. Panel
+ * depth is inherited from the island piece and never re-entered downstream.
+ *
+ * @param {object} run
+ * @returns {Array<{id:string,side:string,panelWidthIn:number,panelHeightIn:number,quantity:number,included:boolean}>|undefined}
+ */
+function normalizeRunWaterfallPanels(run) {
+  const out = [];
+  const depth = Number(run?.depthIn) || 0;
+  const panels = Array.isArray(run?.waterfallPanels) ? run.waterfallPanels : [];
+  for (const p of panels) {
+    const side = String(p?.side || "").toLowerCase();
+    if (!side) continue;
+    const height = Number(p?.panelHeightIn) || 0;
+    if (!(height > 0)) continue;
+    out.push({
+      id: String(p?.id || `${run?.id || "piece"}-${side}`),
+      side,
+      panelWidthIn: Number(p?.panelWidthIn) || depth || 0,
+      panelHeightIn: height,
+      quantity: Math.max(1, Number(p?.quantity) || 1),
+      included: p?.included !== false
+    });
+  }
+  if (out.length) return out;
+  const legacy =
+    run?.waterfallSegmentLengthsIn && typeof run.waterfallSegmentLengthsIn === "object"
+      ? run.waterfallSegmentLengthsIn
+      : null;
+  if (!legacy) return undefined;
+  for (const [side, height] of Object.entries(legacy)) {
+    const h = Number(height) || 0;
+    if (!(h > 0)) continue;
+    out.push({
+      id: `${run?.id || "piece"}-${String(side).toLowerCase()}`,
+      side: String(side).toLowerCase(),
+      panelWidthIn: depth || 0,
+      panelHeightIn: h,
+      quantity: 1,
+      included: true
+    });
+  }
+  return out.length ? out : undefined;
+}
+
 function backsplashMetaForRun(run, area) {
   const pt = resolvePieceType(run);
   const { eligible } = resolveRunBacksplashEligible(run, area);
@@ -312,6 +359,9 @@ export function buildTakeoffImportPayload(params) {
           finishedEdge: run.finishedEdge || null,
           backsplashGeometry: run.backsplashGeometry || null,
           waterfall: isWaterfall || undefined,
+          // Island waterfall panels are physical Takeoff facts attached to the
+          // island piece. Without them the panel never reaches pricing.
+          waterfallPanels: normalizeRunWaterfallPanels(run),
           backsplash: backsplashMetaForRun(run, area),
           areaType: area.areaType || null
         };

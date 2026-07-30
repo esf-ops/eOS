@@ -268,6 +268,24 @@ const RETIRED_ADDON_KEYS = Object.freeze([...RETIRED_KITCHEN_ADDON_KEYS, ...RETI
  *   vanityProgramSelections?: Record<string, { remnantQualifies?: boolean, sinkType?: string, additionalTrips?: number }>
  * }} [opts]
  */
+/**
+ * The estimator's governed Vanity Program election, read from Scope.
+ * Returns null (standard pricing) unless the program was explicitly added.
+ * @param {object} scope
+ * @param {string} roomId
+ */
+export function scopeVanityProgramElection(scope, roomId) {
+  const cfg = scope?.roomConfigurations?.[String(roomId)]?.vanityProgram;
+  if (!cfg || typeof cfg !== "object") return null;
+  if (cfg.useStandardPricing === true) return null;
+  if (cfg.applyProgram !== true) return null;
+  return {
+    remnantQualifies: cfg.remnantQualifies === true,
+    sinkType: cfg.sinkType || undefined,
+    additionalTrips: 0
+  };
+}
+
 export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
   const src = scope || {};
   const rooms = includedRooms(src);
@@ -292,7 +310,12 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
       cfg.backsplash = { selected: true, heightIn };
     }
     if (isVanityRoomType(room.roomType)) {
-      const election = opts.vanityProgramSelections?.[roomId];
+      // The estimator's single add/remove decision lives in Scope
+      // (`roomConfigurations[roomId].vanityProgram.applyProgram`). An explicit
+      // opts election still wins for callers that pass one. With neither, the
+      // room keeps standard pricing exactly as before.
+      const election =
+        opts.vanityProgramSelections?.[roomId] || scopeVanityProgramElection(src, roomId);
       cfg.vanityProgram = election
         ? { remnantQualifies: Boolean(election.remnantQualifies), sinkType: election.sinkType, additionalTrips: election.additionalTrips }
         : { useStandardPricing: true };

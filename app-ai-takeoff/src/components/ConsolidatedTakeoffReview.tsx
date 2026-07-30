@@ -841,6 +841,22 @@ export default function ConsolidatedTakeoffReview() {
       }
       setSaveStatus("saved");
       window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1200);
+      // Physical Takeoff facts changed. Studio projects draft Scope and
+      // recalculates once from this signal — commercial edits never do.
+      const savedSummary = summarizeTakeoffDraftForReady(adopted.draft);
+      postTakeoffParentMessage(
+        TAKEOFF_REVIEW_DRAFT_SAVED,
+        {
+          revisionNumber:
+            Number(new URLSearchParams(window.location.search).get("revisionNumber")) || 1,
+          mode: "editable",
+          roomCount: savedSummary.roomCount,
+          pieceCount: savedSummary.pieceCount,
+          savedState: "saved",
+          waterfalls: savedSummary.waterfalls
+        },
+        { takeoffJobId }
+      );
     } catch (e) {
       if (e instanceof LabApiError && e.status === 409) {
         // Keep local draft + current baseResultId. Review latest draft reloads

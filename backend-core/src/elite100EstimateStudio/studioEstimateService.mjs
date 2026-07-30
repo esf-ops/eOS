@@ -98,6 +98,28 @@ function pricingScopeFingerprint(scope) {
   return scopeFingerprint(copy);
 }
 
+/**
+ * Merge a partial per-room configuration map into the stored one.
+ * Each room's config is merged one level deep so a Vanity election cannot drop
+ * that room's waterfall commercial settings (and vice versa).
+ *
+ * @param {Record<string, any>|null|undefined} current
+ * @param {Record<string, any>} patch
+ */
+function mergeRoomConfigurations(current, patch) {
+  const base = current && typeof current === "object" ? { ...current } : {};
+  for (const [roomId, value] of Object.entries(patch)) {
+    if (!roomId) continue;
+    if (value == null) {
+      delete base[roomId];
+      continue;
+    }
+    const prior = base[roomId] && typeof base[roomId] === "object" ? base[roomId] : {};
+    base[roomId] = typeof value === "object" ? { ...prior, ...value } : value;
+  }
+  return base;
+}
+
 function rejectCallerAuthority(body) {
   if (!body || typeof body !== "object") return;
   const forbidden = [
@@ -304,6 +326,18 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
           ...(meta?.frontExposed != null ? { frontExposed: meta.frontExposed === true } : {}),
           ...(meta?.backExposed != null ? { backExposed: meta.backExposed === true } : {}),
           ...(meta?.areaType ? { areaType: meta.areaType } : {}),
+          // Island waterfall geometry. The calculator resolves panel width from
+          // this map, so it must survive every Takeoff refresh.
+          ...(Array.isArray(meta?.waterfallPanels) && meta.waterfallPanels.length
+            ? {
+                waterfallPanels: meta.waterfallPanels,
+                waterfallSegmentLengthsIn: Object.fromEntries(
+                  meta.waterfallPanels
+                    .filter((p) => p && p.included !== false)
+                    .map((p) => [String(p.side), Number(p.panelHeightIn) || 0])
+                )
+              }
+            : {}),
           notes: ""
         });
       }
@@ -357,16 +391,71 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
     addOns[key] = Number(derivedAddOns[key] ?? 0) || 0;
   }
 
+  const nextRooms = rooms.length ? rooms : baseScope?.rooms || [];
+
   return {
     ...emptyStudioEstimateScope(),
     ...(baseScope || {}),
     // New empty scope is Wholesale; preserved baseScope.pricingBasis wins when provided.
-    rooms: rooms.length ? rooms : baseScope?.rooms || [],
+    rooms: nextRooms,
     addOns,
+    roomConfigurations: syncWaterfallSelectionsFromScopeRooms(
+      baseScope?.roomConfigurations,
+      nextRooms
+    ),
     physicalScopeSource: "takeoff",
     takeoffScopeSummary: scopeSummary,
     edgeEligibleLinearFeet: Number(scopeSummary?.edgeEligibleLinearFeet) || 0
   };
+}
+
+/**
+ * Keep one waterfall selection object per Takeoff panel.
+ *
+ * Physical facts (piece, side, height, quantity) follow Takeoff. Estimator
+ * commercial settings (miter key, backside polish, customer-optional, note) are
+ * preserved by waterfall id, and selections whose panel was deleted in Takeoff
+ * are dropped so nothing prices a panel that no longer exists.
+ *
+ * @param {Record<string, any>|null|undefined} roomConfigurations
+ * @param {Array<object>} rooms studio scope rooms
+ */
+export function syncWaterfallSelectionsFromScopeRooms(roomConfigurations, rooms) {
+  const base =
+    roomConfigurations && typeof roomConfigurations === "object" ? { ...roomConfigurations } : {};
+  for (const room of Array.isArray(rooms) ? rooms : []) {
+    const roomId = String(room?.id || "");
+    if (!roomId) continue;
+    const selections = [];
+    for (const piece of Array.isArray(room?.pieces) ? room.pieces : []) {
+      const panels = Array.isArray(piece?.waterfallPanels) ? piece.waterfallPanels : [];
+      for (const panel of panels) {
+        if (!panel || panel.included === false) continue;
+        const id = String(panel.id || `${piece.id}-${panel.side}`);
+        const prior = (
+          Array.isArray(base[roomId]?.waterfalls) ? base[roomId].waterfalls : []
+        ).find((w) => String(w?.id) === id);
+        selections.push({
+          ...(prior || {}),
+          id,
+          targetPieceId: String(piece.id),
+          side: String(panel.side),
+          legHeightIn: Number(panel.panelHeightIn) || 0,
+          quantity: Math.max(1, Number(panel.quantity) || 1)
+        });
+      }
+    }
+    const priorCfg = base[roomId] && typeof base[roomId] === "object" ? base[roomId] : null;
+    if (!selections.length) {
+      if (priorCfg && "waterfalls" in priorCfg) {
+        const { waterfalls: _dropped, ...rest } = priorCfg;
+        base[roomId] = rest;
+      }
+      continue;
+    }
+    base[roomId] = { ...(priorCfg || {}), waterfalls: selections };
+  }
+  return base;
 }
 
 function round2(n) {
@@ -1136,7 +1225,10 @@ export function createStudioEstimateService(deps = {}) {
     return { preview, estimate: safeEstimateView(updated) };
   }
 
-  return {
+  /** In-process coalescing for editable-draft acquisition (see below). */
+  const ensureDraftInFlight = new Map();
+
+  const service = {
     repositoryMode,
     repository,
     safeEstimateView,
@@ -1278,6 +1370,15 @@ export function createStudioEstimateService(deps = {}) {
 
       const wasManual = isManualStaffEstimate(row);
       let nextScope = { ...row.scope, ...clean };
+      // roomConfigurations is a per-room map. A caller editing one room's Vanity
+      // election or waterfall commercial settings sends only that room, so a
+      // top-level replace would silently drop every other room's configuration.
+      if (clean.roomConfigurations && typeof clean.roomConfigurations === "object") {
+        nextScope.roomConfigurations = mergeRoomConfigurations(
+          row.scope?.roomConfigurations,
+          clean.roomConfigurations
+        );
+      }
       if (wasManual) {
         nextScope.estimateOrigin = MANUAL_ESTIMATE_ORIGIN;
         nextScope.physicalScopeSource = MANUAL_ESTIMATE_ORIGIN;
@@ -1761,7 +1862,24 @@ export function createStudioEstimateService(deps = {}) {
      * Takeoff reopen is best-effort — draft creation must not fail into an
      * empty Takeoff / locked estimator state.
      */
-    async ensureEditableEstimateDraft({
+    async ensureEditableEstimateDraft(args) {
+      // Concurrent callers for the same source revision share one in-flight
+      // acquisition, so a burst of first edits can never create sibling drafts.
+      const key = `${args?.organizationId || ""}:${String(
+        args?.basedOnRevisionId || args?.estimateId || ""
+      ).trim()}`;
+      const pending = ensureDraftInFlight.get(key);
+      if (pending) return pending;
+      const attempt = service
+        .ensureEditableEstimateDraftUncoalesced(args)
+        .finally(() => {
+          ensureDraftInFlight.delete(key);
+        });
+      ensureDraftInFlight.set(key, attempt);
+      return attempt;
+    },
+
+    async ensureEditableEstimateDraftUncoalesced({
       organizationId,
       estimateId,
       basedOnRevisionId = null,
@@ -1980,6 +2098,8 @@ export function createStudioEstimateService(deps = {}) {
       return { superseded };
     }
   };
+
+  return service;
 }
 
 export function hashTakeoffApprovalToken(resultId, approvedAt) {

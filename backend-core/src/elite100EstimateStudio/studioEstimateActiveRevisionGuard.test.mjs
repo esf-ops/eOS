@@ -156,16 +156,6 @@ console.log("\nstudioEstimateActiveRevisionGuard.test.mjs\n");
         })
     ],
     [
-      "pricing",
-      () =>
-        studio.updateScope({
-          organizationId: ORG,
-          estimateId: est1,
-          actorUserId: ACTOR,
-          body: { scope: { materialSku: "HACK" } }
-        })
-    ],
-    [
       "calculate",
       () => studio.calculate({ organizationId: ORG, estimateId: est1, actorUserId: ACTOR, body: {} })
     ],
@@ -203,10 +193,24 @@ console.log("\nstudioEstimateActiveRevisionGuard.test.mjs\n");
     assert.ok(threw, `${label} must throw`);
   }
 
+  // updateScope on a frozen/superseded revision does not throw: the estimator
+  // keeps typing and the write transparently lands on a new editable draft.
+  // The frozen row itself must still be untouched (persistent workspace, §5).
+  const forked = await studio.updateScope({
+    organizationId: ORG,
+    estimateId: est1,
+    actorUserId: ACTOR,
+    body: { scope: { materialSku: "HACK" } }
+  });
+  assert.notEqual(forked.id, est1, "frozen revision is never the write target");
+  assert.equal(forked.id, rev2.id, "acquisition reuses the existing editable sibling draft");
+  assert.equal(forked.scope.materialSku, "HACK", "the edit lands on the editable draft");
+
   const after = await estimates.getById(ORG, est1);
   assert.deepEqual(after.scope, scopeBefore, "superseded row unchanged");
   const active = await estimates.getById(ORG, rev2.id);
-  assert.notEqual(active.scope.materialSku, "HACK");
+  assert.equal(active.scope.materialSku, "HACK", "active revision received the edit");
+  // project-details still 409s on a superseded row — no auto-fork there.
   assert.notEqual(active.scope.projectName, "Should Not Apply");
 
   // Active revision still mutable

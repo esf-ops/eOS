@@ -1,8 +1,14 @@
 /**
- * AiEstimatorWorkspace — single active AI-assisted estimator experience.
+ * AiEstimatorWorkspace — one continuous Elite 100 estimating workspace.
  *
- * PersistentTakeoffSection (Takeoff iframe) stays mounted for every stage.
- * Stage cards (approved / published) render below; mode switches editable ↔ readonly.
+ * The section order is fixed: header, AI Takeoff Review, Live Estimate,
+ * Estimate Options, Digital Estimate, Revision History. Nothing is hidden or
+ * replaced by stage, and the component tree stays stable across save,
+ * calculate, approve, and publish.
+ *
+ * Local edits live in one buffer owned by the Estimate Options section. This
+ * component owns exactly one coalescing save queue (persist → calculate) and
+ * writes only authoritative server read models back into display state.
  *
  * Does not mount ManualPhysicalScopeEditor, EstimateScopePanel, tabs,
  * EstimateWorkflowHeader, EstimateDigitalEstimatePanel, or Customer Choices.
@@ -18,10 +24,27 @@ import {
   transientFailureMessage
 } from "../lib/api";
 import {
+  createWorkspaceSaveQueue,
+  isFreshCalculationResponse
+} from "../lib/workspaceSaveQueue.mjs";
+
+type WorkspaceSaveState =
+  | "Saved"
+  | "Unsaved changes"
+  | "Saving…"
+  | "Updating estimate…"
+  | "Save failed";
+import { writeAdditionalLines } from "./estimateRecord/additionalLinesBoundary.mjs";
+import {
   aiTakeoffHeadUrl,
   isAllowedTakeoffMessageOrigin,
   isValidTakeoffApprovedMessage
 } from "./takeoffPostMessageOrigins.mjs";
+import { buildEstimateWorkspaceHeader } from "./estimateRecord/estimateWorkspaceHeader.mjs";
+import {
+  decideBufferHydration,
+  structuralScopeSignature
+} from "./estimateRecord/workspaceHydration.mjs";
 import {
   buildApprovalSummaryFromEstimate,
   estimateHasMeasuredScope
@@ -53,8 +76,14 @@ import {
 const PUBLISH_CLIENT_TIMEOUT_MS = 55_000;
 const HANDOFF_RETRY_MAX_ATTEMPTS = 6;
 const HANDOFF_RETRY_BASE_MS = 400;
-const APPROVAL_FALLBACK_POLL_MS = 2_500;
-const APPROVAL_FALLBACK_MAX_MS = 45_000;
+const APPROVAL_FALLBACK_POLL_MS = 15_000;
+const APPROVAL_FALLBACK_MAX_MS = 90_000;
+/** Ordinary typing debounce before the workspace persists and recalculates. */
+const WORKSPACE_SAVE_DEBOUNCE_MS = 600;
+
+/** Physical Takeoff facts changed — only these justify a Scope projection. */
+const TAKEOFF_DRAFT_SAVED_MESSAGE = "TAKEOFF_REVIEW_DRAFT_SAVED";
+const TAKEOFF_WATERFALL_CHANGED_MESSAGE = "TAKEOFF_WATERFALL_CHANGED";
 
 type ApprovalSummary = {
   countertopSf?: number;
@@ -97,6 +126,31 @@ type Props = {
 function num(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * The complete workspace payload. Every mutation sends the whole newest state,
+ * so a coalesced save can never persist a mix of old and new fields.
+ */
+export type WorkspaceSavePayload = {
+  lines: Array<Record<string, unknown>>;
+  adjustment: Record<string, unknown>;
+  roomConfigurations?: Record<string, unknown> | null;
+};
+
+/** One boundary between the local buffer and Studio scope. */
+export function buildWorkspaceScopePatch(payload: WorkspaceSavePayload): Record<string, unknown> {
+  const patch: Record<string, unknown> = {
+    customLineItems: writeAdditionalLines(payload.lines),
+    estimateWideAdjustment: {
+      ...(payload.adjustment || {}),
+      updatedAt: new Date().toISOString()
+    }
+  };
+  if (payload.roomConfigurations && Object.keys(payload.roomConfigurations).length) {
+    patch.roomConfigurations = payload.roomConfigurations;
+  }
+  return patch;
 }
 
 /** Transient approval/result consistency — safe to auto-retry briefly. */
@@ -487,8 +541,16 @@ export default function AiEstimatorWorkspace({
   const [commercialError, setCommercialError] = useState<string | null>(null);
   const [commercialDirty, setCommercialDirty] = useState(false);
   const [takeoffDirty, setTakeoffDirty] = useState(false);
-  const [revisionSaveStatus, setRevisionSaveStatus] = useState<string | null>(null);
+  const [revisionSaveStatus, setRevisionSaveStatus] = useState<WorkspaceSaveState | null>(null);
   const [commercialConfig, setCommercialConfig] = useState<Record<string, unknown> | null>(null);
+  /** Bumped only by decideBufferHydration — never by totals or polling. */
+  const [hydrationGeneration, setHydrationGeneration] = useState(0);
+  const [acquiringDraft, setAcquiringDraft] = useState(false);
+  const [approveBusy, setApproveBusy] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [basedOnRevision, setBasedOnRevision] = useState<number | null>(null);
+  const [lastCalculatedAt, setLastCalculatedAt] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [revisionHistory, setRevisionHistory] = useState<
     Array<{
       revision: number;
@@ -512,6 +574,17 @@ export default function AiEstimatorWorkspace({
   const handoffInFlightRef = useRef(false);
   const handoffSucceededRef = useRef(false);
   const pendingSummaryRef = useRef<ApprovalSummary | null>(null);
+  /** Active working revision id — the single mutation target for this workspace. */
+  const estimateIdRef = useRef<string | null>(null);
+  /** True once this workspace owns an editable draft; suppresses repeat acquisition. */
+  const editableDraftOwnedRef = useRef(false);
+  const acquireInFlightRef = useRef<Promise<string | null> | null>(null);
+  const structuralSigRef = useRef<string>("");
+  const hydratedOnceRef = useRef(false);
+  /** Local edits exist that the server has not acknowledged yet. */
+  const pendingLocalEditsRef = useRef(false);
+  const mutationSeqRef = useRef(0);
+  const lastAppliedSeqRef = useRef(0);
 
   const stage = deriveAiEstimatorStage({
     takeoffDisplayStatus,
@@ -532,8 +605,15 @@ export default function AiEstimatorWorkspace({
       if (!est) return;
       onEstimateReady?.(est);
       const id = String(est.id || "").trim();
-      if (id) setEstimateId(id);
+      const previousId = estimateIdRef.current;
+      if (id) {
+        estimateIdRef.current = id;
+        setEstimateId(id);
+      }
       if (est.revision != null) setEstimateRevision(Number(est.revision) || null);
+      const status = String(est.status || "").toLowerCase();
+      // A frozen revision is approved/published; a draft is editable.
+      setMeasurementsApproved(status === "approved" || status === "published");
       const ar = est.activeReview as ActiveReview | undefined;
       setActiveReview(ar && typeof ar === "object" ? ar : null);
       const next = buildApprovalSummaryFromEstimate(est, pendingSummaryRef.current);
@@ -544,9 +624,32 @@ export default function AiEstimatorWorkspace({
       if (opts?.prior !== undefined) setPriorEstimate(opts.prior);
       if (opts?.publication !== undefined) setPublicationSummary(opts.publication);
       setAiSummary(summarizeFromEstimate(est, prior || null, publication || null, deRead));
+      const calculatedAt =
+        (est.calculatedAt as string | undefined) ||
+        ((est.calculation as { calculatedAt?: string } | undefined)?.calculatedAt as
+          | string
+          | undefined) ||
+        null;
+      if (calculatedAt) setLastCalculatedAt(calculatedAt);
+      // Read models always refresh. The editable buffer only rehydrates when
+      // decideBufferHydration says the local buffer cannot be authoritative.
       const commercial = est.commercialConfiguration as Record<string, unknown> | undefined;
       if (commercial && typeof commercial === "object") {
         setCommercialConfig(commercial);
+        const nextSig = structuralScopeSignature(commercial);
+        const decision = decideBufferHydration({
+          previousEstimateId: previousId,
+          nextEstimateId: id || previousId,
+          previousSignature: structuralSigRef.current,
+          nextSignature: nextSig,
+          hasPendingLocalEdits: pendingLocalEditsRef.current,
+          firstLoad: !hydratedOnceRef.current
+        });
+        structuralSigRef.current = nextSig;
+        if (decision.rehydrate) {
+          hydratedOnceRef.current = true;
+          setHydrationGeneration((v) => v + 1);
+        }
       }
       const summary = summarizeFromEstimate(est, prior || null, publication || null, deRead);
       const rev = Number(est.revision) || 1;
@@ -749,12 +852,53 @@ export default function AiEstimatorWorkspace({
     function onMessage(event: MessageEvent) {
       if (!isAllowedTakeoffMessageOrigin(event.origin)) return;
       const data = event.data;
-      if (!isValidTakeoffApprovedMessage(data)) return;
+      // The job id must match — otherwise a stale frame could approve this estimate.
+      if (!isValidTakeoffApprovedMessage(data, takeoffJobId)) return;
       void completeApprovalHandoff(data as Record<string, unknown>);
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [completeApprovalHandoff]);
+  }, [completeApprovalHandoff, takeoffJobId]);
+
+  /**
+   * Initial workspace load. The estimate, its Scope, its commercial
+   * configuration, and its last calculation are all present before the
+   * estimator touches anything, so reload restores a populated workspace.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const body = (await apiGet(
+          `/api/elite100-estimate-studio/intake-cases/${encodeURIComponent(caseId)}/estimate?takeoffJobId=${encodeURIComponent(takeoffJobId)}`,
+          authToken
+        )) as { estimate?: Record<string, unknown> };
+        if (cancelled) return;
+        const est = body.estimate;
+        if (!est?.id) return;
+        const prior =
+          (est.priorEstimate as Record<string, unknown> | undefined) ||
+          (est.previousRevision as Record<string, unknown> | undefined) ||
+          null;
+        applyEstimateView(est, { prior });
+        setRevisionSaveStatus("Saved");
+        await refreshPublicationActivity(String(est.id));
+      } catch (e) {
+        if (!cancelled && !isAbortError(e)) {
+          setLoadError(
+            isTransientHttpError(e)
+              ? transientFailureMessage(e)
+              : "This estimate could not be loaded. Try again."
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Runs once per case/Takeoff pair — never re-runs on totals or status changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, caseId, takeoffJobId]);
 
   // Bounded status-poll fallback when postMessage is missed (does not remount iframe).
   useEffect(() => {
@@ -841,50 +985,81 @@ export default function AiEstimatorWorkspace({
   }
 
   /**
-   * Transparent editable draft acquisition. Does not remount Takeoff.
-   * Idempotent — reuses an existing sibling draft when present.
+   * Transparent editable draft acquisition.
+   *
+   * Called at most once per frozen revision: the first mutation acquires the
+   * draft, every later mutation reuses `estimateIdRef`. Concurrent callers share
+   * one in-flight promise, so a burst of edits cannot create sibling drafts.
+   * Never remounts Takeoff, never resets the form, never blanks the page.
    */
-  async function ensureEditableDraft(basedOnId?: string | null): Promise<string | null> {
-    const sourceId = String(basedOnId || estimateId || "").trim();
-    if (!sourceId) {
-      handoffSucceededRef.current = false;
-      setMeasurementsApproved(false);
-      setEditingRevision(true);
-      return null;
+  const ensureEditableDraft = useCallback(
+    async (basedOnId?: string | null): Promise<string | null> => {
+      const sourceId = String(basedOnId || estimateIdRef.current || "").trim();
+      if (!sourceId) return null;
+      if (editableDraftOwnedRef.current) return estimateIdRef.current;
+      if (acquireInFlightRef.current) return acquireInFlightRef.current;
+
+      const attempt = (async () => {
+        setEditError(null);
+        setAcquiringDraft(true);
+        try {
+          const body = (await apiPost(
+            `/api/elite100-estimate-studio/estimates/${encodeURIComponent(sourceId)}/ensure-editable-draft`,
+            authToken,
+            { basedOnRevisionId: sourceId }
+          )) as {
+            estimate?: Record<string, unknown>;
+            reused?: boolean;
+            created?: boolean;
+            priorEstimate?: Record<string, unknown> | null;
+            previousRevisionSummary?: Record<string, unknown> | null;
+            basedOnRevisionId?: string | null;
+          };
+          const next = body.estimate;
+          const prior = body.priorEstimate || priorEstimate;
+          if (prior && (prior as { revision?: number }).revision != null) {
+            setBasedOnRevision(Number((prior as { revision?: number }).revision) || null);
+          }
+          if (next) applyEstimateView(next, { prior: prior || null });
+          editableDraftOwnedRef.current = true;
+          handoffSucceededRef.current = false;
+          setMeasurementsApproved(false);
+          setEditingRevision(true);
+          setTakeoffCollapsed(false);
+          // customerUrl + publishedRevision are kept — R1 stays customer-active.
+          return next?.id ? String(next.id) : sourceId;
+        } catch (e) {
+          if (!isAbortError(e)) {
+            setEditError(
+              "We couldn’t start an editable draft. Your published estimate was not changed. Try again."
+            );
+          }
+          return null;
+        } finally {
+          setAcquiringDraft(false);
+          acquireInFlightRef.current = null;
+        }
+      })();
+      acquireInFlightRef.current = attempt;
+      return attempt;
+    },
+    [applyEstimateView, authToken, priorEstimate]
+  );
+
+  /** Resolve the mutation target, acquiring the next draft only when frozen. */
+  const resolveMutationTarget = useCallback(async (): Promise<string> => {
+    const current = estimateIdRef.current;
+    if (!current) throw new Error("workspace_not_ready");
+    if (editableDraftOwnedRef.current) return current;
+    if (!measurementsApproved) {
+      // Already an editable draft — claim it so later edits skip acquisition.
+      editableDraftOwnedRef.current = true;
+      return current;
     }
-    setEditError(null);
-    try {
-      const body = (await apiPost(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(sourceId)}/ensure-editable-draft`,
-        authToken,
-        { basedOnRevisionId: sourceId }
-      )) as {
-        estimate?: Record<string, unknown>;
-        reused?: boolean;
-        created?: boolean;
-        priorEstimate?: Record<string, unknown> | null;
-        previousRevisionSummary?: Record<string, unknown> | null;
-      };
-      const next = body.estimate;
-      const prior = body.priorEstimate || priorEstimate;
-      if (next) {
-        applyEstimateView(next, { prior: prior || null });
-      }
-      handoffSucceededRef.current = false;
-      setMeasurementsApproved(false);
-      setEditingRevision(true);
-      setTakeoffCollapsed(false);
-      // Keep customerUrl + publishedRevision — R1 remains active for the customer.
-      return next?.id ? String(next.id) : sourceId;
-    } catch (e) {
-      if (!isAbortError(e)) {
-        setEditError(
-          "We couldn’t start an editable draft. Your published estimate was not changed."
-        );
-      }
-      return null;
-    }
-  }
+    const draftId = await ensureEditableDraft(current);
+    if (!draftId) throw new Error("editable_draft_unavailable");
+    return draftId;
+  }, [ensureEditableDraft, measurementsApproved]);
 
   async function editEstimate() {
     setPublishError(null);
@@ -933,117 +1108,192 @@ export default function AiEstimatorWorkspace({
     return `${aiTakeoffHeadUrl()}/?${params.toString()}`;
   }, [takeoffJobId]);
 
-  const mutationSeqRef = useRef(0);
-  const lastAppliedSeqRef = useRef(0);
+  /**
+   * The one workspace write path: persist the newest complete payload, then run
+   * the authoritative server calculation. Nothing else in this workspace PATCHes
+   * or calculates during ordinary editing.
+   */
+  const runWorkspaceSave = useCallback(
+    async (
+      payload: WorkspaceSavePayload,
+      ctx: { seq: number; onPhase: (phase: "persisting" | "calculating") => void }
+    ) => {
+      const targetId = await resolveMutationTarget();
+      setCommercialBusy(true);
+      setCommercialError(null);
+      try {
+        ctx.onPhase("persisting");
+        const updated = (await apiPatch(
+          `/api/elite100-estimate-studio/estimates/${encodeURIComponent(targetId)}`,
+          authToken,
+          { scope: buildWorkspaceScopePatch(payload) }
+        )) as { estimate?: Record<string, unknown>; id?: string };
+        const calcId = String(updated.estimate?.id || updated.id || targetId);
 
-  async function saveCommercial(payload: {
-    customLineItems: Array<Record<string, unknown>>;
-    estimateWideAdjustment: Record<string, unknown>;
-    roomConfigurations?: Record<string, unknown>;
-  }) {
-    let targetId = estimateId;
-    if (!targetId) {
-      throw new Error("Estimate is not ready to save adjustments");
-    }
-    // Transparent draft when current revision is frozen.
-    if (measurementsApproved || stage === "approved" || stage === "published") {
-      const draftId = await ensureEditableDraft(targetId);
-      if (!draftId) {
-        setCommercialError(
-          "We couldn’t start an editable draft. Your published estimate was not changed."
-        );
-        setRevisionSaveStatus("Save failed");
-        setCommercialDirty(true);
-        throw new Error("editable_draft_unavailable");
-      }
-      targetId = draftId;
-    }
-    const seq = ++mutationSeqRef.current;
-    setCommercialBusy(true);
-    setCommercialError(null);
-    setRevisionSaveStatus("Saving…");
-    try {
-      const customLineItems = payload.customLineItems.map((l) => ({
-        id: l.id,
-        name: l.description,
-        customerDescription: l.description,
-        category: l.category,
-        quantity: l.quantity,
-        unitPrice: l.unitPrice,
-        customerFacing: l.customerVisible !== false,
-        commercialRole: l.commercialRole || "customer_charge",
-        percentageEligible: l.percentageEligible !== false,
-        internalNotes: l.reason || "",
-        roomId: l.roomId || null
-      }));
-      const scopePatch: Record<string, unknown> = {
-        customLineItems,
-        estimateWideAdjustment: {
-          ...payload.estimateWideAdjustment,
-          updatedAt: new Date().toISOString()
+        ctx.onPhase("calculating");
+        const calculated = (await apiPost(
+          `/api/elite100-estimate-studio/estimates/${encodeURIComponent(calcId)}/calculate`,
+          authToken,
+          { clientMutationSeq: ctx.seq }
+        )) as { estimate?: Record<string, unknown> };
+
+        // A slower older response must never replace newer totals or inputs.
+        if (!isFreshCalculationResponse(ctx.seq, lastAppliedSeqRef.current)) return;
+        lastAppliedSeqRef.current = ctx.seq;
+        const est = calculated.estimate || updated.estimate || updated;
+        if (est) applyEstimateView(est as Record<string, unknown>);
+      } catch (e) {
+        if (!isAbortError(e)) {
+          const technical =
+            e instanceof ApiError
+              ? `status=${e.status} ${String(e.message || "").slice(0, 200)}`
+              : String(e);
+          console.error("[estimate-record] workspace save failed", technical);
+          setCommercialError(
+            String((e as Error)?.message) === "editable_draft_unavailable"
+              ? "We couldn’t start an editable draft. Your published estimate was not changed. Try again."
+              : "Your estimate changes were not saved. Try again."
+          );
         }
-      };
-      if (payload.roomConfigurations) {
-        scopePatch.roomConfigurations = payload.roomConfigurations;
+        throw e;
+      } finally {
+        setCommercialBusy(false);
       }
-      const updated = (await apiPatch(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(targetId)}`,
+    },
+    [applyEstimateView, authToken, resolveMutationTarget]
+  );
+
+  const runSaveRef = useRef(runWorkspaceSave);
+  runSaveRef.current = runWorkspaceSave;
+
+  const saveQueue = useMemo(
+    () =>
+      createWorkspaceSaveQueue<WorkspaceSavePayload>({
+        debounceMs: WORKSPACE_SAVE_DEBOUNCE_MS,
+        run: (payload, ctx) => runSaveRef.current(payload, ctx),
+        onStateChange: (state) => {
+          setRevisionSaveStatus(state);
+          const settled = state === "Saved";
+          pendingLocalEditsRef.current = !settled;
+          setCommercialDirty(!settled);
+        }
+      }),
+    []
+  );
+  useEffect(() => () => saveQueue.cancel(), [saveQueue]);
+
+  const queueWorkspaceSave = useCallback(
+    (payload: WorkspaceSavePayload) => {
+      pendingLocalEditsRef.current = true;
+      mutationSeqRef.current = saveQueue.queue(payload);
+    },
+    [saveQueue]
+  );
+
+  /** Physical Takeoff facts changed — project draft Scope, then calculate once. */
+  const projectTakeoffDraft = useCallback(async () => {
+    const targetId = await resolveMutationTarget();
+    setRevisionSaveStatus("Saving…");
+    const seq = ++mutationSeqRef.current;
+    try {
+      // force:false — a draft projection, not an approved-snapshot overwrite.
+      const refreshed = (await apiPost(
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(targetId)}/refresh-from-takeoff`,
         authToken,
-        { scope: scopePatch }
-      )) as { estimate?: Record<string, unknown>; id?: string; forkedFromEstimateId?: string };
-      const calcId = String(updated.estimate?.id || updated.id || targetId);
-      setRevisionSaveStatus("Calculation updating…");
+        { confirm: true }
+      )) as { estimate?: Record<string, unknown> };
+      setRevisionSaveStatus("Updating estimate…");
       const calculated = (await apiPost(
-        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(calcId)}/calculate`,
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(targetId)}/calculate`,
         authToken,
         { clientMutationSeq: seq }
       )) as { estimate?: Record<string, unknown> };
-      if (seq < lastAppliedSeqRef.current) {
-        // Stale response — keep last successful totals.
+      if (!isFreshCalculationResponse(seq, lastAppliedSeqRef.current)) return;
+      lastAppliedSeqRef.current = seq;
+      const est = calculated.estimate || refreshed.estimate;
+      if (est) applyEstimateView(est);
+      setTakeoffDirty(false);
+      setRevisionSaveStatus(saveQueue.isDirty() ? "Unsaved changes" : "Saved");
+    } catch (e) {
+      if (!isAbortError(e)) setRevisionSaveStatus("Save failed");
+    }
+  }, [applyEstimateView, authToken, resolveMutationTarget, saveQueue]);
+
+  /**
+   * Takeoff → Studio physical-change signal. Only a Takeoff draft save projects
+   * Scope; commercial edits never reach refresh-from-takeoff.
+   */
+  useEffect(() => {
+    function onTakeoffMessage(event: MessageEvent) {
+      if (!isAllowedTakeoffMessageOrigin(event.origin)) return;
+      const data = event.data as Record<string, unknown> | null;
+      if (!data || typeof data !== "object") return;
+      const type = String(data.type || "");
+      if (type !== TAKEOFF_DRAFT_SAVED_MESSAGE && type !== TAKEOFF_WATERFALL_CHANGED_MESSAGE) {
         return;
       }
-      lastAppliedSeqRef.current = seq;
-      const est = calculated.estimate || updated.estimate || updated;
-      if (est) applyEstimateView(est as Record<string, unknown>);
-      setCommercialDirty(false);
-      setRevisionSaveStatus("Saved");
+      const jobId = String(data.takeoffJobId ?? "").trim();
+      if (jobId && jobId !== String(takeoffJobId).trim()) return;
+      if (type === TAKEOFF_WATERFALL_CHANGED_MESSAGE) {
+        // Waterfall geometry arrives with the draft-save projection; do not
+        // double-project from the companion notification.
+        return;
+      }
+      void projectTakeoffDraft();
+    }
+    window.addEventListener("message", onTakeoffMessage);
+    return () => window.removeEventListener("message", onTakeoffMessage);
+  }, [projectTakeoffDraft, takeoffJobId]);
+
+  /**
+   * Approval is a deliberate snapshot. It requires the newest draft save and
+   * calculation to have succeeded, and it never remounts Takeoff.
+   */
+  async function approveEstimate() {
+    const targetId = estimateIdRef.current;
+    if (!targetId || approveBusy) return;
+    setApproveBusy(true);
+    setApproveError(null);
+    try {
+      await saveQueue.flush();
+      if (saveQueue.state() === "Save failed") {
+        setApproveError("Save the newest changes before approving this estimate.");
+        return;
+      }
+      const body = (await apiPost(
+        `/api/elite100-estimate-studio/estimates/${encodeURIComponent(estimateIdRef.current || targetId)}/approve`,
+        authToken,
+        { confirm: true }
+      )) as { estimate?: Record<string, unknown> };
+      if (body.estimate) applyEstimateView(body.estimate);
+      // The frozen revision is no longer ours to mutate; the next edit reacquires.
+      editableDraftOwnedRef.current = false;
+      setEditingRevision(false);
+      setMeasurementsApproved(true);
     } catch (e) {
       if (!isAbortError(e)) {
-        const technical =
-          e instanceof ApiError
-            ? `status=${e.status} ${String(e.message || "").slice(0, 200)}`
-            : String(e);
-        console.error("[estimate-record] adjustment save failed", technical);
-        setCommercialError("Your estimate adjustments were not saved. Try again.");
-        setRevisionSaveStatus("Save failed");
-        setCommercialDirty(true);
+        setApproveError(
+          isTransientHttpError(e)
+            ? transientFailureMessage(e)
+            : "This estimate could not be approved. Your draft was not changed."
+        );
       }
-      throw e;
     } finally {
-      setCommercialBusy(false);
+      setApproveBusy(false);
     }
   }
 
-  // Unified autosave — one visible save state for the whole workspace.
-  const commercialSaveRef = useRef<typeof saveCommercial | null>(null);
-  commercialSaveRef.current = saveCommercial;
-  const pendingCommercialPayloadRef = useRef<Parameters<typeof saveCommercial>[0] | null>(null);
-  useEffect(() => {
-    if (!commercialDirty || commercialBusy) return;
-    const handle = window.setTimeout(() => {
-      const payload = pendingCommercialPayloadRef.current;
-      if (!payload) return;
-      void commercialSaveRef.current?.(payload).catch(() => undefined);
-    }, 400);
-    return () => window.clearTimeout(handle);
-  }, [commercialDirty, commercialBusy]);
-
-  const revisionBanner =
-    editingRevision && estimateRevision != null
-      ? publishedRevision != null
-        ? `Draft R${estimateRevision} based on published R${publishedRevision}`
-        : `Draft R${estimateRevision} based on approved R${Math.max(1, (estimateRevision || 1) - 1) || 1}`
-      : null;
+  const headerModel = buildEstimateWorkspaceHeader({
+    customerLabel: header?.title || null,
+    planFilename: header?.planFilename || null,
+    workingRevision: estimateRevision,
+    publishedRevision,
+    basedOnRevision,
+    approved: measurementsApproved,
+    saveState: revisionSaveStatus,
+    acquiringDraft
+  });
+  const revisionBanner = `${headerModel.workingRevisionLabel} · ${headerModel.publicationLabel}`;
 
   const measurementStatusLabel =
     stage === "processing"
@@ -1069,22 +1319,23 @@ export default function AiEstimatorWorkspace({
   const adjustmentsEditable =
     Boolean(estimateId) && stage !== "processing" && stage !== "approving";
 
+  // One workspace save state — Takeoff, lines, percentage, Vanity, waterfalls.
   const aggregatedSaveStatus =
-    revisionSaveStatus ||
-    (commercialDirty || takeoffDirty
-      ? "Unsaved changes"
-      : header?.draftSaveStatus || null);
+    headerModel.saveState || (takeoffDirty ? "Unsaved changes" : null);
+  /** "Save now" is an escape hatch only: dirty, or the last autosave failed. */
+  const showSaveNow =
+    commercialDirty || takeoffDirty || revisionSaveStatus === "Save failed";
 
   const headerNode = (
     <EstimateRecordHeader
-      title={header?.title || header?.planFilename || "Estimate"}
-      planFilename={header?.planFilename || ""}
+      title={headerModel.customer}
+      planFilename={headerModel.planFilename}
       estimateRevision={estimateRevision}
       publishedRevision={publishedRevision}
       measurementStatus={measurementStatusLabel}
       publicationStatus={publicationStatusLabel}
       customerActivityLabel={aiSummary?.publication?.customerActivityLabel || null}
-      revisionBanner={revisionBanner || header?.revisionBanner || null}
+      revisionBanner={revisionBanner}
       draftSaveStatus={aggregatedSaveStatus}
       onViewPlan={header?.onViewPlan}
       onBackToQueue={header?.onBackToQueue}
@@ -1099,7 +1350,19 @@ export default function AiEstimatorWorkspace({
   const publishLabel = publishRevised
     ? "Publish Revised Estimate"
     : "Publish Digital Estimate";
+  const approveLabel =
+    estimateRevision != null && estimateRevision > 1
+      ? "Approve Revised Estimate"
+      : "Approve Estimate";
   const eligible = activeReview ? activeReview.eligible : Boolean(estimateId);
+  /** Room choices for per-room additional lines. */
+  const roomOptions = useMemo(
+    () =>
+      ((aiSummary?.rooms || []) as VerifiedRoom[])
+        .map((r) => ({ id: String(r.id || ""), name: String(r.name || "Room") }))
+        .filter((r) => r.id),
+    [aiSummary]
+  );
 
   return (
     <section
@@ -1148,16 +1411,55 @@ export default function AiEstimatorWorkspace({
             Edit measurements anytime. Changes autosave and recalculate the live draft estimate.
             Approve Estimate freezes the revision when you are ready to publish.
           </p>
-          {takeoffMode === "readonly" ? (
-            <div className="eq-action-row">
+          {acquiringDraft ? (
+            <p className="eq-footnote" data-testid="eq-ai-acquiring-draft" role="status">
+              Starting editable revision…
+            </p>
+          ) : null}
+          {/* Inline status only. An overlay here used to hide a populated Takeoff. */}
+          {handoffBusy ? (
+            <p className="eq-footnote" data-testid="eq-takeoff-inline-status" role="status">
+              Measurements approved. Building verified estimate…
+            </p>
+          ) : null}
+          <div className="eq-action-row eq-ai-stage-actions" data-testid="eq-ai-stage-actions">
+            {showSaveNow ? (
               <button
                 type="button"
                 className="eq-btn-secondary"
+                data-testid="eq-save-now"
+                disabled={commercialBusy}
+                onClick={() => void saveQueue.flush()}
+              >
+                Save now
+              </button>
+            ) : null}
+            {!measurementsApproved ? (
+              <button
+                type="button"
+                className="eq-btn-primary"
+                data-testid="eq-approve-estimate"
+                disabled={approveBusy || !estimateId}
+                onClick={() => void approveEstimate()}
+              >
+                {approveLabel}
+              </button>
+            ) : null}
+            {/* Optional shortcut only — ordinary editing never requires it. */}
+            {measurementsApproved ? (
+              <button
+                type="button"
+                className="eq-btn-ghost"
                 data-testid="eq-edit-estimate"
                 onClick={() => void editEstimate()}
               >
                 Edit Estimate
               </button>
+            ) : null}
+          </div>
+          {approveError ? (
+            <div className="eq-state eq-state--error" role="alert" data-testid="eq-approve-error">
+              {approveError}
             </div>
           ) : null}
         </div>
@@ -1215,11 +1517,14 @@ export default function AiEstimatorWorkspace({
         publishedRevision={publishedRevision}
         activeReview={activeReview}
         calculationStatus={revisionSaveStatus}
+        lastCalculatedAt={lastCalculatedAt}
       />
 
       <CommercialConfigurationSection
         editable={adjustmentsEditable}
         commercial={commercialConfig}
+        hydrationKey={`${estimateId || "none"}:${hydrationGeneration}`}
+        roomOptions={roomOptions}
         busy={commercialBusy}
         error={commercialError}
         dirty={commercialDirty}
@@ -1238,28 +1543,17 @@ export default function AiEstimatorWorkspace({
           null
         }
         onRequestAddIslandWaterfall={(side) => {
+          // Waterfall geometry belongs to the island piece in Takeoff. Estimate
+          // Options asks Takeoff to add it; it never edits geometry itself.
           const win = takeoffFrameRef.current?.contentWindow;
           if (!win) return;
           try {
-            win.postMessage(
-              { type: "STUDIO_REQUEST_ADD_ISLAND_WATERFALL", side },
-              "*"
-            );
+            win.postMessage({ type: "STUDIO_REQUEST_ADD_ISLAND_WATERFALL", side }, "*");
           } catch {
             /* cross-origin / unavailable */
           }
         }}
-        onDirtyChange={(d, payload) => {
-          setCommercialDirty(d);
-          if (d) {
-            setRevisionSaveStatus("Unsaved changes");
-            if (payload) pendingCommercialPayloadRef.current = payload;
-          }
-        }}
-        onSave={async (payload) => {
-          pendingCommercialPayloadRef.current = payload;
-          await saveCommercial(payload);
-        }}
+        onQueueSave={queueWorkspaceSave}
       />
 
       <DigitalEstimateSection

@@ -10,6 +10,7 @@ import {
   computeEstimateWideAdjustmentAmount
 } from "./studioEstimateWideAdjustment.mjs";
 import { roundPublicEstimateToNearestTen } from "../quotes/quoteCalculator.js";
+import { resolveGovernedVanityPrograms } from "./studioVanityProgramGovernance.mjs";
 
 function num(v) {
   const n = Number(v);
@@ -140,114 +141,32 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
   };
 
   const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
-  function vanityPackageLabel(code) {
-    const raw = str(code);
-    const m = raw.match(/^(\d+)_([SD])$/i);
-    if (!m) {
-      if (/vanity program/i.test(raw) || raw === "standard") {
-        return raw === "standard" ? "Standard vanity pricing" : raw || "Governed Vanity Program";
-      }
-      return raw || "Governed Vanity Program";
-    }
-    const bowl = m[2].toUpperCase() === "D" ? "Double" : "Single";
-    return `${m[1]}-inch ${bowl}-Bowl Vanity Program`;
-  }
+  // Governed Vanity Program — one add/remove decision, resolved from Takeoff
+  // facts and the authoritative calculation. No trip or confirmation questions.
+  const vanityPrograms = resolveGovernedVanityPrograms({
+    scope,
+    calculationSnapshot: estimate?.calculationSnapshot || null
+  });
 
-  function vanitySinkOpenings(room) {
-    const fromAddOn = num(room.addOns?.["qty-bar"]);
-    if (fromAddOn > 0) return fromAddOn;
-    let fromCutouts = 0;
-    for (const piece of Array.isArray(room.pieces) ? room.pieces : []) {
-      if (!piece || piece.included === false) continue;
-      for (const c of Array.isArray(piece.cutouts) ? piece.cutouts : []) {
-        const type = str(c?.type || c?.cutoutType).toLowerCase();
-        if (type === "vanity_bar_sink" || type === "vanity_sink" || type === "bar_sink") {
-          fromCutouts += num(c.quantity) || 1;
-        }
-      }
-    }
-    if (fromCutouts > 0) return fromCutouts;
-    const typed = room.openingsByType?.vanityBarSink ?? room.openingsByType?.vanity_bar_sink;
-    return num(typed) || null;
+  /**
+   * Waterfall physical scope belongs to the island piece in Takeoff. This is a
+   * read-only projection of that exact object plus the authoritative price
+   * impact — Estimate Options never owns waterfall geometry.
+   */
+  const calcRooms = Array.isArray(estimate?.calculationSnapshot?.elite100?.rooms)
+    ? estimate.calculationSnapshot.elite100.rooms
+    : [];
+  function roomWaterfallExact(roomId) {
+    const match = calcRooms.find((r) => str(r?.roomId) === str(roomId));
+    if (!match) return null;
+    const total = round2(
+      num(match.waterfallMaterialSubtotal) +
+        num(match.waterfallLaborTotal) +
+        num(match.waterfallPolishTotal) +
+        num(match.waterfallMiterTotal)
+    );
+    return total > 0 ? total : null;
   }
-
-  const vanityPrograms = rooms
-    .filter((r) => r && /vanity|bath/i.test(str(r.name) + str(r.roomType)))
-    .map((room) => {
-      const pieces = Array.isArray(room.pieces) ? room.pieces : [];
-      const vanityPiece =
-        pieces.find((p) => /vanity/i.test(str(p.name) + str(p.pieceType))) || pieces[0] || null;
-      const cfg = room.vanityProgram || scope.roomConfigurations?.[room.id]?.vanityProgram || {};
-      const selectedProgram =
-        cfg.useStandardPricing === true
-          ? "standard"
-          : cfg.selectedProgram
-            ? str(cfg.selectedProgram)
-            : null;
-      const sinkOpenings = vanitySinkOpenings(room);
-      const derivedBowl =
-        sinkOpenings === 1 ? 1 : sinkOpenings === 2 ? 2 : num(cfg.bowlCount) || null;
-      const widthIn = vanityPiece ? num(vanityPiece.lengthIn) : null;
-      let resolvedProgram = selectedProgram;
-      if (!resolvedProgram && derivedBowl === 1 && widthIn >= 36 && widthIn <= 38) {
-        resolvedProgram = "37_S";
-      } else if (!resolvedProgram && derivedBowl === 2 && widthIn >= 60 && widthIn <= 62) {
-        resolvedProgram = "61_D";
-      }
-      return {
-        roomId: str(room.id) || null,
-        roomName: str(room.name) || "Room",
-        physicalFacts: {
-          widthIn,
-          depthIn: vanityPiece ? num(vanityPiece.depthIn) : null,
-          quantity: vanityPiece ? num(vanityPiece.quantity) || 1 : 0,
-          bowlCount: derivedBowl,
-          sinkOpenings,
-          backsplash: cfg.backsplashLabel || null,
-          sameTrip: cfg.additionalTrips == null || Number(cfg.additionalTrips) === 0
-        },
-        eligible:
-          cfg.eligible === true
-            ? true
-            : cfg.eligible === false
-              ? false
-              : derivedBowl != null && widthIn != null
-                ? cfg.sameTripConfirmed === true
-                  ? true
-                  : null
-                : false,
-        eligibilityReasons: (() => {
-          const reasons = Array.isArray(cfg.eligibilityReasons) ? [...cfg.eligibilityReasons] : [];
-          if (derivedBowl != null && widthIn != null && cfg.sameTripConfirmed !== true) {
-            if (!reasons.some((r) => /templated and installed with the kitchen/i.test(String(r)))) {
-              reasons.push(
-                "Confirm whether the vanity will be templated and installed with the kitchen."
-              );
-            }
-          }
-          return reasons;
-        })(),
-        selectedProgram: resolvedProgram,
-        selectedProgramLabel: resolvedProgram ? vanityPackageLabel(resolvedProgram) : null,
-        applyProgram: Boolean(selectedProgram && selectedProgram !== "standard"),
-        sameTrip: cfg.additionalTrips == null || Number(cfg.additionalTrips) === 0,
-        additionalTrips: num(cfg.additionalTrips) || 0,
-        permittedCustomerOptions: Array.isArray(cfg.permittedCustomerOptions)
-          ? cfg.permittedCustomerOptions
-          : [],
-        permittedMaterials: Array.isArray(cfg.permittedMaterials) ? cfg.permittedMaterials : [],
-        permittedSinkUpgrades: Array.isArray(cfg.permittedSinkUpgrades)
-          ? cfg.permittedSinkUpgrades
-          : [],
-        permittedEdgeUpgrades: Array.isArray(cfg.permittedEdgeUpgrades)
-          ? cfg.permittedEdgeUpgrades
-          : [],
-        includedScope: Array.isArray(cfg.includedScope) ? cfg.includedScope : [],
-        serverPrice: cfg.serverPrice != null ? num(cfg.serverPrice) : null,
-        warnings: Array.isArray(cfg.warnings) ? cfg.warnings : [],
-        useStandardPricing: cfg.useStandardPricing === true
-      };
-    });
 
   const waterfalls = [];
   for (const room of rooms) {
@@ -257,31 +176,39 @@ export function buildCommercialConfiguration(estimate, opts = {}) {
       : Array.isArray(room.waterfalls)
         ? room.waterfalls
         : [];
+    const roomTotal = roomWaterfallExact(room.id);
     for (const wf of wfs) {
       if (!wf) continue;
+      const pieceId = str(wf.targetPieceId || wf.pieceId);
+      const piece = (Array.isArray(room.pieces) ? room.pieces : []).find(
+        (p) => str(p?.id) === pieceId
+      );
+      const pieceLabel = str(wf.pieceLabel || piece?.name) || "Island";
       waterfalls.push({
-        id: str(wf.id) || null,
+        id: str(wf.id) || (pieceId ? `${pieceId}-${str(wf.side) || "left"}` : null),
         roomId: str(room.id) || null,
         roomName: str(room.name) || "Room",
-        pieceId: str(wf.targetPieceId || wf.pieceId) || null,
-        pieceLabel: (() => {
-          const pid = str(wf.targetPieceId || wf.pieceId);
-          const piece = (Array.isArray(room.pieces) ? room.pieces : []).find(
-            (p) => str(p?.id) === pid
-          );
-          return str(wf.pieceLabel || piece?.name) || "Island";
-        })(),
+        pieceId: pieceId || null,
+        pieceLabel,
+        // Customer-facing governed option label — dimensions are not customer editable.
+        customerOptionLabel: `${pieceLabel} — ${
+          str(wf.side).toLowerCase() === "right" ? "Right" : "Left"
+        } Waterfall`,
         side: str(wf.side) || "custom",
-        panelWidthIn: num(wf.panelWidthIn) || null,
+        // Panel depth is inherited from the island piece, never re-entered.
+        panelWidthIn: num(wf.panelWidthIn) || (piece ? num(piece.depthIn) : 0) || null,
         panelHeightIn: num(wf.legHeightIn || wf.panelHeightIn) || null,
         quantity: num(wf.quantity) || 1,
         miterHeightIn: num(wf.miterHeightIn) || null,
         miterKey: str(wf.miterKey) || null,
         backsidePolish: wf.backsidePolish === true,
+        note: str(wf.note || wf.estimatorNote) || "",
         required: wf.required === true || wf.customerOptional === false,
         customerOptional: wf.customerOptional === true,
         priceBreakdown: null,
-        total: null
+        // Attributable only when this room has a single waterfall object.
+        total: wfs.length === 1 ? roomTotal : null,
+        roomWaterfallExactTotal: roomTotal
       });
     }
   }

@@ -85,7 +85,7 @@ const deApp = readRepo("app-digital-estimate/src/App.tsx");
 {
   assert.ok(panel.includes("refresh-from-takeoff"));
   assert.ok(panel.includes("/calculate"));
-  assert.ok(panel.includes("eq-takeoff-handoff-overlay"));
+  assert.ok(panel.includes("eq-takeoff-inline-status"));
   assert.ok(panel.includes("Measurements approved. Building verified estimate"));
   assert.ok(panel.includes("setMeasurementsApproved(true)"));
   assert.ok(panel.includes("estimateHasMeasuredScope"));
