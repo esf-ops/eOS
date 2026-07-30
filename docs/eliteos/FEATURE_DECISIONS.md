@@ -3101,3 +3101,15 @@
 | **Protected** | Calculator math, V1 workflow, DE repricing, Takeoff Review imports, catalog/vanity/waterfall/sold/email. |
 | **Revisit trigger** | True per-piece priced edge profiles; mitered/waterfall pricing; side splash pricing. |
 
+### 219. Elite 100 Studio V2 Slice I.1 — scope review UX hardening (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-scope-review-ux` |
+| **Decision** | Rework Studio V2 scope editor into a compact room/piece review table with V2-native **Set exposed sides** modal and **Cutouts** popup. Exposed sides store `piece.exposedSides` + `pieceTopology` and sync `finishedEdgeLf` / `finishedEdge` from dimensions (geometry only). Cutout popup maps to existing Slice I piece fields; pop-up outlet + side splash remain scope-only / not priced. Plan preview shows a placeholder until V2 has a safe attachment URL. Reuses `takeoffExposedEdges` geometry helpers only — does **not** import AI Takeoff Review / V1 workspace components. |
+| **Why** | Slice I data was correct but form-heavy; estimators need the guided review interaction from V1 without resurrecting V1 orchestration. |
+| **SQL** | None. |
+| **Impacted** | `StudioV2ScopeEditor.tsx`, `studioV2ScopeReviewHelpers.ts`, `studioV2ScopeEditor.mjs`, `styles.css`, `studioV2SliceI.test.mjs`. |
+| **Protected** | Calculator math, V1 workflow, DE repricing, Takeoff Review component imports, schema. |
+| **Revisit trigger** | Wire secure plan preview URL into Working Draft; peninsula attached-side UX; priced pop-up outlets. |
+
