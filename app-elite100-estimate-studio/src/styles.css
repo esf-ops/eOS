@@ -3414,3 +3414,9 @@ button.linkish {
   font-size: 0.88rem;
   color: var(--eos-ink-muted);
 }
+.studio-v2-republish-block {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}

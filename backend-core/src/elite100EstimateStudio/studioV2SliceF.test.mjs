@@ -486,11 +486,23 @@ async function createApproved(repo, extra = {}) {
   assert.ok(!/simplifiedPublish|publishDigitalEstimate|createStudioSimplified/.test(shell));
   assert.ok(panel.includes('data-testid="studio-v2-publish"'));
   assert.ok(panel.includes('data-testid="studio-v2-publish-confirm"'));
+  assert.ok(panel.includes('data-testid="studio-v2-republish"'));
+  assert.ok(panel.includes('data-testid="studio-v2-republish-confirm"'));
+  assert.ok(panel.includes('data-testid="studio-v2-republish-hint"'));
+  assert.ok(panel.includes("Republish / Repair Digital Estimate"));
+  assert.ok(panel.includes("Refreshes the customer link configuration. Does not email the customer."));
+  // Initial publish only when !published; repair when published — customer-viewed must not hide repair.
+  assert.ok(panel.includes("approved && !published"));
+  assert.ok(panel.includes("approved && published"));
+  assert.ok(!panel.includes("customer viewed") || panel.includes("studio-v2-republish"));
   assert.ok(panel.includes("Approve required before publish."));
   assert.ok(shell.includes("/approved/"));
   assert.ok(shell.includes("working-draft/approve"));
   assert.ok(shell.includes("StudioV2PublishPanel"));
   assert.ok(shell.includes("StudioV2ApprovalPanel"));
+  assert.ok(shell.includes('deliveryMode: "link_only"'));
+  assert.ok(shell.includes("configuration_envelope_required"));
+  assert.ok(shell.includes("Digital Estimate configuration could not be activated"));
   // No combined approve+publish action
   assert.ok(!shell.includes("approveAndPublish"));
   assert.ok(!shell.includes("approve+publish"));

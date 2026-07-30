@@ -3,6 +3,9 @@
  * Calls POST /api/elite100-studio-v2/approved/:estimateId/publish only.
  * Does not import ActiveReviewPublishPanel or EstimateDigitalEstimatePanel.
  * Does not approve, calculate, or use V1 simplified publish orchestration.
+ *
+ * When an active publication already exists, exposes Republish / Repair so
+ * estimators can refresh the interactive configuration envelope (link-only).
  */
 import React, { useState } from "react";
 
@@ -80,13 +83,16 @@ export default function StudioV2PublishPanel(props: Props) {
 
   const blockers = Array.isArray(readiness?.blockers) ? readiness.blockers : [];
   const backendAllowed = readiness?.allowed === true;
-  const canPublish =
+  const canInitialPublish =
     Boolean(estimateId) &&
     approved &&
     !published &&
     backendAllowed &&
     confirmed &&
     !busy;
+  // Customer-viewed / already-published must not hide repair — reuse same strict endpoint.
+  const canRepair =
+    Boolean(estimateId) && approved && published && confirmed && !busy;
 
   return (
     <section className="studio-v2-panel" data-testid="studio-v2-publish-panel">
@@ -96,11 +102,22 @@ export default function StudioV2PublishPanel(props: Props) {
           <button
             type="button"
             className="eq-btn-primary"
-            disabled={!canPublish}
+            disabled={!canInitialPublish}
             onClick={() => void onPublish({ confirmed: true })}
             data-testid="studio-v2-publish"
           >
             {busy ? "Publishing…" : "Publish Digital Estimate"}
+          </button>
+        ) : null}
+        {approved && published ? (
+          <button
+            type="button"
+            className="eq-btn-primary"
+            disabled={!canRepair}
+            onClick={() => void onPublish({ confirmed: true })}
+            data-testid="studio-v2-republish"
+          >
+            {busy ? "Refreshing…" : "Republish / Repair Digital Estimate"}
           </button>
         ) : null}
       </div>
@@ -174,10 +191,27 @@ export default function StudioV2PublishPanel(props: Props) {
         </>
       ) : null}
 
-      {published ? (
-        <p className="studio-v2-notice" data-testid="studio-v2-published-notice">
-          Active Digital Estimate publication is available.
-        </p>
+      {approved && published ? (
+        <div className="studio-v2-republish-block" data-testid="studio-v2-republish-block">
+          <p className="studio-v2-notice" data-testid="studio-v2-published-notice">
+            Active Digital Estimate publication is available.
+          </p>
+          <p className="studio-v2-scope-editor__hint" data-testid="studio-v2-republish-hint">
+            Refreshes the customer link configuration. Does not email the customer.
+          </p>
+          <label className="studio-v2-approval-confirm" data-testid="studio-v2-republish-confirm">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              disabled={busy}
+              onChange={(e) => setConfirmed(e.target.checked)}
+            />
+            <span>
+              I confirm I want to refresh the customer Digital Estimate configuration (link-only, no
+              email).
+            </span>
+          </label>
+        </div>
       ) : null}
 
       {historicalPublications.length ? (
