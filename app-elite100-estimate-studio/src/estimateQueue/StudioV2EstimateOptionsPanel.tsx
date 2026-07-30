@@ -116,9 +116,62 @@ function newId(prefix: string): string {
 }
 
 function parseAmount(raw: string): number {
-  if (raw.trim() === "") return 0;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
+  const cleaned = String(raw ?? "")
+    .trim()
+    .replace(/\$/g, "")
+    .replace(/,/g, "")
+    .replace(/[^0-9.-]/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === "." || cleaned === "-.") return 0;
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
+function formatDollars(n: number): string {
+  if (!Number.isFinite(n)) return "0.00";
+  return (Math.round(n * 100) / 100).toFixed(2);
+}
+
+/** Dollar amount input — normalizes on blur to avoid leading-zero confusion. */
+function DollarAmountInput(props: {
+  value: number;
+  disabled?: boolean;
+  "aria-label"?: string;
+  onChange: (next: number) => void;
+}) {
+  const [text, setText] = React.useState(() => formatDollars(props.value));
+  const [focused, setFocused] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!focused) setText(formatDollars(props.value));
+  }, [props.value, focused]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      className="studio-v2-dollar-input"
+      value={focused ? text : formatDollars(props.value)}
+      disabled={props.disabled}
+      placeholder="0.00"
+      aria-label={props["aria-label"] || "Amount in dollars"}
+      data-testid="studio-v2-dollar-amount"
+      onFocus={() => {
+        setFocused(true);
+        setText(props.value === 0 ? "" : String(props.value));
+      }}
+      onChange={(e) => {
+        setText(e.target.value);
+        props.onChange(parseAmount(e.target.value));
+      }}
+      onBlur={() => {
+        setFocused(false);
+        const next = parseAmount(text);
+        props.onChange(next);
+        setText(formatDollars(next));
+      }}
+    />
+  );
 }
 
 function money(n: number | null | undefined): string {
@@ -286,7 +339,7 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
                 <tr>
                   <th>Label</th>
                   <th>Type</th>
-                  <th>Amount</th>
+                  <th>Amount ($)</th>
                   <th />
                 </tr>
               </thead>
@@ -333,22 +386,18 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
                       </select>
                     </td>
                     <td>
-                      <input
-                        type="number"
-                        step="0.01"
+                      <DollarAmountInput
                         value={Number.isFinite(line.amount) ? line.amount : 0}
                         disabled={readOnly}
-                        onChange={(e) =>
+                        aria-label="Customer line amount in dollars"
+                        onChange={(next) =>
                           update({
                             ...value,
                             customerLines: value.customerLines.map((l) =>
-                              l.id === line.id
-                                ? { ...l, amount: parseAmount(e.target.value) }
-                                : l
+                              l.id === line.id ? { ...l, amount: next } : l
                             )
                           })
                         }
-                        aria-label="Customer line amount"
                       />
                     </td>
                     <td>
@@ -371,9 +420,16 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
         )}
       </div>
 
-      <div className="studio-v2-options-section">
+      <details className="studio-v2-options-section studio-v2-internal-collapsed" data-testid="studio-v2-internal-collapsed">
+        <summary>
+          Internal cost notes — does not affect customer price
+          {value.internalLines.length ? ` (${value.internalLines.length})` : ""}
+        </summary>
+        <p className="eq-muted">
+          Internal-only lines are estimator notes/costs. They never appear on the customer Digital
+          Estimate and do not change the customer total.
+        </p>
         <div className="studio-v2-options-section__head">
-          <h3>Internal-only line items</h3>
           {!readOnly ? (
             <button
               type="button"
@@ -393,7 +449,7 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
               <thead>
                 <tr>
                   <th>Internal reason</th>
-                  <th>Amount</th>
+                  <th>Amount ($)</th>
                   <th />
                 </tr>
               </thead>
@@ -423,22 +479,18 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
                       />
                     </td>
                     <td>
-                      <input
-                        type="number"
-                        step="0.01"
+                      <DollarAmountInput
                         value={Number.isFinite(line.amount) ? line.amount : 0}
                         disabled={readOnly}
-                        onChange={(e) =>
+                        aria-label="Internal amount in dollars"
+                        onChange={(next) =>
                           update({
                             ...value,
                             internalLines: value.internalLines.map((l) =>
-                              l.id === line.id
-                                ? { ...l, amount: parseAmount(e.target.value) }
-                                : l
+                              l.id === line.id ? { ...l, amount: next } : l
                             )
                           })
                         }
-                        aria-label="Internal amount"
                       />
                     </td>
                     <td>
@@ -459,11 +511,11 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
             </table>
           </div>
         )}
-      </div>
+      </details>
 
       <div className="studio-v2-options-section">
         <div className="studio-v2-options-section__head">
-          <h3>Hidden customer-impacting line items</h3>
+          <h3>Hidden customer-impacting adjustments</h3>
           {!readOnly ? (
             <button
               type="button"
@@ -475,6 +527,9 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
             </button>
           ) : null}
         </div>
+        <p className="eq-muted" data-testid="studio-v2-hidden-help">
+          Affects customer total but does not expose the internal reason.
+        </p>
         {value.hiddenCustomerImpactingLines.length === 0 ? (
           <p className="eq-muted">No hidden customer-impacting lines.</p>
         ) : (
@@ -482,9 +537,9 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
             <table className="studio-v2-piece-table" data-testid="studio-v2-hidden-lines">
               <thead>
                 <tr>
-                  <th>Internal reason</th>
-                  <th>Customer-safe label</th>
-                  <th>Amount</th>
+                  <th>Internal reason (required)</th>
+                  <th>Customer-safe label (optional)</th>
+                  <th>Amount ($)</th>
                   <th />
                 </tr>
               </thead>
@@ -496,6 +551,7 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
                         type="text"
                         value={line.internalReason}
                         disabled={readOnly}
+                        required
                         onChange={(e) =>
                           update({
                             ...value,
@@ -507,7 +563,7 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
                             )
                           })
                         }
-                        aria-label="Hidden line internal reason"
+                        aria-label="Hidden line internal reason (required)"
                       />
                     </td>
                     <td>
@@ -526,27 +582,22 @@ export default function StudioV2EstimateOptionsPanel(props: Props) {
                             )
                           })
                         }
-                        aria-label="Customer-safe rollup label"
+                        aria-label="Customer-safe rollup label (optional)"
                       />
                     </td>
                     <td>
-                      <input
-                        type="number"
-                        step="0.01"
+                      <DollarAmountInput
                         value={Number.isFinite(line.amount) ? line.amount : 0}
                         disabled={readOnly}
-                        onChange={(e) =>
+                        aria-label="Hidden line amount in dollars"
+                        onChange={(next) =>
                           update({
                             ...value,
                             hiddenCustomerImpactingLines: value.hiddenCustomerImpactingLines.map(
-                              (l) =>
-                                l.id === line.id
-                                  ? { ...l, amount: parseAmount(e.target.value) }
-                                  : l
+                              (l) => (l.id === line.id ? { ...l, amount: next } : l)
                             )
                           })
                         }
-                        aria-label="Hidden line amount"
                       />
                     </td>
                     <td>

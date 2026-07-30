@@ -457,6 +457,10 @@ const fakeCalc = {
   assert.ok(panel.includes('data-testid="studio-v2-remove-customer-line"'));
   assert.ok(panel.includes('data-testid="studio-v2-add-internal-line"'));
   assert.ok(panel.includes('data-testid="studio-v2-add-hidden-line"'));
+  assert.ok(panel.includes('data-testid="studio-v2-internal-collapsed"'));
+  assert.ok(panel.includes("Hidden customer-impacting adjustments"));
+  assert.ok(panel.includes("Affects customer total but does not expose the internal reason."));
+  assert.ok(panel.includes('data-testid="studio-v2-dollar-amount"'));
   assert.ok(panel.includes("Unsaved estimate option changes"));
   assert.ok(shell.includes("working-draft/options"));
   assert.ok(shell.includes("Estimate options changed — recalculate to update total."));

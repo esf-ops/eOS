@@ -3017,3 +3017,15 @@
 | **Protected** | Calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, Slice A–E contracts, customer acceptance/sold handoff. |
 | **Revisit trigger** | Email/notification delivery slice; replace-link UX; acceptance/sold handoff. |
 
+### 212. Elite 100 Studio V2 production QA hardening (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/elite100-studio-v2-production-qa-hardening` |
+| **Decision** | After first production smoke, V2 strict publish attaches the same **interactive customer configuration defaults** used by simplified-publish (`resolveSimplifiedPublishConfiguration`) so public Digital Estimate does not fall into `configuration_absent` / “Customer options could not be loaded.” Publish remains **link-only** and still calls only `studioDigitalEstimateService.publish` — never simplified-publish. UX hardening only: header “Studio V2 · Test Mode”, workflow status strip, calculation pricing-breakdown display (read-only from existing calc/scope fields), pricing-basis edit placeholder, dollar amount inputs, collapsed internal-only lines, clearer hidden-adjustment and approval-disabled copy. No calculator math, schema, catalog, vanity, waterfall, revision, or sold handoff. |
+| **Why** | Production V2 publish omitted the configuration envelope, producing a document-only DE that failed customer options load while totals still matched. |
+| **SQL** | None. |
+| **Impacted** | `studioV2Publish.mjs`, `studioV2WorkingDraft.mjs`, `StudioV2EstimatorShell.tsx`, `StudioV2EstimateOptionsPanel.tsx`, `StudioV2ApprovalPanel.tsx`, `styles.css`, `studioV2SliceF.test.mjs`, `studioV2SliceD.test.mjs`. |
+| **Protected** | Calculator math, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, DE public route contracts (payload population only), Slice A–F gates. |
+| **Revisit trigger** | Pricing basis / price group editor; email delivery; already-published V2 links that lack configuration (may need republish). |
+

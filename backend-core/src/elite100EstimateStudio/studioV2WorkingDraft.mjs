@@ -244,6 +244,7 @@ export function buildStudioV2CalculationResult(estimate, calcOverride = null) {
     estimate?.calculation ||
     estimate?.calculationSnapshot ||
     null;
+  const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   if (!calc || typeof calc !== "object") {
     return {
       available: false,
@@ -252,7 +253,8 @@ export function buildStudioV2CalculationResult(estimate, calcOverride = null) {
       warnings: [],
       unresolvedItems: [],
       calculatedAt: null,
-      pricingVersion: null
+      pricingVersion: null,
+      pricingBreakdown: null
     };
   }
   const totals = calc.totals && typeof calc.totals === "object" ? calc.totals : {};
@@ -280,7 +282,95 @@ export function buildStudioV2CalculationResult(estimate, calcOverride = null) {
       message: str(u?.message) || "Unresolved item"
     })),
     calculatedAt: calc.calculatedAt || null,
-    pricingVersion: calc.pricingVersion ?? null
+    pricingVersion: calc.pricingVersion ?? null,
+    pricingBreakdown: buildStudioV2PricingBreakdown(estimate, calc, scope)
+  };
+}
+
+/**
+ * Read-only pricing display fields from existing calc/scope — no new math.
+ * @param {object|null|undefined} estimate
+ * @param {object} calc
+ * @param {object} scope
+ */
+function buildStudioV2PricingBreakdown(estimate, calc, scope) {
+  const review = calc.reviewSummary && typeof calc.reviewSummary === "object" ? calc.reviewSummary : {};
+  const rooms = Array.isArray(calc.elite100?.rooms) ? calc.elite100.rooms : [];
+  const scopeSummaryRooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
+  const firstRoom = rooms[0] || null;
+  const rates = rooms
+    .map((r) => Number(r?.materialRatePerSf))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const uniqueRates = [...new Set(rates.map((n) => Math.round(n * 100) / 100))];
+  const measuredFromRooms = rooms.reduce(
+    (s, r) => s + (Number(r?.measuredCountertopSf) || 0) + (Number(r?.backsplash?.measuredSf) || 0),
+    0
+  );
+  const billedFromRooms = rooms.reduce(
+    (s, r) => s + (Number(r?.billedCountertopSf) || 0),
+    0
+  );
+  const custom = Array.isArray(calc.fabrication?.customLineItems)
+    ? calc.fabrication.customLineItems
+    : Array.isArray(scope.customLineItems)
+      ? scope.customLineItems
+      : [];
+  let customerFacingAdj = 0;
+  let hiddenAdj = 0;
+  for (const line of custom) {
+    const role = String(line?.commercialRole || "").toLowerCase();
+    const amount =
+      line?.lineTotal != null
+        ? Number(line.lineTotal)
+        : (Number(line?.quantity) || 1) * (Number(line?.unitPrice) || 0);
+    if (!Number.isFinite(amount) || amount === 0) continue;
+    if (role === "internal_only" || role === "absorbed") continue;
+    if (
+      role === "legacy_hidden_customer_charge" ||
+      role === "customer_charge_hidden_detail" ||
+      (line?.customerFacing === false && role !== "discount" && role !== "credit")
+    ) {
+      hiddenAdj += amount;
+      continue;
+    }
+    if (
+      line?.customerFacing === true ||
+      role === "customer_charge" ||
+      role === "discount" ||
+      role === "credit"
+    ) {
+      customerFacingAdj += amount;
+    }
+  }
+  const priceGroup =
+    str(firstRoom?.materialGroup) ||
+    (Array.isArray(review.countertopMaterialGroups) && review.countertopMaterialGroups[0]
+      ? str(review.countertopMaterialGroups[0])
+      : "") ||
+    str(scope.materialGroup) ||
+    null;
+  return {
+    pricingBasis: str(calc.pricingBasis || scope.pricingBasis) || null,
+    priceGroup: priceGroup || null,
+    materialRatePerSf: uniqueRates.length === 1 ? uniqueRates[0] : null,
+    materialRatePerSfNote:
+      uniqueRates.length > 1 ? "Multiple rates across rooms" : null,
+    measuredSf:
+      measuredFromRooms > 0
+        ? Math.round(measuredFromRooms * 100) / 100
+        : null,
+    billedSf: billedFromRooms > 0 ? Math.round(billedFromRooms * 100) / 100 : null,
+    materialSubtotal:
+      review.countertopMaterialTotal != null && Number.isFinite(Number(review.countertopMaterialTotal))
+        ? Number(review.countertopMaterialTotal)
+        : null,
+    materialUseTax:
+      review.materialTaxTotal != null && Number.isFinite(Number(review.materialTaxTotal))
+        ? Number(review.materialTaxTotal)
+        : null,
+    customerFacingAdjustments: Math.round(customerFacingAdj * 100) / 100,
+    hiddenCustomerImpactingAdjustments: Math.round(hiddenAdj * 100) / 100,
+    roomCount: rooms.length || scopeSummaryRooms.length || 0
   };
 }
 

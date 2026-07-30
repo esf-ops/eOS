@@ -3338,3 +3338,79 @@ button.linkish {
   padding: 0.4rem 0.5rem;
   background: #fff;
 }
+
+/* Studio V2 production QA hardening */
+.studio-v2-workflow-status__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+}
+.studio-v2-workflow-status__list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.studio-v2-workflow-status__list span {
+  font-size: 0.75rem;
+  color: var(--eos-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.studio-v2-workflow-status__list strong {
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.studio-v2-placeholder {
+  margin: 0.85rem 0 0;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.88rem;
+  color: var(--eos-ink-muted);
+  background: var(--eos-surface-2, #f5f7f6);
+  border: 1px dashed var(--eos-border, #d5ddd8);
+  border-radius: 8px;
+}
+.studio-v2-internal-collapsed {
+  margin-top: 0.75rem;
+  border: 1px solid var(--eos-line);
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem 0.75rem;
+  background: var(--eos-surface-2, #f7f8f7);
+}
+.studio-v2-internal-collapsed > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--eos-ink-mid);
+}
+.studio-v2-internal-collapsed[open] > summary {
+  margin-bottom: 0.55rem;
+}
+.studio-v2-dollar-input {
+  font: inherit;
+  color: var(--eos-ink);
+  border: 1px solid var(--eos-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  background: #fff;
+  width: 100%;
+  min-width: 5.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.studio-v2-approve-btn.is-disabled,
+.studio-v2-approve-btn:disabled {
+  opacity: 0.42;
+  filter: grayscale(0.35);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.studio-v2-approve-disabled-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  color: var(--eos-ink-muted);
+}
