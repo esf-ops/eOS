@@ -344,18 +344,23 @@ export function createStudioEstimateDigitalEstimateService(deps) {
     return out;
   }
 
-  async function assessReadiness(organizationId, estimateId, configuration = null) {
+  async function assessReadiness(organizationId, estimateId, configuration = null, options = null) {
     const estimate = await loadEstimateRow(organizationId, estimateId);
     if (!estimate) {
       throw deError("Estimate not found", "estimate_not_found", 404);
     }
     const takeoffReviewStatus = await takeoffStatusFor(estimate, organizationId);
+    const opts = options && typeof options === "object" ? options : {};
     const readiness = assessStudioEstimatePublicationReadiness({
       estimate: { ...estimate, organizationId },
       repositoryMode: studioEstimateService.repositoryMode,
       takeoffReviewStatus,
       env,
-      configuration
+      configuration,
+      // Server-side only (Studio V2 publishContext). Do not derive from client body.
+      skipLegacyTakeoffApprovalGate: opts.skipLegacyTakeoffApprovalGate === true,
+      approvedSnapshotAuthority: opts.approvedSnapshotAuthority === true,
+      source: opts.source || null
     });
 
     let preview = null;
@@ -1065,7 +1070,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       };
     },
 
-    async publish({ organizationId, estimateId, actorUserId, body }) {
+    async publish({ organizationId, estimateId, actorUserId, body, publishContext = null }) {
       rejectCallerAuthority(body);
       if (!isDigitalEstimateApiEnabled(env) || !isDigitalEstimatePublishEnabled(env)) {
         throw deError("Digital Estimate publish disabled", "digital_estimate_disabled", 404);
@@ -1115,7 +1120,13 @@ export function createStudioEstimateDigitalEstimateService(deps) {
         throw e;
       }
       // Same validation function as readiness GET (including configuration envelope fields).
-      const readiness = await assessReadiness(organizationId, estimateId, configuration);
+      // publishContext is server-side only (e.g. Studio V2 approved-snapshot authority).
+      const ctx = publishContext && typeof publishContext === "object" ? publishContext : null;
+      const readiness = await assessReadiness(organizationId, estimateId, configuration, {
+        skipLegacyTakeoffApprovalGate: ctx?.skipLegacyTakeoffApprovalGate === true,
+        approvedSnapshotAuthority: ctx?.approvedSnapshotAuthority === true,
+        source: ctx?.source || null
+      });
       mark("validate_request");
       if (!readiness.readiness.eligible) {
         throw readinessFailureError(readiness.readiness);

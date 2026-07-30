@@ -1196,11 +1196,18 @@ export function createStudioV2Service(deps = {}) {
     }
 
     try {
+      // After V2 assessStudioV2PublishReadiness (approved + current calculation),
+      // AI Takeoff is not an authority gate — approved Studio V2 snapshot is.
       const result = await studioDigitalEstimateService.publish({
         organizationId,
         estimateId: row.id,
         actorUserId: actorUserId || null,
-        body: sanitized.body
+        body: sanitized.body,
+        publishContext: {
+          source: "studio_v2_approved_snapshot",
+          approvedSnapshotAuthority: true,
+          skipLegacyTakeoffApprovalGate: true
+        }
       });
 
       // V2 always attaches interactive configuration defaults. Refuse silent
