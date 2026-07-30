@@ -2955,3 +2955,16 @@
 | **Protected** | V1 Studio routes/behavior, `elite100RoomPricingCalculator`, `calculateStudioEstimateV4` math, Digital Estimate public routes, Takeoff geometry, Quote Library / sold APIs, historical v2/v3. |
 | **Revisit trigger** | Slice B+ adds scope editing, approval, or Takeoff embed — must keep V1 default until cutover is explicit. |
 
+
+### 207. Elite 100 Studio V2 Slice B — Working Draft scope editor (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-scope-editor` |
+| **Decision** | Studio V2 Slice B adds estimator editing of **physical Working Draft scope** via `PATCH /api/elite100-studio-v2/cases/:caseId/working-draft/scope`. Persistence uses **repository.update directly** — not V1 `updateScope` — because V1 auto-forks approved/published revisions via `ensureEditableEstimateDraft`. V2 refuses frozen/approved/published/non-editable statuses with `approved_snapshot_readonly` / `draft_required`. Explicit **Save Scope** (no autosave). Calculate requires a clean saved scope. AI Takeoff remains the first-draft source; V2 owns estimator-approved Working Draft scope; customer DE never edits physical scope. |
+| **Why** | Estimators must correct AI Takeoff measurements in Studio without the broken V1 orchestration path. |
+| **SQL** | None. |
+| **Impacted** | `studioV2ScopeEditor.mjs`, `studioV2Service.mjs`, `studioV2Errors.mjs`, `elite100StudioV2Routes.js`, `StudioV2ScopeEditor.tsx`, `StudioV2EstimatorShell.tsx`, `studioV2SliceB.test.mjs`. |
+| **Protected** | V1 Studio behavior, calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, Slice A publish/calculate contracts. |
+| **Revisit trigger** | Slice C Takeoff import/re-import; autosave; approval in V2. |
+

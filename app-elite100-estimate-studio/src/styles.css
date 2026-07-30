@@ -3145,3 +3145,112 @@ button.linkish {
   margin: 0 0 0.4rem;
   font-size: 1.1rem;
 }
+
+/* Studio V2 Slice B — Working Draft scope editor */
+.studio-v2-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.studio-v2-dirty {
+  margin: 0 0 0.75rem;
+  color: var(--eos-warn);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.studio-v2-stale {
+  margin: 0 0 0.75rem;
+  color: var(--eos-ink-mid);
+  font-size: 0.9rem;
+}
+.studio-v2-scope-editor__hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+}
+.studio-v2-scope-editor__rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.studio-v2-room-card {
+  border: 1px solid var(--eos-line-strong);
+  border-radius: var(--eos-radius);
+  padding: 0.85rem 0.95rem 1rem;
+  background: #fbfcfe;
+}
+.studio-v2-room-card__head {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  align-items: end;
+  margin-bottom: 0.75rem;
+}
+.studio-v2-room-card__head label,
+.studio-v2-openings__grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+}
+.studio-v2-room-card__head input,
+.studio-v2-room-card__head select,
+.studio-v2-openings__grid input,
+.studio-v2-piece-table input {
+  font: inherit;
+  color: var(--eos-ink);
+  border: 1px solid var(--eos-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+  background: #fff;
+  min-width: 0;
+  width: 100%;
+}
+.studio-v2-openings {
+  margin-top: 0.5rem;
+}
+.studio-v2-openings h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.92rem;
+}
+.studio-v2-openings__grid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+.studio-v2-piece-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 0.65rem;
+}
+.studio-v2-piece-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.studio-v2-piece-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--eos-ink-muted);
+  padding: 0.35rem 0.4rem;
+  border-bottom: 1px solid var(--eos-line);
+  white-space: nowrap;
+}
+.studio-v2-piece-table td {
+  padding: 0.3rem 0.35rem;
+  vertical-align: middle;
+}
+.studio-v2-piece-table input[type="checkbox"] {
+  width: auto;
+}
+.eq-btn-ghost {
+  background: transparent;
+  border: none;
+  color: var(--eos-ink-mid);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+}
+.eq-btn-ghost:hover {
+  color: var(--eos-accent);
+}
