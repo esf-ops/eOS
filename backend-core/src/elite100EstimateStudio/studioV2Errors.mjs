@@ -26,7 +26,11 @@ export const STUDIO_V2_ERROR_CODES = Object.freeze({
   /** Slice C — mapper could not build rooms from takeoff. */
   TAKEOFF_MAPPING_FAILED: "takeoff_mapping_failed",
   /** Slice C — existing Working Draft scope requires explicit replace_all. */
-  EXISTING_SCOPE_CONFIRMATION_REQUIRED: "existing_scope_confirmation_required"
+  EXISTING_SCOPE_CONFIRMATION_REQUIRED: "existing_scope_confirmation_required",
+  /** Slice E — calculation exists but is stale vs current scope/options. */
+  CALCULATION_STALE: "calculation_stale",
+  /** Slice E — approval blocked by validation/review blockers. */
+  APPROVAL_BLOCKED: "approval_blocked"
 });
 
 const USER_MESSAGES = Object.freeze({
@@ -55,7 +59,11 @@ const USER_MESSAGES = Object.freeze({
   [STUDIO_V2_ERROR_CODES.TAKEOFF_MAPPING_FAILED]:
     "Unable to map AI Takeoff into Studio scope. Nothing was changed.",
   [STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED]:
-    "This Working Draft already has scope. Confirm replace_all to overwrite it with Takeoff."
+    "This Working Draft already has scope. Confirm replace_all to overwrite it with Takeoff.",
+  [STUDIO_V2_ERROR_CODES.CALCULATION_STALE]:
+    "Calculation is stale. Recalculate before approving.",
+  [STUDIO_V2_ERROR_CODES.APPROVAL_BLOCKED]:
+    "This estimate cannot be approved yet. Review the blockers below."
 });
 
 /**
@@ -100,6 +108,8 @@ function defaultStatusForCode(code) {
     case STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY:
     case STUDIO_V2_ERROR_CODES.TAKEOFF_NOT_READY:
     case STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED:
+    case STUDIO_V2_ERROR_CODES.CALCULATION_STALE:
+    case STUDIO_V2_ERROR_CODES.APPROVAL_BLOCKED:
       return 409;
     case STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION:
       return 409;

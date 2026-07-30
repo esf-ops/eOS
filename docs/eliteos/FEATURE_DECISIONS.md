@@ -2993,3 +2993,15 @@
 | **Protected** | Calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace / `CommercialConfigurationSection`, Slice A–C contracts. |
 | **Revisit trigger** | Safe waterfall/vanity editors; percent-discount UX; account-adjustment write path; approval in V2. |
 
+### 210. Elite 100 Studio V2 Slice E — approval snapshot (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-approval-snapshot` |
+| **Decision** | Studio V2 adds **Working Draft → Approved Snapshot** via `POST /api/elite100-studio-v2/cases/:caseId/working-draft/approve`. Approval requires `confirmed: true`, editable draft, current priced calculation (`status=priced`, no `staleReason`), and no unresolved/scope blockers. Persistence uses **repository.update** with the same approval payload shape as V1 (`approval` + `status=approved`). **Does not** call V1 `studioEstimateService.approve` because that path runs `refreshTakeoffGate` / auto-confirm mutations. Approval never publishes, never auto-forks, never calls ensure-editable-draft / open-measurement-revision / refresh-from-takeoff / simplified-publish. Post-approval scope/options are read-only; revision/edit flow is a later-slice placeholder. |
+| **Why** | Estimators need a clean approve gate before Digital Estimate publish without resurrecting V1 orchestration side effects. |
+| **SQL** | None. |
+| **Impacted** | `studioV2Approval.mjs`, `studioV2Service.mjs`, `studioV2Errors.mjs`, `elite100StudioV2Routes.js`, `StudioV2ApprovalPanel.tsx`, `StudioV2EstimatorShell.tsx`, `studioV2SliceE.test.mjs`. |
+| **Protected** | Calculator math, DE public routes, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, Slice A–D contracts, publish-after-approve orchestration (Slice A publish remains separate). |
+| **Revisit trigger** | Create-revision / edit-after-approval flow; richer approval readiness from DE readiness service. |
+

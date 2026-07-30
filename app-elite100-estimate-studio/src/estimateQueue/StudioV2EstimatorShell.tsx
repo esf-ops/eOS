@@ -1,5 +1,5 @@
 /**
- * Elite 100 Studio V2 — estimator command shell (Slices A–D).
+ * Elite 100 Studio V2 — estimator command shell (Slices A–E).
  *
  * Intentionally does NOT import:
  * - AiEstimatorWorkspace
@@ -22,6 +22,10 @@ import StudioV2EstimateOptionsPanel, {
   emptyEditableOptions,
   type StudioV2EditableOptions
 } from "./StudioV2EstimateOptionsPanel";
+import StudioV2ApprovalPanel, {
+  type StudioV2ApprovalReadiness,
+  type StudioV2ApprovedSummary
+} from "./StudioV2ApprovalPanel";
 
 type ProjectHeader = {
   accountName?: string | null;
@@ -88,6 +92,8 @@ type WorkingDraftResponse = {
   optionsEditable?: boolean;
   scopeEditability?: { editable?: boolean; code?: string | null; message?: string | null };
   lastCalculation?: CalculationResult;
+  approvalReadiness?: StudioV2ApprovalReadiness;
+  approvedSummary?: StudioV2ApprovedSummary;
   approvedPublished?: {
     approved?: boolean;
     published?: boolean;
@@ -107,6 +113,7 @@ type WorkingDraftResponse = {
   estimateId?: string | null;
   originType?: string | null;
   revision?: number | null;
+  status?: string | null;
   takeoffImportNeeded?: boolean;
   takeoffJobId?: string | null;
 };
@@ -178,11 +185,14 @@ export default function StudioV2EstimatorShell(props: {
   const [scopeSaveNotice, setScopeSaveNotice] = useState<string | null>(null);
   const [optionsSaveError, setOptionsSaveError] = useState<string | null>(null);
   const [optionsSaveNotice, setOptionsSaveNotice] = useState<string | null>(null);
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [approveNotice, setApproveNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [calcBusy, setCalcBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
   const [scopeSaveBusy, setScopeSaveBusy] = useState(false);
   const [optionsSaveBusy, setOptionsSaveBusy] = useState(false);
+  const [approveBusy, setApproveBusy] = useState(false);
 
   const hydrateFromDraft = useCallback((draftBody: WorkingDraftResponse) => {
     setDraft(draftBody);
@@ -451,13 +461,57 @@ export default function StudioV2EstimatorShell(props: {
     }
   }
 
+  async function runApprove(args: { confirmed: true; approvalNote?: string }) {
+    if (scopeDirty || optionsDirty) {
+      setApproveError("Save scope and options before approving.");
+      return;
+    }
+    if (calcStale || !calcResult?.available) {
+      setApproveError("Calculate a current estimate before approving.");
+      return;
+    }
+    setApproveBusy(true);
+    setApproveError(null);
+    setApproveNotice(null);
+    try {
+      const body = (await apiPost(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft/approve`,
+        authToken,
+        {
+          confirmed: true,
+          approvalNote: args.approvalNote,
+          clientMutationId: `v2-approve-${Date.now()}`,
+          expectedRevision: draft?.revision ?? draft?.projectHeader?.revision ?? undefined
+        }
+      )) as {
+        ok?: boolean;
+        status?: string;
+        approvedAt?: string;
+        approvedSummary?: StudioV2ApprovedSummary;
+        approvalReadiness?: StudioV2ApprovalReadiness;
+      };
+      setApproveNotice(
+        body.approvedAt
+          ? `Estimate approved at ${body.approvedAt}.`
+          : "Estimate approved."
+      );
+      setCalcStale(false);
+      setCalcStaleReason(null);
+      await load();
+    } catch (e) {
+      setApproveError(errorMessage(e));
+    } finally {
+      setApproveBusy(false);
+    }
+  }
+
   async function runPublish() {
     const estimateId = draft?.estimateId || draft?.projectHeader?.estimateId;
     if (!estimateId) {
       setPublishError("No approved estimate is available to publish.");
       return;
     }
-    if (!draft?.approvedPublished?.approved) {
+    if (!draft?.approvedPublished?.approved && !draft?.approvedSummary?.approved) {
       setPublishError("Approve required before publish.");
       return;
     }
@@ -481,11 +535,16 @@ export default function StudioV2EstimatorShell(props: {
 
   const header = draft?.projectHeader;
   const scope = draft?.scopeSummary;
-  const approved = Boolean(draft?.approvedPublished?.approved);
+  const approved = Boolean(
+    draft?.approvedPublished?.approved ||
+      draft?.approvedSummary?.approved ||
+      String(draft?.status || header?.status || "").toLowerCase() === "approved"
+  );
   const scopeReadOnly =
     !draft?.scopeEditable ||
     draft?.code === "unsupported_origin" ||
-    draft?.code === "no_estimate";
+    draft?.code === "no_estimate" ||
+    approved;
   const customerUrl =
     draft?.approvedPublished?.customerUrl ||
     draft?.publicationSummary?.customerUrl ||
@@ -743,6 +802,22 @@ export default function StudioV2EstimatorShell(props: {
               </ul>
             ) : null}
           </section>
+
+          <StudioV2ApprovalPanel
+            readiness={draft.approvalReadiness}
+            approvedSummary={draft.approvedSummary}
+            status={draft.status || header?.status}
+            revision={draft.revision ?? header?.revision}
+            calcTotal={calcResult?.total ?? draft.approvedSummary?.customerDisplayTotal}
+            calcAvailable={Boolean(calcResult?.available)}
+            calcStale={calcStale}
+            scopeDirty={scopeDirty}
+            optionsDirty={optionsDirty}
+            busy={approveBusy}
+            error={approveError}
+            notice={approveNotice}
+            onApprove={(args) => void runApprove(args)}
+          />
 
           <section className="studio-v2-panel" data-testid="studio-v2-digital-estimate">
             <div className="studio-v2-panel__head">
