@@ -571,6 +571,10 @@ const fakeCalc = {
   assert.ok(styles.includes(".studio-v2-piece-row.is-excluded"));
   assert.ok(styles.includes(".studio-v2-workbench-panel"));
   assert.ok(styles.includes(".studio-v2-legacy-openings"));
+  assert.ok(styles.includes(".studio-shell--v2"));
+  assert.ok(styles.includes("min-width: 1180px"));
+  assert.ok(styles.includes("4.5rem"));
+  assert.ok(studioApp.includes("studio-shell--v2"));
   assert.ok(!/from\s+["'].*AiEstimatorWorkspace["']/.test(editor));
   assert.ok(!/from\s+["'].*EstimateTakeoffWorkspace["']/.test(editor));
   assert.ok(!/from\s+["'].*TakeoffReviewWorkbench["']/.test(editor));

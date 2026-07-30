@@ -531,15 +531,19 @@ export default function StudioApp() {
         onSignOut={() => void signOut()}
       />
       <main
-        className={
+        className={[
+          "studio-shell",
           mainNav === "shared-inbox" ||
           mainNav === "command-center" ||
           mainNav === "estimate-queue" ||
           mainNav === "estimate-workspace" ||
           mainNav === "publications"
-            ? "studio-shell studio-shell--wide"
-            : "studio-shell"
-        }
+            ? "studio-shell--wide"
+            : "",
+          studioV2Preview && studioV2UiEnabled() ? "studio-shell--v2" : ""
+        ]
+          .filter(Boolean)
+          .join(" ")}
       >
         {mainNav === "publications" && publicationsMode === "publish-search" ? (
           <div className="pilot-banner" data-testid="studio-publications-banner">
