@@ -1,5 +1,5 @@
 /**
- * Elite 100 Studio V2 — estimator command shell (Slices A–E).
+ * Elite 100 Studio V2 — estimator command shell (Slices A–F).
  *
  * Intentionally does NOT import:
  * - AiEstimatorWorkspace
@@ -26,6 +26,10 @@ import StudioV2ApprovalPanel, {
   type StudioV2ApprovalReadiness,
   type StudioV2ApprovedSummary
 } from "./StudioV2ApprovalPanel";
+import StudioV2PublishPanel, {
+  type StudioV2PublishReadiness,
+  type StudioV2PublicationView
+} from "./StudioV2PublishPanel";
 
 type ProjectHeader = {
   accountName?: string | null;
@@ -94,6 +98,7 @@ type WorkingDraftResponse = {
   lastCalculation?: CalculationResult;
   approvalReadiness?: StudioV2ApprovalReadiness;
   approvedSummary?: StudioV2ApprovedSummary;
+  publishReadiness?: StudioV2PublishReadiness;
   approvedPublished?: {
     approved?: boolean;
     published?: boolean;
@@ -505,7 +510,7 @@ export default function StudioV2EstimatorShell(props: {
     }
   }
 
-  async function runPublish() {
+  async function runPublish(args?: { confirmed?: true }) {
     const estimateId = draft?.estimateId || draft?.projectHeader?.estimateId;
     if (!estimateId) {
       setPublishError("No approved estimate is available to publish.");
@@ -515,6 +520,10 @@ export default function StudioV2EstimatorShell(props: {
       setPublishError("Approve required before publish.");
       return;
     }
+    if (!args?.confirmed) {
+      setPublishError("Confirm publish before continuing.");
+      return;
+    }
     setPublishBusy(true);
     setPublishError(null);
     setPublishNotice(null);
@@ -522,9 +531,23 @@ export default function StudioV2EstimatorShell(props: {
       const body = (await apiPost(
         `/api/elite100-studio-v2/approved/${encodeURIComponent(estimateId)}/publish`,
         authToken,
-        { confirm: true }
-      )) as { customerUrl?: string | null; staffNotice?: string | null };
-      setPublishNotice(body.staffNotice || "Digital Estimate published.");
+        {
+          confirmed: true,
+          deliveryMode: "link_only",
+          clientMutationId: `v2-publish-${Date.now()}`
+        }
+      )) as {
+        customerUrl?: string | null;
+        staffNotice?: string | null;
+        publication?: StudioV2PublicationView | null;
+        ok?: boolean;
+      };
+      setPublishNotice(
+        body.staffNotice ||
+          (body.publication?.customerUrl || body.customerUrl
+            ? "Digital Estimate published (link-only)."
+            : "Digital Estimate published.")
+      );
       await load();
     } catch (e) {
       setPublishError(errorMessage(e));
@@ -819,63 +842,31 @@ export default function StudioV2EstimatorShell(props: {
             onApprove={(args) => void runApprove(args)}
           />
 
-          <section className="studio-v2-panel" data-testid="studio-v2-digital-estimate">
-            <div className="studio-v2-panel__head">
-              <h2>Digital Estimate</h2>
-              {approved ? (
-                <button
-                  type="button"
-                  className="eq-btn-primary"
-                  disabled={publishBusy}
-                  onClick={() => void runPublish()}
-                  data-testid="studio-v2-publish"
-                >
-                  {publishBusy ? "Publishing…" : "Publish"}
-                </button>
-              ) : (
-                <p className="studio-v2-approve-required" data-testid="studio-v2-approve-required">
-                  Approve required before publish
-                </p>
-              )}
-            </div>
-            {publishError ? (
-              <div className="error-box" data-testid="studio-v2-publish-error">
-                {publishError}
-              </div>
-            ) : null}
-            {publishNotice ? (
-              <p className="studio-v2-notice" data-testid="studio-v2-publish-notice">
-                {publishNotice}
-              </p>
-            ) : null}
-            <dl className="studio-v2-dl">
-              <div>
-                <dt>Publication status</dt>
-                <dd>
-                  {draft.approvedPublished?.statusLabel ||
-                    draft.publicationSummary?.statusLabel ||
-                    "Not published"}
-                </dd>
-              </div>
-              <div>
-                <dt>Active link</dt>
-                <dd>
-                  {customerUrl ? (
-                    <a
-                      href={customerUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      data-testid="studio-v2-customer-url"
-                    >
-                      Open customer link
-                    </a>
-                  ) : (
-                    "—"
-                  )}
-                </dd>
-              </div>
-            </dl>
-          </section>
+          <StudioV2PublishPanel
+            estimateId={draft.estimateId || header?.estimateId}
+            approved={approved}
+            readiness={draft.publishReadiness}
+            publicationSummary={draft.publicationSummary}
+            activePublication={
+              (activity?.activePublication as StudioV2PublicationView | null) ||
+              (draft.approvedPublished?.customerUrl
+                ? {
+                    customerUrl: draft.approvedPublished.customerUrl,
+                    publicationId: draft.approvedPublished.publicationId,
+                    active: true,
+                    status: draft.approvedPublished.publicationState
+                  }
+                : null)
+            }
+            historicalPublications={
+              (activity?.historicalPublications as StudioV2PublicationView[]) || []
+            }
+            customerUrl={customerUrl}
+            busy={publishBusy}
+            error={publishError}
+            notice={publishNotice}
+            onPublish={(args) => void runPublish(args)}
+          />
 
           <section className="studio-v2-panel" data-testid="studio-v2-customer-activity">
             <h2>Customer activity</h2>
