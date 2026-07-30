@@ -156,8 +156,8 @@ export function attachElite100StudioV2Routes(app, deps) {
         });
       }
     } catch (e) {
-      console.warn(
-        "[elite100-studio-v2] configuration stack unavailable:",
+      console.error(
+        "[elite100-studio-v2][CRITICAL] configuration stack unavailable — interactive V2 publish will fail closed:",
         e?.code || e?.message
       );
       configurationStudioService = null;

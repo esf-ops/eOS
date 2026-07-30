@@ -57,6 +57,7 @@ import {
 } from "./studioV2Approval.mjs";
 import {
   assessStudioV2PublishReadiness,
+  assertStudioV2InteractivePublishResult,
   buildStudioV2PublicationResult,
   sanitizeStudioV2PublishBody
 } from "./studioV2Publish.mjs";
@@ -1053,6 +1054,22 @@ export function createStudioV2Service(deps = {}) {
         body: sanitized.body
       });
 
+      // V2 always attaches interactive configuration defaults. Refuse silent
+      // document-only success so customer links cannot land on configuration_absent.
+      let interactiveEnvelope;
+      try {
+        interactiveEnvelope = assertStudioV2InteractivePublishResult(
+          result,
+          sanitized.body.configuration
+        );
+      } catch (guardErr) {
+        throw createStudioV2Error(STUDIO_V2_ERROR_CODES.CONFIGURATION_ENVELOPE_REQUIRED, {
+          message: guardErr?.message,
+          statusCode: guardErr?.statusCode || 422,
+          details: guardErr?.details || null
+        });
+      }
+
       const estimate = safeView(row);
       const publication = buildStudioV2PublicationResult(result, estimate);
       const pubBundle = await loadPublicationBundle(organizationId, estimate);
@@ -1106,6 +1123,14 @@ export function createStudioV2Service(deps = {}) {
         customerUrl: publication.customerUrl,
         linkStatus: publication.linkStatus,
         reused: publication.reused,
+        configurationUpdated: publication.configurationUpdated,
+        envelope: publication.envelope || {
+          configured: interactiveEnvelope.configured,
+          reason: interactiveEnvelope.reason,
+          repaired: interactiveEnvelope.repaired,
+          updated: interactiveEnvelope.updated
+        },
+        publishedConfiguration: publication.publishedConfiguration,
         staffNotice: publication.staffNotice,
         publicationSummary: pubBundle.publicationSummary || publication.summary,
         activePublication,
@@ -1129,6 +1154,19 @@ export function createStudioV2Service(deps = {}) {
     } catch (e) {
       if (e?.code && Object.values(STUDIO_V2_ERROR_CODES).includes(e.code)) throw e;
       const rawCode = e?.code || null;
+      if (
+        rawCode === "DE-ENVELOPE-ACTIVATION-FAILED" ||
+        rawCode === "DE-CONFIGURATION-UNAVAILABLE" ||
+        rawCode === "configuration_envelope_required"
+      ) {
+        throw createStudioV2Error(STUDIO_V2_ERROR_CODES.CONFIGURATION_ENVELOPE_REQUIRED, {
+          message: e?.message,
+          statusCode:
+            Number(e?.statusCode) ||
+            (rawCode === "DE-CONFIGURATION-UNAVAILABLE" ? 503 : 422),
+          details: { causeCode: rawCode }
+        });
+      }
       const mapped = mapPublishBlockerCode(rawCode);
       if (mapped === STUDIO_V2_ERROR_CODES.APPROVE_REQUIRED) {
         throw createStudioV2Error(STUDIO_V2_ERROR_CODES.APPROVE_REQUIRED);

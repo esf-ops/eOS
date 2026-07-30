@@ -52,6 +52,35 @@ function baseScope(overrides = {}) {
   };
 }
 
+function interactivePublishResult(overrides = {}) {
+  const {
+    publication: publicationOverride,
+    publishedConfiguration: publishedConfigurationOverride,
+    envelope: envelopeOverride,
+    ...rest
+  } = overrides;
+  return {
+    ok: true,
+    publication: {
+      id: "pub-active",
+      status: "active",
+      publishedAt: "2026-07-30T19:00:00.000Z",
+      customerUrl: "https://example.test/e/tok-active",
+      ...(publicationOverride || {})
+    },
+    customerUrl: "https://example.test/e/tok-active",
+    linkStatus: "active",
+    envelope: { configured: true, ...(envelopeOverride || {}) },
+    publishedConfiguration: {
+      customerChoiceGroups: ["material_color", "sink", "edge"],
+      allowedOptionKeys: ["qty-sink"],
+      ...(publishedConfigurationOverride || {})
+    },
+    staffNotice: "Published.",
+    ...rest
+  };
+}
+
 const fakeCalc = {
   fingerprint: "v2f-fp",
   calculatedAt: "2026-07-30T18:00:00.000Z",
@@ -212,18 +241,15 @@ async function createApproved(repo, extra = {}) {
       async publish({ body }) {
         publishCalls += 1;
         seenBody = body;
-        return {
-          ok: true,
+        return interactivePublishResult({
           publication: {
             id: "pub-active",
             status: "active",
             publishedAt: "2026-07-30T19:00:00.000Z",
-            customerUrl: "https://example.test/de/active"
+            customerUrl: "https://example.test/e/tok-active"
           },
-          customerUrl: "https://example.test/de/active",
-          linkStatus: "active",
-          staffNotice: "Published."
-        };
+          customerUrl: "https://example.test/e/tok-active"
+        });
       },
       async simplifiedPublish() {
         simplifiedCalls += 1;
@@ -242,14 +268,14 @@ async function createApproved(repo, extra = {}) {
             publicationId: "pub-active",
             estimateId: row.id,
             revision: 1,
-            customerUrl: "https://example.test/de/active",
+            customerUrl: "https://example.test/e/tok-active",
             publishedAt: "2026-07-30T19:00:00.000Z"
           },
           activePublication: {
             id: "pub-active",
             status: "active",
             revisionNumber: 1,
-            customerUrl: "https://example.test/de/active",
+            customerUrl: "https://example.test/e/tok-active",
             publishedAt: "2026-07-30T19:00:00.000Z"
           },
           publications: [
@@ -257,7 +283,7 @@ async function createApproved(repo, extra = {}) {
               id: "pub-active",
               status: "active",
               revisionNumber: 1,
-              customerUrl: "https://example.test/de/active",
+              customerUrl: "https://example.test/e/tok-active",
               publishedAt: "2026-07-30T19:00:00.000Z"
             }
           ],
@@ -288,9 +314,10 @@ async function createApproved(repo, extra = {}) {
   assert.equal(approveCalls, 0);
   assert.equal(published.estimateId, row.id);
   assert.equal(published.caseId, CASE_ID);
-  assert.equal(published.publication.customerUrl, "https://example.test/de/active");
+  assert.equal(published.publication.customerUrl, "https://example.test/e/tok-active");
   assert.equal(published.publication.active, true);
   assert.equal(published.clientMutationId, "pub-1");
+  assert.equal(published.envelope?.configured, true);
   assert.equal(published.sideEffects.simplifiedPublish, false);
   assert.equal(published.sideEffects.autoApprove, false);
   assert.equal(published.sideEffects.autoCalculate, false);
@@ -310,12 +337,43 @@ async function createApproved(repo, extra = {}) {
   assert.ok(Array.isArray(seenBody?.configuration?.allowedOptionKeys));
   assert.ok(seenBody.configuration.allowedOptionKeys.length > 0);
 
+  // Guard: document-only DE result must fail closed for interactive V2 publish.
+  const v2DocOnly = createStudioV2Service({
+    repository: repo,
+    env: {},
+    calculateStudioEstimateImpl: async () => fakeCalc,
+    studioDigitalEstimateService: {
+      async publish() {
+        return {
+          ok: true,
+          publication: { id: "pub-doc", status: "active", customerUrl: "https://example.test/e/doc" },
+          customerUrl: "https://example.test/e/doc",
+          envelope: { configured: false, reason: "document_only" }
+        };
+      },
+      async getWorkspacePublicationSummary() {
+        return { publicationSummary: {}, publications: [], reviewRequests: [] };
+      }
+    }
+  });
+  await assert.rejects(
+    () =>
+      v2DocOnly.publishApproved({
+        organizationId: ORG,
+        estimateId: row.id,
+        actorUserId: ACTOR,
+        body: { confirmed: true }
+      }),
+    (e) => e?.code === STUDIO_V2_ERROR_CODES.CONFIGURATION_ENVELOPE_REQUIRED
+  );
+
   const svcSrc = readFileSync(join(__dirname, "studioV2Service.mjs"), "utf8");
   assert.ok(!svcSrc.includes("createStudioSimplifiedWorkflowService"));
   assert.ok(!svcSrc.includes("ensureEditableEstimateDraft("));
   assert.ok(!svcSrc.includes("openMeasurementRevision("));
   assert.ok(!svcSrc.includes("refreshScopeFromTakeoff("));
   assert.ok(!/\.publishDigitalEstimate\s*\(/.test(svcSrc));
+  assert.ok(svcSrc.includes("assertStudioV2InteractivePublishResult"));
   console.log("ok: 4–11 Publish succeeds without forbidden orchestration");
 }
 
@@ -329,15 +387,14 @@ async function createApproved(repo, extra = {}) {
     calculateStudioEstimateImpl: async () => fakeCalc,
     studioDigitalEstimateService: {
       async publish() {
-        return {
-          ok: true,
+        return interactivePublishResult({
           publication: {
             id: "pub-active",
             status: "active",
-            customerUrl: "https://example.test/de/active"
+            customerUrl: "https://example.test/e/tok-active"
           },
-          customerUrl: "https://example.test/de/active"
-        };
+          customerUrl: "https://example.test/e/tok-active"
+        });
       },
       async getWorkspacePublicationSummary() {
         return {
@@ -346,27 +403,27 @@ async function createApproved(repo, extra = {}) {
             active: true,
             statusLabel: "Published",
             publicationId: "pub-active",
-            customerUrl: "https://example.test/de/active",
+            customerUrl: "https://example.test/e/tok-active",
             customerActivityState: "customer_viewed"
           },
           activePublication: {
             id: "pub-active",
             status: "active",
             revisionNumber: 1,
-            customerUrl: "https://example.test/de/active"
+            customerUrl: "https://example.test/e/tok-active"
           },
           publications: [
             {
               id: "pub-active",
               status: "active",
               revisionNumber: 1,
-              customerUrl: "https://example.test/de/active"
+              customerUrl: "https://example.test/e/tok-active"
             },
             {
               id: "pub-old",
               status: "superseded",
               revisionNumber: 1,
-              customerUrl: "https://example.test/de/old"
+              customerUrl: "https://example.test/e/tok-old"
             }
           ],
           reviewRequests: []
@@ -614,6 +671,18 @@ async function createApproved(repo, extra = {}) {
   assert.ok(studioApp.includes("EstimateTakeoffWorkspace"));
   assert.ok(studioApp.includes("studioV2=1") || studioApp.includes("studioV2"));
   console.log("ok: production QA hardening contracts");
+}
+
+{
+  // Full interactive Digital Estimate path (V2 → public configure mode)
+  const { spawnSync } = await import("node:child_process");
+  const r = spawnSync(
+    process.execPath,
+    [join(__dirname, "studioV2PublishActivatesDigitalEstimate.test.mjs")],
+    { stdio: "inherit" }
+  );
+  assert.equal(r.status, 0, "studioV2PublishActivatesDigitalEstimate.test.mjs must pass");
+  console.log("ok: V2 interactive Digital Estimate activation suite");
 }
 
 console.log("\nAll Studio V2 Slice F tests passed.\n");
