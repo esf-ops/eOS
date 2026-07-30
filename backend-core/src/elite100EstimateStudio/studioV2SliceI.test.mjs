@@ -432,8 +432,79 @@ const fakeCalc = {
 }
 
 {
+  const {
+    geometrySfFromDimensions,
+    countertopSfMode,
+    displayCountertopSf,
+    cutoutsSummary,
+    exposedSummaryText,
+    edgeProfileLabel,
+    backsplashNeedsRunLength
+  } = await import(
+    "../../../app-elite100-estimate-studio/src/estimateQueue/studioV2ScopeReviewHelpers.ts"
+  );
+
+  assert.equal(geometrySfFromDimensions({ lengthIn: 96, depthIn: 25.5, quantity: 1 }), 17);
+  assert.equal(countertopSfMode({ included: true }), "dimensions");
+  assert.equal(countertopSfMode({ included: true, approvedDirectSqft: 12 }), "direct");
+  assert.equal(countertopSfMode({ included: false }), "excluded");
+  assert.equal(
+    displayCountertopSf({
+      included: true,
+      lengthIn: 96,
+      depthIn: 25.5,
+      quantity: 1
+    }).countedSf,
+    17
+  );
+  assert.equal(
+    displayCountertopSf({
+      included: true,
+      lengthIn: 96,
+      depthIn: 25.5,
+      quantity: 1,
+      approvedDirectSqft: 10
+    }).mode,
+    "direct"
+  );
+  assert.equal(
+    displayCountertopSf({ included: false, lengthIn: 96, depthIn: 25.5, quantity: 1 }).countedSf,
+    null
+  );
+  assert.equal(cutoutsSummary({}), "None");
+  assert.equal(cutoutsSummary({ kitchenSinkCutouts: 1 }), "Sink ×1");
+  assert.equal(
+    cutoutsSummary({ kitchenSinkCutouts: 1, cooktopCutouts: 1, outletCutouts: 4 }),
+    "Sink ×1 · Cooktop ×1 · Outlet ×4"
+  );
+  assert.ok(cutoutsSummary({ popupOutletCutouts: 1 }).includes("not priced"));
+  assert.equal(
+    exposedSummaryText({
+      exposedSidesSummary: "Front 8.00 LF",
+      finishedEdgeLf: 8
+    }),
+    "Front 8.00 LF"
+  );
+  assert.equal(edgeProfileLabel(null, [{ value: "edge_eased", label: "Eased" }]).label, "Estimate default");
+  assert.equal(edgeProfileLabel("edge_knife", [{ value: "edge_knife", label: "Knife" }]).upgraded, true);
+  assert.equal(
+    backsplashNeedsRunLength({ includeBacksplash: true, backsplashEligibleLengthIn: null }),
+    true
+  );
+  assert.equal(
+    backsplashNeedsRunLength({ includeBacksplash: true, backsplashEligibleLengthIn: 96 }),
+    false
+  );
+  console.log("ok: scope review helper display contracts");
+}
+
+{
   const editor = readFileSync(
     join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2ScopeEditor.tsx"),
+    "utf8"
+  );
+  const helpers = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/studioV2ScopeReviewHelpers.ts"),
     "utf8"
   );
   const shell = readFileSync(
@@ -444,21 +515,43 @@ const fakeCalc = {
     join(root, "app-elite100-estimate-studio/src/StudioApp.tsx"),
     "utf8"
   );
+  const styles = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/styles.css"),
+    "utf8"
+  );
   const svc = readFileSync(join(__dirname, "studioV2Service.mjs"), "utf8");
   const adapter = readFileSync(join(__dirname, "elite100RoomPricingStudioAdapter.mjs"), "utf8");
 
   assert.ok(editor.includes('data-testid="studio-v2-piece-table"'));
   assert.ok(editor.includes('data-testid="studio-v2-piece-row"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-geometry-sf"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-sf-mode"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-sf-mode-select"'));
   assert.ok(editor.includes('data-testid="studio-v2-set-exposed-sides"'));
+  assert.ok(editor.includes('data-testid="studio-v2-exposed-summary"'));
   assert.ok(editor.includes('data-testid="studio-v2-exposed-sides-modal"'));
   assert.ok(editor.includes('data-testid="studio-v2-cutouts"'));
+  assert.ok(editor.includes('data-testid="studio-v2-cutouts-summary"'));
   assert.ok(editor.includes('data-testid="studio-v2-cutouts-menu"'));
   assert.ok(editor.includes('data-testid="studio-v2-piece-edge-profile"'));
+  assert.ok(editor.includes('data-testid="studio-v2-backsplash-run-warning"'));
+  assert.ok(editor.includes("Use piece length"));
+  assert.ok(editor.includes("Backsplash selected, but no run length is available."));
+  assert.ok(editor.includes("Excluded from quote"));
+  assert.ok(editor.includes('data-excluded={excluded ? "true" : "false"}'));
+  assert.ok(editor.includes("Approved estimate is read-only."));
   assert.ok(editor.includes('data-testid="studio-v2-plan-preview"'));
+  assert.ok(
+    editor.includes("Plan preview will be added when V2 intake/attachment links are wired.")
+  );
   assert.ok(editor.includes('data-testid="studio-v2-scope-readonly"'));
   assert.ok(editor.includes("STUDIO_V2_EDGE_PROFILES"));
   assert.ok(editor.includes("not priced yet"));
   assert.ok(editor.includes("readOnly"));
+  assert.ok(editor.includes("studio-v2-piece-review"));
+  assert.ok(helpers.includes("geometrySfFromDimensions"));
+  assert.ok(helpers.includes("no countertop SF while included"));
+  assert.ok(styles.includes(".studio-v2-piece-review.is-excluded"));
   assert.ok(!/from\s+["'].*AiEstimatorWorkspace["']/.test(editor));
   assert.ok(!/from\s+["'].*EstimateTakeoffWorkspace["']/.test(editor));
   assert.ok(!/from\s+["'].*TakeoffReviewWorkbench["']/.test(editor));
@@ -467,11 +560,12 @@ const fakeCalc = {
   assert.ok(!shell.includes("ensure-editable-draft"));
   assert.ok(!shell.includes("refresh-from-takeoff"));
   assert.ok(!shell.includes("simplified-publish"));
+  assert.ok(!shell.includes("open-measurement-revision"));
   assert.ok(!svc.includes("ensureEditableEstimateDraft("));
   assert.ok(adapter.includes("hasPieceOpenings"));
   assert.ok(studioApp.includes("EstimateTakeoffWorkspace"));
   assert.ok(studioApp.includes("studioV2Preview"));
-  console.log("ok: frontend/source contracts for Slice I / I.1");
+  console.log("ok: frontend/source contracts for Slice I / scope review UI polish");
 }
 
 console.log("\nAll Studio V2 Slice I tests passed.\n");
