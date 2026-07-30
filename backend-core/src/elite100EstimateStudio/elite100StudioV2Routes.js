@@ -67,6 +67,7 @@ function studioV2ErrorBody(e, fallback) {
     body.blockers = sanitizePublishBlockers(e.blockers);
   }
   if (e?.details != null) body.details = e.details;
+  if (Array.isArray(e?.details?.issues)) body.issues = e.details.issues;
   if (e?.code === "estimate_revision_superseded" || code === STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION) {
     body.activeEstimateId = e.activeEstimateId || e?.details?.activeEstimateId || null;
   }
@@ -250,6 +251,33 @@ export function attachElite100StudioV2Routes(app, deps) {
       } catch (e) {
         logStudioV2("working-draft calculate failed", e, req);
         const { status, body } = studioV2ErrorBody(e, "Unable to calculate estimate");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.patch(
+    "/api/elite100-studio-v2/cases/:caseId/working-draft/scope",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioV2.patchWorkingDraftScope({
+          organizationId,
+          intakeCaseId: req.params.caseId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        auditStudioV2("working_draft.scope_patch", req, {
+          intakeCaseId: req.params.caseId,
+          estimateId: result.estimateId || null
+        });
+        res.json(result);
+      } catch (e) {
+        logStudioV2("working-draft scope patch failed", e, req);
+        const { status, body } = studioV2ErrorBody(e, "Unable to save scope");
         res.status(status).json(body);
       }
     }

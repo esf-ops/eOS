@@ -1,5 +1,5 @@
 /**
- * Elite 100 Studio V2 Slice A — read-only estimator command shell.
+ * Elite 100 Studio V2 — estimator command shell (Slice A + Slice B scope editor).
  *
  * Intentionally does NOT import:
  * - AiEstimatorWorkspace
@@ -10,7 +10,12 @@
  * - deriveAiEstimatorStage
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { apiGet, apiPost, ApiError } from "../lib/api";
+import { apiGet, apiPatch, apiPost, ApiError } from "../lib/api";
+import StudioV2ScopeEditor, {
+  cloneEditableScope,
+  emptyEditableScope,
+  type StudioV2EditableScope
+} from "./StudioV2ScopeEditor";
 
 type ProjectHeader = {
   accountName?: string | null;
@@ -71,6 +76,9 @@ type WorkingDraftResponse = {
   empty?: boolean;
   projectHeader?: ProjectHeader;
   scopeSummary?: ScopeSummary;
+  editableScope?: StudioV2EditableScope;
+  scopeEditable?: boolean;
+  scopeEditability?: { editable?: boolean; code?: string | null; message?: string | null };
   lastCalculation?: CalculationResult;
   approvedPublished?: {
     approved?: boolean;
@@ -90,6 +98,7 @@ type WorkingDraftResponse = {
   };
   estimateId?: string | null;
   originType?: string | null;
+  revision?: number | null;
 };
 
 type CustomerActivityResponse = {
@@ -145,51 +154,152 @@ export default function StudioV2EstimatorShell(props: {
   const [draft, setDraft] = useState<WorkingDraftResponse | null>(null);
   const [activity, setActivity] = useState<CustomerActivityResponse | null>(null);
   const [calcResult, setCalcResult] = useState<CalculationResult | null>(null);
+  const [scopeDraft, setScopeDraft] = useState<StudioV2EditableScope>(emptyEditableScope());
+  const [scopeDirty, setScopeDirty] = useState(false);
+  const [calcStale, setCalcStale] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishNotice, setPublishNotice] = useState<string | null>(null);
+  const [scopeSaveError, setScopeSaveError] = useState<string | null>(null);
+  const [scopeSaveNotice, setScopeSaveNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [calcBusy, setCalcBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
+  const [scopeSaveBusy, setScopeSaveBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    setBusy(true);
-    setLoadError(null);
-    try {
-      const [draftBody, activityBody] = await Promise.all([
-        apiGet(`/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft`, authToken) as Promise<WorkingDraftResponse>,
-        apiGet(
-          `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/customer-activity`,
-          authToken
-        ).catch((e) => {
-          if (e instanceof ApiError) {
-            const code =
-              e.body && typeof e.body === "object"
-                ? String((e.body as { code?: unknown }).code || "")
-                : "";
-            if (code === "no_estimate") return null;
-          }
-          throw e;
-        }) as Promise<CustomerActivityResponse | null>
-      ]);
-      setDraft(draftBody);
-      setCalcResult(draftBody?.lastCalculation || null);
-      setActivity(activityBody);
-    } catch (e) {
-      setLoadError(errorMessage(e));
-      setDraft(null);
-      setActivity(null);
-    } finally {
-      setBusy(false);
-    }
-  }, [authToken, caseId]);
+  const hydrateFromDraft = useCallback((draftBody: WorkingDraftResponse) => {
+    setDraft(draftBody);
+    setCalcResult(draftBody?.lastCalculation || null);
+    // Never overwrite local editable fields from a calculate-only refresh while dirty.
+    setScopeDraft(cloneEditableScope(draftBody?.editableScope));
+    setScopeDirty(false);
+    setCalcStale(false);
+    setScopeSaveError(null);
+  }, []);
+
+  const load = useCallback(
+    async (opts?: { preserveDirtyScope?: boolean }) => {
+      setBusy(true);
+      setLoadError(null);
+      try {
+        const [draftBody, activityBody] = await Promise.all([
+          apiGet(
+            `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft`,
+            authToken
+          ) as Promise<WorkingDraftResponse>,
+          apiGet(
+            `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/customer-activity`,
+            authToken
+          ).catch((e) => {
+            if (e instanceof ApiError) {
+              const code =
+                e.body && typeof e.body === "object"
+                  ? String((e.body as { code?: unknown }).code || "")
+                  : "";
+              if (code === "no_estimate") return null;
+            }
+            throw e;
+          }) as Promise<CustomerActivityResponse | null>
+        ]);
+        if (opts?.preserveDirtyScope && scopeDirty) {
+          setDraft(draftBody);
+          setCalcResult(draftBody?.lastCalculation || null);
+        } else {
+          hydrateFromDraft(draftBody);
+        }
+        setActivity(activityBody);
+      } catch (e) {
+        setLoadError(errorMessage(e));
+        setDraft(null);
+        setActivity(null);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [authToken, caseId, hydrateFromDraft, scopeDirty]
+  );
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // Initial load only — subsequent reloads are explicit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken, caseId]);
+
+  function onScopeChange(next: StudioV2EditableScope) {
+    setScopeDraft(next);
+    setScopeDirty(true);
+    setCalcStale(true);
+    setScopeSaveNotice(null);
+    setScopeSaveError(null);
+  }
+
+  async function runSaveScope() {
+    if (!draft?.scopeEditable) {
+      setScopeSaveError(draft?.scopeEditability?.message || "Scope is read-only.");
+      return;
+    }
+    setScopeSaveBusy(true);
+    setScopeSaveError(null);
+    setScopeSaveNotice(null);
+    try {
+      const body = (await apiPatch(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft/scope`,
+        authToken,
+        {
+          scope: {
+            rooms: scopeDraft.rooms,
+            openings: scopeDraft.openings
+          },
+          clientMutationId: `v2-scope-${Date.now()}`,
+          expectedRevision: draft.revision ?? draft.projectHeader?.revision ?? undefined
+        }
+      )) as {
+        ok?: boolean;
+        scopeSummary?: ScopeSummary;
+        editableScope?: StudioV2EditableScope;
+        lastCalculation?: CalculationResult;
+        revision?: number;
+        status?: string;
+        warnings?: string[];
+      };
+      setDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              scopeSummary: body.scopeSummary || prev.scopeSummary,
+              editableScope: body.editableScope || prev.editableScope,
+              lastCalculation: body.lastCalculation || prev.lastCalculation,
+              revision: body.revision ?? prev.revision,
+              status: body.status || prev.status,
+              projectHeader: prev.projectHeader
+                ? {
+                    ...prev.projectHeader,
+                    revision: body.revision ?? prev.projectHeader.revision,
+                    status: body.status || prev.projectHeader.status,
+                    currentTotal: null
+                  }
+                : prev.projectHeader
+            }
+          : prev
+      );
+      setScopeDraft(cloneEditableScope(body.editableScope || scopeDraft));
+      setScopeDirty(false);
+      setCalcStale(true);
+      setCalcResult(body.lastCalculation || { available: false, total: null });
+      setScopeSaveNotice("Scope saved. Recalculate to update total.");
+    } catch (e) {
+      setScopeSaveError(errorMessage(e));
+    } finally {
+      setScopeSaveBusy(false);
+    }
+  }
 
   async function runCalculate() {
+    if (scopeDirty) {
+      setCalcError("Save Scope first before calculating.");
+      return;
+    }
     setCalcBusy(true);
     setCalcError(null);
     try {
@@ -199,7 +309,15 @@ export default function StudioV2EstimatorShell(props: {
         {}
       )) as { calculation?: CalculationResult; ok?: boolean };
       setCalcResult(body.calculation || null);
-      await load();
+      setCalcStale(false);
+      // Reload draft metadata without clobbering the editor form from calculate.
+      const draftBody = (await apiGet(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft`,
+        authToken
+      )) as WorkingDraftResponse;
+      setDraft(draftBody);
+      setCalcResult(draftBody.lastCalculation || body.calculation || null);
+      // Keep local form fields — do not rehydrate from calculation response.
     } catch (e) {
       setCalcError(errorMessage(e));
     } finally {
@@ -238,6 +356,10 @@ export default function StudioV2EstimatorShell(props: {
   const header = draft?.projectHeader;
   const scope = draft?.scopeSummary;
   const approved = Boolean(draft?.approvedPublished?.approved);
+  const scopeReadOnly =
+    !draft?.scopeEditable ||
+    draft?.code === "unsupported_origin" ||
+    draft?.code === "no_estimate";
   const customerUrl =
     draft?.approvedPublished?.customerUrl ||
     draft?.publicationSummary?.customerUrl ||
@@ -251,9 +373,11 @@ export default function StudioV2EstimatorShell(props: {
           ← Back
         </button>
         <div className="studio-v2-shell__title-block">
-          <p className="studio-v2-shell__eyebrow">Studio V2 · Slice A preview</p>
+          <p className="studio-v2-shell__eyebrow">Studio V2 · Slice B Working Draft</p>
           <h1>Estimator command shell</h1>
-          <p className="muted">Read-only working draft. V1 remains the default workflow.</p>
+          <p className="muted">
+            Edit physical scope on the Working Draft. V1 remains the default workflow.
+          </p>
         </div>
         {onOpenV1 ? (
           <button
@@ -289,7 +413,7 @@ export default function StudioV2EstimatorShell(props: {
       ) : null}
 
       {draft && draft.code !== "no_estimate" ? (
-        <div className="studio-v2-grid">
+        <div className="studio-v2-layout">
           <section className="studio-v2-panel" data-testid="studio-v2-project-header">
             <h2>Project header</h2>
             <dl className="studio-v2-dl">
@@ -315,7 +439,7 @@ export default function StudioV2EstimatorShell(props: {
                 <dt>Estimate</dt>
                 <dd>
                   {header?.estimateId ? `${header.estimateId.slice(0, 8)}…` : "—"} · r
-                  {header?.revision ?? "—"} · {header?.status || "—"}
+                  {header?.revision ?? draft.revision ?? "—"} · {header?.status || "—"}
                 </dd>
               </div>
               <div>
@@ -326,65 +450,32 @@ export default function StudioV2EstimatorShell(props: {
                 <dt>Current total</dt>
                 <dd data-testid="studio-v2-current-total">{money(header?.currentTotal)}</dd>
               </div>
+              <div>
+                <dt>Scope summary</dt>
+                <dd>
+                  {scope?.roomCount ?? 0} rooms · {scope?.pieceCount ?? 0} pieces ·{" "}
+                  {scope?.measuredSf != null ? `${scope.measuredSf.toFixed(1)} SF` : "—"}
+                </dd>
+              </div>
             </dl>
           </section>
 
-          <section className="studio-v2-panel" data-testid="studio-v2-scope-summary">
-            <h2>Scope summary</h2>
-            {scope?.empty ? (
-              <p className="muted" data-testid="studio-v2-scope-empty">
-                No scope exists on this estimate yet.
-              </p>
-            ) : (
-              <>
-                <dl className="studio-v2-dl">
-                  <div>
-                    <dt>Rooms</dt>
-                    <dd>{scope?.roomCount ?? 0}</dd>
-                  </div>
-                  <div>
-                    <dt>Pieces</dt>
-                    <dd>{scope?.pieceCount ?? 0}</dd>
-                  </div>
-                  <div>
-                    <dt>Measured SF</dt>
-                    <dd>{scope?.measuredSf != null ? `${scope.measuredSf.toFixed(2)} SF` : "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Billed SF</dt>
-                    <dd>{scope?.billedSf != null ? `${scope.billedSf.toFixed(2)} SF` : "—"}</dd>
-                  </div>
-                  <div>
-                    <dt>Openings / cutouts</dt>
-                    <dd>{scope?.openings?.total ?? 0}</dd>
-                  </div>
-                  <div>
-                    <dt>Vanity / waterfall</dt>
-                    <dd>
-                      {scope?.indicators?.hasVanityProgram ? "Vanity program" : "No vanity program"}
-                      {" · "}
-                      {scope?.indicators?.hasWaterfall
-                        ? `${scope.indicators.waterfallIndicators} waterfall`
-                        : "No waterfall"}
-                    </dd>
-                  </div>
-                </dl>
-                {Array.isArray(scope?.rooms) && scope.rooms.length ? (
-                  <ul className="studio-v2-room-list">
-                    {scope.rooms.map((r) => (
-                      <li key={r.id || r.name}>
-                        <strong>{r.name || "Room"}</strong>
-                        <span>
-                          {(r.countertopSf ?? 0).toFixed(1)} CT · {(r.backsplashSf ?? 0).toFixed(1)}{" "}
-                          splash · {r.pieceCount ?? 0} pieces
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </>
-            )}
-          </section>
+          <StudioV2ScopeEditor
+            value={scopeDraft}
+            readOnly={scopeReadOnly}
+            readOnlyMessage={
+              draft.scopeEditability?.message ||
+              (draft.code === "unsupported_origin"
+                ? draft.message
+                : "Scope cannot be edited on this estimate.")
+            }
+            dirty={scopeDirty}
+            saveBusy={scopeSaveBusy}
+            saveError={scopeSaveError}
+            saveNotice={scopeSaveNotice}
+            onChange={onScopeChange}
+            onSave={() => void runSaveScope()}
+          />
 
           <section className="studio-v2-panel" data-testid="studio-v2-calculation">
             <div className="studio-v2-panel__head">
@@ -392,13 +483,25 @@ export default function StudioV2EstimatorShell(props: {
               <button
                 type="button"
                 className="eq-btn-primary"
-                disabled={calcBusy || draft.code === "unsupported_origin"}
+                disabled={
+                  calcBusy || draft.code === "unsupported_origin" || scopeDirty || scopeSaveBusy
+                }
                 onClick={() => void runCalculate()}
                 data-testid="studio-v2-calculate"
               >
                 {calcBusy ? "Calculating…" : "Calculate"}
               </button>
             </div>
+            {scopeDirty ? (
+              <p className="studio-v2-dirty" data-testid="studio-v2-calc-requires-save">
+                Save Scope first before calculating.
+              </p>
+            ) : null}
+            {calcStale && !scopeDirty ? (
+              <p className="studio-v2-stale" data-testid="studio-v2-calc-stale">
+                Scope changed — recalculate to update total.
+              </p>
+            ) : null}
             {calcError ? (
               <div className="error-box" data-testid="studio-v2-calc-error">
                 {calcError}

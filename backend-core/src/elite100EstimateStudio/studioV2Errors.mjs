@@ -12,7 +12,13 @@ export const STUDIO_V2_ERROR_CODES = Object.freeze({
   NOT_PRICED: "not_priced",
   SUPERSEDED_REVISION: "superseded_revision",
   FORBIDDEN: "forbidden",
-  UNAVAILABLE: "unavailable"
+  UNAVAILABLE: "unavailable",
+  /** Slice B — current revision is not an editable working draft. */
+  DRAFT_REQUIRED: "draft_required",
+  /** Slice B — approved/published/frozen snapshot cannot be mutated. */
+  APPROVED_SNAPSHOT_READONLY: "approved_snapshot_readonly",
+  /** Slice B — scope payload failed validation. */
+  VALIDATION_FAILED: "validation_failed"
 });
 
 const USER_MESSAGES = Object.freeze({
@@ -27,7 +33,12 @@ const USER_MESSAGES = Object.freeze({
   [STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION]:
     "A newer estimate revision is active. Refresh before continuing.",
   [STUDIO_V2_ERROR_CODES.FORBIDDEN]: "You do not have access to this estimate.",
-  [STUDIO_V2_ERROR_CODES.UNAVAILABLE]: "Studio V2 is temporarily unavailable."
+  [STUDIO_V2_ERROR_CODES.UNAVAILABLE]: "Studio V2 is temporarily unavailable.",
+  [STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED]:
+    "An editable working draft is required before scope can be saved.",
+  [STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY]:
+    "This approved or published estimate is read-only. Scope cannot be changed here.",
+  [STUDIO_V2_ERROR_CODES.VALIDATION_FAILED]: "Scope changes could not be saved. Check the fields and try again."
 });
 
 /**
@@ -67,10 +78,13 @@ function defaultStatusForCode(code) {
     case STUDIO_V2_ERROR_CODES.PUBLISH_BLOCKED:
     case STUDIO_V2_ERROR_CODES.UNSUPPORTED_ORIGIN:
     case STUDIO_V2_ERROR_CODES.NOT_PRICED:
+    case STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED:
+    case STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY:
       return 409;
     case STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION:
       return 409;
     case STUDIO_V2_ERROR_CODES.CALCULATE_FAILED:
+    case STUDIO_V2_ERROR_CODES.VALIDATION_FAILED:
       return 422;
     default:
       return 503;
