@@ -1166,6 +1166,13 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       });
       if (existing) {
         const intendsConfigure = configurationIntendsCustomerConfigure(configuration);
+        if (intendsConfigure && !configurationStudioService) {
+          throw deError(
+            "Customer configuration is required for this publication but the configuration service is unavailable",
+            "DE-CONFIGURATION-UNAVAILABLE",
+            503
+          );
+        }
         if (intendsConfigure && configurationStudioService) {
           const envelopes = await configurationStudioService.listEnvelopes(
             organizationId,
@@ -1244,6 +1251,13 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       });
       if (sameRevisionPub) {
         const intendsConfigure = configurationIntendsCustomerConfigure(configuration);
+        if (intendsConfigure && !configurationStudioService) {
+          throw deError(
+            "Customer configuration is required for this publication but the configuration service is unavailable",
+            "DE-CONFIGURATION-UNAVAILABLE",
+            503
+          );
+        }
         if (intendsConfigure && configurationStudioService) {
           assertWithinBudget("update_envelope");
           const updated = await applyConfigurationEnvelope({
@@ -1309,6 +1323,7 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           };
         }
         // Document-only update on existing revision — treat as reuse.
+        // Only reached when the caller explicitly requested document-only mode.
         const linkMeta = await linkMetaForPublication(organizationId, sameRevisionPub);
         return {
           ok: true,

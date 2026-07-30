@@ -3029,3 +3029,15 @@
 | **Protected** | Calculator math, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, DE public route contracts (payload population only), Slice A–F gates. |
 | **Revisit trigger** | Pricing basis / price group editor; email delivery; already-published V2 links that lack configuration (may need republish). |
 
+### 213. Elite 100 Studio V2 interactive Digital Estimate publish path (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-digital-estimate-interactive-path` |
+| **Decision** | V2 strict publish must produce the **same interactive customer Digital Estimate path** as the fixed simplified-publish workflow: attach interactive `configuration` defaults, activate a configuration envelope on the publication, and **fail closed** if the envelope is missing or the configuration service is unavailable. Reuse/republish of a prior document-only publication must repair/activate the envelope on the active link (same `/e/<token>` URL shape). V2 still calls only `studioDigitalEstimateService.publish` (never simplified-publish / auto-approve / auto-calculate). Public DE bootstrap must reach `configure` mode (`fallbackReason !== configuration_absent`). |
+| **Why** | Production V2 links opened the frozen estimate total but showed “Customer options could not be loaded” because publications could succeed as document-only (especially on reuse) without an active configuration envelope. |
+| **SQL** | None. |
+| **Impacted** | `studioEstimateDigitalEstimateService.mjs`, `studioV2Publish.mjs`, `studioV2Service.mjs`, `studioV2Errors.mjs`, `elite100StudioV2Routes.js`, `studioV2PublishActivatesDigitalEstimate.test.mjs`, `studioV2SliceF.test.mjs`. |
+| **Protected** | Calculator math, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, DE public route contracts, link-only delivery. |
+| **Revisit trigger** | Email delivery; replace-link UX; shared V1/V2 DE service singleton. |
+

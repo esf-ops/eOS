@@ -176,6 +176,67 @@ export function sanitizeStudioV2PublishBody(body) {
 }
 
 /**
+ * True when V2 publish body intends interactive customer configuration
+ * (not explicit document-only).
+ * @param {object|null|undefined} configuration
+ */
+export function studioV2PublishIntendsInteractive(configuration) {
+  const cfg = configuration && typeof configuration === "object" ? configuration : {};
+  if (cfg.enableConfiguration === false || cfg.configurationMode === "document") {
+    return false;
+  }
+  return (
+    cfg.enableConfiguration === true ||
+    cfg.configurationMode === "configure" ||
+    (Array.isArray(cfg.customerChoiceGroups) && cfg.customerChoiceGroups.length > 0) ||
+    (Array.isArray(cfg.allowedOptionKeys) && cfg.allowedOptionKeys.length > 0)
+  );
+}
+
+/**
+ * Guard: V2 interactive publish must not return a static/document-only link.
+ * @param {object|null|undefined} result DE publish result
+ * @param {object|null|undefined} configuration sanitized body.configuration
+ * @returns {{ configured: boolean, reason: string|null, repaired?: boolean, updated?: boolean }}
+ */
+export function assertStudioV2InteractivePublishResult(result, configuration) {
+  if (!studioV2PublishIntendsInteractive(configuration)) {
+    return {
+      configured: false,
+      reason: result?.envelope?.reason || "document_only"
+    };
+  }
+  const envelope =
+    result?.envelope && typeof result.envelope === "object" ? result.envelope : null;
+  if (envelope?.configured === true) {
+    return {
+      configured: true,
+      reason: null,
+      repaired: Boolean(envelope.repaired),
+      updated: Boolean(envelope.updated)
+    };
+  }
+  const reason =
+    str(envelope?.reason || envelope?.message || result?.code, 200) ||
+    "configuration_envelope_missing";
+  const err = new Error(
+    "Customer interactive Digital Estimate configuration could not be activated. " +
+      "Republish after configuration service is available, or contact support."
+  );
+  err.code = "configuration_envelope_required";
+  err.statusCode = reason === "configuration_service_unavailable" ||
+    reason === "DE-CONFIGURATION-UNAVAILABLE"
+    ? 503
+    : 422;
+  err.details = {
+    reason,
+    envelope,
+    customerUrl: result?.customerUrl || null
+  };
+  throw err;
+}
+
+/**
  * Normalize DE publish service result into a staff-safe V2 publication DTO.
  * @param {object|null|undefined} result
  * @param {object|null|undefined} estimate
@@ -189,6 +250,8 @@ export function buildStudioV2PublicationResult(result, estimate) {
   const publishedAt = pub.publishedAt || pub.published_at || null;
   const status = str(pub.status || (customerUrl ? "published" : "unknown"), 40) || "published";
   const publicationId = pub.id || pub.publicationId || null;
+  const envelope =
+    result?.envelope && typeof result.envelope === "object" ? result.envelope : null;
 
   return {
     publicationId,
@@ -198,6 +261,26 @@ export function buildStudioV2PublicationResult(result, estimate) {
     publishedAt,
     linkStatus: result?.linkStatus || pub.linkStatus || null,
     reused: Boolean(result?.reused),
+    configurationUpdated: Boolean(result?.configurationUpdated),
+    envelope: envelope
+      ? {
+          configured: Boolean(envelope.configured),
+          reason: envelope.reason || null,
+          repaired: Boolean(envelope.repaired),
+          updated: Boolean(envelope.updated)
+        }
+      : null,
+    publishedConfiguration:
+      result?.publishedConfiguration && typeof result.publishedConfiguration === "object"
+        ? {
+            customerChoiceGroups: Array.isArray(result.publishedConfiguration.customerChoiceGroups)
+              ? result.publishedConfiguration.customerChoiceGroups
+              : [],
+            allowedOptionKeys: Array.isArray(result.publishedConfiguration.allowedOptionKeys)
+              ? result.publishedConfiguration.allowedOptionKeys
+              : []
+          }
+        : null,
     staffNotice: result?.staffNotice || null,
     summary: buildSafeStudioPublicationSummary({
       estimate,

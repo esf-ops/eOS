@@ -30,7 +30,9 @@ export const STUDIO_V2_ERROR_CODES = Object.freeze({
   /** Slice E — calculation exists but is stale vs current scope/options. */
   CALCULATION_STALE: "calculation_stale",
   /** Slice E — approval blocked by validation/review blockers. */
-  APPROVAL_BLOCKED: "approval_blocked"
+  APPROVAL_BLOCKED: "approval_blocked",
+  /** Interactive DE configuration envelope missing / failed after publish. */
+  CONFIGURATION_ENVELOPE_REQUIRED: "configuration_envelope_required"
 });
 
 const USER_MESSAGES = Object.freeze({
@@ -63,7 +65,9 @@ const USER_MESSAGES = Object.freeze({
   [STUDIO_V2_ERROR_CODES.CALCULATION_STALE]:
     "Calculation is stale. Recalculate before approving.",
   [STUDIO_V2_ERROR_CODES.APPROVAL_BLOCKED]:
-    "This estimate cannot be approved yet. Review the blockers below."
+    "This estimate cannot be approved yet. Review the blockers below.",
+  [STUDIO_V2_ERROR_CODES.CONFIGURATION_ENVELOPE_REQUIRED]:
+    "Customer interactive Digital Estimate configuration could not be activated. Republish after configuration is available."
 });
 
 /**
@@ -116,6 +120,7 @@ function defaultStatusForCode(code) {
     case STUDIO_V2_ERROR_CODES.CALCULATE_FAILED:
     case STUDIO_V2_ERROR_CODES.VALIDATION_FAILED:
     case STUDIO_V2_ERROR_CODES.TAKEOFF_MAPPING_FAILED:
+    case STUDIO_V2_ERROR_CODES.CONFIGURATION_ENVELOPE_REQUIRED:
       return 422;
     default:
       return 503;
