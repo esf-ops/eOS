@@ -2942,3 +2942,16 @@
 | **Impacted** | `AiEstimatorWorkspace.tsx`, `CommercialConfigurationSection.tsx`, `EstimateRecordSections.tsx`, `workspaceSaveQueue.mjs`, `additionalLinesBoundary.mjs`, `workspaceHydration.mjs`, `estimateWorkspaceHeader.mjs`, `ConsolidatedTakeoffReview.tsx` (`TAKEOFF_REVIEW_DRAFT_SAVED`), `studioEstimateService.mjs` (draft coalesce, roomConfig merge, waterfall sync), `studioVanityProgramGovernance.mjs`, `studioCommercialConfiguration.mjs`, `elite100RoomPricingStudioAdapter.mjs`, `takeoffImportPayload.mjs`. |
 | **Protected** | v4 rates/tax/rounding/edges/cutouts/miters/waterfalls/Vanity rates, trusted Spahn policy, public Digital Estimate authority, historical v2/v3, manual Internal Estimate, Quote Library, Shared Inbox, SQL, Moraware, QuickBooks. |
 | **Visual proof** | Real-component review evidence under `.local/review/final-live-estimate-workspace/` (not committed). Harness may use production components + route/service calls when live auth cannot be automated; labeled limitation — not claimed as a production browser pass. |
+
+### 206. Elite 100 Studio V2 Slice A — additive read-only command shell (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-slice-a` |
+| **Decision** | Studio V2 Slice A is a **sibling** read-only estimator command shell beside V1. V1 `estimate-workspace` (`EstimateTakeoffWorkspace` → `AiEstimatorWorkspace`) remains the **default**. V2 mounts only when `VITE_ELITE100_STUDIO_V2_ENABLED=true` **and** `?studioV2=1`. Additive Brain routes under `/api/elite100-studio-v2/*` reuse existing v4 calculator, DE strict publish, and publication/activity read models. V2 calculate calls `calculateStudioEstimateV4` directly — **no** `ensure-editable-draft`, **no** `refresh-from-takeoff`, **no** scope mutation, **no** auto-fork. V2 publish is strict approved-only via `studioDigitalEstimateService.publish` — **never** `simplified-publish`. No schema migrations; no live Takeoff editing; no approval/scope editing in Slice A. |
+| **Why** | Replace broken V1 estimator workspace orchestration with a clean shell while preserving proven pricing, publication, and identity systems. |
+| **SQL** | None. |
+| **Impacted** | `elite100StudioV2Routes.js`, `studioV2Service.mjs`, `studioV2WorkingDraft.mjs`, `studioV2Errors.mjs`, `studioV2SliceA.test.mjs`, `StudioV2EstimatorShell.tsx`, `StudioApp.tsx` (flagged mount), `quoteRoutes.js` (mount), `package.json` test script. |
+| **Protected** | V1 Studio routes/behavior, `elite100RoomPricingCalculator`, `calculateStudioEstimateV4` math, Digital Estimate public routes, Takeoff geometry, Quote Library / sold APIs, historical v2/v3. |
+| **Revisit trigger** | Slice B+ adds scope editing, approval, or Takeoff embed — must keep V1 default until cutover is explicit. |
+

@@ -5,6 +5,11 @@ interface ImportMetaEnv {
   readonly VITE_HEAD_URL_HOME?: string;
   /** UI-only; never grants access. Exact "true" shows Studio shell. */
   readonly VITE_ELITE100_ESTIMATE_STUDIO_UI_ENABLED?: string;
+  /**
+   * UI-only Studio V2 Slice A shell. Exact "true" allows opt-in via ?studioV2=1.
+   * Never grants access; V1 estimate-workspace remains the default.
+   */
+  readonly VITE_ELITE100_STUDIO_V2_ENABLED?: string;
   /** UI-only configuration builder gate; never grants access. Exact "true" shows config panel. */
   readonly VITE_ELITE100_ESTIMATE_STUDIO_CONFIGURATION_UI_ENABLED?: string;
   /** UI-only review queue gate; never grants access. Exact "true" shows review requests. */
