@@ -326,15 +326,24 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
     }
   }
 
-  // One estimate-wide edge profile (Studio has no per-room edge tracking).
-  // The matching finished-edge LF is assigned to the same default room, but
-  // as a Scope fact (`room.edgeFinishedLf`) — see mapStudioScopeToElite100Scope,
-  // which uses the identical resolveDefaultRoomIds/opts.edgeRoomId derivation
-  // so both mappers always agree on the target room.
+  // Edge profile: prefer piece-level token on the edge room when present
+  // (Studio V2 Slice I), else estimate-wide scope.edgeProfileToken.
+  // Finished-edge LF is assigned as a Scope fact (`room.edgeFinishedLf`) —
+  // see mapStudioScopeToElite100Scope (same resolveDefaultRoomIds/opts.edgeRoomId).
   const edgeScopeResult = resolveScopeEdgeLinearFeet(src);
   const edgeRoomId = opts.edgeRoomId ? String(opts.edgeRoomId) : defaultKitchenRoomId;
+  function pieceEdgeProfileForRoom(room) {
+    for (const p of Array.isArray(room?.pieces) ? room.pieces : []) {
+      if (!p || p.included === false) continue;
+      const token = String(p.edgeProfileToken || "").trim();
+      if (token) return token;
+    }
+    return null;
+  }
   if (edgeRoomId && edgeScopeResult.finalLf > 0) {
-    ensureRoom(edgeRoomId).edgeProfile = src.edgeProfileToken || "edge_eased";
+    const edgeRoom = rooms.find((r) => String(r.id) === String(edgeRoomId));
+    ensureRoom(edgeRoomId).edgeProfile =
+      pieceEdgeProfileForRoom(edgeRoom) || src.edgeProfileToken || "edge_eased";
   }
 
   // Miter — also one estimate-wide value in Studio.
@@ -362,7 +371,8 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
     });
   }
 
-  // Sink / cutout / tear-out add-ons — one estimate-wide map in Studio.
+  // Sink / cutout / tear-out add-ons — prefer piece-level detail when present
+  // (Studio V2 Slice I), else the estimate-wide addOns map.
   const addOns = src.addOns && typeof src.addOns === "object" ? src.addOns : {};
   const assignments = opts.roomAssignments || {};
   const ambiguousKitchen = kitchenRooms.length > 1;
@@ -382,29 +392,85 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
     return fallbackRoomId;
   }
 
-  const kitchenSinkQty = Math.max(0, Math.floor(Number(addOns["qty-sink"]) || 0));
-  if (kitchenSinkQty > 0) {
-    const targetRoomId = targetRoomFor("qty-sink", defaultKitchenRoomId, ambiguousKitchen);
-    if (targetRoomId) {
-      ensureRoom(targetRoomId).sinks.push({ id: "qty-sink", sinkKind: "kitchen", quantity: kitchenSinkQty });
+  /** @type {Map<string, { sink: number, bar: number, cook: number, outlet: number }>} */
+  const pieceOpeningsByRoom = new Map();
+  let hasPieceOpenings = false;
+  for (const room of rooms) {
+    const roomId = String(room.id ?? "");
+    if (!roomId) continue;
+    let sink = 0;
+    let bar = 0;
+    let cook = 0;
+    let outlet = 0;
+    let roomHas = false;
+    for (const p of Array.isArray(room.pieces) ? room.pieces : []) {
+      if (!p || p.included === false) continue;
+      if (
+        p.kitchenSinkCutouts == null &&
+        p.vanityBarSinkCutouts == null &&
+        p.cooktopCutouts == null &&
+        p.outletCutouts == null
+      ) {
+        continue;
+      }
+      roomHas = true;
+      hasPieceOpenings = true;
+      sink += Math.max(0, Math.floor(Number(p.kitchenSinkCutouts) || 0));
+      bar += Math.max(0, Math.floor(Number(p.vanityBarSinkCutouts) || 0));
+      cook += Math.max(0, Math.floor(Number(p.cooktopCutouts) || 0));
+      outlet += Math.max(0, Math.floor(Number(p.outletCutouts) || 0));
     }
+    if (roomHas) pieceOpeningsByRoom.set(roomId, { sink, bar, cook, outlet });
   }
-  const barSinkQty = Math.max(0, Math.floor(Number(addOns["qty-bar"]) || 0));
-  if (barSinkQty > 0) {
-    const targetRoomId = targetRoomFor("qty-bar", defaultVanityRoomId, ambiguousVanity);
-    if (targetRoomId) {
-      ensureRoom(targetRoomId).sinks.push({ id: "qty-bar", sinkKind: "vanity", quantity: barSinkQty });
+
+  if (hasPieceOpenings) {
+    for (const [roomId, qty] of pieceOpeningsByRoom.entries()) {
+      const cfg = ensureRoom(roomId);
+      if (qty.sink > 0) {
+        cfg.sinks.push({ id: "qty-sink", sinkKind: "kitchen", quantity: qty.sink });
+      }
+      if (qty.bar > 0) {
+        cfg.sinks.push({ id: "qty-bar", sinkKind: "vanity", quantity: qty.bar });
+      }
+      if (qty.cook > 0) cfg.cutouts.cooktopQuantity = (cfg.cutouts.cooktopQuantity || 0) + qty.cook;
+      if (qty.outlet > 0) {
+        cfg.cutouts.electricalOutletQuantity =
+          (cfg.cutouts.electricalOutletQuantity || 0) + qty.outlet;
+      }
     }
-  }
-  const cooktopQty = Math.max(0, Math.floor(Number(addOns["qty-cook"]) || 0));
-  if (cooktopQty > 0) {
-    const targetRoomId = targetRoomFor("qty-cook", defaultKitchenRoomId, ambiguousKitchen);
-    if (targetRoomId) ensureRoom(targetRoomId).cutouts.cooktopQuantity = cooktopQty;
-  }
-  const outletQty = Math.max(0, Math.floor(Number(addOns["qty-outlet"]) || 0));
-  if (outletQty > 0) {
-    const targetRoomId = targetRoomFor("qty-outlet", defaultKitchenRoomId, rooms.length > 1);
-    if (targetRoomId) ensureRoom(targetRoomId).cutouts.electricalOutletQuantity = outletQty;
+  } else {
+    const kitchenSinkQty = Math.max(0, Math.floor(Number(addOns["qty-sink"]) || 0));
+    if (kitchenSinkQty > 0) {
+      const targetRoomId = targetRoomFor("qty-sink", defaultKitchenRoomId, ambiguousKitchen);
+      if (targetRoomId) {
+        ensureRoom(targetRoomId).sinks.push({
+          id: "qty-sink",
+          sinkKind: "kitchen",
+          quantity: kitchenSinkQty
+        });
+      }
+    }
+    const barSinkQty = Math.max(0, Math.floor(Number(addOns["qty-bar"]) || 0));
+    if (barSinkQty > 0) {
+      const targetRoomId = targetRoomFor("qty-bar", defaultVanityRoomId, ambiguousVanity);
+      if (targetRoomId) {
+        ensureRoom(targetRoomId).sinks.push({
+          id: "qty-bar",
+          sinkKind: "vanity",
+          quantity: barSinkQty
+        });
+      }
+    }
+    const cooktopQty = Math.max(0, Math.floor(Number(addOns["qty-cook"]) || 0));
+    if (cooktopQty > 0) {
+      const targetRoomId = targetRoomFor("qty-cook", defaultKitchenRoomId, ambiguousKitchen);
+      if (targetRoomId) ensureRoom(targetRoomId).cutouts.cooktopQuantity = cooktopQty;
+    }
+    const outletQty = Math.max(0, Math.floor(Number(addOns["qty-outlet"]) || 0));
+    if (outletQty > 0) {
+      const targetRoomId = targetRoomFor("qty-outlet", defaultKitchenRoomId, rooms.length > 1);
+      if (targetRoomId) ensureRoom(targetRoomId).cutouts.electricalOutletQuantity = outletQty;
+    }
   }
   for (const key of RETIRED_ADDON_KEYS) {
     const qty = Math.max(0, Math.floor(Number(addOns[key]) || 0));

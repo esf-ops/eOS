@@ -3243,6 +3243,61 @@ button.linkish {
 .studio-v2-piece-table input[type="checkbox"] {
   width: auto;
 }
+.studio-v2-piece-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+.studio-v2-piece-card {
+  border: 1px solid var(--eos-line);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: #fff;
+}
+.studio-v2-piece-card__geometry,
+.studio-v2-piece-card__detail {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  align-items: end;
+}
+.studio-v2-piece-card__detail {
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--eos-line);
+}
+.studio-v2-piece-card__geometry label,
+.studio-v2-piece-card__detail label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--eos-ink-muted);
+}
+.studio-v2-piece-card__geometry input,
+.studio-v2-piece-card__geometry select,
+.studio-v2-piece-card__detail input,
+.studio-v2-piece-card__detail select {
+  font: inherit;
+  color: var(--eos-ink);
+  border: 1px solid var(--eos-border);
+  border-radius: 8px;
+  padding: 0.35rem 0.45rem;
+  background: #fff;
+  min-width: 0;
+  width: 100%;
+}
+.studio-v2-piece-card__include,
+.studio-v2-piece-card__check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.4rem !important;
+}
+.studio-v2-piece-card__include input,
+.studio-v2-piece-card__check input {
+  width: auto !important;
+}
 .eq-btn-ghost {
   background: transparent;
   border: none;
