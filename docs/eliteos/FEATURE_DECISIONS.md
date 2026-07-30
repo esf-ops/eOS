@@ -3161,3 +3161,15 @@
 | **Protected** | Approved snapshot, Studio V2 workflow, calculator math, Product Catalog, Vanity Program, Waterfall pricing, sold handoff, V1. |
 | **Revisit trigger** | Wire Product Catalog / priced waterfall; enable `canSubmitForFinalReview`; dedicated activity event type if telemetry needs it. |
 
+### 224. Studio V2 publish — ignore legacy Takeoff approval gate (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-publish-ignore-takeoff-approval-gate` |
+| **Decision** | Studio V2 strict publish passes server-only `publishContext` (`source: "studio_v2_approved_snapshot"`, `skipLegacyTakeoffApprovalGate: true`) into `studioDigitalEstimateService.publish`. `assessStudioEstimatePublicationReadiness` skips `takeoff_not_approved` only in that context (same spirit as confirmed-manual skip). V1/shared DE publish without publishContext still requires Takeoff approval. V2 still requires approved + current calculation + interactive envelope. **Authority boundary:** after import, AI Takeoff is historical evidence only — never a publish blocker, never silent override of estimator Working Draft scope. |
+| **Why** | In Studio V2, AI Takeoff is a measurement source; the approved Working Draft snapshot is publish authority. Blocking on original Takeoff approval incorrectly blocked priced/approved V2 estimates. |
+| **SQL** | None. |
+| **Impacted** | `studioEstimatePublicationAdapter.mjs`, `studioEstimateDigitalEstimateService.mjs`, `studioV2Service.mjs`, `studioV2PublishActivatesDigitalEstimate.test.mjs`, this doc. |
+| **Protected** | V1 takeoff gate, approve/stale gates, interactive envelope, no simplified-publish / auto-approve / auto-calculate, no silent takeoff re-apply over estimator scope. |
+| **Revisit trigger** | Takeoff History UI (read-only import/reference/comparison); if a future unified publish path needs the same authority flag outside V2. |
+

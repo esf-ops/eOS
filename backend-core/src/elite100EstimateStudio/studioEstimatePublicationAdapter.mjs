@@ -726,7 +726,10 @@ export function buildSyntheticQuoteHeaderFromStudioEstimate(estimate, opts = {})
  *   repositoryMode: string,
  *   takeoffReviewStatus?: string|null,
  *   env?: NodeJS.ProcessEnv,
- *   configuration?: object|null
+ *   configuration?: object|null,
+ *   skipLegacyTakeoffApprovalGate?: boolean,
+ *   approvedSnapshotAuthority?: boolean,
+ *   source?: string|null
  * }} input
  */
 export function assessStudioEstimatePublicationReadiness(input) {
@@ -816,7 +819,19 @@ export function assessStudioEstimatePublicationReadiness(input) {
     estimate?.scope?.physicalScopeSource === "manual_staff" &&
     estimate?.scope?.estimateOrigin === "manual_staff" &&
     estimate?.scope?.manualScopeConfirmed === true;
-  if (!isConfirmedManual && takeoffStatus !== "approved") {
+  // Studio V2 approved-snapshot publish: AI Takeoff is only a measurement source.
+  // After V2 approve/current calculation gates, do not require the original
+  // Takeoff record to be approved. Never honor this from untrusted client body
+  // alone — callers must pass server-side publishContext/options.
+  const studioV2ApprovedSnapshotAuthority =
+    input.skipLegacyTakeoffApprovalGate === true ||
+    input.approvedSnapshotAuthority === true ||
+    String(input.source || "") === "studio_v2_approved_snapshot";
+  if (
+    !isConfirmedManual &&
+    !studioV2ApprovedSnapshotAuthority &&
+    takeoffStatus !== "approved"
+  ) {
     blockers.push({
       code: "takeoff_not_approved",
       message: "Current Takeoff must be approved before Digital Estimate publication"

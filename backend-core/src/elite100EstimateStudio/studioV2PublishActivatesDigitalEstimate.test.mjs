@@ -223,9 +223,12 @@ console.log("\nstudioV2PublishActivatesDigitalEstimate.test.mjs\n");
   assert.ok(pub.includes("resolveSimplifiedPublishConfiguration"));
   assert.ok(pub.includes("assertStudioV2InteractivePublishResult"));
   assert.ok(svc.includes("assertStudioV2InteractivePublishResult"));
+  assert.ok(svc.includes("studio_v2_approved_snapshot"));
+  assert.ok(svc.includes("skipLegacyTakeoffApprovalGate"));
   assert.ok(!svc.includes("createStudioSimplifiedWorkflowService"));
   assert.ok(!shell.includes("simplified-publish"));
   assert.ok(!shell.includes("ensure-editable-draft"));
+  assert.ok(!shell.includes("autoApprove"));
   assert.ok(studioApp.includes("EstimateTakeoffWorkspace"));
   console.log("ok: V2 interactive publish source contracts (strict/link-only)");
 }
@@ -388,6 +391,173 @@ console.log("\nstudioV2PublishActivatesDigitalEstimate.test.mjs\n");
       e?.code === "DE-ENVELOPE-ACTIVATION-FAILED"
   );
   console.log("ok: V2 interactive publish fails closed when configuration service unavailable");
+}
+
+{
+  // Studio V2 approved-snapshot authority: publish must not require original AI Takeoff approval.
+  const { assessStudioEstimatePublicationReadiness } = await import(
+    "./studioEstimatePublicationAdapter.mjs"
+  );
+
+  const approvedEstimate = {
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    organizationId: ORG,
+    status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+    takeoffJobId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    scope: approvedScope(),
+    calculationSnapshot: {
+      ...fakeCalc,
+      fabrication: { edge: { finalLf: 12 }, customLineItems: fakeCalc.fabrication.customLineItems }
+    },
+    pricingEngine: "elite100-room-pricing-v1",
+    pricingVersion: 4,
+    approval: {
+      approvedAt: "2026-07-30T17:00:00.000Z",
+      approvedByUserId: ACTOR,
+      calculationFingerprint: "v2-interactive-fp",
+      customerDisplayTotal: 4380
+    },
+    staleReason: null
+  };
+
+  const legacyBlocked = assessStudioEstimatePublicationReadiness({
+    estimate: approvedEstimate,
+    repositoryMode: "memory",
+    takeoffReviewStatus: "draft",
+    env: ENV_ON
+  });
+  assert.equal(
+    legacyBlocked.blockers.some((b) => b.code === "takeoff_not_approved"),
+    true,
+    "legacy/shared readiness still blocks when Takeoff is not approved"
+  );
+
+  const v2Authority = assessStudioEstimatePublicationReadiness({
+    estimate: approvedEstimate,
+    repositoryMode: "memory",
+    takeoffReviewStatus: "draft",
+    env: ENV_ON,
+    source: "studio_v2_approved_snapshot",
+    approvedSnapshotAuthority: true,
+    skipLegacyTakeoffApprovalGate: true
+  });
+  assert.equal(
+    v2Authority.blockers.some((b) => b.code === "takeoff_not_approved"),
+    false,
+    "V2 approved-snapshot authority skips takeoff_not_approved"
+  );
+
+  // Unapproved Takeoff loader — V2 publishContext must still succeed.
+  const studioRepo2 = new InMemoryStudioEstimateRepository();
+  const deRepo2 = createInMemoryDigitalEstimateRepository();
+  const pricing2 = createInMemoryPricingPolicyRepository();
+  const cfgRepo2 = createInMemoryConfigurationRepository({ pricingPolicyRepository: pricing2 });
+  const studio2 = createStudioEstimateService({
+    env: ENV_ON,
+    repository: studioRepo2,
+    loadTakeoffWorkspace: async () => ({ reviewStatus: "draft" }),
+    loadLatestTakeoffResult: async () => null
+  });
+  Object.defineProperty(studio2, "repositoryMode", { value: "memory" });
+  const cfgStudio2 = createConfigurationStudioService({
+    configurationRepository: cfgRepo2,
+    pricingPolicyRepository: pricing2,
+    deRepository: deRepo2,
+    env: ENV_ON
+  });
+  const deSvcUnapproved = createStudioEstimateDigitalEstimateService({
+    env: ENV_ON,
+    studioEstimateService: studio2,
+    digitalEstimateRepository: deRepo2,
+    configurationStudioService: cfgStudio2,
+    loadTakeoffWorkspace: async () => ({ reviewStatus: "in_review" })
+  });
+  const v2Unapproved = createStudioV2Service({
+    env: ENV_ON,
+    repository: studioRepo2,
+    studioEstimateService: studio2,
+    studioDigitalEstimateService: deSvcUnapproved,
+    calculateStudioEstimateImpl: async () => fakeCalc
+  });
+  const approved = await createApprovedEstimate(studioRepo2);
+
+  // Direct DE publish without publishContext still blocked by takeoff gate.
+  await assert.rejects(
+    () =>
+      deSvcUnapproved.publish({
+        organizationId: ORG,
+        estimateId: approved.id,
+        actorUserId: ACTOR,
+        body: { confirm: true }
+      }),
+    (e) => {
+      const blockers = e?.blockers || e?.blockingReasons || [];
+      return (
+        e?.code === "takeoff_not_approved" ||
+        e?.code === "publish_blocked" ||
+        e?.code === "not_eligible" ||
+        blockers.some((b) => b.code === "takeoff_not_approved") ||
+        e?.details?.causeCode === "takeoff_not_approved"
+      );
+    }
+  );
+
+  // V2 strict publish succeeds even when Takeoff is not approved.
+  const published = await v2Unapproved.publishApproved({
+    organizationId: ORG,
+    estimateId: approved.id,
+    actorUserId: ACTOR,
+    body: { confirmed: true, deliveryMode: "link_only" }
+  });
+  assert.equal(published.ok, true);
+  assert.equal(published.envelope?.configured, true);
+  assert.ok(published.customerUrl);
+
+  // Still blocks when not approved.
+  const draftRow = await studioRepo2.create({
+    organizationId: ORG,
+    intakeCaseId: "cccccccc-cccc-4ccc-8ccc-ccccccccccc2",
+    takeoffJobId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    createdByUserId: ACTOR,
+    status: STUDIO_ESTIMATE_STATUSES.PRICED,
+    revision: 1,
+    scope: approvedScope(),
+    calculationSnapshot: fakeCalc,
+    pricingEngine: "elite100-room-pricing-v1",
+    pricingVersion: 4,
+    approval: null,
+    staleReason: null
+  });
+  await assert.rejects(
+    () =>
+      v2Unapproved.publishApproved({
+        organizationId: ORG,
+        estimateId: draftRow.id,
+        actorUserId: ACTOR,
+        body: { confirmed: true }
+      }),
+    (e) => e?.code === STUDIO_V2_ERROR_CODES.APPROVE_REQUIRED || e?.code === "approve_required"
+  );
+
+  // Still blocks when calculation is stale.
+  const stale = await studioRepo2.update(ORG, approved.id, {
+    staleReason: "Scope changed — recalculate"
+  });
+  assert.ok(stale.staleReason);
+  await assert.rejects(
+    () =>
+      v2Unapproved.publishApproved({
+        organizationId: ORG,
+        estimateId: approved.id,
+        actorUserId: ACTOR,
+        body: { confirmed: true }
+      }),
+    (e) => e?.code === STUDIO_V2_ERROR_CODES.CALCULATION_STALE || e?.code === "calculation_stale"
+  );
+
+  console.log(
+    "ok: V2 publish ignores unapproved Takeoff; still requires approve/current calc; V1 gate intact"
+  );
 }
 
 console.log("\nstudioV2PublishActivatesDigitalEstimate.test.mjs — passed\n");
