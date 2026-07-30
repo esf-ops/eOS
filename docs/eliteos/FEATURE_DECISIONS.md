@@ -3113,3 +3113,15 @@
 | **Protected** | Calculator math, V1 workflow, DE repricing, Takeoff Review component imports, schema. |
 | **Revisit trigger** | Wire secure plan preview URL into Working Draft; peninsula attached-side UX; priced pop-up outlets. |
 
+### 220. Elite 100 Studio V2 — Scope Review UI Polish (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-scope-review-ui-polish` |
+| **Decision** | Frontend-only clarity pass on Studio V2 Working Draft scope review: piece review cards with geometry SF (L×D×qty÷144 display), countertop SF mode from existing fields (`included` / `approvedDirectSqft` / dimensions), clearer include/exclude, inline backsplash missing-run-length warning + **Use piece length** helper, plain-language edge/cutout summaries, upgraded edge badge, softer plan-preview placeholder, approved read-only copy. **No** separate “No countertop SF while included” mode — exclude from quote remains the only way to drop material SF; a true included-but-no-SF mode would need a new piece field + calculator wiring and is deferred. |
+| **Why** | Slice I.1 controls worked but still felt technical/cramped for estimator review questions. |
+| **SQL** | None. |
+| **Impacted** | `StudioV2ScopeEditor.tsx`, `studioV2ScopeReviewHelpers.ts`, `styles.css`, `studioV2SliceI.test.mjs`, this doc. |
+| **Protected** | Pricing math / calculators, V1 workflow, DE, save/approve/publish, V1 workspace imports, schema. |
+| **Revisit trigger** | Product asks for included pieces that never count toward countertop SF; wire plan preview attachments. |
+
