@@ -39,6 +39,10 @@ import {
   splitSelectionPayloadMeta
 } from "./customerConfigurationDraft.mjs";
 import {
+  buildPublicCustomerConfigurationReadModel,
+  sanitizeCustomerConfigurationFoundation
+} from "./customerConfigurationFoundation.mjs";
+import {
   collectForbiddenCatalogSelections,
   normalizeCustomerCatalogPermissions
 } from "./customerCatalogPermissions.mjs";
@@ -1039,6 +1043,13 @@ export function createPublicConfigurationService(deps) {
         projectNote: selectionMeta.projectNote || null,
         customerProductDrafts: selectionMeta.customerProductDrafts || {},
         backsplashDrafts: selectionMeta.backsplashDrafts || {},
+        customerConfiguration: buildPublicCustomerConfigurationReadModel(
+          selectionMeta.customerConfiguration,
+          {
+            quantities: selectionMeta.quantities || {},
+            lastSavedAt: latestSelection?.updated_at || latestSelection?.created_at || null
+          }
+        ),
         rooms: (ctx.rooms || []).map((r) => ({
           roomKey: r.roomKey,
           displayName:
@@ -1367,6 +1378,7 @@ export function createPublicConfigurationService(deps) {
         customerProductDrafts: {},
         backsplashDrafts: {},
         sideSplashDrafts: {},
+        customerConfiguration: null,
         quantities: {}
       };
       if (typeof configurationRepository.getLatestSelectionForSession === "function") {
@@ -1506,6 +1518,36 @@ export function createPublicConfigurationService(deps) {
         body.sideSplashDrafts || body.side_splash_drafts || {}
       );
 
+      const foundationProvided =
+        body.customerConfiguration != null ||
+        body.customer_configuration != null ||
+        body.customerConfigurationFoundation != null;
+      let customerConfigurationIncoming = null;
+      if (foundationProvided) {
+        try {
+          customerConfigurationIncoming = sanitizeCustomerConfigurationFoundation(
+            body.customerConfiguration ??
+              body.customer_configuration ??
+              body.customerConfigurationFoundation,
+            { rejectForbidden: true, lastSavedAt: new Date().toISOString() }
+          );
+        } catch (e) {
+          if (e?.code === "forbidden_customer_configuration_fields") {
+            throw safeFail(
+              "forbidden_customer_configuration_fields",
+              "Internal fields are not allowed in customer configuration",
+              400,
+              { fields: e.fields || [] }
+            );
+          }
+          throw safeFail(
+            e?.code || "invalid_customer_configuration",
+            "Invalid customer configuration",
+            e?.statusCode || 400
+          );
+        }
+      }
+
       const mergedInfo =
         body.customerInfoDraft != null || body.customer_info_draft != null
           ? customerInfoDraft
@@ -1534,6 +1576,9 @@ export function createPublicConfigurationService(deps) {
         body.sideSplashDrafts != null || body.side_splash_drafts != null
           ? sideSplashDrafts
           : priorMeta.sideSplashDrafts || {};
+      const mergedCustomerConfiguration = foundationProvided
+        ? customerConfigurationIncoming
+        : priorMeta.customerConfiguration || null;
 
       applyBacksplashDraftAuthority(selectionMap, mergedBacksplashDrafts, options);
       rejectGovernedScopeQuantitySelections(body.items || body.selections || []);
@@ -2300,8 +2345,19 @@ export function createPublicConfigurationService(deps) {
         projectNote: mergedProjectNote,
         customerProductDrafts: mergedProductDrafts,
         backsplashDrafts: mergedBacksplashDrafts,
-        sideSplashDrafts: mergedSideSplashDrafts
+        sideSplashDrafts: mergedSideSplashDrafts,
+        ...(mergedCustomerConfiguration != null
+          ? { customerConfiguration: mergedCustomerConfiguration }
+          : {})
       });
+
+      const publicCustomerConfiguration = buildPublicCustomerConfigurationReadModel(
+        mergedCustomerConfiguration,
+        {
+          quantities: normalized.selections,
+          lastSavedAt: mergedCustomerConfiguration?.lastSavedAt || new Date().toISOString()
+        }
+      );
 
       const missingInformationRequirements = buildMissingInformationRequirements(
         selectionPayloadForMeta
@@ -2357,10 +2413,16 @@ export function createPublicConfigurationService(deps) {
               ? "No faucet"
               : null),
         reviewRequested: Boolean(session?.status === "review_requested"),
-        reviewOnlyOutstandingCount: (missingInformationRequirements || []).filter(
-          (r) => r.severity === "review" || /review|specialty/i.test(String(r.code || ""))
-        ).length,
+        reviewOnlyOutstandingCount:
+          (missingInformationRequirements || []).filter(
+            (r) => r.severity === "review" || /review|specialty/i.test(String(r.code || ""))
+          ).length + (publicCustomerConfiguration.scopeChangeRequests?.count || 0),
         missingInformationRequirements,
+        customerConfigurationRequiresReview: Boolean(
+          publicCustomerConfiguration.requiresEstimatorReview
+        ),
+        selectionChangesCount: publicCustomerConfiguration.selectionChanges?.count || 0,
+        scopeRequestCount: publicCustomerConfiguration.scopeChangeRequests?.count || 0,
         now: new Date()
       });
 
@@ -2455,6 +2517,7 @@ export function createPublicConfigurationService(deps) {
           })
         ],
         customerConfigurationSummary,
+        customerConfiguration: publicCustomerConfiguration,
         quoteLibraryCustomerConfig: quoteLibraryProjection,
         roomPricing: publicRoomPricing,
         roomPricingChanges: publicRoomPricingChanges
@@ -2533,6 +2596,7 @@ export function createPublicConfigurationService(deps) {
         selectionHash: normalized.selectionHash,
         customerInfoDraft: mergedInfo,
         roomLabelDrafts: mergedLabels,
+        customerConfiguration: publicCustomerConfiguration,
         missingInformationRequirements
       };
     },

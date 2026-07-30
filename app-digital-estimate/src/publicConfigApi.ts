@@ -289,6 +289,62 @@ export type CustomerMaterial = {
   selectable?: boolean;
 };
 
+export type CustomerConfigurationFoundation = {
+  version: number;
+  selectedMaterial?: {
+    materialGroup?: string | null;
+    colorId?: string | null;
+    colorName?: string | null;
+    roomId?: string | null;
+    pieceId?: string | null;
+  } | null;
+  selectedEdgeProfile?: {
+    profileToken?: string | null;
+    profileName?: string | null;
+    roomId?: string | null;
+    pieceId?: string | null;
+    estimateWide?: boolean;
+  } | null;
+  backsplashPreference?: {
+    preference: "keep_approved" | "include" | "remove" | "request_change" | string;
+    note?: string | null;
+  } | null;
+  requestedOpenings?: Array<{
+    id: string;
+    type: string;
+    quantity: number;
+    roomId?: string | null;
+    pieceId?: string | null;
+    note?: string | null;
+    requiresEstimatorReview: true;
+  }>;
+  requestedWaterfalls?: Array<{
+    id: string;
+    pieceId?: string | null;
+    roomId?: string | null;
+    side?: string | null;
+    legHeight?: number | null;
+    backsidePolishRequested?: boolean;
+    note?: string | null;
+    requiresEstimatorReview: true;
+    priced?: false;
+  }>;
+  customerNotes?: Array<{
+    id: string;
+    note: string;
+    requiresEstimatorReview: true;
+  }>;
+  requiresEstimatorReview?: boolean;
+  selectionChanges?: { count: number; items: Array<{ kind: string; label: string }> };
+  scopeChangeRequests?: {
+    count: number;
+    items: Array<{ kind: string; label: string; requiresEstimatorReview?: true }>;
+  };
+  lastSavedAt?: string | null;
+  canSubmitForFinalReview?: false;
+  approvedBaselinePreserved?: boolean;
+};
+
 export type ConfigurationState = {
   lifecycle: string;
   message?: string | null;
@@ -341,6 +397,8 @@ export type ConfigurationState = {
     /** @deprecated prefer customerProductDrafts */
     productDrafts?: Record<string, RoomProductDrafts>;
     backsplashDrafts?: Record<string, BacksplashDraft>;
+    /** Customer configuration foundation (selections + scope requests). */
+    customerConfiguration?: CustomerConfigurationFoundation | null;
     missingInformationRequirements?: MissingInformationRequirement[];
     currentSelections?: Record<string, number>;
     roomNotes?: Record<string, string>;
@@ -665,6 +723,8 @@ export async function saveConfigurationSelections(payload: {
   /** @deprecated prefer customerProductDrafts */
   productDrafts?: Record<string, RoomProductDrafts> | null;
   backsplashDrafts?: Record<string, BacksplashDraft> | null;
+  /** Customer configuration foundation (selections + scope requests). */
+  customerConfiguration?: CustomerConfigurationFoundation | null;
 }): Promise<{
   ok: boolean;
   session?: { rowVersion: number };
@@ -680,6 +740,7 @@ export async function saveConfigurationSelections(payload: {
   customerProductDrafts?: Record<string, RoomProductDrafts>;
   productDrafts?: Record<string, RoomProductDrafts>;
   backsplashDrafts?: Record<string, BacksplashDraft>;
+  customerConfiguration?: CustomerConfigurationFoundation | null;
   missingInformationRequirements?: MissingInformationRequirement[];
 }> {
   const base = apiBaseUrl();
