@@ -6,12 +6,24 @@ import ReviewWorkspace from "./ReviewWorkspace";
 import EstimateQueuePage from "./estimateQueue/EstimateQueuePage";
 import EstimateCommandCenterPage from "./estimateQueue/EstimateCommandCenterPage";
 import EstimateTakeoffWorkspace from "./estimateQueue/EstimateTakeoffWorkspace";
+import StudioV2EstimatorShell, { studioV2UiEnabled } from "./estimateQueue/StudioV2EstimatorShell";
 import LiveDigitalEstimatesPage from "./estimateQueue/LiveDigitalEstimatesPage";
 import SharedInboxPage from "./estimateQueue/SharedInboxPage";
 import AllEstimatesPage from "./estimateQueue/AllEstimatesPage";
 import ManualEstimateWizard from "./estimateQueue/ManualEstimateWizard";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import { getSupabase } from "./lib/supabase";
+
+/** V2 preview only when UI flag is on AND URL has studioV2=1 (V1 remains default). */
+function studioV2PreviewRequested(): boolean {
+  if (!studioV2UiEnabled()) return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("studioV2") === "1";
+  } catch {
+    return false;
+  }
+}
 
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
@@ -125,6 +137,8 @@ export default function StudioApp() {
   const [workspaceFocus, setWorkspaceFocus] = useState<
     "takeoff" | "scope" | "digital" | "review" | null
   >(null);
+  /** Slice A: opt-in V2 shell; default remains V1 EstimateTakeoffWorkspace. */
+  const [studioV2Preview, setStudioV2Preview] = useState(() => studioV2PreviewRequested());
   const [organizationName, setOrganizationName] = useState(DEFAULT_WORKSPACE_NAME);
   const [organizationLogoUrl, setOrganizationLogoUrl] = useState(EOS_LOGO_URL);
   const [userSubtitle, setUserSubtitle] = useState("");
@@ -765,16 +779,30 @@ export default function StudioApp() {
         ) : null}
 
         {mainNav === "estimate-workspace" && estimateWorkspaceCaseId ? (
-          <EstimateTakeoffWorkspace
-            authToken={sessionToken}
-            caseId={estimateWorkspaceCaseId}
-            initialFocus={workspaceFocus || "takeoff"}
-            onBackToQueue={() => {
-              setMainNav(queueReturnNav);
-              setEstimateWorkspaceCaseId(null);
-              setWorkspaceFocus(null);
-            }}
-          />
+          studioV2Preview && studioV2UiEnabled() ? (
+            <StudioV2EstimatorShell
+              authToken={sessionToken}
+              caseId={estimateWorkspaceCaseId}
+              onBack={() => {
+                setMainNav(queueReturnNav);
+                setEstimateWorkspaceCaseId(null);
+                setWorkspaceFocus(null);
+                setStudioV2Preview(false);
+              }}
+              onOpenV1={() => setStudioV2Preview(false)}
+            />
+          ) : (
+            <EstimateTakeoffWorkspace
+              authToken={sessionToken}
+              caseId={estimateWorkspaceCaseId}
+              initialFocus={workspaceFocus || "takeoff"}
+              onBackToQueue={() => {
+                setMainNav(queueReturnNav);
+                setEstimateWorkspaceCaseId(null);
+                setWorkspaceFocus(null);
+              }}
+            />
+          )
         ) : null}
 
         {mainNav === "reviews" ? (
