@@ -170,6 +170,17 @@ function originLabel(origin: string | null | undefined): string {
 function errorMessage(e: unknown): string {
   if (e instanceof ApiError) {
     const body = e.body && typeof e.body === "object" ? (e.body as Record<string, unknown>) : null;
+    const code = body?.code != null ? String(body.code) : "";
+    if (
+      code === "configuration_envelope_required" ||
+      code === "DE-CONFIGURATION-UNAVAILABLE" ||
+      code === "DE-ENVELOPE-ACTIVATION-FAILED"
+    ) {
+      return (
+        "Digital Estimate configuration could not be activated. The configuration stack may be " +
+        "unavailable — contact support or retry after Brain recovers. The customer was not emailed."
+      );
+    }
     if (body?.error) return String(body.error);
     return e.message;
   }
@@ -531,7 +542,12 @@ export default function StudioV2EstimatorShell(props: {
       setPublishError("No approved estimate is available to publish.");
       return;
     }
-    if (!draft?.approvedPublished?.approved && !draft?.approvedSummary?.approved) {
+    const isApproved = Boolean(
+      draft?.approvedPublished?.approved ||
+        draft?.approvedSummary?.approved ||
+        String(draft?.status || draft?.projectHeader?.status || "").toLowerCase() === "approved"
+    );
+    if (!isApproved) {
       setPublishError("Approve required before publish.");
       return;
     }
@@ -539,6 +555,12 @@ export default function StudioV2EstimatorShell(props: {
       setPublishError("Confirm publish before continuing.");
       return;
     }
+    const hadActivePublication = Boolean(
+      draft?.approvedPublished?.customerUrl ||
+        draft?.publicationSummary?.customerUrl ||
+        activity?.activePublication?.customerUrl ||
+        draft?.approvedPublished?.published
+    );
     setPublishBusy(true);
     setPublishError(null);
     setPublishNotice(null);
@@ -555,13 +577,23 @@ export default function StudioV2EstimatorShell(props: {
         customerUrl?: string | null;
         staffNotice?: string | null;
         publication?: StudioV2PublicationView | null;
+        envelope?: { configured?: boolean; repaired?: boolean; updated?: boolean } | null;
+        configurationUpdated?: boolean;
+        reused?: boolean;
         ok?: boolean;
       };
+      const repaired =
+        Boolean(body.envelope?.repaired) ||
+        Boolean(body.envelope?.updated) ||
+        Boolean(body.configurationUpdated) ||
+        hadActivePublication;
       setPublishNotice(
         body.staffNotice ||
-          (body.publication?.customerUrl || body.customerUrl
-            ? "Digital Estimate published (link-only)."
-            : "Digital Estimate published.")
+          (repaired
+            ? "Customer Digital Estimate configuration refreshed (link-only). The customer was not emailed."
+            : body.publication?.customerUrl || body.customerUrl
+              ? "Digital Estimate published (link-only)."
+              : "Digital Estimate published.")
       );
       await load();
     } catch (e) {

@@ -3041,3 +3041,15 @@
 | **Protected** | Calculator math, Takeoff geometry, Quote Library / sold APIs, V1 estimate-workspace, DE public route contracts, link-only delivery. |
 | **Revisit trigger** | Email delivery; replace-link UX; shared V1/V2 DE service singleton. |
 
+### 214. Elite 100 Studio V2 republish / repair Digital Estimate action (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-republish-digital-estimate-action` |
+| **Decision** | When an active Digital Estimate publication already exists, Studio V2 Publish panel shows **Republish / Repair Digital Estimate**. It calls the same strict `POST /api/elite100-studio-v2/approved/:estimateId/publish` with `confirmed: true` + `deliveryMode: link_only` (no email, no approve/calculate/scope mutation). Customer-viewed status does not hide the action. Clear copy: “Refreshes the customer link configuration. Does not email the customer.” `configuration_envelope_required` surfaces as an estimator-facing error. |
+| **Why** | PR #116 repaired the backend envelope path, but production estimators had no UI control to invoke republish on already-published links showing “Customer options could not be loaded.” |
+| **SQL** | None. |
+| **Impacted** | `StudioV2PublishPanel.tsx`, `StudioV2EstimatorShell.tsx`, `styles.css`, `studioV2SliceF.test.mjs`. |
+| **Protected** | Calculator math, V1 workflow, simplified-publish, email/sold/acceptance, DE public contracts. |
+| **Revisit trigger** | Replace-link UX; email delivery. |
+
