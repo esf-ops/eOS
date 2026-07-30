@@ -133,6 +133,24 @@ export default function StudioV2ApprovalPanel(props: Props) {
     confirmed &&
     !busy;
 
+  const disabledReason = alreadyApproved
+    ? null
+    : scopeDirty
+      ? "Save scope before approving."
+      : optionsDirty
+        ? "Save options before approving."
+        : calcStale
+          ? "Recalculate before approving."
+          : !calcAvailable
+            ? "Calculate before approving."
+            : !backendAllowed
+              ? readiness?.message || "Backend readiness does not allow approval yet."
+              : !confirmed
+                ? "Check the confirmation box before approving."
+                : busy
+                  ? "Approval in progress…"
+                  : null;
+
   return (
     <section className="studio-v2-panel" data-testid="studio-v2-approval">
       <div className="studio-v2-panel__head">
@@ -140,8 +158,10 @@ export default function StudioV2ApprovalPanel(props: Props) {
         {!alreadyApproved ? (
           <button
             type="button"
-            className="eq-btn-primary"
+            className={`eq-btn-primary studio-v2-approve-btn${canApprove ? "" : " is-disabled"}`}
             disabled={!canApprove}
+            aria-disabled={!canApprove}
+            title={disabledReason || "Approve estimate"}
             onClick={() =>
               void onApprove({
                 confirmed: true,
@@ -159,6 +179,12 @@ export default function StudioV2ApprovalPanel(props: Props) {
         Approval freezes the Working Draft into an immutable snapshot. Publishing to Digital
         Estimate is a separate step.
       </p>
+
+      {!alreadyApproved && disabledReason && !canApprove ? (
+        <p className="studio-v2-approve-disabled-hint" data-testid="studio-v2-approve-disabled-hint">
+          Approve is disabled: {disabledReason}
+        </p>
+      ) : null}
 
       <dl className="studio-v2-dl">
         <div>

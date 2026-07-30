@@ -3,15 +3,29 @@
  *
  * Reuses studioDigitalEstimateService.publish only after V2 gates.
  * Never calls simplified-publish / auto-approve / auto-calculate.
+ *
+ * Customer configuration: V2 publish must attach the same interactive defaults used by
+ * simplified-publish so public DE can load customer options (not document-only).
  */
 
 import { STUDIO_ESTIMATE_STATUSES } from "./studioEstimateTypes.mjs";
 import { buildSafeStudioPublicationSummary } from "./studioPublicationSummary.mjs";
+import { resolveSimplifiedPublishConfiguration } from "./studioCustomerChoiceOptions.mjs";
 
 function str(v, max = 240) {
   return String(v ?? "")
     .trim()
     .slice(0, max);
+}
+
+/**
+ * Resolve customer configuration for V2 strict publish.
+ * Missing / empty → interactive defaults (same as simplified-publish defaults).
+ * Explicit document-only remains respected.
+ * @param {object|null|undefined} bodyConfiguration
+ */
+export function resolveStudioV2PublishConfiguration(bodyConfiguration) {
+  return resolveSimplifiedPublishConfiguration(bodyConfiguration);
 }
 
 /**
@@ -150,6 +164,9 @@ export function sanitizeStudioV2PublishBody(body) {
   // Prefer link-only; do not invent email delivery in Slice F.
   raw.deliveryMode = deliveryMode === "link_only" ? "link_only" : "link_only";
   raw.confirm = true;
+  // Attach interactive customer options envelope so public DE does not fall into
+  // document-only / "Customer options could not be loaded."
+  raw.configuration = resolveStudioV2PublishConfiguration(raw.configuration);
 
   return {
     body: raw,

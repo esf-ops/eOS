@@ -73,6 +73,20 @@ type ScopeSummary = {
   };
 };
 
+type PricingBreakdown = {
+  pricingBasis?: string | null;
+  priceGroup?: string | null;
+  materialRatePerSf?: number | null;
+  materialRatePerSfNote?: string | null;
+  measuredSf?: number | null;
+  billedSf?: number | null;
+  materialSubtotal?: number | null;
+  materialUseTax?: number | null;
+  customerFacingAdjustments?: number | null;
+  hiddenCustomerImpactingAdjustments?: number | null;
+  roomCount?: number | null;
+};
+
 type CalculationResult = {
   available?: boolean;
   total?: number | null;
@@ -81,6 +95,7 @@ type CalculationResult = {
   unresolvedItems?: Array<{ code?: string | null; message?: string }>;
   calculatedAt?: string | null;
   pricingVersion?: number | null;
+  pricingBreakdown?: PricingBreakdown | null;
 };
 
 type WorkingDraftResponse = {
@@ -573,6 +588,17 @@ export default function StudioV2EstimatorShell(props: {
     draft?.publicationSummary?.customerUrl ||
     activity?.activePublication?.customerUrl ||
     null;
+  const published =
+    Boolean(customerUrl) ||
+    Boolean(draft?.approvedPublished?.published) ||
+    Boolean(draft?.publicationSummary?.active) ||
+    String(draft?.publicationSummary?.state || "").toLowerCase().includes("published");
+  const calcStatusLabel = !calcResult?.available
+    ? "not priced"
+    : calcStale
+      ? "stale"
+      : "current";
+  const pb = calcResult?.pricingBreakdown;
 
   return (
     <div className="studio-v2-shell" data-testid="studio-v2-estimator-shell">
@@ -581,8 +607,10 @@ export default function StudioV2EstimatorShell(props: {
           ← Back
         </button>
         <div className="studio-v2-shell__title-block">
-          <p className="studio-v2-shell__eyebrow">Studio V2 · Slice C Takeoff Import</p>
-          <h1>Estimator command shell</h1>
+          <p className="studio-v2-shell__eyebrow" data-testid="studio-v2-eyebrow">
+            Studio V2 · Test Mode
+          </p>
+          <h1>Studio V2 Workspace</h1>
           <p className="muted">
             Edit physical scope and import approved AI Takeoff into the Working Draft. V1 remains
             the default workflow.
@@ -623,6 +651,35 @@ export default function StudioV2EstimatorShell(props: {
 
       {draft && draft.code !== "no_estimate" ? (
         <div className="studio-v2-layout">
+          <section
+            className="studio-v2-panel studio-v2-workflow-status"
+            data-testid="studio-v2-workflow-status"
+          >
+            <h2>Workflow status</h2>
+            <ul className="studio-v2-workflow-status__list">
+              <li data-testid="studio-v2-status-scope">
+                <span>Scope</span>
+                <strong>{scopeDirty ? "unsaved" : "clean"}</strong>
+              </li>
+              <li data-testid="studio-v2-status-options">
+                <span>Options</span>
+                <strong>{optionsDirty ? "unsaved" : "clean"}</strong>
+              </li>
+              <li data-testid="studio-v2-status-calculation">
+                <span>Calculation</span>
+                <strong>{calcStatusLabel}</strong>
+              </li>
+              <li data-testid="studio-v2-status-approval">
+                <span>Approval</span>
+                <strong>{approved ? "approved" : "draft"}</strong>
+              </li>
+              <li data-testid="studio-v2-status-publish">
+                <span>Publish</span>
+                <strong>{published ? "published" : "not published"}</strong>
+              </li>
+            </ul>
+          </section>
+
           <section className="studio-v2-panel" data-testid="studio-v2-project-header">
             <h2>Project header</h2>
             <dl className="studio-v2-dl">
@@ -667,6 +724,12 @@ export default function StudioV2EstimatorShell(props: {
                 </dd>
               </div>
             </dl>
+            <p
+              className="studio-v2-placeholder"
+              data-testid="studio-v2-pricing-basis-placeholder"
+            >
+              Pricing basis / price group editing will be added in the next slice.
+            </p>
           </section>
 
           <StudioV2TakeoffImportPanel
@@ -787,7 +850,7 @@ export default function StudioV2EstimatorShell(props: {
                 {calcError}
               </div>
             ) : null}
-            <dl className="studio-v2-dl">
+            <dl className="studio-v2-dl" data-testid="studio-v2-calc-summary">
               <div>
                 <dt>Server total</dt>
                 <dd data-testid="studio-v2-calc-total">{money(calcResult?.total)}</dd>
@@ -795,6 +858,64 @@ export default function StudioV2EstimatorShell(props: {
               <div>
                 <dt>Pricing version</dt>
                 <dd>{calcResult?.pricingVersion ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Pricing basis</dt>
+                <dd data-testid="studio-v2-calc-pricing-basis">
+                  {pb?.pricingBasis || "not available"}
+                </dd>
+              </div>
+              <div>
+                <dt>Price group</dt>
+                <dd data-testid="studio-v2-calc-price-group">{pb?.priceGroup || "not available"}</dd>
+              </div>
+              <div>
+                <dt>Material rate</dt>
+                <dd data-testid="studio-v2-calc-material-rate">
+                  {pb?.materialRatePerSf != null
+                    ? `${money(pb.materialRatePerSf)} / SF`
+                    : pb?.materialRatePerSfNote || "not available"}
+                </dd>
+              </div>
+              <div>
+                <dt>Measured SF</dt>
+                <dd data-testid="studio-v2-calc-measured-sf">
+                  {pb?.measuredSf != null ? pb.measuredSf.toFixed(1) : "not available"}
+                </dd>
+              </div>
+              <div>
+                <dt>Billed SF</dt>
+                <dd data-testid="studio-v2-calc-billed-sf">
+                  {pb?.billedSf != null ? pb.billedSf.toFixed(1) : "not available"}
+                </dd>
+              </div>
+              <div>
+                <dt>Material subtotal</dt>
+                <dd data-testid="studio-v2-calc-material-subtotal">
+                  {pb?.materialSubtotal != null ? money(pb.materialSubtotal) : "not available"}
+                </dd>
+              </div>
+              <div>
+                <dt>Material use tax</dt>
+                <dd data-testid="studio-v2-calc-material-use-tax">
+                  {pb?.materialUseTax != null ? money(pb.materialUseTax) : "not available"}
+                </dd>
+              </div>
+              <div>
+                <dt>Customer-facing adjustments</dt>
+                <dd data-testid="studio-v2-calc-customer-adj">
+                  {pb?.customerFacingAdjustments != null
+                    ? money(pb.customerFacingAdjustments)
+                    : "not available"}
+                </dd>
+              </div>
+              <div>
+                <dt>Hidden customer-impacting adjustments</dt>
+                <dd data-testid="studio-v2-calc-hidden-adj">
+                  {pb?.hiddenCustomerImpactingAdjustments != null
+                    ? money(pb.hiddenCustomerImpactingAdjustments)
+                    : "not available"}
+                </dd>
               </div>
             </dl>
             {Array.isArray(calcResult?.customerSafeLinePreview) &&
