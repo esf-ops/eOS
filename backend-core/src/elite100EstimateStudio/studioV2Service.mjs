@@ -2,13 +2,14 @@
  * Elite 100 Studio V2 — additive working-draft / calculate / publish / scope / options / approve wrappers.
  *
  * Hard rules:
- * - Does not create estimates or acquire drafts.
  * - Does not call ensure-editable-draft, open-measurement-revision, or simplified-publish.
+ * - Create-revision uses repository.createSiblingRevisionFrom only (no Takeoff reopen).
  * - Calculate wraps calculateStudioEstimateV4 without refresh-from-takeoff or scope mutation.
  * - Scope / options PATCH / takeoff apply / approve persist via repository.update only.
  * - Does not call V1 studioEstimateService.approve (refreshTakeoffGate side effects).
  * - Publish is strict (approved only) via existing digital-estimate publish service.
  * - Approval never publishes. Publish never auto-approves / auto-calculates.
+ * - Create-revision never auto-publishes / auto-approves / auto-calculates.
  */
 
 import { calculateStudioEstimateV4 } from "./elite100RoomPricingStudioAdapter.mjs";
@@ -71,6 +72,13 @@ import {
   isHistoricalPublicationForEstimate,
   normalizePublicationStatus
 } from "./studioPublicationSummary.mjs";
+import {
+  buildStudioV2RevisionAffordance,
+  buildStudioV2RevisionSummary,
+  deepCloneStudioV2Json,
+  isStudioV2ApprovedSnapshot,
+  isStudioV2EditableWorkingDraft
+} from "./studioV2Revision.mjs";
 
 /**
  * @param {{
@@ -296,6 +304,23 @@ export function createStudioV2Service(deps = {}) {
     };
   }
 
+  function publicationIsActive(pubBundle) {
+    const summary = pubBundle?.publicationSummary;
+    if (summary?.active) return true;
+    if (pubBundle?.activePublication) return true;
+    const state = String(summary?.state || "").toLowerCase();
+    return state.includes("published") && !state.includes("not_published");
+  }
+
+  function extractRevisionOrigin(scope) {
+    const origin = scope?.studioV2RevisionOrigin;
+    if (!origin || typeof origin !== "object") return null;
+    return {
+      estimateId: origin.basedOnEstimateId || null,
+      revision: origin.basedOnRevision != null ? Number(origin.basedOnRevision) : null
+    };
+  }
+
   /**
    * GET working-draft — read-only shell payload.
    */
@@ -323,6 +348,7 @@ export function createStudioV2Service(deps = {}) {
         lastCalculation: buildStudioV2CalculationResult(null),
         approvalReadiness: assessStudioV2ApprovalReadiness(null),
         approvedSummary: buildStudioV2ApprovedSummary(null),
+        revisionAffordance: buildStudioV2RevisionAffordance(null),
         publishReadiness: assessStudioV2PublishReadiness(null),
         approvedPublished: {
           approved: false,
@@ -363,6 +389,7 @@ export function createStudioV2Service(deps = {}) {
         lastCalculation: buildStudioV2CalculationResult(estimate),
         approvalReadiness: assessStudioV2ApprovalReadiness(row),
         approvedSummary: buildStudioV2ApprovedSummary(estimate),
+        revisionAffordance: buildStudioV2RevisionAffordance(estimate),
         publishReadiness: assessStudioV2PublishReadiness(row),
         approvedPublished: buildApprovedPublishedPointers(estimate, null),
         publicationSummary: buildSafeStudioPublicationSummary({ estimate }),
@@ -377,6 +404,22 @@ export function createStudioV2Service(deps = {}) {
     const pubBundle = await loadPublicationBundle(organizationId, estimate);
     const estimateWithPub = safeView(row, { publication: pubBundle.publicationSummary });
     const editability = assessStudioV2ScopeEditability(row);
+    const basedOn = extractRevisionOrigin(row.scope);
+    let priorPublished = publicationIsActive(pubBundle);
+    // Sibling draft may not own the customer publication — check source if known.
+    if (!priorPublished && basedOn?.estimateId && basedOn.estimateId !== row.id) {
+      try {
+        const source = await repository.getById(organizationId, basedOn.estimateId);
+        if (source) {
+          const sourcePub = await loadPublicationBundle(organizationId, source);
+          priorPublished = publicationIsActive(sourcePub);
+        }
+      } catch {
+        /* non-fatal */
+      }
+    }
+    const revisionOpts = { priorPublished, basedOn };
+    const revisionAffordance = buildStudioV2RevisionAffordance(estimateWithPub, revisionOpts);
 
     return {
       ok: true,
@@ -399,7 +442,8 @@ export function createStudioV2Service(deps = {}) {
       takeoffJobId: row.takeoffJobId || null,
       lastCalculation: buildStudioV2CalculationResult(estimateWithPub),
       approvalReadiness: assessStudioV2ApprovalReadiness(row),
-      approvedSummary: buildStudioV2ApprovedSummary(estimateWithPub),
+      approvedSummary: buildStudioV2ApprovedSummary(estimateWithPub, revisionOpts),
+      revisionAffordance,
       publishReadiness: assessStudioV2PublishReadiness(row),
       approvedPublished: buildApprovedPublishedPointers(estimateWithPub, pubBundle),
       publicationSummary: pubBundle.publicationSummary,
@@ -1079,6 +1123,231 @@ export function createStudioV2Service(deps = {}) {
   }
 
   /**
+   * POST approved/:estimateId/create-revision — fork editable Working Draft from
+   * an approved snapshot via repository.createSiblingRevisionFrom.
+   * Never mutates the approved source scope/approval/calculation.
+   * Never calls ensure-editable-draft / open-measurement-revision /
+   * refresh-from-takeoff / Takeoff reopen / publish / auto-approve / auto-calculate.
+   */
+  async function createRevisionFromApproved({
+    organizationId,
+    intakeCaseId,
+    estimateId,
+    actorUserId,
+    body
+  }) {
+    const caseId = String(intakeCaseId || "").trim();
+    const sourceId = String(estimateId || "").trim();
+    if (!caseId || !sourceId) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "caseId and estimateId are required.",
+        statusCode: 400
+      });
+    }
+
+    const confirmed = body?.confirmed === true || body?.confirm === true;
+    if (!confirmed) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "confirmed: true is required to create a revision.",
+        statusCode: 400,
+        details: { field: "confirmed" }
+      });
+    }
+
+    const source = await repository.getById(organizationId, sourceId);
+    if (!source) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_ESTIMATE, {
+        message: "Approved estimate not found.",
+        statusCode: 404
+      });
+    }
+    if (String(source.intakeCaseId || "") !== caseId) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.FORBIDDEN, {
+        message: "Estimate does not belong to this case.",
+        statusCode: 403,
+        details: { estimateId: source.id, intakeCaseId: caseId }
+      });
+    }
+    if (String(source.status || "").toLowerCase() === STUDIO_ESTIMATE_STATUSES.SUPERSEDED) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION, {
+        details: { estimateId: source.id, revision: source.revision }
+      });
+    }
+    if (!isStudioV2ApprovedSnapshot(source)) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.REVISION_REQUIRES_APPROVED, {
+        details: { estimateId: source.id, status: source.status, revision: source.revision }
+      });
+    }
+    if (isStudioV2OriginUnsupported(source)) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNSUPPORTED_ORIGIN);
+    }
+
+    const sourcePub = await loadPublicationBundle(organizationId, source);
+    const priorPublished = publicationIsActive(sourcePub);
+    const reason =
+      typeof body?.reason === "string"
+        ? body.reason.trim().slice(0, 500)
+        : typeof body?.note === "string"
+          ? body.note.trim().slice(0, 500)
+          : "";
+
+    // Idempotent: reuse an existing editable sibling draft for this case.
+    if (typeof repository.listByIntakeCase === "function") {
+      const siblings = await repository.listByIntakeCase(organizationId, caseId);
+      const drafts = (siblings || [])
+        .filter((s) => s && s.id !== source.id && isStudioV2EditableWorkingDraft(s))
+        .sort((a, b) => Number(b.revision || 1) - Number(a.revision || 1));
+      const existing = drafts[0] || null;
+      if (existing) {
+        const estimate = safeView(existing);
+        const editability = assessStudioV2ScopeEditability(existing);
+        const revisionSummary = buildStudioV2RevisionSummary(source, existing, {
+          priorPublished,
+          reason: reason || null
+        });
+        return {
+          ok: true,
+          created: false,
+          reused: true,
+          caseId,
+          estimateId: estimate.id,
+          revision: estimate.revision,
+          status: estimate.status,
+          basedOnEstimateId: source.id,
+          basedOnRevision: source.revision,
+          scopeEditable: editability.editable,
+          optionsEditable: editability.editable,
+          pricingEditable: editability.editable,
+          scopeEditability: editability,
+          scopeSummary: buildStudioV2ScopeSummary(estimate),
+          editableScope: buildStudioV2EditableScope(estimate),
+          editableOptions: buildStudioV2EditableOptions(estimate),
+          editablePricing: buildStudioV2EditablePricing(estimate, {
+            actorUserId: actorUserId || null,
+            env
+          }),
+          lastCalculation: buildStudioV2CalculationResult(estimate),
+          revisionSummary,
+          revisionAffordance: buildStudioV2RevisionAffordance(estimate, {
+            priorPublished,
+            basedOn: { estimateId: source.id, revision: source.revision }
+          }),
+          priorEstimate: {
+            id: source.id,
+            revision: source.revision,
+            status: source.status,
+            approvedAt: source.approval?.approvedAt || source.approvedAt || null
+          },
+          sideEffects: {
+            ensureEditableDraft: false,
+            refreshFromTakeoff: false,
+            openMeasurementRevision: false,
+            autoFork: false,
+            takeoffReopen: false,
+            v1Approve: false,
+            publish: false,
+            simplifiedPublish: false,
+            autoApprove: false,
+            autoCalculate: false,
+            sourceMutated: false
+          }
+        };
+      }
+    }
+
+    if (typeof repository.createSiblingRevisionFrom !== "function") {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNAVAILABLE, {
+        message: "Revision creation is unavailable for this repository."
+      });
+    }
+
+    const clonedScope = deepCloneStudioV2Json(
+      source.scope && typeof source.scope === "object" ? source.scope : {}
+    );
+    clonedScope.studioV2RevisionOrigin = {
+      basedOnEstimateId: source.id,
+      basedOnRevision: Number(source.revision) || 1,
+      reason: reason || null,
+      createdAt: new Date().toISOString(),
+      createdByUserId: actorUserId || null
+    };
+
+    const next = await repository.createSiblingRevisionFrom(
+      organizationId,
+      source.id,
+      {
+        status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+        scope: clonedScope,
+        takeoffJobId: source.takeoffJobId,
+        sourceTakeoffResultId: source.sourceTakeoffResultId,
+        staleReason: `Editable revision from approved R${Number(source.revision) || 1} — recalculate before approving`
+      },
+      actorUserId || null
+    );
+
+    const sourceAfter = await repository.getById(organizationId, source.id);
+
+    const estimate = safeView(next);
+    const editability = assessStudioV2ScopeEditability(next);
+    const prior = sourceAfter || source;
+    const revisionSummary = buildStudioV2RevisionSummary(prior, next, {
+      priorPublished,
+      reason: reason || null
+    });
+    const clientMutationId =
+      typeof body?.clientMutationId === "string" ? body.clientMutationId.trim().slice(0, 120) : null;
+
+    return {
+      ok: true,
+      created: true,
+      reused: false,
+      caseId,
+      estimateId: estimate.id,
+      revision: estimate.revision,
+      status: estimate.status,
+      basedOnEstimateId: source.id,
+      basedOnRevision: source.revision,
+      scopeEditable: editability.editable,
+      optionsEditable: editability.editable,
+      pricingEditable: editability.editable,
+      scopeEditability: editability,
+      scopeSummary: buildStudioV2ScopeSummary(estimate),
+      editableScope: buildStudioV2EditableScope(estimate),
+      editableOptions: buildStudioV2EditableOptions(estimate),
+      editablePricing: buildStudioV2EditablePricing(estimate, {
+        actorUserId: actorUserId || null,
+        env
+      }),
+      lastCalculation: buildStudioV2CalculationResult(estimate),
+      revisionSummary,
+      revisionAffordance: buildStudioV2RevisionAffordance(estimate, {
+        priorPublished,
+        basedOn: { estimateId: source.id, revision: source.revision }
+      }),
+      priorEstimate: {
+        id: prior.id,
+        revision: prior.revision,
+        status: prior.status,
+        approvedAt: prior.approval?.approvedAt || prior.approvedAt || null
+      },
+      clientMutationId,
+      sideEffects: {
+        ensureEditableDraft: false,
+        refreshFromTakeoff: false,
+        openMeasurementRevision: false,
+        autoFork: false,
+        takeoffReopen: false,
+        v1Approve: false,
+        publish: false,
+        simplifiedPublish: false,
+        autoApprove: false,
+        autoCalculate: false,
+        sourceMutated: false
+      }
+    };
+  }
+
+  /**
    * POST calculate — v4 only; no ensure-editable-draft; no refresh-from-takeoff.
    */
   async function calculateWorkingDraft({ organizationId, intakeCaseId, actorUserId }) {
@@ -1426,6 +1695,7 @@ export function createStudioV2Service(deps = {}) {
     patchWorkingDraftOptions,
     patchWorkingDraftPricing,
     approveWorkingDraft,
+    createRevisionFromApproved,
     previewTakeoffImport,
     applyTakeoffImport,
     calculateWorkingDraft,

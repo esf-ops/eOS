@@ -380,12 +380,19 @@ function pricedRow(extra = {}) {
   assert.ok(!panel.includes("simplified-publish"));
   assert.ok(panel.includes('data-testid="studio-v2-approve"'));
   assert.ok(panel.includes('data-testid="studio-v2-approval-confirm"'));
+  assert.ok(panel.includes('data-testid="studio-v2-create-revision"'));
+  assert.ok(panel.includes("Create editable revision"));
+  assert.ok(!panel.includes("later slice"));
   assert.ok(panel.includes("Unsaved scope changes"));
   assert.ok(panel.includes("Unsaved estimate option changes"));
   assert.ok(panel.includes("Calculation is stale"));
   assert.ok(panel.includes("Estimate is not calculated"));
   assert.ok(shell.includes("working-draft/approve"));
+  assert.ok(shell.includes("create-revision"));
   assert.ok(routes.includes("/api/elite100-studio-v2/cases/:caseId/working-draft/approve"));
+  assert.ok(
+    routes.includes("/api/elite100-studio-v2/cases/:caseId/approved/:estimateId/create-revision")
+  );
   console.log("ok: frontend/source contracts for Approval panel");
 }
 

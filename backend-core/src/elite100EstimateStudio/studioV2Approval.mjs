@@ -13,6 +13,7 @@ import {
 } from "./studioEstimatePricing.mjs";
 import { assessStudioV2ScopeEditability } from "./studioV2ScopeEditor.mjs";
 import { buildStudioV2CalculationResult } from "./studioV2WorkingDraft.mjs";
+import { buildStudioV2RevisionAffordance } from "./studioV2Revision.mjs";
 
 function str(v, max = 240) {
   return String(v ?? "")
@@ -221,12 +222,14 @@ export function buildStudioV2ApprovalPayload(row, opts = {}) {
 
 /**
  * @param {object|null|undefined} estimate
+ * @param {{ priorPublished?: boolean, basedOn?: { estimateId?: string|null, revision?: number|null }|null }} [opts]
  */
-export function buildStudioV2ApprovedSummary(estimate) {
+export function buildStudioV2ApprovedSummary(estimate, opts = {}) {
   const approval = estimate?.approval && typeof estimate.approval === "object" ? estimate.approval : {};
   const calc = buildStudioV2CalculationResult(estimate);
   const status = String(estimate?.status || "").toLowerCase();
   const approved = status === STUDIO_ESTIMATE_STATUSES.APPROVED || Boolean(approval.approvedAt);
+  const revisionAffordance = buildStudioV2RevisionAffordance(estimate, opts);
   return {
     approved,
     estimateId: estimate?.id || null,
@@ -241,7 +244,7 @@ export function buildStudioV2ApprovedSummary(estimate) {
       calc.total ??
       null,
     calculation: calc,
-    revisionEditPlaceholder:
-      "Create revision/edit flow will be added in a later slice."
+    revisionAffordance,
+    canCreateRevision: revisionAffordance.canCreateRevision
   };
 }

@@ -32,7 +32,9 @@ export const STUDIO_V2_ERROR_CODES = Object.freeze({
   /** Slice E — approval blocked by validation/review blockers. */
   APPROVAL_BLOCKED: "approval_blocked",
   /** Interactive DE configuration envelope missing / failed after publish. */
-  CONFIGURATION_ENVELOPE_REQUIRED: "configuration_envelope_required"
+  CONFIGURATION_ENVELOPE_REQUIRED: "configuration_envelope_required",
+  /** Create-revision requires an approved (non-superseded) source snapshot. */
+  REVISION_REQUIRES_APPROVED: "revision_requires_approved"
 });
 
 const USER_MESSAGES = Object.freeze({
@@ -67,7 +69,9 @@ const USER_MESSAGES = Object.freeze({
   [STUDIO_V2_ERROR_CODES.APPROVAL_BLOCKED]:
     "This estimate cannot be approved yet. Review the blockers below.",
   [STUDIO_V2_ERROR_CODES.CONFIGURATION_ENVELOPE_REQUIRED]:
-    "Customer interactive Digital Estimate configuration could not be activated. Republish after configuration is available."
+    "Customer interactive Digital Estimate configuration could not be activated. Republish after configuration is available.",
+  [STUDIO_V2_ERROR_CODES.REVISION_REQUIRES_APPROVED]:
+    "Only an approved estimate can open an editable revision."
 });
 
 /**
@@ -110,6 +114,7 @@ function defaultStatusForCode(code) {
     case STUDIO_V2_ERROR_CODES.NOT_PRICED:
     case STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED:
     case STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY:
+    case STUDIO_V2_ERROR_CODES.REVISION_REQUIRES_APPROVED:
     case STUDIO_V2_ERROR_CODES.TAKEOFF_NOT_READY:
     case STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED:
     case STUDIO_V2_ERROR_CODES.CALCULATION_STALE:
