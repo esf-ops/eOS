@@ -19,6 +19,14 @@ import {
   ALL_EDGE_PROFILES,
   resolveEdgeProfileDefinition
 } from "../digitalEstimate/catalog/studioEdgeAuthority.mjs";
+import {
+  buildFinishedEdgeFromExposedSides,
+  formatExposedSidesSummary,
+  normalizeExposedSides,
+  PIECE_TOPOLOGIES
+} from "../takeoff/takeoffExposedEdges.mjs";
+
+export { formatExposedSidesSummary, PIECE_TOPOLOGIES };
 
 const OPENING_KEYS = Object.freeze(["qty-sink", "qty-bar", "qty-cook", "qty-outlet"]);
 
@@ -237,6 +245,17 @@ export function buildStudioV2EditableScope(estimate) {
                 ? round2(Number(p.sqft))
                 : null;
           const profileNorm = normalizeStudioV2EdgeProfileToken(p?.edgeProfileToken);
+          const exposedSidesRaw =
+            p?.exposedSides ||
+            fe?.exposedSides ||
+            null;
+          const exposedSides = exposedSidesRaw
+            ? normalizeExposedSides(exposedSidesRaw)
+            : null;
+          const includeBacksplash =
+            p?.includeBacksplash === true ||
+            p?.backsplashEligible === true ||
+            (p?.backsplashEligibleLengthIn != null && Number(p.backsplashEligibleLengthIn) > 0);
           return {
             id: str(p?.id, 80) || `piece-${ri + 1}-${pi + 1}`,
             name: str(p?.name || p?.label, 120) || `Piece ${pi + 1}`,
@@ -246,11 +265,20 @@ export function buildStudioV2EditableScope(estimate) {
             depthIn: Number.isFinite(Number(p?.depthIn)) ? Number(p.depthIn) : 0,
             quantity: Math.max(1, Math.floor(Number(p?.quantity) || 1)),
             approvedDirectSqft: directSf,
+            includeBacksplash,
             backsplashEligibleLengthIn:
               p?.backsplashEligibleLengthIn != null
                 ? round2(Number(p.backsplashEligibleLengthIn) || 0)
                 : null,
             finishedEdgeLf,
+            exposedSides,
+            pieceTopology:
+              str(p?.pieceTopology || fe?.pieceTopology || fe?.topology, 40) || null,
+            exposedSidesSummary: exposedSides
+              ? formatExposedSidesSummary(exposedSides, finishedEdgeLf || 0)
+              : finishedEdgeLf != null
+                ? `${Number(finishedEdgeLf).toFixed(2)} LF`
+                : null,
             edgeProfileToken: profileNorm.ok ? profileNorm.value : null,
             kitchenSinkCutouts:
               p?.kitchenSinkCutouts != null ? Math.max(0, Math.floor(Number(p.kitchenSinkCutouts) || 0)) : null,
@@ -262,8 +290,14 @@ export function buildStudioV2EditableScope(estimate) {
               p?.cooktopCutouts != null ? Math.max(0, Math.floor(Number(p.cooktopCutouts) || 0)) : null,
             outletCutouts:
               p?.outletCutouts != null ? Math.max(0, Math.floor(Number(p.outletCutouts) || 0)) : null,
+            popupOutletCutouts:
+              p?.popupOutletCutouts != null
+                ? Math.max(0, Math.floor(Number(p.popupOutletCutouts) || 0))
+                : null,
+            cutoutNote: str(p?.cutoutNote, 240) || null,
             sideSplashLeft: p?.sideSplashLeft === true || p?.sideSplashLeftEligible === true,
             sideSplashRight: p?.sideSplashRight === true || p?.sideSplashRightEligible === true,
+            notes: str(p?.notes, 2000) || null,
             source: str(p?.source, 40) || null
           };
         })
@@ -461,6 +495,14 @@ export function normalizeStudioV2ScopePatch(args = {}) {
       if (priorPiece?.source) out.source = priorPiece.source;
       else if (piece.source) out.source = str(piece.source, 40);
 
+      if (Object.prototype.hasOwnProperty.call(piece, "includeBacksplash")) {
+        out.includeBacksplash = piece.includeBacksplash === true;
+        out.backsplashEligible = piece.includeBacksplash === true;
+      } else if (priorPiece?.includeBacksplash === true || priorPiece?.backsplashEligible === true) {
+        out.includeBacksplash = true;
+        out.backsplashEligible = true;
+      }
+
       if (piece.backsplashEligibleLengthIn != null && piece.backsplashEligibleLengthIn !== "") {
         const b = parseNonNegative(
           piece.backsplashEligibleLengthIn,
@@ -473,45 +515,113 @@ export function normalizeStudioV2ScopePatch(args = {}) {
           });
         } else {
           out.backsplashEligibleLengthIn = round2(b.value);
-          out.backsplashEligible = b.value > 0;
-        }
-      } else if (priorPiece?.backsplashEligibleLengthIn != null) {
-        // cleared intentionally when client sends null — omit
-      }
-
-      const edgeLfRaw =
-        piece.finishedEdgeLf != null
-          ? piece.finishedEdgeLf
-          : piece.finishedEdge?.totalFinishedEdgeLengthIn != null
-            ? Number(piece.finishedEdge.totalFinishedEdgeLengthIn) / 12
-            : null;
-      if (edgeLfRaw != null && edgeLfRaw !== "") {
-        const e = parseNonNegative(edgeLfRaw, `rooms[${i}].pieces[${j}].finishedEdgeLf`);
-        if (!e.ok) {
-          issues.push({
-            field: `rooms[${i}].pieces[${j}].finishedEdgeLf`,
-            message: e.error
-          });
-        } else {
-          const totalIn = round2(e.value * 12);
-          out.finishedEdgeLf = round2(e.value);
-          out.finishedEdge = {
-            frontEdgeLengthIn: totalIn,
-            leftExposedEdgeLengthIn: 0,
-            rightExposedEdgeLengthIn: 0,
-            otherExposedEdgeLengthIn: 0,
-            totalFinishedEdgeLengthIn: totalIn,
-            approved: totalIn > 0,
-            source: "estimator_confirmed"
-          };
-          if (included) {
-            hasPieceEdgeLf = true;
-            pieceEdgeSumLf += round2(e.value);
+          if (b.value > 0) {
+            out.backsplashEligible = true;
+            out.includeBacksplash = true;
+          } else if (out.includeBacksplash !== true) {
+            out.backsplashEligible = false;
           }
         }
-      } else if (priorPiece?.finishedEdgeLf != null && included) {
-        // Prior piece edge retained only when client omitted the field entirely —
-        // handled below via priorPiece preserve is not used; client sends null to clear.
+      } else if (
+        Object.prototype.hasOwnProperty.call(piece, "backsplashEligibleLengthIn") &&
+        (piece.backsplashEligibleLengthIn == null || piece.backsplashEligibleLengthIn === "")
+      ) {
+        // cleared
+      } else if (priorPiece?.backsplashEligibleLengthIn != null) {
+        out.backsplashEligibleLengthIn = priorPiece.backsplashEligibleLengthIn;
+        if (Number(priorPiece.backsplashEligibleLengthIn) > 0) {
+          out.backsplashEligible = true;
+          out.includeBacksplash = true;
+        }
+      }
+
+      // Exposed sides (geometry) — preferred over raw finishedEdgeLf when present.
+      let edgeApplied = false;
+      if (
+        Object.prototype.hasOwnProperty.call(piece, "exposedSides") &&
+        piece.exposedSides &&
+        typeof piece.exposedSides === "object"
+      ) {
+        const topology = str(
+          piece.pieceTopology || piece.topology || PIECE_TOPOLOGIES.CUSTOM,
+          40
+        );
+        const fePayload = buildFinishedEdgeFromExposedSides({
+          lengthIn,
+          depthIn,
+          quantity,
+          exposedSides: normalizeExposedSides(piece.exposedSides),
+          topology,
+          attachedSide: piece.attachedSide || null,
+          confirm: true
+        });
+        out.exposedSides = fePayload.exposedSides;
+        out.pieceTopology = fePayload.pieceTopology;
+        if (fePayload.attachedSide) out.attachedSide = fePayload.attachedSide;
+        out.finishedEdgeLf = round2(fePayload.totalFinishedEdgeLengthIn / 12);
+        out.finishedEdge = {
+          ...fePayload,
+          approved: true,
+          source: "estimator_confirmed"
+        };
+        edgeApplied = true;
+        if (included) {
+          hasPieceEdgeLf = true;
+          pieceEdgeSumLf += out.finishedEdgeLf;
+        }
+      } else if (priorPiece?.exposedSides && !Object.prototype.hasOwnProperty.call(piece, "exposedSides")) {
+        out.exposedSides = normalizeExposedSides(priorPiece.exposedSides);
+        if (priorPiece.pieceTopology) out.pieceTopology = priorPiece.pieceTopology;
+        if (priorPiece.finishedEdge) out.finishedEdge = priorPiece.finishedEdge;
+        if (priorPiece.finishedEdgeLf != null) {
+          out.finishedEdgeLf = round2(Number(priorPiece.finishedEdgeLf));
+          if (included) {
+            hasPieceEdgeLf = true;
+            pieceEdgeSumLf += out.finishedEdgeLf;
+            edgeApplied = true;
+          }
+        }
+      }
+
+      if (!edgeApplied) {
+        const edgeLfRaw =
+          piece.finishedEdgeLf != null
+            ? piece.finishedEdgeLf
+            : piece.finishedEdge?.totalFinishedEdgeLengthIn != null
+              ? Number(piece.finishedEdge.totalFinishedEdgeLengthIn) / 12
+              : null;
+        if (edgeLfRaw != null && edgeLfRaw !== "") {
+          const e = parseNonNegative(edgeLfRaw, `rooms[${i}].pieces[${j}].finishedEdgeLf`);
+          if (!e.ok) {
+            issues.push({
+              field: `rooms[${i}].pieces[${j}].finishedEdgeLf`,
+              message: e.error
+            });
+          } else {
+            const totalIn = round2(e.value * 12);
+            out.finishedEdgeLf = round2(e.value);
+            out.finishedEdge = {
+              ...(priorPiece?.finishedEdge && typeof priorPiece.finishedEdge === "object"
+                ? priorPiece.finishedEdge
+                : {}),
+              frontEdgeLengthIn: totalIn,
+              leftExposedEdgeLengthIn: 0,
+              rightExposedEdgeLengthIn: 0,
+              otherExposedEdgeLengthIn: 0,
+              totalFinishedEdgeLengthIn: totalIn,
+              approved: totalIn > 0,
+              source: "estimator_confirmed"
+            };
+            if (included) {
+              hasPieceEdgeLf = true;
+              pieceEdgeSumLf += round2(e.value);
+            }
+          }
+        }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(piece, "pieceTopology") && !out.pieceTopology) {
+        out.pieceTopology = str(piece.pieceTopology, 40) || null;
       }
 
       if (Object.prototype.hasOwnProperty.call(piece, "edgeProfileToken")) {
@@ -573,6 +683,32 @@ export function normalizeStudioV2ScopePatch(args = {}) {
             pieceOpeningSums[sumKey] += parsed.value;
           }
         }
+      }
+
+      // Pop-up outlets are scope-detail only (not in priced addOns today).
+      if (Object.prototype.hasOwnProperty.call(piece, "popupOutletCutouts")) {
+        if (piece.popupOutletCutouts != null && piece.popupOutletCutouts !== "") {
+          const parsed = parseOptionalNonNegInt(
+            piece.popupOutletCutouts,
+            `rooms[${i}].pieces[${j}].popupOutletCutouts`
+          );
+          if (!parsed.ok) {
+            issues.push({
+              field: `rooms[${i}].pieces[${j}].popupOutletCutouts`,
+              message: parsed.error
+            });
+          } else if (parsed.value != null) {
+            out.popupOutletCutouts = parsed.value;
+          }
+        }
+      } else if (priorPiece?.popupOutletCutouts != null) {
+        out.popupOutletCutouts = Math.max(0, Math.floor(Number(priorPiece.popupOutletCutouts) || 0));
+      }
+
+      if (Object.prototype.hasOwnProperty.call(piece, "cutoutNote")) {
+        out.cutoutNote = str(piece.cutoutNote, 240);
+      } else if (priorPiece?.cutoutNote) {
+        out.cutoutNote = str(priorPiece.cutoutNote, 240);
       }
 
       if (Object.prototype.hasOwnProperty.call(piece, "sideSplashLeft")) {

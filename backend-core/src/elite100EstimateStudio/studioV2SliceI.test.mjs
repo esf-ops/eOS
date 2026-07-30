@@ -83,13 +83,56 @@ const fakeCalc = {
 }
 
 {
-  // Existing estimates without piece-level detail still load
+  // Existing estimates without piece-level detail / exposedSides still load
   const editable = buildStudioV2EditableScope({ scope: baseScope() });
   assert.equal(editable.openings.kitchenSink, 1);
   assert.equal(editable.openingsSource, "estimate");
   assert.equal(editable.rooms[0].pieces[0].kitchenSinkCutouts, null);
   assert.equal(editable.rooms[0].pieces[0].edgeProfileToken, null);
+  assert.equal(editable.rooms[0].pieces[0].exposedSides, null);
   console.log("ok: legacy estimates load without piece detail");
+}
+
+{
+  // Exposed sides save + sync finishedEdgeLf from dimensions (geometry only)
+  const ok = normalizeStudioV2ScopePatch({
+    existingScope: baseScope(),
+    incomingScope: {
+      rooms: [
+        {
+          id: "kitchen",
+          name: "Kitchen",
+          roomType: "Kitchen",
+          pieces: [
+            {
+              id: "run-1",
+              name: "Main Wall",
+              lengthIn: 120,
+              depthIn: 25.5,
+              quantity: 1,
+              included: true,
+              pieceTopology: "wall_run",
+              exposedSides: { front: true, back: false, left: true, right: false },
+              kitchenSinkCutouts: 1,
+              cooktopCutouts: 0,
+              outletCutouts: 0
+            }
+          ]
+        }
+      ]
+    }
+  });
+  assert.equal(ok.ok, true, JSON.stringify(ok.issues));
+  const piece = ok.scope.rooms[0].pieces[0];
+  assert.equal(piece.exposedSides.front, true);
+  assert.equal(piece.exposedSides.left, true);
+  assert.equal(piece.pieceTopology, "wall_run");
+  // Front = 120in, Left = 25.5in → 145.5in → 12.125 LF
+  assert.equal(piece.finishedEdgeLf, 12.13);
+  assert.equal(piece.finishedEdge.frontEdgeLengthIn, 120);
+  assert.equal(piece.finishedEdge.leftExposedEdgeLengthIn, 25.5);
+  assert.equal(ok.scope.addOns["qty-sink"], 1);
+  console.log("ok: exposed sides sync finishedEdgeLf from dimensions");
 }
 
 {
@@ -404,16 +447,23 @@ const fakeCalc = {
   const svc = readFileSync(join(__dirname, "studioV2Service.mjs"), "utf8");
   const adapter = readFileSync(join(__dirname, "elite100RoomPricingStudioAdapter.mjs"), "utf8");
 
-  assert.ok(editor.includes('data-testid="studio-v2-piece-detail"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-table"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-row"'));
+  assert.ok(editor.includes('data-testid="studio-v2-set-exposed-sides"'));
+  assert.ok(editor.includes('data-testid="studio-v2-exposed-sides-modal"'));
+  assert.ok(editor.includes('data-testid="studio-v2-cutouts"'));
+  assert.ok(editor.includes('data-testid="studio-v2-cutouts-menu"'));
   assert.ok(editor.includes('data-testid="studio-v2-piece-edge-profile"'));
-  assert.ok(editor.includes("studio-v2-piece-kitchen-sink"));
-  assert.ok(editor.includes("studio-v2-piece-outlet"));
+  assert.ok(editor.includes('data-testid="studio-v2-plan-preview"'));
+  assert.ok(editor.includes('data-testid="studio-v2-scope-readonly"'));
   assert.ok(editor.includes("STUDIO_V2_EDGE_PROFILES"));
   assert.ok(editor.includes("not priced yet"));
   assert.ok(editor.includes("readOnly"));
   assert.ok(!/from\s+["'].*AiEstimatorWorkspace["']/.test(editor));
   assert.ok(!/from\s+["'].*EstimateTakeoffWorkspace["']/.test(editor));
   assert.ok(!/from\s+["'].*TakeoffReviewWorkbench["']/.test(editor));
+  assert.ok(!/from\s+["'].*ConsolidatedTakeoffReview["']/.test(editor));
+  assert.ok(!/from\s+["'].*ExposedSidesDialog["']/.test(editor));
   assert.ok(!shell.includes("ensure-editable-draft"));
   assert.ok(!shell.includes("refresh-from-takeoff"));
   assert.ok(!shell.includes("simplified-publish"));
@@ -421,7 +471,7 @@ const fakeCalc = {
   assert.ok(adapter.includes("hasPieceOpenings"));
   assert.ok(studioApp.includes("EstimateTakeoffWorkspace"));
   assert.ok(studioApp.includes("studioV2Preview"));
-  console.log("ok: frontend/source contracts for Slice I");
+  console.log("ok: frontend/source contracts for Slice I / I.1");
 }
 
 console.log("\nAll Studio V2 Slice I tests passed.\n");
