@@ -1,0 +1,427 @@
+/**
+ * Elite 100 Studio V2 Slice I — piece-level scope detail controls.
+ * Run: node backend-core/src/elite100EstimateStudio/studioV2SliceI.test.mjs
+ */
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { InMemoryStudioEstimateRepository } from "./inMemoryStudioEstimateRepository.mjs";
+import { STUDIO_ESTIMATE_STATUSES, emptyStudioEstimateScope } from "./studioEstimateTypes.mjs";
+import { createStudioV2Service } from "./studioV2Service.mjs";
+import { STUDIO_V2_ERROR_CODES } from "./studioV2Errors.mjs";
+import {
+  buildStudioV2EditableScope,
+  normalizeStudioV2EdgeProfileToken,
+  normalizeStudioV2ScopePatch,
+  STUDIO_V2_EDGE_PROFILE_OPTIONS
+} from "./studioV2ScopeEditor.mjs";
+import { mapStudioEstimateToElite100Input } from "./elite100RoomPricingStudioAdapter.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, "../../..");
+
+const ORG = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ACTOR = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const CASE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+console.log("\nstudioV2SliceI.test.mjs\n");
+
+function baseScope(overrides = {}) {
+  return {
+    ...emptyStudioEstimateScope(),
+    customerName: "Acme Homes",
+    projectName: "Lakeview Kitchen",
+    estimateOrigin: "email_ai_takeoff",
+    physicalScopeSource: "takeoff",
+    pricingBasis: "wholesale",
+    materialGroup: "Group Promo",
+    edgeProfileToken: "edge_eased",
+    rooms: [
+      {
+        id: "kitchen",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        included: true,
+        pieces: [
+          {
+            id: "run-1",
+            name: "Main Wall",
+            pieceType: "counter",
+            included: true,
+            lengthIn: 96,
+            depthIn: 25.5,
+            quantity: 1,
+            sqft: 17
+          }
+        ]
+      }
+    ],
+    addOns: { "qty-sink": 1 },
+    ...overrides
+  };
+}
+
+const fakeCalc = {
+  fingerprint: "v2i-fp",
+  calculatedAt: "2026-07-30T20:00:00.000Z",
+  pricingVersion: 4,
+  pricingEngine: "elite100-room-pricing-v1",
+  totals: { exactTotal: 1000, customerDisplayTotal: 1010 },
+  warnings: [],
+  unresolvedItems: []
+};
+
+{
+  assert.ok(STUDIO_V2_EDGE_PROFILE_OPTIONS.some((p) => p.value === "edge_eased"));
+  assert.ok(STUDIO_V2_EDGE_PROFILE_OPTIONS.some((p) => p.value === "edge_small_ogee"));
+  assert.equal(normalizeStudioV2EdgeProfileToken("Small Ogee").value, "edge_small_ogee");
+  assert.equal(normalizeStudioV2EdgeProfileToken("edge_knife").value, "edge_knife");
+  assert.equal(normalizeStudioV2EdgeProfileToken("bogus-profile").ok, false);
+  assert.equal(normalizeStudioV2EdgeProfileToken("").value, null);
+  console.log("ok: edge profile tokens validated");
+}
+
+{
+  // Existing estimates without piece-level detail still load
+  const editable = buildStudioV2EditableScope({ scope: baseScope() });
+  assert.equal(editable.openings.kitchenSink, 1);
+  assert.equal(editable.openingsSource, "estimate");
+  assert.equal(editable.rooms[0].pieces[0].kitchenSinkCutouts, null);
+  assert.equal(editable.rooms[0].pieces[0].edgeProfileToken, null);
+  console.log("ok: legacy estimates load without piece detail");
+}
+
+{
+  // Piece-level cutouts persist + aggregate into addOns; invalid profile rejected
+  const bad = normalizeStudioV2ScopePatch({
+    existingScope: baseScope(),
+    incomingScope: {
+      rooms: [
+        {
+          id: "kitchen",
+          name: "Kitchen",
+          roomType: "Kitchen",
+          pieces: [
+            {
+              id: "run-1",
+              name: "Main Wall",
+              lengthIn: 96,
+              depthIn: 25.5,
+              quantity: 1,
+              included: true,
+              edgeProfileToken: "not-a-real-profile"
+            }
+          ]
+        }
+      ]
+    }
+  });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.issues.some((i) => i.field.includes("edgeProfileToken")));
+
+  const ok = normalizeStudioV2ScopePatch({
+    existingScope: baseScope(),
+    incomingScope: {
+      rooms: [
+        {
+          id: "kitchen",
+          name: "Kitchen",
+          roomType: "Kitchen",
+          pieces: [
+            {
+              id: "run-1",
+              name: "Main Wall",
+              lengthIn: 120,
+              depthIn: 25.5,
+              quantity: 1,
+              included: true,
+              kitchenSinkCutouts: 1,
+              cooktopCutouts: 1,
+              outletCutouts: 2,
+              finishedEdgeLf: 12,
+              edgeProfileToken: "edge_small_ogee",
+              backsplashEligibleLengthIn: 96,
+              sideSplashLeft: false,
+              sideSplashRight: false
+            },
+            {
+              id: "island",
+              name: "Island Top",
+              lengthIn: 72,
+              depthIn: 36,
+              quantity: 1,
+              included: true,
+              kitchenSinkCutouts: 0,
+              cooktopCutouts: 0,
+              outletCutouts: 0,
+              finishedEdgeLf: 8,
+              edgeProfileToken: "edge_eased"
+            }
+          ]
+        },
+        {
+          id: "bath",
+          name: "Powder",
+          roomType: "Vanity",
+          pieces: [
+            {
+              id: "vanity-1",
+              name: "Vanity Top",
+              lengthIn: 36,
+              depthIn: 22,
+              quantity: 1,
+              included: true,
+              vanityBarSinkCutouts: 1,
+              sideSplashLeft: true,
+              sideSplashRight: true,
+              finishedEdgeLf: 4,
+              edgeProfileToken: "edge_eased"
+            }
+          ]
+        }
+      ],
+      openings: { kitchenSink: 99, vanityBarSink: 99, cooktop: 99, outlet: 99 }
+    }
+  });
+  assert.equal(ok.ok, true, JSON.stringify(ok.issues));
+  assert.equal(ok.scope.addOns["qty-sink"], 1, "piece cutouts override project openings");
+  assert.equal(ok.scope.addOns["qty-bar"], 1);
+  assert.equal(ok.scope.addOns["qty-cook"], 1);
+  assert.equal(ok.scope.addOns["qty-outlet"], 2);
+  assert.equal(ok.scope.rooms[0].pieces[0].kitchenSinkCutouts, 1);
+  assert.equal(ok.scope.rooms[0].pieces[0].edgeProfileToken, "edge_small_ogee");
+  assert.equal(ok.scope.edgeProfileToken, "edge_small_ogee");
+  assert.equal(ok.scope.rooms[1].pieces[0].vanityBarSinkCutouts, 1);
+  assert.equal(ok.scope.rooms[1].pieces[0].sideSplashLeft, true);
+  assert.equal(ok.scope.edgeEligibleLinearFeet, 24);
+  assert.equal(ok.scope.takeoffScopeSummary.approvedFinishedEdgeLf, 24);
+  assert.equal(ok.scope.rooms[0].backsplashMeasuredLengthIn, 96);
+  console.log("ok: piece cutouts/edge/profile persist and aggregate");
+}
+
+{
+  // Adapter maps piece openings to the owning room (not only default kitchen)
+  const scope = normalizeStudioV2ScopePatch({
+    existingScope: baseScope(),
+    incomingScope: {
+      rooms: [
+        {
+          id: "kitchen",
+          name: "Kitchen",
+          roomType: "Kitchen",
+          pieces: [
+            {
+              id: "run-1",
+              name: "Main Wall",
+              lengthIn: 96,
+              depthIn: 25.5,
+              quantity: 1,
+              included: true,
+              kitchenSinkCutouts: 1,
+              cooktopCutouts: 1
+            }
+          ]
+        },
+        {
+          id: "bath",
+          name: "Bath",
+          roomType: "Vanity",
+          pieces: [
+            {
+              id: "vanity-1",
+              name: "Vanity Top",
+              lengthIn: 36,
+              depthIn: 22,
+              quantity: 1,
+              included: true,
+              vanityBarSinkCutouts: 2,
+              outletCutouts: 1
+            }
+          ]
+        }
+      ]
+    }
+  }).scope;
+  const mapped = mapStudioEstimateToElite100Input(scope);
+  assert.equal(mapped.configuration.rooms.kitchen.sinks[0].quantity, 1);
+  assert.equal(mapped.configuration.rooms.kitchen.cutouts.cooktopQuantity, 1);
+  assert.equal(mapped.configuration.rooms.bath.sinks[0].sinkKind, "vanity");
+  assert.equal(mapped.configuration.rooms.bath.sinks[0].quantity, 2);
+  assert.equal(mapped.configuration.rooms.bath.cutouts.electricalOutletQuantity, 1);
+  console.log("ok: piece openings mapped per room into calculator input");
+}
+
+{
+  // PATCH service: piece detail save + approved reject + stale/ready_to_price
+  const repo = new InMemoryStudioEstimateRepository();
+  await repo.create({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    createdByUserId: ACTOR,
+    status: STUDIO_ESTIMATE_STATUSES.PRICED,
+    revision: 1,
+    scope: baseScope(),
+    calculationSnapshot: fakeCalc
+  });
+  const v2 = createStudioV2Service({
+    repository: repo,
+    env: {},
+    calculateStudioEstimateImpl: async ({ scope }) => ({
+      ...fakeCalc,
+      fingerprint: "v2i-fp-2",
+      totals: {
+        exactTotal: 1000 + (Number(scope.addOns?.["qty-sink"]) || 0) * 100,
+        customerDisplayTotal: 1000 + (Number(scope.addOns?.["qty-sink"]) || 0) * 100,
+        accountAdjustment: 0
+      },
+      fabrication: { addOns: { ...(scope.addOns || {}) } }
+    }),
+    studioEstimateService: {
+      async ensureEditableEstimateDraft() {
+        throw new Error("must not call ensureEditableEstimateDraft");
+      },
+      async refreshScopeFromTakeoff() {
+        throw new Error("must not call refreshScopeFromTakeoff");
+      },
+      async updateScope() {
+        throw new Error("must not call updateScope");
+      }
+    }
+  });
+
+  const patched = await v2.patchWorkingDraftScope({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    actorUserId: ACTOR,
+    body: {
+      scope: {
+        rooms: [
+          {
+            id: "kitchen",
+            name: "Kitchen",
+            roomType: "Kitchen",
+            pieces: [
+              {
+                id: "run-1",
+                name: "Main Wall",
+                lengthIn: 96,
+                depthIn: 25.5,
+                quantity: 1,
+                included: true,
+                kitchenSinkCutouts: 2,
+                cooktopCutouts: 1,
+                outletCutouts: 1,
+                finishedEdgeLf: 10,
+                edgeProfileToken: "edge_crescent"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  });
+  assert.equal(patched.ok, true);
+  assert.equal(patched.status, STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE);
+  assert.equal(patched.editableScope.rooms[0].pieces[0].kitchenSinkCutouts, 2);
+  assert.equal(patched.editableScope.rooms[0].pieces[0].edgeProfileToken, "edge_crescent");
+  assert.equal(patched.editableScope.openings.kitchenSink, 2);
+  assert.equal(patched.editableScope.openingsSource, "piece");
+  assert.equal(patched.sideEffects.ensureEditableDraft, false);
+  assert.equal(patched.sideEffects.refreshFromTakeoff, false);
+
+  const calc = await v2.calculateWorkingDraft({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    actorUserId: ACTOR
+  });
+  assert.equal(calc.calculation.total, 1200);
+
+  // Approved rejects piece detail edits
+  const approvedRepo = new InMemoryStudioEstimateRepository();
+  await approvedRepo.create({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID,
+    createdByUserId: ACTOR,
+    status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+    revision: 1,
+    scope: baseScope(),
+    approval: { approvedAt: "2026-07-30T12:00:00.000Z" },
+    calculationSnapshot: fakeCalc
+  });
+  const v2Approved = createStudioV2Service({
+    repository: approvedRepo,
+    env: {},
+    calculateStudioEstimateImpl: async () => fakeCalc
+  });
+  await assert.rejects(
+    () =>
+      v2Approved.patchWorkingDraftScope({
+        organizationId: ORG,
+        intakeCaseId: CASE_ID,
+        actorUserId: ACTOR,
+        body: {
+          scope: {
+            rooms: [
+              {
+                id: "kitchen",
+                name: "Kitchen",
+                roomType: "Kitchen",
+                pieces: [
+                  {
+                    id: "run-1",
+                    name: "Main Wall",
+                    lengthIn: 96,
+                    depthIn: 25.5,
+                    quantity: 1,
+                    included: true,
+                    kitchenSinkCutouts: 3
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }),
+    (e) => e?.code === STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY
+  );
+  console.log("ok: piece detail save/stale + approved readonly");
+}
+
+{
+  const editor = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2ScopeEditor.tsx"),
+    "utf8"
+  );
+  const shell = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2EstimatorShell.tsx"),
+    "utf8"
+  );
+  const studioApp = readFileSync(
+    join(root, "app-elite100-estimate-studio/src/StudioApp.tsx"),
+    "utf8"
+  );
+  const svc = readFileSync(join(__dirname, "studioV2Service.mjs"), "utf8");
+  const adapter = readFileSync(join(__dirname, "elite100RoomPricingStudioAdapter.mjs"), "utf8");
+
+  assert.ok(editor.includes('data-testid="studio-v2-piece-detail"'));
+  assert.ok(editor.includes('data-testid="studio-v2-piece-edge-profile"'));
+  assert.ok(editor.includes("studio-v2-piece-kitchen-sink"));
+  assert.ok(editor.includes("studio-v2-piece-outlet"));
+  assert.ok(editor.includes("STUDIO_V2_EDGE_PROFILES"));
+  assert.ok(editor.includes("not priced yet"));
+  assert.ok(editor.includes("readOnly"));
+  assert.ok(!/from\s+["'].*AiEstimatorWorkspace["']/.test(editor));
+  assert.ok(!/from\s+["'].*EstimateTakeoffWorkspace["']/.test(editor));
+  assert.ok(!/from\s+["'].*TakeoffReviewWorkbench["']/.test(editor));
+  assert.ok(!shell.includes("ensure-editable-draft"));
+  assert.ok(!shell.includes("refresh-from-takeoff"));
+  assert.ok(!shell.includes("simplified-publish"));
+  assert.ok(!svc.includes("ensureEditableEstimateDraft("));
+  assert.ok(adapter.includes("hasPieceOpenings"));
+  assert.ok(studioApp.includes("EstimateTakeoffWorkspace"));
+  assert.ok(studioApp.includes("studioV2Preview"));
+  console.log("ok: frontend/source contracts for Slice I");
+}
+
+console.log("\nAll Studio V2 Slice I tests passed.\n");

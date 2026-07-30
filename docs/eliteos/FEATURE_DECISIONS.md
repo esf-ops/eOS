@@ -3089,3 +3089,15 @@
 | **Protected** | `elite100RoomPricingCalculator` math, V1 workflow UX, DE repricing, schema, forbidden orchestration calls. |
 | **Revisit trigger** | Per-line distributed adjustment preview in V2; customer-facing DE adjustment labels. |
 
+### 218. Elite 100 Studio V2 Slice I — piece-level scope detail controls (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `feature/elite100-studio-v2-scope-detail-controls` |
+| **Decision** | Studio V2 scope editor stores openings/cutouts, finished edge LF, and edge profile on each piece. On save, piece cutouts aggregate into `scope.addOns` (`qty-sink` / `qty-bar` / `qty-cook` / `qty-outlet`); piece edge LF syncs into `edgeEligibleLinearFeet` + takeoff summary `approvedFinishedEdgeLf`; dominant piece edge profile sets `scope.edgeProfileToken`. Adapter assigns piece openings to the owning room when present, else legacy estimate-wide addOns. Side splash L/R saved as scope detail only (not priced). No calculator math changes; no schema migration. |
+| **Why** | Estimators need piece-attached openings/edges instead of project-wide totals, without importing AI Takeoff Review orchestration. |
+| **SQL** | None. |
+| **Impacted** | `studioV2ScopeEditor.mjs`, `elite100RoomPricingStudioAdapter.mjs`, `StudioV2ScopeEditor.tsx`, `styles.css`, `studioV2SliceI.test.mjs`. |
+| **Protected** | Calculator math, V1 workflow, DE repricing, Takeoff Review imports, catalog/vanity/waterfall/sold/email. |
+| **Revisit trigger** | True per-piece priced edge profiles; mitered/waterfall pricing; side splash pricing. |
+
