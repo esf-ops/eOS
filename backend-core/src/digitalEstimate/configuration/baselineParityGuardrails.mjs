@@ -27,9 +27,11 @@ export const BASELINE_PARITY_NOTICES = Object.freeze({
   PRICE_UPDATE_REVIEW:
     "Price updates for this change require estimator review.",
   ESTIMATOR_WILL_REVIEW:
-    "Your estimator will review this change before the estimate is final.",
+    "Elite will review this before final approval.",
   EDGE_REVIEW:
-    "Edge changes may affect price and require estimator review.",
+    "Edge changes may affect your final estimate and will be reviewed by Elite.",
+  CHANGES_NEED_REVIEW: "Changes need review",
+  REQUESTED_CHANGE: "Requested change",
   FINAL_APPROVAL_UNAVAILABLE:
     "Final approval will be available after estimator review."
 });
@@ -85,8 +87,14 @@ export function publicCalcDivergesFromBaseline(calc, baseline) {
 }
 
 /**
- * Strip misleading edge dollar deltas from a customer-safe option.
- * Keeps Original selection / Included labels. Selection remains possible.
+ * Customer-safe edge option display for public Digital Estimate.
+ *
+ * Keeps backend-calculated display amounts (frozen publication effects or
+ * trusted LF×rate resolution) so included profiles show +$0 and upgraded
+ * profiles show +$N. Does NOT make those amounts authoritative for the
+ * published estimate total — totals stay frozen via
+ * applyBaselineParityToCustomerCalculation until Slice K.
+ *
  * @param {object} publicOpt
  * @returns {object}
  */
@@ -101,31 +109,72 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
     publicOpt.premium === false;
   if (!isEdge && !key.startsWith("edge:")) return publicOpt;
 
-  const included = Boolean(publicOpt.includedInBaseline);
-  const original =
-    publicOpt.customerPriceTreatment === "original_selection" ||
-    publicOpt.priceEffectLabel === "Original selection";
   const next = { ...publicOpt };
+  const centsRaw =
+    publicOpt.priceEffectCents != null ? Number(publicOpt.priceEffectCents) : null;
+  const hasAuthoritativeCents = centsRaw != null && Number.isFinite(centsRaw);
+  const treatment = String(publicOpt.customerPriceTreatment || "");
+
+  // Preserve backend-owned display cents when present (frozen publish or trusted resolve).
+  if (hasAuthoritativeCents) {
+    next.priceEffectCents = Math.trunc(centsRaw);
+    if (next.visibleDelta == null && treatment === "delta") {
+      next.visibleDelta = next.priceEffectCents / 100;
+    }
+  }
+
+  // Published / baseline edge for this room — never show as an upgrade delta.
+  if (
+    Boolean(publicOpt.includedInBaseline) ||
+    treatment === "original_selection" ||
+    publicOpt.priceEffectLabel === "Original selection"
+  ) {
+    next.customerPriceTreatment = "original_selection";
+    next.priceEffectLabel = "Included in your estimate";
+    next.priceEffectCents = 0;
+    next.visibleDelta = 0;
+    next.selectable = true;
+    return next;
+  }
+
+  // Included-tier alternate profiles (Eased, Large Eased, …).
+  if (
+    treatment === "included_alternate" ||
+    publicOpt.premium === false ||
+    publicOpt.priceEffectLabel === "Included" ||
+    (hasAuthoritativeCents && centsRaw === 0 && publicOpt.premium !== true)
+  ) {
+    next.customerPriceTreatment = "included_alternate";
+    next.priceEffectLabel = "+$0";
+    next.priceEffectCents = 0;
+    next.visibleDelta = 0;
+    next.selectable = true;
+    return next;
+  }
+
+  // Upgraded profiles with backend-calculated display cents.
+  if (hasAuthoritativeCents && centsRaw >= 0 && (treatment === "delta" || publicOpt.premium === true)) {
+    const dollars = next.priceEffectCents / 100;
+    next.customerPriceTreatment = "delta";
+    next.priceEffectLabel =
+      publicOpt.priceEffectLabel && /^\+\$/.test(String(publicOpt.priceEffectLabel))
+        ? String(publicOpt.priceEffectLabel)
+        : `+$${Math.round(dollars).toLocaleString("en-US")}`;
+    next.visibleDelta = dollars;
+    next.selectable = true;
+    return next;
+  }
+
+  // No authoritative cents — still selectable as a pending request; section-level
+  // note covers review copy (avoid repeating long text on every upgraded row).
+  next.customerPriceTreatment =
+    treatment === "review_required" ? "review_required" : treatment || "review_required";
+  next.priceEffectLabel = null;
   next.visibleDelta = null;
   next.visibleSellPrice = null;
-  next.priceEffectCents = null;
-  if (original) {
-    next.customerPriceTreatment = "original_selection";
-    next.priceEffectLabel = "Original selection";
-    next.selectable = true;
-  } else if (included) {
-    next.customerPriceTreatment = "included_alternate";
-    next.priceEffectLabel = "Included";
-    next.selectable = true;
-  } else {
-    next.customerPriceTreatment = "review_required";
-    next.priceEffectLabel = BASELINE_PARITY_NOTICES.EDGE_REVIEW;
-    // Still selectable as a pending request — price is not authoritative.
-    next.selectable = true;
-    next.availabilityState =
-      publicOpt.availabilityState === "unavailable"
-        ? "unavailable"
-        : "review_required";
+  next.selectable = publicOpt.availabilityState === "unavailable" ? false : true;
+  if (publicOpt.availabilityState !== "unavailable") {
+    next.availabilityState = "review_required";
   }
   return next;
 }

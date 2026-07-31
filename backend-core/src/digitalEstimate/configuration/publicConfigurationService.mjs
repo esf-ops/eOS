@@ -372,9 +372,10 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     ? sideSplashPieceDisplayName(String(pieceDisplayNameRaw), pieceIndex || 1)
     : null;
 
-  // Authoritative edge price effects (Included / Original selection / +$N).
+  // Authoritative edge display effects (Included in your estimate / +$0 / +$N).
   // Priority: (1) frozen publication edge_option_effects, (2) trusted-context
   // LF × rate for unpublished/preview flows, (3) review-required when absent.
+  // Display amounts do not replace the published baseline total (baseline parity).
   let edgeEffect = null;
   if (optionKey.startsWith("edge:") || compat.role === "edge_selection") {
     const parts = optionKey.split(":");
@@ -534,7 +535,8 @@ function toCustomerSafeOption(opt, group, ctx = null) {
       reviewRequired:
         treatment === "review_required" || Boolean(compat.estimatorReviewRequired)
     });
-  // Hotfix: strip misleading edge dollar deltas until Slice K authoritative reprice.
+  // Hotfix: normalize edge display labels/amounts for customer UI while totals
+  // remain frozen to the published baseline (Slice K owns live reprice).
   if (String(publicOpt.optionKey || "").startsWith("edge:")) {
     return applyEdgeOptionPriceGuardrail(publicOpt);
   }

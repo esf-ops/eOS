@@ -992,7 +992,7 @@ export function resolveSideSplashPriceEffect(args) {
       selectedSideCount: 0,
       billedSfPerSide: 0,
       amountCents: 0,
-      priceEffectLabel: "Original selection"
+      priceEffectLabel: "Included in your estimate"
     };
   }
 

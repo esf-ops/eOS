@@ -260,7 +260,7 @@ function studioEstimateFixture() {
     edgeLinearFeet: lf,
     pricingBasis: "direct"
   });
-  assert.equal(original.priceEffectLabel, "Original selection");
+  assert.equal(original.priceEffectLabel, "Included in your estimate");
   assert.equal(original.priceEffectCents, 0);
 
   for (const free of FREE_EDGE_PROFILES.filter((p) => p.optionToken !== "edge_eased")) {
@@ -270,7 +270,7 @@ function studioEstimateFixture() {
       edgeLinearFeet: lf,
       pricingBasis: "direct"
     });
-    assert.equal(effect.priceEffectLabel, "Included", free.label);
+    assert.equal(effect.priceEffectLabel, "+$0", free.label);
     assert.equal(effect.priceEffectCents, 0);
   }
 
@@ -301,9 +301,9 @@ function studioEstimateFixture() {
       edgeTier: "free",
       visibleDelta: 0
     }),
-    "Included"
+    "+$0"
   );
-  console.log("ok: edge Included / Original selection / premium Direct+Wholesale upcharges");
+  console.log("ok: edge +$0 / Included in your estimate / premium Direct+Wholesale upcharges");
 }
 
 // ---------------------------------------------------------------------------

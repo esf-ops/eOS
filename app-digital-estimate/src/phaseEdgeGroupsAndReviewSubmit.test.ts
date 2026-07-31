@@ -81,14 +81,14 @@ console.log("ok: 1. edge groups");
     edgeLinearFeet: lf,
     pricingBasis: "direct",
   });
-  assert.equal(original.priceEffectLabel, "Original selection");
+  assert.equal(original.priceEffectLabel, "Included in your estimate");
   const included = resolveEdgeOptionPriceEffect({
     profileToken: "edge_bevel",
     originalProfileToken: "edge_eased",
     edgeLinearFeet: lf,
     pricingBasis: "direct",
   });
-  assert.equal(included.priceEffectLabel, "Included");
+  assert.equal(included.priceEffectLabel, "+$0");
   for (const token of ["edge_small_ogee", "edge_crescent", "edge_knife"]) {
     const effect = resolveEdgeOptionPriceEffect({
       profileToken: token,

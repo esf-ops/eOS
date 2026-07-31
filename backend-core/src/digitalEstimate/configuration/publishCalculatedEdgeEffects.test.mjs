@@ -140,13 +140,13 @@ function studioEstimateFixture(overrides = {}) {
   assert.equal(eased.classification, "included");
   assert.equal(eased.originalSelection, true);
   assert.equal(eased.priceEffectCents, 0);
-  assert.equal(eased.priceEffectLabel, "Original selection");
+  assert.equal(eased.priceEffectLabel, "Included in your estimate");
   assert.equal(eased.reviewRequired, false);
   assert.equal(eased.roomKey, "kitchen");
 
   for (const free of FREE_EDGE_PROFILES.filter((p) => p.optionToken !== "edge_eased")) {
     const row = findFrozenEdgeOptionEffect(effects, free.optionToken, "kitchen");
-    assert.equal(row.priceEffectLabel, "Included");
+    assert.equal(row.priceEffectLabel, "+$0");
     assert.equal(row.priceEffectCents, 0);
     assert.equal(row.reviewRequired, false);
   }
@@ -279,7 +279,7 @@ function studioEstimateFixture(overrides = {}) {
   console.log("ok: frozen premium selection → one Add-ons line; totals once; Changes; no LF/rate");
 }
 
-// 6. Included profiles remain $0; original says Original selection
+// 6. Included profiles remain $0; original says Included in your estimate
 {
   const effects = buildCustomerSafeEdgeOptionEffects({
     finalPricedEdgeLf: LF,
@@ -288,7 +288,7 @@ function studioEstimateFixture(overrides = {}) {
   });
   assert.equal(
     findFrozenEdgeOptionEffect(effects, "edge_eased").priceEffectLabel,
-    "Original selection"
+    "Included in your estimate"
   );
   for (const free of FREE_EDGE_PROFILES.filter((p) => p.optionToken !== "edge_eased")) {
     assert.equal(findFrozenEdgeOptionEffect(effects, free.optionToken).priceEffectCents, 0);

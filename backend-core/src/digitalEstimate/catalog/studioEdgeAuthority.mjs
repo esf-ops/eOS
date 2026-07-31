@@ -213,9 +213,10 @@ export function resolveEdgeOptionPriceEffect(args) {
       premium,
       available: true,
       priceEffectCents: 0,
-      priceEffectLabel: "Original selection",
+      // Customer-facing: published/selected edge — not an upgrade delta.
+      priceEffectLabel: "Included in your estimate",
       customerPriceTreatment: "original_selection",
-      visibleDelta: null,
+      visibleDelta: 0,
       visibleSellPrice: null,
       reviewReasonCode: null
     };
@@ -228,9 +229,9 @@ export function resolveEdgeOptionPriceEffect(args) {
       premium: false,
       available: true,
       priceEffectCents: 0,
-      priceEffectLabel: "Included",
+      priceEffectLabel: "+$0",
       customerPriceTreatment: "included_alternate",
-      visibleDelta: null,
+      visibleDelta: 0,
       visibleSellPrice: null,
       reviewReasonCode: null
     };
@@ -365,6 +366,12 @@ export function edgeEffectFromFrozenPublication(frozen) {
     else if (!premium) treatment = "included_alternate";
     else treatment = "delta";
   }
+  let priceEffectLabel = String(frozen.priceEffectLabel || "");
+  if (priceEffectLabel === "Original selection" || (original && !priceEffectLabel)) {
+    priceEffectLabel = "Included in your estimate";
+  } else if (priceEffectLabel === "Included" || (!premium && !original && !priceEffectLabel && !reviewRequired)) {
+    priceEffectLabel = "+$0";
+  }
   return {
     profileKey: frozen.profileKey || normalizeEdgeProfileToken(frozen.profile),
     label: frozen.profile || edgeProfileDisplayLabel(frozen.profileKey),
@@ -372,10 +379,14 @@ export function edgeEffectFromFrozenPublication(frozen) {
     premium,
     available: Boolean(frozen.available) && !reviewRequired,
     priceEffectCents: Number.isFinite(cents) ? cents : null,
-    priceEffectLabel: String(frozen.priceEffectLabel || ""),
+    priceEffectLabel,
     customerPriceTreatment: treatment,
     visibleDelta:
-      treatment === "delta" && Number.isFinite(cents) ? cents / 100 : null,
+      treatment === "delta" && Number.isFinite(cents)
+        ? cents / 100
+        : treatment === "included_alternate" || treatment === "original_selection"
+          ? 0
+          : null,
     visibleSellPrice: null,
     reviewReasonCode: reviewRequired ? "frozen_review_required" : null,
     fromFrozenPublication: true
