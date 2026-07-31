@@ -868,10 +868,24 @@ export function buildChangesRoomPricingProjection(args) {
 
     const originalCountertopCents = origRoom?.countertopAmountCents ?? null;
     const updatedCountertopCents = room.countertopAmountCents ?? null;
+    const countertopDeltaCents =
+      originalCountertopCents != null && updatedCountertopCents != null
+        ? updatedCountertopCents - originalCountertopCents
+        : null;
+    // Material group delta already owns the countertop stone-rate dollars
+    // (updated.countertopAmountCents += materialDeltaCents in the Updated
+    // projection). Emitting a second "Countertop → Countertop" row with the
+    // same cents makes Changes room totals double-count and disagree with
+    // the authoritative project difference.
+    const materialOwnsCountertopDelta =
+      Number(room.materialDeltaCents || 0) !== 0 &&
+      countertopDeltaCents != null &&
+      Math.abs(countertopDeltaCents - Number(room.materialDeltaCents || 0)) <= 1;
     if (
-      originalCountertopCents != null &&
-      updatedCountertopCents != null &&
-      updatedCountertopCents !== originalCountertopCents
+      countertopDeltaCents != null &&
+      countertopDeltaCents !== 0 &&
+      !materialOwnsCountertopDelta &&
+      Number(room.materialDeltaCents || 0) === 0
     ) {
       rows.push({
         roomId: room.roomId,
@@ -880,7 +894,7 @@ export function buildChangesRoomPricingProjection(args) {
         categoryLabel: "Countertop",
         originalLabel: "Countertop",
         updatedLabel: "Countertop",
-        amountDeltaCents: updatedCountertopCents - originalCountertopCents,
+        amountDeltaCents: countertopDeltaCents,
         status: "changed"
       });
     }

@@ -440,7 +440,9 @@ export function buildUpdatedBreakdown(args: {
 }
 
 /**
- * Changes = only differences with dollar effect (from room choice deltas).
+ * Changes = additive dollar differences from the published estimate.
+ * Room total change = sum of that room's additive rows.
+ * Project difference uses authoritative backend totalDelta (configured − published).
  */
 export function buildChangesBreakdown(args: {
   changeLines: Array<{
@@ -466,6 +468,8 @@ export function buildChangesBreakdown(args: {
       }
       byRoom.get(row.roomName)!.push(row);
     }
+    let sumOfRoomAdditiveDeltas = 0;
+    let allRoomsHaveAdditiveTotals = true;
     for (const roomName of roomOrder) {
       const rows = byRoom.get(roomName) || [];
       for (const [index, row] of rows.entries()) {
@@ -487,9 +491,13 @@ export function buildChangesBreakdown(args: {
           category: row.categoryLabel,
         });
       }
+      // Additive room total: only finite dollar deltas. Review-required rows
+      // (null amount) are explanatory and must not invent a room total.
       const roomDelta = rows.every((row) => row.amountDelta != null)
         ? rows.reduce((sum, row) => sum + Number(row.amountDelta || 0), 0)
         : null;
+      if (roomDelta == null) allRoomsHaveAdditiveTotals = false;
+      else sumOfRoomAdditiveDeltas += roomDelta;
       lines.push({
         key: `chg-room-${roomOrder.indexOf(roomName)}-total`,
         label: `${roomName} total change`,
@@ -502,7 +510,32 @@ export function buildChangesBreakdown(args: {
     const total =
       args.roomPricingChanges.totalDelta != null
         ? Number(args.roomPricingChanges.totalDelta)
-        : null;
+        : args.displayTotalDelta != null
+          ? Number(args.displayTotalDelta)
+          : null;
+    // Residual between summed room changes and authoritative project difference
+    // (project-level options/credits/adjustments). Display only — never priced here.
+    if (
+      total != null &&
+      Number.isFinite(total) &&
+      allRoomsHaveAdditiveTotals &&
+      Math.abs(sumOfRoomAdditiveDeltas - total) >= 0.005
+    ) {
+      const residual = Math.round((total - sumOfRoomAdditiveDeltas) * 100) / 100;
+      lines.push({
+        key: "chg-project-level",
+        label: "Project-level adjustments",
+        amount: residual,
+        amountLabel:
+          residual < 0
+            ? `−${formatMoney(Math.abs(residual))}`
+            : residual > 0
+              ? `+${formatMoney(residual)}`
+              : "No change",
+        roomName: null,
+        category: "Project",
+      });
+    }
     lines.push({
       key: "chg-project-total",
       label: "Difference from published estimate",
