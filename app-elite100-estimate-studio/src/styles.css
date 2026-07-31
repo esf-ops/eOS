@@ -4218,3 +4218,38 @@ button.linkish {
   width: 100%;
   max-width: 16rem;
 }
+.studio-v2-selection-totals,
+.studio-v2-selection-priced,
+.studio-v2-selection-scope,
+.studio-v2-selection-diagnostics {
+  margin-top: 1.1rem;
+}
+.studio-v2-selection-totals h3,
+.studio-v2-selection-priced h3,
+.studio-v2-selection-scope h3,
+.studio-v2-selection-diagnostics h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+}
+.studio-v2-selection-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+}
+.studio-v2-selection-rooms {
+  display: grid;
+  gap: 0.75rem;
+}
+.studio-v2-selection-room {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  background: rgba(248, 250, 252, 0.7);
+}
+.studio-v2-selection-room h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.92rem;
+}
+.studio-v2-selection-readonly {
+  margin-top: 1rem;
+  font-size: 0.82rem;
+}
