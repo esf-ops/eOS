@@ -553,11 +553,17 @@ function ScopeWorkbenchPanel(props: {
   planPreviewLabel: string | null;
   onSelectWarningPiece?: (roomId: string, pieceId: string) => void;
   rooms: StudioV2EditableRoom[];
+  estimateDefaultEdgeToken?: string | null;
 }) {
-  const { checklist, selected, planPreviewUrl, planPreviewLabel, rooms } = props;
+  const { checklist, selected, planPreviewUrl, planPreviewLabel, rooms, estimateDefaultEdgeToken } =
+    props;
   const selectedSf = selected ? displayCountertopSf(selected.piece) : null;
   const selectedProfile = selected
-    ? edgeProfileLabel(selected.piece.edgeProfileToken, STUDIO_V2_EDGE_PROFILES)
+    ? edgeProfileLabel(
+        selected.piece.edgeProfileToken,
+        STUDIO_V2_EDGE_PROFILES,
+        estimateDefaultEdgeToken
+      )
     : null;
 
   const warningPieces: Array<{
@@ -1001,7 +1007,8 @@ export default function StudioV2ScopeEditor(props: Props) {
                       const sf = displayCountertopSf(piece);
                       const profile = edgeProfileLabel(
                         piece.edgeProfileToken,
-                        STUDIO_V2_EDGE_PROFILES
+                        STUDIO_V2_EDGE_PROFILES,
+                        value.edgeProfileToken
                       );
                       const splashWarn = backsplashNeedsRunLength(piece);
                       const edgeSummary = exposedSummaryText(piece);
@@ -1273,7 +1280,15 @@ export default function StudioV2ScopeEditor(props: Props) {
                                 aria-label={`Edge profile for ${piece.name}`}
                                 className={profile.upgraded ? "is-upgraded" : undefined}
                               >
-                                <option value="">Estimate default</option>
+                                <option value="">
+                                  {
+                                    edgeProfileLabel(
+                                      null,
+                                      STUDIO_V2_EDGE_PROFILES,
+                                      value.edgeProfileToken
+                                    ).label
+                                  }
+                                </option>
                                 {STUDIO_V2_EDGE_PROFILES.map((p) => (
                                   <option key={p.value} value={p.value}>
                                     {p.label}
@@ -1445,6 +1460,7 @@ export default function StudioV2ScopeEditor(props: Props) {
           checklist={checklist}
           selected={selectedPair}
           rooms={value.rooms}
+          estimateDefaultEdgeToken={value.edgeProfileToken}
           planPreviewUrl={planPreviewUrl}
           planPreviewLabel={planPreviewLabel}
           onSelectWarningPiece={(roomId, pieceId) => setSelected({ roomId, pieceId })}

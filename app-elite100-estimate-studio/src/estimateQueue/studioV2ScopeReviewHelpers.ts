@@ -141,11 +141,28 @@ export function exposedSummaryText(piece: {
   return "Set exposed sides";
 }
 
+/**
+ * Display label for a piece edge profile.
+ * When the piece inherits the estimate-wide default (`token` null/empty),
+ * resolve that default so estimators see e.g. "Estimate default: Knife"
+ * instead of a misleading bare "Estimate default".
+ */
 export function edgeProfileLabel(
   token: string | null | undefined,
-  options: ReadonlyArray<{ value: string; label: string }>
+  options: ReadonlyArray<{ value: string; label: string }>,
+  estimateDefaultToken?: string | null
 ): { label: string; upgraded: boolean } {
-  if (!token) return { label: "Estimate default", upgraded: false };
+  if (!token) {
+    const defToken = estimateDefaultToken || null;
+    if (defToken) {
+      const found = options.find((o) => o.value === defToken);
+      return {
+        label: `Estimate default: ${found?.label || defToken}`,
+        upgraded: STUDIO_V2_PREMIUM_EDGE_TOKENS.has(defToken)
+      };
+    }
+    return { label: "Estimate default", upgraded: false };
+  }
   const found = options.find((o) => o.value === token);
   return {
     label: found?.label || token,

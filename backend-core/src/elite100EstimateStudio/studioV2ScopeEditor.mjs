@@ -633,18 +633,15 @@ export function normalizeStudioV2ScopePatch(args = {}) {
           });
         } else if (profile.value) {
           out.edgeProfileToken = profile.value;
+          // First explicit included piece seeds estimate-wide default only.
+          // Do NOT let a later premium piece overwrite an earlier eased/included
+          // selection — that made R2 Calculate ignore explicit Eased edits when
+          // another piece (or inherited copy) still carried Knife.
           if (included && !dominantPieceEdgeProfile) {
-            dominantPieceEdgeProfile = profile.value;
-          } else if (
-            included &&
-            profile.value &&
-            dominantPieceEdgeProfile &&
-            resolveEdgeProfileDefinition(profile.value)?.tier === "premium" &&
-            resolveEdgeProfileDefinition(dominantPieceEdgeProfile)?.tier !== "premium"
-          ) {
             dominantPieceEdgeProfile = profile.value;
           }
         }
+        // Explicit null/empty clears piece token (inherit Estimate default).
       } else if (priorPiece?.edgeProfileToken) {
         out.edgeProfileToken = priorPiece.edgeProfileToken;
         if (included && !dominantPieceEdgeProfile) {
@@ -844,13 +841,11 @@ export function normalizeStudioV2ScopePatch(args = {}) {
     addOns
   };
 
-  // Estimate-wide edge profile: prefer piece selection, else keep existing.
-  if (dominantPieceEdgeProfile) {
-    nextScope.edgeProfileToken = dominantPieceEdgeProfile;
-  } else if (
-    Object.prototype.hasOwnProperty.call(incoming, "edgeProfileToken") &&
-    incoming.edgeProfileToken != null
-  ) {
+  // Estimate-wide edge profile ("Estimate default"):
+  // - Explicit incoming.edgeProfileToken wins (null clears to eased).
+  // - Else first explicit piece token soft-syncs the default (no premium override).
+  // - Else keep the existing Working Draft value (revision copy may carry Knife).
+  if (Object.prototype.hasOwnProperty.call(incoming, "edgeProfileToken")) {
     const profile = normalizeStudioV2EdgeProfileToken(incoming.edgeProfileToken);
     if (!profile.ok) {
       return {
@@ -860,7 +855,9 @@ export function normalizeStudioV2ScopePatch(args = {}) {
         scope: null
       };
     }
-    if (profile.value) nextScope.edgeProfileToken = profile.value;
+    nextScope.edgeProfileToken = profile.value || "edge_eased";
+  } else if (dominantPieceEdgeProfile) {
+    nextScope.edgeProfileToken = dominantPieceEdgeProfile;
   }
 
   // Sync estimator-confirmed piece edge LF into scope fields the calculator already reads.

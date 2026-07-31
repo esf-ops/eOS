@@ -486,6 +486,14 @@ const fakeCalc = {
     "Front 8.00 LF"
   );
   assert.equal(edgeProfileLabel(null, [{ value: "edge_eased", label: "Eased" }]).label, "Estimate default");
+  assert.equal(
+    edgeProfileLabel(null, [{ value: "edge_knife", label: "Knife" }], "edge_knife").label,
+    "Estimate default: Knife"
+  );
+  assert.equal(
+    edgeProfileLabel(null, [{ value: "edge_knife", label: "Knife" }], "edge_knife").upgraded,
+    true
+  );
   assert.equal(edgeProfileLabel("edge_knife", [{ value: "edge_knife", label: "Knife" }]).upgraded, true);
   assert.equal(
     backsplashNeedsRunLength({ includeBacksplash: true, backsplashEligibleLengthIn: null }),
@@ -496,6 +504,103 @@ const fakeCalc = {
     false
   );
   console.log("ok: scope review helper display contracts");
+}
+
+{
+  // Adapter: per-piece edge profile + finishedEdgeLf authority (no first-piece / premium override)
+  const mapped = mapStudioEstimateToElite100Input({
+    ...baseScope(),
+    edgeProfileToken: "edge_knife",
+    rooms: [
+      {
+        id: "kitchen",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        included: true,
+        pieces: [
+          {
+            id: "run-1",
+            name: "Main Wall",
+            pieceType: "counter",
+            included: true,
+            lengthIn: 120,
+            depthIn: 25.5,
+            quantity: 1,
+            finishedEdgeLf: 10,
+            edgeProfileToken: "edge_eased"
+          },
+          {
+            id: "island",
+            name: "Island",
+            pieceType: "counter",
+            included: true,
+            lengthIn: 72,
+            depthIn: 36,
+            quantity: 1,
+            finishedEdgeLf: 8,
+            edgeProfileToken: "edge_knife"
+          }
+        ]
+      }
+    ]
+  });
+  assert.equal(mapped.configuration.rooms.kitchen.edgeProfile, "edge_knife");
+  assert.deepEqual(mapped.configuration.rooms.kitchen.pieceEdgeProfiles, {
+    "run-1": "edge_eased",
+    island: "edge_knife"
+  });
+  assert.equal(mapped.scope.rooms[0].pieces[0].finishedEdgeLf, 10);
+  assert.equal(mapped.scope.rooms[0].pieces[1].finishedEdgeLf, 8);
+  assert.equal(
+    mapped.scope.rooms[0].edgeFinishedLf,
+    undefined,
+    "per-piece LF must not also dump estimate-wide aggregate onto the room"
+  );
+
+  // Premium piece must not overwrite an earlier eased estimate-wide soft-sync seed
+  const patched = normalizeStudioV2ScopePatch({
+    existingScope: { ...baseScope(), edgeProfileToken: "edge_knife" },
+    incomingScope: {
+      rooms: [
+        {
+          id: "kitchen",
+          name: "Kitchen",
+          roomType: "Kitchen",
+          pieces: [
+            {
+              id: "run-1",
+              name: "Main Wall",
+              lengthIn: 120,
+              depthIn: 25.5,
+              quantity: 1,
+              included: true,
+              finishedEdgeLf: 10,
+              edgeProfileToken: "edge_eased"
+            },
+            {
+              id: "island",
+              name: "Island",
+              lengthIn: 72,
+              depthIn: 36,
+              quantity: 1,
+              included: true,
+              finishedEdgeLf: 8,
+              edgeProfileToken: "edge_knife"
+            }
+          ]
+        }
+      ]
+    }
+  });
+  assert.equal(patched.ok, true);
+  assert.equal(
+    patched.scope.edgeProfileToken,
+    "edge_eased",
+    "first explicit piece seeds estimate default; later Knife must not premium-override it"
+  );
+  assert.equal(patched.scope.rooms[0].pieces[0].edgeProfileToken, "edge_eased");
+  assert.equal(patched.scope.rooms[0].pieces[1].edgeProfileToken, "edge_knife");
+  console.log("ok: adapter + scope patch preserve per-piece edge authority");
 }
 
 {
@@ -586,6 +691,9 @@ const fakeCalc = {
   assert.ok(!shell.includes("open-measurement-revision"));
   assert.ok(!svc.includes("ensureEditableEstimateDraft("));
   assert.ok(adapter.includes("hasPieceOpenings"));
+  assert.ok(adapter.includes("pieceEdgeProfiles"));
+  assert.ok(helpers.includes("Estimate default:"));
+  assert.ok(shell.includes("edgeProfileToken: scopeDraft.edgeProfileToken"));
   assert.ok(studioApp.includes("EstimateTakeoffWorkspace"));
   assert.ok(studioApp.includes("studioV2Preview"));
   // Dimensions must be in the main row (not only behind a collapsed details summary).
