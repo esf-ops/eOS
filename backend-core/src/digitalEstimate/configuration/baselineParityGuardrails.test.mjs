@@ -848,4 +848,79 @@ console.log("ok: 1 customer selection reprice is authoritative");
   console.log("ok: 21 edge rows show gross option price; selection is visual only");
 }
 
+// 22. Uploaded-PDF failure shape: project total equals baseline ($7,120) but every
+// room is Countertop $0 / backsplash-only. When published room pricing cannot be
+// built, this must still freeze — never become authoritative.
+{
+  const pdfShapeRooms = [
+    { roomName: "Kitchen", countertopAmount: 0, backsplashAmount: 2315, addOnsAmount: 0, roomTotal: 2315, selectedMaterial: "Group F" },
+    { roomName: "Master Bath", countertopAmount: 0, backsplashAmount: 816, addOnsAmount: 0, roomTotal: 816 },
+    { roomName: "Guest Bath", countertopAmount: 0, backsplashAmount: 446, addOnsAmount: 0, roomTotal: 446 },
+    { roomName: "LL Bath", countertopAmount: 0, backsplashAmount: 745, addOnsAmount: 0, roomTotal: 745 },
+    { roomName: "Laundry", countertopAmount: 0, backsplashAmount: 1312, addOnsAmount: 0, roomTotal: 1312 },
+    { roomName: "Wet Bar", countertopAmount: 0, backsplashAmount: 1486, addOnsAmount: 0, roomTotal: 1486 }
+  ];
+  const pdfCalc = {
+    baselineDisplayTotal: 7120,
+    configuredDisplayTotal: 7120,
+    pricedSelectionTotal: 7120,
+    displayTotalDelta: 0,
+    roomPricing: { kind: "updated", projectTotal: 7120, rooms: pdfShapeRooms }
+  };
+
+  assert.equal(
+    isUnsafeCustomerFacingCalc(pdfCalc, null),
+    true,
+    "22. PDF shape is unsafe even with no published room pricing to compare"
+  );
+  assert.equal(
+    isUnsafeCustomerFacingCalc(pdfCalc, { rooms: [] }),
+    true,
+    "22. empty published rooms still catch the collapse"
+  );
+
+  const frozen = applyBaselineParityToCustomerCalculation(pdfCalc, {
+    baselineDisplayTotal: 7120,
+    publishedRoomPricingPublic: null,
+    scopeReviewRequired: false
+  });
+  assert.equal(frozen.pricingAuthority, CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN);
+  assert.equal(frozen.configuredDisplayTotal, 7120, "22. header/project total stays published baseline");
+  assert.equal(frozen.roomPricing, null, "22. unsafe room pricing is dropped, not printed");
+  assert.deepEqual(frozen.roomPricingChanges.rows, []);
+  assert.equal(frozen.customerPricingNotice, BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE);
+  assert.ok(
+    !/elite review|estimator review|pending review/i.test(frozen.customerPricingNotice),
+    "22. no estimator-review language for automatic pricing failure"
+  );
+  assert.equal(frozen.scopeReviewRequired, false);
+
+  // With baseline rooms available, substitute them — never the $0 countertops.
+  const withBaseline = applyBaselineParityToCustomerCalculation(pdfCalc, {
+    baselineDisplayTotal: 7120,
+    publishedRoomPricingPublic: {
+      kind: "original",
+      projectTotal: 7120,
+      rooms: [
+        { roomName: "Kitchen", countertopAmount: 4197, backsplashAmount: 459, addOnsAmount: 0, roomTotal: 4656 },
+        { roomName: "Master Bath", countertopAmount: 1648, backsplashAmount: 816, addOnsAmount: 0, roomTotal: 2464 },
+        { roomName: "Guest Bath", countertopAmount: 900, backsplashAmount: 446, addOnsAmount: 0, roomTotal: 1346 },
+        { roomName: "LL Bath", countertopAmount: 1200, backsplashAmount: 745, addOnsAmount: 0, roomTotal: 1945 },
+        { roomName: "Laundry", countertopAmount: 2100, backsplashAmount: 1312, addOnsAmount: 0, roomTotal: 3412 },
+        { roomName: "Wet Bar", countertopAmount: 1800, backsplashAmount: 1486, addOnsAmount: 0, roomTotal: 3286 }
+      ]
+    }
+  });
+  assert.equal(withBaseline.pricingAuthority, CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN);
+  for (const room of withBaseline.roomPricing.rooms) {
+    assert.ok(room.countertopAmount > 0, `22. ${room.roomName} keeps baseline countertop dollars`);
+  }
+  assert.ok(
+    !withBaseline.roomPricing.rooms.some((r) => r.countertopAmount === 0),
+    "22. no Countertop $0 after freeze with baseline rooms"
+  );
+
+  console.log("ok: 22 uploaded-PDF Countertop $0 / backsplash-only shape freezes");
+}
+
 console.log("\nAll baseline parity guardrail tests passed.\n");

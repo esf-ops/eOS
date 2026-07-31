@@ -20,6 +20,7 @@ import {
   buildUpdatedBreakdown,
   failClosedRoomPricing,
   groupBreakdownLinesByRoom,
+  isUnsafeCustomerRoomPricing,
 } from "./customerEstimateBreakdown";
 import { summarizeSideSplashSelections } from "./sideSplashSummary";
 import { buildDigitalEstimatePrintModel } from "./customerPrintAdapter";
@@ -1854,7 +1855,12 @@ function CustomerRoomCard({
         />
       </div>
 
-      {pricing ? (
+      {pricing &&
+      !(
+        (pricing.countertopAmount == null || Number(pricing.countertopAmount) <= 0.005) &&
+        Number(pricing.backsplashAmount) > 0.005 &&
+        Number(pricing.roomTotal) > 0.005
+      ) ? (
         <section
           className="mt-5 rounded-xl border border-border bg-muted/20 px-4 py-3"
           data-testid="de-room-price-summary"
@@ -1864,12 +1870,14 @@ function CustomerRoomCard({
             Room price summary
           </div>
           <dl className="mt-2 space-y-1.5 text-sm">
+            {pricing.countertopAmount != null && Number(pricing.countertopAmount) > 0.005 ? (
             <div className="flex justify-between gap-3">
               <dt>Countertop</dt>
               <dd className="tabular-nums" data-testid="de-room-countertop-amount">
                 {formatMoneyLabel(pricing.countertopAmount)}
               </dd>
             </div>
+            ) : null}
             <div className="flex justify-between gap-3">
               <dt data-testid="de-room-backsplash-status">Backsplash</dt>
               <dd className="tabular-nums" data-testid="de-room-backsplash-amount">
@@ -2076,14 +2084,42 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
 
   // A frozen (fail-closed) calc keeps the published baseline total, so its room
   // detail must be baseline everywhere it is shown — room cards, sidebar
-  // breakdown and print all read room pricing off these calc objects.
+  // breakdown and print all read room pricing off these calc objects. Also
+  // catch Countertop $0 / backsplash-only collapse on persisted calcs that
+  // predate the authority flag, so print/PDF cannot leak that breakdown.
   const publishedRoomPricing = state.estimate?.roomPricing ?? null;
-  const latestCalcForDisplay = latestCalc
-    ? { ...latestCalc, roomPricing: failClosedRoomPricing(latestCalc, publishedRoomPricing) }
-    : latestCalc;
-  const savedCalcForDisplay = savedCalc
-    ? { ...savedCalc, roomPricing: failClosedRoomPricing(savedCalc, publishedRoomPricing) }
-    : savedCalc;
+  const forSafeDisplay = (
+    calc: typeof latestCalc,
+  ): typeof latestCalc => {
+    if (!calc) return calc;
+    const safeRooms = failClosedRoomPricing(calc, publishedRoomPricing);
+    const unsafe = isUnsafeCustomerRoomPricing(
+      (calc as { roomPricing?: import("./publicConfigApi").PublicRoomPricing | null }).roomPricing,
+    );
+    const frozen =
+      String((calc as { pricingAuthority?: string }).pricingAuthority || "") ===
+        "published_baseline_frozen" || unsafe;
+    if (!frozen) return { ...calc, roomPricing: safeRooms };
+    const baseline =
+      (calc as { baselineDisplayTotal?: number | null }).baselineDisplayTotal ??
+      (calc as { publishedBaselineTotal?: number | null }).publishedBaselineTotal ??
+      publishedRoomPricing?.projectTotal ??
+      (calc as { configuredDisplayTotal?: number | null }).configuredDisplayTotal ??
+      null;
+    return {
+      ...calc,
+      roomPricing: safeRooms,
+      pricingAuthority: "published_baseline_frozen",
+      configuredDisplayTotal: baseline,
+      pricedSelectionTotal: baseline,
+      displayTotalDelta: 0,
+      customerPricingNotice:
+        (calc as { customerPricingNotice?: string | null }).customerPricingNotice ||
+        "This selection could not be priced automatically yet. Your current quoted total is still shown.",
+    };
+  };
+  const latestCalcForDisplay = forSafeDisplay(latestCalc);
+  const savedCalcForDisplay = forSafeDisplay(savedCalc);
 
   const vm = mapEliteOsToLovableViewModel(
     state,
@@ -2667,18 +2703,41 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     ) ||
     pricingStatus === "scope_review_required" ||
     customerConfiguration?.requiresEstimatorReview === true;
-  const pricingFrozen = pricingAuthority === "published_baseline_frozen";
+  // Treat the Countertop $0 / backsplash-only collapse as fail-closed even when
+  // a persisted calc predates the authority flag — print/sidebar/room cards
+  // must never show that breakdown under a protected project total.
+  const roomPricingUnsafe = isUnsafeCustomerRoomPricing(
+    (displayCalc as { roomPricing?: import("./publicConfigApi").PublicRoomPricing | null } | null)
+      ?.roomPricing,
+  );
+  const pricingFrozen =
+    pricingAuthority === "published_baseline_frozen" || roomPricingUnsafe;
   const pricingNotice =
     (displayCalc as { customerPricingNotice?: string | null } | null)?.customerPricingNotice ||
-    (scopeReviewRequired ? "Needs Elite review" : null);
+    (pricingFrozen && !scopeReviewRequired
+      ? "This selection could not be priced automatically yet. Your current quoted total is still shown."
+      : scopeReviewRequired
+        ? "Needs Elite review"
+        : null);
   const canSubmitForFinalReview = customerConfiguration?.canSubmitForFinalReview === true;
-  const authoritativeEstimateLabel = vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel;
+  const baselineDisplayTotal =
+    (displayCalc as { baselineDisplayTotal?: number | null; publishedBaselineTotal?: number | null } | null)
+      ?.baselineDisplayTotal ??
+    (displayCalc as { publishedBaselineTotal?: number | null } | null)?.publishedBaselineTotal ??
+    publishedRoomPricing?.projectTotal ??
+    null;
+  const authoritativeEstimateLabel = pricingFrozen
+    ? baselineDisplayTotal != null
+      ? formatMoneyLabel(baselineDisplayTotal)
+      : vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel
+    : vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel;
   const authoritativeDiffLabel = pricingFrozen
     ? "No change"
     : vmForTotals?.materialUpgradeLabel ||
       vmForTotals?.changeFromOriginalLabel ||
       vm.materialUpgradeLabel ||
       vm.changeFromOriginalLabel;
+  // Estimator-review language is only for true physical scope-change requests.
   const changesNeedReview = scopeReviewRequired;
   // Fail-closed calcs must stay visible to the customer, not silently show as
   // an unchanged, saved estimate — otherwise a real backend/pricing problem
@@ -2727,13 +2786,28 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           : null;
 
   const printModel = useMemo(
-    () =>
-      buildDigitalEstimatePrintModel({
+    () => {
+      const printRoomPricing = failClosedRoomPricing(savedCalc, publishedRoomPricing);
+      const savedBaseline =
+        (savedCalc as { baselineDisplayTotal?: number | null; publishedBaselineTotal?: number | null } | null)
+          ?.baselineDisplayTotal ??
+        (savedCalc as { publishedBaselineTotal?: number | null } | null)?.publishedBaselineTotal ??
+        publishedRoomPricing?.projectTotal ??
+        null;
+      const savedFrozen =
+        String((savedCalc as { pricingAuthority?: string } | null)?.pricingAuthority || "") ===
+          "published_baseline_frozen" ||
+        isUnsafeCustomerRoomPricing(
+          (savedCalc as { roomPricing?: import("./publicConfigApi").PublicRoomPricing | null } | null)
+            ?.roomPricing,
+        );
+      const configured =
+        (savedCalc as { configuredDisplayTotal?: number | null } | null)?.configuredDisplayTotal ??
+        null;
+      return buildDigitalEstimatePrintModel({
         rooms: vm.rooms,
-        roomPricing: failClosedRoomPricing(savedCalc, publishedRoomPricing),
-        estimateTotal:
-          (savedCalc as { configuredDisplayTotal?: number | null } | null)?.configuredDisplayTotal ??
-          null,
+        roomPricing: printRoomPricing,
+        estimateTotal: savedFrozen && savedBaseline != null ? savedBaseline : configured,
         customerName: vm.customerName,
         projectName: vm.projectName,
         projectAddress: vm.projectAddress,
@@ -2742,8 +2816,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           ? formatDate(vm.pricingValidThrough)
           : null,
         projectNote,
-      }),
-    [vm, savedCalc, publishedRoomPricing, projectNote],
+        pricingFrozen: savedFrozen,
+        scopeReviewRequired: changesNeedReview,
+      });
+    },
+    [vm, savedCalc, publishedRoomPricing, projectNote, changesNeedReview],
   );
 
   const onPrintEstimate = () => {
