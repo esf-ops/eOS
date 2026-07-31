@@ -147,7 +147,7 @@ console.log("ok: summary / terminology / removed / print source markers");
     edgeLinearFeet: lf,
     pricingBasis: basis,
   });
-  assert.equal(original.priceEffectLabel, "Original selection");
+  assert.equal(original.priceEffectLabel, "Included in your estimate");
 
   for (const free of ["edge_large_eased", "edge_full_bullnose", "edge_large_ogee", "edge_bevel"]) {
     const effect = resolveEdgeOptionPriceEffect({
@@ -156,7 +156,7 @@ console.log("ok: summary / terminology / removed / print source markers");
       edgeLinearFeet: lf,
       pricingBasis: basis,
     });
-    assert.equal(effect.priceEffectLabel, "Included", free);
+    assert.equal(effect.priceEffectLabel, "+$0", free);
   }
 
   for (const premium of ["edge_small_ogee", "edge_crescent", "edge_knife"]) {

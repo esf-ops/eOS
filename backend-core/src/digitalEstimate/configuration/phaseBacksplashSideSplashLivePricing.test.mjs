@@ -439,7 +439,7 @@ const BASE_ITEMS = [
   );
   assert.equal(options.length, 4);
   const byMode = new Map(options.map((o) => [o.optionKey.split(":").pop(), o]));
-  assert.equal(byMode.get("none").priceEffectLabel, "Original selection");
+  assert.equal(byMode.get("none").priceEffectLabel, "Included in your estimate");
   assert.equal(byMode.get("none").priceEffectCents, 0);
   assert.equal(byMode.get("right").priceEffectCents, 8500);
   assert.match(byMode.get("right").priceEffectLabel, /^\+\$85/);

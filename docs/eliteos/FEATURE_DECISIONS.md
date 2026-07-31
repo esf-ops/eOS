@@ -3190,7 +3190,7 @@
 | Field | Value |
 |-------|--------|
 | **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-baseline-parity-guardrails` |
-| **Decision** | Until Slice K authoritative customer repricing ships, public Digital Estimate **freezes customer-visible pricing to the published baseline**. Material/color/edge/backsplash selections may still save as pending configuration / review-required requests, but must not replace “Your estimate” with incomplete engine deltas, invent $0 countertop room lines, or show fake edge +$N labels. Guardrails: (1) `baselineParityGuardrails.mjs` clamps public calc totals to baseline + marks `pending_estimator_review`; (2) engine input uses baseline material group / backsplash mode while selections persist separately; (3) edge option dollar deltas stripped to review copy; (4) public breakdown uses published room pricing snapshot; (5) UI hides **Approve final estimate** while `canSubmitForFinalReview === false` and keeps **Request review** primary; (6) suppress $0 countertop breakdown lines. Does not mutate approved Studio estimates or `quote_publication_snapshots`. Does not move pricing math to the browser. |
+| **Decision** | Until Slice K authoritative customer repricing ships, public Digital Estimate **freezes customer-visible pricing to the published baseline**. Material/color/edge/backsplash selections may still save as pending configuration / review-required requests, but must not replace “Your estimate” with incomplete engine deltas or invent $0 countertop room lines. Guardrails: (1) `baselineParityGuardrails.mjs` clamps public calc totals to baseline + marks `pending_estimator_review`; (2) engine input uses baseline material group / backsplash mode while selections persist separately; (3) public breakdown uses published room pricing snapshot; (4) UI hides **Approve final estimate** while `canSubmitForFinalReview === false` and keeps **Request review** primary; (5) suppress $0 countertop breakdown lines. Edge **option display** amounts are clarified in §228 (backend-calculated, not live reprice). Does not mutate approved Studio estimates or `quote_publication_snapshots`. Does not move pricing math to the browser. |
 | **Why** | Production showed baseline $8,230 correctly on open, then material change dropped “Your estimate” to ~$6,013 with $0 countertop lines and misleading edge +$45 deltas; final approve was visible despite `canSubmitForFinalReview: false`. |
 | **SQL** | None. |
 | **Impacted** | `baselineParityGuardrails.mjs`, `publicConfigurationService.mjs`, `ConfigurationView.tsx`, `customerEstimateBreakdown.ts`, tests, this doc. |
@@ -3208,4 +3208,16 @@
 | **Impacted** | `elite100RoomPricingStudioAdapter.mjs`, `studioV2ScopeEditor.mjs`, `StudioV2ScopeEditor.tsx`, `studioV2ScopeReviewHelpers.ts`, `StudioV2EstimatorShell.tsx`, revision-flow + Slice I tests, this doc. |
 | **Protected** | Calculator rates/formulas, V1 workflow, DE customer repricing, approved snapshot mutation, auto-approve / auto-calculate / auto-publish, simplified-publish / refresh-from-takeoff / ensure-editable-draft. |
 | **Revisit trigger** | If estimate-wide edge picker is added, keep pieceEdgeProfiles as authority for mixed profiles; revisit legacy scopes that only have estimate-wide edge LF with no piece finishedEdgeLf. |
+
+### 228. Digital Estimate — edge option display prices + customer copy (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-customer-ux-simplification` |
+| **Decision** | Public Digital Estimate shows **backend-calculated edge option display impacts** while the published baseline total remains authoritative. Included profiles show `+$0`; upgraded profiles show `+$N` from frozen publication `edge_option_effects` (or trusted LF×rate resolve). Published/selected edge shows **Selected** / **Included in your estimate** — never “Original selection”. Customer edge changes remain pending estimator review and do **not** change Your estimate. One section note: “Edge changes may affect your final estimate and will be reviewed by Elite.” Sidebar shows **Changes need review** (+ optional Pending edge change `+$N`) instead of a contradictory Difference `$0`. |
+| **Why** | Baseline-parity hotfix had stripped all edge dollar labels to vague “Original selection” / “Elite will confirm…” copy; customers need transparent option impacts without re-enabling live repricing. |
+| **SQL** | None. |
+| **Impacted** | `studioEdgeAuthority.mjs`, `customerFacingCopy.mjs`, `baselineParityGuardrails.mjs`, `publicConfigurationService.mjs`, `ConfigurationView.tsx`, `lovableViewModel.ts`, tests, this doc. |
+| **Protected** | Live customer reprice (`isCustomerRepricingAuthoritative` stays false), calculator formulas/rates, Studio V2 pricing math, approved snapshots, `quote_publication_snapshots` mutation from customer saves, Product Catalog / waterfall / vanity / sold / final acceptance, V1 workflow, browser pricing math. |
+| **Revisit trigger** | Slice K authoritative reprice; then option display amounts can drive configured totals under proven gates. |
 

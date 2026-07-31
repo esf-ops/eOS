@@ -425,7 +425,7 @@ function ColorPickerModal({
                       <div className="truncate text-xs font-medium text-foreground">{c.name}</div>
                       <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
                         {c.pricingGroupLabel}
-                        {c.includedInBaseline ? " · Original selection" : ""}
+                        {c.includedInBaseline ? " · Included in your estimate" : ""}
                       </div>
                     </div>
                   </button>
@@ -501,12 +501,16 @@ function ChoiceRadio({
               </span>
             ) : null}
             <span className="block font-semibold text-foreground">{opt.displayLabel}</span>
-            {opt.priceEffectLabel ? (
+            {opt.selected ? (
+              <span className="mt-0.5 block text-xs text-muted-foreground">Selected</span>
+            ) : opt.priceEffectLabel ? (
               <span className="mt-0.5 block text-xs font-medium tabular-nums text-foreground">
                 {opt.priceEffectLabel}
               </span>
             ) : opt.includedInBaseline ? (
-              <span className="mt-0.5 block text-xs text-muted-foreground">Original selection</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Included in your estimate
+              </span>
             ) : null}
             {opt.availabilityText ? (
               <span className="mt-0.5 block text-xs text-muted-foreground">{opt.availabilityText}</span>
@@ -1578,9 +1582,9 @@ function CustomerRoomCard({
     return sel?.priceEffectLabel || null;
   };
   const colorEffect = color?.includedInBaseline
-    ? "Original selection"
+    ? "Included in your estimate"
     : color
-      ? "Price updates when saved"
+      ? "Requested change"
       : null;
   const pricing = room.roomPricing;
   const roomStatus =
@@ -1732,6 +1736,21 @@ function CustomerRoomCard({
                   edgeOpts.find((c) => c.selected)?.optionKey ||
                   edgeOpts.find((c) => c.includedInBaseline)?.optionKey ||
                   "";
+                const selectedOpt = edgeOpts.find((c) => c.optionKey === selectedKey);
+                const pendingEdgeRequest = Boolean(
+                  selectedOpt && !selectedOpt.includedInBaseline
+                );
+                const edgePriceLabel = (opt: (typeof edgeOpts)[number], selected: boolean) => {
+                  if (selected) {
+                    return opt.includedInBaseline ? "Selected" : "Requested change";
+                  }
+                  const raw = String(opt.priceEffectLabel || "").trim();
+                  if (raw === "Included in your estimate") return raw;
+                  if (/^\+\$/.test(raw)) return raw;
+                  if (opt.includedInBaseline) return "Included in your estimate";
+                  if (opt.premium === false) return "+$0";
+                  return raw || null;
+                };
                 const renderGroup = (title: string, opts: typeof edgeOpts, testId: string) =>
                   opts.length ? (
                     <div className="mt-3" data-testid={testId}>
@@ -1741,19 +1760,7 @@ function CustomerRoomCard({
                       <ul className="mt-1.5 space-y-1">
                         {opts.map((opt) => {
                           const selected = opt.optionKey === selectedKey;
-                          const effect =
-                            opt.priceEffectLabel ||
-                            (opt.includedInBaseline ? "Original selection" : "Included");
-                          // Never surface internal review diagnostics as the primary edge tag
-                          // when a priced effect is already available.
-                          const effectLabel =
-                            /^\+\$/.test(effect) ||
-                            effect === "Original selection" ||
-                            effect === "Included"
-                              ? effect
-                              : opt.availabilityState === "review_required"
-                                ? "Elite will confirm this option and price."
-                                : effect;
+                          const effectLabel = edgePriceLabel(opt, selected);
                           return (
                             <li key={opt.optionKey}>
                               <button
@@ -1776,9 +1783,14 @@ function CustomerRoomCard({
                                     <span className="sr-only"> (selected)</span>
                                   ) : null}
                                 </span>
-                                <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
-                                  {effectLabel}
-                                </span>
+                                {effectLabel ? (
+                                  <span
+                                    className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground"
+                                    data-testid="de-edge-option-price"
+                                  >
+                                    {effectLabel}
+                                  </span>
+                                ) : null}
                               </button>
                             </li>
                           );
@@ -1790,15 +1802,28 @@ function CustomerRoomCard({
                   <>
                     {renderGroup("Included edges", included, "de-edge-group-included")}
                     {renderGroup("Upgraded edges", upgraded, "de-edge-group-upgraded")}
+                    <p
+                      className="mt-3 text-xs text-muted-foreground"
+                      data-testid="de-edge-section-note"
+                    >
+                      Edge changes may affect your final estimate and will be reviewed by Elite.
+                    </p>
+                    {pendingEdgeRequest ? (
+                      <p
+                        className="mt-1 text-xs font-medium text-foreground"
+                        data-testid="de-edge-pending-request"
+                      >
+                        Requested change — Elite will review this before final approval
+                        {selectedOpt?.priceEffectLabel &&
+                        /^\+\$/.test(String(selectedOpt.priceEffectLabel))
+                          ? ` (${selectedOpt.priceEffectLabel})`
+                          : ""}
+                        .
+                      </p>
+                    ) : null}
                   </>
                 );
               })()}
-              {selectedEffect("edge") &&
-              !/^Elite will confirm/i.test(String(selectedEffect("edge"))) ? (
-                <div className="mt-2 text-xs font-medium tabular-nums text-foreground">
-                  {selectedEffect("edge")}
-                </div>
-              ) : null}
             </div>
           ) : (
             <SelectionRow
@@ -2633,15 +2658,22 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       : null);
   const canSubmitForFinalReview = customerConfiguration?.canSubmitForFinalReview === true;
   const authoritativeEstimateLabel = vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel;
-  const authoritativeDiffLabel =
-    pricingStatus === "pending_estimator_review"
-      ? "Pending review"
-      : pricingFrozen
-        ? "No change"
-        : vmForTotals?.materialUpgradeLabel ||
-          vmForTotals?.changeFromOriginalLabel ||
-          vm.materialUpgradeLabel ||
-          vm.changeFromOriginalLabel;
+  const pendingEdgeOption = vm.rooms
+    .flatMap((r) => r.choiceOptions.filter((c) => c.role === "edge"))
+    .find((c) => c.selected && !c.includedInBaseline);
+  const pendingEdgeDisplayAmount =
+    pendingEdgeOption?.priceEffectLabel && /^\+\$/.test(String(pendingEdgeOption.priceEffectLabel))
+      ? String(pendingEdgeOption.priceEffectLabel)
+      : null;
+  const changesNeedReview = pricingStatus === "pending_estimator_review";
+  const authoritativeDiffLabel = changesNeedReview
+    ? null
+    : pricingFrozen
+      ? "No change"
+      : vmForTotals?.materialUpgradeLabel ||
+        vmForTotals?.changeFromOriginalLabel ||
+        vm.materialUpgradeLabel ||
+        vm.changeFromOriginalLabel;
 
   const estimateBreakdown = buildUpdatedBreakdown({
     calculation: savedCalc,
@@ -2774,7 +2806,27 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             <span>Not saved yet</span>
           </div>
         ) : null}
-        <Row label="Difference" value={authoritativeDiffLabel} />
+        {changesNeedReview ? (
+          <div className="space-y-1" data-testid="de-changes-need-review">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Status</span>
+              <span className="font-medium text-foreground">Changes need review</span>
+            </div>
+            {pendingEdgeDisplayAmount ? (
+              <div
+                className="flex items-center justify-between text-xs"
+                data-testid="de-pending-edge-change"
+              >
+                <span className="text-muted-foreground">Pending edge change</span>
+                <span className="font-medium tabular-nums text-foreground">
+                  {pendingEdgeDisplayAmount}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        ) : authoritativeDiffLabel ? (
+          <Row label="Difference" value={authoritativeDiffLabel} />
+        ) : null}
         {pricingNotice ? (
           <p
             className="text-xs text-muted-foreground"
@@ -3030,12 +3082,16 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               </dd>
             </div>
             <div className="flex items-baseline justify-between gap-2 sm:block">
-              <dt className="text-xs text-muted-foreground">Difference</dt>
+              <dt className="text-xs text-muted-foreground">
+                {changesNeedReview ? "Status" : "Difference"}
+              </dt>
               <dd
                 className="font-semibold tabular-nums text-foreground"
                 data-testid="de-header-difference"
               >
-                {authoritativeDiffLabel || "No change"}
+                {changesNeedReview
+                  ? "Changes need review"
+                  : authoritativeDiffLabel || "No change"}
               </dd>
             </div>
           </dl>

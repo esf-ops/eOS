@@ -150,7 +150,7 @@ const included = toPublicConfigurationOption({
   sell_price: 0,
   included_in_baseline: true
 });
-assert.equal(included.priceEffectLabel, "Original selection");
+assert.equal(included.priceEffectLabel, "Included in your estimate");
 
 const review = toPublicConfigurationOption({
   option_key: "specialty:kitchen:esf:glow",
@@ -159,12 +159,17 @@ const review = toPublicConfigurationOption({
   sell_price: 0,
   compatibility_json: { estimatorReviewRequired: true }
 });
-assert.equal(review.priceEffectLabel, "Elite will confirm this option and price.");
+// Specialty review-required without cents still surfaces the confirm copy via treatment.
+assert.equal(
+  review.priceEffectLabel,
+  "Elite will confirm this option and price.",
+  "review_required specialty without explicit cents keeps confirm copy"
+);
 
 assert.equal(isAccessoryFamilyHeading({ displayName: "Diamond 50/50 Accessories", variants: [{}] }), true);
 assert.equal(isAccessoryFamilyHeading({ displayName: "3018 Grid", variants: [] }), false);
 assert.equal(conciseCustomerTitle("221008 Diamond Grid For 50/50 Left Side"), "Diamond Grid For 50/50 Left Side");
-assert.equal(customerPriceEffectLabel({ includedInBaseline: true }), "Original selection");
+assert.equal(customerPriceEffectLabel({ includedInBaseline: true }), "Included in your estimate");
 assert.equal(customerPriceEffectLabel({ customerPriceTreatment: "no_change" }), "No change");
 assert.equal(customerPriceEffectLabel({ visibleDelta: -120 }), "−$120");
 

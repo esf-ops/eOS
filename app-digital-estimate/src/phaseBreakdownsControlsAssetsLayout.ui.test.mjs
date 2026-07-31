@@ -97,9 +97,9 @@ assert.equal(configView.includes("de-edge-modal"), false);
 assert.ok(configView.includes("onEdgeChange"));
 
 // Backsplash / price effect wording
-assert.ok(copy.includes("Original selection"));
-assert.ok(vm.includes("Original selection"));
-assert.equal(customerPriceEffectLabel({ includedInBaseline: true }), "Original selection");
+assert.ok(copy.includes("Included in your estimate"));
+assert.ok(vm.includes("Included in your estimate"));
+assert.equal(customerPriceEffectLabel({ includedInBaseline: true }), "Included in your estimate");
 assert.equal(customerPriceEffectLabel({ customerPriceTreatment: "no_change" }), "No change");
 assert.equal(
   customerPriceEffectLabel({ reviewRequired: true }),

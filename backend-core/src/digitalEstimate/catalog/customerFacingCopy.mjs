@@ -170,6 +170,17 @@ export function looksLikeUuid(value) {
  */
 export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
   const treatment = String(opt?.customerPriceTreatment || "");
+  if (treatment === "unavailable" || String(opt?.availabilityState || "") === "unavailable") {
+    return "Unavailable";
+  }
+  // Explicit backend-resolved labels win (Included in your estimate / +$0 / +$N).
+  // Map legacy "Original selection" / bare "Included" for older frozen publications.
+  if (typeof opt?.priceEffectLabel === "string" && opt.priceEffectLabel.trim()) {
+    const explicit = opt.priceEffectLabel.trim();
+    if (explicit === "Original selection") return "Included in your estimate";
+    if (explicit === "Included") return "+$0";
+    return explicit;
+  }
   if (
     opt?.reviewRequired ||
     treatment === "review_required" ||
@@ -177,21 +188,13 @@ export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
   ) {
     return "Elite will confirm this option and price.";
   }
-  if (treatment === "unavailable" || String(opt?.availabilityState || "") === "unavailable") {
-    return "Unavailable";
-  }
-  // Explicit edge / catalog labels take precedence when the serializer already
-  // resolved them (Original selection / Included / +$N).
-  if (typeof opt?.priceEffectLabel === "string" && opt.priceEffectLabel.trim()) {
-    return opt.priceEffectLabel.trim();
-  }
-  // Baseline / current: customer-facing relationship labels.
+  // Baseline / published selection.
   if (opt?.includedInBaseline || treatment === "included" || treatment === "original_selection") {
-    return "Original selection";
+    return "Included in your estimate";
   }
   // Free alternate profiles (and other zero-delta included-tier options).
   if (treatment === "no_change" || treatment === "included_alternate") {
-    return treatment === "included_alternate" ? "Included" : "No change";
+    return treatment === "included_alternate" ? "+$0" : "No change";
   }
   const delta =
     opt?.visibleDelta != null
@@ -205,7 +208,7 @@ export function customerPriceEffectLabel(opt, formatMoney = defaultMoney) {
     return null;
   }
   if (Math.abs(delta) < 0.005) {
-    return treatment === "included_alternate" || opt?.edgeTier === "free" ? "Included" : "No change";
+    return treatment === "included_alternate" || opt?.edgeTier === "free" ? "+$0" : "No change";
   }
   if (delta < 0) return `−${formatMoney(Math.abs(delta))}`;
   return `+${formatMoney(delta)}`;

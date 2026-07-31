@@ -74,6 +74,9 @@ export type LovableChoiceOption = {
   pieceLabel: string | null;
   selectable: boolean;
   priceEffectLabel: string | null;
+  /** Backend edge tier — never used for browser pricing math. */
+  premium?: boolean | null;
+  priceEffectCents?: number | null;
   accessoryKind: string | null;
   compatibleFamilyIds: string[];
   visibleSellPrice: number | null;
@@ -354,14 +357,23 @@ function formatPriceEffect(opt: {
   priceEffectLabel?: string | null;
   visibleSellPrice?: number | null;
   visibleDelta?: number | null;
+  priceEffectCents?: number | null;
 }): string | null {
-  if (opt.priceEffectLabel) return opt.priceEffectLabel;
+  if (opt.priceEffectLabel) {
+    const label = String(opt.priceEffectLabel).trim();
+    if (label === "Original selection") return "Included in your estimate";
+    if (label === "Included") return "+$0";
+    return label;
+  }
   const treatment = String(opt.customerPriceTreatment || "");
   if (treatment === "review_required" || opt.availabilityState === "review_required") {
-    return "Requires estimator review";
+    return null;
   }
-  if (opt.includedInBaseline || treatment === "included") {
-    return "Original selection";
+  if (opt.includedInBaseline || treatment === "included" || treatment === "original_selection") {
+    return "Included in your estimate";
+  }
+  if (treatment === "included_alternate") {
+    return "+$0";
   }
   if (treatment === "no_change") {
     return "No change";
@@ -371,9 +383,11 @@ function formatPriceEffect(opt: {
       ? Number(opt.visibleDelta)
       : opt.visibleSellPrice != null
         ? Number(opt.visibleSellPrice)
-        : null;
+        : opt.priceEffectCents != null
+          ? Number(opt.priceEffectCents) / 100
+          : null;
   if (delta == null || !Number.isFinite(delta)) return null;
-  if (Math.abs(delta) < 0.005) return "No change";
+  if (Math.abs(delta) < 0.005) return "+$0";
   if (delta < 0) return `−${formatCurrency(Math.abs(delta))}`;
   return `+${formatCurrency(delta)}`;
 }
@@ -686,6 +700,8 @@ export function mapEliteOsToLovableViewModel(
           pieceLabel: o.pieceDisplayName || sideMeta?.pieceLabel || null,
           selectable: o.selectable !== false,
           priceEffectLabel: formatPriceEffect(o),
+          premium: o.premium ?? null,
+          priceEffectCents: o.priceEffectCents ?? null,
           accessoryKind: o.accessoryKind ?? null,
           compatibleFamilyIds: Array.isArray(o.compatibleFamilyIds)
             ? o.compatibleFamilyIds.map(String)
