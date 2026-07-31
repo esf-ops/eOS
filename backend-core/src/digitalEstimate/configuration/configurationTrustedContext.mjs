@@ -73,9 +73,20 @@ export function extractLockedRoomsFromEvidence(pricingEvidence, customerSnapshot
     for (let i = 0; i < estimateRooms.length; i++) {
       const r = estimateRooms[i];
       const roomKey = String(r.id || r.roomKey || r.name || `room_${i + 1}`);
+      // Pieces are billing sections only when the frozen evidence actually carries
+      // their SF. Publications frozen before piece SF was preserved list pieces with
+      // no sqft, and treating those as the sections would silently bill 0 SF and
+      // price every countertop at $0 while room-level SF sat unused right beside it.
+      const counterPiecesWithSf = (Array.isArray(r.pieces) ? r.pieces : []).filter(
+        (p) =>
+          p &&
+          p.included !== false &&
+          String(p.pieceType ?? "").toLowerCase() !== "backsplash" &&
+          Number(p.sqft) > 0
+      );
       const counterBilled = billableCountertopFromRoom({
         countertopSqft: r.countertopSqft ?? r.countertop_sqft ?? r.chargeableCounterSf,
-        pieces: Array.isArray(r.pieces) ? r.pieces : []
+        pieces: counterPiecesWithSf
       });
       const splashBilled = billableBacksplashFromRoom({
         includeBacksplash: r.includeBacksplash !== false,

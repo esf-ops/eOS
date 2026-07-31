@@ -3315,3 +3315,16 @@
 | **Impacted** | `baselineParityGuardrails.mjs` (+ test 22), `customerEstimateBreakdown.ts`, `customerPrintAdapter.ts`, `DigitalEstimatePrintDocument.tsx`, `ConfigurationView.tsx`, `phaseFrozenBaselineBreakdownParity.test.ts` (4b PDF shape), this doc. |
 | **Protected** | Pricing formulas/rates, Studio V2, V1, browser pricing math, approved Studio estimates, `quote_publication_snapshots`, internal pricing evidence. |
 | **Revisit trigger** | None known; once all publications carry buildable published room pricing, the intrinsic collapse check remains defense-in-depth. |
+
+### 237. Digital Estimate live pricing — frozen publication dropped piece SF, so every countertop priced at $0 (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-print-frozen-breakdown` |
+| **Root cause** | `freezePiecesForPublication` (studioEstimatePublicationAdapter) froze each countertop piece without its `sqft`. `extractLockedRoomsFromEvidence` then called `billableCountertopFromRoom({ countertopSqft, pieces })`, which prefers pieces as the independently ceiled billing sections whenever pieces exist — so every section billed 0 SF and `chargeableCounterSf` became 0 while the room-level `countertopSqft` sat unused beside it. Zero is finite and non-negative, so no `missing_locked_measurement` blocker fired. Config-delta then priced material at rate × 0 SF (Countertop $0) with backsplash still priced from `backsplashSqft`, producing the backsplash-only room shape that `hasBacksplashOnlyCountertopCollapse` correctly froze to the published baseline. The guardrail was right; its input was starved. |
+| **Decision** | Publication now freezes each piece's measured `sqft` so the DE re-price uses the same section ceiling Studio priced with. The trusted context treats pieces as billing sections only when they actually carry SF (excluding backsplash-typed pieces) and otherwise falls back to room-level `countertopSqft`, so publications frozen before this change live-price instead of billing 0 SF. No formula, rate, engine or guardrail change. |
+| **Why** | Production: customer saved material Aurataj / Group C and edge Eased; sidebar stayed Published $7,120 / Your estimate $7,120 / No change with the fail-closed notice. Permitted selections must live-price. |
+| **SQL** | None. Existing publications are read with the legacy fallback (room-level SF); republished estimates get exact section parity. |
+| **Impacted** | `studioEstimatePublicationAdapter.mjs`, `configurationTrustedContext.mjs`, new `phaseFrozenPieceSquareFeetLivePricing.test.mjs`, `studioEdgeScope.test.mjs` (stale §231 edge label expectation), this doc. |
+| **Protected** | Pricing formulas/rates, Studio V2 calculator, V1, browser pricing math, approved Studio estimates, `quote_publication_snapshots`, internal pricing evidence (piece SF stays in internal evidence; public room DTOs still carry no numeric SF). |
+| **Revisit trigger** | If legacy publications show a 1–2 SF drift vs their published countertop dollars, republish the estimate to restore exact section-ceiling parity. |
