@@ -445,6 +445,13 @@ async function createApproved(repo, extra = {}) {
   assert.ok(activity.activePublication);
   assert.equal(activity.activePublication.publicationId, "pub-active");
   assert.equal(activity.activity.viewed, true);
+  assert.equal(
+    activity.activity.savedSelections,
+    false,
+    "without configurationRepository, savedSelections stays false (not inferred from activity state)"
+  );
+  assert.ok(activity.selectionReview);
+  assert.equal(activity.selectionReview.hasSavedSelections, false);
   console.log("ok: 12 Customer activity reflects active publication after publish");
 }
 
