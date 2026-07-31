@@ -135,7 +135,16 @@ assert.equal(grouped[1].label, "A");
 assert.equal(normalizePricingGroupLabel("Group Promo"), "Promo");
 assert.equal(normalizePricingGroupLabel("group_a"), "A");
 
+assert.ok(view.includes("canSubmitForFinalReview"));
+assert.ok(view.includes("de-final-approval-unavailable"));
+assert.ok(view.includes("Final approval will be available after estimator review"));
+assert.ok(view.includes('data-testid="de-request-review"'));
+assert.ok(view.includes("canSubmitForFinalReview && !configurationLocked"));
+assert.ok(view.includes("Pending review") || view.includes("de-pricing-review-notice"));
+assert.ok(publicSvc.includes("applyBaselineParityToCustomerCalculation"));
+
 console.log("ok: customer info + room cards + color modal grouping wired");
 console.log("ok: textures present; public UI omits Wholesale/Direct/raw keys");
 console.log("ok: drafts persist with selection payload; review snapshot carries corrections");
+console.log("ok: baseline parity / final-approve guardrails present");
 console.log("\nAll phaseCustomerExperience.foundation tests passed.\n");

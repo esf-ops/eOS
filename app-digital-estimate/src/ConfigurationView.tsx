@@ -2617,12 +2617,31 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     productDrafts,
     backsplashDrafts,
   );
+  const pricingStatus = String(
+    (displayCalc as { customerPricingStatus?: string } | null)?.customerPricingStatus || "",
+  );
+  const pricingAuthority = String(
+    (displayCalc as { pricingAuthority?: string } | null)?.pricingAuthority || "",
+  );
+  const pricingFrozen =
+    pricingAuthority === "published_baseline_frozen" ||
+    pricingStatus === "pending_estimator_review";
+  const pricingNotice =
+    (displayCalc as { customerPricingNotice?: string | null } | null)?.customerPricingNotice ||
+    (customerConfiguration?.requiresEstimatorReview
+      ? "Your estimator will review this change before the estimate is final."
+      : null);
+  const canSubmitForFinalReview = customerConfiguration?.canSubmitForFinalReview === true;
   const authoritativeEstimateLabel = vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel;
   const authoritativeDiffLabel =
-    vmForTotals?.materialUpgradeLabel ||
-    vmForTotals?.changeFromOriginalLabel ||
-    vm.materialUpgradeLabel ||
-    vm.changeFromOriginalLabel;
+    pricingStatus === "pending_estimator_review"
+      ? "Pending review"
+      : pricingFrozen
+        ? "No change"
+        : vmForTotals?.materialUpgradeLabel ||
+          vmForTotals?.changeFromOriginalLabel ||
+          vm.materialUpgradeLabel ||
+          vm.changeFromOriginalLabel;
 
   const estimateBreakdown = buildUpdatedBreakdown({
     calculation: savedCalc,
@@ -2756,6 +2775,14 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           </div>
         ) : null}
         <Row label="Difference" value={authoritativeDiffLabel} />
+        {pricingNotice ? (
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="de-pricing-review-notice"
+          >
+            {pricingNotice}
+          </p>
+        ) : null}
         <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold">
           <span>{activeBreakdown.title}</span>
           <span data-testid="de-updated-total">{activeBreakdown.totalLabel}</span>
@@ -2886,7 +2913,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                 : "Request review"}
           </button>
         ) : null}
-        {!configurationLocked ? (
+        {canSubmitForFinalReview && !configurationLocked ? (
           <button
             type="button"
             onClick={() => setAcceptOpen(true)}
@@ -2896,6 +2923,13 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           >
             Approve final estimate
           </button>
+        ) : !configurationLocked ? (
+          <p
+            className="text-center text-xs text-muted-foreground"
+            data-testid="de-final-approval-unavailable"
+          >
+            Final approval will be available after estimator review.
+          </p>
         ) : null}
         {acceptError ? <p className="text-center text-xs text-destructive">{acceptError}</p> : null}
         {reviewError ? <p className="text-center text-xs text-destructive">{reviewError}</p> : null}

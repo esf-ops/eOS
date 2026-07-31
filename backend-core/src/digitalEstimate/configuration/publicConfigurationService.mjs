@@ -43,6 +43,12 @@ import {
   sanitizeCustomerConfigurationFoundation
 } from "./customerConfigurationFoundation.mjs";
 import {
+  applyBaselineParityToCustomerCalculation,
+  applyEdgeOptionPriceGuardrail,
+  applyEdgeOptionPriceGuardrails,
+  isCustomerRepricingAuthoritative
+} from "./baselineParityGuardrails.mjs";
+import {
   collectForbiddenCatalogSelections,
   normalizeCustomerCatalogPermissions
 } from "./customerCatalogPermissions.mjs";
@@ -528,6 +534,10 @@ function toCustomerSafeOption(opt, group, ctx = null) {
       reviewRequired:
         treatment === "review_required" || Boolean(compat.estimatorReviewRequired)
     });
+  // Hotfix: strip misleading edge dollar deltas until Slice K authoritative reprice.
+  if (String(publicOpt.optionKey || "").startsWith("edge:")) {
+    return applyEdgeOptionPriceGuardrail(publicOpt);
+  }
   return publicOpt;
 }
 
@@ -985,8 +995,8 @@ export function createPublicConfigurationService(deps) {
       );
     }
 
-    const customerCalc = latestCalculation?.customer_result_json || null;
-    if (customerCalc) assertPublicConfigurationHasNoForbiddenContent(customerCalc);
+    const rawCustomerCalc = latestCalculation?.customer_result_json || null;
+    if (rawCustomerCalc) assertPublicConfigurationHasNoForbiddenContent(rawCustomerCalc);
 
     const selectionMeta = splitSelectionPayloadMeta(latestSelection?.selection_payload_json);
     const configuredRooms = resolveConfiguredRoomChoiceAuthority(
@@ -1035,7 +1045,7 @@ export function createPublicConfigurationService(deps) {
           activeEnvelope.material_catalog_contract || ELITE100_MATERIAL_CATALOG_CONTRACT,
         pricingValidThrough: publication.pricing_valid_through || ctx.pricingValidThrough,
         lockedScopeNotice:
-          "Professional measurements and fabrication scope are locked. Your finish and option choices may update the estimate total.",
+          "Professional measurements and fabrication scope are locked. Finish and option requests are saved for your estimator — price updates require estimator review until confirmed.",
         sourceProject,
         customerInfoDraft: selectionMeta.customerInfoDraft,
         roomLabelDrafts: selectionMeta.roomLabelDrafts,
@@ -1072,7 +1082,7 @@ export function createPublicConfigurationService(deps) {
           locked: true
         })),
         groups,
-        options,
+        options: applyEdgeOptionPriceGuardrails(options),
         materials,
         // Frozen estimator catalog permissions (missing key = allowed).
         // Public-safe booleans only — never rates or internal policy ids.
@@ -1080,11 +1090,38 @@ export function createPublicConfigurationService(deps) {
           ctx.customerCatalogPermissions
         ),
         currentSelections: selectionMeta.quantities,
-        latestCalculation: customerCalc,
+        latestCalculation: (() => {
+          let publishedRoomPricingPublic = null;
+          try {
+            const originalProjection = buildOriginalRoomPricingProjection(
+              ctx.customerSnapshot || {}
+            );
+            if (originalProjection) {
+              publishedRoomPricingPublic = toPublicRoomPricingDto(originalProjection);
+            }
+          } catch {
+            publishedRoomPricingPublic = null;
+          }
+          const foundation = buildPublicCustomerConfigurationReadModel(
+            selectionMeta.customerConfiguration,
+            {
+              quantities: selectionMeta.quantities || {},
+              lastSavedAt: latestSelection?.updated_at || latestSelection?.created_at || null
+            }
+          );
+          return applyBaselineParityToCustomerCalculation(rawCustomerCalc, {
+            baselineDisplayTotal: ctx.baselineDisplayTotal,
+            publishedRoomPricingPublic,
+            hasPendingPriceAffectingChanges:
+              Boolean(foundation.requiresEstimatorReview) ||
+              Boolean(foundation.selectionChanges?.count) ||
+              Boolean(rawCustomerCalc?.customerPricingStatus === "pending_estimator_review")
+          });
+        })(),
         missingInformationRequirements: Array.isArray(
-          customerCalc?.missingInformationRequirements
+          rawCustomerCalc?.missingInformationRequirements
         )
-          ? customerCalc.missingInformationRequirements
+          ? rawCustomerCalc.missingInformationRequirements
           : [],
         baselineDisplayTotal: ctx.baselineDisplayTotal
       }
@@ -2181,6 +2218,11 @@ export function createPublicConfigurationService(deps) {
           const roomKey = parts[1];
           const token = normalizeEdgeProfileToken(parts.slice(2).join(":"));
           if (!isPremiumEdgeProfile(token)) continue;
+          // Hotfix: do not charge incomplete edge deltas into customer totals.
+          if (!isCustomerRepricingAuthoritative()) {
+            reviewFlags.push(`edge_price_pending_review:${roomKey}:${token}`);
+            continue;
+          }
           const frozen = findFrozenEdgeOptionEffect(ctx.edgeOptionEffects, token, roomKey);
           if (frozen) {
             if (
@@ -2287,6 +2329,21 @@ export function createPublicConfigurationService(deps) {
         }
       }
 
+      // Hotfix: until Slice K authoritative reprice, keep engine material groups on the
+      // published baseline. Customer material/color/edge choices still persist as selections
+      // / foundation requests for estimator review — they must not invent a new public total.
+      const roomsForCalc = isCustomerRepricingAuthoritative()
+        ? rooms
+        : (rooms || []).map((r) => {
+            const baselineSplash =
+              r.baselineBacksplashMode || resolveOriginalBacksplashMode(r) || "none";
+            return {
+              ...r,
+              selectedMaterialGroup: r.baselineMaterialGroup || r.selectedMaterialGroup,
+              backsplashMode: baselineSplash
+            };
+          });
+
       let result;
       try {
         result = calculateElite100ConfigDelta({
@@ -2311,7 +2368,7 @@ export function createPublicConfigurationService(deps) {
         accountMemberships: ctx.accountMemberships,
         materialRateOverrides: ctx.materialRateOverrides,
         estimateAdjustments: ctx.estimateAdjustments,
-        rooms,
+        rooms: roomsForCalc,
         lockedScope: { edgeLinearFeetTotal: edgeLfTotal },
         frozenBaseRates: ctx.frozenBaseRates,
         authorizedMaterialMarkup: { bps: markupBps },
@@ -2486,7 +2543,7 @@ export function createPublicConfigurationService(deps) {
         publicRoomPricingChanges = null;
       }
 
-      const customerResultJson = {
+      const customerResultJsonRaw = {
         ...result.public,
         missingInformationRequirements,
         reviewRequiredMessages: [
@@ -2513,6 +2570,9 @@ export function createPublicConfigurationService(deps) {
             if (f.startsWith("sidesplash_review:")) {
               return "Side splash pricing requires estimator review (piece depth unavailable).";
             }
+            if (f.startsWith("edge_price_pending_review:")) {
+              return "Edge changes may affect price and require estimator review.";
+            }
             return "Estimator review required for one or more selections.";
           })
         ],
@@ -2522,6 +2582,30 @@ export function createPublicConfigurationService(deps) {
         roomPricing: publicRoomPricing,
         roomPricingChanges: publicRoomPricingChanges
       };
+      let publishedRoomPricingPublic = null;
+      try {
+        const originalProjection = buildOriginalRoomPricingProjection(ctx.customerSnapshot || {});
+        if (originalProjection) {
+          publishedRoomPricingPublic = toPublicRoomPricingDto(originalProjection);
+        }
+      } catch {
+        publishedRoomPricingPublic = null;
+      }
+      const materialGroupChanged = (rooms || []).some((r) => {
+        const selected = String(r.selectedMaterialGroup || "").toLowerCase();
+        const baseline = String(r.baselineMaterialGroup || "").toLowerCase();
+        return selected && baseline && selected !== baseline;
+      });
+      const customerResultJson = applyBaselineParityToCustomerCalculation(customerResultJsonRaw, {
+        baselineDisplayTotal:
+          result.public?.baselineDisplayTotal ?? ctx.baselineDisplayTotal ?? null,
+        publishedRoomPricingPublic,
+        hasPendingPriceAffectingChanges:
+          materialGroupChanged ||
+          Boolean(publicCustomerConfiguration.requiresEstimatorReview) ||
+          Boolean(publicCustomerConfiguration.selectionChanges?.count) ||
+          reviewFlags.some((f) => /pending_review|edge_price|specialty_review|sidesplash_review/i.test(String(f)))
+      });
       assertPublicConfigurationHasNoForbiddenContent(customerResultJson);
 
       const internalEvidenceJson = {
@@ -2546,7 +2630,10 @@ export function createPublicConfigurationService(deps) {
         customerResultJson,
         internalEvidenceJson,
         baselineTotal: result.totals.baselineExactTotal,
-        configuredTotal: result.totals.configuredExactTotal,
+        // Hotfix: public configured total stays on published baseline until Slice K.
+        configuredTotal: isCustomerRepricingAuthoritative()
+          ? result.totals.configuredExactTotal
+          : result.totals.baselineExactTotal ?? result.totals.configuredExactTotal,
         pricingValidThrough: ctx.pricingValidThrough,
         engineVersion: ELITE100_CONFIG_DELTA_ENGINE_ID,
         calculationInputFingerprint: result.inputFingerprint,

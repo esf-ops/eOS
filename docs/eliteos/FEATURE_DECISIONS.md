@@ -3185,3 +3185,15 @@
 | **Protected** | Pricing math / calculators, V1 workflow, DE customer repricing, Product Catalog / Waterfall / Vanity / sold / intake / acceptance, auto-publish / auto-approve / auto-calculate, approved snapshot mutation. |
 | **Revisit trigger** | Apply sibling-revisions SQL to production; optional explicit `parent_estimate_id` column; revision history UI list. |
 
+### 226. Digital Estimate — Baseline Parity + Customer UI Guardrails (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-baseline-parity-guardrails` |
+| **Decision** | Until Slice K authoritative customer repricing ships, public Digital Estimate **freezes customer-visible pricing to the published baseline**. Material/color/edge/backsplash selections may still save as pending configuration / review-required requests, but must not replace “Your estimate” with incomplete engine deltas, invent $0 countertop room lines, or show fake edge +$N labels. Guardrails: (1) `baselineParityGuardrails.mjs` clamps public calc totals to baseline + marks `pending_estimator_review`; (2) engine input uses baseline material group / backsplash mode while selections persist separately; (3) edge option dollar deltas stripped to review copy; (4) public breakdown uses published room pricing snapshot; (5) UI hides **Approve final estimate** while `canSubmitForFinalReview === false` and keeps **Request review** primary; (6) suppress $0 countertop breakdown lines. Does not mutate approved Studio estimates or `quote_publication_snapshots`. Does not move pricing math to the browser. |
+| **Why** | Production showed baseline $8,230 correctly on open, then material change dropped “Your estimate” to ~$6,013 with $0 countertop lines and misleading edge +$45 deltas; final approve was visible despite `canSubmitForFinalReview: false`. |
+| **SQL** | None. |
+| **Impacted** | `baselineParityGuardrails.mjs`, `publicConfigurationService.mjs`, `ConfigurationView.tsx`, `customerEstimateBreakdown.ts`, tests, this doc. |
+| **Protected** | Studio V2 pricing math / calculators, Product Catalog, Waterfall, Vanity, sold conversion, final acceptance implementation, V1 workflow, approved snapshot immutability. |
+| **Revisit trigger** | Slice K proves backend reprice from approved snapshot (material + LF edge + all frozen charges) matches Studio V2; then set `isCustomerRepricingAuthoritative()` true under proven gates. |
+
