@@ -6,6 +6,7 @@
 import type { PublicRoomPricing } from "./publicConfigApi.ts";
 import type { LovableRoom } from "./lovableViewModel.ts";
 import { summarizeSideSplashSelections } from "./sideSplashSummary.ts";
+import { isUnsafeCustomerRoomPricing } from "./customerEstimateBreakdown.ts";
 
 export type DigitalEstimatePrintSelection = {
   label: string;
@@ -96,6 +97,10 @@ function roomSelections(room: LovableRoom): DigitalEstimatePrintSelection[] {
 /**
  * Build a print model from the latest saved estimate authority.
  * Does not invent amounts — only copies server DTO fields + customer-safe labels.
+ *
+ * Callers must pass already fail-closed room pricing. As a last line of defense,
+ * Countertop $0 / backsplash-only collapse DTOs are dropped here so a print/PDF
+ * can never show that unsafe breakdown under a protected project total.
  */
 export function buildDigitalEstimatePrintModel(args: {
   rooms: LovableRoom[];
@@ -109,8 +114,14 @@ export function buildDigitalEstimatePrintModel(args: {
   pricingValidThrough: string | null;
   projectNote?: string | null;
   estimateDate?: string;
+  /** True when the estimate is fail-closed / frozen — omit estimator-review copy. */
+  pricingFrozen?: boolean;
+  /** True only for true physical scope-change requests. */
+  scopeReviewRequired?: boolean;
 }): DigitalEstimatePrintModel {
-  const pricing = args.roomPricing;
+  // Never print an unsafe customer room breakdown, even if a caller forgot to
+  // fail-close first. Prefer hiding room-level amounts over Countertop $0.
+  const pricing = isUnsafeCustomerRoomPricing(args.roomPricing) ? null : args.roomPricing;
   const rooms: DigitalEstimatePrintRoom[] = (args.rooms || []).map((room) => {
     const match =
       (pricing?.rooms || []).find(
@@ -118,10 +129,17 @@ export function buildDigitalEstimatePrintModel(args: {
           String(r.roomName || "").toLowerCase() === String(room.name || "").toLowerCase() ||
           String(r.roomLabel || "").toLowerCase() === String(room.name || "").toLowerCase(),
       ) || null;
+    const countertopAmount =
+      match?.countertopAmount != null && Number.isFinite(Number(match.countertopAmount))
+        ? Number(match.countertopAmount)
+        : null;
+    // Never print a $0 countertop line — incomplete reprice artifact.
+    const safeCountertop =
+      countertopAmount != null && countertopAmount > 0.005 ? countertopAmount : null;
     return {
       roomName: room.name,
       selections: roomSelections(room),
-      countertopAmount: match?.countertopAmount ?? null,
+      countertopAmount: safeCountertop,
       backsplashAmount: match?.backsplashAmount ?? null,
       addOnsAmount: match?.addOnsAmount ?? null,
       addOnLines: Array.isArray(match?.addOnLines)
@@ -148,6 +166,12 @@ export function buildDigitalEstimatePrintModel(args: {
         ? Number(pricing.projectTotal)
         : null;
 
+  const reviewNotice = args.scopeReviewRequired
+    ? "A requested scope change will be reviewed before it becomes final."
+    : args.pricingFrozen
+      ? "This selection could not be priced automatically yet. Your current quoted total is still shown."
+      : "Submitted selections remain subject to Elite review — not final acceptance.";
+
   return {
     brandTitle: "Elite Stone Fabrication",
     documentTitle: "Estimate",
@@ -164,7 +188,7 @@ export function buildDigitalEstimatePrintModel(args: {
     estimateTotal: total,
     estimateTotalLabel: moneyLabel(total),
     projectNote: args.projectNote?.trim() || null,
-    reviewNotice: "Submitted selections remain subject to Elite review — not final acceptance.",
+    reviewNotice,
     disclaimer:
       "This estimate is for planning purposes. Final pricing is confirmed by Elite Stone Fabrication after review.",
   };

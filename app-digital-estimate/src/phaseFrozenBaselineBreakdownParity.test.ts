@@ -15,6 +15,7 @@ import {
   buildUpdatedBreakdown,
   failClosedRoomPricing,
   buildRoomHierarchyBreakdown,
+  isUnsafeCustomerRoomPricing,
 } from "./customerEstimateBreakdown.ts";
 import { buildDigitalEstimatePrintModel } from "./customerPrintAdapter.ts";
 import type { PublicRoomPricing } from "./publicConfigApi.ts";
@@ -104,12 +105,36 @@ const unsafeRoomPricing = {
     assert.ok(Number(room.countertopAmount) > 0, `1. ${room.roomName} keeps countertop dollars`);
   }
 
-  // Authoritative (live-priced) results are untouched.
-  const authoritative = failClosedRoomPricing(
+  // Countertop $0 / backsplash-only collapse is never shown — even when the
+  // persisted calc still claims authoritative_backend_reprice.
+  const collapseCaught = failClosedRoomPricing(
     { pricingAuthority: "authoritative_backend_reprice", roomPricing: unsafeRoomPricing },
     publishedRoomPricing,
   );
-  assert.equal(authoritative?.projectTotal, 5264, "1. safe live pricing is not overridden");
+  assert.equal(collapseCaught?.projectTotal, 7120, "1. unsafe collapse prefers published baseline");
+  assert.ok(isUnsafeCustomerRoomPricing(unsafeRoomPricing), "1. collapse detector matches PDF shape");
+
+  // A legitimate live-priced upgrade (real countertop dollars) is untouched.
+  const liveSafe = {
+    kind: "updated" as const,
+    projectTotal: 7441,
+    rooms: [
+      {
+        roomName: "Kitchen",
+        countertopAmount: 5000,
+        backsplashAmount: 459,
+        addOnsAmount: 0,
+        roomTotal: 5459,
+        addOnLines: [],
+      },
+    ],
+    projectAddOns: [],
+  } as unknown as PublicRoomPricing;
+  const authoritative = failClosedRoomPricing(
+    { pricingAuthority: "authoritative_backend_reprice", roomPricing: liveSafe },
+    publishedRoomPricing,
+  );
+  assert.equal(authoritative?.projectTotal, 7441, "1. safe live pricing is not overridden");
   console.log("ok: 1. frozen result exposes no unsafe customer roomPricing");
 }
 
@@ -160,9 +185,7 @@ const unsafeRoomPricing = {
   // Room cards read roomPricing off the calc the view passes to the view model,
   // so the view must hand them the fail-closed pricing.
   assert.ok(
-    /const latestCalcForDisplay = latestCalc[\s\S]{0,200}failClosedRoomPricing\(latestCalc, publishedRoomPricing\)/.test(
-      view,
-    ),
+    /forSafeDisplay|failClosedRoomPricing/.test(view),
     "3. room cards are built from fail-closed room pricing",
   );
   assert.ok(
@@ -170,14 +193,18 @@ const unsafeRoomPricing = {
     "3. view model receives the fail-closed calc",
   );
   assert.ok(
-    /const savedCalcForDisplay = savedCalc[\s\S]{0,200}failClosedRoomPricing\(savedCalc, publishedRoomPricing\)/.test(
-      view,
-    ),
+    /const savedCalcForDisplay = forSafeDisplay\(savedCalc\)/.test(view) ||
+      /failClosedRoomPricing\(savedCalc/.test(view),
     "3. saved-calc surfaces are fail-closed too",
   );
   assert.ok(
     /calculation: savedCalcForDisplay/.test(view),
     "3. sidebar breakdown is built from the fail-closed calc",
+  );
+  assert.ok(
+    /de-room-price-summary[\s\S]{0,800}countertopAmount[\s\S]{0,200}> 0\.005/.test(view) ||
+      /countertopAmount == null \|\| Number\(pricing\.countertopAmount\) <= 0\.005/.test(view),
+    "3. room card hides Countertop $0 / backsplash-only summary",
   );
 
   const baselineCard = buildRoomHierarchyBreakdown("updated", publishedRoomPricing);
@@ -212,10 +239,96 @@ const unsafeRoomPricing = {
     "4. print never shows a $0 countertop for priced countertop scope",
   );
   assert.ok(
-    /roomPricing: failClosedRoomPricing\(savedCalc, publishedRoomPricing\)/.test(view),
+    /failClosedRoomPricing\(savedCalc, publishedRoomPricing\)/.test(view),
     "4. the view builds the print model from fail-closed room pricing",
   );
   console.log("ok: 4. print estimate uses baseline room pricing when frozen");
+}
+
+// 4b. Uploaded-PDF failure shape — total $7,120 with every room Countertop $0 /
+// backsplash-only. Print must not contain those amounts.
+{
+  const pdfUnsafe = {
+    kind: "updated",
+    projectTotal: 7120,
+    rooms: [
+      { roomName: "Kitchen", countertopAmount: 0, backsplashAmount: 2315, addOnsAmount: 0, roomTotal: 2315, addOnLines: [] },
+      { roomName: "Master Bath", countertopAmount: 0, backsplashAmount: 816, addOnsAmount: 0, roomTotal: 816, addOnLines: [] },
+      { roomName: "Guest Bath", countertopAmount: 0, backsplashAmount: 446, addOnsAmount: 0, roomTotal: 446, addOnLines: [] },
+      { roomName: "LL Bath", countertopAmount: 0, backsplashAmount: 745, addOnsAmount: 0, roomTotal: 745, addOnLines: [] },
+      { roomName: "Laundry", countertopAmount: 0, backsplashAmount: 1312, addOnsAmount: 0, roomTotal: 1312, addOnLines: [] },
+      { roomName: "Wet Bar", countertopAmount: 0, backsplashAmount: 1486, addOnsAmount: 0, roomTotal: 1486, addOnLines: [] },
+    ],
+    projectAddOns: [],
+  } as unknown as PublicRoomPricing;
+
+  // Authority may still say authoritative when published rooms were unavailable.
+  const safe = failClosedRoomPricing(
+    { pricingAuthority: "authoritative_backend_reprice", roomPricing: pdfUnsafe },
+    null,
+  );
+  assert.equal(safe, null, "4b. unsafe PDF rooms are dropped when no baseline detail exists");
+
+  const printModel = buildDigitalEstimatePrintModel({
+    rooms: pdfUnsafe.rooms.map((r) => ({
+      name: r.roomName,
+      colors: [],
+      choiceOptions: [],
+      sideSplashPieces: [],
+    })) as never,
+    roomPricing: pdfUnsafe, // adapter must refuse this even if the caller forgot fail-close
+    estimateTotal: 7120,
+    customerName: "Customer",
+    projectName: null,
+    projectAddress: null,
+    quoteNumber: "Q-1",
+    pricingValidThrough: null,
+    pricingFrozen: true,
+    scopeReviewRequired: false,
+  });
+  assert.equal(printModel.estimateTotal, 7120, "4b. header/project total remains published baseline");
+  assert.ok(
+    !printModel.rooms.some((r) => r.countertopAmount === 0),
+    "4b. print model does not contain Countertop $0",
+  );
+  assert.ok(
+    !printModel.rooms.some((r) => r.backsplashAmount === 2315 || r.roomTotal === 2315),
+    "4b. print model does not contain backsplash-only unsafe room totals",
+  );
+  assert.ok(
+    printModel.rooms.every((r) => r.countertopAmount == null && r.roomTotal == null),
+    "4b. print hides room-level pricing when baseline detail is unavailable",
+  );
+  assert.match(
+    printModel.reviewNotice,
+    /could not be priced automatically/i,
+    "4b. fail-closed print copy is not estimator-review language",
+  );
+  assert.ok(
+    !/needs elite review|estimator review/i.test(printModel.reviewNotice),
+    "4b. no estimator-review copy on fail-closed print",
+  );
+
+  // With baseline available, print uses baseline room dollars.
+  const printBaseline = buildDigitalEstimatePrintModel({
+    rooms: [
+      { name: "Kitchen", colors: [], choiceOptions: [], sideSplashPieces: [] },
+    ] as never,
+    roomPricing: failClosedRoomPricing(
+      { pricingAuthority: "authoritative_backend_reprice", roomPricing: pdfUnsafe },
+      publishedRoomPricing,
+    ),
+    estimateTotal: 7120,
+    customerName: "Customer",
+    projectName: null,
+    projectAddress: null,
+    quoteNumber: "Q-1",
+    pricingValidThrough: null,
+    pricingFrozen: true,
+  });
+  assert.equal(printBaseline.rooms[0]?.countertopAmount, 4197);
+  assert.ok(printBaseline.rooms[0]?.roomTotal !== 2315);
+  console.log("ok: 4b. uploaded-PDF failure shape never prints Countertop $0");
 }
 
 // 5. Fail-closed copy is a temporary pricing fallback, not estimator review.
@@ -225,8 +338,16 @@ const unsafeRoomPricing = {
     "5. frozen state always shows its customer notice",
   );
   assert.ok(
+    /could not be priced automatically yet/.test(view),
+    "5. fail-closed notice is customer-safe temporary fallback copy",
+  );
+  assert.ok(
     !/Price updates for this change require estimator review/.test(view),
     "5. no estimator-review copy for normal selection pricing",
+  );
+  assert.ok(
+    /changesNeedReview = scopeReviewRequired/.test(view),
+    "5. estimator-review UI is gated on true scope-change requests only",
   );
   console.log("ok: 5. frozen state stays visible with customer-safe copy");
 }

@@ -92,28 +92,35 @@ export function DigitalEstimatePrintDocument({ model }: { model: DigitalEstimate
             </div>
           ) : null}
 
-          <table className="cep-table cep-table-compact cep-table-amounts">
-            <tbody>
-              {room.countertopAmount != null ? (
-                <tr>
-                  <td>Countertop</td>
-                  <td className="cep-amt">{printMoneyLabel(room.countertopAmount)}</td>
-                </tr>
-              ) : null}
-              {room.backsplashAmount != null ? (
-                <tr>
-                  <td>Backsplash</td>
-                  <td className="cep-amt">{printMoneyLabel(room.backsplashAmount)}</td>
-                </tr>
-              ) : null}
-              {room.addOnsAmount != null ? (
-                <tr>
-                  <td>Add-ons</td>
-                  <td className="cep-amt">{printMoneyLabel(room.addOnsAmount)}</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+          {/* Amount rows only when fail-closed-safe pricing is present. Never
+              render an empty amounts table or a Room total with no dollars —
+              that is how Countertop $0 / backsplash-only leaks used to print. */}
+          {room.countertopAmount != null ||
+          room.backsplashAmount != null ||
+          room.addOnsAmount != null ? (
+            <table className="cep-table cep-table-compact cep-table-amounts">
+              <tbody>
+                {room.countertopAmount != null && room.countertopAmount > 0 ? (
+                  <tr>
+                    <td>Countertop</td>
+                    <td className="cep-amt">{printMoneyLabel(room.countertopAmount)}</td>
+                  </tr>
+                ) : null}
+                {room.backsplashAmount != null ? (
+                  <tr>
+                    <td>Backsplash</td>
+                    <td className="cep-amt">{printMoneyLabel(room.backsplashAmount)}</td>
+                  </tr>
+                ) : null}
+                {room.addOnsAmount != null ? (
+                  <tr>
+                    <td>Add-ons</td>
+                    <td className="cep-amt">{printMoneyLabel(room.addOnsAmount)}</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          ) : null}
 
           {room.addOnLines.length ? (
             <div className="de-print-addon-detail">
@@ -129,18 +136,20 @@ export function DigitalEstimatePrintDocument({ model }: { model: DigitalEstimate
             </div>
           ) : null}
 
-          <table className="cep-table cep-table-compact cep-table-amounts">
-            <tbody>
-              <tr className="cep-summary-total-row">
-                <td>
-                  <strong>Room total</strong>
-                </td>
-                <td className="cep-amt">
-                  <strong>{printMoneyLabel(room.roomTotal)}</strong>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          {room.roomTotal != null ? (
+            <table className="cep-table cep-table-compact cep-table-amounts">
+              <tbody>
+                <tr className="cep-summary-total-row">
+                  <td>
+                    <strong>Room total</strong>
+                  </td>
+                  <td className="cep-amt">
+                    <strong>{printMoneyLabel(room.roomTotal)}</strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          ) : null}
         </section>
       ))}
 

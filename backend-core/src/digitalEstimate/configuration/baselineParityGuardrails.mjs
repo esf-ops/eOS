@@ -143,6 +143,37 @@ function findMatchingCalcRoom(pub, calcRooms) {
 }
 
 /**
+ * Intrinsic incomplete-reprice signature: rooms keep a positive total (or
+ * backsplash dollars / material label) while Countertop is $0/missing. This is
+ * the uploaded-PDF failure shape and must freeze even when published room
+ * pricing is unavailable to compare against.
+ * @param {object[]|null|undefined} calcRooms
+ */
+export function hasBacksplashOnlyCountertopCollapse(calcRooms) {
+  const rooms = Array.isArray(calcRooms) ? calcRooms : [];
+  if (!rooms.length) return false;
+  let scopedRooms = 0;
+  let missingCountertop = 0;
+  let backsplashOnly = 0;
+  for (const r of rooms) {
+    const ct = num(r?.countertopAmount);
+    const bs = num(r?.backsplashAmount) || 0;
+    const total = num(r?.roomTotal) || 0;
+    const material = String(r?.selectedMaterial || "").trim();
+    const hasScope = total > 0.005 || bs > 0.005 || material.length > 0;
+    if (!hasScope) continue;
+    scopedRooms += 1;
+    if (ct == null || ct <= 0.005) {
+      missingCountertop += 1;
+      if (bs > 0.005) backsplashOnly += 1;
+    }
+  }
+  // Every scoped room lost countertop while at least one kept backsplash dollars
+  // — never a legitimate material/edge selection outcome.
+  return scopedRooms > 0 && missingCountertop === scopedRooms && backsplashOnly > 0;
+}
+
+/**
  * Detect incomplete/unsafe public room pricing (e.g. $0 countertop after material change).
  * @param {object|null|undefined} calc
  * @param {object|null|undefined} publishedRoomPricingPublic
@@ -159,7 +190,14 @@ export function isUnsafeCustomerFacingCalc(calc, publishedRoomPricingPublic = nu
     ? publishedRoomPricingPublic.rooms
     : [];
   const calcRooms = Array.isArray(calc?.roomPricing?.rooms) ? calc.roomPricing.rooms : [];
-  if (!publishedRooms.length || !calcRooms.length) return false;
+  if (!calcRooms.length) return false;
+
+  // Defense when published room pricing cannot be built (legacy snapshot /
+  // projection throw): the Countertop $0 / backsplash-only collapse is still
+  // never safe to show under a published project total.
+  if (hasBacksplashOnlyCountertopCollapse(calcRooms)) return true;
+
+  if (!publishedRooms.length) return false;
 
   let publishedCountertopTotal = 0;
   for (const pub of publishedRooms) {

@@ -3303,3 +3303,15 @@
 | **Impacted** | `ConfigurationView.tsx`, `phaseGenericOptionRowPriceParity.test.ts` (new), `phaseCustomerExperiencePolish.test.ts` (assertion 40 relaxed to allow the fail-closed calc variable names from §233), this doc. |
 | **Protected** | Pricing formulas/rates, backend pricing DTOs, Studio V2, V1 workflow, browser pricing math (rows only render backend labels), approved Studio estimates, `quote_publication_snapshots` mutation, edge row behavior (§234). |
 | **Revisit trigger** | If a new option row kind is added, give it the same price slot testid so the parity test covers it. |
+
+### 236. Digital Estimate print/PDF — Countertop $0 / backsplash-only collapse must never print (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-print-frozen-breakdown` |
+| **Decision** | `isUnsafeCustomerFacingCalc` now detects the intrinsic Countertop $0 / backsplash-only collapse even when published room pricing is unavailable (`hasBacksplashOnlyCountertopCollapse`). Previously `!publishedRooms.length` short-circuited to "safe", so an incomplete reprice whose room totals still summed to the published project total ($7,120) became `authoritative_backend_reprice` and the print/PDF rendered Countertop $0 with backsplash-only room totals. Client defense: `isUnsafeCustomerRoomPricing` + hardened `failClosedRoomPricing` treat that collapse as fail-closed regardless of authority; `forSafeDisplay` stamps frozen authority/baseline total for room cards, sidebar and print; `buildDigitalEstimatePrintModel` drops unsafe roomPricing as a last line of defense and never emits Countertop $0; the print document omits empty amount tables / room totals; room-card summary hides the backsplash-only collapse. Fail-closed copy stays "This selection could not be priced automatically yet…"; estimator-review language remains gated on true scope-change requests only. |
+| **Why** | Production uploaded PDF showed Your estimate $7,120 with every room Countertop $0 / backsplash-only (Kitchen $2,315, Master Bath $816, …). The total looked protected because the incomplete rooms summed to the baseline, but print read the unsafe customer `roomPricing` because the guardrail could not freeze without published rooms. |
+| **SQL** | None. |
+| **Impacted** | `baselineParityGuardrails.mjs` (+ test 22), `customerEstimateBreakdown.ts`, `customerPrintAdapter.ts`, `DigitalEstimatePrintDocument.tsx`, `ConfigurationView.tsx`, `phaseFrozenBaselineBreakdownParity.test.ts` (4b PDF shape), this doc. |
+| **Protected** | Pricing formulas/rates, Studio V2, V1, browser pricing math, approved Studio estimates, `quote_publication_snapshots`, internal pricing evidence. |
+| **Revisit trigger** | None known; once all publications carry buildable published room pricing, the intrinsic collapse check remains defense-in-depth. |

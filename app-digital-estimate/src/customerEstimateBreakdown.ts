@@ -58,14 +58,53 @@ export function groupBreakdownLinesByRoom(lines: BreakdownLine[]): BreakdownRoom
 }
 
 /**
+ * Intrinsic incomplete-reprice signature on a public room-pricing DTO:
+ * every scoped room has Countertop $0/missing while at least one keeps
+ * backsplash dollars. Matches the uploaded-PDF failure shape. Presentation
+ * only — never invents amounts.
+ */
+export function isUnsafeCustomerRoomPricing(
+  pricing: PublicRoomPricing | null | undefined,
+): boolean {
+  const rooms = Array.isArray(pricing?.rooms) ? pricing.rooms : [];
+  if (!rooms.length) return false;
+  let scopedRooms = 0;
+  let missingCountertop = 0;
+  let backsplashOnly = 0;
+  for (const r of rooms) {
+    const ct =
+      r?.countertopAmount != null && Number.isFinite(Number(r.countertopAmount))
+        ? Number(r.countertopAmount)
+        : null;
+    const bs = Number(r?.backsplashAmount) || 0;
+    const total = Number(r?.roomTotal) || 0;
+    const material = String((r as { selectedMaterial?: string | null })?.selectedMaterial || "").trim();
+    const hasScope = total > 0.005 || bs > 0.005 || material.length > 0;
+    if (!hasScope) continue;
+    scopedRooms += 1;
+    if (ct == null || ct <= 0.005) {
+      missingCountertop += 1;
+      if (bs > 0.005) backsplashOnly += 1;
+    }
+  }
+  return scopedRooms > 0 && missingCountertop === scopedRooms && backsplashOnly > 0;
+}
+
+function isSafeBaselineRoomPricing(
+  pricing: PublicRoomPricing | null | undefined,
+): pricing is PublicRoomPricing {
+  return Boolean(pricing?.rooms?.length) && !isUnsafeCustomerRoomPricing(pricing);
+}
+
+/**
  * Room pricing a customer may be shown for a calculation. Presentation only — it
  * selects between two backend-authored pricing DTOs and never computes money.
  *
- * When the backend fails closed to the published baseline, the total is the
- * baseline, so every price detail (sidebar breakdown, room cards, print) must be
- * baseline too. The partial calc behind the freeze — a $0 countertop with a
- * backsplash-only room total — must never reach the customer, so it is dropped
- * when no baseline room pricing is available to show instead.
+ * When the backend fails closed to the published baseline, OR the calc's own
+ * roomPricing is the Countertop $0 / backsplash-only collapse (even if
+ * pricingAuthority was not yet marked frozen), every price detail (sidebar
+ * breakdown, room cards, print) must use baseline-safe rooms or hide room-level
+ * amounts. Unsafe customer roomPricing must never reach the customer.
  */
 export function failClosedRoomPricing(
   calc:
@@ -76,11 +115,16 @@ export function failClosedRoomPricing(
 ): PublicRoomPricing | null {
   if (!calc) return null;
   const own = calc.roomPricing ?? null;
-  if (String(calc.pricingAuthority || "") !== "published_baseline_frozen") return own;
-  if (publishedRoomPricing?.rooms?.length) return publishedRoomPricing;
-  // The backend substitutes published baseline rooms on freeze; that DTO is the
-  // only calc-carried pricing that is safe to keep here.
-  return own?.kind === "original" ? own : null;
+  const frozen =
+    String(calc.pricingAuthority || "") === "published_baseline_frozen";
+  const ownUnsafe = isUnsafeCustomerRoomPricing(own);
+  if (!frozen && !ownUnsafe) return own;
+
+  if (isSafeBaselineRoomPricing(publishedRoomPricing)) return publishedRoomPricing;
+  // Backend may have already substituted published baseline rooms on freeze.
+  if (own?.kind === "original" && isSafeBaselineRoomPricing(own)) return own;
+  // No safe room detail — hide amounts rather than leak Countertop $0.
+  return null;
 }
 
 function formatMoney(n: number | null | undefined): string {
