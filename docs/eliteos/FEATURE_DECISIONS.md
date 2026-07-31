@@ -3341,3 +3341,16 @@
 | **Impacted** | `studioCustomerSelectionReview.mjs` (+ test), `studioV2Service.mjs`, `elite100StudioV2Routes.js`, `StudioV2CustomerSelectionReviewPanel.tsx`, `StudioV2EstimatorShell.tsx`, `studioV2SliceF.test.mjs`, this doc. |
 | **Protected** | Pricing formulas, customer pricing math, approved estimates, auto-approve/publish/sold, V1, raw payload / internal evidence / service-role exposure. |
 | **Revisit trigger** | When “apply customer selections into Studio draft” is productized; until then panel stays read-only. |
+
+### 239. Digital Estimate Changes tab — Material must not double-count Countertop (2026-07-31)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-31 · `fix/de-changes-breakdown-reconciliation` |
+| **Root cause** | `buildChangesRoomPricingProjection` emitted both a **Material** row (`materialDeltaCents`, countertop stone-rate delta) and a **Countertop → Countertop** row (`updatedCountertop − originalCountertop`). In proportional-allocation mode those are the same cents (`countertopAmountCents += materialDeltaCents`). The Changes UI summed both into room totals, so visible room changes (~$1,852) exceeded the authoritative project difference (~$1,619) by exactly the duplicated material deltas. |
+| **Decision** | When a Material change row already owns the countertop stone-rate dollars, do not also emit a Countertop change row. Material / backsplash / add-on rows remain additive. Project difference continues to come from backend `totalDelta` (`configured − published`). Frontend Changes room totals sum displayed additive rows; if a residual remains vs project delta, show a **Project-level adjustments** line (display-only). Calculator formulas/rates unchanged. |
+| **Why** | Customer Changes tab looked wrong/conflicting while Your estimate ($8,739) was correct. |
+| **SQL** | None. |
+| **Impacted** | `customerRoomPricingProjection.mjs` (+ regression), `customerEstimateBreakdown.ts`, `phaseChangesBreakdownReconciliation.test.ts`, this doc. |
+| **Protected** | Pricing formulas/rates, browser pricing math, approved estimates, publication snapshots, Studio V2 workflow. |
+| **Revisit trigger** | If a non-material countertop-only customer selection path is introduced, re-evaluate whether a dedicated Countertop change row is needed (with distinct labels). |

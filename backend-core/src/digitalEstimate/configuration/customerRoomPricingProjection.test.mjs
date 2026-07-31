@@ -1115,4 +1115,109 @@ function sharedAllocationInternal({ mode }) {
   console.log("ok: legacy snapshot with unrecorded backsplash mode still projects published room pricing");
 }
 
+// Production Changes tab reconciliation — Material must not double-count with Countertop.
+{
+  const original = {
+    rooms: [
+      {
+        roomId: "master",
+        roomName: "Master Bath",
+        selectedMaterial: "Group Promo",
+        countertopAmountCents: 100_000,
+        backsplashAmountCents: 20_000,
+        backsplashMode: "standard_4in",
+        customerFacingLines: []
+      },
+      {
+        roomId: "ll",
+        roomName: "LL Bath",
+        selectedMaterial: "Group Promo",
+        countertopAmountCents: 90_000,
+        backsplashAmountCents: 25_000,
+        backsplashMode: "standard_4in",
+        customerFacingLines: []
+      },
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        selectedMaterial: "Group Promo",
+        countertopAmountCents: 400_000,
+        backsplashAmountCents: 50_000,
+        backsplashMode: "standard_4in",
+        customerFacingLines: []
+      }
+    ]
+  };
+  const updated = {
+    rooms: [
+      {
+        roomId: "master",
+        roomName: "Master Bath",
+        selectedMaterial: "Group A",
+        materialDeltaCents: 12_200,
+        countertopAmountCents: 112_200,
+        backsplashAmountCents: 22_700,
+        backsplashMode: "standard_4in",
+        customerFacingLines: [],
+        reviewRequiredItems: []
+      },
+      {
+        roomId: "ll",
+        roomName: "LL Bath",
+        selectedMaterial: "Group A",
+        materialDeltaCents: 11_000,
+        countertopAmountCents: 101_000,
+        backsplashAmountCents: 28_500,
+        backsplashMode: "standard_4in",
+        customerFacingLines: [],
+        reviewRequiredItems: []
+      },
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        selectedMaterial: "Group Promo",
+        materialDeltaCents: 0,
+        countertopAmountCents: 400_000,
+        backsplashAmountCents: 50_000,
+        backsplashMode: "standard_4in",
+        customerFacingLines: [
+          { category: "sink", label: "Precis 50/50", amountCents: 57_500 },
+          { category: "specialty", label: "Hubbell specialty", amountCents: 55_000 },
+          { category: "sink_cutout", label: "Sink cutout", amountCents: 20_000 }
+        ],
+        reviewRequiredItems: []
+      }
+    ],
+    deltaFromOriginalCents: 161_900
+  };
+  const changes = buildChangesRoomPricingProjection({ original, updated });
+  assert.equal(
+    changes.rows.some((r) => r.category === "countertop"),
+    false,
+    "Material owns countertop stone-rate dollars — no duplicate Countertop row"
+  );
+  assert.ok(changes.rows.some((r) => r.category === "material" && r.roomName === "Master Bath"));
+  assert.ok(changes.rows.some((r) => r.category === "backsplash" && r.roomName === "Master Bath"));
+
+  const roomSums = new Map();
+  for (const row of changes.rows) {
+    roomSums.set(row.roomName, (roomSums.get(row.roomName) || 0) + Number(row.amountDeltaCents || 0));
+  }
+  assert.equal(roomSums.get("Master Bath"), 14_900);
+  assert.equal(roomSums.get("LL Bath"), 14_500);
+  assert.equal(roomSums.get("Kitchen"), 132_500);
+  const sumRooms = [...roomSums.values()].reduce((s, n) => s + n, 0);
+  assert.equal(sumRooms, 161_900);
+  assert.equal(changes.totalDeltaCents, 161_900);
+  assert.equal(sumRooms, changes.totalDeltaCents);
+
+  const dto = toPublicChangesPricingDto(changes);
+  assert.equal(dto.totalDelta, 1619);
+  assert.equal(
+    dto.rows.filter((r) => r.category === "countertop").length,
+    0
+  );
+  console.log("ok: Changes rows do not double-count Material+Countertop; room sums = project delta");
+}
+
 console.log("\nAll customerRoomPricingProjection tests passed.\n");
