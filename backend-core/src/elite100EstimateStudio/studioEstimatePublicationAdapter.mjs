@@ -305,6 +305,11 @@ function freezePiecesForPublication(pieces) {
       depthIn: Number.isFinite(Number(piece.depthIn ?? piece.depth))
         ? Number(piece.depthIn ?? piece.depth)
         : null,
+      // Section SF must survive the freeze: Digital Estimate re-prices permitted
+      // selections against each piece as an independently ceiled billing section
+      // (billableSquareFeet.mjs). Dropping it here priced every room's countertop
+      // at $0 (FEATURE_DECISIONS §237).
+      sqft: Number.isFinite(Number(piece.sqft)) && Number(piece.sqft) > 0 ? Number(piece.sqft) : null,
       included: true,
       sideSplashLeftEligible: eligibilityKnown ? leftEligible : null,
       sideSplashRightEligible: eligibilityKnown ? rightEligible : null,

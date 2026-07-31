@@ -328,7 +328,7 @@ function takeoffScope(extra = {}) {
   const knife = effects.find((e) => e.profileKey === "edge_knife");
   assert.equal(knife.originalSelection, true);
   assert.equal(knife.priceEffectCents, 0);
-  assert.equal(knife.priceEffectLabel, "Original selection");
+  assert.equal(knife.priceEffectLabel, "Included in your estimate");
   // Other premiums still carry the calculated project edge effect (not review-required).
   const crescent = effects.find((e) => e.profileKey === "edge_crescent");
   assert.ok(crescent.priceEffectCents > 0);
