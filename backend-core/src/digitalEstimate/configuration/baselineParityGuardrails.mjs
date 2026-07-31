@@ -1,48 +1,59 @@
 /**
- * Digital Estimate — Baseline Parity + Customer UI Guardrails (hotfix).
+ * Digital Estimate — customer pricing authority + safety guardrails.
  *
- * Until Slice K ships authoritative backend repricing from the approved
- * publication snapshot, customer-visible totals must stay on the published
- * baseline. Selection/configuration changes may still be saved as
- * pending/review-required, but must not invent lower totals, $0 countertop
- * lines, or fake edge deltas.
+ * Contract:
+ * - Permitted customer selections (material, edge, eligible backsplash, products)
+ *   are live-priced by backend Pricing Engine V4 (config-delta).
+ * - True physical scope-change requests require Elite review and do not silently
+ *   mutate approved geometry.
+ * - If a calculated public result is incomplete/unsafe (e.g. $0 countertop when
+ *   the published estimate had material), freeze to published baseline rather
+ *   than showing a wrong total.
  *
- * Does not change calculator math. Does not mutate approved Studio estimates
- * or quote_publication_snapshots.
+ * Does not change calculator formulas/rates. Does not mutate approved Studio
+ * estimates or quote_publication_snapshots from customer saves.
  */
 
 export const CUSTOMER_PRICING_AUTHORITY = Object.freeze({
-  /** Hotfix: public totals frozen to published baseline. */
+  /** Incomplete/unsafe calc — public totals frozen to published baseline. */
   PUBLISHED_BASELINE_FROZEN: "published_baseline_frozen",
-  /** Future Slice K: trustworthy backend reprice. */
+  /** Backend config-delta / V4 selection reprice is authoritative. */
   AUTHORITATIVE_BACKEND_REPRICE: "authoritative_backend_reprice"
 });
 
 export const CUSTOMER_PRICING_STATUS = Object.freeze({
+  /** No priced selection drift from published baseline. */
   BASELINE: "baseline",
+  /** Permitted selections live-priced; not a scope review. */
+  PRICED_SELECTION: "priced_selection",
+  /** Physical scope change requested — Elite review required. */
+  SCOPE_REVIEW_REQUIRED: "scope_review_required",
+  /** @deprecated Prefer SCOPE_REVIEW_REQUIRED; kept for older clients. */
   PENDING_ESTIMATOR_REVIEW: "pending_estimator_review"
 });
 
 export const BASELINE_PARITY_NOTICES = Object.freeze({
+  // Fail-closed (unsafe calc / missing rate) — customer-friendly, non-technical copy.
   PRICE_UPDATE_REVIEW:
-    "Price updates for this change require estimator review.",
-  ESTIMATOR_WILL_REVIEW:
-    "Elite will review this before final approval.",
+    "This selection needs Elite review before the estimate can update.",
+  ESTIMATOR_WILL_REVIEW: "Elite will review this before final approval.",
+  NEEDS_ELITE_REVIEW: "Needs Elite review",
   EDGE_REVIEW:
-    "Edge changes may affect your final estimate and will be reviewed by Elite.",
-  CHANGES_NEED_REVIEW: "Changes need review",
+    "Edge profile is included in your priced estimate.",
+  CHANGES_NEED_REVIEW: "Needs Elite review",
   REQUESTED_CHANGE: "Requested change",
   FINAL_APPROVAL_UNAVAILABLE:
-    "Final approval will be available after estimator review."
+    "Final approval will be available after Elite review.",
+  CHANGES_SAVED: "Changes saved"
 });
 
 /**
- * Hotfix gate — customer-facing repricing is not authoritative yet.
- * Flip only when Slice K proves backend reprice matches Studio V2.
+ * Permitted customer selections are live-priced by the backend config-delta engine.
+ * Flip off only if production must emergency-freeze to published baseline again.
  * @returns {boolean}
  */
 export function isCustomerRepricingAuthoritative() {
-  return false;
+  return true;
 }
 
 function num(v) {
@@ -64,6 +75,23 @@ export function resolvePublishedBaselineTotal(calc, opts = {}) {
       : null) ??
     num(calc?.totals?.baselineDisplayTotal) ??
     num(calc?.totals?.estimatedProjectTotal) ??
+    num(calc?.publishedBaselineTotal) ??
+    null
+  );
+}
+
+/**
+ * Resolve the customer-facing priced selection total (backend-owned).
+ * @param {object|null|undefined} calc
+ */
+export function resolvePricedSelectionTotal(calc) {
+  return (
+    num(calc?.pricedSelectionTotal) ??
+    num(calc?.configuredDisplayTotal) ??
+    (calc?.configuredDisplayTotalCents != null
+      ? num(calc.configuredDisplayTotalCents) / 100
+      : null) ??
+    num(calc?.totals?.configuredDisplayTotal) ??
     null
   );
 }
@@ -75,32 +103,56 @@ export function resolvePublishedBaselineTotal(calc, opts = {}) {
  */
 export function publicCalcDivergesFromBaseline(calc, baseline) {
   if (baseline == null || !calc) return false;
-  const configured =
-    num(calc.configuredDisplayTotal) ??
-    (calc.configuredDisplayTotalCents != null
-      ? num(calc.configuredDisplayTotalCents) / 100
-      : null) ??
-    num(calc.totals?.configuredDisplayTotal) ??
-    null;
+  const configured = resolvePricedSelectionTotal(calc);
   if (configured == null) return false;
   return Math.abs(configured - baseline) >= 0.005;
 }
 
 /**
+ * Detect incomplete/unsafe public room pricing (e.g. $0 countertop after material change).
+ * @param {object|null|undefined} calc
+ * @param {object|null|undefined} publishedRoomPricingPublic
+ */
+export function isUnsafeCustomerFacingCalc(calc, publishedRoomPricingPublic = null) {
+  if (!calc || typeof calc !== "object") return true;
+  const priced = resolvePricedSelectionTotal(calc);
+  const baseline = resolvePublishedBaselineTotal(calc);
+  if (baseline != null && baseline > 0 && (priced == null || !(priced > 0))) {
+    return true;
+  }
+
+  const publishedRooms = Array.isArray(publishedRoomPricingPublic?.rooms)
+    ? publishedRoomPricingPublic.rooms
+    : [];
+  const calcRooms = Array.isArray(calc?.roomPricing?.rooms) ? calc.roomPricing.rooms : [];
+  if (!publishedRooms.length || !calcRooms.length) return false;
+
+  for (const pub of publishedRooms) {
+    const pubCt = num(pub?.countertopAmount);
+    if (!(pubCt > 0)) continue;
+    const match =
+      calcRooms.find(
+        (r) =>
+          String(r?.roomKey || "") === String(pub?.roomKey || "") ||
+          String(r?.roomName || "").toLowerCase() === String(pub?.roomName || "").toLowerCase()
+      ) || null;
+    if (!match) continue;
+    const ct = num(match.countertopAmount);
+    // Published had countertop; updated shows $0 — classic incomplete reprice failure.
+    if (ct != null && ct <= 0.005) return true;
+  }
+  return false;
+}
+
+/**
  * Customer-safe edge option display for public Digital Estimate.
- *
- * Keeps backend-calculated display amounts (frozen publication effects or
- * trusted LF×rate resolution) so included profiles show +$0 and upgraded
- * profiles show +$N. Does NOT make those amounts authoritative for the
- * published estimate total — totals stay frozen via
- * applyBaselineParityToCustomerCalculation until Slice K.
+ * Preserves backend-calculated display amounts. Does not own estimate totals.
  *
  * @param {object} publicOpt
  * @returns {object}
  */
 export function applyEdgeOptionPriceGuardrail(publicOpt) {
   if (!publicOpt || typeof publicOpt !== "object") return publicOpt;
-  if (isCustomerRepricingAuthoritative()) return publicOpt;
   const key = String(publicOpt.optionKey || "");
   const isEdge =
     key.startsWith("edge:") ||
@@ -115,7 +167,6 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
   const hasAuthoritativeCents = centsRaw != null && Number.isFinite(centsRaw);
   const treatment = String(publicOpt.customerPriceTreatment || "");
 
-  // Preserve backend-owned display cents when present (frozen publish or trusted resolve).
   if (hasAuthoritativeCents) {
     next.priceEffectCents = Math.trunc(centsRaw);
     if (next.visibleDelta == null && treatment === "delta") {
@@ -123,21 +174,29 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
     }
   }
 
-  // Published / baseline edge for this room — never show as an upgrade delta.
+  // Published baseline edge — keep premium context when applicable.
   if (
     Boolean(publicOpt.includedInBaseline) ||
     treatment === "original_selection" ||
     publicOpt.priceEffectLabel === "Original selection"
   ) {
     next.customerPriceTreatment = "original_selection";
-    next.priceEffectLabel = "Included in your estimate";
-    next.priceEffectCents = 0;
-    next.visibleDelta = 0;
+    next.priceEffectLabel =
+      publicOpt.premium === true
+        ? "Included in published estimate"
+        : "Included in published estimate";
+    // Keep display cents for premium baseline rows so they don't look "free".
+    if (publicOpt.premium === true && hasAuthoritativeCents && centsRaw > 0) {
+      next.priceEffectCents = Math.trunc(centsRaw);
+      next.visibleDelta = next.priceEffectCents / 100;
+    } else {
+      next.priceEffectCents = 0;
+      next.visibleDelta = 0;
+    }
     next.selectable = true;
     return next;
   }
 
-  // Included-tier alternate profiles (Eased, Large Eased, …).
   if (
     treatment === "included_alternate" ||
     publicOpt.premium === false ||
@@ -152,7 +211,6 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
     return next;
   }
 
-  // Upgraded profiles with backend-calculated display cents.
   if (hasAuthoritativeCents && centsRaw >= 0 && (treatment === "delta" || publicOpt.premium === true)) {
     const dollars = next.priceEffectCents / 100;
     next.customerPriceTreatment = "delta";
@@ -165,8 +223,6 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
     return next;
   }
 
-  // No authoritative cents — still selectable as a pending request; section-level
-  // note covers review copy (avoid repeating long text on every upgraded row).
   next.customerPriceTreatment =
     treatment === "review_required" ? "review_required" : treatment || "review_required";
   next.priceEffectLabel = null;
@@ -180,12 +236,11 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
 }
 
 /**
- * Apply edge guardrail across an options array (public state).
+ * Apply edge display guardrail across an options array (public state).
  * @param {object[]|null|undefined} options
  */
 export function applyEdgeOptionPriceGuardrails(options) {
   if (!Array.isArray(options)) return options;
-  if (isCustomerRepricingAuthoritative()) return options;
   return options.map((o) => {
     const key = String(o?.optionKey || "");
     if (!key.startsWith("edge:")) return o;
@@ -194,37 +249,97 @@ export function applyEdgeOptionPriceGuardrails(options) {
 }
 
 /**
- * Freeze customer-visible calculation to published baseline.
+ * Annotate / guard customer-facing calculation for public Digital Estimate.
+ *
+ * When selection reprice is authoritative and the calc is safe: keep V4 totals.
+ * When unsafe: freeze to published baseline (parity fail-closed).
+ * Scope-review requests set scopeReviewRequired without freezing selection totals
+ * unless the calc itself is unsafe.
+ *
  * @param {object|null|undefined} calc
  * @param {{
  *   baselineDisplayTotal?: number|null,
  *   publishedRoomPricingPublic?: object|null,
- *   hasPendingPriceAffectingChanges?: boolean
+ *   scopeReviewRequired?: boolean,
+ *   hasPendingPriceAffectingChanges?: boolean,
+ *   forceFreeze?: boolean
  * }} [opts]
  */
 export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
   if (!calc || typeof calc !== "object") return calc;
-  if (isCustomerRepricingAuthoritative()) {
-    return {
-      ...calc,
-      pricingAuthority: CUSTOMER_PRICING_AUTHORITY.AUTHORITATIVE_BACKEND_REPRICE,
-      customerPricingStatus: CUSTOMER_PRICING_STATUS.BASELINE,
-      canSubmitForFinalReview: false
-    };
-  }
 
   const baseline = resolvePublishedBaselineTotal(calc, opts);
-  const pending = Boolean(
-    opts.hasPendingPriceAffectingChanges ||
-      publicCalcDivergesFromBaseline(calc, baseline) ||
-      calc.customerPricingStatus === CUSTOMER_PRICING_STATUS.PENDING_ESTIMATOR_REVIEW
+  // Only true physical scope requests — never normal material/edge selection drift.
+  const scopeReviewRequired = Boolean(
+    opts.scopeReviewRequired ||
+      calc?.scopeReviewRequired ||
+      calc?.customerConfiguration?.requiresEstimatorReview
   );
 
+  // Sticky fail-closed: once a calc has been frozen, re-guarding it (e.g. on a
+  // page reload reading a persisted result) must not reclassify it as safe —
+  // freezing already resets totals/rooms to match the baseline, so the unsafe
+  // check alone can no longer see the original problem on a second pass.
+  const previouslyFrozen =
+    calc?.pricingAuthority === CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN;
+
+  const unsafe =
+    previouslyFrozen ||
+    Boolean(opts.forceFreeze) ||
+    isUnsafeCustomerFacingCalc(calc, opts.publishedRoomPricingPublic);
+
+  if (isCustomerRepricingAuthoritative() && !unsafe) {
+    const priced = resolvePricedSelectionTotal(calc);
+    const diverged = publicCalcDivergesFromBaseline(
+      { ...calc, pricedSelectionTotal: priced, configuredDisplayTotal: priced },
+      baseline
+    );
+    /** @type {Record<string, unknown>} */
+    const next = {
+      ...calc,
+      pricingAuthority: CUSTOMER_PRICING_AUTHORITY.AUTHORITATIVE_BACKEND_REPRICE,
+      publishedBaselineTotal: baseline,
+      pricedSelectionTotal: priced,
+      scopeReviewRequired,
+      canSubmitForFinalReview: false,
+      customerPricingStatus: scopeReviewRequired
+        ? CUSTOMER_PRICING_STATUS.SCOPE_REVIEW_REQUIRED
+        : diverged
+          ? CUSTOMER_PRICING_STATUS.PRICED_SELECTION
+          : CUSTOMER_PRICING_STATUS.BASELINE,
+      customerPricingNotice: scopeReviewRequired
+        ? BASELINE_PARITY_NOTICES.NEEDS_ELITE_REVIEW
+        : null
+    };
+    if (baseline != null) {
+      next.baselineDisplayTotal = baseline;
+    }
+    if (priced != null) {
+      next.configuredDisplayTotal = priced;
+      next.displayTotalDelta =
+        baseline != null ? Math.round((priced - baseline) * 100) / 100 : num(calc.displayTotalDelta);
+      next.displayDelta = next.displayTotalDelta;
+    }
+    if (next.customerConfiguration && typeof next.customerConfiguration === "object") {
+      next.customerConfiguration = {
+        ...next.customerConfiguration,
+        canSubmitForFinalReview: false,
+        approvedBaselinePreserved: true,
+        requiresEstimatorReview: scopeReviewRequired
+      };
+    }
+    return next;
+  }
+
+  // Fail-closed freeze path (unsafe calc or emergency authoritative=false).
+  const pending = scopeReviewRequired;
   /** @type {Record<string, unknown>} */
   const next = { ...calc };
   if (baseline != null) {
     next.baselineDisplayTotal = baseline;
     next.configuredDisplayTotal = baseline;
+    next.pricedSelectionTotal = baseline;
+    next.publishedBaselineTotal = baseline;
     next.displayTotalDelta = 0;
     next.displayDelta = 0;
     if (next.totals && typeof next.totals === "object") {
@@ -245,36 +360,36 @@ export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
   }
 
   next.pricingAuthority = CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN;
+  next.scopeReviewRequired = pending;
   next.customerPricingStatus = pending
-    ? CUSTOMER_PRICING_STATUS.PENDING_ESTIMATOR_REVIEW
+    ? CUSTOMER_PRICING_STATUS.SCOPE_REVIEW_REQUIRED
     : CUSTOMER_PRICING_STATUS.BASELINE;
   next.customerPricingNotice = pending
-    ? BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW
-    : null;
+    ? BASELINE_PARITY_NOTICES.NEEDS_ELITE_REVIEW
+    : unsafe
+      ? BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW
+      : null;
   next.canSubmitForFinalReview = false;
 
   if (opts.publishedRoomPricingPublic && typeof opts.publishedRoomPricingPublic === "object") {
     next.roomPricing = opts.publishedRoomPricingPublic;
-    // Suppress misleading change rows while repricing is frozen.
     next.roomPricingChanges = {
       kind: "changes",
       rows: [],
       totalDelta: 0,
       pendingReview: pending,
-      notice: pending ? BASELINE_PARITY_NOTICES.ESTIMATOR_WILL_REVIEW : null
+      notice: pending ? BASELINE_PARITY_NOTICES.NEEDS_ELITE_REVIEW : null
     };
   }
 
   const messages = Array.isArray(next.reviewRequiredMessages)
     ? [...next.reviewRequiredMessages]
     : [];
-  if (pending) {
-    if (!messages.includes(BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW)) {
-      messages.push(BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW);
-    }
-    if (!messages.includes(BASELINE_PARITY_NOTICES.ESTIMATOR_WILL_REVIEW)) {
-      messages.push(BASELINE_PARITY_NOTICES.ESTIMATOR_WILL_REVIEW);
-    }
+  if (pending || unsafe) {
+    const notice = pending
+      ? BASELINE_PARITY_NOTICES.NEEDS_ELITE_REVIEW
+      : BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW;
+    if (!messages.includes(notice)) messages.push(notice);
   }
   next.reviewRequiredMessages = messages;
 
@@ -306,6 +421,22 @@ export function hasPriceAffectingCustomerSelections(quantities) {
       k.startsWith("sidesplash:") ||
       k.startsWith("waterfall:")
     ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when quantities imply a physical scope-style request (not a priced selection).
+ * Waterfall requests are treated as scope until a safe priced model exists.
+ * @param {Record<string, number>|null|undefined} quantities
+ */
+export function hasScopeChangeCustomerSelections(quantities) {
+  for (const [key, qty] of Object.entries(quantities || {})) {
+    if (!(Number(qty) > 0)) continue;
+    const k = String(key);
+    if (k.startsWith("waterfall:") || k.startsWith("qty-") || k.includes(":opening:")) {
       return true;
     }
   }

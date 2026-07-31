@@ -140,11 +140,22 @@ assert.ok(view.includes("de-final-approval-unavailable"));
 assert.ok(view.includes("Final approval will be available after estimator review"));
 assert.ok(view.includes('data-testid="de-request-review"'));
 assert.ok(view.includes("canSubmitForFinalReview && !configurationLocked"));
-assert.ok(view.includes("Pending review") || view.includes("de-pricing-review-notice"));
+assert.ok(view.includes("Needs Elite review") || view.includes("de-changes-need-review"));
+assert.ok(view.includes("de-pricing-review-notice") || view.includes("de-changes-saved"));
+assert.ok(view.includes("Changes saved") || view.includes("de-changes-saved"));
 assert.ok(publicSvc.includes("applyBaselineParityToCustomerCalculation"));
+
+// Fail-closed frozen calcs must stay visible to the customer, not read as an
+// unchanged, successfully-saved estimate.
+assert.ok(view.includes("showPricingNotice"));
+assert.ok(/changesNeedReview \|\| pricingFrozen/.test(view));
+// A fresh, never-saved estimate must not claim "Changes saved".
+assert.ok(view.includes("hasEverSaved"));
+assert.ok(view.includes("de-as-published"));
 
 console.log("ok: customer info + room cards + color modal grouping wired");
 console.log("ok: textures present; public UI omits Wholesale/Direct/raw keys");
 console.log("ok: drafts persist with selection payload; review snapshot carries corrections");
 console.log("ok: baseline parity / final-approve guardrails present");
+console.log("ok: fail-closed notice visible; fresh estimate does not claim Changes saved");
 console.log("\nAll phaseCustomerExperience.foundation tests passed.\n");

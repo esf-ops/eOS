@@ -3221,3 +3221,27 @@
 | **Protected** | Live customer reprice (`isCustomerRepricingAuthoritative` stays false), calculator formulas/rates, Studio V2 pricing math, approved snapshots, `quote_publication_snapshots` mutation from customer saves, Product Catalog / waterfall / vanity / sold / final acceptance, V1 workflow, browser pricing math. |
 | **Revisit trigger** | Slice K authoritative reprice; then option display amounts can drive configured totals under proven gates. |
 
+### 229. Digital Estimate — live-price permitted selections; scope-only review (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-option-state-contract` |
+| **Decision** | Public Digital Estimate **live-prices permitted customer selections** via backend `calculateElite100ConfigDelta` (Pricing Engine config-delta / V4 path). Material/color/group, edge profile, eligible backsplash, and priced product options update `pricedSelectionTotal` / Your estimate / Difference immediately. **Estimator review is required only for physical scope requests** (openings, waterfalls, geometry change requests, etc.). Baseline-parity freeze remains as a **fail-closed safety** when the public calc is incomplete/unsafe (e.g. $0 countertop vs published material). `isCustomerRepricingAuthoritative()` returns true. Final acceptance stays gated (`canSubmitForFinalReview: false`) until a safe final workflow ships. |
+| **Why** | Prior baseline freeze treated material/edge as “pending review” and kept totals on Promo/published even when V4 could price them — incorrect product contract. |
+| **SQL** | None. |
+| **Impacted** | `baselineParityGuardrails.mjs`, `publicConfigurationService.mjs`, `ConfigurationView.tsx`, tests, this doc (§226/§228 superseded for selection freeze behavior). |
+| **Protected** | Browser pricing math, calculator formulas/rates, Studio V2 math, approved Studio estimates, `quote_publication_snapshots` mutation from customer saves, sold conversion, V1 workflow, silent scope mutation. |
+| **Revisit trigger** | Switch public engine to config-delta V2 when production-proven; enable final acceptance only with safe gates. |
+
+### 230. Digital Estimate live-pricing — deploy-blocking safety edits from review (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-option-state-contract` |
+| **Decision** | Four required fixes to §229 before deploy, no pricing-formula or Studio/V1 changes: (1) the sidebar now shows a customer-safe notice whenever the calc is fail-closed frozen, not only for scope-review requests (`showPricingNotice = changesNeedReview \|\| pricingFrozen`). (2) `missing_material_rate` thrown by the config-delta engine for a countertop material (not just side-splash) is caught in `publicConfigurationService.mjs`, degrades the affected room(s) back to the published baseline material group, retries the calc, flags `material_rate_missing_review`, and forces `forceFreeze` — it never surfaces as a customer-facing save failure. (3) the sidebar only claims "Changes saved" once `customerConfiguration.lastSavedAt` is set; a fresh, never-saved session shows "As published" instead. (4) `applyBaselineParityToCustomerCalculation` is now sticky: re-guarding an already-`published_baseline_frozen` calc (e.g. on page reload) stays frozen instead of reclassifying as safe, because freezing itself resets totals/rooms to match the baseline and would otherwise erase its own signal on the next pass. The old fail-closed copy ("Price updates for this change require estimator review.") is replaced with "This selection needs Elite review before the estimate can update." |
+| **Why** | Opus review of §229 found the fail-closed state was invisible to the customer, a legacy/off-schedule material group could throw a hard save error, "Changes saved" appeared before any save existed, and the frozen signal did not survive a second guard pass. |
+| **SQL** | None. |
+| **Impacted** | `baselineParityGuardrails.mjs`, `baselineParityGuardrails.test.mjs`, `publicConfigurationService.mjs`, `ConfigurationView.tsx`, `phaseCustomerExperience.foundation.test.mjs`, this doc. |
+| **Protected** | Pricing formulas/rates, Studio V2, V1 workflow, browser pricing math, approved Studio estimates, `quote_publication_snapshots` mutation from customer saves. |
+| **Revisit trigger** | If `unknown_material_group` (a related but distinct engine error for a group code that doesn't normalize at all) is ever observed reaching a customer save, extend the same catch/degrade treatment to it. |
+
