@@ -3269,3 +3269,37 @@
 | **Protected** | Pricing formulas/rates, Studio V2, V1 workflow, browser pricing math, approved Studio estimates, `quote_publication_snapshots` mutation, sticky/idempotent frozen state (§230.4), customer-safe notice visibility (§230.1), edge option display (§231). |
 | **Revisit trigger** | If the public room pricing DTO is ever changed to carry a real `roomKey`, the name-based fallback can be simplified, but should stay as defense-in-depth. |
 
+### 233. Digital Estimate fail-closed parity — frozen total must freeze the room breakdown too (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-option-state-contract` |
+| **Decision** | When `applyBaselineParityToCustomerCalculation` freezes to the published baseline, it now replaces **all** customer-visible room pricing, not just the top-level total: published baseline room pricing is substituted when available, and when it is not, `roomPricing` is set to `null` and `roomPricingChanges` is emptied rather than passing the unsafe calc through; `customerConfigurationSummary.totals` is realigned to the baseline as well. `customerRoomPricingProjection.mjs` also stops defaulting a missing `originalBacksplashMode` to `"none"` when the frozen snapshot carries positive Backsplash dollars — that false mode tripped `assertConfiguredBacksplashNoneIsZero`, which was why published baseline room pricing was unavailable to substitute in the first place. Client side, `failClosedRoomPricing()` (`customerEstimateBreakdown.ts`) feeds the same baseline pricing to the room cards, the sidebar breakdown and the print estimate, and `buildUpdatedBreakdown` renders no line detail at all for a frozen calc with no baseline rooms. Fail-closed copy changed from "This selection needs Elite review before the estimate can update." to "This selection could not be priced automatically yet. Your current quoted total is still shown." (`BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE`) — automatic pricing is the norm for material/edge/backsplash selections, so a pricing miss must not read as the estimator review that only true scope changes require. |
+| **Why** | Production: the total was correctly frozen at the published $7,120, but the room breakdown, room cards and print still showed the partial calc behind the freeze — Countertop $0 with backsplash-only room totals ($459, $816, …). Root cause: the freeze substituted room pricing only inside `if (opts.publishedRoomPricingPublic)`, and that DTO was `null` because building it threw `configured_backsplash_none_nonzero` for publications that froze Backsplash dollars without recording the mode. |
+| **SQL** | None. |
+| **Impacted** | `baselineParityGuardrails.mjs`, `customerRoomPricingProjection.mjs`, `customerEstimateBreakdown.ts`, `ConfigurationView.tsx`, `baselineParityGuardrails.test.mjs` (test 20), `customerRoomPricingProjection.test.mjs` (11-G), `phaseFrozenBaselineBreakdownParity.test.ts` (new), this doc. |
+| **Protected** | Pricing formulas/rates, Studio V2, V1 workflow, browser pricing math (the client only selects between two backend DTOs), approved Studio estimates, `quote_publication_snapshots` mutation, sticky frozen state (§230.4), guardrail detection (§232). |
+| **Revisit trigger** | If publications ever guarantee a recorded backsplash mode, the inferred-`null` branch in the Original projection can be dropped. |
+
+### 234. Digital Estimate edge option rows — gross option price, not delta from the current selection (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-option-state-contract` |
+| **Decision** | The customer-safe edge option DTO now carries `grossPriceEffectCents` — the option's own price (`0` for included profiles, the frozen LF × rate premium for upgraded profiles) — alongside the existing selection-relative `priceEffectCents` / `visibleDelta` that pricing consumes. `resolveEdgeOptionPriceEffect`, `buildCustomerSafeEdgeOptionEffects` and `edgeEffectFromFrozenPublication` (`studioEdgeAuthority.mjs`) all populate it; `applyEdgeOptionPriceGuardrail` labels the selected row from it; `edgeRowPriceLabel` (`edgeGroups.ts`) displays it. Publications frozen before the field existed recover the selected premium row's price from a sibling premium row in the same room via `frozenPremiumEdgeGrossCents()` — every upgraded profile in a room shares one frozen price, so no number is re-derived in the browser. The guardrail also no longer stamps "Included in published estimate" on the selected row. |
+| **Why** | An upgraded edge showed `+$627` until the customer selected it, then dropped to `+$0`: the selected profile's delta from itself is zero by definition, and both the engine's `isOriginal` branch and the guardrail's `centsRaw > 0` check discarded the premium it had just computed. Selection is a visual state and must never replace or zero a row's price. |
+| **SQL** | None. |
+| **Impacted** | `studioEdgeAuthority.mjs`, `publicConfigurationService.mjs`, `baselineParityGuardrails.mjs`, `edgeGroups.ts`, `lovableViewModel.ts`, `publicConfigApi.ts`, `baselineParityGuardrails.test.mjs` (test 21), `phaseEdgeOptionCustomerCopy.test.ts`, this doc. |
+| **Protected** | Pricing formulas/rates (`UPGRADED_EDGE_RATE_*_V2` untouched; the delta the engine consumes is unchanged), Studio V2, V1 workflow, browser pricing math, no LF/rate/pricing-basis exposure in public DTOs. |
+| **Revisit trigger** | Once all live publications carry `grossPriceEffectCents`, the sibling-row fallback can be removed. |
+### 235. Digital Estimate priced option rows — one selection rule for every option kind (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-option-state-contract` |
+| **Decision** | The rule established for edge rows in §234 now applies to every customer-selectable priced option row: name, backend-provided price, and a visual selected state. `ChoiceRadio` (`ConfigurationView.tsx`) no longer replaces a selected row's price with the word "Selected" — the price renders unconditionally and selection remains the row highlight plus the existing short `Selected` badge. Sink/faucet product cards and the accessory, plumbing add-on and specialty rows already rendered price independently of selection; they gained a shared `data-testid="de-choice-option-price"` price slot so the invariant is assertable across row kinds. No backend change was needed: these options are priced `absolute` (`visibleSellPrice`), and `customerPriceEffectLabel()` / `formatPriceEffect()` take no selection input, so unlike the edge delta fields nothing upstream can zero a selected row. |
+| **Why** | A selected sink or faucet showed "Selected" where its price had been, hiding the amount the customer had just chosen and making selected rows inconsistent with the edge rows fixed in §234. |
+| **SQL** | None. |
+| **Impacted** | `ConfigurationView.tsx`, `phaseGenericOptionRowPriceParity.test.ts` (new), `phaseCustomerExperiencePolish.test.ts` (assertion 40 relaxed to allow the fail-closed calc variable names from §233), this doc. |
+| **Protected** | Pricing formulas/rates, backend pricing DTOs, Studio V2, V1 workflow, browser pricing math (rows only render backend labels), approved Studio estimates, `quote_publication_snapshots` mutation, edge row behavior (§234). |
+| **Revisit trigger** | If a new option row kind is added, give it the same price slot testid so the parity test covers it. |

@@ -132,6 +132,13 @@ export function resolvePremiumEdgeRatePerLf(pricingBasis) {
  *   edgeLinearFeet: number,
  *   pricingBasis?: string|null
  * }} args
+ * `priceEffectCents` / `visibleDelta` are **relative to the currently selected
+ * (original) profile** — they are what pricing consumes, and they are 0 for the
+ * selected profile by definition. `grossPriceEffectCents` is the
+ * selection-independent price of the profile itself (0 for included profiles,
+ * LF × rate for upgraded profiles) and is what customer-facing option rows must
+ * display, so a selected upgraded edge still shows its own price instead of +$0.
+ *
  * @returns {{
  *   profileKey: string,
  *   label: string,
@@ -139,6 +146,7 @@ export function resolvePremiumEdgeRatePerLf(pricingBasis) {
  *   premium: boolean,
  *   available: boolean,
  *   priceEffectCents: number|null,
+ *   grossPriceEffectCents: number|null,
  *   priceEffectLabel: string,
  *   customerPriceTreatment: string,
  *   visibleDelta: number|null,
@@ -156,6 +164,7 @@ export function resolveEdgeOptionPriceEffect(args) {
       premium: false,
       available: false,
       priceEffectCents: null,
+      grossPriceEffectCents: null,
       priceEffectLabel: "Elite will confirm this option and price.",
       customerPriceTreatment: "review_required",
       visibleDelta: null,
@@ -179,6 +188,7 @@ export function resolveEdgeOptionPriceEffect(args) {
         premium: true,
         available: false,
         priceEffectCents: null,
+        grossPriceEffectCents: null,
         priceEffectLabel: "Elite will confirm this option and price.",
         customerPriceTreatment: "review_required",
         visibleDelta: null,
@@ -195,6 +205,7 @@ export function resolveEdgeOptionPriceEffect(args) {
         premium: true,
         available: false,
         priceEffectCents: null,
+        grossPriceEffectCents: null,
         priceEffectLabel: "Elite will confirm this option and price.",
         customerPriceTreatment: "review_required",
         visibleDelta: null,
@@ -205,6 +216,9 @@ export function resolveEdgeOptionPriceEffect(args) {
     // Integer cents: dollars/LF × LF × 100, half-up.
     priceEffectCents = Math.round(rate * lf * 100);
   }
+  // Selection-independent price of this profile — never zeroed just because the
+  // customer currently has it selected.
+  const grossPriceEffectCents = priceEffectCents;
   if (isOriginal) {
     return {
       profileKey: def.optionToken,
@@ -213,6 +227,7 @@ export function resolveEdgeOptionPriceEffect(args) {
       premium,
       available: true,
       priceEffectCents: 0,
+      grossPriceEffectCents,
       // Customer-facing: published/selected edge — not an upgrade delta.
       priceEffectLabel: "Included in your estimate",
       customerPriceTreatment: "original_selection",
@@ -229,6 +244,7 @@ export function resolveEdgeOptionPriceEffect(args) {
       premium: false,
       available: true,
       priceEffectCents: 0,
+      grossPriceEffectCents: 0,
       priceEffectLabel: "+$0",
       customerPriceTreatment: "included_alternate",
       visibleDelta: 0,
@@ -245,6 +261,7 @@ export function resolveEdgeOptionPriceEffect(args) {
     premium: true,
     available,
     priceEffectCents,
+    grossPriceEffectCents,
     priceEffectLabel: label,
     customerPriceTreatment: "delta",
     visibleDelta: dollars,
@@ -273,6 +290,7 @@ export function resolveEdgeOptionPriceEffect(args) {
  *   available: boolean,
  *   reviewRequired: boolean,
  *   priceEffectCents: number|null,
+ *   grossPriceEffectCents: number|null,
  *   priceEffectLabel: string,
  *   customerPriceTreatment: string,
  *   roomKey: string|null,
@@ -309,6 +327,8 @@ export function buildCustomerSafeEdgeOptionEffects(args) {
       reviewRequired,
       priceEffectCents:
         effect.priceEffectCents == null ? null : Number(effect.priceEffectCents),
+      grossPriceEffectCents:
+        effect.grossPriceEffectCents == null ? null : Number(effect.grossPriceEffectCents),
       priceEffectLabel: String(effect.priceEffectLabel || ""),
       customerPriceTreatment: String(effect.customerPriceTreatment || "review_required"),
       roomKey,
@@ -346,6 +366,35 @@ export function findFrozenEdgeOptionEffect(effects, profileToken, roomKey = null
 }
 
 /**
+ * Frozen premium edge price for a room, independent of what the customer has
+ * selected. Publications frozen before `grossPriceEffectCents` existed only
+ * recorded the upgrade price on the *non-selected* premium rows; every premium
+ * profile in a room shares one frozen price, so a sibling row is the same
+ * backend-authored number — never re-derived from LF × rate here.
+ *
+ * @param {Array<object>|null|undefined} effects
+ * @param {string|null|undefined} [roomKey]
+ * @returns {number|null} cents
+ */
+export function frozenPremiumEdgeGrossCents(effects, roomKey = null) {
+  if (!Array.isArray(effects) || !effects.length) return null;
+  const wantRoom =
+    roomKey != null && String(roomKey).trim() !== "" ? String(roomKey).trim() : null;
+  for (const e of effects) {
+    if (e?.classification !== "premium") continue;
+    if (e?.reviewRequired || e?.customerPriceTreatment === "review_required") continue;
+    if (wantRoom) {
+      const rowRoom = String(e?.roomKey || "").trim();
+      if (rowRoom && rowRoom !== wantRoom) continue;
+    }
+    const gross =
+      e?.grossPriceEffectCents != null ? Number(e.grossPriceEffectCents) : Number(e?.priceEffectCents);
+    if (Number.isFinite(gross) && gross > 0) return gross;
+  }
+  return null;
+}
+
+/**
  * Map a frozen publication effect into the runtime edge-effect shape used by
  * public option DTOs. Prefer this over re-resolving LF × rate for published DE.
  * @param {object|null|undefined} frozen
@@ -372,6 +421,21 @@ export function edgeEffectFromFrozenPublication(frozen) {
   } else if (priceEffectLabel === "Included" || (!premium && !original && !priceEffectLabel && !reviewRequired)) {
     priceEffectLabel = "+$0";
   }
+  const grossRaw =
+    frozen.grossPriceEffectCents == null ? null : Number(frozen.grossPriceEffectCents);
+  // Legacy frozen rows carry no gross: a non-selected premium row's delta already
+  // is its own price, included profiles are $0, and a selected premium row is
+  // resolved from a sibling row by the caller.
+  const gross =
+    grossRaw != null && Number.isFinite(grossRaw)
+      ? grossRaw
+      : reviewRequired
+        ? null
+        : !premium
+          ? 0
+          : !original && Number.isFinite(cents)
+            ? cents
+            : null;
   return {
     profileKey: frozen.profileKey || normalizeEdgeProfileToken(frozen.profile),
     label: frozen.profile || edgeProfileDisplayLabel(frozen.profileKey),
@@ -379,6 +443,7 @@ export function edgeEffectFromFrozenPublication(frozen) {
     premium,
     available: Boolean(frozen.available) && !reviewRequired,
     priceEffectCents: Number.isFinite(cents) ? cents : null,
+    grossPriceEffectCents: gross,
     priceEffectLabel,
     customerPriceTreatment: treatment,
     visibleDelta:

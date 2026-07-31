@@ -19,6 +19,7 @@ import {
   edgeProfileDisplayLabel,
   edgeEffectFromFrozenPublication,
   findFrozenEdgeOptionEffect,
+  frozenPremiumEdgeGrossCents,
   isPremiumEdgeProfile,
   normalizeEdgeProfileToken,
   remapLegacyEdgeOptionKey,
@@ -385,6 +386,15 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     const frozen = findFrozenEdgeOptionEffect(ctx?.edgeOptionEffects, token, roomKey);
     if (frozen) {
       edgeEffect = edgeEffectFromFrozenPublication(frozen);
+      // Publications frozen before gross prices were recorded zeroed the selected
+      // premium row; recover its price from a sibling premium row in the same room
+      // so a selected upgraded edge never displays +$0.
+      if (edgeEffect && edgeEffect.premium && edgeEffect.grossPriceEffectCents == null) {
+        edgeEffect.grossPriceEffectCents = frozenPremiumEdgeGrossCents(
+          ctx?.edgeOptionEffects,
+          roomKey
+        );
+      }
     } else {
       const roomRow =
         (ctx?.configuredRooms || ctx?.rooms || []).find(
@@ -506,6 +516,10 @@ function toCustomerSafeOption(opt, group, ctx = null) {
     premium: edgeEffect ? edgeEffect.premium : null,
     priceEffectCents:
       edgeEffect?.priceEffectCents ?? sideSplashEffect?.amountCents ?? null,
+    // Customer-facing option row price: the option's own price, not its delta
+    // from the current selection. Backend-authored; the browser never derives it.
+    grossPriceEffectCents:
+      edgeEffect?.grossPriceEffectCents ?? sideSplashEffect?.amountCents ?? null,
     visibleSellPrice:
       treatment === "absolute" && sell != null ? Number(sell) : null,
     visibleDelta:

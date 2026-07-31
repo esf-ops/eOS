@@ -57,6 +57,32 @@ export function groupBreakdownLinesByRoom(lines: BreakdownLine[]): BreakdownRoom
   return orderedKeys.map((roomName) => ({ roomName, lines: byRoom.get(roomName) || [] }));
 }
 
+/**
+ * Room pricing a customer may be shown for a calculation. Presentation only — it
+ * selects between two backend-authored pricing DTOs and never computes money.
+ *
+ * When the backend fails closed to the published baseline, the total is the
+ * baseline, so every price detail (sidebar breakdown, room cards, print) must be
+ * baseline too. The partial calc behind the freeze — a $0 countertop with a
+ * backsplash-only room total — must never reach the customer, so it is dropped
+ * when no baseline room pricing is available to show instead.
+ */
+export function failClosedRoomPricing(
+  calc:
+    | { pricingAuthority?: string | null; roomPricing?: PublicRoomPricing | null }
+    | null
+    | undefined,
+  publishedRoomPricing?: PublicRoomPricing | null,
+): PublicRoomPricing | null {
+  if (!calc) return null;
+  const own = calc.roomPricing ?? null;
+  if (String(calc.pricingAuthority || "") !== "published_baseline_frozen") return own;
+  if (publishedRoomPricing?.rooms?.length) return publishedRoomPricing;
+  // The backend substitutes published baseline rooms on freeze; that DTO is the
+  // only calc-carried pricing that is safe to keep here.
+  return own?.kind === "original" ? own : null;
+}
+
 function formatMoney(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
   return new Intl.NumberFormat("en-US", {
@@ -277,12 +303,27 @@ export function buildUpdatedBreakdown(args: {
       lines?: Array<{ label?: string; amount?: number | null; roomName?: string | null }>;
     } | null;
     roomPricing?: PublicRoomPricing | null;
+    pricingAuthority?: string | null;
   } | null;
   rooms?: Array<{ id: string; name: string; selectedColorName?: string | null; materialLabel?: string | null }>;
 }): EstimateBreakdownView {
   const calc = args.calculation;
   if (calc?.roomPricing?.rooms?.length) {
     return buildRoomHierarchyBreakdown("updated", calc.roomPricing);
+  }
+  if (String(calc?.pricingAuthority || "") === "published_baseline_frozen") {
+    // Fail closed: the total is the published baseline and no baseline room detail
+    // is available, so show no line detail rather than the partial calc behind it.
+    const frozenTotal =
+      calc?.configuredDisplayTotal != null ? Number(calc.configuredDisplayTotal) : null;
+    return {
+      kind: "updated",
+      title: "Your estimate",
+      total: Number.isFinite(frozenTotal as number) ? frozenTotal : null,
+      totalLabel: moneyLabel(frozenTotal),
+      lines: [],
+      emptyMessage: "Your quoted total is unchanged.",
+    };
   }
   const lines: BreakdownLine[] = [];
 

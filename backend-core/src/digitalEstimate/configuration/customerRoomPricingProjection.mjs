@@ -679,7 +679,14 @@ export function buildOriginalRoomPricingProjectionFromSnapshot(snapshot) {
     roomName: r?.roomName || `Room ${i + 1}`,
     countertopAmountCents: r?.countertopAmountCents != null ? Math.trunc(Number(r.countertopAmountCents)) : null,
     backsplashAmountCents: r?.backsplashAmountCents != null ? Math.trunc(Number(r.backsplashAmountCents)) : null,
-    backsplashMode: r?.originalBacksplashMode || "none",
+    // Publications frozen before the mode was recorded still carry Backsplash
+    // dollars. Assuming "none" would both mislabel the room and trip the
+    // configured-mode invariant, which drops published room pricing entirely.
+    backsplashMode:
+      r?.originalBacksplashMode ||
+      (r?.backsplashAmountCents != null && Math.trunc(Number(r.backsplashAmountCents)) !== 0
+        ? null
+        : "none"),
     addOnsAmountCents: Math.trunc(Number(r?.addOnsAmountCents) || 0),
     roomTotalCents: r?.roomTotalCents != null ? Math.trunc(Number(r.roomTotalCents)) : null,
     selectedMaterial: r?.selectedMaterialLabel || null,

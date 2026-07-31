@@ -175,7 +175,10 @@ console.log("ok: 26-33 Original/Updated/Changes hierarchy");
 // --- 34-40 save / review ---
 assert.ok(view.includes('data-save-state={saveState}'), "34. save status");
 assert.ok(view.includes("Couldn’t save — Retry"), "35. failed save retry");
-assert.ok(view.includes('saveState === "unsaved" || saveState === "saving" || saveState === "error" ? savedCalc : latestCalc'), "40. pending not labeled saved");
+assert.ok(
+  /saveState === "unsaved" \|\| saveState === "saving" \|\| saveState === "error"\s*\n?\s*\?\s*savedCalc(ForDisplay)?\s*\n?\s*:\s*latestCalc(ForDisplay)?/.test(view),
+  "40. pending not labeled saved",
+);
 assert.ok(view.includes("submittedRef"), "37/38. double-click guard");
 assert.ok(view.includes('data-testid="de-review-submit"'), "37. review submit");
 assert.ok(view.includes("Your selections were sent to Elite for review"), "39. confirmation");

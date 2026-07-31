@@ -169,6 +169,8 @@ export type ConfigOption = {
   visibleDelta?: number | null;
   priceEffectLabel?: string | null;
   priceEffectCents?: number | null;
+  /** Backend-authored price of this option itself, not its delta from the current selection. */
+  grossPriceEffectCents?: number | null;
   profileKey?: string | null;
   premium?: boolean | null;
   accessoryKind?: string | null;

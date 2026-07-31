@@ -36,19 +36,29 @@ export function isUpgradedEdgeToken(token: string): boolean {
 }
 
 /**
- * Customer-facing edge row price. Every row always shows a price — the
- * selected option is indicated only by highlight/badge, never by swapping the
- * price for status text. Backend may still send legacy/history copy on
- * priceEffectLabel ("Included in published estimate", "Included in your
- * estimate", "Original selection", "Included") for baseline rows that carry a
- * real premium; ignore that text and derive the number from the price fields
- * instead so it never reaches the customer.
+ * Customer-facing edge row price, formatted from backend-supplied amounts only —
+ * no pricing math here. Every row always shows a price: the selected option is
+ * indicated by highlight/badge, never by swapping or zeroing the price.
+ *
+ * `grossPriceEffectCents` is the option's own price and is what rows display.
+ * `visibleDelta` / `priceEffectCents` are relative to the current selection and
+ * are 0 for the selected row, so they are only a fallback for older payloads.
+ * Legacy/history copy on `priceEffectLabel` ("Included in published estimate",
+ * "Original selection", "Included") is ignored so it never reaches the customer.
  */
 export function edgeRowPriceLabel(opt: {
   priceEffectLabel?: string | null;
+  grossPriceEffectCents?: number | null;
   visibleDelta?: number | null;
   priceEffectCents?: number | null;
 }): string {
+  const gross =
+    opt.grossPriceEffectCents != null ? Number(opt.grossPriceEffectCents) / 100 : null;
+  if (gross != null && Number.isFinite(gross)) {
+    return Math.abs(gross) >= 0.5
+      ? `+$${Math.round(gross).toLocaleString("en-US")}`
+      : "+$0";
+  }
   const raw = String(opt.priceEffectLabel || "").trim();
   if (/^[+\-\u2212]\$/.test(raw)) return raw;
   const dollars =
