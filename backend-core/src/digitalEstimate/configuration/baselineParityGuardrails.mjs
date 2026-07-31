@@ -108,6 +108,38 @@ export function publicCalcDivergesFromBaseline(calc, baseline) {
   return Math.abs(configured - baseline) >= 0.005;
 }
 
+function normalizeRoomToken(v) {
+  return String(v ?? "").trim().toLowerCase();
+}
+
+/**
+ * Find the customer-priced room that corresponds to a published room.
+ *
+ * IMPORTANT: the real public room pricing DTO (see toPublicRoom in
+ * customerRoomPricingProjection.mjs) never includes a roomKey/roomId field —
+ * only roomName. A naive `roomKey === roomKey` fallback where both sides are
+ * missing the field (`"" === ""`) is trivially true and would silently pin
+ * *every* published room onto whichever calc room happens to be first in the
+ * array, so a room that isn't first can lose countertop/material scope with
+ * no guardrail ever inspecting it. Only trust a roomKey match when at least
+ * one side actually carries a non-empty key; otherwise match by room name.
+ * @param {object} pub
+ * @param {object[]} calcRooms
+ */
+function findMatchingCalcRoom(pub, calcRooms) {
+  const pubKey = normalizeRoomToken(pub?.roomKey ?? pub?.roomId);
+  if (pubKey) {
+    const byKey = calcRooms.find((r) => normalizeRoomToken(r?.roomKey ?? r?.roomId) === pubKey);
+    if (byKey) return byKey;
+  }
+  const pubName = normalizeRoomToken(pub?.roomName ?? pub?.roomLabel);
+  if (pubName) {
+    const byName = calcRooms.find((r) => normalizeRoomToken(r?.roomName ?? r?.roomLabel) === pubName);
+    if (byName) return byName;
+  }
+  return null;
+}
+
 /**
  * Detect incomplete/unsafe public room pricing (e.g. $0 countertop after material change).
  * @param {object|null|undefined} calc
@@ -127,20 +159,46 @@ export function isUnsafeCustomerFacingCalc(calc, publishedRoomPricingPublic = nu
   const calcRooms = Array.isArray(calc?.roomPricing?.rooms) ? calc.roomPricing.rooms : [];
   if (!publishedRooms.length || !calcRooms.length) return false;
 
+  let publishedCountertopTotal = 0;
   for (const pub of publishedRooms) {
     const pubCt = num(pub?.countertopAmount);
-    if (!(pubCt > 0)) continue;
-    const match =
-      calcRooms.find(
-        (r) =>
-          String(r?.roomKey || "") === String(pub?.roomKey || "") ||
-          String(r?.roomName || "").toLowerCase() === String(pub?.roomName || "").toLowerCase()
-      ) || null;
-    if (!match) continue;
+    const pubMaterial = String(pub?.selectedMaterial || "").trim();
+    if (pubCt != null && pubCt > 0) publishedCountertopTotal += pubCt;
+    // A room only needs protecting when the *published* side shows it actually
+    // had countertop scope — either a positive dollar figure, or (legacy
+    // publications with no per-room dollar snapshot — see
+    // buildLegacyOriginalRoomPricingProjection, which reports
+    // countertopAmount: null and can never invent one) a recorded material
+    // selection, which only exists on a room that has a countertop.
+    const publishedHadCountertopOrMaterial = (pubCt != null && pubCt > 0) || pubMaterial.length > 0;
+    if (!publishedHadCountertopOrMaterial) continue;
+
+    const match = findMatchingCalcRoom(pub, calcRooms);
+    // Published room had countertop/material scope but no corresponding room
+    // survived into the customer-priced result at all — never silently drop it.
+    if (!match) return true;
+
     const ct = num(match.countertopAmount);
-    // Published had countertop; updated shows $0 — classic incomplete reprice failure.
-    if (ct != null && ct <= 0.005) return true;
+    // Published had countertop/material scope; updated shows $0/missing —
+    // classic incomplete reprice failure. A material/color change can never
+    // make countertop disappear.
+    if (ct == null || ct <= 0.005) return true;
+
+    const matchMaterial = String(match?.selectedMaterial || "").trim();
+    // Published room had a recorded material and the updated room dropped it
+    // entirely (not changed to a different material — just gone).
+    if (pubMaterial && !matchMaterial) return true;
   }
+
+  // Fallback: even if every individual room matched safely above, a
+  // project-wide countertop total that collapsed to ~$0 while the published
+  // baseline had real countertop dollars is never safe to show — catches any
+  // residual room-matching/naming drift that slips past the per-room check.
+  if (publishedCountertopTotal > 0.005) {
+    const calcCountertopTotal = calcRooms.reduce((s, r) => s + (num(r?.countertopAmount) || 0), 0);
+    if (calcCountertopTotal <= 0.005) return true;
+  }
+
   return false;
 }
 

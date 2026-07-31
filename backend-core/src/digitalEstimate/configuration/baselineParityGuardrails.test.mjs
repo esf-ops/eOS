@@ -473,4 +473,173 @@ console.log("ok: 1 customer selection reprice is authoritative");
   console.log("ok: 18 frozen/fail-closed state renders a customer-visible explanation");
 }
 
+// ---------------------------------------------------------------------------
+// 19. Screenshot regression — incomplete material-change calc must never
+// become authoritative. Published Kitchen: $7,120 with real countertop
+// dollars. Customer-priced Kitchen after a material selection: Countertop
+// $0 / Backsplash $459 / Room total $459 — the room still has countertop
+// scope, so a material/color change can never make countertop disappear.
+// Reproduces two real root causes found in isUnsafeCustomerFacingCalc:
+//  (a) the real public room DTO (customerRoomPricingProjection.mjs
+//      toPublicRoom) never carries a roomKey, so a naive `"" === ""`
+//      roomKey fallback trivially matched every published room onto
+//      whichever calc room came first in the array;
+//  (b) legacy publications with no per-room dollar snapshot report
+//      countertopAmount: null on the published side, which the old code
+//      treated as "nothing to protect" and silently skipped.
+// ---------------------------------------------------------------------------
+{
+  // 19a. Two rooms, Kitchen is NOT first in the array, and neither DTO
+  // carries a roomKey (the real production shape) — the bug matched every
+  // published room onto calcRooms[0] (Powder Bath) and never inspected Kitchen.
+  const twoRoomScreenshot = applyBaselineParityToCustomerCalculation(
+    {
+      baselineDisplayTotal: 7120,
+      configuredDisplayTotal: 5264,
+      displayTotalDelta: -1856,
+      roomPricing: {
+        kind: "updated",
+        rooms: [
+          { roomName: "Powder Bath", countertopAmount: 300, backsplashAmount: 0, addOnsAmount: 0, roomTotal: 300 },
+          { roomName: "Kitchen", countertopAmount: 0, backsplashAmount: 459, addOnsAmount: 0, roomTotal: 459 }
+        ]
+      }
+    },
+    {
+      baselineDisplayTotal: 7120,
+      publishedRoomPricingPublic: {
+        rooms: [
+          { roomName: "Powder Bath", countertopAmount: 300, backsplashAmount: 0, addOnsAmount: 0, roomTotal: 300 },
+          {
+            roomName: "Kitchen",
+            countertopAmount: 6661,
+            backsplashAmount: 459,
+            addOnsAmount: 0,
+            roomTotal: 7120,
+            selectedMaterial: "Calacatta Viol"
+          }
+        ]
+      },
+      scopeReviewRequired: false
+    }
+  );
+  assert.equal(
+    twoRoomScreenshot.pricingAuthority,
+    CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN,
+    "19a. incomplete two-room material-change calc must freeze to baseline"
+  );
+  assert.equal(twoRoomScreenshot.configuredDisplayTotal, 7120, "19a. no incorrect $5,264 total");
+  assert.equal(twoRoomScreenshot.roomPricing.rooms.find((r) => r.roomName === "Kitchen").countertopAmount, 6661);
+  assert.equal(
+    twoRoomScreenshot.customerPricingNotice,
+    BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW,
+    "19a. customer-safe notice is shown"
+  );
+
+  // 19b. Legacy publication: no per-room dollar snapshot exists, so the
+  // published side can only report a material label, never countertopAmount.
+  const legacyScreenshot = applyBaselineParityToCustomerCalculation(
+    {
+      baselineDisplayTotal: 7120,
+      configuredDisplayTotal: 5264,
+      displayTotalDelta: -1856,
+      roomPricing: {
+        kind: "updated",
+        rooms: [
+          {
+            roomName: "Kitchen",
+            countertopAmount: 0,
+            backsplashAmount: 459,
+            addOnsAmount: 0,
+            roomTotal: 459,
+            selectedMaterial: "Group F"
+          }
+        ]
+      }
+    },
+    {
+      baselineDisplayTotal: 7120,
+      publishedRoomPricingPublic: {
+        rooms: [
+          {
+            roomName: "Kitchen",
+            countertopAmount: null,
+            backsplashAmount: null,
+            addOnsAmount: 0,
+            roomTotal: null,
+            selectedMaterial: "Calacatta Viol"
+          }
+        ]
+      },
+      scopeReviewRequired: false
+    }
+  );
+  assert.equal(
+    legacyScreenshot.pricingAuthority,
+    CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN,
+    "19b. legacy publication with unresolved per-room countertop must still freeze"
+  );
+  assert.equal(legacyScreenshot.configuredDisplayTotal, 7120, "19b. no incorrect $5,264 total");
+  assert.equal(
+    legacyScreenshot.customerPricingNotice,
+    BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW,
+    "19b. customer-safe notice is shown"
+  );
+
+  // Direct unit coverage of the detector itself for both root causes.
+  assert.equal(
+    isUnsafeCustomerFacingCalc(
+      {
+        roomPricing: {
+          rooms: [
+            { roomName: "Powder Bath", countertopAmount: 300 },
+            { roomName: "Kitchen", countertopAmount: 0, backsplashAmount: 459 }
+          ]
+        }
+      },
+      {
+        rooms: [
+          { roomName: "Powder Bath", countertopAmount: 300 },
+          { roomName: "Kitchen", countertopAmount: 6661, selectedMaterial: "Calacatta Viol" }
+        ]
+      }
+    ),
+    true,
+    "19c. matching bug: Kitchen not first in the array is still caught"
+  );
+  assert.equal(
+    isUnsafeCustomerFacingCalc(
+      { roomPricing: { rooms: [{ roomName: "Kitchen", countertopAmount: 0, selectedMaterial: "Group F" }] } },
+      { rooms: [{ roomName: "Kitchen", countertopAmount: null, selectedMaterial: "Calacatta Viol" }] }
+    ),
+    true,
+    "19d. legacy null published countertop is still caught via material signal"
+  );
+
+  // Sanity: a legitimate material upgrade in the same two-room shape must
+  // NOT be misclassified as unsafe.
+  assert.equal(
+    isUnsafeCustomerFacingCalc(
+      {
+        roomPricing: {
+          rooms: [
+            { roomName: "Powder Bath", countertopAmount: 300 },
+            { roomName: "Kitchen", countertopAmount: 7441, backsplashAmount: 459, selectedMaterial: "Group F" }
+          ]
+        }
+      },
+      {
+        rooms: [
+          { roomName: "Powder Bath", countertopAmount: 300 },
+          { roomName: "Kitchen", countertopAmount: 6661, selectedMaterial: "Calacatta Viol" }
+        ]
+      }
+    ),
+    false,
+    "19e. legitimate material upgrade with real countertop dollars is not frozen"
+  );
+
+  console.log("ok: 19 screenshot regression — incomplete material-change calc freezes to baseline");
+}
+
 console.log("\nAll baseline parity guardrail tests passed.\n");
