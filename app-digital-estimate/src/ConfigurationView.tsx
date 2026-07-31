@@ -29,7 +29,7 @@ import {
   missingInfoHeadline,
 } from "./itemsForLater";
 import { normalizeCatalogPermissions } from "./catalogPermissions";
-import { sortEdgeOptionsByCanonicalOrder } from "./edgeGroups";
+import { sortEdgeOptionsByCanonicalOrder, edgeRowPriceLabel } from "./edgeGroups";
 import {
   exchangeFragmentToken,
   fetchConfiguration,
@@ -1582,7 +1582,7 @@ function CustomerRoomCard({
     return sel?.priceEffectLabel || null;
   };
   const colorEffect = color?.includedInBaseline
-    ? "Included in published estimate"
+    ? "Included in your estimate"
     : color
       ? null
       : null;
@@ -1737,20 +1737,6 @@ function CustomerRoomCard({
                   edgeOpts.find((c) => c.includedInBaseline)?.optionKey ||
                   "";
                 const selectedOpt = edgeOpts.find((c) => c.optionKey === selectedKey);
-                const edgePriceLabel = (opt: (typeof edgeOpts)[number], selected: boolean) => {
-                  if (selected) return "Selected";
-                  const raw = String(opt.priceEffectLabel || "").trim();
-                  if (
-                    raw === "Included in your estimate" ||
-                    raw === "Included in published estimate"
-                  ) {
-                    return "Included in published estimate";
-                  }
-                  if (/^\+\$/.test(raw)) return raw;
-                  if (opt.includedInBaseline) return "Included in published estimate";
-                  if (opt.premium === false) return "+$0";
-                  return raw || null;
-                };
                 const renderGroup = (title: string, opts: typeof edgeOpts, testId: string) =>
                   opts.length ? (
                     <div className="mt-3" data-testid={testId}>
@@ -1760,7 +1746,7 @@ function CustomerRoomCard({
                       <ul className="mt-1.5 space-y-1">
                         {opts.map((opt) => {
                           const selected = opt.optionKey === selectedKey;
-                          const effectLabel = edgePriceLabel(opt, selected);
+                          const priceLabel = edgeRowPriceLabel(opt);
                           return (
                             <li key={opt.optionKey}>
                               <button
@@ -1777,20 +1763,23 @@ function CustomerRoomCard({
                                 }`}
                                 onClick={() => onEdgeChange?.(opt.optionKey)}
                               >
-                                <span className="font-medium text-foreground">
+                                <span className="flex items-center gap-2 font-medium text-foreground">
                                   {opt.displayLabel}
                                   {selected ? (
-                                    <span className="sr-only"> (selected)</span>
+                                    <span
+                                      className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground"
+                                      data-testid="de-edge-option-selected-badge"
+                                    >
+                                      Selected
+                                    </span>
                                   ) : null}
                                 </span>
-                                {effectLabel ? (
-                                  <span
-                                    className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground"
-                                    data-testid="de-edge-option-price"
-                                  >
-                                    {effectLabel}
-                                  </span>
-                                ) : null}
+                                <span
+                                  className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground"
+                                  data-testid="de-edge-option-price"
+                                >
+                                  {priceLabel}
+                                </span>
                               </button>
                             </li>
                           );

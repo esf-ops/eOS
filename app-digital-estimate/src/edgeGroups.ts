@@ -35,6 +35,34 @@ export function isUpgradedEdgeToken(token: string): boolean {
   return (UPGRADED_EDGE_TOKENS as readonly string[]).includes(t);
 }
 
+/**
+ * Customer-facing edge row price. Every row always shows a price — the
+ * selected option is indicated only by highlight/badge, never by swapping the
+ * price for status text. Backend may still send legacy/history copy on
+ * priceEffectLabel ("Included in published estimate", "Included in your
+ * estimate", "Original selection", "Included") for baseline rows that carry a
+ * real premium; ignore that text and derive the number from the price fields
+ * instead so it never reaches the customer.
+ */
+export function edgeRowPriceLabel(opt: {
+  priceEffectLabel?: string | null;
+  visibleDelta?: number | null;
+  priceEffectCents?: number | null;
+}): string {
+  const raw = String(opt.priceEffectLabel || "").trim();
+  if (/^[+\-\u2212]\$/.test(raw)) return raw;
+  const dollars =
+    opt.visibleDelta != null
+      ? Number(opt.visibleDelta)
+      : opt.priceEffectCents != null
+        ? Number(opt.priceEffectCents) / 100
+        : null;
+  if (dollars != null && Number.isFinite(dollars) && Math.abs(dollars) >= 0.5) {
+    return `+$${Math.round(dollars).toLocaleString("en-US")}`;
+  }
+  return "+$0";
+}
+
 export function sortEdgeOptionsByCanonicalOrder<T extends { optionKey: string; displayLabel: string }>(
   options: T[],
 ): { included: T[]; upgraded: T[] } {

@@ -3245,3 +3245,27 @@
 | **Protected** | Pricing formulas/rates, Studio V2, V1 workflow, browser pricing math, approved Studio estimates, `quote_publication_snapshots` mutation from customer saves. |
 | **Revisit trigger** | If `unknown_material_group` (a related but distinct engine error for a group code that doesn't normalize at all) is ever observed reaching a customer save, extend the same catch/degrade treatment to it. |
 
+### 231. Digital Estimate edge option rows — simplified customer copy, no history language (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-option-state-contract` |
+| **Decision** | Every public edge option row (`ConfigurationView.tsx`) always shows the option name and its price (`+$0` / `+$N`); selection is indicated only by a visual highlight plus a small `Selected` badge, never by replacing the price with status text. A new exported `edgeRowPriceLabel()` (`edgeGroups.ts`) ignores any legacy/history label the backend may still send on `priceEffectLabel` ("Included in published estimate", "Included in your estimate", "Original selection", "Included") and derives the number directly from `visibleDelta` / `priceEffectCents` instead, so that text never reaches the customer. The Material row's `colorEffect` string was also changed from "Included in published estimate" to "Included in your estimate" for the same reason. Backend `applyEdgeOptionPriceGuardrail` output (which still sets that label internally alongside the correct cents) is intentionally unchanged — the fix is purely at the customer-facing render boundary. |
+| **Why** | Production customer UX showed "Included in published estimate" on the selected baseline edge row (e.g. Knife) — internal/history language, and worse, the old code replaced a selected row's price with the bare word "Selected" instead of showing +$627. |
+| **SQL** | None. |
+| **Impacted** | `ConfigurationView.tsx`, `edgeGroups.ts`, `phaseEdgeOptionCustomerCopy.test.ts` (new), this doc. |
+| **Protected** | Pricing formulas/rates, Studio V2, V1 workflow, browser pricing math (`edgeRowPriceLabel` only formats backend-provided numbers). |
+| **Revisit trigger** | None known; if a new legacy label variant appears, add it to the regex/ignore list in `edgeRowPriceLabel`. |
+
+### 232. Digital Estimate baseline-parity guardrail — room-matching bug let incomplete material reprice become authoritative (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/digital-estimate-option-state-contract` |
+| **Decision** | `isUnsafeCustomerFacingCalc()` (`baselineParityGuardrails.mjs`) had two related bugs that let an incomplete room-level reprice (Countertop $0 after a material change) reach the customer as authoritative even though the *project* total was still positive: (1) its room-matching fallback compared `roomKey` on both sides with no guard, and the real public room DTO (`customerRoomPricingProjection.mjs` `toPublicRoom`) never carries a `roomKey` at all — so `"" === ""` was trivially true and pinned **every** published room onto whichever calc room happened to be first in the array, silently skipping any room not at index 0; (2) legacy publications with no per-room dollar snapshot report `countertopAmount: null` on the published side (`buildLegacyOriginalRoomPricingProjection`), which the guardrail treated as "nothing to protect" and skipped entirely. Fix: room matching now only trusts a `roomKey`/`roomId` match when at least one side actually has a non-empty value, otherwise matches by normalized `roomName`; a published room counts as having countertop scope to protect if it has a positive `countertopAmount` **or** a recorded `selectedMaterial` (legacy case); an unmatched room that had scope, or a matched room whose countertop/material collapsed to zero/missing, freezes to baseline; and a project-wide countertop-total fallback catches any residual matching drift. Legitimate material upgrades (different material, real countertop dollars) are unaffected. |
+| **Why** | Production screenshot: published Kitchen $7,120 (real countertop value) vs. customer estimate $5,264 with Kitchen showing Countertop $0 / Backsplash $459 / Room total $459 — an incomplete reprice became the customer-visible total instead of freezing to baseline. |
+| **SQL** | None. |
+| **Impacted** | `baselineParityGuardrails.mjs`, `baselineParityGuardrails.test.mjs` (test 19, reproduces the exact screenshot shape plus the legacy-null-countertop variant), this doc. |
+| **Protected** | Pricing formulas/rates, Studio V2, V1 workflow, browser pricing math, approved Studio estimates, `quote_publication_snapshots` mutation, sticky/idempotent frozen state (§230.4), customer-safe notice visibility (§230.1), edge option display (§231). |
+| **Revisit trigger** | If the public room pricing DTO is ever changed to carry a real `roomKey`, the name-based fallback can be simplified, but should stay as defense-in-depth. |
+
