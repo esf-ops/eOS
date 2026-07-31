@@ -45,8 +45,7 @@ import {
 import {
   applyBaselineParityToCustomerCalculation,
   applyEdgeOptionPriceGuardrail,
-  applyEdgeOptionPriceGuardrails,
-  isCustomerRepricingAuthoritative
+  applyEdgeOptionPriceGuardrails
 } from "./baselineParityGuardrails.mjs";
 import {
   collectForbiddenCatalogSelections,
@@ -1114,10 +1113,7 @@ export function createPublicConfigurationService(deps) {
           return applyBaselineParityToCustomerCalculation(rawCustomerCalc, {
             baselineDisplayTotal: ctx.baselineDisplayTotal,
             publishedRoomPricingPublic,
-            hasPendingPriceAffectingChanges:
-              Boolean(foundation.requiresEstimatorReview) ||
-              Boolean(foundation.selectionChanges?.count) ||
-              Boolean(rawCustomerCalc?.customerPricingStatus === "pending_estimator_review")
+            scopeReviewRequired: Boolean(foundation.requiresEstimatorReview)
           });
         })(),
         missingInformationRequirements: Array.isArray(
@@ -2220,11 +2216,6 @@ export function createPublicConfigurationService(deps) {
           const roomKey = parts[1];
           const token = normalizeEdgeProfileToken(parts.slice(2).join(":"));
           if (!isPremiumEdgeProfile(token)) continue;
-          // Hotfix: do not charge incomplete edge deltas into customer totals.
-          if (!isCustomerRepricingAuthoritative()) {
-            reviewFlags.push(`edge_price_pending_review:${roomKey}:${token}`);
-            continue;
-          }
           const frozen = findFrozenEdgeOptionEffect(ctx.edgeOptionEffects, token, roomKey);
           if (frozen) {
             if (
@@ -2331,24 +2322,12 @@ export function createPublicConfigurationService(deps) {
         }
       }
 
-      // Hotfix: until Slice K authoritative reprice, keep engine material groups on the
-      // published baseline. Customer material/color/edge choices still persist as selections
-      // / foundation requests for estimator review — they must not invent a new public total.
-      const roomsForCalc = isCustomerRepricingAuthoritative()
-        ? rooms
-        : (rooms || []).map((r) => {
-            const baselineSplash =
-              r.baselineBacksplashMode || resolveOriginalBacksplashMode(r) || "none";
-            return {
-              ...r,
-              selectedMaterialGroup: r.baselineMaterialGroup || r.selectedMaterialGroup,
-              backsplashMode: baselineSplash
-            };
-          });
+      // Live-price permitted customer selections (material group, edge, eligible
+      // backsplash) via config-delta. Physical scope requests remain review-only
+      // and are never written into approved geometry here.
+      const roomsForCalc = rooms;
 
-      let result;
-      try {
-        result = calculateElite100ConfigDelta({
+      const buildConfigDeltaInput = (roomsArg) => ({
         organizationId: session.organization_id,
         publication: {
           id: publication.id,
@@ -2370,7 +2349,7 @@ export function createPublicConfigurationService(deps) {
         accountMemberships: ctx.accountMemberships,
         materialRateOverrides: ctx.materialRateOverrides,
         estimateAdjustments: ctx.estimateAdjustments,
-        rooms: roomsForCalc,
+        rooms: roomsArg,
         lockedScope: { edgeLinearFeetTotal: edgeLfTotal },
         frozenBaseRates: ctx.frozenBaseRates,
         authorizedMaterialMarkup: { bps: markupBps },
@@ -2390,9 +2369,34 @@ export function createPublicConfigurationService(deps) {
         materialProgram: "elite_100",
         actor: { type: "public" }
       });
+
+      let result;
+      let materialRateMissingReview = false;
+      try {
+        result = calculateElite100ConfigDelta(buildConfigDeltaInput(roomsForCalc));
       } catch (e) {
-        if (e?.statusCode) throw e;
-        throw mapPersistenceError(e);
+        if (e?.code === "missing_material_rate") {
+          // The customer's selected material group has no frozen rate available
+          // (e.g. legacy publication schedule gap). Fail closed to the published
+          // baseline material groups rather than breaking the customer's save —
+          // Elite must resolve the rate before this selection can be priced.
+          materialRateMissingReview = true;
+          reviewFlags.push(`material_rate_missing_review:${String(e?.message || "").trim()}`);
+          const safeRooms = roomsForCalc.map((r) => ({
+            ...r,
+            selectedMaterialGroup: r.baselineMaterialGroup || r.selectedMaterialGroup
+          }));
+          try {
+            result = calculateElite100ConfigDelta(buildConfigDeltaInput(safeRooms));
+          } catch (e2) {
+            if (e2?.statusCode) throw e2;
+            throw mapPersistenceError(e2);
+          }
+        } else if (e?.statusCode) {
+          throw e;
+        } else {
+          throw mapPersistenceError(e);
+        }
       }
 
       assertPublicConfigurationHasNoForbiddenContent(result.public);
@@ -2572,8 +2576,14 @@ export function createPublicConfigurationService(deps) {
             if (f.startsWith("sidesplash_review:")) {
               return "Side splash pricing requires estimator review (piece depth unavailable).";
             }
+            if (f.startsWith("edge_length_review:")) {
+              return "Edge pricing for this room requires Elite review.";
+            }
             if (f.startsWith("edge_price_pending_review:")) {
-              return "Edge changes may affect price and require estimator review.";
+              return "Edge pricing for this room requires Elite review.";
+            }
+            if (f.startsWith("material_rate_missing_review:")) {
+              return "This material needs Elite review before pricing can update.";
             }
             return "Estimator review required for one or more selections.";
           })
@@ -2593,20 +2603,14 @@ export function createPublicConfigurationService(deps) {
       } catch {
         publishedRoomPricingPublic = null;
       }
-      const materialGroupChanged = (rooms || []).some((r) => {
-        const selected = String(r.selectedMaterialGroup || "").toLowerCase();
-        const baseline = String(r.baselineMaterialGroup || "").toLowerCase();
-        return selected && baseline && selected !== baseline;
-      });
       const customerResultJson = applyBaselineParityToCustomerCalculation(customerResultJsonRaw, {
         baselineDisplayTotal:
           result.public?.baselineDisplayTotal ?? ctx.baselineDisplayTotal ?? null,
         publishedRoomPricingPublic,
-        hasPendingPriceAffectingChanges:
-          materialGroupChanged ||
-          Boolean(publicCustomerConfiguration.requiresEstimatorReview) ||
-          Boolean(publicCustomerConfiguration.selectionChanges?.count) ||
-          reviewFlags.some((f) => /pending_review|edge_price|specialty_review|sidesplash_review/i.test(String(f)))
+        scopeReviewRequired: Boolean(publicCustomerConfiguration.requiresEstimatorReview),
+        // Missing frozen material rate — degrade to published baseline pricing
+        // rather than surface a save failure; Elite review resolves the rate.
+        forceFreeze: materialRateMissingReview
       });
       assertPublicConfigurationHasNoForbiddenContent(customerResultJson);
 
@@ -2632,10 +2636,11 @@ export function createPublicConfigurationService(deps) {
         customerResultJson,
         internalEvidenceJson,
         baselineTotal: result.totals.baselineExactTotal,
-        // Hotfix: public configured total stays on published baseline until Slice K.
-        configuredTotal: isCustomerRepricingAuthoritative()
-          ? result.totals.configuredExactTotal
-          : result.totals.baselineExactTotal ?? result.totals.configuredExactTotal,
+        // Persist backend-priced selection total when authoritative and safe.
+        configuredTotal:
+          customerResultJson?.pricingAuthority === "published_baseline_frozen"
+            ? result.totals.baselineExactTotal ?? result.totals.configuredExactTotal
+            : result.totals.configuredExactTotal,
         pricingValidThrough: ctx.pricingValidThrough,
         engineVersion: ELITE100_CONFIG_DELTA_ENGINE_ID,
         calculationInputFingerprint: result.inputFingerprint,

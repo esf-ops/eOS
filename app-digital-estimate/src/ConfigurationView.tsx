@@ -1582,9 +1582,9 @@ function CustomerRoomCard({
     return sel?.priceEffectLabel || null;
   };
   const colorEffect = color?.includedInBaseline
-    ? "Included in your estimate"
+    ? "Included in published estimate"
     : color
-      ? "Requested change"
+      ? null
       : null;
   const pricing = room.roomPricing;
   const roomStatus =
@@ -1737,17 +1737,17 @@ function CustomerRoomCard({
                   edgeOpts.find((c) => c.includedInBaseline)?.optionKey ||
                   "";
                 const selectedOpt = edgeOpts.find((c) => c.optionKey === selectedKey);
-                const pendingEdgeRequest = Boolean(
-                  selectedOpt && !selectedOpt.includedInBaseline
-                );
                 const edgePriceLabel = (opt: (typeof edgeOpts)[number], selected: boolean) => {
-                  if (selected) {
-                    return opt.includedInBaseline ? "Selected" : "Requested change";
-                  }
+                  if (selected) return "Selected";
                   const raw = String(opt.priceEffectLabel || "").trim();
-                  if (raw === "Included in your estimate") return raw;
+                  if (
+                    raw === "Included in your estimate" ||
+                    raw === "Included in published estimate"
+                  ) {
+                    return "Included in published estimate";
+                  }
                   if (/^\+\$/.test(raw)) return raw;
-                  if (opt.includedInBaseline) return "Included in your estimate";
+                  if (opt.includedInBaseline) return "Included in published estimate";
                   if (opt.premium === false) return "+$0";
                   return raw || null;
                 };
@@ -1802,23 +1802,12 @@ function CustomerRoomCard({
                   <>
                     {renderGroup("Included edges", included, "de-edge-group-included")}
                     {renderGroup("Upgraded edges", upgraded, "de-edge-group-upgraded")}
-                    <p
-                      className="mt-3 text-xs text-muted-foreground"
-                      data-testid="de-edge-section-note"
-                    >
-                      Edge changes may affect your final estimate and will be reviewed by Elite.
-                    </p>
-                    {pendingEdgeRequest ? (
+                    {selectedOpt && !selectedOpt.includedInBaseline ? (
                       <p
-                        className="mt-1 text-xs font-medium text-foreground"
-                        data-testid="de-edge-pending-request"
+                        className="mt-2 text-xs text-muted-foreground"
+                        data-testid="de-edge-priced-note"
                       >
-                        Requested change — Elite will review this before final approval
-                        {selectedOpt?.priceEffectLabel &&
-                        /^\+\$/.test(String(selectedOpt.priceEffectLabel))
-                          ? ` (${selectedOpt.priceEffectLabel})`
-                          : ""}
-                        .
+                        Your estimate updates when this edge is saved.
                       </p>
                     ) : null}
                   </>
@@ -2648,32 +2637,30 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const pricingAuthority = String(
     (displayCalc as { pricingAuthority?: string } | null)?.pricingAuthority || "",
   );
-  const pricingFrozen =
-    pricingAuthority === "published_baseline_frozen" ||
-    pricingStatus === "pending_estimator_review";
+  const scopeReviewRequired =
+    Boolean(
+      (displayCalc as { scopeReviewRequired?: boolean } | null)?.scopeReviewRequired,
+    ) ||
+    pricingStatus === "scope_review_required" ||
+    customerConfiguration?.requiresEstimatorReview === true;
+  const pricingFrozen = pricingAuthority === "published_baseline_frozen";
   const pricingNotice =
     (displayCalc as { customerPricingNotice?: string | null } | null)?.customerPricingNotice ||
-    (customerConfiguration?.requiresEstimatorReview
-      ? "Your estimator will review this change before the estimate is final."
-      : null);
+    (scopeReviewRequired ? "Needs Elite review" : null);
   const canSubmitForFinalReview = customerConfiguration?.canSubmitForFinalReview === true;
   const authoritativeEstimateLabel = vmForTotals?.updatedTotalLabel || vm.updatedTotalLabel;
-  const pendingEdgeOption = vm.rooms
-    .flatMap((r) => r.choiceOptions.filter((c) => c.role === "edge"))
-    .find((c) => c.selected && !c.includedInBaseline);
-  const pendingEdgeDisplayAmount =
-    pendingEdgeOption?.priceEffectLabel && /^\+\$/.test(String(pendingEdgeOption.priceEffectLabel))
-      ? String(pendingEdgeOption.priceEffectLabel)
-      : null;
-  const changesNeedReview = pricingStatus === "pending_estimator_review";
-  const authoritativeDiffLabel = changesNeedReview
-    ? null
-    : pricingFrozen
-      ? "No change"
-      : vmForTotals?.materialUpgradeLabel ||
-        vmForTotals?.changeFromOriginalLabel ||
-        vm.materialUpgradeLabel ||
-        vm.changeFromOriginalLabel;
+  const authoritativeDiffLabel = pricingFrozen
+    ? "No change"
+    : vmForTotals?.materialUpgradeLabel ||
+      vmForTotals?.changeFromOriginalLabel ||
+      vm.materialUpgradeLabel ||
+      vm.changeFromOriginalLabel;
+  const changesNeedReview = scopeReviewRequired;
+  // Fail-closed calcs must stay visible to the customer, not silently show as
+  // an unchanged, saved estimate — otherwise a real backend/pricing problem
+  // reads identically to "nothing happened."
+  const showPricingNotice = Boolean(pricingNotice) && (changesNeedReview || pricingFrozen);
+  const hasEverSaved = Boolean(customerConfiguration?.lastSavedAt);
 
   const estimateBreakdown = buildUpdatedBreakdown({
     calculation: savedCalc,
@@ -2805,29 +2792,38 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             <span>Pending changes</span>
             <span>Not saved yet</span>
           </div>
-        ) : null}
-        {changesNeedReview ? (
-          <div className="space-y-1" data-testid="de-changes-need-review">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Status</span>
-              <span className="font-medium text-foreground">Changes need review</span>
-            </div>
-            {pendingEdgeDisplayAmount ? (
-              <div
-                className="flex items-center justify-between text-xs"
-                data-testid="de-pending-edge-change"
-              >
-                <span className="text-muted-foreground">Pending edge change</span>
-                <span className="font-medium tabular-nums text-foreground">
-                  {pendingEdgeDisplayAmount}
-                </span>
-              </div>
-            ) : null}
+        ) : hasEverSaved ? (
+          <div
+            className="flex items-center justify-between text-xs text-muted-foreground"
+            data-testid="de-changes-saved"
+          >
+            <span>Status</span>
+            <span>Changes saved</span>
           </div>
-        ) : authoritativeDiffLabel ? (
+        ) : (
+          <div
+            className="flex items-center justify-between text-xs text-muted-foreground"
+            data-testid="de-as-published"
+          >
+            <span>Status</span>
+            <span>As published</span>
+          </div>
+        )}
+        {authoritativeDiffLabel ? (
           <Row label="Difference" value={authoritativeDiffLabel} />
         ) : null}
-        {pricingNotice ? (
+        {changesNeedReview ? (
+          <div
+            className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs"
+            data-testid="de-changes-need-review"
+          >
+            <div className="font-medium text-foreground">Needs Elite review</div>
+            <p className="mt-1 text-muted-foreground">
+              A requested scope change will be reviewed before it becomes final.
+            </p>
+          </div>
+        ) : null}
+        {showPricingNotice ? (
           <p
             className="text-xs text-muted-foreground"
             data-testid="de-pricing-review-notice"
@@ -3090,7 +3086,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                 data-testid="de-header-difference"
               >
                 {changesNeedReview
-                  ? "Changes need review"
+                  ? "Needs Elite review"
                   : authoritativeDiffLabel || "No change"}
               </dd>
             </div>
