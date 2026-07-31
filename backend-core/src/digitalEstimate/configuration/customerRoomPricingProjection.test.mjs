@@ -1068,4 +1068,51 @@ function sharedAllocationInternal({ mode }) {
   console.log("ok: backsplash-only hidden line absorbs into Countertop per documented rule 5, audited");
 }
 
+// 11-G. Publications frozen before the backsplash mode was recorded still carry
+// Backsplash dollars. Assuming "none" tripped the configured-mode invariant, so
+// published room pricing threw and the customer got no baseline detail at all.
+{
+  const snapshot = {
+    rooms: [
+      {
+        roomId: "kitchen",
+        roomName: "Kitchen",
+        countertopAmountCents: 666_100,
+        backsplashAmountCents: 45_900,
+        addOnsAmountCents: 0,
+        roomTotalCents: 712_000,
+        selectedMaterialLabel: "Calacatta Viol"
+      }
+    ],
+    totalCents: 712_000,
+    projectAddOnLines: [],
+    projectAddOnsCents: 0
+  };
+  const original = buildOriginalRoomPricingProjectionFromSnapshot(snapshot);
+  assert.equal(original.rooms[0].backsplashMode, null, "unrecorded mode stays unknown, not 'none'");
+  const dto = toPublicRoomPricingDto(original);
+  assert.equal(dto.rooms[0].countertopAmount, 6661);
+  assert.equal(dto.rooms[0].backsplashAmount, 459);
+  assert.equal(dto.rooms[0].roomTotal, 7120);
+  assert.equal(dto.rooms[0].selectedBacksplash, null, "never labels a priced backsplash as 'No backsplash'");
+  assert.equal(dto.projectTotal, 7120);
+
+  // A genuinely backsplash-free room still reports the mode explicitly.
+  const noBacksplash = buildOriginalRoomPricingProjectionFromSnapshot({
+    rooms: [
+      {
+        roomId: "bath",
+        roomName: "Bath",
+        countertopAmountCents: 100_000,
+        backsplashAmountCents: 0,
+        addOnsAmountCents: 0,
+        roomTotalCents: 100_000
+      }
+    ],
+    totalCents: 100_000
+  });
+  assert.equal(noBacksplash.rooms[0].backsplashMode, "none");
+  console.log("ok: legacy snapshot with unrecorded backsplash mode still projects published room pricing");
+}
+
 console.log("\nAll customerRoomPricingProjection tests passed.\n");

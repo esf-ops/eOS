@@ -185,8 +185,9 @@ console.log("ok: 1 customer selection reprice is authoritative");
     priceEffectLabel: "Original selection",
     priceEffectCents: 15200
   });
-  assert.equal(original.priceEffectLabel, "Included in published estimate");
-  assert.equal(original.priceEffectCents, 15200);
+  // Selected upgraded edge keeps its own price — selection is visual only.
+  assert.equal(original.priceEffectLabel, "+$152");
+  assert.equal(original.grossPriceEffectCents, 15200);
 
   const included = applyEdgeOptionPriceGuardrail({
     optionKey: "edge:kitchen:edge_eased",
@@ -312,7 +313,7 @@ console.log("ok: 1 customer selection reprice is authoritative");
     scopeReviewRequired: false
   });
   assert.equal(firstPass.pricingAuthority, CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN);
-  assert.equal(firstPass.customerPricingNotice, BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW);
+  assert.equal(firstPass.customerPricingNotice, BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE);
 
   // Simulate a page reload: the persisted, already-frozen result is re-guarded
   // on read. Freezing already reset totals/rooms to match the published
@@ -324,7 +325,7 @@ console.log("ok: 1 customer selection reprice is authoritative");
   });
   assert.equal(secondPass.pricingAuthority, CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN);
   assert.equal(secondPass.configuredDisplayTotal, 8230);
-  assert.equal(secondPass.customerPricingNotice, BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW);
+  assert.equal(secondPass.customerPricingNotice, BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE);
 
   // Third pass to rule out a two-call coincidence.
   const thirdPass = applyBaselineParityToCustomerCalculation(secondPass, {
@@ -333,7 +334,7 @@ console.log("ok: 1 customer selection reprice is authoritative");
     scopeReviewRequired: false
   });
   assert.equal(thirdPass.pricingAuthority, CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN);
-  assert.equal(thirdPass.customerPricingNotice, BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW);
+  assert.equal(thirdPass.customerPricingNotice, BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE);
   console.log("ok: 14 frozen fail-closed state stays frozen across repeated guard passes");
 }
 
@@ -342,11 +343,11 @@ console.log("ok: 1 customer selection reprice is authoritative");
 // ---------------------------------------------------------------------------
 {
   assert.equal(
-    BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW,
-    "This selection needs Elite review before the estimate can update."
+    BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE,
+    "This selection could not be priced automatically yet. Your current quoted total is still shown."
   );
   assert.ok(!/Price updates for this change require estimator review/.test(
-    BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW
+    BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE
   ));
   console.log("ok: 15 fail-closed notice copy is customer-friendly, not technical");
 }
@@ -532,7 +533,7 @@ console.log("ok: 1 customer selection reprice is authoritative");
   assert.equal(twoRoomScreenshot.roomPricing.rooms.find((r) => r.roomName === "Kitchen").countertopAmount, 6661);
   assert.equal(
     twoRoomScreenshot.customerPricingNotice,
-    BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW,
+    BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE,
     "19a. customer-safe notice is shown"
   );
 
@@ -582,7 +583,7 @@ console.log("ok: 1 customer selection reprice is authoritative");
   assert.equal(legacyScreenshot.configuredDisplayTotal, 7120, "19b. no incorrect $5,264 total");
   assert.equal(
     legacyScreenshot.customerPricingNotice,
-    BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW,
+    BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE,
     "19b. customer-safe notice is shown"
   );
 
@@ -640,6 +641,211 @@ console.log("ok: 1 customer selection reprice is authoritative");
   );
 
   console.log("ok: 19 screenshot regression — incomplete material-change calc freezes to baseline");
+}
+
+// 20. A frozen calc must never leave unsafe customer room pricing behind the
+// frozen total — the sidebar breakdown, room cards and print all read it.
+{
+  const unsafeRooms = {
+    kind: "updated",
+    projectTotal: 5264,
+    rooms: [
+      { roomName: "Kitchen", countertopAmount: 0, backsplashAmount: 459, addOnsAmount: 0, roomTotal: 459 },
+      { roomName: "Master Bath", countertopAmount: 0, backsplashAmount: 816, addOnsAmount: 0, roomTotal: 816 }
+    ]
+  };
+  const unsafeCalc = () => ({
+    baselineDisplayTotal: 7120,
+    configuredDisplayTotal: 5264,
+    displayTotalDelta: -1856,
+    customerConfigurationSummary: {
+      rooms: [],
+      totals: { baselineDisplayTotal: 7120, configuredDisplayTotal: 5264, displayDelta: -1856 }
+    },
+    roomPricing: JSON.parse(JSON.stringify(unsafeRooms)),
+    roomPricingChanges: {
+      kind: "changes",
+      rows: [
+        {
+          roomName: "Kitchen",
+          category: "countertop",
+          categoryLabel: "Countertop",
+          originalLabel: "Calacatta Viol",
+          updatedLabel: "Group F",
+          amountDelta: -1856,
+          status: "changed"
+        }
+      ],
+      totalDelta: -1856
+    }
+  });
+
+  // 20a. Baseline room pricing available → every room line is baseline.
+  const withBaseline = applyBaselineParityToCustomerCalculation(unsafeCalc(), {
+    baselineDisplayTotal: 7120,
+    publishedRoomPricingPublic: {
+      kind: "original",
+      projectTotal: 7120,
+      rooms: [
+        {
+          roomName: "Kitchen",
+          countertopAmount: 4197,
+          backsplashAmount: 459,
+          addOnsAmount: 0,
+          roomTotal: 4656,
+          selectedMaterial: "Calacatta Viol"
+        },
+        {
+          roomName: "Master Bath",
+          countertopAmount: 1648,
+          backsplashAmount: 816,
+          addOnsAmount: 0,
+          roomTotal: 2464,
+          selectedMaterial: "Calacatta Viol"
+        }
+      ]
+    }
+  });
+  assert.equal(withBaseline.pricingAuthority, CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN);
+  assert.equal(withBaseline.configuredDisplayTotal, 7120);
+  assert.equal(withBaseline.roomPricing.kind, "original", "20a. frozen rooms come from the published baseline");
+  assert.equal(withBaseline.roomPricing.projectTotal, 7120);
+  for (const room of withBaseline.roomPricing.rooms) {
+    assert.ok(room.countertopAmount > 0, `20a. ${room.roomName} keeps real countertop dollars`);
+    assert.ok(room.roomTotal > room.backsplashAmount, `20a. ${room.roomName} is not backsplash-only`);
+  }
+  assert.equal(
+    withBaseline.roomPricing.rooms.reduce((s, r) => s + r.roomTotal, 0),
+    7120,
+    "20a. frozen room breakdown sums to the frozen total"
+  );
+  assert.deepEqual(withBaseline.roomPricingChanges.rows, [], "20a. no stale change rows behind a frozen total");
+  assert.equal(withBaseline.roomPricingChanges.totalDelta, 0);
+  assert.equal(withBaseline.customerConfigurationSummary.totals.configuredDisplayTotal, 7120);
+  assert.equal(withBaseline.customerConfigurationSummary.totals.displayDelta, 0);
+
+  // 20b. No baseline room pricing to substitute → unsafe rooms are dropped, never shown.
+  const noBaseline = applyBaselineParityToCustomerCalculation(unsafeCalc(), {
+    baselineDisplayTotal: 7120,
+    publishedRoomPricingPublic: null,
+    forceFreeze: true
+  });
+  assert.equal(noBaseline.pricingAuthority, CUSTOMER_PRICING_AUTHORITY.PUBLISHED_BASELINE_FROZEN);
+  assert.equal(noBaseline.configuredDisplayTotal, 7120);
+  assert.equal(noBaseline.roomPricing, null, "20b. unsafe room pricing is dropped, not passed through");
+  assert.deepEqual(noBaseline.roomPricingChanges.rows, []);
+  assert.equal(noBaseline.customerConfigurationSummary.totals.configuredDisplayTotal, 7120);
+
+  // 20c. Fail-closed copy is a temporary-pricing fallback, not estimator review.
+  assert.equal(noBaseline.customerPricingNotice, BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE);
+  assert.ok(
+    !/elite review|estimator review|pending review/i.test(noBaseline.customerPricingNotice),
+    "20c. normal material/edge pricing failures never use estimator-review language"
+  );
+  assert.match(noBaseline.customerPricingNotice, /could not be priced automatically/i);
+
+  console.log("ok: 20 frozen calc exposes no unsafe customer room pricing");
+}
+
+// 21. Edge option rows show the option's own price. Selection is visual only:
+// a selected upgraded edge keeps +$N, a selected included edge is +$0.
+{
+  const knifeSelected = applyEdgeOptionPriceGuardrail({
+    optionKey: "edge:kitchen:edge_knife",
+    profileKey: "edge_knife",
+    premium: true,
+    includedInBaseline: true,
+    customerPriceTreatment: "original_selection",
+    // Delta cents are 0 for the selected row by definition.
+    priceEffectCents: 0,
+    grossPriceEffectCents: 62700,
+    visibleDelta: 0,
+    priceEffectLabel: "Included in your estimate"
+  });
+  assert.equal(knifeSelected.priceEffectLabel, "+$627", "21. selected Knife shows +$627, not +$0");
+  assert.equal(knifeSelected.grossPriceEffectCents, 62700);
+  assert.equal(knifeSelected.selectable, true);
+
+  const easedSelected = applyEdgeOptionPriceGuardrail({
+    optionKey: "edge:kitchen:edge_eased",
+    profileKey: "edge_eased",
+    premium: false,
+    includedInBaseline: true,
+    customerPriceTreatment: "original_selection",
+    priceEffectCents: 0,
+    grossPriceEffectCents: 0,
+    visibleDelta: 0,
+    priceEffectLabel: "Included in your estimate"
+  });
+  assert.equal(easedSelected.priceEffectLabel, "+$0", "21. selected included edge shows +$0");
+
+  const crescentUnselected = applyEdgeOptionPriceGuardrail({
+    optionKey: "edge:kitchen:edge_crescent",
+    profileKey: "edge_crescent",
+    premium: true,
+    includedInBaseline: false,
+    customerPriceTreatment: "delta",
+    priceEffectCents: 62700,
+    grossPriceEffectCents: 62700,
+    visibleDelta: 627,
+    priceEffectLabel: "+$627"
+  });
+  assert.equal(crescentUnselected.priceEffectLabel, "+$627", "21. non-selected upgraded edge shows +$N");
+
+  const bevelUnselected = applyEdgeOptionPriceGuardrail({
+    optionKey: "edge:kitchen:edge_bevel",
+    profileKey: "edge_bevel",
+    premium: false,
+    includedInBaseline: false,
+    customerPriceTreatment: "included_alternate",
+    priceEffectCents: 0,
+    grossPriceEffectCents: 0,
+    visibleDelta: 0,
+    priceEffectLabel: "+$0"
+  });
+  assert.equal(bevelUnselected.priceEffectLabel, "+$0", "21. non-selected included edge shows +$0");
+
+  for (const row of [knifeSelected, easedSelected, crescentUnselected, bevelUnselected]) {
+    assert.ok(
+      !/included in published estimate|original selection|elite review/i.test(
+        String(row.priceEffectLabel || "")
+      ),
+      "21. edge rows carry no history or review copy"
+    );
+  }
+
+  // Gross price survives the whole backend chain, selected or not.
+  const knifeEffect = resolveEdgeOptionPriceEffect({
+    profileToken: "edge_knife",
+    originalProfileToken: "edge_knife",
+    edgeLinearFeet: 38,
+    pricingBasis: "direct"
+  });
+  assert.equal(knifeEffect.priceEffectCents, 0, "21. delta stays 0 for the selected profile");
+  assert.ok(
+    knifeEffect.grossPriceEffectCents > 0,
+    "21. selected premium profile still reports its own price"
+  );
+  const crescentEffect = resolveEdgeOptionPriceEffect({
+    profileToken: "edge_crescent",
+    originalProfileToken: "edge_knife",
+    edgeLinearFeet: 38,
+    pricingBasis: "direct"
+  });
+  assert.equal(
+    knifeEffect.grossPriceEffectCents,
+    crescentEffect.grossPriceEffectCents,
+    "21. every upgraded profile in a room shares one price"
+  );
+  const easedEffect = resolveEdgeOptionPriceEffect({
+    profileToken: "edge_eased",
+    originalProfileToken: "edge_knife",
+    edgeLinearFeet: 38,
+    pricingBasis: "direct"
+  });
+  assert.equal(easedEffect.grossPriceEffectCents, 0, "21. included profiles are $0");
+
+  console.log("ok: 21 edge rows show gross option price; selection is visual only");
 }
 
 console.log("\nAll baseline parity guardrail tests passed.\n");

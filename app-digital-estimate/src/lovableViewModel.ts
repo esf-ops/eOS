@@ -77,6 +77,8 @@ export type LovableChoiceOption = {
   /** Backend edge tier — never used for browser pricing math. */
   premium?: boolean | null;
   priceEffectCents?: number | null;
+  /** Backend-authored price of this option itself, independent of the current selection. */
+  grossPriceEffectCents?: number | null;
   accessoryKind: string | null;
   compatibleFamilyIds: string[];
   visibleSellPrice: number | null;
@@ -702,6 +704,7 @@ export function mapEliteOsToLovableViewModel(
           priceEffectLabel: formatPriceEffect(o),
           premium: o.premium ?? null,
           priceEffectCents: o.priceEffectCents ?? null,
+          grossPriceEffectCents: o.grossPriceEffectCents ?? null,
           accessoryKind: o.accessoryKind ?? null,
           compatibleFamilyIds: Array.isArray(o.compatibleFamilyIds)
             ? o.compatibleFamilyIds.map(String)

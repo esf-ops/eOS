@@ -18,6 +18,7 @@ import {
 import {
   buildChangesBreakdown,
   buildUpdatedBreakdown,
+  failClosedRoomPricing,
   groupBreakdownLinesByRoom,
 } from "./customerEstimateBreakdown";
 import { summarizeSideSplashSelections } from "./sideSplashSummary";
@@ -501,14 +502,20 @@ function ChoiceRadio({
               </span>
             ) : null}
             <span className="block font-semibold text-foreground">{opt.displayLabel}</span>
-            {opt.selected ? (
-              <span className="mt-0.5 block text-xs text-muted-foreground">Selected</span>
-            ) : opt.priceEffectLabel ? (
-              <span className="mt-0.5 block text-xs font-medium tabular-nums text-foreground">
+            {/* Selection is the badge and highlight above — never a replacement
+                for the option's backend-provided price. */}
+            {opt.priceEffectLabel ? (
+              <span
+                className="mt-0.5 block text-xs font-medium tabular-nums text-foreground"
+                data-testid="de-choice-option-price"
+              >
                 {opt.priceEffectLabel}
               </span>
             ) : opt.includedInBaseline ? (
-              <span className="mt-0.5 block text-xs text-muted-foreground">
+              <span
+                className="mt-0.5 block text-xs text-muted-foreground"
+                data-testid="de-choice-option-price"
+              >
                 Included in your estimate
               </span>
             ) : null}
@@ -873,7 +880,12 @@ function AccessoriesOrSpecialtyModal({
                   <span className="mt-0.5 block text-xs text-muted-foreground">{opt.description}</span>
                 ) : null}
                 {opt.priceEffectLabel ? (
-                  <span className="mt-1 block text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
+                  <span
+                    className="mt-1 block text-xs text-muted-foreground"
+                    data-testid="de-choice-option-price"
+                  >
+                    {opt.priceEffectLabel}
+                  </span>
                 ) : null}
               </span>
               <input
@@ -941,7 +953,12 @@ function AccessoriesOrSpecialtyModal({
                   <span>
                     <span className="font-medium text-foreground">{opt.displayLabel}</span>
                     {opt.priceEffectLabel ? (
-                      <span className="ml-2 text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
+                      <span
+                        className="ml-2 text-xs text-muted-foreground"
+                        data-testid="de-choice-option-price"
+                      >
+                        {opt.priceEffectLabel}
+                      </span>
                     ) : null}
                   </span>
                   <input
@@ -972,7 +989,12 @@ function AccessoriesOrSpecialtyModal({
                   <span>
                     <span className="font-medium text-foreground">{opt.displayLabel}</span>
                     {opt.priceEffectLabel ? (
-                      <span className="ml-2 text-xs text-muted-foreground">{opt.priceEffectLabel}</span>
+                      <span
+                        className="ml-2 text-xs text-muted-foreground"
+                        data-testid="de-choice-option-price"
+                      >
+                        {opt.priceEffectLabel}
+                      </span>
                     ) : null}
                   </span>
                   <input
@@ -2052,10 +2074,21 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     );
   }
 
+  // A frozen (fail-closed) calc keeps the published baseline total, so its room
+  // detail must be baseline everywhere it is shown — room cards, sidebar
+  // breakdown and print all read room pricing off these calc objects.
+  const publishedRoomPricing = state.estimate?.roomPricing ?? null;
+  const latestCalcForDisplay = latestCalc
+    ? { ...latestCalc, roomPricing: failClosedRoomPricing(latestCalc, publishedRoomPricing) }
+    : latestCalc;
+  const savedCalcForDisplay = savedCalc
+    ? { ...savedCalc, roomPricing: failClosedRoomPricing(savedCalc, publishedRoomPricing) }
+    : savedCalc;
+
   const vm = mapEliteOsToLovableViewModel(
     state,
     qty,
-    latestCalc,
+    latestCalcForDisplay,
     infoDraft,
     roomLabels,
     productDrafts,
@@ -2608,7 +2641,9 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   saveFnRef.current = () => onSave();
 
   const displayCalc =
-    saveState === "unsaved" || saveState === "saving" || saveState === "error" ? savedCalc : latestCalc;
+    saveState === "unsaved" || saveState === "saving" || saveState === "error"
+      ? savedCalcForDisplay
+      : latestCalcForDisplay;
   const totalPending =
     saveState === "unsaved" || saveState === "saving" || saveState === "error";
   const vmForTotals = mapEliteOsToLovableViewModel(
@@ -2652,7 +2687,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const hasEverSaved = Boolean(customerConfiguration?.lastSavedAt);
 
   const estimateBreakdown = buildUpdatedBreakdown({
-    calculation: savedCalc,
+    calculation: savedCalcForDisplay,
     rooms: vm.rooms.map((r) => ({
       id: r.id,
       name: r.name,
@@ -2695,9 +2730,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     () =>
       buildDigitalEstimatePrintModel({
         rooms: vm.rooms,
-        roomPricing:
-          (savedCalc as { roomPricing?: import("./publicConfigApi").PublicRoomPricing | null } | null)
-            ?.roomPricing ?? null,
+        roomPricing: failClosedRoomPricing(savedCalc, publishedRoomPricing),
         estimateTotal:
           (savedCalc as { configuredDisplayTotal?: number | null } | null)?.configuredDisplayTotal ??
           null,
@@ -2710,7 +2743,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           : null,
         projectNote,
       }),
-    [vm, savedCalc, projectNote],
+    [vm, savedCalc, publishedRoomPricing, projectNote],
   );
 
   const onPrintEstimate = () => {

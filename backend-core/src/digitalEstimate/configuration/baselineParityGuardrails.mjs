@@ -33,9 +33,11 @@ export const CUSTOMER_PRICING_STATUS = Object.freeze({
 });
 
 export const BASELINE_PARITY_NOTICES = Object.freeze({
-  // Fail-closed (unsafe calc / missing rate) — customer-friendly, non-technical copy.
-  PRICE_UPDATE_REVIEW:
-    "This selection needs Elite review before the estimate can update.",
+  // Fail-closed (unsafe calc / missing rate). Automatic pricing is the norm for
+  // material/edge/backsplash selections, so this reads as a temporary fallback —
+  // never as the estimator review that only true scope changes require.
+  PRICE_UPDATE_UNAVAILABLE:
+    "This selection could not be priced automatically yet. Your current quoted total is still shown.",
   ESTIMATOR_WILL_REVIEW: "Elite will review this before final approval.",
   NEEDS_ELITE_REVIEW: "Needs Elite review",
   EDGE_REVIEW:
@@ -224,6 +226,15 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
     publicOpt.priceEffectCents != null ? Number(publicOpt.priceEffectCents) : null;
   const hasAuthoritativeCents = centsRaw != null && Number.isFinite(centsRaw);
   const treatment = String(publicOpt.customerPriceTreatment || "");
+  // The option's own price, independent of what is currently selected. Delta cents
+  // are 0 for the selected row by definition, which is why the selected upgraded
+  // edge must not be labelled from them.
+  const grossRaw =
+    publicOpt.grossPriceEffectCents != null
+      ? Number(publicOpt.grossPriceEffectCents)
+      : null;
+  const grossCents =
+    grossRaw != null && Number.isFinite(grossRaw) ? Math.trunc(grossRaw) : null;
 
   if (hasAuthoritativeCents) {
     next.priceEffectCents = Math.trunc(centsRaw);
@@ -232,25 +243,31 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
     }
   }
 
-  // Published baseline edge — keep premium context when applicable.
+  // Currently selected edge. Selection is a visual state only: the row keeps its
+  // own price so a selected upgraded edge shows +$N, not +$0.
   if (
-    Boolean(publicOpt.includedInBaseline) ||
-    treatment === "original_selection" ||
-    publicOpt.priceEffectLabel === "Original selection"
+    treatment !== "review_required" &&
+    (Boolean(publicOpt.includedInBaseline) ||
+      treatment === "original_selection" ||
+      publicOpt.priceEffectLabel === "Original selection")
   ) {
     next.customerPriceTreatment = "original_selection";
-    next.priceEffectLabel =
+    const selectedGross =
       publicOpt.premium === true
-        ? "Included in published estimate"
-        : "Included in published estimate";
-    // Keep display cents for premium baseline rows so they don't look "free".
-    if (publicOpt.premium === true && hasAuthoritativeCents && centsRaw > 0) {
-      next.priceEffectCents = Math.trunc(centsRaw);
-      next.visibleDelta = next.priceEffectCents / 100;
-    } else {
-      next.priceEffectCents = 0;
-      next.visibleDelta = 0;
-    }
+        ? grossCents != null && grossCents > 0
+          ? grossCents
+          : hasAuthoritativeCents && centsRaw > 0
+            ? Math.trunc(centsRaw)
+            : null
+        : 0;
+    next.grossPriceEffectCents = selectedGross;
+    next.priceEffectLabel =
+      selectedGross != null && selectedGross > 0
+        ? `+$${Math.round(selectedGross / 100).toLocaleString("en-US")}`
+        : "+$0";
+    // Delta cents stay relative to the current selection — pricing consumes them.
+    next.priceEffectCents = hasAuthoritativeCents ? Math.trunc(centsRaw) : 0;
+    next.visibleDelta = next.priceEffectCents / 100;
     next.selectable = true;
     return next;
   }
@@ -264,6 +281,7 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
     next.customerPriceTreatment = "included_alternate";
     next.priceEffectLabel = "+$0";
     next.priceEffectCents = 0;
+    next.grossPriceEffectCents = 0;
     next.visibleDelta = 0;
     next.selectable = true;
     return next;
@@ -271,11 +289,10 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
 
   if (hasAuthoritativeCents && centsRaw >= 0 && (treatment === "delta" || publicOpt.premium === true)) {
     const dollars = next.priceEffectCents / 100;
+    const gross = grossCents != null ? grossCents : next.priceEffectCents;
     next.customerPriceTreatment = "delta";
-    next.priceEffectLabel =
-      publicOpt.priceEffectLabel && /^\+\$/.test(String(publicOpt.priceEffectLabel))
-        ? String(publicOpt.priceEffectLabel)
-        : `+$${Math.round(dollars).toLocaleString("en-US")}`;
+    next.grossPriceEffectCents = gross;
+    next.priceEffectLabel = `+$${Math.round(gross / 100).toLocaleString("en-US")}`;
     next.visibleDelta = dollars;
     next.selectable = true;
     return next;
@@ -284,6 +301,7 @@ export function applyEdgeOptionPriceGuardrail(publicOpt) {
   next.customerPriceTreatment =
     treatment === "review_required" ? "review_required" : treatment || "review_required";
   next.priceEffectLabel = null;
+  next.grossPriceEffectCents = null;
   next.visibleDelta = null;
   next.visibleSellPrice = null;
   next.selectable = publicOpt.availabilityState === "unavailable" ? false : true;
@@ -425,18 +443,41 @@ export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
   next.customerPricingNotice = pending
     ? BASELINE_PARITY_NOTICES.NEEDS_ELITE_REVIEW
     : unsafe
-      ? BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW
+      ? BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE
       : null;
   next.canSubmitForFinalReview = false;
 
+  // Every customer-visible price must match the frozen total: sidebar breakdown,
+  // room card summaries and the print estimate all read `roomPricing`. Substitute
+  // published baseline room pricing, and when it is unavailable drop the room
+  // detail entirely rather than leaking the unsafe partial calc (e.g. Countertop
+  // $0 with backsplash-only room totals) under a frozen baseline total.
   if (opts.publishedRoomPricingPublic && typeof opts.publishedRoomPricingPublic === "object") {
     next.roomPricing = opts.publishedRoomPricingPublic;
-    next.roomPricingChanges = {
-      kind: "changes",
-      rows: [],
-      totalDelta: 0,
-      pendingReview: pending,
-      notice: pending ? BASELINE_PARITY_NOTICES.NEEDS_ELITE_REVIEW : null
+  } else {
+    next.roomPricing = null;
+  }
+  next.roomPricingChanges = {
+    kind: "changes",
+    rows: [],
+    totalDelta: 0,
+    pendingReview: pending,
+    notice: pending ? BASELINE_PARITY_NOTICES.NEEDS_ELITE_REVIEW : null
+  };
+  if (
+    next.customerConfigurationSummary &&
+    typeof next.customerConfigurationSummary === "object" &&
+    next.customerConfigurationSummary.totals &&
+    typeof next.customerConfigurationSummary.totals === "object"
+  ) {
+    next.customerConfigurationSummary = {
+      ...next.customerConfigurationSummary,
+      totals: {
+        ...next.customerConfigurationSummary.totals,
+        baselineDisplayTotal: baseline ?? null,
+        configuredDisplayTotal: baseline ?? null,
+        displayDelta: 0
+      }
     };
   }
 
@@ -446,7 +487,7 @@ export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
   if (pending || unsafe) {
     const notice = pending
       ? BASELINE_PARITY_NOTICES.NEEDS_ELITE_REVIEW
-      : BASELINE_PARITY_NOTICES.PRICE_UPDATE_REVIEW;
+      : BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE;
     if (!messages.includes(notice)) messages.push(notice);
   }
   next.reviewRequiredMessages = messages;
