@@ -3197,3 +3197,15 @@
 | **Protected** | Studio V2 pricing math / calculators, Product Catalog, Waterfall, Vanity, sold conversion, final acceptance implementation, V1 workflow, approved snapshot immutability. |
 | **Revisit trigger** | Slice K proves backend reprice from approved snapshot (material + LF edge + all frozen charges) matches Studio V2; then set `isCustomerRepricingAuthoritative()` true under proven gates. |
 
+### 227. Studio V2 — revision Calculate uses active Working Draft authority (2026-07-30)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-30 · `hotfix/studio-v2-revision-edge-profile-authority` |
+| **Decision** | After creating editable R2 from approved R1, **Calculate must price the saved active Working Draft**, not stale R1 / legacy estimate-wide fields that contradict piece edits. Adapter maps piece `finishedEdgeLf` + `edgeProfileToken` → calculator `pieceEdgeProfiles` (room `edgeProfile` = estimate-wide “Estimate default” only). Scope save no longer lets a later premium piece overwrite an earlier included/eased selection onto estimate-wide `edgeProfileToken`. Explicit incoming estimate-wide token (including clear→eased) wins over soft-sync. UI Save Scope preserves `edgeProfileToken`; “Estimate default” displays the resolved label (e.g. `Estimate default: Knife`). |
+| **Why** | Production R2 Save + Calculate still showed Edge — Knife after changing a piece to Eased — adapter used first-piece / room-aggregate edge path and ignored per-piece profiles; premium-wins soft-sync could restore Knife on the estimate-wide token. |
+| **SQL** | None. |
+| **Impacted** | `elite100RoomPricingStudioAdapter.mjs`, `studioV2ScopeEditor.mjs`, `StudioV2ScopeEditor.tsx`, `studioV2ScopeReviewHelpers.ts`, `StudioV2EstimatorShell.tsx`, revision-flow + Slice I tests, this doc. |
+| **Protected** | Calculator rates/formulas, V1 workflow, DE customer repricing, approved snapshot mutation, auto-approve / auto-calculate / auto-publish, simplified-publish / refresh-from-takeoff / ensure-editable-draft. |
+| **Revisit trigger** | If estimate-wide edge picker is added, keep pieceEdgeProfiles as authority for mixed profiles; revisit legacy scopes that only have estimate-wide edge LF with no piece finishedEdgeLf. |
+

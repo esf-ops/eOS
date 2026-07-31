@@ -151,6 +151,7 @@ export function mapStudioScopeToElite100Scope(scope, opts = {}) {
           piece.measurementMode === "direct_area" || piece.directAreaOverride === true;
         const sqft = Number(piece.sqft);
         const quantity = Math.max(1, Math.floor(Number(piece.quantity) || 1));
+        const finishedEdgeLf = Number(piece.finishedEdgeLf);
         return {
           id: String(piece.id ?? ""),
           name: piece.name || null,
@@ -159,7 +160,12 @@ export function mapStudioScopeToElite100Scope(scope, opts = {}) {
           depthIn: Number(piece.depthIn) || 0,
           quantity,
           included: true,
-          directArea: isDirectArea && Number.isFinite(sqft) && sqft > 0 ? sqft : undefined
+          directArea: isDirectArea && Number.isFinite(sqft) && sqft > 0 ? sqft : undefined,
+          // Per-piece finished-edge LF unlocks calculator pieceEdgeProfiles authority.
+          // Without this, estimate-wide edge LF + a single room edgeProfile silently
+          // ignore piece-level profile edits (revision R2 Calculate bug).
+          finishedEdgeLf:
+            Number.isFinite(finishedEdgeLf) && finishedEdgeLf > 0 ? finishedEdgeLf : undefined
         };
       });
     const mappedRoom = {
@@ -169,7 +175,10 @@ export function mapStudioScopeToElite100Scope(scope, opts = {}) {
       included: true,
       pieces
     };
-    if (roomId === edgeRoomId && edgeScopeResult.finalLf > 0) {
+    // Prefer per-piece finishedEdgeLf when present; only assign the estimate-wide
+    // aggregate onto the default edge room as a fallback for legacy scopes.
+    const hasPieceEdgeLf = pieces.some((p) => Number(p.finishedEdgeLf) > 0);
+    if (!hasPieceEdgeLf && roomId === edgeRoomId && edgeScopeResult.finalLf > 0) {
       mappedRoom.edgeFinishedLf = edgeScopeResult.finalLf;
     }
     // Canonical Scope backsplash run length (room.backsplashMeasuredLengthIn)
@@ -185,7 +194,10 @@ export function mapStudioScopeToElite100Scope(scope, opts = {}) {
     return mappedRoom;
   });
 
-  if (edgeRoomId && edgeScopeResult.finalLf > 0 && rawRooms.length > 1) {
+  const anyPieceEdgeLf = rooms.some((r) =>
+    (Array.isArray(r.pieces) ? r.pieces : []).some((p) => Number(p.finishedEdgeLf) > 0)
+  );
+  if (!anyPieceEdgeLf && edgeRoomId && edgeScopeResult.finalLf > 0 && rawRooms.length > 1) {
     warnings.push({
       code: "adapter_edge_lf_single_room_assignment",
       message: `Studio tracks one estimate-wide finished-edge total (${edgeScopeResult.finalLf} LF); the adapter assigned it in full to room "${edgeRoomId}". Pass opts.edgeRoomId to change this, or supply per-room finishedEdgeLf directly once Studio tracks edge geometry per room.`
@@ -326,24 +338,34 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
     }
   }
 
-  // Edge profile: prefer piece-level token on the edge room when present
-  // (Studio V2 Slice I), else estimate-wide scope.edgeProfileToken.
-  // Finished-edge LF is assigned as a Scope fact (`room.edgeFinishedLf`) —
-  // see mapStudioScopeToElite100Scope (same resolveDefaultRoomIds/opts.edgeRoomId).
+  // Edge profile authority:
+  // - estimate-wide scope.edgeProfileToken is the "Estimate default" fallback
+  // - explicit piece.edgeProfileToken maps into pieceEdgeProfiles (calculator)
+  // - never promote the first piece's token to room-wide (that overwrote R2 edits)
+  // Finished-edge LF is Scope-owned (`piece.finishedEdgeLf` / room.edgeFinishedLf).
   const edgeScopeResult = resolveScopeEdgeLinearFeet(src);
   const edgeRoomId = opts.edgeRoomId ? String(opts.edgeRoomId) : defaultKitchenRoomId;
-  function pieceEdgeProfileForRoom(room) {
-    for (const p of Array.isArray(room?.pieces) ? room.pieces : []) {
+  const estimateDefaultEdge = String(src.edgeProfileToken || "").trim() || "edge_eased";
+  for (const room of rooms) {
+    const roomId = String(room.id ?? "");
+    if (!roomId) continue;
+    /** @type {Record<string, string>} */
+    const pieceEdgeProfiles = {};
+    let hasPieceEdgeLf = false;
+    for (const p of Array.isArray(room.pieces) ? room.pieces : []) {
       if (!p || p.included === false) continue;
+      if (Number(p.finishedEdgeLf) > 0) hasPieceEdgeLf = true;
       const token = String(p.edgeProfileToken || "").trim();
-      if (token) return token;
+      if (token) pieceEdgeProfiles[String(p.id)] = token;
     }
-    return null;
-  }
-  if (edgeRoomId && edgeScopeResult.finalLf > 0) {
-    const edgeRoom = rooms.find((r) => String(r.id) === String(edgeRoomId));
-    ensureRoom(edgeRoomId).edgeProfile =
-      pieceEdgeProfileForRoom(edgeRoom) || src.edgeProfileToken || "edge_eased";
+    const needsEdgeProfile =
+      hasPieceEdgeLf || (roomId === edgeRoomId && edgeScopeResult.finalLf > 0);
+    if (!needsEdgeProfile) continue;
+    const cfg = ensureRoom(roomId);
+    cfg.edgeProfile = estimateDefaultEdge;
+    if (Object.keys(pieceEdgeProfiles).length > 0) {
+      cfg.pieceEdgeProfiles = pieceEdgeProfiles;
+    }
   }
 
   // Miter — also one estimate-wide value in Studio.

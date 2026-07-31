@@ -429,7 +429,11 @@ export default function StudioV2EstimatorShell(props: {
         {
           scope: {
             rooms: scopeDraft.rooms,
-            openings: scopeDraft.openings
+            openings: scopeDraft.openings,
+            // Preserve estimate-wide default so "Estimate default" pieces keep
+            // the Working Draft's inherited profile (e.g. Knife from R1) unless
+            // the estimator changes a piece explicitly.
+            edgeProfileToken: scopeDraft.edgeProfileToken ?? undefined
           },
           clientMutationId: `v2-scope-${Date.now()}`,
           expectedRevision: draft.revision ?? draft.projectHeader?.revision ?? undefined
