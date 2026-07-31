@@ -75,14 +75,23 @@ function roomHierarchyLines(pricing: PublicRoomPricing): BreakdownLine[] {
   const lines: BreakdownLine[] = [];
   for (const [roomIndex, room] of (pricing.rooms || []).entries()) {
     const roomName = room.roomName || `Room ${roomIndex + 1}`;
-    lines.push(
-      {
+    const countertopAmt =
+      room.countertopAmount != null && Number.isFinite(Number(room.countertopAmount))
+        ? Number(room.countertopAmount)
+        : null;
+    // Guardrail: never show $0 countertop lines — incomplete reprice/allocation
+    // artifacts were presenting approved countertop scope as $0.
+    const showCountertop = countertopAmt != null && countertopAmt > 0;
+    if (showCountertop) {
+      lines.push({
         key: `${pricing.kind}-room-${roomIndex}-countertop`,
         label: "Countertop",
-        amount: room.countertopAmount,
-        amountLabel: moneyLabel(room.countertopAmount),
+        amount: countertopAmt,
+        amountLabel: moneyLabel(countertopAmt),
         roomName,
-      },
+      });
+    }
+    lines.push(
       {
         key: `${pricing.kind}-room-${roomIndex}-backsplash`,
         label: "Backsplash",
