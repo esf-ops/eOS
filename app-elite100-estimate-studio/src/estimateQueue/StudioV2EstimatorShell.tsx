@@ -36,6 +36,9 @@ import StudioV2PublishPanel, {
   type StudioV2PublishReadiness,
   type StudioV2PublicationView
 } from "./StudioV2PublishPanel";
+import StudioV2CustomerSelectionReviewPanel, {
+  type StudioCustomerSelectionReview
+} from "./StudioV2CustomerSelectionReviewPanel";
 
 type ProjectHeader = {
   accountName?: string | null;
@@ -214,12 +217,14 @@ type CustomerActivityResponse = {
     savedSelections?: boolean;
     reviewRequested?: boolean;
     accepted?: boolean;
+    lastSavedAt?: string | null;
   };
   activePublication?: { publicationId?: string | null; customerUrl?: string | null } | null;
   historicalPublications?: Array<{ publicationId?: string | null; status?: string }>;
   reviewRequests?: Array<{ id?: string | null; open?: boolean; status?: string | null }>;
   acceptance?: { acceptedAt?: string | null; customerDisplayTotal?: number | null } | null;
   publicationSummary?: { statusLabel?: string; customerUrl?: string | null };
+  selectionReview?: StudioCustomerSelectionReview | null;
 };
 
 function money(v: unknown): string {
@@ -1338,45 +1343,13 @@ export default function StudioV2EstimatorShell(props: {
             onPublish={(args) => void runPublish(args)}
           />
 
-          <section className="studio-v2-panel" data-testid="studio-v2-customer-activity">
-            <h2>Customer activity</h2>
-            {!activity ? (
-              <p className="muted">No customer activity available.</p>
-            ) : (
-              <dl className="studio-v2-dl">
-                <div>
-                  <dt>Viewed</dt>
-                  <dd>{activity.activity?.viewed ? "Yes" : "No"}</dd>
-                </div>
-                <div>
-                  <dt>Saved selections</dt>
-                  <dd>{activity.activity?.savedSelections ? "Yes" : "No"}</dd>
-                </div>
-                <div>
-                  <dt>Review requested</dt>
-                  <dd>{activity.activity?.reviewRequested ? "Yes" : "No"}</dd>
-                </div>
-                <div>
-                  <dt>Accepted</dt>
-                  <dd>
-                    {activity.activity?.accepted
-                      ? activity.acceptance?.acceptedAt
-                        ? `Yes · ${activity.acceptance.acceptedAt}`
-                        : "Yes"
-                      : "No"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Active vs historical</dt>
-                  <dd>
-                    {activity.activePublication ? "Active publication present" : "No active publication"}
-                    {" · "}
-                    {activity.historicalPublications?.length || 0} historical
-                  </dd>
-                </div>
-              </dl>
-            )}
-          </section>
+          <StudioV2CustomerSelectionReviewPanel
+            activity={activity?.activity || null}
+            selectionReview={activity?.selectionReview || null}
+            acceptance={activity?.acceptance || null}
+            activePublication={activity?.activePublication || null}
+            historicalCount={activity?.historicalPublications?.length || 0}
+          />
         </div>
       ) : null}
     </div>

@@ -139,6 +139,7 @@ export function attachElite100StudioV2Routes(app, deps) {
     createSupabaseDigitalEstimateRepository({ db: getSupabase() });
 
   let configurationStudioService = deps.configurationStudioService || null;
+  let configurationRepository = deps.configurationRepository || null;
   if (!configurationStudioService && isDigitalEstimateConfigurationEnabled(env)) {
     try {
       const stack = createDigitalEstimateConfigurationStack({
@@ -148,6 +149,7 @@ export function attachElite100StudioV2Routes(app, deps) {
         requireRuntimeFlags: true
       });
       if (stack) {
+        configurationRepository = configurationRepository || stack.configuration || null;
         configurationStudioService = createConfigurationStudioService({
           configurationRepository: stack.configuration,
           pricingPolicyRepository: stack.pricingPolicy,
@@ -203,6 +205,8 @@ export function attachElite100StudioV2Routes(app, deps) {
       studioEstimateService,
       studioDigitalEstimateService,
       lifecycleRepository,
+      configurationRepository,
+      configurationStudioService,
       loadTakeoffWorkspace: deps.loadTakeoffWorkspace,
       loadLatestTakeoffResult: deps.loadLatestTakeoffResult
     });

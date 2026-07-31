@@ -73,6 +73,10 @@ import {
   normalizePublicationStatus
 } from "./studioPublicationSummary.mjs";
 import {
+  buildEmptyCustomerSelectionReview,
+  buildStudioCustomerSelectionReview
+} from "./studioCustomerSelectionReview.mjs";
+import {
   buildStudioV2RevisionAffordance,
   buildStudioV2RevisionSummary,
   deepCloneStudioV2Json,
@@ -117,6 +121,8 @@ export function createStudioV2Service(deps = {}) {
 
   const studioDigitalEstimateService = deps.studioDigitalEstimateService || null;
   const lifecycleRepository = deps.lifecycleRepository || null;
+  const configurationRepository = deps.configurationRepository || null;
+  const configurationStudioService = deps.configurationStudioService || null;
 
   const loadWorkspace =
     deps.loadTakeoffWorkspace ||
@@ -1607,7 +1613,109 @@ export function createStudioV2Service(deps = {}) {
   }
 
   /**
-   * GET customer-activity — read-only aggregation.
+   * Load latest saved Digital Estimate selection for the active publication.
+   * Staff-safe — never invents selections when configuration stack is absent.
+   */
+  async function loadCustomerSelectionReview({
+    organizationId,
+    estimate,
+    activePublication,
+    reviewRequested
+  }) {
+    const publicationId =
+      activePublication?.publicationId ||
+      activePublication?.id ||
+      null;
+    const empty = buildEmptyCustomerSelectionReview({
+      publicationId,
+      envelopeId: null
+    });
+    empty.reviewRequested = Boolean(reviewRequested);
+
+    if (!publicationId) return empty;
+    if (
+      !configurationRepository ||
+      typeof configurationRepository.getLatestSelectionForPublicationEnvelope !== "function"
+    ) {
+      empty.staffDiagnostics = [
+        {
+          code: "configuration_stack_unavailable",
+          message: "Configuration stack unavailable — cannot load saved customer selections."
+        }
+      ];
+      return empty;
+    }
+
+    let envelopeId = null;
+    try {
+      if (
+        configurationStudioService &&
+        typeof configurationStudioService.listEnvelopes === "function"
+      ) {
+        const envelopes = await configurationStudioService.listEnvelopes(
+          organizationId,
+          publicationId
+        );
+        const active = (envelopes || []).find((e) => String(e.status || "") === "active");
+        envelopeId = active?.id || null;
+      } else if (typeof configurationRepository.getActiveEnvelope === "function") {
+        const active = await configurationRepository.getActiveEnvelope(
+          organizationId,
+          publicationId
+        );
+        envelopeId = active?.id || null;
+      }
+    } catch {
+      envelopeId = null;
+    }
+
+    if (!envelopeId) {
+      empty.publicationId = publicationId;
+      return empty;
+    }
+
+    let selection = null;
+    let calculation = null;
+    try {
+      selection = await configurationRepository.getLatestSelectionForPublicationEnvelope(
+        organizationId,
+        publicationId,
+        envelopeId
+      );
+      if (
+        selection?.id &&
+        typeof configurationRepository.getCalculationBySelectionId === "function"
+      ) {
+        calculation = await configurationRepository.getCalculationBySelectionId(
+          organizationId,
+          selection.id
+        );
+      }
+    } catch {
+      empty.publicationId = publicationId;
+      empty.envelopeId = envelopeId;
+      empty.staffDiagnostics = [
+        {
+          code: "selection_load_failed",
+          message: "Unable to load saved customer selections for this publication."
+        }
+      ];
+      return empty;
+    }
+
+    const scopeRooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
+    return buildStudioCustomerSelectionReview({
+      selection,
+      calculation,
+      rooms: scopeRooms,
+      publicationId,
+      envelopeId,
+      reviewRequested
+    });
+  }
+
+  /**
+   * GET customer-activity — read-only aggregation + selection review.
    */
   async function getCustomerActivity({ organizationId, intakeCaseId }) {
     const row = await loadActiveEstimateOrNull(organizationId, intakeCaseId);
@@ -1663,16 +1771,39 @@ export function createStudioV2Service(deps = {}) {
     }
 
     const summary = pubBundle.publicationSummary || buildSafeStudioPublicationSummary({ estimate });
+    const reviewRequested = Boolean(
+      summary.reviewRequestOpen || reviewRequests.some((r) => r.open)
+    );
+    const activePublication =
+      classified.find((p) => p.active) ||
+      (pubBundle.activePublication
+        ? {
+            publicationId:
+              pubBundle.activePublication.id ||
+              pubBundle.activePublication.publicationId ||
+              null,
+            active: true
+          }
+        : null);
+
+    const selectionReview = await loadCustomerSelectionReview({
+      organizationId,
+      estimate,
+      activePublication,
+      reviewRequested
+    });
+
     const activityFlags = {
       viewed: Boolean(
         summary.customerActivityState === "customer_viewed" ||
           /viewed/i.test(String(summary.customerActivityState || ""))
       ),
-      savedSelections: Boolean(
-        /saved|configured|selection/i.test(String(summary.customerActivityState || ""))
-      ),
-      reviewRequested: Boolean(summary.reviewRequestOpen),
-      accepted: Boolean(acceptance)
+      // Authoritative: latest DE configuration selection with a calculation exists.
+      // Do NOT infer from customerActivityState — that string never includes "saved".
+      savedSelections: Boolean(selectionReview?.hasSavedSelections),
+      reviewRequested,
+      accepted: Boolean(acceptance),
+      lastSavedAt: selectionReview?.lastSavedAt || null
     };
 
     return {
@@ -1685,7 +1816,8 @@ export function createStudioV2Service(deps = {}) {
       historicalPublications: classified.filter((p) => p.historical),
       reviewRequests,
       acceptance,
-      activity: activityFlags
+      activity: activityFlags,
+      selectionReview
     };
   }
 

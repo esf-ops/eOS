@@ -3328,3 +3328,16 @@
 | **Impacted** | `studioEstimatePublicationAdapter.mjs`, `configurationTrustedContext.mjs`, new `phaseFrozenPieceSquareFeetLivePricing.test.mjs`, `studioEdgeScope.test.mjs` (stale §231 edge label expectation), this doc. |
 | **Protected** | Pricing formulas/rates, Studio V2 calculator, V1, browser pricing math, approved Studio estimates, `quote_publication_snapshots`, internal pricing evidence (piece SF stays in internal evidence; public room DTOs still carry no numeric SF). |
 | **Revisit trigger** | If legacy publications show a 1–2 SF drift vs their published countertop dollars, republish the estimate to restore exact section-ceiling parity. |
+
+### 238. Studio V2 Customer Selection Review — read real saved DE selections (2026-07-31)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-07-31 · `feature/studio-v2-customer-selection-review` |
+| **Root cause** | `getCustomerActivity` set `savedSelections` by regex-matching `customerActivityState` (`/saved\|configured\|selection/i`). Publication activity states are only `waiting` / `viewed` / `review_requested` / … — never “saved” — so estimators always saw **Saved selections: No** even after customers saved live-priced material/edge/product selections. |
+| **Decision** | Customer activity now loads the latest Digital Estimate configuration selection for the active publication+envelope (`getLatestSelectionForPublicationEnvelope` + calculation). `savedSelections` / `lastSavedAt` come from that row. A staff-safe `selectionReview` DTO separates **priced customer selections** (material/edge/backsplash/products) from **scope requests** (openings/waterfalls/notes). Studio V2 shows a read-only Customer Selection Review panel under Digital Estimate / Customer Activity. No apply/approve/publish/sold-job behavior. |
+| **Why** | Estimators could not see what the customer changed after DE live-pricing started working. |
+| **SQL** | None. |
+| **Impacted** | `studioCustomerSelectionReview.mjs` (+ test), `studioV2Service.mjs`, `elite100StudioV2Routes.js`, `StudioV2CustomerSelectionReviewPanel.tsx`, `StudioV2EstimatorShell.tsx`, `studioV2SliceF.test.mjs`, this doc. |
+| **Protected** | Pricing formulas, customer pricing math, approved estimates, auto-approve/publish/sold, V1, raw payload / internal evidence / service-role exposure. |
+| **Revisit trigger** | When “apply customer selections into Studio draft” is productized; until then panel stays read-only. |
