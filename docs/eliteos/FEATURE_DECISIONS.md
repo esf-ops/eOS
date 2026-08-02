@@ -3405,3 +3405,7 @@
 | **Impacted** | `studioV2Url.mjs` (+ test), `StudioApp.tsx`, `StudioV2EstimatorShell.tsx` (load-error Back), this doc. |
 | **Protected** | Pricing formulas/rates, Digital Estimate pricing, Studio V2 approve/publish/revision logic, V1 default Inbox behavior without `caseId`. |
 | **Revisit trigger** | If Studio gains a real client router, migrate these helpers onto route params without changing the public `studioV2` + `caseId` contract. |
+
+### 244. Quote Platform head architecture and scaffold inventory (2026-08-02)
+
+The ownership boundaries, current repository scaffold, migration/retirement maps, V1 retirement gates, and ordered implementation slices for Intake, AI Takeoff Lab, Estimate Queue, Studio V2, Digital Estimates, Product Catalog, Sold Handoff, Quote Library/Estimate History, and Account Directory/Pricing Rules are documented in [`QUOTE_PLATFORM_HEAD_ARCHITECTURE.md`](./QUOTE_PLATFORM_HEAD_ARCHITECTURE.md). This is a documentation-only decision; it changes no runtime behavior.
