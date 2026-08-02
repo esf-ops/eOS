@@ -1476,10 +1476,14 @@ function ReviewRequestModal({
 }
 
 function FinalAcceptanceModal({
+  mode,
+  configuredTotalLabel,
   onConfirm,
   onClose,
   busy,
 }: {
+  mode: "published" | "configured";
+  configuredTotalLabel?: string | null;
   onConfirm: () => void;
   onClose: () => void;
   busy: boolean;
@@ -1490,12 +1494,15 @@ function FinalAcceptanceModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const configured = mode === "configured";
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
       role="presentation"
       data-testid="de-final-acceptance-modal"
+      data-accept-mode={mode}
     >
       <div
         className="w-full max-w-md rounded-2xl bg-background p-6 shadow-2xl"
@@ -1505,12 +1512,21 @@ function FinalAcceptanceModal({
         aria-modal="true"
       >
         <div id="final-acceptance-title" className="text-lg font-semibold text-foreground">
-          Accept estimate
+          {configured ? "Accept estimate with these selections" : "Accept estimate"}
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          You are accepting the published estimate as shown. Elite will confirm scheduling and next
-          steps.
+          {configured
+            ? "You are accepting this estimate with your selected options. Elite will confirm scheduling and next steps."
+            : "You are accepting the published estimate as shown. Elite will confirm scheduling and next steps."}
         </p>
+        {configured && configuredTotalLabel ? (
+          <p
+            className="mt-3 text-sm font-medium text-foreground"
+            data-testid="de-accept-configured-total"
+          >
+            Your estimate: {configuredTotalLabel}
+          </p>
+        ) : null}
         <div className="mt-5 flex gap-2">
           <button
             type="button"
@@ -1527,7 +1543,11 @@ function FinalAcceptanceModal({
             className="flex-1 rounded-lg bg-foreground py-2.5 text-sm font-semibold text-background disabled:opacity-50"
             data-testid="de-accept-confirm"
           >
-            {busy ? "Accepting…" : "Accept estimate"}
+            {busy
+              ? "Accepting…"
+              : configured
+                ? "Accept with these selections"
+                : "Accept estimate"}
           </button>
         </div>
       </div>
@@ -2684,6 +2704,27 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     !scopeReviewRequired &&
     foundationAllowsAccept &&
     (displayCalc == null || calcAllowsAccept);
+  const calcAllowsConfigured =
+    (displayCalc as { canAcceptAsConfigured?: boolean } | null)?.canAcceptAsConfigured === true;
+  const foundationAllowsConfigured = customerConfiguration?.canAcceptAsConfigured === true;
+  const reviewBlocksConfiguredAccept =
+    Boolean(reviewRequest) &&
+    (reviewRequest?.requiresEliteReview === true ||
+      reviewRequest?.reviewKind === "physical_scope" ||
+      reviewRequest?.canAcceptConfigured === false);
+  // Selection-only: accept latest saved configuration (Send selections not required).
+  const canAcceptAsConfigured =
+    !configurationLocked &&
+    !canAcceptPublishedEstimate &&
+    !scopeReviewRequired &&
+    !reviewBlocksConfiguredAccept &&
+    foundationAllowsConfigured &&
+    (displayCalc == null || calcAllowsConfigured);
+  const acceptMode: "published" | "configured" | null = canAcceptPublishedEstimate
+    ? "published"
+    : canAcceptAsConfigured
+      ? "configured"
+      : null;
   const baselineDisplayTotal =
     (displayCalc as { baselineDisplayTotal?: number | null; publishedBaselineTotal?: number | null } | null)
       ?.baselineDisplayTotal ??
@@ -3020,15 +3061,18 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             {reviewRequest ? "Selections already sent" : "Send selections"}
           </button>
         ) : null}
-        {canAcceptPublishedEstimate ? (
+        {acceptMode ? (
           <button
             type="button"
             onClick={() => setAcceptOpen(true)}
             disabled={saveState === "unsaved" || saveState === "saving" || saveState === "error"}
             data-testid="de-approve-final"
+            data-accept-mode={acceptMode}
             className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90 disabled:opacity-50"
           >
-            Accept estimate
+            {acceptMode === "configured"
+              ? "Accept estimate with these selections"
+              : "Accept estimate"}
           </button>
         ) : null}
         {acceptError ? (
@@ -3042,12 +3086,18 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         <div
           className="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs"
           data-testid="de-accepted-banner"
+          data-accepted-as-configured={finalAcceptance.acceptedAsConfigured ? "true" : "false"}
         >
           <div className="font-medium text-foreground" data-testid="de-accepted-title">
-            {finalAcceptance.statusLabel || "Estimate accepted"}
+            {finalAcceptance.acceptedAsConfigured
+              ? "Estimate accepted with your selections"
+              : finalAcceptance.statusLabel || "Estimate accepted"}
           </div>
           <div className="mt-1 text-muted-foreground">
             Accepted {formatDate(finalAcceptance.acceptedAt || "")}
+            {finalAcceptance.customerDisplayTotal != null
+              ? ` · ${formatMoneyLabel(finalAcceptance.customerDisplayTotal)}`
+              : ""}
           </div>
           <p className="mt-2 text-muted-foreground">
             {finalAcceptance.notice ||
@@ -3334,19 +3384,27 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                 data-testid="de-review-cta"
               >
                 <h2 className="text-base font-semibold text-foreground">
-                  {canAcceptPublishedEstimate
+                  {acceptMode === "published"
                     ? "Accept estimate"
-                    : "Send your selections to Elite"}
+                    : acceptMode === "configured"
+                      ? "Accept estimate with these selections"
+                      : scopeReviewRequired
+                        ? "Elite review is required"
+                        : "Send your selections to Elite"}
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {canAcceptPublishedEstimate
+                  {acceptMode === "published"
                     ? "Accept the published estimate as shown, or change selections and send them to Elite."
-                    : "This is not final acceptance. Elite will confirm details before the job is sold."}
+                    : acceptMode === "configured"
+                      ? "Accept this estimate with your selected options. Sending selections to Elite is optional."
+                      : scopeReviewRequired
+                        ? "Elite review is required before this estimate can be accepted."
+                        : "This is not final acceptance. Elite will confirm details before the job is sold."}
                 </p>
                 <div className="mt-4 space-y-2 de-interactive-chrome">
                   {printEstimateButton("de-print-estimate-bottom")}
                 </div>
-                {canAcceptPublishedEstimate ? (
+                {acceptMode ? (
                   <button
                     type="button"
                     onClick={() => setAcceptOpen(true)}
@@ -3355,8 +3413,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                     }
                     className="mt-2 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                     data-testid="de-approve-final-bottom"
+                    data-accept-mode={acceptMode}
                   >
-                    Accept estimate
+                    {acceptMode === "configured"
+                      ? "Accept estimate with these selections"
+                      : "Accept estimate"}
                   </button>
                 ) : (
                   <button
@@ -3532,8 +3593,12 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           onSubmit={(note) => void onSendReview(note)}
         />
       ) : null}
-      {acceptOpen ? (
+      {acceptOpen && acceptMode ? (
         <FinalAcceptanceModal
+          mode={acceptMode}
+          configuredTotalLabel={
+            acceptMode === "configured" ? authoritativeEstimateLabel : null
+          }
           busy={acceptBusy}
           onClose={() => setAcceptOpen(false)}
           onConfirm={() => void onAcceptFinal()}

@@ -3473,3 +3473,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `customerConfigurationFoundation.mjs`, `reviewRequestService.mjs`, `liveDigitalEstimatesStatus.mjs`, `liveDigitalEstimatesService.mjs`, `studioCustomerSelectionReview.mjs`, `studioV2CustomerSelectionRevision.mjs`, `studioV2Service.mjs`, `studioV2Errors.mjs`, `StudioV2CustomerSelectionReviewPanel.tsx`, tests, this doc. |
 | **Protected / unchanged** | Pricing formulas, customer live-pricing math, approved estimate immutability, published snapshots, publish/approve/acceptance/sold rules, AI Takeoff, Internal Estimate. No auto-approve, auto-publish, or sold mutation. |
 | **Revisit trigger** | If staff later need a lightweight “acknowledge selection-only submission” workflow that is not a Studio revision, add a separate non-revision acknowledgment path. |
+
+### 250. Customers can accept selection-only Digital Estimate configurations (2026-08-02)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-02 · `feature/accept-configured-digital-estimate-selections` |
+| **Decision** | Customers may accept a Digital Estimate with allowed **selection-only** changes (`acceptedAsConfigured`) using the latest saved configuration. “Send selections” is optional for this path. Unchanged estimates keep existing `acceptedAsPublished` behavior. Physical scope / manual-review requests still block acceptance and require Elite review. |
+| **Why** | Selection-only choices (material, edge, products, allowed backsplash prefs) are already priced on Digital Estimate and are not Studio V2 revision work. Blocking acceptance forced an unnecessary send/review cycle. |
+| **Acceptance rules** | Browser sends only `{ confirm: true }`. Server classifies via `classifyCustomerConfigurationForReview` / `classifyReviewRequestForEliteReview`, chooses published vs configured mode, and stores a server-derived configured total only. Missing, stale, fail-closed, or non-authoritative configured totals block with a clear error — never client-sent totals. |
+| **Open review requests** | Configured accept may close/supersede **selection-only** open review requests. Physical-scope / manual-review open requests are never closed by acceptance and continue to block. |
+| **Staff visibility** | Digital Estimates Command Center already prioritizes Accepted. Studio V2 customer selection panel shows Accepted + configured vs published mode and the accepted total. |
+| **Impacted** | `studioFinalAcceptanceService.mjs` (+ tests), `publicConfigurationService.mjs`, `reviewRequestService.mjs`, `studioV2Service.mjs`, public Digital Estimate CTA/modal, Studio V2 selection panel, this doc. |
+| **Protected / unchanged** | Pricing formulas, live-pricing math, publish/approve rules, Studio revision, sold handoff, AI Takeoff, Internal Estimate, Supabase migrations, approved snapshots, published snapshots. No auto-approve, auto-publish, or sold mutation. |
+| **Revisit trigger** | If configured accept should also acknowledge staff-side selection-only submissions without closing the review row, add a dedicated non-acceptance acknowledgment path. |

@@ -41,6 +41,7 @@ import {
 } from "./customerConfigurationDraft.mjs";
 import {
   buildPublicCustomerConfigurationReadModel,
+  classifyCustomerConfigurationForReview,
   sanitizeCustomerConfigurationFoundation
 } from "./customerConfigurationFoundation.mjs";
 import {
@@ -48,6 +49,7 @@ import {
   applyEdgeOptionPriceGuardrail,
   applyEdgeOptionPriceGuardrails
 } from "./baselineParityGuardrails.mjs";
+import { resolveServerConfiguredAcceptanceTotal } from "../../elite100EstimateStudio/studioFinalAcceptanceService.mjs";
 import {
   collectForbiddenCatalogSelections,
   normalizeCustomerCatalogPermissions
@@ -1069,8 +1071,26 @@ export function createPublicConfigurationService(deps) {
       (latestCalculationPublic == null ||
         latestCalculationPublic?.canSubmitForFinalReview === true);
     publicCustomerConfiguration.canSubmitForFinalReview = canAcceptPublishedExchange;
+    const exchangeClassification = classifyCustomerConfigurationForReview({
+      foundation: publicCustomerConfiguration,
+      quantities: selectionMeta.quantities || {},
+      roomNotes: selectionMeta.roomNotes || {},
+      projectNote: selectionMeta.projectNote || null
+    });
+    const exchangeConfiguredTotal = resolveServerConfiguredAcceptanceTotal(
+      latestCalculationPublic
+    );
+    const canAcceptConfiguredExchange =
+      exchangeClassification.requiresEliteReview !== true &&
+      (exchangeClassification.reviewKind === "selection_only" ||
+        exchangeClassification.hasSelectionOnlyChanges === true) &&
+      exchangeConfiguredTotal != null;
+    publicCustomerConfiguration.reviewKind = exchangeClassification.reviewKind;
+    publicCustomerConfiguration.canAcceptAsConfigured = canAcceptConfiguredExchange;
     if (latestCalculationPublic && typeof latestCalculationPublic === "object") {
       latestCalculationPublic.canSubmitForFinalReview = canAcceptPublishedExchange;
+      latestCalculationPublic.canAcceptAsConfigured = canAcceptConfiguredExchange;
+      latestCalculationPublic.reviewKind = exchangeClassification.reviewKind;
     }
 
     const state = {
@@ -2632,13 +2652,32 @@ export function createPublicConfigurationService(deps) {
         publicCustomerConfiguration.canSubmitForFinalReview === true &&
         customerResultJson?.canSubmitForFinalReview === true;
       publicCustomerConfiguration.canSubmitForFinalReview = canAcceptPublished;
+      const saveClassification = classifyCustomerConfigurationForReview({
+        foundation: publicCustomerConfiguration,
+        selectionPayload: selectionPayloadForMeta,
+        quantities: selectionMeta?.quantities || {},
+        roomNotes: selectionMeta?.roomNotes || {},
+        projectNote: selectionMeta?.projectNote || null
+      });
+      const saveConfiguredTotal = resolveServerConfiguredAcceptanceTotal(customerResultJson);
+      const canAcceptConfigured =
+        saveClassification.requiresEliteReview !== true &&
+        (saveClassification.reviewKind === "selection_only" ||
+          saveClassification.hasSelectionOnlyChanges === true) &&
+        saveConfiguredTotal != null;
+      publicCustomerConfiguration.reviewKind = saveClassification.reviewKind;
+      publicCustomerConfiguration.canAcceptAsConfigured = canAcceptConfigured;
       if (customerResultJson && typeof customerResultJson === "object") {
         customerResultJson.canSubmitForFinalReview = canAcceptPublished;
+        customerResultJson.canAcceptAsConfigured = canAcceptConfigured;
+        customerResultJson.reviewKind = saveClassification.reviewKind;
         if (
           customerResultJson.customerConfiguration &&
           typeof customerResultJson.customerConfiguration === "object"
         ) {
           customerResultJson.customerConfiguration.canSubmitForFinalReview = canAcceptPublished;
+          customerResultJson.customerConfiguration.canAcceptAsConfigured = canAcceptConfigured;
+          customerResultJson.customerConfiguration.reviewKind = saveClassification.reviewKind;
         }
       }
       assertPublicConfigurationHasNoForbiddenContent(customerResultJson);

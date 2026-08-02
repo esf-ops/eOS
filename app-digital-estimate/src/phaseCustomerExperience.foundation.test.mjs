@@ -137,10 +137,13 @@ assert.equal(normalizePricingGroupLabel("group_a"), "A");
 
 assert.ok(view.includes("canSubmitForFinalReview") || view.includes("canAcceptPublishedEstimate"));
 assert.ok(view.includes("canAcceptPublishedEstimate"));
+assert.ok(view.includes("canAcceptAsConfigured"));
 assert.ok(view.includes("Accept estimate"));
+assert.ok(view.includes("Accept estimate with these selections"));
 assert.ok(view.includes('data-testid="de-request-review"'));
 assert.ok(view.includes('data-testid="de-approve-final"'));
 assert.ok(view.includes("Needs Elite review") || view.includes("de-changes-need-review"));
+assert.ok(view.includes("Elite review is required"));
 assert.ok(view.includes("de-pricing-review-notice") || view.includes("de-changes-saved"));
 assert.ok(view.includes("Changes saved") || view.includes("de-changes-saved"));
 assert.ok(publicSvc.includes("applyBaselineParityToCustomerCalculation"));

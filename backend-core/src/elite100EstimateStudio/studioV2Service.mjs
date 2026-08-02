@@ -2338,13 +2338,17 @@ export function createStudioV2Service(deps = {}) {
         const a = await lifecycleRepository.getAcceptanceForEstimate(organizationId, estimate.id);
         if (a) {
           const snap = a.customer_safe_snapshot_json || a.customerSafeSnapshot || {};
+          const acceptedAsConfigured = snap.acceptedAsConfigured === true;
           acceptance = {
             id: a.id,
             acceptedAt: a.accepted_at || a.acceptedAt || null,
             estimateRevision: a.estimate_revision ?? a.estimateRevision ?? null,
             publicationId: a.publication_id || a.publicationId || null,
             customerDisplayTotal: a.customer_display_total ?? a.customerDisplayTotal ?? null,
-            acceptedAsPublished: snap.acceptedAsPublished !== false
+            acceptedAsConfigured,
+            acceptedAsPublished: acceptedAsConfigured
+              ? false
+              : snap.acceptedAsPublished !== false
           };
         }
       } catch {
