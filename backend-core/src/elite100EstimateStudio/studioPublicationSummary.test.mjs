@@ -120,6 +120,25 @@ const estimate = { id: "est-1", revision: 2, status: "approved" };
 }
 
 {
+  // Public "Send selections" writes DE.2F status `review_requested` (not legacy "open").
+  const s = buildSafeStudioPublicationSummary({
+    estimate,
+    activePublication: {
+      id: "pub-rr-de",
+      status: "active",
+      revisionNumber: 2,
+      customerUrl: "https://example.test/de/rr-de",
+      linkStatus: "active"
+    },
+    reviewRequests: [{ id: "rr-de", status: "review_requested", publication_id: "pub-rr-de" }]
+  });
+  assert.equal(s.state, "customer_review_requested");
+  assert.equal(s.reviewRequestOpen, true);
+  assert.equal(s.customerActivityState, "review_requested");
+  console.log("  ✓ DE.2F review_requested status is open");
+}
+
+{
   const s = buildSafeStudioPublicationSummary({
     estimate,
     activePublication: {

@@ -4,6 +4,8 @@
  * Read-model only: never publishes, replaces, revokes, or notifies.
  */
 
+import { isOpenDigitalEstimateReviewRequestStatus } from "../digitalEstimate/configuration/amendmentConfig.mjs";
+
 /**
  * @typedef {'not_published'|'ready_to_publish'|'published_active'|'published_waiting_for_customer'|'customer_viewed'|'customer_review_requested'|'publication_expired'|'publication_revoked'|'publication_replaced'|'publication_superseded'|'publication_link_unavailable'} StudioPublicationState
  */
@@ -99,11 +101,10 @@ export function buildSafeStudioPublicationSummary(input = {}) {
   const activePublication = input.activePublication || null;
   const reviewRequests = Array.isArray(input.reviewRequests) ? input.reviewRequests : [];
 
+  // Same open statuses as public "Send selections" / DE.2F amendment rows
+  // (`review_requested`, …) plus legacy Studio aliases (`open`, …).
   const openReview =
-    reviewRequests.find((r) => {
-      const st = String(r.status || "").toLowerCase();
-      return st === "open" || st === "new" || st === "pending" || st === "submitted";
-    }) || null;
+    reviewRequests.find((r) => isOpenDigitalEstimateReviewRequestStatus(r?.status)) || null;
 
   const candidate =
     activePublication ||
