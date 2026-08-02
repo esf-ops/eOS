@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import {
   buildEmptyCustomerSelectionReview,
   buildStudioCustomerSelectionReview,
+  friendlyMaterialLabel,
   scrubSelectionReviewDto
 } from "./studioCustomerSelectionReview.mjs";
 import { createStudioV2Service } from "./studioV2Service.mjs";
@@ -451,6 +452,174 @@ function selectionPayload() {
   assert.equal(shell.includes("studio-v2-customer-activity"), false);
   assert.ok(!panel.includes("apply changes"), "no apply-changes CTA");
   console.log("ok: 11 frontend panel wired below publish; read-only");
+}
+
+{
+  // 12. Friendly catalog names — never show raw e100-* slugs when catalog knows the color
+  assert.equal(friendlyMaterialLabel("e100-bayshore-sand"), "Bayshore Sand");
+  assert.equal(friendlyMaterialLabel("e100-bear-hug"), "Bear Hug");
+  assert.equal(friendlyMaterialLabel("e100-axbridge"), "Axbridge");
+  assert.equal(friendlyMaterialLabel("e100-carrara-classic"), "Carrara Classic");
+  assert.equal(friendlyMaterialLabel("bayshore-sand"), "Bayshore Sand");
+
+  const payload = mergeSelectionPayloadMeta(
+    {
+      "material:kitchen:e100-bayshore-sand": 1,
+      "material:master:e100-bear-hug": 1,
+      "material:ll:e100-axbridge": 1
+    },
+    {
+      customerConfiguration: finalizeCustomerConfigurationFoundation({
+        selectedMaterial: {
+          materialGroup: "promo",
+          colorId: "e100-bayshore-sand",
+          colorName: null,
+          roomId: "kitchen"
+        },
+        lastSavedAt: "2026-08-02T12:00:00.000Z"
+      })
+    }
+  );
+  const review = buildStudioCustomerSelectionReview({
+    selection: {
+      id: randomUUID(),
+      selection_hash: "hash-friendly",
+      selection_payload_json: payload,
+      created_at: "2026-08-02T12:00:00.000Z"
+    },
+    calculation: {
+      id: randomUUID(),
+      baseline_total: 7120,
+      configured_total: 8739,
+      customer_result_json: {
+        baselineDisplayTotal: 7120,
+        configuredDisplayTotal: 8739,
+        pricedSelectionTotal: 8739,
+        publishedBaselineTotal: 7120,
+        displayTotalDelta: 1619,
+        pricingAuthority: "authoritative_backend_reprice"
+      }
+    },
+    rooms: [
+      { id: "kitchen", name: "Kitchen" },
+      { id: "master", name: "Master Bath" },
+      { id: "ll", name: "LL Bath" }
+    ],
+    publicationId: PUB_ID,
+    envelopeId: ENV_ID,
+    reviewRequested: false
+  });
+  const labels = (review.pricedSelections.rooms || []).map((r) => r.material?.label).filter(Boolean);
+  assert.ok(labels.some((l) => /Bayshore Sand/i.test(String(l))));
+  const raw = JSON.stringify(review);
+  assert.equal(raw.includes("e100-bayshore-sand"), false);
+  assert.equal(raw.includes("e100-bear-hug"), false);
+  assert.equal(raw.includes("service_role"), false);
+  console.log("ok: 12 Studio V2 review shows friendly material names");
+}
+
+{
+  // 13. Review requested: Yes after customer submits selections (open review request)
+  const repo = new InMemoryStudioEstimateRepository();
+  await repo.create({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID + "-review",
+    createdByUserId: ACTOR,
+    scope: {
+      ...emptyStudioEstimateScope(),
+      customerName: "Acme",
+      projectName: "Kitchen",
+      estimateOrigin: "manual",
+      physicalScopeSource: "manual",
+      rooms: [{ id: "kitchen", name: "Kitchen", included: true, pieces: [] }]
+    },
+    status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+    approval: {
+      approvedAt: "2026-07-30T00:00:00.000Z",
+      approvedByUserId: ACTOR,
+      customerDisplayTotal: 7120,
+      calculationFingerprint: "fp-review"
+    },
+    calculationSnapshot: {
+      fingerprint: "fp-review",
+      totals: { customerDisplayTotal: 7120 }
+    }
+  });
+
+  const payload = selectionPayload();
+  const selectionId = randomUUID();
+  const v2 = createStudioV2Service({
+    repository: repo,
+    env: {},
+    configurationRepository: {
+      async getActiveEnvelope() {
+        return { id: ENV_ID, status: "active" };
+      },
+      async getLatestSelectionForPublicationEnvelope() {
+        return {
+          id: selectionId,
+          organization_id: ORG,
+          selection_hash: "hash-review",
+          selection_payload_json: payload,
+          created_at: "2026-08-02T12:00:00.000Z"
+        };
+      },
+      async getCalculationBySelectionId() {
+        return {
+          id: randomUUID(),
+          organization_id: ORG,
+          selection_id: selectionId,
+          baseline_total: 7120,
+          configured_total: 8739,
+          customer_result_json: {
+            baselineDisplayTotal: 7120,
+            configuredDisplayTotal: 8739,
+            pricedSelectionTotal: 8739,
+            publishedBaselineTotal: 7120,
+            displayTotalDelta: 1619,
+            pricingAuthority: "authoritative_backend_reprice"
+          }
+        };
+      }
+    },
+    studioDigitalEstimateService: {
+      async assessReadiness() {
+        return {
+          publicationSummary: {
+            state: "published_active",
+            active: true,
+            statusLabel: "Published",
+            publicationId: PUB_ID,
+            customerUrl: "https://example.test/e/tok",
+            customerActivityState: "review_requested",
+            reviewRequestOpen: true
+          },
+          activePublication: { id: PUB_ID, status: "active", revisionNumber: 1 },
+          publications: [{ id: PUB_ID, status: "active", revisionNumber: 1 }],
+          reviewRequests: [
+            {
+              id: "rr-open",
+              status: "open",
+              publicationId: PUB_ID,
+              requestedAt: "2026-08-02T13:00:00.000Z"
+            }
+          ]
+        };
+      }
+    }
+  });
+
+  const activity = await v2.getCustomerActivity({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID + "-review"
+  });
+  assert.equal(activity.activity.reviewRequested, true);
+  assert.equal(activity.selectionReview.reviewRequested, true);
+  assert.equal(activity.activity.savedSelections, true);
+  assert.equal(activity.selectionReview.totals.customerEstimateTotal, 8739);
+  assert.equal(activity.selectionReview.totals.difference, 1619);
+  assert.ok(activity.selectionReview.pricedSelections.rooms.length > 0);
+  console.log("ok: 13 Review requested Yes preserves saved selections + totals");
 }
 
 console.log("\nAll studioCustomerSelectionReview tests passed.\n");

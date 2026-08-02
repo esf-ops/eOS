@@ -3354,3 +3354,16 @@
 | **Impacted** | `customerRoomPricingProjection.mjs` (+ regression), `customerEstimateBreakdown.ts`, `phaseChangesBreakdownReconciliation.test.ts`, this doc. |
 | **Protected** | Pricing formulas/rates, browser pricing math, approved estimates, publication snapshots, Studio V2 workflow. |
 | **Revisit trigger** | If a non-material countertop-only customer selection path is introduced, re-evaluate whether a dedicated Countertop change row is needed (with distinct labels). |
+
+### 240. Digital Estimate review copy cleanup — no false estimator-review warning (2026-08-02)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-02 · `hotfix/digital-estimate-review-copy-and-labels` |
+| **Root cause** | `CustomerConfigurationFoundationPanel` always rendered a yellow “Requests that need estimator review” banner, even when `scopeChangeRequests` was empty (“No review-required requests yet.”). That made normal priced selections feel like blockers. Studio V2 selection review also fell back to raw `e100-*` material tokens when `colorName` was missing. |
+| **Decision** | Yellow review warning shows only when true scope requests exist (openings / waterfalls / notes / backsplash change request). Customer copy reframed to “Your selections” + “Send your selections to Elite” (not final acceptance). Studio V2 maps material ids through `getElite100CustomerMaterial` to friendly catalog names (Bayshore Sand, Bear Hug, …) and omits raw `e100-*` ids from the staff DTO. Review-request sync already worked (`reviewRequested` from open amendments); tests now lock it in. |
+| **Why** | Production customer page showed contradictory review language after live pricing started working. |
+| **SQL** | None. |
+| **Impacted** | `CustomerConfigurationFoundationPanel.tsx`, `ConfigurationView.tsx`, `studioCustomerSelectionReview.mjs` (+ test), `customerConfigurationSummary.mjs`, `customerConfigurationFoundation.mjs`, `phaseCustomerReviewCopyCleanup.test.ts`, this doc. |
+| **Protected** | Pricing formulas/rates, browser pricing math, approved estimates, publication snapshots, Studio V2 approve/publish/revision workflow, final acceptance gate. |
+| **Revisit trigger** | When final acceptance is productized, revisit submission CTA copy. |

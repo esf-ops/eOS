@@ -118,16 +118,15 @@ export default function CustomerConfigurationFoundationPanel(props: Props) {
     >
       <div>
         <h2 id="de-customer-config-heading" className="text-base font-semibold text-foreground">
-          Your selections &amp; requests
+          Your selections
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Finish choices can update your estimate. Scope change requests need estimator review
-          before final approval. Your approved estimate baseline is not overwritten.
+          Finish choosing your options. Your estimate updates as selections are saved.
         </p>
       </div>
 
       <div data-testid="de-your-selections">
-        <h3 className="text-sm font-semibold text-foreground">Your selections</h3>
+        <h3 className="text-sm font-semibold text-foreground">Saved selections</h3>
         {selectionItems.length === 0 ? (
           <p className="mt-1 text-sm text-muted-foreground">
             No saved selection summary yet. Choose materials and edges in the rooms above, then
@@ -143,20 +142,25 @@ export default function CustomerConfigurationFoundationPanel(props: Props) {
       </div>
 
       <div data-testid="de-review-required-requests">
-        <h3 className="text-sm font-semibold text-foreground">
-          Requests that need estimator review
-        </h3>
-        <p className="mt-1 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-          These requests require estimator review before final approval.
-        </p>
+        <h3 className="text-sm font-semibold text-foreground">Additional scope requests</h3>
         {scopeItems.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">No review-required requests yet.</p>
+          <p className="mt-1 text-sm text-muted-foreground" data-testid="de-no-scope-requests">
+            No additional scope requests.
+          </p>
         ) : (
-          <ul className="mt-2 list-disc pl-5 text-sm text-foreground space-y-1">
-            {scopeItems.map((item, i) => (
-              <li key={`${item.kind}-${i}`}>{item.label}</li>
-            ))}
-          </ul>
+          <>
+            <p
+              className="mt-1 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2"
+              data-testid="de-scope-review-warning"
+            >
+              These requests need Elite review before final approval.
+            </p>
+            <ul className="mt-2 list-disc pl-5 text-sm text-foreground space-y-1">
+              {scopeItems.map((item, i) => (
+                <li key={`${item.kind}-${i}`}>{item.label}</li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
 
@@ -258,12 +262,12 @@ export default function CustomerConfigurationFoundationPanel(props: Props) {
         >
           {saving ? "Saving…" : "Save selections"}
         </button>
-        {foundation.requiresEstimatorReview ? (
+        {foundation.requiresEstimatorReview && scopeItems.length > 0 ? (
           <span
             className="text-sm text-amber-800"
             data-testid="de-foundation-review-flag"
           >
-            Review required — not final until your estimator approves.
+            Scope requests need Elite review before final approval.
           </span>
         ) : null}
         {foundation.lastSavedAt ? (

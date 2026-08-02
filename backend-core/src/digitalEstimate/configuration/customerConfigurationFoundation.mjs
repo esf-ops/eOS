@@ -6,6 +6,8 @@
  * Browser does not own pricing totals.
  */
 
+import { getElite100CustomerMaterial } from "./elite100CustomerMaterialCatalog.mjs";
+
 export const CUSTOMER_CONFIGURATION_FOUNDATION_KEY = "__customerConfigurationFoundation";
 export const CUSTOMER_CONFIGURATION_FOUNDATION_VERSION = 1;
 
@@ -374,14 +376,37 @@ export function enrichFoundationFromSelectionQuantities(foundation, quantities =
       if (!(Number(qty) > 0)) continue;
       if (!String(key).startsWith("material:")) continue;
       const parts = String(key).split(":");
+      const colorId = parts.slice(2).join(":") || null;
+      const catalog =
+        (colorId && getElite100CustomerMaterial(colorId)) ||
+        (colorId && !/^e100[-_]/i.test(colorId)
+          ? getElite100CustomerMaterial(`e100-${colorId}`)
+          : null);
       next.selectedMaterial = {
         roomId: parts[1] || null,
-        colorId: parts.slice(2).join(":") || null,
-        colorName: null,
-        materialGroup: null,
+        colorId,
+        colorName: catalog?.displayName || null,
+        materialGroup: catalog?.pricingGroupCode || null,
         pieceId: null
       };
       break;
+    }
+  } else if (
+    next.selectedMaterial &&
+    !next.selectedMaterial.colorName &&
+    next.selectedMaterial.colorId
+  ) {
+    // Fill friendly catalog name when only a raw material id was stored.
+    const colorId = String(next.selectedMaterial.colorId);
+    const catalog =
+      getElite100CustomerMaterial(colorId) ||
+      (!/^e100[-_]/i.test(colorId) ? getElite100CustomerMaterial(`e100-${colorId}`) : null);
+    if (catalog?.displayName) {
+      next.selectedMaterial = {
+        ...next.selectedMaterial,
+        colorName: catalog.displayName,
+        materialGroup: next.selectedMaterial.materialGroup || catalog.pricingGroupCode || null
+      };
     }
   }
   if (!next.selectedEdgeProfile) {

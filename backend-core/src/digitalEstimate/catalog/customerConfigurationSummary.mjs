@@ -11,6 +11,7 @@ import {
 import { getProductById } from "./esfPlumbingCatalog.mjs";
 import { parseProductOptionKey } from "./digitalEstimateProductOptions.mjs";
 import { toCustomerSafeProduct } from "./esfPlumbingCatalogContract.mjs";
+import { getElite100CustomerMaterial } from "../configuration/elite100CustomerMaterialCatalog.mjs";
 
 /**
  * @param {{
@@ -71,9 +72,18 @@ export function buildCustomerConfigurationSummary(input = {}) {
     const qty = Number(qtyRaw) || 0;
     if (qty <= 0) continue;
     if (key.startsWith("material:")) {
-      const [, roomKey, token] = key.split(":");
+      const [, roomKey, ...tokenParts] = key.split(":");
+      const token = tokenParts.join(":");
       const room = ensure(roomKey);
-      room.material = { optionKey: key, materialToken: token, quantity: qty };
+      const catalog =
+        getElite100CustomerMaterial(token) ||
+        (!/^e100[-_]/i.test(token) ? getElite100CustomerMaterial(`e100-${token}`) : null);
+      room.material = {
+        optionKey: key,
+        materialToken: token,
+        displayName: catalog?.displayName || null,
+        quantity: qty
+      };
       continue;
     }
     const parsed = parseProductOptionKey(key);
