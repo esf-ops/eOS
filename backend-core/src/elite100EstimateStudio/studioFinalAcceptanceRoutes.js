@@ -61,7 +61,8 @@ function publicError(res, e) {
   ) {
     message = "This estimate link is no longer active. Please contact Elite.";
   } else if (code === "publication_superseded") {
-    message = "A newer estimate is available. Please use the latest link.";
+    message =
+      "A newer estimate is available. Please use the latest estimate link from Elite.";
   } else if (code === "confirmation_required") {
     message = "Please confirm you are accepting this estimate.";
   } else if (

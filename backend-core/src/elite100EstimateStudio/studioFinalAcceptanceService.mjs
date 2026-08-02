@@ -426,7 +426,7 @@ export function createStudioFinalAcceptanceService(deps) {
     if (publication.status === "superseded" || publication.status === "replaced") {
       throw publicationLifecycle(
         "publication_superseded",
-        "A newer estimate is available. Please use the latest link."
+        "A newer estimate is available. Please use the latest estimate link from Elite."
       );
     }
     if (publication.status !== "active") {
@@ -494,7 +494,7 @@ export function createStudioFinalAcceptanceService(deps) {
       if (active && String(active.id) !== String(estimate.id)) {
         throw publicationLifecycle(
           "publication_superseded",
-          "A newer estimate is available. Please use the latest link."
+          "A newer estimate is available. Please use the latest estimate link from Elite."
         );
       }
       // Publication revision must match active estimate revision when present
@@ -505,7 +505,7 @@ export function createStudioFinalAcceptanceService(deps) {
       if (pubRev != null && Number(pubRev) !== Number(active?.revision ?? estimate.revision)) {
         throw publicationLifecycle(
           "publication_superseded",
-          "A newer estimate is available. Please use the latest link."
+          "A newer estimate is available. Please use the latest estimate link from Elite."
         );
       }
     }

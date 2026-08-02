@@ -1478,12 +1478,16 @@ function ReviewRequestModal({
 function FinalAcceptanceModal({
   mode,
   configuredTotalLabel,
+  error,
+  latestEstimateUrl,
   onConfirm,
   onClose,
   busy,
 }: {
   mode: "published" | "configured";
   configuredTotalLabel?: string | null;
+  error?: string | null;
+  latestEstimateUrl?: string | null;
   onConfirm: () => void;
   onClose: () => void;
   busy: boolean;
@@ -1526,6 +1530,20 @@ function FinalAcceptanceModal({
           >
             Your estimate: {configuredTotalLabel}
           </p>
+        ) : null}
+        {error ? (
+          <div className="mt-3 space-y-2" data-testid="de-accept-modal-error">
+            <p className="text-sm text-destructive">{error}</p>
+            {latestEstimateUrl ? (
+              <a
+                href={latestEstimateUrl}
+                className="inline-block text-sm font-medium text-foreground underline underline-offset-2"
+                data-testid="de-accept-open-latest"
+              >
+                Open latest estimate
+              </a>
+            ) : null}
+          </div>
         ) : null}
         <div className="mt-5 flex gap-2">
           <button
@@ -1951,6 +1969,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const [acceptOpen, setAcceptOpen] = useState(false);
   const [acceptBusy, setAcceptBusy] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [acceptLatestUrl, setAcceptLatestUrl] = useState<string | null>(null);
   const [finalAcceptance, setFinalAcceptance] = useState<CustomerFinalAcceptance | null>(null);
   const [reviewRequest, setReviewRequest] = useState<CustomerReviewRequest | null>(null);
   const configurationLocked = Boolean(finalAcceptance);
@@ -2491,6 +2510,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     if (configurationLocked) return;
     setAcceptBusy(true);
     setAcceptError(null);
+    setAcceptLatestUrl(null);
     try {
       const result = await submitFinalAcceptance({
         confirm: true,
@@ -2498,13 +2518,24 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       });
       setFinalAcceptance(result.acceptance);
       setAcceptOpen(false);
+      setAcceptError(null);
+      setAcceptLatestUrl(null);
     } catch (e) {
+      // Action-level failure: keep the loaded estimate page. Do not call onFatal
+      // (that path is for initial load / unrecoverable session wipe only).
       const err = e as ConfigurationSaveError;
-      if (err.lifecycleFatal || err.status === 410) {
-        onFatal();
-        return;
-      }
-      setAcceptError(e instanceof Error ? e.message : "We couldn’t record your acceptance. Please try again.");
+      const message =
+        err?.code === "publication_superseded"
+          ? "A newer estimate is available. Please use the latest estimate link from Elite."
+          : e instanceof Error
+            ? e.message
+            : "We couldn’t record your acceptance. Please try again.";
+      setAcceptError(message);
+      setAcceptLatestUrl(
+        typeof err?.latestEstimateUrl === "string" && /^https?:\/\//i.test(err.latestEstimateUrl)
+          ? err.latestEstimateUrl
+          : null,
+      );
     } finally {
       setAcceptBusy(false);
     }
@@ -3076,9 +3107,18 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           </button>
         ) : null}
         {acceptError ? (
-          <p className="text-center text-xs text-destructive" data-testid="de-accept-error">
-            {acceptError}
-          </p>
+          <div className="space-y-1 text-center" data-testid="de-accept-error">
+            <p className="text-xs text-destructive">{acceptError}</p>
+            {acceptLatestUrl ? (
+              <a
+                href={acceptLatestUrl}
+                className="inline-block text-xs font-medium text-foreground underline underline-offset-2"
+                data-testid="de-accept-open-latest-inline"
+              >
+                Open latest estimate
+              </a>
+            ) : null}
+          </div>
         ) : null}
         {reviewError ? <p className="text-center text-xs text-destructive">{reviewError}</p> : null}
       </div>
@@ -3599,6 +3639,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           configuredTotalLabel={
             acceptMode === "configured" ? authoritativeEstimateLabel : null
           }
+          error={acceptError}
+          latestEstimateUrl={acceptLatestUrl}
           busy={acceptBusy}
           onClose={() => setAcceptOpen(false)}
           onConfirm={() => void onAcceptFinal()}

@@ -552,7 +552,105 @@ export type ConfigurationSaveError = Error & {
   diagnosticCode?: string;
   /** True when the estimate link/session is gone (revoked/expired/unavailable). */
   lifecycleFatal?: boolean;
+  /** Safe latest customer URL from the server only — never invent. */
+  latestEstimateUrl?: string | null;
 };
+
+const ACCEPT_PUBLICATION_SUPERSEDED_MESSAGE =
+  "A newer estimate is available. Please use the latest estimate link from Elite.";
+
+/**
+ * Read a server-provided latest estimate URL only when it is an absolute http(s) URL.
+ * Never invent or rewrite a link.
+ */
+export function readSafeLatestEstimateUrl(body: {
+  latestEstimateUrl?: unknown;
+  latestCustomerUrl?: unknown;
+  replacementCustomerUrl?: unknown;
+  customerUrl?: unknown;
+} | null): string | null {
+  if (!body || typeof body !== "object") return null;
+  for (const key of [
+    "latestEstimateUrl",
+    "latestCustomerUrl",
+    "replacementCustomerUrl",
+    "customerUrl",
+  ] as const) {
+    const raw = body[key];
+    if (typeof raw !== "string") continue;
+    const url = raw.trim();
+    if (/^https?:\/\//i.test(url)) return url;
+  }
+  return null;
+}
+
+/**
+ * Classify final-acceptance action failures.
+ * These must not wipe an already-loaded estimate page — unlike initial load fatals.
+ */
+export function classifyFinalAcceptanceError(
+  status: number,
+  body: {
+    error?: string;
+    code?: string;
+    stage?: string;
+    diagnosticCode?: string;
+    lifecycleFatal?: boolean;
+    latestEstimateUrl?: unknown;
+    latestCustomerUrl?: unknown;
+    replacementCustomerUrl?: unknown;
+    customerUrl?: unknown;
+  } | null,
+): Pick<
+  ConfigurationSaveError,
+  "code" | "stage" | "diagnosticCode" | "lifecycleFatal" | "latestEstimateUrl"
+> & { message: string } {
+  const code = String(body?.code || "").trim();
+  const stage = String(body?.stage || "").trim();
+  const diagnosticCode = String(body?.diagnosticCode || "").trim();
+  const latestEstimateUrl = readSafeLatestEstimateUrl(body);
+
+  if (code === "publication_superseded" || (status === 410 && /newer estimate/i.test(String(body?.error || "")))) {
+    return {
+      message: ACCEPT_PUBLICATION_SUPERSEDED_MESSAGE,
+      code: code || "publication_superseded",
+      stage: stage || "lifecycle",
+      diagnosticCode: diagnosticCode || "DE-ACCEPT-SUPERSEDED",
+      // Action-level: keep the loaded estimate page; show inline/modal error.
+      lifecycleFatal: false,
+      latestEstimateUrl,
+    };
+  }
+
+  if (
+    code === "publication_revoked" ||
+    code === "publication_expired" ||
+    code === "publication_unavailable"
+  ) {
+    return {
+      message: "This estimate link is no longer active. Please contact Elite.",
+      code,
+      stage: stage || "lifecycle",
+      diagnosticCode: diagnosticCode || "DE-ACCEPT-LIFECYCLE",
+      lifecycleFatal: false,
+      latestEstimateUrl,
+    };
+  }
+
+  const mutation = classifyConfigurationMutationError(status, body);
+  return {
+    ...mutation,
+    // Final-acceptance action failures never replace a successfully loaded page.
+    lifecycleFatal: false,
+    latestEstimateUrl,
+    message:
+      code === "publication_superseded"
+        ? ACCEPT_PUBLICATION_SUPERSEDED_MESSAGE
+        : mutation.message === "A newer estimate is available. Please use the latest link."
+          ? ACCEPT_PUBLICATION_SUPERSEDED_MESSAGE
+          : mutation.message || "We couldn’t record your acceptance. Please try again.",
+  };
+}
 
 /**
  * Classify a failed selections/review response.
@@ -601,10 +699,12 @@ export function classifyConfigurationMutationError(
 
   if (code === "publication_superseded") {
     return {
-      message: "A newer estimate is available. Please use the latest link.",
+      message: ACCEPT_PUBLICATION_SUPERSEDED_MESSAGE,
       code,
       stage: stage || "lifecycle",
       diagnosticCode: diagnosticCode || "DE-EXCHANGE-410",
+      // Still lifecycle-fatal for save/review mutations; final-acceptance uses
+      // classifyFinalAcceptanceError and keeps the loaded page.
       lifecycleFatal: true,
     };
   }
@@ -995,25 +1095,40 @@ export async function submitFinalAcceptance(payload: {
     throw err;
   }
   if (!res.ok) {
-    let body: { error?: string; code?: string; stage?: string; diagnosticCode?: string } | null =
-      null;
+    let body: {
+      error?: string;
+      code?: string;
+      stage?: string;
+      diagnosticCode?: string;
+      lifecycleFatal?: boolean;
+      latestEstimateUrl?: unknown;
+      latestCustomerUrl?: unknown;
+      replacementCustomerUrl?: unknown;
+      customerUrl?: unknown;
+    } | null = null;
     try {
       body = (await res.json()) as {
         error?: string;
         code?: string;
         stage?: string;
         diagnosticCode?: string;
+        lifecycleFatal?: boolean;
+        latestEstimateUrl?: unknown;
+        latestCustomerUrl?: unknown;
+        replacementCustomerUrl?: unknown;
+        customerUrl?: unknown;
       };
     } catch {
       body = null;
     }
-    const classified = classifyConfigurationMutationError(res.status, body);
+    const classified = classifyFinalAcceptanceError(res.status, body);
     const err = new Error(classified.message || "Unable to accept estimate") as ConfigurationSaveError;
     err.status = res.status;
     err.code = classified.code;
     err.stage = classified.stage;
     err.diagnosticCode = classified.diagnosticCode;
-    err.lifecycleFatal = classified.lifecycleFatal;
+    err.lifecycleFatal = false;
+    err.latestEstimateUrl = classified.latestEstimateUrl || null;
     throw err;
   }
   return (await res.json()) as {

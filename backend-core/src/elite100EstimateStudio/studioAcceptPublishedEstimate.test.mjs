@@ -541,6 +541,20 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
   assert.ok(view.includes("de-final-acceptance-modal"));
   assert.ok(view.includes("Elite has received your acceptance"));
   assert.ok(view.includes("Elite review is required"));
+  assert.ok(
+    view.includes(
+      "A newer estimate is available. Please use the latest estimate link from Elite."
+    )
+  );
+  const acceptFn = view.slice(
+    view.indexOf("async function onAcceptFinal"),
+    view.indexOf("function applyPlumbingSource")
+  );
+  assert.equal(
+    acceptFn.includes("onFatal("),
+    false,
+    "accept action must not wipe page on publication_superseded"
+  );
   assert.equal(view.includes("Approve final estimate"), false);
 
   const panelSrc = readFileSync(

@@ -174,6 +174,8 @@ assert.ok(api.includes("We couldn’t send your review request"), "transient map
     lifecycleFatal: true,
   });
   assert.match(replaced.message, /newer estimate/i);
+  assert.match(replaced.message, /latest estimate link from Elite/i);
+  assert.equal(replaced.lifecycleFatal, true);
 
   const pending = classifyConfigurationMutationError(409, {
     error: "stale",
