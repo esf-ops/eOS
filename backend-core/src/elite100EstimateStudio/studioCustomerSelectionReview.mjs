@@ -14,6 +14,7 @@ import {
   enrichFoundationFromSelectionQuantities
 } from "../digitalEstimate/configuration/customerConfigurationFoundation.mjs";
 import { splitSelectionPayloadMeta } from "../digitalEstimate/configuration/customerConfigurationDraft.mjs";
+import { getElite100CustomerMaterial } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
 
 const FORBIDDEN_REVIEW_KEYS = [
   "pricing_evidence",
@@ -55,9 +56,32 @@ function humanizeToken(token) {
   const t = str(token);
   if (!t) return null;
   return t
+    .replace(/^e100[-_]/i, "")
     .replace(/^edge[_-]?/i, "")
+    .replace(/^group[_-]?/i, "Group ")
     .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Prefer Elite 100 catalog display names over raw material ids / slugs.
+ * @param {unknown} token
+ * @returns {string|null}
+ */
+export function friendlyMaterialLabel(token) {
+  const raw = str(token);
+  if (!raw) return null;
+  const candidates = [raw];
+  if (!/^e100[-_]/i.test(raw)) candidates.push(`e100-${raw}`);
+  for (const id of candidates) {
+    const mat = getElite100CustomerMaterial(id);
+    if (mat?.displayName) return String(mat.displayName);
+  }
+  // Already a friendly name (spaces / title case) — keep as-is.
+  if (/\s/.test(raw) && !/^e100[-_]/i.test(raw)) return raw;
+  return humanizeToken(raw);
 }
 
 function roomDisplayLabel(room) {
@@ -145,11 +169,13 @@ function mapPricedRoom(room, foundation) {
       : null;
 
   const materialLabel =
-    str(materialFromFoundation?.colorName) ||
+    friendlyMaterialLabel(materialFromFoundation?.colorName) ||
+    friendlyMaterialLabel(materialFromFoundation?.colorId) ||
+    friendlyMaterialLabel(room?.material?.displayName) ||
+    friendlyMaterialLabel(room?.material?.materialToken) ||
     (materialFromFoundation?.materialGroup
       ? `Group ${String(materialFromFoundation.materialGroup).replace(/^group[_ ]?/i, "").toUpperCase()}`
       : null) ||
-    str(room?.material?.materialToken) ||
     null;
 
   const materialGroup =
@@ -233,9 +259,8 @@ function mapPricedRoom(room, foundation) {
   return {
     roomKey,
     roomName: roomDisplayLabel(room),
-    material: materialLabel
-      ? { label: materialLabel, group: materialGroup, colorId: str(materialFromFoundation?.colorId) }
-      : null,
+    // Staff-safe: friendly catalog label only — never raw e100-* color ids.
+    material: materialLabel ? { label: materialLabel, group: materialGroup } : null,
     edge: edgeLabel ? { label: edgeLabel } : null,
     backsplash: backsplashLabel ? { label: backsplashLabel } : null,
     sink,

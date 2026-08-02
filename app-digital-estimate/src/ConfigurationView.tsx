@@ -1410,12 +1410,12 @@ function ReviewRequestModal({
         aria-labelledby="review-modal-title"
         aria-modal="true"
       >
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">Request review</div>
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">Send selections</div>
         <div id="review-modal-title" className="mt-1 text-lg font-semibold text-foreground">
-          Ready for Elite to review your selections?
+          Send your selections to Elite
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          This is not final acceptance. Pricing and availability remain subject to estimator review.
+          This is not final acceptance. Elite will confirm details before the job is sold.
         </p>
         <dl className="mt-4 space-y-1.5 rounded-xl border border-border bg-muted/20 px-3 py-3 text-sm">
           {configuredTotalLabel ? (
@@ -1467,7 +1467,7 @@ function ReviewRequestModal({
             }}
             className="rounded-md bg-foreground px-4 py-2 text-xs font-semibold text-background disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
           >
-            {busy ? "Sending…" : "Request review"}
+            {busy ? "Sending…" : "Send selections"}
           </button>
         </div>
       </div>
@@ -3056,8 +3056,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             {configurationLocked
               ? "Selections locked"
               : reviewRequest
-                ? "Request already sent"
-                : "Request review"}
+                ? "Selections already sent"
+                : "Send selections"}
           </button>
         ) : null}
         {canSubmitForFinalReview && !configurationLocked ? (
@@ -3377,10 +3377,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                 data-testid="de-review-cta"
               >
                 <h2 className="text-base font-semibold text-foreground">
-                  Ready for Elite to review your selections?
+                  Send your selections to Elite
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Send your estimate for review — not final acceptance.
+                  This is not final acceptance. Elite will confirm details before the job is sold.
                 </p>
                 <div className="mt-4 space-y-2 de-interactive-chrome">
                   {printEstimateButton("de-print-estimate-bottom")}
@@ -3397,7 +3397,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                   className="mt-2 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                   data-testid="de-request-review-bottom"
                 >
-                  {reviewRequest ? "Request already sent" : "Request review"}
+                  {reviewRequest ? "Selections already sent" : "Send selections"}
                 </button>
               </section>
             ) : (
