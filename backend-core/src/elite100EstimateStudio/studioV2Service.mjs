@@ -27,7 +27,11 @@ import {
   STUDIO_V2_ERROR_CODES,
   studioV2UserMessage
 } from "./studioV2Errors.mjs";
-import { isOpenDigitalEstimateReviewRequestStatus } from "../digitalEstimate/configuration/amendmentConfig.mjs";
+import {
+  isOpenDigitalEstimateReviewRequestStatus,
+  OPEN_REVIEW_REQUEST_STATUSES,
+  REVIEW_STATUS
+} from "../digitalEstimate/configuration/amendmentConfig.mjs";
 import {
   buildStudioV2CalculationResult,
   buildStudioV2ProjectHeader,
@@ -84,6 +88,12 @@ import {
   isStudioV2ApprovedSnapshot,
   isStudioV2EditableWorkingDraft
 } from "./studioV2Revision.mjs";
+import {
+  buildCustomerSelectionRevisionInfo,
+  customerSelectionRevisionEstimateId,
+  mapCustomerConfigurationToStudioV2DraftPatch,
+  matchesCustomerSelectionRevision
+} from "./studioV2CustomerSelectionRevision.mjs";
 
 /**
  * @param {{
@@ -93,6 +103,9 @@ import {
  *   studioEstimateService?: any,
  *   studioDigitalEstimateService?: any,
  *   lifecycleRepository?: any,
+ *   amendmentRepository?: any,
+ *   configurationRepository?: any,
+ *   configurationStudioService?: any,
  *   calculateStudioEstimateImpl?: Function,
  *   loadTakeoffWorkspace?: Function,
  *   loadLatestTakeoffResult?: Function
@@ -110,6 +123,7 @@ export function createStudioV2Service(deps = {}) {
         db: deps.getSupabase?.()
       });
   const repository = repoBundle.repository;
+  const amendmentRepository = deps.amendmentRepository || null;
 
   const studioEstimateService =
     deps.studioEstimateService ||
@@ -356,6 +370,7 @@ export function createStudioV2Service(deps = {}) {
         approvalReadiness: assessStudioV2ApprovalReadiness(null),
         approvedSummary: buildStudioV2ApprovedSummary(null),
         revisionAffordance: buildStudioV2RevisionAffordance(null),
+        customerSelectionRevision: null,
         publishReadiness: assessStudioV2PublishReadiness(null),
         approvedPublished: {
           approved: false,
@@ -397,6 +412,10 @@ export function createStudioV2Service(deps = {}) {
         approvalReadiness: assessStudioV2ApprovalReadiness(row),
         approvedSummary: buildStudioV2ApprovedSummary(estimate),
         revisionAffordance: buildStudioV2RevisionAffordance(estimate),
+        customerSelectionRevision: buildCustomerSelectionRevisionInfo(row.scope, {
+          status: row.status,
+          needsRecalculation: !row.calculationSnapshot
+        }),
         publishReadiness: assessStudioV2PublishReadiness(row),
         approvedPublished: buildApprovedPublishedPointers(estimate, null),
         publicationSummary: buildSafeStudioPublicationSummary({ estimate }),
@@ -451,6 +470,13 @@ export function createStudioV2Service(deps = {}) {
       approvalReadiness: assessStudioV2ApprovalReadiness(row),
       approvedSummary: buildStudioV2ApprovedSummary(estimateWithPub, revisionOpts),
       revisionAffordance,
+      customerSelectionRevision: buildCustomerSelectionRevisionInfo(row.scope, {
+        status: row.status,
+        published: (pubBundle.publications || []).some((publication) =>
+          isCurrentActivePublicationForEstimate(row, publication)
+        ),
+        needsRecalculation: !row.calculationSnapshot
+      }),
       publishReadiness: assessStudioV2PublishReadiness(row),
       approvedPublished: buildApprovedPublishedPointers(estimateWithPub, pubBundle),
       publicationSummary: pubBundle.publicationSummary,
@@ -1136,6 +1162,34 @@ export function createStudioV2Service(deps = {}) {
    * Never calls ensure-editable-draft / open-measurement-revision /
    * refresh-from-takeoff / Takeoff reopen / publish / auto-approve / auto-calculate.
    */
+  async function createEditableSiblingFromApproved({
+    organizationId,
+    source,
+    scope,
+    actorUserId,
+    staleReason,
+    revisionId = null
+  }) {
+    if (typeof repository.createSiblingRevisionFrom !== "function") {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNAVAILABLE, {
+        message: "Revision creation is unavailable for this repository."
+      });
+    }
+    return repository.createSiblingRevisionFrom(
+      organizationId,
+      source.id,
+      {
+        ...(revisionId ? { id: revisionId } : {}),
+        status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
+        scope,
+        takeoffJobId: source.takeoffJobId,
+        sourceTakeoffResultId: source.sourceTakeoffResultId,
+        staleReason
+      },
+      actorUserId || null
+    );
+  }
+
   async function createRevisionFromApproved({
     organizationId,
     intakeCaseId,
@@ -1262,15 +1316,12 @@ export function createStudioV2Service(deps = {}) {
       }
     }
 
-    if (typeof repository.createSiblingRevisionFrom !== "function") {
-      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNAVAILABLE, {
-        message: "Revision creation is unavailable for this repository."
-      });
-    }
-
     const clonedScope = deepCloneStudioV2Json(
       source.scope && typeof source.scope === "object" ? source.scope : {}
     );
+    // A manual revision is not the direct customer-selection revision that its
+    // source may have been. Do not inherit stale submitted-selection identity.
+    delete clonedScope.studioV2CustomerSelectionRevision;
     clonedScope.studioV2RevisionOrigin = {
       basedOnEstimateId: source.id,
       basedOnRevision: Number(source.revision) || 1,
@@ -1279,18 +1330,13 @@ export function createStudioV2Service(deps = {}) {
       createdByUserId: actorUserId || null
     };
 
-    const next = await repository.createSiblingRevisionFrom(
+    const next = await createEditableSiblingFromApproved({
       organizationId,
-      source.id,
-      {
-        status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE,
-        scope: clonedScope,
-        takeoffJobId: source.takeoffJobId,
-        sourceTakeoffResultId: source.sourceTakeoffResultId,
-        staleReason: `Editable revision from approved R${Number(source.revision) || 1} — recalculate before approving`
-      },
-      actorUserId || null
-    );
+      source,
+      scope: clonedScope,
+      actorUserId,
+      staleReason: `Editable revision from approved R${Number(source.revision) || 1} — recalculate before approving`
+    });
 
     const sourceAfter = await repository.getById(organizationId, source.id);
 
@@ -1350,6 +1396,432 @@ export function createStudioV2Service(deps = {}) {
         autoApprove: false,
         autoCalculate: false,
         sourceMutated: false
+      }
+    };
+  }
+
+  /**
+   * POST customer-selections/create-revision — resolve the immutable submitted
+   * review request server-side and fork an editable sibling from its approved
+   * publication source. Design selections are mapped conservatively; physical
+   * scope requests remain persisted review metadata.
+   */
+  async function createRevisionFromCustomerSelections({
+    organizationId,
+    intakeCaseId,
+    actorUserId,
+    body
+  }) {
+    const caseId = String(intakeCaseId || "").trim();
+    if (!caseId) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "caseId is required.",
+        statusCode: 400
+      });
+    }
+    if (body?.confirmed !== true) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "confirmed: true is required to create a revision.",
+        statusCode: 400
+      });
+    }
+    const allowedBodyFields = new Set([
+      "confirmed",
+      "clientMutationId",
+      "publicationId",
+      "reviewRequestId"
+    ]);
+    const rejectedBodyFields = Object.keys(
+      body && typeof body === "object" ? body : {}
+    ).filter((key) => !allowedBodyFields.has(key));
+    if (rejectedBodyFields.length) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "Only safe revision identifiers are accepted.",
+        statusCode: 400,
+        details: { rejectedFields: rejectedBodyFields.slice(0, 20) }
+      });
+    }
+    if (
+      !amendmentRepository ||
+      typeof amendmentRepository.getReviewRequest !== "function" ||
+      typeof amendmentRepository.claimReviewRequestStatus !== "function" ||
+      !configurationRepository ||
+      typeof configurationRepository.getSelectionById !== "function" ||
+      !lifecycleRepository ||
+      typeof lifecycleRepository.getAcceptanceForEstimate !== "function"
+    ) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNAVAILABLE, {
+        message: "Customer selection revision service is unavailable."
+      });
+    }
+
+    const finishExisting = async (existing, requestId = null) => {
+      const info = buildCustomerSelectionRevisionInfo(existing.scope, {
+        status: existing.status,
+        needsRecalculation: !existing.calculationSnapshot
+      });
+      const resolvedRequestId = requestId || info?.sourceReviewRequestId || null;
+      if (
+        resolvedRequestId &&
+        typeof amendmentRepository.claimReviewRequestStatus === "function"
+      ) {
+        // Recover a crash after revision insert but before status advancement.
+        // Do not overwrite clarification or any resolved staff/customer state
+        // when an already-created revision is merely replayed.
+        await amendmentRepository.claimReviewRequestStatus(
+          organizationId,
+          resolvedRequestId,
+          [
+            REVIEW_STATUS.REQUESTED,
+            REVIEW_STATUS.REVIEWING,
+            "open",
+            "new",
+            "triaged",
+            "customer_replied"
+          ],
+          REVIEW_STATUS.AMENDMENT_PREPARED
+        );
+      }
+      const estimate = safeView(existing);
+      return {
+        ok: true,
+        created: false,
+        reused: true,
+        alreadyCreated: true,
+        caseId,
+        estimateId: estimate.id,
+        revision: estimate.revision,
+        status: estimate.status,
+        customerSelectionRevision: info,
+        notice: "Revision already created from these customer selections.",
+        sideEffects: {
+          sourceMutated: false,
+          publicationMutated: false,
+          calculate: false,
+          approve: false,
+          publish: false,
+          accept: false,
+          sold: false
+        }
+      };
+    };
+
+    const source = await loadActiveEstimateOrNull(organizationId, caseId);
+    if (!source) throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_ESTIMATE);
+    const activeCustomerRevision = buildCustomerSelectionRevisionInfo(source.scope, {
+      status: source.status,
+      needsRecalculation: !source.calculationSnapshot
+    });
+    if (activeCustomerRevision && isStudioV2EditableWorkingDraft(source)) {
+      if (
+        body?.reviewRequestId &&
+        String(body.reviewRequestId) !==
+          String(activeCustomerRevision.sourceReviewRequestId || "")
+      ) {
+        throw createStudioV2Error(
+          STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_CONFLICT
+        );
+      }
+      return finishExisting(source, activeCustomerRevision.sourceReviewRequestId);
+    }
+    if (!isStudioV2ApprovedSnapshot(source)) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.REVISION_REQUIRES_APPROVED, {
+        details: { estimateId: source.id, status: source.status, revision: source.revision }
+      });
+    }
+    if (isStudioV2OriginUnsupported(source)) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNSUPPORTED_ORIGIN);
+    }
+
+    const acceptance = await lifecycleRepository.getAcceptanceForEstimate(
+      organizationId,
+      source.id
+    );
+    if (acceptance) {
+      throw createStudioV2Error(
+        STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_ALREADY_ACCEPTED,
+        {
+          details: { estimateId: source.id }
+        }
+      );
+    }
+
+    const pubBundle = await loadPublicationBundle(organizationId, source);
+    const publications = Array.isArray(pubBundle.publications) ? pubBundle.publications : [];
+    const activePublication =
+      publications.find((publication) =>
+        isCurrentActivePublicationForEstimate(source, publication)
+      ) ||
+      pubBundle.activePublication ||
+      null;
+    const publicationId =
+      activePublication?.id || activePublication?.publicationId || null;
+    if (!publicationId) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_NOT_SENT, {
+        message: "No active published estimate is available for submitted customer selections."
+      });
+    }
+    if (
+      body?.publicationId &&
+      String(body.publicationId) !== String(publicationId)
+    ) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION, {
+        message: "The selected publication is no longer active. Reload customer activity."
+      });
+    }
+
+    const openSummaries = (pubBundle.reviewRequests || [])
+      .filter(
+        (request) =>
+          String(request.publicationId || request.publication_id || "") ===
+            String(publicationId) &&
+          isOpenDigitalEstimateReviewRequestStatus(request.status)
+      )
+      .sort((a, b) =>
+        String(b.requestedAt || b.created_at || "").localeCompare(
+          String(a.requestedAt || a.created_at || "")
+        )
+      );
+    const latestSummary = openSummaries[0] || null;
+    if (!latestSummary?.id) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_NOT_SENT);
+    }
+    if (
+      body?.reviewRequestId &&
+      String(body.reviewRequestId) !== String(latestSummary.id)
+    ) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.SUPERSEDED_REVISION, {
+        message: "A newer customer selection request exists. Reload before creating a revision."
+      });
+    }
+
+    const reviewRequest = await amendmentRepository.getReviewRequest(
+      organizationId,
+      latestSummary.id
+    );
+    if (
+      !reviewRequest ||
+      String(reviewRequest.publication_id || "") !== String(publicationId) ||
+      !isOpenDigitalEstimateReviewRequestStatus(reviewRequest.status)
+    ) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_NOT_SENT);
+    }
+    if (!reviewRequest.selection_id) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_SOURCE_UNAVAILABLE);
+    }
+
+    const selection = await configurationRepository.getSelectionById(
+      organizationId,
+      reviewRequest.selection_id
+    );
+    const selectionMatchesRequest =
+      selection &&
+      String(selection.id || "") === String(reviewRequest.selection_id) &&
+      (!reviewRequest.envelope_id ||
+        String(selection.envelope_id || "") === String(reviewRequest.envelope_id)) &&
+      (!reviewRequest.session_id ||
+        String(selection.session_id || "") === String(reviewRequest.session_id)) &&
+      (!reviewRequest.selection_hash ||
+        String(selection.selection_hash || "") === String(reviewRequest.selection_hash));
+    if (!selectionMatchesRequest) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_SOURCE_UNAVAILABLE);
+    }
+
+    const revisionId = customerSelectionRevisionEstimateId({
+      organizationId,
+      intakeCaseId: caseId,
+      sourceApprovedEstimateId: source.id,
+      reviewRequest
+    });
+    const revisionByIdentity =
+      typeof repository.getById === "function"
+        ? await repository.getById(organizationId, revisionId)
+        : null;
+    if (revisionByIdentity) {
+      if (matchesCustomerSelectionRevision(revisionByIdentity.scope, reviewRequest)) {
+        return finishExisting(revisionByIdentity, reviewRequest.id);
+      }
+      throw createStudioV2Error(
+        STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_CONFLICT
+      );
+    }
+
+    const siblings =
+      typeof repository.listByIntakeCase === "function"
+        ? await repository.listByIntakeCase(organizationId, caseId)
+        : [];
+    const matching = (siblings || [])
+      .filter(
+        (row) =>
+          row &&
+          row.id !== source.id &&
+          matchesCustomerSelectionRevision(row.scope, reviewRequest)
+      )
+      .sort((a, b) => Number(b.revision || 1) - Number(a.revision || 1))[0];
+
+    if (matching) return finishExisting(matching, reviewRequest.id);
+
+    const otherEditable = (siblings || [])
+      .filter(
+        (row) =>
+          row &&
+          row.id !== source.id &&
+          isStudioV2EditableWorkingDraft(row) &&
+          !matchesCustomerSelectionRevision(row.scope, reviewRequest)
+      )
+      .sort((a, b) => Number(b.revision || 1) - Number(a.revision || 1))[0];
+    if (otherEditable) {
+      throw createStudioV2Error(
+        STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_CONFLICT,
+        {
+          details: {
+            activeEstimateId: otherEditable.id,
+            activeRevision: otherEditable.revision
+          }
+        }
+      );
+    }
+
+    const mapped = mapCustomerConfigurationToStudioV2DraftPatch({
+      sourceScope: source.scope,
+      reviewRequest,
+      selection,
+      actorUserId
+    });
+    const createdAt = new Date().toISOString();
+    const clientMutationId =
+      typeof body?.clientMutationId === "string"
+        ? body.clientMutationId.trim().slice(0, 120)
+        : null;
+    const nextScope = mapped.scope;
+    nextScope.studioV2RevisionOrigin = {
+      basedOnEstimateId: source.id,
+      basedOnRevision: Number(source.revision) || 1,
+      reason: "Customer selections review",
+      kind: "customer_selections",
+      createdAt,
+      createdByUserId: actorUserId || null
+    };
+    nextScope.studioV2CustomerSelectionRevision = {
+      createdFromCustomerSelections: true,
+      createdFromCustomerSelectionsAt: createdAt,
+      createdByUserId: actorUserId || null,
+      clientMutationId,
+      sourcePublicationId: mapped.source.publicationId || publicationId,
+      sourceReviewRequestId: mapped.source.reviewRequestId,
+      sourceSelectionId: mapped.source.selectionId,
+      sourceSelectionHash: mapped.source.selectionHash,
+      sourceApprovedEstimateId: source.id,
+      sourceApprovedRevision: Number(source.revision) || 1,
+      appliedSelectionsSummary: mapped.appliedSummary,
+      notAppliedScopeRequests: mapped.notAppliedRequests,
+      warnings: mapped.warnings
+    };
+
+    let revised;
+    try {
+      revised = await createEditableSiblingFromApproved({
+        organizationId,
+        source,
+        scope: nextScope,
+        actorUserId,
+        revisionId,
+        staleReason:
+          "Revision created from customer selections — review scope and recalculate before approving"
+      });
+    } catch (error) {
+      const racedByIdentity =
+        typeof repository.getById === "function"
+          ? await repository.getById(organizationId, revisionId)
+          : null;
+      if (
+        racedByIdentity &&
+        matchesCustomerSelectionRevision(racedByIdentity.scope, reviewRequest)
+      ) {
+        return finishExisting(racedByIdentity, reviewRequest.id);
+      }
+      if (typeof repository.listByIntakeCase === "function") {
+        const after = await repository.listByIntakeCase(organizationId, caseId);
+        const raced = (after || []).find((row) =>
+          matchesCustomerSelectionRevision(row?.scope, reviewRequest)
+        );
+        if (raced) return finishExisting(raced, reviewRequest.id);
+      }
+      throw error;
+    }
+
+    const preparedRequest =
+      typeof amendmentRepository.claimReviewRequestStatus === "function"
+        ? await amendmentRepository.claimReviewRequestStatus(
+            organizationId,
+            reviewRequest.id,
+            OPEN_REVIEW_REQUEST_STATUSES.filter(
+              (status) => status !== REVIEW_STATUS.AMENDMENT_PREPARED
+            ),
+            REVIEW_STATUS.AMENDMENT_PREPARED
+          )
+        : null;
+
+    let auditEventRecorded = false;
+    if (typeof amendmentRepository.appendEvent === "function") {
+      try {
+        await amendmentRepository.appendEvent({
+          organization_id: organizationId,
+          publication_id: publicationId,
+          review_request_id: reviewRequest.id,
+          event_type: "studio_v2_customer_selection_revision_created",
+          actor_type: "user",
+          actor_user_id: actorUserId || null,
+          metadata: {
+            sourceEstimateId: source.id,
+            revisedEstimateId: revised.id,
+            revision: revised.revision,
+            selectionId: reviewRequest.selection_id,
+            physicalScopeRequestsNotApplied: mapped.notAppliedRequests.length
+          }
+        });
+        auditEventRecorded = true;
+      } catch {
+        // scope_json carries the durable audit marker; event history is best-effort.
+      }
+    }
+
+    const estimate = safeView(revised);
+    return {
+      ok: true,
+      created: true,
+      reused: false,
+      alreadyCreated: false,
+      caseId,
+      estimateId: estimate.id,
+      revision: estimate.revision,
+      status: estimate.status,
+      basedOnEstimateId: source.id,
+      basedOnRevision: source.revision,
+      customerSelectionRevision: buildCustomerSelectionRevisionInfo(revised.scope, {
+        status: revised.status,
+        needsRecalculation: !revised.calculationSnapshot
+      }),
+      appliedSelectionsSummary: mapped.appliedSummary,
+      notAppliedScopeRequests: mapped.notAppliedRequests,
+      warnings: mapped.warnings,
+      reviewRequestStatus:
+        preparedRequest?.status ||
+        (reviewRequest.status === REVIEW_STATUS.AMENDMENT_PREPARED
+          ? REVIEW_STATUS.AMENDMENT_PREPARED
+          : reviewRequest.status),
+      auditEventRecorded,
+      clientMutationId,
+      notice:
+        "Revision created from customer selections. Review scope, recalculate, approve, then republish.",
+      sideEffects: {
+        sourceMutated: false,
+        publicationMutated: false,
+        calculate: false,
+        approve: false,
+        publish: false,
+        accept: false,
+        sold: false
       }
     };
   }
@@ -1533,6 +2005,90 @@ export function createStudioV2Service(deps = {}) {
         classified.find((p) => p.active) ||
         (publication.publicationId || publication.customerUrl ? activeFromResult : null);
 
+      let customerSelectionReviewStatusUpdated = false;
+      let customerSelectionReviewStatusResolved = false;
+      const customerRevision = buildCustomerSelectionRevisionInfo(row.scope, {
+        status: row.status,
+        published: Boolean(activePublication),
+        needsRecalculation: false
+      });
+      if (
+        customerRevision?.sourceReviewRequestId &&
+        amendmentRepository &&
+        typeof amendmentRepository.getReviewRequest === "function" &&
+        typeof amendmentRepository.claimReviewRequestStatus === "function"
+      ) {
+        try {
+          const request = await amendmentRepository.getReviewRequest(
+            organizationId,
+            customerRevision.sourceReviewRequestId
+          );
+          if (
+            request &&
+            [
+              REVIEW_STATUS.PUBLISHED,
+              REVIEW_STATUS.CLOSED,
+              REVIEW_STATUS.SUPERSEDED
+            ].includes(request.status)
+          ) {
+            customerSelectionReviewStatusResolved = true;
+          }
+          if (request && isOpenDigitalEstimateReviewRequestStatus(request.status)) {
+            const resolvedRequest =
+              await amendmentRepository.claimReviewRequestStatus(
+                organizationId,
+                request.id,
+                OPEN_REVIEW_REQUEST_STATUSES,
+                REVIEW_STATUS.PUBLISHED
+              );
+            customerSelectionReviewStatusUpdated = Boolean(resolvedRequest);
+            customerSelectionReviewStatusResolved = Boolean(resolvedRequest);
+            if (
+              !resolvedRequest &&
+              typeof amendmentRepository.getReviewRequest === "function"
+            ) {
+              const afterClaim = await amendmentRepository.getReviewRequest(
+                organizationId,
+                request.id
+              );
+              customerSelectionReviewStatusResolved = Boolean(
+                afterClaim &&
+                  [
+                    REVIEW_STATUS.PUBLISHED,
+                    REVIEW_STATUS.CLOSED,
+                    REVIEW_STATUS.SUPERSEDED
+                  ].includes(afterClaim.status)
+              );
+            }
+            if (
+              resolvedRequest &&
+              typeof amendmentRepository.appendEvent === "function"
+            ) {
+              try {
+                await amendmentRepository.appendEvent({
+                  organization_id: organizationId,
+                  publication_id: publication.publicationId || null,
+                  review_request_id: request.id,
+                  event_type: "studio_v2_customer_selection_revision_published",
+                  actor_type: "user",
+                  actor_user_id: actorUserId || null,
+                  metadata: {
+                    estimateId: row.id,
+                    revision: row.revision,
+                    replacementPublicationId: publication.publicationId || null
+                  }
+                });
+              } catch {
+                // Status is authoritative; event history is best-effort.
+              }
+            }
+          }
+        } catch {
+          // Publish already succeeded. A safe idempotent publish retry can repair
+          // review status without rolling back or duplicating the publication.
+        }
+      }
+
       const clientMutationId =
         typeof body?.clientMutationId === "string"
           ? body.clientMutationId.trim().slice(0, 120)
@@ -1563,11 +2119,18 @@ export function createStudioV2Service(deps = {}) {
           updated: interactiveEnvelope.updated
         },
         publishedConfiguration: publication.publishedConfiguration,
-        staffNotice: publication.staffNotice,
+        staffNotice:
+          customerRevision &&
+          customerRevision.sourceReviewRequestId &&
+          !customerSelectionReviewStatusResolved
+            ? `${publication.staffNotice || "Published."} Customer review status could not be closed automatically; retry publish or contact support.`
+            : publication.staffNotice,
         publicationSummary: pubBundle.publicationSummary || publication.summary,
         activePublication,
         historicalPublications: classified.filter((p) => p.historical),
         publishReadiness: { ...readiness, published: Boolean(activePublication) },
+        customerSelectionReviewStatusUpdated,
+        customerSelectionReviewStatusResolved,
         clientMutationId,
         sideEffects: {
           simplifiedPublish: false,
@@ -1814,12 +2377,19 @@ export function createStudioV2Service(deps = {}) {
       revision: estimate.revision,
       publicationSummary: summary,
       publications: classified,
-      activePublication: classified.find((p) => p.active) || null,
+      activePublication,
       historicalPublications: classified.filter((p) => p.historical),
       reviewRequests,
       acceptance,
       activity: activityFlags,
-      selectionReview
+      selectionReview,
+      customerSelectionRevision: buildCustomerSelectionRevisionInfo(row.scope, {
+        status: row.status,
+        published: publications.some((publication) =>
+          isCurrentActivePublicationForEstimate(row, publication)
+        ),
+        needsRecalculation: !row.calculationSnapshot
+      })
     };
   }
 
@@ -1830,6 +2400,7 @@ export function createStudioV2Service(deps = {}) {
     patchWorkingDraftPricing,
     approveWorkingDraft,
     createRevisionFromApproved,
+    createRevisionFromCustomerSelections,
     previewTakeoffImport,
     applyTakeoffImport,
     calculateWorkingDraft,

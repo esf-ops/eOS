@@ -788,6 +788,12 @@ export function createInMemoryConfigurationRepository(opts = {}) {
       return rows[0] ? structuredClone(rows[0]) : null;
     },
 
+    async getSelectionById(organizationId, selectionId) {
+      const row = selections.get(String(selectionId));
+      if (!row || row.organization_id !== organizationId) return null;
+      return structuredClone(row);
+    },
+
     /**
      * Staff-safe, org-scoped activity projection for portfolio reads.
      * Returns identifiers, timestamps, and persisted backend totals only.
@@ -1858,6 +1864,17 @@ export function createSupabaseConfigurationRepository({ db }) {
         .eq("organization_id", organizationId)
         .eq("session_id", sessionId)
         .order("created_at", { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
+    async getSelectionById(organizationId, selectionId) {
+      const { data, error } = await db
+        .from("digital_estimate_configuration_selections")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", selectionId)
         .limit(1);
       if (error) throw error;
       return data?.[0] ?? null;

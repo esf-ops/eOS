@@ -4258,13 +4258,15 @@ button.linkish {
 .studio-v2-selection-totals,
 .studio-v2-selection-priced,
 .studio-v2-selection-scope,
-.studio-v2-selection-diagnostics {
+.studio-v2-selection-diagnostics,
+.studio-v2-selection-revision-create {
   margin-top: 1.1rem;
 }
 .studio-v2-selection-totals h3,
 .studio-v2-selection-priced h3,
 .studio-v2-selection-scope h3,
-.studio-v2-selection-diagnostics h3 {
+.studio-v2-selection-diagnostics h3,
+.studio-v2-selection-revision-create h3 {
   margin: 0 0 0.45rem;
   font-size: 0.95rem;
 }
@@ -4286,7 +4288,13 @@ button.linkish {
   margin: 0 0 0.5rem;
   font-size: 0.92rem;
 }
-.studio-v2-selection-readonly {
-  margin-top: 1rem;
-  font-size: 0.82rem;
+.studio-v2-selection-revision-create {
+  border-top: 1px solid rgba(15, 23, 42, 0.12);
+  padding-top: 1rem;
+}
+.studio-v2-selection-revision-create .studio-v2-notice p {
+  margin: 0.4rem 0 0.75rem;
+}
+.studio-v2-selection-revision-create .studio-v2-notice h4 {
+  margin: 0.9rem 0 0.35rem;
 }

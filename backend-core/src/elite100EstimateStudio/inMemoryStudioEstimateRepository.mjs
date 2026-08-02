@@ -219,8 +219,14 @@ export class InMemoryStudioEstimateRepository {
       err.code = "estimate_not_found";
       throw err;
     }
+    if (input.id && this.byId.has(String(input.id))) {
+      const err = new Error("Estimate revision already exists");
+      err.statusCode = 409;
+      err.code = "estimate_revision_exists";
+      throw err;
+    }
     const row = buildStudioEstimateRow({
-      id: randomUUID(),
+      id: input.id || randomUUID(),
       organizationId: normOrg(organizationId),
       intakeCaseId: current.intakeCaseId,
       takeoffJobId: input.takeoffJobId ?? current.takeoffJobId,

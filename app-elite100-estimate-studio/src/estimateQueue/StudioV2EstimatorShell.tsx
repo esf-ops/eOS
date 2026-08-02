@@ -37,6 +37,7 @@ import StudioV2PublishPanel, {
   type StudioV2PublicationView
 } from "./StudioV2PublishPanel";
 import StudioV2CustomerSelectionReviewPanel, {
+  type CustomerSelectionRevisionInfo,
   type StudioCustomerSelectionReview
 } from "./StudioV2CustomerSelectionReviewPanel";
 
@@ -208,6 +209,7 @@ type WorkingDraftResponse = {
   status?: string | null;
   takeoffImportNeeded?: boolean;
   takeoffJobId?: string | null;
+  customerSelectionRevision?: CustomerSelectionRevisionInfo | null;
 };
 
 type CustomerActivityResponse = {
@@ -222,9 +224,14 @@ type CustomerActivityResponse = {
   activePublication?: { publicationId?: string | null; customerUrl?: string | null } | null;
   historicalPublications?: Array<{ publicationId?: string | null; status?: string }>;
   reviewRequests?: Array<{ id?: string | null; open?: boolean; status?: string | null }>;
-  acceptance?: { acceptedAt?: string | null; customerDisplayTotal?: number | null } | null;
+  acceptance?: {
+    acceptedAt?: string | null;
+    customerDisplayTotal?: number | null;
+    publicationId?: string | null;
+  } | null;
   publicationSummary?: { statusLabel?: string; customerUrl?: string | null };
   selectionReview?: StudioCustomerSelectionReview | null;
+  customerSelectionRevision?: CustomerSelectionRevisionInfo | null;
 };
 
 function money(v: unknown): string {
@@ -298,6 +305,8 @@ export default function StudioV2EstimatorShell(props: {
   const [approveNotice, setApproveNotice] = useState<string | null>(null);
   const [revisionError, setRevisionError] = useState<string | null>(null);
   const [revisionNotice, setRevisionNotice] = useState<string | null>(null);
+  const [customerRevisionError, setCustomerRevisionError] = useState<string | null>(null);
+  const [customerRevisionNotice, setCustomerRevisionNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [calcBusy, setCalcBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
@@ -306,6 +315,7 @@ export default function StudioV2EstimatorShell(props: {
   const [pricingSaveBusy, setPricingSaveBusy] = useState(false);
   const [approveBusy, setApproveBusy] = useState(false);
   const [revisionBusy, setRevisionBusy] = useState(false);
+  const [customerRevisionBusy, setCustomerRevisionBusy] = useState(false);
 
   const hydrateFromDraft = useCallback((draftBody: WorkingDraftResponse) => {
     setDraft(draftBody);
@@ -805,6 +815,69 @@ export default function StudioV2EstimatorShell(props: {
       setRevisionError(errorMessage(e));
     } finally {
       setRevisionBusy(false);
+    }
+  }
+
+  async function runCreateRevisionFromCustomerSelections() {
+    const publicationId =
+      activity?.activePublication?.publicationId ||
+      activity?.selectionReview?.publicationId ||
+      null;
+    const reviewRequestId =
+      (activity?.reviewRequests || []).find((request) => request.open)?.id || null;
+    if (!publicationId || !reviewRequestId) {
+      setCustomerRevisionError("Customer selections have not been sent for Elite review.");
+      return;
+    }
+    setCustomerRevisionBusy(true);
+    setCustomerRevisionError(null);
+    setCustomerRevisionNotice(null);
+    try {
+      const body = (await apiPost(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/customer-selections/create-revision`,
+        authToken,
+        {
+          confirmed: true,
+          publicationId,
+          reviewRequestId,
+          clientMutationId: `v2-customer-selection-revision-${Date.now()}`
+        }
+      )) as {
+        ok?: boolean;
+        created?: boolean;
+        reused?: boolean;
+        alreadyCreated?: boolean;
+        estimateId?: string | null;
+        revision?: number | null;
+        notice?: string | null;
+        notAppliedScopeRequests?: Array<unknown>;
+        customerSelectionRevision?: CustomerSelectionRevisionInfo | null;
+      };
+      const baseNotice =
+        body.notice ||
+        "Revision created from customer selections. Review scope, recalculate, approve, then republish.";
+      const notAppliedCount =
+        body.notAppliedScopeRequests?.length ||
+        body.customerSelectionRevision?.notAppliedScopeRequests?.length ||
+        0;
+      setCustomerRevisionNotice(
+        `${baseNotice}${
+          notAppliedCount > 0
+            ? " Some customer requests were added as review notes and were not automatically applied."
+            : ""
+        }`
+      );
+      setApproveNotice(null);
+      setApproveError(null);
+      await load();
+      setCalcStale(true);
+      setCalcStaleReason(
+        "Revision created from customer selections — recalculate before approving."
+      );
+    } catch (e) {
+      setCustomerRevisionError(errorMessage(e));
+    } finally {
+      setCustomerRevisionBusy(false);
     }
   }
 
@@ -1369,6 +1442,21 @@ export default function StudioV2EstimatorShell(props: {
             acceptance={activity?.acceptance || null}
             activePublication={activity?.activePublication || null}
             historicalCount={activity?.historicalPublications?.length || 0}
+            revisionAffordance={
+              draft?.revisionAffordance || draft?.approvedSummary?.revisionAffordance || null
+            }
+            customerSelectionRevision={
+              draft?.customerSelectionRevision ||
+              activity?.customerSelectionRevision ||
+              null
+            }
+            activeReviewRequestId={
+              (activity?.reviewRequests || []).find((request) => request.open)?.id || null
+            }
+            revisionBusy={customerRevisionBusy}
+            revisionError={customerRevisionError}
+            revisionNotice={customerRevisionNotice}
+            onCreateRevision={() => void runCreateRevisionFromCustomerSelections()}
           />
         </div>
       ) : null}
