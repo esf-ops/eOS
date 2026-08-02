@@ -646,6 +646,56 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         })
       : null);
 
+  let lifecycleRepository = deps.lifecycleRepository || null;
+  if (!lifecycleRepository) {
+    try {
+      lifecycleRepository = resolveStudioLifecycleRepositoryForRoutes({
+        env,
+        getSupabase,
+        studioEstimateRepository: studioEstimateService.repository
+      });
+    } catch (e) {
+      if (e?.code === "studio_lifecycle_persistence_unavailable") {
+        console.error(
+          "[elite100-estimate-studio] lifecycle persistence unavailable at mount",
+          e.code
+        );
+        lifecycleRepository = {
+          mode: "unavailable",
+          async getAcceptanceByPublication() {
+            throw e;
+          },
+          async getAcceptanceForEstimate() {
+            throw e;
+          },
+          async listAcceptancesForPublications() {
+            throw e;
+          },
+          async getSoldReviewForEstimate() {
+            throw e;
+          },
+          async upsertSoldReview() {
+            throw e;
+          },
+          async getSoldSnapshotForEstimate() {
+            throw e;
+          },
+          async createSoldSnapshot() {
+            throw e;
+          },
+          async listLifecycleEvents() {
+            throw e;
+          },
+          async createAcceptance() {
+            throw e;
+          }
+        };
+      } else {
+        throw e;
+      }
+    }
+  }
+
   const liveDigitalEstimatesService =
     deps.liveDigitalEstimatesService ||
     createLiveDigitalEstimatesService({
@@ -655,6 +705,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
       amendmentRepository,
       accountDirectoryStore: deps.accountDirectoryStore || null,
       configurationRepository,
+      lifecycleRepository,
       env,
       queryCounters: deps.liveDeQueryCounters || undefined
     });
@@ -850,6 +901,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
             amendmentRepository,
             accountDirectoryStore: adStore,
             configurationRepository,
+            lifecycleRepository,
             env
           });
         const result = await service.listPortfolio({
@@ -916,6 +968,7 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
             amendmentRepository,
             accountDirectoryStore: adStore,
             configurationRepository,
+            lifecycleRepository,
             env
           });
         const result = await service.getPortfolioDetail(
@@ -2167,52 +2220,6 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
   );
 
   // ── Lifecycle closeout: All Estimates / Sold Review / Mark Sold / Acceptance ──
-  let lifecycleRepository = deps.lifecycleRepository || null;
-  if (!lifecycleRepository) {
-    try {
-      lifecycleRepository = resolveStudioLifecycleRepositoryForRoutes({
-        env,
-        getSupabase,
-        studioEstimateRepository: studioEstimateService.repository
-      });
-    } catch (e) {
-      if (e?.code === "studio_lifecycle_persistence_unavailable") {
-        console.error(
-          "[elite100-estimate-studio] lifecycle persistence unavailable at mount",
-          e.code
-        );
-        lifecycleRepository = {
-          mode: "unavailable",
-          async getAcceptanceByPublication() {
-            throw e;
-          },
-          async getAcceptanceForEstimate() {
-            throw e;
-          },
-          async getSoldReviewForEstimate() {
-            throw e;
-          },
-          async upsertSoldReview() {
-            throw e;
-          },
-          async getSoldSnapshotForEstimate() {
-            throw e;
-          },
-          async createSoldSnapshot() {
-            throw e;
-          },
-          async listLifecycleEvents() {
-            throw e;
-          },
-          async createAcceptance() {
-            throw e;
-          }
-        };
-      } else {
-        throw e;
-      }
-    }
-  }
   const soldReviewService =
     deps.soldReviewService ||
     createStudioSoldReviewService({

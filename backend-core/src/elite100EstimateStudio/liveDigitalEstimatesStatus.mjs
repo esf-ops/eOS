@@ -35,6 +35,24 @@ export const LIVE_DE_STATUS_LABELS = Object.freeze({
   [LIVE_DE_OPERATIONAL_STATUSES.CLOSED]: "Closed"
 });
 
+export const DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES = Object.freeze({
+  ACCEPTED: "accepted",
+  NEEDS_ELITE_REVIEW: "needs_elite_review",
+  SELECTIONS_SAVED: "selections_saved",
+  EXPIRED: "expired",
+  VIEWED: "viewed",
+  PUBLISHED: "published"
+});
+
+export const DIGITAL_ESTIMATE_COMMAND_CENTER_STATUS_LABELS = Object.freeze({
+  [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.ACCEPTED]: "Accepted",
+  [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.NEEDS_ELITE_REVIEW]: "Needs Elite review",
+  [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.SELECTIONS_SAVED]: "Selections saved",
+  [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.EXPIRED]: "Expired",
+  [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.VIEWED]: "Viewed",
+  [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.PUBLISHED]: "Published"
+});
+
 export const LIVE_DE_NEXT_ACTIONS = Object.freeze({
   OPEN_CUSTOMER_VIEW: { code: "open_customer_view", label: "Open customer view" },
   COPY_CUSTOMER_LINK: { code: "copy_customer_link", label: "Copy customer link" },
@@ -63,6 +81,31 @@ export const LIVE_DE_ATTENTION = Object.freeze({
 });
 
 const OPEN_REVIEW_STATUSES = new Set(OPEN_REVIEW_REQUEST_STATUSES);
+
+/**
+ * Customer-activity status for the Digital Estimates Head. Facts remain
+ * independent on the DTO; this only chooses the single display label.
+ *
+ * @param {{
+ *   accepted?: boolean,
+ *   reviewRequested?: boolean,
+ *   savedSelections?: boolean,
+ *   viewed?: boolean,
+ *   expired?: boolean
+ * }} input
+ */
+export function deriveDigitalEstimateCommandCenterStatus(input) {
+  if (input.accepted) return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.ACCEPTED;
+  if (input.reviewRequested) {
+    return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.NEEDS_ELITE_REVIEW;
+  }
+  if (input.savedSelections) {
+    return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.SELECTIONS_SAVED;
+  }
+  if (input.expired) return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.EXPIRED;
+  if (input.viewed) return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.VIEWED;
+  return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.PUBLISHED;
+}
 
 /**
  * @param {string|null|undefined} iso

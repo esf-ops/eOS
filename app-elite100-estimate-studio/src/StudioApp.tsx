@@ -7,7 +7,7 @@ import EstimateQueuePage from "./estimateQueue/EstimateQueuePage";
 import EstimateCommandCenterPage from "./estimateQueue/EstimateCommandCenterPage";
 import EstimateTakeoffWorkspace from "./estimateQueue/EstimateTakeoffWorkspace";
 import StudioV2EstimatorShell, { studioV2UiEnabled } from "./estimateQueue/StudioV2EstimatorShell";
-import LiveDigitalEstimatesPage from "./estimateQueue/LiveDigitalEstimatesPage";
+import DigitalEstimatesPage from "./digitalEstimates/DigitalEstimatesPage";
 import SharedInboxPage from "./estimateQueue/SharedInboxPage";
 import AllEstimatesPage from "./estimateQueue/AllEstimatesPage";
 import ManualEstimateWizard from "./estimateQueue/ManualEstimateWizard";
@@ -782,7 +782,21 @@ export default function StudioApp() {
                       setMoreNavOpen(false);
                     }}
                   >
-                    Live Digital Estimates (compatibility)
+                    Digital Estimates
+                  </button>
+                </li>
+                <li role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="studio-nav-publication-workspace"
+                    onClick={() => {
+                      clearWorkspaceSelectionFromNav("publications");
+                      setPublicationsMode("publish-search");
+                      setMoreNavOpen(false);
+                    }}
+                  >
+                    Publish Digital Estimate (legacy)
                   </button>
                 </li>
                 <li role="none">
@@ -921,21 +935,22 @@ export default function StudioApp() {
         ) : null}
 
         {mainNav === "publications" && publicationsMode === "portfolio" ? (
-          <LiveDigitalEstimatesPage
+          <DigitalEstimatesPage
             authToken={sessionToken}
             onOpenEstimate={(caseId, options) => {
+              setStudioV2Preview(true);
               openEstimateWorkspace({
                 caseId,
                 returnNav: "command-center",
                 openTarget: options?.openTarget,
                 focusFallback: "digital"
               });
+              applyStudioV2WorkspaceUrl({ caseId, mode: "push" });
             }}
             onOpenReviewRequest={(reviewRequestId) => {
               setPreselectReviewRequestId(reviewRequestId);
               setMainNav("reviews");
             }}
-            onOpenLegacyPublishSearch={() => setPublicationsMode("publish-search")}
           />
         ) : null}
 

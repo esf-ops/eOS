@@ -789,6 +789,34 @@ export function createInMemoryConfigurationRepository(opts = {}) {
     },
 
     /**
+     * Staff-safe, org-scoped activity projection for portfolio reads.
+     * Returns identifiers, timestamps, and persisted backend totals only.
+     */
+    async listLatestConfigurationActivityForPublications(organizationId, publicationIds) {
+      const wanted = new Set((publicationIds || []).map(String));
+      /** @type {Map<string, Record<string, unknown>>} */
+      const latestByPublication = new Map();
+      for (const session of sessions.values()) {
+        if (session.organization_id !== organizationId) continue;
+        const publicationId = String(session.publication_id || "");
+        if (!wanted.has(publicationId) || !session.latest_calculation_id) continue;
+        const calculation = calculations.get(String(session.latest_calculation_id));
+        if (!calculation || calculation.organization_id !== organizationId) continue;
+        const candidate = {
+          publication_id: publicationId,
+          selection_id: calculation.selection_id || null,
+          configured_total: calculation.configured_total ?? null,
+          saved_at: calculation.created_at || session.updated_at || null
+        };
+        const existing = latestByPublication.get(publicationId);
+        if (!existing || String(candidate.saved_at || "") > String(existing.saved_at || "")) {
+          latestByPublication.set(publicationId, candidate);
+        }
+      }
+      return [...latestByPublication.values()].map((row) => structuredClone(row));
+    },
+
+    /**
      * Latest successful customer draft for the active publication + envelope.
      * Survives new configuration session exchange for the same stable link.
      */
@@ -1833,6 +1861,54 @@ export function createSupabaseConfigurationRepository({ db }) {
         .limit(1);
       if (error) throw error;
       return data?.[0] ?? null;
+    },
+
+    /**
+     * Staff-safe, org-scoped activity projection for portfolio reads.
+     * Uses session-owned latest calculation ids to avoid raw selection payloads.
+     */
+    async listLatestConfigurationActivityForPublications(organizationId, publicationIds) {
+      const ids = [...new Set((publicationIds || []).map(String).filter(Boolean))];
+      if (!ids.length) return [];
+      const { data: sessionRows, error: sessionErr } = await db
+        .from("digital_estimate_configuration_sessions")
+        .select("id,publication_id,latest_calculation_id,updated_at")
+        .eq("organization_id", organizationId)
+        .in("publication_id", ids)
+        .not("latest_calculation_id", "is", null);
+      if (sessionErr) throw sessionErr;
+
+      const calculationIds = [
+        ...new Set((sessionRows || []).map((row) => row.latest_calculation_id).filter(Boolean))
+      ];
+      if (!calculationIds.length) return [];
+      const { data: calculationRows, error: calculationErr } = await db
+        .from("digital_estimate_configuration_calculations")
+        .select("id,selection_id,configured_total,created_at")
+        .eq("organization_id", organizationId)
+        .in("id", calculationIds);
+      if (calculationErr) throw calculationErr;
+
+      const calculationById = new Map(
+        (calculationRows || []).map((row) => [String(row.id), row])
+      );
+      const latestByPublication = new Map();
+      for (const session of sessionRows || []) {
+        const calculation = calculationById.get(String(session.latest_calculation_id));
+        if (!calculation) continue;
+        const publicationId = String(session.publication_id);
+        const candidate = {
+          publication_id: publicationId,
+          selection_id: calculation.selection_id || null,
+          configured_total: calculation.configured_total ?? null,
+          saved_at: calculation.created_at || session.updated_at || null
+        };
+        const existing = latestByPublication.get(publicationId);
+        if (!existing || String(candidate.saved_at || "") > String(existing.saved_at || "")) {
+          latestByPublication.set(publicationId, candidate);
+        }
+      }
+      return [...latestByPublication.values()];
     },
 
     /**

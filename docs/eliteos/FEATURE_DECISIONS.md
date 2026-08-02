@@ -3409,3 +3409,14 @@
 ### 244. Quote Platform head architecture and scaffold inventory (2026-08-02)
 
 The ownership boundaries, current repository scaffold, migration/retirement maps, V1 retirement gates, and ordered implementation slices for Intake, AI Takeoff Lab, Estimate Queue, Studio V2, Digital Estimates, Product Catalog, Sold Handoff, Quote Library/Estimate History, and Account Directory/Pricing Rules are documented in [`QUOTE_PLATFORM_HEAD_ARCHITECTURE.md`](./QUOTE_PLATFORM_HEAD_ARCHITECTURE.md). This is a documentation-only decision; it changes no runtime behavior.
+
+### 245. Digital Estimates Head Slice 1 — read-only Command Center (2026-08-02)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-02 · `feature/digital-estimates-command-center` |
+| **Decision** | Extend the existing organization-scoped Live Digital Estimates portfolio service into the Digital Estimates Head read model. The list returns independent `viewed`, `savedSelections`, `reviewRequested`, and `accepted` facts, backend-persisted published/current/difference totals, source `intakeCaseId`, expiration, and latest activity. Display status priority is Accepted → Needs Elite review → Selections saved → Expired → Viewed → Published. Customer URLs remain excluded from list DTOs and are recovered only through authenticated staff detail reads. |
+| **UI boundary** | `digitalEstimates/DigitalEstimatesPage.tsx` is the first head module, temporarily mounted in the Elite 100 shell. It exposes read visibility, Open Studio V2, Open customer link, Copy customer link, and detail only. Legacy publish remains a separate shell entry; revoke/replace and other publication mutations are hidden in this head slice. |
+| **Source of truth** | Publications/events from the Digital Estimate repository; latest saved backend calculation from the configuration repository; open review state from the amendment repository; acceptance from the Studio lifecycle repository. |
+| **Security** | Existing staff auth/head/pilot stack and backend organization context remain mandatory. Repository reads include `organization_id`; list/detail DTOs omit tokens, wrapped tokens, raw selection payloads, formulas, rates, pricing evidence, and internal economics. |
+| **Protected** | Pricing math, customer selection saves, acceptance, approval, publication, revision, sold handoff, AI Takeoff, approved/publication snapshots, and V1 behavior. |

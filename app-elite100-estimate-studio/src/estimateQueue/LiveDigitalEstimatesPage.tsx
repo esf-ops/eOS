@@ -9,6 +9,7 @@ export type LiveDigitalEstimatesPageProps = {
   onOpenReviewRequest?: (reviewRequestId: string) => void;
   onOpenLegacyPublishSearch?: () => void;
   onOpenAccountDirectory?: (accountId: string) => void;
+  readOnlyHead?: boolean;
 };
 
 type NextAction = {
@@ -47,6 +48,12 @@ type PubRow = {
   studioEstimateId: string | null;
   isActive: boolean;
   linkStatus: string | null;
+  viewed: boolean;
+  savedSelections: boolean;
+  reviewRequested: boolean;
+  accepted: boolean;
+  acceptedAt?: string | null;
+  expired: boolean;
 };
 
 type AccountGroup = {
@@ -230,7 +237,8 @@ export default function LiveDigitalEstimatesPage({
   onOpenEstimate,
   onOpenReviewRequest,
   onOpenLegacyPublishSearch,
-  onOpenAccountDirectory
+  onOpenAccountDirectory,
+  readOnlyHead = false
 }: LiveDigitalEstimatesPageProps) {
   const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
   const [loading, setLoading] = useState(true);
@@ -405,7 +413,7 @@ export default function LiveDigitalEstimatesPage({
   }, [selectedId, detailLoading, detail]);
 
   async function resolveCustomerUrl(publicationId: string): Promise<string | null> {
-    if (customerUrl) return customerUrl;
+    if (selectedId === publicationId && customerUrl) return customerUrl;
     if (!authToken) return null;
     const body = await apiGet(
       `/api/elite100-estimate-studio/publications/${encodeURIComponent(publicationId)}`,
@@ -625,9 +633,9 @@ export default function LiveDigitalEstimatesPage({
     <div className="live-de" data-testid="live-digital-estimates-page">
       <header className="live-de-header">
         <div>
-          <h2 data-testid="live-de-title">Live Digital Estimates</h2>
+          <h2 data-testid="live-de-title">Digital Estimates</h2>
           <p className="muted">
-            Active estimates currently with customers — status, activity, and next action.
+            Published customer estimates, current customer activity, and safe staff links.
           </p>
         </div>
         <div className="live-de-header-actions">
@@ -975,10 +983,23 @@ export default function LiveDigitalEstimatesPage({
                               {[row.quoteNumber, row.revisionLabel].filter(Boolean).join(" ") || "—"}
                               {row.publishedAsNote ? ` · ${row.publishedAsNote}` : ""}
                             </span>
+                            <span className="muted">
+                              Publication {row.publicationId}
+                              {row.intakeCaseId ? ` · Case ${row.intakeCaseId}` : ""}
+                            </span>
                           </div>
                           <div className="live-de-cell">
                             <span className="live-de-status" data-status={row.operationalStatus}>
                               {row.statusLabel}
+                            </span>
+                            <span
+                              className="muted live-de-activity-flags"
+                              data-testid="digital-estimate-activity-flags"
+                            >
+                              Viewed: {row.viewed ? "Yes" : "No"} · Saved selections:{" "}
+                              {row.savedSelections ? "Yes" : "No"} · Review requested:{" "}
+                              {row.reviewRequested ? "Yes" : "No"} · Accepted:{" "}
+                              {row.accepted ? "Yes" : "No"}
                             </span>
                           </div>
                           <div className="live-de-cell" data-label="Published">
@@ -991,10 +1012,11 @@ export default function LiveDigitalEstimatesPage({
                             {row.pricingValidThrough || "—"}
                           </div>
                           <div className="live-de-cell" data-label="Published value">
-                            {money(row.publishedValue)}
-                            {row.configuredDelta != null ? (
-                              <span className="muted"> · Δ {money(row.configuredDelta)}</span>
-                            ) : null}
+                            <span>Published: {money(row.publishedValue)}</span>
+                            <span className="muted">
+                              Current: {money(row.configuredValue)} · Difference:{" "}
+                              {money(row.configuredDelta)}
+                            </span>
                           </div>
                           <div className="live-de-cell" data-label="Last activity">
                             {activity}
@@ -1012,14 +1034,46 @@ export default function LiveDigitalEstimatesPage({
                           >
                             Open details
                           </button>
+                          {row.intakeCaseId ? (
+                            <button
+                              type="button"
+                              className={actionClass("secondary")}
+                              data-testid="digital-estimate-open-studio"
+                              onClick={() =>
+                                onOpenEstimate(row.intakeCaseId!, { openTarget: "digital" })
+                              }
+                            >
+                              Open Studio V2
+                            </button>
+                          ) : null}
                           <button
                             type="button"
-                            className={actionClass(tone)}
-                            data-testid="live-de-next-action"
-                            onClick={() => runNextAction(row)}
+                            className={actionClass("secondary")}
+                            data-testid="digital-estimate-open-customer-link"
+                            disabled={busy}
+                            onClick={() => void openCustomerView(row.publicationId)}
                           >
-                            {row.nextAction?.label || "Open"}
+                            Open customer link
                           </button>
+                          <button
+                            type="button"
+                            className={actionClass("secondary")}
+                            data-testid="digital-estimate-copy-customer-link"
+                            disabled={busy}
+                            onClick={() => void copyCustomerLink(row.publicationId)}
+                          >
+                            Copy customer link
+                          </button>
+                          {!readOnlyHead ? (
+                            <button
+                              type="button"
+                              className={actionClass(tone)}
+                              data-testid="live-de-next-action"
+                              onClick={() => runNextAction(row)}
+                            >
+                              {row.nextAction?.label || "Open"}
+                            </button>
+                          ) : null}
                         </div>
                         {row.attentionReasons?.length ? (
                           <ul className="live-de-badges" aria-label="Attention reasons">
@@ -1130,6 +1184,17 @@ export default function LiveDigitalEstimatesPage({
                     <p className="muted">
                       Pricing valid through: {selectedRow.pricingValidThrough || "—"}
                     </p>
+                    <p className="muted" data-testid="digital-estimate-detail-totals">
+                      Published: {money(selectedRow.publishedValue)} · Customer current:{" "}
+                      {money(selectedRow.configuredValue)} · Difference:{" "}
+                      {money(selectedRow.configuredDelta)}
+                    </p>
+                    <p className="muted" data-testid="digital-estimate-detail-activity">
+                      Viewed: {selectedRow.viewed ? "Yes" : "No"} · Saved selections:{" "}
+                      {selectedRow.savedSelections ? "Yes" : "No"} · Review requested:{" "}
+                      {selectedRow.reviewRequested ? "Yes" : "No"} · Accepted:{" "}
+                      {selectedRow.accepted ? "Yes" : "No"}
+                    </p>
                     <p className="muted">
                       Last activity:{" "}
                       {formatActivity(
@@ -1199,24 +1264,28 @@ export default function LiveDigitalEstimatesPage({
                       Open customer view
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className={actionClass("warning")}
-                    data-testid="live-de-replace-link"
-                    disabled={busy}
-                    onClick={() => selectedId && void replaceLink(selectedId)}
-                  >
-                    Replace link
-                  </button>
-                  <button
-                    type="button"
-                    className={actionClass("destructive")}
-                    data-testid="live-de-revoke"
-                    disabled={busy}
-                    onClick={() => selectedId && void revokePublication(selectedId)}
-                  >
-                    Revoke publication
-                  </button>
+                  {!readOnlyHead ? (
+                    <>
+                      <button
+                        type="button"
+                        className={actionClass("warning")}
+                        data-testid="live-de-replace-link"
+                        disabled={busy}
+                        onClick={() => selectedId && void replaceLink(selectedId)}
+                      >
+                        Replace link
+                      </button>
+                      <button
+                        type="button"
+                        className={actionClass("destructive")}
+                        data-testid="live-de-revoke"
+                        disabled={busy}
+                        onClick={() => selectedId && void revokePublication(selectedId)}
+                      >
+                        Revoke publication
+                      </button>
+                    </>
+                  ) : null}
                   {selectedRow?.intakeCaseId ? (
                     <button
                       type="button"
@@ -1226,7 +1295,7 @@ export default function LiveDigitalEstimatesPage({
                         onOpenEstimate(selectedRow.intakeCaseId!, { openTarget: "digital" })
                       }
                     >
-                      Open Studio estimate
+                      Open Studio V2
                     </button>
                   ) : null}
                   {selectedRow?.reviewRequestId && onOpenReviewRequest ? (
