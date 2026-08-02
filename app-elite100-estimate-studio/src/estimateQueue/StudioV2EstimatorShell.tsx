@@ -941,7 +941,19 @@ export default function StudioV2EstimatorShell(props: {
       {busy && !draft ? <p className="muted">Loading working draft…</p> : null}
       {loadError ? (
         <div className="error-box" data-testid="studio-v2-load-error">
-          {loadError}
+          <p>{loadError}</p>
+          <p className="muted">
+            This Studio V2 workspace could not be opened. It may be missing, unauthorized, or
+            unavailable.
+          </p>
+          <button
+            type="button"
+            className="eq-btn-secondary"
+            data-testid="studio-v2-load-error-back"
+            onClick={onBack}
+          >
+            Back to Inbox
+          </button>
         </div>
       ) : null}
 
@@ -949,6 +961,14 @@ export default function StudioV2EstimatorShell(props: {
         <div className="studio-v2-empty" data-testid="studio-v2-no-estimate">
           <h2>No estimate yet</h2>
           <p>This case has no Studio estimate. Create or open it in V1 first.</p>
+          <button
+            type="button"
+            className="eq-btn-secondary"
+            data-testid="studio-v2-no-estimate-back"
+            onClick={onBack}
+          >
+            Back to Inbox
+          </button>
         </div>
       ) : null}
 
