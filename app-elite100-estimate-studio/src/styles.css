@@ -2481,6 +2481,8 @@ button.linkish {
 }
 .live-de-cell { font-size: 0.82rem; min-width: 0; }
 .live-de-cell--customer { display: flex; flex-direction: column; gap: 0.15rem; }
+.live-de-cell[data-label="Published value"] { display: flex; flex-direction: column; gap: 0.15rem; }
+.live-de-activity-flags { display: block; margin-top: 0.3rem; line-height: 1.35; }
 .live-de-cell[data-label]::before {
   content: attr(data-label) ": ";
   color: var(--eos-muted);

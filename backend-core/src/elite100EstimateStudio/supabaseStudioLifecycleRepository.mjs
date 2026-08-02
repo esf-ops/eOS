@@ -253,6 +253,27 @@ export function createSupabaseStudioLifecycleRepository(opts) {
       return data || [];
     },
 
+    async listAcceptancesForPublications(organizationId, publicationIds) {
+      await assertReady();
+      const org = normOrg(organizationId);
+      const ids = [...new Set((publicationIds || []).map(String).filter(Boolean))];
+      if (!ids.length) return [];
+      const { data, error } = await db
+        .from(ACCEPTANCES)
+        .select("id,publication_id,accepted_at,customer_display_total")
+        .eq("organization_id", org)
+        .in("publication_id", ids)
+        .order("accepted_at", { ascending: false });
+      if (error) {
+        if (isMissingTable(error)) {
+          ready = false;
+          throw persistenceUnavailable(undefined, error);
+        }
+        throw persistenceUnavailable("Failed to list publication acceptances", error);
+      }
+      return data || [];
+    },
+
     async createAcceptance(input) {
       await assertReady();
       const organizationId = normOrg(input.organizationId);

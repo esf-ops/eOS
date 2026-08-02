@@ -153,6 +153,23 @@ export function createInMemoryStudioLifecycleRepository(opts = {}) {
         .map((r) => structuredClone(r));
     },
 
+    async listAcceptancesForPublications(organizationId, publicationIds) {
+      const wanted = new Set((publicationIds || []).map(String));
+      return [...acceptances.values()]
+        .filter(
+          (row) =>
+            row.organization_id === normOrg(organizationId) &&
+            wanted.has(String(row.publication_id))
+        )
+        .sort((a, b) => String(b.accepted_at).localeCompare(String(a.accepted_at)))
+        .map((row) => ({
+          id: row.id,
+          publication_id: row.publication_id,
+          accepted_at: row.accepted_at,
+          customer_display_total: row.customer_display_total
+        }));
+    },
+
     /**
      * Idempotent create — unique on (org, publication_id).
      */

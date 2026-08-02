@@ -3,12 +3,14 @@
  */
 
 import {
+  DIGITAL_ESTIMATE_COMMAND_CENTER_STATUS_LABELS,
   LIVE_DE_OPERATIONAL_STATUSES,
   LIVE_DE_STATUS_LABELS,
   accountGroupKeyForPublication,
   ageDays,
   daysUntil,
   deriveAttentionReasons,
+  deriveDigitalEstimateCommandCenterStatus,
   deriveLiveDigitalEstimateStatus,
   deriveNextAction,
   isActivePortfolioPublication,
@@ -120,6 +122,7 @@ export function extractPortfolioIdentityFromSnapshot(snap) {
  *   amendmentRepository?: object|null,
  *   accountDirectoryStore?: object|null,
  *   configurationRepository?: object|null,
+ *   lifecycleRepository?: object|null,
  *   env?: NodeJS.ProcessEnv|object,
  *   now?: () => Date,
  *   queryCounters?: { accountDirectoryFetches?: number, eventFetches?: number, reviewFetches?: number }
@@ -131,6 +134,7 @@ export function createLiveDigitalEstimatesService(deps) {
   const amendmentRepo = deps.amendmentRepository || null;
   const adStore = deps.accountDirectoryStore || null;
   const configRepo = deps.configurationRepository || null;
+  const lifecycleRepo = deps.lifecycleRepository || null;
   const env = deps.env || process.env;
   const nowFn = deps.now || (() => new Date());
   const counters = deps.queryCounters || {
@@ -144,6 +148,7 @@ export function createLiveDigitalEstimatesService(deps) {
    * @param {{
    *   organizationId: string,
    *   q?: string,
+   *   publicationId?: string,
    *   status?: string,
    *   accountId?: string,
    *   estimatorUserId?: string,
@@ -195,6 +200,9 @@ export function createLiveDigitalEstimatesService(deps) {
     counters.reviewFetches = (counters.reviewFetches || 0) + 1;
     const reviewByPub = await loadReviewIndex(organizationId);
 
+    // Customer acceptance is a lifecycle fact independent from review requests.
+    const acceptanceByPub = await loadAcceptanceIndex(organizationId, publicationIds);
+
     // Studio estimates batched by family root / source quote id.
     const studioByKey = await loadStudioIndex(organizationId, rawPubs);
 
@@ -243,7 +251,16 @@ export function createLiveDigitalEstimatesService(deps) {
       };
 
       const review = reviewByPub.get(String(pub.id)) || null;
-      const hasConfigActivity = Boolean(configActivityByPub.get(String(pub.id)));
+      const acceptance = acceptanceByPub.get(String(pub.id)) || null;
+      const configActivity = configActivityByPub.get(String(pub.id)) || null;
+      const hasConfigActivity = Boolean(configActivity);
+      const reviewRequested = Boolean(
+        review &&
+          isOpenReviewStatus(review.operatorStatus || review.status)
+      );
+      const viewed = Boolean(events.hasFirstViewed || events.hasViewed);
+      const savedSelections = hasConfigActivity;
+      const accepted = Boolean(acceptance);
 
       const active = isActivePortfolioPublication(
         pub.status,
@@ -299,11 +316,34 @@ export function createLiveDigitalEstimatesService(deps) {
         identity.publishedValue ??
         moneyNumber(studio?.approval?.customerDisplayTotal) ??
         null;
-      const configuredValue = moneyNumber(review?.requestedTotal ?? review?.configuredTotal);
+      const configuredValue = moneyNumber(
+        configActivity?.configuredTotal ??
+          review?.requestedTotal ??
+          review?.configuredTotal
+      );
       const configuredDelta =
         publishedValue != null && configuredValue != null
           ? Math.round((configuredValue - publishedValue) * 100) / 100
           : moneyNumber(review?.deltaTotal);
+      const expired =
+        operationalStatus === LIVE_DE_OPERATIONAL_STATUSES.EXPIRED ||
+        (daysUntil(pub.pricing_valid_through, now) ?? 0) < 0;
+      const commandCenterStatus = deriveDigitalEstimateCommandCenterStatus({
+        accepted,
+        reviewRequested,
+        savedSelections,
+        viewed,
+        expired
+      });
+      const lastActivity = latestCustomerActivity([
+        {
+          at: events.lastCustomerActivityAt,
+          label: events.lastCustomerActivityLabel
+        },
+        { at: configActivity?.savedAt, label: "Selections saved" },
+        { at: review?.activityAt, label: "Review requested" },
+        { at: acceptance?.acceptedAt, label: "Accepted" }
+      ]);
 
       const frozenName = identity.customerDisplayName;
       leanRows.push({
@@ -314,7 +354,11 @@ export function createLiveDigitalEstimatesService(deps) {
         revisionLabel: pub.revision_label || null,
         publicationStatus: pub.status,
         operationalStatus,
-        statusLabel: LIVE_DE_STATUS_LABELS[operationalStatus] || operationalStatus,
+        operationalStatusLabel: LIVE_DE_STATUS_LABELS[operationalStatus] || operationalStatus,
+        commandCenterStatus,
+        statusLabel:
+          DIGITAL_ESTIMATE_COMMAND_CENTER_STATUS_LABELS[commandCenterStatus] ||
+          commandCenterStatus,
         attentionReasons,
         needsAttention: attentionReasons.length > 0,
         nextAction,
@@ -337,8 +381,15 @@ export function createLiveDigitalEstimatesService(deps) {
         publishedValue,
         configuredValue,
         configuredDelta,
-        lastCustomerActivityAt: events.lastCustomerActivityAt,
-        lastCustomerActivityLabel: events.lastCustomerActivityLabel,
+        viewed,
+        savedSelections,
+        reviewRequested,
+        accepted,
+        acceptedAt: acceptance?.acceptedAt || null,
+        acceptanceId: acceptance?.id || null,
+        expired,
+        lastCustomerActivityAt: lastActivity.at,
+        lastCustomerActivityLabel: lastActivity.label,
         estimatorUserId: pub.published_by_user_id || studio?.assignedEstimatorUserId || null,
         branch: studio?.branch || pub.branch || null,
         reviewRequestId: review?.id || null,
@@ -455,7 +506,8 @@ export function createLiveDigitalEstimatesService(deps) {
     const list = await listPortfolio({
       organizationId,
       history: true,
-      limit: 50,
+      publicationId,
+      limit: 1,
       offset: 0
     });
     const row =
@@ -552,9 +604,43 @@ export function createLiveDigitalEstimatesService(deps) {
           operatorStatus: r.operator_status || r.operatorStatus || r.status,
           requestedTotal: r.requested_total ?? r.requestedTotal,
           configuredTotal: r.configured_total ?? r.configuredTotal,
-          deltaTotal: r.delta_total ?? r.deltaTotal
+          deltaTotal: r.delta_total ?? r.deltaTotal,
+          activityAt:
+            r.updated_at ||
+            r.updatedAt ||
+            r.requested_at ||
+            r.requestedAt ||
+            r.created_at ||
+            r.createdAt ||
+            null
         });
       }
+    }
+    return map;
+  }
+
+  async function loadAcceptanceIndex(organizationId, publicationIds) {
+    /** @type {Map<string, object>} */
+    const map = new Map();
+    if (
+      !lifecycleRepo ||
+      typeof lifecycleRepo.listAcceptancesForPublications !== "function"
+    ) {
+      return map;
+    }
+    const rows = await lifecycleRepo.listAcceptancesForPublications(
+      organizationId,
+      publicationIds
+    );
+    for (const row of rows || []) {
+      const publicationId = row.publication_id || row.publicationId;
+      if (!publicationId || map.has(String(publicationId))) continue;
+      map.set(String(publicationId), {
+        id: row.id,
+        acceptedAt: row.accepted_at || row.acceptedAt || null,
+        customerDisplayTotal:
+          row.customer_display_total ?? row.customerDisplayTotal ?? null
+      });
     }
     return map;
   }
@@ -595,18 +681,26 @@ export function createLiveDigitalEstimatesService(deps) {
   }
 
   async function loadConfigActivityIndex(organizationId, publicationIds) {
-    /** @type {Map<string, boolean>} */
+    /** @type {Map<string, object>} */
     const map = new Map();
-    if (!configRepo || typeof configRepo.listActiveSessionsForPublications !== "function") {
+    if (
+      !configRepo ||
+      typeof configRepo.listLatestConfigurationActivityForPublications !== "function"
+    ) {
       return map;
     }
-    const rows = await configRepo.listActiveSessionsForPublications(
+    const rows = await configRepo.listLatestConfigurationActivityForPublications(
       organizationId,
       publicationIds
     );
     for (const r of rows || []) {
       const pubId = r.publication_id || r.publicationId;
-      if (pubId) map.set(String(pubId), true);
+      if (!pubId) continue;
+      map.set(String(pubId), {
+        selectionId: r.selection_id || r.selectionId || null,
+        configuredTotal: r.configured_total ?? r.configuredTotal ?? null,
+        savedAt: r.saved_at || r.savedAt || null
+      });
     }
     return map;
   }
@@ -688,6 +782,20 @@ function isOpenReviewStatus(status) {
   return OPEN_REVIEW_REQUEST_STATUSES.includes(String(status || "").trim().toLowerCase());
 }
 
+function latestCustomerActivity(candidates) {
+  let latest = { at: null, label: null };
+  for (const candidate of candidates || []) {
+    if (!candidate?.at) continue;
+    if (!latest.at || String(candidate.at) > String(latest.at)) {
+      latest = {
+        at: candidate.at,
+        label: candidate.label || null
+      };
+    }
+  }
+  return latest;
+}
+
 async function fallbackAggregateEvents(deRepo, organizationId, publicationIds) {
   /** @type {Map<string, object>} */
   const map = new Map();
@@ -727,6 +835,11 @@ async function fallbackAggregateEvents(deRepo, organizationId, publicationIds) {
 
 function applyFilters(rows, query, now) {
   let out = rows;
+  if (query.publicationId) {
+    out = out.filter(
+      (row) => String(row.publicationId) === String(query.publicationId)
+    );
+  }
   const q = String(query.q || "").trim().toLowerCase();
   if (q) {
     out = out.filter((r) => {
@@ -925,6 +1038,8 @@ function toPublicListRow(row) {
   const out = {
     publicationId: row.publicationId,
     operationalStatus: row.operationalStatus,
+    operationalStatusLabel: row.operationalStatusLabel,
+    commandCenterStatus: row.commandCenterStatus,
     statusLabel: row.statusLabel,
     attentionReasons: row.attentionReasons,
     needsAttention: row.needsAttention,
@@ -950,6 +1065,13 @@ function toPublicListRow(row) {
     publishedValue: row.publishedValue,
     configuredValue: row.configuredValue,
     configuredDelta: row.configuredDelta,
+    viewed: row.viewed,
+    savedSelections: row.savedSelections,
+    reviewRequested: row.reviewRequested,
+    accepted: row.accepted,
+    acceptedAt: row.acceptedAt,
+    acceptanceId: row.acceptanceId,
+    expired: row.expired,
     lastCustomerActivityAt: row.lastCustomerActivityAt,
     lastCustomerActivityLabel: row.lastCustomerActivityLabel,
     estimatorUserId: row.estimatorUserId,

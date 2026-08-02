@@ -10,6 +10,10 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../../..");
 const app = readFileSync(join(root, "app-elite100-estimate-studio/src/StudioApp.tsx"), "utf8");
+const head = readFileSync(
+  join(root, "app-elite100-estimate-studio/src/digitalEstimates/DigitalEstimatesPage.tsx"),
+  "utf8"
+);
 const page = readFileSync(
   join(root, "app-elite100-estimate-studio/src/estimateQueue/LiveDigitalEstimatesPage.tsx"),
   "utf8"
@@ -18,11 +22,17 @@ const css = readFileSync(join(root, "app-elite100-estimate-studio/src/styles.css
 
 console.log("\nliveDigitalEstimates.ui.test.mjs\n");
 
-assert.match(app, /Live Digital Estimates/);
-assert.match(app, /LiveDigitalEstimatesPage/);
+assert.match(app, /Digital Estimates/);
+assert.match(app, /DigitalEstimatesPage/);
 assert.match(app, /data-testid="studio-nav-publications"/);
+assert.match(
+  app,
+  /<DigitalEstimatesPage[\s\S]{0,900}applyStudioV2WorkspaceUrl\(\{ caseId, mode: "push" \}\)/
+);
+assert.match(head, /data-testid="digital-estimates-head"/);
+assert.match(head, /readOnlyHead/);
 assert.match(page, /data-testid="live-digital-estimates-page"/);
-assert.match(page, /Publish an estimate/);
+assert.match(page, /data-testid="live-de-title">Digital Estimates/);
 assert.match(page, /live-de-metrics/);
 assert.match(page, /live-de-metrics-secondary/);
 assert.match(page, /live-de-loading/);
@@ -41,6 +51,17 @@ assert.match(page, /window\.confirm/);
 assert.match(page, /sessionStorage/);
 assert.match(page, /Opening this drawer does not copy a link/);
 assert.match(page, /Open details/);
+assert.match(page, /Published: \{money\(row\.publishedValue\)\}/);
+assert.match(page, /Current: \{money\(row\.configuredValue\)\}/);
+assert.match(page, /Difference:/);
+assert.match(page, /Viewed: \{row\.viewed \? "Yes" : "No"\}/);
+assert.match(page, /Saved selections:/);
+assert.match(page, /Review requested:/);
+assert.match(page, /Accepted:/);
+assert.match(page, /data-testid="digital-estimate-open-studio"/);
+assert.match(page, /data-testid="digital-estimate-open-customer-link"/);
+assert.match(page, /data-testid="digital-estimate-copy-customer-link"/);
+assert.match(page, /Open Studio V2/);
 assert.match(page, /No customer activity yet/);
 assert.match(page, /1 item needs attention/);
 assert.match(page, /extractStaffCustomerUrl/);

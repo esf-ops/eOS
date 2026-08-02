@@ -18,6 +18,7 @@ import {
 import {
   LIVE_DE_OPERATIONAL_STATUSES,
   accountGroupKeyForPublication,
+  deriveDigitalEstimateCommandCenterStatus,
   deriveLiveDigitalEstimateStatus,
   deriveNextAction
 } from "./liveDigitalEstimatesStatus.mjs";
@@ -285,10 +286,41 @@ async function buildHarness() {
         {
           id: "rr-1",
           publication_id: "pub-active-2",
-          operator_status: "new",
-          status: "submitted",
+          operator_status: "review_requested",
+          status: "review_requested",
           requested_total: 4800,
-          delta_total: 300
+          delta_total: 300,
+          created_at: "2026-07-23T13:00:00.000Z"
+        }
+      ];
+    }
+  };
+  const configurationRepository = {
+    async listLatestConfigurationActivityForPublications() {
+      return [
+        {
+          publication_id: "pub-active-2",
+          selection_id: "selection-review",
+          configured_total: 4800,
+          saved_at: "2026-07-23T12:00:00.000Z"
+        },
+        {
+          publication_id: "pub-other-account",
+          selection_id: "selection-saved",
+          configured_total: 3150,
+          saved_at: "2026-07-23T11:00:00.000Z"
+        }
+      ];
+    }
+  };
+  const lifecycleRepository = {
+    async listAcceptancesForPublications() {
+      return [
+        {
+          id: "acceptance-1",
+          publication_id: "pub-active-1",
+          accepted_at: "2026-07-23T14:00:00.000Z",
+          customer_display_total: 8000
         }
       ];
     }
@@ -304,6 +336,8 @@ async function buildHarness() {
     },
     amendmentRepository: amendmentRepo,
     accountDirectoryStore: adStore,
+    configurationRepository,
+    lifecycleRepository,
     env: LINK_ENV,
     now: () => NOW,
     queryCounters: counters
@@ -338,6 +372,26 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
     }),
     LIVE_DE_OPERATIONAL_STATUSES.REVIEW_REQUESTED
   );
+  assert.equal(
+    deriveDigitalEstimateCommandCenterStatus({
+      accepted: true,
+      reviewRequested: true,
+      savedSelections: true,
+      viewed: true
+    }),
+    "accepted"
+  );
+  assert.equal(
+    deriveDigitalEstimateCommandCenterStatus({ reviewRequested: true }),
+    "needs_elite_review"
+  );
+  assert.equal(
+    deriveDigitalEstimateCommandCenterStatus({ savedSelections: true }),
+    "selections_saved"
+  );
+  assert.equal(deriveDigitalEstimateCommandCenterStatus({ expired: true }), "expired");
+  assert.equal(deriveDigitalEstimateCommandCenterStatus({ viewed: true }), "viewed");
+  assert.equal(deriveDigitalEstimateCommandCenterStatus({}), "published");
   console.log("ok: status derivation from authoritative records");
 }
 
@@ -420,11 +474,32 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
 
   const notViewed = active.publications.find((p) => p.publicationId === "pub-active-1");
   assert.equal(notViewed.operationalStatus, LIVE_DE_OPERATIONAL_STATUSES.PUBLISHED_NOT_VIEWED);
+  assert.equal(notViewed.accepted, true);
+  assert.equal(notViewed.reviewRequested, false);
+  assert.equal(notViewed.statusLabel, "Accepted");
+  assert.equal(notViewed.intakeCaseId, "case-1");
   const reviewed = active.publications.find((p) => p.publicationId === "pub-active-2");
   assert.equal(reviewed.operationalStatus, LIVE_DE_OPERATIONAL_STATUSES.REVIEW_REQUESTED);
+  assert.equal(reviewed.savedSelections, true);
+  assert.equal(reviewed.reviewRequested, true);
+  assert.equal(reviewed.accepted, false);
+  assert.equal(reviewed.statusLabel, "Needs Elite review");
+  assert.equal(reviewed.publishedValue, 4500);
+  assert.equal(reviewed.configuredValue, 4800);
+  assert.equal(reviewed.configuredDelta, 300);
   assert.equal(reviewed.reviewRequestId, "rr-1");
   assert.equal(reviewed.nextAction.reviewRequestId, "rr-1");
-  console.log("ok: 11–13 not-viewed / review-requested from authoritative events + review index");
+  const savedOnly = active.publications.find(
+    (p) => p.publicationId === "pub-other-account"
+  );
+  assert.equal(savedOnly.savedSelections, true);
+  assert.equal(savedOnly.reviewRequested, false);
+  assert.equal(savedOnly.accepted, false);
+  assert.equal(savedOnly.statusLabel, "Selections saved");
+  assert.equal(savedOnly.configuredValue, 3150);
+  assert.equal(savedOnly.configuredDelta, 150);
+  assert.equal(savedOnly.viewed, false);
+  console.log("ok: 11–13 command-center activity facts and status labels");
 
   assert.equal(active.metrics.expiringWithin7Days >= 1, true);
   assert.ok(notViewed.pricingValidThrough);
@@ -507,8 +582,8 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
 // UI / route / delivery safety static checks
 {
   const app = readFileSync(path.join(root, "app-elite100-estimate-studio/src/StudioApp.tsx"), "utf8");
-  assert.match(app, /Live Digital Estimates/);
-  assert.match(app, /LiveDigitalEstimatesPage/);
+  assert.match(app, /Digital Estimates/);
+  assert.match(app, /DigitalEstimatesPage/);
   assert.match(app, /data-testid="studio-nav-publications"/);
   const page = readFileSync(
     path.join(root, "app-elite100-estimate-studio/src/estimateQueue/LiveDigitalEstimatesPage.tsx"),
