@@ -1688,6 +1688,23 @@ export function createStudioV2Service(deps = {}) {
       selection,
       actorUserId
     });
+    if (!mapped.classification?.requiresEliteReview) {
+      throw createStudioV2Error(
+        STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_NOT_REQUIRED,
+        {
+          message:
+            "No Studio V2 revision is required for selection-only customer choices.",
+          statusCode: 409,
+          details: {
+            reviewKind: mapped.classification?.reviewKind || "selection_only",
+            hasPhysicalScopeRequests: false,
+            hasSelectionOnlyChanges: Boolean(
+              mapped.classification?.hasSelectionOnlyChanges
+            )
+          }
+        }
+      );
+    }
     const createdAt = new Date().toISOString();
     const clientMutationId =
       typeof body?.clientMutationId === "string"

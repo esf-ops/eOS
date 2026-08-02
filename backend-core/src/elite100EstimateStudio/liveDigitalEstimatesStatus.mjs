@@ -38,6 +38,7 @@ export const LIVE_DE_STATUS_LABELS = Object.freeze({
 export const DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES = Object.freeze({
   ACCEPTED: "accepted",
   NEEDS_ELITE_REVIEW: "needs_elite_review",
+  SELECTIONS_SUBMITTED: "selections_submitted",
   SELECTIONS_SAVED: "selections_saved",
   EXPIRED: "expired",
   VIEWED: "viewed",
@@ -47,6 +48,7 @@ export const DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES = Object.freeze({
 export const DIGITAL_ESTIMATE_COMMAND_CENTER_STATUS_LABELS = Object.freeze({
   [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.ACCEPTED]: "Accepted",
   [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.NEEDS_ELITE_REVIEW]: "Needs Elite review",
+  [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.SELECTIONS_SUBMITTED]: "Selections submitted",
   [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.SELECTIONS_SAVED]: "Selections saved",
   [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.EXPIRED]: "Expired",
   [DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.VIEWED]: "Viewed",
@@ -89,6 +91,8 @@ const OPEN_REVIEW_STATUSES = new Set(OPEN_REVIEW_REQUEST_STATUSES);
  * @param {{
  *   accepted?: boolean,
  *   reviewRequested?: boolean,
+ *   requiresEliteReview?: boolean,
+ *   selectionOnlySubmitted?: boolean,
  *   savedSelections?: boolean,
  *   viewed?: boolean,
  *   expired?: boolean
@@ -96,7 +100,12 @@ const OPEN_REVIEW_STATUSES = new Set(OPEN_REVIEW_REQUEST_STATUSES);
  */
 export function deriveDigitalEstimateCommandCenterStatus(input) {
   if (input.accepted) return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.ACCEPTED;
+  // Only physical-scope / manual-review submissions need Elite review.
+  // Selection-only submissions remain Digital Estimate configuration.
   if (input.reviewRequested) {
+    if (input.requiresEliteReview === false || input.selectionOnlySubmitted === true) {
+      return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.SELECTIONS_SUBMITTED;
+    }
     return DIGITAL_ESTIMATE_COMMAND_CENTER_STATUSES.NEEDS_ELITE_REVIEW;
   }
   if (input.savedSelections) {

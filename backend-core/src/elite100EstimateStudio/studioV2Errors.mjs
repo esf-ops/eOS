@@ -42,7 +42,9 @@ export const STUDIO_V2_ERROR_CODES = Object.freeze({
   /** Submitted selection row referenced by the review request is unavailable. */
   CUSTOMER_SELECTION_SOURCE_UNAVAILABLE: "customer_selection_source_unavailable",
   /** A different editable sibling already exists for this approved source. */
-  CUSTOMER_SELECTION_REVISION_CONFLICT: "customer_selection_revision_conflict"
+  CUSTOMER_SELECTION_REVISION_CONFLICT: "customer_selection_revision_conflict",
+  /** Selection-only Digital Estimate choices do not require a Studio V2 revision. */
+  CUSTOMER_SELECTION_REVISION_NOT_REQUIRED: "customer_selection_revision_not_required"
 });
 
 const USER_MESSAGES = Object.freeze({
@@ -87,7 +89,9 @@ const USER_MESSAGES = Object.freeze({
   [STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_SOURCE_UNAVAILABLE]:
     "The submitted customer selection set is unavailable. Ask the customer to send selections again.",
   [STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_CONFLICT]:
-    "A different editable revision already exists. Open and resolve it before creating another revision."
+    "A different editable revision already exists. Open and resolve it before creating another revision.",
+  [STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_NOT_REQUIRED]:
+    "No Studio V2 revision is required for selection-only customer choices."
 });
 
 /**
@@ -135,6 +139,7 @@ function defaultStatusForCode(code) {
     case STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_ALREADY_ACCEPTED:
     case STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_SOURCE_UNAVAILABLE:
     case STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_CONFLICT:
+    case STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_NOT_REQUIRED:
     case STUDIO_V2_ERROR_CODES.TAKEOFF_NOT_READY:
     case STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED:
     case STUDIO_V2_ERROR_CODES.CALCULATION_STALE:

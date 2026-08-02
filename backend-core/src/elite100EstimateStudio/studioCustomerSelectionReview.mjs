@@ -9,6 +9,7 @@
 import { buildCustomerConfigurationSummary } from "../digitalEstimate/catalog/customerConfigurationSummary.mjs";
 import {
   CUSTOMER_CONFIGURATION_FOUNDATION_KEY,
+  classifyCustomerConfigurationForReview,
   finalizeCustomerConfigurationFoundation,
   sanitizeCustomerConfigurationFoundation,
   enrichFoundationFromSelectionQuantities
@@ -123,6 +124,9 @@ export function buildEmptyCustomerSelectionReview(opts = {}) {
     publicationId: opts.publicationId || null,
     envelopeId: opts.envelopeId || null,
     reviewRequested: false,
+    requiresEliteReview: false,
+    selectionOnlySubmitted: false,
+    reviewKind: "none",
     pricedSelections: {
       rooms: [],
       selectionChangeCount: 0,
@@ -446,6 +450,30 @@ export function buildStudioCustomerSelectionReview(input = {}) {
     }
   }
 
+  const classification = classifyCustomerConfigurationForReview({
+    foundation,
+    selectionPayload: payload,
+    quantities: split.quantities || {},
+    roomNotes: split.roomNotes || {},
+    projectNote: projectNote || split.projectNote || null
+  });
+  // Prefer the richer room-derived selection labels when available; fall back
+  // to the classifier summary for selection-only / empty-room edge cases.
+  const finalSelectionItems =
+    selectionChangeItems.length > 0
+      ? selectionChangeItems
+      : classification.selectionSummary;
+  const finalScopeItems =
+    classification.scopeRequestSummary.length > 0
+      ? classification.scopeRequestSummary
+      : scopeItems;
+  const requiresEliteReview = Boolean(
+    classification.requiresEliteReview || finalScopeItems.length > 0
+  );
+  const selectionOnlySubmitted = Boolean(
+    reviewRequested && !requiresEliteReview && finalSelectionItems.length > 0
+  );
+
   return scrubSelectionReviewDto({
     hasSavedSelections: true,
     lastSavedAt:
@@ -458,14 +486,21 @@ export function buildStudioCustomerSelectionReview(input = {}) {
     publicationId,
     envelopeId,
     reviewRequested,
+    requiresEliteReview,
+    selectionOnlySubmitted,
+    reviewKind: requiresEliteReview
+      ? "physical_scope"
+      : finalSelectionItems.length > 0
+        ? "selection_only"
+        : "none",
     pricedSelections: {
       rooms: pricedRooms,
-      selectionChangeCount: selectionChangeItems.length,
-      selectionChangeItems
+      selectionChangeCount: finalSelectionItems.length,
+      selectionChangeItems: finalSelectionItems
     },
     scopeRequests: {
-      count: scopeItems.length,
-      items: scopeItems,
+      count: finalScopeItems.length,
+      items: finalScopeItems,
       openings: (foundation.requestedOpenings || []).map((o) => ({
         type: str(o.type),
         quantity: Number(o.quantity) || 1,

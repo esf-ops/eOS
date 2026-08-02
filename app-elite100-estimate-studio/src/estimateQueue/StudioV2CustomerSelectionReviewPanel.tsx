@@ -24,6 +24,9 @@ export type StudioCustomerSelectionReview = {
   hasSavedSelections?: boolean;
   lastSavedAt?: string | null;
   reviewRequested?: boolean;
+  requiresEliteReview?: boolean;
+  selectionOnlySubmitted?: boolean;
+  reviewKind?: "none" | "selection_only" | "physical_scope" | string | null;
   pricedSelections?: {
     rooms?: SelectionReviewRoom[];
     selectionChangeCount?: number;
@@ -189,6 +192,13 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
   const scopeCount = Number(scope?.count) || 0;
   const diagnostics = Array.isArray(review?.staffDiagnostics) ? review.staffDiagnostics : [];
   const reviewRequested = Boolean(activity?.reviewRequested || review?.reviewRequested);
+  const requiresEliteReview = Boolean(
+    review?.requiresEliteReview === true || scopeCount > 0
+  );
+  const selectionOnlySubmitted = Boolean(
+    review?.selectionOnlySubmitted === true ||
+      (reviewRequested && !requiresEliteReview && saved)
+  );
   const accepted = Boolean(activity?.accepted || acceptance);
   const alreadyCreated = Boolean(
     customerSelectionRevision?.createdFromCustomerSelections === true &&
@@ -198,6 +208,7 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
   const canCreateRevision = Boolean(
     saved &&
       reviewRequested &&
+      requiresEliteReview &&
       !accepted &&
       !alreadyCreated &&
       activePublication?.publicationId &&
@@ -208,7 +219,13 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
   return (
     <section className="studio-v2-panel" data-testid="studio-v2-customer-selection-review">
       <div className="studio-v2-panel__head">
-        <h2>Customer selection review</h2>
+        <h2>
+          {requiresEliteReview
+            ? "Needs Elite review"
+            : selectionOnlySubmitted || saved
+              ? "Customer final selections"
+              : "Customer selection review"}
+        </h2>
       </div>
 
       <dl className="studio-v2-dl" data-testid="studio-v2-selection-status">
@@ -225,8 +242,16 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
           <dd>{formatWhen(activity?.lastSavedAt || review?.lastSavedAt)}</dd>
         </div>
         <div>
-          <dt>Review requested</dt>
-          <dd>{reviewRequested ? "Yes" : "No"}</dd>
+          <dt>Selections submitted</dt>
+          <dd data-testid="studio-v2-selections-submitted-flag">
+            {reviewRequested || selectionOnlySubmitted ? "Yes" : "No"}
+          </dd>
+        </div>
+        <div>
+          <dt>Needs Elite review</dt>
+          <dd data-testid="studio-v2-needs-elite-review-flag">
+            {requiresEliteReview ? "Yes" : "No"}
+          </dd>
         </div>
         <div>
           <dt>Accepted</dt>
@@ -298,10 +323,11 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
         className="studio-v2-selection-priced"
         data-testid="studio-v2-priced-selections"
       >
-        <h3>Priced customer selections</h3>
+        <h3>{requiresEliteReview ? "Priced customer selections" : "Customer selections"}</h3>
         <p className="muted studio-v2-selection-hint">
-          Material, edge, backsplash, and product choices the customer saved. These are not
-          physical scope-change requests.
+          {requiresEliteReview
+            ? "Material, edge, backsplash, and product choices the customer saved. These are not physical scope-change requests."
+            : "These are customer-selected options from the Digital Estimate. No physical scope changes were requested."}
         </p>
         {!saved || rooms.length === 0 ? (
           <p className="muted">No priced selections saved.</p>
@@ -317,10 +343,14 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
       <div className="studio-v2-selection-scope" data-testid="studio-v2-scope-requests">
         <h3>Scope requests requiring review</h3>
         <p className="muted studio-v2-selection-hint">
-          Additional openings, waterfalls, project notes, and other physical scope requests.
+          {requiresEliteReview
+            ? "Physical scope requests require estimator review before republishing."
+            : "Additional openings, waterfalls, project notes, and other physical scope requests."}
         </p>
         {scopeCount <= 0 ? (
-          <p className="muted">No scope-change requests.</p>
+          <p className="muted" data-testid="studio-v2-no-scope-requests">
+            No scope-change requests.
+          </p>
         ) : (
           <ul className="studio-v2-warnings">
             {(scope?.items || []).map((item, i) => (
@@ -359,7 +389,7 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
             <strong>Revision already created</strong>
             <p>
               This workspace is the editable revision created from the submitted customer
-              selections. Review scope, recalculate, approve, then republish.
+              request. Review scope, recalculate, approve, then republish.
             </p>
             <dl className="studio-v2-dl">
               <div>
@@ -414,6 +444,11 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
             This unchanged published estimate was accepted. A customer-selection revision is not
             available from this accepted state.
           </p>
+        ) : selectionOnlySubmitted || (reviewRequested && !requiresEliteReview) ? (
+          <p className="muted" data-testid="studio-v2-selection-revision-not-required">
+            These are customer-selected options from the Digital Estimate. No physical scope
+            changes were requested, so no Studio V2 revision is required.
+          </p>
         ) : !reviewRequested ? (
           <p className="muted" data-testid="studio-v2-selection-revision-not-sent">
             Customer selections have not been sent for Elite review.
@@ -425,8 +460,9 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
         ) : (
           <>
             <p className="muted">
-              The server will resolve the latest submitted selection set. Safe design choices may
-              be applied; physical scope requests remain review notes.
+              Physical scope requests require estimator review before republishing. The server will
+              resolve the latest submitted request; safe design choices may be applied and physical
+              scope requests remain review notes.
             </p>
             {scopeCount > 0 ? (
               <p className="warn-box">

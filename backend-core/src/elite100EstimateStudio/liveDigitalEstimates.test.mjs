@@ -290,7 +290,51 @@ async function buildHarness() {
           status: "review_requested",
           requested_total: 4800,
           delta_total: 300,
-          created_at: "2026-07-23T13:00:00.000Z"
+          created_at: "2026-07-23T13:00:00.000Z",
+          request_snapshot_json: {
+            reviewClassification: {
+              hasSelectionOnlyChanges: true,
+              hasPhysicalScopeRequests: true,
+              requiresEliteReview: true,
+              reviewKind: "physical_scope",
+              selectionSummary: [{ kind: "material", label: "Bayshore Sand" }],
+              scopeRequestSummary: [{ kind: "opening", label: "cooktop ×1" }]
+            },
+            projectNote: "Please add a waterfall",
+            roomNotes: { kitchen: "Verify dimensions" }
+          }
+        },
+        {
+          id: "rr-selection-only",
+          publication_id: "pub-other-account",
+          operator_status: "review_requested",
+          status: "review_requested",
+          requested_total: 3150,
+          delta_total: 150,
+          created_at: "2026-07-23T14:00:00.000Z",
+          request_snapshot_json: {
+            reviewClassification: {
+              hasSelectionOnlyChanges: true,
+              hasPhysicalScopeRequests: false,
+              requiresEliteReview: false,
+              reviewKind: "selection_only",
+              selectionSummary: [
+                { kind: "material", label: "Bayshore Sand" },
+                { kind: "sink", label: "sink:kitchen:esf:example" }
+              ],
+              scopeRequestSummary: []
+            },
+            selectedOptions: [
+              {
+                optionKey: "material:kitchen:e100-bayshore-sand",
+                quantity: 1
+              },
+              {
+                optionKey: "sink:kitchen:esf:blanco:precis-50-50:coal-black",
+                quantity: 1
+              }
+            ]
+          }
         }
       ];
     }
@@ -382,8 +426,19 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
     "accepted"
   );
   assert.equal(
-    deriveDigitalEstimateCommandCenterStatus({ reviewRequested: true }),
+    deriveDigitalEstimateCommandCenterStatus({
+      reviewRequested: true,
+      requiresEliteReview: true
+    }),
     "needs_elite_review"
+  );
+  assert.equal(
+    deriveDigitalEstimateCommandCenterStatus({
+      reviewRequested: true,
+      requiresEliteReview: false,
+      selectionOnlySubmitted: true
+    }),
+    "selections_submitted"
   );
   assert.equal(
     deriveDigitalEstimateCommandCenterStatus({ savedSelections: true }),
@@ -493,9 +548,11 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
     (p) => p.publicationId === "pub-other-account"
   );
   assert.equal(savedOnly.savedSelections, true);
-  assert.equal(savedOnly.reviewRequested, false);
+  assert.equal(savedOnly.reviewRequested, true);
+  assert.equal(savedOnly.requiresEliteReview, false);
+  assert.equal(savedOnly.selectionOnlySubmitted, true);
   assert.equal(savedOnly.accepted, false);
-  assert.equal(savedOnly.statusLabel, "Selections saved");
+  assert.equal(savedOnly.statusLabel, "Selections submitted");
   assert.equal(savedOnly.configuredValue, 3150);
   assert.equal(savedOnly.configuredDelta, 150);
   assert.equal(savedOnly.viewed, false);
@@ -584,7 +641,7 @@ console.log("\nliveDigitalEstimates.test.mjs\n");
   const app = readFileSync(path.join(root, "app-elite100-estimate-studio/src/StudioApp.tsx"), "utf8");
   assert.match(app, /Digital Estimates/);
   assert.match(app, /DigitalEstimatesPage/);
-  assert.match(app, /data-testid="studio-nav-publications"/);
+  assert.match(app, /data-testid="studio-nav-digital-estimates"/);
   const page = readFileSync(
     path.join(root, "app-elite100-estimate-studio/src/estimateQueue/LiveDigitalEstimatesPage.tsx"),
     "utf8"

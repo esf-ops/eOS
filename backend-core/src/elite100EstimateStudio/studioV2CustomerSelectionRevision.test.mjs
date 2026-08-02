@@ -176,12 +176,86 @@ console.log("\nstudioV2CustomerSelectionRevision.test.mjs\n");
   assert.equal(mapped.scope.exactTotal, undefined);
   assert.ok(mapped.appliedSummary.some((item) => item.kind === "material_color"));
   assert.ok(mapped.appliedSummary.some((item) => item.kind === "edge"));
-  assert.ok(mapped.notAppliedRequests.some((item) => item.kind === "sink"));
+  assert.ok(
+    mapped.appliedSummary.some((item) => item.kind === "sink"),
+    "allowed sink selections stay customer configuration, not revision warnings"
+  );
+  assert.equal(
+    mapped.notAppliedRequests.some((item) => item.kind === "sink"),
+    false
+  );
   assert.ok(mapped.notAppliedRequests.some((item) => item.kind === "opening"));
   assert.ok(mapped.notAppliedRequests.some((item) => item.kind === "waterfall"));
   assert.ok(mapped.notAppliedRequests.some((item) => item.kind === "backsplash_change_request"));
   assert.ok(mapped.notAppliedRequests.some((item) => item.kind === "project_note"));
+  assert.equal(mapped.classification.requiresEliteReview, true);
   console.log("ok: 1 safe design choices apply; products/scope requests remain review notes");
+}
+
+{
+  const selectionOnly = {
+    ...submittedSelection(),
+    selection_payload_json: {
+      "material:kitchen:e100-bayshore-sand": 1,
+      "edge:kitchen:edge_small_ogee": 1,
+      "sink:kitchen:esf:blanco:precis-50-50:coal-black": 1,
+      [CUSTOMER_CONFIGURATION_FOUNDATION_KEY]: {
+        selectedMaterial: {
+          roomId: "kitchen",
+          colorId: "e100-bayshore-sand",
+          colorName: "Bayshore Sand",
+          materialGroup: "Group Promo"
+        },
+        selectedEdgeProfile: {
+          roomId: "kitchen",
+          profileToken: "edge_small_ogee",
+          profileName: "Small Ogee"
+        },
+        backsplashPreference: { preference: "keep_approved" },
+        requestedOpenings: [],
+        requestedWaterfalls: [],
+        customerNotes: []
+      }
+    }
+  };
+  const mapped = mapCustomerConfigurationToStudioV2DraftPatch({
+    sourceScope: sourceScope(),
+    reviewRequest: {
+      ...reviewRequest(),
+      request_snapshot_json: {
+        selectedOptions: [
+          {
+            optionKey: "material:kitchen:e100-bayshore-sand",
+            displayLabel: "Bayshore Sand",
+            quantity: 1
+          },
+          {
+            optionKey: "edge:kitchen:edge_small_ogee",
+            displayLabel: "Small Ogee",
+            quantity: 1
+          },
+          {
+            optionKey: "sink:kitchen:esf:blanco:precis-50-50:coal-black",
+            displayLabel: "Precis 50/50 Sinks · Coal Black",
+            quantity: 1
+          },
+          {
+            optionKey: "backsplash:kitchen:keep_approved",
+            displayLabel: "Keep approved backsplash",
+            quantity: 1
+          }
+        ]
+      }
+    },
+    selection: selectionOnly,
+    actorUserId: ACTOR
+  });
+  assert.equal(mapped.classification.requiresEliteReview, false);
+  assert.equal(mapped.classification.reviewKind, "selection_only");
+  assert.ok(mapped.appliedSummary.some((item) => item.kind === "sink"));
+  assert.ok(mapped.appliedSummary.some((item) => item.kind === "backsplash_preference"));
+  assert.equal(mapped.notAppliedRequests.length, 0);
+  console.log("ok: 1b selection-only choices do not require Elite review / revision notes");
 }
 
 function harness({ accepted = false, includeReview = true } = {}) {
@@ -689,6 +763,63 @@ async function seedApproved(repo) {
   );
   assert.equal((await repo.listByIntakeCase(ORG, CASE_ID)).length, 1);
   console.log("ok: 8 missing sent selections fails without creating a revision");
+}
+
+{
+  const { repo, v2, state } = harness();
+  await seedApproved(repo);
+  state.selection = {
+    ...submittedSelection(),
+    selection_payload_json: {
+      "material:kitchen:e100-bayshore-sand": 1,
+      "edge:kitchen:edge_small_ogee": 1,
+      "sink:kitchen:esf:blanco:precis-50-50:coal-black": 1,
+      [CUSTOMER_CONFIGURATION_FOUNDATION_KEY]: {
+        selectedMaterial: {
+          roomId: "kitchen",
+          colorId: "e100-bayshore-sand",
+          colorName: "Bayshore Sand",
+          materialGroup: "Group Promo"
+        },
+        selectedEdgeProfile: {
+          roomId: "kitchen",
+          profileToken: "edge_small_ogee",
+          profileName: "Small Ogee"
+        },
+        backsplashPreference: { preference: "keep_approved" },
+        requestedOpenings: [],
+        requestedWaterfalls: [],
+        customerNotes: []
+      }
+    }
+  };
+  state.request = {
+    ...state.request,
+    selected_options_json: [
+      {
+        optionKey: "material:kitchen:e100-bayshore-sand",
+        label: "Bayshore Sand",
+        quantity: 1
+      },
+      {
+        optionKey: "sink:kitchen:esf:blanco:precis-50-50:coal-black",
+        label: "Sink",
+        quantity: 1
+      }
+    ]
+  };
+  await assert.rejects(
+    () =>
+      v2.createRevisionFromCustomerSelections({
+        organizationId: ORG,
+        intakeCaseId: CASE_ID,
+        actorUserId: ACTOR,
+        body: { confirmed: true, reviewRequestId: REQUEST_ID }
+      }),
+    (error) => error?.code === "customer_selection_revision_not_required"
+  );
+  assert.equal((await repo.listByIntakeCase(ORG, CASE_ID)).length, 1);
+  console.log("ok: 8b selection-only submission rejects create-revision");
 }
 
 {

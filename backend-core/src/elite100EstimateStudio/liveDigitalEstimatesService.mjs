@@ -25,6 +25,7 @@ import {
   recoverStaffPublicationLinkMeta
 } from "../digitalEstimate/staffPublicationLinkRecovery.mjs";
 import { OPEN_REVIEW_REQUEST_STATUSES } from "../digitalEstimate/configuration/amendmentConfig.mjs";
+import { classifyReviewRequestForEliteReview } from "../digitalEstimate/configuration/customerConfigurationFoundation.mjs";
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 50;
@@ -258,6 +259,17 @@ export function createLiveDigitalEstimatesService(deps) {
         review &&
           isOpenReviewStatus(review.operatorStatus || review.status)
       );
+      const reviewClassification = reviewRequested
+        ? classifyReviewRequestForEliteReview(review)
+        : null;
+      const requiresEliteReview = Boolean(
+        reviewRequested && reviewClassification?.requiresEliteReview
+      );
+      const selectionOnlySubmitted = Boolean(
+        reviewRequested &&
+          reviewClassification &&
+          reviewClassification.requiresEliteReview === false
+      );
       const viewed = Boolean(events.hasFirstViewed || events.hasViewed);
       const savedSelections = hasConfigActivity;
       const accepted = Boolean(acceptance);
@@ -296,17 +308,22 @@ export function createLiveDigitalEstimatesService(deps) {
           pricingValidThrough: pub.pricing_valid_through,
           studioEstimateOutdated: Boolean(studio?.outdatedVersusPublication),
           configurationIncomplete: Boolean(pub.configuration_incomplete),
-          reviewRequest: review
+          // Selection-only submissions are not Elite-review attention items.
+          reviewRequest: requiresEliteReview ? review : null
         },
         now
       );
 
       const nextAction = deriveNextAction({
-        operationalStatus,
+        operationalStatus: requiresEliteReview
+          ? operationalStatus
+          : selectionOnlySubmitted
+            ? LIVE_DE_OPERATIONAL_STATUSES.CUSTOMER_CONFIGURING
+            : operationalStatus,
         attentionReasons,
         accountDirectoryAccountId,
         linkStatus: pub.link_status || null,
-        reviewRequest: review,
+        reviewRequest: requiresEliteReview ? review : null,
         intakeCaseId: studio?.intakeCaseId || null,
         studioEstimateId: studio?.id || null,
         studioEstimateStatus: studio?.status || null
@@ -331,6 +348,8 @@ export function createLiveDigitalEstimatesService(deps) {
       const commandCenterStatus = deriveDigitalEstimateCommandCenterStatus({
         accepted,
         reviewRequested,
+        requiresEliteReview,
+        selectionOnlySubmitted,
         savedSelections,
         viewed,
         expired
@@ -341,7 +360,14 @@ export function createLiveDigitalEstimatesService(deps) {
           label: events.lastCustomerActivityLabel
         },
         { at: configActivity?.savedAt, label: "Selections saved" },
-        { at: review?.activityAt, label: "Review requested" },
+        {
+          at: review?.activityAt,
+          label: requiresEliteReview
+            ? "Review requested"
+            : selectionOnlySubmitted
+              ? "Selections submitted"
+              : "Review requested"
+        },
         { at: acceptance?.acceptedAt, label: "Accepted" }
       ]);
 
@@ -384,6 +410,9 @@ export function createLiveDigitalEstimatesService(deps) {
         viewed,
         savedSelections,
         reviewRequested,
+        requiresEliteReview,
+        selectionOnlySubmitted,
+        reviewKind: reviewClassification?.reviewKind || null,
         accepted,
         acceptedAt: acceptance?.acceptedAt || null,
         acceptanceId: acceptance?.id || null,
@@ -605,6 +634,9 @@ export function createLiveDigitalEstimatesService(deps) {
           requestedTotal: r.requested_total ?? r.requestedTotal,
           configuredTotal: r.configured_total ?? r.configuredTotal,
           deltaTotal: r.delta_total ?? r.deltaTotal,
+          customer_note: r.customer_note ?? r.customerNote ?? null,
+          request_snapshot_json:
+            r.request_snapshot_json || r.requestSnapshotJson || null,
           activityAt:
             r.updated_at ||
             r.updatedAt ||
@@ -1068,6 +1100,9 @@ function toPublicListRow(row) {
     viewed: row.viewed,
     savedSelections: row.savedSelections,
     reviewRequested: row.reviewRequested,
+    requiresEliteReview: row.requiresEliteReview === true,
+    selectionOnlySubmitted: row.selectionOnlySubmitted === true,
+    reviewKind: row.reviewKind || null,
     accepted: row.accepted,
     acceptedAt: row.acceptedAt,
     acceptanceId: row.acceptanceId,

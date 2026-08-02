@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { getElite100CustomerMaterial } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
 import {
+  classifyCustomerConfigurationForReview,
   enrichFoundationFromSelectionQuantities,
   finalizeCustomerConfigurationFoundation,
   sanitizeCustomerConfigurationFoundation
@@ -104,16 +105,10 @@ function physicalScopeRequests(selectionPayload, foundation, split) {
       reason: "Customer notes require estimator judgment."
     });
   }
-  if (
-    foundation.backsplashPreference &&
-    foundation.backsplashPreference.preference !== "keep_approved"
-  ) {
+  if (foundation.backsplashPreference?.preference === "request_change") {
     pushNotApplied(requests, {
-      kind:
-        foundation.backsplashPreference.preference === "request_change"
-          ? "backsplash_change_request"
-          : "backsplash_preference",
-      label: `Backsplash: ${text(foundation.backsplashPreference.preference, 60).replace(/_/g, " ")}`,
+      kind: "backsplash_change_request",
+      label: "Backsplash change request",
       reason: "Backsplash physical scope was not changed automatically."
     });
   }
@@ -163,6 +158,15 @@ export function mapCustomerConfigurationToStudioV2DraftPatch(input) {
   });
   foundation = enrichFoundationFromSelectionQuantities(foundation, split.quantities || {});
   foundation = finalizeCustomerConfigurationFoundation(foundation);
+  const classification = classifyCustomerConfigurationForReview({
+    foundation,
+    selectionPayload,
+    quantities: split.quantities || {},
+    roomNotes: split.roomNotes || {},
+    projectNote: split.projectNote || selectionPayload?.__projectNote || null,
+    customerNote: input?.reviewRequest?.customer_note || null,
+    selectedOptions: options
+  });
 
   const appliedSummary = [];
   const notAppliedRequests = physicalScopeRequests(selectionPayload, foundation, split);
@@ -170,11 +174,15 @@ export function mapCustomerConfigurationToStudioV2DraftPatch(input) {
   const materialSelections = [];
   const edgeSelections = [];
 
-  if (foundation.backsplashPreference?.preference === "keep_approved") {
+  if (
+    foundation.backsplashPreference?.preference === "keep_approved" ||
+    foundation.backsplashPreference?.preference === "include" ||
+    foundation.backsplashPreference?.preference === "remove"
+  ) {
     appliedSummary.push({
       kind: "backsplash_preference",
       roomId: null,
-      label: "Backsplash kept as approved"
+      label: `Backsplash: ${text(foundation.backsplashPreference.preference, 60).replace(/_/g, " ")}`
     });
   }
 
@@ -223,29 +231,41 @@ export function mapCustomerConfigurationToStudioV2DraftPatch(input) {
       parsed &&
       ["sink", "faucet", "accessory", "specialty"].includes(String(parsed.kind || ""))
     ) {
-      pushNotApplied(notAppliedRequests, {
+      // Digital Estimate owns allowed product selections. Record them as applied
+      // customer configuration, not as Studio V2 physical-scope warnings.
+      appliedSummary.push({
         kind: parsed.kind,
-        roomId: parsed.roomKey,
-        label: selectionLabel(row, optionKey),
-        reason:
-          "The customer product choice is preserved for review, but Studio V2 has no first-class editable product field for safe automatic application yet."
+        roomId: parsed.roomKey || null,
+        label: selectionLabel(row, optionKey)
       });
       continue;
     }
     if (
       parsed?.kind === "backsplash" &&
-      String(parsed.mode || "") === "keep_approved"
+      ["keep_approved", "include", "remove"].includes(String(parsed.mode || ""))
     ) {
       if (!appliedSummary.some((item) => item.kind === "backsplash_preference")) {
         appliedSummary.push({
           kind: "backsplash_preference",
           roomId: parsed.roomKey || null,
-          label: "Backsplash kept as approved"
+          label: `Backsplash: ${String(parsed.mode).replace(/_/g, " ")}`
         });
       }
       continue;
     }
-    if (parsed?.kind === "backsplash" || parsed?.kind === "sidesplash") {
+    if (
+      parsed?.kind === "backsplash" &&
+      ["custom_height", "request_change"].includes(String(parsed.mode || ""))
+    ) {
+      pushNotApplied(notAppliedRequests, {
+        kind: "backsplash_scope",
+        roomId: parsed.roomKey,
+        label: selectionLabel(row, optionKey),
+        reason: "Backsplash physical scope was not changed automatically."
+      });
+      continue;
+    }
+    if (parsed?.kind === "sidesplash") {
       pushNotApplied(notAppliedRequests, {
         kind: parsed.kind,
         roomId: parsed.roomKey,
@@ -327,6 +347,7 @@ export function mapCustomerConfigurationToStudioV2DraftPatch(input) {
     appliedSummary,
     notAppliedRequests,
     warnings,
+    classification,
     source: {
       publicationId: text(input?.reviewRequest?.publication_id, 120) || null,
       reviewRequestId: text(input?.reviewRequest?.id, 120) || null,

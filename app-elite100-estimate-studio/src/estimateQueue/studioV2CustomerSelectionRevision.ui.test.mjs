@@ -16,6 +16,10 @@ console.log("\nstudioV2CustomerSelectionRevision.ui.test.mjs\n");
 assert.ok(panel.includes('data-testid="studio-v2-selection-create-revision"'));
 assert.ok(panel.includes("Create revision from customer selections"));
 assert.ok(panel.includes("Customer selections have not been sent for Elite review."));
+assert.ok(panel.includes('data-testid="studio-v2-selection-revision-not-required"'));
+assert.ok(panel.includes("No physical scope changes were requested"));
+assert.ok(panel.includes("requiresEliteReview"));
+assert.ok(panel.includes("Customer final selections"));
 assert.ok(panel.includes('data-testid="studio-v2-selection-revision-accepted-blocked"'));
 assert.ok(panel.includes('data-testid="studio-v2-selection-revision-existing"'));
 assert.ok(panel.includes("Revision already created"));
@@ -25,12 +29,13 @@ assert.ok(
   )
 );
 assert.ok(panel.includes("reviewRequested"));
+assert.ok(panel.includes("requiresEliteReview &&"));
 assert.ok(panel.includes("revisionAffordance?.canCreateRevision"));
 assert.ok(panel.includes("!accepted"));
 assert.ok(panel.includes("!alreadyCreated"));
 assert.ok(panel.includes("activeReviewRequestId"));
 assert.ok(panel.includes("sourceReviewRequestId === activeReviewRequestId"));
-console.log("ok: 1 action gating covers sent, accepted, source, and already-created states");
+console.log("ok: 1 action gating covers sent, accepted, source, selection-only, and already-created states");
 
 assert.ok(
   shell.includes(
