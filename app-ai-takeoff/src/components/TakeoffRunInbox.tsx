@@ -6,11 +6,17 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { listTakeoffJobs, LabApiError, type TakeoffJobListItem } from "../lib/api";
+import {
+  deriveTakeoffJobDisplayStatus,
+  takeoffJobStatusChipClass,
+} from "../lib/takeoffJobStatusLabels.mjs";
 
 export interface TakeoffRunInboxProps {
   token: string;
   selectedJobId: string | null;
   refreshKey?: number;
+  /** Restrict the list to a review status (e.g. "approved" for the history view). */
+  reviewStatusFilter?: string;
   /** Pause list polling while async generation is active. */
   pauseBackgroundRefresh?: boolean;
   onSelectJob: (jobId: string) => void;
@@ -30,23 +36,11 @@ function fmtDate(iso: string | null): string {
   }
 }
 
-function statusChipClass(status: string): string {
-  if (status === "completed") return "takeoff-inbox-chip takeoff-inbox-chip--completed";
-  if (status === "failed") return "takeoff-inbox-chip takeoff-inbox-chip--failed";
-  if (status === "processing") return "takeoff-inbox-chip takeoff-inbox-chip--processing";
-  return "takeoff-inbox-chip takeoff-inbox-chip--pending";
-}
-
-function reviewChipClass(reviewStatus: string): string {
-  if (reviewStatus === "approved") return "status-chip status-approved";
-  if (reviewStatus === "rejected") return "takeoff-inbox-chip takeoff-inbox-chip--failed";
-  return "status-chip status-draft";
-}
-
 export default function TakeoffRunInbox({
   token,
   selectedJobId,
   refreshKey = 0,
+  reviewStatusFilter,
   pauseBackgroundRefresh = false,
   onSelectJob,
 }: TakeoffRunInboxProps) {
@@ -66,7 +60,10 @@ export default function TakeoffRunInbox({
     setLoading(true);
     setError(null);
     try {
-      const res = await listTakeoffJobs(token, { limit: 25 }, { signal });
+      const query = reviewStatusFilter
+        ? { limit: 25, review_status: reviewStatusFilter }
+        : { limit: 25 };
+      const res = await listTakeoffJobs(token, query, { signal });
       if (signal?.aborted) return false;
       setJobs(res.jobs ?? []);
       return true;
@@ -80,7 +77,7 @@ export default function TakeoffRunInbox({
       loadInFlightRef.current = false;
       setLoading(false);
     }
-  }, [token]);
+  }, [token, reviewStatusFilter]);
 
   useEffect(() => {
     if (pauseBackgroundRefresh) return;
@@ -121,11 +118,15 @@ export default function TakeoffRunInbox({
     };
   }, [token, hasProcessingJobs, loadJobs, pauseBackgroundRefresh]);
 
+  const isApprovedView = reviewStatusFilter === "approved";
+
   return (
     <div className="takeoff-inbox">
       <div className="takeoff-inbox-header">
         <p className="lab-section-desc">
-          Recent takeoff runs for your organization. Open a run to continue review.
+          {isApprovedView
+            ? "Approved takeoffs for your organization. Open one to view its measurement evidence."
+            : "Takeoff jobs for your organization. Open a job to review its AI measurements."}
         </p>
         <button
           type="button"
@@ -144,11 +145,17 @@ export default function TakeoffRunInbox({
       ) : null}
 
       {loading && jobs.length === 0 ? (
-        <p className="takeoff-inbox-empty">Loading runs…</p>
+        <p className="takeoff-inbox-empty">
+          {isApprovedView ? "Loading approved takeoffs…" : "Loading takeoff jobs…"}
+        </p>
       ) : null}
 
       {!loading && jobs.length === 0 && !error ? (
-        <p className="takeoff-inbox-empty">No takeoff runs yet. Upload a plan file to start.</p>
+        <p className="takeoff-inbox-empty">
+          {isApprovedView
+            ? "No approved takeoffs yet. Approved measurement evidence will appear here."
+            : "No takeoff jobs yet. Upload a plan file to begin."}
+        </p>
       ) : null}
 
       {jobs.length > 0 ? (
@@ -160,6 +167,9 @@ export default function TakeoffRunInbox({
               job.modelProvider || job.modelVersion
                 ? [job.modelProvider, job.modelVersion].filter(Boolean).join(" · ")
                 : null;
+            const display = deriveTakeoffJobDisplayStatus(job);
+            const runningPhase =
+              job.status === "processing" ? job.processing?.phaseLabel ?? null : null;
 
             return (
               <li key={job.takeoffJobId}>
@@ -174,12 +184,12 @@ export default function TakeoffRunInbox({
                     <span className="takeoff-inbox-meta">{fmtDate(job.createdAt)}</span>
                   </div>
                   <div className="takeoff-inbox-row-sub">
-                    <span className={statusChipClass(job.status)} title={job.processing?.phaseLabel ?? undefined}>
-                      {job.status === "processing" && job.processing?.phaseLabel
-                        ? job.processing.phaseLabel
-                        : job.status}
+                    <span className={takeoffJobStatusChipClass(display.tone)} title={runningPhase ?? undefined}>
+                      {display.label}
                     </span>
-                    <span className={reviewChipClass(job.reviewStatus)}>{job.reviewStatus}</span>
+                    {runningPhase ? (
+                      <span className="takeoff-inbox-phase">{runningPhase}</span>
+                    ) : null}
                     {job.resultCount > 0 ? (
                       <span className="takeoff-inbox-count">
                         {job.resultCount} result{job.resultCount === 1 ? "" : "s"}

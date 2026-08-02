@@ -125,6 +125,23 @@ import {
 
 type TakeoffAppView = "workbench" | "intake";
 
+/**
+ * Team-facing sections for the standalone AI Takeoff Lab landing.
+ * Presentational only — every section is backed by an existing surface/endpoint.
+ *   jobs     — org takeoff job list (GET /api/takeoff-jobs)
+ *   upload   — upload plan / start takeoff (existing TakeoffPlanFileSection)
+ *   review   — review workbench for the open job (existing review panels)
+ *   approved — same job list filtered to approved (review_status=approved)
+ */
+type LabSection = "jobs" | "upload" | "review" | "approved";
+
+const LAB_SECTION_LABELS: Record<LabSection, string> = {
+  jobs: "Takeoff Jobs",
+  upload: "Upload / Start Takeoff",
+  review: "Review Workbench",
+  approved: "Approved / History",
+};
+
 // ── Dev-tools flag ─────────────────────────────────────────────────────────
 // Set VITE_TAKEOFF_SHOW_DEV_TOOLS=1 in .env.local to expose JSON workbench,
 // benchmark tools, and debug JSON. Hidden by default in normal estimator flow.
@@ -460,6 +477,10 @@ export default function TakeoffLabApp() {
   const [appView, setAppView] = useState<TakeoffAppView>(initialAppView);
   const [intakeCaseId, setIntakeCaseId] = useState<string | null>(initialIntakeCaseId);
   const showEstimatorQueue = quoteIntakeUiEnabled && appView === "intake";
+
+  // ── Team-facing landing section (presentational; backed by real surfaces) ─
+  // Default landing is the Takeoff Jobs list. Opening a job switches to Review.
+  const [labSection, setLabSection] = useState<LabSection>("jobs");
 
   useEffect(() => {
     const onPopState = () => {
@@ -1232,7 +1253,20 @@ export default function TakeoffLabApp() {
     const url = new URL(window.location.href);
     url.searchParams.set("takeoffJobId", jobId);
     window.history.replaceState({}, "", url.toString());
+    setLabSection("review");
   }, [takeoffJobId]);
+
+  // Team-facing section navigation. Leaving Review while a job is open clears
+  // the open workspace (data is preserved server-side) and returns to the list.
+  const goToLabSection = useCallback(
+    (section: LabSection) => {
+      if (section !== "review" && takeoffJobIdRef.current) {
+        handleStartNewTakeoff();
+      }
+      setLabSection(section);
+    },
+    [handleStartNewTakeoff]
+  );
 
   // ── Edit actions ──────────────────────────────────────────────────────────
 
@@ -2717,11 +2751,18 @@ export default function TakeoffLabApp() {
 
   const taskPanelContent = hasActiveSource ? reviewSections : uploadGenerateTaskPanel;
 
+  // A loaded source (uploaded/AI draft/pasted/demo) or an open job is the Review
+  // context. Otherwise the active team section is whatever the operator picked.
+  const inReview = hasActiveSource || Boolean(takeoffJobId);
+  const effectiveSection: LabSection = inReview ? "review" : labSection;
+  const showLabSectionNav = Boolean(authToken) && !showEstimatorQueue && !isWorkspaceHydrating;
+  const jobListReviewFilter = effectiveSection === "approved" ? "approved" : undefined;
+
   return (
     <div className={`shell page-ai-takeoff${showReviewActionBar ? " page-ai-takeoff--review-actions" : ""}`}>
       {authChecked && authToken ? (
         <EliteosTopbar
-          appName="AI Takeoff"
+          appName="AI Takeoff Lab"
           organizationName={workspaceName}
           logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
           homeHref={homeBase}
@@ -2735,7 +2776,7 @@ export default function TakeoffLabApp() {
         />
       ) : (
         <EliteosTopbar
-          appName="AI Takeoff"
+          appName="AI Takeoff Lab"
           organizationName={workspaceName}
           logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
           homeHref={homeBase}
@@ -2744,13 +2785,43 @@ export default function TakeoffLabApp() {
       )}
 
       {/* ── Page intro + workflow stepper ─────────────────────────── */}
-      <div className="takeoff-page-hero takeoff-page-hero--compact" role="region" aria-label="AI Takeoff overview">
+      <div className="takeoff-page-hero takeoff-page-hero--compact" role="region" aria-label="AI Takeoff Lab overview">
         <div className="takeoff-page-hero-inner">
           <div className="takeoff-page-hero-main">
             <h1 className="takeoff-page-heading takeoff-page-heading--compact">
-              {showEstimatorQueue ? "Estimator Queue" : "AI Takeoff"}
+              {showEstimatorQueue ? "Estimator Queue" : "AI Takeoff Lab"}
             </h1>
+            {!showEstimatorQueue ? (
+              <p className="takeoff-page-helper">
+                Review AI-generated measurements before they are used in estimates.
+                AI Takeoff owns measurement evidence only; Studio V2 owns pricing and publishing.
+              </p>
+            ) : null}
             <TakeoffBetaBanner compact />
+            {showLabSectionNav ? (
+              <nav className="takeoff-section-nav" aria-label="AI Takeoff Lab sections">
+                {(["jobs", "upload", "review", "approved"] as LabSection[]).map((section) => {
+                  const isActive = effectiveSection === section;
+                  return (
+                    <button
+                      key={section}
+                      type="button"
+                      className={`takeoff-section-tab${isActive ? " is-active" : ""}`}
+                      aria-current={isActive ? "page" : undefined}
+                      onClick={() => goToLabSection(section)}
+                    >
+                      {LAB_SECTION_LABELS[section]}
+                    </button>
+                  );
+                })}
+              </nav>
+            ) : null}
+            {!showEstimatorQueue ? (
+              <p className="takeoff-page-safety" role="note">
+                AI measurements require review before production use. Pricing and publishing are not
+                owned by AI Takeoff Lab.
+              </p>
+            ) : null}
             {quoteIntakeUiEnabled ? (
               <nav className="takeoff-view-tabs" aria-label="AI Takeoff views">
                 <button
@@ -2782,7 +2853,7 @@ export default function TakeoffLabApp() {
                 </button>
               </nav>
             ) : null}
-            {authToken && !isWorkspaceHydrating && !showEstimatorQueue ? (
+            {authToken && !isWorkspaceHydrating && !showEstimatorQueue && (inReview || effectiveSection === "upload") ? (
               <TakeoffWorkflowStepper
                 currentStep={currentWorkflowStep}
                 isStepComplete={workflowStepComplete}
@@ -2920,49 +2991,53 @@ export default function TakeoffLabApp() {
             </div>
           ) : null}
 
-          {!showPlanPreviewColumn && taskPanelContent}
+          {!showPlanPreviewColumn && (inReview || effectiveSection === "upload") ? taskPanelContent : null}
 
-          {/* ── Takeoff runs inbox ─────────────────────────────────────── */}
-          {/* When a workspace is active, runs live inside Advanced. Show the
-              standalone job-picker here only when no job is loaded yet. */}
-          {authToken && !hasActiveSource ? (
-            takeoffJobId ? (
-              <details
-                className="lab-section lab-section-collapsible lab-section--compact"
-                open={false}
-              >
-                <summary className="lab-section-summary">
-                  <span className="lab-section-title" style={{ margin: 0 }}>Takeoff runs</span>
-                  <span className="lab-section-summary-note">
-                    {planFilename ?? "Active workspace"} · switch runs or refresh
-                  </span>
-                </summary>
-                <div className="lab-section-collapsible-body">
-                  <TakeoffRunInbox
-                    token={authToken}
-                    selectedJobId={takeoffJobId}
-                    refreshKey={historyRefreshKey}
-                    pauseBackgroundRefresh={generationBusy}
-                    onSelectJob={handleSelectRun}
-                  />
-                </div>
-              </details>
-            ) : (
-              <section className="lab-section lab-section--card">
-                <h2 className="lab-section-title">Takeoff runs</h2>
-                <TakeoffRunInbox
-                  token={authToken}
-                  selectedJobId={takeoffJobId}
-                  refreshKey={historyRefreshKey}
-                  pauseBackgroundRefresh={generationBusy}
-                  onSelectJob={handleSelectRun}
-                />
-              </section>
-            )
+          {/* ── Takeoff Jobs / Approved list ───────────────────────────── */}
+          {/* Team-facing landing list. Selecting a job opens the Review section.
+              Only shown when no job/source is open (Review context takes over). */}
+          {authToken && !inReview && (effectiveSection === "jobs" || effectiveSection === "approved") ? (
+            <section className="lab-section lab-section--card">
+              <h2 className="lab-section-title">
+                {effectiveSection === "approved" ? "Approved takeoffs" : "Takeoff jobs"}
+              </h2>
+              <p className="lab-section-desc">
+                {effectiveSection === "approved"
+                  ? "Reviewed takeoffs approved as measurement evidence. Open one to view its measurements."
+                  : "New quote requests with supported plan files appear here. Open a job to review its AI measurements."}
+              </p>
+              <TakeoffRunInbox
+                token={authToken}
+                selectedJobId={takeoffJobId}
+                refreshKey={historyRefreshKey}
+                reviewStatusFilter={jobListReviewFilter}
+                pauseBackgroundRefresh={generationBusy}
+                onSelectJob={handleSelectRun}
+              />
+            </section>
+          ) : null}
+
+          {/* ── Review section with no job open — point back to Jobs ────── */}
+          {authToken && !inReview && effectiveSection === "review" ? (
+            <section className="lab-section lab-section--card takeoff-section-empty">
+              <h2 className="lab-section-title">Review Workbench</h2>
+              <p className="lab-section-desc">
+                No takeoff is open. Choose a job from Takeoff Jobs to review its AI measurements,
+                or start a new one from Upload / Start Takeoff.
+              </p>
+              <div className="takeoff-section-empty-actions">
+                <button type="button" className="btn secondary" onClick={() => goToLabSection("jobs")}>
+                  View takeoff jobs
+                </button>
+                <button type="button" className="btn secondary" onClick={() => goToLabSection("upload")}>
+                  Upload a plan
+                </button>
+              </div>
+            </section>
           ) : null}
 
           {/* ── Source plan file (v4) ──────────────────────────────────── */}
-          {showSourcePlanSection ? (
+          {showSourcePlanSection && (inReview || effectiveSection === "upload") ? (
           useWorkspaceSourceSection ? (
             <details className="lab-section lab-section-collapsible lab-section--compact" open={false}>
               <summary className="lab-section-summary">
@@ -3107,7 +3182,7 @@ export default function TakeoffLabApp() {
       ) : null}
 
       <footer className="footer-bar" role="contentinfo">
-        <span>eliteOS · AI Takeoff</span>
+        <span>eliteOS · AI Takeoff Lab</span>
         <span className="footer-meta">Authorized staff only — backend authorization is the source of truth.</span>
       </footer>
 

@@ -3432,3 +3432,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `StudioApp.tsx`, `StudioV2EstimatorShell.tsx` labels, `styles.css`, shell/navigation tests, this doc. |
 | **Protected** | Pricing, publishing, approval, revision, customer selection, final acceptance, sold handoff, AI Takeoff, Digital Estimates read models, customer-facing Digital Estimate behavior, approved/publication snapshots, and V1 fallback behavior. |
 | **Revisit trigger** | When Studio V2 or another quote-platform head receives an independent protected route/app shell, replace the temporary Elite 100 mount without changing the documented head ownership or Studio V2 deep-link contract. |
+
+### 247. Standalone AI Takeoff Lab team-ready UI refactor (2026-08-02)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-02 · `feature/ai-takeoff-lab-team-ready` |
+| **Decision** | Standalone AI Takeoff Lab refactor keeps AI Takeoff as measurement evidence/review head. Studio V2 remains estimate authority; no Studio V2 takeoff import behavior changed. The `app-ai-takeoff` head now presents a team-facing landing: title "AI Takeoff Lab", helper text ("Review AI-generated measurements before they are used in estimates. AI Takeoff owns measurement evidence only; Studio V2 owns pricing and publishing."), explicit sections (Takeoff Jobs, Upload / Start Takeoff, Review Workbench, Approved / History), plain-English job statuses (Not started / Running / Failed / Needs review / Approved), clear empty states, and safety language stating pricing and publishing are not owned here. |
+| **Boundary** | Frontend-only, inside `app-ai-takeoff`. Sections map to existing surfaces/endpoints (`GET /api/takeoff-jobs`, existing upload/generate/review/approve flows); Approved/History reuses the existing `review_status=approved` list query. Status labels are frontend display mappings — no new persisted statuses, no invented project/customer/linked-estimate columns (not in the list DTO), and no fake demo rows. |
+| **SQL** | None. No Supabase migrations. |
+| **Impacted** | `app-ai-takeoff/src/TakeoffLabApp.tsx`, `components/TakeoffRunInbox.tsx`, `lib/takeoffJobStatusLabels.mjs` (new), `lib/takeoffJobStatusLabels.test.mjs` (new), `lib/teamReadyLanding.ui.test.mjs` (new), `styles.css`, this doc. |
+| **Protected / unchanged** | AI measurement engine and extraction algorithms; Studio V2 takeoff import (`studioV2TakeoffImport.mjs`) and Studio V2 shell/panels; Elite 100 pricing calculators, publishing, approval, revision, Digital Estimate, customer acceptance, and sold handoff; approved estimate and publication snapshots. Safety grep confirms `app-ai-takeoff` production code contains no `autoApprove`/`autoCalculate`/`simplified-publish`/`refresh-from-takeoff`/`ensure-editable-draft` coupling. |
+| **Revisit trigger** | When AI Takeoff Lab needs project/customer/linked-estimate columns or an "Imported / linked" status, add an organization-scoped read-model enrichment to the takeoff job list DTO before surfacing it in the UI. |

@@ -2549,9 +2549,11 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   background: var(--eos-info-soft, #e8f4fd); color: var(--eos-info, #1a6fb5);
 }
 .takeoff-inbox-chip--failed { background: var(--eos-danger-soft); color: var(--eos-danger); }
+.takeoff-inbox-chip--neutral { background: var(--eos-surface-soft); color: var(--eos-ink-mid); }
 .takeoff-inbox-count { font-size: 11px; color: var(--eos-ink-mid); }
 .takeoff-inbox-count--muted { color: var(--eos-ink-faint); }
 .takeoff-inbox-model { font-size: 11px; color: var(--eos-ink-muted); }
+.takeoff-inbox-phase { font-size: 11px; color: var(--eos-info, #1a6fb5); }
 
 /* ── Run history panel (v5.3) ─────────────────────────────────────────────── */
 
@@ -4316,6 +4318,51 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   border-color: rgba(163, 19, 47, 0.35);
   color: var(--eos-accent);
 }
+
+/* ── Team-facing landing copy + section nav ─────────────────────────────── */
+.takeoff-page-helper {
+  margin: 0 0 10px;
+  max-width: 720px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--eos-ink-mid);
+}
+.takeoff-page-safety {
+  margin: 10px 0 0;
+  max-width: 720px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--eos-ink-muted);
+}
+.takeoff-section-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.takeoff-section-tab {
+  border: 1px solid var(--eos-line-strong);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--eos-ink-soft);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.takeoff-section-tab:hover { background: var(--eos-surface-soft); }
+.takeoff-section-tab.is-active {
+  background: var(--eos-accent-soft);
+  border-color: rgba(163, 19, 47, 0.35);
+  color: var(--eos-accent);
+}
+.takeoff-section-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .eq-root { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .eq-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .eq-title { margin: 0; font-size: 1.35rem; letter-spacing: -0.02em; }
