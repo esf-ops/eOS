@@ -1757,12 +1757,14 @@ export function createStudioV2Service(deps = {}) {
       try {
         const a = await lifecycleRepository.getAcceptanceForEstimate(organizationId, estimate.id);
         if (a) {
+          const snap = a.customer_safe_snapshot_json || a.customerSafeSnapshot || {};
           acceptance = {
             id: a.id,
             acceptedAt: a.accepted_at || a.acceptedAt || null,
             estimateRevision: a.estimate_revision ?? a.estimateRevision ?? null,
             publicationId: a.publication_id || a.publicationId || null,
-            customerDisplayTotal: a.customer_display_total ?? a.customerDisplayTotal ?? null
+            customerDisplayTotal: a.customer_display_total ?? a.customerDisplayTotal ?? null,
+            acceptedAsPublished: snap.acceptedAsPublished !== false
           };
         }
       } catch {

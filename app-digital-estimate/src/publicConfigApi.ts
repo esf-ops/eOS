@@ -943,7 +943,9 @@ export type CustomerFinalAcceptance = {
   statusLabel?: string;
   acceptedAt?: string | null;
   estimateRevision?: number | null;
+  publicationId?: string | null;
   customerDisplayTotal?: number | null;
+  acceptedAsPublished?: boolean;
   termsVersion?: string | null;
   notice?: string;
   emailSent?: boolean;

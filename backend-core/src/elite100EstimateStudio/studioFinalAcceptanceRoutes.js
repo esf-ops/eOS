@@ -24,6 +24,10 @@ import {
   redactPublicConfigurationSecrets
 } from "../digitalEstimate/configuration/publicConfigurationSession.mjs";
 import { isDigitalEstimateReviewRequestRuntimeEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
+import {
+  createInMemoryAmendmentRepository,
+  createSupabaseAmendmentRepository
+} from "../digitalEstimate/configuration/amendmentRepository.mjs";
 import { createStudioFinalAcceptanceService } from "./studioFinalAcceptanceService.mjs";
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
 import { resolveStudioLifecycleRepositoryForRoutes } from "./studioLifecycleRepositoryFactory.mjs";
@@ -59,7 +63,13 @@ function publicError(res, e) {
   } else if (code === "publication_superseded") {
     message = "A newer estimate is available. Please use the latest link.";
   } else if (code === "confirmation_required") {
-    message = "Please confirm you are accepting this final estimate.";
+    message = "Please confirm you are accepting this estimate.";
+  } else if (
+    code === "acceptance_blocked_selection_changes" ||
+    code === "acceptance_blocked_scope_review" ||
+    code === "acceptance_blocked_review_requested"
+  ) {
+    message = e.message || "Please send your selections to Elite for review before accepting.";
   } else if (code === "session_invalid" || code === "session_required" || code === "session_not_found") {
     message = "Please refresh and try again";
   } else if (code === "forbidden_caller_authority") {
@@ -124,6 +134,14 @@ export function attachStudioFinalAcceptanceRoutes(app, deps) {
     deps.deRepository ||
     deps.repository ||
     (getSupabase ? createSupabaseDigitalEstimateRepository({ db: getSupabase() }) : null);
+  const amendmentRepository =
+    deps.amendmentRepository ||
+    (deps.mode === "memory" || !getSupabase
+      ? createInMemoryAmendmentRepository({
+          deRepository,
+          configurationRepository
+        })
+      : createSupabaseAmendmentRepository({ db: getSupabase() }));
 
   const studioEstimateRepository =
     deps.studioEstimateRepository ||
@@ -177,7 +195,9 @@ export function attachStudioFinalAcceptanceRoutes(app, deps) {
     lifecycleRepository,
     deRepository,
     configurationRepository,
-    studioEstimateRepository
+    studioEstimateRepository,
+    amendmentRepository,
+    listOpenReviewRequests: deps.listOpenReviewRequests || null
   });
 
   app.post("/api/public-digital-estimate/v2/final-acceptance", jsonParser, async (req, res) => {

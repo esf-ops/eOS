@@ -54,7 +54,12 @@ type Props = {
     lastSavedAt?: string | null;
   } | null;
   selectionReview?: StudioCustomerSelectionReview | null;
-  acceptance?: { acceptedAt?: string | null } | null;
+  acceptance?: {
+    acceptedAt?: string | null;
+    customerDisplayTotal?: number | null;
+    publicationId?: string | null;
+    acceptedAsPublished?: boolean;
+  } | null;
   activePublication?: { publicationId?: string | null } | null;
   historicalCount?: number;
 };
@@ -171,14 +176,38 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
         </div>
         <div>
           <dt>Accepted</dt>
-          <dd>
-            {activity?.accepted
-              ? acceptance?.acceptedAt
-                ? `Yes · ${formatWhen(acceptance.acceptedAt)}`
-                : "Yes"
-              : "No"}
+          <dd data-testid="studio-v2-accepted-flag">
+            {activity?.accepted || acceptance ? "Yes" : "No"}
           </dd>
         </div>
+        {activity?.accepted || acceptance ? (
+          <>
+            <div>
+              <dt>Accepted total</dt>
+              <dd data-testid="studio-v2-accepted-total">
+                {money(
+                  acceptance?.customerDisplayTotal ??
+                    review?.totals?.publishedBaselineTotal ??
+                    null
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Accepted at</dt>
+              <dd data-testid="studio-v2-accepted-at">
+                {formatWhen(acceptance?.acceptedAt || null)}
+              </dd>
+            </div>
+            <div>
+              <dt>Accepted publication</dt>
+              <dd data-testid="studio-v2-accepted-publication">
+                {acceptance?.publicationId ||
+                  activePublication?.publicationId ||
+                  "—"}
+              </dd>
+            </div>
+          </>
+        ) : null}
         <div>
           <dt>Publication</dt>
           <dd>

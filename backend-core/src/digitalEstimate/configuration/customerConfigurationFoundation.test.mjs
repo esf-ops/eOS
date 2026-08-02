@@ -26,18 +26,18 @@ console.log("\ncustomerConfigurationFoundation.test.mjs\n");
 {
   const empty = buildEmptyCustomerConfigurationFoundation();
   assert.equal(empty.requiresEstimatorReview, false);
-  assert.equal(empty.canSubmitForFinalReview, false);
+  assert.equal(empty.canSubmitForFinalReview, true);
   assert.equal(empty.selectionChanges.count, 0);
   assert.equal(empty.scopeChangeRequests.count, 0);
-  console.log("ok: empty foundation defaults safely");
+  console.log("ok: empty foundation defaults safely (accept-as-published allowed)");
 }
 
 {
   const read = buildPublicCustomerConfigurationReadModel(null, { quantities: {} });
   assert.equal(read.approvedBaselinePreserved, true);
   assert.equal(read.requiresEstimatorReview, false);
-  assert.equal(read.canSubmitForFinalReview, false);
-  console.log("ok: public read model defaults without stored config");
+  assert.equal(read.canSubmitForFinalReview, true);
+  console.log("ok: public read model defaults without stored config (accept allowed)");
 }
 
 {
@@ -159,7 +159,7 @@ console.log("\ncustomerConfigurationFoundation.test.mjs\n");
   assert.ok(panel.includes('data-testid="de-your-selections"'));
   assert.ok(panel.includes('data-testid="de-review-required-requests"'));
   assert.ok(panel.includes('data-testid="de-foundation-save-selections"'));
-  assert.ok(panel.includes("These requests require estimator review before final approval."));
+  assert.ok(panel.includes("These requests need Elite review before final approval."));
   assert.ok(api.includes("CustomerConfigurationFoundation"));
   assert.ok(api.includes("customerConfiguration?"));
   assert.ok(!panel.includes("Wholesale"));

@@ -135,7 +135,8 @@ console.log("ok: 1 customer selection reprice is authoritative");
   assert.equal(baselineOnly.customerPricingStatus, CUSTOMER_PRICING_STATUS.BASELINE);
   assert.equal(resolvePublishedBaselineTotal(baselineOnly), 8230);
   assert.equal(resolvePricedSelectionTotal(baselineOnly), 8230);
-  console.log("ok: 4 no-change open keeps baseline parity");
+  assert.equal(baselineOnly.canSubmitForFinalReview, true);
+  console.log("ok: 4 no-change open keeps baseline parity (accept allowed)");
 }
 
 {
@@ -265,13 +266,14 @@ console.log("ok: 1 customer selection reprice is authoritative");
   assert.ok(!view.includes("Original selection"));
   assert.ok(view.includes("Needs Elite review") || view.includes("de-changes-need-review"));
   assert.ok(view.includes("Changes saved") || view.includes("de-changes-saved"));
-  assert.ok(view.includes("canSubmitForFinalReview"));
-  assert.ok(view.includes("de-final-approval-unavailable"));
+  assert.ok(view.includes("canSubmitForFinalReview") || view.includes("canAcceptPublishedEstimate"));
+  assert.ok(view.includes("canAcceptPublishedEstimate"));
+  assert.ok(view.includes("Accept estimate"));
   assert.ok(view.includes('data-testid="de-request-review"'));
-  assert.ok(view.includes("canSubmitForFinalReview && !configurationLocked"));
+  assert.ok(view.includes('data-testid="de-approve-final"'));
   assert.ok(!/finishedEdgeLf\s*\*|edgeLinearFeet\s*\*|UPGRADED_EDGE/.test(view));
   assert.ok(!view.includes("de-edge-pending-request"));
-  console.log("ok: 11 frontend live-price copy + final-approve gate; no browser pricing");
+  console.log("ok: 11 frontend live-price copy + accept-as-published gate; no browser pricing");
 }
 
 {

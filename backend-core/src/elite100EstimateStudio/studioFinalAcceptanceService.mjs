@@ -18,6 +18,18 @@ import {
   rejectSyntheticCallerAuthority
 } from "../digitalEstimate/syntheticPilotGuard.mjs";
 import { rejectClientAuthoritativeEconomics } from "../digitalEstimate/configuration/configurationTrustedContext.mjs";
+import {
+  isOpenDigitalEstimateReviewRequestStatus
+} from "../digitalEstimate/configuration/amendmentConfig.mjs";
+import {
+  buildPublicCustomerConfigurationReadModel
+} from "../digitalEstimate/configuration/customerConfigurationFoundation.mjs";
+import {
+  applyBaselineParityToCustomerCalculation,
+  publicCalcDivergesFromBaseline,
+  resolvePricedSelectionTotal
+} from "../digitalEstimate/configuration/baselineParityGuardrails.mjs";
+import { splitSelectionPayloadMeta } from "../digitalEstimate/configuration/customerConfigurationDraft.mjs";
 
 function unavailable(message = "Estimate unavailable", code = "not_found") {
   const e = new Error(message);
@@ -89,22 +101,36 @@ function customerSafeAcceptanceView(acceptance) {
   return {
     acceptanceId: acceptance.id,
     status: "accepted",
-    statusLabel: "Accepted",
+    statusLabel: "Estimate accepted",
     acceptedAt: acceptance.accepted_at,
     estimateRevision: acceptance.estimate_revision,
     publicationId: acceptance.publication_id,
     customerDisplayTotal: acceptance.customer_display_total,
     termsVersion: acceptance.terms_version,
+    acceptedAsPublished: snap.acceptedAsPublished !== false,
     configuration: acceptance.customer_configuration_json || null,
     materialSummary: acceptance.material_summary_json || [],
     customerVisibleLines: snap.customerVisibleLines || [],
     totals: snap.totals || { customerDisplayTotal: acceptance.customer_display_total },
     lifecycleVersion: acceptance.lifecycle_version || STUDIO_LIFECYCLE_VERSION,
     notice:
-      "You have accepted this estimate. Selections are locked. Contact your estimator for any changes.",
+      "Elite has received your acceptance. This is not a scheduling confirmation.",
     emailSent: false,
     markedSold: false
   };
+}
+
+function publishedEstimateTotal(estimate, publication) {
+  const calc = estimate?.calculationSnapshot || estimate?.calculation || null;
+  const fromCalc = Number(calc?.totals?.customerDisplayTotal);
+  if (Number.isFinite(fromCalc)) return Math.round(fromCalc * 100) / 100;
+  const fromApproval = Number(estimate?.approval?.customerDisplayTotal);
+  if (Number.isFinite(fromApproval)) return Math.round(fromApproval * 100) / 100;
+  const fromPub = Number(
+    publication?.customer_display_total ?? publication?.customerDisplayTotal
+  );
+  if (Number.isFinite(fromPub)) return Math.round(fromPub * 100) / 100;
+  return null;
 }
 
 /**
@@ -123,11 +149,81 @@ export function createStudioFinalAcceptanceService(deps) {
     lifecycleRepository,
     deRepository,
     configurationRepository,
-    studioEstimateRepository
+    studioEstimateRepository,
+    amendmentRepository = null,
+    listOpenReviewRequests = null
   } = deps;
 
   if (!lifecycleRepository) {
     throw new Error("lifecycleRepository required");
+  }
+
+  async function hasOpenReviewRequest(organizationId, publicationId) {
+    if (typeof listOpenReviewRequests === "function") {
+      try {
+        const rows = await listOpenReviewRequests(organizationId, publicationId);
+        return (rows || []).some((r) => isOpenDigitalEstimateReviewRequestStatus(r?.status));
+      } catch {
+        /* fall through */
+      }
+    }
+    if (amendmentRepository && typeof amendmentRepository.listReviewRequests === "function") {
+      try {
+        const all = await amendmentRepository.listReviewRequests(organizationId, { limit: 80 });
+        return (all || []).some(
+          (r) =>
+            String(r.publication_id || r.publicationId || "") === String(publicationId) &&
+            isOpenDigitalEstimateReviewRequestStatus(r.status)
+        );
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Block accepting the original published estimate when the customer has
+   * priced selection changes or physical scope requests pending.
+   */
+  function assertAcceptableAsPublished({ configuration, customerCalc }) {
+    const foundation = buildPublicCustomerConfigurationReadModel(configuration || null, {});
+    if (foundation.requiresEstimatorReview || Number(foundation.scopeChangeRequests?.count) > 0) {
+      throw safeFail(
+        "acceptance_blocked_scope_review",
+        "Please send your selections to Elite for review before accepting.",
+        409
+      );
+    }
+    if (Number(foundation.selectionChanges?.count) > 0) {
+      throw safeFail(
+        "acceptance_blocked_selection_changes",
+        "Please send your selections to Elite for review before accepting.",
+        409
+      );
+    }
+    if (customerCalc && typeof customerCalc === "object") {
+      const guarded = applyBaselineParityToCustomerCalculation(customerCalc, {
+        baselineDisplayTotal:
+          customerCalc.publishedBaselineTotal ?? customerCalc.baselineDisplayTotal ?? null,
+        scopeReviewRequired: Boolean(foundation.requiresEstimatorReview)
+      });
+      const baseline =
+        guarded?.publishedBaselineTotal ?? guarded?.baselineDisplayTotal ?? null;
+      const priced = resolvePricedSelectionTotal(guarded);
+      if (
+        publicCalcDivergesFromBaseline(
+          { ...guarded, pricedSelectionTotal: priced, configuredDisplayTotal: priced },
+          baseline
+        )
+      ) {
+        throw safeFail(
+          "acceptance_blocked_selection_changes",
+          "Please send your selections to Elite for review before accepting.",
+          409
+        );
+      }
+    }
   }
 
   async function resolveSession(rawSecret) {
@@ -201,6 +297,7 @@ export function createStudioFinalAcceptanceService(deps) {
       session = null,
       secretHash = null,
       configuration = null,
+      customerCalc = null,
       confirm = false
     } = ctx;
 
@@ -258,26 +355,44 @@ export function createStudioFinalAcceptanceService(deps) {
           markedSold: false,
           quickbooksWritten: false,
           morawareWritten: false,
-          publicationChanged: false
+          publicationChanged: false,
+          revisionCreated: false,
+          autoApproved: false,
+          autoPublished: false,
+          autoCalculated: false
         }
       };
     }
 
+    if (await hasOpenReviewRequest(organizationId, publication.id)) {
+      throw safeFail(
+        "acceptance_blocked_review_requested",
+        "Your selections were already sent for review. Elite will confirm the next steps.",
+        409
+      );
+    }
+
+    assertAcceptableAsPublished({ configuration, customerCalc });
+
     const calc = estimate.calculationSnapshot || estimate.calculation || null;
     const scope = estimate.scope || {};
+    const publishedTotal = publishedEstimateTotal(estimate, publication);
     const customerSafeSnapshot = buildCustomerSafeAcceptanceSnapshot({
       calc,
       scope,
-      configuration,
+      configuration: configuration || {},
       publication,
       estimate
     });
+    // Always accept the published estimate total — never a changed selection total.
+    customerSafeSnapshot.acceptedAsPublished = true;
+    customerSafeSnapshot.totals = {
+      ...(customerSafeSnapshot.totals || {}),
+      customerDisplayTotal: publishedTotal
+    };
     assertNoInternalEconomicsLeak(customerSafeSnapshot);
 
-    const customerDisplayTotal =
-      customerSafeSnapshot.totals?.customerDisplayTotal ??
-      calc?.totals?.customerDisplayTotal ??
-      null;
+    const customerDisplayTotal = publishedTotal;
 
     const { acceptance, created } = await lifecycleRepository.createAcceptance({
       organizationId,
@@ -311,7 +426,11 @@ export function createStudioFinalAcceptanceService(deps) {
         markedSold: false,
         quickbooksWritten: false,
         morawareWritten: false,
-        publicationChanged: false
+        publicationChanged: false,
+        revisionCreated: false,
+        autoApproved: false,
+        autoPublished: false,
+        autoCalculated: false
       }
     };
   }
@@ -382,15 +501,37 @@ export function createStudioFinalAcceptanceService(deps) {
       }
 
       let configuration = null;
+      let customerCalc = null;
       if (configurationRepository?.getLatestSelectionForSession) {
         const selection = await configurationRepository.getLatestSelectionForSession(
           session.organization_id,
           session.id
         );
         if (selection) {
-          configuration =
+          const payload =
             selection.selection_payload_json || selection.selections || selection.customer_configuration_json || {};
+          const meta = splitSelectionPayloadMeta(payload);
+          configuration = meta.customerConfiguration || payload;
+          if (typeof configurationRepository.getCalculationBySelectionId === "function") {
+            try {
+              const calcRow = await configurationRepository.getCalculationBySelectionId(
+                session.organization_id,
+                selection.id
+              );
+              customerCalc = calcRow?.customer_result_json || null;
+            } catch {
+              customerCalc = null;
+            }
+          }
         }
+      }
+
+      if (await hasOpenReviewRequest(session.organization_id, session.publication_id)) {
+        throw safeFail(
+          "acceptance_blocked_review_requested",
+          "Your selections were already sent for review. Elite will confirm the next steps.",
+          409
+        );
       }
 
       let estimate = null;
@@ -427,6 +568,7 @@ export function createStudioFinalAcceptanceService(deps) {
         session,
         secretHash,
         configuration,
+        customerCalc,
         confirm
       });
     },

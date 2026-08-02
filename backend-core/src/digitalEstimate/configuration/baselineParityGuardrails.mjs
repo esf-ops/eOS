@@ -408,6 +408,8 @@ export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
       { ...calc, pricedSelectionTotal: priced, configuredDisplayTotal: priced },
       baseline
     );
+    // Accept-as-published only when totals match published and no scope review.
+    const canAcceptPublished = !scopeReviewRequired && !diverged;
     /** @type {Record<string, unknown>} */
     const next = {
       ...calc,
@@ -415,7 +417,7 @@ export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
       publishedBaselineTotal: baseline,
       pricedSelectionTotal: priced,
       scopeReviewRequired,
-      canSubmitForFinalReview: false,
+      canSubmitForFinalReview: canAcceptPublished,
       customerPricingStatus: scopeReviewRequired
         ? CUSTOMER_PRICING_STATUS.SCOPE_REVIEW_REQUIRED
         : diverged
@@ -435,9 +437,12 @@ export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
       next.displayDelta = next.displayTotalDelta;
     }
     if (next.customerConfiguration && typeof next.customerConfiguration === "object") {
+      const foundationAllows =
+        next.customerConfiguration.canSubmitForFinalReview !== false &&
+        !(Number(next.customerConfiguration.selectionChanges?.count) > 0);
       next.customerConfiguration = {
         ...next.customerConfiguration,
-        canSubmitForFinalReview: false,
+        canSubmitForFinalReview: canAcceptPublished && foundationAllows,
         approvedBaselinePreserved: true,
         requiresEstimatorReview: scopeReviewRequired
       };
@@ -483,7 +488,8 @@ export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
     : unsafe
       ? BASELINE_PARITY_NOTICES.PRICE_UPDATE_UNAVAILABLE
       : null;
-  next.canSubmitForFinalReview = false;
+  // Frozen to published baseline with no scope request → customer may accept as published.
+  next.canSubmitForFinalReview = !pending;
 
   // Every customer-visible price must match the frozen total: sidebar breakdown,
   // room card summaries and the print estimate all read `roomPricing`. Substitute
@@ -531,9 +537,12 @@ export function applyBaselineParityToCustomerCalculation(calc, opts = {}) {
   next.reviewRequiredMessages = messages;
 
   if (next.customerConfiguration && typeof next.customerConfiguration === "object") {
+    const foundationAllows =
+      next.customerConfiguration.canSubmitForFinalReview !== false &&
+      !(Number(next.customerConfiguration.selectionChanges?.count) > 0);
     next.customerConfiguration = {
       ...next.customerConfiguration,
-      canSubmitForFinalReview: false,
+      canSubmitForFinalReview: !pending && foundationAllows,
       approvedBaselinePreserved: true,
       requiresEstimatorReview:
         Boolean(next.customerConfiguration.requiresEstimatorReview) || pending
