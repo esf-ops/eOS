@@ -368,6 +368,286 @@ export function finalizeCustomerConfigurationFoundation(foundation) {
   };
 }
 
+function pushUniqueReviewItem(target, seen, item) {
+  const kind = String(item?.kind || "").trim() || "item";
+  const label = String(item?.label || "").trim() || kind;
+  const key = `${kind}\u001f${label}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  target.push({
+    kind,
+    label,
+    ...(item.requiresEstimatorReview ? { requiresEstimatorReview: true } : {})
+  });
+}
+
+/**
+ * Classify a customer configuration for staff review/status.
+ * Allowed priced Digital Estimate selections are not Elite-review / Studio-revision
+ * requests by themselves. Physical scope and unsupported manual-review requests are.
+ *
+ * @param {{
+ *   foundation?: object|null,
+ *   selectionPayload?: object|null,
+ *   quantities?: Record<string, number>|null,
+ *   roomNotes?: Record<string, string>|null,
+ *   projectNote?: string|null,
+ *   customerNote?: string|null,
+ *   missingInformationRequirements?: Array<object>|null,
+ *   selectedOptions?: Array<{ optionKey?: string, label?: string, quantity?: number }>|null
+ * }} [input]
+ */
+export function classifyCustomerConfigurationForReview(input = {}) {
+  const payload =
+    input.selectionPayload && typeof input.selectionPayload === "object"
+      ? input.selectionPayload
+      : null;
+  const rawFoundation =
+    input.foundation ||
+    payload?.[CUSTOMER_CONFIGURATION_FOUNDATION_KEY] ||
+    null;
+  let foundation = sanitizeCustomerConfigurationFoundation(rawFoundation, {
+    rejectForbidden: false
+  });
+  const quantities =
+    input.quantities ||
+    (payload
+      ? Object.fromEntries(
+          Object.entries(payload).filter(([key, qty]) => {
+            const k = String(key);
+            return (
+              !k.startsWith("__") &&
+              k !== CUSTOMER_CONFIGURATION_FOUNDATION_KEY &&
+              Number(qty) > 0
+            );
+          })
+        )
+      : {});
+  foundation = enrichFoundationFromSelectionQuantities(foundation, quantities);
+  foundation = finalizeCustomerConfigurationFoundation(foundation);
+
+  /** @type {Array<{ kind: string, label: string }>} */
+  const selectionSummary = [];
+  /** @type {Array<{ kind: string, label: string, requiresEstimatorReview?: true }>} */
+  const scopeRequestSummary = [];
+  const selectionSeen = new Set();
+  const scopeSeen = new Set();
+
+  for (const item of foundation.selectionChanges?.items || []) {
+    pushUniqueReviewItem(selectionSummary, selectionSeen, item);
+  }
+  for (const item of foundation.scopeChangeRequests?.items || []) {
+    pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
+      ...item,
+      requiresEstimatorReview: true
+    });
+  }
+
+  const roomNotes =
+    input.roomNotes ||
+    payload?.__roomNotes ||
+    {};
+  for (const [roomId, note] of Object.entries(roomNotes || {})) {
+    const text = String(note || "").trim();
+    if (!text) continue;
+    pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
+      kind: "room_note",
+      label: text.length > 80 ? `${text.slice(0, 77)}…` : text,
+      requiresEstimatorReview: true
+    });
+    void roomId;
+  }
+
+  const projectNote = String(
+    input.projectNote || payload?.__projectNote || ""
+  ).trim();
+  if (projectNote) {
+    pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
+      kind: "project_note",
+      label: projectNote.length > 80 ? `${projectNote.slice(0, 77)}…` : projectNote,
+      requiresEstimatorReview: true
+    });
+  }
+
+  const customerNote = String(input.customerNote || "").trim();
+  if (customerNote) {
+    pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
+      kind: "customer_note",
+      label:
+        customerNote.length > 80 ? `${customerNote.slice(0, 77)}…` : customerNote,
+      requiresEstimatorReview: true
+    });
+  }
+
+  for (const req of input.missingInformationRequirements || []) {
+    const severity = String(req?.severity || "").toLowerCase();
+    const code = String(req?.code || "").toLowerCase();
+    const needsManual =
+      severity === "review" ||
+      /review|unsupported|manual|specialty_review|sidesplash|custom_height|dimension|opening|waterfall/i.test(
+        `${severity} ${code} ${req?.customerCopy || ""}`
+      );
+    if (!needsManual) continue;
+    // Allowed specialty/product priced paths are selection-owned; only true
+    // review/manual blockers become Elite-review scope.
+    if (/^specialty$|^product$|^sink$|^faucet$|^accessory$/i.test(code)) continue;
+    pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
+      kind: "manual_review",
+      label: String(req?.customerCopy || req?.code || "Manual review required"),
+      requiresEstimatorReview: true
+    });
+  }
+
+  for (const [key, qtyRaw] of Object.entries(quantities || {})) {
+    if (!(Number(qtyRaw) > 0)) continue;
+    const optionKey = String(key);
+    if (optionKey.startsWith("material:") || optionKey.startsWith("edge:")) {
+      // Already represented via foundation selectionChanges when present.
+      continue;
+    }
+    if (optionKey.startsWith("sink:") || optionKey.startsWith("faucet:")) {
+      pushUniqueReviewItem(selectionSummary, selectionSeen, {
+        kind: optionKey.startsWith("sink:") ? "sink" : "faucet",
+        label: optionKey
+      });
+      continue;
+    }
+    if (optionKey.startsWith("accessory:") || optionKey.startsWith("specialty:")) {
+      pushUniqueReviewItem(selectionSummary, selectionSeen, {
+        kind: optionKey.startsWith("accessory:") ? "accessory" : "specialty",
+        label: optionKey
+      });
+      continue;
+    }
+    if (optionKey.startsWith("backsplash:")) {
+      const mode = optionKey.split(":")[2] || "";
+      if (mode === "custom_height" || mode === "request_change") {
+        pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
+          kind: "backsplash_scope",
+          label: `Backsplash ${mode.replace(/_/g, " ")}`,
+          requiresEstimatorReview: true
+        });
+      } else if (mode === "keep_approved" || mode === "include" || mode === "remove") {
+        pushUniqueReviewItem(selectionSummary, selectionSeen, {
+          kind: "backsplash_preference",
+          label: `Backsplash: ${mode.replace(/_/g, " ")}`
+        });
+      }
+      continue;
+    }
+    if (optionKey.startsWith("sidesplash:")) {
+      pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
+        kind: "sidesplash",
+        label: "Side splash request",
+        requiresEstimatorReview: true
+      });
+    }
+  }
+
+  for (const row of input.selectedOptions || []) {
+    const optionKey = String(row?.optionKey || "");
+    if (!optionKey || !(Number(row?.quantity) > 0)) continue;
+    if (
+      /^(sink|faucet|accessory|specialty):/.test(optionKey) ||
+      /^(material|edge):/.test(optionKey)
+    ) {
+      const kind = optionKey.split(":")[0];
+      pushUniqueReviewItem(selectionSummary, selectionSeen, {
+        kind,
+        label: String(row.label || optionKey)
+      });
+      continue;
+    }
+    if (optionKey.startsWith("backsplash:")) {
+      const mode = optionKey.split(":")[2] || "";
+      if (mode === "custom_height" || mode === "request_change") {
+        pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
+          kind: "backsplash_scope",
+          label: String(row.label || `Backsplash ${mode.replace(/_/g, " ")}`),
+          requiresEstimatorReview: true
+        });
+      } else if (mode === "keep_approved" || mode === "include" || mode === "remove") {
+        pushUniqueReviewItem(selectionSummary, selectionSeen, {
+          kind: "backsplash_preference",
+          label: String(row.label || `Backsplash: ${mode.replace(/_/g, " ")}`)
+        });
+      }
+    }
+  }
+
+  const hasSelectionOnlyChanges = selectionSummary.length > 0;
+  const hasPhysicalScopeRequests = scopeRequestSummary.length > 0;
+  const requiresEliteReview = hasPhysicalScopeRequests;
+  const reviewKind = requiresEliteReview
+    ? "physical_scope"
+    : hasSelectionOnlyChanges
+      ? "selection_only"
+      : "none";
+
+  return {
+    hasSelectionOnlyChanges,
+    hasPhysicalScopeRequests,
+    requiresEliteReview,
+    reviewKind,
+    selectionSummary,
+    scopeRequestSummary
+  };
+}
+
+/**
+ * Classify an immutable review-request snapshot without reloading selections.
+ * Falls back to selection-only when no physical-scope signals are present.
+ *
+ * @param {object|null|undefined} reviewRequest
+ */
+export function classifyReviewRequestForEliteReview(reviewRequest) {
+  if (!reviewRequest) {
+    return classifyCustomerConfigurationForReview();
+  }
+  const snapshot =
+    reviewRequest.request_snapshot_json ||
+    reviewRequest.requestSnapshotJson ||
+    {};
+  const classification = snapshot.reviewClassification;
+  if (
+    classification &&
+    typeof classification === "object" &&
+    typeof classification.requiresEliteReview === "boolean"
+  ) {
+    return {
+      hasSelectionOnlyChanges: Boolean(classification.hasSelectionOnlyChanges),
+      hasPhysicalScopeRequests: Boolean(classification.hasPhysicalScopeRequests),
+      requiresEliteReview: Boolean(classification.requiresEliteReview),
+      reviewKind:
+        classification.reviewKind ||
+        (classification.requiresEliteReview
+          ? "physical_scope"
+          : classification.hasSelectionOnlyChanges
+            ? "selection_only"
+            : "none"),
+      selectionSummary: Array.isArray(classification.selectionSummary)
+        ? classification.selectionSummary
+        : [],
+      scopeRequestSummary: Array.isArray(classification.scopeRequestSummary)
+        ? classification.scopeRequestSummary
+        : []
+    };
+  }
+  return classifyCustomerConfigurationForReview({
+    foundation: snapshot.customerConfiguration || null,
+    selectionPayload: null,
+    roomNotes: snapshot.roomNotes || {},
+    projectNote: snapshot.projectNote || null,
+    customerNote:
+      reviewRequest.customer_note ||
+      reviewRequest.customerNote ||
+      snapshot.customerFacingNote ||
+      null,
+    missingInformationRequirements: snapshot.missingInformationRequirements || [],
+    selectedOptions: snapshot.selectedOptions || []
+  });
+}
+
 /**
  * When foundation material/edge are empty, mirror from existing selection quantities.
  * Display only — does not invent priced totals.

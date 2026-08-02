@@ -9,6 +9,7 @@ import {
 } from "./amendmentConfig.mjs";
 import { rejectClientAuthoritativeEconomics } from "./configurationTrustedContext.mjs";
 import { splitSelectionPayloadMeta } from "./customerConfigurationDraft.mjs";
+import { classifyCustomerConfigurationForReview } from "./customerConfigurationFoundation.mjs";
 import { buildCustomerConfigurationSummary } from "../catalog/customerConfigurationSummary.mjs";
 import { buildMissingInformationRequirements } from "../catalog/customerDraftRequirements.mjs";
 import {
@@ -376,6 +377,16 @@ export function createReviewRequestService(deps) {
           displayDelta: totals.displayDelta
         });
 
+      const reviewClassification = classifyCustomerConfigurationForReview({
+        selectionPayload: selection.selection_payload_json || selection.selections || {},
+        quantities: draftMeta.quantities || {},
+        roomNotes: draftMeta.roomNotes || {},
+        projectNote: draftMeta.projectNote || null,
+        customerNote,
+        missingInformationRequirements,
+        selectedOptions
+      });
+
       const requestSnapshotJson = {
         version: 1,
         nonAcceptance: true,
@@ -389,6 +400,7 @@ export function createReviewRequestService(deps) {
         selectedOptions: selectedOptions.filter((o) => Number(o.quantity) > 0),
         customerConfigurationSummary,
         missingInformationRequirements,
+        reviewClassification,
         baselineDisplayTotal: totals.baselineDisplayTotal,
         configuredDisplayTotal: totals.configuredDisplayTotal,
         displayDelta: totals.displayDelta,

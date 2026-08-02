@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildEmptyCustomerConfigurationFoundation,
   buildPublicCustomerConfigurationReadModel,
+  classifyCustomerConfigurationForReview,
   collectForbiddenCustomerConfigurationFields,
   sanitizeCustomerConfigurationFoundation
 } from "./customerConfigurationFoundation.mjs";
@@ -96,6 +97,53 @@ console.log("\ncustomerConfigurationFoundation.test.mjs\n");
   assert.equal(selectionOnly.scopeChangeRequests.count, 0);
   assert.ok(selectionOnly.selectionChanges.count >= 1);
   console.log("ok: selection-only changes are not review-required / not sold");
+}
+
+{
+  const selectionOnlyClassified = classifyCustomerConfigurationForReview({
+    foundation: {
+      selectedMaterial: { colorName: "Bayshore Sand", materialGroup: "Group Promo" },
+      selectedEdgeProfile: { profileToken: "edge_small_ogee", profileName: "Small Ogee" },
+      backsplashPreference: { preference: "keep_approved" }
+    },
+    quantities: {
+      "material:kitchen:e100-bayshore-sand": 1,
+      "edge:kitchen:edge_small_ogee": 1,
+      "sink:kitchen:esf:blanco:precis-50-50:coal-black": 1,
+      "faucet:kitchen:esf:example": 1,
+      "accessory:kitchen:esf:outlet": 1
+    }
+  });
+  assert.equal(selectionOnlyClassified.requiresEliteReview, false);
+  assert.equal(selectionOnlyClassified.hasPhysicalScopeRequests, false);
+  assert.equal(selectionOnlyClassified.reviewKind, "selection_only");
+  assert.ok(selectionOnlyClassified.selectionSummary.some((i) => i.kind === "sink"));
+  assert.ok(selectionOnlyClassified.selectionSummary.some((i) => i.kind === "accessory"));
+  assert.equal(selectionOnlyClassified.scopeRequestSummary.length, 0);
+
+  const scopeClassified = classifyCustomerConfigurationForReview({
+    foundation: {
+      selectedMaterial: { colorName: "Bayshore Sand" },
+      requestedOpenings: [{ type: "cooktop", quantity: 1 }],
+      requestedWaterfalls: [{ side: "left", legHeight: 36 }],
+      customerNotes: [{ note: "Please lengthen the island" }]
+    },
+    projectNote: "Extra room requested",
+    quantities: {
+      "material:kitchen:e100-bayshore-sand": 1,
+      "sink:kitchen:esf:blanco:precis-50-50:coal-black": 1
+    }
+  });
+  assert.equal(scopeClassified.requiresEliteReview, true);
+  assert.equal(scopeClassified.hasPhysicalScopeRequests, true);
+  assert.equal(scopeClassified.reviewKind, "physical_scope");
+  assert.ok(scopeClassified.scopeRequestSummary.some((i) => i.kind === "opening"));
+  assert.ok(scopeClassified.scopeRequestSummary.some((i) => i.kind === "project_note"));
+  assert.ok(
+    !scopeClassified.scopeRequestSummary.some((i) => i.kind === "sink"),
+    "allowed sink selections must not become physical scope requests"
+  );
+  console.log("ok: classifyCustomerConfigurationForReview separates selection-only from scope");
 }
 
 {

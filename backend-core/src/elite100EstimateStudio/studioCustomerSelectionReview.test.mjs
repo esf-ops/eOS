@@ -443,10 +443,13 @@ function selectionPayload() {
     "utf8"
   );
   assert.ok(panel.includes("studio-v2-customer-selection-review"));
-  assert.ok(panel.includes("Priced customer selections"));
+  assert.ok(panel.includes("Customer final selections") || panel.includes("Priced customer selections"));
   assert.ok(panel.includes("Scope requests requiring review"));
   assert.ok(panel.includes("Staff diagnostics"));
   assert.ok(panel.includes("Create revision from customer selections"));
+  assert.ok(panel.includes("requiresEliteReview"));
+  assert.ok(panel.includes("studio-v2-selection-revision-not-required"));
+  assert.ok(panel.includes("No physical scope changes were requested"));
   assert.ok(panel.includes("Customer selections have not been sent for Elite review."));
   assert.ok(shell.includes("StudioV2CustomerSelectionReviewPanel"));
   assert.ok(shell.includes("selectionReview"));
@@ -620,6 +623,7 @@ function selectionPayload() {
   assert.equal(activity.activity.savedSelections, true);
   assert.equal(activity.activity.reviewRequested, false);
   assert.equal(activity.selectionReview.reviewRequested, false);
+  assert.equal(activity.selectionReview.requiresEliteReview, false);
   assert.equal(activity.activity.accepted, false);
   assert.equal(activity.selectionReview.scopeRequests.count, 0);
   assert.ok(
@@ -728,6 +732,8 @@ function selectionPayload() {
   });
   assert.equal(activity.activity.reviewRequested, true);
   assert.equal(activity.selectionReview.reviewRequested, true);
+  assert.equal(activity.selectionReview.requiresEliteReview, true);
+  assert.equal(activity.selectionReview.selectionOnlySubmitted, false);
   assert.equal(activity.activity.savedSelections, true);
   assert.equal(activity.activity.accepted, false);
   assert.equal(activity.selectionReview.totals.customerEstimateTotal, 8739);
@@ -737,6 +743,10 @@ function selectionPayload() {
   assert.ok(
     !activity.selectionReview.scopeRequests.items.some((i) => i.kind === "material"),
     "priced material is not a physical scope request"
+  );
+  assert.ok(
+    !activity.selectionReview.scopeRequests.items.some((i) => i.kind === "sink"),
+    "allowed sink selections are not physical scope requests"
   );
   assert.equal(activity.reviewRequests.some((r) => r.open && r.status === "review_requested"), true);
   console.log("ok: 14 Send selections (review_requested) → Review requested Yes; totals preserved");
