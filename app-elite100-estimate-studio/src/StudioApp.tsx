@@ -12,17 +12,56 @@ import SharedInboxPage from "./estimateQueue/SharedInboxPage";
 import AllEstimatesPage from "./estimateQueue/AllEstimatesPage";
 import ManualEstimateWizard from "./estimateQueue/ManualEstimateWizard";
 import { apiGet, apiPost, ApiError } from "./lib/api";
+import {
+  applyStudioV2WorkspaceUrl,
+  parseStudioV2WorkspaceDeepLink
+} from "./lib/studioV2Url.mjs";
 import { getSupabase } from "./lib/supabase";
+
+type QueueReturnNav = "shared-inbox" | "command-center" | "all-estimates" | "estimate-queue";
+type WorkspaceFocus = "takeoff" | "scope" | "digital" | "review" | null;
 
 /** V2 preview only when UI flag is on AND URL has studioV2=1 (V1 remains default). */
 function studioV2PreviewRequested(): boolean {
   if (!studioV2UiEnabled()) return false;
   try {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("studioV2") === "1";
+    return parseStudioV2WorkspaceDeepLink(window.location.search).studioV2;
   } catch {
     return false;
   }
+}
+
+/** Initial V2 deep-link (refresh-safe). Navigation only — no approve/calc/publish. */
+function initialStudioV2DeepLink(): {
+  caseId: string | null;
+  openWorkspace: boolean;
+  caseIdInvalid: boolean;
+} {
+  if (!studioV2UiEnabled()) {
+    return { caseId: null, openWorkspace: false, caseIdInvalid: false };
+  }
+  try {
+    const parsed = parseStudioV2WorkspaceDeepLink(window.location.search);
+    if (parsed.studioV2 && parsed.caseIdInvalid) {
+      return { caseId: null, openWorkspace: false, caseIdInvalid: true };
+    }
+    if (parsed.studioV2 && parsed.caseId) {
+      return { caseId: parsed.caseId, openWorkspace: true, caseIdInvalid: false };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { caseId: null, openWorkspace: false, caseIdInvalid: false };
+}
+
+function normalizeWorkspaceFocus(
+  target: string | undefined,
+  fallback: NonNullable<WorkspaceFocus>
+): NonNullable<WorkspaceFocus> {
+  const t = String(target || fallback);
+  if (t === "manual-scope") return "scope";
+  if (t === "scope" || t === "digital" || t === "review" || t === "takeoff") return t;
+  return fallback;
 }
 
 const EOS_LOGO_URL =
@@ -122,27 +161,115 @@ export default function StudioApp() {
     | "publications"
     | "reviews"
     | "estimate-workspace"
-  >("shared-inbox");
-  const [queueReturnNav, setQueueReturnNav] = useState<
-    "shared-inbox" | "command-center" | "all-estimates" | "estimate-queue"
-  >("shared-inbox");
+  >(() => (initialStudioV2DeepLink().openWorkspace ? "estimate-workspace" : "shared-inbox"));
+  const [queueReturnNav, setQueueReturnNav] = useState<QueueReturnNav>("shared-inbox");
   const [moreNavOpen, setMoreNavOpen] = useState(false);
   const [newEstimateOpen, setNewEstimateOpen] = useState(false);
   const [publicationsMode, setPublicationsMode] = useState<"portfolio" | "publish-search">(
     "portfolio"
   );
   const [preselectReviewRequestId, setPreselectReviewRequestId] = useState<string | null>(null);
-  const [intakeCaseId, setIntakeCaseId] = useState<string | null>(null);
-  const [estimateWorkspaceCaseId, setEstimateWorkspaceCaseId] = useState<string | null>(null);
-  const [workspaceFocus, setWorkspaceFocus] = useState<
-    "takeoff" | "scope" | "digital" | "review" | null
-  >(null);
+  const [intakeCaseId, setIntakeCaseId] = useState<string | null>(
+    () => initialStudioV2DeepLink().caseId
+  );
+  const [estimateWorkspaceCaseId, setEstimateWorkspaceCaseId] = useState<string | null>(
+    () => initialStudioV2DeepLink().caseId
+  );
+  const [workspaceFocus, setWorkspaceFocus] = useState<WorkspaceFocus>(null);
   /** Slice A: opt-in V2 shell; default remains V1 EstimateTakeoffWorkspace. */
   const [studioV2Preview, setStudioV2Preview] = useState(() => studioV2PreviewRequested());
   const [organizationName, setOrganizationName] = useState(DEFAULT_WORKSPACE_NAME);
   const [organizationLogoUrl, setOrganizationLogoUrl] = useState(EOS_LOGO_URL);
   const [userSubtitle, setUserSubtitle] = useState("");
   const [profileFullName, setProfileFullName] = useState("");
+
+  const [studioV2DeepLinkError, setStudioV2DeepLinkError] = useState<string | null>(() =>
+    initialStudioV2DeepLink().caseIdInvalid
+      ? "This Studio V2 link is invalid. Return to Inbox and open the estimate again."
+      : null
+  );
+
+  function studioV2UrlSyncActive(): boolean {
+    return studioV2UiEnabled() && (studioV2Preview || studioV2PreviewRequested());
+  }
+
+  function openEstimateWorkspace(opts: {
+    caseId: string;
+    returnNav: QueueReturnNav;
+    openTarget?: string;
+    focusFallback?: NonNullable<WorkspaceFocus>;
+  }) {
+    const caseId = String(opts.caseId || "").trim();
+    setQueueReturnNav(opts.returnNav);
+    setEstimateWorkspaceCaseId(caseId);
+    setIntakeCaseId(caseId);
+    setWorkspaceFocus(normalizeWorkspaceFocus(opts.openTarget, opts.focusFallback || "takeoff"));
+    setMainNav("estimate-workspace");
+    setStudioV2DeepLinkError(null);
+    // URL addressability is V2-only; V1 keeps prior in-memory navigation.
+    if (studioV2UiEnabled() && (studioV2Preview || studioV2PreviewRequested())) {
+      applyStudioV2WorkspaceUrl({ caseId, mode: "push" });
+    }
+  }
+
+  function leaveEstimateWorkspace(returnNav?: QueueReturnNav) {
+    const next = returnNav || queueReturnNav;
+    setMainNav(next);
+    setEstimateWorkspaceCaseId(null);
+    setWorkspaceFocus(null);
+    setStudioV2DeepLinkError(null);
+    if (studioV2UiEnabled() && studioV2PreviewRequested()) {
+      // Keep ?studioV2=1; only drop the selected case.
+      applyStudioV2WorkspaceUrl({ caseId: null, mode: "push" });
+      setStudioV2Preview(true);
+    } else {
+      setStudioV2Preview(false);
+    }
+  }
+
+  function clearWorkspaceSelectionFromNav(nextNav: QueueReturnNav | "publications" | "reviews") {
+    setEstimateWorkspaceCaseId(null);
+    setWorkspaceFocus(null);
+    if (studioV2UrlSyncActive()) {
+      applyStudioV2WorkspaceUrl({ caseId: null, mode: "push" });
+    }
+    if (nextNav === "publications" || nextNav === "reviews") {
+      setMainNav(nextNav);
+    } else {
+      setMainNav(nextNav);
+      setQueueReturnNav(nextNav);
+    }
+  }
+
+  // Browser back/forward restores or clears V2 workspace from the URL.
+  useEffect(() => {
+    function onPopState() {
+      if (!studioV2UiEnabled()) return;
+      const parsed = parseStudioV2WorkspaceDeepLink(window.location.search);
+      setStudioV2Preview(parsed.studioV2);
+      if (parsed.studioV2 && parsed.caseIdInvalid) {
+        setEstimateWorkspaceCaseId(null);
+        setWorkspaceFocus(null);
+        setStudioV2DeepLinkError(
+          "This Studio V2 link is invalid. Return to Inbox and open the estimate again."
+        );
+        setMainNav(queueReturnNav);
+        return;
+      }
+      setStudioV2DeepLinkError(null);
+      if (parsed.studioV2 && parsed.caseId) {
+        setEstimateWorkspaceCaseId(parsed.caseId);
+        setIntakeCaseId(parsed.caseId);
+        setMainNav("estimate-workspace");
+        return;
+      }
+      setEstimateWorkspaceCaseId(null);
+      setWorkspaceFocus(null);
+      setMainNav((prev) => (prev === "estimate-workspace" ? queueReturnNav : prev));
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [queueReturnNav]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -555,6 +682,19 @@ export default function StudioApp() {
           <div className="error-box">{bootError || "Studio API unavailable for this account."}</div>
         ) : null}
         {actionError ? <div className="error-box">{actionError}</div> : null}
+        {studioV2DeepLinkError ? (
+          <div className="error-box" data-testid="studio-v2-deeplink-error">
+            <p>{studioV2DeepLinkError}</p>
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              data-testid="studio-v2-deeplink-error-back"
+              onClick={() => leaveEstimateWorkspace("shared-inbox")}
+            >
+              Back to Inbox
+            </button>
+          </div>
+        ) : null}
 
         <nav className="studio-nav" aria-label="Studio sections" data-testid="studio-primary-nav">
           <button
@@ -567,9 +707,7 @@ export default function StudioApp() {
             }
             data-testid="studio-nav-inbox"
             onClick={() => {
-              setMainNav("shared-inbox");
-              setQueueReturnNav("shared-inbox");
-              setEstimateWorkspaceCaseId(null);
+              clearWorkspaceSelectionFromNav("shared-inbox");
               setMoreNavOpen(false);
             }}
           >
@@ -585,9 +723,7 @@ export default function StudioApp() {
             }
             data-testid="studio-nav-estimates"
             onClick={() => {
-              setMainNav("all-estimates");
-              setQueueReturnNav("all-estimates");
-              setEstimateWorkspaceCaseId(null);
+              clearWorkspaceSelectionFromNav("all-estimates");
               setMoreNavOpen(false);
             }}
           >
@@ -628,9 +764,7 @@ export default function StudioApp() {
                     role="menuitem"
                     data-testid="studio-nav-command-center"
                     onClick={() => {
-                      setMainNav("command-center");
-                      setQueueReturnNav("command-center");
-                      setEstimateWorkspaceCaseId(null);
+                      clearWorkspaceSelectionFromNav("command-center");
                       setMoreNavOpen(false);
                     }}
                   >
@@ -643,7 +777,7 @@ export default function StudioApp() {
                     role="menuitem"
                     data-testid="studio-nav-publications"
                     onClick={() => {
-                      setMainNav("publications");
+                      clearWorkspaceSelectionFromNav("publications");
                       setPublicationsMode("portfolio");
                       setMoreNavOpen(false);
                     }}
@@ -657,7 +791,7 @@ export default function StudioApp() {
                     role="menuitem"
                     data-testid="studio-nav-review-requests"
                     onClick={() => {
-                      setMainNav("reviews");
+                      clearWorkspaceSelectionFromNav("reviews");
                       setMoreNavOpen(false);
                     }}
                   >
@@ -670,9 +804,7 @@ export default function StudioApp() {
                     role="menuitem"
                     data-testid="studio-nav-legacy-queue"
                     onClick={() => {
-                      setMainNav("estimate-queue");
-                      setQueueReturnNav("estimate-queue");
-                      setEstimateWorkspaceCaseId(null);
+                      clearWorkspaceSelectionFromNav("estimate-queue");
                       setMoreNavOpen(false);
                     }}
                   >
@@ -688,21 +820,12 @@ export default function StudioApp() {
           <SharedInboxPage
             authToken={sessionToken}
             onOpenEstimate={(caseId, options) => {
-              setQueueReturnNav("shared-inbox");
-              setEstimateWorkspaceCaseId(caseId);
-              setIntakeCaseId(caseId);
-              const target = String(options?.openTarget || "takeoff");
-              const normalized =
-                target === "manual-scope"
-                  ? "scope"
-                  : target === "scope" ||
-                      target === "digital" ||
-                      target === "review" ||
-                      target === "takeoff"
-                    ? target
-                    : "takeoff";
-              setWorkspaceFocus(normalized);
-              setMainNav("estimate-workspace");
+              openEstimateWorkspace({
+                caseId,
+                returnNav: "shared-inbox",
+                openTarget: options?.openTarget,
+                focusFallback: "takeoff"
+              });
             }}
           />
         ) : null}
@@ -714,22 +837,13 @@ export default function StudioApp() {
             selectedCaseId={intakeCaseId}
             onSelectCase={setIntakeCaseId}
             onOpenEstimate={(caseId, options) => {
-              setQueueReturnNav("command-center");
-              setEstimateWorkspaceCaseId(caseId);
-              setIntakeCaseId(caseId);
-              const target = String(options?.openTarget || "takeoff");
               // manual-scope → scope focus (Manual Scope editor + Pricing Setup)
-              const normalized =
-                target === "manual-scope"
-                  ? "scope"
-                  : target === "scope" ||
-                      target === "digital" ||
-                      target === "review" ||
-                      target === "takeoff"
-                    ? target
-                    : "takeoff";
-              setWorkspaceFocus(normalized);
-              setMainNav("estimate-workspace");
+              openEstimateWorkspace({
+                caseId,
+                returnNav: "command-center",
+                openTarget: options?.openTarget,
+                focusFallback: "takeoff"
+              });
             }}
           />
         ) : null}
@@ -738,21 +852,12 @@ export default function StudioApp() {
           <AllEstimatesPage
             authToken={sessionToken}
             onOpenEstimate={(caseId, options) => {
-              setQueueReturnNav("all-estimates");
-              setEstimateWorkspaceCaseId(caseId);
-              setIntakeCaseId(caseId);
-              const target = String(options?.openTarget || "scope");
-              const normalized =
-                target === "manual-scope"
-                  ? "scope"
-                  : target === "scope" ||
-                      target === "digital" ||
-                      target === "review" ||
-                      target === "takeoff"
-                    ? target
-                    : "scope";
-              setWorkspaceFocus(normalized);
-              setMainNav("estimate-workspace");
+              openEstimateWorkspace({
+                caseId,
+                returnNav: "all-estimates",
+                openTarget: options?.openTarget,
+                focusFallback: "scope"
+              });
             }}
           />
         ) : null}
@@ -763,21 +868,12 @@ export default function StudioApp() {
             selectedCaseId={intakeCaseId}
             onSelectCase={setIntakeCaseId}
             onOpenEstimate={(caseId, options) => {
-              setQueueReturnNav("estimate-queue");
-              setEstimateWorkspaceCaseId(caseId);
-              setIntakeCaseId(caseId);
-              const target = String(options?.openTarget || "takeoff");
-              const normalized =
-                target === "manual-scope"
-                  ? "scope"
-                  : target === "scope" ||
-                      target === "digital" ||
-                      target === "review" ||
-                      target === "takeoff"
-                    ? target
-                    : "takeoff";
-              setWorkspaceFocus(normalized);
-              setMainNav("estimate-workspace");
+              openEstimateWorkspace({
+                caseId,
+                returnNav: "estimate-queue",
+                openTarget: options?.openTarget,
+                focusFallback: "takeoff"
+              });
             }}
           />
         ) : null}
@@ -787,12 +883,7 @@ export default function StudioApp() {
             <StudioV2EstimatorShell
               authToken={sessionToken}
               caseId={estimateWorkspaceCaseId}
-              onBack={() => {
-                setMainNav(queueReturnNav);
-                setEstimateWorkspaceCaseId(null);
-                setWorkspaceFocus(null);
-                setStudioV2Preview(false);
-              }}
+              onBack={() => leaveEstimateWorkspace()}
               onOpenV1={() => setStudioV2Preview(false)}
             />
           ) : (
@@ -801,6 +892,7 @@ export default function StudioApp() {
               caseId={estimateWorkspaceCaseId}
               initialFocus={workspaceFocus || "takeoff"}
               onBackToQueue={() => {
+                // V1: in-memory only (no URL caseId sync).
                 setMainNav(queueReturnNav);
                 setEstimateWorkspaceCaseId(null);
                 setWorkspaceFocus(null);
@@ -818,11 +910,12 @@ export default function StudioApp() {
               setActionError("Session ended or access denied");
             }}
             onOpenEstimate={(caseId) => {
-              setQueueReturnNav("command-center");
-              setEstimateWorkspaceCaseId(caseId);
-              setIntakeCaseId(caseId);
-              setWorkspaceFocus("review");
-              setMainNav("estimate-workspace");
+              openEstimateWorkspace({
+                caseId,
+                returnNav: "command-center",
+                openTarget: "review",
+                focusFallback: "review"
+              });
             }}
           />
         ) : null}
@@ -831,16 +924,12 @@ export default function StudioApp() {
           <LiveDigitalEstimatesPage
             authToken={sessionToken}
             onOpenEstimate={(caseId, options) => {
-              setQueueReturnNav("command-center");
-              setEstimateWorkspaceCaseId(caseId);
-              setIntakeCaseId(caseId);
-              const target = String(options?.openTarget || "digital");
-              setWorkspaceFocus(
-                target === "scope" || target === "digital" || target === "review" || target === "takeoff"
-                  ? target
-                  : "digital"
-              );
-              setMainNav("estimate-workspace");
+              openEstimateWorkspace({
+                caseId,
+                returnNav: "command-center",
+                openTarget: options?.openTarget,
+                focusFallback: "digital"
+              });
             }}
             onOpenReviewRequest={(reviewRequestId) => {
               setPreselectReviewRequestId(reviewRequestId);
@@ -1051,11 +1140,12 @@ export default function StudioApp() {
           // Standalone create never returns to Inbox/a legacy queue — it
           // opens directly in Scope. "Back" from the workspace returns to
           // whichever primary section (Inbox or Estimates) launched it.
-          setQueueReturnNav(mainNav === "all-estimates" ? "all-estimates" : "shared-inbox");
-          setEstimateWorkspaceCaseId(intakeCaseId);
-          setIntakeCaseId(intakeCaseId);
-          setWorkspaceFocus("scope");
-          setMainNav("estimate-workspace");
+          openEstimateWorkspace({
+            caseId: intakeCaseId,
+            returnNav: mainNav === "all-estimates" ? "all-estimates" : "shared-inbox",
+            openTarget: "scope",
+            focusFallback: "scope"
+          });
           setNewEstimateOpen(false);
         }}
       />

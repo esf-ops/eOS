@@ -3367,3 +3367,16 @@
 | **Impacted** | `CustomerConfigurationFoundationPanel.tsx`, `ConfigurationView.tsx`, `studioCustomerSelectionReview.mjs` (+ test), `customerConfigurationSummary.mjs`, `customerConfigurationFoundation.mjs`, `phaseCustomerReviewCopyCleanup.test.ts`, this doc. |
 | **Protected** | Pricing formulas/rates, browser pricing math, approved estimates, publication snapshots, Studio V2 approve/publish/revision workflow, final acceptance gate. |
 | **Revisit trigger** | When final acceptance is productized, revisit submission CTA copy. |
+
+### 241. Studio V2 workspace deep-link / refresh-safe URL (2026-08-02)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-02 · `fix/studio-v2-workspace-deeplink` |
+| **Root cause** | Opened Studio V2 workspace lived only in React state (`mainNav` + `estimateWorkspaceCaseId`). Refresh rebooted to default Inbox with no case id, so estimators had to wait for Inbox reload and reopen. |
+| **Decision** | Prefer query params `/?studioV2=1&caseId=<intakeCaseId>` (`estimateId` accepted as alias for the same intake case id). Opening a case in V2 `pushState`s `caseId`; init parses the URL and mounts Studio V2 workspace directly when `studioV2=1` + valid `caseId` are present; Back / Inbox nav clears `caseId` while preserving `studioV2=1`; `popstate` restores or clears selection. Invalid deep-links and failed workspace loads show a recoverable error with Back to Inbox. Navigation/state restoration only — no auto approve/calculate/publish/create. V1 remains default when `studioV2=1` is absent. |
+| **Why** | Estimators refresh mid-workspace constantly; Inbox bounce was avoidable operational friction. |
+| **SQL** | None. |
+| **Impacted** | `studioV2Url.mjs` (+ test), `StudioApp.tsx`, `StudioV2EstimatorShell.tsx` (load-error Back), this doc. |
+| **Protected** | Pricing formulas/rates, Digital Estimate pricing, Studio V2 approve/publish/revision logic, V1 default Inbox behavior without `caseId`. |
+| **Revisit trigger** | If Studio gains a real client router, migrate these helpers onto route params without changing the public `studioV2` + `caseId` contract. |
