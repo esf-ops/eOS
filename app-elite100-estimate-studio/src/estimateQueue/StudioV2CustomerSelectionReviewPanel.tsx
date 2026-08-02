@@ -1,9 +1,11 @@
 /**
- * Studio V2 — Customer Selection Review panel (read-only).
- * Shows saved Digital Estimate selections and scope requests for estimators.
- * Does not apply, approve, publish, or invent priced totals.
+ * Studio V2 — Customer Selection Review panel.
+ * Shows server-resolved Digital Estimate selections and offers the explicit
+ * server-owned create-revision bridge. It never applies browser-supplied
+ * selections, approves, publishes, or invents priced totals.
  */
 import React from "react";
+import type { StudioV2RevisionAffordance } from "./StudioV2ApprovalPanel";
 
 export type SelectionReviewRoom = {
   roomKey?: string | null;
@@ -43,6 +45,28 @@ export type StudioCustomerSelectionReview = {
   };
   pricingAuthority?: string | null;
   staffDiagnostics?: Array<{ code?: string; message?: string }>;
+  selectionId?: string | null;
+  publicationId?: string | null;
+};
+
+export type CustomerSelectionRevisionInfo = {
+  createdFromCustomerSelections?: boolean;
+  createdFromCustomerSelectionsAt?: string | null;
+  sourcePublicationId?: string | null;
+  sourceReviewRequestId?: string | null;
+  sourceSelectionId?: string | null;
+  sourceApprovedEstimateId?: string | null;
+  appliedSelectionsSummary?: Array<{ kind?: string; roomId?: string | null; label?: string }>;
+  notAppliedScopeRequests?: Array<{
+    kind?: string;
+    roomId?: string | null;
+    label?: string;
+    reason?: string;
+  }>;
+  warnings?: string[];
+  needsRecalculation?: boolean;
+  approved?: boolean;
+  published?: boolean;
 };
 
 type Props = {
@@ -62,6 +86,13 @@ type Props = {
   } | null;
   activePublication?: { publicationId?: string | null } | null;
   historicalCount?: number;
+  revisionAffordance?: StudioV2RevisionAffordance | null;
+  customerSelectionRevision?: CustomerSelectionRevisionInfo | null;
+  activeReviewRequestId?: string | null;
+  revisionBusy?: boolean;
+  revisionError?: string | null;
+  revisionNotice?: string | null;
+  onCreateRevision?: () => void | Promise<void>;
 };
 
 function money(v: unknown): string {
@@ -141,7 +172,14 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
     selectionReview,
     acceptance,
     activePublication,
-    historicalCount = 0
+    historicalCount = 0,
+    revisionAffordance,
+    customerSelectionRevision,
+    activeReviewRequestId,
+    revisionBusy = false,
+    revisionError,
+    revisionNotice,
+    onCreateRevision
   } = props;
 
   const review = selectionReview || null;
@@ -150,6 +188,22 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
   const scope = review?.scopeRequests;
   const scopeCount = Number(scope?.count) || 0;
   const diagnostics = Array.isArray(review?.staffDiagnostics) ? review.staffDiagnostics : [];
+  const reviewRequested = Boolean(activity?.reviewRequested || review?.reviewRequested);
+  const accepted = Boolean(activity?.accepted || acceptance);
+  const alreadyCreated = Boolean(
+    customerSelectionRevision?.createdFromCustomerSelections === true &&
+      (!activeReviewRequestId ||
+        customerSelectionRevision.sourceReviewRequestId === activeReviewRequestId)
+  );
+  const canCreateRevision = Boolean(
+    saved &&
+      reviewRequested &&
+      !accepted &&
+      !alreadyCreated &&
+      activePublication?.publicationId &&
+      revisionAffordance?.canCreateRevision &&
+      onCreateRevision
+  );
 
   return (
     <section className="studio-v2-panel" data-testid="studio-v2-customer-selection-review">
@@ -172,15 +226,15 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
         </div>
         <div>
           <dt>Review requested</dt>
-          <dd>{activity?.reviewRequested || review?.reviewRequested ? "Yes" : "No"}</dd>
+          <dd>{reviewRequested ? "Yes" : "No"}</dd>
         </div>
         <div>
           <dt>Accepted</dt>
           <dd data-testid="studio-v2-accepted-flag">
-            {activity?.accepted || acceptance ? "Yes" : "No"}
+            {accepted ? "Yes" : "No"}
           </dd>
         </div>
-        {activity?.accepted || acceptance ? (
+        {accepted ? (
           <>
             <div>
               <dt>Accepted total</dt>
@@ -295,9 +349,111 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
         </div>
       ) : null}
 
-      <p className="muted studio-v2-selection-readonly">
-        Read-only review. Applying customer selections to the estimate is not available yet.
-      </p>
+      <div
+        className="studio-v2-selection-revision-create"
+        data-testid="studio-v2-selection-revision-create"
+      >
+        <h3>Create an editable Studio V2 revision</h3>
+        {alreadyCreated ? (
+          <div className="studio-v2-notice" data-testid="studio-v2-selection-revision-existing">
+            <strong>Revision already created</strong>
+            <p>
+              This workspace is the editable revision created from the submitted customer
+              selections. Review scope, recalculate, approve, then republish.
+            </p>
+            <dl className="studio-v2-dl">
+              <div>
+                <dt>Created</dt>
+                <dd>{formatWhen(customerSelectionRevision?.createdFromCustomerSelectionsAt)}</dd>
+              </div>
+              <div>
+                <dt>Needs recalculation</dt>
+                <dd>{customerSelectionRevision?.needsRecalculation ? "Yes" : "No"}</dd>
+              </div>
+              <div>
+                <dt>Approved</dt>
+                <dd>{customerSelectionRevision?.approved ? "Yes" : "No"}</dd>
+              </div>
+              <div>
+                <dt>Published</dt>
+                <dd>{customerSelectionRevision?.published ? "Yes" : "No"}</dd>
+              </div>
+            </dl>
+            {(customerSelectionRevision?.appliedSelectionsSummary || []).length > 0 ? (
+              <>
+                <h4>Applied customer selections</h4>
+                <ul className="studio-v2-warnings">
+                  {(customerSelectionRevision?.appliedSelectionsSummary || []).map((item, i) => (
+                    <li key={`${item.kind || "selection"}-${i}`}>
+                      {item.label || "Customer selection applied"}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+            {(customerSelectionRevision?.notAppliedScopeRequests || []).length > 0 ? (
+              <>
+                <h4>Requires estimator review — not automatically applied</h4>
+                <p className="muted">
+                  Some customer requests were added as review notes and were not automatically
+                  applied.
+                </p>
+                <ul className="studio-v2-warnings">
+                  {(customerSelectionRevision?.notAppliedScopeRequests || []).map((item, i) => (
+                    <li key={`${item.kind || "request"}-${i}`}>
+                      <strong>{item.label || "Customer request"}</strong>
+                      {item.reason ? ` — ${item.reason}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        ) : accepted ? (
+          <p className="muted" data-testid="studio-v2-selection-revision-accepted-blocked">
+            This unchanged published estimate was accepted. A customer-selection revision is not
+            available from this accepted state.
+          </p>
+        ) : !reviewRequested ? (
+          <p className="muted" data-testid="studio-v2-selection-revision-not-sent">
+            Customer selections have not been sent for Elite review.
+          </p>
+        ) : !revisionAffordance?.canCreateRevision ? (
+          <p className="muted" data-testid="studio-v2-selection-revision-source-unavailable">
+            Open the approved published estimate before creating a customer-selection revision.
+          </p>
+        ) : (
+          <>
+            <p className="muted">
+              The server will resolve the latest submitted selection set. Safe design choices may
+              be applied; physical scope requests remain review notes.
+            </p>
+            {scopeCount > 0 ? (
+              <p className="warn-box">
+                Some customer requests will be added as review notes and will not be automatically
+                applied.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="eq-btn-primary"
+              disabled={!canCreateRevision || revisionBusy}
+              data-testid="studio-v2-selection-create-revision"
+              onClick={() => void onCreateRevision?.()}
+            >
+              {revisionBusy
+                ? "Creating revision…"
+                : "Create revision from customer selections"}
+            </button>
+          </>
+        )}
+        {revisionError ? <div className="error-box">{revisionError}</div> : null}
+        {revisionNotice ? (
+          <div className="studio-v2-notice" data-testid="studio-v2-selection-revision-notice">
+            {revisionNotice}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

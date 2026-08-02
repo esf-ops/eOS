@@ -205,6 +205,7 @@ export function attachElite100StudioV2Routes(app, deps) {
       studioEstimateService,
       studioDigitalEstimateService,
       lifecycleRepository,
+      amendmentRepository,
       configurationRepository,
       configurationStudioService,
       loadTakeoffWorkspace: deps.loadTakeoffWorkspace,
@@ -472,6 +473,36 @@ export function attachElite100StudioV2Routes(app, deps) {
       } catch (e) {
         logStudioV2("approved create-revision failed", e, req);
         const { status, body } = studioV2ErrorBody(e, "Unable to create editable revision");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-studio-v2/cases/:caseId/customer-selections/create-revision",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioV2.createRevisionFromCustomerSelections({
+          organizationId,
+          intakeCaseId: req.params.caseId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        auditStudioV2("customer_selections.create_revision", req, {
+          intakeCaseId: req.params.caseId,
+          estimateId: result.estimateId || null
+        });
+        res.json(result);
+      } catch (e) {
+        logStudioV2("customer-selections create-revision failed", e, req);
+        const { status, body } = studioV2ErrorBody(
+          e,
+          "Unable to create revision from customer selections"
+        );
         res.status(status).json(body);
       }
     }

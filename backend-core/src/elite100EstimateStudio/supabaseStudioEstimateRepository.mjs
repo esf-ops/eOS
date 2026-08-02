@@ -315,7 +315,7 @@ export class SupabaseStudioEstimateRepository {
       throw err;
     }
     const row = buildStudioEstimateRow({
-      id: randomUUID(),
+      id: input.id || randomUUID(),
       organizationId: normOrg(organizationId),
       intakeCaseId: current.intakeCaseId,
       takeoffJobId: input.takeoffJobId ?? current.takeoffJobId,

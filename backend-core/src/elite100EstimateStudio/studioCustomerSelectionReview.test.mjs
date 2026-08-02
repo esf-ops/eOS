@@ -446,12 +446,14 @@ function selectionPayload() {
   assert.ok(panel.includes("Priced customer selections"));
   assert.ok(panel.includes("Scope requests requiring review"));
   assert.ok(panel.includes("Staff diagnostics"));
-  assert.ok(panel.includes("Read-only review"));
+  assert.ok(panel.includes("Create revision from customer selections"));
+  assert.ok(panel.includes("Customer selections have not been sent for Elite review."));
   assert.ok(shell.includes("StudioV2CustomerSelectionReviewPanel"));
   assert.ok(shell.includes("selectionReview"));
+  assert.ok(shell.includes("runCreateRevisionFromCustomerSelections"));
   assert.equal(shell.includes("studio-v2-customer-activity"), false);
   assert.ok(!panel.includes("apply changes"), "no apply-changes CTA");
-  console.log("ok: 11 frontend panel wired below publish; read-only");
+  console.log("ok: 11 frontend panel wired below publish with explicit revision bridge");
 }
 
 {

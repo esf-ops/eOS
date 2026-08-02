@@ -34,7 +34,15 @@ export const STUDIO_V2_ERROR_CODES = Object.freeze({
   /** Interactive DE configuration envelope missing / failed after publish. */
   CONFIGURATION_ENVELOPE_REQUIRED: "configuration_envelope_required",
   /** Create-revision requires an approved (non-superseded) source snapshot. */
-  REVISION_REQUIRES_APPROVED: "revision_requires_approved"
+  REVISION_REQUIRES_APPROVED: "revision_requires_approved",
+  /** Customer must submit selections through the immutable review-request path first. */
+  CUSTOMER_SELECTIONS_NOT_SENT: "customer_selections_not_sent",
+  /** Accepted unchanged estimates cannot fork a customer-selection revision. */
+  CUSTOMER_SELECTIONS_ALREADY_ACCEPTED: "customer_selections_already_accepted",
+  /** Submitted selection row referenced by the review request is unavailable. */
+  CUSTOMER_SELECTION_SOURCE_UNAVAILABLE: "customer_selection_source_unavailable",
+  /** A different editable sibling already exists for this approved source. */
+  CUSTOMER_SELECTION_REVISION_CONFLICT: "customer_selection_revision_conflict"
 });
 
 const USER_MESSAGES = Object.freeze({
@@ -71,7 +79,15 @@ const USER_MESSAGES = Object.freeze({
   [STUDIO_V2_ERROR_CODES.CONFIGURATION_ENVELOPE_REQUIRED]:
     "Customer interactive Digital Estimate configuration could not be activated. Republish after configuration is available.",
   [STUDIO_V2_ERROR_CODES.REVISION_REQUIRES_APPROVED]:
-    "Only an approved estimate can open an editable revision."
+    "Only an approved estimate can open an editable revision.",
+  [STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_NOT_SENT]:
+    "Customer selections have not been sent for Elite review.",
+  [STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_ALREADY_ACCEPTED]:
+    "This published estimate was already accepted. A customer-selection revision cannot be created.",
+  [STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_SOURCE_UNAVAILABLE]:
+    "The submitted customer selection set is unavailable. Ask the customer to send selections again.",
+  [STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_CONFLICT]:
+    "A different editable revision already exists. Open and resolve it before creating another revision."
 });
 
 /**
@@ -115,6 +131,10 @@ function defaultStatusForCode(code) {
     case STUDIO_V2_ERROR_CODES.DRAFT_REQUIRED:
     case STUDIO_V2_ERROR_CODES.APPROVED_SNAPSHOT_READONLY:
     case STUDIO_V2_ERROR_CODES.REVISION_REQUIRES_APPROVED:
+    case STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_NOT_SENT:
+    case STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTIONS_ALREADY_ACCEPTED:
+    case STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_SOURCE_UNAVAILABLE:
+    case STUDIO_V2_ERROR_CODES.CUSTOMER_SELECTION_REVISION_CONFLICT:
     case STUDIO_V2_ERROR_CODES.TAKEOFF_NOT_READY:
     case STUDIO_V2_ERROR_CODES.EXISTING_SCOPE_CONFIRMATION_REQUIRED:
     case STUDIO_V2_ERROR_CODES.CALCULATION_STALE:

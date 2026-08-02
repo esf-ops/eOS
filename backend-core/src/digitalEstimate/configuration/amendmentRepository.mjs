@@ -216,6 +216,16 @@ export function createInMemoryAmendmentRepository(opts = {}) {
       return structuredClone(row);
     },
 
+    async claimReviewRequestStatus(organizationId, requestId, fromStatuses, status) {
+      const row = reviewRequests.get(String(requestId));
+      if (!row || row.organization_id !== organizationId) return null;
+      const allowed = new Set((fromStatuses || []).map(String));
+      if (!allowed.has(String(row.status))) return null;
+      row.status = status;
+      row.updated_at = new Date().toISOString();
+      return structuredClone(row);
+    },
+
     async createAmendmentDraft(trusted) {
       const {
         organizationId,
@@ -874,6 +884,24 @@ export function createSupabaseAmendmentRepository({ db }) {
         .select("*")
         .eq("organization_id", organizationId)
         .eq("id", amendmentId)
+        .limit(1);
+      if (error) throw error;
+      return data?.[0] ?? null;
+    },
+
+    async claimReviewRequestStatus(organizationId, requestId, fromStatuses, status) {
+      const allowed = [...new Set((fromStatuses || []).map(String).filter(Boolean))];
+      if (!allowed.length) return null;
+      const { data, error } = await db
+        .from("digital_estimate_configuration_review_requests")
+        .update({
+          status,
+          updated_at: new Date().toISOString()
+        })
+        .eq("organization_id", organizationId)
+        .eq("id", requestId)
+        .in("status", allowed)
+        .select("*")
         .limit(1);
       if (error) throw error;
       return data?.[0] ?? null;
