@@ -17,6 +17,7 @@ import {
   type PublicEstimate,
   type RoomProductDrafts,
 } from "./publicConfigApi";
+import { shouldPreservePersistedSinkDraft } from "./sinkSelectionDisplay.ts";
 
 export type ChoiceRole =
   | "backsplash"
@@ -479,6 +480,12 @@ function draftFromSelection(
     });
   }
   if (!selected) return base;
+  if (
+    role === "sink" &&
+    shouldPreservePersistedSinkDraft(selected, base.source)
+  ) {
+    return base;
+  }
   const source =
     selected.sourceKind === "customer_provided"
       ? "customer_provided"
