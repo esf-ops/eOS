@@ -15,6 +15,7 @@
  */
 import { PRODUCT_CATALOG_ITEMS } from "./productCatalogData";
 import { applyProductCatalogDisplaySplits, applyProductCatalogDisplayNames } from "./productCatalogDisplay";
+import { applyProductCatalogSinkAccessories } from "./productCatalogSinkAccessories";
 import {
   blancoSinkFinishCandidates,
   blancoSinkHeroCandidates,
@@ -388,7 +389,8 @@ export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCata
 export function getProductCatalogItemsWithAssets(): ProductCatalogItem[] {
   const merged = PRODUCT_CATALOG_ITEMS.map(mergeProductCatalogAssets);
   const named = applyProductCatalogDisplayNames(merged);
-  return applyProductCatalogDisplaySplits(named, mergeProductCatalogAssets);
+  const split = applyProductCatalogDisplaySplits(named, mergeProductCatalogAssets);
+  return applyProductCatalogSinkAccessories(split);
 }
 
 export { finishKeyFromLabel as variantSlug } from "./productCatalog";

@@ -32,6 +32,12 @@ export type ProductCatalogVariant = {
   notes?: string;
 };
 
+/** Public-safe sink accessory line for the detail modal (no pricing). */
+export type ProductCatalogAccessory = {
+  name: string;
+  sku?: string;
+};
+
 export type ProductCatalogItem = {
   id: string;
   category: ProductCatalogCategory;
@@ -54,6 +60,11 @@ export type ProductCatalogItem = {
   notes?: string;
   availableColors?: string[];
   variants?: ProductCatalogVariant[];
+  /**
+   * Compatible accessories for this sink (showroom modal).
+   * `undefined` = section hidden; `[]` = “No accessories listed.”
+   */
+  accessories?: ProductCatalogAccessory[];
   imageUrl?: string;
   gallery?: string[];
   installedImageUrl?: string;

@@ -471,6 +471,26 @@ export function ProductCatalogModal({
                 ) : null}
               </dl>
 
+              {item.category === "sink" && item.accessories !== undefined ? (
+                <section className="pc-text-section pc-accessories-section" aria-label="Available accessories">
+                  <h3 className="pc-section-title">Available accessories</h3>
+                  {item.accessories.length > 0 ? (
+                    <ul className="pc-accessory-list">
+                      {item.accessories.map((acc) => (
+                        <li key={`${acc.sku ?? acc.name}-${acc.name}`}>
+                          <span className="pc-accessory-name">{acc.name}</span>
+                          {acc.sku ? (
+                            <span className="pc-accessory-sku"> · {acc.sku}</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="pc-body-text pc-accessory-empty">No accessories listed.</p>
+                  )}
+                </section>
+              ) : null}
+
               {finishOptions.length > 0 ? (
                 <section className="pc-finish-section" aria-label="Color and finish options">
                   <h3 className="pc-section-title">Color / finish</h3>
