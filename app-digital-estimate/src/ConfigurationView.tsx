@@ -1479,18 +1479,11 @@ function FinalAcceptanceModal({
   onConfirm,
   onClose,
   busy,
-  revisionLabel,
-  configuredTotalLabel,
-  termsVersion,
 }: {
   onConfirm: () => void;
   onClose: () => void;
   busy: boolean;
-  revisionLabel?: string | null;
-  configuredTotalLabel?: string | null;
-  termsVersion?: string | null;
 }) {
-  const [acknowledged, setAcknowledged] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -1511,51 +1504,13 @@ function FinalAcceptanceModal({
         aria-labelledby="final-acceptance-title"
         aria-modal="true"
       >
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">
-          Final acceptance
+        <div id="final-acceptance-title" className="text-lg font-semibold text-foreground">
+          Accept estimate
         </div>
-        <div id="final-acceptance-title" className="mt-1 text-lg font-semibold text-foreground">
-          Approve this final estimate?
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          This is final acceptance of the estimate shown below — not a review request. Your
-          selections will lock. Contact your estimator if you need changes after accepting.
+        <p className="mt-2 text-sm text-muted-foreground">
+          You are accepting the published estimate as shown. Elite will confirm scheduling and next
+          steps.
         </p>
-        <dl className="mt-4 space-y-1.5 rounded-xl border border-border bg-muted/20 px-3 py-3 text-sm">
-          {revisionLabel ? (
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Estimate revision</dt>
-              <dd data-testid="de-accept-confirm-revision">{revisionLabel}</dd>
-            </div>
-          ) : null}
-          {configuredTotalLabel ? (
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Your total</dt>
-              <dd className="font-semibold tabular-nums" data-testid="de-accept-confirm-total">
-                {configuredTotalLabel}
-              </dd>
-            </div>
-          ) : null}
-          {termsVersion ? (
-            <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Terms</dt>
-              <dd data-testid="de-accept-confirm-terms">{termsVersion}</dd>
-            </div>
-          ) : null}
-        </dl>
-        <label className="mt-4 flex items-start gap-2 text-sm text-foreground">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={acknowledged}
-            onChange={(e) => setAcknowledged(e.target.checked)}
-            data-testid="de-accept-confirm-check"
-          />
-          <span>
-            I confirm I am accepting this estimate revision, my selected options, the total shown,
-            and the current terms.
-          </span>
-        </label>
         <div className="mt-5 flex gap-2">
           <button
             type="button"
@@ -1567,12 +1522,12 @@ function FinalAcceptanceModal({
           </button>
           <button
             type="button"
-            disabled={!acknowledged || busy}
+            disabled={busy}
             onClick={onConfirm}
             className="flex-1 rounded-lg bg-foreground py-2.5 text-sm font-semibold text-background disabled:opacity-50"
             data-testid="de-accept-confirm"
           >
-            {busy ? "Accepting…" : "Approve final estimate"}
+            {busy ? "Accepting…" : "Accept estimate"}
           </button>
         </div>
       </div>
@@ -2719,7 +2674,16 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       : scopeReviewRequired
         ? "Needs Elite review"
         : null);
-  const canSubmitForFinalReview = customerConfiguration?.canSubmitForFinalReview === true;
+  const calcAllowsAccept =
+    (displayCalc as { canSubmitForFinalReview?: boolean } | null)?.canSubmitForFinalReview === true;
+  const foundationAllowsAccept = customerConfiguration?.canSubmitForFinalReview === true;
+  // Accept original published estimate only — never when selections changed or review sent.
+  const canAcceptPublishedEstimate =
+    !configurationLocked &&
+    !reviewRequest &&
+    !scopeReviewRequired &&
+    foundationAllowsAccept &&
+    (displayCalc == null || calcAllowsAccept);
   const baselineDisplayTotal =
     (displayCalc as { baselineDisplayTotal?: number | null; publishedBaselineTotal?: number | null } | null)
       ?.baselineDisplayTotal ??
@@ -3039,7 +3003,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             Dismiss
           </button>
         ) : null}
-            {reviewUiEnabled() ? (
+        {reviewUiEnabled() && !finalAcceptance ? (
           <button
             type="button"
             onClick={() => setReviewOpen(true)}
@@ -3053,14 +3017,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             data-testid="de-request-review"
             className="w-full rounded-lg border border-border bg-background py-3 text-sm font-semibold text-foreground transition hover:bg-muted/40 disabled:opacity-50"
           >
-            {configurationLocked
-              ? "Selections locked"
-              : reviewRequest
-                ? "Selections already sent"
-                : "Send selections"}
+            {reviewRequest ? "Selections already sent" : "Send selections"}
           </button>
         ) : null}
-        {canSubmitForFinalReview && !configurationLocked ? (
+        {canAcceptPublishedEstimate ? (
           <button
             type="button"
             onClick={() => setAcceptOpen(true)}
@@ -3068,17 +3028,14 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             data-testid="de-approve-final"
             className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90 disabled:opacity-50"
           >
-            Approve final estimate
+            Accept estimate
           </button>
-        ) : !configurationLocked ? (
-          <p
-            className="text-center text-xs text-muted-foreground"
-            data-testid="de-final-approval-unavailable"
-          >
-            Final approval will be available after estimator review.
+        ) : null}
+        {acceptError ? (
+          <p className="text-center text-xs text-destructive" data-testid="de-accept-error">
+            {acceptError}
           </p>
         ) : null}
-        {acceptError ? <p className="text-center text-xs text-destructive">{acceptError}</p> : null}
         {reviewError ? <p className="text-center text-xs text-destructive">{reviewError}</p> : null}
       </div>
       {finalAcceptance ? (
@@ -3086,15 +3043,15 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           className="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs"
           data-testid="de-accepted-banner"
         >
-          <div className="font-medium text-foreground">
-            {finalAcceptance.statusLabel || "Accepted"}
+          <div className="font-medium text-foreground" data-testid="de-accepted-title">
+            {finalAcceptance.statusLabel || "Estimate accepted"}
           </div>
           <div className="mt-1 text-muted-foreground">
             Accepted {formatDate(finalAcceptance.acceptedAt || "")}
           </div>
           <p className="mt-2 text-muted-foreground">
             {finalAcceptance.notice ||
-              "You have accepted this estimate. Selections are locked. Contact your estimator for any changes."}
+              "Elite has received your acceptance. This is not a scheduling confirmation."}
           </p>
         </div>
       ) : null}
@@ -3371,34 +3328,52 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               />
             </div>
 
-            {reviewUiEnabled() ? (
+            {reviewUiEnabled() && !finalAcceptance ? (
               <section
                 className="rounded-2xl border border-border bg-background p-5 shadow-sm"
                 data-testid="de-review-cta"
               >
                 <h2 className="text-base font-semibold text-foreground">
-                  Send your selections to Elite
+                  {canAcceptPublishedEstimate
+                    ? "Accept estimate"
+                    : "Send your selections to Elite"}
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  This is not final acceptance. Elite will confirm details before the job is sold.
+                  {canAcceptPublishedEstimate
+                    ? "Accept the published estimate as shown, or change selections and send them to Elite."
+                    : "This is not final acceptance. Elite will confirm details before the job is sold."}
                 </p>
                 <div className="mt-4 space-y-2 de-interactive-chrome">
                   {printEstimateButton("de-print-estimate-bottom")}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setReviewOpen(true)}
-                  disabled={
-                    saveState === "unsaved" ||
-                    saveState === "saving" ||
-                    saveState === "error" ||
-                    (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
-                  }
-                  className="mt-2 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
-                  data-testid="de-request-review-bottom"
-                >
-                  {reviewRequest ? "Selections already sent" : "Send selections"}
-                </button>
+                {canAcceptPublishedEstimate ? (
+                  <button
+                    type="button"
+                    onClick={() => setAcceptOpen(true)}
+                    disabled={
+                      saveState === "unsaved" || saveState === "saving" || saveState === "error"
+                    }
+                    className="mt-2 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    data-testid="de-approve-final-bottom"
+                  >
+                    Accept estimate
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setReviewOpen(true)}
+                    disabled={
+                      saveState === "unsaved" ||
+                      saveState === "saving" ||
+                      saveState === "error" ||
+                      (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
+                    }
+                    className="mt-2 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    data-testid="de-request-review-bottom"
+                  >
+                    {reviewRequest ? "Selections already sent" : "Send selections"}
+                  </button>
+                )}
               </section>
             ) : (
               <div className="de-interactive-chrome">{printEstimateButton("de-print-estimate-bottom")}</div>
@@ -3560,9 +3535,6 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       {acceptOpen ? (
         <FinalAcceptanceModal
           busy={acceptBusy}
-          configuredTotalLabel={authoritativeEstimateLabel}
-          revisionLabel={vm.quoteNumber || state.estimate?.quoteNumber || null}
-          termsVersion={null}
           onClose={() => setAcceptOpen(false)}
           onConfirm={() => void onAcceptFinal()}
         />

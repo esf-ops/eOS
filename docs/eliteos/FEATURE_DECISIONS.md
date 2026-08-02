@@ -3380,3 +3380,15 @@
 | **Impacted** | `amendmentConfig.mjs`, `studioPublicationSummary.mjs` (+ test), `studioV2Service.mjs`, `studioCustomerSelectionReview.test.mjs`, `liveDigitalEstimatesStatus.mjs`, `liveDigitalEstimatesService.mjs`, this doc. |
 | **Protected** | Pricing formulas/rates, Digital Estimate totals, approve/publish/revision, acceptance, approved snapshots. |
 | **Revisit trigger** | If DE.2F adds a new in-flight review status, add it to `OPEN_REVIEW_REQUEST_STATUSES`. |
+
+### 242. Digital Estimate — Accept original published estimate (2026-08-02)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-02 · `feature/de-accept-original-estimate` |
+| **Decision** | Customers may **Accept estimate** when the published Digital Estimate is unchanged (no priced selection deltas, no physical scope requests, no open review request). Uses the existing public `POST /api/public-digital-estimate/v2/final-acceptance` lifecycle acceptance record (`acceptedAsPublished: true`, accepted total = published estimate total). Changed selections keep **Send selections**; after send, accepting the stale original is blocked. Studio V2 Customer selection review shows Accepted: Yes with accepted total / publication / timestamp; Review requested stays independent. |
+| **Why** | Not every estimate needs a revision — customers who want the published estimate as-is need a safe closeout that is not sold handoff. |
+| **SQL** | None (reuses studio lifecycle acceptance tables). |
+| **Impacted** | `customerConfigurationFoundation.mjs`, `baselineParityGuardrails.mjs`, `publicConfigurationService.mjs`, `studioFinalAcceptanceService.mjs` (+ routes), `ConfigurationView.tsx`, `StudioV2CustomerSelectionReviewPanel.tsx`, `studioAcceptPublishedEstimate.test.mjs`, this doc. |
+| **Protected** | Pricing math, approve/publish/calculate, revision creation, sold handoff, approved/publication snapshots (acceptance metadata/event only), V1, AI Takeoff. |
+| **Revisit trigger** | When post-review final acceptance of a revised republication is productized, keep accept-as-published as the unchanged-only path. |

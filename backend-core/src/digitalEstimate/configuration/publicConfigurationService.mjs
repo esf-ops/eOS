@@ -1043,6 +1043,36 @@ export function createPublicConfigurationService(deps) {
       email: null
     };
 
+    const publicCustomerConfiguration = buildPublicCustomerConfigurationReadModel(
+      selectionMeta.customerConfiguration,
+      {
+        quantities: selectionMeta.quantities || {},
+        lastSavedAt: latestSelection?.updated_at || latestSelection?.created_at || null
+      }
+    );
+    let publishedRoomPricingPublicForExchange = null;
+    try {
+      const originalProjection = buildOriginalRoomPricingProjection(ctx.customerSnapshot || {});
+      if (originalProjection) {
+        publishedRoomPricingPublicForExchange = toPublicRoomPricingDto(originalProjection);
+      }
+    } catch {
+      publishedRoomPricingPublicForExchange = null;
+    }
+    const latestCalculationPublic = applyBaselineParityToCustomerCalculation(rawCustomerCalc, {
+      baselineDisplayTotal: ctx.baselineDisplayTotal,
+      publishedRoomPricingPublic: publishedRoomPricingPublicForExchange,
+      scopeReviewRequired: Boolean(publicCustomerConfiguration.requiresEstimatorReview)
+    });
+    const canAcceptPublishedExchange =
+      publicCustomerConfiguration.canSubmitForFinalReview === true &&
+      (latestCalculationPublic == null ||
+        latestCalculationPublic?.canSubmitForFinalReview === true);
+    publicCustomerConfiguration.canSubmitForFinalReview = canAcceptPublishedExchange;
+    if (latestCalculationPublic && typeof latestCalculationPublic === "object") {
+      latestCalculationPublic.canSubmitForFinalReview = canAcceptPublishedExchange;
+    }
+
     const state = {
       lifecycle: "active",
       message: null,
@@ -1068,13 +1098,7 @@ export function createPublicConfigurationService(deps) {
         projectNote: selectionMeta.projectNote || null,
         customerProductDrafts: selectionMeta.customerProductDrafts || {},
         backsplashDrafts: selectionMeta.backsplashDrafts || {},
-        customerConfiguration: buildPublicCustomerConfigurationReadModel(
-          selectionMeta.customerConfiguration,
-          {
-            quantities: selectionMeta.quantities || {},
-            lastSavedAt: latestSelection?.updated_at || latestSelection?.created_at || null
-          }
-        ),
+        customerConfiguration: publicCustomerConfiguration,
         rooms: (ctx.rooms || []).map((r) => ({
           roomKey: r.roomKey,
           displayName:
@@ -1105,31 +1129,7 @@ export function createPublicConfigurationService(deps) {
           ctx.customerCatalogPermissions
         ),
         currentSelections: selectionMeta.quantities,
-        latestCalculation: (() => {
-          let publishedRoomPricingPublic = null;
-          try {
-            const originalProjection = buildOriginalRoomPricingProjection(
-              ctx.customerSnapshot || {}
-            );
-            if (originalProjection) {
-              publishedRoomPricingPublic = toPublicRoomPricingDto(originalProjection);
-            }
-          } catch {
-            publishedRoomPricingPublic = null;
-          }
-          const foundation = buildPublicCustomerConfigurationReadModel(
-            selectionMeta.customerConfiguration,
-            {
-              quantities: selectionMeta.quantities || {},
-              lastSavedAt: latestSelection?.updated_at || latestSelection?.created_at || null
-            }
-          );
-          return applyBaselineParityToCustomerCalculation(rawCustomerCalc, {
-            baselineDisplayTotal: ctx.baselineDisplayTotal,
-            publishedRoomPricingPublic,
-            scopeReviewRequired: Boolean(foundation.requiresEstimatorReview)
-          });
-        })(),
+        latestCalculation: latestCalculationPublic,
         missingInformationRequirements: Array.isArray(
           rawCustomerCalc?.missingInformationRequirements
         )
@@ -2626,6 +2626,21 @@ export function createPublicConfigurationService(deps) {
         // rather than surface a save failure; Elite review resolves the rate.
         forceFreeze: materialRateMissingReview
       });
+      // Accept-as-published requires both foundation (no selection/scope deltas)
+      // and calc parity (no priced drift / scope review).
+      const canAcceptPublished =
+        publicCustomerConfiguration.canSubmitForFinalReview === true &&
+        customerResultJson?.canSubmitForFinalReview === true;
+      publicCustomerConfiguration.canSubmitForFinalReview = canAcceptPublished;
+      if (customerResultJson && typeof customerResultJson === "object") {
+        customerResultJson.canSubmitForFinalReview = canAcceptPublished;
+        if (
+          customerResultJson.customerConfiguration &&
+          typeof customerResultJson.customerConfiguration === "object"
+        ) {
+          customerResultJson.customerConfiguration.canSubmitForFinalReview = canAcceptPublished;
+        }
+      }
       assertPublicConfigurationHasNoForbiddenContent(customerResultJson);
 
       const internalEvidenceJson = {

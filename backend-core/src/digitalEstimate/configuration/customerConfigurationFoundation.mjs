@@ -114,7 +114,8 @@ export function buildEmptyCustomerConfigurationFoundation(overrides = {}) {
     selectionChanges: { count: 0, items: [] },
     scopeChangeRequests: { count: 0, items: [] },
     lastSavedAt: null,
-    canSubmitForFinalReview: false,
+    // Unchanged published estimate may be accepted as-is (no selection/scope deltas).
+    canSubmitForFinalReview: true,
     ...overrides
   };
 }
@@ -339,6 +340,10 @@ export function finalizeCustomerConfigurationFoundation(foundation) {
   }
 
   const requiresEstimatorReview = scopeItems.length > 0;
+  // Accept original published estimate only when there are no priced selection
+  // deltas and no physical scope requests. Changed selections → Send selections.
+  const canSubmitForFinalReview =
+    !requiresEstimatorReview && selectionItems.length === 0;
 
   return {
     ...base,
@@ -359,7 +364,7 @@ export function finalizeCustomerConfigurationFoundation(foundation) {
     requiresEstimatorReview,
     selectionChanges: { count: selectionItems.length, items: selectionItems },
     scopeChangeRequests: { count: scopeItems.length, items: scopeItems },
-    canSubmitForFinalReview: false
+    canSubmitForFinalReview
   };
 }
 
@@ -440,11 +445,15 @@ export function buildPublicCustomerConfigurationReadModel(stored, ctx = {}) {
           lastSavedAt: ctx.lastSavedAt ?? stored?.lastSavedAt ?? null,
           rejectForbidden: false
         });
+  // Accept eligibility is based on the customer's stored foundation, not on
+  // display enrichment from published baseline quantities (those are not changes).
+  const canAcceptFromStored = sanitized.canSubmitForFinalReview === true;
   const enriched = enrichFoundationFromSelectionQuantities(sanitized, ctx.quantities || {});
   return {
     ...enriched,
     lastSavedAt: ctx.lastSavedAt ?? enriched.lastSavedAt ?? null,
     approvedBaselinePreserved: true,
-    canSubmitForFinalReview: false
+    canSubmitForFinalReview:
+      canAcceptFromStored && enriched.requiresEstimatorReview !== true
   };
 }
