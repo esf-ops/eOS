@@ -222,6 +222,58 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
 }
 
 {
+  // 4b2. Regression: stale pricedSelectionTotal=published must not beat
+  // totals.configuredDisplayTotal (public "Your estimate") for configured accept.
+  const studioRepo = new InMemoryStudioEstimateRepository();
+  const lifecycle = createInMemoryStudioLifecycleRepository({
+    studioEstimateRepository: studioRepo
+  });
+  const acceptSvc = createStudioFinalAcceptanceService({
+    lifecycleRepository: lifecycle,
+    studioEstimateRepository: studioRepo,
+    env: TEST_ENV
+  });
+  const estimate = await seedApprovedEstimate(studioRepo, { total: 4130 });
+  const result = await acceptSvc.acceptResolvedContext({
+    organizationId: ORG,
+    publication: { id: PUB_ID, status: "active", revision_number: 1 },
+    estimate,
+    selection: { id: randomUUID() },
+    configuration: {
+      selectedMaterial: { colorName: "Aurataj", materialGroup: "C", roomId: "kitchen" },
+      selectedEdgeProfile: { profileToken: "edge_small_ogee", profileName: "Small Ogee" }
+    },
+    customerCalc: {
+      pricingAuthority: "authoritative_backend_reprice",
+      publishedBaselineTotal: 4130,
+      baselineDisplayTotal: 4130,
+      // Stale top-level priced field aligned to published baseline…
+      pricedSelectionTotal: 4130,
+      configuredDisplayTotal: 4130,
+      // …while public UI "Your estimate" reads nested configured total.
+      totals: {
+        baselineDisplayTotal: 4130,
+        configuredDisplayTotal: 4524,
+        displayDelta: 394
+      },
+      roomPricing: { projectTotal: 4524 },
+      displayTotalDelta: 394
+    },
+    confirm: true
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.acceptance.acceptedAsConfigured, true);
+  assert.equal(
+    result.acceptance.customerDisplayTotal,
+    4524,
+    "acceptedAsConfigured must persist configured total, not published"
+  );
+  assert.equal(result.acceptance.totals?.acceptedConfiguredTotal, 4524);
+  assert.notEqual(result.acceptance.customerDisplayTotal, 4130);
+  console.log("ok: 4b2 acceptedAsConfigured displays configured total, not published");
+}
+
+{
   // 4c. Fail-closed / frozen configured total cannot be accepted
   const studioRepo = new InMemoryStudioEstimateRepository();
   const lifecycle = createInMemoryStudioLifecycleRepository({
@@ -536,6 +588,8 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
   assert.ok(view.includes("Accept estimate"));
   assert.ok(view.includes("Accept estimate with these selections"));
   assert.ok(view.includes("canAcceptAsConfigured"));
+  assert.ok(view.includes("acceptedDisplayTotal"));
+  assert.ok(view.includes("de-accepted-total"));
   assert.ok(view.includes("Estimate accepted") || view.includes("de-accepted-title"));
   assert.ok(view.includes("canAcceptPublishedEstimate"));
   assert.ok(view.includes("de-final-acceptance-modal"));

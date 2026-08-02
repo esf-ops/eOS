@@ -138,4 +138,44 @@ console.log("\nfinalAcceptanceActionError.ui.test.mjs\n");
   console.log("ok: 5 initial load fatal/unavailable + accept CTAs preserved");
 }
 
+{
+  assert.ok(apiSrc.includes("export function acceptedDisplayTotal"));
+  assert.ok(viewSrc.includes("acceptedDisplayTotal(finalAcceptance)"));
+  assert.ok(viewSrc.includes('data-testid="de-accepted-total"'));
+  // Keep in sync with publicConfigApi.acceptedDisplayTotal
+  function acceptedDisplayTotal(acceptance) {
+    if (!acceptance) return null;
+    const num = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    if (acceptance.acceptedAsConfigured === true) {
+      return (
+        num(acceptance.totals?.acceptedConfiguredTotal) ??
+        num(acceptance.totals?.customerDisplayTotal) ??
+        num(acceptance.customerDisplayTotal)
+      );
+    }
+    return num(acceptance.customerDisplayTotal);
+  }
+  assert.equal(
+    acceptedDisplayTotal({
+      acceptedAsConfigured: true,
+      customerDisplayTotal: 4130,
+      totals: { acceptedConfiguredTotal: 4524, customerDisplayTotal: 4524 },
+    }),
+    4524,
+  );
+  assert.equal(
+    acceptedDisplayTotal({
+      acceptedAsConfigured: false,
+      acceptedAsPublished: true,
+      customerDisplayTotal: 4130,
+      totals: { customerDisplayTotal: 4130 },
+    }),
+    4130,
+  );
+  console.log("ok: 6 acceptedAsConfigured displays configured total, not published");
+}
+
 console.log("\nAll final-acceptance action error UI tests passed.\n");

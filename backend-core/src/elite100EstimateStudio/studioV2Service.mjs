@@ -2339,12 +2339,27 @@ export function createStudioV2Service(deps = {}) {
         if (a) {
           const snap = a.customer_safe_snapshot_json || a.customerSafeSnapshot || {};
           const acceptedAsConfigured = snap.acceptedAsConfigured === true;
+          const snapTotals =
+            snap.totals && typeof snap.totals === "object" ? snap.totals : {};
+          const moneyOrNull = (v) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : null;
+          };
+          const columnTotal = moneyOrNull(
+            a.customer_display_total ?? a.customerDisplayTotal
+          );
+          const configuredTotal =
+            moneyOrNull(snapTotals.acceptedConfiguredTotal) ??
+            moneyOrNull(snapTotals.customerDisplayTotal) ??
+            columnTotal;
           acceptance = {
             id: a.id,
             acceptedAt: a.accepted_at || a.acceptedAt || null,
             estimateRevision: a.estimate_revision ?? a.estimateRevision ?? null,
             publicationId: a.publication_id || a.publicationId || null,
-            customerDisplayTotal: a.customer_display_total ?? a.customerDisplayTotal ?? null,
+            customerDisplayTotal: acceptedAsConfigured
+              ? configuredTotal ?? columnTotal
+              : columnTotal,
             acceptedAsConfigured,
             acceptedAsPublished: acceptedAsConfigured
               ? false

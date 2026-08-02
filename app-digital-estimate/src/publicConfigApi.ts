@@ -1059,7 +1059,31 @@ export type CustomerFinalAcceptance = {
   notice?: string;
   emailSent?: boolean;
   markedSold?: boolean;
+  totals?: {
+    customerDisplayTotal?: number | null;
+    acceptedConfiguredTotal?: number | null;
+    publishedBaselineTotal?: number | null;
+  } | null;
 };
+
+/** Display total for an accepted estimate — configured total when acceptedAsConfigured. */
+export function acceptedDisplayTotal(
+  acceptance: CustomerFinalAcceptance | null | undefined,
+): number | null {
+  if (!acceptance) return null;
+  const num = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  if (acceptance.acceptedAsConfigured === true) {
+    return (
+      num(acceptance.totals?.acceptedConfiguredTotal) ??
+      num(acceptance.totals?.customerDisplayTotal) ??
+      num(acceptance.customerDisplayTotal)
+    );
+  }
+  return num(acceptance.customerDisplayTotal);
+}
 
 export async function submitFinalAcceptance(payload: {
   confirm: true;

@@ -35,6 +35,7 @@ import { sortEdgeOptionsByCanonicalOrder, edgeRowPriceLabel } from "./edgeGroups
 import {
   exchangeFragmentToken,
   fetchConfiguration,
+  acceptedDisplayTotal,
   fetchCurrentFinalAcceptance,
   fetchCurrentReviewRequest,
   formatDate,
@@ -3133,11 +3134,12 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               ? "Estimate accepted with your selections"
               : finalAcceptance.statusLabel || "Estimate accepted"}
           </div>
-          <div className="mt-1 text-muted-foreground">
+          <div className="mt-1 text-muted-foreground" data-testid="de-accepted-total">
             Accepted {formatDate(finalAcceptance.acceptedAt || "")}
-            {finalAcceptance.customerDisplayTotal != null
-              ? ` · ${formatMoneyLabel(finalAcceptance.customerDisplayTotal)}`
-              : ""}
+            {(() => {
+              const total = acceptedDisplayTotal(finalAcceptance);
+              return total != null ? ` · ${formatMoneyLabel(total)}` : "";
+            })()}
           </div>
           <p className="mt-2 text-muted-foreground">
             {finalAcceptance.notice ||

@@ -109,10 +109,26 @@ export function rejectFinalAcceptanceAuthority(body) {
   }
 }
 
+function finiteMoney(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+}
+
 function customerSafeAcceptanceView(acceptance) {
   const snap = acceptance.customer_safe_snapshot_json || {};
   assertNoInternalEconomicsLeak(snap);
   const acceptedAsConfigured = snap.acceptedAsConfigured === true;
+  const snapTotals = snap.totals && typeof snap.totals === "object" ? snap.totals : {};
+  // For configured accept, prefer snapshot configured total over a stale column
+  // that may have been written from a baseline-aligned pricedSelectionTotal.
+  const configuredTotal =
+    finiteMoney(snapTotals.acceptedConfiguredTotal) ??
+    finiteMoney(snapTotals.customerDisplayTotal) ??
+    finiteMoney(acceptance.customer_display_total);
+  const publishedTotal = finiteMoney(acceptance.customer_display_total);
+  const customerDisplayTotal = acceptedAsConfigured
+    ? configuredTotal ?? publishedTotal
+    : publishedTotal;
   return {
     acceptanceId: acceptance.id,
     status: "accepted",
@@ -120,7 +136,7 @@ function customerSafeAcceptanceView(acceptance) {
     acceptedAt: acceptance.accepted_at,
     estimateRevision: acceptance.estimate_revision,
     publicationId: acceptance.publication_id,
-    customerDisplayTotal: acceptance.customer_display_total,
+    customerDisplayTotal,
     termsVersion: acceptance.terms_version,
     acceptedAsPublished: acceptedAsConfigured ? false : snap.acceptedAsPublished !== false,
     acceptedAsConfigured,
@@ -132,7 +148,14 @@ function customerSafeAcceptanceView(acceptance) {
     configuration: acceptance.customer_configuration_json || null,
     materialSummary: acceptance.material_summary_json || [],
     customerVisibleLines: snap.customerVisibleLines || [],
-    totals: snap.totals || { customerDisplayTotal: acceptance.customer_display_total },
+    totals: {
+      ...snapTotals,
+      customerDisplayTotal:
+        customerDisplayTotal ?? finiteMoney(snapTotals.customerDisplayTotal) ?? null,
+      ...(acceptedAsConfigured && customerDisplayTotal != null
+        ? { acceptedConfiguredTotal: customerDisplayTotal }
+        : {})
+    },
     lifecycleVersion: acceptance.lifecycle_version || STUDIO_LIFECYCLE_VERSION,
     notice:
       "Elite has received your acceptance. This is not a scheduling confirmation.",
@@ -157,6 +180,10 @@ function publishedEstimateTotal(estimate, publication) {
 /**
  * Server-owned configured total only. Never reads request body.
  * Returns null when missing, fail-closed, or not authoritative.
+ *
+ * Aligns with the public Digital Estimate "Your estimate" fields when
+ * pricedSelectionTotal is stale/baseline-aligned but totals.configuredDisplayTotal
+ * (or roomPricing.projectTotal) still carries the customer-visible configured total.
  */
 export function resolveServerConfiguredAcceptanceTotal(customerCalc) {
   if (!customerCalc || typeof customerCalc !== "object") return null;
@@ -183,9 +210,34 @@ export function resolveServerConfiguredAcceptanceTotal(customerCalc) {
   ) {
     return null;
   }
-  const priced = resolvePricedSelectionTotal(guarded || customerCalc);
-  if (!Number.isFinite(priced)) return null;
-  return Math.round(Number(priced) * 100) / 100;
+  const source = guarded || customerCalc;
+  const baseline =
+    finiteMoney(source.publishedBaselineTotal) ??
+    finiteMoney(source.baselineDisplayTotal) ??
+    finiteMoney(source.totals?.baselineDisplayTotal);
+  const candidates = [
+    // Public UI calcTotals prefers totals.configuredDisplayTotal first.
+    finiteMoney(source.totals?.configuredDisplayTotal),
+    finiteMoney(source.configuredDisplayTotal),
+    source.configuredDisplayTotalCents != null
+      ? finiteMoney(Number(source.configuredDisplayTotalCents) / 100)
+      : null,
+    finiteMoney(source.pricedSelectionTotal),
+    finiteMoney(source.roomPricing?.projectTotal)
+  ].filter((n) => n != null);
+
+  if (!candidates.length) {
+    const priced = resolvePricedSelectionTotal(source);
+    return finiteMoney(priced);
+  }
+
+  if (baseline != null) {
+    const diverged = candidates.find((n) => Math.abs(n - baseline) >= 0.005);
+    if (diverged != null) return diverged;
+  }
+
+  const priced = resolvePricedSelectionTotal(source);
+  return finiteMoney(priced) ?? candidates[0];
 }
 
 function isSelectionOnlyClassification(classification) {
