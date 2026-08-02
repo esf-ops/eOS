@@ -3368,7 +3368,20 @@
 | **Protected** | Pricing formulas/rates, browser pricing math, approved estimates, publication snapshots, Studio V2 approve/publish/revision workflow, final acceptance gate. |
 | **Revisit trigger** | When final acceptance is productized, revisit submission CTA copy. |
 
-### 241. Studio V2 workspace deep-link / refresh-safe URL (2026-08-02)
+### 241. Studio V2 Customer Selection Review — Review requested must match DE “Send selections” (2026-08-02)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-02 · `fix/studio-v2-review-requested-status` |
+| **Root cause** | Public “Send selections” creates a DE.2F amendment review request with status `review_requested`. Studio publication summary + V2 customer-activity only treated legacy statuses (`open` / `new` / `pending` / `submitted`) as open, so `reviewRequestOpen` stayed false and the Customer Selection Review panel showed **Review requested: No** while the customer page correctly showed “Selections already sent” / “Sent for review”. |
+| **Decision** | Shared helper `isOpenDigitalEstimateReviewRequestStatus` / `OPEN_REVIEW_REQUEST_STATUSES` in `amendmentConfig.mjs` is the source of truth for open/in-flight review requests (`review_requested`, `estimator_reviewing`, `clarification_required`, `amendment_prepared`, plus legacy aliases). `buildSafeStudioPublicationSummary`, Studio V2 `getCustomerActivity`, and Live DE open-status checks use that helper. Saved selections remain separate from review-requested; accepted stays false; priced selections are not physical scope requests. Read-model only — no approve/publish/calculate/revision. |
+| **Why** | Estimators must see the same submitted-for-review state the customer already sees. |
+| **SQL** | None. |
+| **Impacted** | `amendmentConfig.mjs`, `studioPublicationSummary.mjs` (+ test), `studioV2Service.mjs`, `studioCustomerSelectionReview.test.mjs`, `liveDigitalEstimatesStatus.mjs`, `liveDigitalEstimatesService.mjs`, this doc. |
+| **Protected** | Pricing formulas/rates, Digital Estimate totals, approve/publish/revision, acceptance, approved snapshots. |
+| **Revisit trigger** | If DE.2F adds a new in-flight review status, add it to `OPEN_REVIEW_REQUEST_STATUSES`. |
+  
+### 242. Studio V2 workspace deep-link / refresh-safe URL (2026-08-02)
 
 | Field | Value |
 |-------|--------|

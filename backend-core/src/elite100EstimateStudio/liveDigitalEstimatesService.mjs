@@ -22,6 +22,7 @@ import {
   presentStaffLinkForDetail,
   recoverStaffPublicationLinkMeta
 } from "../digitalEstimate/staffPublicationLinkRecovery.mjs";
+import { OPEN_REVIEW_REQUEST_STATUSES } from "../digitalEstimate/configuration/amendmentConfig.mjs";
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 50;
@@ -683,9 +684,8 @@ export function createLiveDigitalEstimatesService(deps) {
 }
 
 function isOpenReviewStatus(status) {
-  return ["new", "open", "submitted", "in_review", "revision_required", "pending"].includes(
-    String(status || "").toLowerCase()
-  );
+  // Keep in sync with DE.2F open review-request statuses (incl. `review_requested`).
+  return OPEN_REVIEW_REQUEST_STATUSES.includes(String(status || "").trim().toLowerCase());
 }
 
 async function fallbackAggregateEvents(deRepo, organizationId, publicationIds) {

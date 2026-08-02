@@ -41,6 +41,37 @@ export const REVIEW_STATUS = Object.freeze({
   SUPERSEDED: "review_superseded"
 });
 
+/**
+ * Open / in-flight customer review-request statuses.
+ * Source of truth for public "Send selections" / "Sent for review".
+ * Includes legacy Studio/portfolio aliases used by older rows and tests.
+ */
+export const OPEN_REVIEW_REQUEST_STATUSES = Object.freeze([
+  REVIEW_STATUS.REQUESTED,
+  REVIEW_STATUS.REVIEWING,
+  REVIEW_STATUS.CLARIFICATION,
+  REVIEW_STATUS.AMENDMENT_PREPARED,
+  // Legacy Studio / portfolio aliases (not written by DE.2F create path)
+  "open",
+  "new",
+  "pending",
+  "submitted",
+  "in_review",
+  "revision_required"
+]);
+
+/**
+ * @param {unknown} status
+ * @returns {boolean}
+ */
+export function isOpenDigitalEstimateReviewRequestStatus(status) {
+  const st = String(status || "")
+    .trim()
+    .toLowerCase();
+  if (!st) return false;
+  return OPEN_REVIEW_REQUEST_STATUSES.includes(st);
+}
+
 export const AMENDMENT_STATUS = Object.freeze({
   DRAFT: "amendment_draft",
   VALIDATING: "amendment_validating",

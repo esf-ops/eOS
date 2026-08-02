@@ -27,6 +27,7 @@ import {
   STUDIO_V2_ERROR_CODES,
   studioV2UserMessage
 } from "./studioV2Errors.mjs";
+import { isOpenDigitalEstimateReviewRequestStatus } from "../digitalEstimate/configuration/amendmentConfig.mjs";
 import {
   buildStudioV2CalculationResult,
   buildStudioV2ProjectHeader,
@@ -1747,9 +1748,8 @@ export function createStudioV2Service(deps = {}) {
       status: r.status || null,
       publicationId: r.publicationId || r.publication_id || null,
       requestedAt: r.requestedAt || r.created_at || null,
-      open: ["open", "new", "pending", "submitted"].includes(
-        String(r.status || "").toLowerCase()
-      )
+      // Align with public DE "Sent for review" (status `review_requested`, …).
+      open: isOpenDigitalEstimateReviewRequestStatus(r.status)
     }));
 
     let acceptance = null;

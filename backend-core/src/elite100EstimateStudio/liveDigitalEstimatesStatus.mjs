@@ -3,6 +3,8 @@
  * Authoritative records only; never invents customer activity.
  */
 
+import { OPEN_REVIEW_REQUEST_STATUSES } from "../digitalEstimate/configuration/amendmentConfig.mjs";
+
 export const LIVE_DE_OPERATIONAL_STATUSES = Object.freeze({
   PUBLISHED_NOT_VIEWED: "published_not_viewed",
   VIEWED: "viewed",
@@ -60,14 +62,7 @@ export const LIVE_DE_ATTENTION = Object.freeze({
   CONFIG_INCOMPLETE: "publication_configuration_incomplete"
 });
 
-const OPEN_REVIEW_STATUSES = new Set([
-  "new",
-  "open",
-  "submitted",
-  "in_review",
-  "revision_required",
-  "pending"
-]);
+const OPEN_REVIEW_STATUSES = new Set(OPEN_REVIEW_REQUEST_STATUSES);
 
 /**
  * @param {string|null|undefined} iso

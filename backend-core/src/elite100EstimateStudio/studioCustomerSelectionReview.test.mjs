@@ -519,7 +519,117 @@ function selectionPayload() {
 }
 
 {
-  // 13. Review requested: Yes after customer submits selections (open review request)
+  // 13. Saved selections only (no Send selections) → Review requested: No
+  const repo = new InMemoryStudioEstimateRepository();
+  await repo.create({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID + "-saved-only",
+    createdByUserId: ACTOR,
+    scope: {
+      ...emptyStudioEstimateScope(),
+      customerName: "Acme",
+      projectName: "Kitchen",
+      estimateOrigin: "manual",
+      physicalScopeSource: "manual",
+      rooms: [{ id: "kitchen", name: "Kitchen", included: true, pieces: [] }]
+    },
+    status: STUDIO_ESTIMATE_STATUSES.APPROVED,
+    approval: {
+      approvedAt: "2026-07-30T00:00:00.000Z",
+      approvedByUserId: ACTOR,
+      customerDisplayTotal: 7120,
+      calculationFingerprint: "fp-saved-only"
+    },
+    calculationSnapshot: {
+      fingerprint: "fp-saved-only",
+      totals: { customerDisplayTotal: 7120 }
+    }
+  });
+
+  const selectionId = randomUUID();
+  const v2 = createStudioV2Service({
+    repository: repo,
+    env: {},
+    configurationRepository: {
+      async getActiveEnvelope() {
+        return { id: ENV_ID, status: "active" };
+      },
+      async getLatestSelectionForPublicationEnvelope() {
+        // Priced material/edge only — no physical scope requests.
+        return {
+          id: selectionId,
+          organization_id: ORG,
+          selection_hash: "hash-saved-only",
+          selection_payload_json: {
+            version: 1,
+            rooms: {
+              kitchen: {
+                materialId: "e100-aurataj",
+                materialGroup: "C",
+                edgeProfileId: "edge-eased"
+              }
+            }
+          },
+          created_at: "2026-08-02T12:00:00.000Z"
+        };
+      },
+      async getCalculationBySelectionId() {
+        return {
+          id: randomUUID(),
+          organization_id: ORG,
+          selection_id: selectionId,
+          baseline_total: 7120,
+          configured_total: 8739,
+          customer_result_json: {
+            baselineDisplayTotal: 7120,
+            configuredDisplayTotal: 8739,
+            pricedSelectionTotal: 8739,
+            publishedBaselineTotal: 7120,
+            displayTotalDelta: 1619,
+            pricingAuthority: "authoritative_backend_reprice"
+          }
+        };
+      }
+    },
+    studioDigitalEstimateService: {
+      async assessReadiness() {
+        return {
+          publicationSummary: {
+            state: "customer_viewed",
+            active: true,
+            statusLabel: "Published — customer viewed",
+            publicationId: PUB_ID,
+            customerUrl: "https://example.test/e/tok",
+            customerActivityState: "viewed",
+            reviewRequestOpen: false
+          },
+          activePublication: { id: PUB_ID, status: "active", revisionNumber: 1 },
+          publications: [{ id: PUB_ID, status: "active", revisionNumber: 1 }],
+          reviewRequests: []
+        };
+      }
+    }
+  });
+
+  const activity = await v2.getCustomerActivity({
+    organizationId: ORG,
+    intakeCaseId: CASE_ID + "-saved-only"
+  });
+  assert.equal(activity.activity.savedSelections, true);
+  assert.equal(activity.activity.reviewRequested, false);
+  assert.equal(activity.selectionReview.reviewRequested, false);
+  assert.equal(activity.activity.accepted, false);
+  assert.equal(activity.selectionReview.scopeRequests.count, 0);
+  assert.ok(
+    !activity.selectionReview.scopeRequests.items.some((i) => i.kind === "material"),
+    "priced material is not a physical scope request"
+  );
+  console.log("ok: 13 saved selections only → Review requested No; no scope requests");
+}
+
+{
+  // 14. Customer clicked Send selections → DE status `review_requested` → Review requested: Yes
+  // Stub summary intentionally leaves reviewRequestOpen false so the status mapping is authoritative.
   const repo = new InMemoryStudioEstimateRepository();
   await repo.create({
     organizationId: ORG,
@@ -591,15 +701,16 @@ function selectionPayload() {
             statusLabel: "Published",
             publicationId: PUB_ID,
             customerUrl: "https://example.test/e/tok",
-            customerActivityState: "review_requested",
-            reviewRequestOpen: true
+            customerActivityState: "viewed",
+            // Must not rely on this stub flag — production writes status review_requested.
+            reviewRequestOpen: false
           },
           activePublication: { id: PUB_ID, status: "active", revisionNumber: 1 },
           publications: [{ id: PUB_ID, status: "active", revisionNumber: 1 }],
           reviewRequests: [
             {
               id: "rr-open",
-              status: "open",
+              status: "review_requested",
               publicationId: PUB_ID,
               requestedAt: "2026-08-02T13:00:00.000Z"
             }
@@ -616,10 +727,73 @@ function selectionPayload() {
   assert.equal(activity.activity.reviewRequested, true);
   assert.equal(activity.selectionReview.reviewRequested, true);
   assert.equal(activity.activity.savedSelections, true);
+  assert.equal(activity.activity.accepted, false);
   assert.equal(activity.selectionReview.totals.customerEstimateTotal, 8739);
   assert.equal(activity.selectionReview.totals.difference, 1619);
   assert.ok(activity.selectionReview.pricedSelections.rooms.length > 0);
-  console.log("ok: 13 Review requested Yes preserves saved selections + totals");
+  assert.ok(activity.selectionReview.scopeRequests.count > 0);
+  assert.ok(
+    !activity.selectionReview.scopeRequests.items.some((i) => i.kind === "material"),
+    "priced material is not a physical scope request"
+  );
+  assert.equal(activity.reviewRequests.some((r) => r.open && r.status === "review_requested"), true);
+  console.log("ok: 14 Send selections (review_requested) → Review requested Yes; totals preserved");
+}
+
+{
+  // 15. Publication summary recognizes real DE.2F status (not only legacy "open")
+  const { buildSafeStudioPublicationSummary } = await import("./studioPublicationSummary.mjs");
+  const s = buildSafeStudioPublicationSummary({
+    estimate: { id: "est-rr", revision: 1 },
+    activePublication: {
+      id: PUB_ID,
+      status: "active",
+      revisionNumber: 1,
+      customerUrl: "https://example.test/e/tok",
+      linkStatus: "active"
+    },
+    reviewRequests: [
+      {
+        id: "rr-de",
+        status: "review_requested",
+        publication_id: PUB_ID
+      }
+    ]
+  });
+  assert.equal(s.reviewRequestOpen, true);
+  assert.equal(s.customerActivityState, "review_requested");
+  assert.equal(s.state, "customer_review_requested");
+  console.log("ok: 15 publication summary open for review_requested");
+}
+
+{
+  // 16. No approval/publish/calculate side effects in selection-review path
+  const src = readFileSync(
+    join(__dirname, "studioCustomerSelectionReview.mjs"),
+    "utf8"
+  );
+  const v2Src = readFileSync(join(__dirname, "studioV2Service.mjs"), "utf8");
+  const activityFn = v2Src.slice(
+    v2Src.indexOf("async function getCustomerActivity"),
+    v2Src.indexOf("return {\n    getWorkingDraft")
+  );
+  for (const forbidden of [
+    "autoApprove",
+    "autoCalculate",
+    "simplified-publish",
+    "refresh-from-takeoff",
+    "ensure-editable-draft"
+  ]) {
+    assert.equal(src.includes(forbidden), false, `selection review must not mention ${forbidden}`);
+    assert.equal(
+      activityFn.includes(forbidden),
+      false,
+      `getCustomerActivity must not mention ${forbidden}`
+    );
+  }
+  assert.equal(activityFn.includes("createSiblingRevisionFrom"), false);
+  assert.ok(activityFn.includes("isOpenDigitalEstimateReviewRequestStatus"));
+  console.log("ok: 16 no approval/publish/calculate/revision side effects on reviewRequested");
 }
 
 console.log("\nAll studioCustomerSelectionReview tests passed.\n");
