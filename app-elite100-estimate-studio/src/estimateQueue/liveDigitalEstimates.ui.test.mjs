@@ -24,7 +24,8 @@ console.log("\nliveDigitalEstimates.ui.test.mjs\n");
 
 assert.match(app, /Digital Estimates/);
 assert.match(app, /DigitalEstimatesPage/);
-assert.match(app, /data-testid="studio-nav-publications"/);
+assert.match(app, /data-testid="studio-nav-digital-estimates"/);
+assert.match(app, /mainNav === "digital-estimates"/);
 assert.match(
   app,
   /<DigitalEstimatesPage[\s\S]{0,900}applyStudioV2WorkspaceUrl\(\{ caseId, mode: "push" \}\)/

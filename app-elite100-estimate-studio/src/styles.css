@@ -399,7 +399,7 @@ button.linkish {
   right: 0;
   top: calc(100% + 6px);
   z-index: 30;
-  min-width: 12rem;
+  min-width: 16rem;
   margin: 0;
   padding: 0.35rem;
   list-style: none;
@@ -407,6 +407,20 @@ button.linkish {
   border: 1px solid var(--eos-border);
   border-radius: var(--eos-radius);
   box-shadow: 0 8px 24px rgba(18, 32, 44, 0.12);
+}
+
+.studio-nav-more-label {
+  padding: 0.6rem 0.75rem 0.3rem;
+  color: var(--eos-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.studio-nav-more-label + li {
+  border-top: 1px solid var(--eos-border);
+  padding-top: 0.25rem;
 }
 
 .studio-nav-more-menu button {
@@ -422,6 +436,27 @@ button.linkish {
 .studio-nav-more-menu button:hover {
   background: var(--eos-accent-soft);
   border-color: transparent;
+}
+
+.studio-v2-landing {
+  max-width: 50rem;
+  margin: 3rem auto;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  text-align: center;
+}
+
+.studio-v2-landing__eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--eos-accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.studio-v2-landing .actions {
+  justify-content: center;
+  margin-top: 1.5rem;
 }
 
 .review-table {

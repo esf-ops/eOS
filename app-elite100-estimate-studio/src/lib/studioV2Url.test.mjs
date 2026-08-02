@@ -119,6 +119,8 @@ console.log("\nstudioV2Url.test.mjs\n");
   assert.ok(app.includes('addEventListener("popstate"'));
   assert.ok(app.includes("studio-v2-deeplink-error"));
   assert.ok(app.includes("studio-v2-deeplink-error-back"));
+  assert.ok(app.includes('data-testid="studio-nav-studio-v2"'));
+  assert.ok(app.includes('data-testid="studio-v2-landing"'));
   // Opening a case from Inbox uses the shared open helper (URL sync).
   assert.match(
     app,
@@ -127,12 +129,19 @@ console.log("\nstudioV2Url.test.mjs\n");
   // Back clears case via leaveEstimateWorkspace (keeps studioV2=1).
   assert.match(app, /StudioV2EstimatorShell[\s\S]*onBack=\{\(\) => leaveEstimateWorkspace\(\)\}/);
   assert.ok(app.includes('applyStudioV2WorkspaceUrl({ caseId: null, mode: "push" })'));
+  assert.match(
+    app,
+    /<DigitalEstimatesPage[\s\S]{0,900}returnNav:\s*"digital-estimates"[\s\S]{0,300}applyStudioV2WorkspaceUrl\(\{ caseId, mode: "push" \}\)/
+  );
   console.log("ok: 5 StudioApp deep-link init / open / back wiring");
 }
 
 {
   // V1 default unchanged when no caseId: default nav remains shared-inbox without deep link.
-  assert.ok(app.includes(': "shared-inbox")'));
+  assert.match(
+    app,
+    /initialStudioV2DeepLink\(\)\.openWorkspace\s*\?\s*"estimate-workspace"\s*:\s*"shared-inbox"/
+  );
   assert.ok(app.includes("EstimateTakeoffWorkspace"));
   // V1 back must not call applyStudioV2WorkspaceUrl.
   const v1BackChunk = app.slice(
