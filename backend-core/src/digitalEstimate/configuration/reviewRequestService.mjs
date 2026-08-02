@@ -9,7 +9,10 @@ import {
 } from "./amendmentConfig.mjs";
 import { rejectClientAuthoritativeEconomics } from "./configurationTrustedContext.mjs";
 import { splitSelectionPayloadMeta } from "./customerConfigurationDraft.mjs";
-import { classifyCustomerConfigurationForReview } from "./customerConfigurationFoundation.mjs";
+import {
+  classifyCustomerConfigurationForReview,
+  classifyReviewRequestForEliteReview
+} from "./customerConfigurationFoundation.mjs";
 import { buildCustomerConfigurationSummary } from "../catalog/customerConfigurationSummary.mjs";
 import { buildMissingInformationRequirements } from "../catalog/customerDraftRequirements.mjs";
 import {
@@ -127,6 +130,11 @@ function customerSafeRequestView(request, { currentSelectionHash = null } = {}) 
     currentSelectionHash != null &&
     submittedHash != null &&
     String(currentSelectionHash) !== String(submittedHash);
+  const classification = classifyReviewRequestForEliteReview(request);
+  const canAcceptConfigured =
+    classification.requiresEliteReview !== true &&
+    (classification.reviewKind === "selection_only" ||
+      classification.hasSelectionOnlyChanges === true);
   return {
     requestReference: String(request.id).slice(0, 8).toUpperCase(),
     status: request.status,
@@ -142,8 +150,12 @@ function customerSafeRequestView(request, { currentSelectionHash = null } = {}) 
       ? snap.missingInformationRequirements
       : [],
     customerNote: request.customer_note,
-    nonAcceptanceNotice:
-      "Your selections were sent to Elite for review. This is not an order or acceptance.",
+    reviewKind: classification.reviewKind || "none",
+    requiresEliteReview: classification.requiresEliteReview === true,
+    canAcceptConfigured,
+    nonAcceptanceNotice: canAcceptConfigured
+      ? "Your selections were submitted. You can accept this estimate with these selections."
+      : "Your selections were sent to Elite for review. This is not an order or acceptance.",
     currentSelectionsDifferFromSubmitted: selectionsDiffer,
     emailSent: false
   };

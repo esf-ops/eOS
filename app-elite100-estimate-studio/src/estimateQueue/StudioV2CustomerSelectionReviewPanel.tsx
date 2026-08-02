@@ -86,6 +86,7 @@ type Props = {
     customerDisplayTotal?: number | null;
     publicationId?: string | null;
     acceptedAsPublished?: boolean;
+    acceptedAsConfigured?: boolean;
   } | null;
   activePublication?: { publicationId?: string | null } | null;
   historicalCount?: number;
@@ -262,10 +263,21 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
         {accepted ? (
           <>
             <div>
+              <dt>Acceptance</dt>
+              <dd data-testid="studio-v2-accepted-mode">
+                {acceptance?.acceptedAsConfigured
+                  ? "Configured selections"
+                  : "Published estimate"}
+              </dd>
+            </div>
+            <div>
               <dt>Accepted total</dt>
               <dd data-testid="studio-v2-accepted-total">
                 {money(
                   acceptance?.customerDisplayTotal ??
+                    (acceptance?.acceptedAsConfigured
+                      ? review?.totals?.customerEstimateTotal
+                      : null) ??
                     review?.totals?.publishedBaselineTotal ??
                     null
                 )}

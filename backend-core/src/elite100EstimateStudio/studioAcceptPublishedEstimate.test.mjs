@@ -135,7 +135,7 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
 }
 
 {
-  // 4. Selection changes block accept
+  // 4. Selection-only changes without a server configured total cannot accept
   const studioRepo = new InMemoryStudioEstimateRepository();
   const lifecycle = createInMemoryStudioLifecycleRepository({
     studioEstimateRepository: studioRepo
@@ -157,13 +157,105 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
         },
         confirm: true
       }),
-    (e) => e?.code === "acceptance_blocked_selection_changes"
+    (e) => e?.code === "acceptance_blocked_configured_total_unavailable"
   );
-  console.log("ok: 4 changed selections block accept");
+  console.log("ok: 4 selection-only without server total blocks accept");
 }
 
 {
-  // 5. Open review request blocks accept of stale original
+  // 4b. Selection-only with authoritative server total accepts as configured
+  const studioRepo = new InMemoryStudioEstimateRepository();
+  const lifecycle = createInMemoryStudioLifecycleRepository({
+    studioEstimateRepository: studioRepo
+  });
+  const acceptSvc = createStudioFinalAcceptanceService({
+    lifecycleRepository: lifecycle,
+    studioEstimateRepository: studioRepo,
+    env: TEST_ENV
+  });
+  const estimate = await seedApprovedEstimate(studioRepo, { total: 12500 });
+  const selectionId = randomUUID();
+  const result = await acceptSvc.acceptResolvedContext({
+    organizationId: ORG,
+    publication: { id: PUB_ID, status: "active", revision_number: 1 },
+    estimate,
+    selection: { id: selectionId },
+    configuration: {
+      selectedMaterial: { colorName: "Aurataj", materialGroup: "C", roomId: "kitchen" },
+      selectedEdgeProfile: { profileToken: "edge_small_ogee", profileName: "Small Ogee" }
+    },
+    customerCalc: {
+      pricingAuthority: "authoritative_backend_reprice",
+      publishedBaselineTotal: 12500,
+      baselineDisplayTotal: 12500,
+      configuredDisplayTotal: 14000,
+      pricedSelectionTotal: 14000,
+      displayTotalDelta: 1500
+    },
+    confirm: true
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.acceptance.acceptedAsConfigured, true);
+  assert.equal(result.acceptance.acceptedAsPublished, false);
+  assert.equal(result.acceptance.customerDisplayTotal, 14000);
+  assert.equal(result.acceptance.acceptedSelectionId, selectionId);
+  assert.equal(result.sideEffects.revisionCreated, false);
+  assert.equal(result.sideEffects.markedSold, false);
+
+  const reused = await acceptSvc.acceptResolvedContext({
+    organizationId: ORG,
+    publication: { id: PUB_ID, status: "active", revision_number: 1 },
+    estimate,
+    configuration: {
+      selectedMaterial: { colorName: "Aurataj", materialGroup: "C", roomId: "kitchen" }
+    },
+    customerCalc: {
+      pricingAuthority: "authoritative_backend_reprice",
+      pricedSelectionTotal: 99999,
+      configuredDisplayTotal: 99999
+    },
+    confirm: true
+  });
+  assert.equal(reused.reused, true);
+  assert.equal(reused.acceptance.customerDisplayTotal, 14000);
+  console.log("ok: 4b selection-only accepts configured total; duplicate is idempotent");
+}
+
+{
+  // 4c. Fail-closed / frozen configured total cannot be accepted
+  const studioRepo = new InMemoryStudioEstimateRepository();
+  const lifecycle = createInMemoryStudioLifecycleRepository({
+    studioEstimateRepository: studioRepo
+  });
+  const acceptSvc = createStudioFinalAcceptanceService({
+    lifecycleRepository: lifecycle,
+    studioEstimateRepository: studioRepo,
+    env: TEST_ENV
+  });
+  const estimate = await seedApprovedEstimate(studioRepo);
+  await assert.rejects(
+    () =>
+      acceptSvc.acceptResolvedContext({
+        organizationId: ORG,
+        publication: { id: PUB_ID, status: "active", revision_number: 1 },
+        estimate,
+        configuration: {
+          selectedMaterial: { colorName: "Aurataj", roomId: "kitchen" }
+        },
+        customerCalc: {
+          pricingAuthority: "published_baseline_frozen",
+          pricedSelectionTotal: 14000,
+          configuredDisplayTotal: 14000
+        },
+        confirm: true
+      }),
+    (e) => e?.code === "acceptance_blocked_configured_total_unavailable"
+  );
+  console.log("ok: 4c fail-closed configured total blocks accept");
+}
+
+{
+  // 5. Unclassified open review request still blocks accept-as-published
   const studioRepo = new InMemoryStudioEstimateRepository();
   const lifecycle = createInMemoryStudioLifecycleRepository({
     studioEstimateRepository: studioRepo
@@ -208,7 +300,144 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
   );
   const rows = await amendmentRepo.listReviewRequests(ORG, { limit: 5 });
   assert.equal(rows[0].status, REVIEW_STATUS.REQUESTED);
-  console.log("ok: 5 review_requested blocks accept of original");
+  console.log("ok: 5 unclassified review_requested blocks accept of original");
+}
+
+{
+  // 5b. Selection-only open review can be accepted; review is closed
+  const studioRepo = new InMemoryStudioEstimateRepository();
+  const lifecycle = createInMemoryStudioLifecycleRepository({
+    studioEstimateRepository: studioRepo
+  });
+  const amendmentRepo = createInMemoryAmendmentRepository({});
+  const created = await amendmentRepo.createReviewRequest({
+    organizationId: ORG,
+    publicationId: PUB_ID,
+    publicationSnapshotId: null,
+    envelopeId: randomUUID(),
+    envelopeVersion: 1,
+    sessionId: randomUUID(),
+    selectionId: randomUUID(),
+    calculationId: randomUUID(),
+    selectionHash: "sel-only",
+    calculationInputFingerprint: "fp",
+    clientIdempotencyKey: "rr-selection-only",
+    customerNote: null,
+    requestSnapshotJson: {
+      version: 1,
+      reviewClassification: {
+        hasSelectionOnlyChanges: true,
+        hasPhysicalScopeRequests: false,
+        requiresEliteReview: false,
+        reviewKind: "selection_only",
+        selectionSummary: [{ kind: "material", label: "Aurataj" }],
+        scopeRequestSummary: []
+      },
+      selectedOptions: [
+        { optionKey: "material:kitchen:aurataj", quantity: 1 }
+      ]
+    },
+    baselineDisplayTotal: 12500,
+    configuredDisplayTotal: 14000,
+    displayDelta: 1500,
+    pricingValidThrough: null
+  });
+  const acceptSvc = createStudioFinalAcceptanceService({
+    lifecycleRepository: lifecycle,
+    studioEstimateRepository: studioRepo,
+    amendmentRepository: amendmentRepo,
+    env: TEST_ENV
+  });
+  const estimate = await seedApprovedEstimate(studioRepo, { total: 12500 });
+  const result = await acceptSvc.acceptResolvedContext({
+    organizationId: ORG,
+    publication: { id: PUB_ID, status: "active", revision_number: 1 },
+    estimate,
+    configuration: {
+      selectedMaterial: { colorName: "Aurataj", roomId: "kitchen" }
+    },
+    customerCalc: {
+      pricingAuthority: "authoritative_backend_reprice",
+      pricedSelectionTotal: 14000,
+      configuredDisplayTotal: 14000,
+      publishedBaselineTotal: 12500
+    },
+    confirm: true
+  });
+  assert.equal(result.acceptance.acceptedAsConfigured, true);
+  assert.equal(result.acceptance.customerDisplayTotal, 14000);
+  const rows = await amendmentRepo.listReviewRequests(ORG, { limit: 5 });
+  const closed = rows.find((r) => r.id === created.request.id);
+  assert.equal(closed.status, REVIEW_STATUS.CLOSED);
+  console.log("ok: 5b selection-only review accepts configured and closes request");
+}
+
+{
+  // 5c. Physical-scope open review blocks and is not closed
+  const studioRepo = new InMemoryStudioEstimateRepository();
+  const lifecycle = createInMemoryStudioLifecycleRepository({
+    studioEstimateRepository: studioRepo
+  });
+  const amendmentRepo = createInMemoryAmendmentRepository({});
+  const created = await amendmentRepo.createReviewRequest({
+    organizationId: ORG,
+    publicationId: PUB_ID,
+    publicationSnapshotId: null,
+    envelopeId: randomUUID(),
+    envelopeVersion: 1,
+    sessionId: randomUUID(),
+    selectionId: randomUUID(),
+    calculationId: randomUUID(),
+    selectionHash: "sel-scope",
+    calculationInputFingerprint: "fp",
+    clientIdempotencyKey: "rr-scope",
+    customerNote: null,
+    requestSnapshotJson: {
+      version: 1,
+      reviewClassification: {
+        hasSelectionOnlyChanges: true,
+        hasPhysicalScopeRequests: true,
+        requiresEliteReview: true,
+        reviewKind: "physical_scope",
+        selectionSummary: [],
+        scopeRequestSummary: [{ kind: "opening", label: "cooktop ×1" }]
+      },
+      projectNote: "Add waterfall"
+    },
+    baselineDisplayTotal: 12500,
+    configuredDisplayTotal: 14000,
+    displayDelta: 1500,
+    pricingValidThrough: null
+  });
+  const acceptSvc = createStudioFinalAcceptanceService({
+    lifecycleRepository: lifecycle,
+    studioEstimateRepository: studioRepo,
+    amendmentRepository: amendmentRepo,
+    env: TEST_ENV
+  });
+  const estimate = await seedApprovedEstimate(studioRepo);
+  await assert.rejects(
+    () =>
+      acceptSvc.acceptResolvedContext({
+        organizationId: ORG,
+        publication: { id: PUB_ID, status: "active", revision_number: 1 },
+        estimate,
+        configuration: {
+          selectedMaterial: { colorName: "Aurataj", roomId: "kitchen" },
+          requestedOpenings: [{ type: "cooktop", quantity: 1 }]
+        },
+        customerCalc: {
+          pricingAuthority: "authoritative_backend_reprice",
+          pricedSelectionTotal: 14000,
+          configuredDisplayTotal: 14000
+        },
+        confirm: true
+      }),
+    (e) => e?.code === "acceptance_blocked_scope_review"
+  );
+  const rows = await amendmentRepo.listReviewRequests(ORG, { limit: 5 });
+  assert.equal(rows.find((r) => r.id === created.request.id).status, REVIEW_STATUS.REQUESTED);
+  console.log("ok: 5c physical-scope review blocks accept and stays open");
 }
 
 {
@@ -234,11 +463,32 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
         },
         confirm: true
       }),
-    (e) =>
-      e?.code === "acceptance_blocked_scope_review" ||
-      e?.code === "acceptance_blocked_selection_changes"
+    (e) => e?.code === "acceptance_blocked_scope_review"
   );
   console.log("ok: 6 physical scope requests block accept");
+}
+
+{
+  // 6b. Client-supplied totals are rejected
+  const studioRepo = new InMemoryStudioEstimateRepository();
+  const lifecycle = createInMemoryStudioLifecycleRepository({
+    studioEstimateRepository: studioRepo
+  });
+  const acceptSvc = createStudioFinalAcceptanceService({
+    lifecycleRepository: lifecycle,
+    studioEstimateRepository: studioRepo,
+    env: TEST_ENV
+  });
+  assert.throws(
+    () =>
+      acceptSvc.rejectFinalAcceptanceAuthority({
+        confirm: true,
+        configuredDisplayTotal: 1,
+        customerDisplayTotal: 2
+      }),
+    (e) => e?.code === "forbidden_caller_authority"
+  );
+  console.log("ok: 6b client-supplied acceptance totals rejected");
 }
 
 {
@@ -284,10 +534,13 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
     "utf8"
   );
   assert.ok(view.includes("Accept estimate"));
+  assert.ok(view.includes("Accept estimate with these selections"));
+  assert.ok(view.includes("canAcceptAsConfigured"));
   assert.ok(view.includes("Estimate accepted") || view.includes("de-accepted-title"));
   assert.ok(view.includes("canAcceptPublishedEstimate"));
   assert.ok(view.includes("de-final-acceptance-modal"));
   assert.ok(view.includes("Elite has received your acceptance"));
+  assert.ok(view.includes("Elite review is required"));
   assert.equal(view.includes("Approve final estimate"), false);
 
   const panelSrc = readFileSync(
@@ -299,7 +552,16 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
   );
   assert.ok(panelSrc.includes("studio-v2-accepted-flag"));
   assert.ok(panelSrc.includes("studio-v2-accepted-total"));
+  assert.ok(panelSrc.includes("studio-v2-accepted-mode"));
+  assert.ok(panelSrc.includes("acceptedAsConfigured"));
   assert.ok(panelSrc.includes("Accepted total"));
+
+  const publicSvc = readFileSync(
+    join(__dirname, "../digitalEstimate/configuration/publicConfigurationService.mjs"),
+    "utf8"
+  );
+  assert.ok(publicSvc.includes("canAcceptAsConfigured"));
+  assert.ok(publicSvc.includes("resolveServerConfiguredAcceptanceTotal"));
 
   const svc = readFileSync(join(__dirname, "studioFinalAcceptanceService.mjs"), "utf8");
   for (const forbidden of [
@@ -312,6 +574,9 @@ async function seedApprovedEstimate(repo, { total = 12500 } = {}) {
   ]) {
     assert.equal(svc.includes(forbidden), false, `must not ${forbidden}`);
   }
+  assert.ok(svc.includes("acceptedAsConfigured"));
+  assert.ok(svc.includes("resolveServerConfiguredAcceptanceTotal"));
+  assert.ok(svc.includes("acceptance_blocked_configured_total_unavailable"));
   console.log("ok: 8 frontend + Studio + no side-effect contracts");
 }
 

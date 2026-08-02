@@ -344,6 +344,9 @@ export type CustomerConfigurationFoundation = {
   };
   lastSavedAt?: string | null;
   canSubmitForFinalReview?: false;
+  /** Server: selection-only changes may be accepted with configured total. */
+  canAcceptAsConfigured?: boolean;
+  reviewKind?: "none" | "selection_only" | "physical_scope" | string;
   approvedBaselinePreserved?: boolean;
 };
 
@@ -855,6 +858,9 @@ export type CustomerReviewRequest = {
   displayDelta?: number | null;
   selectedOptions?: Array<{ optionKey?: string; displayLabel?: string; quantity?: number }>;
   customerNote?: string | null;
+  reviewKind?: "none" | "selection_only" | "physical_scope" | string;
+  requiresEliteReview?: boolean;
+  canAcceptConfigured?: boolean;
   nonAcceptanceNotice?: string;
   currentSelectionsDifferFromSubmitted?: boolean;
   emailSent?: boolean;
@@ -946,6 +952,9 @@ export type CustomerFinalAcceptance = {
   publicationId?: string | null;
   customerDisplayTotal?: number | null;
   acceptedAsPublished?: boolean;
+  acceptedAsConfigured?: boolean;
+  acceptedSelectionId?: string | null;
+  acceptedPublicationId?: string | null;
   termsVersion?: string | null;
   notice?: string;
   emailSent?: boolean;

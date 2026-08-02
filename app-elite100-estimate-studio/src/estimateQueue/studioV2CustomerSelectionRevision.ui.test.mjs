@@ -21,6 +21,9 @@ assert.ok(panel.includes("No physical scope changes were requested"));
 assert.ok(panel.includes("requiresEliteReview"));
 assert.ok(panel.includes("Customer final selections"));
 assert.ok(panel.includes('data-testid="studio-v2-selection-revision-accepted-blocked"'));
+assert.ok(panel.includes('data-testid="studio-v2-accepted-mode"'));
+assert.ok(panel.includes("acceptedAsConfigured"));
+assert.ok(panel.includes("Configured selections"));
 assert.ok(panel.includes('data-testid="studio-v2-selection-revision-existing"'));
 assert.ok(panel.includes("Revision already created"));
 assert.ok(
