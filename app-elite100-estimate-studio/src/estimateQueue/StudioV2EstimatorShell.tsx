@@ -923,7 +923,7 @@ export default function StudioV2EstimatorShell(props: {
           <h1>Studio V2 Workspace</h1>
           <p className="muted">
             Edit physical scope and import approved AI Takeoff into the Working Draft. V1 remains
-            the default workflow.
+            available as a legacy fallback.
           </p>
         </div>
         {onOpenV1 ? (
@@ -933,7 +933,7 @@ export default function StudioV2EstimatorShell(props: {
             onClick={onOpenV1}
             data-testid="studio-v2-open-v1"
           >
-            Open in V1
+            Open in V1 (Legacy fallback)
           </button>
         ) : null}
       </header>

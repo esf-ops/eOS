@@ -3420,3 +3420,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Source of truth** | Publications/events from the Digital Estimate repository; latest saved backend calculation from the configuration repository; open review state from the amendment repository; acceptance from the Studio lifecycle repository. |
 | **Security** | Existing staff auth/head/pilot stack and backend organization context remain mandatory. Repository reads include `organization_id`; list/detail DTOs omit tokens, wrapped tokens, raw selection payloads, formulas, rates, pricing evidence, and internal economics. |
 | **Protected** | Pricing math, customer selection saves, acceptance, approval, publication, revision, sold handoff, AI Takeoff, approved/publication snapshots, and V1 behavior. |
+
+### 246. Elite 100 shell exposes quote-platform heads explicitly (2026-08-02)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-02 · `feature/elite100-head-shell-cleanup` |
+| **Decision** | The Elite 100 primary shell now exposes **Inbox**, **Estimates**, **Digital Estimates**, and **Studio V2** as explicit first-class navigation. Digital Estimates continues to mount the read-only Command Center head module temporarily inside this shell. Direct Studio V2 navigation without a selected case shows a landing state that points staff to Inbox, Estimates, or Digital Estimates. Legacy Publish, Review Requests compatibility, Command Center compatibility, and the Legacy Queue remain under **More**, grouped as legacy/compatibility or support tools. |
+| **Why** | Mixing current heads with V1 and compatibility surfaces made tabs appear to own unrelated domains and hid the Digital Estimates Head. The cleanup clarifies ownership without splitting apps or changing workflows. |
+| **SQL** | None. |
+| **Impacted** | `StudioApp.tsx`, `StudioV2EstimatorShell.tsx` labels, `styles.css`, shell/navigation tests, this doc. |
+| **Protected** | Pricing, publishing, approval, revision, customer selection, final acceptance, sold handoff, AI Takeoff, Digital Estimates read models, customer-facing Digital Estimate behavior, approved/publication snapshots, and V1 fallback behavior. |
+| **Revisit trigger** | When Studio V2 or another quote-platform head receives an independent protected route/app shell, replace the temporary Elite 100 mount without changing the documented head ownership or Studio V2 deep-link contract. |

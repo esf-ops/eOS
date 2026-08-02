@@ -18,7 +18,18 @@ import {
 } from "./lib/studioV2Url.mjs";
 import { getSupabase } from "./lib/supabase";
 
-type QueueReturnNav = "shared-inbox" | "command-center" | "all-estimates" | "estimate-queue";
+type QueueReturnNav =
+  | "shared-inbox"
+  | "command-center"
+  | "all-estimates"
+  | "digital-estimates"
+  | "estimate-queue";
+type MainNav =
+  | QueueReturnNav
+  | "studio-v2"
+  | "publications"
+  | "reviews"
+  | "estimate-workspace";
 type WorkspaceFocus = "takeoff" | "scope" | "digital" | "review" | null;
 
 /** V2 preview only when UI flag is on AND URL has studioV2=1 (V1 remains default). */
@@ -153,15 +164,9 @@ export default function StudioApp() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [studioConfigOk, setStudioConfigOk] = useState<boolean | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [mainNav, setMainNav] = useState<
-    | "shared-inbox"
-    | "command-center"
-    | "all-estimates"
-    | "estimate-queue"
-    | "publications"
-    | "reviews"
-    | "estimate-workspace"
-  >(() => (initialStudioV2DeepLink().openWorkspace ? "estimate-workspace" : "shared-inbox"));
+  const [mainNav, setMainNav] = useState<MainNav>(() =>
+    initialStudioV2DeepLink().openWorkspace ? "estimate-workspace" : "shared-inbox"
+  );
   const [queueReturnNav, setQueueReturnNav] = useState<QueueReturnNav>("shared-inbox");
   const [moreNavOpen, setMoreNavOpen] = useState(false);
   const [newEstimateOpen, setNewEstimateOpen] = useState(false);
@@ -238,6 +243,18 @@ export default function StudioApp() {
     } else {
       setMainNav(nextNav);
       setQueueReturnNav(nextNav);
+    }
+  }
+
+  function openStudioV2Landing() {
+    setStudioV2Preview(true);
+    setEstimateWorkspaceCaseId(null);
+    setWorkspaceFocus(null);
+    setStudioV2DeepLinkError(null);
+    setMainNav("studio-v2");
+    setMoreNavOpen(false);
+    if (studioV2UiEnabled()) {
+      applyStudioV2WorkspaceUrl({ caseId: null, mode: "push" });
     }
   }
 
@@ -662,9 +679,11 @@ export default function StudioApp() {
           "studio-shell",
           mainNav === "shared-inbox" ||
           mainNav === "command-center" ||
+          mainNav === "digital-estimates" ||
           mainNav === "estimate-queue" ||
           mainNav === "estimate-workspace" ||
-          mainNav === "publications"
+          mainNav === "publications" ||
+          mainNav === "studio-v2"
             ? "studio-shell--wide"
             : "",
           studioV2Preview && studioV2UiEnabled() ? "studio-shell--v2" : ""
@@ -731,6 +750,52 @@ export default function StudioApp() {
           </button>
           <button
             type="button"
+            className={
+              mainNav === "digital-estimates" ||
+              (mainNav === "estimate-workspace" && queueReturnNav === "digital-estimates")
+                ? "active"
+                : ""
+            }
+            data-testid="studio-nav-digital-estimates"
+            title="Customer links and customer activity"
+            onClick={() => {
+              clearWorkspaceSelectionFromNav("digital-estimates");
+              setMoreNavOpen(false);
+            }}
+          >
+            Digital Estimates
+          </button>
+          {studioV2UiEnabled() ? (
+            <button
+              type="button"
+              className={
+                mainNav === "studio-v2" ||
+                (mainNav === "estimate-workspace" && studioV2Preview)
+                  ? "active"
+                  : ""
+              }
+              data-testid="studio-nav-studio-v2"
+              title="Estimate workspace and estimate authority"
+              onClick={() => {
+                if (estimateWorkspaceCaseId) {
+                  setStudioV2Preview(true);
+                  setMainNav("estimate-workspace");
+                  setStudioV2DeepLinkError(null);
+                  applyStudioV2WorkspaceUrl({
+                    caseId: estimateWorkspaceCaseId,
+                    mode: "push"
+                  });
+                  setMoreNavOpen(false);
+                  return;
+                }
+                openStudioV2Landing();
+              }}
+            >
+              Studio V2
+            </button>
+          ) : null}
+          <button
+            type="button"
             className="eq-btn-primary studio-nav-new-estimate"
             data-testid="studio-nav-new-estimate"
             title="Create a new estimate — starts you directly in Scope"
@@ -758,6 +823,9 @@ export default function StudioApp() {
             </button>
             {moreNavOpen ? (
               <ul className="studio-nav-more-menu" role="menu" data-testid="studio-nav-more-menu">
+                <li className="studio-nav-more-label" role="none">
+                  Legacy / compatibility
+                </li>
                 <li role="none">
                   <button
                     type="button"
@@ -768,21 +836,7 @@ export default function StudioApp() {
                       setMoreNavOpen(false);
                     }}
                   >
-                    Command Center (compatibility)
-                  </button>
-                </li>
-                <li role="none">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    data-testid="studio-nav-publications"
-                    onClick={() => {
-                      clearWorkspaceSelectionFromNav("publications");
-                      setPublicationsMode("portfolio");
-                      setMoreNavOpen(false);
-                    }}
-                  >
-                    Digital Estimates
+                    Command Center (Compatibility)
                   </button>
                 </li>
                 <li role="none">
@@ -796,7 +850,7 @@ export default function StudioApp() {
                       setMoreNavOpen(false);
                     }}
                   >
-                    Publish Digital Estimate (legacy)
+                    Legacy Publish Digital Estimate
                   </button>
                 </li>
                 <li role="none">
@@ -809,8 +863,11 @@ export default function StudioApp() {
                       setMoreNavOpen(false);
                     }}
                   >
-                    Review Requests (compatibility)
+                    Review Requests (Compatibility)
                   </button>
+                </li>
+                <li className="studio-nav-more-label" role="none">
+                  Support tools
                 </li>
                 <li role="none">
                   <button
@@ -822,7 +879,7 @@ export default function StudioApp() {
                       setMoreNavOpen(false);
                     }}
                   >
-                    Open legacy queue
+                    Open Legacy Queue
                   </button>
                 </li>
               </ul>
@@ -874,6 +931,62 @@ export default function StudioApp() {
               });
             }}
           />
+        ) : null}
+
+        {mainNav === "digital-estimates" ? (
+          <DigitalEstimatesPage
+            authToken={sessionToken}
+            onOpenEstimate={(caseId, options) => {
+              setStudioV2Preview(true);
+              openEstimateWorkspace({
+                caseId,
+                returnNav: "digital-estimates",
+                openTarget: options?.openTarget,
+                focusFallback: "digital"
+              });
+              applyStudioV2WorkspaceUrl({ caseId, mode: "push" });
+            }}
+            onOpenReviewRequest={(reviewRequestId) => {
+              setPreselectReviewRequestId(reviewRequestId);
+              setMainNav("reviews");
+            }}
+          />
+        ) : null}
+
+        {mainNav === "studio-v2" && !estimateWorkspaceCaseId ? (
+          <section className="panel studio-v2-landing" data-testid="studio-v2-landing">
+            <p className="studio-v2-landing__eyebrow">Estimate workspace · estimate authority</p>
+            <h1>Studio V2 Workspace</h1>
+            <p className="muted">
+              Open an estimate from Inbox, Estimates, or Digital Estimates to begin.
+            </p>
+            <div className="actions">
+              <button
+                type="button"
+                className="eq-btn-secondary"
+                data-testid="studio-v2-landing-inbox"
+                onClick={() => clearWorkspaceSelectionFromNav("shared-inbox")}
+              >
+                Go to Inbox
+              </button>
+              <button
+                type="button"
+                className="eq-btn-secondary"
+                data-testid="studio-v2-landing-estimates"
+                onClick={() => clearWorkspaceSelectionFromNav("all-estimates")}
+              >
+                Go to Estimates
+              </button>
+              <button
+                type="button"
+                className="eq-btn-secondary"
+                data-testid="studio-v2-landing-digital-estimates"
+                onClick={() => clearWorkspaceSelectionFromNav("digital-estimates")}
+              >
+                Go to Digital Estimates
+              </button>
+            </div>
+          </section>
         ) : null}
 
         {mainNav === "estimate-queue" ? (
@@ -934,26 +1047,6 @@ export default function StudioApp() {
           />
         ) : null}
 
-        {mainNav === "publications" && publicationsMode === "portfolio" ? (
-          <DigitalEstimatesPage
-            authToken={sessionToken}
-            onOpenEstimate={(caseId, options) => {
-              setStudioV2Preview(true);
-              openEstimateWorkspace({
-                caseId,
-                returnNav: "command-center",
-                openTarget: options?.openTarget,
-                focusFallback: "digital"
-              });
-              applyStudioV2WorkspaceUrl({ caseId, mode: "push" });
-            }}
-            onOpenReviewRequest={(reviewRequestId) => {
-              setPreselectReviewRequestId(reviewRequestId);
-              setMainNav("reviews");
-            }}
-          />
-        ) : null}
-
         {mainNav === "publications" && publicationsMode === "publish-search" ? (
         <div className="studio-grid">
           <p className="muted">
@@ -961,9 +1054,12 @@ export default function StudioApp() {
               type="button"
               className="eq-btn-secondary"
               data-testid="live-de-back-to-portfolio"
-              onClick={() => setPublicationsMode("portfolio")}
+              onClick={() => {
+                setPublicationsMode("portfolio");
+                clearWorkspaceSelectionFromNav("digital-estimates");
+              }}
             >
-              ← Back to Live Digital Estimates
+              ← Back to Digital Estimates
             </button>
           </p>
           <section className="panel">
@@ -1154,10 +1250,13 @@ export default function StudioApp() {
         onCreated={({ intakeCaseId }) => {
           // Standalone create never returns to Inbox/a legacy queue — it
           // opens directly in Scope. "Back" from the workspace returns to
-          // whichever primary section (Inbox or Estimates) launched it.
+          // whichever primary list section launched it.
           openEstimateWorkspace({
             caseId: intakeCaseId,
-            returnNav: mainNav === "all-estimates" ? "all-estimates" : "shared-inbox",
+            returnNav:
+              mainNav === "all-estimates" || mainNav === "digital-estimates"
+                ? mainNav
+                : "shared-inbox",
             openTarget: "scope",
             focusFallback: "scope"
           });

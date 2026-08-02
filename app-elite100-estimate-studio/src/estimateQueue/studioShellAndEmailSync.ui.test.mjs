@@ -42,10 +42,10 @@ assert.ok(app.includes('apiGet("/api/me"'));
 assert.ok(css.includes("--eos-accent: #a3132f"));
 console.log("ok: Studio uses shared EliteosTopbar / Home shell tokens");
 
-assert.match(app, /useState<[\s\S]*?>\("command-center"\)/);
 assert.ok(app.includes("studio-nav-more"));
+assert.ok(app.includes("Command Center (Compatibility)"));
 assert.ok(page.includes("ecc-summary"));
-console.log("ok: Command Center default + nav preserved");
+console.log("ok: compatibility Command Center remains available under More");
 
 // 1–3. Sync inbox opens existing MailboxSyncModal; preview does not import
 assert.ok(page.includes('import MailboxSyncModal from "./MailboxSyncModal"'));
