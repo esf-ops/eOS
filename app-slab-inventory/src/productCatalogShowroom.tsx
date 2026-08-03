@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
 import { ProductCatalogSpecViewer } from "./ProductCatalogSpecViewer";
 import {
@@ -9,12 +9,97 @@ import {
   getProductHeroImageCandidates,
   getUniqueFinishOptions,
   resolveProductCatalogStageUrl,
+  type ProductCatalogAccessory,
   type ProductCatalogFinishOption,
   type ProductCatalogItem,
 } from "./lib/productCatalog";
 import { normalizeProductCatalogDocumentUrl } from "./lib/productCatalogDocuments";
 
 export type ProductCatalogShowroomMode = "internal" | "public";
+
+type CollapsibleAccessorySection = "drain" | "colorMatch" | "value";
+
+type ColorMatchFinishGroup = {
+  finish: string;
+  strainerSku?: string;
+  flangeSku?: string;
+};
+
+/** Group Blanco color-match strainer/flange rows by finish name for compact display. */
+function groupColorMatchDrainOptionsByFinish(
+  options: readonly ProductCatalogAccessory[]
+): ColorMatchFinishGroup[] {
+  const groups: ColorMatchFinishGroup[] = [];
+  const byFinish = new Map<string, ColorMatchFinishGroup>();
+
+  for (const opt of options) {
+    const match = /Basket\s+(Strainer|Flange)\s+(.+)/i.exec(opt.name.trim());
+    if (!match) {
+      groups.push({ finish: opt.name, strainerSku: opt.sku });
+      continue;
+    }
+    const kind = match[1].toLowerCase() as "strainer" | "flange";
+    const finish = match[2].trim();
+    let group = byFinish.get(finish);
+    if (!group) {
+      group = { finish };
+      byFinish.set(finish, group);
+      groups.push(group);
+    }
+    if (kind === "strainer") group.strainerSku = opt.sku ?? group.strainerSku;
+    else group.flangeSku = opt.sku ?? group.flangeSku;
+  }
+
+  return groups;
+}
+
+function formatColorMatchSkuLine(group: ColorMatchFinishGroup): string {
+  const parts: string[] = [];
+  if (group.strainerSku) parts.push(`Strainer ${group.strainerSku}`);
+  if (group.flangeSku) parts.push(`Flange ${group.flangeSku}`);
+  return parts.join(" · ");
+}
+
+function AccessoryAccordion({
+  sectionId,
+  title,
+  countLabel,
+  open,
+  onToggle,
+  children,
+}: {
+  sectionId: string;
+  title: string;
+  countLabel: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const panelId = `${sectionId}-panel`;
+  return (
+    <div className="pc-accessory-group pc-accessory-accordion">
+      <button
+        type="button"
+        className="pc-accessory-toggle"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={onToggle}
+      >
+        <span className="pc-accessory-toggle-label">
+          {title} ({countLabel})
+        </span>
+        <span className="pc-accessory-toggle-icon" aria-hidden>
+          {open ? "−" : "+"}
+        </span>
+      </button>
+      {open ? (
+        <div id={panelId} className="pc-accessory-panel" role="region" aria-label={title}>
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function categoryPlaceholderLabel(category: ProductCatalogItem["category"]): string {
   if (category === "faucet") return "Faucet";
@@ -266,14 +351,30 @@ export function ProductCatalogModal({
   const [zoomOpen, setZoomOpen] = useState(false);
   const [zoomIndex, setZoomIndex] = useState(0);
   const [specViewerOpen, setSpecViewerOpen] = useState(false);
+  const [openAccessorySections, setOpenAccessorySections] = useState<
+    Record<CollapsibleAccessorySection, boolean>
+  >({ drain: false, colorMatch: false, value: false });
   const { loaded, failed, reset, markLoaded, markFailed, isUsable } = useCatalogImageTracker();
 
   useEffect(() => {
     setSelectedFinishKey(defaultFinishKeyForItem(item));
     setActiveGalleryUrl(null);
     setSpecViewerOpen(false);
+    setOpenAccessorySections({ drain: false, colorMatch: false, value: false });
     reset();
   }, [item, reset]);
+
+  const toggleAccessorySection = (key: CollapsibleAccessorySection) => {
+    setOpenAccessorySections((cur) => ({ ...cur, [key]: !cur[key] }));
+  };
+
+  const colorMatchFinishGroups = useMemo(
+    () =>
+      item.accessoryGroups
+        ? groupColorMatchDrainOptionsByFinish(item.accessoryGroups.colorMatchDrainOptions)
+        : [],
+    [item.accessoryGroups]
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -480,8 +581,10 @@ export function ProductCatalogModal({
 
               {item.category === "sink" && item.accessoryGroups ? (
                 <section className="pc-text-section pc-accessories-section" aria-label="Available accessories">
-                  <div className="pc-accessory-group">
-                    <h3 className="pc-section-title">Compatible grids</h3>
+                  <div className="pc-accessory-group pc-accessory-group-grids">
+                    <h3 className="pc-section-title">
+                      Compatible grids ({item.accessoryGroups.grids.length})
+                    </h3>
                     {item.accessoryGroups.grids.length > 0 ? (
                       <ul className="pc-accessory-list">
                         {item.accessoryGroups.grids.map((acc) => (
@@ -500,8 +603,13 @@ export function ProductCatalogModal({
                   </div>
 
                   {item.accessoryGroups.drainOptions.length > 0 ? (
-                    <div className="pc-accessory-group">
-                      <h3 className="pc-section-title">Drain / strainer options</h3>
+                    <AccessoryAccordion
+                      sectionId={`pc-drain-${item.id}`}
+                      title="Drain / strainer options"
+                      countLabel={String(item.accessoryGroups.drainOptions.length)}
+                      open={openAccessorySections.drain}
+                      onToggle={() => toggleAccessorySection("drain")}
+                    >
                       <ul className="pc-accessory-list">
                         {item.accessoryGroups.drainOptions.map((acc) => (
                           <li key={`drain-${acc.sku ?? acc.name}`}>
@@ -510,26 +618,41 @@ export function ProductCatalogModal({
                           </li>
                         ))}
                       </ul>
-                    </div>
+                    </AccessoryAccordion>
                   ) : null}
 
-                  {item.accessoryGroups.colorMatchDrainOptions.length > 0 ? (
-                    <div className="pc-accessory-group">
-                      <h3 className="pc-section-title">Color-match drain options</h3>
-                      <ul className="pc-accessory-list">
-                        {item.accessoryGroups.colorMatchDrainOptions.map((acc) => (
-                          <li key={`color-drain-${acc.sku ?? acc.name}`}>
-                            <span className="pc-accessory-name">{acc.name}</span>
-                            {acc.sku ? <span className="pc-accessory-sku"> · {acc.sku}</span> : null}
-                          </li>
-                        ))}
+                  {colorMatchFinishGroups.length > 0 ? (
+                    <AccessoryAccordion
+                      sectionId={`pc-color-match-${item.id}`}
+                      title="Color-match drain options"
+                      countLabel={`${colorMatchFinishGroups.length} finishes`}
+                      open={openAccessorySections.colorMatch}
+                      onToggle={() => toggleAccessorySection("colorMatch")}
+                    >
+                      <ul className="pc-color-match-list">
+                        {colorMatchFinishGroups.map((group) => {
+                          const skuLine = formatColorMatchSkuLine(group);
+                          return (
+                            <li key={group.finish} className="pc-color-match-item">
+                              <span className="pc-color-match-finish">{group.finish}</span>
+                              {skuLine ? (
+                                <span className="pc-color-match-skus">{skuLine}</span>
+                              ) : null}
+                            </li>
+                          );
+                        })}
                       </ul>
-                    </div>
+                    </AccessoryAccordion>
                   ) : null}
 
                   {item.accessoryGroups.valueDrainOptions.length > 0 ? (
-                    <div className="pc-accessory-group">
-                      <h3 className="pc-section-title">Value drain options</h3>
+                    <AccessoryAccordion
+                      sectionId={`pc-value-drain-${item.id}`}
+                      title="Value drain options"
+                      countLabel={String(item.accessoryGroups.valueDrainOptions.length)}
+                      open={openAccessorySections.value}
+                      onToggle={() => toggleAccessorySection("value")}
+                    >
                       <ul className="pc-accessory-list">
                         {item.accessoryGroups.valueDrainOptions.map((acc) => (
                           <li key={`value-drain-${acc.sku ?? acc.name}`}>
@@ -538,7 +661,7 @@ export function ProductCatalogModal({
                           </li>
                         ))}
                       </ul>
-                    </div>
+                    </AccessoryAccordion>
                   ) : null}
                 </section>
               ) : item.category === "sink" && item.accessories !== undefined ? (
