@@ -1,15 +1,19 @@
 /**
- * Product Catalog — Blanco sink accessory groups for the detail modal
- * ==================================================================
+ * Product Catalog — sink accessory groups for the detail modal
+ * ============================================================
  *
- * Source: ESF Plumbing workbook → “Blanco Sink Program (Non Stock)”
+ * Sources:
+ *   - Blanco Sink Program (Non Stock)
+ *   - Kansas Sinks Program
+ *
  * Attached by stable catalog product id during getProductCatalogItemsWithAssets().
  * Prices/costs and strainer photos are intentionally omitted (text-only).
  *
  * Groups:
  *   - grids: product-specific grids / boards / racks
- *   - drainOptions: stainless strainer + flange (all Blanco sinks)
- *   - colorMatchDrainOptions: metal color-match strainer + flange (all Blanco sinks)
+ *   - drainOptions: Blanco stainless strainer + flange (Blanco sinks)
+ *   - colorMatchDrainOptions: Blanco metal color-match (Blanco sinks)
+ *   - valueDrainOptions: Kansas value strainers (every sink)
  */
 import type {
   ProductCatalogAccessory,
@@ -21,7 +25,7 @@ type GridList = readonly ProductCatalogAccessory[];
 
 const NONE: GridList = [];
 
-/** Stainless drain options — every Blanco sink (separate strainer vs flange SKUs). */
+/** Stainless drain options — Blanco sinks (separate strainer vs flange SKUs). */
 const BLANCO_STAINLESS_DRAIN_OPTIONS: readonly ProductCatalogAccessory[] = [
   { name: "Basket Strainer Stainless Steel", sku: "441093" },
   { name: "Basket Flange Stainless Steel", sku: "441098" },
@@ -29,9 +33,8 @@ const BLANCO_STAINLESS_DRAIN_OPTIONS: readonly ProductCatalogAccessory[] = [
 ];
 
 /**
- * Metal color-match drain options — every Blanco sink.
+ * Metal color-match drain options — Blanco sinks.
  * Display names use “Volcano Gray” (not “Gray”); Cafe → Café Brown.
- * Text-only; no photos or pricing.
  */
 const BLANCO_COLOR_MATCH_DRAIN_OPTIONS: readonly ProductCatalogAccessory[] = [
   { name: "Basket Strainer Anthracite", sku: "240323" },
@@ -51,6 +54,30 @@ const BLANCO_COLOR_MATCH_DRAIN_OPTIONS: readonly ProductCatalogAccessory[] = [
   { name: "Basket Strainer Volcano Gray", sku: "203441" },
   { name: "Basket Flange Volcano Gray", sku: "203451" },
 ];
+
+/**
+ * Kansas value strainers — every sink (including Blanco).
+ * Item code + description only; no photos / pricing.
+ */
+const KANSAS_VALUE_DRAIN_OPTIONS: readonly ProductCatalogAccessory[] = [
+  { name: "Wstrainer 2 Standard Strainer", sku: "Stainless Steel St Strainer" },
+  { name: "Wstrainer 3 in 1 Strainer", sku: "Stainless Steel 3 in 1" },
+];
+
+/** Kansas grid SKUs from workbook parentheticals (e.g. 2317GRID). */
+const KANSAS_GRID = {
+  g2317: { name: "2317 Grid", sku: "2317GRID" },
+  g3018: { name: "3018 Grid", sku: "3018GRID" },
+  g3218_5050: { name: "3218 50/50 Grid", sku: "3218GRID5050" },
+  g3218_6040_large: { name: "3218 60/40 Grid Large", sku: "3218GRID6040Large" },
+  g3218_6040_small: { name: "3218 60/40 Grid Small", sku: "3218GRID6040Small" },
+  g3218_ss: { name: "3218 Super Single Grid", sku: "3218GRIDSuperSingle" },
+  g3221_large: { name: "3221 Large Grid", sku: "3221GRIDLARGE" },
+  g3221_small: { name: "3221 Small Grid", sku: "3221GRIDSMALL" },
+  r15_5050: { name: "R15 50/50 Grid", sku: "R155050GRID" },
+  r15_med: { name: "R15 Medium Grid Single Bowl", sku: "R152318GRID" },
+  r15_ss: { name: "R15 Super Single Grid", sku: "R153118GRID" },
+} as const;
 
 /**
  * Product-specific grids / boards / racks by catalog product id.
@@ -159,13 +186,66 @@ const BLANCO_SINK_GRIDS_BY_PRODUCT_ID: Readonly<Record<string, GridList>> = {
   ],
 };
 
+/**
+ * Kansas sink → compatible grids (stable product ids).
+ * Sinks with no workbook grid map to NONE and still receive value drain options.
+ */
+const KANSAS_SINK_GRIDS_BY_PRODUCT_ID: Readonly<Record<string, GridList>> = {
+  "kansas-1512um18-2": NONE,
+  "kansas-1518um18-3": NONE,
+  "kansas-2317um18-4": [KANSAS_GRID.g2317],
+
+  "kansas-3018um16-6": [KANSAS_GRID.g3018],
+  "kansas-3018um18-7": [KANSAS_GRID.g3018],
+  "kansas-3018um18ada-9": [KANSAS_GRID.g3018],
+
+  // Catalog id says 60-40 but source name is 3218UM18 50/50 — map 50/50 grid.
+  "kansas-3218um16-60-40-14": [KANSAS_GRID.g3218_5050],
+  // Catalog id says ss but source name is 3218UM16 50/50 — map 50/50 grid.
+  "kansas-3218um16-ss-15": [KANSAS_GRID.g3218_5050],
+  "kansas-3218um16-ss-16": [KANSAS_GRID.g3218_ss],
+  "kansas-3218um18-60-40-17": [KANSAS_GRID.g3218_6040_large, KANSAS_GRID.g3218_6040_small],
+  "kansas-3218um18-ss-18": [KANSAS_GRID.g3218_ss],
+
+  "kansas-3221um16-60-40-21": [KANSAS_GRID.g3221_large, KANSAS_GRID.g3221_small],
+  "kansas-3221um18-60-40-22": [KANSAS_GRID.g3221_large, KANSAS_GRID.g3221_small],
+  "kansas-3221um18r-40-60-23": [KANSAS_GRID.g3221_large, KANSAS_GRID.g3221_small],
+
+  "kansas-r10-ss-bl-r103219um18black-24": NONE,
+  "kansas-r10-ss-bl-r10medium18black-25": NONE,
+
+  "kansas-r15-50-50um18-27": [KANSAS_GRID.r15_5050],
+  // Workbook has no dedicated R15 60/40 grid row.
+  "kansas-r15-60-40um18-28": NONE,
+  "kansas-r15-bar-um-18-29": NONE,
+  "kansas-r15-med-um-18-31": [KANSAS_GRID.r15_med],
+  "kansas-r15-ss-um-18-33": [KANSAS_GRID.r15_ss],
+
+  "kansas-vc1512-oval-white-34": NONE,
+  "kansas-vc1613-oval-biscuit-35": NONE,
+  "kansas-vc1613-oval-white-36": NONE,
+  "kansas-vc1638-rect-white-37": NONE,
+  "kansas-vc1912-rect-bisc-38": NONE,
+  "kansas-vc1912-rect-white-39": NONE,
+
+  // Workstation sinks ship “with accessories”; no separate grid SKU in the program.
+  "kansas-win-ss-ws-40": NONE,
+  "kansas-ws32-ss-wsum18-41": NONE,
+};
+
 function isBlancoSink(item: ProductCatalogItem): boolean {
   if (item.category !== "sink") return false;
   if ((item.brand || "").toLowerCase() === "blanco") return true;
   return item.id.startsWith("blanco-");
 }
 
-function gridsForProduct(item: ProductCatalogItem): GridList | undefined {
+function isKansasSink(item: ProductCatalogItem): boolean {
+  if (item.category !== "sink") return false;
+  if ((item.brand || "").toLowerCase().includes("kansas")) return true;
+  return item.id.startsWith("kansas-");
+}
+
+function gridsForBlanco(item: ProductCatalogItem): GridList | undefined {
   const byId = BLANCO_SINK_GRIDS_BY_PRODUCT_ID[item.id];
   if (byId !== undefined) return byId;
   if (item.catalogSourceId) {
@@ -174,39 +254,59 @@ function gridsForProduct(item: ProductCatalogItem): GridList | undefined {
   return undefined;
 }
 
+function gridsForKansas(item: ProductCatalogItem): GridList | undefined {
+  return KANSAS_SINK_GRIDS_BY_PRODUCT_ID[item.id];
+}
+
 function cloneAccessories(list: readonly ProductCatalogAccessory[]): ProductCatalogAccessory[] {
   return list.map((a) => ({ ...a }));
 }
 
-function buildGroups(grids: GridList): ProductCatalogSinkAccessoryGroups {
+function buildGroups(opts: {
+  grids: GridList;
+  includeBlancoDrains: boolean;
+}): ProductCatalogSinkAccessoryGroups {
   return {
-    grids: cloneAccessories(grids),
-    drainOptions: cloneAccessories(BLANCO_STAINLESS_DRAIN_OPTIONS),
-    colorMatchDrainOptions: cloneAccessories(BLANCO_COLOR_MATCH_DRAIN_OPTIONS),
+    grids: cloneAccessories(opts.grids),
+    drainOptions: opts.includeBlancoDrains
+      ? cloneAccessories(BLANCO_STAINLESS_DRAIN_OPTIONS)
+      : [],
+    colorMatchDrainOptions: opts.includeBlancoDrains
+      ? cloneAccessories(BLANCO_COLOR_MATCH_DRAIN_OPTIONS)
+      : [],
+    valueDrainOptions: cloneAccessories(KANSAS_VALUE_DRAIN_OPTIONS),
   };
 }
 
-/** Attach curated accessory groups to Blanco sink products (display-only). */
+/** Attach curated accessory groups to sink products (display-only). */
 export function applyProductCatalogSinkAccessories(
   items: ProductCatalogItem[]
 ): ProductCatalogItem[] {
   return items.map((item) => {
-    if (!isBlancoSink(item)) return item;
+    if (item.category !== "sink") return item;
 
-    const grids = gridsForProduct(item);
-    // Known Blanco family with explicit mapping (including empty grids)
-    if (grids !== undefined) {
-      const accessoryGroups = buildGroups(grids);
+    if (isBlancoSink(item)) {
+      const grids = gridsForBlanco(item) ?? NONE;
+      const accessoryGroups = buildGroups({ grids, includeBlancoDrains: true });
       return {
         ...item,
         accessoryGroups,
-        // Flat list for any legacy display: grids only (drain groups render separately)
         accessories: accessoryGroups.grids,
       };
     }
 
-    // Other Blanco-branded sinks (if any) still get drain options, no grids mapping
-    const accessoryGroups = buildGroups(NONE);
+    if (isKansasSink(item)) {
+      const grids = gridsForKansas(item) ?? NONE;
+      const accessoryGroups = buildGroups({ grids, includeBlancoDrains: false });
+      return {
+        ...item,
+        accessoryGroups,
+        accessories: accessoryGroups.grids,
+      };
+    }
+
+    // Other sinks: value drain options only (Kansas strainers as universal value option).
+    const accessoryGroups = buildGroups({ grids: NONE, includeBlancoDrains: false });
     return {
       ...item,
       accessoryGroups,

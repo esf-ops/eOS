@@ -40,11 +40,15 @@ export type ProductCatalogAccessory = {
   note?: string;
 };
 
-/** Grouped Blanco sink accessories for the detail modal (text-only, no pricing). */
+/** Grouped sink accessories for the detail modal (text-only, no pricing). */
 export type ProductCatalogSinkAccessoryGroups = {
   grids: ProductCatalogAccessory[];
+  /** Blanco stainless drain / strainer options */
   drainOptions: ProductCatalogAccessory[];
+  /** Blanco metal color-match drain options */
   colorMatchDrainOptions: ProductCatalogAccessory[];
+  /** Kansas value strainers — shown on every sink */
+  valueDrainOptions: ProductCatalogAccessory[];
 };
 
 export type ProductCatalogItem = {

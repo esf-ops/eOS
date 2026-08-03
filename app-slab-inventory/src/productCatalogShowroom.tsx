@@ -526,6 +526,20 @@ export function ProductCatalogModal({
                       </ul>
                     </div>
                   ) : null}
+
+                  {item.accessoryGroups.valueDrainOptions.length > 0 ? (
+                    <div className="pc-accessory-group">
+                      <h3 className="pc-section-title">Value drain options</h3>
+                      <ul className="pc-accessory-list">
+                        {item.accessoryGroups.valueDrainOptions.map((acc) => (
+                          <li key={`value-drain-${acc.sku ?? acc.name}`}>
+                            <span className="pc-accessory-name">{acc.name}</span>
+                            {acc.sku ? <span className="pc-accessory-sku"> · {acc.sku}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </section>
               ) : item.category === "sink" && item.accessories !== undefined ? (
                 <section className="pc-text-section pc-accessories-section" aria-label="Available accessories">
