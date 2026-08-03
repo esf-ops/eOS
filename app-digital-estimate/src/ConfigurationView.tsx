@@ -169,7 +169,7 @@ function GroupChip({
       onClick={onClick}
       className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
         active
-          ? "border-primary/40 bg-accent text-accent-foreground"
+          ? "de-option-selected"
           : "border-border bg-background text-muted-foreground hover:text-foreground"
       }`}
     >
@@ -690,7 +690,7 @@ function ProductCards({
                     <div className="text-sm font-medium leading-snug text-foreground" title={p.displayName}>
                       {p.displayName}
                       {selected ? (
-                        <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">Selected</span>
+                        <span className="de-option-selected-badge ml-1.5 align-middle">Selected</span>
                       ) : null}
                     </div>
                     {metaBits.length ? (
@@ -735,9 +735,7 @@ function ProductCards({
                                 {v.finish || v.color || v.displayName || v.sku || "Finish"}
                               </span>
                               {finishSelected ? (
-                                <span className="shrink-0 text-[11px] font-medium text-foreground" aria-hidden>
-                                  ✓
-                                </span>
+                                <span className="de-option-selected-badge shrink-0">Selected</span>
                               ) : null}
                             </button>
                           );
@@ -915,10 +913,14 @@ function AccessoriesOrSpecialtyModal({
             <label
               key={opt.optionKey}
               className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
-                opt.selected ? "border-foreground bg-muted/30" : "border-border"
+                opt.selected ? "de-option-selected" : "border-border"
               }`}
+              data-selected={opt.selected ? "true" : "false"}
             >
               <span>
+                {opt.selected ? (
+                  <span className="de-option-selected-badge mb-1">Selected</span>
+                ) : null}
                 <span className="block font-medium text-foreground">{opt.displayLabel}</span>
                 {opt.description ? (
                   <span className="mt-0.5 block text-xs text-muted-foreground">{opt.description}</span>
@@ -991,10 +993,14 @@ function AccessoriesOrSpecialtyModal({
                 <label
                   key={opt.optionKey}
                   className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
-                    opt.selected ? "border-foreground bg-muted/30" : "border-border"
+                    opt.selected ? "de-option-selected" : "border-border"
                   }`}
+                  data-selected={opt.selected ? "true" : "false"}
                 >
                   <span>
+                    {opt.selected ? (
+                      <span className="de-option-selected-badge mb-1 mr-2 inline-flex">Selected</span>
+                    ) : null}
                     <span className="font-medium text-foreground">{opt.displayLabel}</span>
                     {opt.priceEffectLabel ? (
                       <span
@@ -1027,10 +1033,14 @@ function AccessoriesOrSpecialtyModal({
                 <label
                   key={opt.optionKey}
                   className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm ${
-                    opt.selected ? "border-foreground bg-muted/30" : "border-border"
+                    opt.selected ? "de-option-selected" : "border-border"
                   }`}
+                  data-selected={opt.selected ? "true" : "false"}
                 >
                   <span>
+                    {opt.selected ? (
+                      <span className="de-option-selected-badge mb-1 mr-2 inline-flex">Selected</span>
+                    ) : null}
                     <span className="font-medium text-foreground">{opt.displayLabel}</span>
                     {opt.priceEffectLabel ? (
                       <span
@@ -1145,13 +1155,17 @@ function PlumbingSourceModal({
                 type="button"
                 data-testid={`de-${role}-source-${kind}`}
                 className={`rounded-xl border px-4 py-3 text-left text-sm font-medium ${
-                  active ? "border-foreground bg-muted/30" : "border-border"
+                  active ? "de-option-selected" : "border-border"
                 }`}
+                data-selected={active ? "true" : "false"}
                 onClick={() => {
                   setEsfPane("menu");
                   onSelectSource(kind, opt?.optionKey);
                 }}
               >
+                {active ? (
+                  <span className="de-option-selected-badge mb-1">Selected</span>
+                ) : null}
                 {opt?.displayLabel || label}
               </button>
             );
@@ -1160,13 +1174,17 @@ function PlumbingSourceModal({
             type="button"
             data-testid={`de-${role}-source-esf`}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-medium ${
-              source === "esf" ? "border-foreground bg-muted/30" : "border-border"
+              source === "esf" ? "de-option-selected" : "border-border"
             }`}
+            data-selected={source === "esf" ? "true" : "false"}
             onClick={() => {
               onSelectSource("esf", null);
               setEsfPane("catalog");
             }}
           >
+            {source === "esf" ? (
+              <span className="de-option-selected-badge mb-1">Selected</span>
+            ) : null}
             {esfLabel}
             <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
               {productCards.length} approved {role === "sink" ? "sink" : "faucet"}

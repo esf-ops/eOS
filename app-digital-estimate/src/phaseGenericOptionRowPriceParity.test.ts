@@ -65,11 +65,11 @@ const PRICED_OPTIONS = [
 // 2. Selection is visual only — highlight plus badge, never a price swap.
 {
   assert.ok(
-    /opt\.selected\s*\n?\s*\?\s*"border-foreground/.test(choiceRadioBlock),
+    /opt\.selected\s*\n?\s*\?\s*"de-option-selected/.test(choiceRadioBlock),
     "2. selected row is visually highlighted",
   );
   assert.ok(
-    /rounded-full bg-foreground[\s\S]{0,200}Selected/.test(choiceRadioBlock),
+    /de-option-selected-badge[\s\S]{0,200}Selected/.test(choiceRadioBlock),
     "2. selected row carries a short badge",
   );
   assert.ok(
