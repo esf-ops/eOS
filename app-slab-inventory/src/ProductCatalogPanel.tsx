@@ -3,10 +3,10 @@ import { getProductCatalogItemsWithAssets } from "./lib/productCatalogAssets";
 import { filterCatalogReadyItems } from "./lib/productCatalogReady";
 import {
   PRODUCT_CATALOG_CATEGORY_LABELS,
-  PRODUCT_CATALOG_TABS,
   filterProductCatalogItems,
   groupProductCatalogByManufacturer,
   productCatalogCountForCategory,
+  productCatalogTabsForItems,
   productCatalogUsesManufacturerGrouping,
   type ProductCatalogCategory,
   type ProductCatalogItem,
@@ -63,6 +63,14 @@ export default function ProductCatalogPanel() {
     () => (showAllGenerated ? catalogItems : filterCatalogReadyItems(catalogItems)),
     [catalogItems, showAllGenerated]
   );
+
+  const tabs = useMemo(() => productCatalogTabsForItems(showroomItems), [showroomItems]);
+
+  useEffect(() => {
+    if (!tabs.includes(category)) {
+      setCategory(tabs[0] ?? "sink");
+    }
+  }, [tabs, category]);
 
   const filtered = useMemo(
     () =>
@@ -124,7 +132,7 @@ export default function ProductCatalogPanel() {
       </header>
 
       <nav className="pc-tab-bar" aria-label="Product categories">
-        {PRODUCT_CATALOG_TABS.map((cat) => (
+        {tabs.map((cat) => (
           <button
             key={cat}
             type="button"

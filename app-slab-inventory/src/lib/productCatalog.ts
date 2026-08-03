@@ -539,7 +539,12 @@ export function publicProductCatalogTabsForItems(items: ProductCatalogItem[]): P
   if (productCatalogCountForCategory(items, "specialty_add_on") > 0) {
     tabs.push("specialty_add_on");
   }
-  return tabs;
+  return tabs.filter((cat) => productCatalogCountForCategory(items, cat) > 0);
+}
+
+/** Internal catalog tabs — omit categories with no showroom items. */
+export function productCatalogTabsForItems(items: ProductCatalogItem[]): ProductCatalogCategory[] {
+  return PRODUCT_CATALOG_TABS.filter((cat) => productCatalogCountForCategory(items, cat) > 0);
 }
 
 export type ProductCatalogManufacturerGroup = {
