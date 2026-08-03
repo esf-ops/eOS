@@ -176,6 +176,16 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
     normalized[String(key)] = qty;
   }
 
+  /** Mutually exclusive room-scoped choice roles (one positive selection per role:room). */
+  const EXCLUSIVE_ROOM_ROLES = new Set([
+    "material",
+    "sink",
+    "faucet",
+    "backsplash",
+    "edge",
+    "cooktop"
+  ]);
+
   /** Room already has a positive material selection (mutually exclusive per room). */
   function roomHasMaterialSelection(roomKey) {
     const prefix = `material:${roomKey}:`;
@@ -188,14 +198,36 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
     return parts.length >= 3 ? parts[1] : null;
   }
 
+  /**
+   * Parse role + roomKey for exclusive room options (sink/faucet/material/…).
+   * @param {string} optionKey
+   * @returns {{ role: string, roomKey: string }|null}
+   */
+  function exclusiveRoomRole(optionKey) {
+    const parts = String(optionKey || "").split(":");
+    if (parts.length < 3) return null;
+    const role = parts[0];
+    if (!EXCLUSIVE_ROOM_ROLES.has(role)) return null;
+    return { role, roomKey: parts[1] };
+  }
+
+  function roomRoleHasExplicitSelection(role, roomKey) {
+    const prefix = `${role}:${roomKey}:`;
+    return Object.entries(normalized).some(([k, q]) => k.startsWith(prefix) && Number(q) > 0);
+  }
+
   // Apply defaults for required / included when missing.
-  // Never re-add a baseline material color when the customer already picked another
-  // material for that room (canonical envelope option ID wins).
+  // Never re-add a baseline material/sink/faucet/… when the customer already
+  // picked another exclusive option for that room (canonical envelope key wins).
   for (const opt of options) {
     const key = String(opt.option_key || opt.optionKey);
     if (normalized[key] != null) continue;
     const def = Number(opt.default_qty ?? opt.defaultQty ?? 0);
     if (!(opt.required_selection || opt.requiredSelection || opt.included_in_baseline || opt.includedInBaseline)) {
+      continue;
+    }
+    const exclusive = exclusiveRoomRole(key);
+    if (exclusive && roomRoleHasExplicitSelection(exclusive.role, exclusive.roomKey)) {
       continue;
     }
     const roomKey = materialRoomKey(key);

@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildUpdatedBreakdown } from "./customerEstimateBreakdown.ts";
 import {
+  canonicalEsfPlumbingOptionKey,
   isPlumbingFinishSelected,
   isPlumbingProductCardSelected,
   openFamilyIdForSelection,
@@ -19,10 +20,12 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const viewSource = readFileSync(join(here, "ConfigurationView.tsx"), "utf8");
 const viewModelSource = readFileSync(join(here, "lovableViewModel.ts"), "utf8");
+const apiSource = readFileSync(join(here, "publicConfigApi.ts"), "utf8");
 
 const PRODUCT_ID = "blanco:precis-24";
 const VARIANT_ID = "coal-black";
 const PRODUCT_KEY = `sink:kitchen:esf:${PRODUCT_ID}`;
+const FINISH_KEY = `${PRODUCT_KEY}:coal-black`;
 const SINK_LABEL = `Precis 24" Sink · Coal Black`;
 
 const precisProduct = {
@@ -68,6 +71,28 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
     shouldPreservePersistedSinkDraft(baselineFallback, "customer_provided"),
     true,
   );
+  assert.equal(
+    shouldPreservePersistedSinkDraft(
+      {
+        optionKey: "sink:kitchen:customer_provided",
+        sourceKind: "customer_provided",
+        selected: false,
+      },
+      "esf",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldPreservePersistedSinkDraft(
+      {
+        optionKey: "sink:kitchen:customer_provided",
+        sourceKind: "customer_provided",
+        selected: true,
+      },
+      "esf",
+    ),
+    false,
+  );
   assert.match(
     viewModelSource,
     /role === "sink"[\s\S]{0,120}shouldPreservePersistedSinkDraft\(selected, base\.source\)[\s\S]{0,80}return base/,
@@ -76,7 +101,11 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
     viewModelSource,
     /sinkSummary: summarizeSinkDraft\(sinkDraft, summarizeChoice\(sinkSelected/,
   );
-  console.log("ok: room card preserves authoritative persisted sink draft on variant-key refresh");
+  assert.match(
+    viewModelSource,
+    /ESF Sink — \$\{label\}|ESF Sink — \$\{draft\.displayLabel/,
+  );
+  console.log("ok: room card preserves ESF draft over stale none/customer_provided fallback");
 }
 
 {
@@ -117,6 +146,25 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
 }
 
 {
+  const keys = new Set([PRODUCT_KEY, "sink:kitchen:customer_provided"]);
+  assert.equal(canonicalEsfPlumbingOptionKey(PRODUCT_KEY, keys), PRODUCT_KEY);
+  assert.equal(canonicalEsfPlumbingOptionKey(FINISH_KEY, keys), PRODUCT_KEY);
+  assert.match(viewModelSource, /canonicalEsfPlumbingOptionKey/);
+  assert.match(viewSource, /buildSelectionItems\(effectiveQty, roomsForItems, envelopeKeys\)/);
+  assert.match(viewSource, /resolveProductOptionKey\(product, resolvedVariantId, envelopeKeys\)/);
+  console.log("ok: UI save payload canonicalizes finish key to envelope family key");
+}
+
+{
+  assert.match(
+    viewModelSource,
+    /if \(draft\.source === "esf" \|\| draft\.source === "stock"\)/,
+  );
+  assert.match(viewModelSource, /return `ESF Sink — \$\{label\}`/);
+  console.log("ok: room card shows ESF Sink label, not Customer-provided · Blanco …");
+}
+
+{
   assert.match(
     viewSource,
     /productDrafts\[modalRoom\.id\]\?\.sink \|\| modalRoom\.sinkDraft/,
@@ -130,8 +178,11 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
   assert.match(viewSource, /selectedFinish=\{draft\.finish \|\| null\}/);
   assert.match(viewSource, /isPlumbingFinishSelected/);
   assert.match(viewSource, /openFamilyIdForSelection/);
+  assert.match(viewSource, /source === "esf" && Boolean\(draft\.productId/);
   assert.match(viewSource, /customerProductDrafts/);
-  console.log("ok: modal selected state uses productId + variantId/finish, not optionKey alone");
+  assert.match(apiSource, /code === "selection_unavailable"/);
+  assert.match(apiSource, /DE-OPTION-NOT-ALLOWED/);
+  console.log("ok: modal reopens ESF catalog with product/finish selected; errors map cleanly");
 }
 
 {
@@ -163,7 +214,11 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
     breakdown.lines.some((line) => /cutout/i.test(line.label) && line.amount === 200),
     false,
   );
-  console.log("ok: included published cutout does not create a $200 customer difference line");
+  assert.equal(
+    breakdown.lines.some((line) => /customer-provided/i.test(line.label)),
+    false,
+  );
+  console.log("ok: sidebar shows one ESF sink line; included cutout is not a $200 difference");
 }
 
 {
