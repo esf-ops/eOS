@@ -15,7 +15,7 @@ const app = readFileSync(join(root, "App.tsx"), "utf8");
 
 console.log("\nphaseUnavailableBanner.ui.test.mjs\n");
 
-assert.ok(app.includes('const UNAVAILABLE_MESSAGE = "This estimate is unavailable."'));
+assert.ok(app.includes('const UNAVAILABLE_MESSAGE = "This estimate isn’t available right now."'));
 assert.ok(app.includes("UnavailableScreen"));
 
 // UnavailableScreen is the only full-page unavailable path.
@@ -35,7 +35,7 @@ assert.equal(
   false,
   "estimate branch must not use generic unavailable beside ReadOnlyEstimateView"
 );
-assert.ok(estimateBranch.includes("Customer options could not be loaded"));
+assert.ok(estimateBranch.includes("Your options could not be loaded"));
 assert.ok(estimateBranch.includes("ReadOnlyEstimateView"));
 
 // Valid interactive publication → configure mode (never static-only).

@@ -64,9 +64,9 @@ const view = readFileSync(join(__dirname, "ConfigurationView.tsx"), "utf8");
 }
 
 {
-  // 5. Final acceptance remains gated / unavailable language preserved elsewhere is fine
-  assert.ok(view.includes("Final approval will be available after estimator review."));
-  console.log("ok: 5 final acceptance remains unavailable");
+  // 5. Final acceptance remains gated when Elite review is required
+  assert.ok(view.includes("Elite review is required before this estimate can be accepted."));
+  console.log("ok: 5 final acceptance remains gated when review required");
 }
 
 {

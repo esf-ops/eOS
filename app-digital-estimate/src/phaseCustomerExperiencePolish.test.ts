@@ -174,14 +174,18 @@ console.log("ok: 26-33 Original/Updated/Changes hierarchy");
 
 // --- 34-40 save / review ---
 assert.ok(view.includes('data-save-state={saveState}'), "34. save status");
-assert.ok(view.includes("Couldn’t save — Retry"), "35. failed save retry");
+assert.ok(view.includes('data-testid="de-save-error-dismiss"'), "35. failed save dismiss after rollback");
+assert.ok(
+  view.includes("Your previous estimate has been restored") || view.includes("Got it"),
+  "35. restore messaging after failed save",
+);
 assert.ok(
   /saveState === "unsaved" \|\| saveState === "saving" \|\| saveState === "error"\s*\n?\s*\?\s*savedCalc(ForDisplay)?\s*\n?\s*:\s*latestCalc(ForDisplay)?/.test(view),
   "40. pending not labeled saved",
 );
 assert.ok(view.includes("submittedRef"), "37/38. double-click guard");
 assert.ok(view.includes('data-testid="de-review-submit"'), "37. review submit");
-assert.ok(view.includes("Your selections were sent to Elite for review"), "39. confirmation");
+assert.ok(view.includes("Your selections have been sent to Elite"), "39. confirmation");
 assert.ok(view.includes('data-testid="de-review-cta"'), "37. review CTA");
 console.log("ok: 34-40 save/review");
 
@@ -195,7 +199,12 @@ assert.ok(view.includes('e.key === "Escape"'), "42. Escape closes");
 assert.ok(view.includes('data-testid="de-modal-done"'), "43. Done closes modal");
 assert.ok(view.includes("Selected"), "44. selected not color-only");
 assert.ok(view.includes("py-3"), "45. tap-sized controls");
-assert.ok(view.includes("pb-36 lg:pb-10") || view.includes("pb-28 lg:pb-10"), "46. sticky bar clearance");
+assert.ok(
+  view.includes("pb-36 lg:pb-10") ||
+    view.includes("pb-28 lg:pb-10") ||
+    view.includes("pb-40 lg:pb-12"),
+  "46. sticky bar clearance",
+);
 console.log("ok: 41-48 responsive/a11y markers");
 
 // --- 49-60 regression markers ---

@@ -22,7 +22,7 @@ import {
   type PublicEstimate,
 } from "./publicConfigApi";
 
-const UNAVAILABLE_MESSAGE = "This estimate is unavailable.";
+const UNAVAILABLE_MESSAGE = "This estimate isn’t available right now.";
 
 export { parseTokenFromPath, parseTokenFromHash };
 
@@ -38,20 +38,32 @@ function readBuildMarker(): string {
 
 function UnavailableScreen({ diagnosticCode }: { diagnosticCode: string | null }) {
   const build = readBuildMarker();
+  const showDiagnostics = isDevDiagnosticsEnabled();
   return (
-    <div className="page">
-      <main className="shell shell--narrow">
-        <p className="unavailable" role="alert">
+    <div className="de-premium-page flex min-h-screen items-center justify-center px-4">
+      <main className="de-premium-card max-w-md p-8 text-center">
+        <div className="de-brand-mark mx-auto mb-5" aria-hidden />
+        <p className="text-lg font-semibold tracking-tight text-foreground" role="alert">
           {UNAVAILABLE_MESSAGE}
         </p>
-        {diagnosticCode ? (
-          <p className="status" aria-label="diagnostic code">
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          Please contact Elite Stone Fabrication if you need a new estimate link.
+        </p>
+        {showDiagnostics && diagnosticCode ? (
+          <p className="status mt-4 text-xs text-muted-foreground" aria-label="diagnostic code">
             {diagnosticCode}
           </p>
         ) : null}
-        <p className="status" aria-label="build marker">
-          build {build}
-        </p>
+        {showDiagnostics ? (
+          <p className="status mt-1 text-xs text-muted-foreground" aria-label="build marker">
+            build {build}
+          </p>
+        ) : (
+          /* Keep marker in DOM for production diagnostics tests without exposing it. */
+          <p className="sr-only" aria-label="build marker">
+            build {build}
+          </p>
+        )}
       </main>
     </div>
   );
@@ -271,27 +283,29 @@ export function App() {
       if (lifecycle === "expired") {
         lifecycleNotice =
           configState?.message ||
-          "Pricing expired. Contact your estimator for updated pricing.";
+          "This estimate link has expired. Please contact Elite Stone Fabrication for an updated estimate.";
       } else if (lifecycle === "revoked") {
-        lifecycleNotice = configState?.message || "This estimate link has been revoked.";
+        lifecycleNotice =
+          configState?.message || "This estimate is no longer available. Please contact Elite for help.";
       } else if (lifecycle === "superseded") {
         lifecycleNotice =
-          configState?.message || "A newer estimate is available. Contact your estimator.";
+          configState?.message ||
+          "This link has been replaced by a newer estimate. Ask Elite for the latest link.";
       } else if (configState?.message && !/estimate is unavailable/i.test(configState.message)) {
         lifecycleNotice = configState.message;
       } else if (fallbackReason === "configuration_absent" || !configState?.configuration) {
         lifecycleNotice =
-          "Customer options could not be loaded. Refresh this page to try again, or contact your estimator.";
+          "Your options could not be loaded. Refresh this page to try again, or contact Elite Stone Fabrication.";
       } else {
         lifecycleNotice =
-          "This estimate is temporarily unavailable for configuration. Refresh to try again.";
+          "This estimate is temporarily unavailable. Refresh to try again, or contact Elite for help.";
       }
     } else if (
       mode === "legacy" &&
       (fallbackReason === "configuration_absent" || fallbackReason === "exchange_failed")
     ) {
       lifecycleNotice =
-        "Customer options could not be loaded. Refresh this page to try again, or contact your estimator.";
+        "Your options could not be loaded. Refresh this page to try again, or contact Elite Stone Fabrication.";
     }
     const showDevFallback =
       isDevDiagnosticsEnabled() && Boolean(fallbackReason) && mode === "legacy";

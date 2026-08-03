@@ -166,9 +166,9 @@ function GroupChip({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full border px-3 py-1 text-xs transition ${
+      className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
         active
-          ? "border-foreground bg-foreground text-background"
+          ? "border-primary bg-primary text-primary-foreground"
           : "border-border bg-background text-muted-foreground hover:text-foreground"
       }`}
     >
@@ -245,14 +245,13 @@ function ModalShell({
   }, [onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-6"
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 backdrop-blur-[2px] sm:items-center sm:p-6"
       onClick={onClose}
       role="presentation"
       data-testid={testId}
     >
       <div
-        className={`flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-background shadow-2xl sm:max-h-[90vh] sm:rounded-2xl ${
+        className={`flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/80 bg-card shadow-[0_20px_50px_rgba(11,26,51,0.18)] sm:max-h-[90vh] sm:rounded-2xl ${
           wide ? "max-w-[1200px]" : "max-w-lg"
         }`}
         onClick={(e) => e.stopPropagation()}
@@ -261,25 +260,27 @@ function ModalShell({
         aria-label={title}
         data-layout={wide ? "wide-catalog" : "compact"}
       >
-        <div className="sticky top-0 z-10 border-b border-border bg-background px-6 py-4">
+        <div className="sticky top-0 z-10 border-b border-border bg-card/95 px-5 py-4 backdrop-blur sm:px-6">
           <div className="flex items-start justify-between gap-4">
             <div>
               {eyebrow ? (
-                <div className="text-xs uppercase tracking-widest text-muted-foreground">{eyebrow}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  {eyebrow}
+                </div>
               ) : null}
-              <div className="mt-0.5 text-lg font-semibold text-foreground">{title}</div>
+              <div className="mt-0.5 text-lg font-semibold tracking-tight text-foreground">{title}</div>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+              className="rounded-lg border border-border bg-background px-3.5 py-2 text-xs font-semibold text-foreground transition hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               data-testid="de-modal-done"
             >
               Done
             </button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
       </div>
     </div>
   );
@@ -416,7 +417,7 @@ function ColorPickerModal({
                     data-group={c.pricingGroupLabel}
                     className={`group relative overflow-hidden rounded-xl border text-left transition ${
                       selected
-                        ? "border-foreground bg-foreground/5 shadow-sm ring-2 ring-foreground/25"
+                        ? "border-primary bg-accent/40 shadow-sm ring-2 ring-primary/25"
                         : previewing
                           ? "border-foreground/50"
                           : "border-border hover:border-foreground/40 hover:shadow-sm"
@@ -424,7 +425,7 @@ function ColorPickerModal({
                   >
                     {selected ? (
                       <span
-                        className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-background"
+                        className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground"
                         data-testid="de-color-selected-badge"
                       >
                         <span aria-hidden>✓</span> Selected
@@ -500,13 +501,13 @@ function ChoiceRadio({
           data-testid="de-choice-option"
           className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm transition focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-foreground ${
             opt.selected
-              ? "border-foreground bg-foreground/5 ring-2 ring-foreground/20"
+              ? "border-primary bg-accent/40 ring-2 ring-primary/20"
               : "border-border bg-background hover:border-foreground/40"
           }`}
         >
           <span className="min-w-0 flex-1">
             {opt.selected ? (
-              <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-background">
+              <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
                 <span aria-hidden>✓</span> Selected
               </span>
             ) : null}
@@ -609,7 +610,7 @@ function ProductCards({
   if (!products.length) {
     return (
       <p className="text-sm text-muted-foreground" data-testid={`de-${role}-esf-empty`}>
-        No ESF {role} options are available for this room yet. Your estimator can add them.
+        No {role} options are available for this room yet. Elite can add them for you.
       </p>
     );
   }
@@ -633,7 +634,7 @@ function ProductCards({
                 type="button"
                 className={`rounded-md px-2.5 py-1 text-xs font-medium ${
                   categoryFilter === c
-                    ? "bg-foreground text-background"
+                    ? "bg-primary text-primary-foreground"
                     : "border border-border text-muted-foreground hover:text-foreground"
                 }`}
                 onClick={() => setCategoryFilter(c)}
@@ -676,7 +677,7 @@ function ProductCards({
             return (
               <div
                 key={p.productId}
-                className={`rounded-xl border p-3 ${selected ? "border-foreground ring-1 ring-foreground/20" : "border-border"}`}
+                className={`rounded-xl border p-3 transition ${selected ? "border-primary bg-accent/30 ring-1 ring-primary/25" : "border-border hover:border-primary/30"}`}
                 data-testid={`de-${role}-product-card`}
                 data-product-id={p.productId}
                 data-selected={selected ? "true" : "false"}
@@ -718,10 +719,10 @@ function ProductCards({
                             <button
                               key={v.variantId || `${v.finish || v.color || "finish"}`}
                               type="button"
-                              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-xs ${
+                              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left text-xs transition ${
                                 finishSelected
-                                  ? "border-foreground bg-muted/40"
-                                  : "border-border"
+                                  ? "border-primary bg-accent/40 ring-1 ring-primary/20"
+                                  : "border-border hover:border-primary/30"
                               }`}
                               data-testid={`de-${role}-finish-row`}
                               data-variant-id={v.variantId}
@@ -981,7 +982,7 @@ function AccessoriesOrSpecialtyModal({
             </p>
           ) : sinkMode === "customer_provided" ? (
             <p className="text-sm text-muted-foreground">
-              Model-specific sink accessories are available after an ESF sink is selected.
+              Model-specific sink accessories are available after an Elite Stone Fabrication sink is selected.
             </p>
           ) : sinkAccessories.length ? (
             <div className="flex flex-col gap-2">
@@ -1318,7 +1319,7 @@ function BacksplashModal({
                 />
               </label>
               <p className="text-xs text-muted-foreground" data-testid="de-backsplash-custom-copy">
-                Final measurements and pricing require estimator review.
+                Elite will confirm final measurements and pricing.
               </p>
             </div>
           ) : null}
@@ -1386,7 +1387,7 @@ function SelectionRow({
       {readOnly ? (
         <span className="shrink-0 text-xs text-muted-foreground">As published</span>
       ) : (
-        <span className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground">
+        <span className="shrink-0 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-semibold text-foreground shadow-sm">
           {actionLabel}
         </span>
       )}
@@ -1395,7 +1396,7 @@ function SelectionRow({
   if (readOnly || !onClick) {
     return (
       <div
-        className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-left"
+        className="flex w-full items-start justify-between gap-3 rounded-xl border border-border/80 bg-muted/15 px-4 py-3.5 text-left"
         data-testid={testId}
         data-readonly="true"
       >
@@ -1408,7 +1409,7 @@ function SelectionRow({
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left transition hover:border-foreground/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+      className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left transition hover:border-primary/35 hover:shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
       {body}
     </button>
@@ -1517,7 +1518,7 @@ function ReviewRequestModal({
               submittedRef.current = true;
               onSubmit(message.trim());
             }}
-            className="rounded-md bg-foreground px-4 py-2 text-xs font-semibold text-background disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+            className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             {busy ? "Sending…" : "Send selections"}
           </button>
@@ -1610,7 +1611,7 @@ function FinalAcceptanceModal({
             type="button"
             disabled={busy}
             onClick={onConfirm}
-            className="flex-1 rounded-lg bg-foreground py-2.5 text-sm font-semibold text-background disabled:opacity-50"
+            className="flex-1 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
             data-testid="de-accept-confirm"
           >
             {busy
@@ -1662,27 +1663,28 @@ function CustomerRoomCard({
 
   return (
     <article
-      className="rounded-2xl border border-border bg-background p-5 shadow-sm sm:p-6"
+      className="de-premium-card relative overflow-hidden p-5 sm:p-6"
       data-testid="de-room-card"
     >
-      <header className="flex items-start justify-between gap-4">
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-primary/80" aria-hidden />
+      <header className="flex items-start justify-between gap-4 pl-2">
         <div className="min-w-0 flex-1">
           {room.customerMayEditLabel ? (
             <input
-              className="w-full rounded-md border border-transparent bg-transparent text-lg font-semibold text-foreground outline-none hover:border-border focus:border-border focus:bg-background focus:px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+              className="w-full rounded-md border border-transparent bg-transparent text-lg font-semibold tracking-tight text-foreground outline-none hover:border-border focus:border-border focus:bg-background focus:px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               value={room.name}
               aria-label="Room name"
               data-testid="de-room-label"
               onChange={(e) => onRename(e.target.value)}
             />
           ) : (
-            <h2 className="text-lg font-semibold text-foreground" data-testid="de-room-label">
+            <h2 className="text-lg font-semibold tracking-tight text-foreground" data-testid="de-room-label">
               {room.name}
             </h2>
           )}
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span
-              className="rounded-full border border-border px-2 py-0.5"
+              className={`de-status-pill${roomStatus === "Changed" ? " de-status-pill--accent" : " de-status-pill--ok"}`}
               data-testid="de-room-status"
             >
               {roomStatus}
@@ -1707,7 +1709,7 @@ function CustomerRoomCard({
         />
       </header>
 
-      <div className="mt-5 grid gap-2" data-testid="de-room-selections">
+      <div className="mt-5 grid gap-2.5 pl-2" data-testid="de-room-selections">
         {allowed("material") || color ? (
           <SelectionRow
             label="Material"
@@ -1824,9 +1826,9 @@ function CustomerRoomCard({
                                 data-testid="de-edge-option"
                                 data-edge-token={opt.optionKey}
                                 data-selected={selected ? "true" : "false"}
-                                className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
+                                className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
                                   selected
-                                    ? "border-foreground bg-muted/40 ring-1 ring-foreground/20"
+                                    ? "border-primary bg-accent/40 ring-1 ring-primary/20"
                                     : "border-border hover:bg-muted/20"
                                 }`}
                                 onClick={() => onEdgeChange?.(opt.optionKey)}
@@ -1835,7 +1837,7 @@ function CustomerRoomCard({
                                   {opt.displayLabel}
                                   {selected ? (
                                     <span
-                                      className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground"
+                                      className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
                                       data-testid="de-edge-option-selected-badge"
                                     >
                                       Selected
@@ -2106,23 +2108,28 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   if (state.lifecycle !== "active" || !config || !state.estimate) {
     const title =
       state.lifecycle === "expired"
-        ? "Pricing expired"
+        ? "This estimate link has expired"
         : state.lifecycle === "revoked"
-          ? "Link revoked"
+          ? "This estimate is no longer available"
           : state.lifecycle === "superseded"
-            ? "Estimate updated"
+            ? "This link has been replaced by a newer estimate"
             : "This estimate isn’t available";
+    const detail =
+      state.lifecycle === "expired"
+        ? state.message || "Please contact Elite Stone Fabrication for an updated estimate."
+        : state.lifecycle === "superseded"
+          ? state.message || "Ask Elite for the latest estimate link."
+          : state.message || "Please contact Elite Stone Fabrication if you need help.";
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="de-premium-page flex min-h-screen items-center justify-center px-4">
         <div
-          className="max-w-md rounded-2xl border border-border bg-card p-6 text-center"
+          className="de-premium-card max-w-md p-8 text-center"
           data-testid="de-lifecycle-state"
           data-lifecycle={state.lifecycle || "invalid"}
         >
-          <div className="text-lg font-semibold">{title}</div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {state.message || "This estimate is unavailable."}
-          </p>
+          <div className="de-brand-mark mx-auto mb-5" aria-hidden />
+          <div className="text-lg font-semibold tracking-tight text-foreground">{title}</div>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{detail}</p>
         </div>
       </div>
     );
@@ -2949,7 +2956,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       data-testid={testId}
       className={
         className ||
-        "w-full rounded-lg border border-border bg-background py-3 text-sm font-semibold text-foreground transition hover:bg-muted/40 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+        "w-full rounded-xl border border-border bg-card py-3 text-sm font-semibold text-foreground transition hover:bg-muted/40 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       }
     >
       {saveState === "saving" || saveState === "unsaved" ? "Saving…" : "Print estimate"}
@@ -2957,9 +2964,29 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   );
 
   const summaryCard = (
-    <div className="rounded-2xl border border-border bg-background p-5 shadow-sm" data-testid="de-estimate-panel">
-      <div className="text-xs uppercase tracking-widest text-muted-foreground">Your estimate</div>
-      <div className="mt-3 flex gap-1 rounded-lg border border-border bg-muted/30 p-1" data-testid="de-estimate-tabs" role="tablist" aria-label="Estimate summary">
+    <div
+      className="de-premium-card de-premium-summary p-5 sm:p-6"
+      data-testid="de-estimate-panel"
+    >
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        Your estimate
+      </div>
+      <div
+        className="mt-1 text-3xl font-semibold tracking-tight tabular-nums text-foreground"
+        data-testid="de-summary-hero-total"
+        aria-hidden="true"
+      >
+        {authoritativeEstimateLabel}
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Updates as you choose options. Changes save automatically.
+      </p>
+      <div
+        className="mt-4 flex gap-1 rounded-xl border border-border bg-muted/40 p-1"
+        data-testid="de-estimate-tabs"
+        role="tablist"
+        aria-label="Estimate summary"
+      >
         {(
           [
             ["estimate", "Estimate"],
@@ -2974,9 +3001,9 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             aria-selected={estimateTab === id}
             aria-controls={`de-tabpanel-${id}`}
             data-testid={`de-estimate-tab-${id}`}
-            className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${
+            className={`flex-1 rounded-lg px-2 py-2 text-xs font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
               estimateTab === id
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             }`}
             onClick={() => setEstimateTab(id)}
@@ -3024,12 +3051,12 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         ) : null}
         {changesNeedReview ? (
           <div
-            className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs"
+            className="rounded-xl border border-amber-200/80 bg-amber-50/80 px-3 py-2.5 text-xs"
             data-testid="de-changes-need-review"
           >
-            <div className="font-medium text-foreground">Needs Elite review</div>
+            <div className="font-semibold text-foreground">Needs Elite review</div>
             <p className="mt-1 text-muted-foreground">
-              A requested scope change will be reviewed before it becomes final.
+              Elite will review the details and follow up if needed before this becomes final.
             </p>
           </div>
         ) : null}
@@ -3041,9 +3068,11 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             {pricingNotice}
           </p>
         ) : null}
-        <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold">
+        <div className="flex items-center justify-between border-t border-border pt-4 text-base font-semibold tracking-tight">
           <span>{activeBreakdown.title}</span>
-          <span data-testid="de-updated-total">{activeBreakdown.totalLabel}</span>
+          <span className="text-xl tabular-nums" data-testid="de-updated-total">
+            {activeBreakdown.totalLabel}
+          </span>
         </div>
       </div>
       <button
@@ -3102,9 +3131,9 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           )}
         </div>
       ) : null}
-      <p className="mt-3 text-[11px] text-muted-foreground">
-        Pricing valid through {formatDate(vm.pricingValidThrough)}. Totals calculated by your estimator
-        system — not final acceptance.
+      <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+        Pricing valid through {formatDate(vm.pricingValidThrough)}. Your estimate updates as you choose
+        options. Elite reviews any scope changes before they become final.
       </p>
       <div className="mt-4 de-interactive-chrome">{printEstimateButton("de-print-estimate")}</div>
       <div className="mt-5 space-y-2" data-testid="de-autosave-status-system">
@@ -3144,10 +3173,10 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           <button
             type="button"
             onClick={() => setSaveError(null)}
-            className="w-full rounded-lg border border-border bg-background py-3 text-sm font-semibold text-foreground transition hover:bg-muted/40"
+            className="w-full rounded-lg border border-border bg-background py-3 text-sm font-semibold text-foreground transition hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             data-testid="de-save-error-dismiss"
           >
-            Dismiss
+            Got it
           </button>
         ) : null}
         {reviewUiEnabled() && !finalAcceptance ? (
@@ -3162,7 +3191,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
               (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
             }
             data-testid="de-request-review"
-            className="w-full rounded-lg border border-border bg-background py-3 text-sm font-semibold text-foreground transition hover:bg-muted/40 disabled:opacity-50"
+            className="w-full rounded-xl border border-border bg-card py-3.5 text-sm font-semibold text-foreground transition hover:bg-muted/40 disabled:opacity-50"
           >
             {reviewRequest ? "Selections already sent" : "Send selections"}
           </button>
@@ -3174,7 +3203,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             disabled={saveState === "unsaved" || saveState === "saving" || saveState === "error"}
             data-testid="de-approve-final"
             data-accept-mode={acceptMode}
-            className="w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background transition hover:bg-foreground/90 disabled:opacity-50"
+            className="w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:opacity-50"
           >
             {acceptMode === "configured"
               ? "Accept estimate with these selections"
@@ -3199,14 +3228,14 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       </div>
       {finalAcceptance ? (
         <div
-          className="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs"
+          className="mt-4 rounded-xl border border-primary/20 bg-accent/60 px-3.5 py-3 text-xs"
           data-testid="de-accepted-banner"
           data-accepted-as-configured={finalAcceptance.acceptedAsConfigured ? "true" : "false"}
         >
-          <div className="font-medium text-foreground" data-testid="de-accepted-title">
+          <div className="font-semibold text-foreground" data-testid="de-accepted-title">
             {finalAcceptance.acceptedAsConfigured
-              ? "Estimate accepted with your selections"
-              : finalAcceptance.statusLabel || "Estimate accepted"}
+              ? "This estimate has been accepted with your selected options."
+              : finalAcceptance.statusLabel || "This estimate has been accepted."}
           </div>
           <div className="mt-1 text-muted-foreground" data-testid="de-accepted-total">
             Accepted {formatDate(finalAcceptance.acceptedAt || "")}
@@ -3222,14 +3251,14 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         </div>
       ) : null}
       {reviewRequest && !finalAcceptance ? (
-        <div className="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
-          <div className="font-medium text-foreground">{reviewRequest.statusLabel}</div>
+        <div className="mt-4 rounded-xl border border-border bg-muted/40 px-3.5 py-3 text-xs">
+          <div className="font-semibold text-foreground">{reviewRequest.statusLabel}</div>
           <div className="mt-1 text-muted-foreground">
             Sent {formatDate(reviewRequest.requestedAt)}
           </div>
           <p className="mt-2 text-muted-foreground" data-testid="de-review-confirmation">
             {reviewRequest.nonAcceptanceNotice ||
-              "Your selections were sent to Elite for review."}
+              "Your selections have been sent to Elite. Elite will review the details and follow up if needed."}
           </p>
         </div>
       ) : null}
@@ -3238,13 +3267,21 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
 
   return (
     <>
-    <div className="min-h-screen bg-[oklch(0.98_0.005_260)] pb-36 lg:pb-10 de-screen-root de-no-print">
-      <header className="border-b border-border bg-background">
-        <div className="mx-auto flex w-[min(100%,1650px)] max-w-[1650px] items-center justify-between px-4 sm:px-6 py-3">
-          <div className="text-sm font-semibold tracking-tight text-foreground">
-            Elite Stone Fabrication
+    <div className="de-premium-page min-h-screen pb-40 lg:pb-12 de-screen-root de-no-print">
+      <header className="border-b border-border/80 bg-card/90 backdrop-blur">
+        <div className="mx-auto flex w-[min(100%,1650px)] max-w-[1650px] items-center justify-between gap-3 px-4 py-3.5 sm:px-6">
+          <div className="flex items-center gap-2.5">
+            <span className="de-brand-mark" aria-hidden>
+              ESF
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight text-foreground">
+                Elite Stone Fabrication
+              </div>
+              <div className="text-[11px] text-muted-foreground">Digital Estimate</div>
+            </div>
           </div>
-          <span className="text-xs text-muted-foreground">Digital Estimate</span>
+          <span className="hidden text-xs text-muted-foreground sm:inline">Secure customer link</span>
         </div>
       </header>
 
@@ -3253,20 +3290,23 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         data-testid="de-page-shell"
       >
         <section
-          className="rounded-2xl border border-border bg-background px-4 py-4 shadow-sm sm:px-5"
+          className="de-premium-card px-4 py-5 sm:px-6 sm:py-6"
           data-testid="de-compact-header"
           aria-label="Estimate summary"
         >
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Your project estimate
+          </p>
           <h1
-            className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl"
+            className="mt-1 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl"
             data-testid="de-project-name"
           >
             {vm.projectName || "Your project"}
           </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground" data-testid="de-customer-name">
+          <p className="mt-1 text-sm text-muted-foreground" data-testid="de-customer-name">
             {vm.customerName}
           </p>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {vm.quoteNumber ? (
               <span data-testid="de-quote-number">{vm.quoteNumber}</span>
             ) : null}
@@ -3278,33 +3318,33 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           </div>
 
           <dl
-            className="mt-4 grid grid-cols-1 gap-2 border-t border-border/70 pt-3 text-sm sm:grid-cols-3"
+            className="mt-5 grid grid-cols-1 gap-3 border-t border-border/70 pt-4 text-sm sm:grid-cols-3"
             data-testid="de-header-totals"
           >
-            <div className="flex items-baseline justify-between gap-2 sm:block">
+            <div className="flex items-baseline justify-between gap-2 rounded-xl bg-muted/30 px-3 py-2.5 sm:block sm:bg-transparent sm:px-0 sm:py-0">
               <dt className="text-xs text-muted-foreground">Published estimate</dt>
               <dd
-                className="font-semibold tabular-nums text-foreground"
+                className="font-semibold tabular-nums text-foreground sm:mt-1"
                 data-testid="de-header-original"
               >
                 {vm.originalTotalLabel}
               </dd>
             </div>
-            <div className="flex items-baseline justify-between gap-2 sm:block">
+            <div className="flex items-baseline justify-between gap-2 rounded-xl bg-accent/50 px-3 py-2.5 sm:block sm:bg-transparent sm:px-0 sm:py-0">
               <dt className="text-xs text-muted-foreground">Your estimate</dt>
               <dd
-                className="font-semibold tabular-nums text-foreground"
+                className="text-lg font-semibold tabular-nums tracking-tight text-foreground sm:mt-0.5"
                 data-testid="de-header-current"
               >
                 {authoritativeEstimateLabel}
               </dd>
             </div>
-            <div className="flex items-baseline justify-between gap-2 sm:block">
+            <div className="flex items-baseline justify-between gap-2 rounded-xl bg-muted/30 px-3 py-2.5 sm:block sm:bg-transparent sm:px-0 sm:py-0">
               <dt className="text-xs text-muted-foreground">
                 {changesNeedReview ? "Status" : "Difference"}
               </dt>
               <dd
-                className="font-semibold tabular-nums text-foreground"
+                className="font-semibold tabular-nums text-foreground sm:mt-1"
                 data-testid="de-header-difference"
               >
                 {changesNeedReview
@@ -3330,8 +3370,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
             {!saveError && saveState === "unsaved" ? "Saving…" : null}
             {!saveError && saveState === "saving" ? "Saving…" : null}
           </p>
-          <p className="mt-3 text-sm text-foreground" data-testid="de-primary-instruction">
-            Review each room and choose the options you prefer.
+          <p className="mt-3 text-sm leading-relaxed text-foreground" data-testid="de-primary-instruction">
+            Review each room and choose the options you prefer. Your estimate updates as you go.
           </p>
         </section>
 
@@ -3527,7 +3567,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                     disabled={
                       saveState === "unsaved" || saveState === "saving" || saveState === "error"
                     }
-                    className="mt-2 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    className="mt-2 w-full rounded-xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground shadow-sm disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     data-testid="de-approve-final-bottom"
                     data-accept-mode={acceptMode}
                   >
@@ -3545,7 +3585,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
                       saveState === "error" ||
                       (Boolean(reviewRequest) && !reviewRequest?.currentSelectionsDifferFromSubmitted)
                     }
-                    className="mt-2 w-full rounded-lg bg-foreground py-3 text-sm font-semibold text-background disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    className="mt-2 w-full rounded-xl border border-border bg-card py-3.5 text-sm font-semibold text-foreground disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     data-testid="de-request-review-bottom"
                   >
                     {reviewRequest ? "Selections already sent" : "Send selections"}
@@ -3725,12 +3765,12 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
 
       {/* Mobile / tablet compact sticky total bar */}
       <div
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 p-3 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden de-no-print"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-card/95 p-3 shadow-[0_-12px_32px_rgba(11,26,51,0.1)] backdrop-blur lg:hidden de-no-print"
         data-testid="de-mobile-total-bar"
       >
         <button
           type="button"
-          className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-background px-4 py-3.5 text-left shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           data-testid="de-mobile-total-open"
           onClick={() => {
             setBreakdownOpen(true);
@@ -3741,14 +3781,16 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           }}
         >
           <span>
-            <span className="block text-[11px] uppercase tracking-wider text-muted-foreground">
+            <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               Your estimate
             </span>
-            <span className="text-base font-semibold tabular-nums text-foreground">
+            <span className="text-lg font-semibold tabular-nums tracking-tight text-foreground">
               {authoritativeEstimateLabel}
             </span>
           </span>
-          <span className="text-xs font-medium text-muted-foreground">View summary</span>
+          <span className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground">
+            View summary
+          </span>
         </button>
         <div className="mt-2">{printEstimateButton("de-print-estimate-mobile")}</div>
       </div>
