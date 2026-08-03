@@ -2652,33 +2652,45 @@ export function createPublicConfigurationService(deps) {
         publicCustomerConfiguration.canSubmitForFinalReview === true &&
         customerResultJson?.canSubmitForFinalReview === true;
       publicCustomerConfiguration.canSubmitForFinalReview = canAcceptPublished;
-      const saveClassification = classifyCustomerConfigurationForReview({
-        foundation: publicCustomerConfiguration,
-        selectionPayload: selectionPayloadForMeta,
-        quantities: selectionMeta?.quantities || {},
-        roomNotes: selectionMeta?.roomNotes || {},
-        projectNote: selectionMeta?.projectNote || null
-      });
-      const saveConfiguredTotal = resolveServerConfiguredAcceptanceTotal(customerResultJson);
-      const canAcceptConfigured =
-        saveClassification.requiresEliteReview !== true &&
-        (saveClassification.reviewKind === "selection_only" ||
-          saveClassification.hasSelectionOnlyChanges === true) &&
-        saveConfiguredTotal != null;
-      publicCustomerConfiguration.reviewKind = saveClassification.reviewKind;
-      publicCustomerConfiguration.canAcceptAsConfigured = canAcceptConfigured;
-      if (customerResultJson && typeof customerResultJson === "object") {
-        customerResultJson.canSubmitForFinalReview = canAcceptPublished;
-        customerResultJson.canAcceptAsConfigured = canAcceptConfigured;
-        customerResultJson.reviewKind = saveClassification.reviewKind;
-        if (
-          customerResultJson.customerConfiguration &&
-          typeof customerResultJson.customerConfiguration === "object"
-        ) {
-          customerResultJson.customerConfiguration.canSubmitForFinalReview = canAcceptPublished;
-          customerResultJson.customerConfiguration.canAcceptAsConfigured = canAcceptConfigured;
-          customerResultJson.customerConfiguration.reviewKind = saveClassification.reviewKind;
+      // Affordance flags only — must never block a successful priced save.
+      try {
+        // Use the just-built selection payload / merged drafts — not a nonexistent
+        // `selectionMeta` binding (that ReferenceError was mapped to persistence_failed).
+        const saveSelectionMeta = splitSelectionPayloadMeta(selectionPayloadForMeta);
+        const saveClassification = classifyCustomerConfigurationForReview({
+          foundation: publicCustomerConfiguration,
+          selectionPayload: selectionPayloadForMeta,
+          quantities: saveSelectionMeta.quantities || normalized.selections || {},
+          roomNotes: saveSelectionMeta.roomNotes || mergedRoomNotes || {},
+          projectNote: saveSelectionMeta.projectNote ?? mergedProjectNote ?? null
+        });
+        const saveConfiguredTotal = resolveServerConfiguredAcceptanceTotal(customerResultJson);
+        const canAcceptConfigured =
+          saveClassification.requiresEliteReview !== true &&
+          (saveClassification.reviewKind === "selection_only" ||
+            saveClassification.hasSelectionOnlyChanges === true) &&
+          saveConfiguredTotal != null;
+        publicCustomerConfiguration.reviewKind = saveClassification.reviewKind;
+        publicCustomerConfiguration.canAcceptAsConfigured = canAcceptConfigured;
+        if (customerResultJson && typeof customerResultJson === "object") {
+          customerResultJson.canSubmitForFinalReview = canAcceptPublished;
+          customerResultJson.canAcceptAsConfigured = canAcceptConfigured;
+          customerResultJson.reviewKind = saveClassification.reviewKind;
+          if (
+            customerResultJson.customerConfiguration &&
+            typeof customerResultJson.customerConfiguration === "object"
+          ) {
+            customerResultJson.customerConfiguration.canSubmitForFinalReview = canAcceptPublished;
+            customerResultJson.customerConfiguration.canAcceptAsConfigured = canAcceptConfigured;
+            customerResultJson.customerConfiguration.reviewKind = saveClassification.reviewKind;
+          }
         }
+      } catch (affordanceErr) {
+        console.error(
+          "[digital-estimate-public-config] accept affordance flags failed; continuing save",
+          affordanceErr?.message || affordanceErr
+        );
+        publicCustomerConfiguration.canAcceptAsConfigured = false;
       }
       assertPublicConfigurationHasNoForbiddenContent(customerResultJson);
 

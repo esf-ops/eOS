@@ -189,6 +189,17 @@ console.log("\ncustomerConfigurationFoundation.test.mjs\n");
   assert.ok(!publicSvc.includes("createSoldJob"));
   assert.ok(!/mutate.*approvedSnapshot|updateApprovedEstimate/i.test(publicSvc));
   assert.ok(studioV2Pub.includes("resolveSimplifiedPublishConfiguration") || studioV2Pub.length > 0);
+  // Regression: saveSelections must not call undefined exchange-scope bindings
+  // (a prior ReferenceError was returned to customers as persistence_failed / DE-STATE).
+  const saveFn = publicSvc.slice(
+    publicSvc.indexOf("async saveSelections"),
+    publicSvc.indexOf("async revokeSessionCookie")
+  );
+  assert.equal(saveFn.includes("selectionMeta?."), false);
+  assert.equal(saveFn.includes("selectionMeta."), false);
+  assert.equal(/\bselectionMeta\s*=/.test(saveFn), false);
+  assert.ok(saveFn.includes("saveSelectionMeta"));
+  assert.ok(saveFn.includes("accept affordance flags failed; continuing save"));
   console.log("ok: public service wires foundation; no auto-approve/sold mutation");
 }
 
