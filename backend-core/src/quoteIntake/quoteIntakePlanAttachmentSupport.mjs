@@ -214,3 +214,84 @@ export function requestHasManualPlanOverride(body) {
     b.markAsPlan === "true"
   );
 }
+
+/**
+ * Collect identifier strings for an attachment (Graph + intake + DTO shapes).
+ * @param {object} att
+ * @returns {string[]}
+ */
+export function attachmentIdentityKeys(att = {}) {
+  return [
+    att.attachmentKey,
+    att.id,
+    att.attachmentId,
+    att.sourceAttachmentId,
+    att.graphAttachmentId,
+    att.providerAttachmentId
+  ]
+    .map((v) => String(v ?? "").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Display / stored filename candidates for scoped matching.
+ * @param {object} att
+ * @returns {string[]}
+ */
+export function attachmentFilenameKeys(att = {}) {
+  return [att.filename, att.name, att.safeFilename]
+    .map((v) => String(v ?? "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Find an attachment inside a single message/case list.
+ *
+ * Matching order:
+ * 1) exact id / Graph key fields
+ * 2) truncated Graph-id prefix (stored slice vs live AAMk key)
+ * 3) exact filename within this list only (manual override / disambiguation)
+ *
+ * @param {object[]} attachments
+ * @param {{
+ *   attachmentKey?: string|null,
+ *   attachmentId?: string|null,
+ *   filename?: string|null,
+ *   allowFilenameFallback?: boolean
+ * }} selector
+ * @returns {object|null}
+ */
+export function findScopedAttachment(attachments, selector = {}) {
+  const list = Array.isArray(attachments) ? attachments : [];
+  if (!list.length) return null;
+
+  const key = String(selector.attachmentKey || selector.attachmentId || "").trim();
+  const filename = String(selector.filename || "")
+    .trim()
+    .toLowerCase();
+  const allowFilename = selector.allowFilenameFallback === true;
+
+  if (key) {
+    const exact = list.find((a) => attachmentIdentityKeys(a).includes(key));
+    if (exact) return exact;
+
+    // Persist layer may truncate long Graph immutable ids; live UI sends the full key.
+    if (key.length >= 32) {
+      const prefixed = list.find((a) => {
+        for (const id of attachmentIdentityKeys(a)) {
+          if (id.length < 32) continue;
+          if (key.startsWith(id) || id.startsWith(key)) return true;
+        }
+        return false;
+      });
+      if (prefixed) return prefixed;
+    }
+  }
+
+  if (allowFilename && filename) {
+    const matches = list.filter((a) => attachmentFilenameKeys(a).includes(filename));
+    if (matches.length === 1) return matches[0];
+  }
+
+  return null;
+}

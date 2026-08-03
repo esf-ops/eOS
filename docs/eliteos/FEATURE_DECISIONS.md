@@ -3662,4 +3662,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Pricing, Digital Estimate, acceptance, publish, approval, revision, sold, AI algorithms, Internal Estimate, migrations. Auto-send still requires `direct_pdf` / `direct_image_plan`. |
 | **Revisit trigger** | Persist override on the attachment row so re-preview does not require re-marking. |
 
+### 265. Graph opaque attachment key + scoped filename for manual JPG takeoff (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/inbox-graph-jpg-manual-takeoff` |
+| **Decision** | Manual image override resolves the selected attachment with Graph/intake identity keys **and**, when needed, a **message/case-scoped filename** fallback. `send-to-takeoff` passes `attachmentFilename` into open-estimate. `direct_pdf` selection remains markAsPlan-free. |
+| **Why** | Production Dave Untiedt JPGs sent `attachmentKey: "AAMk..."` from live Graph preview, but persisted intake case rows often lacked matching `sourceAttachmentId`, so open-estimate threw `no_supported_pdf` → 400 `attachment_not_supported` despite a valid `.jpg` override. |
+| **Impacted** | `findScopedAttachment`, Shared Inbox send-to-takeoff, `selectSupportedPdfAttachment` / open-estimate resolution, tests, this doc. |
+| **Protected / unchanged** | PDF auto takeoff, Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. `image_needs_review` still does not auto-send. |
+| **Revisit trigger** | Persist full Graph attachment immutable ids without truncation; optional permanent plan-mark on the attachment row. |
+
 ---

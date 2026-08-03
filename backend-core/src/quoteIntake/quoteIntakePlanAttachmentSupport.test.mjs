@@ -7,6 +7,7 @@ import {
   canMarkAsPlanForTakeoff,
   classifyPlanFileSupport,
   filenameLooksPlanLike,
+  findScopedAttachment,
   isAutoSupportedTakeoffSupport,
   isSafeManualPlanImageOverride,
   planSupportLabel,
@@ -126,6 +127,42 @@ console.log("\nquoteIntakePlanAttachmentSupport.test.mjs\n");
   assert.equal(requestHasManualPlanOverride({ manualPlanOverride: true }), true);
   assert.equal(requestHasManualPlanOverride({ markAsPlan: true }), true);
   assert.equal(requestHasManualPlanOverride({ markAsPlan: false }), false);
+
+  const graphKey = "AAMkAGI2TH93AAA=EAAAAAAopaque==";
+  const list = [
+    {
+      id: "uuid-1",
+      sourceAttachmentId: null,
+      safeFilename: "1000005197.jpg",
+      support: "image_needs_review"
+    },
+    {
+      id: "uuid-2",
+      sourceAttachmentId: graphKey.slice(0, 20),
+      safeFilename: "1000005196.jpg",
+      support: "image_needs_review"
+    }
+  ];
+  assert.equal(
+    findScopedAttachment(list, {
+      attachmentKey: graphKey,
+      filename: "1000005197.jpg",
+      allowFilenameFallback: true
+    })?.id,
+    "uuid-1"
+  );
+  assert.equal(
+    findScopedAttachment(list, { attachmentKey: graphKey, allowFilenameFallback: false }),
+    null
+  );
+  assert.equal(
+    classifyPlanFileSupport({
+      mimeType: "application/pdf",
+      name: "plan.pdf",
+      isFileAttachment: true
+    }),
+    "direct_pdf"
+  );
   console.log("ok: unrelated images are not blindly auto-classified as plans");
 }
 
