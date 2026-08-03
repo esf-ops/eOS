@@ -27,6 +27,7 @@ import { buildDigitalEstimatePrintModel } from "./customerPrintAdapter";
 import { DigitalEstimatePrintDocument } from "./DigitalEstimatePrintDocument";
 import { enrichProductImageUrl, resolveProductImageFields } from "./productCatalogImages";
 import {
+  dedupePlumbingFinishVariants,
   isPlumbingFinishSelected,
   isPlumbingProductCardSelected,
   openFamilyIdForSelection,
@@ -711,11 +712,11 @@ function ProductCards({
                     </button>
                     {familyOpen ? (
                       <div className="mt-2 flex flex-col gap-1.5">
-                        {variants.map((v) => {
+                        {dedupePlumbingFinishVariants(variants, selection).map((v) => {
                           const finishSelected = isPlumbingFinishSelected(v, selection);
                           return (
                             <button
-                              key={v.variantId}
+                              key={v.variantId || `${v.finish || v.color || "finish"}`}
                               type="button"
                               className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-xs ${
                                 finishSelected

@@ -195,6 +195,69 @@ function norm(value: string | null | undefined): string {
     .toLowerCase();
 }
 
+/**
+ * Accent/case-insensitive finish identity for display dedupe within one product.
+ * "Café Brown" and "Cafe Brown" collapse; "Cafe" and "Café Brown" stay distinct.
+ */
+export function normalizePlumbingFinishKey(
+  value: string | null | undefined,
+): string {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function variantFinishKey(variant: VariantLike): string {
+  return (
+    normalizePlumbingFinishKey(variant.finish) ||
+    normalizePlumbingFinishKey(variant.color) ||
+    normalizePlumbingFinishKey(variant.displayName) ||
+    normalizePlumbingFinishKey(variant.sku) ||
+    normalizePlumbingFinishKey(variant.variantId)
+  );
+}
+
+/**
+ * Per-product finish rows: catalog families often ship multiple SKUs that share
+ * the same finish label (e.g. Diamond Regular vs Low Divide). Deduplicate by
+ * normalized finish for the modal UI while preserving a real variantId for save.
+ * Prefer the currently selected variant when it belongs to a finish group.
+ */
+export function dedupePlumbingFinishVariants<T extends VariantLike>(
+  variants: T[] | null | undefined,
+  selection?: SinkModalSelection | null,
+): T[] {
+  if (!Array.isArray(variants) || variants.length === 0) return [];
+  const groups = new Map<string, T[]>();
+  const order: string[] = [];
+  for (const variant of variants) {
+    if (!variant || typeof variant !== "object") continue;
+    const key = variantFinishKey(variant) || `__row:${order.length}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(variant);
+  }
+  const selectedVariant = norm(selection?.variantId || selection?.variantSku);
+  return order.map((key) => {
+    const group = groups.get(key)!;
+    if (group.length === 1) return group[0];
+    if (selectedVariant) {
+      const byId = group.find(
+        (v) => norm(v.variantId) === selectedVariant || norm(v.sku) === selectedVariant,
+      );
+      if (byId) return byId;
+    }
+    const preferred = group.find((v) => isPlumbingFinishSelected(v, selection));
+    return preferred || group[0];
+  });
+}
+
 /** True when the catalog product card matches the persisted sink/faucet draft. */
 export function isPlumbingProductCardSelected(
   product: ProductLike,

@@ -24,6 +24,22 @@ assert.ok(panel.includes('data-testid="studio-v2-selection-revision-accepted-blo
 assert.ok(panel.includes('data-testid="studio-v2-accepted-mode"'));
 assert.ok(panel.includes("acceptedAsConfigured"));
 assert.ok(panel.includes("Configured selections"));
+assert.ok(
+  panel.includes(
+    "This configured Digital Estimate was accepted. No Studio V2 revision is required because no physical scope changes were requested."
+  )
+);
+assert.ok(
+  panel.includes(
+    "This published estimate was accepted as originally published. No customer selection revision is required."
+  )
+);
+assert.equal(
+  panel.includes("This unchanged published estimate was accepted"),
+  false,
+  "configured acceptance must not reuse unchanged-published copy"
+);
+assert.ok(panel.includes("acceptance?.acceptedAsConfigured"));
 assert.ok(panel.includes('data-testid="studio-v2-selection-revision-existing"'));
 assert.ok(panel.includes("Revision already created"));
 assert.ok(

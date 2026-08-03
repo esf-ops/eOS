@@ -11,8 +11,10 @@ import { fileURLToPath } from "node:url";
 import { buildUpdatedBreakdown } from "./customerEstimateBreakdown.ts";
 import {
   canonicalEsfPlumbingOptionKey,
+  dedupePlumbingFinishVariants,
   isPlumbingFinishSelected,
   isPlumbingProductCardSelected,
+  normalizePlumbingFinishKey,
   openFamilyIdForSelection,
   shouldPreservePersistedSinkDraft,
 } from "./sinkSelectionDisplay.ts";
@@ -233,6 +235,49 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
     false,
   );
   console.log("ok: switching back to No sink has no sink or cutout charge line");
+}
+
+{
+  assert.equal(normalizePlumbingFinishKey("Café Brown"), "cafe brown");
+  assert.equal(normalizePlumbingFinishKey("Cafe Brown"), "cafe brown");
+  assert.notEqual(normalizePlumbingFinishKey("Cafe"), normalizePlumbingFinishKey("Café Brown"));
+
+  const diamondLikeVariants = [
+    { variantId: "blanco:diamond:sku:a1", finish: "Coal Black", color: "Coal Black", sku: "a1" },
+    { variantId: "blanco:diamond:sku:a2", finish: "Coal Black", color: "Coal Black", sku: "a2" },
+    { variantId: "blanco:diamond:sku:b1", finish: "Café Brown", color: "Café Brown", sku: "b1" },
+    { variantId: "blanco:diamond:sku:b2", finish: "Cafe Brown", color: "Cafe Brown", sku: "b2" },
+    { variantId: "blanco:diamond:sku:c1", finish: "Anthracite", color: "Anthracite", sku: "c1" },
+    { variantId: "blanco:diamond:sku:c2", finish: "Anthracite", color: "Anthracite", sku: "c2" },
+    { variantId: "blanco:diamond:sku:c3", finish: "Anthracite", color: "Anthracite", sku: "c3" },
+  ];
+  const selected = {
+    optionKey: PRODUCT_KEY,
+    productId: "blanco:diamond-50-50",
+    variantId: "blanco:diamond:sku:a2",
+    finish: "Coal Black",
+  };
+  const deduped = dedupePlumbingFinishVariants(diamondLikeVariants, selected);
+  assert.equal(deduped.length, 3);
+  assert.equal(deduped.filter((v) => normalizePlumbingFinishKey(v.finish) === "coal black").length, 1);
+  assert.equal(deduped.filter((v) => normalizePlumbingFinishKey(v.finish) === "cafe brown").length, 1);
+  assert.equal(deduped.filter((v) => normalizePlumbingFinishKey(v.finish) === "anthracite").length, 1);
+  assert.equal(deduped.find((v) => v.finish === "Coal Black")?.variantId, "blanco:diamond:sku:a2");
+  assert.equal(
+    deduped.filter((v) => isPlumbingFinishSelected(v, selected)).length,
+    1,
+  );
+  assert.equal(
+    canonicalEsfPlumbingOptionKey(
+      PRODUCT_KEY,
+      new Set([PRODUCT_KEY, "sink:kitchen:customer_provided"]),
+    ),
+    PRODUCT_KEY,
+  );
+  assert.match(viewSource, /dedupePlumbingFinishVariants\(variants, selection\)/);
+  console.log(
+    "ok: sink modal finish dedupe keeps one row per finish, preserves selected variant, envelope key intact",
+  );
 }
 
 console.log("\nphaseSinkSelectionDisplay.test.ts: ok\n");
