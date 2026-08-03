@@ -752,30 +752,30 @@ export function classifyConfigurationMutationError(
     code === "persistence_failed" ||
     code === "no_current_review_request"
   ) {
+    const selectionIdentityCode =
+      code === "option_not_allowed" ||
+      code === "invalid_selection" ||
+      code === "unknown_option" ||
+      code === "selection_unavailable";
+    // Never trust a lifecycle DE-EXCHANGE-404 paired with a selection identity
+    // code — that mislabel made UI treat option misses as link-dead.
+    const resolvedDiagnostic = selectionIdentityCode
+      ? "DE-OPTION-NOT-ALLOWED"
+      : code === "product_variant_required"
+        ? diagnosticCode || "DE-PRODUCT-VARIANT-REQUIRED"
+        : diagnosticCode || "DE-SAVE";
     return {
       message:
         code === "product_variant_required"
           ? message || "Choose a finish for this product before saving."
           : code === "incompatible_accessory"
             ? message || "That accessory is not compatible with the selected sink."
-          : code === "invalid_selection" ||
-              code === "unknown_option" ||
-              code === "option_not_allowed" ||
-              code === "selection_unavailable"
+          : selectionIdentityCode
             ? message || "That selection is unavailable. Please choose another option."
             : message || "That selection is unavailable",
       code,
       stage: stage || "selection",
-      diagnosticCode:
-        diagnosticCode ||
-        (code === "product_variant_required"
-          ? "DE-PRODUCT-VARIANT-REQUIRED"
-          : code === "option_not_allowed" ||
-              code === "invalid_selection" ||
-              code === "unknown_option" ||
-              code === "selection_unavailable"
-            ? "DE-OPTION-NOT-ALLOWED"
-            : "DE-SAVE"),
+      diagnosticCode: resolvedDiagnostic,
       lifecycleFatal: false,
     };
   }

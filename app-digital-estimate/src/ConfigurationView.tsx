@@ -2190,6 +2190,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     const room = vm!.rooms.find((r) => r.id === roomId);
     for (const c of room?.colors || []) nextQty[c.optionKey] = 0;
     nextQty[color.optionKey] = 1;
+    qtyRef.current = nextQty;
     setQty(nextQty);
     setSaveState("unsaved");
     setSaveError(null);
@@ -2229,6 +2230,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         );
       }
     }
+    qtyRef.current = nextQty;
     setQty(nextQty);
     setSaveState("unsaved");
     setSaveError(null);
@@ -2237,21 +2239,26 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   function toggleMultiChoice(optionKey: string, role: string, roomId: string) {
     const nextQty = { ...qty };
     nextQty[optionKey] = (nextQty[optionKey] ?? 0) > 0 ? 0 : 1;
+    qtyRef.current = nextQty;
     setQty(nextQty);
     setSaveState("unsaved");
     setSaveError(null);
   }
 
   function updateProductDraft(roomId: string, role: "sink" | "faucet", next: ProductDraft) {
-    setProductDrafts((prev) => ({
-      ...prev,
-      [roomId]: { ...prev[roomId], [role]: next },
-    }));
+    const nextDrafts = {
+      ...productDraftsRef.current,
+      [roomId]: { ...productDraftsRef.current[roomId], [role]: next },
+    };
+    productDraftsRef.current = nextDrafts;
+    setProductDrafts(nextDrafts);
     setSaveState("unsaved");
   }
 
   function updateBacksplashDraft(roomId: string, next: BacksplashDraft) {
-    setBacksplashDrafts((prev) => ({ ...prev, [roomId]: next }));
+    const nextDrafts = { ...backsplashDraftsRef.current, [roomId]: next };
+    backsplashDraftsRef.current = nextDrafts;
+    setBacksplashDrafts(nextDrafts);
     setSaveState("unsaved");
   }
 
@@ -2632,7 +2639,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         nextDraft.finish = "";
       }
     }
-    updateProductDraft(roomId, role, nextDraft);    if (kind !== "esf" && opt?.optionKey) {
+    updateProductDraft(roomId, role, nextDraft);
+    if (kind !== "esf" && opt?.optionKey) {
       selectChoice(opt.optionKey, role, roomId);
     } else if (kind === "esf") {
       const nextQty = { ...qty };
@@ -2657,6 +2665,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
           );
         }
       }
+      qtyRef.current = nextQty;
       setQty(nextQty);
       setSaveState("unsaved");
     } else {
