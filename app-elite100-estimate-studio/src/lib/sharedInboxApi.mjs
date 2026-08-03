@@ -85,20 +85,29 @@ export async function startSharedInboxEstimate(token, messageKey, opts = {}) {
  * Idempotent. Does not calculate / publish / sold.
  * @param {string} token
  * @param {string} messageKey
- * @param {{ attachmentKey: string, markAsPlan?: boolean, idempotencyKey?: string }} opts
+ * @param {{
+ *   attachmentKey: string,
+ *   manualPlanOverride?: boolean,
+ *   markAsPlan?: boolean,
+ *   idempotencyKey?: string
+ * }} opts
  */
 export async function sendSharedInboxToAiTakeoff(token, messageKey, opts = {}) {
   const headers = {};
   if (opts.idempotencyKey) {
     headers["Idempotency-Key"] = String(opts.idempotencyKey);
   }
+  // manualPlanOverride is the staff "Mark as plan" intent. markAsPlan kept as alias.
+  const manualPlanOverride =
+    opts.manualPlanOverride === true || opts.markAsPlan === true;
   return apiPost(
     `/api/elite100-estimate-studio/shared-inbox/${encodeURIComponent(messageKey)}/send-to-takeoff`,
     token,
     {
       confirm: true,
       attachmentKey: opts.attachmentKey,
-      markAsPlan: opts.markAsPlan === true,
+      manualPlanOverride,
+      markAsPlan: manualPlanOverride,
       idempotencyKey: opts.idempotencyKey || undefined
     },
     { headers }

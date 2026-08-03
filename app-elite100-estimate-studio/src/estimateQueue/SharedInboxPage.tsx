@@ -275,7 +275,7 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
   async function runSendToAiTakeoff(
     row: InboxRow,
     attachment: InboxAttachment,
-    opts?: { markAsPlan?: boolean }
+    opts?: { manualPlanOverride?: boolean }
   ) {
     if (!authToken || !attachment.attachmentKey) return;
     setActionError(null);
@@ -283,7 +283,8 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
     try {
       const result = (await sendSharedInboxToAiTakeoff(authToken, row.messageKey, {
         attachmentKey: String(attachment.attachmentKey),
-        markAsPlan: opts?.markAsPlan === true,
+        // Only set from “Mark as plan for AI Takeoff” — never from auto-supported Send.
+        manualPlanOverride: opts?.manualPlanOverride === true,
         idempotencyKey: newImportIdempotencyKey()
       })) as {
         ok?: boolean;
@@ -616,7 +617,9 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                               data-testid="shared-inbox-mark-as-plan"
                               disabled={Boolean(sendingTakeoffKey) || Boolean(importingKey)}
                               onClick={() =>
-                                void runSendToAiTakeoff(selected, a, { markAsPlan: true })
+                                void runSendToAiTakeoff(selected, a, {
+                                  manualPlanOverride: true
+                                })
                               }
                             >
                               {sending ? "Sending…" : "Mark as plan for AI Takeoff"}

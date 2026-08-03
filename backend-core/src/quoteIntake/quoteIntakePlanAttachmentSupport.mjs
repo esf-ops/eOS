@@ -176,3 +176,41 @@ export function canMarkAsPlanForTakeoff(support, att = {}) {
   if (att.isInline) return false;
   return attachmentLooksImage(att);
 }
+
+/**
+ * Safe image types staff may promote via explicit manual override.
+ * PDF / plan-like images do not need this; inline/item never qualify.
+ * @param {{
+ *   mimeType?: string|null,
+ *   contentType?: string|null,
+ *   name?: string|null,
+ *   filename?: string|null,
+ *   safeFilename?: string|null,
+ *   isInline?: boolean,
+ *   support?: string|null
+ * }} att
+ */
+export function isSafeManualPlanImageOverride(att = {}) {
+  if (!att || att.isInline) return false;
+  const support = String(att.support || "");
+  if (support === "inline_ignored" || support === "unsupported_item") return false;
+  return attachmentLooksImage(att);
+}
+
+/**
+ * True when the request body asks for an explicit staff plan override.
+ * Accepts aliases used by Inbox UI / API.
+ * @param {unknown} body
+ */
+export function requestHasManualPlanOverride(body) {
+  if (!body || typeof body !== "object") return false;
+  const b = /** @type {Record<string, unknown>} */ (body);
+  return (
+    b.manualPlanOverride === true ||
+    b.manualPlanOverride === "true" ||
+    b.useAttachmentAsPlan === true ||
+    b.useAttachmentAsPlan === "true" ||
+    b.markAsPlan === true ||
+    b.markAsPlan === "true"
+  );
+}
