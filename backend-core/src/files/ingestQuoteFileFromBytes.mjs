@@ -9,7 +9,6 @@ import {
 } from "./quoteFileStoragePath.mjs";
 import { isUuid, logQuoteFileEvent, MAX_FILE_SIZE_BYTES } from "./quoteFileService.mjs";
 import { pdfTooLargeError } from "../quoteIntake/quoteIntakeGraphConfig.mjs";
-import { validatePlanBytes } from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
 
 /**
  * @param {string} message
@@ -49,7 +48,7 @@ async function findFileByHash(supabase, organizationId, sha256) {
 }
 
 /**
- * Ingest validated plan bytes (PDF or supported image) into eliteos-quote-files and quote_files.
+ * Ingest validated PDF bytes into eliteos-quote-files and quote_files.
  * Idempotent on (organizationId, sha256) when a prior active row exists.
  *
  * @param {{
@@ -77,26 +76,14 @@ export async function ingestQuoteFileFromBytes({
     throw ingestError("organizationId must be a valid UUID", 400, "invalid_organization");
   }
   if (!Buffer.isBuffer(bytes) || bytes.length < 4) {
-    throw ingestError("Plan bytes are required", 400, "attachment_unsupported");
+    throw ingestError("PDF bytes are required", 400, "attachment_unsupported");
   }
   if (bytes.length > MAX_FILE_SIZE_BYTES) {
     throw pdfTooLargeError(bytes.length, MAX_FILE_SIZE_BYTES);
   }
-
-  let validated;
-  try {
-    validated = validatePlanBytes(bytes, {
-      declaredMime: mimeType,
-      filename: originalFilename
-    });
-  } catch (e) {
-    throw ingestError(
-      e?.message || "Attachment is not a supported plan file",
-      Number(e?.statusCode) || 400,
-      e?.code || "attachment_unsupported"
-    );
+  if (!bytes.subarray(0, 4).equals(Buffer.from("%PDF"))) {
+    throw ingestError("Attachment is not a valid PDF", 400, "attachment_unsupported");
   }
-
   const hash = String(sha256 ?? "")
     .trim()
     .toLowerCase();
@@ -104,15 +91,13 @@ export async function ingestQuoteFileFromBytes({
     throw ingestError("sha256 is required", 400, "attachment_hash_failed");
   }
 
-  const resolvedMime = validated.contentType || mimeType || "application/pdf";
   const existing = await findFileByHash(supabase, organizationId, hash);
   if (existing) {
     return {
       quoteFileId: String(existing.id),
       reused: true,
       originalFilename: existing.original_filename,
-      sha256: hash,
-      mimeType: existing.mime_type || resolvedMime
+      sha256: hash
     };
   }
 
@@ -126,7 +111,7 @@ export async function ingestQuoteFileFromBytes({
   });
 
   const { error: uploadErr } = await supabase.storage.from(QUOTE_FILE_BUCKET).upload(storagePath, bytes, {
-    contentType: resolvedMime,
+    contentType: mimeType || "application/pdf",
     upsert: false
   });
   if (uploadErr) {
@@ -148,7 +133,7 @@ export async function ingestQuoteFileFromBytes({
     storage_path: storagePath,
     original_filename: filename,
     safe_filename: safeFilename,
-    mime_type: resolvedMime,
+    mime_type: mimeType || "application/pdf",
     file_size_bytes: bytes.length,
     file_hash: hash,
     file_role: "measurement_plan",
@@ -158,8 +143,7 @@ export async function ingestQuoteFileFromBytes({
     updated_at: new Date().toISOString(),
     metadata: {
       ...metadata,
-      source: "quote_intake_open_estimate",
-      planKind: validated.kind || null
+      source: "quote_intake_open_estimate"
     }
   };
 

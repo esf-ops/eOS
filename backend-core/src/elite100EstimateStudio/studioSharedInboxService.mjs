@@ -13,9 +13,6 @@ import {
   filterAndPageSharedInboxRows,
   sanitizeInboxText
 } from "./studioSharedInboxReadModel.mjs";
-import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
-import { isAutoSupportedTakeoffSupport } from "../quoteIntake/quoteIntakePlanAttachmentSupport.mjs";
-import { ATTACHMENT_SUPPORT } from "../quoteIntake/quoteIntakeAttachmentMeta.mjs";
 
 /**
  * @param {string} code
@@ -27,10 +24,6 @@ export function sharedInboxSafeError(code, fallbackMessage) {
     message_not_found: "The message is no longer available.",
     message_already_imported: "This request has already been imported.",
     message_not_supported: "This message does not contain a currently supported plan attachment.",
-    attachment_not_supported:
-      "That attachment is not a supported plan PDF or image for AI Takeoff.",
-    attachment_required: "Select a plan attachment to send to AI Takeoff.",
-    takeoff_unavailable: "AI Takeoff is temporarily unavailable.",
     import_failed: "The request could not be imported.",
     import_result_unavailable:
       "The import may have completed, but its result could not be confirmed. Refresh the inbox before retrying.",
@@ -65,7 +58,6 @@ export function createStudioSharedInboxService(deps = {}) {
   const getSupabase = deps.getSupabase || null;
   const previewFn = deps.previewFn || previewQuoteIntakeMailbox;
   const importFn = deps.importFn || importQuoteIntakeMailboxMessages;
-  const openEstimateFn = deps.openEstimate || openEstimateForIntakeCase;
 
   if (!repository) {
     throw new Error("createStudioSharedInboxService: quoteIntakeRepository required");
@@ -389,175 +381,10 @@ export function createStudioSharedInboxService(deps = {}) {
     };
   }
 
-  /**
-   * Send a supported plan attachment to AI Takeoff.
-   * Imports the inbox message if needed, then creates/reuses a takeoff job.
-   * Does NOT calculate, approve, publish, create Digital Estimate, or mark sold.
-   */
-  async function sendToAiTakeoff({
-    organizationId,
-    messageKey,
-    actorUserId = null,
-    attachmentKey = null,
-    markAsPlan = false,
-    confirm = false,
-    idempotencyKey = null
-  }) {
-    const org = assertOrg(organizationId);
-    const key = String(messageKey || "").trim();
-    const attKey = String(attachmentKey || "").trim();
-    if (!key) {
-      const err = new Error("The message is no longer available.");
-      err.statusCode = 404;
-      err.code = "message_not_found";
-      throw err;
-    }
-    if (!attKey) {
-      const err = new Error("Select a plan attachment to send to AI Takeoff.");
-      err.statusCode = 400;
-      err.code = "attachment_required";
-      throw err;
-    }
-    if (confirm !== true && confirm !== "true") {
-      const err = new Error("Explicit import confirmation is required.");
-      err.statusCode = 400;
-      err.code = "import_confirm_required";
-      throw err;
-    }
-
-    const detail = await getMessage({ organizationId: org, messageKey: key, actorUserId });
-    const item = detail.item;
-    const att = (item.attachments || []).find(
-      (a) => String(a.attachmentKey || "") === attKey
-    );
-    if (!att) {
-      const err = new Error("The attachment could not be found.");
-      err.statusCode = 404;
-      err.code = "message_not_found";
-      throw err;
-    }
-
-    const autoOk = isAutoSupportedTakeoffSupport(att.support);
-    const manualOk =
-      markAsPlan === true &&
-      (att.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW || att.canMarkAsPlan === true);
-    if (!autoOk && !manualOk) {
-      const err = new Error(
-        "That attachment is not a supported plan PDF or image for AI Takeoff."
-      );
-      err.statusCode = 422;
-      err.code = "attachment_not_supported";
-      throw err;
-    }
-
-    let intakeCaseId = item.intakeCaseId || null;
-    if (!intakeCaseId) {
-      const imported = await importMessage({
-        organizationId: org,
-        messageKey: key,
-        actorUserId,
-        confirm: true,
-        idempotencyKey: idempotencyKey
-          ? `send-takeoff-import:${idempotencyKey}`
-          : `send-takeoff-import:${org}:${key}`
-      });
-      intakeCaseId = imported.intakeCaseId || null;
-    }
-    if (!intakeCaseId) {
-      const err = new Error("The request could not be imported.");
-      err.statusCode = 500;
-      err.code = "import_failed";
-      throw err;
-    }
-
-    let openResult;
-    try {
-      openResult = await openEstimateFn({
-        repository,
-        organizationId: org,
-        intakeCaseId,
-        actorUserId,
-        getSupabase,
-        graphClient,
-        env,
-        body: {
-          attachmentKey: attKey,
-          markAsPlan: manualOk === true
-        },
-        initiationMode: "manual"
-      });
-    } catch (e) {
-      const code = String(e?.code || "takeoff_unavailable");
-      const err = new Error(
-        sharedInboxSafeError(code, e?.message || "AI Takeoff is temporarily unavailable.").error
-      );
-      err.statusCode = Number(e?.statusCode) || 500;
-      err.code =
-        code === "no_supported_pdf" || code === "attachment_selection_invalid"
-          ? "attachment_not_supported"
-          : code === "attachment_bytes_unavailable" || code === "attachment_unsupported"
-            ? "attachment_not_supported"
-            : "takeoff_unavailable";
-      throw err;
-    }
-
-    let refreshed = null;
-    try {
-      const after = await getMessage({ organizationId: org, messageKey: key, actorUserId });
-      refreshed = after.item;
-    } catch {
-      refreshed = item;
-    }
-
-    const takeoffJobId = openResult?.takeoffJobId
-      ? String(openResult.takeoffJobId)
-      : refreshed?.aiTakeoff?.takeoffJobId || null;
-
-    return {
-      ok: true,
-      intakeCaseId,
-      takeoffJobId,
-      created: openResult?.created === true,
-      reused: openResult?.reused === true || openResult?.created === false,
-      attachmentKey: attKey,
-      attachmentName: att.filename || openResult?.attachmentName || null,
-      // Explicitly no estimate ensure / calculate / publish side effects here.
-      sideEffects: {
-        calculated: false,
-        approved: false,
-        published: false,
-        digitalEstimateCreated: false,
-        sold: false,
-        studioEstimateEnsured: false
-      },
-      item: refreshed
-        ? {
-            ...refreshed,
-            aiTakeoff: {
-              ...(refreshed.aiTakeoff || {}),
-              takeoffJobId: takeoffJobId || refreshed.aiTakeoff?.takeoffJobId || null,
-              state: takeoffJobId
-                ? refreshed.aiTakeoff?.state && refreshed.aiTakeoff.state !== "not_started"
-                  ? refreshed.aiTakeoff.state
-                  : "not_started"
-                : refreshed.aiTakeoff?.state || "not_started",
-              label: takeoffJobId
-                ? refreshed.aiTakeoff?.label && refreshed.aiTakeoff.label !== "Not started"
-                  ? refreshed.aiTakeoff.label
-                  : "Not started"
-                : refreshed.aiTakeoff?.label || "Not started"
-            }
-          }
-        : null,
-      idempotencyKey: idempotencyKey ? sanitizeInboxText(idempotencyKey, 128) : null
-    };
-  }
-
   return {
     listInbox,
     getMessage,
     importMessage,
-    sendToAiTakeoff,
     mailboxConfigured
   };
 }

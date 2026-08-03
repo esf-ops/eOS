@@ -3639,16 +3639,3 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Split legacy document CSS into a separate entry that never shares `:root` with the Tailwind configuration theme. |
 
 ---
-
-### 263. Shared Inbox plan attachments + AI Takeoff handoff (2026-08-03)
-
-| Field | Value |
-|-------|--------|
-| **Date / branch** | 2026-08-03 · `feature/inbox-plan-attachments-ai-takeoff` |
-| **Decision** | Shared Inbox treats plan-like PDF **and** JPEG/PNG/WEBP attachments as AI Takeoff candidates (conservative filename/MIME signals; uncertain images need staff “Mark as plan”). Staff can **Send to AI Takeoff** from Inbox detail; the backend imports if needed, then creates/reuses a takeoff job via the existing open-estimate handoff. No migration. |
-| **Why** | Customers often send phone photos/screenshots of plans; Inbox previewed images but only `direct_pdf` counted as supported, so rows incorrectly said “No supported plan.” |
-| **Impacted** | `quoteIntakePlanAttachmentSupport.mjs`, attachment classifier/mailbox eligibility, Shared Inbox read model + UI, `send-to-takeoff` route/service, plan byte ingest/open-estimate selection (PDF+images), tests, this doc. |
-| **Protected / unchanged** | Start/Resume Estimate, pricing, calculate/approve/publish, Digital Estimate, acceptance, sold, Studio V2 revision creation, Internal Estimate, AI measurement algorithms, migrations. |
-| **Revisit trigger** | Persist permanent staff plan-mark overrides on attachment rows; richer multi-attachment takeoff job selection UI. |
-
----

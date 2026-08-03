@@ -222,18 +222,15 @@ export async function previewQuoteIntakeMailbox(input) {
       }
     }
 
-    const planCandidates = attachmentMeta.filter(
-      (a) => a.support === "direct_pdf" || a.support === "direct_image_plan"
-    );
-    const oversizedPlans = planCandidates.filter(
+    const pdfCandidates = attachmentMeta.filter((a) => a.support === "direct_pdf");
+    const oversizedPdfs = pdfCandidates.filter(
       (a) =>
         Number.isFinite(Number(a.sizeBytes)) && Number(a.sizeBytes) > limits.maxPdfBytes
     );
     const hasUnsupportedItem = attachmentMeta.some((a) => a.support === "unsupported_item");
-    const multiPlan = planCandidates.length > 1;
+    const multiPdf = pdfCandidates.length > 1;
     const discoveryFailed = attachmentDiscovery.status === "failed";
     const discoveryEmptyMismatch = attachmentDiscovery.status === "empty_mismatch";
-    const hasImageNeedsReview = attachmentMeta.some((a) => a.support === "image_needs_review");
 
     const existing = await findExistingCase(input.repository, input.organizationId, {
       internetMessageId: core.internetMessageId,
@@ -244,12 +241,11 @@ export async function previewQuoteIntakeMailbox(input) {
     if (existing) eligibilityHint = "already_imported";
     else if (discoveryFailed) eligibilityHint = "attachment_list_failed";
     else if (discoveryEmptyMismatch) eligibilityHint = "attachment_list_empty";
-    else if (oversizedPlans.length && planCandidates.length === oversizedPlans.length) {
+    else if (oversizedPdfs.length && pdfCandidates.length === oversizedPdfs.length) {
       eligibilityHint = "attachment_too_large";
-    } else if (hasUnsupportedItem && planCandidates.length === 0) eligibilityHint = "manual_review";
-    else if (multiPlan) eligibilityHint = "manual_review_multi_pdf";
-    else if (planCandidates.length === 0 && hasImageNeedsReview) eligibilityHint = "manual_review";
-    else if (planCandidates.length === 0 && core.hasAttachments) eligibilityHint = "manual_review";
+    } else if (hasUnsupportedItem && pdfCandidates.length === 0) eligibilityHint = "manual_review";
+    else if (multiPdf) eligibilityHint = "manual_review_multi_pdf";
+    else if (pdfCandidates.length === 0 && core.hasAttachments) eligibilityHint = "manual_review";
     else if (!core.hasAttachments) eligibilityHint = "importable_no_pdf";
 
     previews.push({
@@ -277,7 +273,7 @@ export async function previewQuoteIntakeMailbox(input) {
       hasAttachments: core.hasAttachments,
       attachments: attachmentMeta.map((a) => {
         const tooLarge =
-          (a.support === "direct_pdf" || a.support === "direct_image_plan") &&
+          a.support === "direct_pdf" &&
           Number.isFinite(Number(a.sizeBytes)) &&
           Number(a.sizeBytes) > limits.maxPdfBytes;
         return {
@@ -426,11 +422,9 @@ export async function importQuoteIntakeMailboxMessages(input) {
 
       const attMetas = await client.listAttachmentMetadata(core.graphMessageId);
       const classified = attMetas.map(classifyAttachmentMeta);
-      const planCandidates = classified.filter(
-        (a) => a.support === "direct_pdf" || a.support === "direct_image_plan"
-      );
+      const pdfCandidates = classified.filter((a) => a.support === "direct_pdf");
       const hasUnsupportedItem = classified.some((a) => a.support === "unsupported_item");
-      const multiPdf = planCandidates.length > 1;
+      const multiPdf = pdfCandidates.length > 1;
 
       // Persist a metadata-only record for EVERY classified attachment. Bytes are
       // retrieved, magic-validated, and SHA-256'd later at Open Estimate time using
@@ -446,10 +440,7 @@ export async function importQuoteIntakeMailboxMessages(input) {
         kind: c.kind,
         support: c.support,
         providerMessageId: core.graphMessageId,
-        retrievalState:
-          c.support === "direct_pdf" || c.support === "direct_image_plan"
-            ? "pending"
-            : "not_applicable",
+        retrievalState: c.support === "direct_pdf" ? "pending" : "not_applicable",
         sha256: null
       }));
 
@@ -459,8 +450,8 @@ export async function importQuoteIntakeMailboxMessages(input) {
       if (multiPdf) reasonCodes.push("multi_pdf_ambiguous");
       if (hasUnsupportedItem) reasonCodes.push("pdf_nested_in_forwarded_item");
 
-      // Attachments present but none are a supported plan (PDF or image) → manual review.
-      if (classified.length && planCandidates.length === 0) {
+      // Attachments present but none are a supported direct PDF → manual review.
+      if (classified.length && pdfCandidates.length === 0) {
         manualReview = true;
         reasonCodes.push("no_supported_pdf");
         reasonCodes.push(describeMissingPdfReason(attachmentsForCase));
@@ -468,7 +459,7 @@ export async function importQuoteIntakeMailboxMessages(input) {
 
       // Enforce declared size limits at import (bytes not fetched yet).
       // Same authoritative ceiling as Open Estimate (QUOTE_INTAKE_MAX_PDF_BYTES).
-      for (const cand of planCandidates) {
+      for (const cand of pdfCandidates) {
         if (
           Number.isFinite(Number(cand.sizeBytes)) &&
           Number(cand.sizeBytes) > limits.maxPdfBytes

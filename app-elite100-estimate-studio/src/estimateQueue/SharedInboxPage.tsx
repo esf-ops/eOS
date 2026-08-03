@@ -4,7 +4,6 @@ import {
   fetchSharedInbox,
   importSharedInboxMessage,
   startSharedInboxEstimate,
-  sendSharedInboxToAiTakeoff,
   markSharedInboxViewed,
   isTransientHttpError,
   newImportIdempotencyKey
@@ -25,8 +24,6 @@ type InboxAttachment = {
   supportedForTakeoff?: boolean;
   supportedForImport?: boolean;
   previewSupported?: boolean;
-  canMarkAsPlan?: boolean;
-  supportLabel?: string | null;
   support?: string;
 };
 
@@ -50,7 +47,6 @@ type InboxRow = {
   attachments?: InboxAttachment[];
   attachmentCount?: number;
   supportedAttachmentCount?: number;
-  planSupportSummary?: { key?: string; label?: string; supported?: boolean } | null;
   supportState?: string;
   supportExplanation?: string;
   importState?: string;
@@ -135,7 +131,7 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [mailboxDisplay, setMailboxDisplay] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [sendingTakeoffKey, setSendingTakeoffKey] = useState<string | null>(null);
+  const [importingKey, setImportingKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [planViewer, setPlanViewer] = useState<{
@@ -270,38 +266,6 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
     }
   }
 
-  async function runSendToAiTakeoff(
-    row: InboxRow,
-    attachment: InboxAttachment,
-    opts?: { markAsPlan?: boolean }
-  ) {
-    if (!authToken || !attachment.attachmentKey) return;
-    setActionError(null);
-    setSendingTakeoffKey(`${row.messageKey}:${attachment.attachmentKey}`);
-    try {
-      const result = (await sendSharedInboxToAiTakeoff(authToken, row.messageKey, {
-        attachmentKey: String(attachment.attachmentKey),
-        markAsPlan: opts?.markAsPlan === true,
-        idempotencyKey: newImportIdempotencyKey()
-      })) as {
-        ok?: boolean;
-        takeoffJobId?: string | null;
-        intakeCaseId?: string | null;
-        reused?: boolean;
-        item?: InboxRow | null;
-      };
-      await loadInbox({ preserveOnTransient: true });
-      if (result.intakeCaseId && result.takeoffJobId) {
-        // Keep staff in Inbox detail; they can open the lab from the updated row.
-      }
-    } catch (e) {
-      const classified = classifySharedInboxError(e);
-      setActionError(classified.message);
-    } finally {
-      setSendingTakeoffKey(null);
-    }
-  }
-
   return (
     <div className="eq-root si-root e100-inbox" data-testid="shared-inbox-page">
       <header className="eq-header e100-page-header">
@@ -428,34 +392,16 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                       {(row.attachmentCount || 0) === 1 ? "" : "s"}
                       {filenames.length ? ` · ${filenames.join(", ")}` : ""}
                     </span>
-                    {(row.supportedAttachmentCount || 0) > 0 ||
-                    row.planSupportSummary?.supported ? (
-                      <span className="si-meta-item si-ok" data-testid="shared-inbox-plan-support">
-                        {row.planSupportSummary?.label || "Supported plan"}
-                      </span>
+                    {(row.supportedAttachmentCount || 0) > 0 ? (
+                      <span className="si-meta-item si-ok">Supported plan</span>
                     ) : (
-                      <span className="si-meta-item" data-testid="shared-inbox-plan-support">
-                        {row.planSupportSummary?.label || "No supported plan"}
-                      </span>
+                      <span className="si-meta-item">No supported plan</span>
                     )}
                     <span className="si-meta-item">
                       {row.assignedEstimator?.label || "Unassigned"}
                     </span>
                     {row.aiTakeoff?.label ? (
                       <span className="si-meta-item">AI Takeoff: {row.aiTakeoff.label}</span>
-                    ) : null}
-                    {row.aiTakeoff?.takeoffJobId && row.intakeCaseId ? (
-                      <button
-                        type="button"
-                        className="si-meta-link"
-                        data-testid="shared-inbox-open-takeoff-lab"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenEstimate(row.intakeCaseId!, { openTarget: "takeoff" });
-                        }}
-                      >
-                        Open AI Takeoff Lab
-                      </button>
                     ) : null}
                   </div>
                 </button>
@@ -559,90 +505,46 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                     const canPreview =
                       a.previewSupported === true ||
                       a.supportedForTakeoff === true ||
-                      String(a.support || "") === "direct_pdf" ||
-                      String(a.support || "") === "direct_image_plan" ||
-                      String(a.support || "") === "image_needs_review";
-                    const sending =
-                      sendingTakeoffKey === `${selected.messageKey}:${a.attachmentKey || ""}`;
+                      String(a.support || "") === "direct_pdf";
                     return (
                       <li key={a.attachmentKey || `${a.filename}-${idx}`}>
-                        <div className="si-att-row">
-                          <span>{a.filename}</span>
-                          <span className="eq-muted">
+                        <span>{a.filename}</span>
+                        <span className="eq-muted">
+                          {a.supportedForTakeoff
+                            ? " · Supported for Takeoff"
+                            : " · Not supported for Takeoff"}
+                        </span>
+                        {canPreview && a.attachmentKey ? (
+                          <button
+                            type="button"
+                            className="eq-btn-ghost eq-btn-small"
+                            data-testid="shared-inbox-view-plan"
+                            onClick={() =>
+                              setPlanViewer({
+                                messageKey: selected.messageKey,
+                                attachmentKey: String(a.attachmentKey),
+                                filename: a.filename,
+                                contentType: a.contentType,
+                                sizeBytes: a.sizeBytes
+                              })
+                            }
+                          >
+                            View plan
+                          </button>
+                        ) : (
+                          <span className="eq-muted" data-testid="shared-inbox-preview-unsupported">
                             {" "}
-                            · {a.supportLabel || (a.supportedForTakeoff ? "Supported for Takeoff" : "Not auto-supported for Takeoff")}
+                            · Preview not supported
                           </span>
-                        </div>
-                        <div className="si-att-actions">
-                          {canPreview && a.attachmentKey ? (
-                            <button
-                              type="button"
-                              className="eq-btn-ghost eq-btn-small"
-                              data-testid="shared-inbox-view-plan"
-                              onClick={() =>
-                                setPlanViewer({
-                                  messageKey: selected.messageKey,
-                                  attachmentKey: String(a.attachmentKey),
-                                  filename: a.filename,
-                                  contentType: a.contentType,
-                                  sizeBytes: a.sizeBytes
-                                })
-                              }
-                            >
-                              View plan
-                            </button>
-                          ) : (
-                            <span className="eq-muted" data-testid="shared-inbox-preview-unsupported">
-                              Preview not supported
-                            </span>
-                          )}
-                          {a.supportedForTakeoff && a.attachmentKey ? (
-                            <button
-                              type="button"
-                              className="eq-btn-secondary eq-btn-small"
-                              data-testid="shared-inbox-send-to-takeoff"
-                              disabled={Boolean(sendingTakeoffKey) || Boolean(importingKey)}
-                              onClick={() => void runSendToAiTakeoff(selected, a)}
-                            >
-                              {sending ? "Sending…" : "Send to AI Takeoff"}
-                            </button>
-                          ) : null}
-                          {!a.supportedForTakeoff && a.canMarkAsPlan && a.attachmentKey ? (
-                            <button
-                              type="button"
-                              className="eq-btn-ghost eq-btn-small"
-                              data-testid="shared-inbox-mark-as-plan"
-                              disabled={Boolean(sendingTakeoffKey) || Boolean(importingKey)}
-                              onClick={() =>
-                                void runSendToAiTakeoff(selected, a, { markAsPlan: true })
-                              }
-                            >
-                              {sending ? "Sending…" : "Mark as plan for AI Takeoff"}
-                            </button>
-                          ) : null}
-                        </div>
+                        )}
                       </li>
                     );
                   })}
                 </ul>
               )}
-              {selected.aiTakeoff?.takeoffJobId && selected.intakeCaseId ? (
-                <p className="si-detail-takeoff-lab">
-                  <button
-                    type="button"
-                    className="eq-btn-secondary"
-                    data-testid="shared-inbox-detail-open-takeoff-lab"
-                    onClick={() =>
-                      onOpenEstimate(selected.intakeCaseId!, { openTarget: "takeoff" })
-                    }
-                  >
-                    Open AI Takeoff Lab
-                  </button>
-                </p>
-              ) : null}
               <p className="eq-muted si-detail-note">
-                Plans open in the secure Studio viewer. Sending to AI Takeoff creates or reuses a
-                takeoff job only — it does not calculate, approve, publish, or mark sold.
+                Plans open in the secure Studio viewer. Viewing does not import the message or start
+                Takeoff.
               </p>
               {/* Outlook compose / folder / download controls are intentionally not present. */}
             </div>

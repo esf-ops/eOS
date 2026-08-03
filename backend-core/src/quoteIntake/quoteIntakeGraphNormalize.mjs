@@ -5,7 +5,6 @@
 
 import { createHash } from "node:crypto";
 import { pdfTooLargeError } from "./quoteIntakeGraphConfig.mjs";
-import { classifyPlanFileSupport } from "./quoteIntakePlanAttachmentSupport.mjs";
 
 export const PDF_MAGIC = Buffer.from("%PDF");
 
@@ -93,28 +92,20 @@ export function classifyAttachmentMeta(att) {
   const isItemAttachment =
     odataType.includes("itemattachment") || odataType.includes("referenceattachment");
   const isFileAttachment = odataType.includes("fileattachment") || (!isItemAttachment && Boolean(id));
-  const planSupport =
-    isFileAttachment && !isInline && !isItemAttachment
-      ? classifyPlanFileSupport({
-          mimeType: contentType,
-          name,
-          isInline,
-          isItemAttachment,
-          isFileAttachment: true
-        })
-      : null;
+  const looksPdfMime = contentType.includes("application/pdf") || contentType === "application/x-pdf";
+  const looksPdfName = /\.pdf$/i.test(name);
+  // Filename is not MIME authority — only a hint; import still requires magic bytes.
+  const isDirectPdfCandidate = isFileAttachment && !isInline && !isItemAttachment && (looksPdfMime || looksPdfName);
 
   let kind = "file";
   if (isItemAttachment) kind = "item";
   else if (isInline) kind = "inline";
-  else if (planSupport === "direct_pdf") kind = "pdf_candidate";
-  else if (planSupport === "direct_image_plan") kind = "image_plan_candidate";
-  else if (planSupport === "image_needs_review") kind = "image_review_candidate";
+  else if (isDirectPdfCandidate) kind = "pdf_candidate";
 
   let support = "metadata_only";
   if (isItemAttachment) support = "unsupported_item";
   else if (isInline) support = "inline_ignored";
-  else if (planSupport) support = planSupport;
+  else if (isDirectPdfCandidate) support = "direct_pdf";
 
   return {
     sourceAttachmentId: id || null,

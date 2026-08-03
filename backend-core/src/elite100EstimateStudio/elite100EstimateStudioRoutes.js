@@ -1932,45 +1932,6 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
     }
   );
 
-  /**
-   * Send supported plan attachment (PDF or image) to AI Takeoff.
-   * Idempotent. Does not calculate / approve / publish / sold.
-   */
-  app.post(
-    "/api/elite100-estimate-studio/shared-inbox/:messageKey/send-to-takeoff",
-    ...staffStack,
-    jsonParser,
-    async (req, res) => {
-      res.set("Cache-Control", "no-store");
-      try {
-        const organizationId = await orgIdFor(req);
-        const body = req.body && typeof req.body === "object" ? req.body : {};
-        const idempotencyKey =
-          String(req.get("idempotency-key") || body.idempotencyKey || "").trim() || null;
-        const result = await studioSharedInboxService.sendToAiTakeoff({
-          organizationId,
-          actorUserId: req.user?.id ?? null,
-          messageKey: decodeURIComponent(String(req.params.messageKey || "")),
-          attachmentKey: body.attachmentKey ? String(body.attachmentKey) : null,
-          markAsPlan: body.markAsPlan === true || body.markAsPlan === "true",
-          confirm: body.confirm === true || body.confirm === "true",
-          idempotencyKey
-        });
-        auditStudioEstimate("shared_inbox.send_to_takeoff", req, {
-          intakeCaseId: result.intakeCaseId,
-          takeoffJobId: result.takeoffJobId,
-          status: result.reused ? "reused" : "created"
-        });
-        res.json(result);
-      } catch (e) {
-        logStudio("shared inbox send-to-takeoff failed", e, req);
-        const status = Number(e?.statusCode) || 500;
-        const safe = sharedInboxSafeError(e?.code, "Unable to send attachment to AI Takeoff.");
-        res.status(status).json(safe);
-      }
-    }
-  );
-
   app.post(
     "/api/elite100-estimate-studio/shared-inbox/:messageKey/mark-viewed",
     ...staffStack,

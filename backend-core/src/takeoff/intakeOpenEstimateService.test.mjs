@@ -36,7 +36,7 @@ console.log("\nintakeOpenEstimateService.test.mjs\n");
 }
 
 {
-  assert.throws(() => selectSupportedPdfAttachment({ attachments: [] }), /No supported plan/);
+  assert.throws(() => selectSupportedPdfAttachment({ attachments: [] }), /No supported PDF/);
   const att = selectSupportedPdfAttachment({
     attachments: [
       {

@@ -10,8 +10,6 @@ import { randomUUID } from "node:crypto";
 
 export const ATTACHMENT_SUPPORT = Object.freeze({
   DIRECT_PDF: "direct_pdf",
-  DIRECT_IMAGE_PLAN: "direct_image_plan",
-  IMAGE_NEEDS_REVIEW: "image_needs_review",
   INLINE_IGNORED: "inline_ignored",
   UNSUPPORTED_ITEM: "unsupported_item",
   METADATA_ONLY: "metadata_only"
@@ -21,9 +19,7 @@ export const ATTACHMENT_KIND = Object.freeze({
   FILE: "file",
   INLINE: "inline",
   ITEM: "item",
-  PDF_CANDIDATE: "pdf_candidate",
-  IMAGE_PLAN_CANDIDATE: "image_plan_candidate",
-  IMAGE_REVIEW_CANDIDATE: "image_review_candidate"
+  PDF_CANDIDATE: "pdf_candidate"
 });
 
 export const ATTACHMENT_RETRIEVAL_STATE = Object.freeze({
@@ -69,8 +65,7 @@ export function normalizeAttachmentInput(a) {
   const kind = KIND_VALUES.has(String(a?.kind)) ? String(a.kind) : undefined;
   const retrievalState = RETRIEVAL_VALUES.has(String(a?.retrievalState))
     ? String(a.retrievalState)
-    : support === ATTACHMENT_SUPPORT.DIRECT_PDF ||
-        support === ATTACHMENT_SUPPORT.DIRECT_IMAGE_PLAN
+    : support === ATTACHMENT_SUPPORT.DIRECT_PDF
       ? ATTACHMENT_RETRIEVAL_STATE.PENDING
       : support
         ? ATTACHMENT_RETRIEVAL_STATE.NOT_APPLICABLE
@@ -120,27 +115,13 @@ export function normalizeAttachmentInputs(attachments) {
 export function isSupportedDirectPdf(a) {
   if (!a) return false;
   if (a.support === ATTACHMENT_SUPPORT.DIRECT_PDF) return true;
-  // Explicitly classified as something else (including image plans).
+  // Explicitly classified as something unsupported.
   if (a.support && a.support !== ATTACHMENT_SUPPORT.DIRECT_PDF) return false;
   if (a.isInline) return false;
   if (String(a.kind) === ATTACHMENT_KIND.ITEM) return false;
   const mime = String(a.mimeType ?? "").toLowerCase();
   const name = String(a.safeFilename ?? "").toLowerCase();
   return mime.includes("pdf") || name.endsWith(".pdf");
-}
-
-/**
- * Is this stored attachment auto-eligible for AI Takeoff (PDF or plan-like image)?
- * @param {any} a
- * @returns {boolean}
- */
-export function isSupportedTakeoffPlan(a) {
-  if (!a) return false;
-  if (a.support === ATTACHMENT_SUPPORT.DIRECT_PDF) return true;
-  if (a.support === ATTACHMENT_SUPPORT.DIRECT_IMAGE_PLAN) return true;
-  if (a.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW) return false;
-  if (a.support && a.support !== ATTACHMENT_SUPPORT.DIRECT_PDF) return false;
-  return isSupportedDirectPdf(a);
 }
 
 /**

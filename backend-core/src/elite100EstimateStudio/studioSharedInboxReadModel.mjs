@@ -5,12 +5,6 @@
  * Operational truth for imported rows reuses buildStudioOperationalState via queue rows.
  */
 
-import {
-  canMarkAsPlanForTakeoff,
-  isAutoSupportedTakeoffSupport,
-  planSupportLabel,
-  summarizeRowPlanSupport
-} from "../quoteIntake/quoteIntakePlanAttachmentSupport.mjs";
 import { buildStudioOperationalState } from "./studioOperationalStatus.mjs";
 import {
   resolveCustomerDisplayLabel,
@@ -109,25 +103,8 @@ function stripForbiddenDeep(value, depth = 0) {
  */
 function mapAttachment(att = {}) {
   const support = String(att.support || "");
-  const supportedForTakeoff = isAutoSupportedTakeoffSupport(support);
+  const supportedForTakeoff = support === "direct_pdf";
   const supportedForImport = supportedForTakeoff || support === "too_large";
-  const mime = String(att.mimeType || att.contentType || "").toLowerCase();
-  const name = String(att.name || att.filename || "").toLowerCase();
-  const previewSupported =
-    supportedForTakeoff ||
-    support === "direct_pdf" ||
-    support === "direct_image_plan" ||
-    support === "image_needs_review" ||
-    mime === "image/png" ||
-    /\.png$/i.test(name) ||
-    mime === "image/jpeg" ||
-    mime === "image/jpg" ||
-    /\.jpe?g$/i.test(name) ||
-    mime === "image/webp" ||
-    /\.webp$/i.test(name) ||
-    mime.includes("pdf") ||
-    /\.pdf$/i.test(name);
-
   return {
     attachmentKey: att.sourceAttachmentId || att.attachmentKey || null,
     filename: sanitizeInboxText(att.name || att.filename || "attachment", 120) || "attachment",
@@ -135,13 +112,16 @@ function mapAttachment(att = {}) {
     sizeBytes: Number.isFinite(Number(att.sizeBytes)) ? Number(att.sizeBytes) : null,
     supportedForTakeoff,
     supportedForImport,
-    previewSupported,
-    canMarkAsPlan: canMarkAsPlanForTakeoff(support, {
-      mimeType: att.mimeType || att.contentType,
-      name: att.name || att.filename,
-      isInline: att.isInline
-    }),
-    supportLabel: planSupportLabel(support),
+    previewSupported: supportedForTakeoff || support === "direct_pdf"
+      ? true
+      : (() => {
+          const mime = String(att.mimeType || att.contentType || "").toLowerCase();
+          const name = String(att.name || att.filename || "").toLowerCase();
+          if (mime === "image/png" || /\.png$/i.test(name)) return true;
+          if (mime === "image/jpeg" || mime === "image/jpg" || /\.jpe?g$/i.test(name)) return true;
+          if (mime === "image/webp" || /\.webp$/i.test(name)) return true;
+          return false;
+        })(),
     support,
     kind: att.kind || null,
     isInline: Boolean(att.isInline),
@@ -176,35 +156,22 @@ export function deriveSupportState(previewMessage = {}) {
   if (hint === "manual_review_multi_pdf") {
     return {
       supportState: SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW,
-      supportExplanation: "Multiple plan attachments require estimator review."
+      supportExplanation: "Multiple PDF attachments require estimator review."
     };
   }
   if (hint === "manual_review" || (hint === "importable_no_pdf" && supportedCount === 0)) {
-    const needsReviewCount = attachments.filter((a) => a.support === "image_needs_review").length;
     return {
-      supportState:
-        needsReviewCount > 0
-          ? SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW
-          : SHARED_INBOX_STATES.UNSUPPORTED_ATTACHMENT,
+      supportState: SHARED_INBOX_STATES.UNSUPPORTED_ATTACHMENT,
       supportExplanation:
-        supportedCount === 0 && needsReviewCount > 0
-          ? "An image attachment is present but needs review before AI Takeoff. You can mark it as a plan or continue with a manual estimate."
-          : supportedCount === 0
-            ? "No currently supported plan PDF or image is attached. You can still import for manual estimate work."
-            : "This message needs manual review before AI Takeoff."
+        supportedCount === 0
+          ? "No currently supported plan PDF is attached. You can still import for manual estimate work."
+          : "This message needs manual review before AI Takeoff."
     };
   }
   if (supportedCount === 0 && previewMessage.hasAttachments) {
-    const needsReviewCount = attachments.filter((a) => a.support === "image_needs_review").length;
     return {
-      supportState:
-        needsReviewCount > 0
-          ? SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW
-          : SHARED_INBOX_STATES.UNSUPPORTED_ATTACHMENT,
-      supportExplanation:
-        needsReviewCount > 0
-          ? "Attachments are present; mark an image as a plan for AI Takeoff, or continue manually."
-          : "Attachments are present but none are a supported plan PDF or image."
+      supportState: SHARED_INBOX_STATES.UNSUPPORTED_ATTACHMENT,
+      supportExplanation: "Attachments are present but none are a supported plan PDF."
     };
   }
   if (!previewMessage.hasAttachments && supportedCount === 0) {
@@ -213,16 +180,9 @@ export function deriveSupportState(previewMessage = {}) {
       supportExplanation: "No plan attachment is present. Manual estimate import remains available."
     };
   }
-  const imagePlans = attachments.filter((a) => a.support === "direct_image_plan").length;
-  const pdfPlans = attachments.filter((a) => a.support === "direct_pdf").length;
   return {
     supportState: "supported",
-    supportExplanation:
-      imagePlans > 0 && pdfPlans === 0
-        ? "Supported image plan available for AI Takeoff."
-        : pdfPlans > 0 && imagePlans === 0
-          ? "Supported plan PDF available for AI Takeoff."
-          : "Supported plan attachment available for AI Takeoff."
+    supportExplanation: "Supported plan attachment available for import."
   };
 }
 
@@ -296,7 +256,6 @@ export function buildSharedInboxRow(input = {}) {
     ? preview.attachments.map(mapAttachment)
     : [];
   const supportedAttachmentCount = attachments.filter((a) => a.supportedForTakeoff).length;
-  const planSupportSummary = summarizeRowPlanSupport(attachments);
   const { supportState, supportExplanation } = deriveSupportState(preview);
 
   const alreadyImported = Boolean(preview.alreadyImported || preview.existingCaseId || queueRow?.id);
@@ -473,7 +432,6 @@ export function buildSharedInboxRow(input = {}) {
     attachments,
     attachmentCount: attachments.length,
     supportedAttachmentCount,
-    planSupportSummary,
     supportState,
     supportExplanation,
     importState,

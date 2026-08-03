@@ -17,10 +17,8 @@ import {
 import { createQuoteIntakeGraphClient } from "../quoteIntake/quoteIntakeGraphClient.mjs";
 import {
   ATTACHMENT_RETRIEVAL_STATE,
-  ATTACHMENT_SUPPORT,
   describeMissingPdfReason,
-  isSupportedDirectPdf,
-  isSupportedTakeoffPlan
+  isSupportedDirectPdf
 } from "../quoteIntake/quoteIntakeAttachmentMeta.mjs";
 import { ingestQuoteFileFromBytes } from "../files/ingestQuoteFileFromBytes.mjs";
 import { createTakeoffWorkspace } from "./takeoffWorkspaceService.mjs";
@@ -32,8 +30,7 @@ import {
   deriveIntakeLinkStatusFromJob,
   syncIntakeTakeoffLinkFromJob
 } from "./intakeTakeoffLinkStatus.mjs";
-import { decodeAndValidatePdfBytes, sha256BytesHex } from "../quoteIntake/quoteIntakeGraphNormalize.mjs";
-import { validatePlanBytes } from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
+import { decodeAndValidatePdfBytes } from "../quoteIntake/quoteIntakeGraphNormalize.mjs";
 import { createHash } from "node:crypto";
 
 /** @type {Map<string, Promise<unknown>>} */
@@ -121,37 +118,23 @@ export function rejectCallerOpenEstimateHints(body) {
 }
 
 /**
- * Select a supported plan attachment (PDF or plan-like image) from a case.
+ * Select the supported PDF attachment from a case using server-side classification.
  *
- * - Zero supported plans → no_supported_pdf with a precise `.reason`.
+ * - Zero supported PDFs → no_supported_pdf with a precise `.reason`.
  * - Exactly one → selected deterministically.
- * - More than one → caller may pass selectedAttachmentId; otherwise multi_pdf_ambiguous.
- * - markAsPlan + attachmentId can promote an image_needs_review row for this request.
+ * - More than one → caller may pass selectedAttachmentId (a Quote Intake attachment
+ *   record UUID, never a Graph id/URL); otherwise multi_pdf_ambiguous.
  *
  * @param {object} caseRow
- * @param {{ selectedAttachmentId?: string|null, markAsPlan?: boolean }} [opts]
+ * @param {{ selectedAttachmentId?: string|null }} [opts]
  */
 export function selectSupportedPdfAttachment(caseRow, opts = {}) {
   const atts = Array.isArray(caseRow?.attachments) ? caseRow.attachments : [];
-  let plans = atts.filter(isSupportedTakeoffPlan);
+  const pdfs = atts.filter(isSupportedDirectPdf);
 
-  const selectedId = String(opts.selectedAttachmentId ?? "").trim();
-  if (opts.markAsPlan === true && selectedId) {
-    const candidate = atts.find((a) => String(a?.id ?? "") === selectedId);
-    if (
-      candidate &&
-      (candidate.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW ||
-        (!isSupportedTakeoffPlan(candidate) &&
-          String(candidate.mimeType || "").toLowerCase().startsWith("image/")))
-    ) {
-      // Treat as a plan for this handoff only (persisted promotion is optional).
-      plans = [candidate];
-    }
-  }
-
-  if (plans.length === 0) {
+  if (pdfs.length === 0) {
     const err = openEstimateError(
-      "No supported plan PDF or image attachment is available for this case. Send to manual review.",
+      "No supported PDF attachment is available for this case. Send to manual review.",
       422,
       "no_supported_pdf"
     );
@@ -159,35 +142,32 @@ export function selectSupportedPdfAttachment(caseRow, opts = {}) {
     throw err;
   }
 
-  if (plans.length === 1) return plans[0];
+  if (pdfs.length === 1) return pdfs[0];
 
+  const selectedId = String(opts.selectedAttachmentId ?? "").trim();
   if (selectedId) {
-    const chosen = plans.find((a) => String(a?.id ?? "") === selectedId);
+    const chosen = pdfs.find((a) => String(a?.id ?? "") === selectedId);
     if (chosen) return chosen;
     throw openEstimateError(
-      "Selected attachment is not a supported plan on this case.",
+      "Selected attachment is not a supported PDF on this case.",
       422,
       "attachment_selection_invalid"
     );
   }
 
   const err = openEstimateError(
-    "Multiple plan attachments are available. Select one to open.",
+    "Multiple PDF attachments are available. Select one to open.",
     409,
     "multi_pdf_ambiguous"
   );
   err.selectionRequired = true;
-  err.options = plans.map((a) => ({
+  err.options = pdfs.map((a) => ({
     attachmentId: String(a?.id ?? ""),
-    safeFilename: a?.safeFilename || "plan",
-    sizeBytes: a?.sizeBytes ?? null,
-    support: a?.support || null
+    safeFilename: a?.safeFilename || "plan.pdf",
+    sizeBytes: a?.sizeBytes ?? null
   }));
   throw err;
 }
-
-/** @deprecated Prefer selectSupportedPdfAttachment (now PDF + image plans). */
-export const selectSupportedPlanAttachment = selectSupportedPdfAttachment;
 
 /**
  * @param {object} caseRow
@@ -222,8 +202,7 @@ function findActiveLinkedJob(links) {
 }
 
 /**
- * Resolve plan bytes: injected provider → Graph re-fetch → fail closed.
- * Supports PDF magic and JPEG/PNG/WEBP magic via validatePlanBytes.
+ * Resolve PDF bytes: injected provider → Graph re-fetch → fail closed.
  * @param {{
  *   caseRow: object,
  *   attachment: object,
@@ -232,15 +211,16 @@ function findActiveLinkedJob(links) {
  *   fetchAttachmentBytes?: Function|null
  * }} deps
  */
-async function resolveValidatedPlanBytes(deps) {
+async function resolveValidatedPdfBytes(deps) {
   const { caseRow, attachment, env, graphClient, fetchAttachmentBytes } = deps;
   const storedSha = String(attachment?.sha256 ?? "").trim().toLowerCase();
+  // Metadata-only rows carry no sha256 until now; compute it from the real bytes.
   const expectedSha = /^[a-f0-9]{64}$/.test(storedSha) ? storedSha : null;
   const limits = readQuoteIntakeGraphLimits(env);
   const maxBytes = limits.maxPdfBytes;
-  const filename = attachment?.safeFilename || attachment?.name || "plan";
-  const declaredMime = attachment?.mimeType || null;
 
+  // Reject obviously oversized files from Graph/declared metadata BEFORE download.
+  // Downloaded byte length is still verified below — metadata alone never authorizes.
   assertPdfMetadataWithinLimit(attachment?.sizeBytes, maxBytes);
 
   const assertShaMatch = (actual) => {
@@ -259,41 +239,31 @@ async function resolveValidatedPlanBytes(deps) {
     }
   };
 
-  const validateBuffer = (buf) => {
-    assertDownloadedLength(buf.length);
-    let validatedMeta;
-    try {
-      validatedMeta = validatePlanBytes(buf, {
-        declaredMime: declaredMime,
-        filename
-      });
-    } catch (e) {
-      throw openEstimateError(
-        e?.message || "Attachment is not a supported plan file",
-        Number(e?.statusCode) || 400,
-        e?.code || "attachment_unsupported"
-      );
-    }
-    // Own a copy so post-ingest zero-fill cannot mutate caller/cached buffers.
-    const owned = Buffer.from(buf);
-    const sha = sha256BytesHex(owned);
-    assertShaMatch(sha);
-    return {
-      bytes: owned,
-      sha256: sha,
-      sizeBytes: owned.length,
-      mimeType: validatedMeta.contentType,
-      kind: validatedMeta.kind
-    };
-  };
-
   if (typeof fetchAttachmentBytes === "function") {
     const raw = await fetchAttachmentBytes({ caseRow, attachment });
     if (Buffer.isBuffer(raw)) {
-      return validateBuffer(raw);
+      assertDownloadedLength(raw.length);
+      const validated = decodeAndValidatePdfBytes(raw.toString("base64"), {
+        maxBytes
+      });
+      assertShaMatch(validated.sha256);
+      return validated;
     }
     if (raw && typeof raw === "object" && Buffer.isBuffer(raw.bytes)) {
-      return validateBuffer(raw.bytes);
+      assertDownloadedLength(raw.bytes.length);
+      const sha =
+        String(raw.sha256 ?? "").toLowerCase() ||
+        createHash("sha256").update(raw.bytes).digest("hex");
+      assertShaMatch(sha);
+      // Magic check even for injected byte providers.
+      if (raw.bytes.length < 4 || !raw.bytes.subarray(0, 4).equals(Buffer.from("%PDF"))) {
+        throw openEstimateError(
+          "Attachment is not a valid PDF",
+          400,
+          "attachment_unsupported"
+        );
+      }
+      return { bytes: raw.bytes, sha256: sha, sizeBytes: raw.bytes.length };
     }
   }
 
@@ -302,6 +272,7 @@ async function resolveValidatedPlanBytes(deps) {
   ).trim();
   const sourceAttachmentId = String(attachment?.sourceAttachmentId ?? "").trim();
 
+  // Build a fixed-mailbox Graph client from server env when none injected.
   let client = graphClient;
   if (!client && messageId && sourceAttachmentId && isQuoteIntakeGraphEnabled(env)) {
     try {
@@ -318,38 +289,20 @@ async function resolveValidatedPlanBytes(deps) {
 
   if (!client || !messageId || !sourceAttachmentId) {
     throw openEstimateError(
-      "Plan file bytes are not available for Takeoff. Re-import the mailbox message or use a persistent intake store.",
+      "Plan PDF bytes are not available for Takeoff. Re-import the mailbox message or use a persistent intake store.",
       422,
       "attachment_bytes_unavailable"
     );
   }
 
   const att = await client.getAttachment(messageId, sourceAttachmentId);
+  // Graph may also report size on the full attachment object — reject before decode.
   assertPdfMetadataWithinLimit(att?.size, maxBytes);
-  if (!att?.contentBytes || typeof att.contentBytes !== "string") {
-    throw openEstimateError(
-      "Plan file bytes are not available for Takeoff. Re-import the mailbox message or use a persistent intake store.",
-      422,
-      "attachment_bytes_unavailable"
-    );
-  }
-  let buf;
-  try {
-    buf = Buffer.from(att.contentBytes, "base64");
-  } catch {
-    throw openEstimateError("Attachment decode failed", 400, "attachment_hash_failed");
-  }
-  return validateBuffer(buf);
-}
-
-/** @deprecated Use resolveValidatedPlanBytes */
-async function resolveValidatedPdfBytes(deps) {
-  const result = await resolveValidatedPlanBytes(deps);
-  if (result.kind !== "pdf" && !String(result.mimeType || "").includes("pdf")) {
-    // Legacy callers that only expect PDF still receive validated plan bytes;
-    // image plans are allowed through the shared path.
-  }
-  return result;
+  const validated = decodeAndValidatePdfBytes(att?.contentBytes, {
+    maxBytes
+  });
+  assertShaMatch(validated.sha256);
+  return validated;
 }
 
 /**
@@ -407,27 +360,7 @@ export async function openEstimateForIntakeCase(deps) {
     body && typeof body === "object" && typeof body.attachmentId === "string"
       ? body.attachmentId.trim()
       : null;
-  // Prefer intake attachment UUID; Graph attachmentKey is resolved below when needed.
-  const attachmentKey =
-    body && typeof body === "object" && typeof body.attachmentKey === "string"
-      ? body.attachmentKey.trim()
-      : null;
-  const markAsPlan =
-    body && typeof body === "object" && (body.markAsPlan === true || body.markAsPlan === "true");
-
-  let resolvedSelectedId = selectedAttachmentId;
-  if (!resolvedSelectedId && attachmentKey) {
-    const match = (Array.isArray(caseRow.attachments) ? caseRow.attachments : []).find(
-      (a) =>
-        String(a?.sourceAttachmentId || "") === attachmentKey || String(a?.id || "") === attachmentKey
-    );
-    if (match?.id) resolvedSelectedId = String(match.id);
-  }
-
-  const attachment = selectSupportedPdfAttachment(caseRow, {
-    selectedAttachmentId: resolvedSelectedId,
-    markAsPlan
-  });
+  const attachment = selectSupportedPdfAttachment(caseRow, { selectedAttachmentId });
   const idempotencyKey = buildOpenEstimateIdempotencyKey(caseRow, attachment);
   const lockKey = `${org}:${idempotencyKey}`;
 
@@ -529,7 +462,7 @@ export async function openEstimateForIntakeCase(deps) {
 
     let validated;
     try {
-      validated = await resolveValidatedPlanBytes({
+      validated = await resolveValidatedPdfBytes({
         caseRow,
         attachment,
         env,
@@ -572,7 +505,7 @@ export async function openEstimateForIntakeCase(deps) {
         bytes: validated.bytes,
         sha256: validated.sha256,
         originalFilename: attachment.safeFilename || "plan.pdf",
-        mimeType: validated.mimeType || attachment.mimeType || "application/pdf",
+        mimeType: "application/pdf",
         metadata: {
           intakeCaseId: caseId,
           intakeAttachmentId: attachment.id || null,
