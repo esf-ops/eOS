@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
 import {
   normalizeProductCatalogDocumentUrl,
   productCatalogDocPageUrls,
+  productCatalogInfoPath,
   productIdFromDocumentPdfUrl,
 } from "./lib/productCatalogDocuments";
 
 type ProductCatalogSpecViewerProps = {
   productName: string;
-  /** Raw or legacy catalog PDF path (normalized internally). */
+  /** Catalog PDF asset path — used only for blob download, never as a navigation target. */
   pdfUrl: string;
   /** Optional explicit product id; derived from pdfUrl when omitted. */
   productId?: string;
@@ -17,9 +18,38 @@ type ProductCatalogSpecViewerProps = {
   variant?: "overlay" | "page";
 };
 
+type DownloadPhase = "idle" | "preparing" | "error";
+
+function buildInfoViewerUrl(productId: string): string {
+  const path = productCatalogInfoPath(productId);
+  if (typeof window === "undefined") return path;
+  const url = new URL(path, window.location.origin);
+  const current = new URLSearchParams(window.location.search);
+  for (const key of ["kiosk", "arreya"]) {
+    const value = current.get(key);
+    if (value) url.searchParams.set(key, value);
+  }
+  return `${url.pathname}${url.search}`;
+}
+
+async function triggerBlobDownload(blob: Blob, filename: string): Promise<void> {
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 /**
  * In-app document viewer for Product Catalog specs.
- * Renders pre-converted page PNGs — never embeds a PDF (Chrome/extensions often block those).
+ * Renders pre-converted page PNGs — never embeds or navigates to a PDF.
  */
 export function ProductCatalogSpecViewer({
   productName,
@@ -28,12 +58,19 @@ export function ProductCatalogSpecViewer({
   onClose,
   variant = "overlay",
 }: ProductCatalogSpecViewerProps) {
-  const normalizedUrl = normalizeProductCatalogDocumentUrl(pdfUrl) ?? pdfUrl;
-  const productId = productIdProp || productIdFromDocumentPdfUrl(normalizedUrl) || "";
+  const pdfAssetUrl = normalizeProductCatalogDocumentUrl(pdfUrl) ?? pdfUrl;
+  const productId = productIdProp || productIdFromDocumentPdfUrl(pdfAssetUrl) || "";
   const pageUrls = useMemo(() => productCatalogDocPageUrls(productId), [productId]);
+  const infoViewerUrl = useMemo(
+    () => (productId ? buildInfoViewerUrl(productId) : ""),
+    [productId]
+  );
 
   const [failedPages, setFailedPages] = useState<Record<string, boolean>>({});
   const [loadedCount, setLoadedCount] = useState(0);
+  const [downloadPhase, setDownloadPhase] = useState<DownloadPhase>("idle");
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [showImageDownload, setShowImageDownload] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -49,13 +86,104 @@ export function ProductCatalogSpecViewer({
   useEffect(() => {
     setFailedPages({});
     setLoadedCount(0);
-  }, [productId, normalizedUrl]);
+    setDownloadPhase("idle");
+    setDownloadError(null);
+    setShowImageDownload(false);
+  }, [productId, pdfAssetUrl]);
+
+  const openInNewTab = useCallback(() => {
+    if (!infoViewerUrl) {
+      setDownloadError("Viewer link is unavailable for this product.");
+      return;
+    }
+    window.open(infoViewerUrl, "_blank", "noopener,noreferrer");
+  }, [infoViewerUrl]);
+
+  const downloadImages = useCallback(async () => {
+    const usable = pageUrls.filter((url) => !failedPages[url]);
+    if (!usable.length) {
+      setDownloadError("Spec sheet images are unavailable on this device.");
+      return;
+    }
+    setDownloadPhase("preparing");
+    setDownloadError(null);
+    try {
+      // Save each page; kiosks that block multi-file prompts still get page 1 first.
+      for (let i = 0; i < usable.length; i += 1) {
+        const url = usable[i];
+        const res = await fetch(url, { credentials: "same-origin" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const suffix = usable.length > 1 ? `-page-${i + 1}` : "";
+        await triggerBlobDownload(blob, `${productId || "spec-sheet"}${suffix}.png`);
+      }
+      setDownloadPhase("idle");
+    } catch {
+      setDownloadPhase("error");
+      setDownloadError("Download could not be started on this device.");
+    }
+  }, [failedPages, pageUrls, productId]);
+
+  const downloadPdf = useCallback(async () => {
+    if (!pdfAssetUrl || !productId) {
+      setDownloadPhase("error");
+      setDownloadError("Download could not be started on this device.");
+      setShowImageDownload(pageUrls.length > 0);
+      return;
+    }
+    setDownloadPhase("preparing");
+    setDownloadError(null);
+    try {
+      const response = await fetch(pdfAssetUrl, { credentials: "same-origin" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const blob = await response.blob();
+      await triggerBlobDownload(blob, `${productId}.pdf`);
+      setDownloadPhase("idle");
+      setShowImageDownload(false);
+    } catch {
+      setDownloadPhase("error");
+      setDownloadError("Download could not be started on this device.");
+      setShowImageDownload(pageUrls.length > 0);
+    }
+  }, [pageUrls.length, pdfAssetUrl, productId]);
 
   const visibleCount = pageUrls.filter((url) => !failedPages[url]).length;
   const missingPages = pageUrls.length === 0;
   const allFailed = pageUrls.length > 0 && visibleCount === 0;
   const showFallback = missingPages || allFailed;
   const stillLoading = pageUrls.length > 0 && !showFallback && loadedCount < visibleCount;
+  const downloadLabel = downloadPhase === "preparing" ? "Preparing…" : "Download PDF";
+
+  const actionButtons = (
+    <>
+      <button
+        type="button"
+        className="pc-doc-viewer-btn pc-doc-viewer-btn--ghost"
+        onClick={() => void downloadPdf()}
+        disabled={downloadPhase === "preparing"}
+      >
+        {downloadLabel}
+      </button>
+      {showImageDownload ? (
+        <button
+          type="button"
+          className="pc-doc-viewer-btn pc-doc-viewer-btn--ghost"
+          onClick={() => void downloadImages()}
+          disabled={downloadPhase === "preparing"}
+        >
+          Download images
+        </button>
+      ) : null}
+      {variant === "overlay" && infoViewerUrl ? (
+        <button type="button" className="pc-doc-viewer-btn pc-doc-viewer-btn--ghost" onClick={openInNewTab}>
+          Open in new tab
+        </button>
+      ) : null}
+      <button type="button" className="pc-doc-viewer-btn pc-doc-viewer-btn--solid" onClick={onClose}>
+        Close
+      </button>
+    </>
+  );
 
   const body = (
     <div
@@ -73,40 +201,25 @@ export function ProductCatalogSpecViewer({
           </div>
         </div>
         <div className="pc-doc-viewer-actions">
-          <a className="pc-doc-viewer-btn pc-doc-viewer-btn--ghost" href={normalizedUrl} download>
-            Download PDF
-          </a>
-          <a
-            className="pc-doc-viewer-btn pc-doc-viewer-btn--ghost"
-            href={normalizedUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            Open in new tab
-          </a>
-          <button type="button" className="pc-doc-viewer-btn pc-doc-viewer-btn--solid" onClick={onClose}>
-            Close
-          </button>
+          {actionButtons}
         </div>
+        {downloadError ? (
+          <p className="pc-doc-viewer-action-error" role="alert">
+            {downloadError}
+          </p>
+        ) : null}
       </header>
 
       <div className="pc-doc-viewer-body pc-doc-viewer-body--pages">
         {showFallback ? (
           <div className="pc-doc-viewer-fallback" role="alert">
             <p>Spec sheet could not be displayed.</p>
-            <div className="pc-doc-viewer-fallback-actions">
-              <a className="pc-doc-viewer-btn pc-doc-viewer-btn--solid" href={normalizedUrl} download>
-                Download PDF
-              </a>
-              <a
-                className="pc-doc-viewer-btn pc-doc-viewer-btn--ghost"
-                href={normalizedUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                Open in new tab
-              </a>
-            </div>
+            <div className="pc-doc-viewer-fallback-actions">{actionButtons}</div>
+            {downloadError ? (
+              <p className="pc-doc-viewer-action-error" role="alert">
+                {downloadError}
+              </p>
+            ) : null}
           </div>
         ) : (
           <>

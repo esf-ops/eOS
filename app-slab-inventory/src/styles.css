@@ -4119,6 +4119,14 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   align-items: center;
 }
 
+.pc-doc-viewer-action-error {
+  flex: 1 0 100%;
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #9b1c1c;
+}
+
 .pc-doc-viewer-btn {
   display: inline-flex;
   align-items: center;
@@ -4131,6 +4139,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   text-decoration: none;
   cursor: pointer;
   border: 1px solid transparent;
+  font-family: inherit;
+}
+
+.pc-doc-viewer-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 .pc-doc-viewer-btn--ghost {

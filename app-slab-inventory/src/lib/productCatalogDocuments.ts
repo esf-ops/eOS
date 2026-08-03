@@ -9,7 +9,9 @@
  * `productCatalogDocPages.generated.ts`, built by
  * `scripts/build-product-catalog-doc-pages.mjs`).
  *
- * Raw PDF URLs are only used as Download / Open-in-new-tab fallbacks.
+ * "Open in new tab" uses `/public/product-catalog/info/:productId` (PNG viewer).
+ * PDF assets are only fetched as blobs for optional download — never used as
+ * navigation / iframe / embed targets.
  */
 
 import { PRODUCT_CATALOG_DOC_PAGES } from "./productCatalogDocPages.generated";
