@@ -132,7 +132,14 @@ export function validatePlanBytes(bytes, hint = {}) {
  */
 export function isPreviewSupportedMeta(meta = {}) {
   const support = String(meta.support || "");
-  if (support === "direct_pdf" || support === "too_large") return support === "direct_pdf";
+  if (
+    support === "direct_pdf" ||
+    support === "direct_image_plan" ||
+    support === "image_needs_review"
+  ) {
+    return support !== "too_large";
+  }
+  if (support === "too_large") return false;
   const mime = String(meta.mimeType || meta.contentType || "").toLowerCase();
   const name = String(meta.filename || meta.name || "").toLowerCase();
   if (mime.includes("pdf") || /\.pdf$/i.test(name)) return true;
