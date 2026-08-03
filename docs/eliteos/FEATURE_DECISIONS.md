@@ -3576,3 +3576,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Hero metrics from live portfolio aggregates without new APIs; deeper Studio V2 workspace chrome alignment; replacing More compatibility surfaces with retirement plan. |
 
 ---
+### 258. Digital Estimates command-center readability pass (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `feature/elite100-production-command-center-layout` |
+| **Decision** | Digital Estimates command center received a presentation-only readability pass. Main rows now show status, values, activity, next action, and safe actions; secondary publication/activity details remain in the drawer. No pricing, publish, approval, revision, acceptance, sold, or customer configuration behavior changed. |
+| **Why** | Working Digital Estimate rows were operationally dense (boolean flags, UUIDs, stacked values) and hard to scan compared with Quote Library / Estimates. |
+| **Impacted** | `LiveDigitalEstimatesPage.tsx`, `styles.css`, Digital Estimates UI tests, this doc. |
+| **Protected / unchanged** | Pricing formulas, selection save, acceptance rules, publish/repair, approval, revision, sold, AI Takeoff, Internal Estimate, migrations, Live DE list/detail API contracts. |
+| **Revisit trigger** | Staff display names for estimators become available; command-center status set expands beyond current pills. |
+
+---
