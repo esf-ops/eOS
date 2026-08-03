@@ -65,6 +65,7 @@ export default function PublicProductCatalogInfoPage() {
   return (
     <ProductCatalogSpecViewer
       productName={item.name}
+      productId={item.id}
       pdfUrl={item.specSheetUrl}
       onClose={goBackToCatalog}
       variant="page"

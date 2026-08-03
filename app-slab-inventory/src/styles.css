@@ -4152,11 +4152,61 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   position: relative;
 }
 
+.pc-doc-viewer-body--pages {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #cfd6e0;
+  padding: clamp(12px, 2vw, 22px);
+}
+
 .pc-doc-viewer-frame {
   width: 100%;
   height: 100%;
   border: 0;
   background: #fff;
+}
+
+.pc-doc-viewer-loading {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--eos-ink-muted);
+}
+
+.pc-doc-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.pc-doc-page {
+  margin: 0;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 10px 28px rgba(11, 26, 51, 0.14);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+}
+
+.pc-doc-page-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+}
+
+.pc-doc-page-caption {
+  margin: 0;
+  padding: 8px 12px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+  border-top: 1px solid var(--eos-line);
+  background: #f8fafc;
 }
 
 .pc-doc-viewer-fallback {

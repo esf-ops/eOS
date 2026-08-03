@@ -611,6 +611,7 @@ export function ProductCatalogModal({
       {specViewerOpen && item.specSheetUrl ? (
         <ProductCatalogSpecViewer
           productName={item.name}
+          productId={item.id}
           pdfUrl={normalizeProductCatalogDocumentUrl(item.specSheetUrl) ?? item.specSheetUrl}
           onClose={() => setSpecViewerOpen(false)}
         />

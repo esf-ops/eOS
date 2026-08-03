@@ -1,31 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
-import { normalizeProductCatalogDocumentUrl } from "./lib/productCatalogDocuments";
+import {
+  normalizeProductCatalogDocumentUrl,
+  productCatalogDocPageUrls,
+  productIdFromDocumentPdfUrl,
+} from "./lib/productCatalogDocuments";
 
 type ProductCatalogSpecViewerProps = {
   productName: string;
   /** Raw or legacy catalog PDF path (normalized internally). */
   pdfUrl: string;
+  /** Optional explicit product id; derived from pdfUrl when omitted. */
+  productId?: string;
   onClose: () => void;
   /** Compact overlay stacked above the product modal (default). */
   variant?: "overlay" | "page";
 };
 
 /**
- * In-app PDF viewer for Product Catalog documents.
- * Avoids navigating directly to a raw PDF URL (often blocked by extensions).
+ * In-app document viewer for Product Catalog specs.
+ * Renders pre-converted page PNGs — never embeds a PDF (Chrome/extensions often block those).
  */
 export function ProductCatalogSpecViewer({
   productName,
   pdfUrl,
+  productId: productIdProp,
   onClose,
   variant = "overlay",
 }: ProductCatalogSpecViewerProps) {
   const normalizedUrl = normalizeProductCatalogDocumentUrl(pdfUrl) ?? pdfUrl;
-  const [embedFailed, setEmbedFailed] = useState(false);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const blobRef = useRef<string | null>(null);
+  const productId = productIdProp || productIdFromDocumentPdfUrl(normalizedUrl) || "";
+  const pageUrls = useMemo(() => productCatalogDocPageUrls(productId), [productId]);
+
+  const [failedPages, setFailedPages] = useState<Record<string, boolean>>({});
+  const [loadedCount, setLoadedCount] = useState(0);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -39,45 +47,15 @@ export function ProductCatalogSpecViewer({
   }, [onClose]);
 
   useEffect(() => {
-    let cancelled = false;
-    setEmbedFailed(false);
-    setLoadError(null);
-    setBlobUrl(null);
+    setFailedPages({});
+    setLoadedCount(0);
+  }, [productId, normalizedUrl]);
 
-    (async () => {
-      try {
-        const res = await fetch(normalizedUrl, { credentials: "same-origin" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        if (cancelled) return;
-        if (blobRef.current) URL.revokeObjectURL(blobRef.current);
-        const objectUrl = URL.createObjectURL(blob);
-        blobRef.current = objectUrl;
-        setBlobUrl(objectUrl);
-      } catch {
-        if (!cancelled) {
-          setLoadError("Spec sheet could not be displayed.");
-          setEmbedFailed(true);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (blobRef.current) {
-        URL.revokeObjectURL(blobRef.current);
-        blobRef.current = null;
-      }
-    };
-  }, [normalizedUrl]);
-
-  const onIframeError = useCallback(() => {
-    setEmbedFailed(true);
-    setLoadError("Spec sheet could not be displayed.");
-  }, []);
-
-  const embedSrc = blobUrl ?? `${normalizedUrl}#view=FitH`;
-  const showFallback = embedFailed || Boolean(loadError);
+  const visibleCount = pageUrls.filter((url) => !failedPages[url]).length;
+  const missingPages = pageUrls.length === 0;
+  const allFailed = pageUrls.length > 0 && visibleCount === 0;
+  const showFallback = missingPages || allFailed;
+  const stillLoading = pageUrls.length > 0 && !showFallback && loadedCount < visibleCount;
 
   const body = (
     <div
@@ -95,11 +73,7 @@ export function ProductCatalogSpecViewer({
           </div>
         </div>
         <div className="pc-doc-viewer-actions">
-          <a
-            className="pc-doc-viewer-btn pc-doc-viewer-btn--ghost"
-            href={normalizedUrl}
-            download
-          >
+          <a className="pc-doc-viewer-btn pc-doc-viewer-btn--ghost" href={normalizedUrl} download>
             Download PDF
           </a>
           <a
@@ -116,10 +90,10 @@ export function ProductCatalogSpecViewer({
         </div>
       </header>
 
-      <div className="pc-doc-viewer-body">
+      <div className="pc-doc-viewer-body pc-doc-viewer-body--pages">
         {showFallback ? (
           <div className="pc-doc-viewer-fallback" role="alert">
-            <p>{loadError ?? "Spec sheet could not be displayed."}</p>
+            <p>Spec sheet could not be displayed.</p>
             <div className="pc-doc-viewer-fallback-actions">
               <a className="pc-doc-viewer-btn pc-doc-viewer-btn--solid" href={normalizedUrl} download>
                 Download PDF
@@ -135,12 +109,39 @@ export function ProductCatalogSpecViewer({
             </div>
           </div>
         ) : (
-          <iframe
-            className="pc-doc-viewer-frame"
-            title={`${productName} spec sheet`}
-            src={embedSrc}
-            onError={onIframeError}
-          />
+          <>
+            {stillLoading ? (
+              <p className="pc-doc-viewer-loading" aria-live="polite">
+                Loading spec sheet…
+              </p>
+            ) : null}
+            <div className="pc-doc-pages">
+              {pageUrls.map((url, index) =>
+                failedPages[url] ? null : (
+                  <figure key={url} className="pc-doc-page">
+                    <img
+                      src={url}
+                      alt={`${productName} — page ${index + 1}`}
+                      className="pc-doc-page-img"
+                      loading={index === 0 ? "eager" : "lazy"}
+                      onLoad={() => setLoadedCount((n) => n + 1)}
+                      onError={() =>
+                        setFailedPages((prev) => ({
+                          ...prev,
+                          [url]: true,
+                        }))
+                      }
+                    />
+                    {pageUrls.length > 1 ? (
+                      <figcaption className="pc-doc-page-caption">
+                        Page {index + 1} of {pageUrls.length}
+                      </figcaption>
+                    ) : null}
+                  </figure>
+                )
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>
