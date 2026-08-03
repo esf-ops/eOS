@@ -64,6 +64,10 @@ assert.match(service, /published:\s*false/);
 assert.match(service, /sold:\s*false/);
 assert.match(page, /startSharedInboxEstimate/);
 assert.match(page, /resume_estimate|Start Estimate|primaryAction/);
+assert.match(
+  page,
+  /const\s*\[\s*importingKey\s*,\s*setImportingKey\s*\]\s*=\s*useState/
+);
 console.log("ok: handoff route + no calculate/publish/sold; Start/Resume anchors remain");
 
 console.log("\nsharedInboxPlanTakeoff.ui.test.mjs: ok\n");

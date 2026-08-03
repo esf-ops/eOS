@@ -135,6 +135,8 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [mailboxDisplay, setMailboxDisplay] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  /** Message key currently running Start/Import Estimate (disables row actions). */
+  const [importingKey, setImportingKey] = useState<string | null>(null);
   const [sendingTakeoffKey, setSendingTakeoffKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
