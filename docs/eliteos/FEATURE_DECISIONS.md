@@ -3626,3 +3626,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Envelope republish migrates historical wrong includedInBaseline flags at rest (read-time alignment already corrects public DTO). |
 
 ---
+
+### 262. Public Digital Estimate selected-state chrome hotfix (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/public-de-selected-style-light` |
+| **Decision** | Public Digital Estimate selected option rows use dedicated light burgundy selected tokens (`.de-option-selected` / `.de-option-selected-badge`) and must not render as dark green/gray fills. Legacy document CSS variables in `styles.css` are namespaced (`--de-doc-*`) so they no longer overwrite theme `--accent` / `--border` / `--radius` after import. |
+| **Why** | `main.tsx` imports `lovable-theme.css` then `styles.css`. Legacy `:root --accent: #24513f` overwrote the premium light accent, so `.de-option-selected { background: color-mix(..., var(--accent), ...) }` still painted dark green selected bars (especially edge rows). |
+| **Impacted** | `lovable-theme.css` selected tokens, `styles.css` legacy token names, `ConfigurationView.tsx` option selected classes (edge, ChoiceRadio, material, sink/faucet cards/finishes, accessories, specialty, plumbing source), selected-style tests, this doc. |
+| **Protected / unchanged** | Pricing, backsplash logic, custom-height logic, selection save, acceptance, publish/repair, Studio V2, sold, AI Takeoff, Internal Estimate, migrations. |
+| **Revisit trigger** | Split legacy document CSS into a separate entry that never shares `:root` with the Tailwind configuration theme. |
+
+---
