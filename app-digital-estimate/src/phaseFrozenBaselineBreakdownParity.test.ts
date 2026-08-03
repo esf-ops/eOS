@@ -239,8 +239,9 @@ const unsafeRoomPricing = {
     "4. print never shows a $0 countertop for priced countertop scope",
   );
   assert.ok(
-    /failClosedRoomPricing\(savedCalc, publishedRoomPricing\)/.test(view),
-    "4. the view builds the print model from fail-closed room pricing",
+    /resolveCustomerSafeRoomPricing\(savedCalc,\s*publishedRoomPricing\)/.test(view) ||
+      /failClosedRoomPricing\(savedCalc, publishedRoomPricing\)/.test(view),
+    "4. the view builds the print model from customer-safe room pricing",
   );
   console.log("ok: 4. print estimate uses baseline room pricing when frozen");
 }

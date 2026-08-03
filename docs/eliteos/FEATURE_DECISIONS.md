@@ -3600,3 +3600,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Dedicated design system package for customer heads; print document shared `cep-*` visual refresh. |
 
 ---
+
+### 260. Public Digital Estimate initial-load breakdown hydration (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `feature/public-digital-estimate-premium-ui` |
+| **Decision** | Public Digital Estimate initial load now hydrates the customer-safe estimate breakdown from the published/as-configured calculation source, so customers do not need to save a selection before seeing the breakdown. No pricing, save, acceptance, publish, repair, revision, or sold behavior changed. |
+| **Why** | Fresh published links often expose baseline totals without a selection `latestCalculation.roomPricing` DTO; the sidebar treated missing rooms as “Save a selection…” even when `estimate.roomPricing` already held the published snapshot. |
+| **Impacted** | `customerEstimateBreakdown.ts` (`resolveCustomerSafeRoomPricing`), `ConfigurationView.tsx` display/print hydration, initial-load breakdown test, this doc. |
+| **Protected / unchanged** | Pricing formulas, selection save payloads, acceptance rules, publish/repair, Studio V2, sold, AI Takeoff, Internal Estimate, migrations, token lifecycle. |
+| **Revisit trigger** | Backend exchange always seeds a baseline calculation DTO with published roomPricing for brand-new sessions. |
+
+---

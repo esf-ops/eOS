@@ -93,7 +93,10 @@ for (const breakdown of [original, updated]) {
     (group) => group.roomName === null,
   );
   assert.ok(project?.lines.some((line) => line.label === "Delivery service"));
-  assert.equal(project?.lines.at(-1)?.label, "Project total");
+  assert.equal(
+    project?.lines.at(-1)?.label,
+    breakdown.kind === "original" ? "Published estimate" : "Your estimate",
+  );
   assert.equal(breakdown.total, 6300);
 }
 console.log("ok: Original and Updated share Countertop/Backsplash/Add-ons/Room total hierarchy");

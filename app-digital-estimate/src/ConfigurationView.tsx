@@ -18,9 +18,9 @@ import {
 import {
   buildChangesBreakdown,
   buildUpdatedBreakdown,
-  failClosedRoomPricing,
   groupBreakdownLinesByRoom,
   isUnsafeCustomerRoomPricing,
+  resolveCustomerSafeRoomPricing,
 } from "./customerEstimateBreakdown";
 import { summarizeSideSplashSelections } from "./sideSplashSummary";
 import { buildDigitalEstimatePrintModel } from "./customerPrintAdapter";
@@ -2140,12 +2140,33 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   // breakdown and print all read room pricing off these calc objects. Also
   // catch Countertop $0 / backsplash-only collapse on persisted calcs that
   // predate the authority flag, so print/PDF cannot leak that breakdown.
+  // Fresh published links may have totals without a selection calculation yet;
+  // hydrate room detail from the published snapshot so the breakdown appears
+  // before the customer saves a selection (never invents amounts).
   const publishedRoomPricing = state.estimate?.roomPricing ?? null;
   const forSafeDisplay = (
     calc: typeof latestCalc,
   ): typeof latestCalc => {
-    if (!calc) return calc;
-    const safeRooms = failClosedRoomPricing(calc, publishedRoomPricing);
+    const safeRooms = resolveCustomerSafeRoomPricing(calc, publishedRoomPricing);
+    if (!calc) {
+      if (!safeRooms) return calc;
+      const baseline =
+        publishedRoomPricing?.projectTotal ??
+        state.estimate?.totals?.estimatedProjectTotal ??
+        state.configuration?.baselineDisplayTotal ??
+        null;
+      return {
+        roomPricing: safeRooms,
+        roomPricingChanges: { kind: "changes", rows: [], totalDelta: 0 },
+        configuredDisplayTotal: baseline,
+        pricedSelectionTotal: baseline,
+        baselineDisplayTotal: baseline,
+        publishedBaselineTotal: baseline,
+        displayTotalDelta: 0,
+        displayDelta: 0,
+        customerPricingStatus: "baseline",
+      } as typeof latestCalc;
+    }
     const unsafe = isUnsafeCustomerRoomPricing(
       (calc as { roomPricing?: import("./publicConfigApi").PublicRoomPricing | null }).roomPricing,
     );
@@ -2905,7 +2926,7 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
 
   const printModel = useMemo(
     () => {
-      const printRoomPricing = failClosedRoomPricing(savedCalc, publishedRoomPricing);
+      const printRoomPricing = resolveCustomerSafeRoomPricing(savedCalc, publishedRoomPricing);
       const savedBaseline =
         (savedCalc as { baselineDisplayTotal?: number | null; publishedBaselineTotal?: number | null } | null)
           ?.baselineDisplayTotal ??
