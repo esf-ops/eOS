@@ -1,9 +1,13 @@
 /**
  * All Estimates — Studio-backed historical registry.
- * Command Center remains the action queue.
+ * Presentation polish only; API and status meanings unchanged.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { apiGet } from "../lib/api";
+import Elite100StatusPill, {
+  type Elite100StatusTone,
+} from "../shell/Elite100StatusPill";
+import Elite100ActionBar from "../shell/Elite100ActionBar";
 
 export type AllEstimatesPageProps = {
   authToken: string | null;
@@ -37,12 +41,69 @@ const FILTERS: Array<{ key: string; label: string }> = [
   { key: "changes_requested", label: "Changes Requested" },
   { key: "accepted_awaiting_sold_review", label: "Accepted — Awaiting Sold Review" },
   { key: "sold", label: "Sold" },
-  { key: "archived", label: "Archived" }
+  { key: "archived", label: "Archived" },
 ];
 
 function money(n: number | null | undefined) {
   if (n == null || !Number.isFinite(Number(n))) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(n));
+}
+
+function formatWhen(iso: string | null | undefined) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return String(iso);
+  }
+}
+
+function lifecycleTone(status: string | null | undefined): Elite100StatusTone {
+  const s = String(status || "").toLowerCase();
+  if (s.includes("sold")) return "success";
+  if (s.includes("accepted")) return "accent";
+  if (s.includes("published")) return "info";
+  if (s.includes("archived")) return "neutral";
+  if (s.includes("changes") || s.includes("approval") || s.includes("pricing") || s.includes("scope"))
+    return "warn";
+  if (s.includes("draft")) return "neutral";
+  return "neutral";
+}
+
+function publicationLabel(status: string | null | undefined): string | null {
+  if (!status) return null;
+  const s = String(status).toLowerCase();
+  if (s === "active" || s === "published") return "Published";
+  if (s === "none" || s === "unpublished") return null;
+  return status.replace(/_/g, " ");
+}
+
+function acceptanceLabel(status: string | null | undefined): string | null {
+  if (!status || status === "none") return null;
+  const s = String(status).toLowerCase();
+  if (s.includes("configured")) return "Accepted · Configured";
+  if (s.includes("published") || s === "accepted") return "Accepted";
+  if (s.includes("awaiting")) return "Accepted — Awaiting Sold Review";
+  return status.replace(/_/g, " ");
+}
+
+function nextActionLabel(row: AllEstimatesRow): string {
+  const life = String(row.lifecycleStatus || "").toLowerCase();
+  if (life.includes("sold")) return "Review sold record";
+  if (life.includes("accepted")) return "Complete sold review";
+  if (life.includes("changes")) return "Review customer changes";
+  if (life.includes("published")) return "Open Digital Estimate workspace";
+  if (life.includes("approval")) return "Review & approve";
+  if (life.includes("pricing")) return "Finish pricing";
+  if (life.includes("scope")) return "Complete scope";
+  if (life.includes("draft")) return "Continue drafting";
+  return "Open estimate";
 }
 
 export default function AllEstimatesPage({ authToken, onOpenEstimate }: AllEstimatesPageProps) {
@@ -83,101 +144,135 @@ export default function AllEstimatesPage({ authToken, onOpenEstimate }: AllEstim
   }, [load]);
 
   return (
-    <div className="eos-page" data-testid="studio-all-estimates">
-      <header className="mb-4">
-        <h1 className="text-xl font-semibold tracking-tight">All Estimates</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Complete Studio estimate history. Command Center remains the action queue.
-        </p>
+    <div className="e100-page" data-testid="studio-all-estimates">
+      <header className="e100-page-header">
+        <div>
+          <h1 className="e100-page-title">Estimates</h1>
+          <p className="e100-page-sub">
+            Studio estimate registry — drafts through sold. Open a row to continue in Studio V2.
+          </p>
+        </div>
+        <Elite100ActionBar>
+          <button
+            type="button"
+            className="eq-btn-secondary"
+            onClick={() => void load()}
+            data-testid="all-estimates-refresh"
+          >
+            Refresh
+          </button>
+        </Elite100ActionBar>
       </header>
 
-      <div className="mb-3 flex flex-wrap gap-2">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            data-testid={`all-estimates-filter-${f.key}`}
-            className={
-              filter === f.key
-                ? "rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background"
-                : "rounded-md border border-border px-2.5 py-1 text-xs"
-            }
-            onClick={() => setFilter(f.key)}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mb-4 flex gap-2">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search customer, project, estimate…"
-          className="min-w-[220px] flex-1 rounded-md border border-border px-3 py-2 text-sm"
-          data-testid="all-estimates-search"
-        />
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="rounded-md border border-border px-3 py-2 text-sm"
-        >
-          Refresh
-        </button>
+      <div className="e100-filter-card" data-testid="all-estimates-filters">
+        <div className="e100-filter-chips" role="tablist" aria-label="Estimate status filters">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              role="tab"
+              aria-selected={filter === f.key}
+              data-testid={`all-estimates-filter-${f.key}`}
+              className={`e100-filter-chip${filter === f.key ? " is-active" : ""}`}
+              onClick={() => setFilter(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="e100-filter-search">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search customer, project, estimate…"
+            className="e100-search-input"
+            data-testid="all-estimates-search"
+          />
+        </div>
       </div>
 
       {error ? (
-        <p className="text-sm text-destructive" role="alert">
+        <p className="error-box" role="alert">
           {error}
         </p>
       ) : null}
-      {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+      {loading ? <p className="muted">Loading…</p> : null}
 
-      <p className="mb-2 text-xs text-muted-foreground">{total} estimate{total === 1 ? "" : "s"}</p>
+      <p className="e100-result-meta" data-testid="all-estimates-count">
+        {total} estimate{total === 1 ? "" : "s"}
+      </p>
 
-      <ul className="divide-y divide-border rounded-lg border border-border bg-background">
-        {rows.map((r) => (
-          <li
-            key={r.estimateId}
-            className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
-            data-testid="all-estimates-row"
-          >
-            <div className="min-w-0">
-              <div className="font-medium text-foreground">
-                {r.customerName || "Customer"} — {r.projectName || "Project"}
+      <div className="e100-table-card" role="table" aria-label="Estimates">
+        <div className="e100-table-head" role="row">
+          <span role="columnheader">Customer / project</span>
+          <span role="columnheader">Estimate</span>
+          <span role="columnheader">Status</span>
+          <span role="columnheader">Total</span>
+          <span role="columnheader">Updated</span>
+          <span role="columnheader">Next action</span>
+          <span role="columnheader"> </span>
+        </div>
+        {rows.map((r) => {
+          const pub = publicationLabel(r.publicationStatus);
+          const acc = acceptanceLabel(r.acceptanceStatus);
+          const sold = r.soldStatus && r.soldStatus !== "none";
+          return (
+            <article
+              key={r.estimateId}
+              className="e100-table-row"
+              role="row"
+              data-testid="all-estimates-row"
+            >
+              <div className="e100-table-cell e100-table-cell--primary" role="cell">
+                <strong>{r.customerName || "Customer"}</strong>
+                <span className="muted">{r.projectName || "Project"}</span>
               </div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {r.quoteNumber || r.intakeCaseId} · Rev {r.revision} ·{" "}
-                {r.lifecycleStatusLabel || r.lifecycleStatus}
-                {r.publicationStatus ? ` · Pub: ${r.publicationStatus}` : ""}
-                {r.acceptanceStatus && r.acceptanceStatus !== "none"
-                  ? ` · Acceptance: ${r.acceptanceStatus}`
-                  : ""}
-                {r.soldStatus && r.soldStatus !== "none" ? ` · Sold` : ""}
+              <div className="e100-table-cell" role="cell">
+                <span>{r.quoteNumber || r.intakeCaseId}</span>
+                <span className="muted">Rev {r.revision}</span>
               </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="tabular-nums text-sm font-semibold">{money(r.customerTotal)}</span>
-              <button
-                type="button"
-                data-testid="all-estimates-open"
-                className="rounded-md bg-foreground px-3 py-1.5 text-xs font-semibold text-background"
-                onClick={() =>
-                  onOpenEstimate(r.primaryAction?.intakeCaseId || r.intakeCaseId, {
-                    openTarget: "scope"
-                  })
-                }
-              >
-                Open
-              </button>
-            </div>
-          </li>
-        ))}
+              <div className="e100-table-cell e100-table-cell--pills" role="cell">
+                <Elite100StatusPill
+                  label={r.lifecycleStatusLabel || r.lifecycleStatus || "Status"}
+                  tone={lifecycleTone(r.lifecycleStatusLabel || r.lifecycleStatus)}
+                />
+                {pub ? <Elite100StatusPill label={pub} tone="info" /> : null}
+                {acc ? <Elite100StatusPill label={acc} tone="accent" /> : null}
+                {sold ? <Elite100StatusPill label="Sold" tone="success" /> : null}
+              </div>
+              <div className="e100-table-cell e100-table-cell--num" role="cell">
+                {money(r.customerTotal)}
+              </div>
+              <div className="e100-table-cell muted" role="cell">
+                {formatWhen(r.updatedAt)}
+              </div>
+              <div className="e100-table-cell" role="cell">
+                <span className="e100-next-action">{nextActionLabel(r)}</span>
+              </div>
+              <div className="e100-table-cell e100-table-cell--actions" role="cell">
+                <button
+                  type="button"
+                  data-testid="all-estimates-open"
+                  className="eq-btn-primary eq-btn-small"
+                  onClick={() =>
+                    onOpenEstimate(r.primaryAction?.intakeCaseId || r.intakeCaseId, {
+                      openTarget: "scope",
+                    })
+                  }
+                >
+                  Open
+                </button>
+              </div>
+            </article>
+          );
+        })}
         {!loading && rows.length === 0 ? (
-          <li className="px-4 py-8 text-center text-sm text-muted-foreground">No estimates match.</li>
+          <div className="e100-empty-inline" data-testid="all-estimates-empty">
+            No estimates match.
+          </div>
         ) : null}
-      </ul>
+      </div>
     </div>
   );
 }

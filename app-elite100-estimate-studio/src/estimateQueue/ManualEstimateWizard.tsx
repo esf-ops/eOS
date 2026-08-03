@@ -201,82 +201,98 @@ export default function ManualEstimateWizard({
 
         {mode === "manual" ? (
           <form
-            className="manual-estimate-form"
+            className="manual-estimate-form e100-new-estimate-form"
             data-testid="new-estimate-manual-form"
             onSubmit={(e) => {
               e.preventDefault();
               void createManual();
             }}
           >
-            <p className="muted">
+            <p className="muted e100-new-estimate-lead">
               Customer name and project name are enough to start — everything below stays editable
               after the estimate opens. Creating this estimate never publishes or notifies a customer.
             </p>
-            <label>
-              Customer name
-              <input
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                data-testid="new-estimate-customer-name"
-                autoComplete="organization"
-              />
-            </label>
-            <label>
-              Email
-              <input
-                type="email"
-                value={customerEmail}
-                onChange={(e) => setCustomerEmail(e.target.value)}
-                data-testid="new-estimate-customer-email"
-                autoComplete="email"
-              />
-            </label>
-            <label>
-              Phone
-              <input
-                type="tel"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                data-testid="new-estimate-customer-phone"
-                autoComplete="tel"
-              />
-            </label>
-            <label>
-              Project name
-              <input
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                data-testid="new-estimate-project-name"
-              />
-            </label>
-            <label>
-              Jobsite address
-              <input
-                value={projectAddress}
-                onChange={(e) => setProjectAddress(e.target.value)}
-                data-testid="new-estimate-project-address"
-              />
-            </label>
-            <label>
-              Pricing basis
-              <select
-                value={pricingBasis}
-                onChange={(e) => setPricingBasis(e.target.value === "direct" ? "direct" : "wholesale")}
-                data-testid="new-estimate-pricing-basis"
-              >
-                <option value="wholesale">Wholesale</option>
-                <option value="direct">Direct / Retail</option>
-              </select>
-            </label>
-            <label>
-              Internal notes
-              <textarea
-                value={internalNotes}
-                onChange={(e) => setInternalNotes(e.target.value)}
-                rows={3}
-                data-testid="new-estimate-notes"
-              />
-            </label>
+            <fieldset className="e100-form-group">
+              <legend>Customer</legend>
+              <p className="e100-form-help muted">Who this estimate is for. Optional fields can be filled later.</p>
+              <label>
+                Customer name
+                <input
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  data-testid="new-estimate-customer-name"
+                  autoComplete="organization"
+                  placeholder="Account or homeowner"
+                />
+              </label>
+              <div className="e100-form-row">
+                <label>
+                  Email
+                  <input
+                    type="email"
+                    value={customerEmail}
+                    onChange={(e) => setCustomerEmail(e.target.value)}
+                    data-testid="new-estimate-customer-email"
+                    autoComplete="email"
+                  />
+                </label>
+                <label>
+                  Phone
+                  <input
+                    type="tel"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    data-testid="new-estimate-customer-phone"
+                    autoComplete="tel"
+                  />
+                </label>
+              </div>
+            </fieldset>
+            <fieldset className="e100-form-group">
+              <legend>Project</legend>
+              <p className="e100-form-help muted">Used on the estimate and Digital Estimate title.</p>
+              <label>
+                Project name
+                <input
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  data-testid="new-estimate-project-name"
+                  placeholder="Kitchen remodel, bath, etc."
+                />
+              </label>
+              <label>
+                Jobsite address
+                <input
+                  value={projectAddress}
+                  onChange={(e) => setProjectAddress(e.target.value)}
+                  data-testid="new-estimate-project-address"
+                />
+              </label>
+            </fieldset>
+            <fieldset className="e100-form-group">
+              <legend>Pricing & notes</legend>
+              <label>
+                Pricing basis
+                <select
+                  value={pricingBasis}
+                  onChange={(e) => setPricingBasis(e.target.value === "direct" ? "direct" : "wholesale")}
+                  data-testid="new-estimate-pricing-basis"
+                >
+                  <option value="wholesale">Wholesale</option>
+                  <option value="direct">Direct / Retail</option>
+                </select>
+              </label>
+              <label>
+                Internal notes
+                <textarea
+                  value={internalNotes}
+                  onChange={(e) => setInternalNotes(e.target.value)}
+                  rows={3}
+                  data-testid="new-estimate-notes"
+                  placeholder="Staff-only notes — never shown to the customer"
+                />
+              </label>
+            </fieldset>
             <div className="manual-estimate-form-actions">
               {!skipChooser ? (
                 <button type="button" className="eq-btn-secondary" disabled={busy} onClick={() => setMode("chooser")}>

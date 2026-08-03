@@ -11,6 +11,7 @@ import DigitalEstimatesPage from "./digitalEstimates/DigitalEstimatesPage";
 import SharedInboxPage from "./estimateQueue/SharedInboxPage";
 import AllEstimatesPage from "./estimateQueue/AllEstimatesPage";
 import ManualEstimateWizard from "./estimateQueue/ManualEstimateWizard";
+import Elite100CommandShell from "./shell/Elite100CommandShell";
 import { apiGet, apiPost, ApiError } from "./lib/api";
 import {
   applyStudioV2WorkspaceUrl,
@@ -679,6 +680,7 @@ export default function StudioApp() {
           "studio-shell",
           mainNav === "shared-inbox" ||
           mainNav === "command-center" ||
+          mainNav === "all-estimates" ||
           mainNav === "digital-estimates" ||
           mainNav === "estimate-queue" ||
           mainNav === "estimate-workspace" ||
@@ -715,6 +717,10 @@ export default function StudioApp() {
           </div>
         ) : null}
 
+        <Elite100CommandShell
+          workspaceName={organizationName || "Elite Stone Fabrication"}
+          showHero={mainNav !== "estimate-workspace"}
+        >
         <nav className="studio-nav" aria-label="Studio sections" data-testid="studio-primary-nav">
           <button
             type="button"
@@ -954,16 +960,20 @@ export default function StudioApp() {
         ) : null}
 
         {mainNav === "studio-v2" && !estimateWorkspaceCaseId ? (
-          <section className="panel studio-v2-landing" data-testid="studio-v2-landing">
+          <section className="panel studio-v2-landing e100-empty-landing" data-testid="studio-v2-landing">
             <p className="studio-v2-landing__eyebrow">Estimate workspace · estimate authority</p>
             <h1>Studio V2 Workspace</h1>
             <p className="muted">
               Open an estimate from Inbox, Estimates, or Digital Estimates to begin.
             </p>
-            <div className="actions">
+            <p className="e100-empty-landing__hint muted">
+              Studio V2 is where estimators own scope, pricing, approval, and publish — not an error
+              state.
+            </p>
+            <div className="actions e100-action-bar e100-action-bar--start">
               <button
                 type="button"
-                className="eq-btn-secondary"
+                className="eq-btn-primary"
                 data-testid="studio-v2-landing-inbox"
                 onClick={() => clearWorkspaceSelectionFromNav("shared-inbox")}
               >
@@ -1240,6 +1250,7 @@ export default function StudioApp() {
           </section>
         </div>
         ) : null}
+        </Elite100CommandShell>
       </main>
 
       <ManualEstimateWizard
