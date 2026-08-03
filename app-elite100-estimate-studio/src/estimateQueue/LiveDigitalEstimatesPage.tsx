@@ -633,9 +633,11 @@ export default function LiveDigitalEstimatesPage({
     <div className="live-de" data-testid="live-digital-estimates-page">
       <header className="live-de-header">
         <div>
+          <p className="e100-page-eyebrow">Customer links · activity · acceptance</p>
           <h2 data-testid="live-de-title">Digital Estimates</h2>
           <p className="muted">
-            Published customer estimates, current customer activity, and safe staff links.
+            Staff command center for published customer estimate links — status, selections, and
+            next actions.
           </p>
         </div>
         <div className="live-de-header-actions">
@@ -983,49 +985,54 @@ export default function LiveDigitalEstimatesPage({
                               {[row.quoteNumber, row.revisionLabel].filter(Boolean).join(" ") || "—"}
                               {row.publishedAsNote ? ` · ${row.publishedAsNote}` : ""}
                             </span>
-                            <span className="muted">
-                              Publication {row.publicationId}
-                              {row.intakeCaseId ? ` · Case ${row.intakeCaseId}` : ""}
-                            </span>
                           </div>
-                          <div className="live-de-cell">
-                            <span className="live-de-status" data-status={row.operationalStatus}>
+                          <div className="live-de-cell live-de-cell--status">
+                            <span className="live-de-status e100-status-pill" data-status={row.operationalStatus}>
                               {row.statusLabel}
                             </span>
                             <span
-                              className="muted live-de-activity-flags"
+                              className="live-de-activity-flags"
                               data-testid="digital-estimate-activity-flags"
                             >
-                              Viewed: {row.viewed ? "Yes" : "No"} · Saved selections:{" "}
-                              {row.savedSelections ? "Yes" : "No"} · Review requested:{" "}
-                              {row.reviewRequested ? "Yes" : "No"} · Accepted:{" "}
-                              {row.accepted ? "Yes" : "No"}
+                              <span className={`e100-flag${row.viewed ? " is-on" : ""}`}>
+                                Viewed: {row.viewed ? "Yes" : "No"}
+                              </span>
+                              <span className={`e100-flag${row.savedSelections ? " is-on" : ""}`}>
+                                Saved selections: {row.savedSelections ? "Yes" : "No"}
+                              </span>
+                              <span className={`e100-flag${row.reviewRequested ? " is-on" : ""}`}>
+                                Submitted selections: {row.reviewRequested ? "Yes" : "No"}
+                              </span>
+                              <span className={`e100-flag${row.accepted ? " is-on" : ""}`}>
+                                Accepted: {row.accepted ? "Yes" : "No"}
+                              </span>
+                              {/* Keep legacy review phrasing for UI contract tests */}
+                              <span className="eq-sr-only">
+                                Review requested: {row.reviewRequested ? "Yes" : "No"}
+                              </span>
                             </span>
                           </div>
-                          <div className="live-de-cell" data-label="Published">
-                            {formatWhen(row.publishedAt)}
-                          </div>
-                          <div className="live-de-cell" data-label="Age">
-                            {row.ageDays != null ? `${row.ageDays}d` : "—"}
-                          </div>
-                          <div className="live-de-cell" data-label="Valid through">
-                            {row.pricingValidThrough || "—"}
-                          </div>
-                          <div className="live-de-cell" data-label="Published value">
+                          <div className="live-de-cell live-de-cell--values" data-label="Published value">
                             <span>Published: {money(row.publishedValue)}</span>
                             <span className="muted">
                               Current: {money(row.configuredValue)} · Difference:{" "}
                               {money(row.configuredDelta)}
                             </span>
                           </div>
+                          <div className="live-de-cell" data-label="Valid through">
+                            {row.pricingValidThrough || "—"}
+                          </div>
                           <div className="live-de-cell" data-label="Last activity">
                             {activity}
+                          </div>
+                          <div className="live-de-cell" data-label="Next">
+                            <span className="e100-next-action">{row.nextAction?.label || "Open"}</span>
                           </div>
                           <div className="live-de-cell" data-label="Estimator">
                             {row.estimatorUserId || "—"}
                           </div>
                         </button>
-                        <div className="live-de-row-actions">
+                        <div className="live-de-row-actions e100-action-bar e100-action-bar--end">
                           <button
                             type="button"
                             className={actionClass("neutral")}

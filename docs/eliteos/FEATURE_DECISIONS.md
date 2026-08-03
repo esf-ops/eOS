@@ -3564,3 +3564,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Multi-room distinct edge profiles needing per-room foundation fields beyond the first positive qty. |
 
 ---
+### 257. Elite 100 Estimate Studio command-center UI polish (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `feature/elite100-production-command-center-layout` |
+| **Decision** | Elite 100 Estimate Studio receives a **presentation-only** command-center layout pass aligned with Quote Library polish: hero shell (workflow subtitle + Elite Stone Fabrication workspace identity), clearer primary nav chrome, production Estimates table/cards with status pills, scannable Digital Estimates rows (activity flags + next action), Inbox labeled as Step 1 of the workflow, polished Studio V2 empty landing, and lightly grouped New Estimate form fields. Primary nav order and More → legacy/compatibility tools are unchanged. |
+| **Why** | Staff landed on a raw Inbox/debug feel and developer-style lists; operational hierarchy (what needs attention → next action) was hard to scan even though workflows already worked. |
+| **Impacted** | `app-elite100-estimate-studio/src/shell/*`, `StudioApp.tsx`, `AllEstimatesPage.tsx`, `LiveDigitalEstimatesPage.tsx`, `SharedInboxPage.tsx`, `ManualEstimateWizard.tsx`, `styles.css`, layout/nav UI tests, this doc. |
+| **Protected / unchanged** | Pricing formulas, material rates, sink/cutout prices, selection save, acceptance rules, publish/repair, Studio V2 approval/revision, sold, AI Takeoff, Internal Estimate, migrations, public Digital Estimate behavior, backend APIs. |
+| **Revisit trigger** | Hero metrics from live portfolio aggregates without new APIs; deeper Studio V2 workspace chrome alignment; replacing More compatibility surfaces with retirement plan. |
+
+---

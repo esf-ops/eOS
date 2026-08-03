@@ -267,14 +267,15 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
   }
 
   return (
-    <div className="eq-root si-root" data-testid="shared-inbox-page">
-      <header className="eq-header">
+    <div className="eq-root si-root e100-inbox" data-testid="shared-inbox-page">
+      <header className="eq-header e100-page-header">
         <div>
+          <p className="e100-page-eyebrow">Step 1 · Quote request queue</p>
           <h1 className="eq-title" data-testid="shared-inbox-title">
             Inbox
           </h1>
           <p className="eq-subtitle">
-            Quote requests for estimating.
+            New quote requests waiting to become estimates.
             {mailboxDisplay ? ` (${mailboxDisplay})` : ""}
           </p>
         </div>
