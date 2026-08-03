@@ -97,6 +97,41 @@ function isSafeBaselineRoomPricing(
   return Boolean(pricing?.rooms?.length) && !isUnsafeCustomerRoomPricing(pricing);
 }
 
+function configuredTotalDivergesFromPublished(
+  calc: {
+    pricingAuthority?: string | null;
+    displayTotalDelta?: number | null;
+    displayDelta?: number | null;
+    configuredDisplayTotal?: number | null;
+    baselineDisplayTotal?: number | null;
+    publishedBaselineTotal?: number | null;
+  },
+  publishedRoomPricing?: PublicRoomPricing | null,
+): boolean {
+  const deltaRaw = calc.displayTotalDelta ?? calc.displayDelta;
+  if (deltaRaw != null && Number.isFinite(Number(deltaRaw)) && Math.abs(Number(deltaRaw)) > 0.005) {
+    return true;
+  }
+  const configured =
+    calc.configuredDisplayTotal != null && Number.isFinite(Number(calc.configuredDisplayTotal))
+      ? Number(calc.configuredDisplayTotal)
+      : null;
+  const baseline =
+    calc.baselineDisplayTotal != null && Number.isFinite(Number(calc.baselineDisplayTotal))
+      ? Number(calc.baselineDisplayTotal)
+      : calc.publishedBaselineTotal != null && Number.isFinite(Number(calc.publishedBaselineTotal))
+        ? Number(calc.publishedBaselineTotal)
+        : publishedRoomPricing?.projectTotal != null &&
+            Number.isFinite(Number(publishedRoomPricing.projectTotal))
+          ? Number(publishedRoomPricing.projectTotal)
+          : null;
+  return (
+    configured != null &&
+    baseline != null &&
+    Math.abs(configured - baseline) > 0.005
+  );
+}
+
 /**
  * Room pricing a customer may be shown for a calculation. Presentation only — it
  * selects between two backend-authored pricing DTOs and never computes money.
@@ -126,6 +161,48 @@ export function failClosedRoomPricing(
   if (own?.kind === "original" && isSafeBaselineRoomPricing(own)) return own;
   // No safe room detail — hide amounts rather than leak Countertop $0.
   return null;
+}
+
+/**
+ * Customer-safe room pricing for sidebar / room cards / print on public load.
+ * Presentation only — never invents amounts.
+ *
+ * Prefer the calculation's fail-closed roomPricing. When the calc is missing
+ * (fresh published link, no selection save yet) or as-published without room
+ * detail, hydrate from the published snapshot DTO already on the estimate.
+ * When configured totals diverge but room detail is unavailable, fail closed.
+ */
+export function resolveCustomerSafeRoomPricing(
+  calc:
+    | {
+        pricingAuthority?: string | null;
+        roomPricing?: PublicRoomPricing | null;
+        displayTotalDelta?: number | null;
+        displayDelta?: number | null;
+        configuredDisplayTotal?: number | null;
+        baselineDisplayTotal?: number | null;
+        publishedBaselineTotal?: number | null;
+      }
+    | null
+    | undefined,
+  publishedRoomPricing?: PublicRoomPricing | null,
+): PublicRoomPricing | null {
+  if (calc) {
+    const fromCalc = failClosedRoomPricing(calc, publishedRoomPricing);
+    if (fromCalc?.rooms?.length) return fromCalc;
+    const authority = String(calc.pricingAuthority || "");
+    if (authority === "published_baseline_frozen") {
+      // failClosed already attempted published; stay fail-closed when still empty.
+      return null;
+    }
+    if (
+      authority === "authoritative_backend_reprice" &&
+      configuredTotalDivergesFromPublished(calc, publishedRoomPricing)
+    ) {
+      return null;
+    }
+  }
+  return isSafeBaselineRoomPricing(publishedRoomPricing) ? publishedRoomPricing : null;
 }
 
 function formatMoney(n: number | null | undefined): string {
