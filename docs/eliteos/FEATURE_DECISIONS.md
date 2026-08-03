@@ -3613,3 +3613,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Backend exchange always seeds a baseline calculation DTO with published roomPricing for brand-new sessions. |
 
 ---
+
+### 261. Public Digital Estimate backsplash baseline display + selected chrome (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `feature/public-digital-estimate-premium-ui` |
+| **Decision** | Public Digital Estimate backsplash display now derives the selected baseline from effective selection authority instead of backsplash eligibility/default metadata. Selected option styling was softened for premium customer-facing presentation. No pricing, save, acceptance, publish, repair, revision, sold, AI Takeoff, Internal Estimate, or migration behavior changed. |
+| **Why** | Rooms with eligible wall runs were seeded/displayed as “4-inch backsplash / Included” even when the published pricing baseline was No backsplash, so the card disagreed with the total until the customer changed options. |
+| **Impacted** | `digitalEstimateProductOptions.mjs` seeding + align helper, `publicConfigurationService.mjs` public option alignment, `lovableViewModel.ts` published-mode selection, selected option CSS, backsplash baseline display tests, this doc. |
+| **Protected / unchanged** | Backsplash pricing formulas/rates, selection save authority, acceptance, publish/repair, Studio V2, sold, AI Takeoff, Internal Estimate, migrations. |
+| **Revisit trigger** | Envelope republish migrates historical wrong includedInBaseline flags at rest (read-time alignment already corrects public DTO). |
+
+---

@@ -77,7 +77,8 @@ import {
   productMatchesRoomType,
   resolveCatalogProductSelection,
   resolveSideSplashPriceEffect,
-  sideSplashQtyFromMode
+  sideSplashQtyFromMode,
+  alignBacksplashOptionBaselineToPublished
 } from "../catalog/digitalEstimateProductOptions.mjs";
 import { getProductById } from "../catalog/esfPlumbingCatalog.mjs";
 import {
@@ -164,6 +165,38 @@ function safeFail(code, message, statusCode = 400, extra = {}) {
     if (v !== undefined) e[k] = v;
   }
   return e;
+}
+
+/**
+ * Correct backsplash includedInBaseline / defaultQty / price copy to the
+ * published pricing baseline. Existing envelopes may have seeded 4-inch as
+ * "included" merely because wall runs were eligible — that must not survive
+ * into the customer UI when the estimate was published with No backsplash.
+ */
+function alignPublicBacksplashBaselineOptions(options, rooms) {
+  const aligned = alignBacksplashOptionBaselineToPublished(options, rooms);
+  return aligned.map((opt) => {
+    const key = String(opt?.optionKey || "");
+    if (!key.startsWith("backsplash:")) return opt;
+    const next = { ...opt };
+    if (next.includedInBaseline) {
+      next.customerPriceTreatment = "original_selection";
+    } else if (
+      next.customerPriceTreatment === "original_selection" ||
+      next.customerPriceTreatment === "included"
+    ) {
+      next.customerPriceTreatment = "delta";
+    }
+    next.priceEffectLabel = customerPriceEffectLabel({
+      includedInBaseline: Boolean(next.includedInBaseline),
+      customerPriceTreatment: next.customerPriceTreatment,
+      availabilityState: next.availabilityState,
+      visibleSellPrice: next.visibleSellPrice,
+      visibleDelta: next.visibleDelta,
+      priceEffectCents: next.priceEffectCents
+    });
+    return next;
+  });
 }
 
 /** Map Supabase / persistence failures so public routes never emit bare 404. */
@@ -1029,6 +1062,7 @@ export function createPublicConfigurationService(deps) {
         const g = (graph?.groups || []).find((x) => x.id === o.group_id);
         return toCustomerSafeOption(o, g, optionCtx);
       });
+    options = alignPublicBacksplashBaselineOptions(options, ctx.rooms || []);
     let enrichedById = null;
     try {
       const seedMaterials = [];
@@ -1138,6 +1172,7 @@ export function createPublicConfigurationService(deps) {
           configuredRooms
         });
       });
+    options = alignPublicBacksplashBaselineOptions(options, ctx.rooms || []);
     for (const opt of options) {
       if (!opt.materialId || !enrichedById) continue;
       const mat = enrichedById.get(opt.materialId);

@@ -253,6 +253,8 @@ function emptyDraft(source: SourceProject): CustomerInfoDraft {
   };
 }
 
+import { resolvePublishedBacksplashMode, backsplashModeTokenFromOptionKey } from "./backsplashDisplayAuthority";
+
 /** Normalize backsplash labels so "4-foot" never appears customer-facing. */
 export function normalizeBacksplashLabel(label: string): string {
   return String(label || "")
@@ -260,6 +262,8 @@ export function normalizeBacksplashLabel(label: string): string {
     .replace(/\b4'\s*backsplash/gi, "4-inch backsplash")
     .replace(/\b4″\b/g, "4-inch");
 }
+
+export { resolvePublishedBacksplashMode, backsplashModeTokenFromOptionKey } from "./backsplashDisplayAuthority";
 
 export function optionRoleFromKey(optionKey: string, explicitRole?: string | null): ChoiceRole | string {
   if (explicitRole) {
@@ -707,14 +711,45 @@ export function mapEliteOsToLovableViewModel(
             : role === "sidesplash"
               ? sideSplashModeSummary(sideMeta?.sideToken)
               : o.displayLabel;
+        const publishedBacksplashMode =
+          role === "backsplash" ? resolvePublishedBacksplashMode(r) : null;
+        const backsplashToken =
+          role === "backsplash" ? backsplashModeTokenFromOptionKey(o.optionKey) : "";
+        const backsplashIsPublishedBaseline =
+          role === "backsplash" && backsplashToken === publishedBacksplashMode;
+        // Never treat eligibility/defaultQty as selected for backsplash — only
+        // explicit customer qty or the published pricing baseline mode.
+        const selected = roleHasExplicit
+          ? (effectiveQty[o.optionKey] ?? 0) > 0
+          : role === "backsplash"
+            ? backsplashIsPublishedBaseline
+            : (effectiveQty[o.optionKey] ?? o.defaultQty ?? 0) > 0;
+        const includedInBaseline =
+          role === "backsplash"
+            ? backsplashIsPublishedBaseline
+            : Boolean(o.includedInBaseline);
+        const priceEffectLabel = formatPriceEffect({
+          ...o,
+          includedInBaseline,
+          // Recompute from corrected baseline flags so a wrongly seeded
+          // "Included…" label on 4-inch cannot survive a none baseline.
+          priceEffectLabel:
+            role === "backsplash"
+              ? null
+              : o.priceEffectLabel,
+          customerPriceTreatment:
+            role === "backsplash"
+              ? includedInBaseline
+                ? "original_selection"
+                : "delta"
+              : o.customerPriceTreatment,
+        });
         return {
           optionKey: o.optionKey,
           displayLabel,
           role,
-          selected: roleHasExplicit
-            ? (effectiveQty[o.optionKey] ?? 0) > 0
-            : (effectiveQty[o.optionKey] ?? o.defaultQty ?? 0) > 0,
-          includedInBaseline: Boolean(o.includedInBaseline),
+          selected,
+          includedInBaseline,
           description: o.description ?? null,
           imageAssetRef: o.imageAssetRef ?? null,
           availabilityState: o.availabilityState || "active",
@@ -732,7 +767,7 @@ export function mapEliteOsToLovableViewModel(
           pieceKey: o.pieceKey ?? sideMeta?.pieceKey ?? null,
           pieceLabel: o.pieceDisplayName || sideMeta?.pieceLabel || null,
           selectable: o.selectable !== false,
-          priceEffectLabel: formatPriceEffect(o),
+          priceEffectLabel,
           premium: o.premium ?? null,
           priceEffectCents: o.priceEffectCents ?? null,
           grossPriceEffectCents: o.grossPriceEffectCents ?? null,
@@ -762,10 +797,21 @@ export function mapEliteOsToLovableViewModel(
         };
       });
 
-    const selectedFor = (role: string) =>
-      choiceOptions.find((c) => c.role === role && c.selected) ||
-      choiceOptions.find((c) => c.role === role && c.includedInBaseline) ||
-      null;
+    const selectedFor = (role: string) => {
+      const explicit = choiceOptions.find((c) => c.role === role && c.selected);
+      if (explicit) return explicit;
+      if (role === "backsplash") {
+        const mode = resolvePublishedBacksplashMode(r);
+        return (
+          choiceOptions.find(
+            (c) =>
+              c.role === "backsplash" &&
+              backsplashModeTokenFromOptionKey(c.optionKey) === mode,
+          ) || null
+        );
+      }
+      return choiceOptions.find((c) => c.role === role && c.includedInBaseline) || null;
+    };
 
     const splashSelected = selectedFor("backsplash");
     const sinkSelected = selectedFor("sink");

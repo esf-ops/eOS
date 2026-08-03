@@ -168,7 +168,7 @@ function GroupChip({
       onClick={onClick}
       className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
         active
-          ? "border-primary bg-primary text-primary-foreground"
+          ? "border-primary/40 bg-accent text-accent-foreground"
           : "border-border bg-background text-muted-foreground hover:text-foreground"
       }`}
     >
@@ -417,7 +417,7 @@ function ColorPickerModal({
                     data-group={c.pricingGroupLabel}
                     className={`group relative overflow-hidden rounded-xl border text-left transition ${
                       selected
-                        ? "border-primary bg-accent/40 shadow-sm ring-2 ring-primary/25"
+                        ? "de-option-selected"
                         : previewing
                           ? "border-foreground/50"
                           : "border-border hover:border-foreground/40 hover:shadow-sm"
@@ -425,7 +425,7 @@ function ColorPickerModal({
                   >
                     {selected ? (
                       <span
-                        className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground"
+                        className="de-option-selected-badge absolute left-2 top-2 z-10"
                         data-testid="de-color-selected-badge"
                       >
                         <span aria-hidden>✓</span> Selected
@@ -499,15 +499,15 @@ function ChoiceRadio({
           key={opt.optionKey}
           data-selected={opt.selected ? "true" : "false"}
           data-testid="de-choice-option"
-          className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm transition focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-foreground ${
+          className={`flex cursor-pointer items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm transition focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring ${
             opt.selected
-              ? "border-primary bg-accent/40 ring-2 ring-primary/20"
+              ? "de-option-selected border"
               : "border-border bg-background hover:border-foreground/40"
           }`}
         >
           <span className="min-w-0 flex-1">
             {opt.selected ? (
-              <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground">
+              <span className="de-option-selected-badge mb-1">
                 <span aria-hidden>✓</span> Selected
               </span>
             ) : null}
@@ -677,7 +677,7 @@ function ProductCards({
             return (
               <div
                 key={p.productId}
-                className={`rounded-xl border p-3 transition ${selected ? "border-primary bg-accent/30 ring-1 ring-primary/25" : "border-border hover:border-primary/30"}`}
+                className={`rounded-xl border p-3 transition ${selected ? "de-option-selected" : "border-border hover:border-primary/30"}`}
                 data-testid={`de-${role}-product-card`}
                 data-product-id={p.productId}
                 data-selected={selected ? "true" : "false"}
@@ -721,7 +721,7 @@ function ProductCards({
                               type="button"
                               className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left text-xs transition ${
                                 finishSelected
-                                  ? "border-primary bg-accent/40 ring-1 ring-primary/20"
+                                  ? "de-option-selected"
                                   : "border-border hover:border-primary/30"
                               }`}
                               data-testid={`de-${role}-finish-row`}
@@ -1728,7 +1728,7 @@ function CustomerRoomCard({
             value={room.backsplashSummary || "Choose backsplash"}
             detail={
               room.backsplashSummary === "No backsplash"
-                ? "Removes the standard backsplash from eligible wall runs"
+                ? "Not included in your published estimate"
                 : "Applies to eligible wall runs approved by Elite"
             }
             priceEffect={selectedEffect("backsplash")}
@@ -1828,7 +1828,7 @@ function CustomerRoomCard({
                                 data-selected={selected ? "true" : "false"}
                                 className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
                                   selected
-                                    ? "border-primary bg-accent/40 ring-1 ring-primary/20"
+                                    ? "de-option-selected"
                                     : "border-border hover:bg-muted/20"
                                 }`}
                                 onClick={() => onEdgeChange?.(opt.optionKey)}
@@ -1837,7 +1837,7 @@ function CustomerRoomCard({
                                   {opt.displayLabel}
                                   {selected ? (
                                     <span
-                                      className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
+                                      className="de-option-selected-badge"
                                       data-testid="de-edge-option-selected-badge"
                                     >
                                       Selected
