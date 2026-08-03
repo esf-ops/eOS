@@ -81,6 +81,31 @@ export async function startSharedInboxEstimate(token, messageKey, opts = {}) {
 }
 
 /**
+ * Explicit Send to AI Takeoff for a plan attachment (PDF or supported image).
+ * Idempotent. Does not calculate / publish / sold.
+ * @param {string} token
+ * @param {string} messageKey
+ * @param {{ attachmentKey: string, markAsPlan?: boolean, idempotencyKey?: string }} opts
+ */
+export async function sendSharedInboxToAiTakeoff(token, messageKey, opts = {}) {
+  const headers = {};
+  if (opts.idempotencyKey) {
+    headers["Idempotency-Key"] = String(opts.idempotencyKey);
+  }
+  return apiPost(
+    `/api/elite100-estimate-studio/shared-inbox/${encodeURIComponent(messageKey)}/send-to-takeoff`,
+    token,
+    {
+      confirm: true,
+      attachmentKey: opts.attachmentKey,
+      markAsPlan: opts.markAsPlan === true,
+      idempotencyKey: opts.idempotencyKey || undefined
+    },
+    { headers }
+  );
+}
+
+/**
  * Mark inbox message viewed without starting an estimate.
  * @param {string} token
  * @param {string} messageKey
