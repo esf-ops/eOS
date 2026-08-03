@@ -3501,3 +3501,18 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | If a new exclusive role is added to the envelope, extend `EXCLUSIVE_ROOM_ROLES` and label resolvers; do not loosen off-envelope rejection. |
 
 ---
+
+### 252. Digital Estimate — sanitize contaminated exclusive saved selections (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/digital-estimate-contaminated-selection-sanitize` |
+| **Decision** | Persisted Digital Estimate selection quantities are **sanitized for exclusive room roles** before public read-model, save validation, and pricing. When a room has multiple positive qty values for the same role (e.g. ESF sink + customer_provided), the server keeps the clear envelope-backed winner and strips losers. |
+| **Why** | Pre-identity-fix saves could persist both ESF and customer_provided sink (and similar exclusive conflicts). The page reloaded contaminated; later unrelated saves (e.g. backsplash none) re-submitted the bad sink pair and failed with `selection_unavailable`. |
+| **Rules** | (1) ESF sink/faucet beats customer_provided / none. (2) Explicit non-baseline material/edge/backsplash beats published baseline in the same role. (3) Finish-suffixed ESF keys remap to envelope family keys when present. (4) Ambiguous dual non-baseline winners fail closed. (5) Truly off-envelope keys still reject. Physical cutout baseline scope is unchanged. |
+| **Where** | `sanitizeExclusiveRoomSelections.mjs` → exchange/read meta, save selectionMap (before availability), and `normalizeSelectionPayload`. |
+| **Impacted** | `sanitizeExclusiveRoomSelections.mjs` (+ test), `configurationValidation.mjs`, `publicConfigurationService.mjs`, this doc. |
+| **Protected / unchanged** | Pricing formulas, sink/cutout prices, Studio V2 approve/publish/revision, acceptance rules, sold, AI Takeoff, Internal Estimate, migrations. Backend remains selection authority. |
+| **Revisit trigger** | If new exclusive roles are published, extend the sanitizer priority table; do not auto-pick between two different customer non-baseline options. |
+
+---
