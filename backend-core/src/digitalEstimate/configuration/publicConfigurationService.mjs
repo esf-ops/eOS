@@ -40,6 +40,11 @@ import {
   splitSelectionPayloadMeta
 } from "./customerConfigurationDraft.mjs";
 import {
+  sanitizeExclusiveRoomSelectionQuantities,
+  sanitizeProductDraftsForExclusiveSelections,
+  sanitizeSelectionPayloadMeta
+} from "./sanitizeExclusiveRoomSelections.mjs";
+import {
   buildPublicCustomerConfigurationReadModel,
   classifyCustomerConfigurationForReview,
   sanitizeCustomerConfigurationFoundation
@@ -1068,7 +1073,11 @@ export function createPublicConfigurationService(deps) {
     const rawCustomerCalc = latestCalculation?.customer_result_json || null;
     if (rawCustomerCalc) assertPublicConfigurationHasNoForbiddenContent(rawCustomerCalc);
 
-    const selectionMeta = splitSelectionPayloadMeta(latestSelection?.selection_payload_json);
+    const selectionMeta = sanitizeSelectionPayloadMeta(
+      splitSelectionPayloadMeta(latestSelection?.selection_payload_json),
+      graph?.options || [],
+      { throwOnAmbiguous: false }
+    );
     const configuredRooms = resolveConfiguredRoomChoiceAuthority(
       ctx,
       selectionMeta.quantities,
@@ -1511,14 +1520,29 @@ export function createPublicConfigurationService(deps) {
         );
         priorMeta = splitSelectionPayloadMeta(prior?.selection_payload_json);
       }
+      // Keep raw prior quantities for availability classification (unchanged saved
+      // baseline rows). Exclusive contamination is stripped from the *incoming*
+      // selectionMap after items are collected, and again inside normalize.
       const priorSelections =
         priorMeta.quantities && typeof priorMeta.quantities === "object"
           ? priorMeta.quantities
           : {};
+      const sanitizedPriorMeta = sanitizeSelectionPayloadMeta(priorMeta, options, {
+        throwOnAmbiguous: false
+      });
+      // Prefer sanitized drafts for merge defaults so UI contamination does not
+      // re-enter product draft meta after a clean qty save.
+      priorMeta = {
+        ...priorMeta,
+        customerProductDrafts: sanitizedPriorMeta.customerProductDrafts,
+        backsplashDrafts: sanitizedPriorMeta.backsplashDrafts
+      };
 
       // Normalize: accept items[{optionId|optionKey, quantity}] or selections map.
-      // Unchanged frozen baseline / prior saved selections may remain even when the
-      // live envelope no longer lists them or marks them unavailable.
+      // Unchanged frozen baseline / previously saved selections may remain even when
+      // the live envelope no longer lists them or marks them unavailable.
+      // Availability checks run *after* exclusive-role sanitization so a stale
+      // customer_provided sink co-selected with ESF cannot block an unrelated save.
       let selectionMap = {};
       if (Array.isArray(body.items)) {
         for (const item of body.items) {
@@ -1558,22 +1582,6 @@ export function createPublicConfigurationService(deps) {
             );
           }
           const optKey = opt.option_key || opt.optionKey;
-          const classification = classifyPublicSelection({
-            optionKey: optKey,
-            quantity: qty,
-            option: opt,
-            priorSelections
-          });
-          const rejection = availabilityRejectionForSelection(opt, qty, priorSelections);
-          if (rejection && classification === "newly_requested") {
-            throw safeFail(rejection.code, "That selection is unavailable", 422, {
-              selectionKey: String(optKey).slice(0, 160),
-              diagnosticCode: "DE-OPTION-NOT-ALLOWED",
-              reason: rejection.reason,
-              category: rejection.category,
-              restoreSavedState: true
-            });
-          }
           selectionMap[optKey] = qty;
         }
       } else {
@@ -1609,16 +1617,6 @@ export function createPublicConfigurationService(deps) {
             );
           }
           const optKey = opt.option_key || opt.optionKey;
-          const rejection = availabilityRejectionForSelection(opt, qty, priorSelections);
-          if (rejection) {
-            throw safeFail(rejection.code, "That selection is unavailable", 422, {
-              selectionKey: String(optKey).slice(0, 160),
-              diagnosticCode: "DE-OPTION-NOT-ALLOWED",
-              reason: rejection.reason,
-              category: rejection.category,
-              restoreSavedState: true
-            });
-          }
           selectionMap[optKey] = qty;
         }
       }
@@ -1687,7 +1685,7 @@ export function createPublicConfigurationService(deps) {
         body.projectNote != null || body.project_note != null
           ? projectNote || null
           : priorMeta.projectNote;
-      const mergedProductDrafts =
+      let mergedProductDrafts =
         body.customerProductDrafts != null || body.customer_product_drafts != null
           ? customerProductDrafts
           : priorMeta.customerProductDrafts || {};
@@ -1706,10 +1704,60 @@ export function createPublicConfigurationService(deps) {
       applyBacksplashDraftAuthority(selectionMap, mergedBacksplashDrafts, options);
       rejectGovernedScopeQuantitySelections(body.items || body.selections || []);
       stripGovernedScopeQuantitiesFromMap(selectionMap);
+      // Repair contaminated exclusive-role duplicates from older saved states /
+      // client payloads (e.g. ESF sink + customer_provided) before validation.
+      try {
+        const cleanedMap = sanitizeExclusiveRoomSelectionQuantities(selectionMap, options, {
+          throwOnAmbiguous: true
+        });
+        selectionMap = cleanedMap.quantities;
+      } catch (e) {
+        if (e?.code === "selection_unavailable") {
+          throw safeFail(e.code, "That selection is unavailable", 422, {
+            selectionKey: Array.isArray(e.selectionKeys) ? e.selectionKeys[0] : null,
+            diagnosticCode: "DE-OPTION-NOT-ALLOWED",
+            reason: e.reason || "ambiguous_exclusive_selection",
+            restoreSavedState: true
+          });
+        }
+        throw e;
+      }
+
+      // Availability only for survivors of exclusive sanitation.
+      for (const [optKey, qtyRaw] of Object.entries(selectionMap)) {
+        const qty = Number(qtyRaw) || 0;
+        if (!(qty > 0)) continue;
+        const opt = findEnvelopeOptionForSelectionKey(options, optKey, null);
+        if (!opt) continue;
+        const classification = classifyPublicSelection({
+          optionKey: optKey,
+          quantity: qty,
+          option: opt,
+          priorSelections
+        });
+        const rejection = availabilityRejectionForSelection(opt, qty, priorSelections);
+        if (rejection && classification === "newly_requested") {
+          throw safeFail(rejection.code, "That selection is unavailable", 422, {
+            selectionKey: String(optKey).slice(0, 160),
+            diagnosticCode: "DE-OPTION-NOT-ALLOWED",
+            reason: rejection.reason,
+            category: rejection.category,
+            restoreSavedState: true
+          });
+        }
+      }
+
       const normalized = normalizeSelectionPayload(
         { selections: selectionMap },
         options,
         { priorSelections, allowCanonicalBacksplashOrphans: true }
+      );
+
+      // Drop product drafts that disagree with the exclusive winner (e.g. leftover
+      // customer_provided draft while ESF qty won).
+      mergedProductDrafts = sanitizeProductDraftsForExclusiveSelections(
+        mergedProductDrafts,
+        normalized.selections
       );
 
       // Catalog permissions frozen at publication — reject crafted saves for

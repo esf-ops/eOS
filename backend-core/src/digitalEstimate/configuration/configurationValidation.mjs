@@ -3,6 +3,11 @@
  */
 
 import { createHash } from "node:crypto";
+import {
+  EXCLUSIVE_ROOM_ROLES,
+  parseExclusiveRoomOptionKey,
+  sanitizeExclusiveRoomSelectionQuantities
+} from "./sanitizeExclusiveRoomSelections.mjs";
 
 export function canonicalJson(value) {
   return JSON.stringify(value, (_, v) => v);
@@ -114,12 +119,27 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
     ctx.priorSelections && typeof ctx.priorSelections === "object" ? ctx.priorSelections : {};
   const allowCanonicalBacksplashOrphans = ctx.allowCanonicalBacksplashOrphans !== false;
 
+  // Collapse contaminated exclusive-role duplicates (ESF + customer_provided, etc.)
+  // before allowlist / availability checks so stale saved states cannot block saves.
+  const sanitizedIncoming = sanitizeExclusiveRoomSelectionQuantities(
+    selections,
+    options,
+    { throwOnAmbiguous: true }
+  );
+  const sanitizedPrior = sanitizeExclusiveRoomSelectionQuantities(
+    priorSelections,
+    options,
+    { throwOnAmbiguous: false }
+  );
+  const effectiveSelections = sanitizedIncoming.quantities;
+  const effectivePrior = sanitizedPrior.quantities;
+
   const byKey = new Map(
     options.map((o) => [String(o.option_key || o.optionKey), o])
   );
   /** @type {Record<string, number>} */
   const normalized = {};
-  for (const [key, qtyRaw] of Object.entries(selections)) {
+  for (const [key, qtyRaw] of Object.entries(effectiveSelections)) {
     const opt = byKey.get(String(key));
     const qty = Number(qtyRaw);
     if (!Number.isFinite(qty)) {
@@ -130,7 +150,7 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
     }
     if (!opt) {
       if (!(qty > 0)) continue;
-      const priorQty = Number(priorSelections[key] || 0);
+      const priorQty = Number(effectivePrior[key] || priorSelections[key] || 0);
       const mode = String(key).startsWith("backsplash:")
         ? String(key).split(":").slice(2).join(":")
         : "";
@@ -161,7 +181,7 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
     if ((avail === "review_required" || avail === "unavailable") && qty > 0) {
       const included = Boolean(opt.included_in_baseline ?? opt.includedInBaseline);
       const defaultQty = Number(opt.default_qty ?? opt.defaultQty ?? 0) || 0;
-      const priorQty = Number(priorSelections[key] || 0);
+      const priorQty = Number(effectivePrior[key] || priorSelections[key] || 0);
       const unchangedBaseline = included && defaultQty > 0 && qty === defaultQty;
       const unchangedSaved = priorQty > 0 && qty === priorQty;
       if (!unchangedBaseline && !unchangedSaved) {
@@ -175,16 +195,6 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
     }
     normalized[String(key)] = qty;
   }
-
-  /** Mutually exclusive room-scoped choice roles (one positive selection per role:room). */
-  const EXCLUSIVE_ROOM_ROLES = new Set([
-    "material",
-    "sink",
-    "faucet",
-    "backsplash",
-    "edge",
-    "cooktop"
-  ]);
 
   /** Room already has a positive material selection (mutually exclusive per room). */
   function roomHasMaterialSelection(roomKey) {
@@ -204,11 +214,9 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
    * @returns {{ role: string, roomKey: string }|null}
    */
   function exclusiveRoomRole(optionKey) {
-    const parts = String(optionKey || "").split(":");
-    if (parts.length < 3) return null;
-    const role = parts[0];
-    if (!EXCLUSIVE_ROOM_ROLES.has(role)) return null;
-    return { role, roomKey: parts[1] };
+    const parsed = parseExclusiveRoomOptionKey(optionKey);
+    if (!parsed) return null;
+    return { role: parsed.role, roomKey: parsed.roomKey };
   }
 
   function roomRoleHasExplicitSelection(role, roomKey) {
@@ -235,6 +243,18 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
     normalized[key] = def;
   }
 
+  // Final exclusive collapse after defaults (defensive — should already be clean).
+  const afterDefaults = sanitizeExclusiveRoomSelectionQuantities(normalized, options, {
+    throwOnAmbiguous: true
+  });
+  Object.assign(normalized, afterDefaults.quantities);
+  for (const removed of afterDefaults.removedKeys) {
+    if (Number(normalized[removed] || 0) === 0) {
+      // keep explicit zeros so callers can see cleared contamination
+      normalized[removed] = 0;
+    }
+  }
+
   for (const opt of options) {
     const key = String(opt.option_key || opt.optionKey);
     if (!(opt.required_selection || opt.requiredSelection)) continue;
@@ -246,6 +266,17 @@ export function normalizeSelectionPayload(raw, options, ctx = {}) {
     err.code = "required_option_missing";
     err.statusCode = 400;
     throw err;
+  }
+
+  for (const key of Object.keys(normalized)) {
+    if (Number(normalized[key]) === 0) {
+      const exclusive = exclusiveRoomRole(key);
+      if (exclusive && roomRoleHasExplicitSelection(exclusive.role, exclusive.roomKey)) {
+        delete normalized[key];
+      } else if (!byKey.has(key)) {
+        delete normalized[key];
+      }
+    }
   }
 
   const selectionHash = hashCanonical(normalized);
