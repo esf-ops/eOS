@@ -106,6 +106,25 @@ export async function migrateSanitizedSelectionsToRepairedEnvelope(deps) {
   for (const [key, qty] of Object.entries(sanitizedMeta.quantities || {})) {
     const n = Number(qty) || 0;
     if (!(n > 0)) continue;
+    // Never migrate governed fabrication qty keys into the public selection map —
+    // they round-trip through the UI and break /selections after repair.
+    if (
+      key === "qty-cook" ||
+      key === "qty-sink" ||
+      key === "qty-bar" ||
+      key === "qty-outlet" ||
+      key === "qty-ss" ||
+      key === "qty-v-rect" ||
+      key === "qty-v-oval" ||
+      key === "qty-blanco" ||
+      key === "tearout" ||
+      key === "waterfall" ||
+      key === "popup_outlet_cutout" ||
+      /^qty-(cook|sink|bar|outlet)(:|$)/i.test(key)
+    ) {
+      droppedOffEnvelope.push(key);
+      continue;
+    }
     if (envelopeKeys.size && !envelopeKeys.has(key)) {
       // Finish-specific ESF may have been remapped already; anything else drops.
       droppedOffEnvelope.push(key);

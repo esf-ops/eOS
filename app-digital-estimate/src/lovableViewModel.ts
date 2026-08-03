@@ -1059,6 +1059,7 @@ export function buildSelectionItems(
       : null;
   const items = Object.entries(qty)
     .filter(([key, q]) => !key.startsWith("__") && Number(q) > 0)
+    .filter(([key]) => !isGovernedScopeQuantityKey(key))
     .map(([optionKey, quantity]) => ({
       optionKey: canonicalEsfPlumbingOptionKey(optionKey, keySet) || optionKey,
       quantity: Number(quantity),
@@ -1071,11 +1072,34 @@ export function buildSelectionItems(
   const out = [...collapsed.entries()].map(([optionKey, quantity]) => ({ optionKey, quantity }));
   for (const room of rooms) {
     const key = room.selectedOptionKey;
-    if (key && !out.some((i) => i.optionKey === key)) {
+    if (!key || isGovernedScopeQuantityKey(key)) continue;
+    if (!out.some((i) => i.optionKey === key)) {
       out.push({ optionKey: key, quantity: 1 });
     }
   }
   return out;
+}
+
+/** Fabrication / scope qty keys must never round-trip through public /selections. */
+export function isGovernedScopeQuantityKey(key: string): boolean {
+  const k = String(key || "");
+  if (!k) return false;
+  if (
+    k === "qty-cook" ||
+    k === "qty-sink" ||
+    k === "qty-bar" ||
+    k === "qty-outlet" ||
+    k === "qty-ss" ||
+    k === "qty-v-rect" ||
+    k === "qty-v-oval" ||
+    k === "qty-blanco" ||
+    k === "tearout" ||
+    k === "waterfall" ||
+    k === "popup_outlet_cutout"
+  ) {
+    return true;
+  }
+  return /^qty-(cook|sink|bar|outlet)(:|$)/i.test(k);
 }
 
 /** Resolve ESF product (+ optional variant) to an envelope option key when present. */
