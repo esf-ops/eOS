@@ -15,6 +15,7 @@ import {
 } from "./studioSharedInboxReadModel.mjs";
 import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
 import {
+  findScopedAttachment,
   isAutoSupportedTakeoffSupport,
   isSafeManualPlanImageOverride,
   requestHasManualPlanOverride
@@ -433,9 +434,10 @@ export function createStudioSharedInboxService(deps = {}) {
 
     const detail = await getMessage({ organizationId: org, messageKey: key, actorUserId });
     const item = detail.item;
-    const att = (item.attachments || []).find(
-      (a) => String(a.attachmentKey || "") === attKey
-    );
+    const att = findScopedAttachment(item.attachments || [], {
+      attachmentKey: attKey,
+      allowFilenameFallback: false
+    });
     if (!att) {
       const err = new Error("The attachment could not be found.");
       err.statusCode = 404;
@@ -449,15 +451,19 @@ export function createStudioSharedInboxService(deps = {}) {
       useAttachmentAsPlan
     });
     const autoOk = isAutoSupportedTakeoffSupport(att.support);
+    const safeImageMeta = {
+      ...att,
+      name: att.filename || att.name || att.safeFilename,
+      filename: att.filename || att.name || att.safeFilename,
+      mimeType: att.contentType || att.mimeType,
+      contentType: att.contentType || att.mimeType,
+      support: att.support,
+      isInline: att.isInline === true || att.inline === true
+    };
     // Staff override: only safe JPEG/PNG/WEBP images (never inline / non-images).
     const manualOk =
       overrideRequested &&
-      isSafeManualPlanImageOverride({
-        ...att,
-        name: att.filename || att.name,
-        mimeType: att.contentType || att.mimeType,
-        support: att.support
-      }) &&
+      isSafeManualPlanImageOverride(safeImageMeta) &&
       (att.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW ||
         att.canMarkAsPlan === true ||
         !autoOk);
@@ -510,6 +516,8 @@ export function createStudioSharedInboxService(deps = {}) {
         env,
         body: {
           attachmentKey: attKey,
+          // Scoped filename helps open-estimate when persisted case rows lack Graph ids.
+          attachmentFilename: att.filename || att.name || att.safeFilename || null,
           markAsPlan: manualOk === true,
           manualPlanOverride: manualOk === true
         },

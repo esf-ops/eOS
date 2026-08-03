@@ -23,6 +23,7 @@ import {
   isSupportedTakeoffPlan
 } from "../quoteIntake/quoteIntakeAttachmentMeta.mjs";
 import {
+  findScopedAttachment,
   isSafeManualPlanImageOverride,
   requestHasManualPlanOverride
 } from "../quoteIntake/quoteIntakePlanAttachmentSupport.mjs";
@@ -130,22 +131,36 @@ export function rejectCallerOpenEstimateHints(body) {
  * - Zero supported plans → no_supported_pdf with a precise `.reason`.
  * - Exactly one → selected deterministically.
  * - More than one → caller may pass selectedAttachmentId; otherwise multi_pdf_ambiguous.
- * - markAsPlan + attachmentId can promote an image_needs_review row for this request.
+ * - markAsPlan + Graph key / id / scoped filename can promote an image_needs_review row.
+ *
+ * PDF auto-selection is unchanged: markAsPlan filename/key fallbacks only apply when
+ * markAsPlan is true (manual image override). direct_pdf never requires markAsPlan.
  *
  * @param {object} caseRow
- * @param {{ selectedAttachmentId?: string|null, markAsPlan?: boolean }} [opts]
+ * @param {{
+ *   selectedAttachmentId?: string|null,
+ *   selectedAttachmentKey?: string|null,
+ *   selectedFilename?: string|null,
+ *   markAsPlan?: boolean
+ * }} [opts]
  */
 export function selectSupportedPdfAttachment(caseRow, opts = {}) {
   const atts = Array.isArray(caseRow?.attachments) ? caseRow.attachments : [];
   let plans = atts.filter(isSupportedTakeoffPlan);
 
   const selectedId = String(opts.selectedAttachmentId ?? "").trim();
-  if (opts.markAsPlan === true && selectedId) {
-    const candidate = atts.find(
-      (a) =>
-        String(a?.id ?? "") === selectedId ||
-        String(a?.sourceAttachmentId ?? "") === selectedId
-    );
+  const selectedKey = String(opts.selectedAttachmentKey ?? "").trim();
+  const selectedFilename = String(opts.selectedFilename ?? "").trim();
+
+  if (opts.markAsPlan === true) {
+    const candidate = findScopedAttachment(atts, {
+      attachmentKey: selectedKey || selectedId || null,
+      attachmentId: selectedId || null,
+      filename: selectedFilename || null,
+      // Filename fallback is intentional for Graph JPG override when the persisted
+      // case row lost / truncated sourceAttachmentId. Scoped to this case only.
+      allowFilenameFallback: true
+    });
     if (
       candidate &&
       !candidate.isInline &&
@@ -169,8 +184,15 @@ export function selectSupportedPdfAttachment(caseRow, opts = {}) {
 
   if (plans.length === 1) return plans[0];
 
-  if (selectedId) {
-    const chosen = plans.find((a) => String(a?.id ?? "") === selectedId);
+  if (selectedId || selectedKey || selectedFilename) {
+    const chosen =
+      findScopedAttachment(plans, {
+        attachmentKey: selectedKey || selectedId || null,
+        attachmentId: selectedId || null,
+        filename: selectedFilename || null,
+        allowFilenameFallback: Boolean(selectedFilename)
+      }) ||
+      plans.find((a) => String(a?.id ?? "") === selectedId);
     if (chosen) return chosen;
     throw openEstimateError(
       "Selected attachment is not a supported plan on this case.",
@@ -420,19 +442,35 @@ export async function openEstimateForIntakeCase(deps) {
     body && typeof body === "object" && typeof body.attachmentKey === "string"
       ? body.attachmentKey.trim()
       : null;
+  const selectedFilename =
+    body && typeof body === "object"
+      ? String(
+          body.attachmentFilename ||
+            body.filename ||
+            body.safeFilename ||
+            body.attachmentName ||
+            ""
+        ).trim() || null
+      : null;
   const markAsPlan = requestHasManualPlanOverride(body);
 
-  let resolvedSelectedId = selectedAttachmentId;
-  if (!resolvedSelectedId && attachmentKey) {
-    const match = (Array.isArray(caseRow.attachments) ? caseRow.attachments : []).find(
-      (a) =>
-        String(a?.sourceAttachmentId || "") === attachmentKey || String(a?.id || "") === attachmentKey
-    );
-    if (match?.id) resolvedSelectedId = String(match.id);
-  }
+  // Resolve Graph opaque keys / filenames against the persisted case attachment list.
+  // Filename fallback is only used for manual image override (markAsPlan).
+  const resolved =
+    findScopedAttachment(caseRow.attachments, {
+      attachmentKey: attachmentKey || selectedAttachmentId,
+      attachmentId: selectedAttachmentId,
+      filename: selectedFilename,
+      allowFilenameFallback: markAsPlan === true
+    }) || null;
+  const resolvedSelectedId = resolved?.id
+    ? String(resolved.id)
+    : selectedAttachmentId;
 
   const attachment = selectSupportedPdfAttachment(caseRow, {
     selectedAttachmentId: resolvedSelectedId,
+    selectedAttachmentKey: attachmentKey,
+    selectedFilename: selectedFilename,
     markAsPlan
   });
   const idempotencyKey = buildOpenEstimateIdempotencyKey(caseRow, attachment);

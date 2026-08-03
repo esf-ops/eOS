@@ -43,12 +43,81 @@ console.log("\nintakeOpenEstimateService.test.mjs\n");
         id: "att-1",
         sha256: PDF_SHA,
         mimeType: "application/pdf",
-        safeFilename: "plan.pdf"
+        safeFilename: "plan.pdf",
+        support: "direct_pdf"
       }
     ]
   });
   assert.equal(att.id, "att-1");
-  console.log("ok: no supported PDF fails closed; single PDF selected");
+
+  // PDF path must not require markAsPlan / filename fallback.
+  const pdfOnly = selectSupportedPdfAttachment({
+    attachments: [
+      {
+        id: "pdf-1",
+        support: "direct_pdf",
+        safeFilename: "plan.pdf",
+        mimeType: "application/pdf",
+        sourceAttachmentId: "graph-pdf"
+      },
+      {
+        id: "img-1",
+        support: "image_needs_review",
+        safeFilename: "1000005197.jpg",
+        mimeType: "application/octet-stream"
+      }
+    ]
+  });
+  assert.equal(pdfOnly.id, "pdf-1");
+  assert.equal(pdfOnly.support, "direct_pdf");
+
+  // Graph JPG override: case rows may lack sourceAttachmentId; filename is scoped.
+  const graphJpg = selectSupportedPdfAttachment(
+    {
+      attachments: [
+        {
+          id: "uuid-5197",
+          sourceAttachmentId: null,
+          support: "image_needs_review",
+          safeFilename: "1000005197.jpg",
+          mimeType: "application/octet-stream"
+        },
+        {
+          id: "uuid-5196",
+          sourceAttachmentId: null,
+          support: "image_needs_review",
+          safeFilename: "1000005196.jpg",
+          mimeType: "application/octet-stream"
+        }
+      ]
+    },
+    {
+      selectedAttachmentKey: "AAMkAGI2opaqueKey==",
+      selectedFilename: "1000005197.jpg",
+      markAsPlan: true
+    }
+  );
+  assert.equal(graphJpg.id, "uuid-5197");
+
+  assert.throws(
+    () =>
+      selectSupportedPdfAttachment(
+        {
+          attachments: [
+            {
+              id: "uuid-5197",
+              support: "image_needs_review",
+              safeFilename: "1000005197.jpg",
+              mimeType: "application/octet-stream"
+            }
+          ]
+        },
+        { selectedAttachmentKey: "AAMkAGI2opaqueKey==", selectedFilename: "1000005197.jpg" }
+      ),
+    /No supported plan/
+  );
+
+  console.log("ok: PDF selection unchanged; Graph JPG manual override uses scoped filename");
 }
 
 async function seedCase(repo, org, extras = {}) {

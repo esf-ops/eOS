@@ -263,7 +263,19 @@ function baseEnv() {
   });
   assert.equal(r.takeoffJobId, "job-pdf");
   assert.equal(openBodies[0]?.manualPlanOverride, false);
-  console.log("ok: direct_pdf send succeeds without manual override");
+  assert.equal(openBodies[0]?.markAsPlan, false);
+  assert.ok(!("markAsPlan" in openBodies[0]) || openBodies[0].markAsPlan === false);
+
+  const r2 = await svc.sendToAiTakeoff({
+    organizationId: ORG,
+    messageKey: "msg-pdf",
+    attachmentKey: "att-pdf",
+    confirm: true
+  });
+  assert.equal(r2.takeoffJobId, "job-pdf");
+  assert.equal(openCalls, 2);
+  assert.ok(openBodies.every((b) => b.manualPlanOverride === false));
+  console.log("ok: direct_pdf send succeeds without manual override; duplicate reuses path");
 }
 
 {
@@ -464,6 +476,271 @@ function baseEnv() {
     (e) => e.statusCode === 400 && e.code === "attachment_not_supported"
   );
   console.log("ok: unsupported non-image with manual override is rejected");
+}
+
+// Production Dave Untiedt shape: Graph AAMk key + phone JPG filenames + missing/octet MIME,
+// persisted case rows without sourceAttachmentId.
+{
+  const GRAPH_KEY =
+    "AAMkAGI2TH93AAA=EAAAAAAopaqueGraphAttachmentKeyExample==";
+  const FILENAME = "1000005197.jpg";
+  /** @type {object[]} */
+  const openBodies = [];
+  let openCalls = 0;
+
+  const svc = createStudioSharedInboxService({
+    env: baseEnv(),
+    quoteIntakeRepository: {
+      async getCase() {
+        return {
+          id: "case-dave",
+          attachments: [
+            {
+              id: "uuid-5197",
+              sourceAttachmentId: null,
+              support: "image_needs_review",
+              safeFilename: FILENAME,
+              mimeType: "application/octet-stream"
+            },
+            {
+              id: "uuid-5196",
+              sourceAttachmentId: null,
+              support: "image_needs_review",
+              safeFilename: "1000005196.jpg",
+              mimeType: "application/octet-stream"
+            }
+          ]
+        };
+      },
+      async listTakeoffLinks() {
+        return [];
+      }
+    },
+    previewFn: async () => ({
+      mailboxDisplay: "quotes@example.com",
+      messages: [
+        {
+          graphMessageId: "msg-dave",
+          subject: "Quote request",
+          bodyPreview: "please quote",
+          hasAttachments: true,
+          eligibilityHint: "already_imported",
+          alreadyImported: true,
+          existingCaseId: "case-dave",
+          sender: { displayName: "Dave Untiedt", emailPresent: true },
+          attachments: [
+            {
+              sourceAttachmentId: GRAPH_KEY,
+              name: FILENAME,
+              mimeType: "application/octet-stream",
+              support: "image_needs_review",
+              sizeBytes: 447146
+            },
+            {
+              sourceAttachmentId: `${GRAPH_KEY}-2`,
+              name: "1000005196.jpg",
+              mimeType: null,
+              support: "image_needs_review",
+              sizeBytes: 378156
+            }
+          ]
+        }
+      ]
+    }),
+    openEstimate: async (deps) => {
+      openCalls += 1;
+      openBodies.push(deps.body);
+      assert.equal(deps.body.attachmentKey, GRAPH_KEY);
+      assert.equal(deps.body.attachmentFilename, FILENAME);
+      assert.equal(deps.body.manualPlanOverride, true);
+      assert.equal(deps.body.markAsPlan, true);
+      const caseRow = await deps.repository.getCase(ORG, deps.intakeCaseId);
+      const selected = selectSupportedPdfAttachment(caseRow, {
+        selectedAttachmentKey: deps.body.attachmentKey,
+        selectedFilename: deps.body.attachmentFilename,
+        markAsPlan: true
+      });
+      assert.equal(selected.id, "uuid-5197");
+      assert.equal(selected.safeFilename, FILENAME);
+      return {
+        ok: true,
+        takeoffJobId: "job-dave",
+        created: openCalls === 1,
+        reused: openCalls > 1,
+        attachmentName: FILENAME
+      };
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      svc.sendToAiTakeoff({
+        organizationId: ORG,
+        messageKey: "msg-dave",
+        attachmentKey: GRAPH_KEY,
+        confirm: true
+      }),
+    (e) => e.code === "attachment_not_supported"
+  );
+
+  const first = await svc.sendToAiTakeoff({
+    organizationId: ORG,
+    messageKey: "msg-dave",
+    attachmentKey: GRAPH_KEY,
+    confirm: true,
+    manualPlanOverride: true,
+    markAsPlan: true
+  });
+  assert.equal(first.takeoffJobId, "job-dave");
+  assert.equal(first.created, true);
+
+  const second = await svc.sendToAiTakeoff({
+    organizationId: ORG,
+    messageKey: "msg-dave",
+    attachmentKey: GRAPH_KEY,
+    confirm: true,
+    manualPlanOverride: true,
+    markAsPlan: true
+  });
+  assert.equal(second.takeoffJobId, "job-dave");
+  assert.equal(openCalls, 2);
+  console.log("ok: Graph-style JPG (AAMk + 1000005197.jpg) manual override succeeds + duplicate");
+}
+
+{
+  for (const sample of [
+    {
+      key: "AAMk-png",
+      name: "layout.png",
+      mime: "image/png",
+      id: "uuid-png"
+    },
+    {
+      key: "AAMk-webp",
+      name: "scan.webp",
+      mime: null,
+      id: "uuid-webp"
+    },
+    {
+      key: "AAMk-jpeg-mime",
+      name: "photo.jpeg",
+      mime: "image/jpeg",
+      id: "uuid-jpeg"
+    }
+  ]) {
+    const svc = createStudioSharedInboxService({
+      env: baseEnv(),
+      quoteIntakeRepository: {
+        async getCase() {
+          return {
+            id: `case-${sample.id}`,
+            attachments: [
+              {
+                id: sample.id,
+                sourceAttachmentId: null,
+                support: "image_needs_review",
+                safeFilename: sample.name,
+                mimeType: sample.mime || "application/octet-stream"
+              }
+            ]
+          };
+        },
+        async listTakeoffLinks() {
+          return [];
+        }
+      },
+      previewFn: async () => ({
+        mailboxDisplay: "quotes@example.com",
+        messages: [
+          {
+            graphMessageId: `msg-${sample.id}`,
+            subject: "img",
+            bodyPreview: "hi",
+            hasAttachments: true,
+            eligibilityHint: "already_imported",
+            alreadyImported: true,
+            existingCaseId: `case-${sample.id}`,
+            sender: { displayName: "Customer", emailPresent: true },
+            attachments: [
+              {
+                sourceAttachmentId: sample.key,
+                name: sample.name,
+                mimeType: sample.mime,
+                support: "image_needs_review",
+                sizeBytes: 100
+              }
+            ]
+          }
+        ]
+      }),
+      openEstimate: async (deps) => {
+        const caseRow = await deps.repository.getCase(ORG, deps.intakeCaseId);
+        const selected = selectSupportedPdfAttachment(caseRow, {
+          selectedAttachmentKey: deps.body.attachmentKey,
+          selectedFilename: deps.body.attachmentFilename,
+          markAsPlan: true
+        });
+        assert.equal(selected.id, sample.id);
+        return { ok: true, takeoffJobId: `job-${sample.id}`, created: true };
+      }
+    });
+    const r = await svc.sendToAiTakeoff({
+      organizationId: ORG,
+      messageKey: `msg-${sample.id}`,
+      attachmentKey: sample.key,
+      confirm: true,
+      manualPlanOverride: true
+    });
+    assert.equal(r.takeoffJobId, `job-${sample.id}`);
+  }
+  console.log("ok: PNG / WEBP / image/jpeg MIME manual overrides succeed");
+}
+
+{
+  const svc = createStudioSharedInboxService({
+    env: baseEnv(),
+    quoteIntakeRepository: {},
+    previewFn: async () => ({
+      mailboxDisplay: "quotes@example.com",
+      messages: [
+        {
+          graphMessageId: "msg-inline",
+          subject: "sig",
+          bodyPreview: "hi",
+          hasAttachments: true,
+          eligibilityHint: "manual_review",
+          alreadyImported: false,
+          existingCaseId: null,
+          sender: { displayName: "Customer", emailPresent: true },
+          attachments: [
+            {
+              sourceAttachmentId: "AAMk-inline",
+              name: "signature.jpg",
+              mimeType: "image/jpeg",
+              support: "inline_ignored",
+              isInline: true,
+              sizeBytes: 20
+            }
+          ]
+        }
+      ]
+    }),
+    openEstimate: async () => {
+      throw new Error("inline must not open");
+    }
+  });
+  await assert.rejects(
+    () =>
+      svc.sendToAiTakeoff({
+        organizationId: ORG,
+        messageKey: "msg-inline",
+        attachmentKey: "AAMk-inline",
+        confirm: true,
+        manualPlanOverride: true
+      }),
+    (e) => e.code === "attachment_not_supported"
+  );
+  console.log("ok: inline/signature JPG manual override rejects");
 }
 
 console.log("\nstudioSharedInboxSendToTakeoff.test.mjs: ok\n");
