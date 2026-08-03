@@ -9,6 +9,7 @@ import {
   buildFaucetOptionDefinitions,
   buildSinkOptionDefinitions,
   buildSpecialtyOptionDefinitions,
+  alignBacksplashOptionBaselineToPublished,
   cutoutKeyForSinkSelection,
   inferRoomEligibilityType,
   parseProductOptionKey,
@@ -89,7 +90,52 @@ console.log("\ndigitalEstimateProductOptions.test.mjs\n");
   const labels = splash.map((o) => o.displayLabel);
   assert.ok(labels.includes("4-inch backsplash"));
   assert.ok(splash.some((o) => o.optionKey === "backsplash:kitchen:custom_height"));
+  const four = splash.find((o) => o.optionKey.endsWith(":standard_4in"));
+  assert.equal(four?.includedInBaseline, true);
+  assert.equal(four?.defaultQty, 1);
   console.log("ok: backsplash modes include friendly 4-inch label + custom_height");
+}
+
+{
+  const noneBaseline = buildDefaultRoomProductOptions({
+    rooms: [
+      {
+        roomKey: "kitchen",
+        displayName: "Kitchen",
+        backsplashHeightMode: "none",
+        backsplashSf: 0,
+        backsplashMeasuredLengthIn: 240,
+        includeBacksplash: true
+      }
+    ],
+    choiceGroups: new Set(["backsplash"])
+  });
+  const noneOpt = noneBaseline.find((o) => o.optionKey === "backsplash:kitchen:none");
+  const fourOpt = noneBaseline.find((o) => o.optionKey === "backsplash:kitchen:standard_4in");
+  assert.ok(noneOpt && fourOpt, "eligible walls still offer none + 4-inch");
+  assert.equal(noneOpt.includedInBaseline, true, "published none is baseline");
+  assert.equal(fourOpt.includedInBaseline, false, "eligibility is not baseline");
+  assert.equal(noneOpt.defaultQty, 1);
+  assert.equal(fourOpt.defaultQty, 0);
+
+  const wronglySeeded = [
+    {
+      optionKey: "backsplash:kitchen:none",
+      includedInBaseline: false,
+      defaultQty: 0
+    },
+    {
+      optionKey: "backsplash:kitchen:standard_4in",
+      includedInBaseline: true,
+      defaultQty: 1
+    }
+  ];
+  const aligned = alignBacksplashOptionBaselineToPublished(wronglySeeded, [
+    { roomKey: "kitchen", backsplashHeightMode: "none", backsplashSf: 0 }
+  ]);
+  assert.equal(aligned[0].includedInBaseline, true);
+  assert.equal(aligned[1].includedInBaseline, false);
+  console.log("ok: backsplash baseline from published mode, not eligibility");
 }
 
 {

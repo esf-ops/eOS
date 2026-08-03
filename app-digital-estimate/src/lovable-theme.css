@@ -199,6 +199,31 @@
     color: oklch(0.45 0.14 22);
   }
 
+  /*
+   * Selected option chrome — premium, restrained.
+   * Light burgundy-tint fill + thin border; badge is text/outline, not a dark pill.
+   */
+  .de-option-selected {
+    border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
+    background: color-mix(in oklch, var(--accent) 70%, white);
+    box-shadow: inset 3px 0 0 0 color-mix(in oklch, var(--primary) 55%, transparent);
+  }
+
+  .de-option-selected-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklch, var(--primary) 28%, var(--border));
+    background: color-mix(in oklch, var(--accent) 55%, white);
+    padding: 0.125rem 0.5rem;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent-foreground);
+  }
+
   .sr-only {
     position: absolute;
     width: 1px;

@@ -5,7 +5,10 @@
 
 import { ceilBillableSquareFeet } from "../../quotes/billableSquareFeet.mjs";
 import { STANDARD_BACKSPLASH_HEIGHT_IN } from "../../quotes/vanitySideSplash.js";
-import { roomHasEligibleBacksplashLocations } from "../configuration/backsplashPricingAuthority.mjs";
+import {
+  resolveOriginalBacksplashMode,
+  roomHasEligibleBacksplashLocations
+} from "../configuration/backsplashPricingAuthority.mjs";
 import {
   getCutoutCatalogKeyForProduct,
   getProductById,
@@ -656,7 +659,9 @@ export function buildSpecialtyOptionDefinitions(args) {
 export function buildBacksplashOptionDefinitions(args) {
   const roomKey = String(args.roomKey);
   const groupId = args.groupId ?? null;
-  const defaultMode = args.defaultMode || "standard_4in";
+  // Published/pricing baseline mode — never eligibility alone. Callers must pass
+  // resolveOriginalBacksplashMode(room); default none is fail-safe, not "4-inch".
+  const defaultMode = args.defaultMode || "none";
   const modes = [
     { key: "none", label: "No backsplash" },
     { key: "standard_4in", label: "4-inch backsplash" }
@@ -682,6 +687,46 @@ export function buildBacksplashOptionDefinitions(args) {
       }
     })
   );
+}
+
+/**
+ * Align public/envelope backsplash includedInBaseline + defaultQty to the
+ * published pricing baseline (resolveOriginalBacksplashMode). Eligibility for
+ * 4-inch options must not mark them as the selected/published baseline.
+ *
+ * @param {object[]|null|undefined} options
+ * @param {Array<{ roomKey?: string, backsplashHeightMode?: string|null, backsplashSf?: number, includeBacksplash?: boolean }>|null|undefined} rooms
+ * @returns {object[]}
+ */
+export function alignBacksplashOptionBaselineToPublished(options, rooms) {
+  const roomByKey = new Map();
+  for (const room of rooms || []) {
+    const key = String(room?.roomKey || "").trim();
+    if (key) roomByKey.set(key, room);
+  }
+  return (options || []).map((opt) => {
+    const key = String(opt?.optionKey || opt?.option_key || "");
+    if (!key.startsWith("backsplash:")) return opt;
+    const parts = key.split(":");
+    const roomKey = parts[1] || "";
+    const token = parts.slice(2).join(":");
+    const room = roomByKey.get(roomKey);
+    if (!room) return opt;
+    const baselineMode =
+      room.includeBacksplash === false ? "none" : resolveOriginalBacksplashMode(room);
+    const isBaseline = token === baselineMode;
+    if (Boolean(opt.includedInBaseline ?? opt.included_in_baseline) === isBaseline) {
+      const defQty = Number(opt.defaultQty ?? opt.default_qty ?? 0);
+      if ((isBaseline && defQty > 0) || (!isBaseline && defQty <= 0)) return opt;
+    }
+    return {
+      ...opt,
+      includedInBaseline: isBaseline,
+      included_in_baseline: isBaseline,
+      defaultQty: isBaseline ? 1 : 0,
+      default_qty: isBaseline ? 1 : 0
+    };
+  });
 }
 
 /**
@@ -860,11 +905,10 @@ export function buildDefaultRoomProductOptions(args) {
     const roomType = inferRoomEligibilityType(room);
 
     if (choiceGroupEnabled(choiceGroups, "backsplash") && roomHasEligibleBacksplashLocations(room)) {
-      const heightMode = String(room.backsplashHeightMode || "").toLowerCase();
-      let defaultMode = "standard_4in";
+      // Published pricing baseline — not eligibility. Eligible wall runs may exist
+      // even when the estimate was published with No backsplash.
+      let defaultMode = resolveOriginalBacksplashMode(room);
       if (room.includeBacksplash === false) defaultMode = "none";
-      else if (heightMode === "full_height") defaultMode = "full_height";
-      else if (heightMode === "custom" || heightMode === "custom_height") defaultMode = "custom_height";
       options.push(
         ...buildBacksplashOptionDefinitions({
           roomKey,
