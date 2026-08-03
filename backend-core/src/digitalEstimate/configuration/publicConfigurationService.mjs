@@ -622,12 +622,29 @@ function buildCustomerSafeMaterials(graphOptions, enrichedById = null) {
  * The room card and calculation must never read different authorities.
  * Known modes (none / 4-inch / custom / full) apply even when the envelope
  * option row is missing so a valid draft cannot soft-fail into option_not_allowed.
+ *
+ * When the save payload already includes an explicit backsplash quantity for the
+ * room, that selection wins over a stale draft mode (frontend draft refs can lag
+ * one autosave tick behind qty).
  */
-function applyBacksplashDraftAuthority(selectionMap, backsplashDrafts, options) {
-  for (const [roomKey, draft] of Object.entries(backsplashDrafts || {})) {
-    const mode = String(draft?.mode || "").trim();
-    if (!mode) continue;
+export function applyBacksplashDraftAuthority(selectionMap, backsplashDrafts, options) {
+  const rooms = new Set([
+    ...Object.keys(backsplashDrafts || {}),
+    ...Object.keys(selectionMap || {})
+      .filter((k) => String(k).startsWith("backsplash:"))
+      .map((k) => String(k).split(":")[1])
+      .filter(Boolean)
+  ]);
+  for (const roomKey of rooms) {
     const prefix = `backsplash:${roomKey}:`;
+    const explicit = Object.entries(selectionMap || {}).find(
+      ([k, q]) => k.startsWith(prefix) && Number(q) > 0
+    );
+    const draft = backsplashDrafts?.[roomKey] || null;
+    let mode = explicit
+      ? String(explicit[0]).slice(prefix.length).trim()
+      : String(draft?.mode || "").trim();
+    if (!mode) continue;
     const targetKey = `${prefix}${mode}`;
     const target = (options || []).find(
       (o) => String(o.option_key || o.optionKey) === targetKey
@@ -637,7 +654,6 @@ function applyBacksplashDraftAuthority(selectionMap, backsplashDrafts, options) 
       const key = String(opt.option_key || opt.optionKey || "");
       if (key.startsWith(prefix)) selectionMap[key] = 0;
     }
-    // Also clear any stray map keys for this room's backsplash modes.
     for (const key of Object.keys(selectionMap)) {
       if (key.startsWith(prefix)) selectionMap[key] = 0;
     }
@@ -684,13 +700,16 @@ function selectedMaterialGroupForRoom(room, quantities, options) {
 }
 
 function selectedBacksplashModeForRoom(room, quantities, backsplashDrafts) {
-  const draftMode = String(backsplashDrafts?.[room.roomKey]?.mode || "").trim();
-  if (draftMode) return draftMode;
+  const prefix = `backsplash:${room.roomKey}:`;
+  // Explicit selection quantity wins over a stale draft (same priority as
+  // applyBacksplashDraftAuthority) so room pricing matches saved selections.
   for (const [key, qty] of Object.entries(quantities || {})) {
-    if (Number(qty) > 0 && key.startsWith(`backsplash:${room.roomKey}:`)) {
-      return key.slice(`backsplash:${room.roomKey}:`.length);
+    if (Number(qty) > 0 && key.startsWith(prefix)) {
+      return key.slice(prefix.length);
     }
   }
+  const draftMode = String(backsplashDrafts?.[room.roomKey]?.mode || "").trim();
+  if (draftMode) return draftMode;
   return resolveOriginalBacksplashMode(room);
 }
 
@@ -1083,7 +1102,8 @@ export function createPublicConfigurationService(deps) {
       selectionMeta.customerConfiguration,
       {
         quantities: selectionMeta.quantities || {},
-        lastSavedAt: latestSelection?.updated_at || latestSelection?.created_at || null
+        lastSavedAt: latestSelection?.updated_at || latestSelection?.created_at || null,
+        productDrafts: selectionMeta.customerProductDrafts || null
       }
     );
     let publishedRoomPricingPublicForExchange = null;
@@ -2495,7 +2515,8 @@ export function createPublicConfigurationService(deps) {
         mergedCustomerConfiguration,
         {
           quantities: normalized.selections,
-          lastSavedAt: mergedCustomerConfiguration?.lastSavedAt || new Date().toISOString()
+          lastSavedAt: mergedCustomerConfiguration?.lastSavedAt || new Date().toISOString(),
+          productDrafts: mergedProductDrafts || null
         }
       );
 

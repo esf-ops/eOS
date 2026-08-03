@@ -3487,3 +3487,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `studioFinalAcceptanceService.mjs` (+ tests), `publicConfigurationService.mjs`, `reviewRequestService.mjs`, `studioV2Service.mjs`, public Digital Estimate CTA/modal, Studio V2 selection panel, this doc. |
 | **Protected / unchanged** | Pricing formulas, live-pricing math, publish/approve rules, Studio revision, sold handoff, AI Takeoff, Internal Estimate, Supabase migrations, approved snapshots, published snapshots. No auto-approve, auto-publish, or sold mutation. |
 | **Revisit trigger** | If configured accept should also acknowledge staff-side selection-only submissions without closing the review row, add a dedicated non-acceptance acknowledgment path. |
+
+### 251. Digital Estimate selection exchange — canonical identity + customer-safe summaries (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/digital-estimate-selection-exchange-identity` |
+| **Decision** | Digital Estimate selection exchange uses **canonical published envelope option keys** for all customer-selectable roles (material, edge, backsplash, sink, faucet, accessory/specialty). Mutually exclusive baseline choices are **not resurrected** after a customer selects another option in the same role/room. Customer-facing saved-selection summaries use **customer-safe labels**, never raw option keys (`aura_taj`, `edge_eased`, product IDs). |
+| **Why** | Production saves failed with `selection_unavailable` / mislabeled `DE-EXCHANGE-404` when UI/display keys, stale backsplash drafts, finish-suffixed ESF keys, or baseline rehydration disagreed with the frozen envelope. Room card, sidebar, modal, and “Your selections” could disagree and leak internal tokens. |
+| **Rules** | (1) Frontend submits envelope keys (ESF finish keys collapse to family envelope rows). (2) Backend may remap known safe aliases onto envelope rows but still rejects truly off-envelope keys. (3) Exclusive room roles skip baseline `defaultQty` re-add when another positive selection exists. (4) Explicit backsplash selection quantity wins over a stale draft mode. (5) Selection identity errors map to `DE-OPTION-NOT-ALLOWED`, not lifecycle `DE-EXCHANGE-404`. |
+| **Impacted** | `configurationValidation.mjs`, `publicConfigurationService.mjs`, `customerConfigurationFoundation.mjs`, `ConfigurationView.tsx`, `lovableViewModel.ts`, `publicConfigApi.ts`, `sinkSelectionDisplay.ts`, selection identity / foundation tests, this doc. |
+| **Protected / unchanged** | Pricing formulas, sink/cutout prices, Studio V2 approve/publish/revision, Digital Estimate acceptance rules (except display/read-model labels), sold handoff, AI Takeoff, Internal Estimate, Supabase migrations. Backend remains selection authority. |
+| **Revisit trigger** | If a new exclusive role is added to the envelope, extend `EXCLUSIVE_ROOM_ROLES` and label resolvers; do not loosen off-envelope rejection. |
+
+---
