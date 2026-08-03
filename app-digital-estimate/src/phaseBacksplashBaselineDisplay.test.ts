@@ -127,6 +127,12 @@ console.log("\nphaseBacksplashBaselineDisplay.test.ts\n");
     view,
     /selected\s*\?\s*"border-primary bg-accent\/40 ring-1 ring-primary\/20"/,
   );
+  assert.doesNotMatch(view, /opt\.selected\s*\?\s*"border-foreground bg-muted\/30"/);
+  assert.match(theme, /--de-selected-bg:\s*#fff7f8/);
+  assert.doesNotMatch(
+    theme,
+    /\.de-option-selected\s*\{[^}]*var\(--accent\)/s,
+  );
   console.log("ok: 4. selected styling softened; badge still present");
 }
 

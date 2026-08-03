@@ -89,6 +89,13 @@
   --sidebar-ring: oklch(0.55 0.12 22);
   --de-shadow-card: 0 1px 2px rgba(11, 26, 51, 0.04), 0 10px 28px rgba(11, 26, 51, 0.05);
   --de-shadow-elevated: 0 2px 6px rgba(11, 26, 51, 0.06), 0 18px 40px rgba(11, 26, 51, 0.08);
+  /* Selected option chrome — dedicated tokens (immune to legacy --accent collision) */
+  --de-selected-bg: #fff7f8;
+  --de-selected-border: rgba(178, 35, 48, 0.35);
+  --de-selected-accent: #b22330;
+  --de-selected-fg: #1c1416;
+  --de-selected-badge-bg: #fdf2f4;
+  --de-selected-badge-fg: #8f1c28;
 }
 
 .dark {
@@ -201,12 +208,14 @@
 
   /*
    * Selected option chrome — premium, restrained.
-   * Light burgundy-tint fill + thin border; badge is text/outline, not a dark pill.
+   * Uses dedicated --de-selected-* tokens (not --accent/--primary) so legacy
+   * styles.css cannot paint selected rows as dark green fills.
    */
   .de-option-selected {
-    border-color: color-mix(in oklch, var(--primary) 35%, var(--border));
-    background: color-mix(in oklch, var(--accent) 70%, white);
-    box-shadow: inset 3px 0 0 0 color-mix(in oklch, var(--primary) 55%, transparent);
+    border-color: var(--de-selected-border);
+    background: var(--de-selected-bg);
+    color: var(--de-selected-fg);
+    box-shadow: inset 3px 0 0 0 var(--de-selected-accent);
   }
 
   .de-option-selected-badge {
@@ -214,14 +223,14 @@
     align-items: center;
     gap: 0.25rem;
     border-radius: 999px;
-    border: 1px solid color-mix(in oklch, var(--primary) 28%, var(--border));
-    background: color-mix(in oklch, var(--accent) 55%, white);
+    border: 1px solid var(--de-selected-border);
+    background: var(--de-selected-badge-bg);
     padding: 0.125rem 0.5rem;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--accent-foreground);
+    color: var(--de-selected-badge-fg);
   }
 
   .sr-only {

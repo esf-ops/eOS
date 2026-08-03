@@ -159,7 +159,7 @@ console.log("ok: edge rows avoid 'Included in your estimate'");
 // row markup carries a visual "selected" style and a short badge, never a
 // sentence like "Requested change" / "Price updates for this change...".
 assert.ok(edgeBlock.includes("de-edge-option-selected-badge"), "4. short selected badge present");
-assert.ok(edgeBlock.includes("border-foreground"), "4. selected row is visually highlighted");
+assert.ok(edgeBlock.includes("de-option-selected"), "4. selected row is visually highlighted");
 assert.ok(
   !/Requested change|Elite will review this before final approval|Price updates for this change require estimator review/.test(
     edgeBlock,
