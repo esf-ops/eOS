@@ -3541,4 +3541,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Pricing formulas, material rates, sink/cutout prices, Studio V2 approval, acceptance, sold, AI Takeoff, Internal Estimate, email, migrations, first-time publish semantics. |
 | **Revisit trigger** | If envelope activate cannot keep the same public token; if a full reprice on repair is required beyond sanitized display calc. |
 
+### 255. Digital Estimate public saves after repair — governed qty echo + prior fallback (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/digital-estimate-selection-envelope-diagnostics` |
+| **Decision** | After Repair rebuilds the envelope, public `/selections` must succeed for UI-displayed sink/backsplash/material choices. **Exact rejected key (pre-fix):** `qty-sink` via `governed_scope_quantity_forbidden` — the UI re-submitted the full restored selection map including governed fabrication qty. **Fix:** (1) public `currentSelections` omit governed scope keys; (2) UI `buildSelectionItems` never submits them; (3) repair migration drops them; (4) save rejects only *changed* governed qty (echo of prior/baseline allowed) and attaches `selectionKey` diagnostics; (5) save prior falls back to publication+active-envelope selection when the new post-repair session has none. Customer errors stay friendly; staff/tests see rejected key + envelope id. Off-envelope keys still fail. |
+| **Why** | Repair correctly rebuilt the envelope and cleaned display, but hard-refresh restored `qty-sink` into the customer qty map; every role save then failed before option validation. |
+| **Impacted** | `publicConfigurationService.mjs`, `lovableViewModel.ts`, `repairPublicationSelections.mjs`, `selectionSaveAfterRepair.test.mjs`, governed-scope tests, this doc. |
+| **Protected / unchanged** | Pricing formulas, material rates, sink/cutout prices, Studio V2 approval/publish/revision, acceptance, sold, AI Takeoff, Internal Estimate, migrations. |
+| **Revisit trigger** | If room-scoped `qty-sink:<room>` must be customer-editable for a future product; if governed keys need a dedicated UI surface. |
+
 ---

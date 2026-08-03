@@ -343,40 +343,83 @@ const GOVERNED_SCOPE_QUANTITY_KEYS = new Set([
 ]);
 
 /**
- * Reject crafted public saves that try to change governed Takeoff / Pricing Setup
- * fabrication quantities (cutouts, sinks seeded from scope, etc.).
- * Call with the caller's explicit `items` list — not the merged selection map —
- * so lingering baseline keys do not break ordinary saves.
- * @param {Array<{ optionKey?: string, option_key?: string, quantity?: unknown }>|null|undefined} items
+ * @param {string} key
+ * @returns {boolean}
  */
-export function rejectGovernedScopeQuantitySelections(items) {
+export function isGovernedScopeQuantityKey(key) {
+  const k = String(key || "");
+  if (!k) return false;
+  if (GOVERNED_SCOPE_QUANTITY_KEYS.has(k)) return true;
+  return /^qty-(cook|sink|bar|outlet)(:|$)/i.test(k);
+}
+
+/**
+ * Reject crafted public saves that try to *change* governed Takeoff / Pricing Setup
+ * fabrication quantities. Echoing a restored baseline / prior qty (common after
+ * repair + hard refresh when the UI re-submits the full selection map) is allowed
+ * and stripped from the working map — it is not a customer fabrication edit.
+ *
+ * @param {Array<{ optionKey?: string, option_key?: string, quantity?: unknown }>|null|undefined} items
+ * @param {{
+ *   priorSelections?: Record<string, number>|null,
+ *   envelopeDefaultQuantities?: Record<string, number>|null
+ * }} [opts]
+ */
+export function rejectGovernedScopeQuantitySelections(items, opts = {}) {
+  const prior = opts.priorSelections && typeof opts.priorSelections === "object"
+    ? opts.priorSelections
+    : {};
+  const defaults =
+    opts.envelopeDefaultQuantities && typeof opts.envelopeDefaultQuantities === "object"
+      ? opts.envelopeDefaultQuantities
+      : {};
   for (const item of items || []) {
     const key = String(item?.optionKey || item?.option_key || "");
     const qty = Number(item?.quantity) || 0;
     if (!key || !(qty > 0)) continue;
-    if (
-      GOVERNED_SCOPE_QUANTITY_KEYS.has(key) ||
-      /^qty-(cook|sink|bar|outlet)(:|$)/i.test(key)
-    ) {
-      throw safeFail(
-        "governed_scope_quantity_forbidden",
-        "That selection is unavailable",
-        403
-      );
-    }
+    if (!isGovernedScopeQuantityKey(key)) continue;
+    const priorQty = Number(prior[key] || 0);
+    if (priorQty > 0 && qty === priorQty) continue;
+    const defaultQty = Number(defaults[key] || 0);
+    // New session after repair/exchange: UI echoes frozen baseline qty with empty session prior.
+    if (!(priorQty > 0) && defaultQty > 0 && qty === defaultQty) continue;
+    throw safeFail(
+      "governed_scope_quantity_forbidden",
+      "That selection is unavailable",
+      403,
+      {
+        selectionKey: key.slice(0, 160),
+        diagnosticCode: "DE-OPTION-NOT-ALLOWED",
+        reason: "governed_scope_quantity",
+        category: "scope",
+        restoreSavedState: true
+      }
+    );
   }
 }
 
 /** Drop governed fabrication qty keys from the working selection map (non-authoritative). */
 function stripGovernedScopeQuantitiesFromMap(selectionMap) {
   for (const key of Object.keys(selectionMap || {})) {
-    if (
-      GOVERNED_SCOPE_QUANTITY_KEYS.has(key) ||
-      /^qty-(cook|sink|bar|outlet)(:|$)/i.test(key)
-    ) {
+    if (isGovernedScopeQuantityKey(key)) {
       delete selectionMap[key];
     }
   }
+}
+
+/**
+ * Public read models must not expose governed fabrication keys in currentSelections;
+ * otherwise the UI round-trips them into /selections and trips save rejection.
+ * @param {Record<string, number>|null|undefined} quantities
+ */
+function publicCurrentSelectionsWithoutGovernedScope(quantities) {
+  /** @type {Record<string, number>} */
+  const out = {};
+  for (const [key, qty] of Object.entries(quantities || {})) {
+    if (isGovernedScopeQuantityKey(key)) continue;
+    out[key] = Number(qty) || 0;
+  }
+  return out;
 }
 
 /**
@@ -1219,7 +1262,7 @@ export function createPublicConfigurationService(deps) {
         customerCatalogPermissions: normalizeCustomerCatalogPermissions(
           ctx.customerCatalogPermissions
         ),
-        currentSelections: selectionMeta.quantities,
+        currentSelections: publicCurrentSelectionsWithoutGovernedScope(selectionMeta.quantities),
         latestCalculation: latestCalculationPublic,
         missingInformationRequirements: Array.isArray(
           rawCustomerCalc?.missingInformationRequirements
@@ -1510,6 +1553,9 @@ export function createPublicConfigurationService(deps) {
       const options = graph?.options || [];
 
       // Load prior saved selections first — needed to classify baseline vs new.
+      // After repair, activate revokes old sessions; a hard refresh creates a new
+      // session with no per-session selection yet. Fall back to the publication +
+      // active envelope draft (same source exchange uses for currentSelections).
       let priorMeta = {
         customerInfoDraft: null,
         roomLabelDrafts: {},
@@ -1521,12 +1567,25 @@ export function createPublicConfigurationService(deps) {
         customerConfiguration: null,
         quantities: {}
       };
+      let priorRow = null;
       if (typeof configurationRepository.getLatestSelectionForSession === "function") {
-        const prior = await configurationRepository.getLatestSelectionForSession(
+        priorRow = await configurationRepository.getLatestSelectionForSession(
           session.organization_id,
           session.id
         );
-        priorMeta = splitSelectionPayloadMeta(prior?.selection_payload_json);
+      }
+      if (
+        !priorRow &&
+        typeof configurationRepository.getLatestSelectionForPublicationEnvelope === "function"
+      ) {
+        priorRow = await configurationRepository.getLatestSelectionForPublicationEnvelope(
+          session.organization_id,
+          session.publication_id,
+          activeEnvelope.id
+        );
+      }
+      if (priorRow) {
+        priorMeta = splitSelectionPayloadMeta(priorRow.selection_payload_json);
       }
       // Keep raw prior quantities for availability classification (unchanged saved
       // baseline rows). Exclusive contamination is stripped from the *incoming*
@@ -1710,7 +1769,27 @@ export function createPublicConfigurationService(deps) {
         : priorMeta.customerConfiguration || null;
 
       applyBacksplashDraftAuthority(selectionMap, mergedBacksplashDrafts, options);
-      rejectGovernedScopeQuantitySelections(body.items || body.selections || []);
+      /** @type {Record<string, number>} */
+      const envelopeDefaultQuantities = {};
+      for (const opt of options || []) {
+        const key = String(opt.option_key || opt.optionKey || "");
+        if (!isGovernedScopeQuantityKey(key)) continue;
+        const def = Number(opt.default_qty ?? opt.defaultQty ?? 0) || 0;
+        const included = Boolean(opt.included_in_baseline ?? opt.includedInBaseline);
+        if (included && def > 0) envelopeDefaultQuantities[key] = def;
+      }
+      const rejectItems = Array.isArray(body.items)
+        ? body.items
+        : body.selections && typeof body.selections === "object" && !Array.isArray(body.selections)
+          ? Object.entries(body.selections).map(([optionKey, quantity]) => ({
+              optionKey,
+              quantity
+            }))
+          : [];
+      rejectGovernedScopeQuantitySelections(rejectItems, {
+        priorSelections,
+        envelopeDefaultQuantities
+      });
       stripGovernedScopeQuantitiesFromMap(selectionMap);
       // Repair contaminated exclusive-role duplicates from older saved states /
       // client payloads (e.g. ESF sink + customer_provided) before validation.

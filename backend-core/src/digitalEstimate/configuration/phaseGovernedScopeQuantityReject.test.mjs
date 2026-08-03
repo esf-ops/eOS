@@ -31,6 +31,25 @@ for (const key of cases) {
 rejectGovernedScopeQuantitySelections([]);
 rejectGovernedScopeQuantitySelections([{ optionKey: "edge:kitchen:edge_small_ogee", quantity: 1 }]);
 rejectGovernedScopeQuantitySelections([{ optionKey: "qty-cook", quantity: 0 }]);
+// Echo of frozen / prior governed qty must not reject (repair + hard-refresh UI map).
+rejectGovernedScopeQuantitySelections([{ optionKey: "qty-sink", quantity: 1 }], {
+  envelopeDefaultQuantities: { "qty-sink": 1 }
+});
+rejectGovernedScopeQuantitySelections([{ optionKey: "qty-sink", quantity: 1 }], {
+  priorSelections: { "qty-sink": 1 }
+});
+assert.throws(
+  () =>
+    rejectGovernedScopeQuantitySelections([{ optionKey: "qty-sink", quantity: 2 }], {
+      priorSelections: { "qty-sink": 1 },
+      envelopeDefaultQuantities: { "qty-sink": 1 }
+    }),
+  (err) =>
+    err &&
+    err.code === "governed_scope_quantity_forbidden" &&
+    err.selectionKey === "qty-sink",
+  "changed governed qty still rejected with selectionKey"
+);
 console.log("ok: governed fabrication quantity keys rejected");
 
 // Premium edge with LF + rate must not be review-required
