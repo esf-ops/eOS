@@ -1,22 +1,62 @@
 /**
- * Product Catalog — Blanco sink accessory lists for the detail modal
+ * Product Catalog — Blanco sink accessory groups for the detail modal
  * ==================================================================
  *
  * Source: ESF Plumbing workbook → “Blanco Sink Program (Non Stock)”
- * Accessories are attached by stable catalog product id during
- * `getProductCatalogItemsWithAssets()` (not by fragile string matching
- * inside the modal). Prices/costs are intentionally omitted.
+ * Attached by stable catalog product id during getProductCatalogItemsWithAssets().
+ * Prices/costs and strainer photos are intentionally omitted (text-only).
  *
- * Display-split cards (Regular/Low Divide) inherit via `catalogSourceId`
- * or an explicit display-id entry below.
+ * Groups:
+ *   - grids: product-specific grids / boards / racks
+ *   - drainOptions: stainless strainer + flange (all Blanco sinks)
+ *   - colorMatchDrainOptions: metal color-match strainer + flange (all Blanco sinks)
  */
-import type { ProductCatalogAccessory, ProductCatalogItem } from "./productCatalog";
+import type {
+  ProductCatalogAccessory,
+  ProductCatalogItem,
+  ProductCatalogSinkAccessoryGroups,
+} from "./productCatalog";
 
-type AccessoryList = readonly ProductCatalogAccessory[];
+type GridList = readonly ProductCatalogAccessory[];
 
-const NONE: AccessoryList = [];
+const NONE: GridList = [];
 
-const BLANCO_SINK_ACCESSORIES_BY_PRODUCT_ID: Readonly<Record<string, AccessoryList>> = {
+/** Stainless drain options — every Blanco sink (separate strainer vs flange SKUs). */
+const BLANCO_STAINLESS_DRAIN_OPTIONS: readonly ProductCatalogAccessory[] = [
+  { name: "Basket Strainer Stainless Steel", sku: "441093" },
+  { name: "Basket Flange Stainless Steel", sku: "441098" },
+  { name: "Basket Strainer 3 in 1", sku: "441231" },
+];
+
+/**
+ * Metal color-match drain options — every Blanco sink.
+ * Display names use “Volcano Gray” (not “Gray”); Cafe → Café Brown.
+ * Text-only; no photos or pricing.
+ */
+const BLANCO_COLOR_MATCH_DRAIN_OPTIONS: readonly ProductCatalogAccessory[] = [
+  { name: "Basket Strainer Anthracite", sku: "240323" },
+  { name: "Basket Flange Anthracite", sku: "240333" },
+  { name: "Basket Strainer White", sku: "240319" },
+  { name: "Basket Flange White", sku: "240328" },
+  { name: "Basket Strainer Café Brown", sku: "240321" },
+  { name: "Basket Flange Café Brown", sku: "240330" },
+  { name: "Basket Strainer Truffle", sku: "240322" },
+  { name: "Basket Flange Truffle", sku: "240332" },
+  { name: "Basket Strainer Cinder", sku: "240324" },
+  { name: "Basket Flange Cinder", sku: "240334" },
+  { name: "Basket Strainer Coal Black", sku: "240327" },
+  { name: "Basket Flange Coal Black", sku: "240339" },
+  { name: "Basket Strainer Soft White", sku: "203439" },
+  { name: "Basket Flange Soft White", sku: "203443" },
+  { name: "Basket Strainer Volcano Gray", sku: "203441" },
+  { name: "Basket Flange Volcano Gray", sku: "203451" },
+];
+
+/**
+ * Product-specific grids / boards / racks by catalog product id.
+ * Precis 50/50: one grid only — order qty 2 for both bowls.
+ */
+const BLANCO_SINK_GRIDS_BY_PRODUCT_ID: Readonly<Record<string, GridList>> = {
   "blanco-blanco-diamond-50-50": [
     { name: "Diamond Grid For 50/50 Left Side", sku: "221008" },
     { name: "Diamond Grid For 50/50 Right Side", sku: "221009" },
@@ -59,7 +99,11 @@ const BLANCO_SINK_ACCESSORIES_BY_PRODUCT_ID: Readonly<Record<string, AccessoryLi
   "blanco-blanco-diamond-small-bar-sinks": NONE,
 
   "blanco-blanco-precis-50-50-sinks": [
-    { name: "Precis Grid for 50/50", sku: "516363" },
+    {
+      name: "Precis Grid for 50/50",
+      sku: "516363",
+      note: "Order quantity 2 if a grid is wanted for both bowls.",
+    },
   ],
 
   "blanco-blanco-precis-60-40-sinks": [
@@ -115,23 +159,58 @@ const BLANCO_SINK_ACCESSORIES_BY_PRODUCT_ID: Readonly<Record<string, AccessoryLi
   ],
 };
 
-function accessoriesForProduct(item: ProductCatalogItem): AccessoryList | undefined {
-  const byId = BLANCO_SINK_ACCESSORIES_BY_PRODUCT_ID[item.id];
+function isBlancoSink(item: ProductCatalogItem): boolean {
+  if (item.category !== "sink") return false;
+  if ((item.brand || "").toLowerCase() === "blanco") return true;
+  return item.id.startsWith("blanco-");
+}
+
+function gridsForProduct(item: ProductCatalogItem): GridList | undefined {
+  const byId = BLANCO_SINK_GRIDS_BY_PRODUCT_ID[item.id];
   if (byId !== undefined) return byId;
   if (item.catalogSourceId) {
-    return BLANCO_SINK_ACCESSORIES_BY_PRODUCT_ID[item.catalogSourceId];
+    return BLANCO_SINK_GRIDS_BY_PRODUCT_ID[item.catalogSourceId];
   }
   return undefined;
 }
 
-/** Attach curated accessory lists to Blanco sink products (display-only). */
+function cloneAccessories(list: readonly ProductCatalogAccessory[]): ProductCatalogAccessory[] {
+  return list.map((a) => ({ ...a }));
+}
+
+function buildGroups(grids: GridList): ProductCatalogSinkAccessoryGroups {
+  return {
+    grids: cloneAccessories(grids),
+    drainOptions: cloneAccessories(BLANCO_STAINLESS_DRAIN_OPTIONS),
+    colorMatchDrainOptions: cloneAccessories(BLANCO_COLOR_MATCH_DRAIN_OPTIONS),
+  };
+}
+
+/** Attach curated accessory groups to Blanco sink products (display-only). */
 export function applyProductCatalogSinkAccessories(
   items: ProductCatalogItem[]
 ): ProductCatalogItem[] {
   return items.map((item) => {
-    if (item.category !== "sink") return item;
-    const accessories = accessoriesForProduct(item);
-    if (accessories === undefined) return item;
-    return { ...item, accessories: [...accessories] };
+    if (!isBlancoSink(item)) return item;
+
+    const grids = gridsForProduct(item);
+    // Known Blanco family with explicit mapping (including empty grids)
+    if (grids !== undefined) {
+      const accessoryGroups = buildGroups(grids);
+      return {
+        ...item,
+        accessoryGroups,
+        // Flat list for any legacy display: grids only (drain groups render separately)
+        accessories: accessoryGroups.grids,
+      };
+    }
+
+    // Other Blanco-branded sinks (if any) still get drain options, no grids mapping
+    const accessoryGroups = buildGroups(NONE);
+    return {
+      ...item,
+      accessoryGroups,
+      accessories: [],
+    };
   });
 }

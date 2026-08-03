@@ -36,6 +36,15 @@ export type ProductCatalogVariant = {
 export type ProductCatalogAccessory = {
   name: string;
   sku?: string;
+  /** Optional showroom note (e.g. quantity guidance). */
+  note?: string;
+};
+
+/** Grouped Blanco sink accessories for the detail modal (text-only, no pricing). */
+export type ProductCatalogSinkAccessoryGroups = {
+  grids: ProductCatalogAccessory[];
+  drainOptions: ProductCatalogAccessory[];
+  colorMatchDrainOptions: ProductCatalogAccessory[];
 };
 
 export type ProductCatalogItem = {
@@ -61,10 +70,12 @@ export type ProductCatalogItem = {
   availableColors?: string[];
   variants?: ProductCatalogVariant[];
   /**
-   * Compatible accessories for this sink (showroom modal).
-   * `undefined` = section hidden; `[]` = “No accessories listed.”
+   * @deprecated Prefer `accessoryGroups` for Blanco sinks.
+   * Flat list kept only for legacy callers; may be omitted when groups are set.
    */
   accessories?: ProductCatalogAccessory[];
+  /** Grouped sink accessories (grids + drain options) for the showroom modal. */
+  accessoryGroups?: ProductCatalogSinkAccessoryGroups;
   imageUrl?: string;
   gallery?: string[];
   installedImageUrl?: string;

@@ -478,7 +478,56 @@ export function ProductCatalogModal({
                 ) : null}
               </dl>
 
-              {item.category === "sink" && item.accessories !== undefined ? (
+              {item.category === "sink" && item.accessoryGroups ? (
+                <section className="pc-text-section pc-accessories-section" aria-label="Available accessories">
+                  <div className="pc-accessory-group">
+                    <h3 className="pc-section-title">Compatible grids</h3>
+                    {item.accessoryGroups.grids.length > 0 ? (
+                      <ul className="pc-accessory-list">
+                        {item.accessoryGroups.grids.map((acc) => (
+                          <li key={`grid-${acc.sku ?? acc.name}`}>
+                            <div className="pc-accessory-row">
+                              <span className="pc-accessory-name">{acc.name}</span>
+                              {acc.sku ? <span className="pc-accessory-sku"> · {acc.sku}</span> : null}
+                            </div>
+                            {acc.note ? <p className="pc-accessory-note">{acc.note}</p> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="pc-body-text pc-accessory-empty">No compatible grid listed.</p>
+                    )}
+                  </div>
+
+                  {item.accessoryGroups.drainOptions.length > 0 ? (
+                    <div className="pc-accessory-group">
+                      <h3 className="pc-section-title">Drain / strainer options</h3>
+                      <ul className="pc-accessory-list">
+                        {item.accessoryGroups.drainOptions.map((acc) => (
+                          <li key={`drain-${acc.sku ?? acc.name}`}>
+                            <span className="pc-accessory-name">{acc.name}</span>
+                            {acc.sku ? <span className="pc-accessory-sku"> · {acc.sku}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {item.accessoryGroups.colorMatchDrainOptions.length > 0 ? (
+                    <div className="pc-accessory-group">
+                      <h3 className="pc-section-title">Color-match drain options</h3>
+                      <ul className="pc-accessory-list">
+                        {item.accessoryGroups.colorMatchDrainOptions.map((acc) => (
+                          <li key={`color-drain-${acc.sku ?? acc.name}`}>
+                            <span className="pc-accessory-name">{acc.name}</span>
+                            {acc.sku ? <span className="pc-accessory-sku"> · {acc.sku}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </section>
+              ) : item.category === "sink" && item.accessories !== undefined ? (
                 <section className="pc-text-section pc-accessories-section" aria-label="Available accessories">
                   <h3 className="pc-section-title">Available accessories</h3>
                   {item.accessories.length > 0 ? (
