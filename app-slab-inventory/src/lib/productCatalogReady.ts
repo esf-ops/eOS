@@ -5,6 +5,7 @@ import { isHeroOnlyCatalogSinkId } from "./productCatalogHeroOnlySinkAssets";
 import { usesSinkFolderResolver } from "./productCatalogBlancoSinkAssets";
 import { usesFaucetFolderResolver } from "./productCatalogFaucetAssets";
 import { getProductCatalogAssetOverride } from "./productCatalogAssets";
+import { isCuratedSpecialtyProductId } from "./productCatalogSpecialtyItems";
 import {
   getProductHeroImageCandidates,
   type ProductCatalogItem,
@@ -31,9 +32,15 @@ export function getProductCatalogDisplayImageCandidates(item: ProductCatalogItem
 /**
  * Showroom-ready: at least one display image candidate from the asset pipeline.
  * Spec sheet alone is not sufficient. Folder-resolved sinks require a published override row.
+ * Curated Specialty Items may show with placeholder cards when images are not yet collected.
  */
 export function isProductCatalogItemReady(item: ProductCatalogItem): boolean {
   if (!item.active) return false;
+
+  if (item.category === "specialty_add_on") {
+    return isCuratedSpecialtyProductId(item.id);
+  }
+
   if (getProductCatalogDisplayImageCandidates(item).length === 0) return false;
 
   if (

@@ -71,6 +71,18 @@ export type ProductCatalogItem = {
   esfCode?: string;
   description?: string;
   notes?: string;
+  /** External product website (Specialty Items). */
+  websiteUrl?: string;
+  /** Specialty subcategory key (Countertop Power, Wireless Charging, …). */
+  specialtyGroup?:
+    | "countertop_power"
+    | "wireless_charging"
+    | "backlighting"
+    | "hidden_cooking";
+  /** Sort order within a specialty subcategory. */
+  specialtySortOrder?: number;
+  /** Named configurations shown in the modal (e.g. InvisaCook burners). */
+  configurationOptions?: string[];
   availableColors?: string[];
   variants?: ProductCatalogVariant[];
   /**
@@ -127,7 +139,7 @@ export const PRODUCT_CATALOG_CATEGORY_LABELS: Record<ProductCatalogCategory, str
   sink: "Sinks",
   sink_accessory: "Sink Accessories",
   faucet: "Faucets",
-  specialty_add_on: "Specialty Add-ons",
+  specialty_add_on: "Specialty Items",
 };
 
 /** Public showroom tab labels (Accessories vs Sink Accessories). */
@@ -135,7 +147,7 @@ export const PUBLIC_PRODUCT_CATALOG_TAB_LABELS: Record<ProductCatalogCategory, s
   sink: "Sinks",
   sink_accessory: "Accessories",
   faucet: "Faucets",
-  specialty_add_on: "Specialty",
+  specialty_add_on: "Specialty Items",
 };
 
 /** Fixed public tabs — Specialty is appended only when catalog-ready items exist. */
@@ -439,6 +451,9 @@ export function productCatalogSearchText(item: ProductCatalogItem): string {
     item.esfCode,
     item.description,
     item.notes,
+    item.websiteUrl,
+    item.specialtyGroup,
+    ...(item.configurationOptions ?? []),
     ...(item.availableColors ?? []),
     ...(item.variants ?? []).flatMap((v) => [
       v.colorName,

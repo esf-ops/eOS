@@ -12,6 +12,7 @@ import {
   type ProductCatalogItem,
   type ProductCatalogTagFilter,
 } from "./lib/productCatalog";
+import { groupProductCatalogBySpecialtyGroup } from "./lib/productCatalogSpecialtyItems";
 import {
   ProductCatalogCard,
   ProductCatalogModal,
@@ -77,6 +78,11 @@ export default function ProductCatalogPanel() {
   const manufacturerGroups = useMemo(() => {
     if (!productCatalogUsesManufacturerGrouping(category)) return null;
     return groupProductCatalogByManufacturer(filtered);
+  }, [category, filtered]);
+
+  const specialtyGroups = useMemo(() => {
+    if (category !== "specialty_add_on") return null;
+    return groupProductCatalogBySpecialtyGroup(filtered);
   }, [category, filtered]);
 
   const toggleShowAllGenerated = () => {
@@ -197,6 +203,19 @@ export default function ProductCatalogPanel() {
           {manufacturerGroups.map((group) => (
             <section key={group.brand} className="pc-manufacturer-section" aria-label={group.brand}>
               <h2 className="pc-manufacturer-heading">{group.brand}</h2>
+              <div className="pc-grid">
+                {group.items.map((item) => (
+                  <ProductCatalogCard key={item.id} item={item} onOpen={() => setSelected(item)} />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : specialtyGroups && specialtyGroups.length > 0 ? (
+        <div className="pc-specialty-catalog">
+          {specialtyGroups.map((group) => (
+            <section key={group.groupId} className="pc-specialty-section" aria-label={group.label}>
+              <h2 className="pc-specialty-heading">{group.label}</h2>
               <div className="pc-grid">
                 {group.items.map((item) => (
                   <ProductCatalogCard key={item.id} item={item} onOpen={() => setSelected(item)} />

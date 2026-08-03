@@ -12,6 +12,7 @@ import {
   type ProductCatalogCategory,
   type ProductCatalogItem,
 } from "./lib/productCatalog";
+import { groupProductCatalogBySpecialtyGroup } from "./lib/productCatalogSpecialtyItems";
 import {
   isKioskOrArreyaMode,
   parsePublicCatalogTabQuery,
@@ -49,8 +50,8 @@ export default function PublicProductCatalogPage({
   lockedCategory,
   hideCategoryTabs = false,
   pageTitle = "Elite Stone Fabrication Product Catalog",
-  pageSubtitle = "Sinks, faucets, and accessories",
-  metaDescription = "Elite Stone Fabrication product catalog — sinks, faucets, and accessories showroom.",
+  pageSubtitle = "Sinks, faucets, accessories, and specialty items",
+  metaDescription = "Elite Stone Fabrication product catalog — sinks, faucets, accessories, and specialty items showroom.",
   rootClassName,
 }: PublicProductCatalogPageProps = {}) {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
@@ -130,6 +131,11 @@ export default function PublicProductCatalogPage({
     return groupProductCatalogByManufacturer(filtered);
   }, [displayCategory, filtered]);
 
+  const specialtyGroups = useMemo(() => {
+    if (displayCategory !== "specialty_add_on") return null;
+    return groupProductCatalogBySpecialtyGroup(filtered);
+  }, [displayCategory, filtered]);
+
   const rootClass = [
     "pc-public-page",
     kiosk ? "pc-public-kiosk" : "",
@@ -202,6 +208,24 @@ export default function PublicProductCatalogPage({
             {manufacturerGroups.map((group) => (
               <section key={group.brand} className="pc-manufacturer-section" aria-label={group.brand}>
                 <h2 className="pc-manufacturer-heading">{group.brand}</h2>
+                <div className="pc-grid">
+                  {group.items.map((item) => (
+                    <ProductCatalogCard
+                      key={item.id}
+                      item={item}
+                      detail="detailed"
+                      onOpen={() => setSelected(item)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : specialtyGroups && specialtyGroups.length > 0 ? (
+          <div className="pc-specialty-catalog">
+            {specialtyGroups.map((group) => (
+              <section key={group.groupId} className="pc-specialty-section" aria-label={group.label}>
+                <h2 className="pc-specialty-heading">{group.label}</h2>
                 <div className="pc-grid">
                   {group.items.map((item) => (
                     <ProductCatalogCard

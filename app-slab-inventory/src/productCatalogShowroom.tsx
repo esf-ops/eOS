@@ -13,6 +13,7 @@ import {
   type ProductCatalogFinishOption,
   type ProductCatalogItem,
 } from "./lib/productCatalog";
+import { getSpecialtyGroupLabel } from "./lib/productCatalogSpecialtyItems";
 import { normalizeProductCatalogDocumentUrl } from "./lib/productCatalogDocuments";
 
 export type ProductCatalogShowroomMode = "internal" | "public";
@@ -298,8 +299,15 @@ export function ProductCatalogCard({
   }, [heroCandidates.join("|")]);
 
   const hasHero = heroCandidates.length > 0 && !showPlaceholder;
-  const metaLine = [item.type, item.suggestedUse].filter(Boolean).join(" · ");
-  const codeLine = item.sku || item.model || item.esfCode;
+  const specialtyGroupLabel = getSpecialtyGroupLabel(item.specialtyGroup);
+  const metaLine =
+    item.category === "specialty_add_on"
+      ? [specialtyGroupLabel ?? item.series, item.specSummary].filter(Boolean).join(" · ")
+      : [item.type, item.suggestedUse].filter(Boolean).join(" · ");
+  const codeLine =
+    item.category === "specialty_add_on"
+      ? undefined
+      : item.sku || item.model || item.esfCode;
 
   return (
     <button type="button" className="pc-card" onClick={onOpen} aria-label={`View ${item.name}`}>
@@ -566,10 +574,16 @@ export function ProductCatalogModal({
 
               <dl className="pc-detail-grid">
                 {item.brand ? <><dt>Brand</dt><dd>{item.brand}</dd></> : null}
-                {item.series ? <><dt>Series</dt><dd>{item.series}</dd></> : null}
+                {item.specialtyGroup ? (
+                  <><dt>Category</dt><dd>{getSpecialtyGroupLabel(item.specialtyGroup)}</dd></>
+                ) : item.series ? (
+                  <><dt>Series</dt><dd>{item.series}</dd></>
+                ) : null}
                 {item.type ? <><dt>Type</dt><dd>{item.type}</dd></> : null}
                 {item.material ? <><dt>Material</dt><dd>{item.material}</dd></> : null}
-                {item.suggestedUse ? <><dt>Suggested use</dt><dd>{item.suggestedUse}</dd></> : null}
+                {item.suggestedUse && item.category !== "specialty_add_on" ? (
+                  <><dt>Suggested use</dt><dd>{item.suggestedUse}</dd></>
+                ) : null}
                 {item.specSummary ? <><dt>Specs</dt><dd>{item.specSummary}</dd></> : null}
                 {item.sku ? <><dt>SKU / item #</dt><dd>{item.sku}</dd></> : null}
                 {item.esfCode && item.esfCode !== item.sku ? <><dt>ESF#</dt><dd>{item.esfCode}</dd></> : null}
@@ -756,6 +770,17 @@ export function ProductCatalogModal({
                 </section>
               ) : null}
 
+              {item.configurationOptions && item.configurationOptions.length > 0 ? (
+                <section className="pc-variant-section" aria-label="Available configurations">
+                  <h3 className="pc-section-title">Available configurations</h3>
+                  <div className="pc-variant-chips">
+                    {item.configurationOptions.map((opt) => (
+                      <span key={opt} className="pc-variant-chip static">{opt}</span>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
               {sourceDiffers ? (
                 <section className="pc-text-section">
                   <h3 className="pc-section-title">Source name</h3>
@@ -770,10 +795,24 @@ export function ProductCatalogModal({
                 </section>
               ) : null}
 
-              {item.notes ? (
+              {item.notes && item.notes !== item.description ? (
                 <section className="pc-text-section">
                   <h3 className="pc-section-title">Notes</h3>
                   <p className="pc-body-text">{item.notes}</p>
+                </section>
+              ) : null}
+
+              {item.websiteUrl ? (
+                <section className="pc-text-section pc-website-section">
+                  <h3 className="pc-section-title">Product website</h3>
+                  <a
+                    className="pc-website-btn"
+                    href={item.websiteUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Visit product website
+                  </a>
                 </section>
               ) : null}
 

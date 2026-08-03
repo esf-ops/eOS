@@ -3376,6 +3376,65 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   border-bottom: 1px solid var(--eos-line);
 }
 
+.pc-specialty-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+}
+
+.pc-specialty-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pc-specialty-heading {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--eos-ink);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.pc-website-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 12px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--eos-line);
+  background: #f7f5f2;
+  color: var(--eos-ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-decoration: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pc-website-btn:focus-visible {
+  outline: 3px solid rgba(11, 26, 51, 0.28);
+  outline-offset: 2px;
+}
+
+.pc-website-btn:hover {
+  background: #f0ebe4;
+  border-color: #d7d0c7;
+}
+
+.pc-public-kiosk .pc-website-btn {
+  min-height: 56px;
+  padding: 14px 22px;
+  font-size: 1.02rem;
+}
+
+.pc-public-kiosk .pc-specialty-heading {
+  font-size: 1.15rem;
+}
+
 .pc-dev-toggle-wrap {
   margin: 28px 0 0;
   text-align: center;
