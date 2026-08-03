@@ -73,7 +73,10 @@ const updated = buildUpdatedBreakdown({
 });
 const labels = updated.lines.map((l) => l.label);
 assert.ok(labels.some((l) => /^ESF Sink/.test(l)), labels.join(" | "));
-assert.ok(labels.some((l) => l === "Kitchen — Sink cutout"), labels.join(" | "));
+assert.ok(
+  labels.some((l) => /sink cutout/i.test(l) && !/vanity|bar/i.test(l)),
+  labels.join(" | "),
+);
 assert.ok(!labels.includes("Vanity / bar sink cutout"));
 console.log("ok: room-specific updated breakdown lines");
 

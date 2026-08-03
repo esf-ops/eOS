@@ -27,6 +27,12 @@ import { buildDigitalEstimatePrintModel } from "./customerPrintAdapter";
 import { DigitalEstimatePrintDocument } from "./DigitalEstimatePrintDocument";
 import { enrichProductImageUrl, resolveProductImageFields } from "./productCatalogImages";
 import {
+  isPlumbingFinishSelected,
+  isPlumbingProductCardSelected,
+  openFamilyIdForSelection,
+  type SinkModalSelection,
+} from "./sinkSelectionDisplay";
+import {
   groupMissingInformationRequirements,
   missingInfoHeadline,
 } from "./itemsForLater";
@@ -543,17 +549,36 @@ function ChoiceRadio({
 function ProductCards({
   products,
   selectedOptionKey,
+  selectedProductId = null,
+  selectedVariantId = null,
+  selectedFinish = null,
   onPick,
   role,
 }: {
   products: ConfigProduct[];
   selectedOptionKey: string | null;
+  selectedProductId?: string | null;
+  selectedVariantId?: string | null;
+  selectedFinish?: string | null;
   onPick: (product: ConfigProduct, variantId?: string | null) => void;
   role: "sink" | "faucet";
 }) {
-  const [openFamily, setOpenFamily] = useState<string | null>(null);
+  const selection: SinkModalSelection = {
+    optionKey: selectedOptionKey,
+    productId: selectedProductId,
+    variantId: selectedVariantId,
+    finish: selectedFinish,
+  };
+  const [openFamily, setOpenFamily] = useState<string | null>(() =>
+    openFamilyIdForSelection(products, selection),
+  );
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("All");
+
+  useEffect(() => {
+    const nextOpen = openFamilyIdForSelection(products, selection);
+    if (nextOpen) setOpenFamily(nextOpen);
+  }, [selectedOptionKey, selectedProductId, selectedVariantId, selectedFinish]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -629,10 +654,7 @@ function ProductCards({
             const variants = Array.isArray(p.variants) ? p.variants : [];
             const hasVariants = variants.length > 0;
             const familyOpen = openFamily === p.productId;
-            const selected =
-              selectedOptionKey &&
-              (selectedOptionKey === p.optionKey ||
-                variants.some((v) => v.optionKey === selectedOptionKey));
+            const selected = isPlumbingProductCardSelected(p, selection);
             const imageUrl = enrichProductImageUrl(p) || p.imageUrl;
             const faucetCat = customerFacingFaucetCategory(p.category);
             const metaBits = [
@@ -656,12 +678,17 @@ function ProductCards({
                 className={`rounded-xl border p-3 ${selected ? "border-foreground ring-1 ring-foreground/20" : "border-border"}`}
                 data-testid={`de-${role}-product-card`}
                 data-product-id={p.productId}
+                data-selected={selected ? "true" : "false"}
+                aria-selected={selected}
               >
                 <div className="flex gap-3">
                   <MaterialThumb src={imageUrl} alt={p.displayName} size="md" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium leading-snug text-foreground" title={p.displayName}>
                       {p.displayName}
+                      {selected ? (
+                        <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">Selected</span>
+                      ) : null}
                     </div>
                     {metaBits.length ? (
                       <div className="mt-0.5 text-xs text-muted-foreground">{metaBits.join(" · ")}</div>
@@ -684,22 +711,34 @@ function ProductCards({
                     </button>
                     {familyOpen ? (
                       <div className="mt-2 flex flex-col gap-1.5">
-                        {variants.map((v) => (
-                          <button
-                            key={v.variantId}
-                            type="button"
-                            className={`rounded-lg border px-3 py-2 text-left text-xs ${
-                              v.optionKey && v.optionKey === selectedOptionKey
-                                ? "border-foreground bg-muted/40"
-                                : "border-border"
-                            }`}
-                            onClick={() => onPick(p, v.variantId)}
-                          >
-                            <span className="font-medium text-foreground">
-                              {v.finish || v.color || v.displayName || v.sku || "Finish"}
-                            </span>
-                          </button>
-                        ))}
+                        {variants.map((v) => {
+                          const finishSelected = isPlumbingFinishSelected(v, selection);
+                          return (
+                            <button
+                              key={v.variantId}
+                              type="button"
+                              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-xs ${
+                                finishSelected
+                                  ? "border-foreground bg-muted/40"
+                                  : "border-border"
+                              }`}
+                              data-testid={`de-${role}-finish-row`}
+                              data-variant-id={v.variantId}
+                              data-selected={finishSelected ? "true" : "false"}
+                              aria-selected={finishSelected}
+                              onClick={() => onPick(p, v.variantId)}
+                            >
+                              <span className="font-medium text-foreground">
+                                {v.finish || v.color || v.displayName || v.sku || "Finish"}
+                              </span>
+                              {finishSelected ? (
+                                <span className="shrink-0 text-[11px] font-medium text-foreground" aria-hidden>
+                                  ✓
+                                </span>
+                              ) : null}
+                            </button>
+                          );
+                        })}
                       </div>
                     ) : null}
                   </div>
@@ -709,7 +748,7 @@ function ProductCards({
                     className="mt-3 w-full rounded-lg border border-border py-2 text-xs font-medium hover:border-foreground/40"
                     onClick={() => onPick(p, null)}
                   >
-                    Select
+                    {selected ? "Selected" : "Select"}
                   </button>
                 )}
               </div>
@@ -1184,6 +1223,9 @@ function PlumbingSourceModal({
           <ProductCards
             products={productCards}
             selectedOptionKey={draft.optionKey || null}
+            selectedProductId={draft.productId || null}
+            selectedVariantId={draft.variantId || draft.variantSku || null}
+            selectedFinish={draft.finish || null}
             onPick={onSelectProduct}
             role={role}
           />
