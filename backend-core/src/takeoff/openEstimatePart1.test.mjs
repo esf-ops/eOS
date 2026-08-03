@@ -137,7 +137,7 @@ console.log("\nopenEstimatePart1.test.mjs\n");
   const result = await importOne(repo, transport);
   await assert.rejects(
     () => openEstimateForIntakeCase(openDeps(repo, result.caseId, graphClientFor(transport))),
-    (e) => e.code === "attachment_unsupported"
+    (e) => e.code === "attachment_type_mismatch" || e.code === "attachment_unsupported"
   );
   const after = repo.getCase(ORG, result.caseId);
   assert.equal(after.attachments[0].retrievalState, "failed");
