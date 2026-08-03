@@ -856,6 +856,94 @@ export function createInMemoryConfigurationRepository(opts = {}) {
       return rows[0] ? structuredClone(rows[0]) : null;
     },
 
+    /**
+     * Latest successful customer selection for a publication across any envelope
+     * (including superseded). Used by Studio Repair to migrate sanitized state.
+     */
+    async getLatestSelectionForPublication(organizationId, publicationId) {
+      if (!organizationId || !publicationId) return null;
+      const rows = [...selections.values()]
+        .filter((sel) => {
+          if (sel.organization_id !== organizationId) return false;
+          const sess = sessions.get(String(sel.session_id));
+          if (!sess || sess.organization_id !== organizationId) return false;
+          if (String(sess.publication_id) !== String(publicationId)) return false;
+          const hasCalc = [...calculations.values()].some(
+            (c) =>
+              c.organization_id === organizationId &&
+              String(c.selection_id) === String(sel.id)
+          );
+          return hasCalc;
+        })
+        .sort((a, b) => {
+          const t = String(b.created_at).localeCompare(String(a.created_at));
+          if (t !== 0) return t;
+          return String(b.id).localeCompare(String(a.id));
+        });
+      return rows[0] ? structuredClone(rows[0]) : null;
+    },
+
+    /**
+     * Persist a staff-repair selection onto the newly activated envelope.
+     * Creates an internal session (not a customer cookie) + selection + calc.
+     */
+    async saveRepairedPublicationSelection({
+      organizationId,
+      publicationId,
+      envelopeId,
+      actorUserId = null,
+      selectionPayload,
+      selectionHash,
+      customerResultJson,
+      baselineTotal = null,
+      configuredTotal = null,
+      sourceSelectionId = null
+    }) {
+      const sessionSecretHash = `studio-repair:${randomUUID()}`;
+      const session = await api.createPublicConfigurationSession({
+        organizationId,
+        publicationId,
+        envelopeId,
+        sessionSecretHash,
+        status: "active"
+      });
+      const engineVersion = DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION_PLACEHOLDER;
+      const fingerprint = `studio-repair:${envelopeId}:${selectionHash}:${sourceSelectionId || "none"}`;
+      const saved = await api.saveSelectionAndCalculationAtomic({
+        organizationId,
+        sessionId: session.id,
+        expectedRowVersion: session.row_version ?? 1,
+        idempotencyKey: `studio-repair:${envelopeId}:${selectionHash}`,
+        selectionPayload,
+        selectionHash,
+        customerResultJson,
+        internalEvidenceJson: {
+          studioRepair: true,
+          sourceSelectionId: sourceSelectionId || null,
+          actorUserId: actorUserId || null
+        },
+        baselineTotal,
+        configuredTotal,
+        pricingValidThrough: null,
+        engineVersion,
+        calculationInputFingerprint: fingerprint
+      });
+      await appendEvent({
+        organization_id: organizationId,
+        envelope_id: envelopeId,
+        publication_id: publicationId,
+        session_id: session.id,
+        event_type: "configuration_repaired",
+        actor_type: "user",
+        actor_user_id: actorUserId || null,
+        metadata: {
+          sourceSelectionId: sourceSelectionId || null,
+          selectionId: saved?.selection?.id || null
+        }
+      });
+      return saved;
+    },
+
     async getCalculationBySelectionId(organizationId, selectionId) {
       const row = [...calculations.values()].find(
         (c) => c.organization_id === organizationId && c.selection_id === selectionId
@@ -1969,6 +2057,103 @@ export function createSupabaseConfigurationRepository({ db }) {
         if (calcRows?.[0]) return sel;
       }
       return null;
+    },
+
+    /**
+     * Latest successful customer selection for a publication across any envelope.
+     */
+    async getLatestSelectionForPublication(organizationId, publicationId) {
+      if (!organizationId || !publicationId) return null;
+      const { data: sessionRows, error: sessionErr } = await db
+        .from("digital_estimate_configuration_sessions")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("publication_id", publicationId);
+      if (sessionErr) throw sessionErr;
+      const sessionIds = (sessionRows || []).map((s) => s.id).filter(Boolean);
+      if (!sessionIds.length) return null;
+
+      const { data: selRows, error: selErr } = await db
+        .from("digital_estimate_configuration_selections")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .in("session_id", sessionIds)
+        .order("created_at", { ascending: false })
+        .limit(80);
+      if (selErr) throw selErr;
+
+      for (const sel of selRows || []) {
+        const { data: calcRows, error: calcErr } = await db
+          .from("digital_estimate_configuration_calculations")
+          .select("id")
+          .eq("organization_id", organizationId)
+          .eq("selection_id", sel.id)
+          .limit(1);
+        if (calcErr) throw calcErr;
+        if (calcRows?.[0]) return sel;
+      }
+      return null;
+    },
+
+    async saveRepairedPublicationSelection({
+      organizationId,
+      publicationId,
+      envelopeId,
+      actorUserId = null,
+      selectionPayload,
+      selectionHash,
+      customerResultJson,
+      baselineTotal = null,
+      configuredTotal = null,
+      sourceSelectionId = null
+    }) {
+      const sessionSecretHash = `studio-repair:${randomUUID()}`;
+      const session = await this.createPublicConfigurationSession({
+        organizationId,
+        publicationId,
+        envelopeId,
+        sessionSecretHash,
+        status: "active"
+      });
+      const engineVersion = DIGITAL_ESTIMATE_CONFIG_ENGINE_VERSION_PLACEHOLDER;
+      const fingerprint = `studio-repair:${envelopeId}:${selectionHash}:${sourceSelectionId || "none"}`;
+      const saved = await this.saveSelectionAndCalculationAtomic({
+        organizationId,
+        sessionId: session.id,
+        expectedRowVersion: session.row_version ?? 1,
+        idempotencyKey: `studio-repair:${envelopeId}:${selectionHash}`,
+        selectionPayload,
+        selectionHash,
+        customerResultJson,
+        internalEvidenceJson: {
+          studioRepair: true,
+          sourceSelectionId: sourceSelectionId || null,
+          actorUserId: actorUserId || null
+        },
+        baselineTotal,
+        configuredTotal,
+        pricingValidThrough: null,
+        engineVersion,
+        calculationInputFingerprint: fingerprint
+      });
+      try {
+        await db.from("digital_estimate_configuration_events").insert({
+          organization_id: organizationId,
+          envelope_id: envelopeId,
+          publication_id: publicationId,
+          session_id: session.id,
+          event_type: "configuration_repaired",
+          actor_type: "user",
+          actor_user_id: actorUserId || null,
+          metadata: {
+            sourceSelectionId: sourceSelectionId || null,
+            selectionId: saved?.selection?.id || null
+          }
+        });
+      } catch {
+        // Event history is best-effort; selection persist is authoritative.
+      }
+      return saved;
     },
 
     async getCalculationBySelectionId(organizationId, selectionId) {

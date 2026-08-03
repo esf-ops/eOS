@@ -213,7 +213,20 @@ export function assertStudioV2InteractivePublishResult(result, configuration) {
       configured: true,
       reason: null,
       repaired: Boolean(envelope.repaired),
-      updated: Boolean(envelope.updated)
+      updated: Boolean(envelope.updated),
+      envelopeRebuilt: Boolean(envelope.envelopeRebuilt),
+      envelopeId: envelope.envelopeId || null,
+      optionCountBefore:
+        envelope.optionCountBefore != null ? envelope.optionCountBefore : null,
+      optionCountAfter:
+        envelope.optionCountAfter != null ? envelope.optionCountAfter : null,
+      sanitizedSelectionsCount: Number(envelope.sanitizedSelectionsCount) || 0,
+      droppedOrCanonicalizedCount: Number(envelope.droppedOrCanonicalizedCount) || 0,
+      selectionMigrated: Boolean(envelope.selectionMigrated),
+      activePublicationUnchanged:
+        envelope.activePublicationUnchanged != null
+          ? Boolean(envelope.activePublicationUnchanged)
+          : true
     };
   }
   const reason =
@@ -267,9 +280,40 @@ export function buildStudioV2PublicationResult(result, estimate) {
           configured: Boolean(envelope.configured),
           reason: envelope.reason || null,
           repaired: Boolean(envelope.repaired),
-          updated: Boolean(envelope.updated)
+          updated: Boolean(envelope.updated),
+          envelopeRebuilt: Boolean(envelope.envelopeRebuilt),
+          envelopeId: envelope.envelopeId || null,
+          optionCountBefore:
+            envelope.optionCountBefore != null ? envelope.optionCountBefore : null,
+          optionCountAfter:
+            envelope.optionCountAfter != null ? envelope.optionCountAfter : null,
+          sanitizedSelectionsCount: Number(envelope.sanitizedSelectionsCount) || 0,
+          droppedOrCanonicalizedCount: Number(envelope.droppedOrCanonicalizedCount) || 0,
+          selectionMigrated: Boolean(envelope.selectionMigrated),
+          activePublicationUnchanged:
+            envelope.activePublicationUnchanged != null
+              ? Boolean(envelope.activePublicationUnchanged)
+              : Boolean(envelope.repaired || envelope.updated)
         }
       : null,
+    repair:
+      result?.repair && typeof result.repair === "object"
+        ? {
+            publicationId: result.repair.publicationId || publicationId,
+            envelopeRebuilt: Boolean(result.repair.envelopeRebuilt),
+            optionCountBefore:
+              result.repair.optionCountBefore != null
+                ? result.repair.optionCountBefore
+                : null,
+            optionCountAfter:
+              result.repair.optionCountAfter != null ? result.repair.optionCountAfter : null,
+            sanitizedSelectionsCount: Number(result.repair.sanitizedSelectionsCount) || 0,
+            droppedOrCanonicalizedCount:
+              Number(result.repair.droppedOrCanonicalizedCount) || 0,
+            activePublicationUnchanged:
+              result.repair.activePublicationUnchanged !== false
+          }
+        : null,
     publishedConfiguration:
       result?.publishedConfiguration && typeof result.publishedConfiguration === "object"
         ? {
