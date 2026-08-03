@@ -3588,3 +3588,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | Staff display names for estimators become available; command-center status set expands beyond current pills. |
 
 ---
+### 259. Public Digital Estimate premium customer UI pass (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `feature/public-digital-estimate-premium-ui` |
+| **Decision** | Public Digital Estimate received a premium customer-facing presentation pass. The customer page, room selections, estimate summary, option modals, status states, and mobile layout were polished without changing pricing, customer configuration authority, acceptance, publish, repair, revision, sold, AI Takeoff, Internal Estimate, or migrations. |
+| **Why** | The customer estimate link is a primary slabOS surface; the prior Tailwind-neutral UI worked but lacked Elite brand confidence, hierarchy, and mobile polish expected of a premium fabrication experience. |
+| **Impacted** | `app-digital-estimate/src/lovable-theme.css`, `ConfigurationView.tsx` (presentation/copy only), customer experience polish test, this doc. |
+| **Protected / unchanged** | Pricing formulas, material/sink/cutout/edge rates, selection save payloads, acceptance rules, print model authority, publish/repair, Studio V2, sold, AI Takeoff, Internal Estimate, migrations, public token lifecycle. |
+| **Revisit trigger** | Dedicated design system package for customer heads; print document shared `cep-*` visual refresh. |
+
+---

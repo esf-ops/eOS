@@ -94,9 +94,10 @@ console.log("ok: 11/15/16 typed conflict + option-not-allowed classification");
 
 assert.equal(
   (viewSrc.match(/void onSave\(/g) || []).length,
-  1,
-  "only Retry path should call void onSave(",
+  0,
+  "no void onSave( — autosave + atomic rollback (Dismiss/Got it, not Retry-resave)",
 );
+assert.ok(viewSrc.includes('data-testid="de-save-error-dismiss"'), "save error dismiss control");
 assert.ok(
   viewSrc.includes('data-testid="de-mobile-total-bar"') ||
     !viewSrc.includes("fixed inset-x-0 bottom-0"),
@@ -107,7 +108,7 @@ assert.ok(viewSrc.includes("de-save-status"));
 assert.ok(viewSrc.includes("Pending changes"));
 assert.ok(viewSrc.includes("savedCalc"));
 assert.ok(viewSrc.includes("setLatestCalc(savedCalc)"));
-assert.ok(viewSrc.includes("Retry"));
+assert.ok(viewSrc.includes("Retry")); // error-boundary Retry only
 console.log("ok: 21–31 save UI + optimistic total safety");
 
 assert.ok(viewSrc.includes("All changes saved") || viewSrc.includes("Saving…"));

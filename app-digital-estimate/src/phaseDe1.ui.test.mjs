@@ -62,7 +62,7 @@ assert.ok(
 );
 
 assert.ok(
-  appTsx.includes("This estimate is unavailable."),
+  appTsx.includes("This estimate isn’t available right now."),
   "App.tsx must show generic unavailable message",
 );
 
