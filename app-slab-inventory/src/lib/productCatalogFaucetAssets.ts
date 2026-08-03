@@ -4,6 +4,7 @@
 import type { ProductCatalogItem } from "./productCatalog";
 import { finishKeyFromLabel } from "./productCatalog";
 import type { ProductCatalogAssetOverride } from "./productCatalogAssets";
+import { productCatalogDocumentPdfUrl } from "./productCatalogDocuments";
 
 export const FAUCET_FINISH_HERO_ORDER = [
   "matte-black",
@@ -29,7 +30,7 @@ export function faucetPublicBase(productId: string): string {
 }
 
 export function faucetSpecSheetUrl(productId: string): string {
-  return `/product-catalog/spec-sheets/${productId}/${productId}.pdf`;
+  return productCatalogDocumentPdfUrl(productId);
 }
 
 export function pickHeroFromFinishMap(

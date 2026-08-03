@@ -48,7 +48,7 @@ export function faucetPublicBase(productId) {
 }
 
 export function faucetSpecSheetPublicUrl(productId) {
-  return `/product-catalog/spec-sheets/${productId}/${productId}.pdf`;
+  return `/product-catalog/docs/${productId}/${productId}.pdf`;
 }
 
 export function expectedProductIdFromFolder(folderName) {
@@ -178,7 +178,7 @@ export function destinationPaths(publicRoot, productId, finishImages) {
   );
   const specPath = path.join(
     publicRoot,
-    "product-catalog/spec-sheets",
+    "product-catalog/docs",
     productId,
     `${productId}.pdf`
   );

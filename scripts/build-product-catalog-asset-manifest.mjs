@@ -28,7 +28,7 @@
  *   product-catalog/sinks/<product-id>/<color-slug>.jpg   (variant finish swatches)
  *   product-catalog/faucets/<product-id>/…
  *   product-catalog/specialty/<product-id>/…
- *   product-catalog/spec-sheets/<product-id>/<product-id>.pdf
+ *   product-catalog/docs/<product-id>/<product-id>.pdf
  *
  * After assets are on disk, wire URLs into productCatalogData.ts (or a future
  * asset map module) — this script does not auto-link files yet.
@@ -129,7 +129,7 @@ function buildRow(item) {
   const folder = categoryFolder(item.category);
   const relFolder = `product-catalog/${folder}/${slug}`;
   const absFolder = `${PUBLIC_ROOT}/${relFolder}`;
-  const specRel = `product-catalog/spec-sheets/${slug}`;
+  const specRel = `product-catalog/docs/${slug}`;
   const colors = variantColors(item);
   const catalogNums = variantCatalogNumbers(item);
   const variantFiles = recommendedVariantFilenames(item);
@@ -229,7 +229,7 @@ Fill in the \`notes\` column (CSV) with source URLs, vendor links, or AppSheet p
 3. For each product, collect files into the **folder_path** using the recommended filenames.
 4. Optional combo photos: \`combo-01.jpg\` … \`combo-09.jpg\`
 5. Variant/finish images: one JPG per color (see \`variant_image_filenames\`).
-6. Spec sheets go in \`app-slab-inventory/public/product-catalog/spec-sheets/<product-id>/\`.
+6. Spec sheets go in \`app-slab-inventory/public/product-catalog/docs/<product-id>/\`.
 7. After files exist, wire public URLs into catalog data in a future pass (not automatic yet).
 
 ## Folder structure
@@ -239,7 +239,7 @@ app-slab-inventory/public/product-catalog/
   sinks/<product-id>/hero.jpg | installed.jpg | diagram.jpg | combo-*.jpg | <color>.jpg
   faucets/<product-id>/…
   specialty/<product-id>/…
-  spec-sheets/<product-id>/<product-id>.pdf
+  docs/<product-id>/<product-id>.pdf
 \`\`\`
 
 ---

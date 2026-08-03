@@ -2,16 +2,21 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import SlabInventoryApp from "./SlabInventoryApp";
 import PublicProductCatalogPage from "./PublicProductCatalogPage";
+import PublicProductCatalogInfoPage from "./PublicProductCatalogInfoPage";
 import PublicElite100Page from "./PublicElite100Page";
 import PublicCambriaPage from "./PublicCambriaPage";
 import PublicFaucetsPage from "./PublicFaucetsPage";
 import { isPublicProductCatalogPath } from "./lib/publicProductCatalogRoute";
+import { isPublicProductCatalogInfoPath } from "./lib/productCatalogDocuments";
 import { isPublicElite100Path } from "./lib/publicElite100Route";
 import { isPublicCambriaPath } from "./lib/publicCambriaRoute";
 import { isPublicFaucetsPath } from "./lib/publicFaucetsRoute";
 import "./styles.css";
 
 function AppRoot() {
+  if (isPublicProductCatalogInfoPath()) {
+    return <PublicProductCatalogInfoPage />;
+  }
   if (isPublicProductCatalogPath()) {
     return <PublicProductCatalogPage />;
   }

@@ -2,6 +2,7 @@
  * Hero-only catalog sinks (Kansas Sinks Program) — public folder conventions.
  * One product hero + spec sheet; no BLANCO finish swatches or coal-black defaults.
  */
+import { productCatalogDocumentPdfUrl } from "./productCatalogDocuments";
 
 export function isHeroOnlyCatalogSinkId(productId: string, category?: string) {
   return category === "sink" && productId.startsWith("kansas-");
@@ -21,7 +22,7 @@ export function heroOnlySinkHeroUrl(productId: string) {
 }
 
 export function heroOnlySinkSpecSheetUrl(productId: string) {
-  return `/product-catalog/spec-sheets/${productId}/${productId}.pdf`;
+  return productCatalogDocumentPdfUrl(productId);
 }
 
 /** Auto-assign hero + spec from `/product-catalog/sinks/<item.id>/`. */

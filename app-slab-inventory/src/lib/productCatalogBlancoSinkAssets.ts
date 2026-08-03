@@ -2,6 +2,7 @@
  * BLANCO composite sink — public folder asset path conventions.
  * Paths always use the catalog item id (including display split ids).
  */
+import { productCatalogDocumentPdfUrl } from "./productCatalogDocuments";
 
 /** Finish slug → primary on-disk PNG filename. */
 export const BLANCO_FINISH_PNG_BY_KEY: Record<string, string> = {
@@ -88,7 +89,7 @@ export function blancoSinkFinishCandidates(productId: string, finishKey: string)
 }
 
 export function blancoSinkSpecSheetUrl(productId: string) {
-  return `/product-catalog/spec-sheets/${productId}/${productId}.pdf`;
+  return productCatalogDocumentPdfUrl(productId);
 }
 
 export function blancoSinkInstalledUrl(productId: string) {

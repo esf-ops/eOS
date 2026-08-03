@@ -99,7 +99,7 @@ test("buildProposedFaucetOverride uses finish map hero", () => {
   });
   assert.equal(override.imageUrl, "/product-catalog/faucets/faucet-delta-559lf-blmpu/matte-black.png");
   assert.equal(override.finishImageUrls["matte-black"], override.imageUrl);
-  assert.equal(override.specSheetUrl, "/product-catalog/spec-sheets/faucet-delta-559lf-blmpu/faucet-delta-559lf-blmpu.pdf");
+  assert.equal(override.specSheetUrl, "/product-catalog/docs/faucet-delta-559lf-blmpu/faucet-delta-559lf-blmpu.pdf");
 });
 
 test("Calacatta unrelated — Delta Lucent folder would not match Athena", () => {

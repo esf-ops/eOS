@@ -95,7 +95,7 @@ function expandTemplateHelpers(text) {
   let expanded = text
     .replace(/\$\{sinkBase\("([^"]+)"\)\}/g, "/product-catalog/sinks/$1")
     .replace(/\$\{faucetBase\("([^"]+)"\)\}/g, "/product-catalog/faucets/$1")
-    .replace(/specSheetUrl\("([^"]+)"\)/g, "/product-catalog/spec-sheets/$1/$1.pdf")
+    .replace(/specSheetUrl\("([^"]+)"\)/g, "/product-catalog/docs/$1/$1.pdf")
     .replace(/blancoSinkHeroUrl\("([^"]+)"\)/g, "/product-catalog/sinks/$1/coal-black.png");
 
   expanded = expanded.replace(
@@ -141,7 +141,7 @@ function synthesizeHeroOnlySinkFolderAssets(productId) {
   return [
     { assetType: "hero", url: `${base}/hero.jpg` },
     { assetType: "hero_fallback", url: `${base}/hero.png` },
-    { assetType: "spec_sheet", url: `/product-catalog/spec-sheets/${productId}/${productId}.pdf` },
+    { assetType: "spec_sheet", url: `/product-catalog/docs/${productId}/${productId}.pdf` },
   ];
 }
 
@@ -155,7 +155,7 @@ function synthesizeBlancoSinkFolderAssets(productId) {
     { assetType: "installed", url: `${base}/installed.jpg` },
     { assetType: "installed", url: `${base}/installed2.jpg` },
     { assetType: "installed", url: `${base}/installed3.jpg` },
-    { assetType: "spec_sheet", url: `/product-catalog/spec-sheets/${productId}/${productId}.pdf` },
+    { assetType: "spec_sheet", url: `/product-catalog/docs/${productId}/${productId}.pdf` },
   ];
   if (isInteos) {
     assets.splice(1, 0, { assetType: "hero_fallback", url: `${base}/hero.jpg` });

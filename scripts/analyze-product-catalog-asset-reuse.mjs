@@ -366,7 +366,7 @@ function recommendedTargetUrl(item, assetType, comboIndex = 0) {
     case "finish_example":
       return `${base}/finish-example-${String(comboIndex + 1).padStart(2, "0")}.jpg`;
     case "spec_sheet":
-      return `/product-catalog/spec-sheets/${item.id}/${item.id}.pdf`;
+      return `/product-catalog/docs/${item.id}/${item.id}.pdf`;
     case "combo":
       return `${base}/combo-${String(comboIndex + 1).padStart(2, "0")}.jpg`;
     default:

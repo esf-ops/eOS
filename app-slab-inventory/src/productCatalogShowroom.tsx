@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
+import { ProductCatalogSpecViewer } from "./ProductCatalogSpecViewer";
 import {
   PRODUCT_CATALOG_CATEGORY_LABELS,
   defaultFinishKeyForItem,
@@ -11,6 +12,7 @@ import {
   type ProductCatalogFinishOption,
   type ProductCatalogItem,
 } from "./lib/productCatalog";
+import { normalizeProductCatalogDocumentUrl } from "./lib/productCatalogDocuments";
 
 export type ProductCatalogShowroomMode = "internal" | "public";
 
@@ -263,21 +265,26 @@ export function ProductCatalogModal({
   const [activeGalleryUrl, setActiveGalleryUrl] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [zoomIndex, setZoomIndex] = useState(0);
+  const [specViewerOpen, setSpecViewerOpen] = useState(false);
   const { loaded, failed, reset, markLoaded, markFailed, isUsable } = useCatalogImageTracker();
 
   useEffect(() => {
     setSelectedFinishKey(defaultFinishKeyForItem(item));
     setActiveGalleryUrl(null);
+    setSpecViewerOpen(false);
     reset();
   }, [item, reset]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (specViewerOpen) return;
+        onClose();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, specViewerOpen]);
 
   const supportingGalleryCandidates = useMemo(
     () => buildSupportingGalleryThumbs(item, finishOptions),
@@ -587,13 +594,27 @@ export function ProductCatalogModal({
               {item.specSheetUrl ? (
                 <section className="pc-text-section">
                   <h3 className="pc-section-title">Spec sheet</h3>
-                  <a href={item.specSheetUrl} target="_blank" rel="noreferrer noopener" className="pc-spec-link">View spec sheet</a>
+                  <button
+                    type="button"
+                    className="pc-spec-link pc-spec-link-btn"
+                    onClick={() => setSpecViewerOpen(true)}
+                  >
+                    View spec sheet
+                  </button>
                 </section>
               ) : null}
             </div>
           </div>
         </div>
       </div>
+
+      {specViewerOpen && item.specSheetUrl ? (
+        <ProductCatalogSpecViewer
+          productName={item.name}
+          pdfUrl={normalizeProductCatalogDocumentUrl(item.specSheetUrl) ?? item.specSheetUrl}
+          onClose={() => setSpecViewerOpen(false)}
+        />
+      ) : null}
 
       {zoomOpen && galleryItems.length > 0 ? (
         <ZoomImageViewer

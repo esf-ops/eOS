@@ -32,6 +32,7 @@ import {
   type ProductCatalogItem,
   type ProductCatalogVariant,
 } from "./productCatalog";
+import { productCatalogDocumentPdfUrl, normalizeProductCatalogDocumentUrl } from "./productCatalogDocuments";
 
 export type ProductCatalogAssetOverride = {
   productId: string;
@@ -57,7 +58,7 @@ function faucetBase(productId: string) {
 }
 
 function specSheetUrl(productId: string) {
-  return `/product-catalog/spec-sheets/${productId}/${productId}.pdf`;
+  return productCatalogDocumentPdfUrl(productId);
 }
 
 /** Batch 1 — source notes and non-BLANCO asset paths. BLANCO sink image URLs resolve from item.id folders. */
@@ -373,7 +374,9 @@ export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCata
     comboPhotoUrls: override.comboPhotoUrls ?? item.comboPhotoUrls,
     diagramUrl: override.diagramUrl ?? item.diagramUrl,
     finishExampleUrls: override.finishExampleUrls ?? item.finishExampleUrls,
-    specSheetUrl: override.specSheetUrl ?? item.specSheetUrl,
+    specSheetUrl: normalizeProductCatalogDocumentUrl(
+      override.specSheetUrl ?? item.specSheetUrl
+    ),
     finishImageUrls: override.finishImageUrls,
     defaultFinishKey: override.defaultFinishKey,
     variants,
