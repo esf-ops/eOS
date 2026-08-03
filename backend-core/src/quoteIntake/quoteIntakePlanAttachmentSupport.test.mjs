@@ -8,7 +8,9 @@ import {
   classifyPlanFileSupport,
   filenameLooksPlanLike,
   isAutoSupportedTakeoffSupport,
+  isSafeManualPlanImageOverride,
   planSupportLabel,
+  requestHasManualPlanOverride,
   summarizeRowPlanSupport
 } from "./quoteIntakePlanAttachmentSupport.mjs";
 import { classifyAttachmentMeta } from "./quoteIntakeGraphNormalize.mjs";
@@ -89,6 +91,41 @@ console.log("\nquoteIntakePlanAttachmentSupport.test.mjs\n");
   assert.equal(filenameLooksPlanLike("vacation.png"), false);
   assert.equal(canMarkAsPlanForTakeoff("image_needs_review"), true);
   assert.equal(isAutoSupportedTakeoffSupport("image_needs_review"), false);
+  assert.equal(
+    isSafeManualPlanImageOverride({
+      support: "image_needs_review",
+      mimeType: "image/jpeg",
+      name: "IMG_99.jpg"
+    }),
+    true
+  );
+  assert.equal(
+    isSafeManualPlanImageOverride({
+      support: "metadata_only",
+      mimeType: "application/octet-stream",
+      safeFilename: "scan.webp"
+    }),
+    true
+  );
+  assert.equal(
+    isSafeManualPlanImageOverride({
+      support: "metadata_only",
+      mimeType: "application/pdf",
+      name: "notes.docx"
+    }),
+    false
+  );
+  assert.equal(
+    isSafeManualPlanImageOverride({
+      support: "image_needs_review",
+      mimeType: "image/jpeg",
+      isInline: true
+    }),
+    false
+  );
+  assert.equal(requestHasManualPlanOverride({ manualPlanOverride: true }), true);
+  assert.equal(requestHasManualPlanOverride({ markAsPlan: true }), true);
+  assert.equal(requestHasManualPlanOverride({ markAsPlan: false }), false);
   console.log("ok: unrelated images are not blindly auto-classified as plans");
 }
 

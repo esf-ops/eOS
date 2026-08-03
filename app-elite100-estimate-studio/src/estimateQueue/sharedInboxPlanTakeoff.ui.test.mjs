@@ -51,9 +51,17 @@ assert.match(page, /Send to AI Takeoff/);
 assert.match(page, /Mark as plan for AI Takeoff/);
 assert.match(page, /Open AI Takeoff Lab/);
 assert.match(page, /shared-inbox-open-takeoff-lab|shared-inbox-detail-open-takeoff-lab/);
+assert.match(page, /manualPlanOverride:\s*true/);
+assert.match(page, /shared-inbox-mark-as-plan/);
+// Normal Send must not pass manualPlanOverride: true
+assert.match(
+  page,
+  /data-testid="shared-inbox-send-to-takeoff"[\s\S]{0,220}onClick=\{\(\) => void runSendToAiTakeoff\(selected, a\)\}/
+);
 assert.match(api, /send-to-takeoff/);
 assert.match(api, /sendSharedInboxToAiTakeoff/);
 assert.match(api, /confirm:\s*true/);
+assert.match(api, /manualPlanOverride/);
 console.log("ok: Inbox UI shows image plan label + Send / Mark / Lab actions");
 
 assert.match(routes, /send-to-takeoff/);

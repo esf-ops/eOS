@@ -22,6 +22,10 @@ import {
   isSupportedDirectPdf,
   isSupportedTakeoffPlan
 } from "../quoteIntake/quoteIntakeAttachmentMeta.mjs";
+import {
+  isSafeManualPlanImageOverride,
+  requestHasManualPlanOverride
+} from "../quoteIntake/quoteIntakePlanAttachmentSupport.mjs";
 import { ingestQuoteFileFromBytes } from "../files/ingestQuoteFileFromBytes.mjs";
 import { createTakeoffWorkspace } from "./takeoffWorkspaceService.mjs";
 import {
@@ -137,12 +141,16 @@ export function selectSupportedPdfAttachment(caseRow, opts = {}) {
 
   const selectedId = String(opts.selectedAttachmentId ?? "").trim();
   if (opts.markAsPlan === true && selectedId) {
-    const candidate = atts.find((a) => String(a?.id ?? "") === selectedId);
+    const candidate = atts.find(
+      (a) =>
+        String(a?.id ?? "") === selectedId ||
+        String(a?.sourceAttachmentId ?? "") === selectedId
+    );
     if (
       candidate &&
+      !candidate.isInline &&
       (candidate.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW ||
-        (!isSupportedTakeoffPlan(candidate) &&
-          String(candidate.mimeType || "").toLowerCase().startsWith("image/")))
+        (!isSupportedTakeoffPlan(candidate) && isSafeManualPlanImageOverride(candidate)))
     ) {
       // Treat as a plan for this handoff only (persisted promotion is optional).
       plans = [candidate];
@@ -412,8 +420,7 @@ export async function openEstimateForIntakeCase(deps) {
     body && typeof body === "object" && typeof body.attachmentKey === "string"
       ? body.attachmentKey.trim()
       : null;
-  const markAsPlan =
-    body && typeof body === "object" && (body.markAsPlan === true || body.markAsPlan === "true");
+  const markAsPlan = requestHasManualPlanOverride(body);
 
   let resolvedSelectedId = selectedAttachmentId;
   if (!resolvedSelectedId && attachmentKey) {

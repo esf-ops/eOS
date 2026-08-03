@@ -1953,6 +1953,10 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
           messageKey: decodeURIComponent(String(req.params.messageKey || "")),
           attachmentKey: body.attachmentKey ? String(body.attachmentKey) : null,
           markAsPlan: body.markAsPlan === true || body.markAsPlan === "true",
+          manualPlanOverride:
+            body.manualPlanOverride === true || body.manualPlanOverride === "true",
+          useAttachmentAsPlan:
+            body.useAttachmentAsPlan === true || body.useAttachmentAsPlan === "true",
           confirm: body.confirm === true || body.confirm === "true",
           idempotencyKey
         });

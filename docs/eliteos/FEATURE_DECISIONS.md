@@ -3651,4 +3651,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Start/Resume Estimate, pricing, calculate/approve/publish, Digital Estimate, acceptance, sold, Studio V2 revision creation, Internal Estimate, AI measurement algorithms, migrations. |
 | **Revisit trigger** | Persist permanent staff plan-mark overrides on attachment rows; richer multi-attachment takeoff job selection UI. |
 
+### 264. Shared Inbox manual image plan override for AI Takeoff (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/inbox-image-plan-manual-override` |
+| **Decision** | “Mark as plan for AI Takeoff” sends explicit `manualPlanOverride: true` (alias `markAsPlan`). Backend honors override only for safe JPEG/PNG/WEBP (MIME/ext), never for inline/non-images. Open-estimate selection matches intake UUID **or** Graph `sourceAttachmentId`, and accepts extension-based images (e.g. octet-stream + `.jpg`). |
+| **Why** | Production returned 400 when staff marked `image_needs_review` JPGs as plans: override intent was too easy to miss downstream, and selection required intake UUID + `image/*` MIME only. |
+| **Impacted** | Shared Inbox UI/API, `send-to-takeoff` route/service, `selectSupportedPdfAttachment`, plan-support helpers/tests, this doc. |
+| **Protected / unchanged** | Pricing, Digital Estimate, acceptance, publish, approval, revision, sold, AI algorithms, Internal Estimate, migrations. Auto-send still requires `direct_pdf` / `direct_image_plan`. |
+| **Revisit trigger** | Persist override on the attachment row so re-preview does not require re-marking. |
+
 ---

@@ -14,7 +14,11 @@ import {
   sanitizeInboxText
 } from "./studioSharedInboxReadModel.mjs";
 import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
-import { isAutoSupportedTakeoffSupport } from "../quoteIntake/quoteIntakePlanAttachmentSupport.mjs";
+import {
+  isAutoSupportedTakeoffSupport,
+  isSafeManualPlanImageOverride,
+  requestHasManualPlanOverride
+} from "../quoteIntake/quoteIntakePlanAttachmentSupport.mjs";
 import { ATTACHMENT_SUPPORT } from "../quoteIntake/quoteIntakeAttachmentMeta.mjs";
 
 /**
@@ -400,6 +404,8 @@ export function createStudioSharedInboxService(deps = {}) {
     actorUserId = null,
     attachmentKey = null,
     markAsPlan = false,
+    manualPlanOverride = false,
+    useAttachmentAsPlan = false,
     confirm = false,
     idempotencyKey = null
   }) {
@@ -437,15 +443,37 @@ export function createStudioSharedInboxService(deps = {}) {
       throw err;
     }
 
+    const overrideRequested = requestHasManualPlanOverride({
+      markAsPlan,
+      manualPlanOverride,
+      useAttachmentAsPlan
+    });
     const autoOk = isAutoSupportedTakeoffSupport(att.support);
+    // Staff override: only safe JPEG/PNG/WEBP images (never inline / non-images).
     const manualOk =
-      markAsPlan === true &&
-      (att.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW || att.canMarkAsPlan === true);
+      overrideRequested &&
+      isSafeManualPlanImageOverride({
+        ...att,
+        name: att.filename || att.name,
+        mimeType: att.contentType || att.mimeType,
+        support: att.support
+      }) &&
+      (att.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW ||
+        att.canMarkAsPlan === true ||
+        !autoOk);
+    if (!autoOk && overrideRequested && !manualOk) {
+      const err = new Error(
+        "That attachment cannot be marked as a plan for AI Takeoff."
+      );
+      err.statusCode = 400;
+      err.code = "attachment_not_supported";
+      throw err;
+    }
     if (!autoOk && !manualOk) {
       const err = new Error(
         "That attachment is not a supported plan PDF or image for AI Takeoff."
       );
-      err.statusCode = 422;
+      err.statusCode = 400;
       err.code = "attachment_not_supported";
       throw err;
     }
@@ -482,22 +510,28 @@ export function createStudioSharedInboxService(deps = {}) {
         env,
         body: {
           attachmentKey: attKey,
-          markAsPlan: manualOk === true
+          markAsPlan: manualOk === true,
+          manualPlanOverride: manualOk === true
         },
         initiationMode: "manual"
       });
     } catch (e) {
       const code = String(e?.code || "takeoff_unavailable");
-      const err = new Error(
-        sharedInboxSafeError(code, e?.message || "AI Takeoff is temporarily unavailable.").error
-      );
-      err.statusCode = Number(e?.statusCode) || 500;
-      err.code =
-        code === "no_supported_pdf" || code === "attachment_selection_invalid"
+      const mapped =
+        code === "no_supported_pdf" ||
+        code === "attachment_selection_invalid" ||
+        code === "attachment_bytes_unavailable" ||
+        code === "attachment_unsupported" ||
+        code === "attachment_type_mismatch" ||
+        code === "attachment_not_supported"
           ? "attachment_not_supported"
-          : code === "attachment_bytes_unavailable" || code === "attachment_unsupported"
-            ? "attachment_not_supported"
-            : "takeoff_unavailable";
+          : "takeoff_unavailable";
+      const err = new Error(
+        sharedInboxSafeError(mapped, e?.message || "AI Takeoff is temporarily unavailable.").error
+      );
+      err.statusCode =
+        mapped === "attachment_not_supported" ? 400 : Number(e?.statusCode) || 500;
+      err.code = mapped;
       throw err;
     }
 
