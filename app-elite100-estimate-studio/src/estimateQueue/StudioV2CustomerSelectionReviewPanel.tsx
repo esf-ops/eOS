@@ -453,8 +453,9 @@ export default function StudioV2CustomerSelectionReviewPanel(props: Props) {
           </div>
         ) : accepted ? (
           <p className="muted" data-testid="studio-v2-selection-revision-accepted-blocked">
-            This unchanged published estimate was accepted. A customer-selection revision is not
-            available from this accepted state.
+            {acceptance?.acceptedAsConfigured
+              ? "This configured Digital Estimate was accepted. No Studio V2 revision is required because no physical scope changes were requested."
+              : "This published estimate was accepted as originally published. No customer selection revision is required."}
           </p>
         ) : selectionOnlySubmitted || (reviewRequested && !requiresEliteReview) ? (
           <p className="muted" data-testid="studio-v2-selection-revision-not-required">
