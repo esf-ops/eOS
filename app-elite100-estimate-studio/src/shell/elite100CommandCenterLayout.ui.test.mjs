@@ -65,7 +65,12 @@ assert.match(liveDe, /Open Studio V2/);
 assert.match(liveDe, /Open customer link/);
 assert.match(liveDe, /Copy customer link/);
 assert.match(liveDe, /data-testid="digital-estimate-open-studio"/);
-assert.match(liveDe, /Submitted selections:/);
+assert.match(liveDe, /rowStatusDisplay/);
+assert.match(liveDe, /rowNextActionLabel/);
+assert.match(liveDe, /Waiting on customer/);
+assert.doesNotMatch(liveDe, /data-label="Estimator"[\s\S]{0,80}\{row\.estimatorUserId/);
+assert.match(liveDe, /data-testid="live-de-detail-ids"/);
+assert.match(liveDe, /Viewed: \{selectedRow\.viewed \? "Yes" : "No"\}/);
 console.log("ok: 4 Digital Estimates remains first-class with row actions");
 
 assert.match(app, /data-testid="studio-v2-landing"/);

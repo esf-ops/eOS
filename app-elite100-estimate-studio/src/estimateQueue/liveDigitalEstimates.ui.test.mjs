@@ -54,11 +54,22 @@ assert.match(page, /Opening this drawer does not copy a link/);
 assert.match(page, /Open details/);
 assert.match(page, /Published: \{money\(row\.publishedValue\)\}/);
 assert.match(page, /Current: \{money\(row\.configuredValue\)\}/);
-assert.match(page, /Difference:/);
-assert.match(page, /Viewed: \{row\.viewed \? "Yes" : "No"\}/);
+assert.match(page, /Difference: \{money\(row\.configuredDelta\)\}/);
+assert.match(page, /rowStatusDisplay/);
+assert.match(page, /rowNextActionLabel/);
+assert.match(page, /Elite100StatusPill/);
+assert.match(page, /Waiting on customer/);
+assert.match(page, /Accepted — review sold handoff/);
+assert.match(page, /No action needed/);
+assert.match(page, /Estimator assigned/);
+assert.match(page, /Unassigned/);
+assert.match(page, /Viewed: \{selectedRow\.viewed \? "Yes" : "No"\}/);
 assert.match(page, /Saved selections:/);
 assert.match(page, /Review requested:/);
 assert.match(page, /Accepted:/);
+assert.match(page, /Publication ID/);
+assert.match(page, /Case ID/);
+assert.match(page, /data-testid="live-de-detail-ids"/);
 assert.match(page, /data-testid="digital-estimate-open-studio"/);
 assert.match(page, /data-testid="digital-estimate-open-customer-link"/);
 assert.match(page, /data-testid="digital-estimate-copy-customer-link"/);
@@ -75,10 +86,16 @@ assert.doesNotMatch(page, /eq-btn-primary live-de-next/);
 assert.doesNotMatch(page, /Find estimate to publish/);
 assert.doesNotMatch(page, /useEffect\([\s\S]{0,300}copyCustomerLink/);
 assert.doesNotMatch(page, /useEffect\([\s\S]{0,300}link-copied/);
+// Main row must not dump raw estimator UUID as a primary cell.
+assert.doesNotMatch(
+  page,
+  /data-label="Estimator"[\s\S]{0,80}\{row\.estimatorUserId/
+);
 assert.match(css, /\.live-de-metrics/);
 assert.match(css, /\.live-de-drawer/);
 assert.match(css, /\.live-de-action--neutral/);
 assert.match(css, /\.live-de-action--warning/);
 assert.match(css, /\.live-de-action--destructive/);
+assert.match(css, /\.live-de-detail-dl/);
 console.log("ok: Live Digital Estimates nav + portfolio UI contracts");
 console.log("\nliveDigitalEstimates.ui.test.mjs: ok\n");

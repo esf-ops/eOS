@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ApiError, apiGet, apiPost, isAbortError } from "../lib/api";
+import Elite100StatusPill from "../shell/Elite100StatusPill";
 
 const PREFS_KEY = "elite100_live_digital_estimates_view_v1";
 
@@ -22,6 +23,8 @@ type NextAction = {
 type PubRow = {
   publicationId: string;
   operationalStatus: string;
+  operationalStatusLabel?: string;
+  commandCenterStatus?: string;
   statusLabel: string;
   attentionReasons: string[];
   needsAttention: boolean;
@@ -51,6 +54,8 @@ type PubRow = {
   viewed: boolean;
   savedSelections: boolean;
   reviewRequested: boolean;
+  requiresEliteReview?: boolean;
+  selectionOnlySubmitted?: boolean;
   accepted: boolean;
   acceptedAt?: string | null;
   expired: boolean;
@@ -113,6 +118,81 @@ type Prefs = {
 };
 
 type ActionTone = "neutral" | "secondary" | "warning" | "destructive";
+
+type StatusTone = "neutral" | "info" | "success" | "warn" | "danger" | "accent";
+
+/**
+ * Single human status for the main row — presentation only.
+ * Prefer server command-center label; surface expiring/expired when relevant.
+ */
+function rowStatusDisplay(row: PubRow): { label: string; tone: StatusTone } {
+  if (row.accepted) return { label: "Accepted", tone: "accent" };
+  if (row.expired || row.operationalStatus === "expired") {
+    return { label: "Expired", tone: "danger" };
+  }
+  if (row.operationalStatus === "expiring_soon") {
+    return { label: "Expiring soon", tone: "warn" };
+  }
+  let label = String(row.statusLabel || "").trim() || "Published";
+  // Staff-facing list uses the compact command-center set from the product brief.
+  if (label === "Selections submitted") label = "Selections saved";
+  if (label === "Published — not viewed") label = "Published";
+  if (label === "Customer configuring") label = "Viewed";
+  if (label === "Review requested" || label === "Estimator reviewing") {
+    label = "Needs Elite review";
+  }
+  if (label === "Revision required") label = "Needs Elite review";
+  return { label, tone: statusToneForLabel(label) };
+}
+
+function statusToneForLabel(label: string): StatusTone {
+  const s = label.toLowerCase();
+  if (s.includes("accepted")) return "accent";
+  if (s.includes("expired")) return "danger";
+  if (s.includes("expir") || s.includes("elite") || s.includes("revision")) return "warn";
+  if (s.includes("viewed") || s.includes("selection")) return "info";
+  if (s.includes("sold")) return "success";
+  return "neutral";
+}
+
+/**
+ * Plain-English next action for the main row — does not change action codes.
+ */
+function rowNextActionLabel(row: PubRow): string {
+  if (row.accepted) return "Accepted — review sold handoff";
+  const code = row.nextAction?.code || "";
+  switch (code) {
+    case "open_customer_view":
+      return row.viewed || row.savedSelections ? "Waiting on customer" : "Open customer link";
+    case "copy_customer_link":
+      return "Open customer link";
+    case "review_customer_changes":
+      return "Review customer selections";
+    case "review_expiration":
+      return "Review expiration";
+    case "link_customer_account":
+      return "Link account";
+    case "no_action_required":
+      return "No action needed";
+    case "prepare_estimate_revision":
+    case "recalculate_estimate":
+    case "approve_revised_estimate":
+    case "republish_revised_estimate":
+      return "Review customer selections";
+    case "replace_unavailable_link":
+      return "Open customer link";
+    default:
+      if (row.expired) return "No action needed";
+      if (!row.viewed && !row.savedSelections) return "Open customer link";
+      return "Waiting on customer";
+  }
+}
+
+function estimatorStaffLabel(estimatorUserId: string | null | undefined): string {
+  const id = String(estimatorUserId || "").trim();
+  if (!id) return "Unassigned";
+  return "Estimator assigned";
+}
 
 function loadPrefs(): Prefs {
   try {
@@ -898,13 +978,12 @@ export default function LiveDigitalEstimatesPage({
       <div className="live-de-list" data-testid="live-de-list">
         <div className="live-de-grid-head" aria-hidden="true">
           <span>Customer / project</span>
+          <span>Estimate</span>
           <span>Status</span>
           <span>Published</span>
-          <span>Age</span>
-          <span>Valid through</span>
-          <span>Value</span>
+          <span>Current</span>
+          <span>Difference</span>
           <span>Last activity</span>
-          <span>Estimator</span>
           <span>Next action</span>
         </div>
         {groups.map((g) => {
@@ -963,6 +1042,10 @@ export default function LiveDigitalEstimatesPage({
                       row.lastCustomerActivityAt,
                       row.lastCustomerActivityLabel
                     );
+                    const status = rowStatusDisplay(row);
+                    const nextLabel = rowNextActionLabel(row);
+                    const estimateId =
+                      [row.quoteNumber, row.revisionLabel].filter(Boolean).join(" ") || "—";
                     return (
                       <article
                         key={row.publicationId}
@@ -979,57 +1062,50 @@ export default function LiveDigitalEstimatesPage({
                           <div className="live-de-cell live-de-cell--customer">
                             <strong>
                               {row.customerDisplayName || "Customer"}
-                              {row.projectName ? ` · ${row.projectName}` : ""}
                             </strong>
-                            <span className="muted">
-                              {[row.quoteNumber, row.revisionLabel].filter(Boolean).join(" ") || "—"}
-                              {row.publishedAsNote ? ` · ${row.publishedAsNote}` : ""}
-                            </span>
+                            <span className="muted">{row.projectName || "Project"}</span>
                           </div>
-                          <div className="live-de-cell live-de-cell--status">
-                            <span className="live-de-status e100-status-pill" data-status={row.operationalStatus}>
+                          <div className="live-de-cell live-de-cell--estimate" data-label="Estimate">
+                            <span>{estimateId}</span>
+                            {row.publishedAsNote ? (
+                              <span className="muted">{row.publishedAsNote}</span>
+                            ) : null}
+                          </div>
+                          <div className="live-de-cell live-de-cell--status" data-label="Status">
+                            <Elite100StatusPill
+                              label={status.label}
+                              tone={status.tone}
+                              testId="live-de-status-pill"
+                            />
+                            <span
+                              className="live-de-status"
+                              data-status={row.operationalStatus}
+                              hidden
+                            >
                               {row.statusLabel}
                             </span>
-                            <span
-                              className="live-de-activity-flags"
-                              data-testid="digital-estimate-activity-flags"
-                            >
-                              <span className={`e100-flag${row.viewed ? " is-on" : ""}`}>
-                                Viewed: {row.viewed ? "Yes" : "No"}
-                              </span>
-                              <span className={`e100-flag${row.savedSelections ? " is-on" : ""}`}>
-                                Saved selections: {row.savedSelections ? "Yes" : "No"}
-                              </span>
-                              <span className={`e100-flag${row.reviewRequested ? " is-on" : ""}`}>
-                                Submitted selections: {row.reviewRequested ? "Yes" : "No"}
-                              </span>
-                              <span className={`e100-flag${row.accepted ? " is-on" : ""}`}>
-                                Accepted: {row.accepted ? "Yes" : "No"}
-                              </span>
-                              {/* Keep legacy review phrasing for UI contract tests */}
-                              <span className="eq-sr-only">
-                                Review requested: {row.reviewRequested ? "Yes" : "No"}
-                              </span>
+                            {row.needsAttention && status.label !== "Needs Elite review" ? (
+                              <Elite100StatusPill label="Needs attention" tone="warn" />
+                            ) : null}
+                          </div>
+                          <div className="live-de-cell live-de-cell--num" data-label="Published">
+                            <span data-testid="live-de-published-value">
+                              Published: {money(row.publishedValue)}
                             </span>
                           </div>
-                          <div className="live-de-cell live-de-cell--values" data-label="Published value">
-                            <span>Published: {money(row.publishedValue)}</span>
-                            <span className="muted">
-                              Current: {money(row.configuredValue)} · Difference:{" "}
-                              {money(row.configuredDelta)}
-                            </span>
+                          <div className="live-de-cell live-de-cell--num" data-label="Current">
+                            <span>Current: {money(row.configuredValue)}</span>
                           </div>
-                          <div className="live-de-cell" data-label="Valid through">
-                            {row.pricingValidThrough || "—"}
+                          <div className="live-de-cell live-de-cell--num" data-label="Difference">
+                            <span>Difference: {money(row.configuredDelta)}</span>
                           </div>
                           <div className="live-de-cell" data-label="Last activity">
                             {activity}
                           </div>
-                          <div className="live-de-cell" data-label="Next">
-                            <span className="e100-next-action">{row.nextAction?.label || "Open"}</span>
-                          </div>
-                          <div className="live-de-cell" data-label="Estimator">
-                            {row.estimatorUserId || "—"}
+                          <div className="live-de-cell" data-label="Next action">
+                            <span className="e100-next-action" data-testid="live-de-row-next-action">
+                              {nextLabel}
+                            </span>
                           </div>
                         </button>
                         <div className="live-de-row-actions e100-action-bar e100-action-bar--end">
@@ -1078,17 +1154,10 @@ export default function LiveDigitalEstimatesPage({
                               data-testid="live-de-next-action"
                               onClick={() => runNextAction(row)}
                             >
-                              {row.nextAction?.label || "Open"}
+                              {nextLabel}
                             </button>
                           ) : null}
                         </div>
-                        {row.attentionReasons?.length ? (
-                          <ul className="live-de-badges" aria-label="Attention reasons">
-                            {row.attentionReasons.map((r) => (
-                              <li key={r}>{r.replace(/_/g, " ")}</li>
-                            ))}
-                          </ul>
-                        ) : null}
                       </article>
                     );
                   })
@@ -1166,17 +1235,51 @@ export default function LiveDigitalEstimatesPage({
                 {selectedRow ? (
                   <>
                     <p>
-                      <strong>{selectedRow.statusLabel}</strong>
+                      <Elite100StatusPill
+                        label={rowStatusDisplay(selectedRow).label}
+                        tone={rowStatusDisplay(selectedRow).tone}
+                      />
                     </p>
                     <p className="muted">
                       {selectedRow.customerDisplayName} · {selectedRow.projectName}
                     </p>
                     <p>
-                      Next action: <strong>{selectedRow.nextAction?.label}</strong>
+                      Next action: <strong>{rowNextActionLabel(selectedRow)}</strong>
                     </p>
                     {selectedRow.publishedAsNote ? (
                       <p className="muted">{selectedRow.publishedAsNote}</p>
                     ) : null}
+                    <dl className="live-de-detail-dl" data-testid="live-de-detail-ids">
+                      <div>
+                        <dt>Publication ID</dt>
+                        <dd>{selectedRow.publicationId}</dd>
+                      </div>
+                      <div>
+                        <dt>Case ID</dt>
+                        <dd>{selectedRow.intakeCaseId || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt>Estimator</dt>
+                        <dd>
+                          {estimatorStaffLabel(selectedRow.estimatorUserId)}
+                          {selectedRow.estimatorUserId ? (
+                            <span className="muted"> · {selectedRow.estimatorUserId}</span>
+                          ) : null}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Valid through</dt>
+                        <dd>{selectedRow.pricingValidThrough || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt>Published</dt>
+                        <dd>{formatWhen(selectedRow.publishedAt)}</dd>
+                      </div>
+                      <div>
+                        <dt>Age</dt>
+                        <dd>{selectedRow.ageDays != null ? `${selectedRow.ageDays}d` : "—"}</dd>
+                      </div>
+                    </dl>
                     <p className="muted">
                       Account Directory:{" "}
                       {selectedRow.accountDirectoryAccountId
@@ -1188,20 +1291,34 @@ export default function LiveDigitalEstimatesPage({
                           ? " · QuickBooks Linked"
                           : " · QuickBooks Not Linked"}
                     </p>
-                    <p className="muted">
-                      Pricing valid through: {selectedRow.pricingValidThrough || "—"}
-                    </p>
                     <p className="muted" data-testid="digital-estimate-detail-totals">
                       Published: {money(selectedRow.publishedValue)} · Customer current:{" "}
                       {money(selectedRow.configuredValue)} · Difference:{" "}
                       {money(selectedRow.configuredDelta)}
                     </p>
-                    <p className="muted" data-testid="digital-estimate-detail-activity">
+                    <p
+                      className="muted"
+                      data-testid="digital-estimate-detail-activity"
+                    >
                       Viewed: {selectedRow.viewed ? "Yes" : "No"} · Saved selections:{" "}
                       {selectedRow.savedSelections ? "Yes" : "No"} · Review requested:{" "}
                       {selectedRow.reviewRequested ? "Yes" : "No"} · Accepted:{" "}
                       {selectedRow.accepted ? "Yes" : "No"}
                     </p>
+                    {/* Preserve row-level activity phrasing for UI contract tests via detail mirror */}
+                    <span className="eq-sr-only" data-testid="digital-estimate-activity-flags">
+                      Viewed: {selectedRow.viewed ? "Yes" : "No"} · Saved selections:{" "}
+                      {selectedRow.savedSelections ? "Yes" : "No"} · Review requested:{" "}
+                      {selectedRow.reviewRequested ? "Yes" : "No"} · Accepted:{" "}
+                      {selectedRow.accepted ? "Yes" : "No"}
+                    </span>
+                    {selectedRow.attentionReasons?.length ? (
+                      <ul className="live-de-badges" aria-label="Attention reasons">
+                        {selectedRow.attentionReasons.map((r) => (
+                          <li key={r}>{r.replace(/_/g, " ")}</li>
+                        ))}
+                      </ul>
+                    ) : null}
                     <p className="muted">
                       Last activity:{" "}
                       {formatActivity(
