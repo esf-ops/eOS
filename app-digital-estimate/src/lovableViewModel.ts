@@ -117,6 +117,8 @@ export type LovableRoom = {
   locked: boolean;
   countertopIncluded: boolean;
   backsplashIncluded: boolean;
+  /** Published baseline height mode from server room DTO (not eligibility). */
+  backsplashHeightMode: string | null;
   backsplashSummary: string | null;
   sinkSummary: string | null;
   faucetSummary: string | null;
@@ -148,6 +150,8 @@ export type LovableRoom = {
     roomTotal: number | null;
     addOnLines: Array<{ label: string; amount: number | null; category?: string | null }>;
     changeFromOriginal: number | null;
+    /** Server-priced backsplash delta vs published (from roomPricingChanges). */
+    backsplashChangeFromOriginal: number | null;
   } | null;
 };
 
@@ -573,9 +577,10 @@ export function summarizeBacksplashDraft(
 ): string | null {
   if (draft?.mode === "custom_height") {
     const inches = draft.requestedHeightInches ?? draft.customHeightIn;
-    const h =
-      inches != null && Number(inches) > 0 ? `${inches}" custom height` : "Custom height";
-    return h;
+    if (inches != null && Number(inches) > 0) {
+      return `${inches}-inch custom-height backsplash`;
+    }
+    return "Custom-height backsplash";
   }
   if (selectedLabel) return normalizeBacksplashLabel(selectedLabel);
   if (!draft) return null;
@@ -875,6 +880,7 @@ export function mapEliteOsToLovableViewModel(
       locked: true,
       countertopIncluded: r.countertopIncluded !== false,
       backsplashIncluded: Boolean(r.backsplashIncluded),
+      backsplashHeightMode: r.backsplashHeightMode ?? null,
       backsplashSummary: summarizeBacksplashDraft(
         backsplashDraft,
         summarizeChoice(splashSelected || undefined),
@@ -974,17 +980,28 @@ export function mapEliteOsToLovableViewModel(
           (
             latestCalc as {
               roomPricingChanges?: {
-                rows?: Array<{ roomName?: string; amountDelta?: number | null }>;
+                rows?: Array<{
+                  roomName?: string;
+                  category?: string;
+                  amountDelta?: number | null;
+                }>;
               } | null;
             } | null
           )?.roomPricingChanges?.rows || [];
+        const roomNameKey = String(
+          match.roomName || labelDraft || r.displayName || "",
+        ).toLowerCase();
         const roomDelta = changeRows
-          .filter(
-            (row) =>
-              String(row.roomName || "").toLowerCase() ===
-              String(match.roomName || labelDraft || r.displayName || "").toLowerCase(),
-          )
+          .filter((row) => String(row.roomName || "").toLowerCase() === roomNameKey)
           .reduce((s, row) => s + (Number(row.amountDelta) || 0), 0);
+        const backsplashDeltaRows = changeRows.filter(
+          (row) =>
+            String(row.roomName || "").toLowerCase() === roomNameKey &&
+            String(row.category || "").toLowerCase() === "backsplash",
+        );
+        const backsplashDelta = backsplashDeltaRows.length
+          ? backsplashDeltaRows.reduce((s, row) => s + (Number(row.amountDelta) || 0), 0)
+          : null;
         return {
           countertopAmount:
             match.countertopAmount != null && Number.isFinite(Number(match.countertopAmount))
@@ -1040,6 +1057,10 @@ export function mapEliteOsToLovableViewModel(
               ? Number(match.roomTotal)
               : null,
           changeFromOriginal: changeRows.length ? roomDelta : null,
+          backsplashChangeFromOriginal:
+            backsplashDelta != null && Number.isFinite(backsplashDelta)
+              ? backsplashDelta
+              : null,
         };
       })(),
     };

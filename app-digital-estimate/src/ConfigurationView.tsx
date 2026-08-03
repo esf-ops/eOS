@@ -10,6 +10,7 @@ import {
   mapEliteOsToLovableViewModel,
   normalizeBacksplashLabel,
   resolveProductOptionKey,
+  resolvePublishedBacksplashMode,
   type CustomerInfoDraft,
   type LovableChoiceOption,
   type LovableColor,
@@ -1263,11 +1264,44 @@ function BacksplashModal({
     .map((o) => ({ ...o, displayLabel: normalizeBacksplashLabel(o.displayLabel) }));
   const customOpt = options.find((o) => /custom/i.test(o.optionKey) || /custom/i.test(o.displayLabel));
   const isCustom = draft.mode === "custom_height" || Boolean(customOpt?.selected);
+  const publishedMode = resolvePublishedBacksplashMode(room);
+  // Normal customer choices: No / 4-inch / Custom. Full-height only when it is
+  // already the published baseline or the current selection (legacy).
+  const normalOptions = options.filter((o) => {
+    const token = String(o.optionKey || "").split(":").slice(2).join(":").toLowerCase();
+    if (token.includes("custom")) return false;
+    if (token.includes("full")) {
+      return (
+        publishedMode === "full_height" ||
+        o.selected ||
+        draft.mode === "full_height"
+      );
+    }
+    return true;
+  });
+  const customPriceEffect = (() => {
+    if (!isCustom) return null;
+    const delta = room.roomPricing?.backsplashChangeFromOriginal;
+    if (delta != null && Number.isFinite(delta) && Math.abs(delta) >= 0.005) {
+      return formatSignedMoney(delta);
+    }
+    if (
+      publishedMode === "none" &&
+      room.roomPricing?.backsplashAmount != null &&
+      Number.isFinite(room.roomPricing.backsplashAmount) &&
+      Math.abs(Number(room.roomPricing.backsplashAmount)) >= 0.005
+    ) {
+      return formatSignedMoney(Number(room.roomPricing.backsplashAmount));
+    }
+    return customOpt?.priceEffectLabel && customOpt.priceEffectLabel !== "+$0"
+      ? customOpt.priceEffectLabel
+      : null;
+  })();
 
   return (
     <ModalShell title="Backsplash" eyebrow={room.name} onClose={onClose} testId="de-backsplash-modal">
       <ChoiceRadio
-        options={options.filter((o) => !/custom/i.test(o.optionKey))}
+        options={normalOptions}
         name={`backsplash-${room.id}`}
         onSelect={onSelectOption}
       />
@@ -1276,8 +1310,8 @@ function BacksplashModal({
           <button
             type="button"
             data-testid="de-backsplash-custom"
-            className={`w-full rounded-xl border px-4 py-3 text-left text-sm font-medium ${
-              isCustom ? "border-foreground bg-muted/30" : "border-border"
+            className={`w-full rounded-xl border px-4 py-3 text-left text-sm font-medium transition ${
+              isCustom ? "de-option-selected" : "border-border hover:border-foreground/40"
             }`}
             onClick={() => {
               if (customOpt) onSelectOption(customOpt.optionKey);
@@ -1288,7 +1322,16 @@ function BacksplashModal({
               });
             }}
           >
-            {customOpt ? normalizeBacksplashLabel(customOpt.displayLabel) : "Custom-height backsplash"}
+            {isCustom && draft.requestedHeightInches != null && Number(draft.requestedHeightInches) > 0
+              ? `${draft.requestedHeightInches}-inch custom-height backsplash`
+              : customOpt
+                ? normalizeBacksplashLabel(customOpt.displayLabel)
+                : "Custom-height backsplash"}
+            {isCustom && customPriceEffect ? (
+              <span className="mt-0.5 block text-xs font-medium tabular-nums text-foreground">
+                {customPriceEffect}
+              </span>
+            ) : null}
           </button>
           {isCustom ? (
             <div className="mt-3 space-y-3 rounded-xl border border-border bg-muted/20 p-4" data-testid="de-backsplash-custom-fields">
@@ -1644,10 +1687,28 @@ function CustomerRoomCard({
   const hasSideSplash = room.sideSplashPieces.length > 0;
   const allowed = (key: string) =>
     catalogPermissions == null || catalogPermissions[key] !== false;
+  const pricing = room.roomPricing;
   const selectedEffect = (role: string) => {
     const sel =
       room.choiceOptions.find((c) => c.role === role && c.selected) ||
       room.choiceOptions.find((c) => c.role === role && c.includedInBaseline);
+    if (role === "backsplash" && sel) {
+      const delta = pricing?.backsplashChangeFromOriginal;
+      if (delta != null && Number.isFinite(delta) && Math.abs(delta) >= 0.005) {
+        return formatSignedMoney(delta);
+      }
+      // Custom/upgraded absolute charge when published was none (amount is the delta).
+      if (
+        !sel.includedInBaseline &&
+        pricing?.backsplashAmount != null &&
+        Number.isFinite(pricing.backsplashAmount) &&
+        Math.abs(Number(pricing.backsplashAmount)) >= 0.005 &&
+        resolvePublishedBacksplashMode(room) === "none"
+      ) {
+        return formatSignedMoney(Number(pricing.backsplashAmount));
+      }
+      if (sel.includedInBaseline) return "Included in your estimate";
+    }
     return sel?.priceEffectLabel || null;
   };
   const colorEffect = color?.includedInBaseline
@@ -1655,7 +1716,6 @@ function CustomerRoomCard({
     : color
       ? null
       : null;
-  const pricing = room.roomPricing;
   const roomStatus =
     pricing?.changeFromOriginal != null && Math.abs(pricing.changeFromOriginal) >= 0.005
       ? "Changed"
