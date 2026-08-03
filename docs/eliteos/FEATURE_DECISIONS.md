@@ -3516,3 +3516,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Revisit trigger** | If new exclusive roles are published, extend the sanitizer priority table; do not auto-pick between two different customer non-baseline options. |
 
 ---
+
+### 253. Digital Estimate — sanitized selections drive all read models (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/digital-estimate-contaminated-selection-sanitize` |
+| **Decision** | After exclusive-role sanitation, **every** Digital Estimate read model (public room cards, sidebar/current estimate breakdown, print, “Your selections”, Studio V2 customer final selections, configuration summaries) must use the same effective sanitized quantities/drafts. Persisted `roomPricing` add-on lines from contaminated calcs are filtered so customer-provided sink losers cannot reappear beside ESF. |
+| **Why** | Qty/meta were sanitized on exchange, but sidebar/print still rendered stale `latestCalculation.roomPricing` lines that still listed both ESF and customer-provided sinks. Studio summary and public cards could therefore disagree. |
+| **Where** | Exchange + save wrap calc DTOs with `sanitizeCustomerCalculationForExclusiveSelections`; `buildCustomerConfigurationSummary` and Studio review sanitize quantities; public UI collapses exclusive qty and dedupes sink add-on lines in breakdown/print. |
+| **Impacted** | `sanitizeExclusiveRoomSelections.mjs`, `publicConfigurationService.mjs`, `customerConfigurationSummary.mjs`, `studioCustomerSelectionReview.mjs`, `sinkSelectionDisplay.ts`, `lovableViewModel.ts`, `customerEstimateBreakdown.ts`, `customerPrintAdapter.ts`, tests, this doc. |
+| **Protected / unchanged** | Pricing formulas, sink/cutout prices, Studio V2 approve/publish/revision, acceptance, sold, AI Takeoff, Internal Estimate, migrations. |
+| **Revisit trigger** | If calculation rows are rewritten on read, prefer reprojecting roomPricing from sanitized selections instead of display-only filtering. |
+
+---

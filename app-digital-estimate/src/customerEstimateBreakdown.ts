@@ -8,6 +8,7 @@ import type {
   PublicRoomPricing,
   PublicRoomPricingChanges,
 } from "./publicConfigApi";
+import { dedupeExclusiveSinkAddOnLines } from "./sinkSelectionDisplay.ts";
 
 export type BreakdownLine = {
   key: string;
@@ -177,7 +178,8 @@ function roomHierarchyLines(pricing: PublicRoomPricing): BreakdownLine[] {
         roomName,
       },
     );
-    for (const [lineIndex, addOn] of (room.addOnLines || []).entries()) {
+    const addOnLines = dedupeExclusiveSinkAddOnLines(room.addOnLines || []);
+    for (const [lineIndex, addOn] of addOnLines.entries()) {
       lines.push({
         key: `${pricing.kind}-room-${roomIndex}-addon-${lineIndex}`,
         label: addOn.label || "Item",

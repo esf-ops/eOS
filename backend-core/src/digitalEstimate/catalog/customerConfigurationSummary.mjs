@@ -12,6 +12,10 @@ import { getProductById } from "./esfPlumbingCatalog.mjs";
 import { parseProductOptionKey } from "./digitalEstimateProductOptions.mjs";
 import { toCustomerSafeProduct } from "./esfPlumbingCatalogContract.mjs";
 import { getElite100CustomerMaterial } from "../configuration/elite100CustomerMaterialCatalog.mjs";
+import {
+  sanitizeExclusiveRoomSelectionQuantities,
+  sanitizeProductDraftsForExclusiveSelections
+} from "../configuration/sanitizeExclusiveRoomSelections.mjs";
 
 /**
  * @param {{
@@ -39,8 +43,15 @@ export function buildCustomerConfigurationSummary(input = {}) {
         projectNote: input.projectNote || null
       };
 
-  const quantities = split.quantities || {};
-  const productDrafts = split.customerProductDrafts || input.customerProductDrafts || {};
+  const quantities = sanitizeExclusiveRoomSelectionQuantities(
+    split.quantities || input.quantities || {},
+    [],
+    { throwOnAmbiguous: false }
+  ).quantities;
+  const productDrafts = sanitizeProductDraftsForExclusiveSelections(
+    split.customerProductDrafts || input.customerProductDrafts || {},
+    quantities
+  );
   const backsplashDrafts = split.backsplashDrafts || input.backsplashDrafts || {};
   const roomNotes = split.roomNotes || input.roomNotes || {};
   const roomNameByKey = new Map(
