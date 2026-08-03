@@ -145,6 +145,42 @@ console.log("\nintakeOpenEstimateService.test.mjs\n");
   );
   assert.equal(pdfKept.sourceAttachmentId, "graph-pdf-id");
 
+  // Empty case attachments: live manual candidate selects under markAsPlan only.
+  const live = selectSupportedPdfAttachment(
+    { attachments: [] },
+    {
+      selectedAttachmentKey: "AAkALgAAopaque",
+      selectedFilename: "1000005197.jpg",
+      markAsPlan: true,
+      liveManualAttachment: {
+        attachmentKey: "AAkALgAAopaque",
+        filename: "1000005197.jpg",
+        contentType: "image/jpeg",
+        providerMessageId: "msg-1",
+        isInline: false,
+        support: "image_needs_review"
+      }
+    }
+  );
+  assert.equal(live.safeFilename, "1000005197.jpg");
+  assert.equal(live.sourceAttachmentId, "AAkALgAAopaque");
+  assert.throws(
+    () =>
+      selectSupportedPdfAttachment(
+        { attachments: [] },
+        {
+          selectedAttachmentKey: "AAkALgAAopaque",
+          selectedFilename: "1000005197.jpg",
+          liveManualAttachment: {
+            attachmentKey: "AAkALgAAopaque",
+            filename: "1000005197.jpg",
+            contentType: "image/jpeg"
+          }
+        }
+      ),
+    /No supported plan/
+  );
+
   console.log("ok: PDF selection unchanged; Graph JPG manual override uses scoped filename + hydrate");
 }
 

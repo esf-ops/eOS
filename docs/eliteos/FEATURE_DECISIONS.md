@@ -3684,4 +3684,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | PDF auto takeoff (existing `sourceAttachmentId` not overwritten), Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. |
 | **Revisit trigger** | Remove staff diagnostics once production shape is confirmed stable; persist Graph attachment ids durably at import. |
 
+### 267. Live Graph image candidate when intake case has zero attachments (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/inbox-graph-jpg-no-case-attachment` |
+| **Decision** | For staff `manualPlanOverride` only: when the live Inbox/Graph attachment is a safe JPG/PNG/WEBP but the persisted intake case has **no matching attachment rows**, Shared Inbox builds a **server-side in-memory** attachment candidate (`sourceAttachmentId` + `providerMessageId` + filename/MIME) and passes it to open-estimate as `deps.liveManualAttachment` (never from the browser body). Bytes still come from Graph fetch + existing ingest. |
+| **Why** | Production diagnostic showed `intakeCaseAttachmentCount: 0` / `rejectedReason: open_estimate:no_supported_pdf` for Dave Untiedt `1000005197.jpg` — prior fixes assumed a persisted attachment row existed. |
+| **Impacted** | `buildLiveManualPlanAttachmentCandidate`, Shared Inbox send-to-takeoff, `selectSupportedPdfAttachment` / open-estimate, tests, this doc. |
+| **Protected / unchanged** | PDF auto takeoff, Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. `image_needs_review` still does not auto-send. |
+| **Revisit trigger** | Persist Graph attachment metadata on import so live candidates are rarely needed; remove staff diagnostics after stable production. |
+
 ---

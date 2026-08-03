@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 import {
+  buildLiveManualPlanAttachmentCandidate,
   canMarkAsPlanForTakeoff,
   classifyPlanFileSupport,
   filenameLooksPlanLike,
@@ -162,6 +163,33 @@ console.log("\nquoteIntakePlanAttachmentSupport.test.mjs\n");
       isFileAttachment: true
     }),
     "direct_pdf"
+  );
+
+  const live = buildLiveManualPlanAttachmentCandidate({
+    liveAttachment: {
+      attachmentKey: "AAkALgAAopaque",
+      filename: "1000005197.jpg",
+      contentType: "image/jpeg",
+      isInline: false,
+      support: "image_needs_review"
+    },
+    attachmentKey: "AAkALgAAopaque",
+    providerMessageId: "graph-msg-1"
+  });
+  assert.ok(live);
+  assert.equal(live.safeFilename, "1000005197.jpg");
+  assert.equal(live.sourceAttachmentId, "AAkALgAAopaque");
+  assert.equal(live.providerMessageId, "graph-msg-1");
+  assert.equal(
+    buildLiveManualPlanAttachmentCandidate({
+      liveAttachment: {
+        filename: "sig.jpg",
+        contentType: "image/jpeg",
+        isInline: true
+      },
+      attachmentKey: "inline-1"
+    }),
+    null
   );
   console.log("ok: unrelated images are not blindly auto-classified as plans");
 }

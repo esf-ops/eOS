@@ -887,7 +887,7 @@ function baseEnv() {
     (e) => {
       assert.equal(e.code, "attachment_not_supported");
       assert.ok(e.diagnostic);
-      assert.equal(e.diagnostic.codePath, "inbox-graph-jpg-hydrate-v1");
+      assert.equal(e.diagnostic.codePath, "inbox-graph-jpg-live-candidate-v1");
       return true;
     }
   );
@@ -928,8 +928,176 @@ function baseEnv() {
   });
   assert.equal(d.requestedAttachmentKeyPrefix, "AAMkAGI2");
   assert.equal(d.matchedExtension, ".jpg");
+  assert.equal(d.codePath, "inbox-graph-jpg-live-candidate-v1");
   assert.doesNotMatch(JSON.stringify(d), /secretLongKey/);
   console.log("ok: staff diagnostic omits full Graph key");
+}
+
+// Exact production diagnostic shape: live JPG matched, intake case has ZERO attachments.
+{
+  const GRAPH_KEY = "AAkALgAAopaqueGraphKeyEmptyCase==";
+  const FILENAME = "1000005197.jpg";
+  const JPEG_BYTES = Buffer.from([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00,
+    0x01, 0x00, 0x01, 0x00, 0x00, 0xff, 0xd9
+  ]);
+  /** @type {{ messageId: string, attachmentId: string }[]} */
+  const fetched = [];
+
+  const repo = {
+    async getCase() {
+      return {
+        id: "case-empty-atts",
+        sourceMessage: { graphImmutableMessageId: "graph-msg-dave" },
+        attachments: []
+      };
+    },
+    async listTakeoffLinks() {
+      return [];
+    },
+    async createTakeoffLink({ takeoffJobId }) {
+      return { id: "link-1", takeoffJobId, relationshipStatus: "queued" };
+    },
+    async appendAuditEvent() {}
+  };
+
+  const svc = createStudioSharedInboxService({
+    env: baseEnv(),
+    quoteIntakeRepository: repo,
+    previewFn: async () => ({
+      mailboxDisplay: "quotes@example.com",
+      messages: [
+        {
+          graphMessageId: "msg-dave-empty",
+          subject: "Quote",
+          bodyPreview: "hi",
+          hasAttachments: true,
+          eligibilityHint: "already_imported",
+          alreadyImported: true,
+          existingCaseId: "case-empty-atts",
+          sender: { displayName: "Dave Untiedt", emailPresent: true },
+          attachments: [
+            {
+              sourceAttachmentId: GRAPH_KEY,
+              name: FILENAME,
+              mimeType: "image/jpeg",
+              support: "image_needs_review",
+              isInline: false,
+              sizeBytes: JPEG_BYTES.length
+            },
+            {
+              sourceAttachmentId: `${GRAPH_KEY}-2`,
+              name: "1000005196.jpg",
+              mimeType: "image/jpeg",
+              support: "image_needs_review",
+              sizeBytes: JPEG_BYTES.length
+            }
+          ]
+        }
+      ]
+    }),
+    openEstimate: async (deps) => {
+      assert.ok(deps.liveManualAttachment, "empty case requires live candidate");
+      assert.equal(deps.liveManualAttachment.safeFilename, FILENAME);
+      assert.equal(deps.liveManualAttachment.sourceAttachmentId, GRAPH_KEY);
+      assert.equal(deps.liveManualAttachment.providerMessageId, "graph-msg-dave");
+      return openEstimateForIntakeCase({
+        ...deps,
+        repository: repo,
+        repositoryMode: "memory",
+        getSupabase: () => ({}),
+        graphClient: {
+          async getAttachment(messageId, attachmentId) {
+            fetched.push({ messageId: String(messageId), attachmentId: String(attachmentId) });
+            return {
+              size: JPEG_BYTES.length,
+              contentBytes: JPEG_BYTES.toString("base64")
+            };
+          }
+        },
+        ingestFile: async ({ sha256 }) => ({
+          quoteFileId: `file-${sha256.slice(0, 8)}`,
+          reused: false
+        }),
+        createWorkspace: async ({ quoteFileId }) => ({
+          takeoffJobId: `job-${quoteFileId}`
+        })
+      });
+    }
+  });
+
+  await assert.rejects(
+    () =>
+      svc.sendToAiTakeoff({
+        organizationId: ORG,
+        messageKey: "msg-dave-empty",
+        attachmentKey: GRAPH_KEY,
+        confirm: true
+      }),
+    (e) => e.code === "attachment_not_supported"
+  );
+
+  const ok = await svc.sendToAiTakeoff({
+    organizationId: ORG,
+    messageKey: "msg-dave-empty",
+    attachmentKey: GRAPH_KEY,
+    confirm: true,
+    manualPlanOverride: true,
+    markAsPlan: true
+  });
+  assert.ok(ok.takeoffJobId);
+  assert.equal(fetched[0]?.messageId, "graph-msg-dave");
+  assert.equal(fetched[0]?.attachmentId, GRAPH_KEY);
+
+  // unsupported .txt with override still rejects (no live candidate path success)
+  const txtSvc = createStudioSharedInboxService({
+    env: baseEnv(),
+    quoteIntakeRepository: {
+      async getCase() {
+        return { id: "case-txt", attachments: [], sourceMessage: {} };
+      }
+    },
+    previewFn: async () => ({
+      mailboxDisplay: "quotes@example.com",
+      messages: [
+        {
+          graphMessageId: "msg-txt",
+          subject: "Doc",
+          bodyPreview: "hi",
+          hasAttachments: true,
+          eligibilityHint: "manual_review",
+          alreadyImported: true,
+          existingCaseId: "case-txt",
+          sender: { displayName: "Customer", emailPresent: true },
+          attachments: [
+            {
+              sourceAttachmentId: "AAk-txt",
+              name: "notes.txt",
+              mimeType: "text/plain",
+              support: "metadata_only",
+              sizeBytes: 12
+            }
+          ]
+        }
+      ]
+    }),
+    openEstimate: async () => {
+      throw new Error("txt must not open");
+    }
+  });
+  await assert.rejects(
+    () =>
+      txtSvc.sendToAiTakeoff({
+        organizationId: ORG,
+        messageKey: "msg-txt",
+        attachmentKey: "AAk-txt",
+        confirm: true,
+        manualPlanOverride: true
+      }),
+    (e) => e.code === "attachment_not_supported"
+  );
+
+  console.log("ok: empty intake-case attachments + live Graph JPG manual override succeeds");
 }
 
 console.log("\nstudioSharedInboxSendToTakeoff.test.mjs: ok\n");
