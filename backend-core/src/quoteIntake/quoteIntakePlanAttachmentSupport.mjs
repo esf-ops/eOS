@@ -245,6 +245,57 @@ export function attachmentFilenameKeys(att = {}) {
 }
 
 /**
+ * Build an in-memory intake-shaped attachment from a live Inbox/Graph attachment.
+ * Used only for staff manual image override when the persisted case has no rows.
+ * Does not include bytes.
+ *
+ * @param {{
+ *   liveAttachment?: object|null,
+ *   attachmentKey?: string|null,
+ *   providerMessageId?: string|null
+ * }} input
+ * @returns {object|null}
+ */
+export function buildLiveManualPlanAttachmentCandidate(input = {}) {
+  const live = input.liveAttachment && typeof input.liveAttachment === "object"
+    ? input.liveAttachment
+    : null;
+  if (!live) return null;
+  if (live.isInline === true || live.inline === true) return null;
+
+  const key = String(
+    input.attachmentKey ||
+      live.attachmentKey ||
+      live.sourceAttachmentId ||
+      live.id ||
+      ""
+  ).trim();
+  const filename = String(
+    live.filename || live.name || live.safeFilename || ""
+  ).trim();
+  const mime = normalizePlanMime(live.contentType || live.mimeType);
+  const candidate = {
+    id: live.id || (key ? `live:${key.slice(0, 48)}` : null),
+    sourceAttachmentId: key || null,
+    providerMessageId: String(input.providerMessageId || live.providerMessageId || "").trim() || null,
+    safeFilename: filename || "plan-image",
+    name: filename || null,
+    filename: filename || null,
+    mimeType: mime || null,
+    contentType: mime || null,
+    sizeBytes: Number.isFinite(Number(live.sizeBytes)) ? Number(live.sizeBytes) : undefined,
+    isInline: false,
+    support: "image_needs_review",
+    kind: "image_review_candidate",
+    retrievalState: "pending",
+    liveManualCandidate: true
+  };
+
+  if (!isSafeManualPlanImageOverride(candidate)) return null;
+  return candidate;
+}
+
+/**
  * Find an attachment inside a single message/case list.
  *
  * Matching order:

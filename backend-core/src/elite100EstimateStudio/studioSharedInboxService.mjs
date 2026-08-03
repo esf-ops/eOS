@@ -15,6 +15,7 @@ import {
 } from "./studioSharedInboxReadModel.mjs";
 import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
 import {
+  buildLiveManualPlanAttachmentCandidate,
   findScopedAttachment,
   isAutoSupportedTakeoffSupport,
   isSafeManualPlanImageOverride,
@@ -66,7 +67,7 @@ export function buildAttachmentNotSupportedDiagnostic(partial = {}) {
   const extMatch = name.match(/\.([a-z0-9]+)$/i);
   return {
     stage: String(partial.stage || "unknown"),
-    codePath: "inbox-graph-jpg-hydrate-v1",
+    codePath: "inbox-graph-jpg-live-candidate-v1",
     requestedAttachmentKeyPresent: Boolean(key),
     manualPlanOverride: partial.manualPlanOverride === true,
     markAsPlan: partial.markAsPlan === true,
@@ -587,6 +588,22 @@ export function createStudioSharedInboxService(deps = {}) {
       allowFilenameFallback: manualOk === true
     });
 
+    // Production Dave Untiedt shape: case exists but has zero attachment rows.
+    // Build a server-side in-memory candidate from the live Inbox/Graph attachment
+    // so open-estimate can fetch bytes. Never accepted from the browser body.
+    const providerMessageId =
+      String(caseRowForDiag?.sourceMessage?.graphImmutableMessageId || "").trim() ||
+      String(item.messageKey || key || "").trim() ||
+      null;
+    const liveManualAttachment =
+      manualOk === true && !caseMatch
+        ? buildLiveManualPlanAttachmentCandidate({
+            liveAttachment: att,
+            attachmentKey: attKey,
+            providerMessageId
+          })
+        : null;
+
     let openResult;
     try {
       openResult = await openEstimateFn({
@@ -604,6 +621,7 @@ export function createStudioSharedInboxService(deps = {}) {
           markAsPlan: manualOk === true,
           manualPlanOverride: manualOk === true
         },
+        liveManualAttachment,
         initiationMode: "manual"
       });
     } catch (e) {
@@ -624,21 +642,31 @@ export function createStudioSharedInboxService(deps = {}) {
         mapped === "attachment_not_supported" ? 400 : Number(e?.statusCode) || 500;
       err.code = mapped;
       if (mapped === "attachment_not_supported") {
+        const stage =
+          code === "attachment_bytes_unavailable" ? "graph_fetch" : "open_estimate";
         err.diagnostic = buildAttachmentNotSupportedDiagnostic({
           ...baseDiag,
-          stage: "open_estimate",
+          stage,
           intakeCaseAttachmentCount: caseAtts.length,
           intakeCaseMatchedAttachmentFound: Boolean(caseMatch),
           intakeCaseMatchedBy: caseMatch
             ? String(caseMatch.sourceAttachmentId || "").trim()
               ? "sourceAttachmentId_or_key"
               : "scoped_filename"
-            : null,
-          intakeCaseMatchedSafeFilename: caseMatch?.safeFilename || null,
+            : liveManualAttachment
+              ? "live_manual_candidate"
+              : null,
+          intakeCaseMatchedSafeFilename:
+            caseMatch?.safeFilename || liveManualAttachment?.safeFilename || null,
           intakeCaseMatchedSourceAttachmentIdPresent: Boolean(
-            String(caseMatch?.sourceAttachmentId || "").trim()
+            String(
+              caseMatch?.sourceAttachmentId || liveManualAttachment?.sourceAttachmentId || ""
+            ).trim()
           ),
-          rejectedReason: `open_estimate:${code}`
+          rejectedReason:
+            code === "attachment_bytes_unavailable"
+              ? "attachment_bytes_unavailable"
+              : `open_estimate:${code}`
         });
       }
       throw err;

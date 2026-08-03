@@ -23,6 +23,7 @@ import {
   isSupportedTakeoffPlan
 } from "../quoteIntake/quoteIntakeAttachmentMeta.mjs";
 import {
+  buildLiveManualPlanAttachmentCandidate,
   findScopedAttachment,
   isSafeManualPlanImageOverride,
   requestHasManualPlanOverride
@@ -141,7 +142,8 @@ export function rejectCallerOpenEstimateHints(body) {
  *   selectedAttachmentId?: string|null,
  *   selectedAttachmentKey?: string|null,
  *   selectedFilename?: string|null,
- *   markAsPlan?: boolean
+ *   markAsPlan?: boolean,
+ *   liveManualAttachment?: object|null
  * }} [opts]
  */
 export function selectSupportedPdfAttachment(caseRow, opts = {}) {
@@ -153,7 +155,7 @@ export function selectSupportedPdfAttachment(caseRow, opts = {}) {
   const selectedFilename = String(opts.selectedFilename ?? "").trim();
 
   if (opts.markAsPlan === true) {
-    const candidate = findScopedAttachment(atts, {
+    let candidate = findScopedAttachment(atts, {
       attachmentKey: selectedKey || selectedId || null,
       attachmentId: selectedId || null,
       filename: selectedFilename || null,
@@ -161,10 +163,23 @@ export function selectSupportedPdfAttachment(caseRow, opts = {}) {
       // case row lost / truncated sourceAttachmentId. Scoped to this case only.
       allowFilenameFallback: true
     });
+
+    // Production: intake case may have zero attachment rows while Inbox still has
+    // the live Graph JPG. Staff-only manual override may supply an in-memory candidate
+    // (never from browser body — caller passes deps.liveManualAttachment).
+    if (!candidate && opts.liveManualAttachment) {
+      candidate = buildLiveManualPlanAttachmentCandidate({
+        liveAttachment: opts.liveManualAttachment,
+        attachmentKey: selectedKey || null,
+        providerMessageId: opts.liveManualAttachment.providerMessageId || null
+      });
+    }
+
     if (
       candidate &&
       !candidate.isInline &&
       (candidate.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW ||
+        candidate.liveManualCandidate === true ||
         (!isSupportedTakeoffPlan(candidate) && isSafeManualPlanImageOverride(candidate)))
     ) {
       // Treat as a plan for this handoff only (persisted promotion is optional).
@@ -433,7 +448,8 @@ async function resolveValidatedPdfBytes(deps) {
  *   ingestFile?: typeof ingestQuoteFileFromBytes,
  *   createWorkspace?: typeof createTakeoffWorkspace,
  *   repositoryMode?: string,
- *   initiationMode?: string
+ *   initiationMode?: string,
+ *   liveManualAttachment?: object|null
  * }} deps
  */
 export async function openEstimateForIntakeCase(deps) {
@@ -450,7 +466,9 @@ export async function openEstimateForIntakeCase(deps) {
     ingestFile = ingestQuoteFileFromBytes,
     createWorkspace = createTakeoffWorkspace,
     repositoryMode = "unknown",
-    initiationMode = TAKEOFF_INITIATION_MODE.MANUAL
+    initiationMode = TAKEOFF_INITIATION_MODE.MANUAL,
+    // Server-built only (Shared Inbox manual image override). Never read from body.
+    liveManualAttachment = null
   } = deps;
   const resolvedInitiationMode =
     String(initiationMode || "").trim() === TAKEOFF_INITIATION_MODE.AUTOMATIC
@@ -508,18 +526,28 @@ export async function openEstimateForIntakeCase(deps) {
     selectedAttachmentId: resolvedSelectedId,
     selectedAttachmentKey: attachmentKey,
     selectedFilename: selectedFilename,
-    markAsPlan
+    markAsPlan,
+    liveManualAttachment: markAsPlan ? liveManualAttachment : null
   });
 
   // Production Graph JPG shape: live UI sends AAMk… attachmentKey, but the persisted
-  // intake attachment often has sourceAttachmentId null. Selection can succeed via
-  // scoped filename; Graph byte fetch still requires the opaque attachment id.
+  // intake attachment often has sourceAttachmentId null (or the case has zero rows).
   // Hydrate in-memory only (no migration). PDF auto path is unchanged when the
   // stored sourceAttachmentId is already present.
   attachment = hydrateAttachmentGraphIdentity(attachment, {
     attachmentKey,
     caseRow
   });
+  if (
+    markAsPlan &&
+    !String(attachment.providerMessageId || "").trim() &&
+    liveManualAttachment?.providerMessageId
+  ) {
+    attachment = {
+      ...attachment,
+      providerMessageId: String(liveManualAttachment.providerMessageId).trim()
+    };
+  }
 
   const idempotencyKey = buildOpenEstimateIdempotencyKey(caseRow, attachment);
   const lockKey = `${org}:${idempotencyKey}`;
