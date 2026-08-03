@@ -993,7 +993,130 @@ export function createStudioEstimateDigitalEstimateService(deps) {
       acknowledgeFreeze: true
     }, actorUserId);
 
-    return { configured: true, envelopeId };
+    return { configured: true, envelopeId, optionCount: options.length };
+  }
+
+  /**
+   * Always rebuild + activate the configuration envelope for an existing
+   * publication (Studio Repair / Republish), then sanitize/migrate prior
+   * customer selections onto the new active envelope.
+   */
+  async function repairInteractiveConfiguration({
+    organizationId,
+    actorUserId,
+    publicationId,
+    configuration,
+    estimate,
+    assertWithinBudget,
+    mark,
+    budgetMark = "repair_envelope"
+  }) {
+    let optionCountBefore = null;
+    try {
+      const envelopes = await configurationStudioService.listEnvelopes(
+        organizationId,
+        publicationId
+      );
+      const priorActive = (envelopes || []).find(
+        (e) => String(e.status || "") === "active"
+      );
+      if (priorActive?.id) {
+        const priorGraph = await configurationStudioService.getEnvelope(
+          organizationId,
+          priorActive.id
+        );
+        optionCountBefore = Array.isArray(priorGraph?.options)
+          ? priorGraph.options.length
+          : null;
+      }
+    } catch {
+      optionCountBefore = null;
+    }
+
+    if (typeof assertWithinBudget === "function") assertWithinBudget(budgetMark);
+    const repaired = await applyConfigurationEnvelope({
+      organizationId,
+      actorUserId,
+      publicationId,
+      configuration,
+      estimate
+    });
+    if (typeof mark === "function") mark(budgetMark);
+    if (!repaired.configured) {
+      throw deError(
+        repaired.message ||
+          "Configuration envelope is required for this customer link but could not be activated",
+        "DE-ENVELOPE-ACTIVATION-FAILED",
+        422
+      );
+    }
+
+    let selectionRepair = {
+      migrated: false,
+      reason: "not_attempted",
+      removedKeys: [],
+      remappedKeys: [],
+      changed: false
+    };
+    if (
+      configurationStudioService &&
+      typeof configurationStudioService.repairSelectionsOntoEnvelope === "function"
+    ) {
+      try {
+        selectionRepair = await configurationStudioService.repairSelectionsOntoEnvelope(
+          organizationId,
+          publicationId,
+          repaired.envelopeId,
+          {
+            actorUserId,
+            rooms: Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : []
+          }
+        );
+        if (typeof mark === "function") mark("repair_selections");
+      } catch (e) {
+        console.warn(
+          JSON.stringify({
+            msg: "studio_de_repair_selection_migrate_failed",
+            publicationId,
+            envelopeId: repaired.envelopeId,
+            error: e?.message || String(e)
+          })
+        );
+        selectionRepair = {
+          migrated: false,
+          reason: "migrate_failed",
+          removedKeys: [],
+          remappedKeys: [],
+          changed: false,
+          error: e?.message || String(e)
+        };
+      }
+    }
+
+    const optionCountAfter =
+      repaired.optionCount != null
+        ? repaired.optionCount
+        : selectionRepair.optionCount != null
+          ? selectionRepair.optionCount
+          : null;
+
+    return {
+      configured: true,
+      repaired: true,
+      envelopeRebuilt: true,
+      envelopeId: repaired.envelopeId,
+      optionCountBefore,
+      optionCountAfter,
+      sanitizedSelectionsCount: selectionRepair.migrated ? 1 : 0,
+      droppedOrCanonicalizedCount:
+        (selectionRepair.removedKeys?.length || 0) +
+        (selectionRepair.remappedKeys?.length || 0),
+      removedKeys: selectionRepair.removedKeys || [],
+      remappedKeys: selectionRepair.remappedKeys || [],
+      selectionMigrated: Boolean(selectionRepair.migrated),
+      selectionRepairReason: selectionRepair.reason || null,
+      activePublicationUnchanged: true
+    };
   }
 
   function strOrNull(v) {
@@ -1184,33 +1307,22 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             503
           );
         }
+        /** @type {object|null} */
+        let repairMeta = null;
         if (intendsConfigure && configurationStudioService) {
-          const envelopes = await configurationStudioService.listEnvelopes(
+          // Always rebuild the active envelope on interactive reuse/repair —
+          // skipping when an (possibly stale) active envelope already exists left
+          // public /selections reading contaminated option keys / saved state.
+          repairMeta = await repairInteractiveConfiguration({
             organizationId,
-            existing.id
-          );
-          const hasActive = (envelopes || []).some(
-            (e) => String(e.status || "") === "active"
-          );
-          if (!hasActive) {
-            assertWithinBudget("idempotent_repair");
-            const repaired = await applyConfigurationEnvelope({
-              organizationId,
-              actorUserId,
-              publicationId: existing.id,
-              configuration,
-              estimate
-            });
-            mark("repair_envelope");
-            if (!repaired.configured) {
-              throw deError(
-                repaired.message ||
-                  "Configuration envelope is required for this customer link but could not be activated",
-                "DE-ENVELOPE-ACTIVATION-FAILED",
-                422
-              );
-            }
-          }
+            actorUserId,
+            publicationId: existing.id,
+            configuration,
+            estimate,
+            assertWithinBudget,
+            mark,
+            budgetMark: "idempotent_repair"
+          });
         }
         const linkMeta = await linkMetaForPublication(organizationId, existing);
         mark("build_response");
@@ -1220,10 +1332,23 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             correlationId,
             estimateId,
             reused: true,
+            envelopeRebuilt: Boolean(repairMeta?.envelopeRebuilt),
+            optionCountBefore: repairMeta?.optionCountBefore ?? null,
+            optionCountAfter: repairMeta?.optionCountAfter ?? null,
+            sanitizedSelectionsCount: repairMeta?.sanitizedSelectionsCount ?? 0,
+            droppedOrCanonicalizedCount: repairMeta?.droppedOrCanonicalizedCount ?? 0,
+            activePublicationUnchanged: true,
             phases,
             elapsedMs: Date.now() - t0
           })
         );
+        const staffNotice = repairMeta?.envelopeRebuilt
+          ? linkMeta.customerUrl
+            ? "Digital Estimate configuration repaired. The customer link is unchanged."
+            : "Digital Estimate configuration repaired. Use Replace Link if a customer URL is missing."
+          : linkMeta.customerUrl
+            ? "This revision is already published. The customer link is unchanged."
+            : "Publication already exists for this revision. Use Replace Link to create a recoverable customer URL.";
         return {
           ok: true,
           reused: true,
@@ -1235,7 +1360,19 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           linkStatus: linkMeta.linkStatus,
           readiness: readiness.readiness,
           envelope: intendsConfigure
-            ? { configured: true, repaired: true }
+            ? {
+                configured: true,
+                repaired: true,
+                envelopeRebuilt: Boolean(repairMeta?.envelopeRebuilt),
+                envelopeId: repairMeta?.envelopeId || null,
+                optionCountBefore: repairMeta?.optionCountBefore ?? null,
+                optionCountAfter: repairMeta?.optionCountAfter ?? null,
+                sanitizedSelectionsCount: repairMeta?.sanitizedSelectionsCount ?? 0,
+                droppedOrCanonicalizedCount:
+                  repairMeta?.droppedOrCanonicalizedCount ?? 0,
+                selectionMigrated: Boolean(repairMeta?.selectionMigrated),
+                activePublicationUnchanged: true
+              }
             : { configured: false, reason: "document_only" },
           publishedConfiguration: {
             customerChoiceGroups: Array.isArray(configuration?.customerChoiceGroups)
@@ -1246,10 +1383,18 @@ export function createStudioEstimateDigitalEstimateService(deps) {
               : [],
             envelopeFingerprint
           },
-          staffNotice:
-            linkMeta.customerUrl
-              ? "This revision is already published. The customer link is unchanged."
-              : "Publication already exists for this revision. Use Replace Link to create a recoverable customer URL."
+          repair: repairMeta
+            ? {
+                publicationId: existing.id,
+                envelopeRebuilt: true,
+                optionCountBefore: repairMeta.optionCountBefore,
+                optionCountAfter: repairMeta.optionCountAfter,
+                sanitizedSelectionsCount: repairMeta.sanitizedSelectionsCount,
+                droppedOrCanonicalizedCount: repairMeta.droppedOrCanonicalizedCount,
+                activePublicationUnchanged: true
+              }
+            : null,
+          staffNotice
         };
       }
 
@@ -1270,23 +1415,16 @@ export function createStudioEstimateDigitalEstimateService(deps) {
           );
         }
         if (intendsConfigure && configurationStudioService) {
-          assertWithinBudget("update_envelope");
-          const updated = await applyConfigurationEnvelope({
+          const repairMeta = await repairInteractiveConfiguration({
             organizationId,
             actorUserId,
             publicationId: sameRevisionPub.id,
             configuration,
-            estimate
+            estimate,
+            assertWithinBudget,
+            mark,
+            budgetMark: "update_envelope"
           });
-          mark("update_envelope");
-          if (!updated.configured) {
-            throw deError(
-              updated.message ||
-                "Configuration envelope could not be updated for the changed permissions",
-              "DE-ENVELOPE-ACTIVATION-FAILED",
-              422
-            );
-          }
           await recordConfigurationFingerprintEvent({
             organizationId,
             publication: sameRevisionPub,
@@ -1304,6 +1442,12 @@ export function createStudioEstimateDigitalEstimateService(deps) {
               estimateId,
               reused: false,
               configurationUpdated: true,
+              envelopeRebuilt: true,
+              optionCountBefore: repairMeta.optionCountBefore,
+              optionCountAfter: repairMeta.optionCountAfter,
+              sanitizedSelectionsCount: repairMeta.sanitizedSelectionsCount,
+              droppedOrCanonicalizedCount: repairMeta.droppedOrCanonicalizedCount,
+              activePublicationUnchanged: true,
               phases,
               elapsedMs: Date.now() - t0
             })
@@ -1319,7 +1463,19 @@ export function createStudioEstimateDigitalEstimateService(deps) {
             customerUrl: linkMeta.customerUrl,
             linkStatus: linkMeta.linkStatus,
             readiness: readiness.readiness,
-            envelope: { configured: true, updated: true },
+            envelope: {
+              configured: true,
+              updated: true,
+              repaired: true,
+              envelopeRebuilt: true,
+              envelopeId: repairMeta.envelopeId,
+              optionCountBefore: repairMeta.optionCountBefore,
+              optionCountAfter: repairMeta.optionCountAfter,
+              sanitizedSelectionsCount: repairMeta.sanitizedSelectionsCount,
+              droppedOrCanonicalizedCount: repairMeta.droppedOrCanonicalizedCount,
+              selectionMigrated: repairMeta.selectionMigrated,
+              activePublicationUnchanged: true
+            },
             publishedConfiguration: {
               customerChoiceGroups: Array.isArray(configuration?.customerChoiceGroups)
                 ? configuration.customerChoiceGroups
@@ -1329,8 +1485,17 @@ export function createStudioEstimateDigitalEstimateService(deps) {
                 : [],
               envelopeFingerprint
             },
+            repair: {
+              publicationId: sameRevisionPub.id,
+              envelopeRebuilt: true,
+              optionCountBefore: repairMeta.optionCountBefore,
+              optionCountAfter: repairMeta.optionCountAfter,
+              sanitizedSelectionsCount: repairMeta.sanitizedSelectionsCount,
+              droppedOrCanonicalizedCount: repairMeta.droppedOrCanonicalizedCount,
+              activePublicationUnchanged: true
+            },
             staffNotice:
-              "Configuration permissions updated. The customer link is unchanged."
+              "Configuration permissions updated and customer selections repaired. The customer link is unchanged."
           };
         }
         // Document-only update on existing revision — treat as reuse.

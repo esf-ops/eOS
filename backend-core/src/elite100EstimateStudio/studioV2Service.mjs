@@ -2135,6 +2135,7 @@ export function createStudioV2Service(deps = {}) {
           repaired: interactiveEnvelope.repaired,
           updated: interactiveEnvelope.updated
         },
+        repair: publication.repair || null,
         publishedConfiguration: publication.publishedConfiguration,
         staffNotice:
           customerRevision &&

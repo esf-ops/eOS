@@ -3529,4 +3529,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Pricing formulas, sink/cutout prices, Studio V2 approve/publish/revision, acceptance, sold, AI Takeoff, Internal Estimate, migrations. |
 | **Revisit trigger** | If calculation rows are rewritten on read, prefer reprojecting roomPricing from sanitized selections instead of display-only filtering. |
 
+### 254. Studio V2 Repair Digital Estimate rebuilds customer configuration envelope (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/digital-estimate-repair-rebuild-envelope` |
+| **Decision** | Studio V2 **Repair Digital Estimate** rebuilds the active customer configuration envelope and sanitizes existing saved customer selections while keeping the customer link stable. Repair does not email, approve, accept, sell, or change pricing formulas. When an already-published revision is repaired (idempotent reuse), Studio always re-seeds and activates a new envelope from the current approved snapshot, migrates the latest publication selection onto that envelope with exclusive-role sanitation (ESF sink wins, none backsplash wins over baseline, aliases remapped, off-envelope keys dropped), and returns repair metadata (`publicationId`, envelope rebuilt, option counts, sanitized/dropped counts, active publication unchanged). |
+| **Why** | Production “Republish / Repair” returned 200 with “customer link is unchanged” but skipped envelope rebuild whenever any active envelope already existed — leaving public `/selections` on stale keys and contaminated saved state (`selection_unavailable` / `DE-EXCHANGE-404` for sink/backsplash). |
+| **Where** | `studioEstimateDigitalEstimateService.mjs` always calls repair rebuild on interactive reuse; `repairPublicationSelections.mjs` + configuration repository migrate/sanitize; V2 publish DTO surfaces repair metadata; staff notice distinguishes actual repair. |
+| **Impacted** | `studioEstimateDigitalEstimateService.mjs`, `studioV2Publish.mjs`, `studioV2Service.mjs`, `configurationRepository.mjs`, `configurationStudioService.mjs`, `repairPublicationSelections.mjs`, `studioV2RepairRebuildsEnvelope.test.mjs`, this doc. |
+| **Protected / unchanged** | Pricing formulas, material rates, sink/cutout prices, Studio V2 approval, acceptance, sold, AI Takeoff, Internal Estimate, email, migrations, first-time publish semantics. |
+| **Revisit trigger** | If envelope activate cannot keep the same public token; if a full reprice on repair is required beyond sanitized display calc. |
+
 ---

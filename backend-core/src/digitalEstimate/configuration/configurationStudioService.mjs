@@ -761,6 +761,39 @@ export function createConfigurationStudioService(deps) {
 
     async listEvents(organizationId, envelopeId) {
       return configurationRepository.listEvents(organizationId, envelopeId);
+    },
+
+    /**
+     * After Studio Repair rebuilds an envelope, migrate sanitized customer
+     * selections onto the new active envelope (same publication / link).
+     */
+    async repairSelectionsOntoEnvelope(
+      organizationId,
+      publicationId,
+      envelopeId,
+      { actorUserId = null, rooms = [] } = {}
+    ) {
+      const { migrateSanitizedSelectionsToRepairedEnvelope } = await import(
+        "./repairPublicationSelections.mjs"
+      );
+      const graph = await configurationRepository.getEnvelopeGraph(
+        organizationId,
+        envelopeId
+      );
+      return migrateSanitizedSelectionsToRepairedEnvelope({
+        configurationRepository,
+        organizationId,
+        publicationId,
+        envelopeId,
+        actorUserId,
+        options: graph?.options || [],
+        rooms
+      });
+    },
+
+    /** Expose repository for Studio repair diagnostics (tests / staff path). */
+    getConfigurationRepository() {
+      return configurationRepository;
     }
   };
 }
