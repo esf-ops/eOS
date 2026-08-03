@@ -79,6 +79,10 @@ import {
   sideSplashPieceDisplayName
 } from "../catalog/customerFacingCopy.mjs";
 import {
+  publishedScopeIncludesSinkCutout,
+  sinkCutoutBaselineFlags
+} from "./sinkCutoutBaseline.mjs";
+import {
   buildQuoteLibraryCustomerConfigProjection
 } from "../catalog/quoteLibraryCustomerConfigProjection.mjs";
 import { buildCustomerConfigurationSummary } from "../catalog/customerConfigurationSummary.mjs";
@@ -1914,10 +1918,25 @@ export function createPublicConfigurationService(deps) {
           const roomType = roomRow?.roomType || "kitchen";
           const roomName = roomRow?.displayName || roomKey;
           const draft = mergedProductDrafts[roomKey]?.sink || null;
+          const cutoutAlreadyPublished = publishedScopeIncludesSinkCutout({
+            roomKey,
+            roomName,
+            roomType,
+            envelopeOptions: options,
+            publishedRoomPricing,
+            customerSnapshot: ctx.customerSnapshot || null
+          });
+          const cutoutBaseline = sinkCutoutBaselineFlags(cutoutAlreadyPublished);
 
           if (parsed.mode === "none") continue;
 
           if (parsed.mode === "customer_provided" || parsed.mode === "customer") {
+            const cpEnvelope = options.find(
+              (o) => (o.option_key || o.optionKey) === `sink:${roomKey}:customer_provided`
+            );
+            const cpInBaseline = Boolean(
+              cpEnvelope?.included_in_baseline ?? cpEnvelope?.includedInBaseline
+            );
             calcOptions.push({
               optionKey: key,
               displayLabel: "Customer-provided sink",
@@ -1926,9 +1945,9 @@ export function createPublicConfigurationService(deps) {
               pricingMode: "per_each",
               customerPriceTreatment: "absolute",
               availabilityState: "active",
-              includedInBaseline: false,
-              defaultQty: 0,
-              baselineQuantity: 0
+              includedInBaseline: cpInBaseline,
+              defaultQty: cpInBaseline ? 1 : 0,
+              baselineQuantity: cpInBaseline ? 1 : 0
             });
             const cutoutKey = cutoutKeyForSinkSelection(roomType, null);
             const sinkCutout = catalog.get(cutoutKey);
@@ -1941,9 +1960,7 @@ export function createPublicConfigurationService(deps) {
                 pricingMode: "per_each",
                 customerPriceTreatment: "absolute",
                 availabilityState: "active",
-                includedInBaseline: false,
-                defaultQty: 0,
-                baselineQuantity: 0
+                ...cutoutBaseline
               });
             }
             continue;
@@ -1961,9 +1978,7 @@ export function createPublicConfigurationService(deps) {
                 pricingMode: "per_each",
                 customerPriceTreatment: "absolute",
                 availabilityState: "active",
-                includedInBaseline: false,
-                defaultQty: 0,
-                baselineQuantity: 0
+                ...cutoutBaseline
               });
             }
             const stock = catalog.get("qty-ss");
@@ -2057,9 +2072,7 @@ export function createPublicConfigurationService(deps) {
                 pricingMode: "per_each",
                 customerPriceTreatment: "absolute",
                 availabilityState: "active",
-                includedInBaseline: false,
-                defaultQty: 0,
-                baselineQuantity: 0
+                ...cutoutBaseline
               });
             }
             continue;

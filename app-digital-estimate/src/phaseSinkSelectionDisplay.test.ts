@@ -9,14 +9,50 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildUpdatedBreakdown } from "./customerEstimateBreakdown.ts";
-import { shouldPreservePersistedSinkDraft } from "./sinkSelectionDisplay.ts";
+import {
+  isPlumbingFinishSelected,
+  isPlumbingProductCardSelected,
+  openFamilyIdForSelection,
+  shouldPreservePersistedSinkDraft,
+} from "./sinkSelectionDisplay.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewSource = readFileSync(join(here, "ConfigurationView.tsx"), "utf8");
 const viewModelSource = readFileSync(join(here, "lovableViewModel.ts"), "utf8");
 
-const VARIANT_KEY = "sink:kitchen:esf:blanco:precis-50-50:coal-black";
-const SINK_LABEL = "Precis 50/50 Sinks · Coal Black";
+const PRODUCT_ID = "blanco:precis-24";
+const VARIANT_ID = "coal-black";
+const PRODUCT_KEY = `sink:kitchen:esf:${PRODUCT_ID}`;
+const SINK_LABEL = `Precis 24" Sink · Coal Black`;
+
+const precisProduct = {
+  productId: PRODUCT_ID,
+  optionKey: PRODUCT_KEY,
+  displayName: `Precis 24" Sink`,
+  variants: [
+    {
+      variantId: VARIANT_ID,
+      sku: "PREC24-CB",
+      finish: "Coal Black",
+      color: "Coal Black",
+      optionKey: null,
+    },
+    {
+      variantId: "white",
+      sku: "PREC24-WH",
+      finish: "White",
+      color: "White",
+      optionKey: null,
+    },
+  ],
+};
+
+const selection = {
+  optionKey: PRODUCT_KEY,
+  productId: PRODUCT_ID,
+  variantId: VARIANT_ID,
+  finish: "Coal Black",
+};
 
 console.log("\nphaseSinkSelectionDisplay.test.ts\n");
 
@@ -27,10 +63,7 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
     selected: false,
     includedInBaseline: true,
   };
-  assert.equal(
-    shouldPreservePersistedSinkDraft(baselineFallback, "esf"),
-    true,
-  );
+  assert.equal(shouldPreservePersistedSinkDraft(baselineFallback, "esf"), true);
   assert.equal(
     shouldPreservePersistedSinkDraft(baselineFallback, "customer_provided"),
     true,
@@ -48,27 +81,39 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
 
 {
   assert.equal(
-    shouldPreservePersistedSinkDraft(
-      { sourceKind: "none", selected: true },
-      "none",
-    ),
+    shouldPreservePersistedSinkDraft({ sourceKind: "none", selected: true }, "none"),
     false,
   );
   assert.equal(
-    shouldPreservePersistedSinkDraft(
-      { sourceKind: "none", selected: false },
-      "none",
-    ),
+    shouldPreservePersistedSinkDraft({ sourceKind: "none", selected: false }, "none"),
     false,
   );
   assert.equal(
-    shouldPreservePersistedSinkDraft(
-      { sourceKind: "esf", selected: true },
-      "esf",
-    ),
+    shouldPreservePersistedSinkDraft({ sourceKind: "esf", selected: true }, "esf"),
     false,
   );
   console.log("ok: explicit and untouched No sink states remain authoritative");
+}
+
+{
+  assert.equal(isPlumbingProductCardSelected(precisProduct, selection), true);
+  assert.equal(
+    isPlumbingProductCardSelected(precisProduct, {
+      optionKey: "sink:kitchen:esf:other",
+      productId: "other",
+    }),
+    false,
+  );
+  assert.equal(
+    isPlumbingFinishSelected(precisProduct.variants[0], selection),
+    true,
+  );
+  assert.equal(
+    isPlumbingFinishSelected(precisProduct.variants[1], selection),
+    false,
+  );
+  assert.equal(openFamilyIdForSelection([precisProduct], selection), PRODUCT_ID);
+  console.log("ok: Precis 24 · Coal Black selects product card and Coal Black finish");
 }
 
 {
@@ -77,17 +122,25 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
     /productDrafts\[modalRoom\.id\]\?\.sink \|\| modalRoom\.sinkDraft/,
   );
   assert.match(viewSource, /selectedOptionKey=\{draft\.optionKey \|\| null\}/);
+  assert.match(viewSource, /selectedProductId=\{draft\.productId \|\| null\}/);
+  assert.match(
+    viewSource,
+    /selectedVariantId=\{draft\.variantId \|\| draft\.variantSku \|\| null\}/,
+  );
+  assert.match(viewSource, /selectedFinish=\{draft\.finish \|\| null\}/);
+  assert.match(viewSource, /isPlumbingFinishSelected/);
+  assert.match(viewSource, /openFamilyIdForSelection/);
   assert.match(viewSource, /customerProductDrafts/);
-  console.log("ok: modal selected state continues to use the saved/current sink draft");
+  console.log("ok: modal selected state uses productId + variantId/finish, not optionKey alone");
 }
 
 {
   const breakdown = buildUpdatedBreakdown({
     calculation: {
-      configuredDisplayTotal: 1775,
+      configuredDisplayTotal: 1575,
       options: [
         {
-          optionKey: VARIANT_KEY,
+          optionKey: PRODUCT_KEY,
           displayLabel: `ESF Sink — ${SINK_LABEL}`,
           visiblePrice: 575,
           included: false,
@@ -95,8 +148,8 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
         {
           optionKey: "qty-sink:kitchen",
           displayLabel: "Kitchen — Sink cutout",
-          visiblePrice: 200,
-          included: false,
+          visiblePrice: null,
+          included: true,
         },
       ],
     },
@@ -106,12 +159,11 @@ console.log("\nphaseSinkSelectionDisplay.test.ts\n");
       (line) => line.label === `ESF Sink — ${SINK_LABEL}` && line.amount === 575,
     ),
   );
-  assert.ok(
-    breakdown.lines.some(
-      (line) => line.label === "Kitchen — Sink cutout" && line.amount === 200,
-    ),
+  assert.equal(
+    breakdown.lines.some((line) => /cutout/i.test(line.label) && line.amount === 200),
+    false,
   );
-  console.log("ok: sink and cutout prices remain separate backend-authored lines");
+  console.log("ok: included published cutout does not create a $200 customer difference line");
 }
 
 {
