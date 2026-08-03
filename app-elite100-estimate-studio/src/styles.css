@@ -2977,6 +2977,22 @@ button.linkish {
 .si-detail-dl dd { margin: 2px 0 0; font-size: 0.9rem; }
 .si-detail-body { white-space: pre-wrap; word-break: break-word; }
 .si-att-list { margin: 0; padding-left: 1.1rem; font-size: 0.88rem; }
+.si-att-list li { margin: 0.55rem 0; }
+.si-att-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; }
+.si-meta-link {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--eos-accent, #8b1e2d);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.si-detail-takeoff-lab { margin: 0.85rem 0 0; }
 .si-detail-note { margin-top: 12px; font-size: 0.8rem; }
 .si-count { margin: 4px 0 0; }
 
