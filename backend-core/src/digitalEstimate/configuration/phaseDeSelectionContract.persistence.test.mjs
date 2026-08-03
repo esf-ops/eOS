@@ -218,7 +218,9 @@ async function seed() {
         }
       }),
     (e) =>
-      (e.code === "invalid_selection" || e.code === "option_not_allowed") &&
+      (e.code === "invalid_selection" ||
+        e.code === "option_not_allowed" ||
+        e.code === "selection_unavailable") &&
       e.statusCode === 422 &&
       e.selectionKey === "e100-india-black-pearl" &&
       (e.diagnosticCode === "DE-OPTION-NOT-ALLOWED" || !e.diagnosticCode)
