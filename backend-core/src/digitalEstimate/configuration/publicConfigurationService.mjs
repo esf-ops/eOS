@@ -191,18 +191,48 @@ function mapPersistenceError(error) {
 
 /**
  * Resolve option key against envelope, remapping legacy edge tokens (eased→edge_eased, etc.).
+ * Finish/variant-specific ESF sink/faucet keys (…:esf:productId:finish) map to the
+ * product-level envelope key (…:esf:productId) when that family row exists.
  */
 function findEnvelopeOptionForSelectionKey(options, key, id) {
   const rawKey = key ? String(key) : "";
   let opt = options.find(
     (o) => o.id === id || (o.option_key || o.optionKey) === rawKey
   );
-  if (opt || !rawKey.startsWith("edge:")) return opt || null;
-  const remapped = remapLegacyEdgeOptionKey(rawKey);
-  if (remapped === rawKey) return null;
-  return (
-    options.find((o) => (o.option_key || o.optionKey) === remapped) || null
-  );
+  if (opt) return opt;
+  if (rawKey.startsWith("edge:")) {
+    const remapped = remapLegacyEdgeOptionKey(rawKey);
+    if (remapped !== rawKey) {
+      opt = options.find((o) => (o.option_key || o.optionKey) === remapped) || null;
+      if (opt) return opt;
+    }
+  }
+  return findEnvelopeEsfFamilyOption(options, rawKey);
+}
+
+/**
+ * Map finish-specific ESF keys onto the seeded product-family envelope row.
+ * @param {Array<object>} options
+ * @param {string} rawKey
+ */
+function findEnvelopeEsfFamilyOption(options, rawKey) {
+  const parsed = parseProductOptionKey(rawKey);
+  if (!parsed || parsed.mode !== "esf" || !parsed.productId) return null;
+  if (!["sink", "faucet"].includes(String(parsed.kind || ""))) return null;
+
+  const prefix = `${parsed.kind}:${parsed.roomKey}:esf:`;
+  /** @type {Array<{ optionKey: string, opt: object }>} */
+  const matches = [];
+  for (const o of options || []) {
+    const optionKey = String(o.option_key || o.optionKey || "");
+    if (!optionKey.startsWith(prefix)) continue;
+    if (rawKey === optionKey || rawKey.startsWith(`${optionKey}:`)) {
+      matches.push({ optionKey, opt: o });
+    }
+  }
+  if (!matches.length) return null;
+  matches.sort((a, b) => b.optionKey.length - a.optionKey.length);
+  return matches[0].opt;
 }
 
 /** Recoverable session cookie / row problems — customer may re-exchange. */

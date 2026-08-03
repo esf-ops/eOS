@@ -1091,8 +1091,16 @@ function PlumbingSourceModal({
       : draft.source === "stock"
         ? "esf"
         : "none";
-  const [esfPane, setEsfPane] = useState<"menu" | "catalog">("menu");
+  const [esfPane, setEsfPane] = useState<"menu" | "catalog">(() =>
+    source === "esf" && Boolean(draft.productId || draft.optionKey) ? "catalog" : "menu",
+  );
   const showingCatalog = esfPane === "catalog";
+
+  useEffect(() => {
+    if (source === "esf" && (draft.productId || draft.optionKey)) {
+      setEsfPane("catalog");
+    }
+  }, [source, draft.productId, draft.optionKey, draft.variantId, draft.finish]);
 
   return (
     <ModalShell
@@ -2289,7 +2297,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
         effectiveProductDrafts,
         effectiveBacksplashDrafts,
       )?.rooms || vm!.rooms;
-    const items = buildSelectionItems(effectiveQty, roomsForItems);
+    const envelopeKeys = new Set((state.configuration?.options || []).map((o) => o.optionKey));
+    const items = buildSelectionItems(effectiveQty, roomsForItems, envelopeKeys);
 
     const finishFlight = () => {
       saveInFlightRef.current = false;
@@ -2605,17 +2614,25 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
       source: kind,
       optionKey: kind === "esf" ? null : opt?.optionKey || null,
       displayLabel: kind === "esf" ? null : opt?.displayLabel || null,
-      productId: kind === "esf" ? null : null,
+      productId: null,
       variantId: null,
       variantSku: null,
     };
-    if (kind === "customer_provided" || kind === "none") {
-      nextDraft.manufacturer = kind === "customer_provided" ? nextDraft.manufacturer || "" : "";
-      nextDraft.model = kind === "customer_provided" ? nextDraft.model || "" : "";
-      nextDraft.finish = kind === "customer_provided" ? nextDraft.finish || "" : "";
+    if (kind === "none" || kind === "esf") {
+      nextDraft.manufacturer = "";
+      nextDraft.model = "";
+      nextDraft.finish = "";
+      nextDraft.notes = kind === "none" ? "" : nextDraft.notes || "";
+    } else if (kind === "customer_provided") {
+      const priorSource =
+        (role === "sink" ? room?.sinkDraft : room?.faucetDraft)?.source || null;
+      if (priorSource === "esf" || priorSource === "stock") {
+        nextDraft.manufacturer = "";
+        nextDraft.model = "";
+        nextDraft.finish = "";
+      }
     }
-    updateProductDraft(roomId, role, nextDraft);
-    if (kind !== "esf" && opt?.optionKey) {
+    updateProductDraft(roomId, role, nextDraft);    if (kind !== "esf" && opt?.optionKey) {
       selectChoice(opt.optionKey, role, roomId);
     } else if (kind === "esf") {
       const nextQty = { ...qty };
@@ -2661,14 +2678,19 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     }
     const resolvedVariantId =
       variantId || (variants.length === 1 ? variants[0]?.variantId || variants[0]?.sku : null);
+    const envelopeKeys = new Set((state.configuration?.options || []).map((o) => o.optionKey));
     const optionKey =
-      resolveProductOptionKey(product, resolvedVariantId) || product.optionKey;
+      resolveProductOptionKey(product, resolvedVariantId, envelopeKeys) || product.optionKey;
     if (!optionKey) {
       setSaveState("error");
       setSaveError("That product is unavailable. Please choose another option.");
       return;
     }
-    const variant = product.variants?.find(
+    if (envelopeKeys.size && !envelopeKeys.has(optionKey)) {
+      setSaveState("error");
+      setSaveError("That product is unavailable. Please choose another option.");
+      return;
+    }    const variant = product.variants?.find(
       (v) => v.variantId === resolvedVariantId || v.sku === resolvedVariantId,
     );
     const nextDraft: ProductDraft = {

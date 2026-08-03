@@ -17,7 +17,7 @@ import {
   type PublicEstimate,
   type RoomProductDrafts,
 } from "./publicConfigApi";
-import { shouldPreservePersistedSinkDraft } from "./sinkSelectionDisplay.ts";
+import { shouldPreservePersistedSinkDraft, canonicalEsfPlumbingOptionKey } from "./sinkSelectionDisplay.ts";
 
 export type ChoiceRole =
   | "backsplash"
@@ -544,6 +544,12 @@ export function summarizeSinkDraft(draft: ProductDraft | null, selectedLabel: st
     const bits = [draft.manufacturer, draft.model, draft.finish].filter(Boolean);
     return bits.length ? `Customer-provided · ${bits.join(" · ")}` : "Customer-provided sink";
   }
+  if (draft.source === "esf" || draft.source === "stock") {
+    const label = draft.displayLabel || selectedLabel;
+    if (!label) return "ESF sink selected";
+    if (/^ESF Sink\b/i.test(label)) return label;
+    return `ESF Sink — ${label}`;
+  }
   return draft.displayLabel || selectedLabel || "ESF sink selected";
 }
 
@@ -621,6 +627,7 @@ export function mapEliteOsToLovableViewModel(
 
   const options = config.options || [];
   const products = config.products || [];
+  const envelopeOptionKeys = new Set(options.map((o) => o.optionKey).filter(Boolean));
   const productDrafts = {
     ...(config.customerProductDrafts || config.productDrafts || {}),
     ...(productDraftOverrides || {}),
@@ -631,8 +638,24 @@ export function mapEliteOsToLovableViewModel(
   };
   // Precedence: persisted draft < unsaved browser qty edits. Baseline defaults apply
   // only when neither has a positive material selection for the room.
+  // Canonicalize finish-specific ESF sink/faucet keys onto envelope family keys so
+  // room card / modal / save payload share one identity.
   const persistedQty = config.currentSelections || {};
-  const effectiveQty: Record<string, number> = { ...persistedQty, ...qty };
+  const mergedQty: Record<string, number> = { ...persistedQty, ...qty };
+  const effectiveQty: Record<string, number> = {};
+  for (const [key, value] of Object.entries(mergedQty)) {
+    if (key.startsWith("__")) {
+      effectiveQty[key] = Number(value) || 0;
+      continue;
+    }
+    const canon = canonicalEsfPlumbingOptionKey(key, envelopeOptionKeys) || key;
+    const n = Number(value) || 0;
+    if (n <= 0) {
+      if (effectiveQty[canon] == null) effectiveQty[canon] = 0;
+      continue;
+    }
+    effectiveQty[canon] = Math.max(effectiveQty[canon] || 0, n);
+  }
 
   function roomHasMaterialSelection(roomKey: string): boolean {
     const prefix = `material:${roomKey}:`;
@@ -998,29 +1021,48 @@ export function mapEliteOsToLovableViewModel(
 export function buildSelectionItems(
   qty: Record<string, number>,
   rooms: LovableRoom[],
+  envelopeOptionKeys?: Iterable<string> | null,
 ): Array<{ optionKey: string; quantity: number }> {
+  const keySet =
+    envelopeOptionKeys != null
+      ? envelopeOptionKeys instanceof Set
+        ? envelopeOptionKeys
+        : new Set(envelopeOptionKeys)
+      : null;
   const items = Object.entries(qty)
     .filter(([key, q]) => !key.startsWith("__") && Number(q) > 0)
-    .map(([optionKey, quantity]) => ({ optionKey, quantity: Number(quantity) }));
+    .map(([optionKey, quantity]) => ({
+      optionKey: canonicalEsfPlumbingOptionKey(optionKey, keySet) || optionKey,
+      quantity: Number(quantity),
+    }));
+  // Collapse finish-specific duplicates onto one canonical family key.
+  const collapsed = new Map<string, number>();
+  for (const item of items) {
+    collapsed.set(item.optionKey, Math.max(collapsed.get(item.optionKey) || 0, item.quantity));
+  }
+  const out = [...collapsed.entries()].map(([optionKey, quantity]) => ({ optionKey, quantity }));
   for (const room of rooms) {
     const key = room.selectedOptionKey;
-    if (key && !items.some((i) => i.optionKey === key)) {
-      items.push({ optionKey: key, quantity: 1 });
+    if (key && !out.some((i) => i.optionKey === key)) {
+      out.push({ optionKey: key, quantity: 1 });
     }
   }
-  return items;
+  return out;
 }
 
 /** Resolve ESF product (+ optional variant) to an envelope option key when present. */
 export function resolveProductOptionKey(
   product: ConfigProduct,
   variantId?: string | null,
+  envelopeOptionKeys?: Iterable<string> | null,
 ): string | null {
+  let key: string | null = null;
   if (variantId && Array.isArray(product.variants)) {
     const v = product.variants.find((x) => x.variantId === variantId || x.sku === variantId);
-    if (v?.optionKey) return v.optionKey;
+    if (v?.optionKey) key = v.optionKey;
   }
-  return product.optionKey || null;
+  if (!key) key = product.optionKey || null;
+  return canonicalEsfPlumbingOptionKey(key, envelopeOptionKeys) || key;
 }
 
 /** Group colors for modal tabs — preferred order (short labels). */

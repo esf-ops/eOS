@@ -739,6 +739,7 @@ export function classifyConfigurationMutationError(
     code === "unknown_option" ||
     code === "invalid_selection" ||
     code === "option_not_allowed" ||
+    code === "selection_unavailable" ||
     code === "unresolved_product" ||
     code === "product_variant_required" ||
     code === "incompatible_accessory" ||
@@ -757,7 +758,10 @@ export function classifyConfigurationMutationError(
           ? message || "Choose a finish for this product before saving."
           : code === "incompatible_accessory"
             ? message || "That accessory is not compatible with the selected sink."
-          : code === "invalid_selection" || code === "unknown_option" || code === "option_not_allowed"
+          : code === "invalid_selection" ||
+              code === "unknown_option" ||
+              code === "option_not_allowed" ||
+              code === "selection_unavailable"
             ? message || "That selection is unavailable. Please choose another option."
             : message || "That selection is unavailable",
       code,
@@ -766,7 +770,10 @@ export function classifyConfigurationMutationError(
         diagnosticCode ||
         (code === "product_variant_required"
           ? "DE-PRODUCT-VARIANT-REQUIRED"
-          : code === "option_not_allowed" || code === "invalid_selection" || code === "unknown_option"
+          : code === "option_not_allowed" ||
+              code === "invalid_selection" ||
+              code === "unknown_option" ||
+              code === "selection_unavailable"
             ? "DE-OPTION-NOT-ALLOWED"
             : "DE-SAVE"),
       lifecycleFatal: false,
