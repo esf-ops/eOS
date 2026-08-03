@@ -170,6 +170,105 @@ function selectionPayload() {
 }
 
 {
+  // Stale foundation Eased + qty Crescent → Studio final selections show Crescent.
+  const foundation = finalizeCustomerConfigurationFoundation({
+    selectedEdgeProfile: {
+      profileToken: "edge_eased",
+      profileName: "Eased",
+      roomId: "kitchen"
+    },
+    selectedMaterial: {
+      colorId: "e100-antique-gray",
+      colorName: "Antique Gray",
+      roomId: "kitchen"
+    },
+    lastSavedAt: "2026-08-03T16:00:00.000Z"
+  });
+  const payload = mergeSelectionPayloadMeta(
+    {
+      "material:kitchen:e100-antique-gray": 1,
+      "edge:kitchen:edge_crescent": 1,
+      "edge:kitchen:edge_eased": 0
+    },
+    { customerConfiguration: foundation }
+  );
+  const review = buildStudioCustomerSelectionReview({
+    selection: {
+      id: randomUUID(),
+      selection_payload_json: payload,
+      selection_hash: "edge-crescent-hash",
+      created_at: "2026-08-03T16:01:00.000Z"
+    },
+    calculation: {
+      id: randomUUID(),
+      baseline_total: 4000,
+      configured_total: 4608,
+      customer_result_json: {
+        baselineDisplayTotal: 4000,
+        configuredDisplayTotal: 4608,
+        displayTotalDelta: 608
+      }
+    },
+    rooms: [{ roomKey: "kitchen", displayName: "Kitchen" }],
+    publicationId: PUB_ID,
+    envelopeId: ENV_ID,
+    reviewRequested: false
+  });
+  const kitchen = review.pricedSelections.rooms.find((r) => r.roomKey === "kitchen");
+  assert.match(String(kitchen?.edge?.label || ""), /Crescent/i);
+  assert.equal(/eased/i.test(String(kitchen?.edge?.label || "")), false);
+  assert.ok(
+    review.pricedSelections.selectionChangeItems.some(
+      (i) => /edge/i.test(String(i.kind || "")) && /crescent/i.test(String(i.label || ""))
+    ),
+    "Customer final selections lists Crescent"
+  );
+  assert.equal(
+    review.pricedSelections.selectionChangeItems.some((i) =>
+      /^eased$/i.test(String(i.label || "").trim())
+    ),
+    false,
+    "Customer final selections must not keep stale Eased"
+  );
+
+  const easedReview = buildStudioCustomerSelectionReview({
+    selection: {
+      id: randomUUID(),
+      selection_payload_json: mergeSelectionPayloadMeta(
+        { "edge:kitchen:edge_eased": 1 },
+        {
+          customerConfiguration: finalizeCustomerConfigurationFoundation({
+            selectedEdgeProfile: {
+              profileToken: "edge_crescent",
+              profileName: "Crescent",
+              roomId: "kitchen"
+            }
+          })
+        }
+      ),
+      selection_hash: "edge-eased-hash",
+      created_at: "2026-08-03T16:02:00.000Z"
+    },
+    calculation: {
+      id: randomUUID(),
+      baseline_total: 4000,
+      configured_total: 4000,
+      customer_result_json: {
+        baselineDisplayTotal: 4000,
+        configuredDisplayTotal: 4000,
+        displayTotalDelta: 0
+      }
+    },
+    rooms: [{ roomKey: "kitchen", displayName: "Kitchen" }],
+    publicationId: PUB_ID,
+    envelopeId: ENV_ID
+  });
+  const easedKitchen = easedReview.pricedSelections.rooms.find((r) => r.roomKey === "kitchen");
+  assert.match(String(easedKitchen?.edge?.label || ""), /Eased/i);
+  console.log("ok: Studio edge summary follows qty (Crescent / Eased), not stale foundation");
+}
+
+{
   // 8. scrub strips forbidden keys
   const scrubbed = scrubSelectionReviewDto({
     ok: true,

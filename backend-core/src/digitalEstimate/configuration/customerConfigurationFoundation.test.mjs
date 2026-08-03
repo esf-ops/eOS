@@ -174,6 +174,48 @@ console.log("\ncustomerConfigurationFoundation.test.mjs\n");
 }
 
 {
+  // Stale foundation Eased must yield to qty Crescent (sidebar/summary consistency).
+  const stale = sanitizeCustomerConfigurationFoundation({
+    selectedEdgeProfile: { profileToken: "edge_eased", profileName: "Eased" },
+    selectedMaterial: {
+      colorId: "e100-antique-gray",
+      colorName: "Antique Gray",
+      roomId: "kitchen"
+    }
+  });
+  const read = buildPublicCustomerConfigurationReadModel(stale, {
+    quantities: {
+      "edge:kitchen:edge_crescent": 1,
+      "edge:kitchen:edge_eased": 0,
+      "material:kitchen:e100-antique-gray": 1
+    }
+  });
+  assert.equal(read.selectedEdgeProfile?.profileToken, "edge_crescent");
+  assert.match(String(read.selectedEdgeProfile?.profileName || ""), /crescent/i);
+  assert.ok(
+    (read.selectionChanges?.items || []).some(
+      (i) => /crescent/i.test(String(i.label || "")) && /edge/i.test(String(i.kind || ""))
+    ),
+    "Saved selections summary lists Crescent"
+  );
+  assert.equal(
+    (read.selectionChanges?.items || []).some((i) => /^eased$/i.test(String(i.label || "").trim())),
+    false,
+    "Saved selections must not keep stale Eased when Crescent qty wins"
+  );
+
+  const easedOnly = buildPublicCustomerConfigurationReadModel(
+    {
+      selectedEdgeProfile: { profileToken: "edge_crescent", profileName: "Crescent" }
+    },
+    { quantities: { "edge:kitchen:edge_eased": 1 } }
+  );
+  assert.equal(easedOnly.selectedEdgeProfile?.profileToken, "edge_eased");
+  assert.match(String(easedOnly.selectedEdgeProfile?.profileName || ""), /eased/i);
+  console.log("ok: qty-authoritative edge wins over stale foundation for summary");
+}
+
+{
   const publicSvc = readFileSync(join(__dirname, "publicConfigurationService.mjs"), "utf8");
   const draft = readFileSync(join(__dirname, "customerConfigurationDraft.mjs"), "utf8");
   const studioV2Pub = readFileSync(

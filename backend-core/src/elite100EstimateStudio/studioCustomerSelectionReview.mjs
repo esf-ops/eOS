@@ -12,7 +12,8 @@ import {
   classifyCustomerConfigurationForReview,
   finalizeCustomerConfigurationFoundation,
   sanitizeCustomerConfigurationFoundation,
-  enrichFoundationFromSelectionQuantities
+  enrichFoundationFromSelectionQuantities,
+  resolveCustomerEdgeLabel
 } from "../digitalEstimate/configuration/customerConfigurationFoundation.mjs";
 import { splitSelectionPayloadMeta } from "../digitalEstimate/configuration/customerConfigurationDraft.mjs";
 import { sanitizeSelectionPayloadMeta } from "../digitalEstimate/configuration/sanitizeExclusiveRoomSelections.mjs";
@@ -174,10 +175,11 @@ function mapPricedRoom(room, foundation) {
       : null;
 
   const materialLabel =
-    friendlyMaterialLabel(materialFromFoundation?.colorName) ||
-    friendlyMaterialLabel(materialFromFoundation?.colorId) ||
+    // Qty-derived summary material wins over stale foundation color.
     friendlyMaterialLabel(room?.material?.displayName) ||
     friendlyMaterialLabel(room?.material?.materialToken) ||
+    friendlyMaterialLabel(materialFromFoundation?.colorName) ||
+    friendlyMaterialLabel(materialFromFoundation?.colorId) ||
     (materialFromFoundation?.materialGroup
       ? `Group ${String(materialFromFoundation.materialGroup).replace(/^group[_ ]?/i, "").toUpperCase()}`
       : null) ||
@@ -188,6 +190,8 @@ function mapPricedRoom(room, foundation) {
     null;
 
   const edgeLabel =
+    // Qty-derived room summary wins over stale foundation edge (repair / prior saves).
+    (room?.edgeMode ? resolveCustomerEdgeLabel(room.edgeMode, null) : null) ||
     str(edgeFromFoundation?.profileName) ||
     humanizeToken(edgeFromFoundation?.profileToken) ||
     humanizeToken(room?.edgeMode) ||
@@ -428,7 +432,39 @@ export function buildStudioCustomerSelectionReview(input = {}) {
 
   // Priced product selections (sink/faucet/accessory/specialty) are not always
   // in foundation.selectionChanges — surface them from room rows for the panel.
+  // Material/edge come from qty-enriched foundation selectionChanges; also mirror
+  // room edge/material when foundation omitted them.
   for (const room of pricedRooms) {
+    if (room.material?.label) {
+      const matKind = "material";
+      if (!selectionChangeItems.some((i) => i.kind === matKind)) {
+        selectionChangeItems.push({
+          kind: matKind,
+          label: `${room.roomName}: ${room.material.label}`
+        });
+      }
+    }
+    if (room.edge?.label) {
+      const edgeKind = "edge_profile";
+      const existing = selectionChangeItems.findIndex(
+        (i) => i.kind === edgeKind || i.kind === "edge"
+      );
+      const label = room.edge.label;
+      if (existing >= 0) {
+        // Prefer qty-derived room edge over stale foundation "Eased".
+        selectionChangeItems[existing] = {
+          kind: edgeKind,
+          label: selectionChangeItems[existing].label?.includes(":")
+            ? `${room.roomName}: ${label}`
+            : label
+        };
+      } else {
+        selectionChangeItems.push({
+          kind: edgeKind,
+          label: `${room.roomName}: ${label}`
+        });
+      }
+    }
     if (room.sink?.label) {
       selectionChangeItems.push({
         kind: "sink",

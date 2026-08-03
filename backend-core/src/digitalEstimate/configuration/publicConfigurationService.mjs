@@ -2633,19 +2633,6 @@ export function createPublicConfigurationService(deps) {
 
       assertPublicConfigurationHasNoForbiddenContent(result.public);
 
-      const selectionPayloadForMeta = mergeSelectionPayloadMeta(normalized.selections, {
-        customerInfoDraft: mergedInfo,
-        roomLabelDrafts: mergedLabels,
-        roomNotes: mergedRoomNotes,
-        projectNote: mergedProjectNote,
-        customerProductDrafts: mergedProductDrafts,
-        backsplashDrafts: mergedBacksplashDrafts,
-        sideSplashDrafts: mergedSideSplashDrafts,
-        ...(mergedCustomerConfiguration != null
-          ? { customerConfiguration: mergedCustomerConfiguration }
-          : {})
-      });
-
       const publicCustomerConfiguration = buildPublicCustomerConfigurationReadModel(
         mergedCustomerConfiguration,
         {
@@ -2654,6 +2641,45 @@ export function createPublicConfigurationService(deps) {
           productDrafts: mergedProductDrafts || null
         }
       );
+
+      // Persist qty-authoritative material/edge onto the foundation so Saved
+      // selections / Studio review cannot keep a stale baseline edge label.
+      const foundationForPersist =
+        publicCustomerConfiguration && typeof publicCustomerConfiguration === "object"
+          ? sanitizeCustomerConfigurationFoundation(
+              {
+                ...(mergedCustomerConfiguration && typeof mergedCustomerConfiguration === "object"
+                  ? mergedCustomerConfiguration
+                  : {}),
+                selectedMaterial: publicCustomerConfiguration.selectedMaterial ?? null,
+                selectedEdgeProfile: publicCustomerConfiguration.selectedEdgeProfile ?? null,
+                lastSavedAt:
+                  publicCustomerConfiguration.lastSavedAt ||
+                  mergedCustomerConfiguration?.lastSavedAt ||
+                  new Date().toISOString()
+              },
+              {
+                lastSavedAt:
+                  publicCustomerConfiguration.lastSavedAt ||
+                  mergedCustomerConfiguration?.lastSavedAt ||
+                  new Date().toISOString(),
+                rejectForbidden: false
+              }
+            )
+          : mergedCustomerConfiguration;
+
+      const selectionPayloadForMeta = mergeSelectionPayloadMeta(normalized.selections, {
+        customerInfoDraft: mergedInfo,
+        roomLabelDrafts: mergedLabels,
+        roomNotes: mergedRoomNotes,
+        projectNote: mergedProjectNote,
+        customerProductDrafts: mergedProductDrafts,
+        backsplashDrafts: mergedBacksplashDrafts,
+        sideSplashDrafts: mergedSideSplashDrafts,
+        ...(foundationForPersist != null
+          ? { customerConfiguration: foundationForPersist }
+          : {})
+      });
 
       const missingInformationRequirements = buildMissingInformationRequirements(
         selectionPayloadForMeta

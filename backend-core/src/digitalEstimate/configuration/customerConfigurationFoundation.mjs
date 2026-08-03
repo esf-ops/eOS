@@ -8,6 +8,7 @@
 
 import { getElite100CustomerMaterial } from "./elite100CustomerMaterialCatalog.mjs";
 import { edgeProfileDisplayLabel } from "../catalog/studioEdgeAuthority.mjs";
+import { sanitizeExclusiveRoomSelectionQuantities } from "./sanitizeExclusiveRoomSelections.mjs";
 
 export const CUSTOMER_CONFIGURATION_FOUNDATION_KEY = "__customerConfigurationFoundation";
 export const CUSTOMER_CONFIGURATION_FOUNDATION_VERSION = 1;
@@ -823,30 +824,38 @@ export function classifyReviewRequestForEliteReview(reviewRequest) {
 }
 
 /**
- * When foundation material/edge are empty, mirror from existing selection quantities.
- * Display only — does not invent priced totals.
+ * Prefer effective selection quantities over a stale foundation material/edge.
+ * Display only — does not invent priced totals. Exclusive-role sanitation collapses
+ * contaminated duplicates first so Crescent cannot lose to a leftover Eased qty.
  * @param {object} foundation
  * @param {Record<string, number>} quantities
  */
 export function enrichFoundationFromSelectionQuantities(foundation, quantities = {}) {
   const next = finalizeCustomerConfigurationFoundation(foundation);
-  if (!next.selectedMaterial) {
-    for (const [key, qty] of Object.entries(quantities || {})) {
-      if (!(Number(qty) > 0)) continue;
-      if (!String(key).startsWith("material:")) continue;
-      const parts = String(key).split(":");
-      const colorId = parts.slice(2).join(":") || null;
-      const resolved = resolveCustomerMaterialLabel(colorId, null);
-      next.selectedMaterial = {
-        roomId: parts[1] || null,
-        colorId: resolved.colorId || colorId,
-        colorName: resolved.colorName,
-        materialGroup: resolved.materialGroup,
-        pieceId: null
-      };
-      break;
-    }
-  } else {
+  const cleanedQty = sanitizeExclusiveRoomSelectionQuantities(quantities || {}, [], {
+    throwOnAmbiguous: false
+  }).quantities;
+
+  /** @type {{ roomId: string|null, colorId: string|null, colorName: string|null, materialGroup: string|null, pieceId: null }|null} */
+  let materialFromQty = null;
+  for (const [key, qty] of Object.entries(cleanedQty || {})) {
+    if (!(Number(qty) > 0)) continue;
+    if (!String(key).startsWith("material:")) continue;
+    const parts = String(key).split(":");
+    const colorId = parts.slice(2).join(":") || null;
+    const resolved = resolveCustomerMaterialLabel(colorId, null);
+    materialFromQty = {
+      roomId: parts[1] || null,
+      colorId: resolved.colorId || colorId,
+      colorName: resolved.colorName,
+      materialGroup: resolved.materialGroup,
+      pieceId: null
+    };
+    break;
+  }
+  if (materialFromQty) {
+    next.selectedMaterial = materialFromQty;
+  } else if (next.selectedMaterial) {
     const resolved = resolveCustomerMaterialLabel(
       next.selectedMaterial.colorId,
       next.selectedMaterial.colorName
@@ -866,22 +875,27 @@ export function enrichFoundationFromSelectionQuantities(foundation, quantities =
       };
     }
   }
-  if (!next.selectedEdgeProfile) {
-    for (const [key, qty] of Object.entries(quantities || {})) {
-      if (!(Number(qty) > 0)) continue;
-      if (!String(key).startsWith("edge:")) continue;
-      const parts = String(key).split(":");
-      const profileToken = parts.slice(2).join(":") || null;
-      next.selectedEdgeProfile = {
-        roomId: parts[1] || null,
-        profileToken,
-        profileName: resolveCustomerEdgeLabel(profileToken, null),
-        pieceId: null,
-        estimateWide: !parts[1]
-      };
-      break;
-    }
-  } else if (next.selectedEdgeProfile.profileToken) {
+
+  /** @type {{ roomId: string|null, profileToken: string|null, profileName: string|null, pieceId: null, estimateWide: boolean }|null} */
+  let edgeFromQty = null;
+  for (const [key, qty] of Object.entries(cleanedQty || {})) {
+    if (!(Number(qty) > 0)) continue;
+    if (!String(key).startsWith("edge:")) continue;
+    const parts = String(key).split(":");
+    const profileToken = parts.slice(2).join(":") || null;
+    if (!profileToken) continue;
+    edgeFromQty = {
+      roomId: parts[1] || null,
+      profileToken,
+      profileName: resolveCustomerEdgeLabel(profileToken, null),
+      pieceId: null,
+      estimateWide: !parts[1]
+    };
+    break;
+  }
+  if (edgeFromQty) {
+    next.selectedEdgeProfile = edgeFromQty;
+  } else if (next.selectedEdgeProfile?.profileToken) {
     next.selectedEdgeProfile = {
       ...next.selectedEdgeProfile,
       profileName: resolveCustomerEdgeLabel(

@@ -3552,4 +3552,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Pricing formulas, material rates, sink/cutout prices, Studio V2 approval/publish/revision, acceptance, sold, AI Takeoff, Internal Estimate, migrations. |
 | **Revisit trigger** | If room-scoped `qty-sink:<room>` must be customer-editable for a future product; if governed keys need a dedicated UI surface. |
 
+### 256. Digital Estimate edge summary follows selection qty, not stale foundation (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/digital-estimate-edge-selection-summary-consistency` |
+| **Decision** | Customer-selected edge is authoritative from sanitized effective selection quantities (`edge:{room}:{profile}`). Public “Saved selections”, Studio V2 customer final selections, and persisted foundation `selectedEdgeProfile` must follow that qty winner — not a stale baseline foundation label (e.g. Eased) when pricing/sidebar already show Crescent. Enrichment overrides stale foundation material/edge from qty; save persists the synced foundation; Studio room/edge labels prefer qty-derived summary. Do not infer edge from pricing lines when qty exists. |
+| **Why** | After edge upgrade saves, sidebar/breakdown correctly showed Crescent +$608 while Saved selections and Studio still showed Eased because `enrichFoundationFromSelectionQuantities` only filled edge when foundation was empty. |
+| **Impacted** | `customerConfigurationFoundation.mjs`, `publicConfigurationService.mjs`, `studioCustomerSelectionReview.mjs`, foundation + Studio review tests, this doc. |
+| **Protected / unchanged** | Edge pricing formulas, material rates, sink/cutout prices, approval/publish/revision, acceptance, sold, AI Takeoff, Internal Estimate, migrations. |
+| **Revisit trigger** | Multi-room distinct edge profiles needing per-room foundation fields beyond the first positive qty. |
+
 ---
