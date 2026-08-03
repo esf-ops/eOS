@@ -1970,6 +1970,14 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         logStudio("shared inbox send-to-takeoff failed", e, req);
         const status = Number(e?.statusCode) || 500;
         const safe = sharedInboxSafeError(e?.code, "Unable to send attachment to AI Takeoff.");
+        // Staff-only diagnostics for attachment_not_supported (no secrets / no bytes).
+        if (
+          safe.code === "attachment_not_supported" &&
+          e?.diagnostic &&
+          typeof e.diagnostic === "object"
+        ) {
+          safe.diagnostic = e.diagnostic;
+        }
         res.status(status).json(safe);
       }
     }

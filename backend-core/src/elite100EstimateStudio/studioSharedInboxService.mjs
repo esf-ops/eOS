@@ -57,6 +57,41 @@ export function sharedInboxSafeError(code, fallbackMessage) {
 }
 
 /**
+ * Staff-only diagnostic payload for attachment_not_supported (no secrets / no bytes).
+ * @param {Record<string, unknown>} partial
+ */
+export function buildAttachmentNotSupportedDiagnostic(partial = {}) {
+  const key = String(partial.requestedAttachmentKey || "").trim();
+  const name = String(partial.matchedName || partial.matchedFilename || "").trim();
+  const extMatch = name.match(/\.([a-z0-9]+)$/i);
+  return {
+    stage: String(partial.stage || "unknown"),
+    codePath: "inbox-graph-jpg-hydrate-v1",
+    requestedAttachmentKeyPresent: Boolean(key),
+    manualPlanOverride: partial.manualPlanOverride === true,
+    markAsPlan: partial.markAsPlan === true,
+    requestedAttachmentKeyPrefix: key ? key.slice(0, 8) : null,
+    messageAttachmentCount: Number(partial.messageAttachmentCount) || 0,
+    matchedAttachmentFound: partial.matchedAttachmentFound === true,
+    matchedBy: partial.matchedBy || null,
+    matchedName: name || null,
+    matchedFilename: String(partial.matchedFilename || name || "").trim() || null,
+    matchedContentType: partial.matchedContentType || null,
+    matchedMimeType: partial.matchedMimeType || null,
+    matchedExtension: extMatch ? `.${extMatch[1].toLowerCase()}` : null,
+    matchedIsInline: partial.matchedIsInline === true,
+    matchedHasContentId: partial.matchedHasContentId === true,
+    intakeCaseAttachmentCount: Number(partial.intakeCaseAttachmentCount) || 0,
+    intakeCaseMatchedAttachmentFound: partial.intakeCaseMatchedAttachmentFound === true,
+    intakeCaseMatchedBy: partial.intakeCaseMatchedBy || null,
+    intakeCaseMatchedSafeFilename: partial.intakeCaseMatchedSafeFilename || null,
+    intakeCaseMatchedSourceAttachmentIdPresent:
+      partial.intakeCaseMatchedSourceAttachmentIdPresent === true,
+    rejectedReason: String(partial.rejectedReason || "unknown")
+  };
+}
+
+/**
  * @param {object} deps
  */
 export function createStudioSharedInboxService(deps = {}) {
@@ -434,7 +469,8 @@ export function createStudioSharedInboxService(deps = {}) {
 
     const detail = await getMessage({ organizationId: org, messageKey: key, actorUserId });
     const item = detail.item;
-    const att = findScopedAttachment(item.attachments || [], {
+    const messageAttachments = Array.isArray(item.attachments) ? item.attachments : [];
+    const att = findScopedAttachment(messageAttachments, {
       attachmentKey: attKey,
       allowFilenameFallback: false
     });
@@ -450,16 +486,17 @@ export function createStudioSharedInboxService(deps = {}) {
       manualPlanOverride,
       useAttachmentAsPlan
     });
-    const autoOk = isAutoSupportedTakeoffSupport(att.support);
+    const matchedFilename = att.filename || att.name || att.safeFilename || null;
     const safeImageMeta = {
       ...att,
-      name: att.filename || att.name || att.safeFilename,
-      filename: att.filename || att.name || att.safeFilename,
+      name: matchedFilename,
+      filename: matchedFilename,
       mimeType: att.contentType || att.mimeType,
       contentType: att.contentType || att.mimeType,
       support: att.support,
       isInline: att.isInline === true || att.inline === true
     };
+    const autoOk = isAutoSupportedTakeoffSupport(att.support);
     // Staff override: only safe JPEG/PNG/WEBP images (never inline / non-images).
     const manualOk =
       overrideRequested &&
@@ -467,12 +504,35 @@ export function createStudioSharedInboxService(deps = {}) {
       (att.support === ATTACHMENT_SUPPORT.IMAGE_NEEDS_REVIEW ||
         att.canMarkAsPlan === true ||
         !autoOk);
+
+    const baseDiag = {
+      requestedAttachmentKey: attKey,
+      manualPlanOverride: overrideRequested,
+      markAsPlan: overrideRequested,
+      messageAttachmentCount: messageAttachments.length,
+      matchedAttachmentFound: true,
+      matchedBy: "attachmentKey",
+      matchedName: matchedFilename,
+      matchedFilename,
+      matchedContentType: att.contentType || null,
+      matchedMimeType: att.mimeType || att.contentType || null,
+      matchedIsInline: safeImageMeta.isInline === true,
+      matchedHasContentId: Boolean(att.contentId)
+    };
+
     if (!autoOk && overrideRequested && !manualOk) {
       const err = new Error(
         "That attachment cannot be marked as a plan for AI Takeoff."
       );
       err.statusCode = 400;
       err.code = "attachment_not_supported";
+      err.diagnostic = buildAttachmentNotSupportedDiagnostic({
+        ...baseDiag,
+        stage: "inbox_manual_override_validation",
+        rejectedReason: safeImageMeta.isInline
+          ? "inline_image"
+          : "not_safe_manual_image"
+      });
       throw err;
     }
     if (!autoOk && !manualOk) {
@@ -481,6 +541,11 @@ export function createStudioSharedInboxService(deps = {}) {
       );
       err.statusCode = 400;
       err.code = "attachment_not_supported";
+      err.diagnostic = buildAttachmentNotSupportedDiagnostic({
+        ...baseDiag,
+        stage: "inbox_support_validation",
+        rejectedReason: "override_required_or_unsupported"
+      });
       throw err;
     }
 
@@ -504,6 +569,24 @@ export function createStudioSharedInboxService(deps = {}) {
       throw err;
     }
 
+    /** @type {object|null} */
+    let caseRowForDiag = null;
+    try {
+      if (typeof repository.getCase === "function") {
+        caseRowForDiag = await repository.getCase(org, intakeCaseId);
+      }
+    } catch {
+      caseRowForDiag = null;
+    }
+    const caseAtts = Array.isArray(caseRowForDiag?.attachments)
+      ? caseRowForDiag.attachments
+      : [];
+    const caseMatch = findScopedAttachment(caseAtts, {
+      attachmentKey: attKey,
+      filename: matchedFilename,
+      allowFilenameFallback: manualOk === true
+    });
+
     let openResult;
     try {
       openResult = await openEstimateFn({
@@ -517,7 +600,7 @@ export function createStudioSharedInboxService(deps = {}) {
         body: {
           attachmentKey: attKey,
           // Scoped filename helps open-estimate when persisted case rows lack Graph ids.
-          attachmentFilename: att.filename || att.name || att.safeFilename || null,
+          attachmentFilename: matchedFilename,
           markAsPlan: manualOk === true,
           manualPlanOverride: manualOk === true
         },
@@ -540,6 +623,24 @@ export function createStudioSharedInboxService(deps = {}) {
       err.statusCode =
         mapped === "attachment_not_supported" ? 400 : Number(e?.statusCode) || 500;
       err.code = mapped;
+      if (mapped === "attachment_not_supported") {
+        err.diagnostic = buildAttachmentNotSupportedDiagnostic({
+          ...baseDiag,
+          stage: "open_estimate",
+          intakeCaseAttachmentCount: caseAtts.length,
+          intakeCaseMatchedAttachmentFound: Boolean(caseMatch),
+          intakeCaseMatchedBy: caseMatch
+            ? String(caseMatch.sourceAttachmentId || "").trim()
+              ? "sourceAttachmentId_or_key"
+              : "scoped_filename"
+            : null,
+          intakeCaseMatchedSafeFilename: caseMatch?.safeFilename || null,
+          intakeCaseMatchedSourceAttachmentIdPresent: Boolean(
+            String(caseMatch?.sourceAttachmentId || "").trim()
+          ),
+          rejectedReason: `open_estimate:${code}`
+        });
+      }
       throw err;
     }
 

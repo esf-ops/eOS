@@ -252,6 +252,43 @@ function findActiveLinkedJob(links) {
 }
 
 /**
+ * Ensure Graph fetch identity is present on a selected attachment.
+ * Used when inbox sends a live Graph attachmentKey but the case row lost it.
+ * @param {object} attachment
+ * @param {{ attachmentKey?: string|null, caseRow?: object }} opts
+ */
+export function hydrateAttachmentGraphIdentity(attachment, opts = {}) {
+  if (!attachment || typeof attachment !== "object") return attachment;
+  const key = String(opts.attachmentKey || "").trim();
+  const caseMessageId = String(
+    opts.caseRow?.sourceMessage?.graphImmutableMessageId || ""
+  ).trim();
+  const existingSource = String(attachment.sourceAttachmentId || "").trim();
+
+  /** @type {Record<string, unknown>} */
+  const next = { ...attachment };
+
+  if (key) {
+    if (!existingSource) {
+      next.sourceAttachmentId = key;
+    } else if (
+      existingSource.length >= 32 &&
+      key.length > existingSource.length &&
+      key.startsWith(existingSource)
+    ) {
+      // Prefer the longer live Graph key when the stored id looks truncated.
+      next.sourceAttachmentId = key;
+    }
+  }
+
+  if (!String(next.providerMessageId || "").trim() && caseMessageId) {
+    next.providerMessageId = caseMessageId;
+  }
+
+  return next;
+}
+
+/**
  * Resolve plan bytes: injected provider → Graph re-fetch → fail closed.
  * Supports PDF magic and JPEG/PNG/WEBP magic via validatePlanBytes.
  * @param {{
@@ -467,12 +504,23 @@ export async function openEstimateForIntakeCase(deps) {
     ? String(resolved.id)
     : selectedAttachmentId;
 
-  const attachment = selectSupportedPdfAttachment(caseRow, {
+  let attachment = selectSupportedPdfAttachment(caseRow, {
     selectedAttachmentId: resolvedSelectedId,
     selectedAttachmentKey: attachmentKey,
     selectedFilename: selectedFilename,
     markAsPlan
   });
+
+  // Production Graph JPG shape: live UI sends AAMk… attachmentKey, but the persisted
+  // intake attachment often has sourceAttachmentId null. Selection can succeed via
+  // scoped filename; Graph byte fetch still requires the opaque attachment id.
+  // Hydrate in-memory only (no migration). PDF auto path is unchanged when the
+  // stored sourceAttachmentId is already present.
+  attachment = hydrateAttachmentGraphIdentity(attachment, {
+    attachmentKey,
+    caseRow
+  });
+
   const idempotencyKey = buildOpenEstimateIdempotencyKey(caseRow, attachment);
   const lockKey = `${org}:${idempotencyKey}`;
 

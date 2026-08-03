@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { InMemoryQuoteIntakeRepository } from "../quoteIntake/quoteIntakeRepository.mjs";
 import {
   buildOpenEstimateIdempotencyKey,
+  hydrateAttachmentGraphIdentity,
   openEstimateForIntakeCase,
   rejectCallerOpenEstimateHints,
   selectSupportedPdfAttachment
@@ -117,7 +118,34 @@ console.log("\nintakeOpenEstimateService.test.mjs\n");
     /No supported plan/
   );
 
-  console.log("ok: PDF selection unchanged; Graph JPG manual override uses scoped filename");
+  const hydrated = hydrateAttachmentGraphIdentity(
+    {
+      id: "uuid-1",
+      sourceAttachmentId: null,
+      safeFilename: "1000005197.jpg",
+      support: "image_needs_review"
+    },
+    {
+      attachmentKey: "AAMkAGI2opaqueLiveKey==",
+      caseRow: { sourceMessage: { graphImmutableMessageId: "msg-1" } }
+    }
+  );
+  assert.equal(hydrated.sourceAttachmentId, "AAMkAGI2opaqueLiveKey==");
+  assert.equal(hydrated.providerMessageId, "msg-1");
+
+  // Existing PDF sourceAttachmentId must not be overwritten by a different key.
+  const pdfKept = hydrateAttachmentGraphIdentity(
+    {
+      id: "pdf-1",
+      sourceAttachmentId: "graph-pdf-id",
+      support: "direct_pdf",
+      safeFilename: "plan.pdf"
+    },
+    { attachmentKey: "AAMkDifferentKey==", caseRow: {} }
+  );
+  assert.equal(pdfKept.sourceAttachmentId, "graph-pdf-id");
+
+  console.log("ok: PDF selection unchanged; Graph JPG manual override uses scoped filename + hydrate");
 }
 
 async function seedCase(repo, org, extras = {}) {
