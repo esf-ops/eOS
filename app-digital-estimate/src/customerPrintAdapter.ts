@@ -7,6 +7,7 @@ import type { PublicRoomPricing } from "./publicConfigApi.ts";
 import type { LovableRoom } from "./lovableViewModel.ts";
 import { summarizeSideSplashSelections } from "./sideSplashSummary.ts";
 import { isUnsafeCustomerRoomPricing } from "./customerEstimateBreakdown.ts";
+import { dedupeExclusiveSinkAddOnLines } from "./sinkSelectionDisplay.ts";
 
 export type DigitalEstimatePrintSelection = {
   label: string;
@@ -142,12 +143,14 @@ export function buildDigitalEstimatePrintModel(args: {
       countertopAmount: safeCountertop,
       backsplashAmount: match?.backsplashAmount ?? null,
       addOnsAmount: match?.addOnsAmount ?? null,
-      addOnLines: Array.isArray(match?.addOnLines)
-        ? match!.addOnLines.map((l) => ({
-            label: String(l.label || "Item"),
-            amount: l.amount != null && Number.isFinite(Number(l.amount)) ? Number(l.amount) : null,
-          }))
-        : [],
+      addOnLines: dedupeExclusiveSinkAddOnLines(
+        Array.isArray(match?.addOnLines)
+          ? match!.addOnLines.map((l) => ({
+              label: String(l.label || "Item"),
+              amount: l.amount != null && Number.isFinite(Number(l.amount)) ? Number(l.amount) : null,
+            }))
+          : [],
+      ),
       roomTotal: match?.roomTotal ?? null,
     };
   });

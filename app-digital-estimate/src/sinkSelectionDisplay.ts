@@ -47,6 +47,124 @@ export function shouldPreservePersistedSinkDraft(
 }
 
 /**
+ * Collapse exclusive-role duplicates in a qty map (ESF sink beats customer_provided).
+ * Frontend defense so room cards never show dual selected states if a stale
+ * payload still contains both keys.
+ */
+export function collapseExclusiveRoomQuantities(
+  quantities: Record<string, number> | null | undefined,
+): Record<string, number> {
+  const EXCLUSIVE = new Set(["material", "sink", "faucet", "backsplash", "edge", "cooktop"]);
+  const working: Record<string, number> = { ...(quantities || {}) };
+
+  const priority = (key: string): number => {
+    const parts = key.split(":");
+    if (parts.length < 3) return 0;
+    const role = parts[0];
+    const token = parts.slice(2).join(":").toLowerCase();
+    if (role === "sink" || role === "faucet") {
+      if (token.startsWith("esf:") || token === "esf") return 100;
+      if (token.startsWith("customer")) return 50;
+      if (token === "none") return 40;
+      return 60;
+    }
+    if (role === "backsplash") {
+      if (token === "none") return 90;
+      if (token === "standard_4in") return 70;
+      return 60;
+    }
+    return 100;
+  };
+
+  const groups = new Map<string, string[]>();
+  for (const [key, qty] of Object.entries(working)) {
+    if (!(Number(qty) > 0)) continue;
+    const parts = key.split(":");
+    if (parts.length < 3 || !EXCLUSIVE.has(parts[0])) continue;
+    const id = `${parts[0]}:${parts[1]}`;
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id)!.push(key);
+  }
+  for (const keys of groups.values()) {
+    if (keys.length < 2) continue;
+    keys.sort((a, b) => priority(b) - priority(a) || a.localeCompare(b));
+    for (const loser of keys.slice(1)) working[loser] = 0;
+  }
+  return working;
+}
+
+/**
+ * Drop customer-provided sink/faucet add-on lines when ESF (or none) won.
+ */
+export function filterAddOnLinesForExclusiveSelections(
+  addOnLines: Array<{ label?: string; amount?: number | null; category?: string | null }> | null | undefined,
+  quantities: Record<string, number>,
+): Array<{ label?: string; amount?: number | null; category?: string | null }> {
+  const lines = Array.isArray(addOnLines) ? addOnLines : [];
+  const collapsed = collapseExclusiveRoomQuantities(quantities);
+  let esfSink = false;
+  let noneSink = false;
+  for (const [key, qty] of Object.entries(collapsed)) {
+    if (!(Number(qty) > 0) || !key.startsWith("sink:")) continue;
+    const token = key.split(":").slice(2).join(":");
+    if (token.startsWith("esf:") || token === "esf") esfSink = true;
+    if (token === "none") noneSink = true;
+  }
+  if (!esfSink && !noneSink) return lines;
+  const seen = new Set<string>();
+  const out: typeof lines = [];
+  for (const line of lines) {
+    const label = String(line?.label || "");
+    const lower = label.toLowerCase();
+    if (/cutout/.test(lower)) {
+      out.push(line);
+      continue;
+    }
+    if (/customer-provided|customer provided/.test(lower)) continue;
+    if (noneSink && (/^sink\b/i.test(label) || String(line?.category || "").toLowerCase() === "sink")) {
+      continue;
+    }
+    const key = lower.trim();
+    if (esfSink && (/^sink\b/i.test(label) || String(line?.category || "").toLowerCase() === "sink")) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/**
+ * When a room's add-on list already contains an ESF sink line, drop
+ * customer-provided sink duplicates (stale calc projections).
+ */
+export function dedupeExclusiveSinkAddOnLines<
+  T extends { label?: string; amount?: number | null; category?: string | null },
+>(addOnLines: T[] | null | undefined): T[] {
+  const lines = Array.isArray(addOnLines) ? addOnLines : [];
+  const hasEsfSink = lines.some((line) => {
+    const label = String(line.label || "");
+    const category = String(line.category || "").toLowerCase();
+    if (/cutout|customer-provided|customer provided/i.test(label)) return false;
+    return category === "sink" || /^sink\b/i.test(label) || /esf sink/i.test(label);
+  });
+  if (!hasEsfSink) return lines;
+  const seen = new Set<string>();
+  return lines.filter((line) => {
+    const label = String(line.label || "");
+    const lower = label.toLowerCase();
+    if (/cutout/.test(lower)) return true;
+    if (/customer-provided|customer provided/.test(lower)) return false;
+    const category = String(line.category || "").toLowerCase();
+    if (category === "sink" || /^sink\b/i.test(label)) {
+      if (seen.has(lower)) return false;
+      seen.add(lower);
+    }
+    return true;
+  });
+}
+
+/**
  * Canonical envelope option key for an ESF sink/faucet selection.
  * Finish/variant identity lives in the product draft — never in a longer option key.
  */

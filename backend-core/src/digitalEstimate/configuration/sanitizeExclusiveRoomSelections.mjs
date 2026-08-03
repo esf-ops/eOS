@@ -326,3 +326,270 @@ export function sanitizeSelectionPayloadMeta(meta, options = [], ctx = {}) {
     }
   };
 }
+
+/**
+ * @param {Record<string, number>|null|undefined} quantities
+ * @returns {Map<string, { sink: string|null, faucet: string|null, backsplash: string|null, material: string|null, edge: string|null }>}
+ */
+export function exclusiveWinnersByRoom(quantities) {
+  const cleaned = sanitizeExclusiveRoomSelectionQuantities(quantities || {}, [], {
+    throwOnAmbiguous: false
+  }).quantities;
+  /** @type {Map<string, { sink: string|null, faucet: string|null, backsplash: string|null, material: string|null, edge: string|null }>} */
+  const byRoom = new Map();
+  for (const [key, qty] of Object.entries(cleaned)) {
+    if (!(Number(qty) > 0)) continue;
+    const parsed = parseExclusiveRoomOptionKey(key);
+    if (!parsed) continue;
+    if (!byRoom.has(parsed.roomKey)) {
+      byRoom.set(parsed.roomKey, {
+        sink: null,
+        faucet: null,
+        backsplash: null,
+        material: null,
+        edge: null
+      });
+    }
+    const row = byRoom.get(parsed.roomKey);
+    if (parsed.role === "sink" || parsed.role === "faucet" || parsed.role === "backsplash") {
+      const mode = String(parsed.token || "").split(":")[0] || parsed.token;
+      row[parsed.role] = mode;
+    } else if (parsed.role === "material" || parsed.role === "edge") {
+      row[parsed.role] = parsed.token;
+    }
+  }
+  return byRoom;
+}
+
+function lineAmountNumber(line) {
+  const n = Number(line?.amount ?? line?.displayAmount ?? line?.amountCents);
+  if (!Number.isFinite(n)) return 0;
+  // amountCents are integers; public DTO amounts are dollars
+  if (line?.amountCents != null && Number.isFinite(Number(line.amountCents))) {
+    return Number(line.amountCents) / 100;
+  }
+  return n;
+}
+
+function isCustomerProvidedPlumbingLine(line, role = "sink") {
+  const label = String(line?.label || "").toLowerCase();
+  const category = String(line?.category || "").toLowerCase();
+  if (/cutout/.test(label) || category.includes("cutout")) return false;
+  if (!/customer-provided|customer provided/.test(label)) return false;
+  if (role === "faucet") {
+    return /faucet/.test(category) || /faucet/.test(label);
+  }
+  // Sink role: any customer-provided line that is not clearly a faucet.
+  return !/faucet/.test(label);
+}
+
+function isEsfPlumbingProductLine(line, role = "sink") {
+  const label = String(line?.label || "").toLowerCase();
+  const category = String(line?.category || "").toLowerCase();
+  if (/cutout/.test(label) || category.includes("cutout")) return false;
+  if (/customer-provided|customer provided/.test(label)) return false;
+  if (role === "sink") {
+    return (
+      category === "sink" ||
+      /^sink\b/i.test(String(line?.label || "")) ||
+      /esf sink/i.test(label)
+    );
+  }
+  return category === "faucet" || /^faucet\b/i.test(String(line?.label || ""));
+}
+
+/**
+ * Strip exclusive-role loser add-on lines from a persisted public roomPricing DTO
+ * so sidebar/print match sanitized currentSelections without re-running pricing.
+ *
+ * @param {object|null|undefined} roomPricing
+ * @param {Record<string, number>|null|undefined} quantities
+ * @param {Array<{ roomKey?: string, displayName?: string }>|null|undefined} rooms
+ * @returns {object|null|undefined}
+ */
+export function sanitizePublicRoomPricingForExclusiveSelections(
+  roomPricing,
+  quantities,
+  rooms = []
+) {
+  if (!roomPricing || typeof roomPricing !== "object") return roomPricing;
+  const winners = exclusiveWinnersByRoom(quantities);
+  if (!winners.size) return roomPricing;
+
+  /** @type {Map<string, ReturnType<typeof exclusiveWinnersByRoom> extends Map<any, infer V> ? V : never>} */
+  const byName = new Map();
+  for (const r of rooms || []) {
+    const key = String(r?.roomKey || "");
+    const name = String(r?.displayName || "").trim().toLowerCase();
+    if (key && winners.has(key) && name) byName.set(name, winners.get(key));
+  }
+
+  // If only one room has a sink winner, apply it when roomName matching fails.
+  let soleSinkWinner = null;
+  for (const w of winners.values()) {
+    if (!w.sink) continue;
+    if (soleSinkWinner && soleSinkWinner !== w.sink) {
+      soleSinkWinner = null;
+      break;
+    }
+    soleSinkWinner = w.sink;
+  }
+
+  const nextRooms = (Array.isArray(roomPricing.rooms) ? roomPricing.rooms : []).map((room) => {
+    const name = String(room?.roomName || room?.roomLabel || "").trim().toLowerCase();
+    const roomId = String(room?.roomId || room?.roomKey || "");
+    const winner =
+      (roomId && winners.get(roomId)) ||
+      byName.get(name) ||
+      (soleSinkWinner ? { sink: soleSinkWinner, faucet: null, backsplash: null, material: null, edge: null } : null);
+    if (!winner) return room;
+
+    const lines = Array.isArray(room.addOnLines) ? room.addOnLines : [];
+    /** @type {typeof lines} */
+    const kept = [];
+    let removedAmount = 0;
+    const seenSinkLabels = new Set();
+
+    for (const line of lines) {
+      const labelKey = String(line?.label || "")
+        .trim()
+        .toLowerCase();
+      if (winner.sink === "esf" || winner.sink === "none") {
+        if (isCustomerProvidedPlumbingLine(line, "sink")) {
+          removedAmount += lineAmountNumber(line);
+          continue;
+        }
+      }
+      if (winner.sink === "none" && isEsfPlumbingProductLine(line, "sink")) {
+        removedAmount += lineAmountNumber(line);
+        continue;
+      }
+      if (winner.faucet === "esf" || winner.faucet === "none") {
+        if (isCustomerProvidedPlumbingLine(line, "faucet")) {
+          removedAmount += lineAmountNumber(line);
+          continue;
+        }
+      }
+      if (winner.sink === "esf" && isEsfPlumbingProductLine(line, "sink")) {
+        if (seenSinkLabels.has(labelKey)) continue;
+        seenSinkLabels.add(labelKey);
+      }
+      kept.push(line);
+    }
+
+    const addOnsAmount =
+      room.addOnsAmount != null && Number.isFinite(Number(room.addOnsAmount))
+        ? Math.max(0, Number(room.addOnsAmount) - removedAmount)
+        : room.addOnsAmount;
+    const roomTotal =
+      room.roomTotal != null && Number.isFinite(Number(room.roomTotal)) && removedAmount
+        ? Math.max(0, Number(room.roomTotal) - removedAmount)
+        : room.roomTotal;
+
+    const nestedAddOns = room.addOns && typeof room.addOns === "object" ? room.addOns : null;
+
+    const esfSinkLabel =
+      winner.sink === "esf"
+        ? kept.find((line) => isEsfPlumbingProductLine(line, "sink"))?.label || null
+        : null;
+
+    return {
+      ...room,
+      addOnLines: kept,
+      addOnsAmount,
+      roomTotal,
+      selectedSink:
+        winner.sink === "none"
+          ? null
+          : winner.sink === "esf"
+            ? esfSinkLabel ||
+              (room.selectedSink && !/customer-provided/i.test(String(room.selectedSink))
+                ? room.selectedSink
+                : room.selectedSink)
+            : room.selectedSink,
+      ...(nestedAddOns
+        ? {
+            addOns: {
+              ...nestedAddOns,
+              lines: kept,
+              displayAmount:
+                nestedAddOns.displayAmount != null && removedAmount
+                  ? Math.max(0, Number(nestedAddOns.displayAmount) - removedAmount)
+                  : nestedAddOns.displayAmount,
+              amountCents:
+                nestedAddOns.amountCents != null && removedAmount
+                  ? Math.max(0, Number(nestedAddOns.amountCents) - Math.round(removedAmount * 100))
+                  : nestedAddOns.amountCents
+            }
+          }
+        : {})
+    };
+  });
+
+  let projectTotal = roomPricing.projectTotal;
+  // Only adjust project total when we removed dollars from room add-ons and the
+  // previous total was a simple sum of rooms (display hygiene — not a reprice).
+  const removedAcrossRooms = (roomPricing.rooms || []).reduce((sum, room, idx) => {
+    const before = Number(room?.addOnsAmount);
+    const after = Number(nextRooms[idx]?.addOnsAmount);
+    if (Number.isFinite(before) && Number.isFinite(after) && after < before) {
+      return sum + (before - after);
+    }
+    return sum;
+  }, 0);
+  if (
+    removedAcrossRooms > 0 &&
+    projectTotal != null &&
+    Number.isFinite(Number(projectTotal))
+  ) {
+    projectTotal = Math.max(0, Number(projectTotal) - removedAcrossRooms);
+  }
+
+  return {
+    ...roomPricing,
+    rooms: nextRooms,
+    projectTotal
+  };
+}
+
+/**
+ * Sanitize persisted customer calculation display projections for exclusive losers.
+ * Does not recompute pricing formulas — only removes display lines / adjusts
+ * matching add-on dollars that belong to exclusive-role losers.
+ *
+ * @param {object|null|undefined} customerCalc
+ * @param {Record<string, number>|null|undefined} quantities
+ * @param {Array<{ roomKey?: string, displayName?: string }>|null|undefined} rooms
+ */
+export function sanitizeCustomerCalculationForExclusiveSelections(
+  customerCalc,
+  quantities,
+  rooms = []
+) {
+  if (!customerCalc || typeof customerCalc !== "object") return customerCalc;
+  const roomPricing = sanitizePublicRoomPricingForExclusiveSelections(
+    customerCalc.roomPricing,
+    quantities,
+    rooms
+  );
+  let roomPricingChanges = customerCalc.roomPricingChanges;
+  if (roomPricingChanges && Array.isArray(roomPricingChanges.rows)) {
+    const winners = exclusiveWinnersByRoom(quantities);
+    const anyEsfSink = [...winners.values()].some((w) => w.sink === "esf");
+    if (anyEsfSink) {
+      roomPricingChanges = {
+        ...roomPricingChanges,
+        rows: roomPricingChanges.rows.filter((row) => {
+          const labels = `${row?.originalLabel || ""} ${row?.updatedLabel || ""}`.toLowerCase();
+          if (/cutout/.test(labels)) return true;
+          return !/customer-provided|customer provided/.test(labels);
+        })
+      };
+    }
+  }
+  return {
+    ...customerCalc,
+    roomPricing,
+    roomPricingChanges
+  };
+}

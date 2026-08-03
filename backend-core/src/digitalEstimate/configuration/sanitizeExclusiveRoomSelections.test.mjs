@@ -12,7 +12,8 @@ import { normalizeSelectionPayload } from "./configurationValidation.mjs";
 import {
   sanitizeExclusiveRoomSelectionQuantities,
   sanitizeProductDraftsForExclusiveSelections,
-  sanitizeSelectionPayloadMeta
+  sanitizeSelectionPayloadMeta,
+  sanitizePublicRoomPricingForExclusiveSelections
 } from "./sanitizeExclusiveRoomSelections.mjs";
 import { buildPublicCustomerConfigurationReadModel } from "./customerConfigurationFoundation.mjs";
 
@@ -75,6 +76,7 @@ function sinkOptions() {
 console.log("\nsanitizeExclusiveRoomSelections.test.mjs\n");
 
 {
+  assert.match(serviceSource, /sanitizeCustomerCalculationForExclusiveSelections/);
   assert.match(serviceSource, /sanitizeExclusiveRoomSelectionQuantities/);
   assert.match(serviceSource, /sanitizeSelectionPayloadMeta/);
   assert.match(
@@ -95,6 +97,40 @@ console.log("\nsanitizeExclusiveRoomSelections.test.mjs\n");
   assert.equal(result.changed, true);
   console.log("ok: contaminated ESF + customer_provided → ESF only");
 }
+
+{
+  const contaminated = {
+    rooms: [
+      {
+        roomName: "Kitchen",
+        addOnsAmount: 575,
+        roomTotal: 8575,
+        addOnLines: [
+          { category: "Sink", label: 'Sink — ESF Sink — Precis 24" Sink · Coal Black', amount: 575 },
+          { category: "Sink", label: "Sink — Customer-provided sink", amount: 0 },
+          { category: "Sink", label: "Customer-provided sink", amount: 0 },
+          { category: "Sink cutout", label: "Kitchen sink cutout", amount: 0 }
+        ]
+      }
+    ],
+    projectTotal: 8575
+  };
+  const cleaned = sanitizePublicRoomPricingForExclusiveSelections(
+    contaminated,
+    { [ESF]: 1, [CP]: 1 },
+    [{ roomKey: ROOM, displayName: "Kitchen" }]
+  );
+  const labels = (cleaned.rooms[0].addOnLines || []).map((l) => l.label);
+  assert.ok(labels.some((l) => /Precis 24/i.test(l)));
+  assert.ok(!labels.some((l) => /customer-provided/i.test(l)));
+  assert.ok(labels.some((l) => /Kitchen sink cutout/i.test(l)));
+  assert.equal(
+    labels.filter((l) => /^Sink\b/i.test(l) && !/cutout/i.test(l)).length,
+    1
+  );
+  console.log("ok: roomPricing sidebar projection drops customer-provided after ESF win");
+}
+
 
 {
   const result = sanitizeExclusiveRoomSelectionQuantities(

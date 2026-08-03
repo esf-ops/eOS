@@ -17,7 +17,7 @@ import {
   type PublicEstimate,
   type RoomProductDrafts,
 } from "./publicConfigApi";
-import { shouldPreservePersistedSinkDraft, canonicalEsfPlumbingOptionKey } from "./sinkSelectionDisplay.ts";
+import { shouldPreservePersistedSinkDraft, canonicalEsfPlumbingOptionKey, collapseExclusiveRoomQuantities, filterAddOnLinesForExclusiveSelections } from "./sinkSelectionDisplay.ts";
 
 export type ChoiceRole =
   | "backsplash"
@@ -642,20 +642,21 @@ export function mapEliteOsToLovableViewModel(
   // room card / modal / save payload share one identity.
   const persistedQty = config.currentSelections || {};
   const mergedQty: Record<string, number> = { ...persistedQty, ...qty };
-  const effectiveQty: Record<string, number> = {};
+  const remappedQty: Record<string, number> = {};
   for (const [key, value] of Object.entries(mergedQty)) {
     if (key.startsWith("__")) {
-      effectiveQty[key] = Number(value) || 0;
+      remappedQty[key] = Number(value) || 0;
       continue;
     }
     const canon = canonicalEsfPlumbingOptionKey(key, envelopeOptionKeys) || key;
     const n = Number(value) || 0;
     if (n <= 0) {
-      if (effectiveQty[canon] == null) effectiveQty[canon] = 0;
+      if (remappedQty[canon] == null) remappedQty[canon] = 0;
       continue;
     }
-    effectiveQty[canon] = Math.max(effectiveQty[canon] || 0, n);
+    remappedQty[canon] = Math.max(remappedQty[canon] || 0, n);
   }
+  const effectiveQty = collapseExclusiveRoomQuantities(remappedQty);
 
   function roomHasMaterialSelection(roomKey: string): boolean {
     const prefix = `material:${roomKey}:`;
@@ -947,24 +948,51 @@ export function mapEliteOsToLovableViewModel(
             match.backsplashAmount != null && Number.isFinite(Number(match.backsplashAmount))
               ? Number(match.backsplashAmount)
               : null,
-          addOnsAmount:
-            match.addOnsAmount != null && Number.isFinite(Number(match.addOnsAmount))
-              ? Number(match.addOnsAmount)
-              : null,
-          roomTotal:
-            match.roomTotal != null && Number.isFinite(Number(match.roomTotal))
-              ? Number(match.roomTotal)
-              : null,
-          addOnLines: Array.isArray(match.addOnLines)
-            ? match.addOnLines.map((line) => ({
+          addOnLines: (() => {
+            const filtered = filterAddOnLinesForExclusiveSelections(
+              Array.isArray(match.addOnLines)
+                ? match.addOnLines.map((line) => ({
+                    label: String(line.label || "Item"),
+                    amount:
+                      line.amount != null && Number.isFinite(Number(line.amount))
+                        ? Number(line.amount)
+                        : null,
+                    category: line.category ?? null,
+                  }))
+                : [],
+              effectiveQty,
+            );
+            return filtered;
+          })(),
+          addOnsAmount: (() => {
+            const raw =
+              match.addOnsAmount != null && Number.isFinite(Number(match.addOnsAmount))
+                ? Number(match.addOnsAmount)
+                : null;
+            if (raw == null) return null;
+            const before = Array.isArray(match.addOnLines) ? match.addOnLines : [];
+            const after = filterAddOnLinesForExclusiveSelections(
+              before.map((line) => ({
                 label: String(line.label || "Item"),
                 amount:
                   line.amount != null && Number.isFinite(Number(line.amount))
                     ? Number(line.amount)
                     : null,
                 category: line.category ?? null,
-              }))
-            : [],
+              })),
+              effectiveQty,
+            );
+            const removed = before.reduce((s, line) => {
+              const label = String(line.label || "");
+              if (after.some((a) => String(a.label || "") === label)) return s;
+              return s + (Number(line.amount) || 0);
+            }, 0);
+            return Math.max(0, raw - removed);
+          })(),
+          roomTotal:
+            match.roomTotal != null && Number.isFinite(Number(match.roomTotal))
+              ? Number(match.roomTotal)
+              : null,
           changeFromOriginal: changeRows.length ? roomDelta : null,
         };
       })(),

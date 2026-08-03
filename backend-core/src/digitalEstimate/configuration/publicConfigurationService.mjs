@@ -42,7 +42,8 @@ import {
 import {
   sanitizeExclusiveRoomSelectionQuantities,
   sanitizeProductDraftsForExclusiveSelections,
-  sanitizeSelectionPayloadMeta
+  sanitizeSelectionPayloadMeta,
+  sanitizeCustomerCalculationForExclusiveSelections
 } from "./sanitizeExclusiveRoomSelections.mjs";
 import {
   buildPublicCustomerConfigurationReadModel,
@@ -1124,11 +1125,18 @@ export function createPublicConfigurationService(deps) {
     } catch {
       publishedRoomPricingPublicForExchange = null;
     }
-    const latestCalculationPublic = applyBaselineParityToCustomerCalculation(rawCustomerCalc, {
-      baselineDisplayTotal: ctx.baselineDisplayTotal,
-      publishedRoomPricingPublic: publishedRoomPricingPublicForExchange,
-      scopeReviewRequired: Boolean(publicCustomerConfiguration.requiresEstimatorReview)
-    });
+    const latestCalculationPublic = sanitizeCustomerCalculationForExclusiveSelections(
+      applyBaselineParityToCustomerCalculation(rawCustomerCalc, {
+        baselineDisplayTotal: ctx.baselineDisplayTotal,
+        publishedRoomPricingPublic: publishedRoomPricingPublicForExchange,
+        scopeReviewRequired: Boolean(publicCustomerConfiguration.requiresEstimatorReview)
+      }),
+      selectionMeta.quantities || {},
+      (ctx.rooms || []).map((r) => ({
+        roomKey: r.roomKey,
+        displayName: r.displayName
+      }))
+    );
     const canAcceptPublishedExchange =
       publicCustomerConfiguration.canSubmitForFinalReview === true &&
       (latestCalculationPublic == null ||
@@ -2749,15 +2757,22 @@ export function createPublicConfigurationService(deps) {
       } catch {
         publishedRoomPricingPublic = null;
       }
-      const customerResultJson = applyBaselineParityToCustomerCalculation(customerResultJsonRaw, {
-        baselineDisplayTotal:
-          result.public?.baselineDisplayTotal ?? ctx.baselineDisplayTotal ?? null,
-        publishedRoomPricingPublic,
-        scopeReviewRequired: Boolean(publicCustomerConfiguration.requiresEstimatorReview),
-        // Missing frozen material rate — degrade to published baseline pricing
-        // rather than surface a save failure; Elite review resolves the rate.
-        forceFreeze: materialRateMissingReview
-      });
+      const customerResultJson = sanitizeCustomerCalculationForExclusiveSelections(
+        applyBaselineParityToCustomerCalculation(customerResultJsonRaw, {
+          baselineDisplayTotal:
+            result.public?.baselineDisplayTotal ?? ctx.baselineDisplayTotal ?? null,
+          publishedRoomPricingPublic,
+          scopeReviewRequired: Boolean(publicCustomerConfiguration.requiresEstimatorReview),
+          // Missing frozen material rate — degrade to published baseline pricing
+          // rather than surface a save failure; Elite review resolves the rate.
+          forceFreeze: materialRateMissingReview
+        }),
+        normalized.selections,
+        (ctx.rooms || []).map((r) => ({
+          roomKey: r.roomKey,
+          displayName: r.displayName
+        }))
+      );
       // Accept-as-published requires both foundation (no selection/scope deltas)
       // and calc parity (no priced drift / scope review).
       const canAcceptPublished =

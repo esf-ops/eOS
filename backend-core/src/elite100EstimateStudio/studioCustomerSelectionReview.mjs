@@ -15,6 +15,7 @@ import {
   enrichFoundationFromSelectionQuantities
 } from "../digitalEstimate/configuration/customerConfigurationFoundation.mjs";
 import { splitSelectionPayloadMeta } from "../digitalEstimate/configuration/customerConfigurationDraft.mjs";
+import { sanitizeSelectionPayloadMeta } from "../digitalEstimate/configuration/sanitizeExclusiveRoomSelections.mjs";
 import { getElite100CustomerMaterial } from "../digitalEstimate/configuration/elite100CustomerMaterialCatalog.mjs";
 
 const FORBIDDEN_REVIEW_KEYS = [
@@ -315,7 +316,11 @@ export function buildStudioCustomerSelectionReview(input = {}) {
     selection.selectionPayloadJson ||
     selection.selectionPayload ||
     {};
-  const split = splitSelectionPayloadMeta(payload);
+  const split = sanitizeSelectionPayloadMeta(
+    splitSelectionPayloadMeta(payload),
+    [],
+    { throwOnAmbiguous: false }
+  );
   const rawFoundation =
     payload?.[CUSTOMER_CONFIGURATION_FOUNDATION_KEY] ||
     split.customerConfiguration ||
