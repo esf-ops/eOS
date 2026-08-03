@@ -3673,4 +3673,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | PDF auto takeoff, Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. `image_needs_review` still does not auto-send. |
 | **Revisit trigger** | Persist full Graph attachment immutable ids without truncation; optional permanent plan-mark on the attachment row. |
 
+### 266. Hydrate Graph attachment id for manual JPG Takeoff byte fetch (2026-08-03)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-03 · `hotfix/inbox-graph-jpg-production-shape` |
+| **Decision** | After selecting a manually overridden image plan, open-estimate **hydrates** missing/truncated `sourceAttachmentId` from the live request Graph `attachmentKey` (and `providerMessageId` from the case message id) so Graph byte fetch can proceed. Staff-only `diagnostic` object is returned on `attachment_not_supported` (prefix/booleans/filenames only). |
+| **Why** | After §265, selection succeeded via scoped filename, but production still returned `attachment_not_supported` because `resolveValidatedPlanBytes` requires `sourceAttachmentId` and persisted Dave Untiedt rows had it null → `attachment_bytes_unavailable` remapped to the same 400. |
+| **Impacted** | `hydrateAttachmentGraphIdentity`, Shared Inbox send-to-takeoff diagnostics/route, open-estimate, tests, this doc. |
+| **Protected / unchanged** | PDF auto takeoff (existing `sourceAttachmentId` not overwritten), Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. |
+| **Revisit trigger** | Remove staff diagnostics once production shape is confirmed stable; persist Graph attachment ids durably at import. |
+
 ---
