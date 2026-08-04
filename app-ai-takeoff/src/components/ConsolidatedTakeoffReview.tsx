@@ -247,6 +247,14 @@ export default function ConsolidatedTakeoffReview() {
     }
   }, []);
 
+  const quoteFlowSetScope = useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("quoteFlowSetScope") === "1";
+    } catch {
+      return false;
+    }
+  }, []);
+
   const urlWorkspace = useMemo(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -2479,7 +2487,8 @@ export default function ConsolidatedTakeoffReview() {
                   approveStatus,
                   advisoryCount: advisory.length,
                   blockingCount: blocking.length,
-                  isRevisionDraft: urlWorkspace.isRevisionDraft
+                  isRevisionDraft: urlWorkspace.isRevisionDraft,
+                  quoteFlowSetScope
                 })}
               </button>
               ) : null}

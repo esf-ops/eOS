@@ -66,15 +66,7 @@ export function summarizeTakeoffDraftForReady(draft) {
  * @param {{ localReview?: boolean }} [opts]
  */
 export function resolveTakeoffParentOrigin(opts = {}) {
-  try {
-    const env = (typeof import.meta !== "undefined" && import.meta.env) || {};
-    const configured = String(
-      env.VITE_HEAD_URL_ELITE100_ESTIMATE_STUDIO || env.VITE_HEAD_URL_ESTIMATE_STUDIO || ""
-    ).trim();
-    if (configured) return new URL(configured).origin;
-  } catch {
-    /* ignore */
-  }
+  // Prefer embedding parent (Quote Flow / Estimate Studio) so postMessage reaches the iframe host.
   try {
     if (typeof document !== "undefined" && document.referrer) {
       return new URL(document.referrer).origin;
@@ -82,10 +74,31 @@ export function resolveTakeoffParentOrigin(opts = {}) {
   } catch {
     /* ignore */
   }
+  try {
+    const env = (typeof import.meta !== "undefined" && import.meta.env) || {};
+    const configured = String(
+      env.VITE_HEAD_URL_ELITE100_QUOTE_FLOW ||
+        env.VITE_HEAD_URL_ELITE100_ESTIMATE_STUDIO ||
+        env.VITE_HEAD_URL_ESTIMATE_STUDIO ||
+        ""
+    ).trim();
+    if (configured) return new URL(configured).origin;
+  } catch {
+    /* ignore */
+  }
   if (opts.localReview) return "*";
   try {
     const isDev = Boolean(import.meta?.env?.DEV);
-    if (isDev) return "http://localhost:5191";
+    if (isDev) {
+      try {
+        if (new URLSearchParams(window.location.search).get("quoteFlowSetScope") === "1") {
+          return "http://localhost:5197";
+        }
+      } catch {
+        /* ignore */
+      }
+      return "http://localhost:5191";
+    }
   } catch {
     /* ignore */
   }

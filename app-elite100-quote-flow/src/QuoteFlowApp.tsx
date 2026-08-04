@@ -95,7 +95,9 @@ export default function QuoteFlowApp() {
         };
         if (!cancelled) {
           setShellStatus(
-            body?.shell === "slice-1a" || body?.shell === "slice-1b"
+            body?.shell === "slice-1a" ||
+              body?.shell === "slice-1b" ||
+              body?.shell === "slice-1c"
               ? "Quote Flow connected"
               : "Connected"
           );
@@ -263,7 +265,12 @@ export default function QuoteFlowApp() {
               onOpenQueuePlaceholder={() => setNav("queue")}
             />
           ) : null}
-          {mainNav === "queue" ? <EstimateQueuePage /> : null}
+          {mainNav === "queue" ? (
+            <EstimateQueuePage
+              authToken={sessionToken}
+              onOpenEstimates={() => setNav("estimates")}
+            />
+          ) : null}
           {mainNav === "estimates" ? <EstimatesListPage /> : null}
         </main>
       </div>

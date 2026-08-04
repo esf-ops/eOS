@@ -354,6 +354,21 @@ async function requestApp(app, path, init = {}) {
       mockSupabase({ headRows: [{ head_slug: ELITE100_QUOTE_FLOW_HEAD_SLUG }] }),
     env: { ELITE100_QUOTE_FLOW_ENABLED: "1" },
     quoteFlowService: svc,
+    quoteFlowSetScopeService: {
+      listQueue: async () => ({ ok: true, items: [], total: 0 }),
+      getQueueDetail: async () => {
+        const err = new Error("not found");
+        err.code = "takeoff_not_found";
+        err.statusCode = 404;
+        throw err;
+      },
+      setScope: async () => {
+        const err = new Error("not implemented in 1b harness");
+        err.code = "takeoff_unavailable";
+        err.statusCode = 503;
+        throw err;
+      }
+    },
     sharedInboxService: shared,
     studioEstimateRepository: { getActiveByIntakeCase: async () => null },
     // Avoid constructing real studio stack when service is injected:

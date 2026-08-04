@@ -42,9 +42,27 @@ export function advisoryConfirmDialogMessage(advisoryCount) {
 
 /**
  * Primary button label.
- * @param {{ approveStatus: string, advisoryCount: number, blockingCount: number }} input
+ * @param {{
+ *   approveStatus: string,
+ *   advisoryCount: number,
+ *   blockingCount: number,
+ *   isRevisionDraft?: boolean,
+ *   quoteFlowSetScope?: boolean
+ * }} input
  */
 export function approveButtonLabel(input) {
+  if (input.quoteFlowSetScope) {
+    if (input.approveStatus === "approving") return "Setting scope…";
+    if (input.approveStatus === "approved") return "Scope set";
+    if (
+      (Number(input.blockingCount) || 0) === 0 &&
+      (Number(input.advisoryCount) || 0) > 0
+    ) {
+      const n = Number(input.advisoryCount) || 0;
+      return `Use these measurements (${n} advisory warning${n === 1 ? "" : "s"})`;
+    }
+    return "Use these measurements";
+  }
   if (input.approveStatus === "approving") return "Approving…";
   if (input.approveStatus === "approved") return "Approved";
   if (input.isRevisionDraft) return "Approve Revised Estimate";
