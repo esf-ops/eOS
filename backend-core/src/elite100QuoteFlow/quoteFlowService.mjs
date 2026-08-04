@@ -5,7 +5,11 @@
 
 import { sharedInboxSafeError } from "../elite100EstimateStudio/studioSharedInboxService.mjs";
 import { createQuoteFlowError, quoteFlowSafeError } from "./quoteFlowErrors.mjs";
-import { presentQuoteFlowInboxItem } from "./quoteFlowInboxPresenter.mjs";
+import {
+  groupQuoteFlowInboxItems,
+  presentQuoteFlowInboxItem,
+  sortQuoteFlowInboxItems
+} from "./quoteFlowInboxPresenter.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
 
 export { isOfficialScopeSet } from "./quoteFlowScope.mjs";
@@ -47,14 +51,22 @@ export function createQuoteFlowService(deps) {
     for (const item of items) {
       presented.push(await enrichItem(organizationId, item));
     }
+    const sorted = sortQuoteFlowInboxItems(presented);
+    const grouped = groupQuoteFlowInboxItems(sorted);
     return {
       ok: true,
       mailboxDisplay: result.mailboxDisplay || null,
       readOnly: true,
-      total: result.total ?? presented.length,
-      limit: result.limit ?? presented.length,
+      total: result.total ?? sorted.length,
+      limit: result.limit ?? sorted.length,
       offset: result.offset ?? 0,
-      items: presented,
+      items: sorted,
+      groups: {
+        needs_action: grouped.needs_action,
+        active: grouped.active,
+        completed: grouped.completed
+      },
+      stats: grouped.stats,
       sideEffects: {
         calculated: false,
         approved: false,

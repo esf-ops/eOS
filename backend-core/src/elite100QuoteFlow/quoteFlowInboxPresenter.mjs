@@ -1,5 +1,5 @@
 /**
- * Present Shared Inbox rows as Quote Flow Inbox DTOs (Slice 1B).
+ * Present Shared Inbox rows as Quote Flow Inbox DTOs.
  * Product statuses only — no V1/V2 language.
  */
 
@@ -36,6 +36,157 @@ export function formatQuoteFlowPersonLabel(value, fallback = "Unknown contact") 
   }
 
   return fallback;
+}
+
+/**
+ * Stage progress for Inbox (coarse mapping — not fake precision).
+ * @param {{ statusKey?: string, aiState?: string, aiLabel?: string, alreadyScoped?: boolean }} input
+ */
+export function mapQuoteFlowTakeoffProgress(input = {}) {
+  if (input.alreadyScoped === true || input.statusKey === "already_scoped") {
+    return {
+      percent: 100,
+      stageKey: "scope_set",
+      stageLabel: "Scope set",
+      isError: false,
+      isComplete: true
+    };
+  }
+
+  const statusKey = String(input.statusKey || "").toLowerCase();
+  const aiState = String(input.aiState || "").toLowerCase();
+  const aiLabel = String(input.aiLabel || "").toLowerCase();
+  const blob = `${statusKey} ${aiState} ${aiLabel}`;
+
+  if (statusKey === "takeoff_failed" || aiState === "failed" || /fail/.test(blob)) {
+    return {
+      percent: 0,
+      stageKey: "failed",
+      stageLabel: "Takeoff failed",
+      isError: true,
+      isComplete: false
+    };
+  }
+
+  if (
+    statusKey === "takeoff_returned" ||
+    aiState === "needs_review" ||
+    aiState === "approved" ||
+    /returned|ready.?for.?review|needs.?review/.test(blob)
+  ) {
+    return {
+      percent: 100,
+      stageKey: "returned",
+      stageLabel: "Ready for review",
+      isError: false,
+      isComplete: true
+    };
+  }
+
+  if (/building.?measurement|importing|import/.test(blob)) {
+    return {
+      percent: 80,
+      stageKey: "building_measurements",
+      stageLabel: "Building measurements",
+      isError: false,
+      isComplete: false
+    };
+  }
+
+  if (/fetching|preparing|prepare|download/.test(blob)) {
+    return {
+      percent: 25,
+      stageKey: "preparing",
+      stageLabel: "Preparing plan",
+      isError: false,
+      isComplete: false
+    };
+  }
+
+  if (
+    statusKey === "takeoff_processing" ||
+    aiState === "processing" ||
+    /processing|running|in.?progress/.test(blob)
+  ) {
+    return {
+      percent: 55,
+      stageKey: "processing",
+      stageLabel: "Processing takeoff",
+      isError: false,
+      isComplete: false
+    };
+  }
+
+  if (statusKey === "takeoff_queued" || aiState === "queued" || /queue/.test(blob)) {
+    return {
+      percent: 10,
+      stageKey: "queued",
+      stageLabel: "Queued",
+      isError: false,
+      isComplete: false
+    };
+  }
+
+  return {
+    percent: 0,
+    stageKey: "not_started",
+    stageLabel: "Not started",
+    isError: false,
+    isComplete: false
+  };
+}
+
+/**
+ * @param {string} statusKey
+ */
+export function mapQuoteFlowInboxGroup(statusKey) {
+  const key = String(statusKey || "");
+  if (
+    key === "needs_attachment_selection" ||
+    key === "ready_to_start" ||
+    key === "takeoff_failed"
+  ) {
+    return {
+      key: "needs_action",
+      label: "New / needs action",
+      sortOrder: 0
+    };
+  }
+  if (key === "takeoff_queued" || key === "takeoff_processing") {
+    return {
+      key: "active",
+      label: "Active AI Takeoffs",
+      sortOrder: 1
+    };
+  }
+  return {
+    key: "completed",
+    label: "Completed / already handled",
+    sortOrder: 2
+  };
+}
+
+/**
+ * @param {string} statusKey
+ */
+export function mapQuoteFlowNextAction(statusKey) {
+  switch (String(statusKey || "")) {
+    case "needs_attachment_selection":
+      return { key: "select_plan", label: "Select plan" };
+    case "ready_to_start":
+      return { key: "start_takeoff", label: "Start AI Takeoff" };
+    case "takeoff_queued":
+    case "takeoff_processing":
+      return { key: "track_progress", label: "Track progress" };
+    case "takeoff_returned":
+      return { key: "view_queue", label: "View in Estimate Queue" };
+    case "takeoff_failed":
+      return { key: "retry_plan", label: "Choose plan & retry" };
+    case "already_scoped":
+      return { key: "view_estimates", label: "View in Estimates" };
+    default:
+      return { key: "open", label: "Open" };
+  }
 }
 
 /**
@@ -76,6 +227,15 @@ export function mapQuoteFlowTakeoffStatus(item, opts = {}) {
     return { key: "takeoff_returned", label: "Takeoff returned", takeoffJobId };
   }
   if (takeoffJobId && state !== "not_started") {
+    // Prefer finer labels from ai.label when present.
+    const progress = mapQuoteFlowTakeoffProgress({
+      aiState: state,
+      aiLabel: ai.label,
+      statusKey: "takeoff_processing"
+    });
+    if (progress.stageKey === "queued") {
+      return { key: "takeoff_queued", label: "Takeoff queued", takeoffJobId };
+    }
     return { key: "takeoff_processing", label: "Takeoff processing", takeoffJobId };
   }
   if (takeoffJobId) {
@@ -88,10 +248,79 @@ export function mapQuoteFlowTakeoffStatus(item, opts = {}) {
       takeoffJobId: null
     };
   }
+  if (supportedCount === 1) {
+    return {
+      key: "ready_to_start",
+      label: "Ready to start",
+      takeoffJobId: null
+    };
+  }
   return {
     key: "needs_attachment_selection",
     label: "Needs attachment selection",
     takeoffJobId: null
+  };
+}
+
+/**
+ * @param {object[]} attachments
+ */
+export function pickBestPlanCandidate(attachments) {
+  const list = Array.isArray(attachments) ? attachments : [];
+  const supported = list.filter((a) => a?.supportedForTakeoff === true);
+  if (supported.length === 1) return supported[0];
+  if (supported.length > 1) {
+    // Prefer PDF-like plans when multiple candidates exist.
+    const pdf = supported.find((a) =>
+      /pdf/i.test(String(a.contentType || "")) || /\.pdf$/i.test(String(a.filename || ""))
+    );
+    return pdf || supported[0];
+  }
+  const markable = list.find((a) => a?.canMarkAsPlan === true);
+  return markable || null;
+}
+
+/**
+ * Sort inbox items: needs_action → active → completed, then newest first.
+ * @param {object[]} items
+ */
+export function sortQuoteFlowInboxItems(items) {
+  const list = Array.isArray(items) ? [...items] : [];
+  list.sort((a, b) => {
+    const ao = Number(a?.group?.sortOrder ?? 99);
+    const bo = Number(b?.group?.sortOrder ?? 99);
+    if (ao !== bo) return ao - bo;
+    return String(b?.receivedAt || "").localeCompare(String(a?.receivedAt || ""));
+  });
+  return list;
+}
+
+/**
+ * @param {object[]} items
+ */
+export function groupQuoteFlowInboxItems(items) {
+  const sorted = sortQuoteFlowInboxItems(items);
+  /** @type {Record<string, object[]>} */
+  const buckets = {
+    needs_action: [],
+    active: [],
+    completed: []
+  };
+  for (const item of sorted) {
+    const key = item?.group?.key || "completed";
+    if (buckets[key]) buckets[key].push(item);
+    else buckets.completed.push(item);
+  }
+  return {
+    needs_action: buckets.needs_action,
+    active: buckets.active,
+    completed: buckets.completed,
+    stats: {
+      needsAction: buckets.needs_action.length,
+      activeTakeoffs: buckets.active.length,
+      readyForReview: sorted.filter((i) => i?.takeoffStatus?.key === "takeoff_returned").length,
+      scopeSet: sorted.filter((i) => i?.takeoffStatus?.key === "already_scoped").length
+    }
   };
 }
 
@@ -106,6 +335,8 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
     filename: a.filename || a.name || "Attachment",
     contentType: a.contentType || a.mimeType || null,
     support: a.support || null,
+    supportLabel: a.supportLabel || null,
+    detectionReason: a.supportLabel || a.detectionReason || a.support || null,
     supportedForTakeoff: a.supportedForTakeoff === true,
     canMarkAsPlan: a.canMarkAsPlan === true,
     action:
@@ -116,6 +347,7 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
           : "unsupported"
   }));
 
+  const bestPlan = pickBestPlanCandidate(attachments);
   const senderLabel = formatQuoteFlowPersonLabel(item?.sender, "Unknown contact");
   const customerLabel = formatQuoteFlowPersonLabel(
     item?.customerLabel ?? item?.customer ?? item?.contact ?? item?.requester,
@@ -125,36 +357,97 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
     item?.accountLabel ?? item?.account,
     "Unknown contact"
   );
+
+  const subjectRaw = String(item?.subject || "").trim();
+  const subject =
+    subjectRaw && subjectRaw !== "(no subject)" ? subjectRaw : subjectRaw || "(no subject)";
   const projectRaw = item?.projectLabel ?? item?.project ?? item?.projectName ?? null;
-  const projectLabel =
+  let projectLabel =
     projectRaw == null || projectRaw === ""
       ? null
       : typeof projectRaw === "string" || typeof projectRaw === "number"
-        ? String(projectRaw)
-        : formatQuoteFlowPersonLabel(projectRaw, "Project");
+        ? String(projectRaw).trim() || null
+        : formatQuoteFlowPersonLabel(projectRaw, "");
+
+  // Prefer real subject / plan filename over empty project placeholders.
+  if (!projectLabel || /not named|not identified|unknown project/i.test(projectLabel)) {
+    projectLabel = null;
+  }
+
+  const requestTitle =
+    (subject && subject !== "(no subject)" ? subject : null) ||
+    projectLabel ||
+    (bestPlan?.filename ? String(bestPlan.filename) : null) ||
+    "Quote request";
+
+  const customerDisplay =
+    (senderLabel && senderLabel !== "Unknown contact" ? senderLabel : null) ||
+    (customerLabel && customerLabel !== "Unknown contact" ? customerLabel : null) ||
+    (accountLabel && accountLabel !== "Unknown contact" ? accountLabel : null) ||
+    (bestPlan?.filename ? `Plan: ${bestPlan.filename}` : null) ||
+    "Unknown contact";
+
+  const ai = item?.aiTakeoff && typeof item.aiTakeoff === "object" ? item.aiTakeoff : {};
+  const progress = mapQuoteFlowTakeoffProgress({
+    statusKey: takeoffStatus.key,
+    aiState: ai.state,
+    aiLabel: ai.label,
+    alreadyScoped: opts.alreadyScoped === true
+  });
+  const group = mapQuoteFlowInboxGroup(takeoffStatus.key);
+  const nextAction = mapQuoteFlowNextAction(takeoffStatus.key);
+  const estimateId = item?.estimateId || item?.activeEstimateId || null;
+
+  const canStartTakeoff =
+    opts.alreadyScoped !== true &&
+    (takeoffStatus.key === "ready_to_start" ||
+      takeoffStatus.key === "needs_attachment_selection" ||
+      takeoffStatus.key === "takeoff_failed");
 
   return {
     messageKey: item?.messageKey || null,
     receivedAt: item?.receivedAt || null,
-    // Always a display string (production Shared Inbox sender is often an object).
     sender: senderLabel,
     senderLabel,
-    customerLabel,
+    customerLabel: customerDisplay,
+    customerDisplay,
     accountLabel,
-    projectLabel,
-    subject: item?.subject || "(no subject)",
+    projectLabel: projectLabel || (subject !== "(no subject)" ? subject : null),
+    requestTitle,
+    subject: subject || "(no subject)",
     bodyPreview: item?.bodyPreview || null,
     intakeCaseId: item?.intakeCaseId || null,
-    estimateId: item?.estimateId || item?.activeEstimateId || null,
-    planSelectionRequired: item?.planSelectionRequired === true,
+    estimateId,
+    planSelectionRequired:
+      item?.planSelectionRequired === true ||
+      attachments.filter((a) => a.supportedForTakeoff).length > 1,
+    attachmentCount: attachments.length,
+    bestPlanCandidate: bestPlan
+      ? {
+          attachmentKey: bestPlan.attachmentKey,
+          filename: bestPlan.filename,
+          contentType: bestPlan.contentType,
+          detectionReason: bestPlan.detectionReason || bestPlan.supportLabel || bestPlan.support
+        }
+      : null,
     attachments,
     takeoffStatus,
     takeoffJobId: takeoffStatus.takeoffJobId,
+    progress,
+    group,
+    nextAction,
+    canStartTakeoff,
     alreadyScoped: opts.alreadyScoped === true,
-    // Placeholder affordance for later Estimate Queue slice (non-functional in UI).
+    viewQueue:
+      takeoffStatus.key === "takeoff_returned" ||
+      takeoffStatus.key === "takeoff_queued" ||
+      takeoffStatus.key === "takeoff_processing",
+    viewEstimates: takeoffStatus.key === "already_scoped" && Boolean(estimateId || item?.intakeCaseId),
     queueHint:
-      takeoffStatus.key === "takeoff_returned" || takeoffStatus.key === "takeoff_queued"
+      takeoffStatus.key === "takeoff_returned"
         ? "View in Estimate Queue"
-        : null
+        : takeoffStatus.key === "already_scoped"
+          ? "View in Estimates"
+          : null
   };
 }

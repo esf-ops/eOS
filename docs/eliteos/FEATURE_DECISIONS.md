@@ -3794,3 +3794,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowEstimates`, estimates presenter/routes, EstimatesListPage + OfficialScopeEditor, tests, head map, this doc. |
 | **Protected / unchanged** | Digital Estimate, pricing formulas, Studio V2 product path, Internal Estimate, AI Takeoff algorithm, migrations. |
 | **Revisit trigger** | Slice for pricing controls / calculation / approval. |
+
+### 277. Elite 100 Quote Flow Inbox polish / operations (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-inbox-polish-progress` |
+| **Decision** | Polish Quote Flow Inbox only: group New / needs action → Active AI Takeoffs → Completed; stats cards; safe request labels; attachment selection + detection reason; bulk “Start selected AI Takeoffs” via existing start-takeoff endpoint (per-item success/failure, reuse, already-scoped blocked); coarse takeoff progress stage bars; View in Estimate Queue / Estimates links. No Set Scope, pricing, publish, accept, or sold. |
+| **Why** | Estimators need an operational Inbox to start and track multiple takeoffs without Studio chrome. |
+| **Impacted** | `quoteFlowInboxPresenter`, `quoteFlowService.listInbox` groups/stats, InboxPage, inboxGrouping helper, tests, this doc. |
+| **Protected / unchanged** | Digital Estimate, pricing formulas, Estimate Queue Set Scope, Estimates editor, Studio V2, Internal Estimate, AI Takeoff algorithm. |
+| **Revisit trigger** | Richer takeoff progress events if/when Brain exposes them. |
