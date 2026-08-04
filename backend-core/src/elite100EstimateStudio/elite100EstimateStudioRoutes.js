@@ -1972,7 +1972,9 @@ export function attachElite100EstimateStudioRoutes(app, deps) {
         const safe = sharedInboxSafeError(e?.code, "Unable to send attachment to AI Takeoff.");
         // Staff-only diagnostics (no secrets / no bytes).
         if (
-          (safe.code === "attachment_not_supported" || safe.code === "takeoff_unavailable") &&
+          (safe.code === "attachment_not_supported" ||
+            safe.code === "takeoff_unavailable" ||
+            safe.code === "import_failed") &&
           e?.diagnostic &&
           typeof e.diagnostic === "object"
         ) {

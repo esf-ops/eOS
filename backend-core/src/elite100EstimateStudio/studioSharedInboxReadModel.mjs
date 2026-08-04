@@ -176,7 +176,7 @@ export function deriveSupportState(previewMessage = {}) {
   if (hint === "manual_review_multi_pdf") {
     return {
       supportState: SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW,
-      supportExplanation: "Multiple plan attachments require estimator review."
+      supportExplanation: "Choose the plan file to send to AI Takeoff."
     };
   }
   if (hint === "manual_review" || (hint === "importable_no_pdf" && supportedCount === 0)) {
@@ -297,7 +297,14 @@ export function buildSharedInboxRow(input = {}) {
     : [];
   const supportedAttachmentCount = attachments.filter((a) => a.supportedForTakeoff).length;
   const planSupportSummary = summarizeRowPlanSupport(attachments);
-  const { supportState, supportExplanation } = deriveSupportState(preview);
+  const { supportState, supportExplanation: baseSupportExplanation } = deriveSupportState(preview);
+  const planSelectionRequired =
+    planSupportSummary?.planSelectionRequired === true ||
+    planSupportSummary?.key === "choose_plan" ||
+    String(preview.eligibilityHint || "") === "manual_review_multi_pdf";
+  const supportExplanation = planSelectionRequired
+    ? "Choose the plan file to send to AI Takeoff."
+    : baseSupportExplanation;
 
   const alreadyImported = Boolean(preview.alreadyImported || preview.existingCaseId || queueRow?.id);
   const intakeCaseId =
@@ -371,8 +378,14 @@ export function buildSharedInboxRow(input = {}) {
       String(queueRow?.caseStatus || "").toLowerCase() === "manual_review"
     ) {
       importState = SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW;
-      primaryActionKey = "review_request";
-      primaryActionLabel = "Review request";
+      // Imported multi-plan / manual review: still choose which plan to send when no takeoff yet.
+      if (planSelectionRequired && !aiTakeoff.takeoffJobId) {
+        primaryActionKey = "choose_plan";
+        primaryActionLabel = "Choose plan";
+      } else {
+        primaryActionKey = "review_request";
+        primaryActionLabel = "Review request";
+      }
       openTarget = operationalState?.openTarget || "takeoff";
     } else if (estimateId) {
       importState = SHARED_INBOX_STATES.IMPORTED;
@@ -390,10 +403,10 @@ export function buildSharedInboxRow(input = {}) {
     primaryActionKey = "create_manual_estimate";
     primaryActionLabel = "Create manual estimate";
     openTarget = "scope";
-  } else if (supportState === SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW) {
+  } else if (planSelectionRequired || supportState === SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW) {
     importState = SHARED_INBOX_STATES.NOT_IMPORTED;
-    primaryActionKey = "review_request";
-    primaryActionLabel = "Review request";
+    primaryActionKey = "choose_plan";
+    primaryActionLabel = "Choose plan";
     openTarget = "takeoff";
   } else {
     importState = SHARED_INBOX_STATES.NOT_IMPORTED;
@@ -474,6 +487,7 @@ export function buildSharedInboxRow(input = {}) {
     attachmentCount: attachments.length,
     supportedAttachmentCount,
     planSupportSummary,
+    planSelectionRequired,
     supportState,
     supportExplanation,
     importState,
@@ -502,11 +516,13 @@ export function buildSharedInboxRow(input = {}) {
           mutates: false
         }
       : null,
-    // Simplified estimator surface (Start / Resume). Legacy key kept for compatibility wrappers.
+    // Simplified estimator surface (Start / Resume / Choose plan).
     primaryAction: simplifyInboxPrimaryAction(legacyPrimaryAction, {
       estimateId,
       activeEstimateId,
-      intakeCaseId
+      intakeCaseId,
+      planSelectionRequired,
+      planSupportSummary
     }),
     legacyPrimaryAction,
     secondaryActions: [

@@ -15,7 +15,7 @@ import {
 } from "./studioSharedInboxReadModel.mjs";
 import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
 import {
-  buildLiveManualPlanAttachmentCandidate,
+  buildLivePlanAttachmentCandidate,
   findScopedAttachment,
   isAutoSupportedTakeoffSupport,
   isSafeManualPlanImageOverride,
@@ -37,7 +37,10 @@ export function sharedInboxSafeError(code, fallbackMessage) {
       "That attachment is not a supported plan PDF or image for AI Takeoff.",
     attachment_required: "Select a plan attachment to send to AI Takeoff.",
     takeoff_unavailable: "AI Takeoff is temporarily unavailable.",
-    import_failed: "The request could not be imported.",
+    import_failed:
+      "AI Takeoff could not import this file. Try another plan attachment or continue manually.",
+    file_ingest_failed:
+      "AI Takeoff could not import this file. Try another plan attachment or continue manually.",
     import_result_unavailable:
       "The import may have completed, but its result could not be confirmed. Refresh the inbox before retrying.",
     graph_disabled: "Mailbox preview is not configured for this organization.",
@@ -119,6 +122,45 @@ export function buildTakeoffUnavailableDiagnostic(partial = {}) {
       ["workspace_create", "link_create"].includes(stage),
     quoteFileIdPresent: partial.quoteFileIdPresent === true,
     workspaceLookupAttempted: partial.workspaceLookupAttempted === true,
+    workspaceCreateAttempted:
+      partial.workspaceCreateAttempted === true ||
+      stage === "workspace_create" ||
+      stage === "link_create",
+    existingWorkspaceFound: partial.existingWorkspaceFound === true,
+    rejectedReason: String(partial.rejectedReason || stage || "unknown")
+  };
+}
+
+/**
+ * Staff-only diagnostic for import_failed (no secrets / no bytes / no Graph keys).
+ * @param {Record<string, unknown>} partial
+ */
+export function buildImportFailedDiagnostic(partial = {}) {
+  const name = String(partial.selectedAttachmentName || "").trim();
+  const extMatch = name.match(/\.([a-z0-9]+)$/i);
+  const stage = String(partial.stage || partial.openEstimateStage || "import");
+  return {
+    codePath: "inbox-takeoff-import-failed-v1",
+    stage,
+    requestedAttachmentKeyPresent: partial.requestedAttachmentKeyPresent === true,
+    selectedAttachmentName: name || null,
+    selectedAttachmentExtension: extMatch ? `.${extMatch[1].toLowerCase()}` : null,
+    selectedAttachmentSupport: partial.selectedAttachmentSupport || null,
+    manualPlanOverride: partial.manualPlanOverride === true,
+    liveManualAttachmentPresent: partial.liveManualAttachmentPresent === true,
+    graphFetchAttempted:
+      partial.graphFetchAttempted === true ||
+      ["graph_fetch", "ingest", "workspace_create", "link_create"].includes(stage),
+    graphFetchSucceeded:
+      partial.graphFetchSucceeded === true ||
+      ["ingest", "workspace_create", "link_create"].includes(stage),
+    ingestAttempted:
+      partial.ingestAttempted === true ||
+      ["ingest", "workspace_create", "link_create"].includes(stage),
+    ingestSucceeded:
+      partial.ingestSucceeded === true ||
+      ["workspace_create", "link_create"].includes(stage),
+    quoteFileIdPresent: partial.quoteFileIdPresent === true,
     workspaceCreateAttempted:
       partial.workspaceCreateAttempted === true ||
       stage === "workspace_create" ||
@@ -588,21 +630,54 @@ export function createStudioSharedInboxService(deps = {}) {
 
     let intakeCaseId = item.intakeCaseId || null;
     if (!intakeCaseId) {
-      const imported = await importMessage({
-        organizationId: org,
-        messageKey: key,
-        actorUserId,
-        confirm: true,
-        idempotencyKey: idempotencyKey
-          ? `send-takeoff-import:${idempotencyKey}`
-          : `send-takeoff-import:${org}:${key}`
-      });
-      intakeCaseId = imported.intakeCaseId || null;
+      try {
+        const imported = await importMessage({
+          organizationId: org,
+          messageKey: key,
+          actorUserId,
+          confirm: true,
+          idempotencyKey: idempotencyKey
+            ? `send-takeoff-import:${idempotencyKey}`
+            : `send-takeoff-import:${org}:${key}`
+        });
+        intakeCaseId = imported.intakeCaseId || null;
+      } catch (e) {
+        const code = String(e?.code || "import_failed");
+        const err = new Error(
+          sharedInboxSafeError(
+            code === "message_not_found" ? "message_not_found" : "import_failed",
+            e?.message
+          ).error
+        );
+        err.statusCode =
+          code === "message_not_found" ? 404 : Number(e?.statusCode) || 400;
+        err.code = code === "message_not_found" ? "message_not_found" : "import_failed";
+        err.diagnostic = buildImportFailedDiagnostic({
+          stage: "import",
+          requestedAttachmentKeyPresent: Boolean(attKey),
+          selectedAttachmentName: matchedFilename,
+          selectedAttachmentSupport: att.support || null,
+          manualPlanOverride: overrideRequested,
+          liveManualAttachmentPresent: false,
+          rejectedReason: `import:${code}`
+        });
+        throw err;
+      }
     }
     if (!intakeCaseId) {
-      const err = new Error("The request could not be imported.");
+      const err = new Error(
+        sharedInboxSafeError("import_failed").error
+      );
       err.statusCode = 500;
       err.code = "import_failed";
+      err.diagnostic = buildImportFailedDiagnostic({
+        stage: "import",
+        requestedAttachmentKeyPresent: Boolean(attKey),
+        selectedAttachmentName: matchedFilename,
+        selectedAttachmentSupport: att.support || null,
+        manualPlanOverride: overrideRequested,
+        rejectedReason: "import:missing_intake_case_id"
+      });
       throw err;
     }
 
@@ -621,19 +696,19 @@ export function createStudioSharedInboxService(deps = {}) {
     const caseMatch = findScopedAttachment(caseAtts, {
       attachmentKey: attKey,
       filename: matchedFilename,
-      allowFilenameFallback: manualOk === true
+      allowFilenameFallback: true
     });
 
-    // Production Dave Untiedt shape: case exists but has zero attachment rows.
+    // Production shape: case exists but missing / unmatched attachment rows.
     // Build a server-side in-memory candidate from the live Inbox/Graph attachment
-    // so open-estimate can fetch bytes. Never accepted from the browser body.
+    // so open-estimate can fetch bytes (PDF auto + image override). Never from browser.
     const providerMessageId =
       String(caseRowForDiag?.sourceMessage?.graphImmutableMessageId || "").trim() ||
       String(item.messageKey || key || "").trim() ||
       null;
     const liveManualAttachment =
-      manualOk === true && !caseMatch
-        ? buildLiveManualPlanAttachmentCandidate({
+      !caseMatch && (manualOk === true || autoOk === true)
+        ? buildLivePlanAttachmentCandidate({
             liveAttachment: att,
             attachmentKey: attKey,
             providerMessageId
@@ -662,24 +737,40 @@ export function createStudioSharedInboxService(deps = {}) {
       });
     } catch (e) {
       const code = String(e?.code || "takeoff_unavailable");
-      const mapped =
+      const openStage = String(e?.openEstimateStage || "");
+      const isSupportReject =
         code === "no_supported_pdf" ||
         code === "attachment_selection_invalid" ||
         code === "attachment_bytes_unavailable" ||
         code === "attachment_unsupported" ||
         code === "attachment_type_mismatch" ||
-        code === "attachment_not_supported"
-          ? "attachment_not_supported"
+        code === "attachment_not_supported" ||
+        code === "multi_pdf_ambiguous";
+      const isImportFail =
+        openStage === "ingest" ||
+        code === "file_ingest_failed" ||
+        code === "import_failed";
+      const mapped = isSupportReject
+        ? "attachment_not_supported"
+        : isImportFail
+          ? "import_failed"
           : "takeoff_unavailable";
       const err = new Error(
-        sharedInboxSafeError(mapped, e?.message || "AI Takeoff is temporarily unavailable.").error
+        sharedInboxSafeError(
+          mapped,
+          e?.message ||
+            (mapped === "import_failed"
+              ? "AI Takeoff could not import this file. Try another plan attachment or continue manually."
+              : "AI Takeoff is temporarily unavailable.")
+        ).error
       );
       err.statusCode =
         mapped === "attachment_not_supported"
           ? 400
-          : Number(e?.statusCode) || (mapped === "takeoff_unavailable" ? 503 : 500);
+          : mapped === "import_failed"
+            ? Number(e?.statusCode) || 422
+            : Number(e?.statusCode) || (mapped === "takeoff_unavailable" ? 503 : 500);
       err.code = mapped;
-      const openStage = String(e?.openEstimateStage || "");
       if (mapped === "attachment_not_supported") {
         const stage =
           code === "attachment_bytes_unavailable" || openStage === "graph_fetch"
@@ -708,6 +799,17 @@ export function createStudioSharedInboxService(deps = {}) {
             code === "attachment_bytes_unavailable"
               ? "attachment_bytes_unavailable"
               : `open_estimate:${code}`
+        });
+      } else if (mapped === "import_failed") {
+        err.diagnostic = buildImportFailedDiagnostic({
+          stage: openStage || "ingest",
+          openEstimateStage: openStage || "ingest",
+          requestedAttachmentKeyPresent: Boolean(attKey),
+          selectedAttachmentName: matchedFilename,
+          selectedAttachmentSupport: att.support || null,
+          manualPlanOverride: overrideRequested,
+          liveManualAttachmentPresent: Boolean(liveManualAttachment),
+          rejectedReason: openStage ? `${openStage}:${code}` : `open_estimate:${code}`
         });
       } else if (mapped === "takeoff_unavailable") {
         err.diagnostic = buildTakeoffUnavailableDiagnostic({

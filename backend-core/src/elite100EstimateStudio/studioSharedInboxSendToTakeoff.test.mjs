@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import {
   buildAttachmentNotSupportedDiagnostic,
+  buildImportFailedDiagnostic,
   buildTakeoffUnavailableDiagnostic,
   createStudioSharedInboxService
 } from "./studioSharedInboxService.mjs";
@@ -1312,6 +1313,193 @@ function baseEnv() {
   assert.equal(d.ingestSucceeded, true);
   assert.doesNotMatch(JSON.stringify(d), /AAkALgAA/);
   console.log("ok: workspace create failure returns takeoff_unavailable diagnostic");
+}
+
+// Ingest failure returns import_failed with stage diagnostic (not attachment_not_supported).
+{
+  const GRAPH_KEY = "AAkALgAAingestFail==";
+  const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n");
+  const repo = {
+    async getCase() {
+      return {
+        id: "case-ingest-fail",
+        sourceMessage: { graphImmutableMessageId: "graph-msg" },
+        attachments: []
+      };
+    },
+    async listTakeoffLinks() {
+      return [];
+    },
+    async createTakeoffLink() {
+      throw new Error("should not link");
+    }
+  };
+  const svc = createStudioSharedInboxService({
+    env: baseEnv(),
+    quoteIntakeRepository: repo,
+    previewFn: async () => ({
+      mailboxDisplay: "quotes@example.com",
+      messages: [
+        {
+          graphMessageId: "msg-ingest-fail",
+          subject: "Q",
+          bodyPreview: "hi",
+          hasAttachments: true,
+          eligibilityHint: "already_imported",
+          alreadyImported: true,
+          existingCaseId: "case-ingest-fail",
+          sender: { displayName: "Marshal", emailPresent: true },
+          attachments: [
+            {
+              sourceAttachmentId: GRAPH_KEY,
+              name: "floor-plan.pdf",
+              mimeType: "application/pdf",
+              support: "direct_pdf",
+              sizeBytes: PDF_BYTES.length
+            }
+          ]
+        }
+      ]
+    }),
+    openEstimate: async (deps) =>
+      openEstimateForIntakeCase({
+        ...deps,
+        repository: repo,
+        repositoryMode: "memory",
+        getSupabase: () => ({}),
+        graphClient: {
+          async getAttachment() {
+            return {
+              size: PDF_BYTES.length,
+              contentBytes: PDF_BYTES.toString("base64"),
+              name: "floor-plan.pdf",
+              contentType: "application/pdf"
+            };
+          }
+        },
+        ingestFile: async () => {
+          const e = new Error("ingest blew up");
+          e.code = "file_ingest_failed";
+          throw e;
+        }
+      })
+  });
+  await assert.rejects(
+    () =>
+      svc.sendToAiTakeoff({
+        organizationId: ORG,
+        messageKey: "msg-ingest-fail",
+        attachmentKey: GRAPH_KEY,
+        confirm: true,
+        manualPlanOverride: false,
+        markAsPlan: false
+      }),
+    (e) => {
+      assert.equal(e.code, "import_failed");
+      assert.equal(e.diagnostic?.codePath, "inbox-takeoff-import-failed-v1");
+      assert.equal(e.diagnostic?.stage, "ingest");
+      assert.equal(e.diagnostic?.selectedAttachmentExtension, ".pdf");
+      assert.notEqual(e.code, "attachment_not_supported");
+      return true;
+    }
+  );
+  const d = buildImportFailedDiagnostic({
+    stage: "ingest",
+    selectedAttachmentName: "floor-plan.pdf",
+    selectedAttachmentSupport: "direct_pdf",
+    requestedAttachmentKeyPresent: true,
+    rejectedReason: "ingest:file_ingest_failed"
+  });
+  assert.equal(d.graphFetchSucceeded, true);
+  assert.equal(d.ingestAttempted, true);
+  assert.doesNotMatch(JSON.stringify(d), /AAkALgAA/);
+  console.log("ok: ingest failure returns import_failed diagnostic");
+}
+
+// Live Graph PDF with zero case attachment rows still succeeds (auto path).
+{
+  const GRAPH_KEY = "AAkALgAAlivePdf==";
+  const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n");
+  let linkedSource = "unset";
+  const repo = {
+    async getCase() {
+      return {
+        id: "case-live-pdf",
+        sourceMessage: { graphImmutableMessageId: "graph-msg-pdf" },
+        attachments: []
+      };
+    },
+    async listTakeoffLinks() {
+      return [];
+    },
+    async createTakeoffLink(input) {
+      linkedSource = input.sourceAttachmentId;
+      return { id: "link-pdf", takeoffJobId: input.takeoffJobId, relationshipStatus: "queued" };
+    },
+    async appendAuditEvent() {}
+  };
+  const svc = createStudioSharedInboxService({
+    env: baseEnv(),
+    quoteIntakeRepository: repo,
+    previewFn: async () => ({
+      mailboxDisplay: "quotes@example.com",
+      messages: [
+        {
+          graphMessageId: "msg-live-pdf",
+          subject: "Vanderschoot",
+          bodyPreview: "plans",
+          hasAttachments: true,
+          eligibilityHint: "already_imported",
+          alreadyImported: true,
+          existingCaseId: "case-live-pdf",
+          sender: { displayName: "Marshal Tolly", emailPresent: true },
+          attachments: [
+            {
+              sourceAttachmentId: GRAPH_KEY,
+              name: "kitchen.pdf",
+              mimeType: "application/pdf",
+              support: "direct_pdf",
+              sizeBytes: PDF_BYTES.length
+            }
+          ]
+        }
+      ]
+    }),
+    openEstimate: async (deps) =>
+      openEstimateForIntakeCase({
+        ...deps,
+        repository: repo,
+        repositoryMode: "memory",
+        getSupabase: () => ({}),
+        graphClient: {
+          async getAttachment() {
+            return {
+              size: PDF_BYTES.length,
+              contentBytes: PDF_BYTES.toString("base64"),
+              name: "kitchen.pdf",
+              contentType: "application/pdf"
+            };
+          }
+        },
+        ingestFile: async () => ({
+          quoteFileId: "qf-live-pdf",
+          created: true
+        }),
+        createWorkspace: async () => ({ takeoffJobId: "job-live-pdf" })
+      })
+  });
+  const out = await svc.sendToAiTakeoff({
+    organizationId: ORG,
+    messageKey: "msg-live-pdf",
+    attachmentKey: GRAPH_KEY,
+    confirm: true,
+    manualPlanOverride: false,
+    markAsPlan: false
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.takeoffJobId, "job-live-pdf");
+  assert.equal(linkedSource, null);
+  console.log("ok: live Graph PDF zero-row case succeeds without UUID FK");
 }
 
 console.log("\nstudioSharedInboxSendToTakeoff.test.mjs: ok\n");

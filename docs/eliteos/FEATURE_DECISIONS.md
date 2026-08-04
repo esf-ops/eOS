@@ -3706,4 +3706,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | PDF takeoff (real attachment UUIDs still linked), Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. |
 | **Revisit trigger** | Persist Graph attachment rows at import so links can reference a real intake attachment UUID. |
 
+### 269. Inbox Choose plan + import_failed clarity (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/inbox-takeoff-handoff-clarity` |
+| **Decision** | Multi-plan Inbox rows use primary action **Choose plan** (opens details + attachment focus) instead of silent Start Estimate. Details copy: “Choose the plan file to send to AI Takeoff.” Send-to-takeoff maps **ingest** failures to `import_failed` with staff diagnostic `inbox-takeoff-import-failed-v1` (not `attachment_not_supported`). Live Graph PDF candidates work when intake case attachment rows are missing (same pattern as image override). |
+| **Why** | Production multi-PDF rows showed Start Estimate but `simplifyInboxPrimaryAction` mapped `review_request` → `resume_estimate` with no `intakeCaseId`, causing a silent no-op. PDF send-to-takeoff could hit import/ingest failure with opaque `import_failed` and no stage. |
+| **Impacted** | Shared Inbox read model / simplify action, SharedInboxPage, send-to-takeoff service/route diagnostics, live plan candidate (PDF+image), tests, this doc. |
+| **Protected / unchanged** | PDF AI Takeoff, manual image override, Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. `image_needs_review` still requires Mark as plan. |
+| **Revisit trigger** | Persist Graph attachments on import; retire Choose plan once single-plan selection is automatic. |
+
 ---
