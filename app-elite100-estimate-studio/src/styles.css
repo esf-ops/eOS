@@ -3286,29 +3286,6 @@ button.linkish {
   margin: 0 0 0.4rem;
   font-size: 1.1rem;
 }
-.studio-v2-empty__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
-  margin-top: 1rem;
-  align-items: center;
-}
-
-.studio-v2-takeoff-review__frame-wrap {
-  margin-top: 0.75rem;
-  border: 1px solid var(--eos-border);
-  border-radius: var(--eos-radius);
-  overflow: hidden;
-  background: var(--eos-surface-2, #f7f7f8);
-  min-height: 520px;
-}
-.studio-v2-takeoff-review__frame {
-  display: block;
-  width: 100%;
-  min-height: 560px;
-  border: 0;
-  background: #fff;
-}
 
 /* Studio V2 Slice B — Working Draft scope editor */
 .studio-v2-layout {

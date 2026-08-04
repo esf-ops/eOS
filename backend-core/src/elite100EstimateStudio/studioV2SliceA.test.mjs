@@ -89,11 +89,6 @@ const fakeCalc = {
   assert.equal(empty.empty, true);
   assert.equal(empty.scopeSummary.empty, true);
   assert.equal(empty.projectHeader.estimateId, null);
-  assert.equal(empty.canCreateDraft, true);
-  assert.ok(Array.isArray(empty.availableActions));
-  assert.ok(empty.availableActions.includes("create_studio_v2_draft"));
-  assert.match(String(empty.message || ""), /Studio V2 estimate yet/i);
-  assert.doesNotMatch(String(empty.message || ""), /V1 first/i);
   console.log("ok: 1 GET working-draft safe empty for no estimate");
 }
 
@@ -425,10 +420,6 @@ const fakeCalc = {
   assert.ok(!/import\s+.*deriveAiEstimatorStage/.test(shell));
   assert.ok(!shell.includes("ensure-editable-draft"));
   assert.ok(!shell.includes("simplified-publish"));
-  assert.match(shell, /Create Studio V2 Draft/);
-  assert.match(shell, /This Inbox case does not have a Studio V2 estimate yet/);
-  assert.doesNotMatch(shell, /Create or open it in V1 first/);
-  assert.match(shell, /studio-v2-create-draft/);
   console.log("ok: V2 shell does not reuse forbidden V1 orchestration components");
 }
 

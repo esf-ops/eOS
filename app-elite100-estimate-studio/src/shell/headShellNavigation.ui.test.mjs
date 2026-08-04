@@ -107,13 +107,9 @@ assert.match(more, /Open Legacy Queue/);
 assert.doesNotMatch(more, /studio-nav-digital-estimates/);
 console.log("ok: More is explicitly legacy, compatibility, and support");
 
-assert.match(shell, /Open Takeoff Review/);
-assert.match(shell, /studio-v2-open-takeoff-review|StudioV2TakeoffReviewPanel/);
-assert.match(shell, /Create Studio V2 Draft/);
-assert.match(shell, /Use these measurements|AI Takeoff Review/);
-assert.doesNotMatch(shell, /Create or open it in V1 first/);
-assert.doesNotMatch(shell, /Open in V1 \(Legacy fallback\)/);
-console.log("ok: Studio V2 owns Takeoff Review; create-draft empty state present");
+assert.match(shell, /Open in V1 \(Legacy fallback\)/);
+assert.match(shell, /V1 remains[\s\S]{0,80}legacy fallback/);
+console.log("ok: V1 remains available and clearly secondary");
 
 const landingFunction = app.slice(
   app.indexOf("function openStudioV2Landing"),

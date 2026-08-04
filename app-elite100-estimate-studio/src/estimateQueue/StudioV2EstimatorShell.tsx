@@ -17,7 +17,6 @@ import StudioV2ScopeEditor, {
   type StudioV2EditableScope
 } from "./StudioV2ScopeEditor";
 import StudioV2TakeoffImportPanel from "./StudioV2TakeoffImportPanel";
-import StudioV2TakeoffReviewPanel from "./StudioV2TakeoffReviewPanel";
 import StudioV2EstimateOptionsPanel, {
   cloneEditableOptions,
   emptyEditableOptions,
@@ -41,10 +40,6 @@ import StudioV2CustomerSelectionReviewPanel, {
   type CustomerSelectionRevisionInfo,
   type StudioCustomerSelectionReview
 } from "./StudioV2CustomerSelectionReviewPanel";
-import {
-  fetchIntakePlanContent,
-  fetchIntakeSourcePlans
-} from "../lib/securePlanViewerApi.mjs";
 
 type ProjectHeader = {
   accountName?: string | null;
@@ -214,21 +209,6 @@ type WorkingDraftResponse = {
   status?: string | null;
   takeoffImportNeeded?: boolean;
   takeoffJobId?: string | null;
-  takeoffJobIdPresent?: boolean;
-  takeoffStatus?: string | null;
-  takeoffProcessing?: boolean;
-  canCreateDraft?: boolean;
-  availableActions?: string[];
-  created?: boolean;
-  reused?: boolean;
-  sideEffects?: {
-    calculated?: boolean;
-    approved?: boolean;
-    published?: boolean;
-    sold?: boolean;
-    revised?: boolean;
-    accepted?: boolean;
-  };
   customerSelectionRevision?: CustomerSelectionRevisionInfo | null;
 };
 
@@ -297,13 +277,9 @@ export default function StudioV2EstimatorShell(props: {
   authToken: string;
   caseId: string;
   onBack: () => void;
-  /** Optional external Takeoff Review opener (legacy). Prefer in-shell review. */
-  onOpenTakeoffReview?: () => void;
-  /** @deprecated Prefer onOpenTakeoffReview */
   onOpenV1?: () => void;
 }) {
-  const { authToken, caseId, onBack } = props;
-  const onOpenTakeoffReviewExternal = props.onOpenTakeoffReview || props.onOpenV1;
+  const { authToken, caseId, onBack, onOpenV1 } = props;
   const [draft, setDraft] = useState<WorkingDraftResponse | null>(null);
   const [activity, setActivity] = useState<CustomerActivityResponse | null>(null);
   const [calcResult, setCalcResult] = useState<CalculationResult | null>(null);
@@ -340,10 +316,6 @@ export default function StudioV2EstimatorShell(props: {
   const [approveBusy, setApproveBusy] = useState(false);
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [customerRevisionBusy, setCustomerRevisionBusy] = useState(false);
-  const [createDraftBusy, setCreateDraftBusy] = useState(false);
-  const [createDraftError, setCreateDraftError] = useState<string | null>(null);
-  const [planPreviewUrl, setPlanPreviewUrl] = useState<string | null>(null);
-  const [planPreviewLabel, setPlanPreviewLabel] = useState<string | null>(null);
 
   const hydrateFromDraft = useCallback((draftBody: WorkingDraftResponse) => {
     setDraft(draftBody);
@@ -429,55 +401,6 @@ export default function StudioV2EstimatorShell(props: {
     // Initial load only — subsequent reloads are explicit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, caseId]);
-
-  // Authenticated plan blob for scope sidebar preview (same secure source as Takeoff Review).
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    (async () => {
-      try {
-        const res = (await fetchIntakeSourcePlans(authToken, caseId)) as {
-          plans?: Array<{
-            attachmentId?: string;
-            filename?: string;
-            contentType?: string;
-            primary?: boolean;
-          }>;
-        };
-        if (cancelled) return;
-        const plans = Array.isArray(res?.plans) ? res.plans : [];
-        const plan =
-          plans.find((p) => p.primary && p.attachmentId) ||
-          plans.find((p) => p.attachmentId) ||
-          null;
-        if (!plan?.attachmentId) {
-          setPlanPreviewUrl(null);
-          setPlanPreviewLabel(null);
-          return;
-        }
-        const content = await fetchIntakePlanContent(authToken, caseId, String(plan.attachmentId));
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(content.blob);
-        setPlanPreviewUrl(objectUrl);
-        setPlanPreviewLabel(plan.filename || content.filename || "Plan preview");
-      } catch {
-        if (!cancelled) {
-          setPlanPreviewUrl(null);
-          setPlanPreviewLabel(null);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [authToken, caseId]);
-
-  function scrollToTakeoffReview() {
-    const el = document.getElementById("studio-v2-takeoff-review");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    else if (onOpenTakeoffReviewExternal) onOpenTakeoffReviewExternal();
-  }
 
   function onScopeChange(next: StudioV2EditableScope) {
     setScopeDraft(next);
@@ -839,34 +762,6 @@ export default function StudioV2EstimatorShell(props: {
     }
   }
 
-  async function runCreateStudioV2Draft() {
-    if (createDraftBusy) return;
-    setCreateDraftBusy(true);
-    setCreateDraftError(null);
-    try {
-      const body = (await apiPost(
-        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft`,
-        authToken,
-        {
-          confirm: true,
-          clientMutationId: `v2-create-draft-${Date.now()}`
-        }
-      )) as WorkingDraftResponse;
-      if (body?.code === "no_estimate" || body?.empty) {
-        setCreateDraftError("Draft was not created. Try again.");
-        return;
-      }
-      hydrateFromDraft(body);
-      setLoadError(null);
-      // Refresh activity pointers for the new estimate id (best effort).
-      void load();
-    } catch (e) {
-      setCreateDraftError(errorMessage(e));
-    } finally {
-      setCreateDraftBusy(false);
-    }
-  }
-
   async function runCreateRevision(args: { confirmed: true; reason?: string }) {
     const estimateId =
       draft?.estimateId ||
@@ -1100,19 +995,18 @@ export default function StudioV2EstimatorShell(props: {
           </p>
           <h1>Studio V2 Workspace</h1>
           <p className="muted">
-            Estimate authority for scope, pricing, approval, and Digital Estimate. Review the plan
-            and measurements in AI Takeoff Review, then load them into this draft.
+            Edit physical scope and import approved AI Takeoff into the Working Draft. V1 remains
+            available as a legacy fallback.
           </p>
         </div>
-        {draft?.takeoffJobId ? (
+        {onOpenV1 ? (
           <button
             type="button"
             className="eq-btn-secondary"
-            onClick={scrollToTakeoffReview}
-            data-testid="studio-v2-open-takeoff-review"
-            title="Jump to plan-visible measurement review"
+            onClick={onOpenV1}
+            data-testid="studio-v2-open-v1"
           >
-            Open Takeoff Review
+            Open in V1 (Legacy fallback)
           </button>
         ) : null}
       </header>
@@ -1139,51 +1033,15 @@ export default function StudioV2EstimatorShell(props: {
       {draft?.code === "no_estimate" ? (
         <div className="studio-v2-empty" data-testid="studio-v2-no-estimate">
           <h2>No estimate yet</h2>
-          <p>This Inbox case does not have a Studio V2 estimate yet.</p>
-          <p className="muted">
-            Create a draft estimate here, then use AI Takeoff Review to verify dimensions.
-          </p>
-          {draft.takeoffProcessing ? (
-            <p className="muted" data-testid="studio-v2-takeoff-processing-hint">
-              AI Takeoff is processing. You can create the draft now; findings can be imported when
-              ready.
-            </p>
-          ) : null}
-          {createDraftError ? (
-            <p className="error-text" data-testid="studio-v2-create-draft-error">
-              {createDraftError}
-            </p>
-          ) : null}
-          <div className="studio-v2-empty__actions">
-            <button
-              type="button"
-              className="eq-btn-primary"
-              data-testid="studio-v2-create-draft"
-              disabled={createDraftBusy}
-              onClick={() => void runCreateStudioV2Draft()}
-            >
-              {createDraftBusy ? "Creating draft…" : "Create Studio V2 Draft"}
-            </button>
-            {onOpenTakeoffReviewExternal && (draft.takeoffJobId || draft.takeoffJobIdPresent) ? (
-              <button
-                type="button"
-                className="eq-btn-secondary"
-                data-testid="studio-v2-no-estimate-open-takeoff-review"
-                onClick={onOpenTakeoffReviewExternal}
-                title="Open plan-visible measurement review"
-              >
-                Open Takeoff Review
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="eq-btn-secondary"
-              data-testid="studio-v2-no-estimate-back"
-              onClick={onBack}
-            >
-              Back to Inbox
-            </button>
-          </div>
+          <p>This case has no Studio estimate. Create or open it in V1 first.</p>
+          <button
+            type="button"
+            className="eq-btn-secondary"
+            data-testid="studio-v2-no-estimate-back"
+            onClick={onBack}
+          >
+            Back to Inbox
+          </button>
         </div>
       ) : null}
 
@@ -1294,31 +1152,6 @@ export default function StudioV2EstimatorShell(props: {
             onSave={() => void runSavePricing()}
           />
 
-          {draft.takeoffJobId ? (
-            <StudioV2TakeoffReviewPanel
-              authToken={authToken}
-              caseId={caseId}
-              takeoffJobId={String(draft.takeoffJobId)}
-              scopeLoaded={
-                !Boolean(draft.takeoffImportNeeded) &&
-                Boolean(scopeDraft.rooms?.length) &&
-                !Boolean(scope?.empty)
-              }
-              onFinished={(result) => {
-                hydrateFromDraft(result as WorkingDraftResponse);
-                setScopeSaveNotice(
-                  String(
-                    (result as { message?: string }).message ||
-                      "Takeoff scope is loaded into this draft."
-                  )
-                );
-                setCalcStale(true);
-                setCalcStaleReason("Scope changed — recalculate to update total.");
-                void load();
-              }}
-            />
-          ) : null}
-
           <StudioV2TakeoffImportPanel
             authToken={authToken}
             caseId={caseId}
@@ -1326,7 +1159,6 @@ export default function StudioV2EstimatorShell(props: {
             takeoffImportNeeded={Boolean(draft.takeoffImportNeeded)}
             scopeDirty={scopeDirty}
             currentScopeEmpty={Boolean(scope?.empty || !scopeDraft.rooms.length)}
-            onOpenReview={scrollToTakeoffReview}
             onApplied={(result) => {
               setScopeDraft(cloneEditableScope(result.editableScope));
               setScopeDirty(false);
@@ -1360,10 +1192,7 @@ export default function StudioV2EstimatorShell(props: {
                     }
                   : prev
               );
-              setScopeSaveNotice(
-                result.message || "Takeoff scope is loaded into this draft."
-              );
-              void load();
+              setScopeSaveNotice("Takeoff scope applied. Recalculate to update total.");
             }}
           />
 
@@ -1382,8 +1211,6 @@ export default function StudioV2EstimatorShell(props: {
             saveNotice={scopeSaveNotice}
             onChange={onScopeChange}
             onSave={() => void runSaveScope()}
-            planPreviewUrl={planPreviewUrl}
-            planPreviewLabel={planPreviewLabel}
           />
 
           <StudioV2EstimateOptionsPanel

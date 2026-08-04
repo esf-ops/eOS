@@ -51,15 +51,6 @@ assert.match(page, /Send to AI Takeoff/);
 assert.match(page, /Mark as plan for AI Takeoff/);
 assert.match(page, /Open AI Takeoff Lab/);
 assert.match(page, /shared-inbox-open-takeoff-lab|shared-inbox-detail-open-takeoff-lab/);
-assert.match(
-  readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2EstimatorShell.tsx"), "utf8"),
-  /Create Studio V2 Draft/
-);
-assert.doesNotMatch(
-  readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2EstimatorShell.tsx"), "utf8"),
-  /Create or open it in V1 first/
-);
-console.log("ok: Inbox Takeoff Lab preserved; Studio V2 create-draft empty state ready");
 assert.match(page, /manualPlanOverride:\s*true/);
 assert.match(page, /shared-inbox-mark-as-plan/);
 assert.match(page, /Choose the plan file to send to AI Takeoff/);

@@ -45,24 +45,17 @@ export function advisoryConfirmDialogMessage(advisoryCount) {
  * @param {{ approveStatus: string, advisoryCount: number, blockingCount: number }} input
  */
 export function approveButtonLabel(input) {
-  if (input.approveStatus === "approving") {
-    return input.studioV2Finish ? "Saving measurements…" : "Approving…";
-  }
-  if (input.approveStatus === "approved") {
-    return input.studioV2Finish ? "Measurements ready" : "Approved";
-  }
-  if (input.isRevisionDraft && !input.studioV2Finish) return "Approve Revised Estimate";
+  if (input.approveStatus === "approving") return "Approving…";
+  if (input.approveStatus === "approved") return "Approved";
+  if (input.isRevisionDraft) return "Approve Revised Estimate";
   if (
     (Number(input.blockingCount) || 0) === 0 &&
     (Number(input.advisoryCount) || 0) > 0
   ) {
     const n = Number(input.advisoryCount) || 0;
-    if (input.studioV2Finish) {
-      return `Use these measurements (${n} advisory warning${n === 1 ? "" : "s"})`;
-    }
     return `Approve with ${n} advisory warning${n === 1 ? "" : "s"}`;
   }
-  return input.studioV2Finish ? "Use these measurements" : "Approve Estimate";
+  return "Approve Estimate";
 }
 
 /**

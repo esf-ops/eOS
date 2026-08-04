@@ -658,8 +658,7 @@ const fakeCalc = {
   assert.ok(editor.includes('data-testid="studio-v2-scope-checklist"'));
   assert.ok(editor.includes('data-testid="studio-v2-selected-piece"'));
   assert.ok(
-    editor.includes("Open AI Takeoff Review to view the plan while verifying measurements.") ||
-      editor.includes("Plan preview")
+    editor.includes("Plan preview will be added when V2 intake/attachment links are wired.")
   );
   assert.ok(editor.includes('data-testid="studio-v2-scope-readonly"'));
   assert.ok(editor.includes("Legacy openings"));
