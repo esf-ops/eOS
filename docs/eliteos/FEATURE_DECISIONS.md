@@ -3717,6 +3717,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | PDF AI Takeoff, manual image override, Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. `image_needs_review` still requires Mark as plan. |
 | **Revisit trigger** | Persist Graph attachments on import; retire Choose plan once single-plan selection is automatic. |
 
+### 270. Elite 100 Home Launcher visibility follows head access (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/home-launcher-elite100-visibility` |
+| **Decision** | Home Launcher (`GET /api/me/heads`) shows **Elite 100 Estimate Studio** (`elite100_estimate_studio`) when Brain has `ELITE100_ESTIMATE_STUDIO_ENABLED=1` **and** the user has System Admin head access (or a full-catalog role). Env pilot ID/email lists are **no longer** an access gate for launcher tiles or Studio staff middleware. Staff APIs still require auth + internal operator + `requireHeadAccess(elite100_estimate_studio)` + Studio enabled. |
+| **Why** | Granting Elite 100 in System Admin did not show the Home tile because launcher/API still required a separate hard-coded Brain pilot allowlist — operators could not grant access without redeploying env. |
+| **Impacted** | `launcherHeads.js`, `elite100EstimateStudioAccess.mjs`, Phase DE.1.1 / launcher visibility tests, this doc. |
+| **Protected / unchanged** | Pricing, Digital Estimate customer flows, AI Takeoff algorithm, publish/approval/acceptance/sold business logic, migrations, quote formulas. |
+| **Revisit trigger** | Optional soft “pilot badge” UI using advisory env lists; move feature enablement into org config UI. |
 
 
 ### 271. Studio V2 create draft from Inbox case (2026-08-04)
@@ -3740,5 +3750,3 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `StudioV2TakeoffReviewPanel`, `StudioV2TakeoffImportPanel`, `StudioV2EstimatorShell`, `StudioV2ScopeEditor`, `studioV2Service.finishTakeoffIntoWorkingDraft`, takeoff-finish route, consolidated approve button label, tests, this doc. |
 | **Protected / unchanged** | AI Takeoff algorithm, pricing formulas, estimate approval/publish/DE/acceptance/sold, Internal Estimate, migrations. |
 | **Revisit trigger** | In-process React extract of ConsolidatedTakeoffReview into a shared package (instead of iframe). |
-
----

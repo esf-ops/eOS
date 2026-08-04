@@ -1,7 +1,9 @@
 /**
- * Elite 100 Estimate Studio — server flags & pilot allowlist (Phase DE.1.1).
- * Exact "1" enables the Studio feature. Pilot lists default empty (no grants in source).
- * Never expose pilot IDs/emails via VITE_* or public responses beyond a boolean for the caller.
+ * Elite 100 Estimate Studio — server flags & optional pilot metadata (Phase DE.1.1).
+ * Exact "1" enables the Studio feature.
+ * Access authority for launcher + staff APIs is System Admin `user_head_access`
+ * (`elite100_estimate_studio`) plus this feature flag — not hard-coded pilot env lists.
+ * Pilot ID/email env vars remain available as advisory metadata only.
  */
 
 export const ELITE100_ESTIMATE_STUDIO_HEAD_SLUG = "elite100_estimate_studio";

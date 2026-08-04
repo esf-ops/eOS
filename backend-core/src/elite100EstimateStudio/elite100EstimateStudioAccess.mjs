@@ -1,12 +1,14 @@
 /**
- * Elite 100 Estimate Studio access middleware — Phase DE.1.1.
- * Chain: requireAuth → internal operator → requireHeadAccess(studio) → this pilot gate.
+ * Elite 100 Estimate Studio access middleware — feature flag gate.
+ * Chain: requireAuth → internal operator → requireHeadAccess(studio) → this.
+ *
+ * System Admin `user_head_access` (via requireHeadAccess) is the access source of
+ * truth. Env pilot ID/email lists are advisory only and must not block users who
+ * already passed head access — that mismatch hid the Home Launcher tile / API
+ * after a legitimate grant.
  */
 
-import {
-  isElite100EstimateStudioEnabled,
-  isElite100EstimateStudioPilotUser
-} from "./elite100EstimateStudioConfig.mjs";
+import { isElite100EstimateStudioEnabled } from "./elite100EstimateStudioConfig.mjs";
 
 /**
  * @param {{ env?: NodeJS.ProcessEnv }} [options]
@@ -22,10 +24,7 @@ export function requireElite100EstimateStudioPilot(options = {}) {
       if (!u || !u.id) {
         return res.status(401).json({ ok: false, error: "Unauthorized" });
       }
-      // Reject spoofed identity claims on body/query/headers — auth user only.
-      if (!isElite100EstimateStudioPilotUser(u, env)) {
-        return res.status(403).json({ ok: false, error: "Forbidden" });
-      }
+      // Head access already enforced upstream. Do not re-gate on env pilot lists.
       return next();
     } catch {
       return res.status(500).json({ ok: false, error: "Access check failed" });

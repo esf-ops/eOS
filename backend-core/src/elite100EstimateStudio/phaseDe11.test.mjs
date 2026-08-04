@@ -142,19 +142,22 @@ console.log("\nphaseDe11.test.mjs\n");
 
   const prev = { ...process.env };
   Object.assign(process.env, ENV_STUDIO);
-  const payloadHidden = await buildMeHeadsPayload(mockSbHidden, {
+
+  // Full-catalog admin (no explicit Elite 100 grant) still sees the tile when Studio is on.
+  const payloadAdmin = await buildMeHeadsPayload(mockSbHidden, {
     id: "non-pilot-admin",
     email: "admin@example.com",
     role: "admin",
     isActive: true
   });
   assert.equal(
-    payloadHidden.heads.some((h) => h.slug === ELITE100_ESTIMATE_STUDIO_HEAD_SLUG),
-    false,
-    "admin without pilot must not see Studio tile"
+    payloadAdmin.heads.some((h) => h.slug === ELITE100_ESTIMATE_STUDIO_HEAD_SLUG),
+    true,
+    "admin with Studio enabled sees Studio tile via full catalog (no env pilot required)"
   );
 
-  const mockSbPilot = {
+  // Explicit head grant (non-admin) sees the tile — System Admin access source.
+  const mockSbGranted = {
     from: (table) => {
       if (table === "user_profiles") return chain({ user_kind: "internal" });
       if (table === "user_head_access")
@@ -162,16 +165,50 @@ console.log("\nphaseDe11.test.mjs\n");
       return chain(null);
     }
   };
-  const payloadPilot = await buildMeHeadsPayload(mockSbPilot, {
-    id: PILOT_ID,
-    email: PILOT_EMAIL,
+  const payloadGranted = await buildMeHeadsPayload(mockSbGranted, {
+    id: "granted-estimator",
+    email: "estimator@example.com",
+    role: "estimator",
+    isActive: true
+  });
+  assert.equal(
+    payloadGranted.heads.some((h) => h.slug === ELITE100_ESTIMATE_STUDIO_HEAD_SLUG),
+    true,
+    "user with elite100_estimate_studio head access sees Studio tile"
+  );
+
+  // No grant + non-full-catalog role → hidden.
+  const mockSbNoGrant = {
+    from: (table) => {
+      if (table === "user_profiles") return chain({ user_kind: "internal" });
+      if (table === "user_head_access") return chain([]);
+      return chain(null);
+    }
+  };
+  const payloadNoGrant = await buildMeHeadsPayload(mockSbNoGrant, {
+    id: "plain-estimator",
+    email: "plain@example.com",
+    role: "estimator",
+    isActive: true
+  });
+  assert.equal(
+    payloadNoGrant.heads.some((h) => h.slug === ELITE100_ESTIMATE_STUDIO_HEAD_SLUG),
+    false,
+    "estimator without Elite 100 head access must not see Studio tile"
+  );
+
+  // Studio disabled → hidden even for admin.
+  process.env.ELITE100_ESTIMATE_STUDIO_ENABLED = "0";
+  const payloadOff = await buildMeHeadsPayload(mockSbHidden, {
+    id: "non-pilot-admin",
+    email: "admin@example.com",
     role: "admin",
     isActive: true
   });
   assert.equal(
-    payloadPilot.heads.some((h) => h.slug === ELITE100_ESTIMATE_STUDIO_HEAD_SLUG),
-    true,
-    "pilot admin sees Studio tile"
+    payloadOff.heads.some((h) => h.slug === ELITE100_ESTIMATE_STUDIO_HEAD_SLUG),
+    false,
+    "Studio tile hidden when ELITE100_ESTIMATE_STUDIO_ENABLED is not 1"
   );
 
   for (const [k, v] of Object.entries(prev)) {
@@ -181,7 +218,7 @@ console.log("\nphaseDe11.test.mjs\n");
   for (const k of Object.keys(ENV_STUDIO)) {
     if (!(k in prev)) delete process.env[k];
   }
-  console.log("ok: launcher tile requires pilot allowlist");
+  console.log("ok: launcher tile follows head access / Studio flag (not env pilot list)");
 }
 
 {
@@ -193,8 +230,8 @@ console.log("\nphaseDe11.test.mjs\n");
   });
   assert.equal(r.mounted, false);
 
-  const mw = requireElite100EstimateStudioPilot({ env: ENV_STUDIO });
-  const denied = await new Promise((resolve) => {
+  const mwOff = requireElite100EstimateStudioPilot({ env: {} });
+  const disabled = await new Promise((resolve) => {
     const res = {
       statusCode: 0,
       body: null,
@@ -207,12 +244,31 @@ console.log("\nphaseDe11.test.mjs\n");
         resolve(this);
       }
     };
-    mw({ user: { id: "spoofed", email: "spoof@x.com" }, body: { userId: PILOT_ID } }, res, () =>
+    mwOff({ user: { id: "u1", email: "a@b.com" } }, res, () => resolve({ statusCode: 200 }));
+  });
+  assert.equal(disabled.statusCode, 404);
+
+  const mwOn = requireElite100EstimateStudioPilot({ env: ENV_STUDIO });
+  const allowed = await new Promise((resolve) => {
+    const res = {
+      statusCode: 0,
+      body: null,
+      status(c) {
+        this.statusCode = c;
+        return this;
+      },
+      json(b) {
+        this.body = b;
+        resolve(this);
+      }
+    };
+    // Head access is enforced upstream; this gate only checks Studio enabled + auth.
+    mwOn({ user: { id: "granted-user", email: "new@example.com" } }, res, () =>
       resolve({ statusCode: 200 })
     );
   });
-  assert.equal(denied.statusCode, 403);
-  console.log("ok: spoofed identity cannot pass pilot middleware");
+  assert.equal(allowed.statusCode, 200);
+  console.log("ok: Studio access middleware uses feature flag + upstream head access");
 }
 
 {
