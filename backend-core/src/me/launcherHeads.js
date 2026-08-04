@@ -1,8 +1,5 @@
 import { DEALER_SAFE_HEAD_SLUG_SET, EOS_HEAD_SLUGS, isKnownHeadSlug } from "../auth/eosGovernanceConstants.js";
-import {
-  isElite100EstimateStudioEnabled,
-  isElite100EstimateStudioPilotUser
-} from "../elite100EstimateStudio/elite100EstimateStudioConfig.mjs";
+import { isElite100EstimateStudioEnabled } from "../elite100EstimateStudio/elite100EstimateStudioConfig.mjs";
 import { inferHeadDeploymentStatus, resolveHeadDeploymentUrl } from "./headDeploymentUrls.js";
 
 /**
@@ -169,11 +166,11 @@ export const HEAD_LAUNCHER_CATALOG = [
     slug: "elite100_estimate_studio",
     label: "Elite 100 Estimate Studio",
     description:
-      "Private pilot studio to publish immutable Elite 100 Digital Estimates from saved Internal Estimates.",
+      "Elite 100 estimating workspace — AI Takeoff Review, Studio scope/pricing, and Digital Estimate publish.",
     category: "Revenue",
     href: "/elite100-estimate-studio",
     roleNote:
-      "Private pilot only — requires elite100_estimate_studio head access plus server-side pilot allowlist. Not granted by role defaults. System Admin assigns head access; Brain env controls pilot IDs/emails. Public Digital Estimate is a separate customer head and does not appear here."
+      "Requires elite100_estimate_studio head access (System Admin) and ELITE100_ESTIMATE_STUDIO_ENABLED=1 on Brain. Not granted by role defaults. Public Digital Estimate is a separate customer head and does not appear here."
   },
   {
     slug: "reports",
@@ -594,8 +591,8 @@ export async function buildMeHeadsPayload(supabase, reqUser) {
 
   heads = appendPublicQuoteIfMissing(heads);
 
-  // Elite 100 Estimate Studio: stealth filter — never show unless Studio enabled + pilot.
-  // Admins otherwise receive full catalog; this slug must stay absent without pilot allowlist.
+  // Elite 100 Estimate Studio: feature-flag + head-access gate (same source as System Admin).
+  // Hide when Studio is off, or when the user lacks the head grant / full-catalog role.
   heads = await filterElite100EstimateStudioLauncherHeads(heads, ctx, reqUser);
 
   return {
@@ -606,25 +603,20 @@ export async function buildMeHeadsPayload(supabase, reqUser) {
 }
 
 /**
- * Hide Studio tile unless feature flag on AND authenticated user is on pilot allowlist.
- * Head-access alone (including admin full catalog) is not enough for launcher visibility.
+ * Show Studio tile when Studio is enabled and the user has Elite 100 access.
+ * Access source matches System Admin head grants / full-catalog roles — not a
+ * separate hard-coded pilot email/id env list (that list remains advisory only).
  * @param {LauncherHeadDtoApi[]} heads
  * @param {object} ctx
  * @param {object} reqUser
  */
-async function filterElite100EstimateStudioLauncherHeads(heads, ctx, reqUser) {
+async function filterElite100EstimateStudioLauncherHeads(heads, ctx, _reqUser) {
   const studioOn = isElite100EstimateStudioEnabled(process.env);
-  const pilot = isElite100EstimateStudioPilotUser(
-    { id: ctx.id, email: ctx.email || reqUser?.email },
-    process.env
-  );
   return heads.filter((h) => {
     if (h.slug !== "elite100_estimate_studio") return true;
-    if (!studioOn || !pilot) return false;
-    if (!ctx.launcherFullCatalog && !ctx.actionableGrantSet.has("elite100_estimate_studio")) {
-      return false;
-    }
-    return true;
+    if (!studioOn) return false;
+    if (ctx.launcherFullCatalog) return true;
+    return ctx.actionableGrantSet.has("elite100_estimate_studio");
   });
 }
 
