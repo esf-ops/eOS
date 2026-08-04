@@ -16,6 +16,6 @@ export function readSafeElite100QuoteFlowConfig(env = process.env) {
     quoteFlowEnabled: isElite100QuoteFlowEnabled(env),
     headSlug: ELITE100_QUOTE_FLOW_HEAD_SLUG,
     headUrl: String(env.HEAD_URL_ELITE100_QUOTE_FLOW ?? "").trim() || null,
-    shell: "slice-1a"
+    shell: "slice-1b"
   };
 }

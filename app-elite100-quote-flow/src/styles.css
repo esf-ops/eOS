@@ -173,3 +173,133 @@ body {
   line-height: 1.5;
   max-width: 60ch;
 }
+
+.qf-error-box {
+  background: rgba(163, 19, 47, 0.08);
+  border: 1px solid rgba(163, 19, 47, 0.24);
+  color: var(--eos-accent);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.qf-notice {
+  color: var(--eos-ink-soft);
+  background: rgba(46, 105, 184, 0.08);
+  border: 1px solid rgba(46, 105, 184, 0.2);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+
+.qf-btn-secondary {
+  border: 1px solid var(--eos-line-strong);
+  background: var(--eos-surface);
+  color: var(--eos-ink-soft);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.qf-inbox {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .qf-inbox {
+    grid-template-columns: 1fr;
+  }
+}
+
+.qf-inbox__list,
+.qf-inbox__detail {
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  padding: 16px;
+  box-shadow: var(--sh-1);
+  min-height: 280px;
+}
+
+.qf-inbox__list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.qf-inbox__list-head h2,
+.qf-inbox__detail h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.qf-inbox__rows,
+.qf-inbox__attachments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.qf-inbox__row {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--eos-line);
+  background: #fbfcfe;
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  font: inherit;
+}
+
+.qf-inbox__row.is-active,
+.qf-inbox__att.is-selected {
+  border-color: rgba(163, 19, 47, 0.35);
+  background: var(--eos-accent-soft);
+}
+
+.qf-inbox__row-title {
+  font-weight: 650;
+  color: var(--eos-ink);
+}
+
+.qf-inbox__row-meta,
+.qf-inbox__status {
+  font-size: 0.85rem;
+  color: var(--eos-ink-muted);
+}
+
+.qf-inbox__status--detail {
+  margin: 8px 0 16px;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+}
+
+.qf-inbox__att {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  padding: 12px;
+}
+
+.qf-inbox__att-actions {
+  flex-shrink: 0;
+}
+
+.qf-inbox__detail h3 {
+  margin: 16px 0 8px;
+  font-size: 0.95rem;
+}

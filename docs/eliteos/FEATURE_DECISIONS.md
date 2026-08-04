@@ -3761,3 +3761,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | New app + `elite100QuoteFlow` Brain module, `EOS_HEAD_SLUGS`, launcher/CORS URL keys, `quoteRoutes` mount, head map, this doc. |
 | **Protected / unchanged** | AI Takeoff algorithm, Studio V2 behavior, Digital Estimate (`app-digital-estimate` / `backend-core/src/digitalEstimate`), pricing formulas, approval/publish/sold, migrations. |
 | **Revisit trigger** | Slice 1B Inbox + start-takeoff; then Queue Set Scope; then Estimates scope detail. |
+
+### 274. Elite 100 Quote Flow Slice 1B — Inbox + start AI Takeoff (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/elite100-quote-flow-slice-1b-inbox-takeoff` |
+| **Decision** | Quote Flow Inbox lists real Shared Inbox rows (adapter), shows attachments, and starts/reuses AI Takeoff via existing `sendToAiTakeoff` / `openEstimateForIntakeCase`. Routes: `GET/POST /api/elite100-quote-flow/inbox…`. Statuses: Needs attachment selection / queued / processing / failed / returned. Already-scoped `studio_estimates` block takeoff rerun (`already_scoped`). Idempotent duplicate start. No Set Scope, pricing, calculate, approve, publish, acceptance, or sold. |
+| **Why** | Deliver Inbox → select plan → AI Takeoff background start without using the Studio V1/V2 hybrid UI. |
+| **Impacted** | `quoteFlowService`, Quote Flow routes, `InboxPage`, presenter/tests, this doc. |
+| **Protected / unchanged** | Digital Estimate, pricing formulas, Studio V2 behavior, Internal Estimate, AI Takeoff algorithm, migrations. |
+| **Revisit trigger** | Slice 1C Estimate Queue + Set Scope. |

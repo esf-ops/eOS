@@ -48,3 +48,12 @@ export async function apiFetch(path: string, token: string, init: RequestInit = 
 export function apiGet(path: string, token: string) {
   return apiFetch(path, token, { method: "GET" });
 }
+
+export function apiPost(path: string, token: string, json?: unknown, init: RequestInit = {}) {
+  return apiFetch(path, token, {
+    ...init,
+    method: "POST",
+    body: json !== undefined ? JSON.stringify(json) : undefined,
+    headers: init.headers
+  });
+}

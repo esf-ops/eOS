@@ -45,7 +45,8 @@ assert.match(queue, /data-testid="qf-queue-page"/);
 assert.match(estimates, /data-testid="qf-estimates-page"/);
 assert.match(queue, /Set Scope/);
 assert.match(inbox, /AI Takeoff/);
-console.log("ok: placeholder pages present with product copy");
+assert.match(inbox, /data-testid="qf-inbox-list"/);
+console.log("ok: Inbox wired; Queue/Estimates remain placeholder until later slices");
 
 const allSrc = readAllSrc(join(appRoot, "src")).join("\n");
 assert.doesNotMatch(allSrc, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);
