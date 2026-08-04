@@ -19,6 +19,9 @@ const MESSAGES = {
     "Scope is already set for this estimate. AI Takeoff will not run again.",
   takeoff_not_found: "That takeoff job could not be found.",
   takeoff_not_ready: "Review measurements before setting scope.",
+  estimate_not_found: "Estimate not found.",
+  estimate_not_scoped: "Official scope is not set for this estimate yet.",
+  scope_invalid: "Official scope is invalid.",
   organization_required: "Organization context unavailable.",
   forbidden: "Forbidden"
 };
@@ -55,11 +58,13 @@ export function createQuoteFlowError(code, opts = {}) {
       ? 409
       : safe.code === "message_not_found" ||
           safe.code === "mailbox_not_configured" ||
-          safe.code === "takeoff_not_found"
+          safe.code === "takeoff_not_found" ||
+          safe.code === "estimate_not_found" ||
+          safe.code === "estimate_not_scoped"
         ? 404
         : safe.code === "mailbox_unavailable" || safe.code === "takeoff_unavailable"
           ? 503
-          : safe.code === "takeoff_not_ready"
+          : safe.code === "takeoff_not_ready" || safe.code === "scope_invalid"
             ? 422
             : 400);
   err.code = safe.code;

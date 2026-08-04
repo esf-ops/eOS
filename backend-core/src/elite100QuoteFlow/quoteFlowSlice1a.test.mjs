@@ -118,7 +118,8 @@ console.log("ok: flag + head slug");
   assert.ok(
     health.body?.shell === "slice-1a" ||
       health.body?.shell === "slice-1b" ||
-      health.body?.shell === "slice-1c"
+      health.body?.shell === "slice-1c" ||
+      health.body?.shell === "slice-1d"
   );
   const cfg = await requestApp(app, "/api/elite100-quote-flow/config");
   assert.equal(cfg.status, 200);
@@ -169,7 +170,10 @@ console.log("ok: flag + head slug");
   assert.equal(status, 200);
   assert.equal(body?.ok, true);
   assert.ok(
-    body?.shell === "slice-1a" || body?.shell === "slice-1b" || body?.shell === "slice-1c"
+    body?.shell === "slice-1a" ||
+      body?.shell === "slice-1b" ||
+      body?.shell === "slice-1c" ||
+      body?.shell === "slice-1d"
   );
   console.log("ok: granted user reaches health stub");
 }

@@ -361,3 +361,123 @@ body {
   cursor: pointer;
   padding: 0;
 }
+
+.qf-estimates {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .qf-estimates {
+    grid-template-columns: 1fr;
+  }
+}
+
+.qf-estimates__list,
+.qf-estimates__detail {
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  padding: 16px;
+  box-shadow: var(--sh-1);
+  min-height: 280px;
+}
+
+.qf-estimates__detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.qf-estimates__detail-head h2 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+}
+
+.qf-estimates__section {
+  border-top: 1px solid var(--eos-line);
+  padding: 16px 0;
+}
+
+.qf-estimates__section.is-later {
+  opacity: 0.55;
+}
+
+.qf-estimates__section.is-later h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.qf-scope__intro h2 {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+
+.qf-scope__hint {
+  margin: 8px 0 0;
+  font-size: 0.9rem;
+}
+
+.qf-scope__room {
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  padding: 12px;
+  margin: 12px 0;
+  display: grid;
+  gap: 12px;
+}
+
+.qf-scope__room-head,
+.qf-scope__backsplash,
+.qf-scope__piece {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.qf-scope label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+}
+
+.qf-scope input[type="text"],
+.qf-scope input[type="number"] {
+  border: 1px solid var(--eos-line-strong);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.qf-scope__check {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.qf-scope__pieces {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.qf-scope__piece {
+  border: 1px dashed var(--eos-line-strong);
+  border-radius: var(--r-sm);
+  padding: 10px;
+}
+
+.qf-scope__piece.is-excluded {
+  opacity: 0.55;
+  background: #f8f9fc;
+}
