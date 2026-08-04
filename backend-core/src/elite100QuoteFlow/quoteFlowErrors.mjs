@@ -13,10 +13,12 @@ const MESSAGES = {
   import_failed:
     "AI Takeoff could not import this file. Try another plan attachment.",
   import_confirm_required: "Confirm Start AI Takeoff to continue.",
-  already_scoped:
-    "Scope is already set for this estimate. AI Takeoff will not run again.",
+  set_scope_confirm_required: "Confirm Set Scope to continue.",
+  already_scoped: "Scope is already set for this estimate.",
   takeoff_not_allowed:
     "Scope is already set for this estimate. AI Takeoff will not run again.",
+  takeoff_not_found: "That takeoff job could not be found.",
+  takeoff_not_ready: "Review measurements before setting scope.",
   organization_required: "Organization context unavailable.",
   forbidden: "Forbidden"
 };
@@ -51,11 +53,15 @@ export function createQuoteFlowError(code, opts = {}) {
     opts.statusCode ??
     (safe.code === "already_scoped" || safe.code === "takeoff_not_allowed"
       ? 409
-      : safe.code === "message_not_found" || safe.code === "mailbox_not_configured"
+      : safe.code === "message_not_found" ||
+          safe.code === "mailbox_not_configured" ||
+          safe.code === "takeoff_not_found"
         ? 404
         : safe.code === "mailbox_unavailable" || safe.code === "takeoff_unavailable"
           ? 503
-          : 400);
+          : safe.code === "takeoff_not_ready"
+            ? 422
+            : 400);
   err.code = safe.code;
   if (opts.diagnostic && typeof opts.diagnostic === "object") {
     err.diagnostic = opts.diagnostic;

@@ -303,3 +303,61 @@ body {
   margin: 16px 0 8px;
   font-size: 0.95rem;
 }
+
+.qf-queue {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .qf-queue {
+    grid-template-columns: 1fr;
+  }
+}
+
+.qf-queue__list,
+.qf-queue__detail {
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  padding: 16px;
+  box-shadow: var(--sh-1);
+  min-height: 280px;
+}
+
+.qf-queue__detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.qf-queue__frame-wrap {
+  margin-top: 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  min-height: 640px;
+  background: #fff;
+}
+
+.qf-queue__frame {
+  width: 100%;
+  min-height: 640px;
+  border: 0;
+  display: block;
+}
+
+.qf-linkish {
+  border: 0;
+  background: transparent;
+  color: var(--eos-accent);
+  font: inherit;
+  font-weight: 650;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}

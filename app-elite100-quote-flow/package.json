@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node src/shell/quoteFlowShell.ui.test.mjs && node src/inbox/quoteFlowInbox.ui.test.mjs"
+    "test": "node src/shell/quoteFlowShell.ui.test.mjs && node src/inbox/quoteFlowInbox.ui.test.mjs && node src/queue/quoteFlowQueue.ui.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",

@@ -15,6 +15,7 @@ function readAllSrc(dir, acc = []) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) {
       if (name === "shell") continue; // exclude this contract test from copy scan
+      // Still scan inbox/queue page sources; skip nested test-only dirs if added later
       readAllSrc(p, acc);
     } else if (/\.(tsx|ts|css|html)$/.test(name) && !name.endsWith(".test.mjs")) {
       acc.push(readFileSync(p, "utf8"));
@@ -46,7 +47,9 @@ assert.match(estimates, /data-testid="qf-estimates-page"/);
 assert.match(queue, /Set Scope/);
 assert.match(inbox, /AI Takeoff/);
 assert.match(inbox, /data-testid="qf-inbox-list"/);
-console.log("ok: Inbox wired; Queue/Estimates remain placeholder until later slices");
+assert.match(queue, /data-testid="qf-queue-list"/);
+assert.match(queue, /Review Takeoff|Set Scope/);
+console.log("ok: Inbox + Estimate Queue wired; Estimates detail remains later slice");
 
 const allSrc = readAllSrc(join(appRoot, "src")).join("\n");
 assert.doesNotMatch(allSrc, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);

@@ -3772,3 +3772,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowService`, Quote Flow routes, `InboxPage`, presenter/tests, this doc. |
 | **Protected / unchanged** | Digital Estimate, pricing formulas, Studio V2 behavior, Internal Estimate, AI Takeoff algorithm, migrations. |
 | **Revisit trigger** | Slice 1C Estimate Queue + Set Scope. |
+
+### 275. Elite 100 Quote Flow Slice 1C — Estimate Queue + Set Scope (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/elite100-quote-flow-slice-1c-set-scope` |
+| **Decision** | Estimate Queue lists returned takeoffs (via Studio queue read model). Review embeds ConsolidatedTakeoffReview (`quoteFlowSetScope=1` → **Use these measurements**). `POST …/queue/:takeoffJobId/set-scope` freezes takeoff via `approveAndBuildEstimate`, ensures `studio_estimates`, seeds `scope_json` via `refreshScopeFromTakeoff({ force: true })`. Idempotent already-scoped returns existing estimateId. No calculate / estimate approve / publish / accept / sold. |
+| **Why** | Completes Inbox → verify dimensions → Set Scope without Studio V1/V2 hybrid. |
+| **Impacted** | `quoteFlowSetScope`, queue presenter/routes, EstimateQueuePage, consolidated approve label, tests, this doc. |
+| **Protected / unchanged** | Digital Estimate, pricing formulas, Studio V2 product path, Internal Estimate, AI Takeoff algorithm, migrations. |
+| **Revisit trigger** | Slice 1D Estimates list/detail official scope editor. |

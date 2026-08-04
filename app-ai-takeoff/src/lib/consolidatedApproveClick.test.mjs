@@ -25,6 +25,15 @@ console.log("\nconsolidatedApproveClick.test.mjs\n");
     approveButtonLabel({ approveStatus: "idle", advisoryCount: 7, blockingCount: 0 }),
     "Approve with 7 advisory warnings"
   );
+  assert.equal(
+    approveButtonLabel({
+      approveStatus: "idle",
+      advisoryCount: 0,
+      blockingCount: 0,
+      quoteFlowSetScope: true
+    }),
+    "Use these measurements"
+  );
   console.log("  ✓ T1 dialog + button label for hosted 7-advisory case");
 }
 
