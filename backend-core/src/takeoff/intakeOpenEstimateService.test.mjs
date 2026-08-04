@@ -8,6 +8,7 @@ import { InMemoryQuoteIntakeRepository } from "../quoteIntake/quoteIntakeReposit
 import {
   buildOpenEstimateIdempotencyKey,
   hydrateAttachmentGraphIdentity,
+  intakeAttachmentIdForTakeoffLink,
   openEstimateForIntakeCase,
   rejectCallerOpenEstimateHints,
   selectSupportedPdfAttachment
@@ -179,6 +180,21 @@ console.log("\nintakeOpenEstimateService.test.mjs\n");
         }
       ),
     /No supported plan/
+  );
+
+  assert.equal(
+    intakeAttachmentIdForTakeoffLink({
+      id: "live:AAk",
+      liveManualCandidate: true,
+      sourceAttachmentId: "AAkALgAA"
+    }),
+    null
+  );
+  assert.equal(
+    intakeAttachmentIdForTakeoffLink({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    }),
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
   );
 
   console.log("ok: PDF selection unchanged; Graph JPG manual override uses scoped filename + hydrate");

@@ -20,6 +20,11 @@ import {
 import { sanitizeQuoteIntakeAuditMetadata } from "./quoteIntakeAuditSanitize.mjs";
 import { normalizeAttachmentInputs } from "./quoteIntakeAttachmentMeta.mjs";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function isUuid(value) {
+  return UUID_RE.test(String(value ?? "").trim());
+}
+
 function normOrg(organizationId) {
   const id = String(organizationId ?? "").trim();
   if (!id) {
@@ -647,7 +652,10 @@ export class SupabaseQuoteIntakeRepository {
       organization_id: organizationId,
       intake_case_id: intakeCaseId,
       takeoff_job_id: input.takeoffJobId ? String(input.takeoffJobId) : null,
-      intake_attachment_id: input.sourceAttachmentId ? String(input.sourceAttachmentId) : null,
+      intake_attachment_id:
+        input.sourceAttachmentId && isUuid(input.sourceAttachmentId)
+          ? String(input.sourceAttachmentId)
+          : null,
       attachment_sha256: input.attachmentSha256 ? normSha(input.attachmentSha256) : null,
       relationship_status: input.relationshipStatus || TAKEOFF_LINK_RELATIONSHIP_STATUS.REQUESTED,
       initiation_mode: input.initiationMode || TAKEOFF_INITIATION_MODE.MANUAL,
