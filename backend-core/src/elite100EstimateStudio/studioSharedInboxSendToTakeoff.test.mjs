@@ -5,10 +5,12 @@
 import assert from "node:assert/strict";
 import {
   buildAttachmentNotSupportedDiagnostic,
+  buildTakeoffUnavailableDiagnostic,
   createStudioSharedInboxService
 } from "./studioSharedInboxService.mjs";
 import {
   hydrateAttachmentGraphIdentity,
+  intakeAttachmentIdForTakeoffLink,
   openEstimateForIntakeCase,
   selectSupportedPdfAttachment
 } from "../takeoff/intakeOpenEstimateService.mjs";
@@ -955,8 +957,20 @@ function baseEnv() {
     async listTakeoffLinks() {
       return [];
     },
-    async createTakeoffLink({ takeoffJobId }) {
-      return { id: "link-1", takeoffJobId, relationshipStatus: "queued" };
+    async createTakeoffLink(input) {
+      if (
+        input.sourceAttachmentId &&
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          String(input.sourceAttachmentId)
+        )
+      ) {
+        const e = new Error("invalid input syntax for type uuid");
+        e.statusCode = 503;
+        e.code = "db_error";
+        throw e;
+      }
+      assert.equal(input.sourceAttachmentId, null);
+      return { id: "link-1", takeoffJobId: input.takeoffJobId, relationshipStatus: "queued" };
     },
     async appendAuditEvent() {}
   };
@@ -1098,6 +1112,206 @@ function baseEnv() {
   );
 
   console.log("ok: empty intake-case attachments + live Graph JPG manual override succeeds");
+}
+
+{
+  assert.equal(
+    intakeAttachmentIdForTakeoffLink({
+      id: "live:AAkALgAA",
+      liveManualCandidate: true,
+      sourceAttachmentId: "AAkALgAAopaque"
+    }),
+    null
+  );
+  assert.equal(
+    intakeAttachmentIdForTakeoffLink({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      support: "direct_pdf"
+    }),
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  );
+  console.log("ok: live candidate never writes Graph key into intake_attachment UUID FK");
+}
+
+// Graph fetch failure must surface graph_fetch diagnostic (not mislabeled support).
+{
+  const GRAPH_KEY = "AAkALgAAfetchFail==";
+  const JPEG_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const repo = {
+    async getCase() {
+      return {
+        id: "case-fetch-fail",
+        sourceMessage: { graphImmutableMessageId: "graph-msg" },
+        attachments: []
+      };
+    },
+    async listTakeoffLinks() {
+      return [];
+    }
+  };
+  const svc = createStudioSharedInboxService({
+    env: baseEnv(),
+    quoteIntakeRepository: repo,
+    previewFn: async () => ({
+      mailboxDisplay: "quotes@example.com",
+      messages: [
+        {
+          graphMessageId: "msg-fetch-fail",
+          subject: "Q",
+          bodyPreview: "hi",
+          hasAttachments: true,
+          eligibilityHint: "already_imported",
+          alreadyImported: true,
+          existingCaseId: "case-fetch-fail",
+          sender: { displayName: "Dave", emailPresent: true },
+          attachments: [
+            {
+              sourceAttachmentId: GRAPH_KEY,
+              name: "1000005197.jpg",
+              mimeType: "image/jpeg",
+              support: "image_needs_review",
+              sizeBytes: JPEG_BYTES.length
+            }
+          ]
+        }
+      ]
+    }),
+    openEstimate: async (deps) =>
+      openEstimateForIntakeCase({
+        ...deps,
+        repository: repo,
+        repositoryMode: "memory",
+        getSupabase: () => ({}),
+        graphClient: {
+          async getAttachment() {
+            return { size: 0, contentBytes: null };
+          }
+        }
+      })
+  });
+  await assert.rejects(
+    () =>
+      svc.sendToAiTakeoff({
+        organizationId: ORG,
+        messageKey: "msg-fetch-fail",
+        attachmentKey: GRAPH_KEY,
+        confirm: true,
+        manualPlanOverride: true,
+        markAsPlan: true
+      }),
+    (e) => {
+      assert.equal(e.code, "attachment_not_supported");
+      assert.equal(e.diagnostic?.stage, "graph_fetch");
+      assert.equal(e.diagnostic?.rejectedReason, "attachment_bytes_unavailable");
+      return true;
+    }
+  );
+  console.log("ok: Graph fetch failure returns graph_fetch diagnostic");
+}
+
+// Workspace/job create failure returns takeoff_unavailable with stage diagnostic.
+{
+  const GRAPH_KEY = "AAkALgAAworkspaceFail==";
+  const JPEG_BYTES = Buffer.from([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00,
+    0x01, 0x00, 0x01, 0x00, 0x00, 0xff, 0xd9
+  ]);
+  const repo = {
+    async getCase() {
+      return {
+        id: "case-ws-fail",
+        sourceMessage: { graphImmutableMessageId: "graph-msg" },
+        attachments: []
+      };
+    },
+    async listTakeoffLinks() {
+      return [];
+    },
+    async createTakeoffLink() {
+      throw new Error("should not link if workspace fails");
+    }
+  };
+  const svc = createStudioSharedInboxService({
+    env: baseEnv(),
+    quoteIntakeRepository: repo,
+    previewFn: async () => ({
+      mailboxDisplay: "quotes@example.com",
+      messages: [
+        {
+          graphMessageId: "msg-ws-fail",
+          subject: "Q",
+          bodyPreview: "hi",
+          hasAttachments: true,
+          eligibilityHint: "already_imported",
+          alreadyImported: true,
+          existingCaseId: "case-ws-fail",
+          sender: { displayName: "Dave", emailPresent: true },
+          attachments: [
+            {
+              sourceAttachmentId: GRAPH_KEY,
+              name: "1000005197.jpg",
+              mimeType: "image/jpeg",
+              support: "image_needs_review",
+              sizeBytes: JPEG_BYTES.length
+            }
+          ]
+        }
+      ]
+    }),
+    openEstimate: async (deps) =>
+      openEstimateForIntakeCase({
+        ...deps,
+        repository: repo,
+        repositoryMode: "memory",
+        getSupabase: () => ({}),
+        graphClient: {
+          async getAttachment() {
+            return {
+              size: JPEG_BYTES.length,
+              contentBytes: JPEG_BYTES.toString("base64")
+            };
+          }
+        },
+        ingestFile: async () => ({
+          quoteFileId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          reused: false
+        }),
+        createWorkspace: async () => {
+          const e = new Error("Failed to create takeoff job");
+          e.statusCode = 503;
+          throw e;
+        }
+      })
+  });
+  await assert.rejects(
+    () =>
+      svc.sendToAiTakeoff({
+        organizationId: ORG,
+        messageKey: "msg-ws-fail",
+        attachmentKey: GRAPH_KEY,
+        confirm: true,
+        manualPlanOverride: true,
+        markAsPlan: true
+      }),
+    (e) => {
+      assert.equal(e.code, "takeoff_unavailable");
+      assert.equal(e.diagnostic?.codePath, "inbox-takeoff-unavailable-v1");
+      assert.equal(e.diagnostic?.stage, "workspace_create");
+      assert.equal(e.diagnostic?.liveManualAttachmentPresent, true);
+      assert.equal(e.diagnostic?.selectedAttachmentExtension, ".jpg");
+      return true;
+    }
+  );
+  const d = buildTakeoffUnavailableDiagnostic({
+    stage: "link_create",
+    manualPlanOverride: true,
+    liveManualAttachmentPresent: true,
+    selectedAttachmentName: "1000005197.jpg",
+    rejectedReason: "link_create:db_error"
+  });
+  assert.equal(d.ingestSucceeded, true);
+  assert.doesNotMatch(JSON.stringify(d), /AAkALgAA/);
+  console.log("ok: workspace create failure returns takeoff_unavailable diagnostic");
 }
 
 console.log("\nstudioSharedInboxSendToTakeoff.test.mjs: ok\n");

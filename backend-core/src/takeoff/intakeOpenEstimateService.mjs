@@ -29,6 +29,7 @@ import {
   requestHasManualPlanOverride
 } from "../quoteIntake/quoteIntakePlanAttachmentSupport.mjs";
 import { ingestQuoteFileFromBytes } from "../files/ingestQuoteFileFromBytes.mjs";
+import { isUuid } from "../files/quoteFileService.mjs";
 import { createTakeoffWorkspace } from "./takeoffWorkspaceService.mjs";
 import {
   TAKEOFF_INITIATION_MODE,
@@ -264,6 +265,18 @@ function findActiveLinkedJob(links) {
         String(l.relationshipStatus ?? "") !== TAKEOFF_LINK_RELATIONSHIP_STATUS.SUPERSEDED
     ) || null
   );
+}
+
+/**
+ * intake_attachment_id is a UUID FK. Live Graph candidates use opaque AAMk keys /
+ * synthetic `live:…` ids — never write those into the FK column.
+ * @param {object} attachment
+ * @returns {string|null}
+ */
+export function intakeAttachmentIdForTakeoffLink(attachment) {
+  if (!attachment || attachment.liveManualCandidate === true) return null;
+  const id = String(attachment.id || "").trim();
+  return isUuid(id) ? id : null;
 }
 
 /**
@@ -649,7 +662,10 @@ export async function openEstimateForIntakeCase(deps) {
     }
 
     let validated;
+    let quoteFileId = null;
+    let openEstimateStage = "graph_fetch";
     try {
+      openEstimateStage = "graph_fetch";
       validated = await resolveValidatedPlanBytes({
         caseRow,
         attachment,
@@ -670,10 +686,11 @@ export async function openEstimateForIntakeCase(deps) {
           // best-effort
         }
       }
+      e.openEstimateStage = "graph_fetch";
       throw e;
     }
 
-    if (attachment?.id && typeof repository.updateAttachmentRetrieval === "function") {
+    if (attachment?.id && isUuid(attachment.id) && typeof repository.updateAttachmentRetrieval === "function") {
       try {
         await repository.updateAttachmentRetrieval(org, caseId, attachment.id, {
           sha256: validated.sha256,
@@ -684,8 +701,8 @@ export async function openEstimateForIntakeCase(deps) {
       }
     }
 
-    let quoteFileId;
     try {
+      openEstimateStage = "ingest";
       const ingested = await ingestFile({
         supabase,
         organizationId: org,
@@ -696,7 +713,9 @@ export async function openEstimateForIntakeCase(deps) {
         mimeType: validated.mimeType || attachment.mimeType || "application/pdf",
         metadata: {
           intakeCaseId: caseId,
-          intakeAttachmentId: attachment.id || null,
+          // Only persist real intake attachment UUIDs — never Graph keys / live: ids.
+          intakeAttachmentId: intakeAttachmentIdForTakeoffLink(attachment),
+          liveManualCandidate: attachment.liveManualCandidate === true,
           contentFingerprint: createHash("sha256")
             .update(`intake:${caseId}:${validated.sha256}`)
             .digest("hex")
@@ -704,30 +723,51 @@ export async function openEstimateForIntakeCase(deps) {
         }
       });
       quoteFileId = ingested.quoteFileId;
+    } catch (e) {
+      e.openEstimateStage = "ingest";
+      if (!e.code) e.code = "file_ingest_failed";
+      throw e;
     } finally {
       validated.bytes.fill?.(0);
     }
 
-    const workspace = await createWorkspace({
-      supabase,
-      organizationId: org,
-      userId: actorUserId,
-      quoteFileId
-    });
-    const takeoffJobId = String(workspace.takeoffJobId);
+    let takeoffJobId;
+    try {
+      openEstimateStage = "workspace_create";
+      const workspace = await createWorkspace({
+        supabase,
+        organizationId: org,
+        userId: actorUserId,
+        quoteFileId
+      });
+      takeoffJobId = String(workspace.takeoffJobId);
+    } catch (e) {
+      e.openEstimateStage = "workspace_create";
+      if (!e.code) e.code = "takeoff_unavailable";
+      throw e;
+    }
 
-    const link = await repository.createTakeoffLink({
-      organizationId: org,
-      intakeCaseId: caseId,
-      takeoffJobId,
-      sourceAttachmentId: attachment.id || attachment.sourceAttachmentId,
-      attachmentSha256: validated.sha256 || attachment.sha256,
-      relationshipStatus: TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED,
-      initiationMode: resolvedInitiationMode,
-      idempotencyKey,
-      actorType: "user",
-      createdBy: actorUserId
-    });
+    let link;
+    try {
+      openEstimateStage = "link_create";
+      link = await repository.createTakeoffLink({
+        organizationId: org,
+        intakeCaseId: caseId,
+        takeoffJobId,
+        // UUID FK only — live Graph image candidates leave this null.
+        sourceAttachmentId: intakeAttachmentIdForTakeoffLink(attachment),
+        attachmentSha256: validated.sha256 || attachment.sha256,
+        relationshipStatus: TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED,
+        initiationMode: resolvedInitiationMode,
+        idempotencyKey,
+        actorType: "user",
+        createdBy: actorUserId
+      });
+    } catch (e) {
+      e.openEstimateStage = "link_create";
+      if (!e.code) e.code = "takeoff_unavailable";
+      throw e;
+    }
 
     // If an earlier stub link lacked a job id, createTakeoffLink returns that stub.
     // Prefer the workspace job id we just ensured.

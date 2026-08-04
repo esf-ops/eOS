@@ -3695,4 +3695,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | PDF auto takeoff, Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. `image_needs_review` still does not auto-send. |
 | **Revisit trigger** | Persist Graph attachment metadata on import so live candidates are rarely needed; remove staff diagnostics after stable production. |
 
+### 268. Live Graph image takeoff link must not write opaque ids into UUID FK (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/inbox-takeoff-unavailable-after-image-handoff` |
+| **Decision** | After live Graph image handoff reaches ingest/workspace create, `createTakeoffLink` receives `intake_attachment_id` **only when it is a real UUID**. Live manual candidates (`live:…` / Graph AAMk keys) pass `null`. Staff-only `takeoff_unavailable` diagnostics report stage (`graph_fetch` / `ingest` / `workspace_create` / `link_create`). |
+| **Why** | Production returned `takeoff_unavailable` after attachment support was fixed: open-estimate passed Graph/synthetic ids into `quote_intake_takeoff_links.intake_attachment_id` (UUID FK), link insert failed, and the catch mapped any non-support error to `takeoff_unavailable`. |
+| **Impacted** | `intakeAttachmentIdForTakeoffLink`, open-estimate link/ingest metadata, Shared Inbox send-to-takeoff diagnostics/route, Supabase link insert guard, tests, this doc. |
+| **Protected / unchanged** | PDF takeoff (real attachment UUIDs still linked), Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. |
+| **Revisit trigger** | Persist Graph attachment rows at import so links can reference a real intake attachment UUID. |
+
 ---

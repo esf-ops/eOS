@@ -93,6 +93,42 @@ export function buildAttachmentNotSupportedDiagnostic(partial = {}) {
 }
 
 /**
+ * Staff-only diagnostic for takeoff_unavailable (no secrets / no bytes).
+ * @param {Record<string, unknown>} partial
+ */
+export function buildTakeoffUnavailableDiagnostic(partial = {}) {
+  const name = String(partial.selectedAttachmentName || "").trim();
+  const extMatch = name.match(/\.([a-z0-9]+)$/i);
+  const stage = String(partial.stage || partial.openEstimateStage || "unknown");
+  return {
+    codePath: "inbox-takeoff-unavailable-v1",
+    stage,
+    manualPlanOverride: partial.manualPlanOverride === true,
+    liveManualAttachmentPresent: partial.liveManualAttachmentPresent === true,
+    selectedAttachmentName: name || null,
+    selectedAttachmentExtension: extMatch ? `.${extMatch[1].toLowerCase()}` : null,
+    graphFetchAttempted: partial.graphFetchAttempted === true || stage !== "select",
+    graphFetchSucceeded:
+      partial.graphFetchSucceeded === true ||
+      ["ingest", "workspace_create", "link_create"].includes(stage),
+    ingestAttempted:
+      partial.ingestAttempted === true ||
+      ["ingest", "workspace_create", "link_create"].includes(stage),
+    ingestSucceeded:
+      partial.ingestSucceeded === true ||
+      ["workspace_create", "link_create"].includes(stage),
+    quoteFileIdPresent: partial.quoteFileIdPresent === true,
+    workspaceLookupAttempted: partial.workspaceLookupAttempted === true,
+    workspaceCreateAttempted:
+      partial.workspaceCreateAttempted === true ||
+      stage === "workspace_create" ||
+      stage === "link_create",
+    existingWorkspaceFound: partial.existingWorkspaceFound === true,
+    rejectedReason: String(partial.rejectedReason || stage || "unknown")
+  };
+}
+
+/**
  * @param {object} deps
  */
 export function createStudioSharedInboxService(deps = {}) {
@@ -639,11 +675,16 @@ export function createStudioSharedInboxService(deps = {}) {
         sharedInboxSafeError(mapped, e?.message || "AI Takeoff is temporarily unavailable.").error
       );
       err.statusCode =
-        mapped === "attachment_not_supported" ? 400 : Number(e?.statusCode) || 500;
+        mapped === "attachment_not_supported"
+          ? 400
+          : Number(e?.statusCode) || (mapped === "takeoff_unavailable" ? 503 : 500);
       err.code = mapped;
+      const openStage = String(e?.openEstimateStage || "");
       if (mapped === "attachment_not_supported") {
         const stage =
-          code === "attachment_bytes_unavailable" ? "graph_fetch" : "open_estimate";
+          code === "attachment_bytes_unavailable" || openStage === "graph_fetch"
+            ? "graph_fetch"
+            : "open_estimate";
         err.diagnostic = buildAttachmentNotSupportedDiagnostic({
           ...baseDiag,
           stage,
@@ -667,6 +708,17 @@ export function createStudioSharedInboxService(deps = {}) {
             code === "attachment_bytes_unavailable"
               ? "attachment_bytes_unavailable"
               : `open_estimate:${code}`
+        });
+      } else if (mapped === "takeoff_unavailable") {
+        err.diagnostic = buildTakeoffUnavailableDiagnostic({
+          stage: openStage || "open_estimate",
+          openEstimateStage: openStage || "open_estimate",
+          manualPlanOverride: overrideRequested,
+          liveManualAttachmentPresent: Boolean(liveManualAttachment),
+          selectedAttachmentName: matchedFilename,
+          rejectedReason: openStage
+            ? `${openStage}:${code}`
+            : `open_estimate:${code}`
         });
       }
       throw err;
