@@ -30,6 +30,7 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "visualizer", // Countertop Visualizer MVP — concept-only AI render (standalone head)
   "quickbooks_intelligence", // QuickBooks Intelligence — AR/revenue/payment insights (read-only)
   "elite100_estimate_studio", // Elite 100 Estimate Studio — private pilot Digital Estimate publish head
+  "elite100_quote_flow", // Elite 100 Quote Flow — Inbox → Estimate Queue → Estimates (clean staff head)
   "account_directory" // Account Directory — standalone account identity + estimating contacts (not Estimate Studio)
 ]);
 

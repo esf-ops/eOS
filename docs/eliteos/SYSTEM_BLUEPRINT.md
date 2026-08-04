@@ -248,6 +248,8 @@ See also: `docs/EOS_REPO_SECRET_AUDIT.md`, `.cursor/rules/security-audit.mdc`.
 | **`app-quote` changed** | `npm run build --prefix app-quote` |
 | **`app-internal-estimate` changed** | `npm install --prefix app-internal-estimate` (first clone) then `npm run build --prefix app-internal-estimate` |
 | **`app-pricing-admin` changed** | `npm install --prefix app-pricing-admin` (first clone) then `npm run build --prefix app-pricing-admin` |
+| **`app-elite100-quote-flow` changed** | `npm install --prefix app-elite100-quote-flow` (first clone) then `npm run build --prefix app-elite100-quote-flow` |
+| **`app-elite100-estimate-studio` changed** | `npm run build --prefix app-elite100-estimate-studio` |
 | **Backend JS touched** | `node --check <path-to-changed-file.js>` |
 | **Repo-wide sanity** | `npm run eos:check:local` |
 | **After deploy** (sensitive) | Hosted smoke: public calculate + submit + verify Supabase + Monday |

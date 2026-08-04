@@ -1,0 +1,175 @@
+/* Elite 100 Quote Flow — shell styles (Slice 1A). Uses standard --eos-* tokens. */
+
+:root {
+  --eos-ink: #0b1a33;
+  --eos-ink-soft: #1e2b48;
+  --eos-ink-mid: #475067;
+  --eos-ink-muted: #6b7892;
+  --eos-ink-faint: #94a0b8;
+  --eos-line: rgba(11, 26, 51, 0.08);
+  --eos-line-strong: rgba(11, 26, 51, 0.14);
+  --eos-bg: #f6f7fb;
+  --eos-surface: #ffffff;
+  --eos-accent: #a3132f;
+  --eos-accent-hover: #8e0f28;
+  --eos-accent-soft: rgba(163, 19, 47, 0.08);
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --sh-1: 0 1px 2px rgba(11, 26, 51, 0.04);
+  --sh-2: 0 4px 14px rgba(11, 26, 51, 0.06);
+  --eos-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --eos-dur-1: 140ms;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color: var(--eos-ink);
+  background: var(--eos-bg);
+}
+
+.qf-muted {
+  color: var(--eos-ink-muted);
+  line-height: 1.45;
+}
+
+.qf-error {
+  color: var(--eos-accent);
+}
+
+.qf-boot-error,
+.qf-auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.qf-auth__card {
+  width: min(420px, 100%);
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-2);
+  padding: 28px;
+}
+
+.qf-auth__card form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.qf-auth__card label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.qf-auth__card input {
+  border: 1px solid var(--eos-line-strong);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.qf-btn-primary {
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--eos-accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.qf-btn-primary:hover {
+  background: var(--eos-accent-hover);
+}
+
+.qf-app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.qf-shell {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 20px 20px 48px;
+}
+
+.qf-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.qf-nav__btn {
+  border: 1px solid var(--eos-line-strong);
+  background: var(--eos-surface);
+  color: var(--eos-ink-soft);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--eos-dur-1) var(--eos-ease), border-color var(--eos-dur-1) var(--eos-ease);
+}
+
+.qf-nav__btn:hover {
+  border-color: var(--eos-ink-faint);
+}
+
+.qf-nav__btn.is-active {
+  background: var(--eos-accent-soft);
+  border-color: rgba(163, 19, 47, 0.35);
+  color: var(--eos-accent);
+}
+
+.qf-shell-status {
+  margin: 0 0 16px;
+  font-size: 0.9rem;
+  color: var(--eos-ink-muted);
+}
+
+.qf-page__header h1 {
+  margin: 0 0 8px;
+  font-size: 1.6rem;
+}
+
+.qf-page__header p {
+  margin: 0 0 20px;
+  max-width: 62ch;
+}
+
+.qf-placeholder {
+  background: var(--eos-surface);
+  border: 1px dashed var(--eos-line-strong);
+  border-radius: var(--r-md);
+  padding: 24px;
+  box-shadow: var(--sh-1);
+}
+
+.qf-placeholder p {
+  margin: 0;
+  color: var(--eos-ink-mid);
+  line-height: 1.5;
+  max-width: 60ch;
+}
