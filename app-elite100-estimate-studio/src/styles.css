@@ -3296,6 +3296,13 @@ button.linkish {
   margin: 0 0 0.4rem;
   font-size: 1.1rem;
 }
+.studio-v2-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  align-items: center;
+}
 
 /* Studio V2 Slice B — Working Draft scope editor */
 .studio-v2-layout {
