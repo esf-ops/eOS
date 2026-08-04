@@ -107,9 +107,11 @@ assert.match(more, /Open Legacy Queue/);
 assert.doesNotMatch(more, /studio-nav-digital-estimates/);
 console.log("ok: More is explicitly legacy, compatibility, and support");
 
-assert.match(shell, /Open in V1 \(Legacy fallback\)/);
-assert.match(shell, /V1 remains[\s\S]{0,80}legacy fallback/);
-console.log("ok: V1 remains available and clearly secondary");
+assert.match(shell, /Open Takeoff Review/);
+assert.match(shell, /studio-v2-open-takeoff-review/);
+assert.match(shell, /Studio V2 remains where the estimate is finalized|quote authority|does not price, publish/);
+assert.doesNotMatch(shell, /Open in V1 \(Legacy fallback\)/);
+console.log("ok: Takeoff Review is supporting tool; Studio V2 is authority");
 
 const landingFunction = app.slice(
   app.indexOf("function openStudioV2Landing"),

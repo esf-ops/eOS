@@ -347,6 +347,10 @@ export function buildSharedInboxRow(input = {}) {
     });
   }
 
+  const takeoffFailed = aiTakeoff.state === "failed";
+  const hasUsableTakeoff =
+    Boolean(aiTakeoff.takeoffJobId) && !takeoffFailed && aiTakeoff.state !== "not_applicable";
+
   /** @type {string} */
   let importState = SHARED_INBOX_STATES.NOT_IMPORTED;
   /** @type {string} */
@@ -363,30 +367,46 @@ export function buildSharedInboxRow(input = {}) {
   } else if (alreadyImported) {
     importState = SHARED_INBOX_STATES.ALREADY_IMPORTED;
     const opKey = String(operationalState?.key || "");
-    if (opKey === "takeoff_processing") {
-      importState = SHARED_INBOX_STATES.TAKEOFF_PROCESSING;
-      primaryActionKey = "view_progress";
-      primaryActionLabel = "View progress";
+    if (takeoffFailed || (opKey === "takeoff_failed" && !hasUsableTakeoff)) {
+      // Import may have succeeded while AI Takeoff handoff failed — do not Resume.
+      importState = SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW;
+      primaryActionKey = "choose_plan";
+      primaryActionLabel = "Choose plan";
       openTarget = "takeoff";
-    } else if (opKey === "needs_takeoff_review" || aiTakeoff.reviewReady) {
+    } else if (opKey === "takeoff_processing" && hasUsableTakeoff) {
+      importState = SHARED_INBOX_STATES.TAKEOFF_PROCESSING;
+      primaryActionKey = "open_studio_v2";
+      primaryActionLabel = "Continue in Studio V2";
+      openTarget = "takeoff";
+    } else if ((opKey === "needs_takeoff_review" || aiTakeoff.reviewReady) && hasUsableTakeoff) {
       importState = SHARED_INBOX_STATES.TAKEOFF_READY;
-      primaryActionKey = "review_ai_takeoff";
-      primaryActionLabel = "Review AI Takeoff";
+      primaryActionKey = "open_studio_v2";
+      primaryActionLabel = "Open Studio V2";
       openTarget = "takeoff";
     } else if (
       opKey === "needs_plan_review" ||
-      String(queueRow?.caseStatus || "").toLowerCase() === "manual_review"
+      String(queueRow?.caseStatus || "").toLowerCase() === "manual_review" ||
+      (planSelectionRequired && !hasUsableTakeoff)
     ) {
       importState = SHARED_INBOX_STATES.NEEDS_MANUAL_REVIEW;
-      // Imported multi-plan / manual review: still choose which plan to send when no takeoff yet.
-      if (planSelectionRequired && !aiTakeoff.takeoffJobId) {
-        primaryActionKey = "choose_plan";
-        primaryActionLabel = "Choose plan";
-      } else {
-        primaryActionKey = "review_request";
-        primaryActionLabel = "Review request";
-      }
+      // Imported multi-plan / manual review without usable takeoff — choose a plan.
+      primaryActionKey = "choose_plan";
+      primaryActionLabel = "Choose plan";
       openTarget = operationalState?.openTarget || "takeoff";
+    } else if (!hasUsableTakeoff && supportedAttachmentCount > 0) {
+      // Imported with plan(s) but takeoff not started — open details to send (not Resume).
+      importState = SHARED_INBOX_STATES.IMPORTED;
+      primaryActionKey = "choose_plan";
+      primaryActionLabel =
+        supportedAttachmentCount > 1 || planSelectionRequired
+          ? "Choose plan"
+          : "Send to AI Takeoff";
+      openTarget = "takeoff";
+    } else if (hasUsableTakeoff) {
+      importState = SHARED_INBOX_STATES.IMPORTED;
+      primaryActionKey = "open_studio_v2";
+      primaryActionLabel = "Open Studio V2";
+      openTarget = "takeoff";
     } else if (estimateId) {
       importState = SHARED_INBOX_STATES.IMPORTED;
       primaryActionKey = "open_estimate";
@@ -394,8 +414,8 @@ export function buildSharedInboxRow(input = {}) {
       openTarget = operationalState?.openTarget || "takeoff";
     } else {
       importState = SHARED_INBOX_STATES.IMPORTED;
-      primaryActionKey = "open_estimate";
-      primaryActionLabel = "Open estimate";
+      primaryActionKey = "choose_plan";
+      primaryActionLabel = "Choose plan";
       openTarget = "takeoff";
     }
   } else if (supportState === SHARED_INBOX_STATES.UNSUPPORTED_ATTACHMENT) {
@@ -522,7 +542,9 @@ export function buildSharedInboxRow(input = {}) {
       activeEstimateId,
       intakeCaseId,
       planSelectionRequired,
-      planSupportSummary
+      planSupportSummary,
+      hasUsableTakeoff,
+      aiTakeoffFailed: takeoffFailed
     }),
     legacyPrimaryAction,
     secondaryActions: [
