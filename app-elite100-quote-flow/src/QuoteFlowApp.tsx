@@ -94,7 +94,11 @@ export default function QuoteFlowApp() {
           shell?: string;
         };
         if (!cancelled) {
-          setShellStatus(body?.shell === "slice-1a" ? "Quote Flow shell connected" : "Connected");
+          setShellStatus(
+            body?.shell === "slice-1a" || body?.shell === "slice-1b"
+              ? "Quote Flow connected"
+              : "Connected"
+          );
         }
       } catch (e) {
         if (!cancelled) {
@@ -253,7 +257,12 @@ export default function QuoteFlowApp() {
         ) : null}
 
         <main className="qf-main">
-          {mainNav === "inbox" ? <InboxPage /> : null}
+          {mainNav === "inbox" ? (
+            <InboxPage
+              authToken={sessionToken}
+              onOpenQueuePlaceholder={() => setNav("queue")}
+            />
+          ) : null}
           {mainNav === "queue" ? <EstimateQueuePage /> : null}
           {mainNav === "estimates" ? <EstimatesListPage /> : null}
         </main>

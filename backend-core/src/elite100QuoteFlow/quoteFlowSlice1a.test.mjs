@@ -115,7 +115,7 @@ console.log("ok: flag + head slug");
   assert.equal(on.mounted, true);
   const health = await requestApp(app, "/api/elite100-quote-flow/health");
   assert.equal(health.status, 200);
-  assert.equal(health.body?.shell, "slice-1a");
+  assert.ok(health.body?.shell === "slice-1a" || health.body?.shell === "slice-1b");
   const cfg = await requestApp(app, "/api/elite100-quote-flow/config");
   assert.equal(cfg.status, 200);
   assert.equal(cfg.body?.config?.headSlug, ELITE100_QUOTE_FLOW_HEAD_SLUG);
@@ -164,7 +164,7 @@ console.log("ok: flag + head slug");
   const { status, body } = await requestApp(app, "/api/elite100-quote-flow/health");
   assert.equal(status, 200);
   assert.equal(body?.ok, true);
-  assert.equal(body?.shell, "slice-1a");
+  assert.ok(body?.shell === "slice-1a" || body?.shell === "slice-1b");
   console.log("ok: granted user reaches health stub");
 }
 
