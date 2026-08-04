@@ -53,19 +53,29 @@ assert.match(page, /Open AI Takeoff Lab/);
 assert.match(page, /shared-inbox-open-takeoff-lab|shared-inbox-detail-open-takeoff-lab/);
 assert.match(page, /manualPlanOverride:\s*true/);
 assert.match(page, /shared-inbox-mark-as-plan/);
-// Normal Send must not pass manualPlanOverride: true
+assert.match(page, /Choose the plan file to send to AI Takeoff/);
+assert.match(page, /choose_plan|Choose plan/);
+assert.match(page, /shared-inbox-choose-plan-hint/);
+assert.match(page, /shared-inbox-attachment-error/);
+assert.match(page, /AI Takeoff could not import this file/);
+assert.match(page, /setFocusAttachmentsForKey|focusAttachmentsForKey/);
 assert.match(
   page,
   /data-testid="shared-inbox-send-to-takeoff"[\s\S]{0,220}onClick=\{\(\) => void runSendToAiTakeoff\(selected, a\)\}/
 );
+assert.match(page, /manualPlanOverride:\s*true/);
+console.log("ok: multi-plan Choose plan UX + import_failed copy");
+
 assert.match(api, /send-to-takeoff/);
 assert.match(api, /sendSharedInboxToAiTakeoff/);
 assert.match(api, /confirm:\s*true/);
 assert.match(api, /manualPlanOverride/);
+assert.match(api, /AI Takeoff could not import this file/);
 console.log("ok: Inbox UI shows image plan label + Send / Mark / Lab actions");
 
 assert.match(routes, /send-to-takeoff/);
 assert.match(service, /sendToAiTakeoff/);
+assert.match(service, /buildImportFailedDiagnostic|inbox-takeoff-import-failed-v1/);
 assert.match(service, /studioEstimateEnsured:\s*false/);
 assert.match(service, /calculated:\s*false/);
 assert.match(service, /published:\s*false/);

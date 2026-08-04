@@ -188,6 +188,21 @@ export function selectSupportedPdfAttachment(caseRow, opts = {}) {
     }
   }
 
+  // Auto PDF/image: same zero-row production shape — use server-built live candidate.
+  if (plans.length === 0 && opts.liveManualAttachment) {
+    const live =
+      opts.liveManualAttachment.liveManualCandidate === true
+        ? opts.liveManualAttachment
+        : buildLiveManualPlanAttachmentCandidate({
+            liveAttachment: opts.liveManualAttachment,
+            attachmentKey: selectedKey || null,
+            providerMessageId: opts.liveManualAttachment.providerMessageId || null
+          });
+    if (live && isSupportedTakeoffPlan(live)) {
+      plans = [live];
+    }
+  }
+
   if (plans.length === 0) {
     const err = openEstimateError(
       "No supported plan PDF or image attachment is available for this case. Send to manual review.",
@@ -529,7 +544,8 @@ export async function openEstimateForIntakeCase(deps) {
       attachmentKey: attachmentKey || selectedAttachmentId,
       attachmentId: selectedAttachmentId,
       filename: selectedFilename,
-      allowFilenameFallback: markAsPlan === true
+      // Filename helps when Graph keys are truncated; scoped to this case only.
+      allowFilenameFallback: markAsPlan === true || Boolean(selectedFilename)
     }) || null;
   const resolvedSelectedId = resolved?.id
     ? String(resolved.id)
@@ -540,7 +556,8 @@ export async function openEstimateForIntakeCase(deps) {
     selectedAttachmentKey: attachmentKey,
     selectedFilename: selectedFilename,
     markAsPlan,
-    liveManualAttachment: markAsPlan ? liveManualAttachment : null
+    // Always forward server-built live candidates (PDF auto + image override).
+    liveManualAttachment: liveManualAttachment || null
   });
 
   // Production Graph JPG shape: live UI sends AAMk… attachmentKey, but the persisted
@@ -552,7 +569,6 @@ export async function openEstimateForIntakeCase(deps) {
     caseRow
   });
   if (
-    markAsPlan &&
     !String(attachment.providerMessageId || "").trim() &&
     liveManualAttachment?.providerMessageId
   ) {

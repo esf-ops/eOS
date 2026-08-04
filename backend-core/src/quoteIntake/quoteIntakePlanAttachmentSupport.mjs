@@ -141,6 +141,16 @@ export function summarizeRowPlanSupport(attachments = []) {
       a.support === "direct_image_plan"
   ).length;
 
+  const needsReviewCount = list.filter((a) => a.support === "image_needs_review").length;
+  const possiblePlanCount = supportedCount + needsReviewCount;
+  if (possiblePlanCount > 1) {
+    return {
+      key: "choose_plan",
+      label: "Choose plan",
+      supported: supportedCount > 0,
+      planSelectionRequired: true
+    };
+  }
   if (supportedCount > 0) {
     if (hasImagePlan && !hasPdf) {
       return { key: "supported_image_plan", label: "Supported image plan", supported: true };
@@ -245,9 +255,9 @@ export function attachmentFilenameKeys(att = {}) {
 }
 
 /**
- * Build an in-memory intake-shaped attachment from a live Inbox/Graph attachment.
- * Used only for staff manual image override when the persisted case has no rows.
- * Does not include bytes.
+ * Server-built in-memory plan candidate from a live Inbox/Graph attachment when the
+ * persisted intake case has no matching attachment row. Never accept from browser body.
+ * Supports auto PDF/image plans and manual image override. Does not include bytes.
  *
  * @param {{
  *   liveAttachment?: object|null,
@@ -256,7 +266,7 @@ export function attachmentFilenameKeys(att = {}) {
  * }} input
  * @returns {object|null}
  */
-export function buildLiveManualPlanAttachmentCandidate(input = {}) {
+export function buildLivePlanAttachmentCandidate(input = {}) {
   const live = input.liveAttachment && typeof input.liveAttachment === "object"
     ? input.liveAttachment
     : null;
@@ -274,6 +284,38 @@ export function buildLiveManualPlanAttachmentCandidate(input = {}) {
     live.filename || live.name || live.safeFilename || ""
   ).trim();
   const mime = normalizePlanMime(live.contentType || live.mimeType);
+  const liveSupport = String(live.support || "");
+  const asPdf =
+    liveSupport === "direct_pdf" ||
+    attachmentLooksPdf({
+      ...live,
+      name: filename,
+      filename,
+      mimeType: mime,
+      contentType: mime
+    });
+
+  if (asPdf) {
+    return {
+      id: live.id || (key ? `live:${key.slice(0, 48)}` : null),
+      sourceAttachmentId: key || null,
+      providerMessageId:
+        String(input.providerMessageId || live.providerMessageId || "").trim() || null,
+      safeFilename: filename || "plan.pdf",
+      name: filename || null,
+      filename: filename || null,
+      mimeType: mime || "application/pdf",
+      contentType: mime || "application/pdf",
+      sizeBytes: Number.isFinite(Number(live.sizeBytes)) ? Number(live.sizeBytes) : undefined,
+      isInline: false,
+      support: "direct_pdf",
+      kind: "pdf_candidate",
+      retrievalState: "pending",
+      // Synthetic / Graph ids must not write into intake_attachment UUID FK.
+      liveManualCandidate: true
+    };
+  }
+
   const candidate = {
     id: live.id || (key ? `live:${key.slice(0, 48)}` : null),
     sourceAttachmentId: key || null,
@@ -285,14 +327,21 @@ export function buildLiveManualPlanAttachmentCandidate(input = {}) {
     contentType: mime || null,
     sizeBytes: Number.isFinite(Number(live.sizeBytes)) ? Number(live.sizeBytes) : undefined,
     isInline: false,
-    support: "image_needs_review",
-    kind: "image_review_candidate",
+    support: liveSupport === "direct_image_plan" ? "direct_image_plan" : "image_needs_review",
+    kind:
+      liveSupport === "direct_image_plan" ? "image_plan_candidate" : "image_review_candidate",
     retrievalState: "pending",
     liveManualCandidate: true
   };
 
+  if (candidate.support === "direct_image_plan") return candidate;
   if (!isSafeManualPlanImageOverride(candidate)) return null;
   return candidate;
+}
+
+/** @deprecated Prefer buildLivePlanAttachmentCandidate (PDF + image). */
+export function buildLiveManualPlanAttachmentCandidate(input = {}) {
+  return buildLivePlanAttachmentCandidate(input);
 }
 
 /**

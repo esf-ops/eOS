@@ -50,7 +50,13 @@ type InboxRow = {
   attachments?: InboxAttachment[];
   attachmentCount?: number;
   supportedAttachmentCount?: number;
-  planSupportSummary?: { key?: string; label?: string; supported?: boolean } | null;
+  planSupportSummary?: {
+    key?: string;
+    label?: string;
+    supported?: boolean;
+    planSelectionRequired?: boolean;
+  } | null;
+  planSelectionRequired?: boolean;
   supportState?: string;
   supportExplanation?: string;
   importState?: string;
@@ -139,6 +145,11 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
   const [importingKey, setImportingKey] = useState<string | null>(null);
   const [sendingTakeoffKey, setSendingTakeoffKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  /** Attachment key for the last send-to-takeoff failure (detail-panel scoped). */
+  const [takeoffErrorKey, setTakeoffErrorKey] = useState<string | null>(null);
+  const [takeoffErrorMessage, setTakeoffErrorMessage] = useState<string | null>(null);
+  /** Highlight attachment list after Choose plan. */
+  const [focusAttachmentsForKey, setFocusAttachmentsForKey] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [planViewer, setPlanViewer] = useState<{
     messageKey: string;
@@ -196,8 +207,23 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
 
   async function runPrimaryAction(row: InboxRow) {
     setActionError(null);
+    setTakeoffErrorKey(null);
+    setTakeoffErrorMessage(null);
     const action = row.primaryAction;
     if (!action) return;
+
+    const needsPlanChoice =
+      action.key === "choose_plan" ||
+      row.planSelectionRequired === true ||
+      row.planSupportSummary?.key === "choose_plan" ||
+      row.planSupportSummary?.planSelectionRequired === true;
+
+    if (needsPlanChoice) {
+      setSelectedKey(row.messageKey);
+      setFocusAttachmentsForKey(row.messageKey);
+      setActionError("Choose the plan file to send to AI Takeoff.");
+      return;
+    }
 
     const resumes =
       action.key === "resume_estimate" ||
@@ -221,6 +247,11 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
     if (!needsStart) {
       if (row.intakeCaseId) {
         onOpenEstimate(row.intakeCaseId, { openTarget: action.openTarget || "scope" });
+      } else {
+        // Never silently no-op — open details so staff can pick a plan or continue.
+        setSelectedKey(row.messageKey);
+        setFocusAttachmentsForKey(row.messageKey);
+        setActionError("Open message details to continue. Choose a plan attachment if available.");
       }
       return;
     }
@@ -279,6 +310,9 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
   ) {
     if (!authToken || !attachment.attachmentKey) return;
     setActionError(null);
+    setTakeoffErrorKey(null);
+    setTakeoffErrorMessage(null);
+    setFocusAttachmentsForKey(null);
     setSendingTakeoffKey(`${row.messageKey}:${attachment.attachmentKey}`);
     try {
       const result = (await sendSharedInboxToAiTakeoff(authToken, row.messageKey, {
@@ -299,7 +333,14 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
       }
     } catch (e) {
       const classified = classifySharedInboxError(e);
-      setActionError(classified.message);
+      const importFailed =
+        classified.code === "import_failed" || classified.code === "file_ingest_failed";
+      const message = importFailed
+        ? "AI Takeoff could not import this file. Try another plan attachment or continue manually."
+        : classified.message;
+      setActionError(message);
+      setTakeoffErrorKey(String(attachment.attachmentKey));
+      setTakeoffErrorMessage(message);
     } finally {
       setSendingTakeoffKey(null);
     }
@@ -554,10 +595,26 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                 </div>
               </dl>
               <h3 className="si-detail-sub">Attachments</h3>
+              {selected.planSelectionRequired ||
+              selected.planSupportSummary?.key === "choose_plan" ||
+              focusAttachmentsForKey === selected.messageKey ? (
+                <p
+                  className="si-detail-choose-plan"
+                  data-testid="shared-inbox-choose-plan-hint"
+                  role="status"
+                >
+                  Choose the plan file to send to AI Takeoff.
+                </p>
+              ) : null}
               {(selected.attachments || []).length === 0 ? (
                 <p className="eq-muted">No attachments</p>
               ) : (
-                <ul className="si-att-list" data-testid="shared-inbox-attachment-list">
+                <ul
+                  className={`si-att-list${
+                    focusAttachmentsForKey === selected.messageKey ? " si-att-list--focus" : ""
+                  }`}
+                  data-testid="shared-inbox-attachment-list"
+                >
                   {(selected.attachments || []).map((a, idx) => {
                     const canPreview =
                       a.previewSupported === true ||
@@ -567,6 +624,12 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                       String(a.support || "") === "image_needs_review";
                     const sending =
                       sendingTakeoffKey === `${selected.messageKey}:${a.attachmentKey || ""}`;
+                    const attErr =
+                      takeoffErrorKey &&
+                      a.attachmentKey &&
+                      takeoffErrorKey === String(a.attachmentKey)
+                        ? takeoffErrorMessage
+                        : null;
                     return (
                       <li key={a.attachmentKey || `${a.filename}-${idx}`}>
                         <div className="si-att-row">
@@ -626,6 +689,15 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                             </button>
                           ) : null}
                         </div>
+                        {attErr ? (
+                          <p
+                            className="eq-state eq-state--error si-att-error"
+                            data-testid="shared-inbox-attachment-error"
+                            role="alert"
+                          >
+                            {attErr}
+                          </p>
+                        ) : null}
                       </li>
                     );
                   })}

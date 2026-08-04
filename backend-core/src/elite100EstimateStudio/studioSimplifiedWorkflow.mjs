@@ -120,6 +120,21 @@ export function simplifyInboxPrimaryAction(primaryAction, row = {}) {
   const key = String(src.key || "").trim();
   const openTarget = src.openTarget || "scope";
   const hasEstimate = Boolean(row.estimateId || row.activeEstimateId || row.intakeCaseId);
+  const planSelectionRequired =
+    row.planSelectionRequired === true ||
+    String(row.planSupportSummary?.key || "") === "choose_plan" ||
+    String(src.key || "") === "choose_plan";
+
+  // Multi-plan / mixed candidates: open details — never silent Start Estimate.
+  if (key === "choose_plan" || (planSelectionRequired && !hasEstimate)) {
+    return {
+      key: "choose_plan",
+      label: "Choose plan",
+      openTarget: "takeoff",
+      mutates: false,
+      legacyKey: key === "choose_plan" ? src.legacyKey || null : key || null
+    };
+  }
 
   if (
     key === "import_and_open" ||
@@ -131,6 +146,17 @@ export function simplifyInboxPrimaryAction(primaryAction, row = {}) {
       label: "Start Estimate",
       openTarget: key === "create_manual_estimate" ? "scope" : openTarget === "takeoff" ? "scope" : openTarget,
       mutates: true,
+      legacyKey: key
+    };
+  }
+
+  // Unimported review_request must not become resume_estimate (silent no-op when no case).
+  if (key === "review_request" && !hasEstimate) {
+    return {
+      key: "choose_plan",
+      label: "Choose plan",
+      openTarget: "takeoff",
+      mutates: false,
       legacyKey: key
     };
   }

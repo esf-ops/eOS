@@ -328,6 +328,32 @@ console.log("\nstudioSharedInbox.test.mjs\n");
 }
 
 {
+  const multi = buildSharedInboxRow({
+    previewMessage: {
+      graphMessageId: "multi-plan",
+      subject: "Vanderschoot Project",
+      bodyPreview: "plans attached",
+      sender: { displayName: "Marshal Tolly", emailPresent: true },
+      hasAttachments: true,
+      attachments: [
+        { sourceAttachmentId: "a1", name: "plan-a.pdf", mimeType: "application/pdf", support: "direct_pdf" },
+        { sourceAttachmentId: "a2", name: "plan-b.pdf", mimeType: "application/pdf", support: "direct_pdf" },
+        { sourceAttachmentId: "a3", name: "notes.txt", mimeType: "text/plain", support: "metadata_only" }
+      ],
+      eligibilityHint: "manual_review_multi_pdf",
+      importable: true,
+      alreadyImported: false
+    }
+  });
+  assert.equal(multi.primaryAction.key, "choose_plan");
+  assert.equal(multi.primaryAction.label, "Choose plan");
+  assert.equal(multi.primaryAction.mutates, false);
+  assert.equal(multi.planSelectionRequired, true);
+  assert.match(multi.supportExplanation, /Choose the plan file to send to AI Takeoff/);
+  console.log("ok: multi-plan row uses Choose plan (no silent Start Estimate)");
+}
+
+{
   const manual = buildSharedInboxRow({
     previewMessage: {
       graphMessageId: "m6",

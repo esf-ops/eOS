@@ -158,10 +158,14 @@ export function classifySharedInboxError(e) {
   if (e instanceof ApiError) {
     const body = e.body && typeof e.body === "object" ? /** @type {Record<string, unknown>} */ (e.body) : null;
     const code = String(body?.code || "import_failed");
+    const importFailed = code === "import_failed" || code === "file_ingest_failed";
     return {
       code,
-      message: e.message || "Request failed",
-      transient: false
+      message: importFailed
+        ? "AI Takeoff could not import this file. Try another plan attachment or continue manually."
+        : e.message || "Request failed",
+      transient: false,
+      diagnostic: body?.diagnostic && typeof body.diagnostic === "object" ? body.diagnostic : null
     };
   }
   return { code: "import_failed", message: "Request failed", transient: false };
