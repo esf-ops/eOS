@@ -277,13 +277,9 @@ export default function StudioV2EstimatorShell(props: {
   authToken: string;
   caseId: string;
   onBack: () => void;
-  /** Opens plan-visible AI Takeoff Review (supporting tool — not estimate authority). */
-  onOpenTakeoffReview?: () => void;
-  /** @deprecated Prefer onOpenTakeoffReview */
   onOpenV1?: () => void;
 }) {
-  const { authToken, caseId, onBack } = props;
-  const onOpenTakeoffReview = props.onOpenTakeoffReview || props.onOpenV1;
+  const { authToken, caseId, onBack, onOpenV1 } = props;
   const [draft, setDraft] = useState<WorkingDraftResponse | null>(null);
   const [activity, setActivity] = useState<CustomerActivityResponse | null>(null);
   const [calcResult, setCalcResult] = useState<CalculationResult | null>(null);
@@ -999,19 +995,18 @@ export default function StudioV2EstimatorShell(props: {
           </p>
           <h1>Studio V2 Workspace</h1>
           <p className="muted">
-            Estimate authority for scope, pricing, approval, and Digital Estimate. Use AI Takeoff
-            Review to verify plan dimensions — then import approved measurements here.
+            Edit physical scope and import approved AI Takeoff into the Working Draft. V1 remains
+            available as a legacy fallback.
           </p>
         </div>
-        {onOpenTakeoffReview ? (
+        {onOpenV1 ? (
           <button
             type="button"
             className="eq-btn-secondary"
-            onClick={onOpenTakeoffReview}
-            data-testid="studio-v2-open-takeoff-review"
-            title="Open plan-visible measurement review"
+            onClick={onOpenV1}
+            data-testid="studio-v2-open-v1"
           >
-            Open Takeoff Review
+            Open in V1 (Legacy fallback)
           </button>
         ) : null}
       </header>
@@ -1092,53 +1087,6 @@ export default function StudioV2EstimatorShell(props: {
             </ul>
           </section>
 
-          <section
-            className="studio-v2-panel studio-v2-takeoff-status-card"
-            data-testid="studio-v2-takeoff-status-card"
-          >
-            <div className="studio-v2-panel__head">
-              <div>
-                <h2>AI Takeoff</h2>
-                <p className="muted studio-v2-scope-editor__hint">
-                  Verify dimensions on the plan in Takeoff Review. Studio V2 remains where the
-                  estimate is finalized — Takeoff Review does not price, publish, or mark sold.
-                </p>
-              </div>
-              {onOpenTakeoffReview ? (
-                <button
-                  type="button"
-                  className="eq-btn-primary"
-                  onClick={onOpenTakeoffReview}
-                  data-testid="studio-v2-open-takeoff-review-card"
-                  disabled={!draft.takeoffJobId}
-                  title={
-                    draft.takeoffJobId
-                      ? "Open plan-visible measurement review"
-                      : "No AI Takeoff job is linked yet"
-                  }
-                >
-                  Open Takeoff Review
-                </button>
-              ) : null}
-            </div>
-            <dl className="studio-v2-dl" data-testid="studio-v2-takeoff-status-dl">
-              <div>
-                <dt>Status</dt>
-                <dd>
-                  {draft.takeoffJobId
-                    ? draft.takeoffImportNeeded
-                      ? "Linked — review measurements, then import into scope"
-                      : "Linked"
-                    : "Not started"}
-                </dd>
-              </div>
-              <div>
-                <dt>Job</dt>
-                <dd>{draft.takeoffJobId ? "Present" : "None"}</dd>
-              </div>
-            </dl>
-          </section>
-
           <section className="studio-v2-panel" data-testid="studio-v2-project-header">
             <h2>Project header</h2>
             <dl className="studio-v2-dl">
@@ -1211,7 +1159,6 @@ export default function StudioV2EstimatorShell(props: {
             takeoffImportNeeded={Boolean(draft.takeoffImportNeeded)}
             scopeDirty={scopeDirty}
             currentScopeEmpty={Boolean(scope?.empty || !scopeDraft.rooms.length)}
-            onOpenTakeoffReview={onOpenTakeoffReview}
             onApplied={(result) => {
               setScopeDraft(cloneEditableScope(result.editableScope));
               setScopeDirty(false);

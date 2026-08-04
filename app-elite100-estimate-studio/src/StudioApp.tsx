@@ -184,8 +184,6 @@ export default function StudioApp() {
   const [workspaceFocus, setWorkspaceFocus] = useState<WorkspaceFocus>(null);
   /** Slice A: opt-in V2 shell; default remains V1 EstimateTakeoffWorkspace. */
   const [studioV2Preview, setStudioV2Preview] = useState(() => studioV2PreviewRequested());
-  /** When true, Takeoff Review back returns to Studio V2 for the same case. */
-  const [takeoffReviewReturnToV2, setTakeoffReviewReturnToV2] = useState(false);
   const [organizationName, setOrganizationName] = useState(DEFAULT_WORKSPACE_NAME);
   const [organizationLogoUrl, setOrganizationLogoUrl] = useState(EOS_LOGO_URL);
   const [userSubtitle, setUserSubtitle] = useState("");
@@ -899,19 +897,12 @@ export default function StudioApp() {
           <SharedInboxPage
             authToken={sessionToken}
             onOpenEstimate={(caseId, options) => {
-              const preferV2 = options?.studioV2 === true && studioV2UiEnabled();
-              if (preferV2) {
-                setStudioV2Preview(true);
-              }
               openEstimateWorkspace({
                 caseId,
                 returnNav: "shared-inbox",
                 openTarget: options?.openTarget,
                 focusFallback: "takeoff"
               });
-              if (preferV2) {
-                applyStudioV2WorkspaceUrl({ caseId, mode: "push" });
-              }
             }}
           />
         ) : null}
@@ -1030,34 +1021,18 @@ export default function StudioApp() {
               authToken={sessionToken}
               caseId={estimateWorkspaceCaseId}
               onBack={() => leaveEstimateWorkspace()}
-              onOpenTakeoffReview={() => {
-                setTakeoffReviewReturnToV2(true);
-                setStudioV2Preview(false);
-                setWorkspaceFocus("takeoff");
-              }}
+              onOpenV1={() => setStudioV2Preview(false)}
             />
           ) : (
             <EstimateTakeoffWorkspace
               authToken={sessionToken}
               caseId={estimateWorkspaceCaseId}
               initialFocus={workspaceFocus || "takeoff"}
-              reviewMode={takeoffReviewReturnToV2}
-              backLabel={takeoffReviewReturnToV2 ? "Back to Studio V2" : undefined}
               onBackToQueue={() => {
-                if (takeoffReviewReturnToV2 && studioV2UiEnabled()) {
-                  setTakeoffReviewReturnToV2(false);
-                  setStudioV2Preview(true);
-                  applyStudioV2WorkspaceUrl({
-                    caseId: estimateWorkspaceCaseId,
-                    mode: "push"
-                  });
-                  return;
-                }
-                // V1 / Inbox path: in-memory only (no URL caseId sync).
+                // V1: in-memory only (no URL caseId sync).
                 setMainNav(queueReturnNav);
                 setEstimateWorkspaceCaseId(null);
                 setWorkspaceFocus(null);
-                setTakeoffReviewReturnToV2(false);
               }}
             />
           )

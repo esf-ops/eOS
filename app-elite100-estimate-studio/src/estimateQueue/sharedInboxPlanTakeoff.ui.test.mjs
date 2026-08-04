@@ -29,10 +29,6 @@ const routes = readFileSync(
   join(root, "backend-core/src/elite100EstimateStudio/elite100EstimateStudioRoutes.js"),
   "utf8"
 );
-const appSrc = readFileSync(
-  join(root, "app-elite100-estimate-studio/src/StudioApp.tsx"),
-  "utf8"
-);
 
 console.log("\nsharedInboxPlanTakeoff.ui.test.mjs\n");
 
@@ -53,29 +49,8 @@ assert.match(page, /Supported image plan|planSupportSummary\?\.label/);
 assert.match(page, /shared-inbox-send-to-takeoff/);
 assert.match(page, /Send to AI Takeoff/);
 assert.match(page, /Mark as plan for AI Takeoff/);
-assert.match(page, /Open Studio V2|Continue in Studio V2/);
-assert.match(page, /shared-inbox-open-studio-v2|shared-inbox-detail-open-studio-v2/);
-assert.match(page, /studioV2:\s*true/);
-assert.match(page, /onOpenEstimate\([\s\S]*studioV2:\s*true/);
-assert.doesNotMatch(page, /Open AI Takeoff Lab/);
-assert.match(appSrc, /setStudioV2Preview\(true\)/);
-assert.match(appSrc, /applyStudioV2WorkspaceUrl/);
-assert.match(appSrc, /onOpenTakeoffReview/);
-assert.match(appSrc, /takeoffReviewReturnToV2|Back to Studio V2/);
-assert.match(
-  readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2EstimatorShell.tsx"), "utf8"),
-  /studio-v2-takeoff-status-card|Open Takeoff Review/
-);
-assert.match(
-  readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/EstimateTakeoffWorkspace.tsx"), "utf8"),
-  /AI Takeoff Review/
-);
-assert.doesNotMatch(
-  readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/EstimateTakeoffWorkspace.tsx"), "utf8"),
-  />Estimate workspace</
-);
-console.log("ok: successful handoff → Studio V2; Takeoff Review preserved as supporting tool");
-
+assert.match(page, /Open AI Takeoff Lab/);
+assert.match(page, /shared-inbox-open-takeoff-lab|shared-inbox-detail-open-takeoff-lab/);
 assert.match(page, /manualPlanOverride:\s*true/);
 assert.match(page, /shared-inbox-mark-as-plan/);
 assert.match(page, /Choose the plan file to send to AI Takeoff/);

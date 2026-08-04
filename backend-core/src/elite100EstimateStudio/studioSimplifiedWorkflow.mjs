@@ -120,36 +120,19 @@ export function simplifyInboxPrimaryAction(primaryAction, row = {}) {
   const key = String(src.key || "").trim();
   const openTarget = src.openTarget || "scope";
   const hasEstimate = Boolean(row.estimateId || row.activeEstimateId || row.intakeCaseId);
-  const hasUsableTakeoff = row.hasUsableTakeoff === true;
-  const aiTakeoffFailed = row.aiTakeoffFailed === true;
   const planSelectionRequired =
     row.planSelectionRequired === true ||
     String(row.planSupportSummary?.key || "") === "choose_plan" ||
     String(src.key || "") === "choose_plan";
 
-  // Multi-plan / failed takeoff / no usable job: never silent Resume Estimate.
-  if (
-    key === "choose_plan" ||
-    (planSelectionRequired && !hasUsableTakeoff) ||
-    (aiTakeoffFailed && !hasUsableTakeoff)
-  ) {
+  // Multi-plan / mixed candidates: open details — never silent Start Estimate.
+  if (key === "choose_plan" || (planSelectionRequired && !hasEstimate)) {
     return {
       key: "choose_plan",
-      label: src.label || "Choose plan",
+      label: "Choose plan",
       openTarget: "takeoff",
       mutates: false,
       legacyKey: key === "choose_plan" ? src.legacyKey || null : key || null
-    };
-  }
-
-  if (key === "open_studio_v2") {
-    return {
-      key: "open_studio_v2",
-      label: src.label || "Open Studio V2",
-      openTarget: "takeoff",
-      mutates: false,
-      legacyKey: src.legacyKey || null,
-      studioV2: true
     };
   }
 
@@ -178,35 +161,12 @@ export function simplifyInboxPrimaryAction(primaryAction, row = {}) {
     };
   }
 
-  // Imported review without usable takeoff → choose plan (not Resume).
-  if ((key === "review_request" || key === "open_estimate") && hasEstimate && !hasUsableTakeoff) {
-    if (planSelectionRequired || aiTakeoffFailed || !row.estimateId) {
-      return {
-        key: "choose_plan",
-        label: "Choose plan",
-        openTarget: "takeoff",
-        mutates: false,
-        legacyKey: key
-      };
-    }
-  }
-
   if (
     key === "open_estimate" ||
     key === "view_progress" ||
     key === "review_ai_takeoff" ||
     key === "review_request"
   ) {
-    if (hasUsableTakeoff) {
-      return {
-        key: "open_studio_v2",
-        label: "Open Studio V2",
-        openTarget: "takeoff",
-        mutates: false,
-        legacyKey: key,
-        studioV2: true
-      };
-    }
     return {
       key: hasEstimate || key !== "open_estimate" ? "resume_estimate" : "start_estimate",
       label: hasEstimate ? "Resume Estimate" : "Start Estimate",

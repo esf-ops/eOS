@@ -283,38 +283,6 @@ function findActiveLinkedJob(links) {
 }
 
 /**
- * Whether an existing takeoff link is for the same attachment selection.
- * Prevents PDF job reuse when staff later marks a different Graph JPG on the same case.
- * @param {object|null} link
- * @param {object} attachment
- * @param {string} idempotencyKey
- */
-export function linkMatchesSelectedAttachment(link, attachment, idempotencyKey) {
-  if (!link?.takeoffJobId) return false;
-  const key = String(idempotencyKey || "").trim();
-  if (key && String(link.idempotencyKey || "").trim() === key) return true;
-
-  const linkAtt = String(
-    link.sourceAttachmentId || link.intakeAttachmentId || link.intake_attachment_id || ""
-  ).trim();
-  const selectedUuid = intakeAttachmentIdForTakeoffLink(attachment);
-  if (selectedUuid && linkAtt && selectedUuid === linkAtt) return true;
-
-  const selectedGraph = String(attachment?.sourceAttachmentId || "").trim();
-  if (selectedGraph && linkAtt && selectedGraph === linkAtt) return true;
-
-  const linkSha = String(link.attachmentSha256 || link.attachment_sha256 || "")
-    .trim()
-    .toLowerCase();
-  const attSha = String(attachment?.sha256 || "")
-    .trim()
-    .toLowerCase();
-  if (/^[a-f0-9]{64}$/.test(linkSha) && linkSha === attSha) return true;
-
-  return false;
-}
-
-/**
  * intake_attachment_id is a UUID FK. Live Graph candidates use opaque AAMk keys /
  * synthetic `live:…` ids — never write those into the FK column.
  * @param {object} attachment
@@ -637,16 +605,7 @@ export async function openEstimateForIntakeCase(deps) {
 
     const existingLinks = await repository.listTakeoffLinks(org, caseId);
     const active = findActiveLinkedJob(existingLinks);
-    // Explicit Inbox attachment selection must not reuse a different plan's job
-    // (e.g. PDF job blocking a later staff-marked JPG on the same case).
-    const explicitAttachmentSelection = Boolean(
-      attachmentKey || selectedFilename || markAsPlan
-    );
-    if (
-      active?.takeoffJobId &&
-      (!explicitAttachmentSelection ||
-        linkMatchesSelectedAttachment(active, attachment, idempotencyKey))
-    ) {
+    if (active?.takeoffJobId) {
       try {
         await repository.appendAuditEvent?.({
           organizationId: org,

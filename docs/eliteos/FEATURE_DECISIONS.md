@@ -3717,15 +3717,4 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | PDF AI Takeoff, manual image override, Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. `image_needs_review` still requires Mark as plan. |
 | **Revisit trigger** | Persist Graph attachments on import; retire Choose plan once single-plan selection is automatic. |
 
-### 270. Inbox takeoff contract: Studio V2 route + no false Resume + attachment-scoped reuse (2026-08-04)
-
-| Field | Value |
-|-------|--------|
-| **Date / branch** | 2026-08-04 · `hotfix/inbox-takeoff-contract-and-studio-v2-route` |
-| **Decision** | Successful Inbox send-to-takeoff opens **Studio V2** (`?studioV2=1&caseId=…`) as estimate authority. The plan-visible V1 takeoff UI is preserved as **AI Takeoff Review** (Open Takeoff Review from Studio V2) — not the primary estimating workspace. Failed / missing usable takeoff shows **Choose plan** — never Resume Estimate. Explicit attachment selection does not reuse a different plan’s takeoff job on the same case. |
-| **Why** | PDF success previously opened legacy Estimate Workspace without Studio V2. Staff still need plan-visible measurement review; that tool must not own pricing/publish/Digital Estimate/sold. Case-level job reuse blocked later JPG handoffs; import-without-usable-takeoff mapped to Resume Estimate. |
-| **Impacted** | SharedInboxPage, StudioApp (V2 open + Takeoff Review return), StudioV2EstimatorShell / TakeoffImportPanel, EstimateTakeoffWorkspace labeling, read model / simplify actions, open-estimate link reuse, tests, this doc. |
-| **Protected / unchanged** | Plan preview, measurement rows, takeoff approve/save draft, Digital Estimate, pricing algorithms, publish/acceptance/sold flows in Studio V2, migrations. |
-| **Revisit trigger** | Embed Takeoff Review inside Studio V2 chrome; retire standalone review shell. |
-
 ---

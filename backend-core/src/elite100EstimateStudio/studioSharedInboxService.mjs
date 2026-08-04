@@ -126,8 +126,6 @@ export function buildTakeoffUnavailableDiagnostic(partial = {}) {
       partial.workspaceCreateAttempted === true ||
       stage === "workspace_create" ||
       stage === "link_create",
-    linkCreateAttempted:
-      partial.linkCreateAttempted === true || stage === "link_create",
     existingWorkspaceFound: partial.existingWorkspaceFound === true,
     rejectedReason: String(partial.rejectedReason || stage || "unknown")
   };
@@ -167,8 +165,6 @@ export function buildImportFailedDiagnostic(partial = {}) {
       partial.workspaceCreateAttempted === true ||
       stage === "workspace_create" ||
       stage === "link_create",
-    linkCreateAttempted:
-      partial.linkCreateAttempted === true || stage === "link_create",
     existingWorkspaceFound: partial.existingWorkspaceFound === true,
     rejectedReason: String(partial.rejectedReason || stage || "unknown")
   };
@@ -702,11 +698,8 @@ export function createStudioSharedInboxService(deps = {}) {
       filename: matchedFilename,
       allowFilenameFallback: true
     });
-    const caseMatchHasGraphId = Boolean(
-      String(caseMatch?.sourceAttachmentId || "").trim()
-    );
 
-    // Production shape: case missing rows OR matched row lost Graph identity.
+    // Production shape: case exists but missing / unmatched attachment rows.
     // Build a server-side in-memory candidate from the live Inbox/Graph attachment
     // so open-estimate can fetch bytes (PDF auto + image override). Never from browser.
     const providerMessageId =
@@ -714,7 +707,7 @@ export function createStudioSharedInboxService(deps = {}) {
       String(item.messageKey || key || "").trim() ||
       null;
     const liveManualAttachment =
-      (manualOk === true || autoOk === true) && (!caseMatch || !caseMatchHasGraphId)
+      !caseMatch && (manualOk === true || autoOk === true)
         ? buildLivePlanAttachmentCandidate({
             liveAttachment: att,
             attachmentKey: attKey,

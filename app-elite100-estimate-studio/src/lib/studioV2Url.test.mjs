@@ -137,24 +137,20 @@ console.log("\nstudioV2Url.test.mjs\n");
 }
 
 {
-  // Default landing remains shared-inbox without a deep link.
+  // V1 default unchanged when no caseId: default nav remains shared-inbox without deep link.
   assert.match(
     app,
     /initialStudioV2DeepLink\(\)\.openWorkspace\s*\?\s*"estimate-workspace"\s*:\s*"shared-inbox"/
   );
   assert.ok(app.includes("EstimateTakeoffWorkspace"));
-  // Takeoff Review is a supporting tool: back returns to Studio V2 when opened from V2.
+  // V1 back must not call applyStudioV2WorkspaceUrl.
   const v1BackChunk = app.slice(
     app.indexOf("<EstimateTakeoffWorkspace"),
     app.indexOf("</EstimateTakeoffWorkspace>")
   );
   assert.ok(v1BackChunk.includes("onBackToQueue"));
-  assert.ok(v1BackChunk.includes("takeoffReviewReturnToV2"));
-  assert.ok(v1BackChunk.includes("reviewMode={takeoffReviewReturnToV2}"));
-  assert.match(v1BackChunk, /Back to Studio V2/);
-  // Return-to-V2 may sync URL; leaving to Inbox still clears case without mutations.
-  assert.ok(v1BackChunk.includes("applyStudioV2WorkspaceUrl"));
-  console.log("ok: 6 Takeoff Review returns to Studio V2; Inbox remains default landing");
+  assert.equal(v1BackChunk.includes("applyStudioV2WorkspaceUrl"), false);
+  console.log("ok: 6 V1/default Inbox behavior unchanged without caseId URL sync");
 }
 
 {
