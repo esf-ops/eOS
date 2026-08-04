@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ApiError } from "../lib/api";
+import { formatPersonLabel, normalizeInboxItemLabels } from "../lib/formatPersonLabel.mjs";
 import {
   fetchQuoteFlowInbox,
   fetchQuoteFlowInboxMessage,
@@ -48,7 +49,8 @@ export default function InboxPage(props: Props) {
     setError(null);
     try {
       const res = await fetchQuoteFlowInbox(authToken, { limit: 50, state: "all" });
-      setItems(Array.isArray(res.items) ? res.items : []);
+      const rows = Array.isArray(res.items) ? res.items : [];
+      setItems(rows.map((row) => normalizeInboxItemLabels(row) as QuoteFlowInboxItem));
     } catch (e) {
       setError(errorMessage(e));
       setItems([]);
@@ -70,7 +72,7 @@ export default function InboxPage(props: Props) {
     setError(null);
     try {
       const res = await fetchQuoteFlowInboxMessage(authToken, messageKey);
-      setDetail(res.item);
+      setDetail(normalizeInboxItemLabels(res.item) as QuoteFlowInboxItem);
       const supported = (res.item.attachments || []).filter((a) => a.supportedForTakeoff);
       if (supported.length === 1 && supported[0].attachmentKey) {
         setSelectedAttachmentKey(supported[0].attachmentKey);
@@ -112,7 +114,7 @@ export default function InboxPage(props: Props) {
           ? `AI Takeoff job reused (${res.takeoffJobId || "same job"}).`
           : `AI Takeoff started (${res.takeoffJobId || "queued"}).`
       );
-      if (res.item) setDetail(res.item);
+      if (res.item) setDetail(normalizeInboxItemLabels(res.item) as QuoteFlowInboxItem);
       await loadList();
     } catch (e) {
       setError(errorMessage(e));
@@ -177,7 +179,7 @@ export default function InboxPage(props: Props) {
                   >
                     <span className="qf-inbox__row-title">{row.subject}</span>
                     <span className="qf-inbox__row-meta">
-                      {row.sender || "Unknown sender"}
+                      {formatPersonLabel(row.senderLabel ?? row.sender, "Unknown contact")}
                       {row.receivedAt ? ` · ${new Date(row.receivedAt).toLocaleString()}` : ""}
                     </span>
                     <span
@@ -205,7 +207,7 @@ export default function InboxPage(props: Props) {
             <>
               <h2>{detail.subject}</h2>
               <p className="qf-muted">
-                {detail.sender || "Unknown sender"}
+                {formatPersonLabel(detail.senderLabel ?? detail.sender, "Unknown contact")}
                 {detail.bodyPreview ? ` — ${detail.bodyPreview}` : ""}
               </p>
               <p
