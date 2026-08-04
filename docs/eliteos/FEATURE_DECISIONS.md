@@ -3717,4 +3717,28 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | PDF AI Takeoff, manual image override, Digital Estimate, pricing, acceptance, publish, approval, revision, sold, AI algorithms, migrations. `image_needs_review` still requires Mark as plan. |
 | **Revisit trigger** | Persist Graph attachments on import; retire Choose plan once single-plan selection is automatic. |
 
+
+
+### 271. Studio V2 create draft from Inbox case (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/studio-v2-create-draft-from-inbox-case` |
+| **Decision** | When Studio V2 opens for an Inbox/takeoff case with no `studio_estimates` row, show a production empty state (no V1 requirement) with primary **Create Studio V2 Draft**. `POST /api/elite100-studio-v2/cases/:caseId/working-draft` (`confirm: true`) idempotently creates or reuses an editable Working Draft shell via `repository.create` — links intake case + takeoff job when known, seeds safe customer/project basics when present, defaults pricing basis like new estimates. Does **not** auto-create on handoff, does **not** call `refreshTakeoffGate`, calculate, approve, publish, revise, accept, or mark sold. Open Takeoff Review remains available as a supporting tool. |
+| **Why** | Inbox → Studio V2 routing worked (`?studioV2=1&caseId=…`) but staff were told to create/open in V1 first because GET working-draft never creates and no V2 create-draft path existed. |
+| **Impacted** | `studioV2Service.ensureWorkingDraft`, Studio V2 routes, `StudioV2EstimatorShell` empty state, Slice A / ensure-draft tests, this doc. |
+| **Protected / unchanged** | Digital Estimate, pricing formulas, publish/approval/revision/acceptance/sold, Internal Estimate, migrations, AI Takeoff algorithm, auto-calculate/auto-approve. |
+| **Revisit trigger** | Optional auto-create draft after successful Inbox handoff once production confidence is high. |
+
+### 272. Studio V2 embedded Takeoff Review + Use these measurements (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/studio-v2-takeoff-review-finish` |
+| **Decision** | Studio V2 embeds the production AI Takeoff consolidated review (iframe `?consolidated=1&studioV2Finish=1`) as **AI Takeoff Review** — PDF/plan + editable measurements stay in the working Takeoff head. Primary finish CTA is **Use these measurements** (`POST …/takeoff-finish`): approve-and-build (idempotent) → ensure Working Draft → import approved scope. Scope sidebar plan preview uses authenticated intake source-plans blob URLs. Copy no longer references V1 / “Approve Estimate” in the takeoff context. Does **not** calculate, approve estimate revision, publish, accept, or mark sold. |
+| **Why** | Production V2 showed a plan-preview placeholder and red “must be approved before importing” friction while staff still needed the working PDF review UI. |
+| **Impacted** | `StudioV2TakeoffReviewPanel`, `StudioV2TakeoffImportPanel`, `StudioV2EstimatorShell`, `StudioV2ScopeEditor`, `studioV2Service.finishTakeoffIntoWorkingDraft`, takeoff-finish route, consolidated approve button label, tests, this doc. |
+| **Protected / unchanged** | AI Takeoff algorithm, pricing formulas, estimate approval/publish/DE/acceptance/sold, Internal Estimate, migrations. |
+| **Revisit trigger** | In-process React extract of ConsolidatedTakeoffReview into a shared package (instead of iframe). |
+
 ---

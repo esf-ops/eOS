@@ -2479,7 +2479,10 @@ export default function ConsolidatedTakeoffReview() {
                   approveStatus,
                   advisoryCount: advisory.length,
                   blockingCount: blocking.length,
-                  isRevisionDraft: urlWorkspace.isRevisionDraft
+                  isRevisionDraft: urlWorkspace.isRevisionDraft,
+                  studioV2Finish:
+                    typeof window !== "undefined" &&
+                    new URLSearchParams(window.location.search).get("studioV2Finish") === "1"
                 })}
               </button>
               ) : null}

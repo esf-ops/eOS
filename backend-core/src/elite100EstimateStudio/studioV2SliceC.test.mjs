@@ -344,13 +344,15 @@ function serviceWithTakeoff(repo, opts = {}) {
   assert.ok(!panel.includes("refresh-from-takeoff"));
   assert.ok(!shell.includes("ensure-editable-draft"));
   assert.ok(!panel.includes("ensure-editable-draft"));
-  assert.ok(panel.includes('data-testid="studio-v2-takeoff-preview"'));
   assert.ok(panel.includes('data-testid="studio-v2-takeoff-apply"'));
+  assert.ok(panel.includes("Use these measurements"));
   assert.ok(panel.includes("Save or discard unsaved scope changes"));
   assert.ok(panel.includes("replace the current Working Draft scope"));
+  assert.ok(shell.includes("StudioV2TakeoffReviewPanel"));
   assert.ok(shell.includes("Scope changed — recalculate to update total."));
   assert.ok(routes.includes("/api/elite100-studio-v2/cases/:caseId/takeoff-import-preview"));
   assert.ok(routes.includes("/api/elite100-studio-v2/cases/:caseId/takeoff-import-apply"));
+  assert.ok(routes.includes("/api/elite100-studio-v2/cases/:caseId/takeoff-finish"));
   console.log("ok: frontend/source contracts for Takeoff Import panel");
 }
 
