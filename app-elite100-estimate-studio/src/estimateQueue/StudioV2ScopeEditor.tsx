@@ -710,7 +710,7 @@ function ScopeWorkbenchPanel(props: {
           />
         ) : (
           <p className="muted" data-testid="studio-v2-plan-preview-placeholder">
-            Plan preview will be added when V2 intake/attachment links are wired.
+            Open AI Takeoff Review to view the plan while verifying measurements.
           </p>
         )}
       </div>

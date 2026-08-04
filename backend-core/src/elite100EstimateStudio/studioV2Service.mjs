@@ -15,10 +15,11 @@
 import { calculateStudioEstimateV4 } from "./elite100RoomPricingStudioAdapter.mjs";
 import { createStudioEstimateRepository } from "./studioEstimateRepository.mjs";
 import { createStudioEstimateService } from "./studioEstimateService.mjs";
-import { STUDIO_ESTIMATE_STATUSES } from "./studioEstimateTypes.mjs";
+import { STUDIO_ESTIMATE_STATUSES, emptyStudioEstimateScope } from "./studioEstimateTypes.mjs";
 import {
   getLatestTakeoffResult,
-  getTakeoffWorkspace
+  getTakeoffWorkspace,
+  approveAndBuildEstimate
 } from "../takeoff/takeoffWorkspaceService.mjs";
 import {
   createStudioV2Error,
@@ -224,6 +225,219 @@ export function createStudioV2Service(deps = {}) {
     return repository.getActiveByIntakeCase(organizationId, caseId);
   }
 
+  /**
+   * Best-effort takeoff job id for an intake case (org-scoped).
+   * Used when creating a V2 draft and for empty-state Takeoff Review affordances.
+   * @param {string} organizationId
+   * @param {string} intakeCaseId
+   * @returns {Promise<string|null>}
+   */
+  async function resolveLinkedTakeoffJobId(organizationId, intakeCaseId) {
+    const caseId = String(intakeCaseId || "").trim();
+    const org = String(organizationId || "").trim();
+    if (!caseId || !org) return null;
+    if (typeof deps.resolveTakeoffJobIdForCase === "function") {
+      try {
+        const id = await deps.resolveTakeoffJobIdForCase({
+          organizationId: org,
+          intakeCaseId: caseId
+        });
+        return id ? String(id).trim() || null : null;
+      } catch {
+        // fall through
+      }
+    }
+    const supabase = deps.getSupabase?.();
+    if (!supabase) return null;
+    try {
+      const { data, error } = await supabase
+        .from("quote_intake_takeoff_links")
+        .select("takeoff_job_id,relationship_status,created_at")
+        .eq("organization_id", org)
+        .eq("intake_case_id", caseId)
+        .order("created_at", { ascending: false })
+        .limit(8);
+      if (error || !Array.isArray(data)) return null;
+      const active = data.find(
+        (r) =>
+          r?.takeoff_job_id &&
+          String(r.relationship_status || "").toLowerCase() !== "failed" &&
+          String(r.relationship_status || "").toLowerCase() !== "superseded"
+      );
+      const pick = active || data.find((r) => r?.takeoff_job_id);
+      return pick?.takeoff_job_id ? String(pick.takeoff_job_id).trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Best-effort customer/project basics from the Inbox intake case.
+   * Never invents identity; empty strings stay empty when unknown.
+   * @param {string} organizationId
+   * @param {string} intakeCaseId
+   */
+  async function resolveIntakeCaseBasics(organizationId, intakeCaseId) {
+    const supabase = deps.getSupabase?.();
+    if (!supabase) return {};
+    try {
+      const { data, error } = await supabase
+        .from("quote_intake_cases")
+        .select("id,extracted_customer_name,extracted_project_name,source_message")
+        .eq("organization_id", organizationId)
+        .eq("id", intakeCaseId)
+        .maybeSingle();
+      if (error || !data) return {};
+      const customerName = String(data.extracted_customer_name || "").trim();
+      const subject =
+        data.source_message && typeof data.source_message === "object"
+          ? String(data.source_message.subject || "").trim()
+          : "";
+      const projectName = String(data.extracted_project_name || subject || "").trim();
+      const out = {};
+      if (customerName) out.customerName = customerName;
+      if (projectName) out.projectName = projectName;
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Soft takeoff-job status for empty-state copy (processing vs ready).
+   * @param {string} organizationId
+   * @param {string|null} takeoffJobId
+   */
+  async function resolveTakeoffJobStatusHint(organizationId, takeoffJobId) {
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) {
+      return { takeoffJobId: null, takeoffStatus: null, takeoffProcessing: false };
+    }
+    const supabase = deps.getSupabase?.();
+    if (!supabase) {
+      return { takeoffJobId: jobId, takeoffStatus: null, takeoffProcessing: false };
+    }
+    try {
+      const { data, error } = await supabase
+        .from("quote_takeoff_jobs")
+        .select("id,status,review_status")
+        .eq("organization_id", organizationId)
+        .eq("id", jobId)
+        .maybeSingle();
+      if (error || !data) {
+        return { takeoffJobId: jobId, takeoffStatus: null, takeoffProcessing: false };
+      }
+      const status = String(data.status || "").toLowerCase();
+      const processing = [
+        "pending",
+        "queued",
+        "running",
+        "processing",
+        "ingesting",
+        "started",
+        "in_progress"
+      ].includes(status);
+      return {
+        takeoffJobId: jobId,
+        takeoffStatus: status || null,
+        takeoffProcessing: processing
+      };
+    } catch {
+      return { takeoffJobId: jobId, takeoffStatus: null, takeoffProcessing: false };
+    }
+  }
+
+  /**
+   * Create or reuse a Studio V2 editable draft for an Inbox/takeoff case.
+   * Idempotent. Does not calculate, approve, publish, revise, accept, or mark sold.
+   * Uses repository.create (shell only) — does not call V1 refreshTakeoffGate.
+   */
+  async function ensureWorkingDraft({
+    organizationId,
+    intakeCaseId,
+    actorUserId = null,
+    takeoffJobId = null,
+    confirm = false
+  }) {
+    if (confirm !== true && confirm !== "true") {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "Confirm create Studio V2 draft to continue.",
+        statusCode: 400
+      });
+    }
+    const caseId = String(intakeCaseId || "").trim();
+    if (!caseId) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "Intake case is required.",
+        statusCode: 400
+      });
+    }
+
+    const noSideEffects = Object.freeze({
+      calculated: false,
+      approved: false,
+      published: false,
+      sold: false,
+      revised: false,
+      accepted: false
+    });
+
+    const existing = await loadActiveEstimateOrNull(organizationId, caseId);
+    if (existing) {
+      const draft = await getWorkingDraft({
+        organizationId,
+        intakeCaseId: caseId,
+        actorUserId
+      });
+      return {
+        ...draft,
+        created: false,
+        reused: true,
+        sideEffects: { ...noSideEffects }
+      };
+    }
+
+    const linkedTakeoffJobId =
+      String(takeoffJobId || "").trim() ||
+      (await resolveLinkedTakeoffJobId(organizationId, caseId));
+
+    const basics = await resolveIntakeCaseBasics(organizationId, caseId);
+    const scope = {
+      ...emptyStudioEstimateScope(),
+      ...basics,
+      estimateOrigin: "email_ai_takeoff",
+      physicalScopeSource: "takeoff"
+    };
+
+    if (typeof repository.create !== "function") {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.UNAVAILABLE, {
+        message: "Studio estimate repository is unavailable.",
+        statusCode: 503
+      });
+    }
+
+    await repository.create({
+      organizationId,
+      intakeCaseId: caseId,
+      takeoffJobId: linkedTakeoffJobId || null,
+      createdByUserId: actorUserId,
+      status: STUDIO_ESTIMATE_STATUSES.NEEDS_TAKEOFF_APPROVAL,
+      scope
+    });
+
+    const draft = await getWorkingDraft({
+      organizationId,
+      intakeCaseId: caseId,
+      actorUserId
+    });
+    return {
+      ...draft,
+      created: true,
+      reused: false,
+      sideEffects: { ...noSideEffects }
+    };
+  }
+
   async function loadPublicationBundle(organizationId, estimate) {
     if (!estimate?.id || !studioDigitalEstimateService) {
       return {
@@ -348,11 +562,23 @@ export function createStudioV2Service(deps = {}) {
   async function getWorkingDraft({ organizationId, intakeCaseId, actorUserId = null }) {
     const row = await loadActiveEstimateOrNull(organizationId, intakeCaseId);
     if (!row) {
+      const caseId = String(intakeCaseId || "").trim();
+      const linkedTakeoffJobId = await resolveLinkedTakeoffJobId(organizationId, caseId);
+      const takeoffHint = await resolveTakeoffJobStatusHint(organizationId, linkedTakeoffJobId);
       return {
         ok: true,
         code: STUDIO_V2_ERROR_CODES.NO_ESTIMATE,
-        message: studioV2UserMessage(STUDIO_V2_ERROR_CODES.NO_ESTIMATE),
+        message:
+          "This Inbox case does not have a Studio V2 estimate yet. Create a draft estimate here, then use AI Takeoff Review to verify dimensions.",
         empty: true,
+        caseId,
+        estimateId: null,
+        canCreateDraft: true,
+        availableActions: ["create_studio_v2_draft"],
+        takeoffJobId: takeoffHint.takeoffJobId,
+        takeoffJobIdPresent: Boolean(takeoffHint.takeoffJobId),
+        takeoffStatus: takeoffHint.takeoffStatus,
+        takeoffProcessing: takeoffHint.takeoffProcessing,
         projectHeader: buildStudioV2ProjectHeader(null),
         scopeSummary: buildStudioV2ScopeSummary(null),
         editableScope: buildStudioV2EditableScope(null),
@@ -364,7 +590,8 @@ export function createStudioV2Service(deps = {}) {
         scopeEditability: {
           editable: false,
           code: STUDIO_V2_ERROR_CODES.NO_ESTIMATE,
-          message: studioV2UserMessage(STUDIO_V2_ERROR_CODES.NO_ESTIMATE)
+          message:
+            "This Inbox case does not have a Studio V2 estimate yet. Create a draft estimate here, then use AI Takeoff Review to verify dimensions."
         },
         lastCalculation: buildStudioV2CalculationResult(null),
         approvalReadiness: assessStudioV2ApprovalReadiness(null),
@@ -659,6 +886,173 @@ export function createStudioV2Service(deps = {}) {
         updateScope: false,
         approve: false,
         publish: false
+      }
+    };
+  }
+
+  /**
+   * Finish AI Takeoff Review into Studio V2 Working Draft.
+   * Assumes takeoff was already approved (frozen snapshot) via approve-and-build.
+   * Ensures draft shell, then imports approved measurements. Idempotent.
+   * Does not calculate, approve estimate, publish, accept, or mark sold.
+   */
+  async function finishTakeoffIntoWorkingDraft({
+    organizationId,
+    intakeCaseId,
+    actorUserId = null,
+    body = {}
+  }) {
+    const confirmed = body?.confirmed === true || body?.confirmed === "true";
+    if (!confirmed) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "Confirm Use these measurements to continue.",
+        statusCode: 400
+      });
+    }
+
+    const caseId = String(intakeCaseId || "").trim();
+    if (!caseId) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.VALIDATION_FAILED, {
+        message: "Intake case is required.",
+        statusCode: 400
+      });
+    }
+
+    const takeoffJobIdHint = String(body?.takeoffJobId || "").trim() || null;
+
+    // Ensure / reuse Working Draft shell (no calculate/approve/publish).
+    await ensureWorkingDraft({
+      organizationId,
+      intakeCaseId: caseId,
+      actorUserId,
+      takeoffJobId: takeoffJobIdHint,
+      confirm: true
+    });
+
+    let row = await loadActiveEstimateOrNull(organizationId, caseId);
+    if (!row) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_ESTIMATE);
+    }
+
+    if (!row.takeoffJobId && takeoffJobIdHint) {
+      row = await repository.update(
+        organizationId,
+        row.id,
+        { takeoffJobId: takeoffJobIdHint },
+        actorUserId || null
+      );
+    }
+
+    const jobId = String(row.takeoffJobId || takeoffJobIdHint || "").trim();
+    if (!jobId) {
+      throw createStudioV2Error(STUDIO_V2_ERROR_CODES.NO_TAKEOFF_AVAILABLE);
+    }
+
+    // Freeze approved snapshot when still in review (idempotent if already approved).
+    const approveImpl = deps.approveAndBuildEstimate || approveAndBuildEstimate;
+    const supabase = deps.getSupabase?.();
+    if (typeof approveImpl === "function" && (supabase || deps.approveAndBuildEstimate)) {
+      try {
+        await approveImpl({
+          supabase,
+          organizationId,
+          userId: actorUserId,
+          takeoffJobId: jobId,
+          confirmAdvisories: true,
+          acceptAdvisoryWarnings: true,
+          correctionNotes: "Studio V2 Use these measurements"
+        });
+      } catch (e) {
+        const code = String(e?.code || "").toLowerCase();
+        // Already approved / soft advisory paths — continue to import when snapshot exists.
+        if (
+          code !== "already_approved" &&
+          e?.statusCode !== 409 &&
+          !String(e?.message || "")
+            .toLowerCase()
+            .includes("already approved")
+        ) {
+          // If blockers prevent approval, surface as takeoff_not_ready.
+          throw createStudioV2Error(STUDIO_V2_ERROR_CODES.TAKEOFF_NOT_READY, {
+            message: e?.message || "Takeoff must be reviewed before using measurements.",
+            statusCode: Number(e?.statusCode) || 422
+          });
+        }
+      }
+    }
+
+    const scopeEmpty = currentScopeIsEmpty(row.scope);
+    // Idempotent reload: if rooms already present from this takeoff, treat as loaded
+    // unless caller forces replace_all.
+    const forceReplace = body?.mode === "replace_all";
+    if (!scopeEmpty && !forceReplace && !needsStudioV2TakeoffImport(row)) {
+      const draft = await getWorkingDraft({
+        organizationId,
+        intakeCaseId: caseId,
+        actorUserId
+      });
+      return {
+        ...draft,
+        ok: true,
+        finished: true,
+        reused: true,
+        alreadyLoaded: true,
+        message: "Takeoff scope is loaded into this draft.",
+        sideEffects: {
+          calculated: false,
+          approved: false,
+          published: false,
+          sold: false,
+          revised: false,
+          accepted: false,
+          ensureEditableDraft: false,
+          refreshFromTakeoff: false
+        }
+      };
+    }
+
+    const mode = scopeEmpty ? "replace_empty" : "replace_all";
+    const applied = await applyTakeoffImport({
+      organizationId,
+      intakeCaseId: caseId,
+      actorUserId,
+      body: {
+        mode,
+        confirmed: true,
+        takeoffJobId: takeoffJobIdHint || row.takeoffJobId || null,
+        clientMutationId:
+          typeof body?.clientMutationId === "string"
+            ? body.clientMutationId
+            : `v2-takeoff-finish-${Date.now()}`
+      }
+    });
+
+    const draft = await getWorkingDraft({
+      organizationId,
+      intakeCaseId: caseId,
+      actorUserId
+    });
+
+    return {
+      ...draft,
+      ok: true,
+      finished: true,
+      reused: false,
+      alreadyLoaded: false,
+      message: "Takeoff scope is loaded into this draft.",
+      takeoffJobId: applied.takeoffJobId || draft.takeoffJobId || null,
+      resultId: applied.resultId || null,
+      mode: applied.mode,
+      sideEffects: {
+        calculated: false,
+        approved: false,
+        published: false,
+        sold: false,
+        revised: false,
+        accepted: false,
+        ensureEditableDraft: false,
+        refreshFromTakeoff: false,
+        ...(applied.sideEffects || {})
       }
     };
   }
@@ -2432,6 +2826,7 @@ export function createStudioV2Service(deps = {}) {
 
   return {
     getWorkingDraft,
+    ensureWorkingDraft,
     patchWorkingDraftScope,
     patchWorkingDraftOptions,
     patchWorkingDraftPricing,
@@ -2440,6 +2835,7 @@ export function createStudioV2Service(deps = {}) {
     createRevisionFromCustomerSelections,
     previewTakeoffImport,
     applyTakeoffImport,
+    finishTakeoffIntoWorkingDraft,
     calculateWorkingDraft,
     publishApproved,
     getCustomerActivity,

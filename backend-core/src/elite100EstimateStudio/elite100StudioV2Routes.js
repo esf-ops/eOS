@@ -239,6 +239,37 @@ export function attachElite100StudioV2Routes(app, deps) {
   );
 
   app.post(
+    "/api/elite100-studio-v2/cases/:caseId/working-draft",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await studioV2.ensureWorkingDraft({
+          organizationId,
+          intakeCaseId: req.params.caseId,
+          actorUserId: req.user?.id ?? null,
+          takeoffJobId: body.takeoffJobId || null,
+          confirm: body.confirm === true || body.confirm === "true"
+        });
+        auditStudioV2("working_draft.ensure", req, {
+          intakeCaseId: req.params.caseId,
+          estimateId: result.estimateId || null,
+          created: result.created === true,
+          reused: result.reused === true
+        });
+        res.json(result);
+      } catch (e) {
+        logStudioV2("working-draft ensure failed", e, req);
+        const { status, body } = studioV2ErrorBody(e, "Unable to create Studio V2 draft");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.post(
     "/api/elite100-studio-v2/cases/:caseId/working-draft/calculate",
     ...staffStack,
     jsonParser,
@@ -391,6 +422,34 @@ export function attachElite100StudioV2Routes(app, deps) {
       } catch (e) {
         logStudioV2("takeoff-import apply failed", e, req);
         const { status, body } = studioV2ErrorBody(e, "Unable to apply Takeoff import");
+        res.status(status).json(body);
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-studio-v2/cases/:caseId/takeoff-finish",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await studioV2.finishTakeoffIntoWorkingDraft({
+          organizationId,
+          intakeCaseId: req.params.caseId,
+          actorUserId: req.user?.id ?? null,
+          body: req.body && typeof req.body === "object" ? req.body : {}
+        });
+        auditStudioV2("takeoff.finish", req, {
+          intakeCaseId: req.params.caseId,
+          estimateId: result.estimateId || null,
+          alreadyLoaded: result.alreadyLoaded === true
+        });
+        res.json(result);
+      } catch (e) {
+        logStudioV2("takeoff finish failed", e, req);
+        const { status, body } = studioV2ErrorBody(e, "Unable to finish Takeoff Review");
         res.status(status).json(body);
       }
     }
