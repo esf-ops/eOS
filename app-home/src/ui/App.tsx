@@ -210,7 +210,9 @@ const HEAD_TINT_BY_SLUG: Record<string, HeadTint> = {
   reports: "slate",
   partner_quote: "burgundy",
   dealer_resources: "navy",
-  org_directory: "slate"
+  org_directory: "slate",
+  elite100_estimate_studio: "navy",
+  elite100_quote_flow: "burgundy"
 };
 
 function headTintFor(slug: string): HeadTint {
@@ -245,6 +247,8 @@ const HEAD_CATEGORY_BY_SLUG: Record<string, string> = {
   reports: "Platform",
   partner_quote: "Quote",
   dealer_resources: "Quote",
+  elite100_estimate_studio: "Quote",
+  elite100_quote_flow: "Quote"
 };
 
 function headCategoryFor(slug: string): string {
@@ -273,6 +277,8 @@ const HEAD_BUSINESS_GROUP_BY_SLUG: Record<string, BusinessGroupLabel> = {
   quote: "Quote Platform",
   quote_library: "Quote Platform",
   custom_quote: "Quote Platform",
+  elite100_estimate_studio: "Quote Platform",
+  elite100_quote_flow: "Quote Platform",
   public_quote: "Quote Platform",
   partner_quote: "Quote Platform",
   dealer_resources: "Quote Platform",

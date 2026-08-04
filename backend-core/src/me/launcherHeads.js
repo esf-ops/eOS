@@ -1,5 +1,6 @@
 import { DEALER_SAFE_HEAD_SLUG_SET, EOS_HEAD_SLUGS, isKnownHeadSlug } from "../auth/eosGovernanceConstants.js";
 import { isElite100EstimateStudioEnabled } from "../elite100EstimateStudio/elite100EstimateStudioConfig.mjs";
+import { isElite100QuoteFlowEnabled } from "../elite100QuoteFlow/elite100QuoteFlowConfig.mjs";
 import { inferHeadDeploymentStatus, resolveHeadDeploymentUrl } from "./headDeploymentUrls.js";
 
 /**
@@ -171,6 +172,16 @@ export const HEAD_LAUNCHER_CATALOG = [
     href: "/elite100-estimate-studio",
     roleNote:
       "Requires elite100_estimate_studio head access (System Admin) and ELITE100_ESTIMATE_STUDIO_ENABLED=1 on Brain. Not granted by role defaults. Public Digital Estimate is a separate customer head and does not appear here."
+  },
+  {
+    slug: "elite100_quote_flow",
+    label: "Elite 100 Quote Flow",
+    description:
+      "Clean Elite 100 workflow — Inbox, Estimate Queue (Set Scope), and Estimates. Separate from Estimate Studio.",
+    category: "Revenue",
+    href: "/elite100-quote-flow",
+    roleNote:
+      "Requires elite100_quote_flow head access (System Admin) and ELITE100_QUOTE_FLOW_ENABLED=1 on Brain. Not granted by role defaults."
   },
   {
     slug: "reports",
@@ -594,6 +605,7 @@ export async function buildMeHeadsPayload(supabase, reqUser) {
   // Elite 100 Estimate Studio: feature-flag + head-access gate (same source as System Admin).
   // Hide when Studio is off, or when the user lacks the head grant / full-catalog role.
   heads = await filterElite100EstimateStudioLauncherHeads(heads, ctx, reqUser);
+  heads = await filterElite100QuoteFlowLauncherHeads(heads, ctx, reqUser);
 
   return {
     ok: true,
@@ -617,6 +629,23 @@ async function filterElite100EstimateStudioLauncherHeads(heads, ctx, _reqUser) {
     if (!studioOn) return false;
     if (ctx.launcherFullCatalog) return true;
     return ctx.actionableGrantSet.has("elite100_estimate_studio");
+  });
+}
+
+/**
+ * Show Quote Flow tile when enabled and the user has elite100_quote_flow access.
+ * Not granted by role defaults — explicit head grant (or full-catalog role) required.
+ * @param {LauncherHeadDtoApi[]} heads
+ * @param {object} ctx
+ * @param {object} _reqUser
+ */
+async function filterElite100QuoteFlowLauncherHeads(heads, ctx, _reqUser) {
+  const quoteFlowOn = isElite100QuoteFlowEnabled(process.env);
+  return heads.filter((h) => {
+    if (h.slug !== "elite100_quote_flow") return true;
+    if (!quoteFlowOn) return false;
+    if (ctx.launcherFullCatalog) return true;
+    return ctx.actionableGrantSet.has("elite100_quote_flow");
   });
 }
 

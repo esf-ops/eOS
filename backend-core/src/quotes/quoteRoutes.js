@@ -10,6 +10,7 @@ import { maybeAttachDigitalEstimateReviewRequestRoutes } from "../digitalEstimat
 import { maybeAttachDigitalEstimateAmendmentRoutes } from "../digitalEstimate/configuration/amendmentRoutes.js";
 import { maybeAttachElite100EstimateStudioRoutes } from "../elite100EstimateStudio/elite100EstimateStudioRoutes.js";
 import { maybeAttachElite100StudioV2Routes } from "../elite100EstimateStudio/elite100StudioV2Routes.js";
+import { maybeAttachElite100QuoteFlowRoutes } from "../elite100QuoteFlow/elite100QuoteFlowRoutes.js";
 import { maybeAttachStudioFinalAcceptanceRoutes } from "../elite100EstimateStudio/studioFinalAcceptanceRoutes.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
 import { attachCustomQuoteRoutes } from "./customQuotesApi.js";
@@ -289,6 +290,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
   maybeAttachDigitalEstimateRoutes(app, { requireAuth, getSupabase });
   maybeAttachElite100EstimateStudioRoutes(app, { requireAuth, getSupabase });
   maybeAttachElite100StudioV2Routes(app, { requireAuth, getSupabase });
+  maybeAttachElite100QuoteFlowRoutes(app, { requireAuth, getSupabase });
   maybeAttachDigitalEstimateConfigurationRoutes(app, { requireAuth, getSupabase });
   maybeAttachDigitalEstimatePublicConfigurationRoutes(app, { requireAuth, getSupabase });
   maybeAttachDigitalEstimateReviewRequestRoutes(app, { requireAuth, getSupabase });

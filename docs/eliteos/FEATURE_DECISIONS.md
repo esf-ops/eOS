@@ -3750,3 +3750,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `StudioV2TakeoffReviewPanel`, `StudioV2TakeoffImportPanel`, `StudioV2EstimatorShell`, `StudioV2ScopeEditor`, `studioV2Service.finishTakeoffIntoWorkingDraft`, takeoff-finish route, consolidated approve button label, tests, this doc. |
 | **Protected / unchanged** | AI Takeoff algorithm, pricing formulas, estimate approval/publish/DE/acceptance/sold, Internal Estimate, migrations. |
 | **Revisit trigger** | In-process React extract of ConsolidatedTakeoffReview into a shared package (instead of iframe). |
+
+### 273. Elite 100 Quote Flow head — Slice 1A shell (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/elite100-quote-flow-slice-1a-shell` |
+| **Decision** | Add isolated staff head **Elite 100 Quote Flow** (`app-elite100-quote-flow`, slug `elite100_quote_flow`, Brain `/api/elite100-quote-flow/*`, flag `ELITE100_QUOTE_FLOW_ENABLED` exact `"1"`). Slice 1A is shell only: three tabs Inbox / Estimate Queue / Estimates with placeholder copy, health/config stub routes, launcher tile only when flag + head access (or full-catalog role). No attachment selection, start-takeoff, Set Scope, pricing, publish, acceptance, or sold. No V1/V2 language in the new UI. |
+| **Why** | Stop patching the tangled Studio V1/V2 hybrid; give estimators a clean product path for tomorrow’s MVP slices. |
+| **Impacted** | New app + `elite100QuoteFlow` Brain module, `EOS_HEAD_SLUGS`, launcher/CORS URL keys, `quoteRoutes` mount, head map, this doc. |
+| **Protected / unchanged** | AI Takeoff algorithm, Studio V2 behavior, Digital Estimate (`app-digital-estimate` / `backend-core/src/digitalEstimate`), pricing formulas, approval/publish/sold, migrations. |
+| **Revisit trigger** | Slice 1B Inbox + start-takeoff; then Queue Set Scope; then Estimates scope detail. |
