@@ -93,6 +93,33 @@ function baseItem(overrides = {}) {
 {
   const presented = presentQuoteFlowInboxItem(baseItem());
   assert.equal(presented.takeoffStatus.key, "needs_attachment_selection");
+  assert.equal(presented.sender, "Buyer Co");
+  assert.equal(presented.senderLabel, "Buyer Co");
+  const objectSender = presentQuoteFlowInboxItem(
+    baseItem({
+      sender: {
+        displayName: "Dave Untiedt",
+        safeAddressLabel: "d***@builder.com",
+        emailPresent: true
+      }
+    })
+  );
+  assert.equal(typeof objectSender.sender, "string");
+  assert.equal(objectSender.sender, "Dave Untiedt");
+  assert.equal(objectSender.senderLabel, "Dave Untiedt");
+  const emailOnly = presentQuoteFlowInboxItem(
+    baseItem({
+      sender: { displayName: "", safeAddressLabel: "", emailPresent: true }
+    })
+  );
+  assert.equal(emailOnly.sender, "Email on file");
+  const missing = presentQuoteFlowInboxItem(baseItem({ sender: null }));
+  assert.equal(missing.sender, "Unknown contact");
+  console.log("ok: inbox presenter normalizes production sender object to display string");
+}
+{
+  const presented = presentQuoteFlowInboxItem(baseItem());
+  assert.equal(presented.takeoffStatus.key, "needs_attachment_selection");
   const returned = presentQuoteFlowInboxItem(
     baseItem({
       aiTakeoff: {

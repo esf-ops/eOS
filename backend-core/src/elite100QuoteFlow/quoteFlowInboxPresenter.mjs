@@ -4,6 +4,41 @@
  */
 
 /**
+ * Shared Inbox may send sender/customer as
+ * `{ displayName, safeAddressLabel, emailPresent }` — never pass that object to React.
+ *
+ * @param {unknown} value
+ * @param {string} [fallback="Unknown contact"]
+ * @returns {string}
+ */
+export function formatQuoteFlowPersonLabel(value, fallback = "Unknown contact") {
+  if (value == null || value === "") return fallback;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const s = String(value).trim();
+    return s || fallback;
+  }
+  if (typeof value !== "object") return fallback;
+
+  const obj = /** @type {Record<string, unknown>} */ (value);
+  const displayName = String(obj.displayName ?? "").trim();
+  if (displayName) return displayName;
+
+  const safeAddressLabel = String(obj.safeAddressLabel ?? "").trim();
+  if (safeAddressLabel) return safeAddressLabel;
+
+  if (obj.emailPresent === true) return "Email on file";
+
+  for (const key of ["sender", "from", "customer", "contact", "requester", "account", "recipient"]) {
+    if (obj[key] != null) {
+      const nested = formatQuoteFlowPersonLabel(obj[key], "");
+      if (nested) return nested;
+    }
+  }
+
+  return fallback;
+}
+
+/**
  * @param {object|null|undefined} item Shared Inbox row
  * @param {{ alreadyScoped?: boolean }} [opts]
  */
@@ -81,10 +116,32 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
           : "unsupported"
   }));
 
+  const senderLabel = formatQuoteFlowPersonLabel(item?.sender, "Unknown contact");
+  const customerLabel = formatQuoteFlowPersonLabel(
+    item?.customerLabel ?? item?.customer ?? item?.contact ?? item?.requester,
+    "Unknown contact"
+  );
+  const accountLabel = formatQuoteFlowPersonLabel(
+    item?.accountLabel ?? item?.account,
+    "Unknown contact"
+  );
+  const projectRaw = item?.projectLabel ?? item?.project ?? item?.projectName ?? null;
+  const projectLabel =
+    projectRaw == null || projectRaw === ""
+      ? null
+      : typeof projectRaw === "string" || typeof projectRaw === "number"
+        ? String(projectRaw)
+        : formatQuoteFlowPersonLabel(projectRaw, "Project");
+
   return {
     messageKey: item?.messageKey || null,
     receivedAt: item?.receivedAt || null,
-    sender: item?.sender || null,
+    // Always a display string (production Shared Inbox sender is often an object).
+    sender: senderLabel,
+    senderLabel,
+    customerLabel,
+    accountLabel,
+    projectLabel,
     subject: item?.subject || "(no subject)",
     bodyPreview: item?.bodyPreview || null,
     intakeCaseId: item?.intakeCaseId || null,

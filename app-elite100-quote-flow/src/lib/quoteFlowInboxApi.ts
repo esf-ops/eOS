@@ -19,10 +19,22 @@ export type QuoteFlowTakeoffStatus = {
   takeoffJobId: string | null;
 };
 
+/** Production Shared Inbox may still send this object before presenter normalization. */
+export type QuoteFlowPersonRef = {
+  displayName?: string | null;
+  safeAddressLabel?: string | null;
+  emailPresent?: boolean;
+};
+
 export type QuoteFlowInboxItem = {
   messageKey: string | null;
   receivedAt: string | null;
-  sender: string | null;
+  /** Display string after presenter/normalize; may historically be a person object. */
+  sender: string | QuoteFlowPersonRef | null;
+  senderLabel?: string | null;
+  customerLabel?: string | null;
+  accountLabel?: string | null;
+  projectLabel?: string | null;
   subject: string;
   bodyPreview: string | null;
   intakeCaseId: string | null;
