@@ -109,8 +109,6 @@ console.log("ok: More is explicitly legacy, compatibility, and support");
 
 assert.match(shell, /Open Takeoff Review/);
 assert.match(shell, /studio-v2-open-takeoff-review/);
-assert.match(shell, /Create Studio V2 Draft/);
-assert.doesNotMatch(shell, /Create or open it in V1 first/);
 assert.match(shell, /Studio V2 remains where the estimate is finalized|quote authority|does not price, publish/);
 assert.doesNotMatch(shell, /Open in V1 \(Legacy fallback\)/);
 console.log("ok: Takeoff Review is supporting tool; Studio V2 is authority");

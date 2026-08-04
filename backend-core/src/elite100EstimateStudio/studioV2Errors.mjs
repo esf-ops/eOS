@@ -48,8 +48,7 @@ export const STUDIO_V2_ERROR_CODES = Object.freeze({
 });
 
 const USER_MESSAGES = Object.freeze({
-  [STUDIO_V2_ERROR_CODES.NO_ESTIMATE]:
-    "This Inbox case does not have a Studio V2 estimate yet. Create a draft estimate here, then use AI Takeoff Review to verify dimensions.",
+  [STUDIO_V2_ERROR_CODES.NO_ESTIMATE]: "No estimate exists for this case yet.",
   [STUDIO_V2_ERROR_CODES.UNSUPPORTED_ORIGIN]:
     "This estimate origin is not supported in Studio V2 yet.",
   [STUDIO_V2_ERROR_CODES.APPROVE_REQUIRED]: "Approve required before publish.",

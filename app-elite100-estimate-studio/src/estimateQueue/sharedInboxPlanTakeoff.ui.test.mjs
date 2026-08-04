@@ -67,14 +67,6 @@ assert.match(
   /studio-v2-takeoff-status-card|Open Takeoff Review/
 );
 assert.match(
-  readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2EstimatorShell.tsx"), "utf8"),
-  /Create Studio V2 Draft/
-);
-assert.doesNotMatch(
-  readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/StudioV2EstimatorShell.tsx"), "utf8"),
-  /Create or open it in V1 first/
-);
-assert.match(
   readFileSync(join(root, "app-elite100-estimate-studio/src/estimateQueue/EstimateTakeoffWorkspace.tsx"), "utf8"),
   /AI Takeoff Review/
 );

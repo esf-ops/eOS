@@ -3728,15 +3728,4 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Plan preview, measurement rows, takeoff approve/save draft, Digital Estimate, pricing algorithms, publish/acceptance/sold flows in Studio V2, migrations. |
 | **Revisit trigger** | Embed Takeoff Review inside Studio V2 chrome; retire standalone review shell. |
 
-### 271. Studio V2 create draft from Inbox case (2026-08-04)
-
-| Field | Value |
-|-------|--------|
-| **Date / branch** | 2026-08-04 · `hotfix/studio-v2-create-draft-from-inbox-case` |
-| **Decision** | When Studio V2 opens for an Inbox/takeoff case with no `studio_estimates` row, show a production empty state (no V1 requirement) with primary **Create Studio V2 Draft**. `POST /api/elite100-studio-v2/cases/:caseId/working-draft` (`confirm: true`) idempotently creates or reuses an editable Working Draft shell via `repository.create` — links intake case + takeoff job when known, seeds safe customer/project basics when present, defaults pricing basis like new estimates. Does **not** auto-create on handoff, does **not** call `refreshTakeoffGate`, calculate, approve, publish, revise, accept, or mark sold. Open Takeoff Review remains available as a supporting tool. |
-| **Why** | Inbox → Studio V2 routing worked (`?studioV2=1&caseId=…`) but staff were told to create/open in V1 first because GET working-draft never creates and no V2 create-draft path existed. |
-| **Impacted** | `studioV2Service.ensureWorkingDraft`, Studio V2 routes, `StudioV2EstimatorShell` empty state, Slice A / ensure-draft tests, this doc. |
-| **Protected / unchanged** | Digital Estimate, pricing formulas, publish/approval/revision/acceptance/sold, Internal Estimate, migrations, AI Takeoff algorithm, auto-calculate/auto-approve. |
-| **Revisit trigger** | Optional auto-create draft after successful Inbox handoff once production confidence is high. |
-
 ---
