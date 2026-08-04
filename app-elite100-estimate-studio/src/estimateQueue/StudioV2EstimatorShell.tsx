@@ -209,6 +209,21 @@ type WorkingDraftResponse = {
   status?: string | null;
   takeoffImportNeeded?: boolean;
   takeoffJobId?: string | null;
+  takeoffJobIdPresent?: boolean;
+  takeoffStatus?: string | null;
+  takeoffProcessing?: boolean;
+  canCreateDraft?: boolean;
+  availableActions?: string[];
+  created?: boolean;
+  reused?: boolean;
+  sideEffects?: {
+    calculated?: boolean;
+    approved?: boolean;
+    published?: boolean;
+    sold?: boolean;
+    revised?: boolean;
+    accepted?: boolean;
+  };
   customerSelectionRevision?: CustomerSelectionRevisionInfo | null;
 };
 
@@ -320,6 +335,8 @@ export default function StudioV2EstimatorShell(props: {
   const [approveBusy, setApproveBusy] = useState(false);
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [customerRevisionBusy, setCustomerRevisionBusy] = useState(false);
+  const [createDraftBusy, setCreateDraftBusy] = useState(false);
+  const [createDraftError, setCreateDraftError] = useState<string | null>(null);
 
   const hydrateFromDraft = useCallback((draftBody: WorkingDraftResponse) => {
     setDraft(draftBody);
@@ -766,6 +783,34 @@ export default function StudioV2EstimatorShell(props: {
     }
   }
 
+  async function runCreateStudioV2Draft() {
+    if (createDraftBusy) return;
+    setCreateDraftBusy(true);
+    setCreateDraftError(null);
+    try {
+      const body = (await apiPost(
+        `/api/elite100-studio-v2/cases/${encodeURIComponent(caseId)}/working-draft`,
+        authToken,
+        {
+          confirm: true,
+          clientMutationId: `v2-create-draft-${Date.now()}`
+        }
+      )) as WorkingDraftResponse;
+      if (body?.code === "no_estimate" || body?.empty) {
+        setCreateDraftError("Draft was not created. Try again.");
+        return;
+      }
+      hydrateFromDraft(body);
+      setLoadError(null);
+      // Refresh activity pointers for the new estimate id (best effort).
+      void load();
+    } catch (e) {
+      setCreateDraftError(errorMessage(e));
+    } finally {
+      setCreateDraftBusy(false);
+    }
+  }
+
   async function runCreateRevision(args: { confirmed: true; reason?: string }) {
     const estimateId =
       draft?.estimateId ||
@@ -1038,15 +1083,51 @@ export default function StudioV2EstimatorShell(props: {
       {draft?.code === "no_estimate" ? (
         <div className="studio-v2-empty" data-testid="studio-v2-no-estimate">
           <h2>No estimate yet</h2>
-          <p>This case has no Studio estimate. Create or open it in V1 first.</p>
-          <button
-            type="button"
-            className="eq-btn-secondary"
-            data-testid="studio-v2-no-estimate-back"
-            onClick={onBack}
-          >
-            Back to Inbox
-          </button>
+          <p>This Inbox case does not have a Studio V2 estimate yet.</p>
+          <p className="muted">
+            Create a draft estimate here, then use AI Takeoff Review to verify dimensions.
+          </p>
+          {draft.takeoffProcessing ? (
+            <p className="muted" data-testid="studio-v2-takeoff-processing-hint">
+              AI Takeoff is processing. You can create the draft now; findings can be imported when
+              ready.
+            </p>
+          ) : null}
+          {createDraftError ? (
+            <p className="error-text" data-testid="studio-v2-create-draft-error">
+              {createDraftError}
+            </p>
+          ) : null}
+          <div className="studio-v2-empty__actions">
+            <button
+              type="button"
+              className="eq-btn-primary"
+              data-testid="studio-v2-create-draft"
+              disabled={createDraftBusy}
+              onClick={() => void runCreateStudioV2Draft()}
+            >
+              {createDraftBusy ? "Creating draft…" : "Create Studio V2 Draft"}
+            </button>
+            {onOpenTakeoffReview && (draft.takeoffJobId || draft.takeoffJobIdPresent) ? (
+              <button
+                type="button"
+                className="eq-btn-secondary"
+                data-testid="studio-v2-no-estimate-open-takeoff-review"
+                onClick={onOpenTakeoffReview}
+                title="Open plan-visible measurement review"
+              >
+                Open Takeoff Review
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              data-testid="studio-v2-no-estimate-back"
+              onClick={onBack}
+            >
+              Back to Inbox
+            </button>
+          </div>
         </div>
       ) : null}
 
