@@ -3783,3 +3783,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowSetScope`, queue presenter/routes, EstimateQueuePage, consolidated approve label, tests, this doc. |
 | **Protected / unchanged** | Digital Estimate, pricing formulas, Studio V2 product path, Internal Estimate, AI Takeoff algorithm, migrations. |
 | **Revisit trigger** | Slice 1D Estimates list/detail official scope editor. |
+
+### 276. Elite 100 Quote Flow Slice 1D — Estimates + official scope editor (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/elite100-quote-flow-slice-1d-estimates-scope` |
+| **Decision** | Estimates tab lists only `studio_estimates` with official scope set (`isOfficialScopeSet`). Detail workspace edits `scope_json` rooms/pieces (manual) via `PATCH …/estimates/:estimateId/scope` → `studioEstimateService.updateScope`. No AI Takeoff iframe, no takeoff rerun, no calculate / estimate approve / publish / accept / sold. Later groups shown as “coming later.” |
+| **Why** | Estimators own official scope after Set Scope without reopening AI Takeoff or Studio hybrid chrome. |
+| **Impacted** | `quoteFlowEstimates`, estimates presenter/routes, EstimatesListPage + OfficialScopeEditor, tests, head map, this doc. |
+| **Protected / unchanged** | Digital Estimate, pricing formulas, Studio V2 product path, Internal Estimate, AI Takeoff algorithm, migrations. |
+| **Revisit trigger** | Slice for pricing controls / calculation / approval. |

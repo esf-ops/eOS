@@ -49,7 +49,9 @@ assert.match(inbox, /AI Takeoff/);
 assert.match(inbox, /data-testid="qf-inbox-list"/);
 assert.match(queue, /data-testid="qf-queue-list"/);
 assert.match(queue, /Review Takeoff|Set Scope/);
-console.log("ok: Inbox + Estimate Queue wired; Estimates detail remains later slice");
+assert.match(estimates, /data-testid="qf-estimates-list"/);
+assert.match(estimates, /Official scope|qf-official-scope-editor|Save Scope/);
+console.log("ok: Inbox + Estimate Queue + Estimates official scope wired");
 
 const allSrc = readAllSrc(join(appRoot, "src")).join("\n");
 assert.doesNotMatch(allSrc, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);

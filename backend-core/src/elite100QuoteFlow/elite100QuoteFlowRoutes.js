@@ -1,5 +1,5 @@
 /**
- * Elite 100 Quote Flow Brain API — Slice 1A shell + Slice 1B Inbox/start-takeoff.
+ * Elite 100 Quote Flow Brain API — Slice 1A–1D (shell, Inbox, Queue/Set Scope, Estimates).
  */
 
 import express from "express";
@@ -23,6 +23,7 @@ import {
 } from "./elite100QuoteFlowConfig.mjs";
 import { createQuoteFlowService } from "./quoteFlowService.mjs";
 import { createQuoteFlowSetScopeService } from "./quoteFlowSetScope.mjs";
+import { createQuoteFlowEstimatesService } from "./quoteFlowEstimates.mjs";
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
 import {
   approveAndBuildEstimate,
@@ -39,6 +40,8 @@ const jsonParser = express.json({ limit: "256kb" });
  *   getSupabase: () => import("@supabase/supabase-js").SupabaseClient,
  *   env?: NodeJS.ProcessEnv,
  *   quoteFlowService?: ReturnType<typeof createQuoteFlowService>,
+ *   quoteFlowSetScopeService?: ReturnType<typeof createQuoteFlowSetScopeService>,
+ *   quoteFlowEstimatesService?: ReturnType<typeof createQuoteFlowEstimatesService>,
  *   sharedInboxService?: object,
  *   studioEstimateRepository?: object
  * }} deps
@@ -97,8 +100,9 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
 
   let quoteFlowService = deps.quoteFlowService || null;
   let quoteFlowSetScopeService = deps.quoteFlowSetScopeService || null;
+  let quoteFlowEstimatesService = deps.quoteFlowEstimatesService || null;
 
-  if (!quoteFlowService || !quoteFlowSetScopeService) {
+  if (!quoteFlowService || !quoteFlowSetScopeService || !quoteFlowEstimatesService) {
     const studioEstimateService =
       deps.studioEstimateService || createStudioEstimateService({ env, getSupabase });
     const quoteIntakeRepository =
@@ -107,6 +111,8 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     const studioEstimateQueueService =
       deps.studioEstimateQueueService ||
       createStudioEstimateQueueService({ env, getSupabase });
+    const estimateRepository =
+      deps.studioEstimateRepository || studioEstimateService.repository || null;
 
     if (!quoteFlowService) {
       const sharedInboxService =
@@ -130,8 +136,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
 
       quoteFlowService = createQuoteFlowService({
         sharedInboxService,
-        estimateRepository:
-          deps.studioEstimateRepository || studioEstimateService.repository || null,
+        estimateRepository,
         env
       });
     }
@@ -139,13 +144,20 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     if (!quoteFlowSetScopeService) {
       quoteFlowSetScopeService = createQuoteFlowSetScopeService({
         queueService: deps.studioEstimateQueueService || studioEstimateQueueService,
-        estimateRepository:
-          deps.studioEstimateRepository || studioEstimateService.repository || null,
+        estimateRepository,
         studioEstimateService,
         approveAndBuildEstimate: deps.approveAndBuildEstimate || approveAndBuildEstimate,
         getTakeoffWorkspace: deps.getTakeoffWorkspace || getTakeoffWorkspace,
         getLatestTakeoffResult: deps.getLatestTakeoffResult || getLatestTakeoffResult,
         getSupabase,
+        env
+      });
+    }
+
+    if (!quoteFlowEstimatesService) {
+      quoteFlowEstimatesService = createQuoteFlowEstimatesService({
+        estimateRepository,
+        studioEstimateService,
         env
       });
     }
@@ -176,7 +188,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     res.set("Cache-Control", "no-store");
     res.json({
       ok: true,
-      shell: "slice-1c",
+      shell: "slice-1d",
       headSlug: ELITE100_QUOTE_FLOW_HEAD_SLUG
     });
   });
@@ -187,7 +199,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
       ok: true,
       config: {
         ...readSafeElite100QuoteFlowConfig(env),
-        shell: "slice-1c"
+        shell: "slice-1d"
       }
     });
   });
@@ -334,8 +346,75 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get("/api/elite100-quote-flow/estimates", ...staffStack, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      const organizationId = await orgIdFor(req);
+      const result = await quoteFlowEstimatesService.listEstimates({
+        organizationId,
+        actorUserId: req.user?.id ?? null,
+        query: req.query || {}
+      });
+      res.json(result);
+    } catch (e) {
+      console.error("[elite100-quote-flow] estimates list failed", e?.code || e?.message);
+      sendSafeError(res, e, "Estimates could not be refreshed.");
+    }
+  });
+
+  app.get("/api/elite100-quote-flow/estimates/:estimateId", ...staffStack, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      const organizationId = await orgIdFor(req);
+      const result = await quoteFlowEstimatesService.getEstimateDetail({
+        organizationId,
+        estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+        actorUserId: req.user?.id ?? null
+      });
+      res.json(result);
+    } catch (e) {
+      console.error("[elite100-quote-flow] estimate detail failed", e?.code || e?.message);
+      sendSafeError(res, e, "Unable to load estimate.");
+    }
+  });
+
+  app.patch(
+    "/api/elite100-quote-flow/estimates/:estimateId/scope",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowEstimatesService.patchOfficialScope({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          body
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "estimates.patch_scope",
+            userId: req.user?.id ?? null,
+            estimateId: result.estimate?.estimateId ?? null,
+            intakeCaseId: result.estimate?.intakeCaseId ?? null,
+            takeoffJobId: result.estimate?.takeoffJobId ?? null,
+            reused: result.reused === true,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] patch scope failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to save official scope.");
+      }
+    }
+  );
+
   console.log(
-    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope (Slice 1C)"
+    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates (Slice 1D)"
   );
   return { mounted: true, reason: "ok" };
 }

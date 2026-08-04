@@ -47,6 +47,7 @@ export default function QuoteFlowApp() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [mainNav, setMainNav] = useState<MainNav>(() => parseNavFromSearch());
   const [shellStatus, setShellStatus] = useState<string | null>(null);
+  const [openEstimateId, setOpenEstimateId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -97,7 +98,8 @@ export default function QuoteFlowApp() {
           setShellStatus(
             body?.shell === "slice-1a" ||
               body?.shell === "slice-1b" ||
-              body?.shell === "slice-1c"
+              body?.shell === "slice-1c" ||
+              body?.shell === "slice-1d"
               ? "Quote Flow connected"
               : "Connected"
           );
@@ -268,10 +270,15 @@ export default function QuoteFlowApp() {
           {mainNav === "queue" ? (
             <EstimateQueuePage
               authToken={sessionToken}
-              onOpenEstimates={() => setNav("estimates")}
+              onOpenEstimates={(estimateId) => {
+                setOpenEstimateId(estimateId || null);
+                setNav("estimates");
+              }}
             />
           ) : null}
-          {mainNav === "estimates" ? <EstimatesListPage /> : null}
+          {mainNav === "estimates" ? (
+            <EstimatesListPage authToken={sessionToken} initialEstimateId={openEstimateId} />
+          ) : null}
         </main>
       </div>
     </div>
