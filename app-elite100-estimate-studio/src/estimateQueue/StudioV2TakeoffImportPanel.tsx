@@ -45,6 +45,8 @@ type Props = {
   takeoffImportNeeded?: boolean;
   scopeDirty: boolean;
   currentScopeEmpty: boolean;
+  /** Opens plan-visible Takeoff Review (geometry only). */
+  onOpenTakeoffReview?: () => void;
   onApplied: (result: {
     editableScope?: StudioV2EditableScope;
     scopeSummary?: unknown;
@@ -62,6 +64,7 @@ export default function StudioV2TakeoffImportPanel(props: Props) {
     takeoffImportNeeded,
     scopeDirty,
     currentScopeEmpty,
+    onOpenTakeoffReview,
     onApplied
   } = props;
 
@@ -153,18 +156,31 @@ export default function StudioV2TakeoffImportPanel(props: Props) {
           <h2>AI Takeoff Import</h2>
           <p className="muted studio-v2-scope-editor__hint">
             Import approved Takeoff measurements into the Studio V2 Working Draft. Does not edit
-            Takeoff geometry.
+            Takeoff geometry — use Takeoff Review for plan-visible dimension verification.
           </p>
         </div>
-        <button
-          type="button"
-          className="eq-btn-secondary"
-          disabled={busy || scopeDirty}
-          onClick={() => void runPreview()}
-          data-testid="studio-v2-takeoff-preview"
-        >
-          {busy ? "Loading…" : "Preview Takeoff Scope"}
-        </button>
+        <div className="studio-v2-takeoff-import__actions">
+          {onOpenTakeoffReview ? (
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              disabled={!takeoffJobId}
+              onClick={onOpenTakeoffReview}
+              data-testid="studio-v2-takeoff-import-open-review"
+            >
+              Open Takeoff Review
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="eq-btn-secondary"
+            disabled={busy || scopeDirty}
+            onClick={() => void runPreview()}
+            data-testid="studio-v2-takeoff-preview"
+          >
+            {busy ? "Loading…" : "Preview Takeoff Scope"}
+          </button>
+        </div>
       </div>
 
       {takeoffImportNeeded ? (

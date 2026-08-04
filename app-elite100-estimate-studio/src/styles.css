@@ -2995,6 +2995,10 @@ button.linkish {
   margin: 6px 0 0;
   font-size: 0.82rem;
 }
+.si-meta-item--danger {
+  color: #b42318;
+  font-weight: 600;
+}
 .si-att-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; }
 .si-meta-link {
   appearance: none;
@@ -3209,6 +3213,12 @@ button.linkish {
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
+}
+.studio-v2-takeoff-import__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
 }
 .studio-v2-panel__head h2 {
   margin: 0;

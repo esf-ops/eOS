@@ -14,7 +14,10 @@ import PlanViewerModal from "./PlanViewerModal";
 
 export type SharedInboxPageProps = {
   authToken: string | null;
-  onOpenEstimate: (caseId: string, options?: { openTarget?: string }) => void;
+  onOpenEstimate: (
+    caseId: string,
+    options?: { openTarget?: string; studioV2?: boolean }
+  ) => void;
 };
 
 type InboxAttachment = {
@@ -36,6 +39,7 @@ type PrimaryAction = {
   openTarget?: string;
   mutates?: boolean;
   legacyKey?: string;
+  studioV2?: boolean;
 };
 
 type InboxRow = {
@@ -161,6 +165,14 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
 
   const selected = items.find((r) => r.messageKey === selectedKey) || null;
 
+  function selectMessage(messageKey: string) {
+    setSelectedKey(messageKey);
+    setActionError(null);
+    setTakeoffErrorKey(null);
+    setTakeoffErrorMessage(null);
+    setFocusAttachmentsForKey(null);
+  }
+
   const loadInbox = useCallback(
     async (opts?: { preserveOnTransient?: boolean }) => {
       if (!authToken) {
@@ -228,12 +240,19 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
     const resumes =
       action.key === "resume_estimate" ||
       action.key === "open_estimate" ||
+      action.key === "open_studio_v2" ||
       action.key === "view_progress" ||
       action.key === "review_ai_takeoff" ||
       (action.key === "review_request" && row.intakeCaseId && !action.mutates);
 
     if (resumes && row.intakeCaseId) {
-      onOpenEstimate(row.intakeCaseId, { openTarget: action.openTarget || "scope" });
+      onOpenEstimate(row.intakeCaseId, {
+        openTarget: action.openTarget || "takeoff",
+        studioV2:
+          action.key === "open_studio_v2" ||
+          action.studioV2 === true ||
+          Boolean(row.aiTakeoff?.takeoffJobId && row.aiTakeoff?.state !== "failed")
+      });
       return;
     }
 
@@ -329,7 +348,10 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
       };
       await loadInbox({ preserveOnTransient: true });
       if (result.intakeCaseId && result.takeoffJobId) {
-        // Keep staff in Inbox detail; they can open the lab from the updated row.
+        onOpenEstimate(result.intakeCaseId, {
+          openTarget: "takeoff",
+          studioV2: true
+        });
       }
     } catch (e) {
       const classified = classifySharedInboxError(e);
@@ -455,7 +477,7 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                   type="button"
                   className="si-row-main"
                   data-testid="shared-inbox-row-open"
-                  onClick={() => setSelectedKey(row.messageKey)}
+                  onClick={() => selectMessage(row.messageKey)}
                 >
                   <div className="si-row-top">
                     <strong className="si-sender">{row.sender?.displayName || "Unknown sender"}</strong>
@@ -486,19 +508,31 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                       {row.assignedEstimator?.label || "Unassigned"}
                     </span>
                     {row.aiTakeoff?.label ? (
-                      <span className="si-meta-item">AI Takeoff: {row.aiTakeoff.label}</span>
+                      <span
+                        className={`si-meta-item${
+                          row.aiTakeoff.state === "failed" ? " si-meta-item--danger" : ""
+                        }`}
+                        data-testid="shared-inbox-ai-takeoff-status"
+                      >
+                        AI Takeoff: {row.aiTakeoff.label}
+                      </span>
                     ) : null}
-                    {row.aiTakeoff?.takeoffJobId && row.intakeCaseId ? (
+                    {row.aiTakeoff?.takeoffJobId &&
+                    row.intakeCaseId &&
+                    row.aiTakeoff.state !== "failed" ? (
                       <button
                         type="button"
                         className="si-meta-link"
-                        data-testid="shared-inbox-open-takeoff-lab"
+                        data-testid="shared-inbox-open-studio-v2"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onOpenEstimate(row.intakeCaseId!, { openTarget: "takeoff" });
+                          onOpenEstimate(row.intakeCaseId!, {
+                            openTarget: "takeoff",
+                            studioV2: true
+                          });
                         }}
                       >
-                        Open AI Takeoff Lab
+                        Open Studio V2
                       </button>
                     ) : null}
                   </div>
@@ -518,7 +552,7 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                     type="button"
                     className="eq-btn-ghost eq-btn-small"
                     data-testid="shared-inbox-view-details"
-                    onClick={() => setSelectedKey(row.messageKey)}
+                    onClick={() => selectMessage(row.messageKey)}
                   >
                     View message details
                   </button>
@@ -703,17 +737,22 @@ export default function SharedInboxPage({ authToken, onOpenEstimate }: SharedInb
                   })}
                 </ul>
               )}
-              {selected.aiTakeoff?.takeoffJobId && selected.intakeCaseId ? (
+              {selected.aiTakeoff?.takeoffJobId &&
+              selected.intakeCaseId &&
+              selected.aiTakeoff.state !== "failed" ? (
                 <p className="si-detail-takeoff-lab">
                   <button
                     type="button"
                     className="eq-btn-secondary"
-                    data-testid="shared-inbox-detail-open-takeoff-lab"
+                    data-testid="shared-inbox-detail-open-studio-v2"
                     onClick={() =>
-                      onOpenEstimate(selected.intakeCaseId!, { openTarget: "takeoff" })
+                      onOpenEstimate(selected.intakeCaseId!, {
+                        openTarget: "takeoff",
+                        studioV2: true
+                      })
                     }
                   >
-                    Open AI Takeoff Lab
+                    Continue in Studio V2
                   </button>
                 </p>
               ) : null}

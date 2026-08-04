@@ -285,8 +285,9 @@ console.log("\nstudioSharedInbox.test.mjs\n");
     }
   });
   assert.equal(processing.importState, SHARED_INBOX_STATES.TAKEOFF_PROCESSING);
-  assert.equal(processing.primaryAction.key, "resume_estimate");
-  assert.equal(processing.legacyPrimaryAction.key, "view_progress");
+  assert.equal(processing.primaryAction.key, "open_studio_v2");
+  assert.equal(processing.primaryAction.label, "Continue in Studio V2");
+  assert.equal(processing.legacyPrimaryAction.key, "open_studio_v2");
   assert.equal(processing.aiTakeoff.state, "processing");
 
   const ready = buildSharedInboxRow({
@@ -313,8 +314,9 @@ console.log("\nstudioSharedInbox.test.mjs\n");
     }
   });
   assert.equal(ready.importState, SHARED_INBOX_STATES.TAKEOFF_READY);
-  assert.equal(ready.primaryAction.key, "resume_estimate");
-  assert.equal(ready.legacyPrimaryAction.key, "review_ai_takeoff");
+  assert.equal(ready.primaryAction.key, "open_studio_v2");
+  assert.equal(ready.primaryAction.label, "Open Studio V2");
+  assert.equal(ready.legacyPrimaryAction.key, "open_studio_v2");
   assert.equal(ready.aiTakeoff.reviewReady, true);
 
   const failed = deriveAiTakeoffSummary({
@@ -324,7 +326,31 @@ console.log("\nstudioSharedInbox.test.mjs\n");
     takeoffJobId: "tj-f"
   });
   assert.equal(failed.state, "failed");
-  console.log("ok: 5–7 takeoff processing / ready / failed");
+
+  const failedRow = buildSharedInboxRow({
+    previewMessage: {
+      graphMessageId: "m-fail-takeoff",
+      alreadyImported: true,
+      existingCaseId: "c-fail",
+      subject: "Failed takeoff",
+      sender: { displayName: "F" },
+      attachments: [
+        { sourceAttachmentId: "a1", name: "plan.pdf", mimeType: "application/pdf", support: "direct_pdf" }
+      ],
+      eligibilityHint: "already_imported"
+    },
+    queueRow: {
+      id: "c-fail",
+      workflowStatus: "Takeoff failed",
+      operationalState: { key: "takeoff_failed", openTarget: "takeoff" },
+      aiTakeoffStatus: "Failed",
+      takeoffJobId: "tj-f"
+    }
+  });
+  assert.equal(failedRow.aiTakeoff.state, "failed");
+  assert.equal(failedRow.primaryAction.key, "choose_plan");
+  assert.notEqual(failedRow.primaryAction.key, "resume_estimate");
+  console.log("ok: 5–7 takeoff processing / ready / failed (no false Resume)");
 }
 
 {

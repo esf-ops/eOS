@@ -34,6 +34,9 @@ type Props = {
   caseId: string;
   initialFocus?: "takeoff" | "scope" | "digital" | "review" | null;
   onBackToQueue: () => void;
+  /** Supporting plan-visible review (from Studio V2) — not estimate authority. */
+  reviewMode?: boolean;
+  backLabel?: string;
 };
 
 type ReadyState = {
@@ -87,15 +90,21 @@ function formatReceivedAt(value?: string | null): string | null {
 }
 
 /**
- * Linked Takeoff workspace — resolves/creates intake→takeoff link, then embeds
+ * Linked Takeoff review — resolves/creates intake→takeoff link, then embeds
  * the existing production AI Takeoff review UI for that job id.
+ * Prefer opening from Studio V2 via “Open Takeoff Review”. Studio V2 remains
+ * quote authority (pricing / publish / Digital Estimate / sold).
  */
 export default function EstimateTakeoffWorkspace({
   authToken,
   caseId,
   initialFocus = "takeoff",
-  onBackToQueue
+  onBackToQueue,
+  reviewMode = false,
+  backLabel
 }: Props) {
+  const resolvedBackLabel =
+    backLabel || (reviewMode ? "Back to Studio V2" : "Back to Inbox");
   const client = useMemo(() => createQuoteIntakeApiClient(), []);
   const [state, setState] = useState<OpenState>({ kind: "resolving" });
   const [forceProjectEdit, setForceProjectEdit] = useState(false);
@@ -632,14 +641,18 @@ export default function EstimateTakeoffWorkspace({
       {!(state.kind === "ready" && !state.manualMode && state.takeoffJobId) ? (
         <header className="eq-header">
           <div>
-            <h1 className="eq-title">Estimate workspace</h1>
+            <h1 className="eq-title">
+              {reviewMode ? "AI Takeoff Review" : "AI Takeoff Review"}
+            </h1>
             <p className="eq-subtitle">
-              Linked production AI Takeoff review for this Estimate Queue case.
+              {reviewMode
+                ? "Verify dimensions on the plan. Studio V2 is where the estimate is finalized — this review does not price, publish, or mark sold."
+                : "Plan-visible measurement review for this intake case. Finalize pricing and Digital Estimate in Studio V2."}
             </p>
           </div>
           <div className="eq-header-actions">
             <button type="button" className="eq-btn-secondary" onClick={onBackToQueue}>
-              Back to Estimate Queue
+              {resolvedBackLabel}
             </button>
           </div>
         </header>
@@ -653,10 +666,10 @@ export default function EstimateTakeoffWorkspace({
 
       {state.kind === "error" ? (
         <div className="eq-state eq-state--error" role="alert" data-testid="eq-open-error">
-          <strong>Could not open estimate.</strong> {state.message}
+          <strong>Could not open Takeoff Review.</strong> {state.message}
           <div className="eq-action-row">
             <button type="button" className="eq-btn-secondary" onClick={onBackToQueue}>
-              Back to Estimate Queue
+              {resolvedBackLabel}
             </button>
           </div>
         </div>
