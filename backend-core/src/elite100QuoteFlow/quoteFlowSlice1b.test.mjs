@@ -92,9 +92,12 @@ function baseItem(overrides = {}) {
 
 {
   const presented = presentQuoteFlowInboxItem(baseItem());
-  assert.equal(presented.takeoffStatus.key, "needs_attachment_selection");
+  // Single supported plan → ready to start (needs_attachment_selection only when multi/choice).
+  assert.equal(presented.takeoffStatus.key, "ready_to_start");
   assert.equal(presented.sender, "Buyer Co");
   assert.equal(presented.senderLabel, "Buyer Co");
+  assert.equal(presented.group.key, "needs_action");
+  assert.equal(presented.bestPlanCandidate?.filename, "plan.pdf");
   const objectSender = presentQuoteFlowInboxItem(
     baseItem({
       sender: {
@@ -119,7 +122,29 @@ function baseItem(overrides = {}) {
 }
 {
   const presented = presentQuoteFlowInboxItem(baseItem());
-  assert.equal(presented.takeoffStatus.key, "needs_attachment_selection");
+  assert.equal(presented.takeoffStatus.key, "ready_to_start");
+  const multi = presentQuoteFlowInboxItem(
+    baseItem({
+      planSelectionRequired: true,
+      attachments: [
+        {
+          attachmentKey: "a1",
+          filename: "a.pdf",
+          contentType: "application/pdf",
+          supportedForTakeoff: true,
+          canMarkAsPlan: false
+        },
+        {
+          attachmentKey: "a2",
+          filename: "b.pdf",
+          contentType: "application/pdf",
+          supportedForTakeoff: true,
+          canMarkAsPlan: false
+        }
+      ]
+    })
+  );
+  assert.equal(multi.takeoffStatus.key, "needs_attachment_selection");
   const returned = presentQuoteFlowInboxItem(
     baseItem({
       aiTakeoff: {
@@ -132,6 +157,15 @@ function baseItem(overrides = {}) {
   );
   assert.equal(returned.takeoffStatus.key, "takeoff_returned");
   assert.equal(returned.queueHint, "View in Estimate Queue");
+  assert.equal(returned.viewQueue, true);
+  assert.equal(returned.progress.percent, 100);
+  const scoped = presentQuoteFlowInboxItem(baseItem({ estimateId: "est-1" }), {
+    alreadyScoped: true
+  });
+  assert.equal(scoped.takeoffStatus.key, "already_scoped");
+  assert.equal(scoped.viewEstimates, true);
+  assert.equal(scoped.queueHint, "View in Estimates");
+  assert.equal(scoped.progress.stageKey, "scope_set");
   console.log("ok: takeoff status presenter");
 }
 

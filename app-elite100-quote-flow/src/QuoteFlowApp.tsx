@@ -264,7 +264,11 @@ export default function QuoteFlowApp() {
           {mainNav === "inbox" ? (
             <InboxPage
               authToken={sessionToken}
-              onOpenQueuePlaceholder={() => setNav("queue")}
+              onOpenQueue={() => setNav("queue")}
+              onOpenEstimates={(estimateId) => {
+                setOpenEstimateId(estimateId || null);
+                setNav("estimates");
+              }}
             />
           ) : null}
           {mainNav === "queue" ? (

@@ -8,6 +8,8 @@ export type QuoteFlowAttachment = {
   filename: string;
   contentType: string | null;
   support: string | null;
+  supportLabel?: string | null;
+  detectionReason?: string | null;
   supportedForTakeoff: boolean;
   canMarkAsPlan: boolean;
   action: string;
@@ -17,6 +19,25 @@ export type QuoteFlowTakeoffStatus = {
   key: string;
   label: string;
   takeoffJobId: string | null;
+};
+
+export type QuoteFlowProgress = {
+  percent: number;
+  stageKey: string;
+  stageLabel: string;
+  isError: boolean;
+  isComplete: boolean;
+};
+
+export type QuoteFlowInboxGroup = {
+  key: string;
+  label: string;
+  sortOrder?: number;
+};
+
+export type QuoteFlowNextAction = {
+  key: string;
+  label: string;
 };
 
 /** Production Shared Inbox may still send this object before presenter normalization. */
@@ -29,22 +50,43 @@ export type QuoteFlowPersonRef = {
 export type QuoteFlowInboxItem = {
   messageKey: string | null;
   receivedAt: string | null;
-  /** Display string after presenter/normalize; may historically be a person object. */
   sender: string | QuoteFlowPersonRef | null;
   senderLabel?: string | null;
   customerLabel?: string | null;
+  customerDisplay?: string | null;
   accountLabel?: string | null;
   projectLabel?: string | null;
+  requestTitle?: string | null;
   subject: string;
   bodyPreview: string | null;
   intakeCaseId: string | null;
   estimateId: string | null;
   planSelectionRequired: boolean;
+  attachmentCount?: number;
+  bestPlanCandidate?: {
+    attachmentKey: string | null;
+    filename: string;
+    contentType?: string | null;
+    detectionReason?: string | null;
+  } | null;
   attachments: QuoteFlowAttachment[];
   takeoffStatus: QuoteFlowTakeoffStatus;
   takeoffJobId: string | null;
+  progress?: QuoteFlowProgress;
+  group?: QuoteFlowInboxGroup;
+  nextAction?: QuoteFlowNextAction;
+  canStartTakeoff?: boolean;
   alreadyScoped: boolean;
+  viewQueue?: boolean;
+  viewEstimates?: boolean;
   queueHint: string | null;
+};
+
+export type QuoteFlowInboxStats = {
+  needsAction: number;
+  activeTakeoffs: number;
+  readyForReview: number;
+  scopeSet: number;
 };
 
 export async function fetchQuoteFlowInbox(
@@ -60,6 +102,12 @@ export async function fetchQuoteFlowInbox(
   return apiGet(`/api/elite100-quote-flow/inbox${qs ? `?${qs}` : ""}`, token) as Promise<{
     ok: boolean;
     items: QuoteFlowInboxItem[];
+    groups?: {
+      needs_action: QuoteFlowInboxItem[];
+      active: QuoteFlowInboxItem[];
+      completed: QuoteFlowInboxItem[];
+    };
+    stats?: QuoteFlowInboxStats;
     total?: number;
     mailboxDisplay?: string | null;
   }>;

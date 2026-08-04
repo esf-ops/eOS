@@ -99,7 +99,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 - Sales Territory Admin Head  
 - Partner Pricing Assignment Head  
 - **AI Takeoff Lab** (**`app-ai-takeoff`** — **`https://takeoff.eliteosfab.com`**; slug `ai_takeoff`; live internal head — run inbox, correction audit, approve workflow, validation fix panel; AI review-only; **no quote mutation**; Internal Estimate import **disabled**; approved takeoff = future handoff only)  
-- **Elite 100 Quote Flow** (**`app-elite100-quote-flow/`** — slug `elite100_quote_flow`; Brain `/api/elite100-quote-flow/*`; flag `ELITE100_QUOTE_FLOW_ENABLED`; clean Inbox → Estimate Queue (Set Scope) → Estimates staff head; **not** Estimate Studio / Studio V2; Slice 1D: Estimates library + official scope editor)
+- **Elite 100 Quote Flow** (**`app-elite100-quote-flow/`** — slug `elite100_quote_flow`; Brain `/api/elite100-quote-flow/*`; flag `ELITE100_QUOTE_FLOW_ENABLED`; clean Inbox → Estimate Queue (Set Scope) → Estimates staff head; **not** Estimate Studio / Studio V2; Inbox polish: grouped requests, bulk start takeoff, progress stages)
 
 - Visualize / Layout Quote Head  
 - Quote Forecasting / Bid-Close Analytics Head  
