@@ -279,15 +279,39 @@ export function createQuoteFlowEstimatesService(deps = {}) {
     const preservedIntakeCaseId = existing.intakeCaseId ?? null;
     const preservedSourceTakeoffResultId = existing.sourceTakeoffResultId ?? null;
 
+    const displayNameRaw =
+      scopeBody.projectName != null
+        ? String(scopeBody.projectName)
+        : scopeBody.estimateName != null
+          ? String(scopeBody.estimateName)
+          : scopeBody.quoteFlowEstimateName != null
+            ? String(scopeBody.quoteFlowEstimateName)
+            : null;
+    const displayName = displayNameRaw != null ? String(displayNameRaw).trim() : null;
+    const priorName = String(
+      existing.scope?.projectName || existing.scope?.quoteFlowEstimateName || ""
+    ).trim();
+    const nameChanged = displayName != null && displayName !== "" && displayName !== priorName;
+
+    const addOnsProvided = scopeBody.addOns && typeof scopeBody.addOns === "object";
     /** @type {Record<string, unknown>} */
-    const scopePatch = { rooms };
-    if (scopeBody.addOns && typeof scopeBody.addOns === "object") {
+    const scopePatch = {
+      rooms,
+      quoteFlowScopeEdited: true,
+      quoteFlowManualEdits: true
+    };
+    if (addOnsProvided) {
       scopePatch.addOns = scopeBody.addOns;
     }
+    if (displayName) {
+      scopePatch.projectName = displayName.slice(0, 200);
+      scopePatch.quoteFlowEstimateName = displayName.slice(0, 200);
+    }
 
+    const unchangedPayload = priorFp === nextFp && !nameChanged && !addOnsProvided;
     let updated;
-    if (priorFp === nextFp && !("addOns" in scopePatch)) {
-      // Idempotent no-op: same rooms already persisted.
+    if (unchangedPayload && existing.scope?.quoteFlowScopeEdited === true) {
+      // Idempotent no-op: same rooms already persisted after an Estimates edit.
       updated = existing;
     } else {
       updated = await studioEstimateService.updateScope({
@@ -319,8 +343,8 @@ export function createQuoteFlowEstimatesService(deps = {}) {
         sourceTakeoffResultId:
           updated.sourceTakeoffResultId ?? preservedSourceTakeoffResultId
       }),
-      reused: priorFp === nextFp,
-      message: "Official scope saved.",
+      reused: unchangedPayload && existing.scope?.quoteFlowScopeEdited === true,
+      message: "Scope saved.",
       sideEffects: { ...NO_SIDE_EFFECTS }
     };
   }

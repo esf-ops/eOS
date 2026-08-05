@@ -3,6 +3,14 @@ import { apiFetch, apiGet } from "./api";
 export type QuoteFlowScopeSummary = {
   roomCount: number;
   pieceCount: number;
+  excludedPieceCount?: number;
+  countertopSf?: number;
+  backsplashSf?: number;
+  label: string;
+};
+
+export type QuoteFlowScopeSource = {
+  key: string;
   label: string;
 };
 
@@ -10,9 +18,14 @@ export type QuoteFlowEstimateListItem = {
   estimateId: string | null;
   intakeCaseId: string | null;
   takeoffJobId: string | null;
+  estimateName?: string | null;
+  displayName?: string | null;
   customerName: string | null;
   accountName: string | null;
   projectName: string | null;
+  subject?: string | null;
+  planFilename?: string | null;
+  scopeSource?: QuoteFlowScopeSource;
   scopeSummary: QuoteFlowScopeSummary;
   status: { key: string; label: string; nextAction?: string };
   nextAction?: string | null;
@@ -57,6 +70,10 @@ export type QuoteFlowEstimateDetail = QuoteFlowEstimateListItem & {
   scope: {
     rooms: QuoteFlowScopeRoom[];
     addOns?: Record<string, unknown>;
+    projectName?: string | null;
+    quoteFlowEstimateName?: string | null;
+    source?: string | null;
+    planFilename?: string | null;
   };
   revision?: number | null;
   sourceTakeoffResultId?: string | null;
@@ -83,7 +100,13 @@ export async function fetchQuoteFlowEstimateDetail(token: string, estimateId: st
 export async function patchQuoteFlowEstimateScope(
   token: string,
   estimateId: string,
-  scope: { rooms: QuoteFlowScopeRoom[]; addOns?: Record<string, unknown> }
+  scope: {
+    rooms: QuoteFlowScopeRoom[];
+    addOns?: Record<string, unknown>;
+    projectName?: string;
+    estimateName?: string;
+    quoteFlowEstimateName?: string;
+  }
 ) {
   return apiFetch(
     `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/scope`,

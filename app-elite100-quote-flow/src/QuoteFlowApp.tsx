@@ -229,7 +229,7 @@ export default function QuoteFlowApp() {
 
       <div
         className={
-          mainNav === "inbox" || mainNav === "queue"
+          mainNav === "inbox" || mainNav === "queue" || mainNav === "estimates"
             ? "qf-shell qf-shell--command"
             : "qf-shell"
         }
