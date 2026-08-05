@@ -7,6 +7,8 @@ export const TAKEOFF_APPROVED_MESSAGE_TYPE = "eliteos-takeoff-approved";
 export const QUOTE_FLOW_REQUEST_SET_SCOPE = "eliteos-quote-flow-request-set-scope";
 /** iframe → parent: reviewed takeoffResult (+ reviewState) ready for Set Scope. */
 export const QUOTE_FLOW_SET_SCOPE_PAYLOAD = "eliteos-quote-flow-set-scope-payload";
+/** iframe footer → parent: run the same Set Scope action as the workspace button. */
+export const QUOTE_FLOW_TRIGGER_SET_SCOPE = "eliteos-quote-flow-trigger-set-scope";
 
 export const LOCAL_TAKEOFF_ORIGINS = Object.freeze([
   "http://localhost:5186",
@@ -72,6 +74,14 @@ export function isValidTakeoffApprovedMessage(data, expectedTakeoffJobId) {
 export function isValidQuoteFlowSetScopePayload(data, expectedTakeoffJobId) {
   if (!data || typeof data !== "object") return false;
   if (data.type !== QUOTE_FLOW_SET_SCOPE_PAYLOAD) return false;
+  const jobId = String(data.takeoffJobId ?? "").trim();
+  if (!jobId || jobId !== String(expectedTakeoffJobId || "").trim()) return false;
+  return true;
+}
+
+export function isValidQuoteFlowTriggerSetScope(data, expectedTakeoffJobId) {
+  if (!data || typeof data !== "object") return false;
+  if (data.type !== QUOTE_FLOW_TRIGGER_SET_SCOPE) return false;
   const jobId = String(data.takeoffJobId ?? "").trim();
   if (!jobId || jobId !== String(expectedTakeoffJobId || "").trim()) return false;
   return true;

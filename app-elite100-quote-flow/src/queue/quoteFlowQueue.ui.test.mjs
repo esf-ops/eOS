@@ -45,7 +45,7 @@ assert.match(queue, /Review AI Takeoff/);
 assert.match(queue, /Create Manual Scope/);
 assert.match(queue, /Set Scope/);
 assert.match(queue, /requestSetScopePayloadFromIframe/);
-assert.match(queue, /Save Draft is optional/);
+assert.match(queue, /isValidQuoteFlowTriggerSetScope/);
 assert.match(queue, /Set Scope saves these reviewed measurements/);
 assert.match(queue, /Scope is set for this estimate/);
 assert.match(queue, /Open in Estimates/);
@@ -68,6 +68,26 @@ assert.doesNotMatch(queue, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);
 assert.doesNotMatch(queue, /Unknown contact — Unknown contact/);
 assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish/);
 assert.doesNotMatch(queue, /calculate|publish|mark sold|accept/i);
+
+{
+  const takeoffUi = readFileSync(
+    join(repoRoot, "app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
+    "utf8"
+  );
+  const origins = readFileSync(
+    join(appRoot, "src/lib/takeoffPostMessageOrigins.mjs"),
+    "utf8"
+  );
+  assert.match(takeoffUi, /data-testid="ctr-quote-flow-set-scope"/);
+  assert.match(takeoffUi, /QUOTE_FLOW_TRIGGER_SET_SCOPE/);
+  assert.match(origins, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
+  assert.match(origins, /isValidQuoteFlowTriggerSetScope/);
+  // Save Draft is gated out of quoteFlowSetScope mode (not rendered).
+  assert.match(takeoffUi, /!quoteFlowSetScope \? \([\s\S]*?ctr-save-draft/);
+  assert.doesNotMatch(takeoffUi, /ctr-approve-build[\s\S]{0,300}quoteFlowSetScope \?/);
+  console.log("ok: footer Set Scope; Save Draft hidden in Quote Flow mode");
+}
+
 console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
 
 {
