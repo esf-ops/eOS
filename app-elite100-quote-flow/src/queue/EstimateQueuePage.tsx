@@ -324,40 +324,27 @@ export default function EstimateQueuePage(props: Props) {
     const name = resolvedNameForSubmit();
     const saveDraftFirstMsg = "Save draft first, then Set Scope.";
     try {
-      // Collect current worksheet/review state from the embedded review (dirty edits + openEdgeLf).
+      // Prefer live worksheet state from the iframe (dirty edits + openEdgeLf).
+      // If postMessage times out / fails, still call Set Scope — backend uses latest
+      // saved reviewed takeoff (Save Draft) or already-approved measurements.
       const payload = await requestSetScopePayloadFromIframe(
         takeoffIframeRef.current,
         selectedJobId,
         { timeoutMs: 8000 }
       );
 
-      if (!payload?.takeoffResult) {
-        // Never silently Set Scope without current review state (would drop dirty edits).
-        setError(saveDraftFirstMsg);
-        return;
-      }
-
       const res = await setQuoteFlowScope(authToken, selectedJobId, {
         confirm: true,
         projectName: name,
         estimateName: name,
-        takeoffResult: payload.takeoffResult,
-        reviewState: payload.reviewState || undefined
+        takeoffResult: payload?.takeoffResult || undefined,
+        reviewState: payload?.reviewState || undefined
       });
       applyScopeSuccess({ ...res, projectName: res.projectName || name });
       await loadList("refresh");
       // Do not refetch takeoff detail after success — avoids stale 404 noise.
     } catch (e) {
       const msg = errorMessage(e);
-      // Soften locked-approved / postMessage / low-level takeoff copy.
-      if (
-        /Approved Takeoff measurements cannot be changed|Edit Measurements|postMessage|takeoff_already_approved|takeoff_not_ready/i.test(
-          msg
-        )
-      ) {
-        setError(saveDraftFirstMsg);
-        return;
-      }
       if (/already.?scoped|Scope is already set|Open in Estimates/i.test(msg)) {
         applyScopeSuccess({
           estimateId: estimateId || detail?.estimateId,
@@ -367,11 +354,18 @@ export default function EstimateQueuePage(props: Props) {
           projectName: name
         });
         await loadList("refresh");
-      } else if (/timeout|unavailable|Unable to|Failed to|network/i.test(msg)) {
-        setError(saveDraftFirstMsg);
-      } else {
-        setError(msg);
+        return;
       }
+      // Only after backend confirms no live payload and no saved/approved review.
+      if (
+        /No saved result|takeoff_not_ready|Review measurements before setting scope|No usable measurements|takeoff_already_approved|Approved Takeoff measurements cannot be changed|Edit Measurements/i.test(
+          msg
+        )
+      ) {
+        setError(saveDraftFirstMsg);
+        return;
+      }
+      setError(msg);
     } finally {
       inFlightRef.current = false;
       setSetScopeBusy(false);

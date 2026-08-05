@@ -3926,3 +3926,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | ConsolidatedTakeoffReview footer, takeoff↔Quote Flow postMessage (request/payload only), EstimateQueuePage `runSetScope`, UI/slice tests, this doc. |
 | **Protected / unchanged** | Open edge LF carry-forward (§287), pricing/calculate/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
 | **Revisit trigger** | Native non-iframe measurement editor if postMessage collection remains fragile. |
+
+### 289. Elite 100 Quote Flow — Set Scope saved-draft fallback (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/quote-flow-set-scope-saved-draft-fallback` |
+| **Decision** | Header Set Scope tries live iframe review state first, then always calls `POST …/set-scope`. When the client omits `takeoffResult`, backend freeze uses latest saved reviewed takeoff (`approveAndBuildEstimate` / storage) or already-approved measurements; openEdgeLf is stamped from live payload or `getLatestTakeoffResult`. UI shows **Save draft first, then Set Scope** only when that backend path confirms no usable saved/approved measurements — never solely because postMessage timed out. Footer remains Add room / Add piece / Save draft (no footer Set Scope). |
+| **Why** | After Save Draft, iframe live collection can still fail; requiring a live payload blocked the real finish action. |
+| **Impacted** | `EstimateQueuePage.runSetScope`, `quoteFlowSetScope` open-edge saved-draft resolve, slice 1c / queue UI tests, this doc. |
+| **Protected / unchanged** | Pricing/calculate/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`, footer Set Scope removal (§288). |
+| **Revisit trigger** | Optional `TAKEOFF_REVIEW_DRAFT_SAVED` parent badge if estimators need stronger post-save feedback. |

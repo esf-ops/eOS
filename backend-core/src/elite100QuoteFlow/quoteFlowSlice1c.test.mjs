@@ -591,6 +591,209 @@ function queueRow(overrides = {}) {
 }
 
 {
+  // No live client payload, but saved draft exists → Set Scope uses stored takeoff + openEdgeLf.
+  const estimatesByCase = new Map();
+  let approveCalls = 0;
+  let updateScopeCalls = 0;
+  let latestCalls = 0;
+  const savedJob = "22222222-2222-4222-8222-222222222228";
+  const savedCase = "case-saved-draft";
+  const rows = [
+    queueRow({
+      id: savedCase,
+      takeoffJobId: savedJob,
+      takeoffReviewStatus: "needs_review"
+    })
+  ];
+  const savedDraft = {
+    rooms: [
+      {
+        id: "r1",
+        name: "Kitchen",
+        areas: [
+          {
+            id: "a1",
+            runs: [
+              {
+                id: "run-island",
+                label: "Island",
+                included: true,
+                lengthIn: 96,
+                depthIn: 25.5,
+                finishedEdge: { totalFinishedEdgeLengthIn: 147, approved: true }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+  const studioEstimateService = {
+    repository: {
+      async getActiveByIntakeCase(_org, caseId) {
+        return estimatesByCase.get(String(caseId)) || null;
+      }
+    },
+    async getOrCreateForCase({ intakeCaseId, takeoffJobId }) {
+      const created = {
+        id: `est-${intakeCaseId}`,
+        status: "draft",
+        intakeCaseId,
+        takeoffJobId,
+        scope: { rooms: [] }
+      };
+      estimatesByCase.set(String(intakeCaseId), created);
+      return created;
+    },
+    async refreshScopeFromTakeoff({ estimateId }) {
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          const next = {
+            ...est,
+            status: "ready_to_price",
+            scope: {
+              rooms: [
+                {
+                  id: "r1",
+                  name: "Kitchen",
+                  included: true,
+                  pieces: [
+                    {
+                      id: "p1",
+                      name: "Island",
+                      takeoffRunId: "run-island",
+                      lengthIn: 96,
+                      depthIn: 25.5,
+                      quantity: 1,
+                      included: true,
+                      finishedEdge: { totalFinishedEdgeLengthIn: 147, approved: true }
+                    }
+                  ]
+                }
+              ]
+            }
+          };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    },
+    async updateScope({ estimateId, body }) {
+      updateScopeCalls += 1;
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          const patch = body?.scope && typeof body.scope === "object" ? body.scope : {};
+          const next = {
+            ...est,
+            scope: { ...(est.scope || {}), ...patch, rooms: patch.rooms || est.scope?.rooms }
+          };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    }
+  };
+  const svc = createQuoteFlowSetScopeService({
+    queueService: { async listQueue() { return { cases: rows }; } },
+    estimateRepository: studioEstimateService.repository,
+    studioEstimateService,
+    approveAndBuildEstimate: async (args) => {
+      approveCalls += 1;
+      // No live client payload — approve loads saved result itself.
+      assert.equal(args.takeoffResult, undefined);
+      return { reviewStatus: "approved", takeoffJobId: savedJob };
+    },
+    getLatestTakeoffResult: async () => {
+      latestCalls += 1;
+      return { normalizedTakeoffJson: savedDraft, takeoffResult: savedDraft };
+    },
+    getSupabase: () => ({})
+  });
+  const res = await svc.setScope({
+    organizationId: ORG,
+    takeoffJobId: savedJob,
+    confirm: true,
+    projectName: "Saved Draft Scope"
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.message, "Scope is set for this estimate.");
+  assert.equal(approveCalls, 1);
+  assert.ok(latestCalls >= 1, "saved draft loaded for openEdgeLf fallback");
+  assert.ok(updateScopeCalls >= 1, "openEdgeLf stamp persisted");
+  const scoped = estimatesByCase.get(savedCase);
+  assert.equal(isOfficialScopeSet(scoped), true);
+  assert.equal(scoped.scope.rooms[0].pieces[0].openEdgeLf, 12.25);
+  assert.equal(scoped.scope.rooms[0].pieces[0].exposedEdgeLf, 12.25);
+  assert.equal(scoped.scope.rooms[0].pieces[0].finishedEdgeLf, 12.25);
+  const after = await svc.listQueue({ organizationId: ORG });
+  assert.equal(after.items.some((i) => i.takeoffJobId === savedJob), false);
+  console.log("ok: Set Scope without live payload uses saved draft + openEdgeLf");
+}
+
+{
+  // Neither live payload nor saved/approved measurements → Set Scope fails (parent shows Save draft first).
+  const estimatesByCase = new Map();
+  const emptyJob = "22222222-2222-4222-8222-222222222229";
+  const emptyCase = "case-no-measurements";
+  const rows = [
+    queueRow({
+      id: emptyCase,
+      takeoffJobId: emptyJob,
+      takeoffReviewStatus: "needs_review"
+    })
+  ];
+  const svc = createQuoteFlowSetScopeService({
+    queueService: { async listQueue() { return { cases: rows }; } },
+    estimateRepository: {
+      async getActiveByIntakeCase(_org, caseId) {
+        return estimatesByCase.get(String(caseId)) || null;
+      }
+    },
+    studioEstimateService: {
+      repository: {
+        async getActiveByIntakeCase(_org, caseId) {
+          return estimatesByCase.get(String(caseId)) || null;
+        }
+      },
+      async getOrCreateForCase() {
+        throw new Error("should not create estimate without measurements");
+      },
+      async refreshScopeFromTakeoff() {
+        throw new Error("should not refresh without measurements");
+      }
+    },
+    approveAndBuildEstimate: async () => {
+      const err = new Error("No saved result found for this takeoff workspace");
+      err.statusCode = 404;
+      throw err;
+    },
+    getLatestTakeoffResult: async () => {
+      const err = new Error("No saved result found for this takeoff workspace");
+      err.statusCode = 404;
+      throw err;
+    },
+    getSupabase: () => ({})
+  });
+  await assert.rejects(
+    () =>
+      svc.setScope({
+        organizationId: ORG,
+        takeoffJobId: emptyJob,
+        confirm: true
+      }),
+    (err) => {
+      const msg = String(err?.message || "");
+      const code = String(err?.code || "");
+      assert.match(code || msg, /takeoff_not_ready|No saved result|Review measurements/i);
+      return true;
+    }
+  );
+  console.log("ok: Set Scope without live or saved measurements fails clearly");
+}
+
+{
   // Open edge LF carry-forward: AI Set Scope stamps canonical piece.openEdgeLf.
   const {
     resolvePieceOpenEdgeLf,
@@ -945,15 +1148,22 @@ function queueRow(overrides = {}) {
   assert.match(ui, /requestSetScopePayloadFromIframe/);
   assert.match(ui, /Save draft first, then Set Scope/);
   assert.match(ui, /Review measurements\. Save draft if needed, then Set Scope from the Quote Flow/);
+  assert.match(ui, /payload\?\.takeoffResult \|\| undefined/);
+  assert.match(ui, /backend uses latest|saved reviewed takeoff|Save Draft/);
   assert.match(ui, /quoteFlowSetScope/);
   assert.match(ui, /Open in Estimates/);
   assert.match(ui, /filter:\s*["']active["']/);
   assert.match(ui, /qf-queue-manual-builder|OfficialScopeEditor/);
   assert.match(ui, /do not refetch takeoff detail|Do not refetch takeoff detail/);
+  assert.doesNotMatch(ui, /if \(!payload\?\.takeoffResult\)/);
   assert.doesNotMatch(ui, /isValidQuoteFlowTriggerSetScope|QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
   assert.doesNotMatch(ui, /Approve Estimate/);
   assert.doesNotMatch(ui, /\bV1\b|\bV2\b|Studio V2/);
   assert.doesNotMatch(ui, /Use these measurements/);
+  const setScopeSrc = readFileSync(join(__dirname, "quoteFlowSetScope.mjs"), "utf8");
+  assert.match(setScopeSrc, /loadSavedReviewedTakeoffResult|resolveTakeoffResultForOpenEdge/);
+  assert.match(setScopeSrc, /stampOpenEdgeLfOnTakeoffResult/);
+  assert.match(setScopeSrc, /getLatestTakeoffResult/);
   const takeoffUi = readFileSync(
     join(root, "app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
     "utf8"

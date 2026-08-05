@@ -6,7 +6,8 @@
 
 import { createQuoteFlowError } from "./quoteFlowErrors.mjs";
 import {
-  applyTakeoffOpenEdgeLfToOfficialRooms
+  applyTakeoffOpenEdgeLfToOfficialRooms,
+  stampOpenEdgeLfOnTakeoffResult
 } from "./quoteFlowOpenEdge.mjs";
 import { validateAndNormalizeOfficialScopeRooms } from "./quoteFlowEstimates.mjs";
 import {
@@ -326,10 +327,53 @@ export function createQuoteFlowSetScopeService(deps) {
     );
   }
 
+  function hasClientTakeoffPayload(takeoffResult) {
+    return takeoffResult != null && typeof takeoffResult === "object" && !Array.isArray(takeoffResult);
+  }
+
+  /**
+   * Load latest saved reviewed/editable takeoff draft for Set Scope fallback
+   * (when the Quote Flow parent could not collect a live iframe payload).
+   * Returns stamped takeoffResult or null.
+   */
+  async function loadSavedReviewedTakeoffResult(organizationId, takeoffJobId) {
+    const supabase = getSupabase?.();
+    if (!supabase || typeof getLatestTakeoffResult !== "function") return null;
+    try {
+      const latest = await getLatestTakeoffResult({
+        supabase,
+        organizationId,
+        takeoffJobId
+      });
+      const draft =
+        latest?.normalizedTakeoffJson ||
+        latest?.takeoffResult ||
+        latest?.normalized_takeoff_json ||
+        null;
+      if (!hasClientTakeoffPayload(draft)) return null;
+      return stampOpenEdgeLfOnTakeoffResult(draft);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Resolve takeoffResult used for openEdgeLf carry-forward after official scope import.
+   * Prefers live client payload; otherwise latest saved reviewed draft.
+   */
+  async function resolveTakeoffResultForOpenEdge(organizationId, takeoffJobId, clientTakeoffResult) {
+    if (hasClientTakeoffPayload(clientTakeoffResult)) {
+      return stampOpenEdgeLfOnTakeoffResult(clientTakeoffResult);
+    }
+    return loadSavedReviewedTakeoffResult(organizationId, takeoffJobId);
+  }
+
   /**
    * Freeze reviewed measurements for Quote Flow Set Scope.
    * Accepts optional dirty takeoffResult — saves edits (reopening approved jobs
-   * when needed) then approves. Already-approved + no edits is a no-op success.
+   * when needed) then approves. When no live payload is provided, approveAndBuildEstimate
+   * loads the latest saved reviewed takeoff from storage (post–Save Draft path).
+   * Already-approved + no edits is a no-op success.
    */
   async function freezeReviewedMeasurements({
     organizationId,
@@ -340,8 +384,7 @@ export function createQuoteFlowSetScopeService(deps) {
   }) {
     if (typeof approveAndBuildEstimate !== "function" || !getSupabase) return;
     const supabase = getSupabase();
-    const hasReviewedPayload =
-      takeoffResult != null && typeof takeoffResult === "object" && !Array.isArray(takeoffResult);
+    const hasReviewedPayload = hasClientTakeoffPayload(takeoffResult);
 
     // Dirty edits on an approved-but-unscoped takeoff: reopen before save/approve.
     if (
@@ -516,10 +559,11 @@ export function createQuoteFlowSetScopeService(deps) {
     estimate = { ...estimate, id: estimate?.id || estimateId };
 
     // Carry open/exposed edge LF from reviewed takeoff → canonical piece.openEdgeLf.
-    // refreshScopeFromTakeoff/seed preserves finishedEdge but historically omitted openEdgeLf.
+    // Prefer live client payload; otherwise latest saved draft (Save Draft → Set Scope).
     const priorRooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
     if (priorRooms.length > 0) {
-      const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(priorRooms, takeoffResult);
+      const edgeSource = await resolveTakeoffResultForOpenEdge(organizationId, jobId, takeoffResult);
+      const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(priorRooms, edgeSource);
       const normalizedEdgeRooms = validateAndNormalizeOfficialScopeRooms(edgedRooms);
       if (studioEstimateService?.updateScope) {
         try {
