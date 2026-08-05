@@ -28,7 +28,9 @@ import { createQuoteFlowPricingService } from "./quoteFlowPricing.mjs";
 import { createQuoteFlowReviewService } from "./quoteFlowReview.mjs";
 import { createQuoteFlowDigitalEstimateService } from "./quoteFlowDigitalEstimate.mjs";
 import { createQuoteFlowActivityService } from "./quoteFlowActivity.mjs";
+import { createQuoteFlowAcceptedReportService } from "./quoteFlowAcceptedReport.mjs";
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
+import { resolveStudioLifecycleRepositoryForRoutes } from "../elite100EstimateStudio/studioLifecycleRepositoryFactory.mjs";
 import {
   approveAndBuildEstimate,
   getLatestTakeoffResult,
@@ -124,10 +126,24 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   let quoteFlowReviewService = deps.quoteFlowReviewService || null;
   let quoteFlowDigitalEstimateService = deps.quoteFlowDigitalEstimateService || null;
   let quoteFlowActivityService = deps.quoteFlowActivityService || null;
+  let quoteFlowAcceptedReportService = deps.quoteFlowAcceptedReportService || null;
   /** @type {object|null} */
   let wiredDigitalEstimateRepository = deps.digitalEstimateRepository || null;
   /** @type {object|null} */
   let wiredStudioDigitalEstimateService = deps.studioDigitalEstimateService || null;
+  /** @type {object|null} */
+  let lifecycleRepository = deps.lifecycleRepository || null;
+  if (!lifecycleRepository) {
+    try {
+      lifecycleRepository = resolveStudioLifecycleRepositoryForRoutes({
+        env,
+        getSupabase,
+        studioEstimateRepository: deps.studioEstimateRepository || null
+      });
+    } catch {
+      lifecycleRepository = null;
+    }
+  }
 
   if (
     !quoteFlowService ||
@@ -290,6 +306,18 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         });
       }
 
+      if (!lifecycleRepository) {
+        try {
+          lifecycleRepository = resolveStudioLifecycleRepositoryForRoutes({
+            env,
+            getSupabase,
+            studioEstimateRepository: estimateRepository
+          });
+        } catch {
+          lifecycleRepository = null;
+        }
+      }
+
       if (!quoteFlowActivityService) {
         quoteFlowActivityService = createQuoteFlowActivityService({
           estimateRepository,
@@ -298,6 +326,16 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
           digitalEstimateRepository: deRepository,
           configurationRepository,
           configurationStudioService,
+          lifecycleRepository,
+          env
+        });
+      }
+
+      if (!quoteFlowAcceptedReportService) {
+        quoteFlowAcceptedReportService = createQuoteFlowAcceptedReportService({
+          estimateRepository,
+          studioEstimateService,
+          lifecycleRepository,
           env
         });
       }
@@ -314,6 +352,16 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         wiredDigitalEstimateRepository || deps.digitalEstimateRepository || null,
       configurationRepository: deps.configurationRepository || null,
       configurationStudioService: deps.configurationStudioService || null,
+      lifecycleRepository,
+      env
+    });
+  }
+
+  if (!quoteFlowAcceptedReportService) {
+    quoteFlowAcceptedReportService = createQuoteFlowAcceptedReportService({
+      estimateRepository: deps.studioEstimateRepository || null,
+      studioEstimateService: deps.studioEstimateService || null,
+      lifecycleRepository,
       env
     });
   }
@@ -948,8 +996,30 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get(
+    "/api/elite100-quote-flow/estimates/:estimateId/accepted-report",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await quoteFlowAcceptedReportService.getAcceptedReport({
+          organizationId,
+          estimateId: decodeURIComponent(String(req.params.estimateId || ""))
+        });
+        res.json(result);
+      } catch (e) {
+        console.error(
+          "[elite100-quote-flow] accepted-report get failed",
+          e?.code || e?.message
+        );
+        sendSafeError(res, e, "Unable to load accepted job report.");
+      }
+    }
+  );
+
   console.log(
-    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review|digital-estimate|activity"
+    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review|digital-estimate|activity|accepted-report"
   );
   return { mounted: true, reason: "ok" };
 }

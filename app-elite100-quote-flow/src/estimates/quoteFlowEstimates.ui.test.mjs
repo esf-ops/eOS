@@ -205,20 +205,36 @@ assert.match(activityPanel, /Customer selected total|qf-activity-customer-select
 assert.match(activityPanel, /Published customer total|qf-activity-selection-totals/);
 assert.match(activityPanel, /is-changed/);
 assert.match(activityPanel, /qf-activity-selection-edge|qf-activity-selection-material/);
+assert.match(activityPanel, /qf-activity-acceptance-status|Acceptance/);
+assert.match(activityPanel, /OfficialAcceptedReportPanel/);
 assert.match(activityPanel, /Timeline|qf-activity-timeline/);
 assert.match(activityPanel, /Publication history|qf-activity-publications/);
 assert.match(activityPanel, /Not tracked yet/);
 assert.match(activityPanel, /Open link|Copy link/);
-assert.doesNotMatch(activityPanel, /Mark sold|Create handoff|Send email|Accept Estimate/i);
+assert.doesNotMatch(activityPanel, /Mark sold|Create handoff|Send email|Create invoice|QuickBooks API/i);
 assert.doesNotMatch(activityPanel, /\bV1\b|\bV2\b|Studio V2/);
+const acceptedPanel = readFileSync(
+  join(appRoot, "src/estimates/OfficialAcceptedReportPanel.tsx"),
+  "utf8"
+);
+assert.match(acceptedPanel, /Accepted job report/);
+assert.match(acceptedPanel, /Not accepted yet/);
+assert.match(acceptedPanel, /qf-accepted-piece-table|Rounded SF/);
+assert.match(acceptedPanel, /qf-accepted-room-material|Material \/ color/);
+assert.match(acceptedPanel, /qf-accepted-room-group|Price group/);
+assert.match(acceptedPanel, /qf-accepted-room-edge|Edge profile/);
+assert.match(acceptedPanel, /qf-accepted-room-sink|qf-accepted-room-faucet|qf-accepted-room-accessories/);
+assert.match(acceptedPanel, /Invoice preparation summary|qf-accepted-invoice-prep/);
+assert.match(acceptedPanel, /Internal only|qf-accepted__internal-tag/);
+assert.match(acceptedPanel, /Print report|Copy summary/);
+assert.doesNotMatch(acceptedPanel, /Mark sold|Create handoff|Create invoice|sendEmail/i);
 assert.match(activityCss, /\.qf-activity__status-card/);
-assert.match(activityCss, /\.qf-activity__status-label/);
-assert.match(activityCss, /\.qf-activity__status-value/);
-assert.match(activityCss, /grid-template-columns:\s*repeat\(auto-fit/);
-assert.match(activityCss, /\.qf-activity__comparison tr\.is-changed/);
+assert.match(activityCss, /\.qf-accepted/);
+assert.match(activityCss, /\.qf-accepted__internal-tag/);
 assert.match(page, /key: "activity"[\s\S]*active: true/);
 assert.match(page, /key: "handoff"[\s\S]*active: false/);
 assert.match(api, /selectionReview|QuoteFlowActivitySelectionReview/);
+assert.match(api, /accepted-report|fetchQuoteFlowAcceptedReport/);
 console.log("ok: Estimates Quote Library; Pricing + Review + Digital Estimate + Activity tabs; no Takeoff/V1/V2");
 
 {

@@ -18,6 +18,10 @@ import {
   mapQuoteFlowCustomerSelectionStatus
 } from "./quoteFlowCustomerSelections.mjs";
 import { buildEmptyCustomerSelectionReview } from "../elite100EstimateStudio/studioCustomerSelectionReview.mjs";
+import {
+  buildQuoteFlowAcceptedReport,
+  presentQuoteFlowAcceptance
+} from "./quoteFlowAcceptedReport.mjs";
 
 export { selectOfficialQuoteFlowLibraryRows };
 export {
@@ -68,6 +72,8 @@ function timelineEvent(type, label, at, detail = "", meta = {}) {
  *   reviewRequests?: object[],
  *   publicationEvents?: object[],
  *   selectionReview?: object|null,
+ *   acceptance?: object|null,
+ *   acceptedReport?: object|null,
  *   actorUserId?: string|null,
  *   env?: NodeJS.ProcessEnv,
  *   organizationId?: string
@@ -82,8 +88,19 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
     scope.quoteFlowDigitalEstimate && typeof scope.quoteFlowDigitalEstimate === "object"
       ? scope.quoteFlowDigitalEstimate
       : null;
-  const listItem = presentQuoteFlowEstimateListItem(row);
-  const estimateStatus = mapQuoteFlowEstimateStatus(row, scope);
+  const acceptancePresented =
+    opts.acceptance && typeof opts.acceptance === "object"
+      ? presentQuoteFlowAcceptance(opts.acceptance) ||
+        (opts.acceptance.id || opts.acceptance.acceptedAt
+          ? opts.acceptance
+          : null)
+      : null;
+  const listItem = presentQuoteFlowEstimateListItem(row, {
+    acceptance: acceptancePresented
+  });
+  const estimateStatus = mapQuoteFlowEstimateStatus(row, scope, {
+    acceptance: acceptancePresented
+  });
   const review = assessQuoteFlowReviewReadiness(row, {
     actorUserId: opts.actorUserId || null,
     env
@@ -280,6 +297,24 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
     );
   }
 
+  if (acceptancePresented?.acceptedAt) {
+    timeline.push(
+      timelineEvent(
+        "customer_accepted",
+        "Customer accepted Digital Estimate",
+        acceptancePresented.acceptedAt,
+        acceptancePresented.selectionSource === "customer_configured"
+          ? "Accepted with customer-configured selections."
+          : "Accepted as published.",
+        {
+          publicationId: acceptancePresented.publicationId || null,
+          customerDisplayTotal: acceptancePresented.customerDisplayTotal,
+          selectionSource: acceptancePresented.selectionSource
+        }
+      )
+    );
+  }
+
   timeline.sort((a, b) => {
     const ta = Date.parse(String(a.at || "")) || 0;
     const tb = Date.parse(String(b.at || "")) || 0;
@@ -391,6 +426,31 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
       customerSelectionDifference: selectionReview.totals?.difference ?? null,
       customerChangesReceived,
       needsStaffReview,
+      acceptanceStatus: acceptancePresented
+        ? {
+            key:
+              acceptancePresented.selectionSource === "customer_configured"
+                ? "accepted_as_configured"
+                : "accepted_as_published",
+            label:
+              acceptancePresented.selectionSource === "customer_configured"
+                ? "Accepted (customer configured)"
+                : "Accepted",
+            acceptedAt: acceptancePresented.acceptedAt,
+            customerDisplayTotal: acceptancePresented.customerDisplayTotal,
+            publishedBaselineTotal: acceptancePresented.publishedBaselineTotal,
+            difference: acceptancePresented.difference,
+            selectionSource: acceptancePresented.selectionSource
+          }
+        : {
+            key: "not_accepted",
+            label: "Not accepted yet",
+            acceptedAt: null,
+            customerDisplayTotal: null,
+            publishedBaselineTotal: null,
+            difference: null,
+            selectionSource: null
+          },
       needsRereview: review.reReviewRequired === true,
       needsRepublish:
         digital.publishStatusKey === "needs_republish" || qfDe?.status === "stale",
@@ -400,6 +460,22 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
     publicationHistory,
     customerSelections,
     selectionReview,
+    acceptance: acceptancePresented,
+    acceptedReport:
+      opts.acceptedReport && typeof opts.acceptedReport === "object"
+        ? opts.acceptedReport
+        : acceptancePresented
+          ? buildQuoteFlowAcceptedReport(row, opts.acceptance, {
+              selectionReview
+            })
+          : {
+              ok: true,
+              status: "not_accepted",
+              statusLabel: "Not accepted yet",
+              acceptance: null,
+              report: null,
+              sideEffects: { ...NO_SIDE_EFFECTS }
+            },
     unavailableNotes: [
       !row.takeoffJobId ? "AI Takeoff start/return detail: Not tracked yet." : null,
       !publicationEvents.length && !selectionReview.hasSavedSelections
@@ -423,6 +499,7 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
  *   }|null,
  *   configurationRepository?: object|null,
  *   configurationStudioService?: object|null,
+ *   lifecycleRepository?: { getAcceptanceForEstimate?: Function }|null,
  *   env?: NodeJS.ProcessEnv
  * }} deps
  */
@@ -434,6 +511,7 @@ export function createQuoteFlowActivityService(deps = {}) {
   const digitalEstimateRepository = deps.digitalEstimateRepository || null;
   const configurationRepository = deps.configurationRepository || null;
   const configurationStudioService = deps.configurationStudioService || null;
+  const lifecycleRepository = deps.lifecycleRepository || null;
   const env = deps.env || process.env;
 
   async function loadEstimateRow(organizationId, estimateId) {
@@ -561,12 +639,31 @@ export function createQuoteFlowActivityService(deps = {}) {
       });
     }
 
+    /** @type {object|null} */
+    let acceptance = null;
+    if (lifecycleRepository?.getAcceptanceForEstimate) {
+      try {
+        acceptance = await lifecycleRepository.getAcceptanceForEstimate(
+          organizationId,
+          row.id || estimateId
+        );
+      } catch {
+        acceptance = null;
+      }
+    }
+
+    const acceptedReport = buildQuoteFlowAcceptedReport(row, acceptance, {
+      selectionReview
+    });
+
     return buildQuoteFlowActivityPayload(row, {
       publications,
       activePublication,
       reviewRequests,
       publicationEvents,
       selectionReview,
+      acceptance,
+      acceptedReport,
       actorUserId,
       env,
       organizationId

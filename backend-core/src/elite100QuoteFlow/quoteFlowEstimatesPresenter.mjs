@@ -188,7 +188,7 @@ export function summarizeOfficialScope(scope) {
  * @param {object} estimate
  * @param {object} scope
  */
-export function mapQuoteFlowEstimateStatus(estimate, scope = {}) {
+export function mapQuoteFlowEstimateStatus(estimate, scope = {}, opts = {}) {
   const commercial = String(estimate?.status || "").toLowerCase();
   const qfReview =
     scope.quoteFlowReview && typeof scope.quoteFlowReview === "object" ? scope.quoteFlowReview : null;
@@ -203,7 +203,19 @@ export function mapQuoteFlowEstimateStatus(estimate, scope = {}) {
     qfDe?.status === "published" ||
     (Boolean(qfDe?.publicationId || qfDe?.customerUrl) && qfDe?.status !== "stale");
   const deNeedsRepublish = qfDe?.status === "stale";
+  const acceptance = opts.acceptance || null;
+  const isAccepted =
+    Boolean(acceptance?.acceptedAt || acceptance?.id) ||
+    String(estimate?.lifecycleStatus || "").toLowerCase() === "accepted_awaiting_sold_review" ||
+    Boolean(estimate?.acceptedAt);
 
+  if (isAccepted) {
+    return {
+      key: "accepted",
+      label: "Accepted",
+      nextAction: "Open Activity"
+    };
+  }
   if (deNeedsRepublish) {
     return {
       key: "needs_republish",
@@ -252,7 +264,7 @@ export function mapQuoteFlowEstimateStatus(estimate, scope = {}) {
 /**
  * @param {object} estimate studio estimate row or safe view
  */
-export function presentQuoteFlowEstimateListItem(estimate) {
+export function presentQuoteFlowEstimateListItem(estimate, opts = {}) {
   const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
   const identity =
     estimate?.customerIdentitySnapshot && typeof estimate.customerIdentitySnapshot === "object"
@@ -303,7 +315,9 @@ export function presentQuoteFlowEstimateListItem(estimate) {
     takeoffJobId: estimate?.takeoffJobId || null,
     sourceTakeoffResultId: estimate?.sourceTakeoffResultId || null
   });
-  const status = mapQuoteFlowEstimateStatus(estimate, scope);
+  const status = mapQuoteFlowEstimateStatus(estimate, scope, {
+    acceptance: opts.acceptance || null
+  });
   const scopeSummary = summarizeOfficialScope(scope);
 
   return {

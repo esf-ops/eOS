@@ -556,17 +556,50 @@ function edgeChangeSelectionReview({ reviewRequested = true } = {}) {
 }
 
 {
+  const acceptanceRow = {
+    id: randomUUID(),
+    accepted_at: "2026-08-04T20:00:00.000Z",
+    publication_id: PUB_ID,
+    estimate_revision: 2,
+    customer_display_total: 4873,
+    customer_safe_snapshot_json: {
+      acceptedAsConfigured: true,
+      acceptedAsPublished: false,
+      totals: {
+        acceptedConfiguredTotal: 4873,
+        publishedBaselineTotal: 4310,
+        customerDisplayTotal: 4873
+      }
+    }
+  };
+  const activity = buildQuoteFlowActivityPayload(scopedRow(EST_R2, 2), {
+    activePublication: { id: PUB_ID, customerUrl: "http://localhost:5190/e/token-2" },
+    acceptance: acceptanceRow,
+    organizationId: ORG
+  });
+  assert.equal(activity.summary.acceptanceStatus.key, "accepted_as_configured");
+  assert.equal(activity.summary.officialStatus.key, "accepted");
+  assert.ok(activity.timeline.some((e) => e.type === "customer_accepted"));
+  assert.equal(activity.acceptedReport.status, "accepted");
+  assert.equal(activity.acceptance.customerDisplayTotal, 4873);
+  assert.equal(activity.sideEffects.sold, false);
+  console.log("ok: activity surfaces accepted status + acceptedReport");
+}
+
+{
   const src = readFileSync(join(__dirname, "quoteFlowActivity.mjs"), "utf8");
   assert.match(src, /buildStudioCustomerSelectionReview|loadQuoteFlowCustomerSelectionReview/);
-  assert.doesNotMatch(src, /markSold|finalAcceptance|sendEmail|notifyCustomer/i);
+  assert.match(src, /presentQuoteFlowAcceptance|buildQuoteFlowAcceptedReport/);
+  assert.doesNotMatch(src, /markSold|sendEmail|notifyCustomer/i);
   assert.match(src, /sold:\s*false/);
   assert.match(src, /accepted:\s*false/);
   assert.match(src, /handoffCreated:\s*false/);
   const helper = readFileSync(join(__dirname, "quoteFlowCustomerSelections.mjs"), "utf8");
   assert.match(helper, /buildStudioCustomerSelectionReview/);
-  assert.doesNotMatch(helper, /markSold|createJob|sendEmail|createHandoff|finalAcceptance/i);
+  assert.doesNotMatch(helper, /markSold|createJob|sendEmail|createHandoff/i);
   const routes = readFileSync(join(__dirname, "elite100QuoteFlowRoutes.js"), "utf8");
   assert.match(routes, /estimates\/:estimateId\/activity/);
+  assert.match(routes, /accepted-report/);
   assert.match(routes, /configurationRepository/);
   assert.match(routes, /quoteFlowActivityService/);
   const lib = readFileSync(join(__dirname, "quoteFlowLibraryRows.mjs"), "utf8");

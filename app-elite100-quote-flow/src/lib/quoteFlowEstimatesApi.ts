@@ -514,6 +514,129 @@ export type QuoteFlowActivitySelectionReview = {
   staffDiagnostics?: Array<{ code?: string; message?: string }>;
 };
 
+export type QuoteFlowAcceptanceSummary = {
+  id?: string | null;
+  acceptedAt?: string | null;
+  estimateRevision?: number | null;
+  publicationId?: string | null;
+  customerDisplayTotal?: number | null;
+  publishedBaselineTotal?: number | null;
+  difference?: number | null;
+  acceptedAsConfigured?: boolean;
+  acceptedAsPublished?: boolean;
+  selectionSource?: string | null;
+  customerName?: string | null;
+  projectName?: string | null;
+  materialGroup?: string | null;
+};
+
+export type QuoteFlowAcceptedReportRoom = {
+  roomId?: string | null;
+  roomName?: string | null;
+  roomType?: string | null;
+  material?: string | null;
+  priceGroup?: string | null;
+  edgeProfile?: string | null;
+  countertopMeasuredSf?: number | null;
+  countertopRoundedSf?: number | null;
+  backsplash?: {
+    selected?: boolean;
+    heightIn?: number | null;
+    measuredSf?: number | null;
+    roundedSf?: number | null;
+  } | null;
+  sink?: string | null;
+  sinkCutout?: {
+    kitchenSinkQty?: number;
+    kitchenSinkCharge?: number | null;
+  } | null;
+  faucet?: string | null;
+  accessories?: Array<{ label?: string | null; quantity?: number }>;
+  specialty?: Array<{ label?: string | null; quantity?: number }>;
+  customerNote?: string | null;
+  roomSubtotal?: number | null;
+  pieces?: Array<{
+    pieceId?: string | null;
+    name?: string | null;
+    lengthIn?: number | null;
+    depthIn?: number | null;
+    quantity?: number | null;
+    rawSquareFeet?: number | null;
+    roundedSquareFeet?: number | null;
+    openEdgeLf?: number | null;
+    included?: boolean;
+    isBacksplash?: boolean;
+  }>;
+  customerFacingLines?: Array<{
+    label?: string | null;
+    amount?: number | null;
+    internalOnly?: boolean;
+  }>;
+  internalOnlyLines?: Array<{
+    label?: string | null;
+    amount?: number | null;
+    internalOnly?: boolean;
+  }>;
+  roundingCheck?: {
+    sumRoundedIncludedCountertopPieces?: number;
+    roomCountertopRoundedSf?: number;
+    matchesRoomTotal?: boolean;
+  };
+};
+
+export type QuoteFlowAcceptedReportPayload = {
+  ok?: boolean;
+  status?: "not_accepted" | "accepted" | string;
+  statusLabel?: string;
+  acceptance?: QuoteFlowAcceptanceSummary | null;
+  report?: {
+    purpose?: string;
+    header?: {
+      estimateName?: string | null;
+      customerName?: string | null;
+      customerEmail?: string | null;
+      intakeCaseId?: string | null;
+      acceptedAt?: string | null;
+      publicationId?: string | null;
+      estimateRevision?: number | null;
+      acceptedCustomerTotal?: number | null;
+      publishedEstimateTotal?: number | null;
+      difference?: number | null;
+      selectionSource?: string | null;
+      pricingBasis?: string | null;
+      priceGroup?: string | null;
+      materialSummary?: string | null;
+      notice?: string | null;
+      quickbooksInvoiceCreated?: boolean;
+    };
+    rooms?: QuoteFlowAcceptedReportRoom[];
+    projectSquareFeet?: {
+      countertopMeasuredSf?: number | null;
+      countertopRoundedSf?: number | null;
+      backsplashRoundedSf?: number | null;
+      roundingRule?: string | null;
+    };
+    lineItems?: {
+      customerFacing?: Array<{ label?: string | null; amount?: number | null; internalOnly?: boolean }>;
+      internalOnly?: Array<{ label?: string | null; amount?: number | null; internalOnly?: boolean }>;
+      notes?: string | null;
+    };
+    invoicePreparation?: {
+      acceptedCustomerTotal?: number | null;
+      materialCountertopTotal?: number | null;
+      backsplashTotal?: number | null;
+      sinkCutoutTotal?: number | null;
+      faucetAccessoriesTotal?: number | null;
+      customerFacingCustomLineTotal?: number | null;
+      materialUseTax?: number | null;
+      internalOnlyAdjustmentsTotal?: number | null;
+      exactInternalTotal?: number | null;
+      suggestedQuickBooksNotes?: string | null;
+    };
+  } | null;
+  sideEffects?: Record<string, boolean>;
+};
+
 export type QuoteFlowActivityPayload = {
   ok?: boolean;
   estimateId?: string;
@@ -538,6 +661,15 @@ export type QuoteFlowActivityPayload = {
     customerSelectionDifference?: number | null;
     customerChangesReceived?: boolean;
     needsStaffReview?: boolean;
+    acceptanceStatus?: {
+      key?: string;
+      label?: string;
+      acceptedAt?: string | null;
+      customerDisplayTotal?: number | null;
+      publishedBaselineTotal?: number | null;
+      difference?: number | null;
+      selectionSource?: string | null;
+    };
     needsRereview?: boolean;
     needsRepublish?: boolean;
     workflowState?: string;
@@ -551,6 +683,8 @@ export type QuoteFlowActivityPayload = {
     needsStaffReview?: boolean;
   };
   selectionReview?: QuoteFlowActivitySelectionReview | null;
+  acceptance?: QuoteFlowAcceptanceSummary | null;
+  acceptedReport?: QuoteFlowAcceptedReportPayload | null;
   unavailableNotes?: string[];
   sideEffects?: Record<string, boolean>;
 };
@@ -560,4 +694,11 @@ export async function fetchQuoteFlowEstimateActivity(token: string, estimateId: 
     `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/activity`,
     token
   ) as Promise<QuoteFlowActivityPayload>;
+}
+
+export async function fetchQuoteFlowAcceptedReport(token: string, estimateId: string) {
+  return apiGet(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/accepted-report`,
+    token
+  ) as Promise<QuoteFlowAcceptedReportPayload>;
 }

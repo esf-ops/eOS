@@ -1806,6 +1806,143 @@ body {
   display: block;
 }
 
+.qf-accepted {
+  margin: 1.35rem 0;
+  border: 1px solid #d8dee8;
+  background: #fff;
+  padding: 1rem 1.1rem 1.2rem;
+}
+
+.qf-accepted__head h3 {
+  margin: 0 0 0.25rem;
+}
+
+.qf-accepted__header-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.85rem;
+  margin: 0.85rem 0 1rem;
+}
+
+.qf-accepted__header-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  border: 1px solid #e6ebf2;
+  background: #fbfcfe;
+  padding: 0.75rem 0.85rem;
+}
+
+.qf-accepted__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 0 0 1rem;
+}
+
+.qf-accepted__room {
+  margin: 0.85rem 0;
+  border: 1px solid #e6ebf2;
+  background: #fbfcfe;
+  padding: 0.85rem 0.95rem;
+}
+
+.qf-accepted__room h4,
+.qf-accepted__room h5 {
+  margin: 0 0 0.45rem;
+}
+
+.qf-accepted__dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.55rem 0.85rem;
+  margin: 0.5rem 0;
+}
+
+.qf-accepted__dl div {
+  min-width: 0;
+}
+
+.qf-accepted__dl dt {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #5b6575;
+  margin-bottom: 0.15rem;
+}
+
+.qf-accepted__dl dd {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.qf-accepted__pieces {
+  margin-top: 0.75rem;
+  overflow-x: auto;
+}
+
+.qf-accepted__pieces table {
+  width: 100%;
+  min-width: 34rem;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.qf-accepted__pieces th,
+.qf-accepted__pieces td {
+  border: 1px solid #d8dee8;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+.qf-accepted__pieces th {
+  background: #f1f4f8;
+  font-weight: 650;
+}
+
+.qf-accepted__internal-tag {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: 1px solid #e2c48a;
+  background: #fff8ea;
+  color: #5c4a1f;
+}
+
+.qf-accepted__invoice,
+.qf-accepted__sf {
+  margin: 1rem 0;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #e6ebf2;
+  background: #f8f9fc;
+}
+
+@media print {
+  .qf-review__actions,
+  .qf-activity__timeline,
+  .qf-activity__pubs,
+  .qf-activity__notes,
+  .qf-de__link,
+  .qf-activity__summary,
+  .qf-activity__selections-panel {
+    display: none !important;
+  }
+
+  .qf-accepted {
+    border: none;
+    padding: 0;
+  }
+}
+
 .qf-review__status--ready_for_review {
   background: #eef6ff;
   border-color: #b7d0ef;

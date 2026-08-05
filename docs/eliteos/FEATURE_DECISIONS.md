@@ -4059,4 +4059,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `elite100RoomPricingStudioAdapter.mjs` (`mergePricedCutoutsIntoFabricationAddOns`), `quoteFlowOpenEdge.mjs` / pricing / estimates scope sync, `sinkCutoutBaseline.mjs`, Activity panel CSS/UI, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Cutout unit rates ($200 kitchen), DE selection formulas, acceptance/sold/handoff/email, internal-only exclusion. |
 | **Revisit trigger** | Staff apply-customer-selections into official scope. |
+
+### 301. Elite 100 Quote Flow — customer acceptance status + internal accepted-job report (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `main` |
+| **Decision** | Quote Flow Activity reads existing Studio Final Acceptance (`studio_estimate_acceptances` via lifecycle repository — same model as Studio V2 customer-activity). Shows Accepted / Not accepted yet, accepted totals, and an internal **Accepted job report** (staff-only) with room/piece SF (v4 `pieceSections` + `ceilBillableSquareFeet`), selections, customer-facing + internal-only lines, and invoice-preparation summary. Library status can show Accepted via `lifecycleStatus` / acceptance. No sold, handoff, job creation, QuickBooks invoice, or email. |
+| **Why** | Staff need accepted-job visibility and invoicing prep without operational closeout. |
+| **Impacted** | `quoteFlowAcceptedReport.mjs`, Activity payload/UI, `mapQuoteFlowEstimateStatus` Accepted, routes `…/accepted-report`, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Pricing formulas/rates, public DE acceptance APIs, sold/handoff/QB/email, customer-facing DE payloads (internal lines stay staff-only). |
+| **Revisit trigger** | Sold review / QuickBooks invoice creation / handoff. |
 |

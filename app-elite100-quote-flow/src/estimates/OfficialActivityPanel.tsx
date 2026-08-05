@@ -1,6 +1,7 @@
 /**
- * Estimates modal — Activity tab (read-only lifecycle / publication / customer selections).
- * No sold, handoff, acceptance, or email actions.
+ * Estimates modal — Activity tab (read-only lifecycle / publication / customer selections /
+ * acceptance + internal accepted-job report).
+ * No sold, handoff, QuickBooks invoice, or email actions.
  */
 import React, { useEffect, useState } from "react";
 import { ApiError } from "../lib/api";
@@ -12,6 +13,7 @@ import {
   type QuoteFlowActivitySelectionReview,
   type QuoteFlowActivityTimelineEvent
 } from "../lib/quoteFlowEstimatesApi";
+import OfficialAcceptedReportPanel from "./OfficialAcceptedReportPanel";
 
 type Props = {
   authToken: string;
@@ -225,6 +227,25 @@ export default function OfficialActivityPanel(props: Props) {
             testId="qf-activity-customer-status"
           />
           <StatusCard
+            label="Acceptance"
+            value={summary.acceptanceStatus?.label || "Not accepted yet"}
+            helper={
+              summary.acceptanceStatus?.acceptedAt
+                ? `${when(summary.acceptanceStatus.acceptedAt)}${
+                    summary.acceptanceStatus.selectionSource
+                      ? ` · ${summary.acceptanceStatus.selectionSource}`
+                      : ""
+                  }${
+                    summary.acceptanceStatus.customerDisplayTotal != null
+                      ? ` · ${money(summary.acceptanceStatus.customerDisplayTotal)}`
+                      : ""
+                  }`
+                : "Customer has not accepted the Digital Estimate yet."
+            }
+            warn={summary.acceptanceStatus?.key === "not_accepted"}
+            testId="qf-activity-acceptance-status"
+          />
+          <StatusCard
             label="Published estimate total"
             value={money(publishedTotal)}
             testId="qf-activity-published-total"
@@ -400,6 +421,8 @@ export default function OfficialActivityPanel(props: Props) {
           </div>
         ) : null}
       </div>
+
+      <OfficialAcceptedReportPanel acceptedReport={payload?.acceptedReport || null} />
 
       <div className="qf-activity__timeline" data-testid="qf-activity-timeline">
         <h3>Timeline</h3>
