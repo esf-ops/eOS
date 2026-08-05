@@ -243,6 +243,8 @@ export async function saveTakeoffCorrection(
       sourceResultId?: string | null;
     } | null;
     clientMutationRevision?: number;
+    /** Quote Flow: reopen approved takeoff automatically before saving edits. */
+    reopenIfApproved?: boolean;
   },
   init: Pick<RequestInit, "signal"> = {}
 ): Promise<SaveTakeoffCorrectionResponse> {

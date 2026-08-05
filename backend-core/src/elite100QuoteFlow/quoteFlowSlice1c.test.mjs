@@ -193,13 +193,22 @@ function queueRow(overrides = {}) {
     }
   };
 
+  /** @type {any[]} */
+  const approveArgs = [];
+  let reopenCalls = 0;
+
   const svc = createQuoteFlowSetScopeService({
     queueService,
     estimateRepository,
     studioEstimateService,
-    approveAndBuildEstimate: async () => {
+    approveAndBuildEstimate: async (args) => {
       approveCalls += 1;
+      approveArgs.push(args);
       return { reviewStatus: "approved", takeoffJobId: JOB };
+    },
+    reopenTakeoffJobForMeasurementRevision: async () => {
+      reopenCalls += 1;
+      return { ok: true, alreadyEditable: false, reviewStatus: "needs_review" };
     },
     getTakeoffWorkspace: async () => ({
       status: "completed",
@@ -257,6 +266,7 @@ function queueRow(overrides = {}) {
   assert.equal(refreshCalls, 1);
   assert.equal(createCalls >= 1, true);
   assert.equal(isOfficialScopeSet(estimatesByCase.get(CASE)), true);
+  assert.equal(approveArgs[0]?.reopenIfApproved, false);
   console.log("ok: AI Takeoff Set Scope creates official scope");
 
   const afterScope = await svc.listQueue({ organizationId: ORG });
@@ -388,10 +398,196 @@ function queueRow(overrides = {}) {
   const setScopeSrc = readFileSync(join(__dirname, "quoteFlowSetScope.mjs"), "utf8");
   assert.match(setScopeSrc, /refreshScopeFromTakeoff/);
   assert.match(setScopeSrc, /approveAndBuildEstimate/);
+  assert.match(setScopeSrc, /reopenTakeoffJobForMeasurementRevision|reopenIfApproved/);
+  assert.match(setScopeSrc, /freezeReviewedMeasurements/);
   assert.match(setScopeSrc, /setManualScope/);
   assert.match(setScopeSrc, /alreadyScoped !== true/);
   assert.match(setScopeSrc, /NO_SIDE_EFFECTS|calculated: false/);
   console.log("ok: route/source contracts; no calculate/approve/publish/sold");
+}
+
+{
+  // Dirty measurement payload → reopen + approve with takeoffResult in one Set Scope.
+  const estimatesByCase = new Map();
+  let approveCalls = 0;
+  let reopenCalls = 0;
+  /** @type {any[]} */
+  const approveArgs = [];
+  const dirtyJob = "22222222-2222-4222-8222-222222222225";
+  const dirtyCase = "case-dirty";
+  const rows = [
+    queueRow({
+      id: dirtyCase,
+      takeoffJobId: dirtyJob,
+      takeoffReviewStatus: "approved"
+    })
+  ];
+  const studioEstimateService = {
+    repository: {
+      async getActiveByIntakeCase(_org, caseId) {
+        return estimatesByCase.get(String(caseId)) || null;
+      }
+    },
+    async getOrCreateForCase({ intakeCaseId, takeoffJobId }) {
+      const existing = estimatesByCase.get(String(intakeCaseId));
+      if (existing) return existing;
+      const created = {
+        id: `est-${intakeCaseId}`,
+        status: "draft",
+        intakeCaseId,
+        takeoffJobId,
+        scope: { rooms: [] }
+      };
+      estimatesByCase.set(String(intakeCaseId), created);
+      return created;
+    },
+    async refreshScopeFromTakeoff({ estimateId }) {
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          const next = {
+            ...est,
+            status: "ready_to_price",
+            scope: { rooms: scopedRooms }
+          };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    },
+    async updateScope({ estimateId, body }) {
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          const next = {
+            ...est,
+            status: "ready_to_price",
+            scope: { ...(est.scope || {}), ...(body?.scope || {}) }
+          };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    }
+  };
+  const svc = createQuoteFlowSetScopeService({
+    queueService: { async listQueue() { return { cases: rows }; } },
+    estimateRepository: studioEstimateService.repository,
+    studioEstimateService,
+    approveAndBuildEstimate: async (args) => {
+      approveCalls += 1;
+      approveArgs.push(args);
+      assert.equal(args.reopenIfApproved, true);
+      assert.ok(args.takeoffResult?.rooms);
+      return { reviewStatus: "approved", takeoffJobId: dirtyJob };
+    },
+    reopenTakeoffJobForMeasurementRevision: async () => {
+      reopenCalls += 1;
+      return { ok: true, reviewStatus: "needs_review" };
+    },
+    getSupabase: () => ({})
+  });
+  const dirtyResult = {
+    rooms: [{ id: "r-edit", name: "Kitchen", areas: [{ id: "a1", runs: [{ id: "p1", lengthIn: 100, depthIn: 26, included: true }] }] }]
+  };
+  const res = await svc.setScope({
+    organizationId: ORG,
+    takeoffJobId: dirtyJob,
+    confirm: true,
+    takeoffResult: dirtyResult,
+    reviewState: { excludedRunIds: [] },
+    projectName: "Edited Scope Name"
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.message, "Scope is set for this estimate.");
+  assert.equal(approveCalls, 1);
+  assert.equal(reopenCalls >= 1, true);
+  assert.equal(isOfficialScopeSet(estimatesByCase.get(dirtyCase)), true);
+  const after = await svc.listQueue({ organizationId: ORG });
+  assert.equal(after.items.some((i) => i.takeoffJobId === dirtyJob), false);
+  console.log("ok: Set Scope with dirty edits reopens + saves + scopes in one action");
+}
+
+{
+  // Already-approved takeoff without dirty payload still Set Scopes (no Edit Measurements blocker).
+  const estimatesByCase = new Map();
+  let approveCalls = 0;
+  const approvedJob = "22222222-2222-4222-8222-222222222226";
+  const approvedCase = "case-approved";
+  const rows = [
+    queueRow({
+      id: approvedCase,
+      takeoffJobId: approvedJob,
+      takeoffReviewStatus: "approved"
+    })
+  ];
+  const studioEstimateService = {
+    repository: {
+      async getActiveByIntakeCase(_org, caseId) {
+        return estimatesByCase.get(String(caseId)) || null;
+      }
+    },
+    async getOrCreateForCase({ intakeCaseId, takeoffJobId }) {
+      const created = {
+        id: `est-${intakeCaseId}`,
+        status: "draft",
+        intakeCaseId,
+        takeoffJobId,
+        scope: { rooms: [] }
+      };
+      estimatesByCase.set(String(intakeCaseId), created);
+      return created;
+    },
+    async refreshScopeFromTakeoff({ estimateId }) {
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          const next = { ...est, status: "ready_to_price", scope: { rooms: scopedRooms } };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    },
+    async updateScope({ estimateId, body }) {
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          const next = {
+            ...est,
+            status: "ready_to_price",
+            scope: { ...(est.scope || {}), ...(body?.scope || {}) }
+          };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    }
+  };
+  const svc = createQuoteFlowSetScopeService({
+    queueService: { async listQueue() { return { cases: rows }; } },
+    estimateRepository: studioEstimateService.repository,
+    studioEstimateService,
+    approveAndBuildEstimate: async () => {
+      approveCalls += 1;
+      const err = new Error(
+        "Approved Takeoff measurements cannot be changed. Open Edit Measurements to start a new editable revision."
+      );
+      err.code = "takeoff_already_approved";
+      err.statusCode = 409;
+      throw err;
+    },
+    getSupabase: () => ({})
+  });
+  const res = await svc.setScope({
+    organizationId: ORG,
+    takeoffJobId: approvedJob,
+    confirm: true
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.message, "Scope is set for this estimate.");
+  assert.equal(approveCalls, 1);
+  assert.equal(isOfficialScopeSet(estimatesByCase.get(approvedCase)), true);
+  console.log("ok: already-approved unscoped takeoff Set Scope succeeds without Edit Measurements blocker");
 }
 
 {
@@ -401,7 +597,9 @@ function queueRow(overrides = {}) {
   );
   assert.match(ui, /Review Takeoff/);
   assert.match(ui, /Create Manual Scope/);
-  assert.match(ui, /Set Scope|Use these measurements/);
+  assert.match(ui, /Set Scope/);
+  assert.match(ui, /requestSetScopePayloadFromIframe/);
+  assert.match(ui, /Save Draft is optional/);
   assert.match(ui, /quoteFlowSetScope/);
   assert.match(ui, /Open in Estimates/);
   assert.match(ui, /filter:\s*["']active["']/);
@@ -409,12 +607,15 @@ function queueRow(overrides = {}) {
   assert.match(ui, /do not refetch takeoff detail|Do not refetch takeoff detail/);
   assert.doesNotMatch(ui, /Approve Estimate/);
   assert.doesNotMatch(ui, /\bV1\b|\bV2\b|Studio V2/);
-  const label = readFileSync(
-    join(root, "app-ai-takeoff/src/lib/consolidatedApproveClick.mjs"),
+  assert.doesNotMatch(ui, /Use these measurements/);
+  const takeoffUi = readFileSync(
+    join(root, "app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
     "utf8"
   );
-  assert.match(label, /Use these measurements|Set Scope/);
-  console.log("ok: UI uses Set Scope / Use these measurements; no V1/V2");
+  assert.match(takeoffUi, /QUOTE_FLOW_REQUEST_SET_SCOPE|eliteos-quote-flow-request-set-scope/);
+  assert.match(takeoffUi, /!quoteFlowSetScope/);
+  assert.match(takeoffUi, /reopenIfApproved:\s*quoteFlowSetScope/);
+  console.log("ok: UI one primary Set Scope; Save Draft optional; no competing Use these measurements");
 }
 
 console.log("\nquoteFlowSlice1c.test.mjs: ok\n");

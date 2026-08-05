@@ -3849,3 +3849,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | Queue presenter/setScope/set-manual-scope routes, EstimateQueuePage, queueGrouping, UI/slice tests, this doc. |
 | **Protected / unchanged** | Unscoped-only queue filter, pricing, Digital Estimate, Studio V2, AI Takeoff algorithm, migrations. |
 | **Revisit trigger** | Dedicated estimate title column if scope.projectName is overloaded elsewhere. |
+
+### 282. Elite 100 Quote Flow — one primary Set Scope action (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/quote-flow-single-set-scope-action` |
+| **Decision** | Estimate Queue has one primary **Set Scope** action. Clicking it collects current reviewed measurements from the embedded Takeoff iframe (dirty or clean), then `POST …/set-scope` saves edits (reopening approved takeoffs via `reopenIfApproved` / `reopenTakeoffJobForMeasurementRevision` when needed), freezes measurements, and creates official estimate scope in one request. Save Draft remains optional secondary in the iframe. Competing “Use these measurements” is hidden when `quoteFlowSetScope=1`. Already-approved but unscoped takeoffs Set Scope without surfacing the Studio “Edit Measurements” hard blocker. Manual Set Scope stays one action. |
+| **Why** | Requiring Save Draft then Use these measurements broke Quote Flow’s purpose (create official scope) and exposed locked-approved takeoff errors. |
+| **Impacted** | `quoteFlowSetScope`, Quote Flow set-scope route (4mb body), EstimateQueuePage + postMessage bridge, ConsolidatedTakeoffReview (payload reply + hide primary approve), `saveTakeoffCorrection`/`approveAndBuildEstimate` `reopenIfApproved`, slice/UI tests, this doc. |
+| **Protected / unchanged** | Inbox, unscoped-only queue filter, pricing, calculate, estimate approval, Digital Estimate, acceptance, sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
+| **Revisit trigger** | Native non-iframe Quote Flow measurement editor if postMessage bridge proves fragile. |

@@ -99,7 +99,13 @@ export async function fetchQuoteFlowQueueDetail(token: string, takeoffJobId: str
 export async function setQuoteFlowScope(
   token: string,
   takeoffJobId: string,
-  opts: { confirm?: boolean; projectName?: string; estimateName?: string } = {}
+  opts: {
+    confirm?: boolean;
+    projectName?: string;
+    estimateName?: string;
+    takeoffResult?: unknown;
+    reviewState?: unknown;
+  } = {}
 ) {
   return apiPost(
     `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/set-scope`,
@@ -107,7 +113,9 @@ export async function setQuoteFlowScope(
     {
       confirm: opts.confirm !== false,
       projectName: opts.projectName || opts.estimateName || undefined,
-      estimateName: opts.estimateName || opts.projectName || undefined
+      estimateName: opts.estimateName || opts.projectName || undefined,
+      takeoffResult: opts.takeoffResult || undefined,
+      reviewState: opts.reviewState || undefined
     }
   ) as Promise<QuoteFlowSetScopeResult>;
 }

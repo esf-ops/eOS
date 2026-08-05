@@ -22,7 +22,8 @@ import {
 import {
   aiTakeoffHeadUrl,
   isAllowedTakeoffMessageOrigin,
-  isValidTakeoffApprovedMessage
+  isValidTakeoffApprovedMessage,
+  requestSetScopePayloadFromIframe
 } from "../lib/takeoffPostMessageOrigins.mjs";
 
 type Props = {
@@ -88,6 +89,7 @@ export default function EstimateQueuePage(props: Props) {
   const selectedJobIdRef = useRef<string | null>(null);
   const detailModeRef = useRef<DetailMode>("idle");
   const estimateNameByJobRef = useRef<Record<string, string>>({});
+  const takeoffIframeRef = useRef<HTMLIFrameElement | null>(null);
 
   selectedJobIdRef.current = selectedJobId;
   detailModeRef.current = detailMode;
@@ -321,16 +323,40 @@ export default function EstimateQueuePage(props: Props) {
     setNotice(null);
     const name = resolvedNameForSubmit();
     try {
+      // Collect unsaved worksheet edits from the embedded review (no Save Draft required).
+      const payload = await requestSetScopePayloadFromIframe(
+        takeoffIframeRef.current,
+        selectedJobId,
+        { timeoutMs: 8000 }
+      );
       const res = await setQuoteFlowScope(authToken, selectedJobId, {
         confirm: true,
         projectName: name,
-        estimateName: name
+        estimateName: name,
+        takeoffResult: payload?.takeoffResult || undefined,
+        reviewState: payload?.reviewState || undefined
       });
       applyScopeSuccess({ ...res, projectName: res.projectName || name });
       await loadList("refresh");
       // Do not refetch takeoff detail after success — avoids stale 404 noise.
     } catch (e) {
       const msg = errorMessage(e);
+      // Soften locked-approved takeoff copy — Quote Flow Set Scope should not need Edit Measurements.
+      if (/Approved Takeoff measurements cannot be changed|Edit Measurements/i.test(msg)) {
+        try {
+          const retry = await setQuoteFlowScope(authToken, selectedJobId, {
+            confirm: true,
+            projectName: name,
+            estimateName: name
+          });
+          applyScopeSuccess({ ...retry, projectName: retry.projectName || name });
+          await loadList("refresh");
+          return;
+        } catch (retryErr) {
+          setError(errorMessage(retryErr));
+          return;
+        }
+      }
       if (/already.?scoped|Scope is already set|Open in Estimates/i.test(msg)) {
         applyScopeSuccess({
           estimateId: estimateId || detail?.estimateId,
@@ -825,8 +851,8 @@ export default function EstimateQueuePage(props: Props) {
 
                   {detailMode === "review" ? (
                     <p className="qf-muted" data-testid="qf-queue-set-scope-hint">
-                      Verify dimensions against the plan, then click <strong>Set Scope</strong> or{" "}
-                      <strong>Use these measurements</strong> in the review panel.
+                      Set Scope saves these reviewed measurements as the official estimate scope.
+                      Save Draft is optional — you do not need it before Set Scope.
                     </p>
                   ) : null}
                   {detailMode === "manual" ? (
@@ -870,6 +896,7 @@ export default function EstimateQueuePage(props: Props) {
               {detailMode === "review" && takeoffSrc ? (
                 <div className="qf-queue__frame-wrap qf-queue__frame-wrap--command">
                   <iframe
+                    ref={takeoffIframeRef}
                     title="Takeoff review"
                     src={takeoffSrc}
                     className="qf-queue__frame"
