@@ -13,8 +13,17 @@ import {
 import { assessQuoteFlowReviewReadiness } from "./quoteFlowReview.mjs";
 import { assessQuoteFlowDigitalEstimateReadiness } from "./quoteFlowDigitalEstimate.mjs";
 import { selectOfficialQuoteFlowLibraryRows } from "./quoteFlowLibraryRows.mjs";
+import {
+  loadQuoteFlowCustomerSelectionReview,
+  mapQuoteFlowCustomerSelectionStatus
+} from "./quoteFlowCustomerSelections.mjs";
+import { buildEmptyCustomerSelectionReview } from "../elite100EstimateStudio/studioCustomerSelectionReview.mjs";
 
 export { selectOfficialQuoteFlowLibraryRows };
+export {
+  loadQuoteFlowCustomerSelectionReview,
+  mapQuoteFlowCustomerSelectionStatus
+} from "./quoteFlowCustomerSelections.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -58,6 +67,7 @@ function timelineEvent(type, label, at, detail = "", meta = {}) {
  *   activePublication?: object|null,
  *   reviewRequests?: object[],
  *   publicationEvents?: object[],
+ *   selectionReview?: object|null,
  *   actorUserId?: string|null,
  *   env?: NodeJS.ProcessEnv,
  *   organizationId?: string
@@ -285,49 +295,32 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
     qfDe?.customerUrl ||
     null;
 
-  /** @type {{ key: string, label: string, detail: string|null }} */
-  let customerSelections = {
-    key: "none",
-    label: "No customer activity yet",
-    detail: null
-  };
+  const selectionReview =
+    opts.selectionReview && typeof opts.selectionReview === "object"
+      ? opts.selectionReview
+      : buildEmptyCustomerSelectionReview({
+          publicationId:
+            activePublication?.id ||
+            activePublication?.publicationId ||
+            qfDe?.publicationId ||
+            null
+        });
+
   const hasView = timeline.some((e) => e.type === "customer_link_opened");
-  const hasSelection = timeline.some((e) => e.type === "customer_selections_changed");
-  const openRequest = reviewRequests.find((r) => {
-    const s = String(r.status || "").toLowerCase();
-    return s && s !== "closed" && s !== "resolved" && s !== "cancelled";
+  const customerSelections = mapQuoteFlowCustomerSelectionStatus(selectionReview, {
+    hasView,
+    hasLink: Boolean(latestLink),
+    publicationEventsTracked: publicationEvents.length > 0 || reviewRequests.length > 0
   });
-  if (openRequest) {
-    customerSelections = {
-      key: "revision_requested",
-      label: "Revision requested / changes pending",
-      detail: openRequest.status ? `Request status: ${openRequest.status}` : null
-    };
-  } else if (hasSelection) {
-    customerSelections = {
-      key: "selections_saved",
-      label: "Customer selections saved",
-      detail: "From Digital Estimate configuration activity."
-    };
-  } else if (hasView) {
-    customerSelections = {
-      key: "link_opened",
-      label: "Customer opened link",
-      detail: "Selections not tracked yet."
-    };
-  } else if (!latestLink) {
-    customerSelections = {
-      key: "not_published",
-      label: "Not tracked yet",
-      detail: "Publish a Digital Estimate to track customer activity."
-    };
-  } else if (!publicationEvents.length && !reviewRequests.length) {
-    customerSelections = {
-      key: "not_tracked",
-      label: "Not tracked yet",
-      detail: "No customer view or selection events are available for this publication."
-    };
-  }
+
+  const comparisonRows = Array.isArray(selectionReview.selectionComparison?.rows)
+    ? selectionReview.selectionComparison.rows
+    : [];
+  const customerChangesReceived =
+    customerSelections.needsStaffReview === true ||
+    Boolean(selectionReview.hasSavedSelections) ||
+    comparisonRows.length > 0;
+  const needsStaffReview = customerSelections.needsStaffReview === true;
 
   const publicationHistory = sortedPubs
     .slice()
@@ -393,6 +386,11 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
       customerLinkAvailable: Boolean(latestLink),
       customerUrl: latestLink,
       customerSelections,
+      customerSelectedTotal: selectionReview.totals?.customerEstimateTotal ?? null,
+      publishedCustomerTotal: selectionReview.totals?.publishedBaselineTotal ?? null,
+      customerSelectionDifference: selectionReview.totals?.difference ?? null,
+      customerChangesReceived,
+      needsStaffReview,
       needsRereview: review.reReviewRequired === true,
       needsRepublish:
         digital.publishStatusKey === "needs_republish" || qfDe?.status === "stale",
@@ -401,9 +399,10 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
     timeline,
     publicationHistory,
     customerSelections,
+    selectionReview,
     unavailableNotes: [
       !row.takeoffJobId ? "AI Takeoff start/return detail: Not tracked yet." : null,
-      !publicationEvents.length
+      !publicationEvents.length && !selectionReview.hasSavedSelections
         ? "Detailed customer view/selection events: Not tracked yet (or none recorded)."
         : null
     ].filter(Boolean),
@@ -422,6 +421,8 @@ export function buildQuoteFlowActivityPayload(row, opts = {}) {
  *   digitalEstimateRepository?: {
  *     listEventsForPublication?: Function
  *   }|null,
+ *   configurationRepository?: object|null,
+ *   configurationStudioService?: object|null,
  *   env?: NodeJS.ProcessEnv
  * }} deps
  */
@@ -431,6 +432,8 @@ export function createQuoteFlowActivityService(deps = {}) {
   const studioEstimateService = deps.studioEstimateService || null;
   const studioDigitalEstimateService = deps.studioDigitalEstimateService || null;
   const digitalEstimateRepository = deps.digitalEstimateRepository || null;
+  const configurationRepository = deps.configurationRepository || null;
+  const configurationStudioService = deps.configurationStudioService || null;
   const env = deps.env || process.env;
 
   async function loadEstimateRow(organizationId, estimateId) {
@@ -535,11 +538,35 @@ export function createQuoteFlowActivityService(deps = {}) {
       }
     }
 
+    /** @type {object} */
+    let selectionReview = buildEmptyCustomerSelectionReview({
+      publicationId: activeId
+    });
+    try {
+      selectionReview = await loadQuoteFlowCustomerSelectionReview({
+        organizationId,
+        estimate: row,
+        activePublication:
+          activePublication ||
+          (activeId
+            ? { id: activeId, publicationId: activeId }
+            : null),
+        reviewRequests,
+        configurationRepository,
+        configurationStudioService
+      });
+    } catch {
+      selectionReview = buildEmptyCustomerSelectionReview({
+        publicationId: activeId
+      });
+    }
+
     return buildQuoteFlowActivityPayload(row, {
       publications,
       activePublication,
       reviewRequests,
       publicationEvents,
+      selectionReview,
       actorUserId,
       env,
       organizationId

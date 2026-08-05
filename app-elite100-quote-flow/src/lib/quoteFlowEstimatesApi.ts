@@ -465,6 +465,55 @@ export type QuoteFlowActivityPublication = {
   linkStatus?: string | null;
 };
 
+export type QuoteFlowActivitySelectionComparisonRow = {
+  room?: string | null;
+  category?: string;
+  publishedSelection?: string;
+  customerSelection?: string;
+  priceDelta?: number | null;
+  status?: string | null;
+};
+
+export type QuoteFlowActivitySelectionReview = {
+  hasSavedSelections?: boolean;
+  lastSavedAt?: string | null;
+  reviewRequested?: boolean;
+  requiresEliteReview?: boolean;
+  selectionOnlySubmitted?: boolean;
+  reviewKind?: string | null;
+  pricedSelections?: {
+    rooms?: Array<{
+      roomKey?: string | null;
+      roomName?: string | null;
+      material?: { label?: string | null; group?: string | null } | null;
+      edge?: { label?: string | null } | null;
+      backsplash?: { label?: string | null } | null;
+      sink?: { label?: string | null } | null;
+      faucet?: { label?: string | null } | null;
+      accessories?: Array<{ label?: string | null; quantity?: number }>;
+      specialty?: Array<{ label?: string | null; quantity?: number }>;
+      notes?: string | null;
+    }>;
+    selectionChangeCount?: number;
+    selectionChangeItems?: Array<{ kind?: string; label?: string }>;
+  };
+  scopeRequests?: {
+    count?: number;
+    items?: Array<{ kind?: string; label?: string }>;
+    projectNote?: string | null;
+  };
+  totals?: {
+    publishedBaselineTotal?: number | null;
+    customerEstimateTotal?: number | null;
+    difference?: number | null;
+  };
+  selectionComparison?: {
+    rows?: QuoteFlowActivitySelectionComparisonRow[];
+    totalDelta?: number | null;
+  };
+  staffDiagnostics?: Array<{ code?: string; message?: string }>;
+};
+
 export type QuoteFlowActivityPayload = {
   ok?: boolean;
   estimateId?: string;
@@ -478,14 +527,30 @@ export type QuoteFlowActivityPayload = {
     latestPublication?: QuoteFlowActivityPublication | null;
     customerLinkAvailable?: boolean;
     customerUrl?: string | null;
-    customerSelections?: { key?: string; label?: string; detail?: string | null };
+    customerSelections?: {
+      key?: string;
+      label?: string;
+      detail?: string | null;
+      needsStaffReview?: boolean;
+    };
+    customerSelectedTotal?: number | null;
+    publishedCustomerTotal?: number | null;
+    customerSelectionDifference?: number | null;
+    customerChangesReceived?: boolean;
+    needsStaffReview?: boolean;
     needsRereview?: boolean;
     needsRepublish?: boolean;
     workflowState?: string;
   };
   timeline?: QuoteFlowActivityTimelineEvent[];
   publicationHistory?: QuoteFlowActivityPublication[];
-  customerSelections?: { key?: string; label?: string; detail?: string | null };
+  customerSelections?: {
+    key?: string;
+    label?: string;
+    detail?: string | null;
+    needsStaffReview?: boolean;
+  };
+  selectionReview?: QuoteFlowActivitySelectionReview | null;
   unavailableNotes?: string[];
   sideEffects?: Record<string, boolean>;
 };

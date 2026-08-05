@@ -148,6 +148,10 @@ export function buildEmptyCustomerSelectionReview(opts = {}) {
       customerEstimateTotal: null,
       difference: null
     },
+    selectionComparison: {
+      rows: [],
+      totalDelta: null
+    },
     pricingAuthority: null,
     staffDiagnostics: []
   });
@@ -278,6 +282,63 @@ function mapPricedRoom(room, foundation) {
     specialty,
     notes: str(room?.notes)
   };
+}
+
+/**
+ * Map Digital Estimate `roomPricingChanges` (customer-safe DE calculation DTO)
+ * into staff-facing before/after comparison rows. Does not recalculate prices.
+ *
+ * @param {object|null|undefined} calculation
+ * @returns {{
+ *   rows: Array<{
+ *     room: string|null,
+ *     category: string,
+ *     publishedSelection: string,
+ *     customerSelection: string,
+ *     priceDelta: number|null,
+ *     status: string|null
+ *   }>,
+ *   totalDelta: number|null
+ * }}
+ */
+export function presentSelectionComparisonFromCalculation(calculation) {
+  const customerResult =
+    calculation?.customer_result_json ||
+    calculation?.customerResultJson ||
+    null;
+  const changes =
+    customerResult?.roomPricingChanges && typeof customerResult.roomPricingChanges === "object"
+      ? customerResult.roomPricingChanges
+      : null;
+  const rawRows = Array.isArray(changes?.rows) ? changes.rows : [];
+  const rows = rawRows
+    .map((r) => {
+      const published = str(r?.originalLabel) || "Published selection";
+      const customer = str(r?.updatedLabel) || "Customer selection";
+      const category = str(r?.categoryLabel) || str(r?.category) || "Selection";
+      const delta =
+        moneyFromStoredTotal(r?.amountDelta) ??
+        (r?.amountDeltaCents != null && Number.isFinite(Number(r.amountDeltaCents))
+          ? Math.round(Number(r.amountDeltaCents)) / 100
+          : null);
+      return {
+        room: str(r?.roomName) || str(r?.room) || null,
+        category,
+        publishedSelection: published,
+        customerSelection: customer,
+        priceDelta: delta,
+        status: str(r?.status)
+      };
+    })
+    .filter((r) => r.publishedSelection || r.customerSelection);
+
+  const totalDelta =
+    moneyFromStoredTotal(changes?.totalDelta) ??
+    (changes?.totalDeltaCents != null && Number.isFinite(Number(changes.totalDeltaCents))
+      ? Math.round(Number(changes.totalDeltaCents)) / 100
+      : null);
+
+  return { rows, totalDelta };
 }
 
 /**
@@ -565,6 +626,7 @@ export function buildStudioCustomerSelectionReview(input = {}) {
       customerEstimateTotal,
       difference
     },
+    selectionComparison: presentSelectionComparisonFromCalculation(calculation),
     pricingAuthority,
     staffDiagnostics
   });

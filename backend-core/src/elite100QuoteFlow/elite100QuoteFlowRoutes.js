@@ -225,7 +225,11 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
           : createInMemoryDigitalEstimateRepository());
 
       let configurationStudioService = deps.configurationStudioService || null;
-      if (!configurationStudioService && isDigitalEstimateConfigurationEnabled(env)) {
+      let configurationRepository = deps.configurationRepository || null;
+      if (
+        (!configurationStudioService || !configurationRepository) &&
+        isDigitalEstimateConfigurationEnabled(env)
+      ) {
         try {
           const stack = createDigitalEstimateConfigurationStack({
             env,
@@ -234,12 +238,15 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
             requireRuntimeFlags: true
           });
           if (stack) {
-            configurationStudioService = createConfigurationStudioService({
-              configurationRepository: stack.configuration,
-              pricingPolicyRepository: stack.pricingPolicy,
-              deRepository,
-              env
-            });
+            configurationRepository = configurationRepository || stack.configuration || null;
+            if (!configurationStudioService) {
+              configurationStudioService = createConfigurationStudioService({
+                configurationRepository: stack.configuration,
+                pricingPolicyRepository: stack.pricingPolicy,
+                deRepository,
+                env
+              });
+            }
           }
         } catch (e) {
           console.warn(
@@ -289,6 +296,8 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
           studioEstimateService,
           studioDigitalEstimateService,
           digitalEstimateRepository: deRepository,
+          configurationRepository,
+          configurationStudioService,
           env
         });
       }
@@ -303,6 +312,8 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         wiredStudioDigitalEstimateService || deps.studioDigitalEstimateService || null,
       digitalEstimateRepository:
         wiredDigitalEstimateRepository || deps.digitalEstimateRepository || null,
+      configurationRepository: deps.configurationRepository || null,
+      configurationStudioService: deps.configurationStudioService || null,
       env
     });
   }

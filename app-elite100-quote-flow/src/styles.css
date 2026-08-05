@@ -1643,6 +1643,58 @@ body {
   border-color: #efd9a8;
 }
 
+.qf-activity__selections,
+.qf-activity__timeline,
+.qf-activity__pubs,
+.qf-activity__notes {
+  margin: 1.1rem 0;
+}
+
+.qf-activity__totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0;
+}
+
+.qf-activity__totals .qf-stat__label,
+.qf-activity__totals .qf-stat__value {
+  display: block;
+}
+
+.qf-activity__comparison {
+  margin: 0.85rem 0;
+  overflow-x: auto;
+}
+
+.qf-activity__comparison table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.qf-activity__comparison th,
+.qf-activity__comparison td {
+  border: 1px solid #d8dee8;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.qf-activity__comparison th {
+  background: #f1f4f8;
+  font-weight: 600;
+}
+
+.qf-activity__room {
+  margin: 0.55rem 0;
+}
+
+.qf-activity__room ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.15rem;
+}
+
 .qf-activity__timeline ol,
 .qf-activity__pubs ul,
 .qf-activity__notes ul {

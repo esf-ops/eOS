@@ -4036,3 +4036,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowActivity.mjs` / `quoteFlowLibraryRows.mjs` + routes/tests, `listEstimates` collapse, QF publish supersede hook, `OfficialActivityPanel`, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Pricing formulas, Review/DE publish rules (except supersede after publish), acceptance/sold/handoff/email, `app-digital-estimate`, DB rows (no delete/merge). |
 | **Revisit trigger** | Handoff / sold; richer amendment timeline UI. |
+
+### 299. Elite 100 Quote Flow — Activity shows Digital Estimate customer selections (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `main` |
+| **Decision** | Quote Flow Activity loads staff-safe customer selections via the existing Studio V2 helper `buildStudioCustomerSelectionReview` (same stack as `GET …/customer-activity`) plus DE calculation `roomPricingChanges` for before/after rows and published vs customer-selected totals. Activity UI renders a dedicated **Customer selections** section (status, totals, comparison table, current choices). Read-only: refresh / open / copy link only. No accept/sold/handoff/job/email; no pricing formula changes; no automatic approve/republish. |
+| **Why** | Activity already tracked lifecycle/link events but did not visibly show customer-selected changes from the published Digital Estimate. |
+| **Impacted** | `quoteFlowCustomerSelections.mjs`, `quoteFlowActivity.mjs` (+ route wiring for configuration repository), `studioCustomerSelectionReview.mjs` (`selectionComparison` from `roomPricingChanges`), `OfficialActivityPanel`, Activity tests/UI smoke, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Pricing formulas, Review/DE publish gates, acceptance/sold/handoff/email, internal-only line exclusion / economics totals, `app-digital-estimate` UX. |
+| **Revisit trigger** | Staff accept / apply customer selections into official scope; sold/handoff. |
+| **Note** | Public Digital Estimate may still expose Accept Estimate separately; this slice does not wire acceptance into Quote Flow. |
+|

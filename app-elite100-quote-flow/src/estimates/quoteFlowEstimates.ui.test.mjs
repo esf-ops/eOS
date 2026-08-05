@@ -192,14 +192,21 @@ assert.match(api, /fetchQuoteFlowEstimateActivity/);
 const activityPanel = readFileSync(join(appRoot, "src/estimates/OfficialActivityPanel.tsx"), "utf8");
 assert.match(activityPanel, /data-testid="qf-official-activity-panel"/);
 assert.match(activityPanel, /qf-activity-summary|Activity/);
+assert.match(activityPanel, /Customer selections|qf-activity-customer-selections/);
+assert.match(activityPanel, /No customer selections yet/);
+assert.match(activityPanel, /Before \/ after|qf-activity-selection-comparison/);
+assert.match(activityPanel, /Customer selected total|qf-activity-customer-selected-total/);
+assert.match(activityPanel, /Needs staff review|qf-activity-needs-staff-review/);
+assert.match(activityPanel, /qf-activity-selection-edge|qf-activity-selection-material/);
 assert.match(activityPanel, /Timeline|qf-activity-timeline/);
 assert.match(activityPanel, /Publication history|qf-activity-publications/);
 assert.match(activityPanel, /Not tracked yet/);
 assert.match(activityPanel, /Open link|Copy link/);
-assert.doesNotMatch(activityPanel, /Mark sold|Create handoff|Send email/i);
+assert.doesNotMatch(activityPanel, /Mark sold|Create handoff|Send email|Accept Estimate/i);
 assert.doesNotMatch(activityPanel, /\bV1\b|\bV2\b|Studio V2/);
 assert.match(page, /key: "activity"[\s\S]*active: true/);
 assert.match(page, /key: "handoff"[\s\S]*active: false/);
+assert.match(api, /selectionReview|QuoteFlowActivitySelectionReview/);
 console.log("ok: Estimates Quote Library; Pricing + Review + Digital Estimate + Activity tabs; no Takeoff/V1/V2");
 
 {
