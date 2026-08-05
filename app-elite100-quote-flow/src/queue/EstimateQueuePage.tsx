@@ -22,7 +22,6 @@ import {
 import {
   aiTakeoffHeadUrl,
   isAllowedTakeoffMessageOrigin,
-  isValidQuoteFlowTriggerSetScope,
   isValidTakeoffApprovedMessage,
   requestSetScopePayloadFromIframe
 } from "../lib/takeoffPostMessageOrigins.mjs";
@@ -323,40 +322,41 @@ export default function EstimateQueuePage(props: Props) {
     setError(null);
     setNotice(null);
     const name = resolvedNameForSubmit();
+    const saveDraftFirstMsg = "Save draft first, then Set Scope.";
     try {
-      // Collect unsaved worksheet edits from the embedded review (no Save Draft required).
+      // Collect current worksheet/review state from the embedded review (dirty edits + openEdgeLf).
       const payload = await requestSetScopePayloadFromIframe(
         takeoffIframeRef.current,
         selectedJobId,
         { timeoutMs: 8000 }
       );
+
+      if (!payload?.takeoffResult) {
+        // Never silently Set Scope without current review state (would drop dirty edits).
+        setError(saveDraftFirstMsg);
+        return;
+      }
+
       const res = await setQuoteFlowScope(authToken, selectedJobId, {
         confirm: true,
         projectName: name,
         estimateName: name,
-        takeoffResult: payload?.takeoffResult || undefined,
-        reviewState: payload?.reviewState || undefined
+        takeoffResult: payload.takeoffResult,
+        reviewState: payload.reviewState || undefined
       });
       applyScopeSuccess({ ...res, projectName: res.projectName || name });
       await loadList("refresh");
       // Do not refetch takeoff detail after success — avoids stale 404 noise.
     } catch (e) {
       const msg = errorMessage(e);
-      // Soften locked-approved takeoff copy — Quote Flow Set Scope should not need Edit Measurements.
-      if (/Approved Takeoff measurements cannot be changed|Edit Measurements/i.test(msg)) {
-        try {
-          const retry = await setQuoteFlowScope(authToken, selectedJobId, {
-            confirm: true,
-            projectName: name,
-            estimateName: name
-          });
-          applyScopeSuccess({ ...retry, projectName: retry.projectName || name });
-          await loadList("refresh");
-          return;
-        } catch (retryErr) {
-          setError(errorMessage(retryErr));
-          return;
-        }
+      // Soften locked-approved / postMessage / low-level takeoff copy.
+      if (
+        /Approved Takeoff measurements cannot be changed|Edit Measurements|postMessage|takeoff_already_approved|takeoff_not_ready/i.test(
+          msg
+        )
+      ) {
+        setError(saveDraftFirstMsg);
+        return;
       }
       if (/already.?scoped|Scope is already set|Open in Estimates/i.test(msg)) {
         applyScopeSuccess({
@@ -367,6 +367,8 @@ export default function EstimateQueuePage(props: Props) {
           projectName: name
         });
         await loadList("refresh");
+      } else if (/timeout|unavailable|Unable to|Failed to|network/i.test(msg)) {
+        setError(saveDraftFirstMsg);
       } else {
         setError(msg);
       }
@@ -416,11 +418,8 @@ export default function EstimateQueuePage(props: Props) {
     if (!selectedJobId || detailMode !== "review") return;
     function onMessage(event: MessageEvent) {
       if (!isAllowedTakeoffMessageOrigin(event.origin)) return;
-      // Footer Set Scope in the iframe, or legacy approved handoff → same parent Set Scope flow.
-      if (
-        isValidQuoteFlowTriggerSetScope(event.data, selectedJobId) ||
-        isValidTakeoffApprovedMessage(event.data, selectedJobId)
-      ) {
+      // Legacy approved handoff only — footer Set Scope trigger is removed.
+      if (isValidTakeoffApprovedMessage(event.data, selectedJobId)) {
         void runSetScope();
       }
     }
@@ -857,7 +856,8 @@ export default function EstimateQueuePage(props: Props) {
 
                   {detailMode === "review" ? (
                     <p className="qf-muted" data-testid="qf-queue-set-scope-hint">
-                      Set Scope saves these reviewed measurements as official estimate scope.
+                      Review measurements. Save draft if needed, then Set Scope from the Quote Flow
+                      header.
                     </p>
                   ) : null}
                   {detailMode === "manual" ? (

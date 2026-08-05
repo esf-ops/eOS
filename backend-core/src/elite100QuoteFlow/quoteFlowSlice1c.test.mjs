@@ -943,13 +943,14 @@ function queueRow(overrides = {}) {
   assert.match(ui, /Create Manual Scope/);
   assert.match(ui, /Set Scope/);
   assert.match(ui, /requestSetScopePayloadFromIframe/);
-  assert.match(ui, /isValidQuoteFlowTriggerSetScope/);
-  assert.match(ui, /Set Scope saves these reviewed measurements/);
+  assert.match(ui, /Save draft first, then Set Scope/);
+  assert.match(ui, /Review measurements\. Save draft if needed, then Set Scope from the Quote Flow/);
   assert.match(ui, /quoteFlowSetScope/);
   assert.match(ui, /Open in Estimates/);
   assert.match(ui, /filter:\s*["']active["']/);
   assert.match(ui, /qf-queue-manual-builder|OfficialScopeEditor/);
   assert.match(ui, /do not refetch takeoff detail|Do not refetch takeoff detail/);
+  assert.doesNotMatch(ui, /isValidQuoteFlowTriggerSetScope|QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
   assert.doesNotMatch(ui, /Approve Estimate/);
   assert.doesNotMatch(ui, /\bV1\b|\bV2\b|Studio V2/);
   assert.doesNotMatch(ui, /Use these measurements/);
@@ -958,20 +959,23 @@ function queueRow(overrides = {}) {
     "utf8"
   );
   assert.match(takeoffUi, /QUOTE_FLOW_REQUEST_SET_SCOPE|eliteos-quote-flow-request-set-scope/);
-  assert.match(takeoffUi, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
-  assert.match(takeoffUi, /data-testid="ctr-quote-flow-set-scope"/);
+  assert.doesNotMatch(takeoffUi, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
+  assert.doesNotMatch(takeoffUi, /data-testid="ctr-quote-flow-set-scope"/);
+  assert.match(takeoffUi, /data-testid="ctr-save-draft"/);
+  assert.match(takeoffUi, /data-testid="ctr-quote-flow-set-scope-hint"/);
   assert.match(takeoffUi, /reopenIfApproved:\s*quoteFlowSetScope/);
   assert.match(takeoffUi, /stampOpenEdgeLfOnTakeoffDraft/);
-  // Save Draft must not render in quoteFlowSetScope footer (gated behind !quoteFlowSetScope).
-  const saveDraftBlock = takeoffUi.slice(
-    takeoffUi.indexOf('data-testid="ctr-add-piece"'),
-    takeoffUi.indexOf('data-testid="ctr-quote-flow-set-scope"')
-  );
-  assert.match(saveDraftBlock, /!quoteFlowSetScope/);
-  assert.match(saveDraftBlock, /ctr-save-draft/);
+  // Footer Save draft is always present (not gated behind !quoteFlowSetScope).
+  const saveDraftStart = takeoffUi.indexOf('data-testid="ctr-save-draft"');
+  const saveDraftBtn = takeoffUi.slice(saveDraftStart, saveDraftStart + 900);
+  assert.match(saveDraftBtn, /Save draft/);
+  assert.doesNotMatch(saveDraftBtn, /!quoteFlowSetScope/);
   assert.doesNotMatch(takeoffUi, /data-testid="ctr-approve-build"[\s\S]{0,200}quoteFlowSetScope/);
   assert.doesNotMatch(
-    takeoffUi.slice(takeoffUi.indexOf("quoteFlowSetScope ? ("), takeoffUi.indexOf("ctr-quote-flow-set-scope") + 80),
+    takeoffUi.slice(
+      takeoffUi.indexOf("quoteFlowSetScope ? ("),
+      takeoffUi.indexOf("ctr-quote-flow-set-scope-hint") + 120
+    ),
     /Use these measurements/
   );
   const contract = readFileSync(
@@ -981,7 +985,14 @@ function queueRow(overrides = {}) {
   assert.match(contract, /stampOpenEdgeLfOnTakeoffDraft/);
   assert.match(contract, /resolveRunOpenEdgeLf/);
   assert.match(contract, /openEdgeLf/);
-  console.log("ok: UI footer Set Scope; Save Draft hidden; openEdgeLf in Set Scope payload contract");
+  assert.doesNotMatch(contract, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
+  const origins = readFileSync(
+    join(root, "app-elite100-quote-flow/src/lib/takeoffPostMessageOrigins.mjs"),
+    "utf8"
+  );
+  assert.match(origins, /requestSetScopePayloadFromIframe/);
+  assert.doesNotMatch(origins, /QUOTE_FLOW_TRIGGER_SET_SCOPE|isValidQuoteFlowTriggerSetScope/);
+  console.log("ok: header Set Scope only; Save Draft restored; openEdgeLf payload contract");
 }
 
 console.log("\nquoteFlowSlice1c.test.mjs: ok\n");

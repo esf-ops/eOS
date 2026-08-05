@@ -32,7 +32,6 @@ import {
   TAKEOFF_WATERFALL_CHANGED,
   QUOTE_FLOW_REQUEST_SET_SCOPE,
   QUOTE_FLOW_SET_SCOPE_PAYLOAD,
-  QUOTE_FLOW_TRIGGER_SET_SCOPE,
   summarizeTakeoffDraftForReady,
   postTakeoffParentMessage,
   loadLocalReviewDraft,
@@ -2450,7 +2449,6 @@ export default function ConsolidatedTakeoffReview() {
               >
                 Add piece
               </button>
-              {!quoteFlowSetScope ? (
               <button
                 type="button"
                 className="ctr-btn-secondary"
@@ -2464,13 +2462,13 @@ export default function ConsolidatedTakeoffReview() {
                       canonicalDraft: canonicalDraftRef.current,
                       localExcludedRunIds: excludedRunIds,
                       canonicalExcludedRunIds: canonicalExcludedRef.current
-                    }))
+                    }) &&
+                    unsavedEdgeRunIds.size === 0)
                 }
                 onClick={() => void persistDraft()}
               >
                 {saveStatus === "saving" ? "Saving…" : "Save draft"}
               </button>
-              ) : null}
               {aiPhase === "failed" ? (
                 <button
                   type="button"
@@ -2563,27 +2561,11 @@ export default function ConsolidatedTakeoffReview() {
                 })}
               </button>
               ) : null}
-              {/* Quote Flow: footer Set Scope triggers the same parent Set Scope flow. */}
-              {!isReadonly && quoteFlowSetScope ? (
-                <button
-                  type="button"
-                  className="ctr-btn-primary"
-                  data-testid="ctr-quote-flow-set-scope"
-                  disabled={
-                    displayStatus === "Takeoff failed" ||
-                    !hasUsableTakeoffGeometry(draft) ||
-                    Boolean(blocking.length)
-                  }
-                  onClick={() => {
-                    postTakeoffParentMessage(
-                      QUOTE_FLOW_TRIGGER_SET_SCOPE,
-                      {},
-                      { takeoffJobId, localReview }
-                    );
-                  }}
-                >
-                  Set Scope
-                </button>
+              {quoteFlowSetScope ? (
+                <p className="ctr-muted" data-testid="ctr-quote-flow-set-scope-hint">
+                  Review measurements. Save draft if needed, then Set Scope from the Quote Flow
+                  header.
+                </p>
               ) : null}
             </div>
             {summary ? (
