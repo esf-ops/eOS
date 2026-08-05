@@ -837,6 +837,24 @@ export default function EstimatesListPage(props: Props) {
                 </section>
               )}
             </div>
+
+            {section === "scope" && dirty ? (
+              <div
+                className="qf-estimates-modal__sticky-save"
+                data-testid="qf-estimates-sticky-save"
+              >
+                <span className="qf-estimates-modal__sticky-label">Unsaved scope changes</span>
+                <button
+                  type="button"
+                  className="qf-btn-primary"
+                  data-testid="qf-estimates-save-scope-sticky"
+                  disabled={saving || detailLoading}
+                  onClick={() => void saveScope()}
+                >
+                  {saving ? "Saving…" : "Save Scope"}
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
