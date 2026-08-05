@@ -546,6 +546,36 @@ body {
   align-items: start;
 }
 
+.qf-queue--scope {
+  grid-template-columns: minmax(340px, 44%) minmax(0, 1fr);
+  gap: 20px;
+  min-height: calc(100vh - 260px);
+}
+
+.qf-queue .qf-inbox__row-card {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.qf-queue__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 0 2px 2px;
+}
+
+.qf-queue__success {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 8px 0;
+}
+
+.qf-queue__success h2 {
+  margin: 0;
+}
+
 @media (max-width: 860px) {
   .qf-queue {
     grid-template-columns: 1fr;

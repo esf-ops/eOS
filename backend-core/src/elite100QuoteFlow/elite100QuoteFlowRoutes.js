@@ -435,6 +435,42 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.post(
+    "/api/elite100-quote-flow/queue/:takeoffJobId/set-manual-scope",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowSetScopeService.setManualScope({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || "")),
+          confirm: body.confirm === true || body.confirm === "true",
+          rooms: body.rooms
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "queue.set_manual_scope",
+            userId: req.user?.id ?? null,
+            intakeCaseId: result.intakeCaseId ?? null,
+            takeoffJobId: result.takeoffJobId ?? null,
+            estimateId: result.estimateId ?? null,
+            reused: result.reused === true,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] set-manual-scope failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to set manual scope.");
+      }
+    }
+  );
+
   app.get("/api/elite100-quote-flow/estimates", ...staffStack, async (req, res) => {
     res.set("Cache-Control", "no-store");
     try {

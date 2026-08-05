@@ -48,6 +48,7 @@ export default function QuoteFlowApp() {
   const [mainNav, setMainNav] = useState<MainNav>(() => parseNavFromSearch());
   const [shellStatus, setShellStatus] = useState<string | null>(null);
   const [openEstimateId, setOpenEstimateId] = useState<string | null>(null);
+  const [openInboxMessageKey, setOpenInboxMessageKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -264,6 +265,7 @@ export default function QuoteFlowApp() {
           {mainNav === "inbox" ? (
             <InboxPage
               authToken={sessionToken}
+              initialMessageKey={openInboxMessageKey}
               onOpenQueue={() => setNav("queue")}
               onOpenEstimates={(estimateId) => {
                 setOpenEstimateId(estimateId || null);
@@ -277,6 +279,10 @@ export default function QuoteFlowApp() {
               onOpenEstimates={(estimateId) => {
                 setOpenEstimateId(estimateId || null);
                 setNav("estimates");
+              }}
+              onOpenInbox={(messageKey) => {
+                setOpenInboxMessageKey(messageKey || null);
+                setNav("inbox");
               }}
             />
           ) : null}

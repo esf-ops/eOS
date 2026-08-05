@@ -1,10 +1,16 @@
 /**
- * Quote Flow Set Scope — freeze takeoff measurements + seed official studio_estimates scope.
+ * Quote Flow Scope Creation Queue — Set Scope from AI Takeoff or manual rooms.
  * No calculate / estimate-approve / publish / accept / sold.
+ * Already-scoped items belong in Estimates, not the main queue.
  */
 
 import { createQuoteFlowError } from "./quoteFlowErrors.mjs";
-import { presentQuoteFlowQueueItem } from "./quoteFlowQueuePresenter.mjs";
+import { validateAndNormalizeOfficialScopeRooms } from "./quoteFlowEstimates.mjs";
+import {
+  groupQuoteFlowQueueItems,
+  presentQuoteFlowQueueItem,
+  sortQuoteFlowQueueItems
+} from "./quoteFlowQueuePresenter.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
@@ -17,6 +23,14 @@ const NO_SIDE_EFFECTS = Object.freeze({
   takeoffRerun: false
 });
 
+const QUEUE_STATUS_KEYS = new Set([
+  "ready_for_review",
+  "takeoff_processing",
+  "takeoff_queued",
+  "takeoff_failed",
+  "manual_scope_needed"
+]);
+
 /**
  * @param {{
  *   queueService: { listQueue: Function },
@@ -24,6 +38,7 @@ const NO_SIDE_EFFECTS = Object.freeze({
  *   studioEstimateService?: {
  *     getOrCreateForCase?: Function,
  *     refreshScopeFromTakeoff?: Function,
+ *     updateScope?: Function,
  *     repository?: object
  *   }|null,
  *   approveAndBuildEstimate?: Function|null,
@@ -64,7 +79,6 @@ export function createQuoteFlowSetScopeService(deps) {
       query: { filter: "takeoff", limit: 100, offset: 0 }
     });
     const cases = Array.isArray(result?.cases) ? result.cases : [];
-    // Also pull "all" rows that have takeoff jobs if takeoff filter is empty.
     if (cases.length) return cases;
     const all = await queueService.listQueue({
       organizationId,
@@ -84,29 +98,47 @@ export function createQuoteFlowSetScopeService(deps) {
         alreadyScoped: scoped,
         estimateId: estimate?.id || row.studioEstimateId || null
       });
-      // Keep returned/processing/failed/scoped takeoffs visible.
-      if (
-        presented.status.key === "ready_for_review" ||
-        presented.status.key === "takeoff_processing" ||
-        presented.status.key === "takeoff_queued" ||
-        presented.status.key === "takeoff_failed" ||
-        presented.status.key === "scope_set"
-      ) {
+      if (QUEUE_STATUS_KEYS.has(presented.status.key) || presented.status.key === "scope_set") {
         items.push(presented);
       }
     }
-    const filter = String(query.filter || query.state || "ready").toLowerCase();
-    const filtered =
-      filter === "all"
-        ? items
-        : filter === "scoped"
-          ? items.filter((i) => i.alreadyScoped)
-          : items.filter((i) => i.status.key === "ready_for_review" || i.status.key === "takeoff_processing" || i.status.key === "takeoff_queued");
+
+    const filter = String(query.filter || query.state || "active").toLowerCase();
+    let filtered;
+    if (filter === "all") {
+      filtered = items;
+    } else if (filter === "scoped") {
+      filtered = items.filter((i) => i.alreadyScoped === true);
+    } else if (filter === "ready") {
+      // Legacy alias: unscoped ready + in-flight (excludes failed/manual/scoped).
+      filtered = items.filter(
+        (i) =>
+          i.alreadyScoped !== true &&
+          (i.status.key === "ready_for_review" ||
+            i.status.key === "takeoff_processing" ||
+            i.status.key === "takeoff_queued")
+      );
+    } else {
+      // active (default): Scope Creation Queue — unscoped only.
+      filtered = items.filter(
+        (i) => i.alreadyScoped !== true && QUEUE_STATUS_KEYS.has(i.status.key)
+      );
+    }
+
+    const sorted = sortQuoteFlowQueueItems(filtered);
+    const grouped = groupQuoteFlowQueueItems(sorted);
 
     return {
       ok: true,
-      items: filtered,
-      total: filtered.length,
+      items: sorted,
+      groups: {
+        ready: grouped.ready,
+        manual: grouped.manual,
+        processing: grouped.processing,
+        failed: grouped.failed
+      },
+      stats: grouped.stats,
+      total: sorted.length,
       sideEffects: { ...NO_SIDE_EFFECTS }
     };
   }
@@ -125,10 +157,6 @@ export function createQuoteFlowSetScopeService(deps) {
     if (!caseRow) throw createQuoteFlowError("takeoff_not_found");
 
     const { scoped, estimate } = await alreadyScopedForCase(organizationId, caseRow.id);
-    const item = presentQuoteFlowQueueItem(caseRow, {
-      alreadyScoped: scoped,
-      estimateId: estimate?.id || caseRow.studioEstimateId || null
-    });
 
     let workspace = null;
     let latestResult = null;
@@ -156,6 +184,22 @@ export function createQuoteFlowSetScopeService(deps) {
       }
     }
 
+    const roomCount = Number(latestResult?.computedMeasurementsJson?.roomCount);
+    const pieceCount = Number(latestResult?.computedMeasurementsJson?.pieceCount);
+    const totalSf = Number(
+      latestResult?.computedMeasurementsJson?.totalSf ??
+        latestResult?.computedMeasurementsJson?.totalSquareFeet
+    );
+
+    const item = presentQuoteFlowQueueItem(caseRow, {
+      alreadyScoped: scoped,
+      estimateId: estimate?.id || caseRow.studioEstimateId || null,
+      roomCount: Number.isFinite(roomCount) ? roomCount : null,
+      pieceCount: Number.isFinite(pieceCount) ? pieceCount : null,
+      totalSf: Number.isFinite(totalSf) ? totalSf : null,
+      failureReason: workspace?.errorMessage || caseRow.failureReason || null
+    });
+
     return {
       ok: true,
       item,
@@ -163,13 +207,31 @@ export function createQuoteFlowSetScopeService(deps) {
         takeoffJobId: jobId,
         intakeCaseId: caseRow.id,
         canSetScope: !scoped && item.status.key === "ready_for_review",
+        canCreateManualScope: !scoped && item.canCreateManualScope === true,
         reviewStatus: workspace?.reviewStatus || caseRow.takeoffReviewStatus || null,
         jobStatus: workspace?.status || caseRow.takeoffJobStatus || null,
         canApprove: workspace?.canApprove === true,
         resultId: latestResult?.id || latestResult?.resultId || null,
-        roomCount: Number(latestResult?.computedMeasurementsJson?.roomCount) || null,
-        pieceCount: Number(latestResult?.computedMeasurementsJson?.pieceCount) || null
+        roomCount: Number.isFinite(roomCount) ? roomCount : null,
+        pieceCount: Number.isFinite(pieceCount) ? pieceCount : null,
+        failureReason: item.failureReason
       },
+      sideEffects: { ...NO_SIDE_EFFECTS }
+    };
+  }
+
+  function scopedSuccessPayload({ estimate, intakeCaseId, takeoffJobId, created, reused }) {
+    const rooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
+    return {
+      ok: true,
+      alreadyScoped: reused === true || created !== true,
+      reused: reused === true,
+      created: created === true,
+      estimateId: estimate?.id || null,
+      intakeCaseId,
+      takeoffJobId: takeoffJobId || null,
+      message: "Scope is set for this estimate.",
+      roomCount: rooms.length,
       sideEffects: { ...NO_SIDE_EFFECTS }
     };
   }
@@ -194,20 +256,13 @@ export function createQuoteFlowSetScopeService(deps) {
 
     const prior = await alreadyScopedForCase(organizationId, intakeCaseId);
     if (prior.scoped && prior.estimate?.id) {
-      return {
-        ok: true,
-        alreadyScoped: true,
-        reused: true,
-        created: false,
-        estimateId: prior.estimate.id,
+      return scopedSuccessPayload({
+        estimate: prior.estimate,
         intakeCaseId,
         takeoffJobId: jobId,
-        message: "Scope is set for this estimate.",
-        roomCount: Array.isArray(prior.estimate.scope?.rooms)
-          ? prior.estimate.scope.rooms.length
-          : 0,
-        sideEffects: { ...NO_SIDE_EFFECTS }
-      };
+        created: false,
+        reused: true
+      });
     }
 
     // Freeze verified measurements (idempotent if already approved).
@@ -264,21 +319,13 @@ export function createQuoteFlowSetScopeService(deps) {
     // Idempotent: if getOrCreate already seeded usable scope, reuse without re-import.
     const afterEnsure = await alreadyScopedForCase(organizationId, intakeCaseId);
     if (afterEnsure.scoped && afterEnsure.estimate?.id) {
-      const rooms = Array.isArray(afterEnsure.estimate.scope?.rooms)
-        ? afterEnsure.estimate.scope.rooms
-        : [];
-      return {
-        ok: true,
-        alreadyScoped: true,
-        reused: true,
-        created: false,
-        estimateId: afterEnsure.estimate.id,
+      return scopedSuccessPayload({
+        estimate: afterEnsure.estimate,
         intakeCaseId,
         takeoffJobId: jobId,
-        message: "Scope is set for this estimate.",
-        roomCount: rooms.length,
-        sideEffects: { ...NO_SIDE_EFFECTS }
-      };
+        created: false,
+        reused: true
+      });
     }
 
     const refreshed = await studioEstimateService.refreshScopeFromTakeoff({
@@ -288,25 +335,119 @@ export function createQuoteFlowSetScopeService(deps) {
       force: true
     });
     const estimate = refreshed?.estimate || refreshed;
-    const rooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
 
-    return {
-      ok: true,
-      alreadyScoped: false,
-      reused: false,
-      created: true,
-      estimateId: estimate?.id || estimateId,
+    return scopedSuccessPayload({
+      estimate: { ...estimate, id: estimate?.id || estimateId },
       intakeCaseId,
       takeoffJobId: jobId,
-      message: "Scope is set for this estimate.",
-      roomCount: rooms.length,
-      sideEffects: { ...NO_SIDE_EFFECTS }
+      created: true,
+      reused: false
+    });
+  }
+
+  /**
+   * Create official scope from manually entered rooms (no takeoff refresh).
+   */
+  async function setManualScope({
+    organizationId,
+    takeoffJobId,
+    actorUserId = null,
+    confirm = false,
+    rooms = null
+  }) {
+    if (confirm !== true && confirm !== "true") {
+      throw createQuoteFlowError("set_scope_confirm_required");
+    }
+    const jobId = String(takeoffJobId || "").trim();
+    if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+
+    const caseRow = await findCaseForTakeoffJob(organizationId, jobId, actorUserId);
+    if (!caseRow?.id) throw createQuoteFlowError("takeoff_not_found");
+    const intakeCaseId = String(caseRow.id);
+
+    const prior = await alreadyScopedForCase(organizationId, intakeCaseId);
+    if (prior.scoped && prior.estimate?.id) {
+      return scopedSuccessPayload({
+        estimate: prior.estimate,
+        intakeCaseId,
+        takeoffJobId: jobId,
+        created: false,
+        reused: true
+      });
+    }
+
+    const normalizedRooms = validateAndNormalizeOfficialScopeRooms(rooms);
+    const hasIncludedPiece = normalizedRooms.some(
+      (r) =>
+        r?.included !== false &&
+        Array.isArray(r.pieces) &&
+        r.pieces.some((p) => p && p.excluded !== true && p.included !== false)
+    );
+    if (!hasIncludedPiece) {
+      throw createQuoteFlowError("scope_invalid", {
+        message: "Add at least one included room and piece before setting scope.",
+        statusCode: 422
+      });
+    }
+
+    if (!studioEstimateService?.getOrCreateForCase || !studioEstimateService?.updateScope) {
+      throw createQuoteFlowError("takeoff_unavailable", {
+        message: "Unable to create estimate scope right now.",
+        statusCode: 503
+      });
+    }
+
+    const ensured = await studioEstimateService.getOrCreateForCase({
+      organizationId,
+      intakeCaseId,
+      takeoffJobId: jobId,
+      actorUserId
+    });
+    const estimateId = ensured?.id || ensured?.estimateId;
+    if (!estimateId) {
+      throw createQuoteFlowError("takeoff_unavailable", {
+        message: "Unable to create estimate for this case.",
+        statusCode: 503
+      });
+    }
+
+    const updated = await studioEstimateService.updateScope({
+      organizationId,
+      estimateId,
+      actorUserId,
+      body: {
+        scope: {
+          rooms: normalizedRooms,
+          source: "quote_flow_manual_scope"
+        }
+      }
+    });
+    const estimate = updated?.estimate || updated || {
+      id: estimateId,
+      scope: { rooms: normalizedRooms }
     };
+
+    // Ensure readiness: if updateScope didn't flip status, still treat rooms as official.
+    if (!isOfficialScopeSet(estimate) && Array.isArray(normalizedRooms) && normalizedRooms.length) {
+      estimate.scope = { ...(estimate.scope || {}), rooms: normalizedRooms };
+      if (!estimate.status || estimate.status === "draft") {
+        estimate.status = "ready_to_price";
+      }
+    }
+
+    return scopedSuccessPayload({
+      estimate: { ...estimate, id: estimate?.id || estimateId },
+      intakeCaseId,
+      takeoffJobId: jobId,
+      created: true,
+      reused: false
+    });
   }
 
   return {
     listQueue,
     getQueueDetail,
-    setScope
+    setScope,
+    setManualScope
   };
 }
