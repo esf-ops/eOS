@@ -10,6 +10,8 @@ export const TAKEOFF_WATERFALL_CHANGED = "TAKEOFF_WATERFALL_CHANGED";
 export const QUOTE_FLOW_REQUEST_SET_SCOPE = "eliteos-quote-flow-request-set-scope";
 /** Quote Flow iframe → parent: reviewed takeoffResult ready for Set Scope. */
 export const QUOTE_FLOW_SET_SCOPE_PAYLOAD = "eliteos-quote-flow-set-scope-payload";
+/** Quote Flow iframe footer → parent: run the same Set Scope action as the workspace button. */
+export const QUOTE_FLOW_TRIGGER_SET_SCOPE = "eliteos-quote-flow-trigger-set-scope";
 
 /**
  * @param {object} draft

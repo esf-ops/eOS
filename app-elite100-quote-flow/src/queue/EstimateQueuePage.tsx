@@ -22,6 +22,7 @@ import {
 import {
   aiTakeoffHeadUrl,
   isAllowedTakeoffMessageOrigin,
+  isValidQuoteFlowTriggerSetScope,
   isValidTakeoffApprovedMessage,
   requestSetScopePayloadFromIframe
 } from "../lib/takeoffPostMessageOrigins.mjs";
@@ -415,8 +416,13 @@ export default function EstimateQueuePage(props: Props) {
     if (!selectedJobId || detailMode !== "review") return;
     function onMessage(event: MessageEvent) {
       if (!isAllowedTakeoffMessageOrigin(event.origin)) return;
-      if (!isValidTakeoffApprovedMessage(event.data, selectedJobId)) return;
-      void runSetScope();
+      // Footer Set Scope in the iframe, or legacy approved handoff → same parent Set Scope flow.
+      if (
+        isValidQuoteFlowTriggerSetScope(event.data, selectedJobId) ||
+        isValidTakeoffApprovedMessage(event.data, selectedJobId)
+      ) {
+        void runSetScope();
+      }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -851,8 +857,7 @@ export default function EstimateQueuePage(props: Props) {
 
                   {detailMode === "review" ? (
                     <p className="qf-muted" data-testid="qf-queue-set-scope-hint">
-                      Set Scope saves these reviewed measurements as the official estimate scope.
-                      Save Draft is optional — you do not need it before Set Scope.
+                      Set Scope saves these reviewed measurements as official estimate scope.
                     </p>
                   ) : null}
                   {detailMode === "manual" ? (

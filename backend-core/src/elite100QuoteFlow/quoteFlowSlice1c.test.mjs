@@ -599,7 +599,8 @@ function queueRow(overrides = {}) {
   assert.match(ui, /Create Manual Scope/);
   assert.match(ui, /Set Scope/);
   assert.match(ui, /requestSetScopePayloadFromIframe/);
-  assert.match(ui, /Save Draft is optional/);
+  assert.match(ui, /isValidQuoteFlowTriggerSetScope/);
+  assert.match(ui, /Set Scope saves these reviewed measurements/);
   assert.match(ui, /quoteFlowSetScope/);
   assert.match(ui, /Open in Estimates/);
   assert.match(ui, /filter:\s*["']active["']/);
@@ -613,9 +614,22 @@ function queueRow(overrides = {}) {
     "utf8"
   );
   assert.match(takeoffUi, /QUOTE_FLOW_REQUEST_SET_SCOPE|eliteos-quote-flow-request-set-scope/);
-  assert.match(takeoffUi, /!quoteFlowSetScope/);
+  assert.match(takeoffUi, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
+  assert.match(takeoffUi, /data-testid="ctr-quote-flow-set-scope"/);
   assert.match(takeoffUi, /reopenIfApproved:\s*quoteFlowSetScope/);
-  console.log("ok: UI one primary Set Scope; Save Draft optional; no competing Use these measurements");
+  // Save Draft must not render in quoteFlowSetScope footer (gated behind !quoteFlowSetScope).
+  const saveDraftBlock = takeoffUi.slice(
+    takeoffUi.indexOf('data-testid="ctr-add-piece"'),
+    takeoffUi.indexOf('data-testid="ctr-quote-flow-set-scope"')
+  );
+  assert.match(saveDraftBlock, /!quoteFlowSetScope/);
+  assert.match(saveDraftBlock, /ctr-save-draft/);
+  assert.doesNotMatch(takeoffUi, /data-testid="ctr-approve-build"[\s\S]{0,200}quoteFlowSetScope/);
+  assert.doesNotMatch(
+    takeoffUi.slice(takeoffUi.indexOf("quoteFlowSetScope ? ("), takeoffUi.indexOf("ctr-quote-flow-set-scope") + 80),
+    /Use these measurements/
+  );
+  console.log("ok: UI footer Set Scope; Save Draft hidden in Quote Flow mode");
 }
 
 console.log("\nquoteFlowSlice1c.test.mjs: ok\n");

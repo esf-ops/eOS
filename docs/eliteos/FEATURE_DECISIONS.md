@@ -3860,3 +3860,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowSetScope`, Quote Flow set-scope route (4mb body), EstimateQueuePage + postMessage bridge, ConsolidatedTakeoffReview (payload reply + hide primary approve), `saveTakeoffCorrection`/`approveAndBuildEstimate` `reopenIfApproved`, slice/UI tests, this doc. |
 | **Protected / unchanged** | Inbox, unscoped-only queue filter, pricing, calculate, estimate approval, Digital Estimate, acceptance, sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
 | **Revisit trigger** | Native non-iframe Quote Flow measurement editor if postMessage bridge proves fragile. |
+
+### 283. Elite 100 Quote Flow — footer Set Scope in review table (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/quote-flow-footer-set-scope` |
+| **Decision** | In `quoteFlowSetScope=1` review, hide **Save Draft** from the iframe footer and show a primary **Set Scope** button after Add room / Add piece. Footer Set Scope posts `eliteos-quote-flow-trigger-set-scope` so the Quote Flow parent runs the same Set Scope flow as the top-right sticky button (collect edits → save → official scope → success). No “Use these measurements” in Quote Flow mode. |
+| **Why** | Estimators finish at the bottom of the measurement table; a disabled Save Draft + helper text there was confusing when Set Scope is the real finish action. |
+| **Impacted** | ConsolidatedTakeoffReview footer, takeoff↔Quote Flow postMessage contract, EstimateQueuePage listener, UI/slice tests, this doc. |
+| **Protected / unchanged** | Set Scope backend orchestration, queue filter, pricing, Digital Estimate, Studio V2, acceptance, sold. |
+| **Revisit trigger** | Sticky footer bar inside the iframe if long tables still bury the button. |

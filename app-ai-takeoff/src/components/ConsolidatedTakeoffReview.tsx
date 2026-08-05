@@ -32,6 +32,7 @@ import {
   TAKEOFF_WATERFALL_CHANGED,
   QUOTE_FLOW_REQUEST_SET_SCOPE,
   QUOTE_FLOW_SET_SCOPE_PAYLOAD,
+  QUOTE_FLOW_TRIGGER_SET_SCOPE,
   summarizeTakeoffDraftForReady,
   postTakeoffParentMessage,
   loadLocalReviewDraft,
@@ -2446,15 +2447,11 @@ export default function ConsolidatedTakeoffReview() {
               >
                 Add piece
               </button>
+              {!quoteFlowSetScope ? (
               <button
                 type="button"
                 className="ctr-btn-secondary"
                 data-testid="ctr-save-draft"
-                title={
-                  quoteFlowSetScope
-                    ? "Optional — Set Scope in Quote Flow also saves reviewed measurements"
-                    : undefined
-                }
                 disabled={
                   saveStatus === "saving" ||
                   saveStatus === "conflict" ||
@@ -2470,6 +2467,7 @@ export default function ConsolidatedTakeoffReview() {
               >
                 {saveStatus === "saving" ? "Saving…" : "Save draft"}
               </button>
+              ) : null}
               {aiPhase === "failed" ? (
                 <button
                   type="button"
@@ -2534,7 +2532,7 @@ export default function ConsolidatedTakeoffReview() {
                 </div>
               ) : null}
 
-              {/* Quote Flow: parent workspace owns the single Set Scope action. */}
+              {/* Studio / non–Quote Flow: approve-and-build primary. */}
               {!isReadonly && !quoteFlowSetScope ? (
               <button
                 type="button"
@@ -2562,11 +2560,27 @@ export default function ConsolidatedTakeoffReview() {
                 })}
               </button>
               ) : null}
+              {/* Quote Flow: footer Set Scope triggers the same parent Set Scope flow. */}
               {!isReadonly && quoteFlowSetScope ? (
-                <p className="ctr-muted" data-testid="ctr-quote-flow-set-scope-hint">
-                  Use <strong>Set Scope</strong> in Quote Flow to save these reviewed measurements
-                  as the official estimate scope.
-                </p>
+                <button
+                  type="button"
+                  className="ctr-btn-primary"
+                  data-testid="ctr-quote-flow-set-scope"
+                  disabled={
+                    displayStatus === "Takeoff failed" ||
+                    !hasUsableTakeoffGeometry(draft) ||
+                    Boolean(blocking.length)
+                  }
+                  onClick={() => {
+                    postTakeoffParentMessage(
+                      QUOTE_FLOW_TRIGGER_SET_SCOPE,
+                      {},
+                      { takeoffJobId, localReview }
+                    );
+                  }}
+                >
+                  Set Scope
+                </button>
               ) : null}
             </div>
             {summary ? (
