@@ -3937,3 +3937,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `EstimateQueuePage.runSetScope`, `quoteFlowSetScope` open-edge saved-draft resolve, slice 1c / queue UI tests, this doc. |
 | **Protected / unchanged** | Pricing/calculate/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`, footer Set Scope removal (§288). |
 | **Revisit trigger** | Optional `TAKEOFF_REVIEW_DRAFT_SAVED` parent badge if estimators need stronger post-save feedback. |
+
+### 290. Vercel — disable automatic non-main preview deploys (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `chore/vercel-disable-non-main-previews` |
+| **Decision** | Each Vercel-deployed head keeps its own `vercel.json` (no monorepo-root config). Add `git.deploymentEnabled`: `{ "main": true, "*": false }` so Git auto-deploys **only** `main`. Official docs: unspecified branches default to **true**; only listing `main: true` does **not** disable others. `main` matches both rules and still deploys because any matching `true` wins. Explicit preview remains via Vercel CLI/dashboard Deploy. Prefer this over Ignored Build Step (canceled builds can still consume quota). |
+| **Why** | Feature/hotfix/cursor pushes were creating preview builds across many monorepo projects and growing the Vercel bill; local tests remain the normal validation path. |
+| **Impacted** | `backend-core/vercel.json`, existing SPA `vercel.json` files (except Digital Estimate), new git-only `vercel.json` for Quote Flow / AI Takeoff / Quote Library / Public Quote, this doc. |
+| **Protected / unchanged** | Production deploy from `main`, backend-core crons/functions, product code, `app-digital-estimate` file (dashboard-only for that project), `backend-core/src/digitalEstimate`. |
+| **Revisit trigger** | Need a named staging branch → add that branch as `true` alongside `main` (do not set a blanket `*` to true). |
