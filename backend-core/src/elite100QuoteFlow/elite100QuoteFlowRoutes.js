@@ -26,6 +26,7 @@ import { createQuoteFlowSetScopeService } from "./quoteFlowSetScope.mjs";
 import { createQuoteFlowEstimatesService } from "./quoteFlowEstimates.mjs";
 import { createQuoteFlowPricingService } from "./quoteFlowPricing.mjs";
 import { createQuoteFlowReviewService } from "./quoteFlowReview.mjs";
+import { createQuoteFlowDigitalEstimateService } from "./quoteFlowDigitalEstimate.mjs";
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
 import {
   approveAndBuildEstimate,
@@ -33,6 +34,16 @@ import {
   getTakeoffWorkspace,
   reopenTakeoffJobForMeasurementRevision
 } from "../takeoff/takeoffWorkspaceService.mjs";
+import { createStudioEstimateDigitalEstimateService } from "../elite100EstimateStudio/studioEstimateDigitalEstimateService.mjs";
+import {
+  createInMemoryDigitalEstimateRepository,
+  createSupabaseDigitalEstimateRepository
+} from "../digitalEstimate/digitalEstimateRepository.mjs";
+import { createDigitalEstimateConfigurationStack } from "../digitalEstimate/configuration/configurationFactory.mjs";
+import { createConfigurationStudioService } from "../digitalEstimate/configuration/configurationStudioService.mjs";
+import { isDigitalEstimateConfigurationEnabled } from "../digitalEstimate/configuration/configurationConfig.mjs";
+import { isDigitalEstimateReviewRequestsEnabled } from "../digitalEstimate/configuration/amendmentConfig.mjs";
+import { createSupabaseAmendmentRepository } from "../digitalEstimate/configuration/amendmentRepository.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 /** Set Scope may include a full reviewed TakeoffResult payload. */
@@ -110,13 +121,15 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   let quoteFlowEstimatesService = deps.quoteFlowEstimatesService || null;
   let quoteFlowPricingService = deps.quoteFlowPricingService || null;
   let quoteFlowReviewService = deps.quoteFlowReviewService || null;
+  let quoteFlowDigitalEstimateService = deps.quoteFlowDigitalEstimateService || null;
 
   if (
     !quoteFlowService ||
     !quoteFlowSetScopeService ||
     !quoteFlowEstimatesService ||
     !quoteFlowPricingService ||
-    !quoteFlowReviewService
+    !quoteFlowReviewService ||
+    !quoteFlowDigitalEstimateService
   ) {
     const studioEstimateService =
       deps.studioEstimateService || createStudioEstimateService({ env, getSupabase });
@@ -193,6 +206,69 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         estimateRepository,
         studioEstimateService,
         env
+      });
+    }
+
+    if (!quoteFlowDigitalEstimateService) {
+      const deRepository =
+        deps.digitalEstimateRepository ||
+        (typeof getSupabase === "function" && getSupabase()
+          ? createSupabaseDigitalEstimateRepository({ db: getSupabase() })
+          : createInMemoryDigitalEstimateRepository());
+
+      let configurationStudioService = deps.configurationStudioService || null;
+      if (!configurationStudioService && isDigitalEstimateConfigurationEnabled(env)) {
+        try {
+          const stack = createDigitalEstimateConfigurationStack({
+            env,
+            mode: deps.configurationStackMode || undefined,
+            db: typeof getSupabase === "function" ? getSupabase() : null,
+            requireRuntimeFlags: true
+          });
+          if (stack) {
+            configurationStudioService = createConfigurationStudioService({
+              configurationRepository: stack.configuration,
+              pricingPolicyRepository: stack.pricingPolicy,
+              deRepository,
+              env
+            });
+          }
+        } catch (e) {
+          console.warn(
+            "[elite100-quote-flow] configuration stack unavailable for Digital Estimate publish:",
+            e?.code || e?.message
+          );
+        }
+      }
+
+      let amendmentRepository = deps.amendmentRepository || null;
+      if (!amendmentRepository && isDigitalEstimateReviewRequestsEnabled(env)) {
+        try {
+          amendmentRepository = createSupabaseAmendmentRepository({ db: getSupabase() });
+        } catch {
+          amendmentRepository = null;
+        }
+      }
+
+      const studioDigitalEstimateService =
+        deps.studioDigitalEstimateService ||
+        createStudioEstimateDigitalEstimateService({
+          env,
+          studioEstimateService,
+          digitalEstimateRepository: deRepository,
+          configurationStudioService,
+          amendmentRepository,
+          getSupabase,
+          loadTakeoffWorkspace: deps.getTakeoffWorkspace || getTakeoffWorkspace
+        });
+
+      quoteFlowDigitalEstimateService = createQuoteFlowDigitalEstimateService({
+        estimateRepository,
+        studioEstimateService,
+        studioDigitalEstimateService,
+        env,
+        // Prefer interactive customer selections when configuration stack is available.
+        preferInteractiveConfiguration: Boolean(configurationStudioService)
       });
     }
   }
@@ -745,8 +821,70 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get(
+    "/api/elite100-quote-flow/estimates/:estimateId/digital-estimate",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await quoteFlowDigitalEstimateService.getDigitalEstimate({
+          organizationId,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          actorUserId: req.user?.id ?? null
+        });
+        res.json(result);
+      } catch (e) {
+        console.error(
+          "[elite100-quote-flow] digital estimate get failed",
+          e?.code || e?.message
+        );
+        sendSafeError(res, e, "Unable to load Digital Estimate.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/estimates/:estimateId/digital-estimate/publish",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowDigitalEstimateService.publishDigitalEstimate({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          body
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "estimates.digital_estimate_publish",
+            userId: req.user?.id ?? null,
+            estimateId: result.estimateId ?? null,
+            publicationId: result.publication?.publicationId ?? null,
+            reused: result.reused === true,
+            sold: false,
+            accepted: false,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error(
+          "[elite100-quote-flow] digital estimate publish failed",
+          e?.code || e?.message
+        );
+        sendSafeError(res, e, "Unable to publish Digital Estimate.");
+      }
+    }
+  );
+
   console.log(
-    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review (Slice 1F)"
+    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review|digital-estimate"
   );
   return { mounted: true, reason: "ok" };
 }

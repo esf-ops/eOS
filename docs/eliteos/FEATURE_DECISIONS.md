@@ -4001,5 +4001,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Decision** | Activate Review tab as an **internal** approval gate only. Readiness checklist (scope, pieces, pricing draft, current calc, customer total, open-edge warning, custom lines). Approve persists Studio-compatible `status=approved` + `approval` blob and `scope.quoteFlowReview` metadata (no migration). Reopen clears approval. Scope/pricing edits after approval mark re-review / clear approval; do **not** publish Digital Estimate, accept, or mark sold. |
 | **Why** | Estimators need a gate after Pricing before customer-quote prep without enabling publish. |
 | **Impacted** | `quoteFlowReview.mjs` / `quoteFlowReviewMeta.mjs` + routes/tests, Estimates `OfficialReviewPanel`, presenter status labels, pricing/scope stale-after-approval hooks, FEATURE_DECISIONS (this entry). |
-| **Protected / unchanged** | Inbox, Queue/Set Scope, Digital Estimate publish, acceptance, sold/handoff, Studio V2 layout, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
-| **Revisit trigger** | Digital Estimate publish consuming approved Quote Flow estimates; stricter edge-profile blocker vs warning. |
+| **Protected / unchanged** | Inbox, Queue/Set Scope, acceptance, sold/handoff, Studio V2 layout, `app-digital-estimate`, `backend-core/src/digitalEstimate` (reuse only). |
+| **Revisit trigger** | Interactive customer selections required by default; acceptance/sold/handoff; edge-profile blocker vs warning. |
+
+### 296. Elite 100 Quote Flow — Digital Estimate publish from approved estimates (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-digital-estimate-publish` |
+| **Decision** | Activate Estimates **Digital Estimate** tab to publish a customer-facing Digital Estimate **only** from a current Quote Flow Review approval. Reuses Studio `createStudioEstimateDigitalEstimateService().publish` with `publishContext` (`quote_flow_approved_snapshot`, approved-snapshot authority, skip legacy takeoff gate). Persists `scope.quoteFlowDigitalEstimate` (publicationId, customerUrl, fingerprints) without migration. Customer payload uses existing freeze/public DTO (customer-facing custom lines included; internal-only excluded). Scope/pricing changes mark publish stale (`Needs republish`) after re-review. No acceptance, sold, handoff, or email automation. |
+| **Why** | First customer-facing Quote Flow slice after internal Review, without rebuilding Digital Estimate. |
+| **Impacted** | `quoteFlowDigitalEstimate.mjs` + routes/tests, `quoteFlowReviewMeta` stale publish stamp, Estimates `OfficialDigitalEstimatePanel`, presenter Published/Needs republish labels, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Inbox, Queue/Set Scope, AI Takeoff, pricing formulas, Review gate semantics (except publish-stale metadata), acceptance, sold/handoff, email automation, `app-digital-estimate` UI, `backend-core/src/digitalEstimate` (helpers reused only). |
+| **Revisit trigger** | Force interactive configuration envelope when stack available; customer email send; acceptance/sold. |

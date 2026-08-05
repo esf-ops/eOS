@@ -470,10 +470,8 @@ function makeStore(initialRows) {
   assert.match(routes, /estimates\/:estimateId\/pricing/);
   assert.match(routes, /pricing\/calculate/);
   assert.match(routes, /createQuoteFlowPricingService/);
-  assert.doesNotMatch(
-    routes,
-    /publishDigitalEstimate|markSold|approveWorkingDraft|takeoff-finish|digitalEstimate/
-  );
+  assert.match(routes, /digital-estimate/);
+  assert.doesNotMatch(routes, /markSold|approveWorkingDraft|takeoff-finish/);
   // Routes must not import calculator directly (service owns that).
   assert.doesNotMatch(routes, /calculateStudioEstimateV4/);
   const pricingSrc = readFileSync(join(__dirname, "quoteFlowPricing.mjs"), "utf8");

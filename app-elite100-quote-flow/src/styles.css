@@ -1593,6 +1593,38 @@ body {
   color: #1f5b32;
 }
 
+.qf-review__status--published,
+.qf-review__status--ready_to_publish {
+  background: #eaf7ee;
+  border-color: #b7dfc2;
+  color: #1f5b32;
+}
+
+.qf-review__status--needs_republish,
+.qf-review__status--needs_rereview {
+  background: #fff8ea;
+  border-color: #efd9a8;
+  color: #6a4b10;
+}
+
+.qf-de__link {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid #d8dee8;
+  background: #f8f9fc;
+}
+
+.qf-de__url {
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.qf-de__lines ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
 .qf-review__status--ready_for_review {
   background: #eef6ff;
   border-color: #b7d0ef;

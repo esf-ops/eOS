@@ -370,3 +370,76 @@ export async function reopenQuoteFlowEstimateReview(token: string, estimateId: s
     }
   ) as Promise<QuoteFlowReviewPayload>;
 }
+
+export type QuoteFlowDigitalEstimatePayload = {
+  ok?: boolean;
+  estimateId?: string;
+  revision?: number | null;
+  status?: string | null;
+  publishStatus?: { key: string; label: string };
+  canPublish?: boolean;
+  checklist?: QuoteFlowReviewChecklistItem[];
+  blockers?: string[];
+  warnings?: string[];
+  publishSummary?: {
+    estimateName?: string | null;
+    customerEstimateTotal?: number | null;
+    customerFacingLineCount?: number;
+    internalOnlyLineCount?: number;
+    approvedAt?: string | null;
+    calculatedAt?: string | null;
+  };
+  reviewStatus?: { key: string; label: string };
+  reReviewRequired?: boolean;
+  reReviewMessage?: string | null;
+  customerFacingLines?: Array<{
+    id?: string;
+    label?: string;
+    type?: string;
+    amount?: number;
+    visibility?: string;
+  }>;
+  internalOnlyLines?: Array<{
+    id?: string;
+    label?: string;
+    type?: string;
+    amount?: number;
+    visibility?: string;
+  }>;
+  internalOnlyExcluded?: boolean;
+  customerPreview?: {
+    customerDisplayTotal?: number | null;
+    lineItems?: Array<{ label?: string; amount?: number }>;
+    roomCount?: number;
+  } | null;
+  publication?: {
+    publicationId?: string | null;
+    customerUrl?: string | null;
+    linkStatus?: string | null;
+    publishedAt?: string | null;
+    status?: string | null;
+  } | null;
+  customerUrl?: string | null;
+  accessToken?: string | null;
+  message?: string;
+  reused?: boolean;
+  sideEffects?: Record<string, boolean>;
+};
+
+export async function fetchQuoteFlowDigitalEstimate(token: string, estimateId: string) {
+  return apiGet(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/digital-estimate`,
+    token
+  ) as Promise<QuoteFlowDigitalEstimatePayload>;
+}
+
+export async function publishQuoteFlowDigitalEstimate(token: string, estimateId: string) {
+  return apiFetch(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/digital-estimate/publish`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ confirm: true })
+    }
+  ) as Promise<QuoteFlowDigitalEstimatePayload>;
+}
