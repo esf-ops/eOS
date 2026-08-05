@@ -3893,3 +3893,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | EstimatesListPage (library + modal), OfficialScopeEditor (Open edge LF), estimateGrouping / presenter / PATCH normalize, styles, UI/slice 1d tests, this doc. |
 | **Protected / unchanged** | Inbox, Estimate Queue Set Scope (except modal handoff already wired), AI Takeoff, pricing/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
 | **Revisit trigger** | Activate Pricing (and later sections) inside the same modal when those slices land. |
+
+### 286. Elite 100 Quote Flow — Estimates Quote Library table layout (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-estimates-quote-library-layout` |
+| **Decision** | Estimates main page matches **Quote Library command-center structure** (visual only): hero (“Estimate command center”), metric cards (scoped / recent / AI / manual / total countertop SF / total open edge LF), view tabs, Search & filters card (search, source, status, sort), and a **table** of scoped estimates (not a card grid). Row click / Edit official scope opens the existing near-fullscreen modal. Modal workspace, Open edge LF, Save Scope, and Queue handoff are unchanged. No Quote Library backend coupling. |
+| **Why** | Card grid did not match Chris’s expectation of the existing Quote Library list/table command center. |
+| **Impacted** | EstimatesListPage, estimateGrouping (filter/sort/stats), styles (`qf-el-*`), UI/slice 1d tests, this doc. |
+| **Protected / unchanged** | Modal + official scope editor, Open edge LF PATCH semantics, Inbox, Queue Set Scope, pricing/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`, Quote Library app itself. |
+| **Revisit trigger** | Add server-side pagination when estimate volume requires it. |

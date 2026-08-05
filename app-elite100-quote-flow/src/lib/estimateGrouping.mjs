@@ -101,41 +101,77 @@ export function computeEstimateStats(items = []) {
   const list = Array.isArray(items) ? items : [];
   let aiSourced = 0;
   let manual = 0;
+  let unknownSource = 0;
   let recentlyUpdated = 0;
+  let totalCountertopSf = 0;
+  let totalOpenEdgeLf = 0;
   for (const item of list) {
     const source = resolveEstimateSource(item);
     if (source.key === "ai_takeoff") aiSourced += 1;
     else if (source.key === "manual") manual += 1;
+    else unknownSource += 1;
     if (isRecentlyUpdated(item.updatedAt || item.createdAt)) recentlyUpdated += 1;
+    const summary = item.scopeSummary && typeof item.scopeSummary === "object" ? item.scopeSummary : {};
+    const sf = Number(summary.countertopSf);
+    if (Number.isFinite(sf) && sf > 0) totalCountertopSf += sf;
+    const lf = Number(summary.openEdgeLf);
+    if (Number.isFinite(lf) && lf > 0) totalOpenEdgeLf += lf;
   }
+  const round2 = (n) => Math.round(n * 100) / 100;
   return {
     total: list.length,
     aiSourced,
     manual,
-    recentlyUpdated
+    unknownSource,
+    recentlyUpdated,
+    totalCountertopSf: round2(totalCountertopSf),
+    totalOpenEdgeLf: round2(totalOpenEdgeLf)
   };
 }
 
 /**
- * @param {object[]} items
- * @param {string} filter
- * @param {string} search
+ * @param {object} item
  */
-export function filterEstimateItems(items = [], filter = "all", search = "") {
+export function resolveEstimateStatusKey(item = {}) {
+  return String(item.status?.key || "").toLowerCase() || "scope_set";
+}
+
+/**
+ * @param {object[]} items
+ * @param {{ view?: string, source?: string, status?: string, search?: string, sort?: string }} [opts]
+ */
+export function filterAndSortEstimateItems(items = [], opts = {}) {
   const list = Array.isArray(items) ? items : [];
-  const q = String(search || "")
+  const q = String(opts.search || "")
     .trim()
     .toLowerCase();
-  const f = String(filter || "all").toLowerCase();
+  const view = String(opts.view || "all").toLowerCase();
+  const sourceFilter = String(opts.source || "any").toLowerCase();
+  const statusFilter = String(opts.status || "any").toLowerCase();
+  const sort = String(opts.sort || "newest").toLowerCase();
 
-  return list.filter((item) => {
+  let next = list.filter((item) => {
     const source = resolveEstimateSource(item);
-    if (f === "ai" || f === "ai_sourced") {
+    const statusKey = resolveEstimateStatusKey(item);
+
+    if (view === "ai" || view === "ai_sourced") {
       if (source.key !== "ai_takeoff") return false;
-    } else if (f === "manual") {
+    } else if (view === "manual") {
       if (source.key !== "manual") return false;
-    } else if (f === "recent" || f === "recently_updated") {
+    } else if (view === "recent" || view === "recently_updated") {
       if (!isRecentlyUpdated(item.updatedAt || item.createdAt)) return false;
+    }
+
+    if (sourceFilter === "ai" || sourceFilter === "ai_takeoff" || sourceFilter === "ai_sourced") {
+      if (source.key !== "ai_takeoff") return false;
+    } else if (sourceFilter === "manual") {
+      if (source.key !== "manual") return false;
+    } else if (sourceFilter === "unknown") {
+      if (source.key !== "unknown") return false;
+    }
+
+    if (statusFilter !== "any" && statusFilter !== "") {
+      if (statusKey !== statusFilter) return false;
     }
 
     if (!q) return true;
@@ -145,14 +181,33 @@ export function filterEstimateItems(items = [], filter = "all", search = "") {
       item.subject,
       item.projectName,
       item.planFilename,
-      source.label
+      source.label,
+      item.status?.label
     ]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
     return hay.includes(q);
   });
+
+  next = [...next].sort((a, b) => {
+    const ta = new Date(a.updatedAt || a.createdAt || 0).getTime() || 0;
+    const tb = new Date(b.updatedAt || b.createdAt || 0).getTime() || 0;
+    return sort === "oldest" ? ta - tb : tb - ta;
+  });
+
+  return next;
 }
+
+/**
+ * @param {object[]} items
+ * @param {string} filter
+ * @param {string} search
+ */
+export function filterEstimateItems(items = [], filter = "all", search = "") {
+  return filterAndSortEstimateItems(items, { view: filter, search, sort: "newest" });
+}
+
 
 /**
  * Resolve open/exposed edge linear feet from common scope field names.

@@ -325,8 +325,10 @@ const scopedRooms = [
   assert.match(ui, /Manual edits here do not rerun AI Takeoff/);
   assert.match(ui, /Save Scope/);
   assert.match(ui, /qf-page--command|qf-estimates--command/);
-  assert.match(ui, /qf-estimates--library/);
+  assert.match(ui, /qf-estimates--library|qf-estimates--ql/);
   assert.match(ui, /qf-estimates-modal/);
+  assert.match(ui, /qf-el-table|qf-estimates-table/);
+  assert.match(ui, /Estimate command center/);
   assert.match(ui, /Back to library/);
   assert.match(ui, /Open edge LF/);
   assert.match(ui, /qf-estimates-tab-pricing|Pricing/);
@@ -335,7 +337,8 @@ const scopedRooms = [
   assert.doesNotMatch(ui, /\bV1\b|\bV2\b|Studio V2/);
   assert.doesNotMatch(ui, /\bSet Scope\b/);
   assert.doesNotMatch(ui, /qf-estimates--command-layout/);
-  console.log("ok: Estimates library + modal; official scope; Open edge LF; no takeoff iframe; no V1/V2");
+  assert.doesNotMatch(ui, /qf-estimates__cards/);
+  console.log("ok: Estimates Quote Library table layout; modal; Open edge LF; no takeoff iframe; no V1/V2");
 }
 
 {
