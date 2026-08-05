@@ -3915,3 +3915,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowOpenEdge.mjs`, `quoteFlowSetScope.mjs`, `seedScopeFromTakeoffPayload`, `takeoffReviewReadyContract.mjs`, `ConsolidatedTakeoffReview.tsx`, slice 1c/1d tests, this doc. |
 | **Protected / unchanged** | Pricing/calculate/approve/publish/accept/sold, Studio V2 product behavior, `app-digital-estimate`, `backend-core/src/digitalEstimate`, Estimates library/table/modal layout. |
 | **Revisit trigger** | None unless edge field naming is unified repo-wide. |
+
+### 288. Elite 100 Quote Flow — header Set Scope only; Save Draft restored (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/quote-flow-set-scope-reliable-header` |
+| **Decision** | In `quoteFlowSetScope=1` review, footer actions are **Add room \| Add piece \| Save draft** only. Footer **Set Scope** and the `eliteos-quote-flow-trigger-set-scope` path are removed. Quote Flow header **Set Scope** is the only finish action: collect current iframe review state (including dirty edits + `openEdgeLf`), then create official scope. If iframe review state cannot be collected, show **Save draft first, then Set Scope.** — never silent fail / low-level postMessage errors. “Use these measurements” stays hidden. Hint copy: “Review measurements. Save draft if needed, then Set Scope from the Quote Flow header.” |
+| **Why** | Footer Set Scope was unreliable and hid Save Draft; estimators need a clear optional draft save plus one reliable header finish action. |
+| **Impacted** | ConsolidatedTakeoffReview footer, takeoff↔Quote Flow postMessage (request/payload only), EstimateQueuePage `runSetScope`, UI/slice tests, this doc. |
+| **Protected / unchanged** | Open edge LF carry-forward (§287), pricing/calculate/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
+| **Revisit trigger** | Native non-iframe measurement editor if postMessage collection remains fragile. |

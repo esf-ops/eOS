@@ -45,8 +45,8 @@ assert.match(queue, /Review AI Takeoff/);
 assert.match(queue, /Create Manual Scope/);
 assert.match(queue, /Set Scope/);
 assert.match(queue, /requestSetScopePayloadFromIframe/);
-assert.match(queue, /isValidQuoteFlowTriggerSetScope/);
-assert.match(queue, /Set Scope saves these reviewed measurements/);
+assert.match(queue, /Save draft first, then Set Scope/);
+assert.match(queue, /Review measurements\. Save draft if needed, then Set Scope from the Quote Flow/);
 assert.match(queue, /Scope is set for this estimate/);
 assert.match(queue, /Open in Estimates/);
 assert.match(queue, /filter:\s*["']active["']/);
@@ -63,6 +63,7 @@ assert.match(app, /qf-shell--command/);
 assert.match(grouping, /resolveDefaultEstimateName/);
 assert.match(grouping, /Untitled quote request/);
 assert.doesNotMatch(queue, /Use these measurements/);
+assert.doesNotMatch(queue, /isValidQuoteFlowTriggerSetScope|QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
 assert.doesNotMatch(queue, /Approve Estimate/);
 assert.doesNotMatch(queue, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);
 assert.doesNotMatch(queue, /Unknown contact — Unknown contact/);
@@ -78,14 +79,28 @@ assert.doesNotMatch(queue, /calculate|publish|mark sold|accept/i);
     join(appRoot, "src/lib/takeoffPostMessageOrigins.mjs"),
     "utf8"
   );
-  assert.match(takeoffUi, /data-testid="ctr-quote-flow-set-scope"/);
-  assert.match(takeoffUi, /QUOTE_FLOW_TRIGGER_SET_SCOPE/);
-  assert.match(origins, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
-  assert.match(origins, /isValidQuoteFlowTriggerSetScope/);
-  // Save Draft is gated out of quoteFlowSetScope mode (not rendered).
-  assert.match(takeoffUi, /!quoteFlowSetScope \? \([\s\S]*?ctr-save-draft/);
+  // Footer: Add room | Add piece | Save draft — no footer Set Scope.
+  assert.doesNotMatch(takeoffUi, /data-testid="ctr-quote-flow-set-scope"/);
+  assert.doesNotMatch(takeoffUi, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
+  assert.doesNotMatch(origins, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
+  assert.doesNotMatch(origins, /isValidQuoteFlowTriggerSetScope/);
+  assert.match(origins, /QUOTE_FLOW_REQUEST_SET_SCOPE|eliteos-quote-flow-request-set-scope/);
+  assert.match(origins, /requestSetScopePayloadFromIframe/);
+  assert.match(takeoffUi, /data-testid="ctr-save-draft"/);
+  assert.match(takeoffUi, /data-testid="ctr-quote-flow-set-scope-hint"/);
+  assert.match(
+    takeoffUi,
+    /Review measurements\. Save draft if needed, then Set Scope from the Quote Flow/
+  );
+  // Save Draft always rendered in footer (not gated behind !quoteFlowSetScope).
+  const saveDraftStart = takeoffUi.indexOf('data-testid="ctr-save-draft"');
+  const saveDraftBtn = takeoffUi.slice(saveDraftStart, saveDraftStart + 900);
+  assert.match(saveDraftBtn, /Save draft/);
+  assert.doesNotMatch(saveDraftBtn, /!quoteFlowSetScope/);
+  // Use these measurements / approve-build hidden in Quote Flow mode.
+  assert.match(takeoffUi, /!isReadonly && !quoteFlowSetScope \? \([\s\S]*?ctr-approve-build/);
   assert.doesNotMatch(takeoffUi, /ctr-approve-build[\s\S]{0,300}quoteFlowSetScope \?/);
-  console.log("ok: footer Set Scope; Save Draft hidden in Quote Flow mode");
+  console.log("ok: footer Save Draft restored; footer Set Scope removed; Use these measurements hidden");
 }
 
 console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
