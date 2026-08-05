@@ -3948,3 +3948,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `backend-core/vercel.json`, existing SPA `vercel.json` files (except Digital Estimate), new git-only `vercel.json` for Quote Flow / AI Takeoff / Quote Library / Public Quote, this doc. |
 | **Protected / unchanged** | Production deploy from `main`, backend-core crons/functions, product code, `app-digital-estimate` file (dashboard-only for that project), `backend-core/src/digitalEstimate`. |
 | **Revisit trigger** | Need a named staging branch → add that branch as `true` alongside `main` (do not set a blanket `*` to true). |
+
+### 291. Elite 100 Quote Flow — open edge LF real Set Scope path (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/quote-flow-open-edge-set-scope-real-path` |
+| **Decision** | Review UI exposes edge as **`run.finishedEdge.totalFinishedEdgeLengthIn`** (inches → “X.XX LF”), not `openEdgeLf`. Production Set Scope drop: (1) `getOrCreateForCase` seeds usable rooms → **`afterEnsure` early-return skipped open-edge stamp**; (2) `openEdgeLf: 0` blocked fallthrough to finishedEdge inches in resolvers/normalizer; (3) unapproved review inches were replaced by `attachDraftPieceGeometry` draft_suggestion. Fix: always `persistOpenEdgeLfOnEstimate` on afterEnsure + refresh paths; resolve positive LF then finishedEdge inches; preserve review inches on import; seed prefers positive LF/inches. |
+| **Why** | New Estimates still showed Open edge LF = 0.0 after Set Scope despite review showing exposed edge values — prior carry-forward tests mocked empty seed rooms so the real early-return path never ran. |
+| **Impacted** | `quoteFlowSetScope.mjs`, `quoteFlowOpenEdge.mjs`, `quoteFlowEstimates` normalizer, import payload, seed, presenter/grouping resolvers, slice 1c realistic fixture, this doc. |
+| **Protected / unchanged** | Pricing/calculate/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`, Estimates layout. |
+| **Revisit trigger** | Backfill historical zeroed openEdgeLf from takeoff finishedEdge when operators need it. |

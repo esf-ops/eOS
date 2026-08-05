@@ -816,6 +816,14 @@ function queueRow(overrides = {}) {
   assert.equal(resolvePieceOpenEdgeLf({}), 0);
   assert.equal(resolvePieceOpenEdgeLf({ openEdgeLf: "", exposedEdgeLf: null }), 0);
   assert.equal(Number.isNaN(resolvePieceOpenEdgeLf({ openEdgeLf: "nope" })), false);
+  // Explicit openEdgeLf:0 must not hide review finishedEdge inches (UI "X.XX LF" source).
+  assert.equal(
+    resolvePieceOpenEdgeLf({
+      openEdgeLf: 0,
+      finishedEdge: { totalFinishedEdgeLengthIn: 48.96 }
+    }),
+    4.08
+  );
   assert.equal(stampPieceOpenEdgeLf({ name: "A" }).openEdgeLf, 0);
   assert.equal(stampPieceOpenEdgeLf({ name: "A", exposedEdgeLf: 7 }).openEdgeLf, 7);
   assert.equal(stampPieceOpenEdgeLf({ name: "A", exposedEdgeLf: 7 }).finishedEdgeLf, 7);
@@ -1138,6 +1146,286 @@ function queueRow(overrides = {}) {
 }
 
 {
+  // PRODUCTION PATH: getOrCreate seeds usable rooms (afterEnsure early-return).
+  // Review UI shows exposed edge from finishedEdge.totalFinishedEdgeLengthIn only
+  // (no piece.openEdgeLf). Live Set Scope payload must still stamp official openEdgeLf.
+  const { summarizeOfficialScope } = await import("./quoteFlowEstimatesPresenter.mjs");
+  const { validateAndNormalizeOfficialScopeRooms } = await import("./quoteFlowEstimates.mjs");
+  const { buildTakeoffImportPayload } = await import("../takeoff/takeoffImportPayload.mjs");
+  const { seedScopeFromTakeoffPayload } = await import(
+    "../elite100EstimateStudio/studioEstimateService.mjs"
+  );
+  const { stampOpenEdgeLfOnTakeoffDraft } = await import(
+    join(root, "app-ai-takeoff/src/lib/takeoffReviewReadyContract.mjs")
+  );
+
+  // Observed review display values (LF) → stored as inches on finishedEdge.
+  const reviewLf = [4.08, 6.0, 24.5, 12.25, 5.71, 2.76];
+  const reviewRuns = reviewLf.map((lf, i) => ({
+    id: `run-${i + 1}`,
+    label: `Piece ${i + 1}`,
+    included: true,
+    lengthIn: 60 + i * 6,
+    depthIn: 25.5,
+    // UI reads this — not openEdgeLf — via formatExposedSidesTriggerText
+    finishedEdge: {
+      totalFinishedEdgeLengthIn: Math.round(lf * 12 * 100) / 100,
+      // Often present in review WITHOUT approved=true until Confirm
+      approved: false,
+      finishedEdgeConfirmed: false
+    }
+  }));
+  const reviewDraft = {
+    schemaVersion: "1.0",
+    rooms: [
+      {
+        id: "room-kitchen",
+        name: "Kitchen",
+        areas: [{ id: "area-1", label: "Main", runs: reviewRuns }]
+      }
+    ]
+  };
+
+  // Save Draft / Set Scope live stamp mirrors iframe reply
+  const stampedLive = stampOpenEdgeLfOnTakeoffDraft(structuredClone(reviewDraft));
+  for (let i = 0; i < reviewLf.length; i += 1) {
+    assert.equal(
+      stampedLive.rooms[0].areas[0].runs[i].openEdgeLf,
+      reviewLf[i],
+      `live stamp run ${i + 1}`
+    );
+  }
+  console.log("ok: realistic review finishedEdge inches → Save Draft / live stamp openEdgeLf");
+
+  // Import must NOT replace review inches with draft_suggestion when inches exist
+  const importPayload = buildTakeoffImportPayload({
+    takeoffJobId: "22222222-2222-4222-8222-222222222230",
+    takeoffResultId: "res-real-edge",
+    takeoffResult: { ...reviewDraft, status: "approved" },
+    reviewState: { excludedRunIds: [] },
+    reviewStatus: "approved",
+    ignoreApprovalGateBlockers: true
+  });
+  for (let i = 0; i < reviewLf.length; i += 1) {
+    const piece = importPayload.rooms[0].pieces[i];
+    assert.ok(piece, `import piece ${i + 1}`);
+    assert.equal(piece.openEdgeLf, reviewLf[i], `import openEdgeLf piece ${i + 1}`);
+    assert.equal(
+      Number(piece.finishedEdge?.totalFinishedEdgeLengthIn),
+      Math.round(reviewLf[i] * 12 * 100) / 100,
+      `import finishedEdge inches piece ${i + 1}`
+    );
+    assert.notEqual(piece.finishedEdge?.source, "draft_suggestion");
+  }
+  const seeded = seedScopeFromTakeoffPayload(importPayload, { projectName: "20260529091846252" });
+  assert.equal(seeded.rooms[0].pieces.length, 6);
+  for (let i = 0; i < reviewLf.length; i += 1) {
+    assert.equal(seeded.rooms[0].pieces[i].openEdgeLf, reviewLf[i], `seed piece ${i + 1}`);
+  }
+  assert.equal(summarizeOfficialScope(seeded).openEdgeLf, 55.3);
+  console.log("ok: seedScopeFromTakeoffPayload writes openEdgeLf from review finishedEdge inches");
+
+  // Normalizer must not wipe finishedEdge inches when openEdgeLf was historically 0
+  const wipedRisk = validateAndNormalizeOfficialScopeRooms([
+    {
+      id: "r1",
+      name: "Kitchen",
+      included: true,
+      pieces: [
+        {
+          id: "p1",
+          name: "Piece 1",
+          lengthIn: 60,
+          depthIn: 25.5,
+          quantity: 1,
+          included: true,
+          openEdgeLf: 0,
+          finishedEdge: { totalFinishedEdgeLengthIn: 48.96 }
+        }
+      ]
+    }
+  ]);
+  assert.equal(wipedRisk[0].pieces[0].openEdgeLf, 4.08);
+  assert.equal(wipedRisk[0].pieces[0].finishedEdge.totalFinishedEdgeLengthIn, 48.96);
+  console.log("ok: official scope normalizer does not wipe openEdgeLf / finishedEdge inches");
+
+  // Set Scope afterEnsure path: getOrCreate already seeded rooms with openEdgeLf:0
+  const estimatesByCase = new Map();
+  let updateScopeCalls = 0;
+  const realJob = "22222222-2222-4222-8222-222222222231";
+  const realCase = "case-real-open-edge";
+  const zeroedSeedRooms = [
+    {
+      id: "r1",
+      name: "Kitchen",
+      included: true,
+      pieces: reviewRuns.map((run, i) => ({
+        id: `p${i + 1}`,
+        name: run.label,
+        takeoffRunId: run.id,
+        lengthIn: run.lengthIn,
+        depthIn: run.depthIn,
+        quantity: 1,
+        included: true,
+        openEdgeLf: 0,
+        exposedEdgeLf: 0,
+        finishedEdgeLf: 0,
+        // Historical seed kept inches but wrote openEdgeLf:0
+        finishedEdge: { ...run.finishedEdge }
+      }))
+    }
+  ];
+  const studioEstimateService = {
+    repository: {
+      async getActiveByIntakeCase(_org, caseId) {
+        return estimatesByCase.get(String(caseId)) || null;
+      }
+    },
+    async getOrCreateForCase({ intakeCaseId, takeoffJobId }) {
+      const created = {
+        id: `est-${intakeCaseId}`,
+        status: "ready_to_price",
+        intakeCaseId,
+        takeoffJobId,
+        scope: { rooms: structuredClone(zeroedSeedRooms), physicalScopeSource: "takeoff" }
+      };
+      estimatesByCase.set(String(intakeCaseId), created);
+      return created;
+    },
+    async refreshScopeFromTakeoff() {
+      throw new Error("refreshScopeFromTakeoff must not run on afterEnsure path");
+    },
+    async updateScope({ estimateId, body }) {
+      updateScopeCalls += 1;
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          const patch = body?.scope && typeof body.scope === "object" ? body.scope : {};
+          const next = {
+            ...est,
+            scope: { ...(est.scope || {}), ...patch, rooms: patch.rooms || est.scope?.rooms }
+          };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    }
+  };
+  const svc = createQuoteFlowSetScopeService({
+    queueService: {
+      async listQueue() {
+        return {
+          cases: [
+            queueRow({
+              id: realCase,
+              takeoffJobId: realJob,
+              takeoffReviewStatus: "needs_review",
+              projectName: "20260529091846252"
+            })
+          ]
+        };
+      }
+    },
+    estimateRepository: studioEstimateService.repository,
+    studioEstimateService,
+    approveAndBuildEstimate: async () => ({ reviewStatus: "approved", takeoffJobId: realJob }),
+    getSupabase: () => ({})
+  });
+
+  const res = await svc.setScope({
+    organizationId: ORG,
+    takeoffJobId: realJob,
+    confirm: true,
+    projectName: "20260529091846252",
+    // Live iframe payload shape (finishedEdge inches; stamp adds openEdgeLf)
+    takeoffResult: stampedLive
+  });
+  assert.equal(res.ok, true);
+  assert.ok(updateScopeCalls >= 1, "afterEnsure path must persist openEdgeLf via updateScope");
+  const scoped = estimatesByCase.get(realCase);
+  assert.equal(isOfficialScopeSet(scoped), true);
+  const pieces = scoped.scope.rooms[0].pieces;
+  assert.equal(pieces.length, 6);
+  for (let i = 0; i < reviewLf.length; i += 1) {
+    assert.equal(pieces[i].openEdgeLf, reviewLf[i], `official piece ${i + 1} openEdgeLf`);
+    assert.equal(pieces[i].exposedEdgeLf, reviewLf[i]);
+    assert.equal(pieces[i].finishedEdgeLf, reviewLf[i]);
+    assert.ok(Number(pieces[i].finishedEdge.totalFinishedEdgeLengthIn) > 0);
+  }
+  const summary = summarizeOfficialScope(scoped.scope);
+  assert.equal(summary.openEdgeLf, 55.3);
+  assert.equal(summary.pieceCount, 6);
+  const after = await svc.listQueue({ organizationId: ORG });
+  assert.equal(after.items.some((i) => i.takeoffJobId === realJob), false);
+
+  // Saved-draft fallback (no live payload) still carries edges via getLatestTakeoffResult
+  const estimatesByCase2 = new Map();
+  const savedJob2 = "22222222-2222-4222-8222-222222222232";
+  const savedCase2 = "case-real-saved-fallback";
+  const studio2 = {
+    repository: {
+      async getActiveByIntakeCase(_org, caseId) {
+        return estimatesByCase2.get(String(caseId)) || null;
+      }
+    },
+    async getOrCreateForCase({ intakeCaseId, takeoffJobId }) {
+      const created = {
+        id: `est-${intakeCaseId}`,
+        status: "ready_to_price",
+        intakeCaseId,
+        takeoffJobId,
+        scope: { rooms: structuredClone(zeroedSeedRooms) }
+      };
+      estimatesByCase2.set(String(intakeCaseId), created);
+      return created;
+    },
+    async refreshScopeFromTakeoff() {
+      throw new Error("should not refresh on afterEnsure");
+    },
+    async updateScope({ estimateId, body }) {
+      for (const [caseId, est] of estimatesByCase2.entries()) {
+        if (est.id === estimateId) {
+          const patch = body?.scope && typeof body.scope === "object" ? body.scope : {};
+          const next = {
+            ...est,
+            scope: { ...(est.scope || {}), ...patch, rooms: patch.rooms || est.scope?.rooms }
+          };
+          estimatesByCase2.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    }
+  };
+  const svc2 = createQuoteFlowSetScopeService({
+    queueService: {
+      async listQueue() {
+        return {
+          cases: [queueRow({ id: savedCase2, takeoffJobId: savedJob2, takeoffReviewStatus: "needs_review" })]
+        };
+      }
+    },
+    estimateRepository: studio2.repository,
+    studioEstimateService: studio2,
+    approveAndBuildEstimate: async () => ({ reviewStatus: "approved" }),
+    getLatestTakeoffResult: async () => ({
+      normalizedTakeoffJson: reviewDraft,
+      takeoffResult: reviewDraft
+    }),
+    getSupabase: () => ({})
+  });
+  const res2 = await svc2.setScope({
+    organizationId: ORG,
+    takeoffJobId: savedJob2,
+    confirm: true
+  });
+  assert.equal(res2.ok, true);
+  const scoped2 = estimatesByCase2.get(savedCase2);
+  assert.equal(summarizeOfficialScope(scoped2.scope).openEdgeLf, 55.3);
+  console.log("ok: production afterEnsure Set Scope + saved-draft fallback carry review open edge LF");
+}
+
+{
   const ui = readFileSync(
     join(root, "app-elite100-quote-flow/src/queue/EstimateQueuePage.tsx"),
     "utf8"
@@ -1161,9 +1449,12 @@ function queueRow(overrides = {}) {
   assert.doesNotMatch(ui, /\bV1\b|\bV2\b|Studio V2/);
   assert.doesNotMatch(ui, /Use these measurements/);
   const setScopeSrc = readFileSync(join(__dirname, "quoteFlowSetScope.mjs"), "utf8");
+  assert.match(setScopeSrc, /persistOpenEdgeLfOnEstimate/);
+  assert.match(setScopeSrc, /applyTakeoffOpenEdgeLfToOfficialRooms/);
   assert.match(setScopeSrc, /loadSavedReviewedTakeoffResult|resolveTakeoffResultForOpenEdge/);
   assert.match(setScopeSrc, /stampOpenEdgeLfOnTakeoffResult/);
   assert.match(setScopeSrc, /getLatestTakeoffResult/);
+  assert.match(setScopeSrc, /afterEnsure/);
   const takeoffUi = readFileSync(
     join(root, "app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
     "utf8"

@@ -226,14 +226,19 @@ export function resolvePieceOpenEdgeLf(piece) {
     piece.finishedEdgeLf
   ];
   for (const c of candidates) {
+    if (c == null || c === "") continue;
     const n = Number(c);
-    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+    if (Number.isFinite(n) && n > 0) return Math.round(n * 100) / 100;
   }
   const fe = piece.finishedEdge;
   if (fe && typeof fe === "object") {
     const inches = Number(fe.totalFinishedEdgeLengthIn);
-    if (Number.isFinite(inches) && inches >= 0) {
+    if (Number.isFinite(inches) && inches > 0) {
       return Math.round((inches / 12) * 100) / 100;
+    }
+    const lfAlias = Number(fe.totalFinishedEdgeLengthLf ?? fe.linearFeet ?? fe.total);
+    if (Number.isFinite(lfAlias) && lfAlias > 0) {
+      return Math.round(lfAlias * 100) / 100;
     }
   }
   return 0;

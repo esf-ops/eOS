@@ -9,6 +9,8 @@ function round2(n) {
 
 /**
  * Resolve open/exposed edge LF from common piece field aliases.
+ * Positive LF aliases win; otherwise fall through to finishedEdge inches.
+ * Explicit 0 does not hide richer finishedEdge inch data (seed often wrote 0).
  * Blank / missing / non-finite → 0 (never NaN).
  * @param {object|null|undefined} piece
  */
@@ -26,14 +28,20 @@ export function resolvePieceOpenEdgeLf(piece) {
   for (const c of candidates) {
     if (c == null || c === "") continue;
     const n = Number(c);
-    if (Number.isFinite(n) && n >= 0) return round2(n);
+    if (Number.isFinite(n) && n > 0) return round2(n);
   }
   const fe = piece.finishedEdge;
   if (fe && typeof fe === "object") {
     const totalIn = Number(fe.totalFinishedEdgeLengthIn);
-    if (Number.isFinite(totalIn) && totalIn >= 0) return round2(totalIn / 12);
-    const lfAlias = Number(fe.totalFinishedEdgeLengthLf ?? fe.linearFeet);
-    if (Number.isFinite(lfAlias) && lfAlias >= 0) return round2(lfAlias);
+    if (Number.isFinite(totalIn) && totalIn > 0) return round2(totalIn / 12);
+    const lfAlias = Number(fe.totalFinishedEdgeLengthLf ?? fe.linearFeet ?? fe.total);
+    if (Number.isFinite(lfAlias) && lfAlias > 0) return round2(lfAlias);
+  }
+  // Truly blank / explicit zeros with no finishedEdge inches → 0
+  for (const c of candidates) {
+    if (c == null || c === "") continue;
+    const n = Number(c);
+    if (Number.isFinite(n) && n >= 0) return 0;
   }
   return 0;
 }

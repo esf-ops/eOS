@@ -295,14 +295,9 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
               ? meta.sideSplashRightEligible === true
               : null;
         // Canonical open/exposed edge LF for Quote Flow Estimates (and Studio).
-        // Prefer import finishedEdge inches; never leave the field undefined when
-        // geometry exists — Estimates reads piece.openEdgeLf as scope data.
+        // Prefer positive import LF / finishedEdge inches — explicit openEdgeLf:0
+        // must not hide review inches (see quoteFlowOpenEdge.resolvePieceOpenEdgeLf).
         const openEdgeLf = (() => {
-          const fe = meta?.finishedEdge;
-          const totalIn = Number(fe?.totalFinishedEdgeLengthIn);
-          if (Number.isFinite(totalIn) && totalIn >= 0) {
-            return Math.round((totalIn / 12) * 100) / 100;
-          }
           for (const c of [
             meta?.openEdgeLf,
             meta?.exposedEdgeLf,
@@ -311,7 +306,16 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
             p.finishedEdgeLf
           ]) {
             const n = Number(c);
-            if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+            if (Number.isFinite(n) && n > 0) return Math.round(n * 100) / 100;
+          }
+          const fe = meta?.finishedEdge;
+          const totalIn = Number(fe?.totalFinishedEdgeLengthIn);
+          if (Number.isFinite(totalIn) && totalIn > 0) {
+            return Math.round((totalIn / 12) * 100) / 100;
+          }
+          const lfAlias = Number(fe?.totalFinishedEdgeLengthLf ?? fe?.linearFeet);
+          if (Number.isFinite(lfAlias) && lfAlias > 0) {
+            return Math.round(lfAlias * 100) / 100;
           }
           return 0;
         })();
