@@ -262,7 +262,8 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         baseResultId,
         reviewState,
         aiHandling,
-        clientMutationRevision
+        clientMutationRevision,
+        reopenIfApproved
       } = body;
 
       const result = await saveTakeoffCorrection({
@@ -276,6 +277,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         reviewState: reviewState ?? null,
         aiHandling: aiHandling ?? null,
         clientMutationRevision: clientMutationRevision ?? null,
+        reopenIfApproved: reopenIfApproved === true || reopenIfApproved === "true"
       });
 
       return res.status(201).json(result);

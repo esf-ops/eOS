@@ -1124,6 +1124,7 @@ export async function saveTakeoffCorrection({
   reviewState = null,
   aiHandling = null,
   clientMutationRevision = null,
+  reopenIfApproved = false,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -1141,19 +1142,34 @@ export async function saveTakeoffCorrection({
     throw workspaceError("baseResultId must be a valid UUID");
   }
 
-  const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  let jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
   if (!jobRow) {
     throw workspaceError("Takeoff job not found", 404);
   }
 
   // Approved Takeoff is immutable until Edit Measurements reopens an editable revision.
+  // Quote Flow Set Scope may opt in to reopen automatically for still-unscoped work.
   if (String(jobRow.review_status ?? "").toLowerCase() === "approved") {
-    const err = workspaceError(
-      "Approved Takeoff measurements cannot be changed. Open Edit Measurements to start a new editable revision.",
-      409
-    );
-    err.code = "takeoff_already_approved";
-    throw err;
+    if (reopenIfApproved === true) {
+      await reopenTakeoffJobForMeasurementRevision({
+        supabase,
+        organizationId,
+        takeoffJobId,
+        userId
+      });
+      jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+      if (!jobRow) {
+        throw workspaceError("Takeoff job not found", 404);
+      }
+    }
+    if (String(jobRow.review_status ?? "").toLowerCase() === "approved") {
+      const err = workspaceError(
+        "Approved Takeoff measurements cannot be changed. Open Edit Measurements to start a new editable revision.",
+        409
+      );
+      err.code = "takeoff_already_approved";
+      throw err;
+    }
   }
 
   let computed, validation, importPlan;
@@ -1998,7 +2014,8 @@ export async function approveAndBuildEstimate({
   dimensionEvidence = null,
   acceptAdvisoryWarnings = false,
   confirmAdvisories = undefined,
-  correctionNotes = null
+  correctionNotes = null,
+  reopenIfApproved = false
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -2052,21 +2069,25 @@ export async function approveAndBuildEstimate({
         takeoffResult: resolvedResult,
         correctionNotes: correctionNotes ?? "Consolidated worksheet save before approve-and-build",
         reviewState,
-        baseResultId: latestRow?.id ?? null
+        baseResultId: latestRow?.id ?? null,
+        reopenIfApproved: reopenIfApproved === true
       });
     } catch (e) {
       const err = workspaceError(
         `Failed to persist reviewed Takeoff edits: ${e instanceof Error ? e.message : String(e)}`,
         e?.statusCode && e.statusCode >= 400 ? e.statusCode : 503
       );
-      err.code = "PERSISTENCE_FAILED";
+      err.code = e?.code === "takeoff_already_approved" ? "takeoff_already_approved" : "PERSISTENCE_FAILED";
       err.approvalBlockers = {
         ok: false,
         code: "approval_hard_blockers",
         hardBlockers: [
           {
-            code: "PERSISTENCE_FAILED",
-            message: "Server cannot persist the reviewed edits or approved result.",
+            code: err.code,
+            message:
+              err.code === "takeoff_already_approved"
+                ? String(e?.message || "Approved Takeoff measurements cannot be changed.")
+                : "Server cannot persist the reviewed edits or approved result.",
             path: null,
             category: "persist"
           }
@@ -2077,7 +2098,7 @@ export async function approveAndBuildEstimate({
           approvalMode: "consolidated",
           confirmAdvisories: advisoriesConfirmed,
           skipLegacyValidationGate: true,
-          hardBlockers: [{ code: "PERSISTENCE_FAILED", message: "persist failed" }],
+          hardBlockers: [{ code: err.code, message: "persist failed" }],
           advisory: [],
           legacyValidationCodes: [],
           branch: "approve_and_build_persist_failed"

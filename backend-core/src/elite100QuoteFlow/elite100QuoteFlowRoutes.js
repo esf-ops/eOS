@@ -28,10 +28,13 @@ import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
 import {
   approveAndBuildEstimate,
   getLatestTakeoffResult,
-  getTakeoffWorkspace
+  getTakeoffWorkspace,
+  reopenTakeoffJobForMeasurementRevision
 } from "../takeoff/takeoffWorkspaceService.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
+/** Set Scope may include a full reviewed TakeoffResult payload. */
+const setScopeJsonParser = express.json({ limit: "4mb" });
 
 /**
  * @param {import("express").Express} app
@@ -148,6 +151,8 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         estimateRepository,
         studioEstimateService,
         approveAndBuildEstimate: deps.approveAndBuildEstimate || approveAndBuildEstimate,
+        reopenTakeoffJobForMeasurementRevision:
+          deps.reopenTakeoffJobForMeasurementRevision || reopenTakeoffJobForMeasurementRevision,
         getTakeoffWorkspace: deps.getTakeoffWorkspace || getTakeoffWorkspace,
         getLatestTakeoffResult: deps.getLatestTakeoffResult || getLatestTakeoffResult,
         getSupabase,
@@ -401,7 +406,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   app.post(
     "/api/elite100-quote-flow/queue/:takeoffJobId/set-scope",
     ...staffStack,
-    jsonParser,
+    setScopeJsonParser,
     async (req, res) => {
       res.set("Cache-Control", "no-store");
       try {

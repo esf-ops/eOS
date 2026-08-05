@@ -44,26 +44,31 @@ assert.match(queue, /Estimate name/);
 assert.match(queue, /Review AI Takeoff/);
 assert.match(queue, /Create Manual Scope/);
 assert.match(queue, /Set Scope/);
-assert.match(queue, /Use these measurements/);
+assert.match(queue, /requestSetScopePayloadFromIframe/);
+assert.match(queue, /Save Draft is optional/);
+assert.match(queue, /Set Scope saves these reviewed measurements/);
 assert.match(queue, /Scope is set for this estimate/);
 assert.match(queue, /Open in Estimates/);
 assert.match(queue, /filter:\s*["']active["']/);
 assert.match(queue, /projectName:\s*name|estimateName:\s*name/);
+assert.match(queue, /takeoffResult:\s*payload/);
 assert.match(queue, /rowAction === "review_takeoff"/);
 assert.match(queue, /rowAction === "create_manual_scope"/);
 assert.match(queue, /Needs decision/);
 assert.match(api, /projectName/);
 assert.match(api, /estimateName/);
+assert.match(api, /takeoffResult/);
 assert.match(api, /set-manual-scope/);
 assert.match(app, /qf-shell--command/);
 assert.match(grouping, /resolveDefaultEstimateName/);
 assert.match(grouping, /Untitled quote request/);
+assert.doesNotMatch(queue, /Use these measurements/);
 assert.doesNotMatch(queue, /Approve Estimate/);
 assert.doesNotMatch(queue, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);
 assert.doesNotMatch(queue, /Unknown contact — Unknown contact/);
 assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish/);
 assert.doesNotMatch(queue, /calculate|publish|mark sold|accept/i);
-console.log("ok: Queue UX contracts; estimate name; no V1/V2");
+console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
 
 {
   // Ready rows: primary row action is Review Takeoff, not repeated Create Manual Scope.

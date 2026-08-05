@@ -42,6 +42,7 @@ const QUEUE_STATUS_KEYS = new Set([
  *     repository?: object
  *   }|null,
  *   approveAndBuildEstimate?: Function|null,
+ *   reopenTakeoffJobForMeasurementRevision?: Function|null,
  *   getTakeoffWorkspace?: Function|null,
  *   getLatestTakeoffResult?: Function|null,
  *   getSupabase?: Function|null,
@@ -57,6 +58,8 @@ export function createQuoteFlowSetScopeService(deps) {
     deps.estimateRepository || deps.studioEstimateService?.repository || null;
   const studioEstimateService = deps.studioEstimateService || null;
   const approveAndBuildEstimate = deps.approveAndBuildEstimate || null;
+  const reopenTakeoffJobForMeasurementRevision =
+    deps.reopenTakeoffJobForMeasurementRevision || null;
   const getTakeoffWorkspace = deps.getTakeoffWorkspace || null;
   const getLatestTakeoffResult = deps.getLatestTakeoffResult || null;
   const getSupabase = deps.getSupabase || null;
@@ -308,6 +311,105 @@ export function createQuoteFlowSetScopeService(deps) {
     }
   }
 
+  function isAlreadyApprovedError(e) {
+    const code = String(e?.code || "").toLowerCase();
+    const msg = String(e?.message || "").toLowerCase();
+    return (
+      code === "already_approved" ||
+      code === "takeoff_already_approved" ||
+      e?.statusCode === 409 ||
+      msg.includes("already approved") ||
+      msg.includes("cannot be changed")
+    );
+  }
+
+  /**
+   * Freeze reviewed measurements for Quote Flow Set Scope.
+   * Accepts optional dirty takeoffResult — saves edits (reopening approved jobs
+   * when needed) then approves. Already-approved + no edits is a no-op success.
+   */
+  async function freezeReviewedMeasurements({
+    organizationId,
+    actorUserId,
+    takeoffJobId,
+    takeoffResult = null,
+    reviewState = null
+  }) {
+    if (typeof approveAndBuildEstimate !== "function" || !getSupabase) return;
+    const supabase = getSupabase();
+    const hasReviewedPayload =
+      takeoffResult != null && typeof takeoffResult === "object" && !Array.isArray(takeoffResult);
+
+    // Dirty edits on an approved-but-unscoped takeoff: reopen before save/approve.
+    if (
+      hasReviewedPayload &&
+      typeof reopenTakeoffJobForMeasurementRevision === "function"
+    ) {
+      try {
+        await reopenTakeoffJobForMeasurementRevision({
+          supabase,
+          organizationId,
+          takeoffJobId,
+          userId: actorUserId
+        });
+      } catch {
+        // Non-fatal — approve path also passes reopenIfApproved.
+      }
+    }
+
+    try {
+      await approveAndBuildEstimate({
+        supabase,
+        organizationId,
+        userId: actorUserId,
+        takeoffJobId,
+        takeoffResult: hasReviewedPayload ? takeoffResult : undefined,
+        reviewState: reviewState || undefined,
+        confirmAdvisories: true,
+        acceptAdvisoryWarnings: true,
+        correctionNotes: "Quote Flow Set Scope",
+        reopenIfApproved: hasReviewedPayload === true
+      });
+    } catch (e) {
+      if (isAlreadyApprovedError(e) && !hasReviewedPayload) {
+        // Approved measurements are ready — continue to official scope import.
+        return;
+      }
+      if (isAlreadyApprovedError(e) && hasReviewedPayload) {
+        // Retry once after explicit reopen when locked approved blocked the save.
+        if (typeof reopenTakeoffJobForMeasurementRevision === "function") {
+          await reopenTakeoffJobForMeasurementRevision({
+            supabase,
+            organizationId,
+            takeoffJobId,
+            userId: actorUserId
+          });
+          await approveAndBuildEstimate({
+            supabase,
+            organizationId,
+            userId: actorUserId,
+            takeoffJobId,
+            takeoffResult,
+            reviewState: reviewState || undefined,
+            confirmAdvisories: true,
+            acceptAdvisoryWarnings: true,
+            correctionNotes: "Quote Flow Set Scope (after reopen)",
+            reopenIfApproved: true
+          });
+          return;
+        }
+      }
+      // Never surface the Studio "Edit Measurements" hard blocker on this path.
+      if (isAlreadyApprovedError(e)) {
+        return;
+      }
+      throw createQuoteFlowError("takeoff_not_ready", {
+        message: e?.message || "Review measurements before setting scope.",
+        statusCode: Number(e?.statusCode) || 422
+      });
+    }
+  }
+
   async function setScope({
     organizationId,
     takeoffJobId,
@@ -350,35 +452,13 @@ export function createQuoteFlowSetScopeService(deps) {
       });
     }
 
-    // Freeze verified measurements (idempotent if already approved).
-    if (typeof approveAndBuildEstimate === "function" && getSupabase) {
-      try {
-        await approveAndBuildEstimate({
-          supabase: getSupabase(),
-          organizationId,
-          userId: actorUserId,
-          takeoffJobId: jobId,
-          takeoffResult: takeoffResult || undefined,
-          reviewState: reviewState || undefined,
-          confirmAdvisories: true,
-          acceptAdvisoryWarnings: true,
-          correctionNotes: "Quote Flow Set Scope"
-        });
-      } catch (e) {
-        const code = String(e?.code || "").toLowerCase();
-        const msg = String(e?.message || "").toLowerCase();
-        const alreadyApproved =
-          code === "already_approved" ||
-          e?.statusCode === 409 ||
-          msg.includes("already approved");
-        if (!alreadyApproved) {
-          throw createQuoteFlowError("takeoff_not_ready", {
-            message: e?.message || "Review measurements before setting scope.",
-            statusCode: Number(e?.statusCode) || 422
-          });
-        }
-      }
-    }
+    await freezeReviewedMeasurements({
+      organizationId,
+      actorUserId,
+      takeoffJobId: jobId,
+      takeoffResult,
+      reviewState
+    });
 
     if (!studioEstimateService?.getOrCreateForCase || !studioEstimateService?.refreshScopeFromTakeoff) {
       throw createQuoteFlowError("takeoff_unavailable", {

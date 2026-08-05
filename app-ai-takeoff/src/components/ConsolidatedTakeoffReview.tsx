@@ -30,6 +30,8 @@ import {
   TAKEOFF_REVIEW_READY,
   TAKEOFF_REVIEW_DRAFT_SAVED,
   TAKEOFF_WATERFALL_CHANGED,
+  QUOTE_FLOW_REQUEST_SET_SCOPE,
+  QUOTE_FLOW_SET_SCOPE_PAYLOAD,
   summarizeTakeoffDraftForReady,
   postTakeoffParentMessage,
   loadLocalReviewDraft,
@@ -702,6 +704,52 @@ export default function ConsolidatedTakeoffReview() {
     [markWorksheetDirty, urlWorkspace.mode]
   );
 
+  // Quote Flow parent Set Scope: return current reviewed measurements (dirty or clean).
+  useEffect(() => {
+    if (!quoteFlowSetScope || !takeoffJobId) return;
+    function onQuoteFlowSetScopeRequest(ev: MessageEvent) {
+      const data = ev.data;
+      if (!data || typeof data !== "object") return;
+      if (data.type !== QUOTE_FLOW_REQUEST_SET_SCOPE) return;
+      if (String(data.takeoffJobId || "") !== String(takeoffJobId)) return;
+      const dirty = isTakeoffWorksheetDirty({
+        localDraft: draftRef.current,
+        canonicalDraft: canonicalDraftRef.current,
+        localExcludedRunIds: excludedRef.current,
+        canonicalExcludedRunIds: canonicalExcludedRef.current
+      });
+      const draft = draftRef.current;
+      if (!draft || !hasUsableTakeoffGeometry(draft)) {
+        postTakeoffParentMessage(
+          QUOTE_FLOW_SET_SCOPE_PAYLOAD,
+          {
+            error: "No usable measurements to set scope.",
+            dirty: false,
+            takeoffResult: null,
+            reviewState: null
+          },
+          { takeoffJobId, localReview }
+        );
+        return;
+      }
+      postTakeoffParentMessage(
+        QUOTE_FLOW_SET_SCOPE_PAYLOAD,
+        {
+          dirty:
+            dirty ||
+            saveStatusRef.current === "dirty" ||
+            saveStatusRef.current === "saving" ||
+            unsavedEdgeRunIds.size > 0,
+          takeoffResult: structuredClone(draft),
+          reviewState: buildReviewState()
+        },
+        { takeoffJobId, localReview }
+      );
+    }
+    window.addEventListener("message", onQuoteFlowSetScopeRequest);
+    return () => window.removeEventListener("message", onQuoteFlowSetScopeRequest);
+  }, [quoteFlowSetScope, takeoffJobId, buildReviewState, localReview, unsavedEdgeRunIds.size]);
+
   // Estimate Options → Takeoff: add left/right waterfall on first eligible island.
   useEffect(() => {
     function onStudioMessage(ev: MessageEvent) {
@@ -803,7 +851,12 @@ export default function ConsolidatedTakeoffReview() {
     const revision = nextExplicitMutationRevision(latestClientMutationRevisionRef.current);
     try {
       const response = await saveTakeoffDraftExplicit({
-        saveCorrection: (body) => saveTakeoffCorrection(authToken, takeoffJobId, body),
+        saveCorrection: (body) =>
+          saveTakeoffCorrection(authToken, takeoffJobId, {
+            ...body,
+            // Quote Flow unscoped review: reopen approved takeoff instead of hard-blocking.
+            reopenIfApproved: quoteFlowSetScope === true
+          }),
         takeoffResult: snapshot,
         baseResultId: latestResultIdRef.current,
         clientMutationRevision: revision,
@@ -880,7 +933,15 @@ export default function ConsolidatedTakeoffReview() {
     } finally {
       saveInFlightRef.current = false;
     }
-  }, [authToken, takeoffJobId, buildReviewState, approveStatus, saveStatus, urlWorkspace.mode]);
+  }, [
+    authToken,
+    takeoffJobId,
+    buildReviewState,
+    approveStatus,
+    saveStatus,
+    urlWorkspace.mode,
+    quoteFlowSetScope
+  ]);
 
   /** Confirm exposed edges — local draft only; zero correction requests. */
   const confirmExposedEdges = useCallback(
@@ -1706,7 +1767,10 @@ export default function ConsolidatedTakeoffReview() {
                         const bsId = `ctr-bs-${rowControlKey}`;
                         const inclId = `ctr-incl-${rowControlKey}`;
                         const cutId = `ctr-cutouts-${rowControlKey}`;
-                        const rowLocked = isReadonly || approveStatus === "approved";
+                        // Quote Flow queue stays editable until official scope is set.
+                        const rowLocked =
+                          isReadonly ||
+                          (!quoteFlowSetScope && approveStatus === "approved");
                         return (
                     <tr
                       key={row.key}
@@ -2386,6 +2450,11 @@ export default function ConsolidatedTakeoffReview() {
                 type="button"
                 className="ctr-btn-secondary"
                 data-testid="ctr-save-draft"
+                title={
+                  quoteFlowSetScope
+                    ? "Optional — Set Scope in Quote Flow also saves reviewed measurements"
+                    : undefined
+                }
                 disabled={
                   saveStatus === "saving" ||
                   saveStatus === "conflict" ||
@@ -2465,7 +2534,8 @@ export default function ConsolidatedTakeoffReview() {
                 </div>
               ) : null}
 
-              {!isReadonly ? (
+              {/* Quote Flow: parent workspace owns the single Set Scope action. */}
+              {!isReadonly && !quoteFlowSetScope ? (
               <button
                 type="button"
                 className="ctr-btn-primary"
@@ -2491,6 +2561,12 @@ export default function ConsolidatedTakeoffReview() {
                   quoteFlowSetScope
                 })}
               </button>
+              ) : null}
+              {!isReadonly && quoteFlowSetScope ? (
+                <p className="ctr-muted" data-testid="ctr-quote-flow-set-scope-hint">
+                  Use <strong>Set Scope</strong> in Quote Flow to save these reviewed measurements
+                  as the official estimate scope.
+                </p>
               ) : null}
             </div>
             {summary ? (

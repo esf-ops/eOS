@@ -6,6 +6,10 @@
 export const TAKEOFF_REVIEW_READY = "TAKEOFF_REVIEW_READY";
 export const TAKEOFF_REVIEW_DRAFT_SAVED = "TAKEOFF_REVIEW_DRAFT_SAVED";
 export const TAKEOFF_WATERFALL_CHANGED = "TAKEOFF_WATERFALL_CHANGED";
+/** Quote Flow parent → iframe: request current reviewed measurements for Set Scope. */
+export const QUOTE_FLOW_REQUEST_SET_SCOPE = "eliteos-quote-flow-request-set-scope";
+/** Quote Flow iframe → parent: reviewed takeoffResult ready for Set Scope. */
+export const QUOTE_FLOW_SET_SCOPE_PAYLOAD = "eliteos-quote-flow-set-scope-payload";
 
 /**
  * @param {object} draft
