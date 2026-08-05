@@ -3816,3 +3816,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowInboxStateStore`, presenter/service/routes, InboxPage + styles/shell width, tests, this doc. |
 | **Protected / unchanged** | External mailbox delete, Estimate Queue Set Scope, Estimates editor, pricing, Digital Estimate, Studio V2, Internal Estimate, AI Takeoff algorithm. |
 | **Revisit trigger** | Dedicated triage table if key volume exceeds JSON config; optional cancel-on-dismiss for active takeoffs. |
+
+### 279. Elite 100 Quote Flow — Estimate Queue as Scope Creation Queue (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-scope-creation-queue` |
+| **Decision** | Estimate Queue is the **Scope Creation Queue**, not takeoff history. Default list (`filter=active`) includes only **unscoped** items (ready for AI review, processing, failed, manual). Already-scoped rows are excluded and belong in Estimates. AI path: Review Takeoff → Set Scope / Use these measurements. Manual path: Create Manual Scope builder → `POST …/set-manual-scope` (`getOrCreateForCase` + `updateScope`, no takeoff refresh). After Set Scope (or already_scoped), show temporary success with **Open in Estimates**; item disappears on refresh. Failed takeoffs offer Choose another plan (Inbox) + Create Manual Scope. No pricing/calculate/approve/publish/accept/sold. |
+| **Why** | Estimators were seeing scoped/history clutter in the queue; product intent is “create official scope here, then work the estimate in Estimates.” |
+| **Impacted** | `quoteFlowSetScope`, `quoteFlowQueuePresenter`, queue routes, `EstimateQueuePage`, queue helpers/API/tests, shell Inbox deep-link, this doc. |
+| **Protected / unchanged** | Digital Estimate, pricing formulas, Studio V2, Internal Estimate, AI Takeoff algorithm, Inbox fresh-start rules, Estimates editor beyond navigation. |
+| **Revisit trigger** | Unscoped cases with no takeoffJobId in the queue; cancel-on-dismiss for active takeoffs. |

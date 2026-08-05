@@ -1,17 +1,57 @@
 import { apiGet, apiPost } from "./api";
+import type { QuoteFlowScopeRoom } from "./quoteFlowEstimatesApi";
 
 export type QuoteFlowQueueItem = {
   takeoffJobId: string | null;
   intakeCaseId: string | null;
   estimateId: string | null;
+  messageKey?: string | null;
   customerName: string | null;
   projectName: string | null;
+  customerDisplay?: string | null;
+  projectDisplay?: string | null;
+  requestTitle?: string | null;
+  planFilename?: string | null;
+  receivedAt?: string | null;
+  returnedAt?: string | null;
+  startedAt?: string | null;
   workflowStatus?: string;
   status: { key: string; label: string };
+  group?: { key: string; label: string; sortOrder?: number };
+  nextAction?: { key: string; label: string };
+  summary?: {
+    roomCount?: number | null;
+    pieceCount?: number | null;
+    totalSf?: number | null;
+    label?: string | null;
+  };
+  failureReason?: string | null;
   alreadyScoped: boolean;
   reviewReady: boolean;
+  canCreateManualScope?: boolean;
+  canReviewTakeoff?: boolean;
   action: string | null;
   actionLabel: string | null;
+};
+
+export type QuoteFlowQueueStats = {
+  readyForReview: number;
+  manualScopeNeeded: number;
+  processing: number;
+  failed: number;
+  total: number;
+};
+
+export type QuoteFlowSetScopeResult = {
+  ok: boolean;
+  estimateId: string;
+  intakeCaseId: string | null;
+  takeoffJobId: string | null;
+  message?: string;
+  alreadyScoped?: boolean;
+  reused?: boolean;
+  created?: boolean;
+  sideEffects?: Record<string, boolean>;
 };
 
 export async function fetchQuoteFlowQueue(
@@ -27,6 +67,13 @@ export async function fetchQuoteFlowQueue(
   return apiGet(`/api/elite100-quote-flow/queue${qs ? `?${qs}` : ""}`, token) as Promise<{
     ok: boolean;
     items: QuoteFlowQueueItem[];
+    groups?: {
+      ready: QuoteFlowQueueItem[];
+      manual: QuoteFlowQueueItem[];
+      processing: QuoteFlowQueueItem[];
+      failed: QuoteFlowQueueItem[];
+    };
+    stats?: QuoteFlowQueueStats;
     total?: number;
   }>;
 }
@@ -51,15 +98,20 @@ export async function setQuoteFlowScope(
     `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/set-scope`,
     token,
     { confirm: opts.confirm !== false }
-  ) as Promise<{
-    ok: boolean;
-    estimateId: string;
-    intakeCaseId: string | null;
-    takeoffJobId: string;
-    message?: string;
-    alreadyScoped?: boolean;
-    reused?: boolean;
-    created?: boolean;
-    sideEffects?: Record<string, boolean>;
-  }>;
+  ) as Promise<QuoteFlowSetScopeResult>;
+}
+
+export async function setQuoteFlowManualScope(
+  token: string,
+  takeoffJobId: string,
+  opts: { confirm?: boolean; rooms: QuoteFlowScopeRoom[] }
+) {
+  return apiPost(
+    `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/set-manual-scope`,
+    token,
+    {
+      confirm: opts.confirm !== false,
+      rooms: opts.rooms
+    }
+  ) as Promise<QuoteFlowSetScopeResult>;
 }

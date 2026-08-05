@@ -26,6 +26,8 @@ type Props = {
   authToken: string;
   onOpenQueue?: () => void;
   onOpenEstimates?: (estimateId?: string | null) => void;
+  /** Open a specific Inbox request after navigating from Estimate Queue. */
+  initialMessageKey?: string | null;
   /** @deprecated use onOpenQueue */
   onOpenQueuePlaceholder?: () => void;
 };
@@ -143,7 +145,7 @@ function ProgressBar({ item }: { item: QuoteFlowInboxItem }) {
 }
 
 export default function InboxPage(props: Props) {
-  const { authToken, onOpenEstimates } = props;
+  const { authToken, onOpenEstimates, initialMessageKey = null } = props;
   const onOpenQueue = props.onOpenQueue || props.onOpenQueuePlaceholder;
   const [items, setItems] = useState<QuoteFlowInboxItem[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -290,6 +292,15 @@ export default function InboxPage(props: Props) {
     void loadList("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
+
+  // Deep-link / cross-tab: open a request when navigating from Estimate Queue.
+  useEffect(() => {
+    const key = String(initialMessageKey || "").trim();
+    if (!key || items.length === 0) return;
+    if (selectedKey === key) return;
+    void openRow(key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMessageKey, items.length]);
 
   // Background poll while active takeoffs exist — never blanks the list.
   useEffect(() => {
