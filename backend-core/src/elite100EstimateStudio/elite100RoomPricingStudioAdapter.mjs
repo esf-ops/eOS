@@ -732,6 +732,41 @@ function buildActiveReviewSummary(result) {
   };
 }
 
+/**
+ * Merge priced cutout quantities into fabrication.addOns so Digital Estimate
+ * publish freezes named Original cutout lines (Kitchen sink cutout, etc.).
+ * Piece openings can price cutouts while scope.addOns is empty (Quote Flow);
+ * DE freeze only reads fabrication.addOns — keep those maps aligned.
+ *
+ * @param {Record<string, number>|null|undefined} scopeAddOns
+ * @param {Array<object>|null|undefined} pricedRooms
+ * @returns {Record<string, number>}
+ */
+export function mergePricedCutoutsIntoFabricationAddOns(scopeAddOns, pricedRooms) {
+  /** @type {Record<string, number>} */
+  const addOns =
+    scopeAddOns && typeof scopeAddOns === "object" ? { ...scopeAddOns } : {};
+  let kitchenSink = 0;
+  let vanityBar = 0;
+  let cooktop = 0;
+  let outlet = 0;
+  for (const room of Array.isArray(pricedRooms) ? pricedRooms : []) {
+    const c = room?.cutouts && typeof room.cutouts === "object" ? room.cutouts : null;
+    if (!c) continue;
+    kitchenSink += Math.max(0, Math.floor(Number(c.kitchenSinkQty) || 0));
+    vanityBar += Math.max(0, Math.floor(Number(c.vanitySinkQty) || 0));
+    cooktop += Math.max(0, Math.floor(Number(c.cooktopQty) || 0));
+    outlet += Math.max(0, Math.floor(Number(c.electricalOutletQty) || 0));
+  }
+  // Prefer priced quantities when the calculator charged cutouts; otherwise keep
+  // existing scope.addOns (covers non-priced / empty-room edge cases).
+  if (kitchenSink > 0) addOns["qty-sink"] = kitchenSink;
+  if (vanityBar > 0) addOns["qty-bar"] = vanityBar;
+  if (cooktop > 0) addOns["qty-cook"] = cooktop;
+  if (outlet > 0) addOns["qty-outlet"] = outlet;
+  return addOns;
+}
+
 export async function calculateStudioEstimateV4(params = {}) {
   const { scope, env, now, ...opts } = params;
   const result = await calculateElite100StudioEstimate({ scope, env, now, ...opts });
@@ -754,7 +789,7 @@ export async function calculateStudioEstimateV4(params = {}) {
     pricingVersion: result.pricingVersion,
     pricingBasis: result.pricingBasis === "wholesale" ? "wholesale" : "direct",
     fabrication: {
-      addOns: scope?.addOns && typeof scope.addOns === "object" ? { ...scope.addOns } : {},
+      addOns: mergePricedCutoutsIntoFabricationAddOns(scope?.addOns, result.rooms),
       edge: {
         profileToken: edgeRoom?.edge?.profile || scope?.edgeProfileToken || "edge_eased",
         profileLabel: edgeRoom?.edge?.profileLabel || null,

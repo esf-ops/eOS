@@ -166,6 +166,36 @@ console.log("\nsinkCutoutBaseline.test.mjs\n");
 }
 
 {
+  assert.equal(
+    publishedScopeIncludesSinkCutout({
+      roomKey: "kitchen",
+      envelopeOptions: [
+        {
+          optionKey: "qty-sink",
+          includedInBaseline: true,
+          defaultQty: 1
+        }
+      ]
+    }),
+    true
+  );
+  assert.equal(
+    publishedScopeIncludesSinkCutout({
+      roomKey: "kitchen",
+      envelopeOptions: [
+        {
+          optionKey: "qty-sink",
+          includedInBaseline: false,
+          defaultQty: 0
+        }
+      ]
+    }),
+    false
+  );
+  console.log("ok: bare qty-sink envelope option detects published cutout scope");
+}
+
+{
   assert.match(serviceSource, /publishedScopeIncludesSinkCutout/);
   assert.match(serviceSource, /sinkCutoutBaselineFlags/);
   assert.match(serviceSource, /\.\.\.cutoutBaseline/);

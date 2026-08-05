@@ -89,6 +89,54 @@ function makeStore(initialRows) {
 }
 
 {
+  // Official piece sink cutout → pricing includes cutout + fabrication.addOns freeze map.
+  const { mergePricedCutoutsIntoFabricationAddOns } = await import(
+    "../elite100EstimateStudio/elite100RoomPricingStudioAdapter.mjs"
+  );
+  const scope = stampOpenEdgeLfOntoScopeForPricing({
+    pricingBasis: "wholesale",
+    materialGroup: "Group Promo",
+    // Intentionally empty — piece openings alone must drive cutout pricing/freeze.
+    addOns: {},
+    rooms: [
+      {
+        id: "kitchen",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        included: true,
+        pieces: [
+          {
+            id: "p1",
+            name: "Island",
+            lengthIn: 96,
+            depthIn: 25.5,
+            quantity: 1,
+            included: true,
+            openEdgeLf: 10,
+            kitchenSinkCutouts: 1
+          }
+        ]
+      }
+    ]
+  });
+  assert.equal(scope.addOns?.["qty-sink"], 1, "pricing stamp syncs piece openings into addOns");
+  const calc = await calculateStudioEstimateV4({ scope, env: {} });
+  assert.equal(calc.fabrication?.addOns?.["qty-sink"], 1);
+  const cutoutRoom = (calc.elite100?.rooms || []).find(
+    (r) => (Number(r?.cutouts?.kitchenSinkQty) || 0) >= 1
+  );
+  assert.ok(cutoutRoom, "priced rooms include kitchen sink cutout qty");
+  assert.ok((Number(cutoutRoom?.cutouts?.kitchenSinkCharge) || 0) >= 200);
+  const merged = mergePricedCutoutsIntoFabricationAddOns({}, [
+    { cutouts: { kitchenSinkQty: 1, vanitySinkQty: 0, cooktopQty: 0, electricalOutletQty: 0 } }
+  ]);
+  assert.equal(merged["qty-sink"], 1);
+  const total = Number(calc.totals?.customerDisplayTotal);
+  assert.ok(Number.isFinite(total) && total > 0);
+  console.log("ok: pricing includes sink cutout when official piece openings include it");
+}
+
+{
   const empty = presentQuoteFlowPricingResult({ calculationSnapshot: null });
   assert.equal(empty.available, false);
   assert.equal(empty.estimatedTotal, null);

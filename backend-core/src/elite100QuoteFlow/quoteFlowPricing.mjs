@@ -7,7 +7,11 @@
 import { createQuoteFlowError } from "./quoteFlowErrors.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
 import { summarizeOfficialScope } from "./quoteFlowEstimatesPresenter.mjs";
-import { resolvePieceOpenEdgeLf, stampPieceOpenEdgeLf } from "./quoteFlowOpenEdge.mjs";
+import {
+  resolvePieceOpenEdgeLf,
+  stampPieceOpenEdgeLf,
+  syncPieceOpeningsIntoOfficialScopeAddOns
+} from "./quoteFlowOpenEdge.mjs";
 import {
   buildStudioV2EditablePricing,
   normalizeStudioV2PricingPatch,
@@ -46,9 +50,10 @@ const NO_SIDE_EFFECTS = Object.freeze({
  */
 export function stampOpenEdgeLfOntoScopeForPricing(scope) {
   if (!scope || typeof scope !== "object") return scope || {};
-  const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
+  const withOpenings = syncPieceOpeningsIntoOfficialScopeAddOns(scope);
+  const rooms = Array.isArray(withOpenings.rooms) ? withOpenings.rooms : [];
   return {
-    ...scope,
+    ...withOpenings,
     rooms: rooms.map((room) => {
       if (!room || typeof room !== "object") return room;
       const pieces = Array.isArray(room.pieces)

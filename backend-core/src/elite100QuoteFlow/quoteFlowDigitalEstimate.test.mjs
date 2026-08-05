@@ -582,4 +582,92 @@ function harness(customLines = []) {
   console.log("ok: QF openEdgeLf freezes as edgeLinearFeet; paid edge changes customer total; free stays +$0");
 }
 
+{
+  // Piece sink cutout with empty addOns → publish normalize + calc freeze include Kitchen sink cutout.
+  const { normalizeFabricationAddOnsForSnapshot } = await import(
+    "../digitalEstimate/configuration/roomPricingPublishSnapshot.mjs"
+  );
+  const { calculateStudioEstimateV4 } = await import(
+    "../elite100EstimateStudio/elite100RoomPricingStudioAdapter.mjs"
+  );
+  const {
+    normalizeQuoteFlowScopeForDigitalEstimatePublish
+  } = await import("./quoteFlowOpenEdge.mjs");
+  const { publishedScopeIncludesSinkCutout, sinkCutoutBaselineFlags } = await import(
+    "../digitalEstimate/configuration/sinkCutoutBaseline.mjs"
+  );
+
+  const scoped = normalizeQuoteFlowScopeForDigitalEstimatePublish({
+    pricingBasis: "wholesale",
+    materialGroup: "Group Promo",
+    addOns: {},
+    rooms: [
+      {
+        id: "kitchen",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        included: true,
+        pieces: [
+          {
+            id: "p1",
+            name: "Island",
+            lengthIn: 96,
+            depthIn: 25.5,
+            quantity: 1,
+            included: true,
+            openEdgeLf: 12,
+            kitchenSinkCutouts: 1
+          }
+        ]
+      }
+    ]
+  });
+  assert.equal(scoped.addOns?.["qty-sink"], 1, "publish normalize syncs piece cutout into addOns");
+
+  const calc = await calculateStudioEstimateV4({ scope: scoped, env: {} });
+  assert.equal(calc.fabrication?.addOns?.["qty-sink"], 1);
+
+  const fabLines = normalizeFabricationAddOnsForSnapshot(calc.fabrication.addOns, [
+    { roomId: "kitchen", roomName: "Kitchen", roomType: "Kitchen" }
+  ]);
+  assert.ok(
+    fabLines.some(
+      (l) =>
+        l.category === "sink_cutout" &&
+        /kitchen sink cutout/i.test(String(l.label || l.name || "")) &&
+        Number(l.amountCents) === 20000
+    ),
+    "published baseline freezes Kitchen sink cutout $200"
+  );
+
+  // Customer sink selection must not re-charge cutout when baseline already includes it.
+  assert.equal(
+    publishedScopeIncludesSinkCutout({
+      roomKey: "kitchen",
+      roomName: "Kitchen",
+      envelopeOptions: [
+        { optionKey: "qty-sink", includedInBaseline: true, defaultQty: 1 }
+      ],
+      publishedRoomPricing: {
+        rooms: [
+          {
+            roomId: "kitchen",
+            roomName: "Kitchen",
+            customerFacingLines: fabLines.map((l) => ({
+              category: l.category,
+              label: l.label,
+              amountCents: l.amountCents
+            }))
+          }
+        ]
+      }
+    }),
+    true
+  );
+  const flags = sinkCutoutBaselineFlags(true);
+  assert.equal(flags.customerPriceTreatment, "included");
+  assert.equal(flags.includedInBaseline, true);
+  console.log("ok: DE publish freezes sink cutout in baseline; customer sink does not duplicate cutout");
+}
+
 console.log("\nquoteFlowDigitalEstimate.test.mjs: ok\n");

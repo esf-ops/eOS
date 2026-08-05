@@ -114,15 +114,72 @@ export function stampOpenEdgeLfOnOfficialRooms(rooms) {
 }
 
 /**
+ * Aggregate piece-level openings into scope.addOns (same contract as Studio V2
+ * scope editor). Quote Flow often prices cutouts from piece openings while
+ * leaving addOns empty — DE publish freezes and envelope baseline flags need
+ * qty-sink / qty-bar / qty-cook / qty-outlet on scope.addOns.
+ *
+ * @param {object|null|undefined} scope
+ * @returns {object}
+ */
+export function syncPieceOpeningsIntoOfficialScopeAddOns(scope) {
+  if (!scope || typeof scope !== "object") return scope || {};
+  const rooms = Array.isArray(scope.rooms) ? scope.rooms : [];
+  let kitchenSink = 0;
+  let vanityBar = 0;
+  let cooktop = 0;
+  let outlet = 0;
+  let hasPieceOpenings = false;
+  for (const room of rooms) {
+    if (!room || room.included === false) continue;
+    for (const p of Array.isArray(room.pieces) ? room.pieces : []) {
+      if (!p || p.included === false || p.excluded === true) continue;
+      if (
+        p.kitchenSinkCutouts == null &&
+        p.vanityBarSinkCutouts == null &&
+        p.cooktopCutouts == null &&
+        p.outletCutouts == null &&
+        p.electricalOutletCutouts == null
+      ) {
+        continue;
+      }
+      hasPieceOpenings = true;
+      kitchenSink += Math.max(0, Math.floor(Number(p.kitchenSinkCutouts) || 0));
+      vanityBar += Math.max(0, Math.floor(Number(p.vanityBarSinkCutouts) || 0));
+      cooktop += Math.max(0, Math.floor(Number(p.cooktopCutouts) || 0));
+      outlet += Math.max(
+        0,
+        Math.floor(Number(p.outletCutouts ?? p.electricalOutletCutouts) || 0)
+      );
+    }
+  }
+  if (!hasPieceOpenings) return scope;
+  const existing =
+    scope.addOns && typeof scope.addOns === "object" ? { ...scope.addOns } : {};
+  return {
+    ...scope,
+    addOns: {
+      ...existing,
+      "qty-sink": kitchenSink,
+      "qty-bar": vanityBar,
+      "qty-cook": cooktop,
+      "qty-outlet": outlet
+    }
+  };
+}
+
+/**
  * Normalize official scope for Digital Estimate publish / freeze preview.
- * Maps Quote Flow openEdgeLf into the finishedEdge shape the working DE path uses.
+ * Maps Quote Flow openEdgeLf into the finishedEdge shape the working DE path uses,
+ * and syncs piece openings into addOns for cutout freeze / baseline parity.
  * @param {object|null|undefined} scope
  */
 export function normalizeQuoteFlowScopeForDigitalEstimatePublish(scope) {
   if (!scope || typeof scope !== "object") return scope || {};
+  const withOpenings = syncPieceOpeningsIntoOfficialScopeAddOns(scope);
   return {
-    ...scope,
-    rooms: stampOpenEdgeLfOnOfficialRooms(scope.rooms)
+    ...withOpenings,
+    rooms: stampOpenEdgeLfOnOfficialRooms(withOpenings.rooms)
   };
 }
 

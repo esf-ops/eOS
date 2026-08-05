@@ -8,7 +8,11 @@ import {
   presentQuoteFlowEstimateDetail,
   presentQuoteFlowEstimateListItem
 } from "./quoteFlowEstimatesPresenter.mjs";
-import { resolvePieceOpenEdgeLf, stampPieceOpenEdgeLf } from "./quoteFlowOpenEdge.mjs";
+import {
+  resolvePieceOpenEdgeLf,
+  stampPieceOpenEdgeLf,
+  syncPieceOpeningsIntoOfficialScopeAddOns
+} from "./quoteFlowOpenEdge.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
 import { markQuoteFlowReviewStaleOnScope } from "./quoteFlowReviewMeta.mjs";
 import { selectOfficialQuoteFlowLibraryRows } from "./quoteFlowLibraryRows.mjs";
@@ -306,8 +310,21 @@ export function createQuoteFlowEstimatesService(deps = {}) {
       quoteFlowScopeEdited: true,
       quoteFlowManualEdits: true
     };
+    let addOnsSyncedFromPieces = false;
     if (addOnsProvided) {
       scopePatch.addOns = scopeBody.addOns;
+    } else {
+      // Match Studio V2: piece openings are authoritative for cutout addOns.
+      const synced = syncPieceOpeningsIntoOfficialScopeAddOns({
+        ...(existing.scope && typeof existing.scope === "object" ? existing.scope : {}),
+        rooms
+      });
+      if (synced.addOns && typeof synced.addOns === "object") {
+        scopePatch.addOns = synced.addOns;
+        const priorAddOns = JSON.stringify(existing.scope?.addOns || {});
+        const nextAddOns = JSON.stringify(synced.addOns || {});
+        addOnsSyncedFromPieces = priorAddOns !== nextAddOns;
+      }
     }
     if (displayName) {
       scopePatch.projectName = displayName.slice(0, 200);
@@ -325,7 +342,8 @@ export function createQuoteFlowEstimatesService(deps = {}) {
       scopePatch.quoteFlowDigitalEstimate = withReviewMeta.quoteFlowDigitalEstimate;
     }
 
-    const unchangedPayload = priorFp === nextFp && !nameChanged && !addOnsProvided;
+    const unchangedPayload =
+      priorFp === nextFp && !nameChanged && !addOnsProvided && !addOnsSyncedFromPieces;
     let updated;
     if (unchangedPayload && existing.scope?.quoteFlowScopeEdited === true) {
       // Idempotent no-op: same rooms already persisted after an Estimates edit.

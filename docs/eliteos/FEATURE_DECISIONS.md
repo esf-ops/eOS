@@ -4048,4 +4048,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Pricing formulas, Review/DE publish gates, acceptance/sold/handoff/email, internal-only line exclusion / economics totals, `app-digital-estimate` UX. |
 | **Revisit trigger** | Staff accept / apply customer selections into official scope; sold/handoff. |
 | **Note** | Public Digital Estimate may still expose Accept Estimate separately; this slice does not wire acceptance into Quote Flow. |
+
+### 300. Elite 100 Quote Flow — sink cutout in published baseline + Activity UI cleanup (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `main` |
+| **Decision** | When official scope includes sink cutout (piece openings and/or `qty-sink`), Quote Flow pricing and Digital Estimate publish must freeze that cutout into the published Original baseline so customer sink selection does not re-add “Kitchen sink cutout +$200”. Match Studio V2: sync piece openings → `scope.addOns`, and set `calculationSnapshot.fabrication.addOns` from priced cutout quantities. Harden `publishedScopeIncludesSinkCutout` for bare `qty-sink` envelope options. Clean Activity status cards / Customer selections panel layout (no overlap). No sold/handoff/job/email; no pricing formula rate changes. |
+| **Why** | QF often priced cutouts from piece openings while leaving `scope.addOns` empty; DE freeze only read `fabrication.addOns` copied from empty addOns, so Original omitted the cutout and live DE charged it again. |
+| **Impacted** | `elite100RoomPricingStudioAdapter.mjs` (`mergePricedCutoutsIntoFabricationAddOns`), `quoteFlowOpenEdge.mjs` / pricing / estimates scope sync, `sinkCutoutBaseline.mjs`, Activity panel CSS/UI, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Cutout unit rates ($200 kitchen), DE selection formulas, acceptance/sold/handoff/email, internal-only exclusion. |
+| **Revisit trigger** | Staff apply-customer-selections into official scope. |
 |

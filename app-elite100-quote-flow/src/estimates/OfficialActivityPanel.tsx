@@ -52,6 +52,41 @@ function deltaMoney(v: unknown): string {
   return n > 0 ? `+${abs}` : `−${abs.replace("$", "")}`;
 }
 
+function selectionBadge(key: string | undefined, needsStaffReview: boolean): {
+  label: string;
+  tone: "warn" | "ok" | "muted";
+} {
+  if (needsStaffReview || key === "needs_staff_review") {
+    return { label: "Needs staff review", tone: "warn" };
+  }
+  if (key === "selections_submitted") return { label: "Submitted", tone: "ok" };
+  if (key === "selections_saved") return { label: "Saved", tone: "ok" };
+  if (key === "link_opened") return { label: "No changes", tone: "muted" };
+  if (key === "none" || key === "not_tracked" || key === "not_published") {
+    return { label: "No changes", tone: "muted" };
+  }
+  return { label: "No changes", tone: "muted" };
+}
+
+function StatusCard(props: {
+  label: string;
+  value: string;
+  helper?: string | null;
+  warn?: boolean;
+  testId?: string;
+}) {
+  return (
+    <div
+      className={`qf-activity__status-card${props.warn ? " is-warn" : ""}`}
+      data-testid={props.testId}
+    >
+      <span className="qf-activity__status-label">{props.label}</span>
+      <span className="qf-activity__status-value">{props.value}</span>
+      {props.helper ? <span className="qf-activity__status-helper">{props.helper}</span> : null}
+    </div>
+  );
+}
+
 export default function OfficialActivityPanel(props: Props) {
   const { authToken, estimateId, disabled = false } = props;
   const [loading, setLoading] = useState(true);
@@ -133,10 +168,13 @@ export default function OfficialActivityPanel(props: Props) {
   const needsStaffReview = Boolean(
     summary?.needsStaffReview || payload?.customerSelections?.needsStaffReview
   );
+  const selectionStatusKey =
+    payload?.customerSelections?.key || summary?.customerSelections?.key || "none";
   const selectionStatusLabel =
     payload?.customerSelections?.label ||
     summary?.customerSelections?.label ||
     "No customer selections yet";
+  const badge = selectionBadge(selectionStatusKey, needsStaffReview);
 
   return (
     <section className="qf-review qf-activity" data-testid="qf-official-activity-panel">
@@ -165,72 +203,82 @@ export default function OfficialActivityPanel(props: Props) {
 
       {summary ? (
         <div className="qf-activity__summary" data-testid="qf-activity-summary">
-          <div className="qf-activity__card">
-            <span className="qf-stat__label">Official estimate</span>
-            <span className="qf-stat__value">{summary.officialStatus?.label || "—"}</span>
-          </div>
-          <div className="qf-activity__card">
-            <span className="qf-stat__label">Review</span>
-            <span className="qf-stat__value">{summary.reviewStatus?.label || "—"}</span>
-          </div>
-          <div className="qf-activity__card">
-            <span className="qf-stat__label">Digital Estimate</span>
-            <span className="qf-stat__value">{summary.publishStatus?.label || "—"}</span>
-          </div>
-          <div className="qf-activity__card">
-            <span className="qf-stat__label">Customer link</span>
-            <span className="qf-stat__value">
-              {summary.customerLinkAvailable ? "Available" : "Not available"}
-            </span>
-          </div>
-          <div className="qf-activity__card" data-testid="qf-activity-customer-status">
-            <span className="qf-stat__label">Customer selection status</span>
-            <span className="qf-stat__value">{selectionStatusLabel}</span>
-          </div>
-          <div className="qf-activity__card" data-testid="qf-activity-customer-selected-total">
-            <span className="qf-stat__label">Customer selected total</span>
-            <span className="qf-stat__value">{money(customerTotal)}</span>
-          </div>
-          <div className="qf-activity__card" data-testid="qf-activity-published-total">
-            <span className="qf-stat__label">Published estimate total</span>
-            <span className="qf-stat__value">{money(publishedTotal)}</span>
-          </div>
-          <div className="qf-activity__card" data-testid="qf-activity-selection-difference">
-            <span className="qf-stat__label">Difference from published</span>
-            <span className="qf-stat__value">{deltaMoney(difference)}</span>
-          </div>
+          <StatusCard
+            label="Official estimate"
+            value={summary.officialStatus?.label || "—"}
+          />
+          <StatusCard label="Review" value={summary.reviewStatus?.label || "—"} />
+          <StatusCard
+            label="Digital Estimate"
+            value={summary.publishStatus?.label || "—"}
+          />
+          <StatusCard
+            label="Customer link"
+            value={summary.customerLinkAvailable ? "Available" : "Not available"}
+            helper={summary.customerLinkAvailable ? "Open or copy from the link section below." : null}
+          />
+          <StatusCard
+            label="Customer selection status"
+            value={selectionStatusLabel}
+            helper={payload?.customerSelections?.detail || null}
+            warn={needsStaffReview}
+            testId="qf-activity-customer-status"
+          />
+          <StatusCard
+            label="Published estimate total"
+            value={money(publishedTotal)}
+            testId="qf-activity-published-total"
+          />
+          <StatusCard
+            label="Customer selected total"
+            value={money(customerTotal)}
+            testId="qf-activity-customer-selected-total"
+          />
+          <StatusCard
+            label="Difference from published"
+            value={deltaMoney(difference)}
+            warn={difference != null && Math.abs(Number(difference)) >= 0.005}
+            testId="qf-activity-selection-difference"
+          />
           {needsStaffReview || summary.customerChangesReceived ? (
-            <div className="qf-activity__card is-warn" data-testid="qf-activity-needs-staff-review">
-              <span className="qf-stat__label">Staff attention</span>
-              <span className="qf-stat__value">
-                {[
-                  summary.customerChangesReceived ? "Customer changes received" : null,
-                  needsStaffReview ? "Needs staff review" : null,
-                  summary.needsRereview ? "Needs re-review" : null,
-                  summary.needsRepublish ? "Needs republish" : null
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "—"}
-              </span>
-            </div>
+            <StatusCard
+              label="Staff attention"
+              value={[
+                summary.customerChangesReceived ? "Customer changes received" : null,
+                needsStaffReview ? "Needs staff review" : null,
+                summary.needsRereview ? "Needs re-review" : null,
+                summary.needsRepublish ? "Needs republish" : null
+              ]
+                .filter(Boolean)
+                .join(" · ") || "—"}
+              warn
+              testId="qf-activity-needs-staff-review"
+            />
           ) : summary.needsRereview || summary.needsRepublish ? (
-            <div className="qf-activity__card is-warn">
-              <span className="qf-stat__label">Attention</span>
-              <span className="qf-stat__value">
-                {[
-                  summary.needsRereview ? "Needs re-review" : null,
-                  summary.needsRepublish ? "Needs republish" : null
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </div>
+            <StatusCard
+              label="Attention"
+              value={[
+                summary.needsRereview ? "Needs re-review" : null,
+                summary.needsRepublish ? "Needs republish" : null
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              warn
+            />
           ) : null}
         </div>
       ) : null}
 
-      <div className="qf-activity__selections" data-testid="qf-activity-customer-selections">
-        <h3>Customer selections</h3>
+      <div className="qf-activity__selections-panel" data-testid="qf-activity-customer-selections">
+        <div className="qf-activity__selections-head">
+          <h3>Customer selections</h3>
+          <span
+            className={`qf-activity__badge qf-activity__badge--${badge.tone}`}
+            data-testid="qf-activity-selection-badge"
+          >
+            {badge.label}
+          </span>
+        </div>
         <p className="qf-muted" data-testid="qf-activity-selection-status-detail">
           {payload?.customerSelections?.detail || selectionStatusLabel}
         </p>
@@ -252,17 +300,17 @@ export default function OfficialActivityPanel(props: Props) {
         ) : null}
 
         <div className="qf-activity__totals" data-testid="qf-activity-selection-totals">
-          <div>
-            <span className="qf-stat__label">Published customer total</span>
-            <span className="qf-stat__value">{money(publishedTotal)}</span>
+          <div className="qf-activity__total-card">
+            <span className="qf-activity__status-label">Published customer total</span>
+            <span className="qf-activity__status-value">{money(publishedTotal)}</span>
           </div>
-          <div>
-            <span className="qf-stat__label">Customer-selected total</span>
-            <span className="qf-stat__value">{money(customerTotal)}</span>
+          <div className="qf-activity__total-card">
+            <span className="qf-activity__status-label">Customer-selected total</span>
+            <span className="qf-activity__status-value">{money(customerTotal)}</span>
           </div>
-          <div>
-            <span className="qf-stat__label">Difference</span>
-            <span className="qf-stat__value">{deltaMoney(difference)}</span>
+          <div className="qf-activity__total-card">
+            <span className="qf-activity__status-label">Difference</span>
+            <span className="qf-activity__status-value">{deltaMoney(difference)}</span>
           </div>
         </div>
 
@@ -280,21 +328,27 @@ export default function OfficialActivityPanel(props: Props) {
                 </tr>
               </thead>
               <tbody>
-                {comparisonRows.map((row, idx) => (
-                  <tr
-                    key={`${row.category}-${row.customerSelection}-${idx}`}
-                    data-testid="qf-activity-comparison-row"
-                  >
-                    <td>
-                      {row.room ? `${row.room} · ` : ""}
-                      {row.category || "Selection"}
-                    </td>
-                    <td>{row.publishedSelection || "—"}</td>
-                    <td>{row.customerSelection || "—"}</td>
-                    <td>{deltaMoney(row.priceDelta)}</td>
-                    <td>{row.status || "—"}</td>
-                  </tr>
-                ))}
+                {comparisonRows.map((row, idx) => {
+                  const changed =
+                    String(row.publishedSelection || "") !== String(row.customerSelection || "") ||
+                    (row.priceDelta != null && Math.abs(Number(row.priceDelta)) >= 0.005);
+                  return (
+                    <tr
+                      key={`${row.category}-${row.customerSelection}-${idx}`}
+                      className={changed ? "is-changed" : undefined}
+                      data-testid="qf-activity-comparison-row"
+                    >
+                      <td>
+                        {row.room ? `${row.room} · ` : ""}
+                        {row.category || "Selection"}
+                      </td>
+                      <td>{row.publishedSelection || "—"}</td>
+                      <td>{row.customerSelection || "—"}</td>
+                      <td>{deltaMoney(row.priceDelta)}</td>
+                      <td>{row.status || "—"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

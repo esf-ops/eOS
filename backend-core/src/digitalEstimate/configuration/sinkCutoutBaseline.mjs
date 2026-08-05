@@ -21,6 +21,12 @@ export function publishedScopeIncludesSinkCutout(args) {
 
   for (const opt of args?.envelopeOptions || []) {
     const key = String(opt?.option_key || opt?.optionKey || "");
+    // Bare fabrication cutout options seeded from scope.addOns at publish.
+    if (key === "qty-sink" || key === "qty-bar" || key.startsWith(`qty-sink:`) || key.startsWith(`qty-bar:`)) {
+      const included = Boolean(opt?.included_in_baseline ?? opt?.includedInBaseline);
+      const defaultQty = Number(opt?.default_qty ?? opt?.defaultQty ?? 0);
+      if (included || defaultQty > 0) return true;
+    }
     if (!key.startsWith(`sink:${roomKey}:`)) continue;
     const mode = key.split(":")[2] || "";
     if (mode !== "customer_provided" && mode !== "customer" && mode !== "stock") continue;

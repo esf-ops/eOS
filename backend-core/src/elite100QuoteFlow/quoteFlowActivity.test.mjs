@@ -483,6 +483,79 @@ function edgeChangeSelectionReview({ reviewRequested = true } = {}) {
 }
 
 {
+  // Baseline already includes Kitchen sink cutout → Activity comparison must not
+  // treat cutout as a new customer-added charge (product delta may still appear).
+  const review = buildStudioCustomerSelectionReview({
+    selection: {
+      id: randomUUID(),
+      selection_payload_json: mergeSelectionPayloadMeta(
+        { "sink:kitchen:esf:demo-sink": 1 },
+        {
+          customerConfiguration: finalizeCustomerConfigurationFoundation({
+            lastSavedAt: "2026-08-04T19:00:00.000Z"
+          })
+        }
+      ),
+      created_at: "2026-08-04T19:00:00.000Z"
+    },
+    calculation: {
+      id: randomUUID(),
+      baseline_total: 4510,
+      configured_total: 5085,
+      customer_result_json: {
+        publishedBaselineTotal: 4510,
+        pricedSelectionTotal: 5085,
+        configuredDisplayTotal: 5085,
+        displayTotalDelta: 575,
+        pricingAuthority: "authoritative_backend_reprice",
+        roomPricingChanges: {
+          totalDelta: 575,
+          rows: [
+            {
+              roomName: "Kitchen",
+              category: "sink",
+              categoryLabel: "Sink",
+              originalLabel: "Customer-provided sink",
+              updatedLabel: "ESF Demo Sink",
+              amountDelta: 575,
+              status: "changed"
+            }
+            // Intentionally no Kitchen sink cutout new_selection — baseline already had it.
+          ]
+        }
+      }
+    },
+    rooms: [{ id: "kitchen", name: "Kitchen", roomKey: "kitchen" }],
+    publicationId: PUB_ID,
+    envelopeId: ENV_ID,
+    reviewRequested: true
+  });
+  assert.equal(
+    review.selectionComparison.rows.some((r) => /sink cutout/i.test(String(r.customerSelection || ""))),
+    false
+  );
+  assert.ok(
+    review.selectionComparison.rows.some(
+      (r) =>
+        /sink/i.test(String(r.category || "")) &&
+        /ESF Demo Sink/i.test(String(r.customerSelection || ""))
+    )
+  );
+  const activity = buildQuoteFlowActivityPayload(scopedRow(EST_R2, 2), {
+    selectionReview: review,
+    activePublication: { id: PUB_ID, customerUrl: "http://localhost:5190/e/token-2" },
+    organizationId: ORG
+  });
+  assert.equal(
+    (activity.selectionReview?.selectionComparison?.rows || []).some((r) =>
+      /kitchen sink cutout/i.test(String(r.customerSelection || r.publishedSelection || ""))
+    ),
+    false
+  );
+  console.log("ok: customer sink product delta allowed; baseline sink cutout not shown as new");
+}
+
+{
   const src = readFileSync(join(__dirname, "quoteFlowActivity.mjs"), "utf8");
   assert.match(src, /buildStudioCustomerSelectionReview|loadQuoteFlowCustomerSelectionReview/);
   assert.doesNotMatch(src, /markSold|finalAcceptance|sendEmail|notifyCustomer/i);
