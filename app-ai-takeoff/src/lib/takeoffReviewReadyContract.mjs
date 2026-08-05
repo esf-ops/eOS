@@ -68,6 +68,100 @@ export function summarizeTakeoffDraftForReady(draft) {
 }
 
 /**
+ * Resolve open/exposed edge LF from a takeoff run / piece for Set Scope payloads.
+ * @param {object|null|undefined} run
+ */
+export function resolveRunOpenEdgeLf(run) {
+  if (!run || typeof run !== "object") return 0;
+  const candidates = [
+    run.openEdgeLf,
+    run.exposedEdgeLf,
+    run.exposedEdgeLinearFeet,
+    run.openEdgeLinearFeet,
+    run.edgeLinearFeet,
+    run.edgeLf,
+    run.finishedEdgeLf
+  ];
+  for (const c of candidates) {
+    if (c == null || c === "") continue;
+    const n = Number(c);
+    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+  }
+  const fe = run.finishedEdge;
+  if (fe && typeof fe === "object") {
+    const totalIn = Number(fe.totalFinishedEdgeLengthIn);
+    if (Number.isFinite(totalIn) && totalIn >= 0) {
+      return Math.round((totalIn / 12) * 100) / 100;
+    }
+    const lfAlias = Number(fe.totalFinishedEdgeLengthLf ?? fe.linearFeet);
+    if (Number.isFinite(lfAlias) && lfAlias >= 0) {
+      return Math.round(lfAlias * 100) / 100;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Stamp canonical openEdgeLf onto every run before Quote Flow Set Scope postMessage.
+ * Preserves finishedEdge and other legacy fields.
+ * @param {object|null|undefined} draft
+ */
+export function stampOpenEdgeLfOnTakeoffDraft(draft) {
+  if (!draft || typeof draft !== "object") return draft;
+  const rooms = Array.isArray(draft.rooms) ? draft.rooms : [];
+  return {
+    ...draft,
+    rooms: rooms.map((room) => {
+      if (!room || typeof room !== "object") return room;
+      const areas = Array.isArray(room.areas) ? room.areas : [];
+      return {
+        ...room,
+        areas: areas.map((area) => {
+          if (!area || typeof area !== "object") return area;
+          const runs = Array.isArray(area.runs) ? area.runs : [];
+          return {
+            ...area,
+            runs: runs.map((run) => {
+              if (!run || typeof run !== "object") return run;
+              const openEdgeLf = resolveRunOpenEdgeLf(run);
+              const fe =
+                run.finishedEdge && typeof run.finishedEdge === "object"
+                  ? { ...run.finishedEdge }
+                  : null;
+              return {
+                ...run,
+                openEdgeLf,
+                finishedEdgeLf: openEdgeLf,
+                exposedEdgeLf: openEdgeLf,
+                ...(fe
+                  ? {
+                      finishedEdge: {
+                        ...fe,
+                        totalFinishedEdgeLengthIn:
+                          Number.isFinite(Number(fe.totalFinishedEdgeLengthIn)) &&
+                          Number(fe.totalFinishedEdgeLengthIn) >= 0
+                            ? Number(fe.totalFinishedEdgeLengthIn)
+                            : Math.round(openEdgeLf * 12 * 100) / 100
+                      }
+                    }
+                  : openEdgeLf > 0
+                    ? {
+                        finishedEdge: {
+                          totalFinishedEdgeLengthIn: Math.round(openEdgeLf * 12 * 100) / 100,
+                          source: "quote_flow_set_scope"
+                        }
+                      }
+                    : {})
+              };
+            })
+          };
+        })
+      };
+    })
+  };
+}
+
+/**
  * Resolve postMessage target origin for parent Estimate Studio.
  * @param {{ localReview?: boolean }} [opts]
  */

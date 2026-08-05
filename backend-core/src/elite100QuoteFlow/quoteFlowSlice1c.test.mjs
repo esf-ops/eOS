@@ -591,6 +591,350 @@ function queueRow(overrides = {}) {
 }
 
 {
+  // Open edge LF carry-forward: AI Set Scope stamps canonical piece.openEdgeLf.
+  const {
+    resolvePieceOpenEdgeLf,
+    stampPieceOpenEdgeLf,
+    applyTakeoffOpenEdgeLfToOfficialRooms,
+    stampOpenEdgeLfOnTakeoffResult
+  } = await import("./quoteFlowOpenEdge.mjs");
+  const { summarizeOfficialScope } = await import("./quoteFlowEstimatesPresenter.mjs");
+  const { seedScopeFromTakeoffPayload } = await import(
+    "../elite100EstimateStudio/studioEstimateService.mjs"
+  );
+  const { buildTakeoffImportPayload } = await import("../takeoff/takeoffImportPayload.mjs");
+
+  assert.equal(resolvePieceOpenEdgeLf({ openEdgeLf: 8.5 }), 8.5);
+  assert.equal(resolvePieceOpenEdgeLf({ exposedEdgeLf: 4 }), 4);
+  assert.equal(
+    resolvePieceOpenEdgeLf({ finishedEdge: { totalFinishedEdgeLengthIn: 36 } }),
+    3
+  );
+  assert.equal(resolvePieceOpenEdgeLf({}), 0);
+  assert.equal(resolvePieceOpenEdgeLf({ openEdgeLf: "", exposedEdgeLf: null }), 0);
+  assert.equal(Number.isNaN(resolvePieceOpenEdgeLf({ openEdgeLf: "nope" })), false);
+  assert.equal(stampPieceOpenEdgeLf({ name: "A" }).openEdgeLf, 0);
+  assert.equal(stampPieceOpenEdgeLf({ name: "A", exposedEdgeLf: 7 }).openEdgeLf, 7);
+  assert.equal(stampPieceOpenEdgeLf({ name: "A", exposedEdgeLf: 7 }).finishedEdgeLf, 7);
+  console.log("ok: openEdgeLf resolve/stamp defaults blank to 0, never NaN");
+
+  const takeoffWithOpen = {
+    rooms: [
+      {
+        id: "r1",
+        name: "Kitchen",
+        areas: [
+          {
+            id: "a1",
+            label: "Main",
+            runs: [
+              {
+                id: "run-island",
+                label: "Island",
+                lengthIn: 96,
+                depthIn: 25.5,
+                included: true,
+                openEdgeLf: 12.25
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+  const stampedDraft = stampOpenEdgeLfOnTakeoffResult({
+    rooms: [
+      {
+        id: "r1",
+        name: "Kitchen",
+        areas: [
+          {
+            id: "a1",
+            runs: [
+              {
+                id: "run-island",
+                label: "Island",
+                lengthIn: 96,
+                depthIn: 25.5,
+                included: true,
+                finishedEdge: { totalFinishedEdgeLengthIn: 147, approved: true }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  });
+  assert.equal(stampedDraft.rooms[0].areas[0].runs[0].openEdgeLf, 12.25);
+  console.log("ok: takeoff draft stamp carries finishedEdge inches → openEdgeLf");
+
+  const officialFromExposed = applyTakeoffOpenEdgeLfToOfficialRooms(
+    [
+      {
+        id: "r1",
+        name: "Kitchen",
+        included: true,
+        pieces: [{ id: "run-island", name: "Island", takeoffRunId: "run-island", lengthIn: 96, depthIn: 25.5, quantity: 1, included: true }]
+      }
+    ],
+    {
+      rooms: [
+        {
+          areas: [
+            {
+              runs: [
+                {
+                  id: "run-island",
+                  label: "Island",
+                  included: true,
+                  exposedEdgeLf: 9.5
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  );
+  assert.equal(officialFromExposed[0].pieces[0].openEdgeLf, 9.5);
+  console.log("ok: exposedEdgeLf from takeoff carries into official openEdgeLf");
+
+  const fromInches = applyTakeoffOpenEdgeLfToOfficialRooms(
+    [
+      {
+        id: "r1",
+        included: true,
+        pieces: [{ id: "p1", name: "Island", takeoffRunId: "run1", lengthIn: 96, depthIn: 25.5, included: true }]
+      }
+    ],
+    {
+      rooms: [
+        {
+          areas: [
+            {
+              runs: [
+                {
+                  id: "run1",
+                  label: "Island",
+                  included: true,
+                  finishedEdge: { totalFinishedEdgeLengthIn: 120 }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  );
+  assert.equal(fromInches[0].pieces[0].openEdgeLf, 10);
+  console.log("ok: finishedEdge.totalFinishedEdgeLengthIn converts inches → LF");
+
+  // seedScopeFromTakeoffPayload now writes canonical openEdgeLf
+  const payload = buildTakeoffImportPayload({
+    takeoffJobId: JOB,
+    takeoffResultId: "res-edge",
+    takeoffResult: {
+      schemaVersion: "1.0",
+      status: "approved",
+      rooms: [
+        {
+          id: "r1",
+          name: "Kitchen",
+          roomType: "Kitchen",
+          areas: [
+            {
+              id: "a1",
+              label: "Main",
+              runs: [
+                {
+                  id: "run1",
+                  label: "Island",
+                  lengthIn: 96,
+                  depthIn: 25.5,
+                  pieceType: "counter",
+                  included: true,
+                  finishedEdge: {
+                    approved: true,
+                    finishedEdgeConfirmed: true,
+                    totalFinishedEdgeLengthIn: 147,
+                    frontEdgeLengthIn: 96
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    requireApproved: false,
+    reviewStatus: "approved",
+    ignoreApprovalGateBlockers: true
+  });
+  const seeded = seedScopeFromTakeoffPayload(payload, { projectName: "Edge Job" });
+  assert.equal(seeded.rooms[0].pieces[0].openEdgeLf, 12.25);
+  assert.equal(seeded.rooms[0].pieces[0].finishedEdgeLf, 12.25);
+  assert.equal(summarizeOfficialScope(seeded).openEdgeLf, 12.25);
+  console.log("ok: seedScopeFromTakeoffPayload writes canonical openEdgeLf");
+
+  // End-to-end Set Scope with dirty review payload including openEdgeLf
+  const estimatesByCase = new Map();
+  let approveCalls = 0;
+  let updateScopeCalls = 0;
+  const edgeJob = "22222222-2222-4222-8222-222222222227";
+  const edgeCase = "case-edge-lf";
+  const rows = [
+    queueRow({
+      id: edgeCase,
+      takeoffJobId: edgeJob,
+      takeoffReviewStatus: "needs_review"
+    })
+  ];
+  const studioEstimateService = {
+    repository: {
+      async getActiveByIntakeCase(_org, caseId) {
+        return estimatesByCase.get(String(caseId)) || null;
+      }
+    },
+    async getOrCreateForCase({ intakeCaseId, takeoffJobId }) {
+      const created = {
+        id: `est-${intakeCaseId}`,
+        status: "draft",
+        intakeCaseId,
+        takeoffJobId,
+        scope: { rooms: [] }
+      };
+      estimatesByCase.set(String(intakeCaseId), created);
+      return created;
+    },
+    async refreshScopeFromTakeoff({ estimateId }) {
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          // Seeded without openEdgeLf (historical drop) — Set Scope must stamp it.
+          const next = {
+            ...est,
+            status: "ready_to_price",
+            scope: {
+              rooms: [
+                {
+                  id: "r1",
+                  name: "Kitchen",
+                  included: true,
+                  pieces: [
+                    {
+                      id: "p1",
+                      name: "Island",
+                      takeoffRunId: "run-island",
+                      lengthIn: 96,
+                      depthIn: 25.5,
+                      quantity: 1,
+                      included: true,
+                      finishedEdge: { totalFinishedEdgeLengthIn: 147, approved: true }
+                    }
+                  ]
+                }
+              ]
+            }
+          };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    },
+    async updateScope({ estimateId, body }) {
+      updateScopeCalls += 1;
+      for (const [caseId, est] of estimatesByCase.entries()) {
+        if (est.id === estimateId) {
+          const patch = body?.scope && typeof body.scope === "object" ? body.scope : {};
+          const next = {
+            ...est,
+            scope: { ...(est.scope || {}), ...patch, rooms: patch.rooms || est.scope?.rooms }
+          };
+          estimatesByCase.set(caseId, next);
+          return { estimate: next };
+        }
+      }
+      return { estimate: null };
+    }
+  };
+  const svc = createQuoteFlowSetScopeService({
+    queueService: { async listQueue() { return { cases: rows }; } },
+    estimateRepository: studioEstimateService.repository,
+    studioEstimateService,
+    approveAndBuildEstimate: async (args) => {
+      approveCalls += 1;
+      assert.equal(args.takeoffResult?.rooms?.[0]?.areas?.[0]?.runs?.[0]?.openEdgeLf, 12.25);
+      return { reviewStatus: "approved", takeoffJobId: edgeJob };
+    },
+    reopenTakeoffJobForMeasurementRevision: async () => ({ ok: true }),
+    getSupabase: () => ({})
+  });
+  const dirtyTakeoff = {
+    rooms: [
+      {
+        id: "r1",
+        name: "Kitchen",
+        areas: [
+          {
+            id: "a1",
+            runs: [
+              {
+                id: "run-island",
+                label: "Island",
+                lengthIn: 96,
+                depthIn: 25.5,
+                included: true,
+                openEdgeLf: 12.25,
+                finishedEdge: { totalFinishedEdgeLengthIn: 147, approved: true }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+  const res = await svc.setScope({
+    organizationId: ORG,
+    takeoffJobId: edgeJob,
+    confirm: true,
+    takeoffResult: dirtyTakeoff,
+    reviewState: { excludedRunIds: [] },
+    projectName: "Edge Carry Job"
+  });
+  assert.equal(res.ok, true);
+  assert.equal(approveCalls, 1);
+  assert.ok(updateScopeCalls >= 1, "openEdgeLf stamp persisted via updateScope");
+  const scoped = estimatesByCase.get(edgeCase);
+  assert.equal(scoped.scope.rooms[0].pieces[0].openEdgeLf, 12.25);
+  assert.equal(summarizeOfficialScope(scoped.scope).openEdgeLf, 12.25);
+  console.log("ok: dirty Set Scope with openEdgeLf saves + stamps official scope");
+
+  // Manual scope preserves openEdgeLf through normalize
+  const { validateAndNormalizeOfficialScopeRooms } = await import("./quoteFlowEstimates.mjs");
+  const manual = validateAndNormalizeOfficialScopeRooms([
+    {
+      id: "r1",
+      name: "Bath",
+      included: true,
+      pieces: [
+        {
+          id: "p1",
+          name: "Vanity",
+          lengthIn: 60,
+          depthIn: 22,
+          quantity: 1,
+          included: true,
+          openEdgeLf: 5.5
+        }
+      ]
+    }
+  ]);
+  assert.equal(manual[0].pieces[0].openEdgeLf, 5.5);
+  assert.equal(manual[0].pieces[0].finishedEdgeLf, 5.5);
+  console.log("ok: manual scope openEdgeLf preserved by normalize");
+}
+
+{
   const ui = readFileSync(
     join(root, "app-elite100-quote-flow/src/queue/EstimateQueuePage.tsx"),
     "utf8"
@@ -617,6 +961,7 @@ function queueRow(overrides = {}) {
   assert.match(takeoffUi, /QUOTE_FLOW_TRIGGER_SET_SCOPE|eliteos-quote-flow-trigger-set-scope/);
   assert.match(takeoffUi, /data-testid="ctr-quote-flow-set-scope"/);
   assert.match(takeoffUi, /reopenIfApproved:\s*quoteFlowSetScope/);
+  assert.match(takeoffUi, /stampOpenEdgeLfOnTakeoffDraft/);
   // Save Draft must not render in quoteFlowSetScope footer (gated behind !quoteFlowSetScope).
   const saveDraftBlock = takeoffUi.slice(
     takeoffUi.indexOf('data-testid="ctr-add-piece"'),
@@ -629,7 +974,14 @@ function queueRow(overrides = {}) {
     takeoffUi.slice(takeoffUi.indexOf("quoteFlowSetScope ? ("), takeoffUi.indexOf("ctr-quote-flow-set-scope") + 80),
     /Use these measurements/
   );
-  console.log("ok: UI footer Set Scope; Save Draft hidden in Quote Flow mode");
+  const contract = readFileSync(
+    join(root, "app-ai-takeoff/src/lib/takeoffReviewReadyContract.mjs"),
+    "utf8"
+  );
+  assert.match(contract, /stampOpenEdgeLfOnTakeoffDraft/);
+  assert.match(contract, /resolveRunOpenEdgeLf/);
+  assert.match(contract, /openEdgeLf/);
+  console.log("ok: UI footer Set Scope; Save Draft hidden; openEdgeLf in Set Scope payload contract");
 }
 
 console.log("\nquoteFlowSlice1c.test.mjs: ok\n");

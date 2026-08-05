@@ -5,6 +5,9 @@
  */
 
 import { createQuoteFlowError } from "./quoteFlowErrors.mjs";
+import {
+  applyTakeoffOpenEdgeLfToOfficialRooms
+} from "./quoteFlowOpenEdge.mjs";
 import { validateAndNormalizeOfficialScopeRooms } from "./quoteFlowEstimates.mjs";
 import {
   groupQuoteFlowQueueItems,
@@ -511,6 +514,68 @@ export function createQuoteFlowSetScopeService(deps) {
     });
     let estimate = refreshed?.estimate || refreshed;
     estimate = { ...estimate, id: estimate?.id || estimateId };
+
+    // Carry open/exposed edge LF from reviewed takeoff → canonical piece.openEdgeLf.
+    // refreshScopeFromTakeoff/seed preserves finishedEdge but historically omitted openEdgeLf.
+    const priorRooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
+    if (priorRooms.length > 0) {
+      const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(priorRooms, takeoffResult);
+      const normalizedEdgeRooms = validateAndNormalizeOfficialScopeRooms(edgedRooms);
+      if (studioEstimateService?.updateScope) {
+        try {
+          const updated = await studioEstimateService.updateScope({
+            organizationId,
+            estimateId: estimate.id,
+            actorUserId,
+            body: {
+              scope: {
+                rooms: normalizedEdgeRooms,
+                ...(estimate.scope?.source != null ? { source: estimate.scope.source } : {}),
+                ...(estimate.scope?.physicalScopeSource != null
+                  ? { physicalScopeSource: estimate.scope.physicalScopeSource }
+                  : { physicalScopeSource: "takeoff" })
+              }
+            }
+          });
+          const next = updated?.estimate || updated;
+          if (next) {
+            estimate = {
+              ...next,
+              id: next.id || estimate.id,
+              scope: {
+                ...(next.scope || {}),
+                rooms: Array.isArray(next.scope?.rooms) ? next.scope.rooms : normalizedEdgeRooms
+              }
+            };
+          } else {
+            estimate = {
+              ...estimate,
+              scope: {
+                ...(estimate.scope || {}),
+                rooms: normalizedEdgeRooms
+              }
+            };
+          }
+        } catch {
+          estimate = {
+            ...estimate,
+            scope: {
+              ...(estimate.scope || {}),
+              rooms: normalizedEdgeRooms
+            }
+          };
+        }
+      } else {
+        estimate = {
+          ...estimate,
+          scope: {
+            ...(estimate.scope || {}),
+            rooms: normalizedEdgeRooms
+          }
+        };
+      }
+    }
+
     if (displayName) {
       estimate = await applyEstimateDisplayName({
         organizationId,
