@@ -1,5 +1,5 @@
 /**
- * Quote Flow Estimate Queue UI — Scope Creation Queue contracts.
+ * Quote Flow Estimate Queue UI — command-center + estimate name contracts.
  * Run: node app-elite100-quote-flow/src/queue/quoteFlowQueue.ui.test.mjs
  */
 import assert from "node:assert/strict";
@@ -7,8 +7,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  filterQueueItems,
   groupQueueItems,
+  resolveDefaultEstimateName,
   resolveQueueCustomer,
+  resolveQueueSubtitle,
   resolveQueueTitle
 } from "../lib/queueGrouping.mjs";
 
@@ -24,6 +27,8 @@ const app = readFileSync(join(appRoot, "src/QuoteFlowApp.tsx"), "utf8");
 const grouping = readFileSync(join(appRoot, "src/lib/queueGrouping.mjs"), "utf8");
 
 assert.match(queue, /data-testid="qf-queue-page"/);
+assert.match(queue, /data-testid="qf-queue-command-header"/);
+assert.match(queue, /qf-page--command|qf-queue--command/);
 assert.match(queue, /data-testid="qf-queue-list"/);
 assert.match(queue, /data-testid="qf-queue-row"/);
 assert.match(queue, /data-testid="qf-queue-review"/);
@@ -32,31 +37,54 @@ assert.match(queue, /data-testid="qf-queue-takeoff-iframe"/);
 assert.match(queue, /data-testid="qf-queue-manual-scope"/);
 assert.match(queue, /data-testid="qf-queue-manual-builder"/);
 assert.match(queue, /data-testid="qf-queue-goto-estimates"/);
-assert.match(queue, /data-testid="qf-queue-choose-plan"/);
-assert.match(queue, /qf-queue-group-ready/);
-assert.match(queue, /qf-queue-group-failed/);
-assert.match(queue, /Review Takeoff/);
+assert.match(queue, /data-testid="qf-queue-estimate-name"/);
+assert.match(queue, /data-testid="qf-queue-estimate-name-input"/);
+assert.match(queue, /data-testid="qf-queue-workspace-actions"/);
+assert.match(queue, /Estimate name/);
+assert.match(queue, /Review AI Takeoff/);
 assert.match(queue, /Create Manual Scope/);
 assert.match(queue, /Set Scope/);
 assert.match(queue, /Use these measurements/);
 assert.match(queue, /Scope is set for this estimate/);
 assert.match(queue, /Open in Estimates/);
 assert.match(queue, /filter:\s*["']active["']/);
-assert.match(queue, /setQuoteFlowManualScope|OfficialScopeEditor/);
-assert.match(queue, /onOpenInbox/);
-assert.match(queue, /applyScopeSuccess/);
-assert.match(api, /\/api\/elite100-quote-flow\/queue/);
-assert.match(api, /set-scope/);
+assert.match(queue, /projectName:\s*name|estimateName:\s*name/);
+assert.match(queue, /rowAction === "review_takeoff"/);
+assert.match(queue, /rowAction === "create_manual_scope"/);
+assert.match(queue, /Needs decision/);
+assert.match(api, /projectName/);
+assert.match(api, /estimateName/);
 assert.match(api, /set-manual-scope/);
-assert.match(app, /EstimateQueuePage/);
-assert.match(app, /onOpenInbox/);
-assert.match(grouping, /groupQueueItems/);
+assert.match(app, /qf-shell--command/);
+assert.match(grouping, /resolveDefaultEstimateName/);
+assert.match(grouping, /Untitled quote request/);
 assert.doesNotMatch(queue, /Approve Estimate/);
 assert.doesNotMatch(queue, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);
-assert.doesNotMatch(queue, /Returned takeoffs/);
+assert.doesNotMatch(queue, /Unknown contact — Unknown contact/);
 assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish/);
 assert.doesNotMatch(queue, /calculate|publish|mark sold|accept/i);
-console.log("ok: Scope Creation Queue UI contracts; no V1/V2");
+console.log("ok: Queue UX contracts; estimate name; no V1/V2");
+
+{
+  // Ready rows: primary row action is Review Takeoff, not repeated Create Manual Scope.
+  const reviewBlock = queue.slice(
+    queue.indexOf("function renderRow"),
+    queue.indexOf("function renderSection")
+  );
+  assert.match(reviewBlock, /rowAction === "review_takeoff"/);
+  assert.match(reviewBlock, /Review Takeoff/);
+  // Create Manual Scope must not be the ready-row primary action.
+  assert.doesNotMatch(
+    reviewBlock,
+    /rowAction === "review_takeoff"[\s\S]{0,400}Create Manual Scope/
+  );
+  assert.match(queue, /qf-queue-workspace-actions/);
+  assert.match(
+    queue.slice(queue.indexOf("qf-queue-workspace-actions")),
+    /Create Manual Scope/
+  );
+  console.log("ok: ready rows show Review Takeoff; manual scope is workspace-level");
+}
 
 {
   const rows = [
@@ -64,72 +92,77 @@ console.log("ok: Scope Creation Queue UI contracts; no V1/V2");
       takeoffJobId: "a",
       status: { key: "already_scoped", label: "Scope set" },
       alreadyScoped: true,
-      group: { key: "scoped" }
+      group: { key: "scoped" },
+      customerName: "Should Hide"
     },
     {
       takeoffJobId: "b",
       status: { key: "ready_for_review", label: "AI Takeoff ready for review" },
       group: { key: "ready" },
-      customerName: "Buyer Co",
-      projectName: "Kitchen",
-      planFilename: "plan.pdf"
-    },
-    {
-      takeoffJobId: "c",
-      status: { key: "takeoff_processing", label: "Waiting on AI Takeoff" },
-      group: { key: "processing" }
+      action: "review_takeoff",
+      rowAction: "review_takeoff",
+      subject: "Relihan VanderSchot Finals Plans",
+      customerName: "Customer not identified",
+      planFilename: "finals.pdf"
     },
     {
       takeoffJobId: "d",
       status: { key: "takeoff_failed", label: "Takeoff failed / needs decision" },
       group: { key: "failed" },
+      action: "needs_decision",
+      rowAction: "needs_decision",
       canCreateManualScope: true
     }
   ];
   const grouped = groupQueueItems(rows);
-  assert.equal(grouped.ready[0].takeoffJobId, "b");
-  assert.equal(grouped.processing[0].takeoffJobId, "c");
-  assert.equal(grouped.failed[0].takeoffJobId, "d");
-  assert.equal(grouped.stats.total, 3);
+  assert.equal(grouped.stats.total, 2);
+  assert.equal(filterQueueItems(rows, "all_active").some((r) => r.alreadyScoped), false);
+
+  assert.equal(resolveDefaultEstimateName(rows[1]), "Relihan VanderSchot Finals Plans");
   assert.equal(
-    grouped.ready.concat(grouped.processing, grouped.failed).some((r) => r.alreadyScoped),
-    false
-  );
-  assert.equal(resolveQueueCustomer(rows[1]), "Buyer Co");
-  assert.equal(resolveQueueTitle(rows[1]), "Kitchen");
-  assert.equal(
-    resolveQueueTitle({
+    resolveDefaultEstimateName({
+      customerName: "Unknown contact",
       projectName: "Project not named",
-      planFilename: "island.pdf",
-      customerName: "X"
+      planFilename: "NCH-McLain Top Drawing.pdf"
     }),
-    "island.pdf"
+    "NCH-McLain Top Drawing"
   );
-  console.log("ok: client grouping excludes scoped; label fallbacks");
+  assert.equal(resolveQueueTitle(rows[1]), "Relihan VanderSchot Finals Plans");
+  const subtitle = resolveQueueSubtitle(rows[1], resolveQueueTitle(rows[1]));
+  assert.doesNotMatch(subtitle, /Unknown contact/);
+  assert.doesNotMatch(`${resolveQueueTitle(rows[1])} — ${subtitle}`, /Unknown contact — Unknown contact/);
+  assert.equal(resolveQueueCustomer({ customerName: "Customer not identified", planFilename: "x.pdf" }), "Plan: x");
+  console.log("ok: estimate name fallbacks; no Unknown contact — Unknown contact");
 }
 
 {
-  const { presentQuoteFlowQueueItem } = await import(
+  const { presentQuoteFlowQueueItem, resolveDefaultEstimateName: backendName } = await import(
     join(repoRoot, "backend-core/src/elite100QuoteFlow/quoteFlowQueuePresenter.mjs")
   );
-  const item = presentQuoteFlowQueueItem({
+  const ready = presentQuoteFlowQueueItem({
     id: "case-1",
     takeoffJobId: "job-1",
-    customerName: { displayName: "Amanda", safeAddressLabel: "a***@x.com", emailPresent: true },
-    projectName: "",
-    planFilename: "kitchen.pdf",
+    customerName: "Customer not identified",
+    projectName: "Project not named",
+    planFilename: "Hoskins Williams Job.pdf",
     workflowStatus: "Takeoff draft ready",
     takeoffJobStatus: "completed",
     takeoffReviewStatus: "needs_review",
     messageKey: "AAMkAGI2ExampleGraphKeyThatIsLong=="
   });
-  assert.equal(item.customerDisplay, "Amanda");
-  assert.equal(item.planFilename, "kitchen.pdf");
-  // messageKey may be stored but must not be used as the visible title/customer.
-  assert.doesNotMatch(item.customerDisplay, /AAMk/);
-  assert.doesNotMatch(item.requestTitle, /AAMk/);
-  assert.doesNotMatch(item.projectDisplay, /AAMk/);
-  console.log("ok: no raw Graph keys in queue labels");
+  assert.equal(ready.rowAction, "review_takeoff");
+  assert.equal(ready.actionLabel, "Review Takeoff");
+  assert.equal(ready.defaultEstimateName, "Hoskins Williams Job");
+  assert.doesNotMatch(ready.defaultEstimateName, /AAMk|Unknown contact/);
+  assert.equal(
+    backendName({
+      subject: "Amanda Rushton",
+      customerName: "Unknown contact",
+      planFilename: "ignored.pdf"
+    }),
+    "Amanda Rushton"
+  );
+  console.log("ok: presenter default estimate name + ready rowAction");
 }
 
 console.log("\nquoteFlowQueue.ui.test.mjs: ok\n");

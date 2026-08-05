@@ -11,7 +11,11 @@ export type QuoteFlowQueueItem = {
   customerDisplay?: string | null;
   projectDisplay?: string | null;
   requestTitle?: string | null;
+  defaultEstimateName?: string | null;
+  estimateName?: string | null;
+  senderLabel?: string | null;
   planFilename?: string | null;
+  planLabel?: string | null;
   receivedAt?: string | null;
   returnedAt?: string | null;
   startedAt?: string | null;
@@ -30,6 +34,7 @@ export type QuoteFlowQueueItem = {
   reviewReady: boolean;
   canCreateManualScope?: boolean;
   canReviewTakeoff?: boolean;
+  rowAction?: string | null;
   action: string | null;
   actionLabel: string | null;
 };
@@ -47,6 +52,8 @@ export type QuoteFlowSetScopeResult = {
   estimateId: string;
   intakeCaseId: string | null;
   takeoffJobId: string | null;
+  projectName?: string | null;
+  estimateName?: string | null;
   message?: string;
   alreadyScoped?: boolean;
   reused?: boolean;
@@ -92,26 +99,37 @@ export async function fetchQuoteFlowQueueDetail(token: string, takeoffJobId: str
 export async function setQuoteFlowScope(
   token: string,
   takeoffJobId: string,
-  opts: { confirm?: boolean } = {}
+  opts: { confirm?: boolean; projectName?: string; estimateName?: string } = {}
 ) {
   return apiPost(
     `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/set-scope`,
     token,
-    { confirm: opts.confirm !== false }
+    {
+      confirm: opts.confirm !== false,
+      projectName: opts.projectName || opts.estimateName || undefined,
+      estimateName: opts.estimateName || opts.projectName || undefined
+    }
   ) as Promise<QuoteFlowSetScopeResult>;
 }
 
 export async function setQuoteFlowManualScope(
   token: string,
   takeoffJobId: string,
-  opts: { confirm?: boolean; rooms: QuoteFlowScopeRoom[] }
+  opts: {
+    confirm?: boolean;
+    rooms: QuoteFlowScopeRoom[];
+    projectName?: string;
+    estimateName?: string;
+  }
 ) {
   return apiPost(
     `/api/elite100-quote-flow/queue/${encodeURIComponent(takeoffJobId)}/set-manual-scope`,
     token,
     {
       confirm: opts.confirm !== false,
-      rooms: opts.rooms
+      rooms: opts.rooms,
+      projectName: opts.projectName || opts.estimateName || undefined,
+      estimateName: opts.estimateName || opts.projectName || undefined
     }
   ) as Promise<QuoteFlowSetScopeResult>;
 }

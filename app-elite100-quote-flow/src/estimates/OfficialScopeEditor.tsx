@@ -5,6 +5,10 @@ type Props = {
   rooms: QuoteFlowScopeRoom[];
   onChange: (rooms: QuoteFlowScopeRoom[]) => void;
   disabled?: boolean;
+  /** Optional heading override (Estimate Queue create mode). */
+  heading?: string;
+  /** Optional hint override. */
+  hint?: string;
 };
 
 function rid(prefix: string): string {
@@ -81,7 +85,7 @@ export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined):
 }
 
 export default function OfficialScopeEditor(props: Props) {
-  const { rooms, onChange, disabled } = props;
+  const { rooms, onChange, disabled, heading, hint } = props;
   const [showEdgeHint] = useState(true);
 
   function updateRoom(index: number, patch: Partial<QuoteFlowScopeRoom>) {
@@ -123,9 +127,11 @@ export default function OfficialScopeEditor(props: Props) {
   return (
     <div className="qf-scope" data-testid="qf-official-scope-editor">
       <div className="qf-scope__intro">
-        <h2>Official scope</h2>
-        <p className="qf-muted">Manual edits here do not rerun AI Takeoff.</p>
-        {showEdgeHint ? (
+        <h2>{heading || "Official scope"}</h2>
+        <p className="qf-muted">
+          {hint || "Manual edits here do not rerun AI Takeoff."}
+        </p>
+        {showEdgeHint && !heading ? (
           <p className="qf-muted qf-scope__hint">
             Edit room and piece measurements for this estimate. Finished edge and backsplash fields
             appear when they already exist on the scope.
