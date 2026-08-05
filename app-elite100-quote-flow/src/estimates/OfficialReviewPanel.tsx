@@ -135,7 +135,7 @@ export default function OfficialReviewPanel(props: Props) {
           Review official scope and internal pricing before preparing a customer quote.
         </p>
         <p className="qf-muted" data-testid="qf-review-no-publish">
-          Digital Estimate publish is not active yet.
+          After approval, open Digital Estimate to publish a customer link.
         </p>
       </header>
 

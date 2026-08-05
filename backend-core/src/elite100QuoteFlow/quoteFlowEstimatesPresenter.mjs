@@ -192,12 +192,34 @@ export function mapQuoteFlowEstimateStatus(estimate, scope = {}) {
   const commercial = String(estimate?.status || "").toLowerCase();
   const qfReview =
     scope.quoteFlowReview && typeof scope.quoteFlowReview === "object" ? scope.quoteFlowReview : null;
+  const qfDe =
+    scope.quoteFlowDigitalEstimate && typeof scope.quoteFlowDigitalEstimate === "object"
+      ? scope.quoteFlowDigitalEstimate
+      : null;
   const staleReview =
     qfReview?.status === "stale" ||
     (commercial === "approved" && String(estimate?.staleReason || "").trim());
-  // Display-only commercial labels — no pricing/approval actions in Estimates UI.
+  const dePublished =
+    qfDe?.status === "published" ||
+    (Boolean(qfDe?.publicationId || qfDe?.customerUrl) && qfDe?.status !== "stale");
+  const deNeedsRepublish = qfDe?.status === "stale";
+
+  if (deNeedsRepublish) {
+    return {
+      key: "needs_republish",
+      label: "Needs republish",
+      nextAction: staleReview ? "Open Review" : "Open Digital Estimate"
+    };
+  }
+  if (dePublished && commercial === "approved" && !staleReview) {
+    return {
+      key: "published",
+      label: "Published",
+      nextAction: "Open Digital Estimate"
+    };
+  }
   if (commercial === "approved" && !staleReview) {
-    return { key: "approved", label: "Approved", nextAction: "Prepare customer quote later" };
+    return { key: "approved", label: "Approved", nextAction: "Open Digital Estimate" };
   }
   if (staleReview || (qfReview?.status === "stale" && commercial !== "approved")) {
     return {

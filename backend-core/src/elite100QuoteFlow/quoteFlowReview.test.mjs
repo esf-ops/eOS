@@ -269,10 +269,8 @@ function makeStore(initialRows) {
   assert.match(routes, /review\/approve/);
   assert.match(routes, /review\/reopen/);
   assert.match(routes, /createQuoteFlowReviewService/);
-  assert.doesNotMatch(
-    routes,
-    /publishDigitalEstimate|markSold|approveWorkingDraft|takeoff-finish|digitalEstimate/
-  );
+  assert.match(routes, /digital-estimate/);
+  assert.doesNotMatch(routes, /markSold|approveWorkingDraft|takeoff-finish/);
   const reviewSrc = readFileSync(join(__dirname, "quoteFlowReview.mjs"), "utf8");
   assert.doesNotMatch(reviewSrc, /publishApproved\(|markSold\(|from ["'].*digitalEstimate/);
   assert.doesNotMatch(reviewSrc, /studioDigitalEstimate|publishDigital/);

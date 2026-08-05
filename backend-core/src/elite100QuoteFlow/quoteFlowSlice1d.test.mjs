@@ -306,7 +306,7 @@ const scopedRooms = [
   assert.match(routes, /slice-1d/);
   assert.doesNotMatch(
     routes,
-    /publishDigitalEstimate|markSold|calculateStudioEstimateV4|approveWorkingDraft|takeoff-finish/
+    /markSold|calculateStudioEstimateV4|approveWorkingDraft|takeoff-finish/
   );
   const estimatesSrc = readFileSync(join(__dirname, "quoteFlowEstimates.mjs"), "utf8");
   assert.match(estimatesSrc, /updateScope/);

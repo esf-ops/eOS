@@ -25,6 +25,9 @@ const MESSAGES = {
   pricing_calculate_failed: "Unable to calculate pricing.",
   review_not_ready: "Estimate is not ready for approval.",
   review_confirm_required: "Confirm to continue.",
+  publish_not_ready: "Estimate is not ready to publish.",
+  publish_confirm_required: "Confirm Publish Digital Estimate to continue.",
+  publish_unavailable: "Digital Estimate publish is unavailable.",
   organization_required: "Organization context unavailable.",
   forbidden: "Forbidden"
 };
@@ -71,9 +74,12 @@ export function createQuoteFlowError(code, opts = {}) {
               safe.code === "scope_invalid" ||
               safe.code === "pricing_invalid" ||
               safe.code === "pricing_calculate_failed" ||
-              safe.code === "review_not_ready"
+              safe.code === "review_not_ready" ||
+              safe.code === "publish_not_ready"
             ? 422
-            : 400);
+            : safe.code === "publish_unavailable"
+              ? 503
+              : 400);
   err.code = safe.code;
   if (opts.diagnostic && typeof opts.diagnostic === "object") {
     err.diagnostic = opts.diagnostic;

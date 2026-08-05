@@ -311,13 +311,16 @@ export function createQuoteFlowEstimatesService(deps = {}) {
       scopePatch.projectName = displayName.slice(0, 200);
       scopePatch.quoteFlowEstimateName = displayName.slice(0, 200);
     }
-    // Preserve / mark Quote Flow review metadata when scope changes after approval.
+    // Preserve / mark Quote Flow review + Digital Estimate metadata when scope changes after approval/publish.
     const withReviewMeta = markQuoteFlowReviewStaleOnScope(
       { ...(existing.scope && typeof existing.scope === "object" ? existing.scope : {}), ...scopePatch },
       "Scope or pricing changed after approval. Re-review required."
     );
     if (withReviewMeta.quoteFlowReview) {
       scopePatch.quoteFlowReview = withReviewMeta.quoteFlowReview;
+    }
+    if (withReviewMeta.quoteFlowDigitalEstimate) {
+      scopePatch.quoteFlowDigitalEstimate = withReviewMeta.quoteFlowDigitalEstimate;
     }
 
     const unchangedPayload = priorFp === nextFp && !nameChanged && !addOnsProvided;
