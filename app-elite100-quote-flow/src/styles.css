@@ -1356,6 +1356,133 @@ body {
   max-width: 40rem;
 }
 
+.qf-pricing {
+  display: grid;
+  gap: 18px;
+  max-width: 52rem;
+}
+
+.qf-pricing__header h2 {
+  margin: 0 0 6px;
+  font-size: 1.08rem;
+  letter-spacing: -0.01em;
+}
+
+.qf-pricing__internal {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--eos-muted, #5c6578);
+}
+
+.qf-pricing__job {
+  margin: 0;
+  font-weight: 600;
+}
+
+.qf-pricing__summary,
+.qf-pricing__result-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.qf-pricing__summary-card,
+.qf-pricing__result-card {
+  min-width: 6.5rem;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-line, #d8dee8);
+  border-radius: var(--r-md);
+  background: #fbfcfe;
+  display: grid;
+  gap: 2px;
+}
+
+.qf-pricing__stale,
+.qf-pricing__blockers {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid #e2c48a;
+  background: #fff8ea;
+  color: #5c4a1f;
+  font-size: 0.9rem;
+}
+
+.qf-pricing__blockers {
+  list-style: disc;
+  padding-left: 1.4rem;
+}
+
+.qf-pricing__controls,
+.qf-pricing__result {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--eos-line, #d8dee8);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+
+.qf-pricing__controls h3,
+.qf-pricing__result h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.qf-pricing__field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.qf-pricing__field select,
+.qf-pricing__field input {
+  max-width: 18rem;
+  padding: 8px 10px;
+  border: 1px solid var(--eos-line-strong, #c5cddb);
+  border-radius: var(--r-sm, 6px);
+  font: inherit;
+}
+
+.qf-pricing__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.qf-pricing__ewa {
+  display: grid;
+  gap: 10px;
+}
+
+.qf-pricing__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.qf-pricing__lines,
+.qf-pricing__notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.qf-pricing__lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--eos-line, #e6ebf2);
+  font-size: 0.9rem;
+}
+
 .qf-scope--worksheet {
   display: grid;
   gap: 16px;

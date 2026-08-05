@@ -302,17 +302,18 @@ const scopedRooms = [
   const routes = readFileSync(join(__dirname, "elite100QuoteFlowRoutes.js"), "utf8");
   assert.match(routes, /\/api\/elite100-quote-flow\/estimates/);
   assert.match(routes, /estimates\/:estimateId\/scope/);
+  assert.match(routes, /estimates\/:estimateId\/pricing/);
   assert.match(routes, /slice-1d/);
   assert.doesNotMatch(
     routes,
-    /publishDigitalEstimate|markSold|calculateStudio|approveWorkingDraft|takeoff-finish/
+    /publishDigitalEstimate|markSold|calculateStudioEstimateV4|approveWorkingDraft|takeoff-finish/
   );
   const estimatesSrc = readFileSync(join(__dirname, "quoteFlowEstimates.mjs"), "utf8");
   assert.match(estimatesSrc, /updateScope/);
   assert.doesNotMatch(estimatesSrc, /refreshScopeFromTakeoff\(/);
   assert.doesNotMatch(estimatesSrc, /\.calculate\(|\.approve\(/);
   assert.match(estimatesSrc, /takeoffRerun:\s*false/);
-  console.log("ok: route/source contracts; no takeoff rerun / calculate / approve / publish");
+  console.log("ok: route/source contracts; no takeoff rerun / approve / publish on scope path");
 }
 
 {
