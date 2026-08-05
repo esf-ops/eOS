@@ -20,6 +20,12 @@ import {
 } from "../elite100EstimateStudio/studioV2WorkingDraft.mjs";
 import { calculateStudioEstimateV4 } from "../elite100EstimateStudio/elite100RoomPricingStudioAdapter.mjs";
 import { STUDIO_ESTIMATE_STATUSES } from "../elite100EstimateStudio/studioEstimateTypes.mjs";
+import {
+  applyQuoteFlowCustomLineItemsToScope,
+  presentQuoteFlowEdgeStatus,
+  readQuoteFlowCustomLineItems,
+  summarizeQuoteFlowCustomLineItems
+} from "./quoteFlowCustomLineItems.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -89,6 +95,18 @@ export function presentQuoteFlowPricingResult(estimate, calcOverride = null) {
         ? Number(breakdown.edgeLf)
         : null;
 
+  const scope = estimate?.scope && typeof estimate.scope === "object" ? estimate.scope : {};
+  const customLines = readQuoteFlowCustomLineItems(scope);
+  const customSummary = summarizeQuoteFlowCustomLineItems(customLines);
+  const edgeStatus = presentQuoteFlowEdgeStatus(scope, {
+    openEdgeLf: summarizeOfficialScope(scope).openEdgeLf,
+    edgeLf,
+    openEdgeAmount: edgeAmount,
+    edgeTier: edge.tier || null,
+    edgeProfileToken: edge.profileToken || scope.edgeProfileToken || null,
+    edgeProfileLabel: edge.profileLabel || null
+  });
+
   return {
     available: built.available === true,
     calculatedAt: built.calculatedAt || null,
@@ -109,6 +127,19 @@ export function presentQuoteFlowPricingResult(estimate, calcOverride = null) {
           ? Math.round(Number(built.total) * 100) / 100
           : null,
     openEdgeAmount: edgeAmount,
+    edgeStatus,
+    customLineItems: {
+      customerFacing: customSummary.customerFacing,
+      internalOnly: customSummary.internalOnly,
+      summary: {
+        customerFacingChargesTotal: customSummary.customerFacingChargesTotal,
+        customerFacingCreditsTotal: customSummary.customerFacingCreditsTotal,
+        internalOnlyChargesTotal: customSummary.internalOnlyChargesTotal,
+        internalOnlyCreditsTotal: customSummary.internalOnlyCreditsTotal,
+        noteOnlyCount: customSummary.noteOnlyCount,
+        netCustomAdjustment: customSummary.netCustomAdjustment
+      }
+    },
     linePreview: Array.isArray(built.customerSafeLinePreview)
       ? built.customerSafeLinePreview.map((g) => ({
           label: String(g?.label || g?.name || "Line"),
@@ -124,7 +155,7 @@ export function presentQuoteFlowPricingResult(estimate, calcOverride = null) {
       billedStoneSf: breakdown.billedStoneSf != null ? Number(breakdown.billedStoneSf) : null,
       materialRatePerSf:
         breakdown.materialRatePerSf != null ? Number(breakdown.materialRatePerSf) : null,
-      edgeLf,
+      edgeLf: edgeStatus.profileSelected ? edgeLf : null,
       openEdgeAmount: edgeAmount,
       pricingBasis: breakdown.pricingBasis || breakdown.selectedPricingBasis || null,
       materialGroup: breakdown.materialGroup || breakdown.selectedPriceGroup || null
@@ -185,6 +216,74 @@ export function createQuoteFlowPricingService(deps = {}) {
     return summarizeOfficialScope(row?.scope || {});
   }
 
+  /**
+   * Apply Studio pricing fields + optional Quote Flow custom line items onto scope.
+   * @param {object} existingScope
+   * @param {object} pricingPayload
+   * @param {string|null} actorUserId
+   */
+  function applyPricingDraftToScope(existingScope, pricingPayload, actorUserId) {
+    const normalized = normalizeStudioV2PricingPatch({
+      existingScope: existingScope && typeof existingScope === "object" ? existingScope : {},
+      pricing: pricingPayload,
+      actorUserId: actorUserId || null,
+      env
+    });
+    if (!normalized.ok) {
+      return { ok: false, issues: normalized.issues };
+    }
+
+    let nextScope = {
+      ...normalized.scope,
+      quoteFlowPricingEdited: true
+    };
+
+    if (Object.prototype.hasOwnProperty.call(pricingPayload, "customLineItems")) {
+      const applied = applyQuoteFlowCustomLineItemsToScope(
+        nextScope,
+        pricingPayload.customLineItems
+      );
+      if (!applied.ok) {
+        return { ok: false, issues: applied.issues };
+      }
+      nextScope = applied.scope;
+    } else {
+      // Keep existing QF lines synced onto Studio customLineItems for calculator.
+      const existingLines = readQuoteFlowCustomLineItems(nextScope);
+      const applied = applyQuoteFlowCustomLineItemsToScope(nextScope, existingLines);
+      if (applied.ok) nextScope = applied.scope;
+    }
+
+    return {
+      ok: true,
+      scope: nextScope,
+      customLineItems: readQuoteFlowCustomLineItems(nextScope),
+      customLineSummary: summarizeQuoteFlowCustomLineItems(
+        readQuoteFlowCustomLineItems(nextScope)
+      )
+    };
+  }
+
+  function presentPricingDraft(row, editablePricing) {
+    const customLineItems = readQuoteFlowCustomLineItems(row?.scope || {});
+    const customLineSummary = summarizeQuoteFlowCustomLineItems(customLineItems);
+    return {
+      customLineItems,
+      customLineSummary: {
+        customerFacingChargesTotal: customLineSummary.customerFacingChargesTotal,
+        customerFacingCreditsTotal: customLineSummary.customerFacingCreditsTotal,
+        internalOnlyChargesTotal: customLineSummary.internalOnlyChargesTotal,
+        internalOnlyCreditsTotal: customLineSummary.internalOnlyCreditsTotal,
+        noteOnlyCount: customLineSummary.noteOnlyCount,
+        netCustomAdjustment: customLineSummary.netCustomAdjustment
+      },
+      edgeStatus: presentQuoteFlowEdgeStatus(row?.scope || {}, {
+        openEdgeLf: buildScopeSummary(row).openEdgeLf
+      }),
+      blockers: buildBlockers(row, editablePricing)
+    };
+  }
+
   function buildBlockers(row, editablePricing) {
     /** @type {string[]} */
     const blockers = [];
@@ -231,6 +330,7 @@ export function createQuoteFlowPricingService(deps = {}) {
     const lastCalculation = presentQuoteFlowPricingResult(row);
     const staleReason = String(row.staleReason || "").trim() || null;
     const scopeChangedSinceCalculation = /scope changed/i.test(String(staleReason || ""));
+    const draft = presentPricingDraft(row, editablePricing);
     return {
       ok: true,
       estimateId: row.id || estimateId,
@@ -240,11 +340,14 @@ export function createQuoteFlowPricingService(deps = {}) {
       editablePricing,
       allowedPricingBases: [...STUDIO_V2_PRICING_BASES],
       allowedMaterialGroups: [...STUDIO_V2_MATERIAL_GROUPS],
+      customLineItems: draft.customLineItems,
+      customLineSummary: draft.customLineSummary,
+      edgeStatus: draft.edgeStatus,
       lastCalculation,
       staleReason,
       pricingStale: Boolean(staleReason),
       scopeChangedSinceCalculation,
-      blockers: buildBlockers(row, editablePricing),
+      blockers: draft.blockers,
       sideEffects: { ...NO_SIDE_EFFECTS }
     };
   }
@@ -278,28 +381,24 @@ export function createQuoteFlowPricingService(deps = {}) {
         : body && typeof body === "object"
           ? body
           : {};
-    const normalized = normalizeStudioV2PricingPatch({
-      existingScope: row.scope && typeof row.scope === "object" ? row.scope : {},
-      pricing: pricingPayload,
-      actorUserId: actorUserId || null,
-      env
-    });
-    if (!normalized.ok) {
-      const first = normalized.issues?.[0];
+    const applied = applyPricingDraftToScope(
+      row.scope && typeof row.scope === "object" ? row.scope : {},
+      pricingPayload,
+      actorUserId
+    );
+    if (!applied.ok) {
+      const first = applied.issues?.[0];
       throw createQuoteFlowError("pricing_invalid", {
         message: first?.message || "Pricing settings could not be saved.",
         statusCode: 422,
-        diagnostic: { issues: normalized.issues }
+        diagnostic: { issues: applied.issues }
       });
     }
 
     const statusBefore = String(row.status || "").toLowerCase();
     /** @type {Record<string, unknown>} */
     const patch = {
-      scope: {
-        ...normalized.scope,
-        quoteFlowPricingEdited: true
-      },
+      scope: applied.scope,
       staleReason: "Pricing settings changed — recalculate"
     };
     if (statusBefore === STUDIO_ESTIMATE_STATUSES.PRICED) {
@@ -320,6 +419,7 @@ export function createQuoteFlowPricingService(deps = {}) {
       actorUserId,
       env
     });
+    const draft = presentPricingDraft(updated, editablePricing);
     return {
       ok: true,
       message: "Pricing draft saved.",
@@ -327,12 +427,15 @@ export function createQuoteFlowPricingService(deps = {}) {
       revision: updated.revision ?? null,
       status: updated.status || null,
       editablePricing,
+      customLineItems: draft.customLineItems,
+      customLineSummary: draft.customLineSummary,
+      edgeStatus: draft.edgeStatus,
       lastCalculation: presentQuoteFlowPricingResult(updated),
       staleReason: String(updated.staleReason || "").trim() || null,
       pricingStale: true,
       scopeChangedSinceCalculation: false,
       scopeSummary: buildScopeSummary(updated),
-      blockers: buildBlockers(updated, editablePricing),
+      blockers: draft.blockers,
       sideEffects: { ...NO_SIDE_EFFECTS }
     };
   }
@@ -365,24 +468,33 @@ export function createQuoteFlowPricingService(deps = {}) {
     const pricingPayload =
       body?.pricing && typeof body.pricing === "object" ? body.pricing : null;
     if (pricingPayload) {
-      const normalized = normalizeStudioV2PricingPatch({
-        existingScope: row.scope && typeof row.scope === "object" ? row.scope : {},
-        pricing: pricingPayload,
-        actorUserId: actorUserId || null,
-        env
-      });
-      if (!normalized.ok) {
-        const first = normalized.issues?.[0];
+      const applied = applyPricingDraftToScope(
+        row.scope && typeof row.scope === "object" ? row.scope : {},
+        pricingPayload,
+        actorUserId
+      );
+      if (!applied.ok) {
+        const first = applied.issues?.[0];
         throw createQuoteFlowError("pricing_invalid", {
           message: first?.message || "Pricing settings are invalid.",
           statusCode: 422,
-          diagnostic: { issues: normalized.issues }
+          diagnostic: { issues: applied.issues }
         });
       }
       working = {
         ...row,
-        scope: { ...normalized.scope, quoteFlowPricingEdited: true }
+        scope: applied.scope
       };
+    } else {
+      // Ensure persisted QF lines are synced onto Studio customLineItems before calc.
+      const applied = applyPricingDraftToScope(
+        row.scope && typeof row.scope === "object" ? row.scope : {},
+        {},
+        actorUserId
+      );
+      if (applied.ok) {
+        working = { ...row, scope: applied.scope };
+      }
     }
 
     const editablePricing = buildStudioV2EditablePricing(working, {
@@ -437,6 +549,7 @@ export function createQuoteFlowPricingService(deps = {}) {
 
     const result = presentQuoteFlowPricingResult(nextRow, calc);
     const notes = buildWarnings(nextRow, result);
+    const draft = presentPricingDraft(nextRow, editablePricing);
     return {
       ok: true,
       message: "Pricing calculated.",
@@ -445,6 +558,9 @@ export function createQuoteFlowPricingService(deps = {}) {
       revision: nextRow.revision ?? null,
       status: nextRow.status || null,
       editablePricing: buildStudioV2EditablePricing(nextRow, { actorUserId, env }),
+      customLineItems: draft.customLineItems,
+      customLineSummary: draft.customLineSummary,
+      edgeStatus: result.edgeStatus || draft.edgeStatus,
       lastCalculation: result,
       calculationNotes: notes,
       staleReason: null,

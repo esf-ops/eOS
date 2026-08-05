@@ -126,6 +126,43 @@ export async function patchQuoteFlowEstimateScope(
   }>;
 }
 
+export type QuoteFlowCustomLineItem = {
+  id?: string;
+  label: string;
+  type: "charge" | "credit" | "note";
+  visibility: "customer" | "internal";
+  quantity?: number;
+  unitAmount?: number;
+  amount?: number;
+  taxable?: boolean;
+  category?: string;
+  note?: string;
+  sortOrder?: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type QuoteFlowCustomLineSummary = {
+  customerFacingChargesTotal?: number;
+  customerFacingCreditsTotal?: number;
+  internalOnlyChargesTotal?: number;
+  internalOnlyCreditsTotal?: number;
+  noteOnlyCount?: number;
+  netCustomAdjustment?: number;
+};
+
+export type QuoteFlowEdgeStatus = {
+  openEdgeLf?: number;
+  profileSelected?: boolean;
+  profileToken?: string | null;
+  profileLabel?: string | null;
+  profileDisplay?: string;
+  chargeStatus?: "none" | "pending" | "included" | "charged";
+  chargeLabel?: string | null;
+  edgeAmount?: number | null;
+  edgeLfPriced?: number | null;
+};
+
 export type QuoteFlowEditablePricing = {
   pricingBasis?: string;
   materialGroup?: string;
@@ -163,6 +200,12 @@ export type QuoteFlowPricingResult = {
   exactInternalTotal?: number | null;
   customerDisplayTotal?: number | null;
   openEdgeAmount?: number | null;
+  edgeStatus?: QuoteFlowEdgeStatus | null;
+  customLineItems?: {
+    customerFacing?: QuoteFlowCustomLineItem[];
+    internalOnly?: QuoteFlowCustomLineItem[];
+    summary?: QuoteFlowCustomLineSummary;
+  };
   linePreview?: Array<{ label: string; amount: number | null }>;
   breakdown?: {
     measuredStoneSf?: number | null;
@@ -184,6 +227,9 @@ export type QuoteFlowPricingPayload = {
   status?: string | null;
   scopeSummary?: QuoteFlowScopeSummary;
   editablePricing?: QuoteFlowEditablePricing;
+  customLineItems?: QuoteFlowCustomLineItem[];
+  customLineSummary?: QuoteFlowCustomLineSummary;
+  edgeStatus?: QuoteFlowEdgeStatus | null;
   lastCalculation?: QuoteFlowPricingResult | null;
   blockers?: string[];
   calculationNotes?: string[];
@@ -200,6 +246,7 @@ export type QuoteFlowPricingDraftBody = {
   materialGroup?: string;
   estimateWideAdjustment?: QuoteFlowEditablePricing["estimateWideAdjustment"];
   internalMarkupPercent?: number;
+  customLineItems?: QuoteFlowCustomLineItem[];
 };
 
 export async function fetchQuoteFlowEstimatePricing(token: string, estimateId: string) {
