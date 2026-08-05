@@ -149,6 +149,7 @@ export async function startQuoteFlowTakeoff(
     intakeCaseId: string | null;
     created: boolean;
     reused: boolean;
+    alreadyRunning?: boolean;
     message?: string;
     item?: QuoteFlowInboxItem | null;
     sideEffects?: Record<string, boolean>;

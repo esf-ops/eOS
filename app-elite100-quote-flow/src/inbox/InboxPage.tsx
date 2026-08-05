@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../lib/api";
 import { formatPersonLabel, normalizeInboxItemLabels } from "../lib/formatPersonLabel.mjs";
 import {
@@ -7,6 +7,11 @@ import {
   resolveInboxProgress,
   resolveRequestTitle
 } from "../lib/inboxGrouping.mjs";
+import {
+  formatBatchResultLine,
+  humanInboxLabel,
+  shortJobLabel
+} from "../lib/inboxUiHelpers.mjs";
 import {
   fetchQuoteFlowInbox,
   fetchQuoteFlowInboxMessage,
@@ -25,11 +30,15 @@ type Props = {
 
 type BatchResult = {
   messageKey: string;
+  label: string;
   ok: boolean;
   reused?: boolean;
   takeoffJobId?: string | null;
   error?: string;
+  kind: "started" | "already_running" | "blocked" | "failed";
 };
+
+type LoadMode = "initial" | "refresh" | "poll";
 
 function errorMessage(e: unknown): string {
   if (e instanceof ApiError) {
@@ -56,6 +65,10 @@ function formatReceived(iso: string | null | undefined): string {
   } catch {
     return String(iso);
   }
+}
+
+function labelHelpers() {
+  return { resolveCustomerDisplay, resolveRequestTitle, formatPersonLabel };
 }
 
 function ProgressBar({ item }: { item: QuoteFlowInboxItem }) {
@@ -100,41 +113,138 @@ export default function InboxPage(props: Props) {
     Record<string, string>
   >({});
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const listInFlightRef = useRef(false);
+  const selectedKeyRef = useRef<string | null>(null);
+  const selectedAttachmentKeyRef = useRef<string | null>(null);
+  const selectedAttachmentByMessageRef = useRef<Record<string, string>>({});
+  const itemsRef = useRef<QuoteFlowInboxItem[]>([]);
+
+  selectedKeyRef.current = selectedKey;
+  selectedAttachmentKeyRef.current = selectedAttachmentKey;
+  selectedAttachmentByMessageRef.current = selectedAttachmentByMessage;
+  itemsRef.current = items;
+
   const grouped = useMemo(() => groupInboxItems(items), [items]);
   const selectedCount = Object.keys(selectedAttachmentByMessage).length;
+  const showSyncing = isRefreshing || isPolling || batchBusy;
 
-  async function loadList() {
-    setLoading(true);
-    setError(null);
+  function applyListRows(rows: QuoteFlowInboxItem[]) {
+    setItems(rows);
+
+    const key = selectedKeyRef.current;
+    if (key) {
+      const stillThere = rows.find((r) => r.messageKey === key);
+      if (!stillThere) {
+        setSelectedKey(null);
+        setDetail(null);
+        setSelectedAttachmentKey(null);
+      } else {
+        // Soft-merge status onto open detail without wiping the panel.
+        setDetail((prev) => {
+          if (!prev || prev.messageKey !== key) return prev;
+          return {
+            ...prev,
+            ...stillThere,
+            attachments:
+              Array.isArray(stillThere.attachments) && stillThere.attachments.length
+                ? stillThere.attachments
+                : prev.attachments
+          };
+        });
+        if (stillThere.alreadyScoped) {
+          setSelectedAttachmentKey(null);
+          setSelectedAttachmentByMessage((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+        } else {
+          const attKey = selectedAttachmentKeyRef.current;
+          if (attKey) {
+            const stillValid = (stillThere.attachments || []).some(
+              (a) => a.attachmentKey === attKey
+            );
+            if (!stillValid) {
+              // Keep prior selection unless attachments prove it gone.
+              const fromMap = selectedAttachmentByMessageRef.current[key];
+              if (fromMap) {
+                const mapValid = (stillThere.attachments || []).some(
+                  (a) => a.attachmentKey === fromMap
+                );
+                if (!mapValid) setSelectedAttachmentKey(null);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Drop batch checks for requests that became scoped.
+    setSelectedAttachmentByMessage((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const messageKey of Object.keys(next)) {
+        const row = rows.find((r) => r.messageKey === messageKey);
+        if (row?.alreadyScoped) {
+          delete next[messageKey];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }
+
+  async function loadList(mode: LoadMode = "refresh") {
+    if (listInFlightRef.current) return;
+    listInFlightRef.current = true;
+    const isInitial = mode === "initial" || (mode !== "poll" && itemsRef.current.length === 0);
+    if (isInitial) setInitialLoading(true);
+    else if (mode === "poll") setIsPolling(true);
+    else setIsRefreshing(true);
+
+    if (mode !== "poll") setError(null);
+
     try {
       const res = await fetchQuoteFlowInbox(authToken, { limit: 50, state: "all" });
-      const rows = Array.isArray(res.items) ? res.items : [];
-      setItems(rows.map((row) => normalizeInboxItemLabels(row) as QuoteFlowInboxItem));
+      const rows = (Array.isArray(res.items) ? res.items : []).map(
+        (row) => normalizeInboxItemLabels(row) as QuoteFlowInboxItem
+      );
+      applyListRows(rows);
     } catch (e) {
-      setError(errorMessage(e));
-      setItems([]);
+      // Keep existing rows visible on background refresh failures.
+      if (itemsRef.current.length === 0) {
+        setError(errorMessage(e));
+        setItems([]);
+      } else if (mode !== "poll") {
+        setError(errorMessage(e));
+      }
     } finally {
-      setLoading(false);
+      listInFlightRef.current = false;
+      setInitialLoading(false);
+      setIsRefreshing(false);
+      setIsPolling(false);
     }
   }
 
   useEffect(() => {
-    void loadList();
+    void loadList("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
 
-  // Light poll while active takeoffs exist.
+  // Background poll while active takeoffs exist — never blanks the list.
   useEffect(() => {
     if (grouped.active.length === 0) return;
     const id = window.setInterval(() => {
-      void loadList();
+      void loadList("poll");
     }, 12000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -201,7 +311,7 @@ export default function InboxPage(props: Props) {
   async function runStartTakeoff(att: QuoteFlowAttachment, markAsPlan = false) {
     if (!detail?.messageKey || !att.attachmentKey) return;
     if (detail.alreadyScoped) {
-      setError("Scope is already set for this estimate. AI Takeoff will not run again.");
+      setError("Scope is already set. Open in Estimates.");
       return;
     }
     const needsChoice =
@@ -224,13 +334,14 @@ export default function InboxPage(props: Props) {
         idempotencyKey: `qf-start-${detail.messageKey}-${att.attachmentKey}`
       });
       setNotice(
-        res.reused
-          ? `AI Takeoff job reused (${res.takeoffJobId || "same job"}).`
-          : `AI Takeoff started (${res.takeoffJobId || "queued"}).`
+        res.message ||
+          (res.alreadyRunning || res.reused
+            ? "AI Takeoff is already running."
+            : "AI Takeoff started.")
       );
       if (res.item) setDetail(normalizeInboxItemLabels(res.item) as QuoteFlowInboxItem);
       clearSelection(detail.messageKey);
-      await loadList();
+      await loadList("refresh");
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -249,12 +360,15 @@ export default function InboxPage(props: Props) {
 
     await Promise.all(
       entries.map(async ([messageKey, attachmentKey]) => {
-        const row = items.find((i) => i.messageKey === messageKey);
+        const row = itemsRef.current.find((i) => i.messageKey === messageKey);
+        const label = humanInboxLabel(row, labelHelpers());
         if (row?.alreadyScoped) {
           results.push({
             messageKey,
+            label,
             ok: false,
-            error: "Scope already set — AI Takeoff will not run again."
+            kind: "blocked",
+            error: "Scope is already set. Open in Estimates."
           });
           return;
         }
@@ -265,42 +379,49 @@ export default function InboxPage(props: Props) {
             manualPlanOverride: Boolean(att && att.canMarkAsPlan && !att.supportedForTakeoff),
             idempotencyKey: `qf-batch-${messageKey}-${attachmentKey}`
           });
+          const reused = res.alreadyRunning === true || res.reused === true;
           results.push({
             messageKey,
+            label,
             ok: true,
-            reused: res.reused === true,
-            takeoffJobId: res.takeoffJobId
+            reused,
+            takeoffJobId: res.takeoffJobId,
+            kind: reused ? "already_running" : "started"
           });
         } catch (e) {
-          results.push({ messageKey, ok: false, error: errorMessage(e) });
+          const msg = errorMessage(e);
+          results.push({
+            messageKey,
+            label,
+            ok: false,
+            error: msg,
+            kind: /scope already set|already_scoped|Open in Estimates/i.test(msg)
+              ? "blocked"
+              : "failed"
+          });
         }
       })
     );
 
     setBatchResults(results);
-    const okCount = results.filter((r) => r.ok).length;
-    const failCount = results.length - okCount;
-    setNotice(
-      `Started ${okCount} AI Takeoff${okCount === 1 ? "" : "s"}${
-        failCount ? ` · ${failCount} failed` : ""
-      }.`
-    );
+    const started = results.filter((r) => r.ok && !r.reused).length;
+    const running = results.filter((r) => r.ok && r.reused).length;
+    const blocked = results.filter((r) => r.kind === "blocked").length;
+    const failed = results.filter((r) => r.kind === "failed").length;
+    const parts = [];
+    if (started) parts.push(`${started} started`);
+    if (running) parts.push(`${running} already running`);
+    if (blocked) parts.push(`${blocked} blocked`);
+    if (failed) parts.push(`${failed} failed`);
+    setNotice(parts.length ? parts.join(" · ") : "No takeoffs started.");
     setSelectedAttachmentByMessage((prev) => {
       const next = { ...prev };
       for (const r of results) {
-        if (r.ok) delete next[r.messageKey];
+        if (r.ok || r.kind === "blocked") delete next[r.messageKey];
       }
       return next;
     });
-    await loadList();
-    if (selectedKey) {
-      try {
-        const refreshed = await fetchQuoteFlowInboxMessage(authToken, selectedKey);
-        setDetail(normalizeInboxItemLabels(refreshed.item) as QuoteFlowInboxItem);
-      } catch {
-        /* keep prior detail */
-      }
-    }
+    await loadList("refresh");
     setBatchBusy(false);
   }
 
@@ -313,6 +434,7 @@ export default function InboxPage(props: Props) {
     const attachmentCount =
       typeof row.attachmentCount === "number" ? row.attachmentCount : (row.attachments || []).length;
     const nextLabel = row.nextAction?.label || row.takeoffStatus?.label || "Open";
+    const jobShort = shortJobLabel(row.takeoffJobId);
 
     return (
       <li key={key || title} className="qf-inbox__row-wrap">
@@ -364,6 +486,7 @@ export default function InboxPage(props: Props) {
               {row.takeoffStatus?.label || "Needs attachment selection"}
               {" · "}
               {nextLabel}
+              {jobShort ? ` · ${jobShort}` : ""}
             </span>
             <ProgressBar item={row} />
           </button>
@@ -394,6 +517,10 @@ export default function InboxPage(props: Props) {
       </div>
     );
   }
+
+  const showFullLoading = initialLoading && items.length === 0;
+  const showEmpty = !initialLoading && items.length === 0;
+  const showGroups = items.length > 0;
 
   return (
     <section className="qf-page" data-testid="qf-inbox-page">
@@ -437,10 +564,8 @@ export default function InboxPage(props: Props) {
       {batchResults.length ? (
         <ul className="qf-inbox__batch-results" data-testid="qf-inbox-batch-results">
           {batchResults.map((r) => (
-            <li key={r.messageKey} data-ok={r.ok ? "1" : "0"}>
-              {r.ok
-                ? `${r.messageKey}: ${r.reused ? "Reused" : "Started"} ${r.takeoffJobId || "job"}`
-                : `${r.messageKey}: ${r.error || "Failed"}`}
+            <li key={r.messageKey} data-ok={r.ok ? "1" : "0"} data-kind={r.kind}>
+              {formatBatchResultLine(r)}
             </li>
           ))}
         </ul>
@@ -451,6 +576,11 @@ export default function InboxPage(props: Props) {
           <div className="qf-inbox__list-head">
             <h2>Requests</h2>
             <div className="qf-inbox__list-actions">
+              {showSyncing ? (
+                <span className="qf-inbox__syncing" data-testid="qf-inbox-syncing">
+                  Syncing…
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="qf-btn-primary"
@@ -466,20 +596,24 @@ export default function InboxPage(props: Props) {
                 type="button"
                 className="qf-btn-secondary"
                 data-testid="qf-inbox-refresh"
-                onClick={() => void loadList()}
-                disabled={loading}
+                onClick={() => void loadList("refresh")}
+                disabled={initialLoading || isRefreshing}
               >
-                {loading ? "Loading…" : "Refresh"}
+                {isRefreshing ? "Refreshing…" : "Refresh"}
               </button>
             </div>
           </div>
-          {loading ? <p className="qf-muted">Loading inbox…</p> : null}
-          {!loading && items.length === 0 ? (
+          {showFullLoading ? (
+            <p className="qf-muted" data-testid="qf-inbox-initial-loading">
+              Loading inbox…
+            </p>
+          ) : null}
+          {showEmpty ? (
             <p className="qf-muted" data-testid="qf-inbox-empty">
               No quote requests right now.
             </p>
           ) : null}
-          {!loading && items.length > 0 ? (
+          {showGroups ? (
             <>
               {renderSection(
                 "qf-inbox-group-needs-action",
@@ -508,7 +642,7 @@ export default function InboxPage(props: Props) {
             <div className="qf-placeholder">
               <p>Select a request to review attachments and start AI Takeoff.</p>
             </div>
-          ) : detailLoading ? (
+          ) : detailLoading && !detail ? (
             <p className="qf-muted">Loading attachments…</p>
           ) : detail ? (
             <>
@@ -523,14 +657,16 @@ export default function InboxPage(props: Props) {
                 data-status={detail.takeoffStatus?.key || ""}
               >
                 {detail.takeoffStatus?.label}
-                {detail.takeoffJobId ? ` · Job ${detail.takeoffJobId}` : ""}
+                {shortJobLabel(detail.takeoffJobId)
+                  ? ` · ${shortJobLabel(detail.takeoffJobId)}`
+                  : ""}
                 {detail.nextAction?.label ? ` · ${detail.nextAction.label}` : ""}
               </p>
               <ProgressBar item={detail} />
 
               {detail.alreadyScoped ? (
                 <p className="qf-notice" data-testid="qf-inbox-already-scoped">
-                  Scope is already set for this estimate. AI Takeoff will not run again.
+                  Scope is already set. Open in Estimates.
                 </p>
               ) : null}
 

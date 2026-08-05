@@ -195,12 +195,16 @@ function mockSharedInbox({ item = baseItem(), sendImpl } = {}) {
         err.statusCode = 400;
         throw err;
       }
+      // Default mock: first call creates; subsequent calls while "active" reuse.
+      const activeReuse = sendCalls > 1;
       return {
         ok: true,
         intakeCaseId: "case-1",
         takeoffJobId: JOB,
-        created: sendCalls === 1,
-        reused: sendCalls > 1,
+        created: !activeReuse,
+        reused: activeReuse,
+        alreadyRunning: activeReuse,
+        startFresh: args.startFresh === true,
         attachmentKey: att,
         attachmentName: "plan.pdf",
         item: {
@@ -251,6 +255,7 @@ function mockSharedInbox({ item = baseItem(), sendImpl } = {}) {
   });
   assert.equal(started.takeoffJobId, JOB);
   assert.equal(started.created, true);
+  assert.equal(started.message, "AI Takeoff started.");
   assert.equal(started.sideEffects.calculated, false);
   assert.equal(started.sideEffects.published, false);
   assert.equal(started.sideEffects.sold, false);
@@ -264,8 +269,10 @@ function mockSharedInbox({ item = baseItem(), sendImpl } = {}) {
   });
   assert.equal(again.takeoffJobId, JOB);
   assert.equal(again.reused, true);
+  assert.equal(again.alreadyRunning, true);
+  assert.equal(again.message, "AI Takeoff is already running.");
   assert.equal(shared.sendCalls(), 2);
-  console.log("ok: Duplicate start reuses same takeoff job");
+  console.log("ok: Duplicate start while active reuses same takeoff job");
 
   await assert.rejects(
     () =>
@@ -318,10 +325,134 @@ function mockSharedInbox({ item = baseItem(), sendImpl } = {}) {
         attachmentKey: ATT_PDF,
         confirm: true
       }),
-    (e) => e.code === "already_scoped" || e.code === "takeoff_not_allowed"
+    (e) =>
+      (e.code === "already_scoped" || e.code === "takeoff_not_allowed") &&
+      /Open in Estimates/i.test(String(e.message || ""))
   );
   assert.equal(shared.sendCalls(), 0);
   console.log("ok: Already-scoped estimate blocks AI Takeoff rerun");
+}
+
+{
+  /** @type {"none"|"active"|"returned"|"failed"} */
+  let phase = "none";
+  let jobSeq = 0;
+  /** @type {string|null} */
+  let currentJob = null;
+  /** @type {boolean[]} */
+  const startFreshFlags = [];
+
+  const shared = mockSharedInbox({
+    sendImpl: async (args) => {
+      startFreshFlags.push(args.startFresh === true);
+      assert.equal(args.startFresh, true, "Quote Flow must request startFresh");
+      if (phase === "active" && currentJob) {
+        return {
+          ok: true,
+          intakeCaseId: "case-1",
+          takeoffJobId: currentJob,
+          created: false,
+          reused: true,
+          alreadyRunning: true,
+          attachmentKey: args.attachmentKey,
+          item: baseItem({
+            aiTakeoff: {
+              state: "processing",
+              takeoffJobId: currentJob,
+              reviewReady: false,
+              label: "Processing"
+            }
+          }),
+          sideEffects: {
+            calculated: false,
+            approved: false,
+            published: false,
+            digitalEstimateCreated: false,
+            sold: false,
+            studioEstimateEnsured: false
+          }
+        };
+      }
+      // Returned / failed / none → mint a new job (do not reuse old terminal jobs).
+      jobSeq += 1;
+      currentJob = `job-fresh-${jobSeq}`;
+      phase = "active";
+      return {
+        ok: true,
+        intakeCaseId: "case-1",
+        takeoffJobId: currentJob,
+        created: true,
+        reused: false,
+        alreadyRunning: false,
+        attachmentKey: args.attachmentKey,
+        item: baseItem({
+          aiTakeoff: {
+            state: "queued",
+            takeoffJobId: currentJob,
+            reviewReady: false,
+            label: "Queued"
+          }
+        }),
+        sideEffects: {
+          calculated: false,
+          approved: false,
+          published: false,
+          digitalEstimateCreated: false,
+          sold: false,
+          studioEstimateEnsured: false
+        }
+      };
+    }
+  });
+
+  const svc = createQuoteFlowService({
+    sharedInboxService: shared,
+    estimateRepository: { getActiveByIntakeCase: async () => null }
+  });
+
+  const first = await svc.startTakeoff({
+    organizationId: ORG,
+    messageKey: MSG,
+    attachmentKey: ATT_PDF,
+    confirm: true
+  });
+  assert.equal(first.created, true);
+  assert.equal(first.message, "AI Takeoff started.");
+  assert.equal(first.takeoffJobId, "job-fresh-1");
+
+  const duringActive = await svc.startTakeoff({
+    organizationId: ORG,
+    messageKey: MSG,
+    attachmentKey: ATT_PDF,
+    confirm: true
+  });
+  assert.equal(duringActive.alreadyRunning, true);
+  assert.equal(duringActive.takeoffJobId, "job-fresh-1");
+  assert.equal(duringActive.message, "AI Takeoff is already running.");
+
+  phase = "returned";
+  const afterReturned = await svc.startTakeoff({
+    organizationId: ORG,
+    messageKey: MSG,
+    attachmentKey: ATT_PDF,
+    confirm: true
+  });
+  assert.equal(afterReturned.created, true);
+  assert.equal(afterReturned.takeoffJobId, "job-fresh-2");
+  assert.notEqual(afterReturned.takeoffJobId, "job-fresh-1");
+  assert.equal(afterReturned.message, "AI Takeoff started.");
+
+  phase = "failed";
+  const afterFailed = await svc.startTakeoff({
+    organizationId: ORG,
+    messageKey: MSG,
+    attachmentKey: ATT_PDF,
+    confirm: true
+  });
+  assert.equal(afterFailed.created, true);
+  assert.equal(afterFailed.takeoffJobId, "job-fresh-3");
+  assert.ok(startFreshFlags.every((f) => f === true));
+  console.log("ok: startFresh — returned/failed mint new jobs; active reuses");
 }
 
 function mockSupabase({ headRows = [], userKind = "internal" } = {}) {

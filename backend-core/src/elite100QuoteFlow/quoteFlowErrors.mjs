@@ -14,9 +14,8 @@ const MESSAGES = {
     "AI Takeoff could not import this file. Try another plan attachment.",
   import_confirm_required: "Confirm Start AI Takeoff to continue.",
   set_scope_confirm_required: "Confirm Set Scope to continue.",
-  already_scoped: "Scope is already set for this estimate.",
-  takeoff_not_allowed:
-    "Scope is already set for this estimate. AI Takeoff will not run again.",
+  already_scoped: "Scope is already set. Open in Estimates.",
+  takeoff_not_allowed: "Scope is already set. Open in Estimates.",
   takeoff_not_found: "That takeoff job could not be found.",
   takeoff_not_ready: "Review measurements before setting scope.",
   estimate_not_found: "Estimate not found.",

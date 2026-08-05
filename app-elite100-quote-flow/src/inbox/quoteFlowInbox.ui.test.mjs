@@ -46,8 +46,20 @@ assert.match(inbox, /selectedAttachmentByMessage/);
 assert.match(inbox, /Start selected AI Takeoffs/);
 assert.match(inbox, /Start AI Takeoff|Select for AI Takeoff/);
 assert.match(inbox, /Supported plan|Needs mark as plan/);
+assert.match(inbox, /AI Takeoff started/);
+assert.match(inbox, /AI Takeoff is already running/);
+assert.match(inbox, /Scope is already set\. Open in Estimates/);
+assert.doesNotMatch(inbox, /AI Takeoff job reused/);
 assert.match(inbox, /formatPersonLabel/);
 assert.match(inbox, /normalizeInboxItemLabels/);
+assert.match(inbox, /setInterval|12000/);
+assert.match(inbox, /initialLoading/);
+assert.match(inbox, /isPolling|isRefreshing/);
+assert.match(inbox, /listInFlightRef/);
+assert.match(inbox, /qf-inbox-syncing|Syncing…/);
+assert.match(inbox, /qf-inbox-initial-loading/);
+assert.match(inbox, /showFullLoading/);
+assert.match(inbox, /loadList\("poll"\)|mode === "poll"|LoadMode/);
 assert.match(api, /\/api\/elite100-quote-flow\/inbox/);
 assert.match(api, /start-takeoff/);
 assert.match(app, /authToken=\{sessionToken\}/);
@@ -214,8 +226,79 @@ console.log("ok: Inbox UI polish contracts; no V1/V2 copy");
   assert.match(inbox, /Promise\.all/);
   assert.match(inbox, /alreadyScoped/);
   assert.match(inbox, /qf-inbox-batch-results/);
+  assert.match(inbox, /formatBatchResultLine|humanInboxLabel/);
   assert.match(inbox, /reused/);
+  // Full-page loading copy only for initial empty load — not polled blanking.
+  assert.match(inbox, /showFullLoading = initialLoading && items\.length === 0/);
+  assert.doesNotMatch(
+    inbox,
+    /\{loading \? <p className="qf-muted">Loading inbox/
+  );
   console.log("ok: bulk start contracts (per-item success/failure, reuse, scoped block)");
+}
+
+{
+  const {
+    formatBatchResultLine,
+    humanInboxLabel,
+    looksLikeGraphKey,
+    shortJobLabel
+  } = await import(join(appRoot, "src/lib/inboxUiHelpers.mjs"));
+
+  assert.equal(looksLikeGraphKey("AAMkAGI2ExampleGraphKeyThatIsLong=="), true);
+  assert.equal(looksLikeGraphKey("Vanderschot Project"), false);
+  assert.equal(shortJobLabel("462abe28-aaaa-bbbb-cccc-dddddddddddd"), "Job 462abe28…");
+
+  const graphRow = {
+    messageKey: "AAMkAGI2ExampleGraphKeyThatIsLong==",
+    senderLabel: "Amanda Rushton",
+    subject: "Kitchen",
+    bestPlanCandidate: { filename: "plan.pdf" }
+  };
+  const label = humanInboxLabel(graphRow, {
+    resolveCustomerDisplay,
+    resolveRequestTitle,
+    formatPersonLabel
+  });
+  assert.equal(label, "Amanda Rushton");
+  assert.doesNotMatch(label, /AAMk/);
+
+  assert.equal(
+    formatBatchResultLine({ ok: true, reused: false, label: "Vanderschot Project" }),
+    "Started: Vanderschot Project"
+  );
+  assert.equal(
+    formatBatchResultLine({ ok: true, reused: true, label: "Fashion Par Sales" }),
+    "Already running: Fashion Par Sales"
+  );
+  assert.equal(
+    formatBatchResultLine({
+      ok: false,
+      kind: "blocked",
+      label: "Done Co",
+      error: "Scope is already set. Open in Estimates."
+    }),
+    "Blocked: scope already set"
+  );
+  const batchLine = formatBatchResultLine({
+    ok: true,
+    reused: false,
+    label,
+    takeoffJobId: "462abe28-aaaa-bbbb-cccc-dddddddddddd"
+  });
+  assert.doesNotMatch(batchLine, /AAMk/);
+  assert.doesNotMatch(batchLine, /462abe28-aaaa/);
+  console.log("ok: batch results are human readable; no raw Graph keys");
+}
+
+{
+  // Selection / list preservation contracts through polling merge path.
+  assert.match(inbox, /applyListRows/);
+  assert.match(inbox, /selectedKeyRef/);
+  assert.match(inbox, /stillThere/);
+  assert.match(inbox, /Soft-merge|soft-merge|setDetail\(\(prev\)/);
+  assert.match(inbox, /grouped\.active\.length === 0/);
+  console.log("ok: polling preserves selection and avoids full list blanking");
 }
 
 {
