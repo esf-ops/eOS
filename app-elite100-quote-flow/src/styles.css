@@ -1566,6 +1566,136 @@ body {
   font-size: 0.9rem;
 }
 
+.qf-review {
+  display: grid;
+  gap: 18px;
+  max-width: 52rem;
+}
+
+.qf-review__header h2 {
+  margin: 0 0 6px;
+  font-size: 1.08rem;
+}
+
+.qf-review__status {
+  justify-self: start;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--eos-line, #d8dee8);
+  font-weight: 600;
+  font-size: 0.9rem;
+  background: #f8f9fc;
+}
+
+.qf-review__status--approved {
+  background: #eaf7ee;
+  border-color: #b7dfc2;
+  color: #1f5b32;
+}
+
+.qf-review__status--ready_for_review {
+  background: #eef6ff;
+  border-color: #b7d0ef;
+  color: #1f4b7a;
+}
+
+.qf-review__status--needs_recalculation,
+.qf-review__status--needs_updates {
+  background: #fff8ea;
+  border-color: #e2c48a;
+  color: #5c4a1f;
+}
+
+.qf-review__summary,
+.qf-review__checklist,
+.qf-review__approval-meta {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--eos-line, #d8dee8);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+
+.qf-review__summary h3,
+.qf-review__checklist h3,
+.qf-review__approval-meta h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.qf-review__dl {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.qf-review__dl > div {
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) 1fr;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.qf-review__dl dt {
+  color: var(--eos-muted, #5c6578);
+}
+
+.qf-review__dl dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+.qf-review__checklist ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.qf-review__check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--eos-line, #d8dee8);
+}
+
+.qf-review__check.is-passed {
+  background: #f3faf5;
+}
+
+.qf-review__check.is-warning {
+  background: #fff8ea;
+}
+
+.qf-review__check.is-blocker {
+  background: #fff1f1;
+}
+
+.qf-review__check-badge {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--eos-line, #d8dee8);
+  background: #fff;
+}
+
+.qf-review__check p {
+  margin: 4px 0 0;
+}
+
+.qf-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .qf-scope--worksheet {
   display: grid;
   gap: 16px;

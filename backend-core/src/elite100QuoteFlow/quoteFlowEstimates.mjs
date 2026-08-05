@@ -10,6 +10,7 @@ import {
 } from "./quoteFlowEstimatesPresenter.mjs";
 import { resolvePieceOpenEdgeLf, stampPieceOpenEdgeLf } from "./quoteFlowOpenEdge.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
+import { markQuoteFlowReviewStaleOnScope } from "./quoteFlowReviewMeta.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -309,6 +310,14 @@ export function createQuoteFlowEstimatesService(deps = {}) {
     if (displayName) {
       scopePatch.projectName = displayName.slice(0, 200);
       scopePatch.quoteFlowEstimateName = displayName.slice(0, 200);
+    }
+    // Preserve / mark Quote Flow review metadata when scope changes after approval.
+    const withReviewMeta = markQuoteFlowReviewStaleOnScope(
+      { ...(existing.scope && typeof existing.scope === "object" ? existing.scope : {}), ...scopePatch },
+      "Scope or pricing changed after approval. Re-review required."
+    );
+    if (withReviewMeta.quoteFlowReview) {
+      scopePatch.quoteFlowReview = withReviewMeta.quoteFlowReview;
     }
 
     const unchangedPayload = priorFp === nextFp && !nameChanged && !addOnsProvided;

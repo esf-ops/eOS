@@ -127,7 +127,8 @@ assert.doesNotMatch(page, /qf-queue-takeoff-iframe|takeoff-iframe|ConsolidatedTa
 assert.doesNotMatch(editor, /iframe|quoteFlowSetScope|AI Takeoff review/);
 assert.doesNotMatch(page + editor + api, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);
 assert.doesNotMatch(page, /\bSet Scope\b/);
-assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish|approve/);
+assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish/);
+assert.doesNotMatch(api, /approveWorkingDraft|publishDigital|markSold/);
 assert.doesNotMatch(page, /publishDigital|mark sold|Approve Estimate/i);
 assert.doesNotMatch(page, /Publish Digital|Customer acceptance|Mark sold/i);
 
@@ -148,15 +149,31 @@ assert.match(pricingPanel, /Add customer-facing line item/);
 assert.match(pricingPanel, /Add internal-only line item/);
 assert.match(pricingPanel, /Customer-facing items may appear on the customer quote later/);
 assert.match(pricingPanel, /Internal-only items stay inside eliteOS/);
-assert.match(pricingPanel, /Review\/Publish is not active yet/);
+assert.match(pricingPanel, /Digital Estimate publish is not active yet/);
+assert.match(pricingPanel, /Use Review to approve internally/);
 assert.match(pricingPanel, /qf-pricing-edge-status|Edge profile|Pending/);
 assert.match(pricingPanel, /Included \/ no charge/);
 assert.match(pricingPanel, /Net custom adjustment/);
 assert.match(api, /customLineItems/);
 assert.match(styles, /qf-pricing__custom-lines|qf-pricing__line-row/);
-assert.doesNotMatch(pricingPanel, /Approve Estimate|Mark sold|Customer acceptance|Digital Estimate publish/i);
+assert.match(page, /OfficialReviewPanel/);
+assert.match(page, /qf-estimates-section-review/);
+assert.match(api, /\/review/);
+assert.match(api, /review\/approve|approveQuoteFlowEstimateReview/);
+assert.match(api, /review\/reopen|reopenQuoteFlowEstimateReview/);
+
+const reviewPanel = readFileSync(join(appRoot, "src/estimates/OfficialReviewPanel.tsx"), "utf8");
+assert.match(reviewPanel, /data-testid="qf-official-review-panel"/);
+assert.match(reviewPanel, /Review official scope and internal pricing before preparing a customer quote/);
+assert.match(reviewPanel, /Approve estimate/);
+assert.match(reviewPanel, /Reopen review/);
+assert.match(reviewPanel, /Readiness checklist|qf-review-checklist/);
+assert.match(reviewPanel, /Digital Estimate publish is not active yet/);
+assert.doesNotMatch(reviewPanel, /Publish Digital|Mark sold|Customer acceptance/i);
+assert.doesNotMatch(reviewPanel, /\bV1\b|\bV2\b|Studio V2/);
+assert.doesNotMatch(pricingPanel, /Approve estimate|Mark sold|Customer acceptance/i);
 assert.doesNotMatch(pricingPanel, /\bV1\b|\bV2\b|Studio V2/);
-console.log("ok: Estimates Quote Library layout; Pricing tab active; custom line items; Open edge LF; no Takeoff/V1/V2");
+console.log("ok: Estimates Quote Library; Pricing + Review tabs; custom line items; no Takeoff/V1/V2");
 
 {
   const rows = [

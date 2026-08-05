@@ -26,6 +26,7 @@ import {
   readQuoteFlowCustomLineItems,
   summarizeQuoteFlowCustomLineItems
 } from "./quoteFlowCustomLineItems.mjs";
+import { markQuoteFlowReviewStaleOnScope } from "./quoteFlowReviewMeta.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -368,7 +369,7 @@ export function createQuoteFlowPricingService(deps = {}) {
     assertScoped(row);
 
     const status = String(row.status || "").toLowerCase();
-    if (status === "approved" || status === "superseded") {
+    if (status === "superseded") {
       throw createQuoteFlowError("scope_invalid", {
         message: "This estimate revision cannot be priced here.",
         statusCode: 409
@@ -396,14 +397,24 @@ export function createQuoteFlowPricingService(deps = {}) {
     }
 
     const statusBefore = String(row.status || "").toLowerCase();
+    const staleScope = markQuoteFlowReviewStaleOnScope(
+      applied.scope,
+      "Scope or pricing changed after approval. Re-review required."
+    );
     /** @type {Record<string, unknown>} */
     const patch = {
-      scope: applied.scope,
+      scope: staleScope,
       staleReason: "Pricing settings changed — recalculate"
     };
-    if (statusBefore === STUDIO_ESTIMATE_STATUSES.PRICED) {
+    if (
+      statusBefore === STUDIO_ESTIMATE_STATUSES.PRICED ||
+      statusBefore === STUDIO_ESTIMATE_STATUSES.APPROVED
+    ) {
       patch.status = STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE;
       patch.calculationSnapshot = null;
+      if (statusBefore === STUDIO_ESTIMATE_STATUSES.APPROVED) {
+        patch.approval = null;
+      }
     } else if (statusBefore === STUDIO_ESTIMATE_STATUSES.DRAFT) {
       patch.status = STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE;
     }
@@ -456,7 +467,7 @@ export function createQuoteFlowPricingService(deps = {}) {
     assertScoped(row);
 
     const status = String(row.status || "").toLowerCase();
-    if (status === "approved" || status === "superseded") {
+    if (status === "superseded") {
       throw createQuoteFlowError("scope_invalid", {
         message: "This estimate revision cannot be priced here.",
         statusCode: 409
@@ -465,6 +476,7 @@ export function createQuoteFlowPricingService(deps = {}) {
 
     // Optional: save pricing draft fields before calculate when provided.
     let working = row;
+    const wasApproved = status === STUDIO_ESTIMATE_STATUSES.APPROVED;
     const pricingPayload =
       body?.pricing && typeof body.pricing === "object" ? body.pricing : null;
     if (pricingPayload) {
@@ -483,7 +495,13 @@ export function createQuoteFlowPricingService(deps = {}) {
       }
       working = {
         ...row,
-        scope: applied.scope
+        scope: markQuoteFlowReviewStaleOnScope(
+          applied.scope,
+          "Scope or pricing changed after approval. Re-review required."
+        ),
+        ...(wasApproved
+          ? { status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE, approval: null }
+          : {})
       };
     } else {
       // Ensure persisted QF lines are synced onto Studio customLineItems before calc.
@@ -493,7 +511,18 @@ export function createQuoteFlowPricingService(deps = {}) {
         actorUserId
       );
       if (applied.ok) {
-        working = { ...row, scope: applied.scope };
+        working = {
+          ...row,
+          scope: wasApproved
+            ? markQuoteFlowReviewStaleOnScope(
+                applied.scope,
+                "Scope or pricing changed after approval. Re-review required."
+              )
+            : applied.scope,
+          ...(wasApproved
+            ? { status: STUDIO_ESTIMATE_STATUSES.READY_TO_PRICE, approval: null }
+            : {})
+        };
       }
     }
 

@@ -19,6 +19,7 @@ import {
 } from "../lib/quoteFlowEstimatesApi";
 import OfficialScopeEditor, { roomsFromOfficialScope } from "./OfficialScopeEditor";
 import OfficialPricingPanel from "./OfficialPricingPanel";
+import OfficialReviewPanel from "./OfficialReviewPanel";
 
 type Props = {
   authToken: string;
@@ -62,8 +63,8 @@ const SECTIONS: {
   {
     key: "review",
     label: "Review",
-    placeholder: "Estimate review and approval will be added in a later slice.",
-    active: false
+    placeholder: "",
+    active: true
   },
   {
     key: "digital",
@@ -97,7 +98,7 @@ function errorMessage(e: unknown): string {
 
 function statusPillClass(statusKey: string | undefined): string {
   const k = String(statusKey || "");
-  if (k === "scope_edited") return "qf-pill qf-pill--go";
+  if (k === "scope_edited" || k === "needs_review") return "qf-pill qf-pill--go";
   if (k === "scope_set") return "qf-pill qf-pill--ready";
   if (k === "priced" || k === "approved") return "qf-pill qf-pill--done";
   return "qf-pill";
@@ -840,6 +841,30 @@ export default function EstimatesListPage(props: Props) {
                   {dirty ? (
                     <p className="qf-muted" data-testid="qf-pricing-scope-dirty-hint">
                       Save Scope before calculating pricing so quantities stay in sync.
+                    </p>
+                  ) : null}
+                </section>
+              ) : section === "review" && selectedId ? (
+                <section
+                  className="qf-estimates__section is-active"
+                  data-testid="qf-estimates-section-review"
+                >
+                  <OfficialReviewPanel
+                    authToken={authToken}
+                    estimateId={selectedId}
+                    disabled={saving || detailLoading || dirty}
+                    onApproved={() => {
+                      void loadList("refresh");
+                      if (selectedId) void openEstimate(selectedId);
+                    }}
+                    onReopened={() => {
+                      void loadList("refresh");
+                      if (selectedId) void openEstimate(selectedId);
+                    }}
+                  />
+                  {dirty ? (
+                    <p className="qf-muted" data-testid="qf-review-scope-dirty-hint">
+                      Save Scope before approving so quantities stay in sync.
                     </p>
                   ) : null}
                 </section>

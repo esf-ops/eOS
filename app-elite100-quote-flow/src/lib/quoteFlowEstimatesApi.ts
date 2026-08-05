@@ -285,3 +285,88 @@ export async function calculateQuoteFlowEstimatePricing(
     }
   ) as Promise<QuoteFlowPricingPayload>;
 }
+
+export type QuoteFlowReviewChecklistItem = {
+  id: string;
+  label: string;
+  severity: "passed" | "warning" | "blocker";
+  detail?: string | null;
+  passed?: boolean;
+};
+
+export type QuoteFlowReviewSummary = {
+  estimateName?: string | null;
+  source?: { key?: string; label?: string } | null;
+  rooms?: number;
+  pieces?: number;
+  countertopSf?: number;
+  backsplashSf?: number;
+  openEdgeLf?: number;
+  pricingBasis?: string | null;
+  priceGroup?: string | null;
+  priceGroupLabel?: string | null;
+  customerEstimateTotal?: number | null;
+  customerFacingAdjustments?: number;
+  customerFacingChargesTotal?: number;
+  customerFacingCreditsTotal?: number;
+  internalOnlyAdjustments?: number;
+  internalOnlyChargesTotal?: number;
+  internalOnlyCreditsTotal?: number;
+  exactInternalTotal?: number | null;
+  calculatedAt?: string | null;
+  edgeStatus?: QuoteFlowEdgeStatus | null;
+};
+
+export type QuoteFlowReviewPayload = {
+  ok?: boolean;
+  estimateId?: string;
+  revision?: number | null;
+  status?: string | null;
+  reviewStatus?: { key: string; label: string };
+  canApprove?: boolean;
+  checklist?: QuoteFlowReviewChecklistItem[];
+  blockers?: string[];
+  warnings?: string[];
+  reviewSummary?: QuoteFlowReviewSummary;
+  approval?: {
+    approvedAt?: string | null;
+    approvedByUserId?: string | null;
+    calculationFingerprint?: string | null;
+    customerDisplayTotal?: number | null;
+    exactInternalTotal?: number | null;
+  } | null;
+  reReviewRequired?: boolean;
+  reReviewMessage?: string | null;
+  message?: string;
+  reused?: boolean;
+  sideEffects?: Record<string, boolean>;
+};
+
+export async function fetchQuoteFlowEstimateReview(token: string, estimateId: string) {
+  return apiGet(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/review`,
+    token
+  ) as Promise<QuoteFlowReviewPayload>;
+}
+
+export async function approveQuoteFlowEstimateReview(token: string, estimateId: string) {
+  return apiFetch(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/review/approve`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ confirm: true })
+    }
+  ) as Promise<QuoteFlowReviewPayload>;
+}
+
+export async function reopenQuoteFlowEstimateReview(token: string, estimateId: string) {
+  return apiFetch(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/review/reopen`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ confirm: true })
+    }
+  ) as Promise<QuoteFlowReviewPayload>;
+}

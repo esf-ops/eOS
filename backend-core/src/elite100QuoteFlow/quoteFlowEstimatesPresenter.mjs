@@ -190,12 +190,24 @@ export function summarizeOfficialScope(scope) {
  */
 export function mapQuoteFlowEstimateStatus(estimate, scope = {}) {
   const commercial = String(estimate?.status || "").toLowerCase();
+  const qfReview =
+    scope.quoteFlowReview && typeof scope.quoteFlowReview === "object" ? scope.quoteFlowReview : null;
+  const staleReview =
+    qfReview?.status === "stale" ||
+    (commercial === "approved" && String(estimate?.staleReason || "").trim());
   // Display-only commercial labels — no pricing/approval actions in Estimates UI.
-  if (commercial === "priced") {
-    return { key: "priced", label: "Priced", nextAction: "Edit official scope" };
+  if (commercial === "approved" && !staleReview) {
+    return { key: "approved", label: "Approved", nextAction: "Prepare customer quote later" };
   }
-  if (commercial === "approved") {
-    return { key: "approved", label: "Approved", nextAction: "Edit official scope" };
+  if (staleReview || (qfReview?.status === "stale" && commercial !== "approved")) {
+    return {
+      key: "needs_review",
+      label: "Re-review required",
+      nextAction: "Open Review"
+    };
+  }
+  if (commercial === "priced") {
+    return { key: "priced", label: "Priced", nextAction: "Open Review" };
   }
   const edited =
     scope.quoteFlowScopeEdited === true ||

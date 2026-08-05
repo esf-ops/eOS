@@ -25,6 +25,7 @@ import { createQuoteFlowService } from "./quoteFlowService.mjs";
 import { createQuoteFlowSetScopeService } from "./quoteFlowSetScope.mjs";
 import { createQuoteFlowEstimatesService } from "./quoteFlowEstimates.mjs";
 import { createQuoteFlowPricingService } from "./quoteFlowPricing.mjs";
+import { createQuoteFlowReviewService } from "./quoteFlowReview.mjs";
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
 import {
   approveAndBuildEstimate,
@@ -47,6 +48,7 @@ const setScopeJsonParser = express.json({ limit: "4mb" });
  *   quoteFlowSetScopeService?: ReturnType<typeof createQuoteFlowSetScopeService>,
  *   quoteFlowEstimatesService?: ReturnType<typeof createQuoteFlowEstimatesService>,
  *   quoteFlowPricingService?: ReturnType<typeof createQuoteFlowPricingService>,
+ *   quoteFlowReviewService?: ReturnType<typeof createQuoteFlowReviewService>,
  *   sharedInboxService?: object,
  *   studioEstimateRepository?: object
  * }} deps
@@ -107,12 +109,14 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   let quoteFlowSetScopeService = deps.quoteFlowSetScopeService || null;
   let quoteFlowEstimatesService = deps.quoteFlowEstimatesService || null;
   let quoteFlowPricingService = deps.quoteFlowPricingService || null;
+  let quoteFlowReviewService = deps.quoteFlowReviewService || null;
 
   if (
     !quoteFlowService ||
     !quoteFlowSetScopeService ||
     !quoteFlowEstimatesService ||
-    !quoteFlowPricingService
+    !quoteFlowPricingService ||
+    !quoteFlowReviewService
   ) {
     const studioEstimateService =
       deps.studioEstimateService || createStudioEstimateService({ env, getSupabase });
@@ -178,6 +182,14 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
 
     if (!quoteFlowPricingService) {
       quoteFlowPricingService = createQuoteFlowPricingService({
+        estimateRepository,
+        studioEstimateService,
+        env
+      });
+    }
+
+    if (!quoteFlowReviewService) {
+      quoteFlowReviewService = createQuoteFlowReviewService({
         estimateRepository,
         studioEstimateService,
         env
@@ -648,8 +660,93 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get(
+    "/api/elite100-quote-flow/estimates/:estimateId/review",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await quoteFlowReviewService.getReview({
+          organizationId,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          actorUserId: req.user?.id ?? null
+        });
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] estimate review get failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to load review.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/estimates/:estimateId/review/approve",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowReviewService.approveReview({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          body
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "estimates.review_approve",
+            userId: req.user?.id ?? null,
+            estimateId: result.estimateId ?? null,
+            reused: result.reused === true,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] review approve failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to approve estimate.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/estimates/:estimateId/review/reopen",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowReviewService.reopenReview({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          body
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "estimates.review_reopen",
+            userId: req.user?.id ?? null,
+            estimateId: result.estimateId ?? null,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] review reopen failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to reopen review.");
+      }
+    }
+  );
+
   console.log(
-    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing (Slice 1E)"
+    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review (Slice 1F)"
   );
   return { mounted: true, reason: "ok" };
 }
