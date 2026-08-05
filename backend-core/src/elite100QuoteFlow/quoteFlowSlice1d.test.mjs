@@ -12,6 +12,7 @@ import {
 } from "./quoteFlowEstimates.mjs";
 import {
   presentQuoteFlowEstimateListItem,
+  resolveEstimateDisplayName,
   summarizeOfficialScope
 } from "./quoteFlowEstimatesPresenter.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
@@ -63,7 +64,30 @@ const scopedRooms = [
   assert.equal(item.estimateId, EST);
   assert.equal(item.customerName, "Buyer Co");
   assert.equal(item.projectName, "Remodel");
+  assert.equal(item.estimateName, "Remodel");
   assert.equal(item.status.key, "scope_set");
+  assert.equal(item.scopeSource?.key, "ai_takeoff");
+  assert.equal(item.scopeSummary.countertopSf > 0, true);
+  assert.equal(
+    resolveEstimateDisplayName({
+      customerName: "Unknown contact",
+      planFilename: "Hoskins Williams Job.pdf",
+      scope: {}
+    }),
+    "Hoskins Williams Job"
+  );
+  const manual = presentQuoteFlowEstimateListItem({
+    id: "m1",
+    status: "ready_to_price",
+    scope: {
+      rooms: scopedRooms,
+      source: "quote_flow_manual_scope",
+      projectName: "Manual Job",
+      quoteFlowScopeEdited: true
+    }
+  });
+  assert.equal(manual.scopeSource.key, "manual");
+  assert.equal(manual.status.key, "scope_edited");
   console.log("ok: estimates presenter");
 }
 
@@ -113,8 +137,9 @@ const scopedRooms = [
       updateScopeCalls += 1;
       const row = store.find((r) => r.id === estimateId);
       assert.ok(row);
-      const rooms = body?.scope?.rooms;
-      row.scope = { ...row.scope, rooms };
+      const patch = body?.scope && typeof body.scope === "object" ? body.scope : {};
+      const rooms = Array.isArray(patch.rooms) ? patch.rooms : row.scope?.rooms;
+      row.scope = { ...row.scope, ...patch, rooms };
       row.updatedAt = new Date().toISOString();
       return { ...row };
     },
@@ -208,6 +233,23 @@ const scopedRooms = [
   assert.equal(updateScopeCalls, 1);
   console.log("ok: PATCH scope is idempotent for identical rooms");
 
+  const named = await svc.patchOfficialScope({
+    organizationId: ORG,
+    estimateId: EST,
+    body: {
+      scope: {
+        rooms: patched.estimate.scope.rooms,
+        projectName: "Relihan VanderSchot Finals Plans",
+        estimateName: "Relihan VanderSchot Finals Plans"
+      }
+    }
+  });
+  assert.equal(named.ok, true);
+  assert.equal(named.message, "Scope saved.");
+  assert.equal(named.estimate.estimateName, "Relihan VanderSchot Finals Plans");
+  assert.equal(store.find((r) => r.id === EST)?.scope?.projectName, "Relihan VanderSchot Finals Plans");
+  console.log("ok: PATCH persists estimate/job name on scope");
+
   await assert.rejects(
     () =>
       svc.patchOfficialScope({
@@ -252,8 +294,12 @@ const scopedRooms = [
   assert.match(ui, /qf-official-scope-editor/);
   assert.match(ui, /Manual edits here do not rerun AI Takeoff/);
   assert.match(ui, /Save Scope/);
+  assert.match(ui, /qf-page--command|qf-estimates--command/);
+  assert.match(ui, /qf-estimates-tab-pricing|Pricing/);
+  assert.match(ui, /Digital Estimate/);
   assert.doesNotMatch(ui, /takeoff-iframe|ConsolidatedTakeoffReview|quoteFlowSetScope/);
   assert.doesNotMatch(ui, /\bV1\b|\bV2\b|Studio V2/);
+  assert.doesNotMatch(ui, /\bSet Scope\b/);
   console.log("ok: Estimates UI official scope; no takeoff iframe; no V1/V2");
 }
 

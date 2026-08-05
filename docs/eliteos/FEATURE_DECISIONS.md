@@ -3871,3 +3871,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | ConsolidatedTakeoffReview footer, takeoff↔Quote Flow postMessage contract, EstimateQueuePage listener, UI/slice tests, this doc. |
 | **Protected / unchanged** | Set Scope backend orchestration, queue filter, pricing, Digital Estimate, Studio V2, acceptance, sold. |
 | **Revisit trigger** | Sticky footer bar inside the iframe if long tables still bury the button. |
+
+### 284. Elite 100 Quote Flow — Estimates Official Workspace (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-estimates-official-workspace` |
+| **Decision** | Estimates becomes a full-width command-center library/detail workspace for **scoped estimates only**. Selected estimate has internal sections Scope / Pricing / Review / Digital Estimate / Activity / Handoff — only **Scope** is functional. Official Scope editor supports estimate name, rooms/pieces/dimensions, add/remove with confirm, SF summary, and **Save Scope** (PATCH). Presenter exposes estimate display name, AI/Manual source, and SF summary from existing scope fields (no migration). Other sections are placeholders only. No pricing, calculate, approval, publish, acceptance, or sold. |
+| **Why** | After Queue Set Scope, estimators need a polished permanent official estimate record — not a narrow prototype list. |
+| **Impacted** | EstimatesListPage, OfficialScopeEditor, estimateGrouping, estimates presenter/PATCH (name + edited flags), QuoteFlowApp shell width, styles, UI/slice 1d tests, this doc. |
+| **Protected / unchanged** | Inbox, Estimate Queue filter/Set Scope, AI Takeoff algorithm, pricing, Digital Estimate modules, Studio V2, acceptance, sold. |
+| **Revisit trigger** | Activate Pricing section when Quote Flow pricing slice lands. |

@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { QuoteFlowScopePiece, QuoteFlowScopeRoom } from "../lib/quoteFlowEstimatesApi";
+import { summarizeRoomsLocal } from "../lib/estimateGrouping.mjs";
 
 type Props = {
   rooms: QuoteFlowScopeRoom[];
@@ -87,6 +88,7 @@ export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined):
 export default function OfficialScopeEditor(props: Props) {
   const { rooms, onChange, disabled, heading, hint } = props;
   const [showEdgeHint] = useState(true);
+  const localSummary = useMemo(() => summarizeRoomsLocal(rooms), [rooms]);
 
   function updateRoom(index: number, patch: Partial<QuoteFlowScopeRoom>) {
     const next = rooms.map((r, i) => (i === index ? { ...r, ...patch } : r));
@@ -113,7 +115,7 @@ export default function OfficialScopeEditor(props: Props) {
     onChange(next);
   }
 
-  function removePiece(roomIndex: number, pieceIndex: number) {
+  function excludePiece(roomIndex: number, pieceIndex: number) {
     const next = rooms.map((r, i) => {
       if (i !== roomIndex) return r;
       const pieces = (r.pieces || []).map((p, pi) =>
@@ -122,6 +124,29 @@ export default function OfficialScopeEditor(props: Props) {
       return { ...r, pieces };
     });
     onChange(next);
+  }
+
+  function removePiece(roomIndex: number, pieceIndex: number) {
+    const piece = rooms[roomIndex]?.pieces?.[pieceIndex];
+    const label = String(piece?.name || "this piece");
+    if (!window.confirm(`Remove ${label} from official scope?`)) return;
+    const next = rooms.map((r, i) => {
+      if (i !== roomIndex) return r;
+      const pieces = (r.pieces || []).filter((_, pi) => pi !== pieceIndex);
+      return { ...r, pieces: pieces.length ? pieces : [emptyPiece()] };
+    });
+    onChange(next);
+  }
+
+  function removeRoom(roomIndex: number) {
+    const room = rooms[roomIndex];
+    const label = String(room?.name || "this room");
+    if (!window.confirm(`Remove ${label} from official scope?`)) return;
+    if (rooms.length <= 1) {
+      onChange([emptyRoom()]);
+      return;
+    }
+    onChange(rooms.filter((_, i) => i !== roomIndex));
   }
 
   return (
@@ -137,6 +162,19 @@ export default function OfficialScopeEditor(props: Props) {
             appear when they already exist on the scope.
           </p>
         ) : null}
+        <p className="qf-scope__sf-summary" data-testid="qf-scope-sf-summary">
+          {localSummary.roomCount} room{localSummary.roomCount === 1 ? "" : "s"} ·{" "}
+          {localSummary.pieceCount} piece{localSummary.pieceCount === 1 ? "" : "s"}
+          {localSummary.countertopSf > 0
+            ? ` · ${localSummary.countertopSf.toFixed(1)} SF countertop`
+            : ""}
+          {localSummary.backsplashSf > 0
+            ? ` · ${localSummary.backsplashSf.toFixed(1)} SF backsplash`
+            : ""}
+          {localSummary.excludedPieceCount > 0
+            ? ` · ${localSummary.excludedPieceCount} excluded`
+            : ""}
+        </p>
       </div>
 
       {rooms.map((room, roomIndex) => (
@@ -173,6 +211,15 @@ export default function OfficialScopeEditor(props: Props) {
               />
               Include room
             </label>
+            <button
+              type="button"
+              className="qf-btn-secondary"
+              data-testid="qf-scope-remove-room"
+              disabled={disabled}
+              onClick={() => removeRoom(roomIndex)}
+            >
+              Remove room
+            </button>
           </div>
 
           {roomHasBacksplashFields(room) ? (
@@ -341,10 +388,20 @@ export default function OfficialScopeEditor(props: Props) {
                   <button
                     type="button"
                     className="qf-btn-secondary"
+                    data-testid="qf-scope-exclude-piece"
+                    disabled={disabled}
+                    onClick={() => excludePiece(roomIndex, pieceIndex)}
+                  >
+                    Exclude piece
+                  </button>
+                  <button
+                    type="button"
+                    className="qf-btn-secondary"
+                    data-testid="qf-scope-remove-piece"
                     disabled={disabled}
                     onClick={() => removePiece(roomIndex, pieceIndex)}
                   >
-                    Exclude piece
+                    Remove piece
                   </button>
                 </li>
               );
