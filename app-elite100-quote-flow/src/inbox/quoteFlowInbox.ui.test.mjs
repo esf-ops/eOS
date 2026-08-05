@@ -10,10 +10,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatPersonLabel, normalizeInboxItemLabels } from "../lib/formatPersonLabel.mjs";
 import {
+  filterInboxItems,
   groupInboxItems,
   resolveCustomerDisplay,
   resolveInboxProgress,
-  resolveRequestTitle
+  resolveRequestTitle,
+  sortInboxItemsForDisplay
 } from "../lib/inboxGrouping.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +31,9 @@ const helper = readFileSync(join(appRoot, "src/lib/formatPersonLabel.mjs"), "utf
 const grouping = readFileSync(join(appRoot, "src/lib/inboxGrouping.mjs"), "utf8");
 
 assert.match(inbox, /data-testid="qf-inbox-page"/);
+assert.match(inbox, /data-testid="qf-inbox-command-header"/);
+assert.match(inbox, /qf-page--command|qf-inbox--command/);
+assert.match(inbox, /Quote Flow Inbox/);
 assert.match(inbox, /data-testid="qf-inbox-list"/);
 assert.match(inbox, /data-testid="qf-inbox-row"/);
 assert.match(inbox, /data-testid="qf-inbox-attachment"/);
@@ -42,6 +47,13 @@ assert.match(inbox, /data-testid="qf-inbox-progress"/);
 assert.match(inbox, /data-testid="qf-inbox-view-queue"/);
 assert.match(inbox, /data-testid="qf-inbox-view-estimates"/);
 assert.match(inbox, /data-testid="qf-inbox-batch-check"/);
+assert.match(inbox, /data-testid="qf-inbox-remove"/);
+assert.match(inbox, /data-testid="qf-inbox-restore"/);
+assert.match(inbox, /data-testid="qf-inbox-toggle-removed"/);
+assert.match(inbox, /data-testid="qf-inbox-filters"/);
+assert.match(inbox, /data-testid="qf-inbox-search"/);
+assert.match(inbox, /Remove from Quote Flow/);
+assert.match(inbox, /does not delete the original email/);
 assert.match(inbox, /selectedAttachmentByMessage/);
 assert.match(inbox, /Start selected AI Takeoffs/);
 assert.match(inbox, /Start AI Takeoff|Select for AI Takeoff/);
@@ -60,16 +72,22 @@ assert.match(inbox, /qf-inbox-syncing|Syncing…/);
 assert.match(inbox, /qf-inbox-initial-loading/);
 assert.match(inbox, /showFullLoading/);
 assert.match(inbox, /loadList\("poll"\)|mode === "poll"|LoadMode/);
+assert.match(inbox, /markQuoteFlowInboxOpened|opened/);
 assert.match(api, /\/api\/elite100-quote-flow\/inbox/);
 assert.match(api, /start-takeoff/);
+assert.match(api, /\/dismiss/);
+assert.match(api, /\/restore/);
+assert.match(api, /\/opened/);
 assert.match(app, /authToken=\{sessionToken\}/);
 assert.match(app, /onOpenEstimates/);
+assert.match(app, /qf-shell--command/);
 assert.doesNotMatch(inbox, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);
 assert.doesNotMatch(inbox, /Approve Estimate|mark sold|auto-publish/);
 assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish/);
 assert.match(helper, /safeAddressLabel/);
 assert.match(grouping, /resolveInboxProgress/);
-console.log("ok: Inbox UI polish contracts; no V1/V2 copy");
+assert.match(grouping, /filterInboxItems/);
+console.log("ok: Inbox command-center contracts; no V1/V2 copy");
 
 {
   const { presentQuoteFlowInboxItem, sortQuoteFlowInboxItems, mapQuoteFlowTakeoffProgress } =
@@ -146,7 +164,8 @@ console.log("ok: Inbox UI polish contracts; no V1/V2 copy");
     {
       messageKey: "b",
       takeoffStatus: { key: "ready_to_start", label: "Ready to start" },
-      group: { key: "needs_action" }
+      group: { key: "needs_action" },
+      opened: false
     },
     {
       messageKey: "c",
@@ -159,16 +178,37 @@ console.log("ok: Inbox UI polish contracts; no V1/V2 copy");
         isError: false,
         isComplete: false
       }
+    },
+    {
+      messageKey: "d",
+      takeoffStatus: { key: "ready_to_start", label: "Ready to start" },
+      group: { key: "needs_action" },
+      dismissed: true
     }
   ];
   const grouped = groupInboxItems(rows);
   assert.equal(grouped.needs_action[0].messageKey, "b");
   assert.equal(grouped.active[0].messageKey, "c");
   assert.equal(grouped.completed[0].messageKey, "a");
+  assert.equal(grouped.dismissed[0].messageKey, "d");
   assert.equal(resolveInboxProgress(rows[2]).percent, 55);
   assert.equal(resolveInboxProgress({ takeoffStatus: { key: "takeoff_returned" } }).percent, 100);
   assert.equal(resolveInboxProgress({ alreadyScoped: true }).stageKey, "scope_set");
-  console.log("ok: client grouping + progress stage mapping");
+
+  const activeOnly = filterInboxItems(rows, "all_active");
+  assert.equal(activeOnly.some((r) => r.messageKey === "d"), false);
+  const removedOnly = filterInboxItems(rows, "removed");
+  assert.equal(removedOnly.length, 1);
+  assert.equal(removedOnly[0].messageKey, "d");
+
+  const sorted = sortInboxItemsForDisplay([
+    { messageKey: "opened", group: { key: "needs_action" }, opened: true, receivedAt: "2026-08-04T12:00:00Z" },
+    { messageKey: "new", group: { key: "needs_action" }, opened: false, receivedAt: "2026-08-01T12:00:00Z" },
+    { messageKey: "done", group: { key: "completed" }, alreadyScoped: true, receivedAt: "2026-08-04T13:00:00Z" }
+  ]);
+  assert.equal(sorted[0].messageKey, "new");
+  assert.equal(sorted[sorted.length - 1].messageKey, "done");
+  console.log("ok: client grouping, dismiss hide, unopened-first sort");
 }
 
 {
