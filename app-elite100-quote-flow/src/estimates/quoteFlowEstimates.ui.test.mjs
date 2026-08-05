@@ -143,9 +143,20 @@ assert.match(pricingPanel, /Open edge LF/);
 assert.match(pricingPanel, /Scope changed since last calculation/);
 assert.match(pricingPanel, /qf-pricing-price-group|Price group/);
 assert.match(pricingPanel, /qf-pricing-basis|Pricing basis/);
+assert.match(pricingPanel, /Custom line items|qf-pricing-custom-lines/);
+assert.match(pricingPanel, /Add customer-facing line item/);
+assert.match(pricingPanel, /Add internal-only line item/);
+assert.match(pricingPanel, /Customer-facing items may appear on the customer quote later/);
+assert.match(pricingPanel, /Internal-only items stay inside eliteOS/);
+assert.match(pricingPanel, /Review\/Publish is not active yet/);
+assert.match(pricingPanel, /qf-pricing-edge-status|Edge profile|Pending/);
+assert.match(pricingPanel, /Included \/ no charge/);
+assert.match(pricingPanel, /Net custom adjustment/);
+assert.match(api, /customLineItems/);
+assert.match(styles, /qf-pricing__custom-lines|qf-pricing__line-row/);
 assert.doesNotMatch(pricingPanel, /Approve Estimate|Mark sold|Customer acceptance|Digital Estimate publish/i);
 assert.doesNotMatch(pricingPanel, /\bV1\b|\bV2\b|Studio V2/);
-console.log("ok: Estimates Quote Library layout; Pricing tab active; polished scope; Open edge LF; no Takeoff/V1/V2");
+console.log("ok: Estimates Quote Library layout; Pricing tab active; custom line items; Open edge LF; no Takeoff/V1/V2");
 
 {
   const rows = [

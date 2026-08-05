@@ -290,6 +290,179 @@ function makeStore(initialRows) {
   const scopeStale = await svc.getPricing({ organizationId: ORG, estimateId: EST });
   assert.equal(scopeStale.scopeChangedSinceCalculation, true);
   console.log("ok: scope-changed stale marker");
+
+  // Custom line items — customer / internal / note
+  await repo.update(ORG, EST, {
+    status: "ready_to_price",
+    calculationSnapshot: null,
+    staleReason: null,
+    scope: {
+      rooms: baseRooms(),
+      pricingBasis: "wholesale",
+      materialGroup: "Group Promo"
+    }
+  });
+
+  const baseline = await svc.calculatePricing({
+    organizationId: ORG,
+    estimateId: EST,
+    body: { pricing: { pricingBasis: "wholesale", materialGroup: "Group Promo", customLineItems: [] } }
+  });
+  const baselineTotal = Number(
+    baseline.lastCalculation.exactInternalTotal ?? baseline.lastCalculation.estimatedTotal
+  );
+  assert.ok(baselineTotal > 0);
+
+  const withLines = await svc.patchPricing({
+    organizationId: ORG,
+    estimateId: EST,
+    body: {
+      pricing: {
+        customLineItems: [
+          {
+            id: "cli-cust-charge",
+            label: "Special install charge",
+            type: "charge",
+            visibility: "customer",
+            quantity: 1,
+            unitAmount: 150,
+            category: "install"
+          },
+          {
+            id: "cli-cust-credit",
+            label: "Promo credit",
+            type: "credit",
+            visibility: "customer",
+            quantity: 1,
+            unitAmount: 40,
+            category: "adjustment"
+          },
+          {
+            id: "cli-int-charge",
+            label: "Extra shop labor",
+            type: "charge",
+            visibility: "internal",
+            quantity: 2,
+            unitAmount: 25,
+            category: "labor"
+          },
+          {
+            id: "cli-note",
+            label: "Estimator note: verify sink model",
+            type: "note",
+            visibility: "internal",
+            note: "Do not show externally"
+          }
+        ]
+      }
+    }
+  });
+  assert.equal(withLines.ok, true);
+  assert.equal(withLines.customLineItems.length, 4);
+  assert.equal(
+    withLines.customLineItems.filter((l) => l.visibility === "customer").length,
+    2
+  );
+  assert.equal(
+    withLines.customLineItems.filter((l) => l.visibility === "internal").length,
+    2
+  );
+  assert.equal(withLines.customLineSummary.customerFacingChargesTotal, 150);
+  assert.equal(withLines.customLineSummary.customerFacingCreditsTotal, 40);
+  assert.equal(withLines.customLineSummary.internalOnlyChargesTotal, 50);
+  assert.equal(withLines.customLineSummary.noteOnlyCount, 1);
+  assert.equal(withLines.customLineSummary.netCustomAdjustment, 160);
+  const persistedQfp = repo.peek(EST).scope.quoteFlowPricing.customLineItems;
+  assert.equal(persistedQfp.length, 4);
+  assert.ok(persistedQfp.some((l) => l.visibility === "customer" && l.type === "charge"));
+  assert.ok(persistedQfp.some((l) => l.visibility === "internal" && l.type === "note"));
+  // Notes must not be mapped into Studio calculator lines.
+  assert.ok(
+    !(repo.peek(EST).scope.customLineItems || []).some((l) => /Estimator note/i.test(String(l.name || "")))
+  );
+  assert.ok(
+    (repo.peek(EST).scope.customLineItems || []).some((l) => l.commercialRole === "customer_charge")
+  );
+  assert.ok(
+    (repo.peek(EST).scope.customLineItems || []).some((l) => l.commercialRole === "internal_only")
+  );
+  console.log("ok: pricing draft saves customer-facing and internal-only line items");
+
+  await assert.rejects(
+    () =>
+      svc.patchPricing({
+        organizationId: ORG,
+        estimateId: EST,
+        body: {
+          pricing: {
+            customLineItems: [{ type: "charge", visibility: "customer", unitAmount: 10 }]
+          }
+        }
+      }),
+    (e) => e.code === "pricing_invalid"
+  );
+  console.log("ok: missing label returns safe validation");
+
+  const calcWithLines = await svc.calculatePricing({ organizationId: ORG, estimateId: EST });
+  assert.equal(calcWithLines.ok, true);
+  assert.equal(calcWithLines.sideEffects.approved, false);
+  assert.equal(calcWithLines.sideEffects.published, false);
+  assert.equal(calcWithLines.sideEffects.sold, false);
+  assert.equal(calcWithLines.sideEffects.digitalEstimateCreated, false);
+  const withLinesTotal = Number(
+    calcWithLines.lastCalculation.exactInternalTotal ??
+      calcWithLines.lastCalculation.estimatedTotal
+  );
+  // Customer net +100 and internal +50 should raise exact internal total vs baseline.
+  assert.ok(
+    withLinesTotal >= baselineTotal + 140,
+    `expected internal total to include billable customs (baseline=${baselineTotal}, got=${withLinesTotal})`
+  );
+  assert.equal(calcWithLines.customLineSummary.netCustomAdjustment, 160);
+  assert.equal(calcWithLines.lastCalculation.customLineItems.summary.netCustomAdjustment, 160);
+  assert.equal(calcWithLines.lastCalculation.customLineItems.customerFacing.length, 2);
+  assert.equal(calcWithLines.lastCalculation.customLineItems.internalOnly.length, 2);
+  // Notes do not change totals when toggling note amount (already 0).
+  const noteOnly = await svc.calculatePricing({
+    organizationId: ORG,
+    estimateId: EST,
+    body: {
+      pricing: {
+        customLineItems: [
+          {
+            id: "only-note",
+            label: "Just a note",
+            type: "note",
+            visibility: "internal"
+          }
+        ]
+      }
+    }
+  });
+  const noteTotal = Number(
+    noteOnly.lastCalculation.exactInternalTotal ?? noteOnly.lastCalculation.estimatedTotal
+  );
+  assert.ok(
+    Math.abs(noteTotal - baselineTotal) < 0.02,
+    `note-only should not change total (baseline=${baselineTotal}, got=${noteTotal})`
+  );
+  console.log("ok: charges/credits affect calc; notes do not; visibility preserved");
+
+  // Edge pending when open edge LF exists but no profile selected
+  const edgePending = presentQuoteFlowPricingResult({
+    scope: {
+      rooms: baseRooms(),
+      // no edgeProfileToken
+    },
+    calculationSnapshot: {
+      fabrication: { edge: { amount: 0, finalLf: 10, tier: "free", profileToken: null } },
+      totals: { exactInternalTotal: 100, customerDisplayTotal: 100 }
+    }
+  });
+  assert.equal(edgePending.edgeStatus.chargeStatus, "pending");
+  assert.equal(edgePending.edgeStatus.profileDisplay, "Not selected");
+  assert.equal(edgePending.breakdown.edgeLf, null);
+  console.log("ok: edge pending when openEdgeLf exists without profile");
 }
 
 {

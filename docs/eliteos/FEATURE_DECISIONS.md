@@ -3981,3 +3981,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowPricing.mjs` + routes/tests, Estimates `OfficialPricingPanel`, estimates API helpers, styles, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Inbox, Estimate Queue Set Scope, Scope editor behavior (except reading summary), approval, Digital Estimate publish, customer acceptance, sold/handoff, Studio V2 page layout, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
 | **Revisit trigger** | Estimate Review / approve, Digital Estimate publish, customer-facing totals, or material/color catalog UX beyond price group. |
+
+### 294. Elite 100 Quote Flow — Pricing custom line items (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-pricing-line-items` |
+| **Decision** | Pricing tab supports structured custom line items under `scope.quoteFlowPricing.customLineItems` (type charge/credit/note × visibility customer/internal). Billable charge/credit lines sync into Studio `scope.customLineItems` via `studioCommercialLines` so `calculateStudioEstimateV4` applies them; notes stay QF-only and do not change totals. Edge UI shows Pending when openEdgeLf > 0 and no edge profile selected (no false “0.0 LF priced”). No migration. |
+| **Why** | Estimators need customer-facing vs internal-only extras before Review/Publish without inventing a parallel pricing engine. |
+| **Impacted** | `quoteFlowCustomLineItems.mjs`, `quoteFlowPricing.mjs` + tests, `OfficialPricingPanel`, estimates API/styles, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Inbox, Queue/Set Scope, Scope editor, approval, Digital Estimate publish, acceptance, sold/handoff, Studio V2 layout, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
+| **Revisit trigger** | Review/Publish consuming customer-facing lines; edge profile picker in Quote Flow Pricing. |

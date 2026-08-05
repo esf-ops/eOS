@@ -8,7 +8,10 @@ import {
   calculateQuoteFlowEstimatePricing,
   fetchQuoteFlowEstimatePricing,
   patchQuoteFlowEstimatePricing,
+  type QuoteFlowCustomLineItem,
+  type QuoteFlowCustomLineSummary,
   type QuoteFlowEditablePricing,
+  type QuoteFlowEdgeStatus,
   type QuoteFlowPricingPayload,
   type QuoteFlowPricingResult,
   type QuoteFlowScopeSummary
@@ -29,6 +32,16 @@ const GROUP_OPTIONS = [
   { value: "Group E", label: "E" },
   { value: "Group F", label: "F" },
   { value: "Remnant", label: "Remnant" }
+] as const;
+
+const CATEGORY_OPTIONS = [
+  { value: "material", label: "Material" },
+  { value: "labor", label: "Labor" },
+  { value: "install", label: "Install" },
+  { value: "sink/cutout", label: "Sink / cutout" },
+  { value: "edge", label: "Edge" },
+  { value: "adjustment", label: "Adjustment" },
+  { value: "other", label: "Other" }
 ] as const;
 
 type Props = {
@@ -74,17 +87,253 @@ function money(n: number | null | undefined): string {
   })}`;
 }
 
-function pricingFingerprint(p: QuoteFlowEditablePricing): string {
+function newLineId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return `qf-cli-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  return `qf-cli-${Date.now().toString(36)}`;
+}
+
+function createLine(visibility: "customer" | "internal"): QuoteFlowCustomLineItem {
+  return {
+    id: newLineId(),
+    label: "",
+    type: "charge",
+    visibility,
+    quantity: 1,
+    unitAmount: 0,
+    amount: 0,
+    category: "other",
+    note: "",
+    sortOrder: Date.now()
+  };
+}
+
+function lineAmount(line: QuoteFlowCustomLineItem): number {
+  if (line.type === "note") return 0;
+  const qty = Number(line.quantity) > 0 ? Number(line.quantity) : 1;
+  const unit = Math.abs(Number(line.unitAmount) || 0);
+  return Math.round(unit * qty * 100) / 100;
+}
+
+function summarizeLocal(lines: QuoteFlowCustomLineItem[]): QuoteFlowCustomLineSummary {
+  let customerFacingChargesTotal = 0;
+  let customerFacingCreditsTotal = 0;
+  let internalOnlyChargesTotal = 0;
+  let internalOnlyCreditsTotal = 0;
+  let noteOnlyCount = 0;
+  let netCustomAdjustment = 0;
+  for (const line of lines) {
+    if (line.type === "note") {
+      noteOnlyCount += 1;
+      continue;
+    }
+    const amt = lineAmount(line);
+    if (line.visibility === "customer") {
+      if (line.type === "credit") {
+        customerFacingCreditsTotal += amt;
+        netCustomAdjustment -= amt;
+      } else {
+        customerFacingChargesTotal += amt;
+        netCustomAdjustment += amt;
+      }
+    } else if (line.type === "credit") {
+      internalOnlyCreditsTotal += amt;
+      netCustomAdjustment -= amt;
+    } else {
+      internalOnlyChargesTotal += amt;
+      netCustomAdjustment += amt;
+    }
+  }
+  return {
+    customerFacingChargesTotal: Math.round(customerFacingChargesTotal * 100) / 100,
+    customerFacingCreditsTotal: Math.round(customerFacingCreditsTotal * 100) / 100,
+    internalOnlyChargesTotal: Math.round(internalOnlyChargesTotal * 100) / 100,
+    internalOnlyCreditsTotal: Math.round(internalOnlyCreditsTotal * 100) / 100,
+    noteOnlyCount,
+    netCustomAdjustment: Math.round(netCustomAdjustment * 100) / 100
+  };
+}
+
+function pricingFingerprint(
+  p: QuoteFlowEditablePricing,
+  lines: QuoteFlowCustomLineItem[]
+): string {
   try {
     return JSON.stringify({
       pricingBasis: p.pricingBasis,
       materialGroup: p.materialGroup,
       estimateWideAdjustment: p.estimateWideAdjustment,
-      internalMarkupPercent: p.internalMarkupPercent
+      internalMarkupPercent: p.internalMarkupPercent,
+      customLineItems: lines.map((l) => ({
+        id: l.id,
+        label: l.label,
+        type: l.type,
+        visibility: l.visibility,
+        quantity: l.quantity,
+        unitAmount: l.unitAmount,
+        category: l.category,
+        note: l.note,
+        sortOrder: l.sortOrder
+      }))
     });
   } catch {
     return "";
   }
+}
+
+function LineItemsGroup(props: {
+  title: string;
+  helper: string;
+  visibility: "customer" | "internal";
+  lines: QuoteFlowCustomLineItem[];
+  busy: boolean;
+  onChange: (id: string, patch: Partial<QuoteFlowCustomLineItem>) => void;
+  onRemove: (id: string) => void;
+  onAdd: () => void;
+}) {
+  const { title, helper, visibility, lines, busy, onChange, onRemove, onAdd } = props;
+  const group = lines.filter((l) => l.visibility === visibility);
+  return (
+    <div
+      className="qf-pricing__line-group"
+      data-testid={`qf-pricing-lines-${visibility}`}
+    >
+      <div className="qf-pricing__line-group-head">
+        <div>
+          <h4>{title}</h4>
+          <p className="qf-muted">{helper}</p>
+        </div>
+        <button
+          type="button"
+          className="qf-btn-secondary"
+          disabled={busy}
+          data-testid={`qf-pricing-add-${visibility}-line`}
+          onClick={onAdd}
+        >
+          {visibility === "customer" ? "Add customer-facing line item" : "Add internal-only line item"}
+        </button>
+      </div>
+      {group.length === 0 ? (
+        <p className="qf-muted">No {visibility === "customer" ? "customer-facing" : "internal-only"} line items yet.</p>
+      ) : (
+        <ul className="qf-pricing__line-list">
+          {group.map((line) => (
+            <li key={line.id} className="qf-pricing__line-row" data-testid="qf-pricing-line-row">
+              <span
+                className={
+                  visibility === "customer"
+                    ? "qf-pricing__visibility-badge is-customer"
+                    : "qf-pricing__visibility-badge is-internal"
+                }
+              >
+                {visibility === "customer" ? "Customer" : "Internal"}
+              </span>
+              <label className="qf-pricing__field">
+                Description
+                <input
+                  type="text"
+                  value={line.label}
+                  disabled={busy}
+                  data-testid="qf-pricing-line-label"
+                  onChange={(e) => onChange(line.id || "", { label: e.target.value })}
+                />
+              </label>
+              <label className="qf-pricing__field">
+                Type
+                <select
+                  value={line.type}
+                  disabled={busy}
+                  data-testid="qf-pricing-line-type"
+                  onChange={(e) =>
+                    onChange(line.id || "", {
+                      type: e.target.value as QuoteFlowCustomLineItem["type"]
+                    })
+                  }
+                >
+                  <option value="charge">Charge</option>
+                  <option value="credit">Credit</option>
+                  <option value="note">Note</option>
+                </select>
+              </label>
+              {line.type !== "note" ? (
+                <>
+                  <label className="qf-pricing__field">
+                    Qty
+                    <input
+                      type="number"
+                      min={0}
+                      step="1"
+                      value={line.quantity ?? 1}
+                      disabled={busy}
+                      data-testid="qf-pricing-line-qty"
+                      onChange={(e) =>
+                        onChange(line.id || "", { quantity: Number(e.target.value) || 0 })
+                      }
+                    />
+                  </label>
+                  <label className="qf-pricing__field">
+                    Unit amount
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={line.unitAmount ?? 0}
+                      disabled={busy}
+                      data-testid="qf-pricing-line-unit"
+                      onChange={(e) =>
+                        onChange(line.id || "", { unitAmount: Number(e.target.value) || 0 })
+                      }
+                    />
+                  </label>
+                  <div className="qf-pricing__line-amount" data-testid="qf-pricing-line-amount">
+                    <span className="qf-stat__label">Amount</span>
+                    <span className="qf-stat__value">{money(lineAmount(line))}</span>
+                  </div>
+                </>
+              ) : (
+                <p className="qf-muted">Note does not change total</p>
+              )}
+              <label className="qf-pricing__field">
+                Category
+                <select
+                  value={line.category || "other"}
+                  disabled={busy}
+                  data-testid="qf-pricing-line-category"
+                  onChange={(e) => onChange(line.id || "", { category: e.target.value })}
+                >
+                  {CATEGORY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="qf-pricing__field">
+                Note
+                <input
+                  type="text"
+                  value={line.note || ""}
+                  disabled={busy}
+                  data-testid="qf-pricing-line-note"
+                  onChange={(e) => onChange(line.id || "", { note: e.target.value })}
+                />
+              </label>
+              <button
+                type="button"
+                className="qf-btn-secondary"
+                disabled={busy}
+                data-testid="qf-pricing-line-remove"
+                onClick={() => onRemove(line.id || "")}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export default function OfficialPricingPanel(props: Props) {
@@ -95,6 +344,7 @@ export default function OfficialPricingPanel(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pricing, setPricing] = useState<QuoteFlowEditablePricing>(emptyPricing());
+  const [customLines, setCustomLines] = useState<QuoteFlowCustomLineItem[]>([]);
   const [savedFp, setSavedFp] = useState("");
   const [scopeSummary, setScopeSummary] = useState<QuoteFlowScopeSummary | null>(null);
   const [lastCalculation, setLastCalculation] = useState<QuoteFlowPricingResult | null>(null);
@@ -103,16 +353,21 @@ export default function OfficialPricingPanel(props: Props) {
   const [staleReason, setStaleReason] = useState<string | null>(null);
   const [pricingStale, setPricingStale] = useState(false);
   const [scopeChangedSinceCalculation, setScopeChangedSinceCalculation] = useState(false);
+  const [edgeStatus, setEdgeStatus] = useState<QuoteFlowEdgeStatus | null>(null);
+  const [serverSummary, setServerSummary] = useState<QuoteFlowCustomLineSummary | null>(null);
 
-  const dirty = pricingFingerprint(pricing) !== savedFp;
+  const dirty = pricingFingerprint(pricing, customLines) !== savedFp;
+  const localSummary = useMemo(() => summarizeLocal(customLines), [customLines]);
 
   function applyPayload(payload: QuoteFlowPricingPayload) {
     const next = {
       ...emptyPricing(),
       ...(payload.editablePricing || {})
     };
+    const lines = Array.isArray(payload.customLineItems) ? payload.customLineItems : [];
     setPricing(next);
-    setSavedFp(pricingFingerprint(next));
+    setCustomLines(lines);
+    setSavedFp(pricingFingerprint(next, lines));
     setScopeSummary(payload.scopeSummary || null);
     setLastCalculation(payload.lastCalculation || null);
     setBlockers(Array.isArray(payload.blockers) ? payload.blockers : []);
@@ -120,6 +375,8 @@ export default function OfficialPricingPanel(props: Props) {
     setStaleReason(payload.staleReason || null);
     setPricingStale(payload.pricingStale === true);
     setScopeChangedSinceCalculation(payload.scopeChangedSinceCalculation === true);
+    setEdgeStatus(payload.edgeStatus || payload.lastCalculation?.edgeStatus || null);
+    setServerSummary(payload.customLineSummary || payload.lastCalculation?.customLineItems?.summary || null);
   }
 
   useEffect(() => {
@@ -170,19 +427,28 @@ export default function OfficialPricingPanel(props: Props) {
     ];
   }, [scopeSummary]);
 
+  function draftBody() {
+    return {
+      pricingBasis: pricing.pricingBasis,
+      materialGroup: pricing.materialGroup,
+      estimateWideAdjustment: pricing.estimateWideAdjustment,
+      ...(pricing.internalMarkupEditable
+        ? { internalMarkupPercent: pricing.internalMarkupPercent }
+        : {}),
+      customLineItems: customLines.map((l, i) => ({
+        ...l,
+        amount: lineAmount(l),
+        sortOrder: l.sortOrder ?? i
+      }))
+    };
+  }
+
   async function saveDraft() {
     setSaving(true);
     setError(null);
     setNotice(null);
     try {
-      const res = await patchQuoteFlowEstimatePricing(authToken, estimateId, {
-        pricingBasis: pricing.pricingBasis,
-        materialGroup: pricing.materialGroup,
-        estimateWideAdjustment: pricing.estimateWideAdjustment,
-        ...(pricing.internalMarkupEditable
-          ? { internalMarkupPercent: pricing.internalMarkupPercent }
-          : {})
-      });
+      const res = await patchQuoteFlowEstimatePricing(authToken, estimateId, draftBody());
       applyPayload(res);
       setNotice("Pricing draft saved.");
     } catch (e) {
@@ -197,14 +463,7 @@ export default function OfficialPricingPanel(props: Props) {
     setError(null);
     setNotice(null);
     try {
-      const res = await calculateQuoteFlowEstimatePricing(authToken, estimateId, {
-        pricingBasis: pricing.pricingBasis,
-        materialGroup: pricing.materialGroup,
-        estimateWideAdjustment: pricing.estimateWideAdjustment,
-        ...(pricing.internalMarkupEditable
-          ? { internalMarkupPercent: pricing.internalMarkupPercent }
-          : {})
-      });
+      const res = await calculateQuoteFlowEstimatePricing(authToken, estimateId, draftBody());
       applyPayload(res);
       setNotice("Pricing calculated.");
     } catch (e) {
@@ -212,6 +471,24 @@ export default function OfficialPricingPanel(props: Props) {
     } finally {
       setCalculating(false);
     }
+  }
+
+  function updateLine(id: string, patch: Partial<QuoteFlowCustomLineItem>) {
+    setCustomLines((prev) =>
+      prev.map((line) => {
+        if (line.id !== id) return line;
+        const next = { ...line, ...patch };
+        if (next.type === "note") {
+          next.unitAmount = 0;
+          next.amount = 0;
+          next.quantity = 1;
+        } else {
+          next.amount = lineAmount(next);
+        }
+        return next;
+      })
+    );
+    setNotice(null);
   }
 
   const ewa = pricing.estimateWideAdjustment;
@@ -223,6 +500,8 @@ export default function OfficialPricingPanel(props: Props) {
     ...(missingGroup ? ["Select a pricing group before calculating."] : []),
     ...(missingBasis ? ["Select a pricing basis before calculating."] : [])
   ];
+  const displaySummary = serverSummary && !dirty ? serverSummary : localSummary;
+  const edge = edgeStatus || lastCalculation?.edgeStatus || null;
 
   return (
     <section className="qf-pricing" data-testid="qf-official-pricing-panel">
@@ -233,6 +512,9 @@ export default function OfficialPricingPanel(props: Props) {
         </p>
         <p className="qf-pricing__internal" data-testid="qf-pricing-internal-only">
           Internal pricing only
+        </p>
+        <p className="qf-muted" data-testid="qf-pricing-review-not-active">
+          Review/Publish is not active yet.
         </p>
       </header>
 
@@ -249,6 +531,37 @@ export default function OfficialPricingPanel(props: Props) {
           </div>
         ))}
       </div>
+
+      {edge ? (
+        <div className="qf-pricing__edge" data-testid="qf-pricing-edge-status">
+          <div className="qf-pricing__summary-card">
+            <span className="qf-stat__value">{Number(edge.openEdgeLf || 0).toFixed(1)}</span>
+            <span className="qf-stat__label">Open edge LF</span>
+          </div>
+          <div className="qf-pricing__summary-card" data-testid="qf-pricing-edge-profile">
+            <span className="qf-stat__value">{edge.profileDisplay || "Not selected"}</span>
+            <span className="qf-stat__label">Edge profile</span>
+          </div>
+          <div className="qf-pricing__summary-card" data-testid="qf-pricing-edge-charge">
+            <span className="qf-stat__value">
+              {edge.chargeStatus === "pending"
+                ? "Pending"
+                : edge.chargeStatus === "included"
+                  ? "Included / no charge"
+                  : edge.chargeStatus === "charged"
+                    ? money(edge.edgeAmount)
+                    : "—"}
+            </span>
+            <span className="qf-stat__label">Edge charge</span>
+          </div>
+          {edge.profileSelected && edge.edgeLfPriced != null ? (
+            <div className="qf-pricing__summary-card" data-testid="qf-pricing-edge-lf">
+              <span className="qf-stat__value">{Number(edge.edgeLfPriced).toFixed(1)}</span>
+              <span className="qf-stat__label">Edge LF priced</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? <p className="qf-muted">Loading pricing…</p> : null}
 
@@ -388,27 +701,90 @@ export default function OfficialPricingPanel(props: Props) {
             </>
           ) : null}
         </div>
+      </div>
 
-        <div className="qf-pricing__actions">
-          <button
-            type="button"
-            className="qf-btn-secondary"
-            data-testid="qf-pricing-save-draft"
-            disabled={busy || !dirty}
-            onClick={() => void saveDraft()}
-          >
-            {saving ? "Saving…" : "Save pricing draft"}
-          </button>
-          <button
-            type="button"
-            className="qf-btn-primary"
-            data-testid="qf-pricing-calculate"
-            disabled={busy || missingGroup || missingBasis}
-            onClick={() => void calculate()}
-          >
-            {calculating ? "Calculating…" : "Calculate pricing"}
-          </button>
+      <div className="qf-pricing__custom-lines" data-testid="qf-pricing-custom-lines">
+        <h3>Custom line items</h3>
+        <LineItemsGroup
+          title="Customer-facing line items"
+          helper="Customer-facing items may appear on the customer quote later."
+          visibility="customer"
+          lines={customLines}
+          busy={busy}
+          onChange={updateLine}
+          onRemove={(id) => {
+            setCustomLines((prev) => prev.filter((l) => l.id !== id));
+            setNotice(null);
+          }}
+          onAdd={() => {
+            setCustomLines((prev) => [...prev, createLine("customer")]);
+            setNotice(null);
+          }}
+        />
+        <LineItemsGroup
+          title="Internal-only line items"
+          helper="Internal-only items stay inside eliteOS."
+          visibility="internal"
+          lines={customLines}
+          busy={busy}
+          onChange={updateLine}
+          onRemove={(id) => {
+            setCustomLines((prev) => prev.filter((l) => l.id !== id));
+            setNotice(null);
+          }}
+          onAdd={() => {
+            setCustomLines((prev) => [...prev, createLine("internal")]);
+            setNotice(null);
+          }}
+        />
+
+        <div className="qf-pricing__line-summary" data-testid="qf-pricing-line-summary">
+          <div className="qf-pricing__summary-card">
+            <span className="qf-stat__value">{money(displaySummary.customerFacingChargesTotal)}</span>
+            <span className="qf-stat__label">Customer-facing charges</span>
+          </div>
+          <div className="qf-pricing__summary-card">
+            <span className="qf-stat__value">{money(displaySummary.customerFacingCreditsTotal)}</span>
+            <span className="qf-stat__label">Customer-facing credits</span>
+          </div>
+          <div className="qf-pricing__summary-card">
+            <span className="qf-stat__value">{money(displaySummary.internalOnlyChargesTotal)}</span>
+            <span className="qf-stat__label">Internal-only charges</span>
+          </div>
+          <div className="qf-pricing__summary-card">
+            <span className="qf-stat__value">{money(displaySummary.internalOnlyCreditsTotal)}</span>
+            <span className="qf-stat__label">Internal-only credits</span>
+          </div>
+          <div className="qf-pricing__summary-card">
+            <span className="qf-stat__value">{displaySummary.noteOnlyCount ?? 0}</span>
+            <span className="qf-stat__label">Notes</span>
+          </div>
+          <div className="qf-pricing__summary-card" data-testid="qf-pricing-net-custom">
+            <span className="qf-stat__value">{money(displaySummary.netCustomAdjustment)}</span>
+            <span className="qf-stat__label">Net custom adjustment</span>
+          </div>
         </div>
+      </div>
+
+      <div className="qf-pricing__actions">
+        <button
+          type="button"
+          className="qf-btn-secondary"
+          data-testid="qf-pricing-save-draft"
+          disabled={busy || !dirty}
+          onClick={() => void saveDraft()}
+        >
+          {saving ? "Saving…" : "Save pricing draft"}
+        </button>
+        <button
+          type="button"
+          className="qf-btn-primary"
+          data-testid="qf-pricing-calculate"
+          disabled={busy || missingGroup || missingBasis}
+          onClick={() => void calculate()}
+        >
+          {calculating ? "Calculating…" : "Calculate pricing"}
+        </button>
       </div>
 
       <div className="qf-pricing__result" data-testid="qf-pricing-result">
@@ -422,10 +798,12 @@ export default function OfficialPricingPanel(props: Props) {
                 </span>
                 <span className="qf-stat__label">Estimated total</span>
               </div>
-              {lastCalculation.openEdgeAmount != null ? (
-                <div className="qf-pricing__result-card" data-testid="qf-pricing-edge-amount">
-                  <span className="qf-stat__value">{money(lastCalculation.openEdgeAmount)}</span>
-                  <span className="qf-stat__label">Open edge / edge</span>
+              {lastCalculation.customLineItems?.summary?.netCustomAdjustment != null ? (
+                <div className="qf-pricing__result-card" data-testid="qf-pricing-result-custom-net">
+                  <span className="qf-stat__value">
+                    {money(lastCalculation.customLineItems.summary.netCustomAdjustment)}
+                  </span>
+                  <span className="qf-stat__label">Custom adjustment in calc</span>
                 </div>
               ) : null}
               {lastCalculation.breakdown?.billedStoneSf != null ? (
@@ -434,14 +812,6 @@ export default function OfficialPricingPanel(props: Props) {
                     {Number(lastCalculation.breakdown.billedStoneSf).toFixed(1)}
                   </span>
                   <span className="qf-stat__label">Billed stone SF</span>
-                </div>
-              ) : null}
-              {lastCalculation.breakdown?.edgeLf != null ? (
-                <div className="qf-pricing__result-card" data-testid="qf-pricing-edge-lf">
-                  <span className="qf-stat__value">
-                    {Number(lastCalculation.breakdown.edgeLf).toFixed(1)}
-                  </span>
-                  <span className="qf-stat__label">Edge LF priced</span>
                 </div>
               ) : null}
             </div>
