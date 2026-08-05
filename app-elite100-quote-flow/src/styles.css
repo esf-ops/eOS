@@ -280,6 +280,14 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+}
+
+.qf-inbox__syncing {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--eos-ink-muted);
+  letter-spacing: 0.01em;
 }
 
 .qf-inbox__list-head h2,

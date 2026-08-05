@@ -506,6 +506,7 @@ export async function createTakeoffWorkspace({
   organizationId,
   userId,
   quoteFileId,
+  forceNew = false
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -517,27 +518,30 @@ export async function createTakeoffWorkspace({
   const fileRow = await loadVerifiedFileRow(supabase, organizationId, quoteFileId);
 
   // Idempotency: return existing job if one already exists for this file + org.
-  const { data: existing } = await supabase
-    .from("quote_takeoff_jobs")
-    .select("id,review_status,created_at,result_summary")
-    .eq("quote_file_id", quoteFileId)
-    .eq("organization_id", organizationId)
-    .limit(1);
+  // forceNew (Quote Flow Inbox fresh start) always inserts a new job row.
+  if (forceNew !== true) {
+    const { data: existing } = await supabase
+      .from("quote_takeoff_jobs")
+      .select("id,review_status,created_at,result_summary")
+      .eq("quote_file_id", quoteFileId)
+      .eq("organization_id", organizationId)
+      .limit(1);
 
-  if (existing && existing.length > 0) {
-    const ex = existing[0];
-    const rs = ex.result_summary;
-    const hasSavedResult =
-      rs !== null &&
-      typeof rs === "object" &&
-      Object.keys(rs).length > 0;
-    return {
-      takeoffJobId: ex.id,
-      startedAt: ex.created_at,
-      reviewStatus: ex.review_status ?? "needs_review",
-      hasSavedResult: Boolean(hasSavedResult),
-      file: safeFileSummary(fileRow),
-    };
+    if (existing && existing.length > 0) {
+      const ex = existing[0];
+      const rs = ex.result_summary;
+      const hasSavedResult =
+        rs !== null &&
+        typeof rs === "object" &&
+        Object.keys(rs).length > 0;
+      return {
+        takeoffJobId: ex.id,
+        startedAt: ex.created_at,
+        reviewStatus: ex.review_status ?? "needs_review",
+        hasSavedResult: Boolean(hasSavedResult),
+        file: safeFileSummary(fileRow),
+      };
+    }
   }
 
   // Insert new quote_takeoff_jobs row.

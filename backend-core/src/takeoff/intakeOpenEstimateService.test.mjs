@@ -346,4 +346,66 @@ async function seedCase(repo, org, extras = {}) {
   console.log("ok: idempotency key is server-derived from case + sha256");
 }
 
+{
+  const repo = new InMemoryQuoteIntakeRepository();
+  const created = await seedCase(repo, ORG_A, { contentHash: "fresh-start" });
+  let workspaceCalls = 0;
+  const createWorkspace = async ({ forceNew } = {}) => {
+    workspaceCalls += 1;
+    return { takeoffJobId: `job-fresh-${workspaceCalls}`, forceNew: forceNew === true };
+  };
+  const common = {
+    repository: repo,
+    organizationId: ORG_A,
+    intakeCaseId: created.id,
+    actorUserId: "user-1",
+    body: {},
+    repositoryMode: "memory",
+    getSupabase: () => ({}),
+    fetchAttachmentBytes: async () => PDF_BYTES,
+    ingestFile: async ({ organizationId, sha256 }) => ({
+      quoteFileId: `file-${organizationId.slice(0, 8)}-${sha256.slice(0, 8)}`,
+      reused: false
+    }),
+    createWorkspace,
+    startFresh: true
+  };
+
+  const first = await openEstimateForIntakeCase(common);
+  assert.equal(first.created, true);
+  assert.equal(first.reused, false);
+  assert.equal(first.takeoffJobId, "job-fresh-1");
+
+  const whileQueued = await openEstimateForIntakeCase(common);
+  assert.equal(whileQueued.reused, true);
+  assert.equal(whileQueued.alreadyRunning, true);
+  assert.equal(whileQueued.takeoffJobId, "job-fresh-1");
+  assert.equal(workspaceCalls, 1);
+
+  // Simulate returned/ready terminal state on the link.
+  for (const link of repo.links.values()) {
+    if (link.intakeCaseId === created.id) {
+      link.relationshipStatus = "ready";
+    }
+  }
+
+  const afterReady = await openEstimateForIntakeCase(common);
+  assert.equal(afterReady.created, true);
+  assert.equal(afterReady.reused, false);
+  assert.equal(afterReady.takeoffJobId, "job-fresh-2");
+  assert.notEqual(afterReady.takeoffJobId, first.takeoffJobId);
+  assert.equal(workspaceCalls, 2);
+
+  for (const link of repo.links.values()) {
+    if (link.takeoffJobId === "job-fresh-2") {
+      link.relationshipStatus = "failed";
+    }
+  }
+
+  const afterFailed = await openEstimateForIntakeCase(common);
+  assert.equal(afterFailed.created, true);
+  assert.equal(afterFailed.takeoffJobId, "job-fresh-3");
+  console.log("ok: startFresh reuses only in-flight; returned/failed mint new jobs");
+}
+
 console.log("\nAll intakeOpenEstimateService tests passed.\n");

@@ -116,7 +116,7 @@ export function createQuoteFlowService(deps) {
     if (intakeCaseId && (await alreadyScopedForCase(organizationId, intakeCaseId))) {
       throw createQuoteFlowError("already_scoped", {
         statusCode: 409,
-        message: "Scope is already set for this estimate. AI Takeoff will not run again."
+        message: "Scope is already set. Open in Estimates."
       });
     }
 
@@ -130,7 +130,9 @@ export function createQuoteFlowService(deps) {
         markAsPlan,
         manualPlanOverride,
         confirm: true,
-        idempotencyKey
+        idempotencyKey,
+        // Inbox intentional starts: never reuse old returned/failed jobs.
+        startFresh: true
       });
     } catch (e) {
       const code = String(e?.code || "takeoff_unavailable");
@@ -142,6 +144,9 @@ export function createQuoteFlowService(deps) {
       // Prefer Shared Inbox safe messages when known.
       const shared = sharedInboxSafeError(code, e?.message);
       if (shared?.error) err.message = shared.error;
+      if (code === "already_scoped") {
+        err.message = "Scope is already set. Open in Estimates.";
+      }
       throw err;
     }
 
@@ -149,18 +154,24 @@ export function createQuoteFlowService(deps) {
       ? await enrichItem(organizationId, result.item)
       : null;
 
+    const alreadyRunning =
+      result.alreadyRunning === true ||
+      (result.reused === true && result.created !== true);
+    const created = result.created === true && !alreadyRunning;
+
     return {
       ok: true,
       intakeCaseId: result.intakeCaseId || null,
       takeoffJobId: result.takeoffJobId || null,
-      created: result.created === true,
-      reused: result.reused === true,
+      created,
+      reused: alreadyRunning,
+      alreadyRunning,
       attachmentKey: result.attachmentKey || attKey,
       attachmentName: result.attachmentName || null,
       item,
-      message: result.reused
-        ? "AI Takeoff job reused for this attachment."
-        : "AI Takeoff started for this attachment.",
+      message: alreadyRunning
+        ? "AI Takeoff is already running."
+        : "AI Takeoff started.",
       sideEffects: {
         calculated: false,
         approved: false,

@@ -522,7 +522,9 @@ export function createStudioSharedInboxService(deps = {}) {
     manualPlanOverride = false,
     useAttachmentAsPlan = false,
     confirm = false,
-    idempotencyKey = null
+    idempotencyKey = null,
+    /** Quote Flow: only reuse in-flight jobs; start a new job after returned/failed. */
+    startFresh = false
   }) {
     const org = assertOrg(organizationId);
     const key = String(messageKey || "").trim();
@@ -733,7 +735,8 @@ export function createStudioSharedInboxService(deps = {}) {
           manualPlanOverride: manualOk === true
         },
         liveManualAttachment,
-        initiationMode: "manual"
+        initiationMode: "manual",
+        startFresh: startFresh === true
       });
     } catch (e) {
       const code = String(e?.code || "takeoff_unavailable");
@@ -838,12 +841,14 @@ export function createStudioSharedInboxService(deps = {}) {
       ? String(openResult.takeoffJobId)
       : refreshed?.aiTakeoff?.takeoffJobId || null;
 
+    const reused = openResult?.alreadyRunning === true || openResult?.reused === true;
     return {
       ok: true,
       intakeCaseId,
       takeoffJobId,
-      created: openResult?.created === true,
-      reused: openResult?.reused === true || openResult?.created === false,
+      created: openResult?.created === true && !reused,
+      reused,
+      alreadyRunning: reused,
       attachmentKey: attKey,
       attachmentName: att.filename || openResult?.attachmentName || null,
       // Explicitly no estimate ensure / calculate / publish side effects here.

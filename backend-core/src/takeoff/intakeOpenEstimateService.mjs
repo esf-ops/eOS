@@ -268,6 +268,21 @@ export function buildOpenEstimateIdempotencyKey(caseRow, attachment) {
 }
 
 /**
+ * In-flight only — queued/processing/requested.
+ * READY (returned) / FAILED / SUPERSEDED must not block a fresh start.
+ * @param {unknown} status
+ */
+export function isInFlightTakeoffLinkStatus(status) {
+  const s = String(status || "").toLowerCase();
+  return (
+    s === TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED ||
+    s === TAKEOFF_LINK_RELATIONSHIP_STATUS.PROCESSING ||
+    s === TAKEOFF_LINK_RELATIONSHIP_STATUS.REQUESTED
+  );
+}
+
+/**
+ * Legacy "active" finder (non-failed / non-superseded). Kept for default Studio opens.
  * @param {object[]} links
  */
 function findActiveLinkedJob(links) {
@@ -280,6 +295,50 @@ function findActiveLinkedJob(links) {
         String(l.relationshipStatus ?? "") !== TAKEOFF_LINK_RELATIONSHIP_STATUS.SUPERSEDED
     ) || null
   );
+}
+
+/**
+ * Prefer in-flight link for the same attachment idempotency base key.
+ * @param {object[]} links
+ * @param {string} baseIdempotencyKey
+ */
+function findInFlightLinkedJobForAttachment(links, baseIdempotencyKey) {
+  const list = Array.isArray(links) ? links : [];
+  const base = String(baseIdempotencyKey || "").trim();
+  const related = base
+    ? list.filter(
+        (l) =>
+          l?.idempotencyKey === base ||
+          String(l?.idempotencyKey || "").startsWith(`${base}:attempt:`)
+      )
+    : list;
+  const pool = related.length ? related : list;
+  // Newest in-flight first.
+  const sorted = [...pool].sort((a, b) =>
+    String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+  );
+  return (
+    sorted.find((l) => l?.takeoffJobId && isInFlightTakeoffLinkStatus(l.relationshipStatus)) ||
+    null
+  );
+}
+
+/**
+ * When starting fresh after a terminal job, mint a new idempotency key so
+ * createTakeoffLink can record a new row (old links remain as history).
+ * @param {object[]} links
+ * @param {string} baseIdempotencyKey
+ */
+function nextFreshIdempotencyKey(links, baseIdempotencyKey) {
+  const base = String(baseIdempotencyKey || "").trim();
+  const related = (Array.isArray(links) ? links : []).filter(
+    (l) =>
+      l?.idempotencyKey === base ||
+      String(l?.idempotencyKey || "").startsWith(`${base}:attempt:`)
+  );
+  const hasPriorJob = related.some((l) => l?.takeoffJobId);
+  if (!hasPriorJob) return base;
+  return `${base}:attempt:${Date.now()}`;
 }
 
 /**
@@ -477,7 +536,8 @@ async function resolveValidatedPdfBytes(deps) {
  *   createWorkspace?: typeof createTakeoffWorkspace,
  *   repositoryMode?: string,
  *   initiationMode?: string,
- *   liveManualAttachment?: object|null
+ *   liveManualAttachment?: object|null,
+ *   startFresh?: boolean
  * }} deps
  */
 export async function openEstimateForIntakeCase(deps) {
@@ -496,8 +556,11 @@ export async function openEstimateForIntakeCase(deps) {
     repositoryMode = "unknown",
     initiationMode = TAKEOFF_INITIATION_MODE.MANUAL,
     // Server-built only (Shared Inbox manual image override). Never read from body.
-    liveManualAttachment = null
+    liveManualAttachment = null,
+    // Quote Flow Inbox: only reuse in-flight jobs; create a new job after returned/failed.
+    startFresh = false
   } = deps;
+  const wantFreshStart = startFresh === true;
   const resolvedInitiationMode =
     String(initiationMode || "").trim() === TAKEOFF_INITIATION_MODE.AUTOMATIC
       ? TAKEOFF_INITIATION_MODE.AUTOMATIC
@@ -578,8 +641,9 @@ export async function openEstimateForIntakeCase(deps) {
     };
   }
 
-  const idempotencyKey = buildOpenEstimateIdempotencyKey(caseRow, attachment);
-  const lockKey = `${org}:${idempotencyKey}`;
+  const baseIdempotencyKey = buildOpenEstimateIdempotencyKey(caseRow, attachment);
+  // Lock on base key so double-clicks while in-flight coalesce even across attempt keys.
+  const lockKey = `${org}:${baseIdempotencyKey}`;
 
   return withIdempotencyLock(lockKey, async () => {
     async function resolveLinkStatusForJob(takeoffJobId, fallbackStatus) {
@@ -588,6 +652,9 @@ export async function openEstimateForIntakeCase(deps) {
       }
       try {
         const supabase = getSupabase();
+        if (!supabase?.from) {
+          return String(fallbackStatus || TAKEOFF_LINK_RELATIONSHIP_STATUS.QUEUED);
+        }
         const { data: job } = await supabase
           .from("quote_takeoff_jobs")
           .select("id,organization_id,status,review_status,metadata")
@@ -604,62 +671,118 @@ export async function openEstimateForIntakeCase(deps) {
     }
 
     const existingLinks = await repository.listTakeoffLinks(org, caseId);
-    const active = findActiveLinkedJob(existingLinks);
-    if (active?.takeoffJobId) {
-      try {
-        await repository.appendAuditEvent?.({
-          organizationId: org,
-          intakeCaseId: caseId,
-          eventType: "takeoff_link_reused",
-          actorType: "user",
-          actorUserId,
-          metadata: {
-            linkId: active.id,
-            takeoffJobIdPresent: true,
-            reused: true
+
+    if (wantFreshStart) {
+      // Only reuse an in-flight job for this attachment. Returned/failed → new job.
+      const inFlight = findInFlightLinkedJobForAttachment(existingLinks, baseIdempotencyKey);
+      if (inFlight?.takeoffJobId) {
+        const liveStatus = await resolveLinkStatusForJob(
+          inFlight.takeoffJobId,
+          inFlight.relationshipStatus
+        );
+        if (isInFlightTakeoffLinkStatus(liveStatus)) {
+          try {
+            await repository.appendAuditEvent?.({
+              organizationId: org,
+              intakeCaseId: caseId,
+              eventType: "takeoff_link_reused",
+              actorType: "user",
+              actorUserId,
+              metadata: {
+                linkId: inFlight.id,
+                takeoffJobIdPresent: true,
+                reused: true,
+                reason: "in_flight_duplicate_protection",
+                startFresh: true
+              }
+            });
+          } catch {
+            // optional
           }
-        });
-      } catch {
-        // optional
+          return {
+            ok: true,
+            intakeCaseId: caseId,
+            takeoffJobId: String(inFlight.takeoffJobId),
+            linkStatus: liveStatus,
+            created: false,
+            reused: true,
+            alreadyRunning: true,
+            attachmentName: attachment.safeFilename || "plan.pdf",
+            repositoryMode,
+            persistenceWarning:
+              String(repositoryMode).toLowerCase() === "memory"
+                ? "Quote Intake is using in-memory persistence; links reset when the Brain process restarts."
+                : null
+          };
+        }
       }
-      const linkStatus = await resolveLinkStatusForJob(
-        active.takeoffJobId,
-        active.relationshipStatus
+    } else {
+      const active = findActiveLinkedJob(existingLinks);
+      if (active?.takeoffJobId) {
+        try {
+          await repository.appendAuditEvent?.({
+            organizationId: org,
+            intakeCaseId: caseId,
+            eventType: "takeoff_link_reused",
+            actorType: "user",
+            actorUserId,
+            metadata: {
+              linkId: active.id,
+              takeoffJobIdPresent: true,
+              reused: true
+            }
+          });
+        } catch {
+          // optional
+        }
+        const linkStatus = await resolveLinkStatusForJob(
+          active.takeoffJobId,
+          active.relationshipStatus
+        );
+        return {
+          ok: true,
+          intakeCaseId: caseId,
+          takeoffJobId: String(active.takeoffJobId),
+          linkStatus,
+          created: false,
+          reused: true,
+          attachmentName: attachment.safeFilename || "plan.pdf",
+          repositoryMode,
+          persistenceWarning:
+            String(repositoryMode).toLowerCase() === "memory"
+              ? "Quote Intake is using in-memory persistence; links reset when the Brain process restarts."
+              : null
+        };
+      }
+
+      const byKey = existingLinks.find(
+        (l) => l.idempotencyKey === baseIdempotencyKey && l.takeoffJobId
       );
-      return {
-        ok: true,
-        intakeCaseId: caseId,
-        takeoffJobId: String(active.takeoffJobId),
-        linkStatus,
-        created: false,
-        reused: true,
-        attachmentName: attachment.safeFilename || "plan.pdf",
-        repositoryMode,
-        persistenceWarning:
-          String(repositoryMode).toLowerCase() === "memory"
-            ? "Quote Intake is using in-memory persistence; links reset when the Brain process restarts."
-            : null
-      };
+      if (byKey?.takeoffJobId) {
+        const linkStatus = await resolveLinkStatusForJob(
+          byKey.takeoffJobId,
+          byKey.relationshipStatus
+        );
+        return {
+          ok: true,
+          intakeCaseId: caseId,
+          takeoffJobId: String(byKey.takeoffJobId),
+          linkStatus,
+          created: false,
+          reused: true,
+          attachmentName: attachment.safeFilename || "plan.pdf",
+          repositoryMode,
+          persistenceWarning:
+            String(repositoryMode).toLowerCase() === "memory"
+              ? "Quote Intake is using in-memory persistence; links reset when the Brain process restarts."
+              : null
+        };
+      }
     }
 
-    const byKey = existingLinks.find((l) => l.idempotencyKey === idempotencyKey && l.takeoffJobId);
-    if (byKey?.takeoffJobId) {
-      const linkStatus = await resolveLinkStatusForJob(byKey.takeoffJobId, byKey.relationshipStatus);
-      return {
-        ok: true,
-        intakeCaseId: caseId,
-        takeoffJobId: String(byKey.takeoffJobId),
-        linkStatus,
-        created: false,
-        reused: true,
-        attachmentName: attachment.safeFilename || "plan.pdf",
-        repositoryMode,
-        persistenceWarning:
-          String(repositoryMode).toLowerCase() === "memory"
-            ? "Quote Intake is using in-memory persistence; links reset when the Brain process restarts."
-            : null
-      };
-    }
+    const idempotencyKey = wantFreshStart
+      ? nextFreshIdempotencyKey(existingLinks, baseIdempotencyKey)
+      : baseIdempotencyKey;
 
     if (typeof getSupabase !== "function") {
       throw openEstimateError(
@@ -754,7 +877,9 @@ export async function openEstimateForIntakeCase(deps) {
         supabase,
         organizationId: org,
         userId: actorUserId,
-        quoteFileId
+        quoteFileId,
+        // Fresh Inbox starts must not return a prior completed job for the same file.
+        forceNew: wantFreshStart === true
       });
       takeoffJobId = String(workspace.takeoffJobId);
     } catch (e) {
