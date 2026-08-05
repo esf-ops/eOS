@@ -220,8 +220,11 @@ export function createQuoteFlowSetScopeService(deps) {
     };
   }
 
-  function scopedSuccessPayload({ estimate, intakeCaseId, takeoffJobId, created, reused }) {
+  function scopedSuccessPayload({ estimate, intakeCaseId, takeoffJobId, created, reused, projectName = null }) {
     const rooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
+    const name =
+      String(projectName || estimate?.scope?.projectName || estimate?.scope?.quoteFlowEstimateName || "").trim() ||
+      null;
     return {
       ok: true,
       alreadyScoped: reused === true || created !== true,
@@ -230,10 +233,79 @@ export function createQuoteFlowSetScopeService(deps) {
       estimateId: estimate?.id || null,
       intakeCaseId,
       takeoffJobId: takeoffJobId || null,
+      projectName: name,
+      estimateName: name,
       message: "Scope is set for this estimate.",
       roomCount: rooms.length,
       sideEffects: { ...NO_SIDE_EFFECTS }
     };
+  }
+
+  function normalizeDisplayName(value) {
+    const name = String(value || "").trim();
+    if (!name) return null;
+    if (/^unknown contact$/i.test(name)) return null;
+    if (name.length > 200) return name.slice(0, 200);
+    return name;
+  }
+
+  /**
+   * Persist editable Estimate/Job name on scope.projectName (no migration).
+   */
+  async function applyEstimateDisplayName({
+    organizationId,
+    estimateId,
+    actorUserId,
+    projectName,
+    estimate
+  }) {
+    const name = normalizeDisplayName(projectName);
+    if (!name || !estimateId || !studioEstimateService?.updateScope) {
+      return estimate || null;
+    }
+    try {
+      const updated = await studioEstimateService.updateScope({
+        organizationId,
+        estimateId,
+        actorUserId,
+        body: {
+          scope: {
+            projectName: name,
+            quoteFlowEstimateName: name
+          }
+        }
+      });
+      const next = updated?.estimate || updated;
+      if (next?.scope) {
+        return {
+          ...next,
+          scope: {
+            ...next.scope,
+            projectName: name,
+            quoteFlowEstimateName: name
+          }
+        };
+      }
+      return {
+        ...(estimate || {}),
+        id: estimateId,
+        scope: {
+          ...((estimate && estimate.scope) || {}),
+          projectName: name,
+          quoteFlowEstimateName: name,
+          rooms: Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : []
+        }
+      };
+    } catch {
+      return {
+        ...(estimate || { id: estimateId }),
+        scope: {
+          ...((estimate && estimate.scope) || {}),
+          projectName: name,
+          quoteFlowEstimateName: name
+        }
+      };
+    }
   }
 
   async function setScope({
@@ -242,13 +314,16 @@ export function createQuoteFlowSetScopeService(deps) {
     actorUserId = null,
     confirm = false,
     takeoffResult = null,
-    reviewState = null
+    reviewState = null,
+    projectName = null,
+    estimateName = null
   }) {
     if (confirm !== true && confirm !== "true") {
       throw createQuoteFlowError("set_scope_confirm_required");
     }
     const jobId = String(takeoffJobId || "").trim();
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const displayName = normalizeDisplayName(projectName || estimateName);
 
     const caseRow = await findCaseForTakeoffJob(organizationId, jobId, actorUserId);
     if (!caseRow?.id) throw createQuoteFlowError("takeoff_not_found");
@@ -256,12 +331,22 @@ export function createQuoteFlowSetScopeService(deps) {
 
     const prior = await alreadyScopedForCase(organizationId, intakeCaseId);
     if (prior.scoped && prior.estimate?.id) {
+      const named = displayName
+        ? await applyEstimateDisplayName({
+            organizationId,
+            estimateId: prior.estimate.id,
+            actorUserId,
+            projectName: displayName,
+            estimate: prior.estimate
+          })
+        : prior.estimate;
       return scopedSuccessPayload({
-        estimate: prior.estimate,
+        estimate: named,
         intakeCaseId,
         takeoffJobId: jobId,
         created: false,
-        reused: true
+        reused: true,
+        projectName: displayName
       });
     }
 
@@ -319,12 +404,22 @@ export function createQuoteFlowSetScopeService(deps) {
     // Idempotent: if getOrCreate already seeded usable scope, reuse without re-import.
     const afterEnsure = await alreadyScopedForCase(organizationId, intakeCaseId);
     if (afterEnsure.scoped && afterEnsure.estimate?.id) {
+      const named = displayName
+        ? await applyEstimateDisplayName({
+            organizationId,
+            estimateId: afterEnsure.estimate.id,
+            actorUserId,
+            projectName: displayName,
+            estimate: afterEnsure.estimate
+          })
+        : afterEnsure.estimate;
       return scopedSuccessPayload({
-        estimate: afterEnsure.estimate,
+        estimate: named,
         intakeCaseId,
         takeoffJobId: jobId,
         created: false,
-        reused: true
+        reused: true,
+        projectName: displayName
       });
     }
 
@@ -334,14 +429,25 @@ export function createQuoteFlowSetScopeService(deps) {
       actorUserId,
       force: true
     });
-    const estimate = refreshed?.estimate || refreshed;
+    let estimate = refreshed?.estimate || refreshed;
+    estimate = { ...estimate, id: estimate?.id || estimateId };
+    if (displayName) {
+      estimate = await applyEstimateDisplayName({
+        organizationId,
+        estimateId: estimate.id,
+        actorUserId,
+        projectName: displayName,
+        estimate
+      });
+    }
 
     return scopedSuccessPayload({
-      estimate: { ...estimate, id: estimate?.id || estimateId },
+      estimate,
       intakeCaseId,
       takeoffJobId: jobId,
       created: true,
-      reused: false
+      reused: false,
+      projectName: displayName
     });
   }
 
@@ -353,13 +459,16 @@ export function createQuoteFlowSetScopeService(deps) {
     takeoffJobId,
     actorUserId = null,
     confirm = false,
-    rooms = null
+    rooms = null,
+    projectName = null,
+    estimateName = null
   }) {
     if (confirm !== true && confirm !== "true") {
       throw createQuoteFlowError("set_scope_confirm_required");
     }
     const jobId = String(takeoffJobId || "").trim();
     if (!jobId) throw createQuoteFlowError("takeoff_not_found");
+    const displayName = normalizeDisplayName(projectName || estimateName);
 
     const caseRow = await findCaseForTakeoffJob(organizationId, jobId, actorUserId);
     if (!caseRow?.id) throw createQuoteFlowError("takeoff_not_found");
@@ -367,12 +476,22 @@ export function createQuoteFlowSetScopeService(deps) {
 
     const prior = await alreadyScopedForCase(organizationId, intakeCaseId);
     if (prior.scoped && prior.estimate?.id) {
+      const named = displayName
+        ? await applyEstimateDisplayName({
+            organizationId,
+            estimateId: prior.estimate.id,
+            actorUserId,
+            projectName: displayName,
+            estimate: prior.estimate
+          })
+        : prior.estimate;
       return scopedSuccessPayload({
-        estimate: prior.estimate,
+        estimate: named,
         intakeCaseId,
         takeoffJobId: jobId,
         created: false,
-        reused: true
+        reused: true,
+        projectName: displayName
       });
     }
 
@@ -411,25 +530,29 @@ export function createQuoteFlowSetScopeService(deps) {
       });
     }
 
+    const scopeBody = {
+      rooms: normalizedRooms,
+      source: "quote_flow_manual_scope"
+    };
+    if (displayName) {
+      scopeBody.projectName = displayName;
+      scopeBody.quoteFlowEstimateName = displayName;
+    }
+
     const updated = await studioEstimateService.updateScope({
       organizationId,
       estimateId,
       actorUserId,
-      body: {
-        scope: {
-          rooms: normalizedRooms,
-          source: "quote_flow_manual_scope"
-        }
-      }
+      body: { scope: scopeBody }
     });
     const estimate = updated?.estimate || updated || {
       id: estimateId,
-      scope: { rooms: normalizedRooms }
+      scope: scopeBody
     };
 
     // Ensure readiness: if updateScope didn't flip status, still treat rooms as official.
     if (!isOfficialScopeSet(estimate) && Array.isArray(normalizedRooms) && normalizedRooms.length) {
-      estimate.scope = { ...(estimate.scope || {}), rooms: normalizedRooms };
+      estimate.scope = { ...(estimate.scope || {}), ...scopeBody, rooms: normalizedRooms };
       if (!estimate.status || estimate.status === "draft") {
         estimate.status = "ready_to_price";
       }
@@ -440,7 +563,8 @@ export function createQuoteFlowSetScopeService(deps) {
       intakeCaseId,
       takeoffJobId: jobId,
       created: true,
-      reused: false
+      reused: false,
+      projectName: displayName
     });
   }
 

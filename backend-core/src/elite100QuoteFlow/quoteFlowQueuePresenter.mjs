@@ -73,7 +73,7 @@ export function mapQuoteFlowQueueNextAction(statusKey) {
     case "manual_scope_needed":
       return { key: "create_manual_scope", label: "Create Manual Scope" };
     case "takeoff_failed":
-      return { key: "create_manual_scope", label: "Create Manual Scope" };
+      return { key: "needs_decision", label: "Needs decision" };
     case "takeoff_queued":
     case "takeoff_processing":
       return { key: "waiting", label: "Waiting on AI Takeoff" };
@@ -85,15 +85,104 @@ export function mapQuoteFlowQueueNextAction(statusKey) {
 }
 
 /**
- * Safe display labels — avoid "Customer not identified / Project not named" spam.
+ * @param {string|null|undefined} filename
+ */
+export function filenameWithoutExtension(filename) {
+  const s = String(filename || "").trim();
+  if (!s) return "";
+  return s.replace(/\.[a-z0-9]{2,5}$/i, "") || s;
+}
+
+/**
+ * Default editable Estimate / Job name for Set Scope.
+ * Order: existing project → subject/project → plan basename → sender → short id → Untitled.
+ * @param {object} row
+ * @param {ReturnType<typeof resolveQueueRowLabels>|null} [labels]
+ */
+export function resolveDefaultEstimateName(row = {}, labels = null) {
+  const L = labels || resolveQueueRowLabels(row);
+  const existing = String(
+    row.scopeProjectName ||
+      row.estimateProjectName ||
+      row.quoteFlowEstimateName ||
+      row.scope?.projectName ||
+      ""
+  ).trim();
+  if (existing && !/not named|not identified|^unknown/i.test(existing) && !isWeakQueueLabel(existing)) {
+    return existing;
+  }
+
+  const subject = String(row.subject || "").trim();
+  if (subject && subject !== "(no subject)" && !/not named|not identified/i.test(subject)) {
+    return subject;
+  }
+
+  const project = String(L.projectDisplay || "").trim();
+  if (
+    project &&
+    project !== "Quote request" &&
+    !/not named|not identified/i.test(project) &&
+    !isWeakQueueLabel(project)
+  ) {
+    if (L.planFilename && project === L.planFilename) {
+      return filenameWithoutExtension(L.planFilename) || project;
+    }
+    return project;
+  }
+
+  const planBase = filenameWithoutExtension(L.planFilename);
+  if (planBase) return planBase;
+
+  const customer = String(L.customerDisplay || "").trim();
+  if (customer && !isWeakQueueLabel(customer) && !/^Plan:/i.test(customer)) {
+    return customer;
+  }
+
+  const rawId = String(row.takeoffJobId || row.id || row.intakeCaseId || "").trim();
+  if (rawId && !/^AAMk/i.test(rawId)) {
+    const short = rawId.replace(/-/g, "").slice(0, 8);
+    if (short) return `Quote ${short}`;
+  }
+  return "Untitled quote request";
+}
+
+/**
+ * @param {string} value
+ */
+function isWeakQueueLabel(value) {
+  const s = String(value || "").trim();
+  if (!s) return true;
+  return /^(unknown contact|customer not identified|not identified|inbound sender|inbound mailbox|manual estimate|email on file)$/i.test(
+    s
+  );
+}
+
+/**
+ * Safe display labels — prefer sender / subject / plan before "Unknown contact".
  * @param {object} row
  */
 export function resolveQueueRowLabels(row = {}) {
-  const customer = formatQuoteFlowPersonLabel(
-    row.customerName ?? row.customer ?? row.sender ?? row.senderLabel,
-    ""
-  );
-  const projectRaw = row.projectName ?? row.projectLabel ?? row.subject ?? null;
+  const candidates = [
+    row.customerName,
+    row.customer,
+    row.customerLabel,
+    row.sender,
+    row.senderLabel,
+    row.senderDisplayName,
+    row.contact,
+    row.requester,
+    row.from
+  ];
+  let customer = "";
+  for (const c of candidates) {
+    const label = formatQuoteFlowPersonLabel(c, "");
+    if (label && !isWeakQueueLabel(label)) {
+      customer = label;
+      break;
+    }
+  }
+
+  const projectRaw = row.projectName ?? row.projectLabel ?? row.subject ?? row.requestTitle ?? null;
   let project =
     projectRaw == null || projectRaw === ""
       ? ""
@@ -102,32 +191,37 @@ export function resolveQueueRowLabels(row = {}) {
         : formatQuoteFlowPersonLabel(projectRaw, "");
   if (/not named|not identified|unknown project/i.test(project)) project = "";
 
+  const attachmentFiles = Array.isArray(row?.attachmentSummary?.filenames)
+    ? row.attachmentSummary.filenames
+    : Array.isArray(row?.attachments)
+      ? row.attachments.map((a) => a?.filename || a?.name).filter(Boolean)
+      : [];
   const planFilename = String(
     row.planFilename ||
       row.attachmentName ||
       row.sourcePlanName ||
       row.planName ||
       row.bestPlanFilename ||
+      attachmentFiles[0] ||
       ""
   ).trim();
 
   const customerDisplay =
-    (customer && customer !== "Unknown contact" ? customer : null) ||
-    (planFilename ? `Plan: ${planFilename}` : null) ||
-    "Unknown contact";
+    customer ||
+    (planFilename ? `Plan: ${filenameWithoutExtension(planFilename) || planFilename}` : null) ||
+    (project && !isWeakQueueLabel(project) ? project : null) ||
+    null;
 
   const projectDisplay =
     project ||
-    (planFilename || null) ||
-    (customer && customer !== "Unknown contact" ? customer : null) ||
-    "Quote request";
-
-  const requestTitle = project || planFilename || customerDisplay;
+    (planFilename ? filenameWithoutExtension(planFilename) || planFilename : null) ||
+    (customer || null) ||
+    null;
 
   return {
     customerDisplay,
     projectDisplay,
-    requestTitle,
+    requestTitle: null, // filled after defaultEstimateName
     planFilename: planFilename || null
   };
 }
@@ -162,6 +256,9 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
   const group = mapQuoteFlowQueueGroup(status.key);
   const nextAction = mapQuoteFlowQueueNextAction(status.key);
   const labels = resolveQueueRowLabels(row);
+  const defaultEstimateName = resolveDefaultEstimateName(row, labels);
+  const customerDisplay = labels.customerDisplay || null;
+  const projectDisplay = labels.projectDisplay || defaultEstimateName;
 
   const roomCount =
     opts.roomCount != null
@@ -180,7 +277,9 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
       ? Number(opts.totalSf)
       : row?.totalSf != null
         ? Number(row.totalSf)
-        : null;
+        : row?.countertopSf != null
+          ? Number(row.countertopSf)
+          : null;
 
   let summaryLabel = null;
   if (Number.isFinite(roomCount) || Number.isFinite(pieceCount) || Number.isFinite(totalSf)) {
@@ -201,12 +300,21 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
     intakeCaseId: row?.id || row?.intakeCaseId || null,
     estimateId: opts.estimateId || row?.studioEstimateId || null,
     messageKey: row?.messageKey || row?.graphMessageKey || row?.mailboxMessageKey || null,
-    customerName: labels.customerDisplay,
-    projectName: labels.projectDisplay,
-    customerDisplay: labels.customerDisplay,
-    projectDisplay: labels.projectDisplay,
-    requestTitle: labels.requestTitle,
+    customerName: customerDisplay,
+    projectName: projectDisplay,
+    customerDisplay,
+    projectDisplay,
+    requestTitle: defaultEstimateName,
+    defaultEstimateName,
+    estimateName: defaultEstimateName,
+    senderLabel: (() => {
+      const s = formatQuoteFlowPersonLabel(row?.senderLabel ?? row?.senderDisplayName ?? row?.sender, "");
+      return s && !isWeakQueueLabel(s) ? s : null;
+    })(),
     planFilename: labels.planFilename,
+    planLabel: labels.planFilename
+      ? filenameWithoutExtension(labels.planFilename) || labels.planFilename
+      : null,
     receivedAt: row?.receivedAt || row?.createdAt || row?.updatedAt || null,
     returnedAt: row?.returnedAt || row?.takeoffReturnedAt || null,
     startedAt: row?.takeoffStartedAt || row?.startedAt || null,
@@ -228,14 +336,27 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
       status.key === "takeoff_failed" ||
       status.key === "ready_for_review",
     canReviewTakeoff: status.key === "ready_for_review" && Boolean(takeoffJobId),
+    /** Primary list-row action — manual scope is workspace-only for ready AI rows. */
+    rowAction:
+      status.key === "ready_for_review"
+        ? "review_takeoff"
+        : status.key === "manual_scope_needed"
+          ? "create_manual_scope"
+          : status.key === "takeoff_failed"
+            ? "needs_decision"
+            : status.key === "takeoff_queued" || status.key === "takeoff_processing"
+              ? "waiting"
+              : null,
     action:
       status.key === "ready_for_review"
         ? "review_takeoff"
-        : status.key === "manual_scope_needed" || status.key === "takeoff_failed"
+        : status.key === "manual_scope_needed"
           ? "create_manual_scope"
-          : status.key === "takeoff_queued" || status.key === "takeoff_processing"
-            ? "waiting"
-            : null,
+          : status.key === "takeoff_failed"
+            ? "needs_decision"
+            : status.key === "takeoff_queued" || status.key === "takeoff_processing"
+              ? "waiting"
+              : null,
     actionLabel: nextAction.label
   };
 }

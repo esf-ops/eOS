@@ -3827,3 +3827,25 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowSetScope`, `quoteFlowQueuePresenter`, queue routes, `EstimateQueuePage`, queue helpers/API/tests, shell Inbox deep-link, this doc. |
 | **Protected / unchanged** | Digital Estimate, pricing formulas, Studio V2, Internal Estimate, AI Takeoff algorithm, Inbox fresh-start rules, Estimates editor beyond navigation. |
 | **Revisit trigger** | Unscoped cases with no takeoffJobId in the queue; cancel-on-dismiss for active takeoffs. |
+
+### 280. Elite 100 Quote Flow — Estimate Queue command-center UI (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-queue-command-center-ui` |
+| **Decision** | Polish Estimate Queue presentation only to match Inbox command-center: full-width shell, command header, stats, client filter/search chips, wider list + scope workspace, larger Takeoff review iframe, clearer manual scope builder. Label fallbacks prefer sender/subject/plan/attachment filename before “Unknown contact.” Product filtering (unscoped-only active queue), Set Scope, and manual Set Scope backends unchanged. |
+| **Why** | Scope creation worked but felt narrow/prototype vs polished Inbox; estimators need a larger operational workspace. |
+| **Impacted** | `EstimateQueuePage`, `queueGrouping`, queue presenter labels, shell width for queue, styles, UI tests, this doc. |
+| **Protected / unchanged** | Queue filter=active exclusion of scoped rows, AI Takeoff algorithm, set-scope / set-manual-scope behavior, pricing, Digital Estimate, Studio V2, Estimates editor logic. |
+| **Revisit trigger** | Three-pane activity timeline if estimators need takeoff history alongside creation. |
+
+### 281. Elite 100 Quote Flow — Estimate Queue estimate name + row-action cleanup (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-queue-command-center-ui` |
+| **Decision** | Ready AI rows show **Review Takeoff** only (no repeated Create Manual Scope). Manual scope is a selected-workspace mode alongside Review AI Takeoff. Failed rows show **Needs decision**. Editable **Estimate name** defaults from subject → plan basename → sender → short id → “Untitled quote request”, and is persisted on Set Scope as `scope.projectName` + `scope.quoteFlowEstimateName` via existing `updateScope` (no migration). Labels avoid “Unknown contact — Unknown contact.” Queue filter/set-scope product rules unchanged. |
+| **Why** | Duplicate Manual Scope on every ready row felt wrong; estimators need a clear job name before scope lands in Estimates. |
+| **Impacted** | Queue presenter/setScope/set-manual-scope routes, EstimateQueuePage, queueGrouping, UI/slice tests, this doc. |
+| **Protected / unchanged** | Unscoped-only queue filter, pricing, Digital Estimate, Studio V2, AI Takeoff algorithm, migrations. |
+| **Revisit trigger** | Dedicated estimate title column if scope.projectName is overloaded elsewhere. |

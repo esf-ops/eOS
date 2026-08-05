@@ -413,7 +413,9 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
           takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || "")),
           confirm: body.confirm === true || body.confirm === "true",
           takeoffResult: body.takeoffResult || null,
-          reviewState: body.reviewState || null
+          reviewState: body.reviewState || null,
+          projectName: body.projectName != null ? String(body.projectName) : null,
+          estimateName: body.estimateName != null ? String(body.estimateName) : null
         });
         console.info(
           "[elite100-quote-flow][audit]",
@@ -449,7 +451,9 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
           actorUserId: req.user?.id ?? null,
           takeoffJobId: decodeURIComponent(String(req.params.takeoffJobId || "")),
           confirm: body.confirm === true || body.confirm === "true",
-          rooms: body.rooms
+          rooms: body.rooms,
+          projectName: body.projectName != null ? String(body.projectName) : null,
+          estimateName: body.estimateName != null ? String(body.estimateName) : null
         });
         console.info(
           "[elite100-quote-flow][audit]",

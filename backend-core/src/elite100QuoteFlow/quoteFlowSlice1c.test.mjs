@@ -66,8 +66,11 @@ function queueRow(overrides = {}) {
   );
   assert.equal(failed.status.key, "takeoff_failed");
   assert.equal(failed.canCreateManualScope, true);
-  assert.equal(failed.action, "create_manual_scope");
+  assert.equal(failed.action, "needs_decision");
+  assert.equal(failed.actionLabel, "Needs decision");
   assert.equal(failed.failureReason, "Plan unreadable");
+  assert.equal(item.rowAction, "review_takeoff");
+  assert.match(item.defaultEstimateName || item.estimateName || "", /Kitchen|plan|Buyer/i);
 
   const processing = presentQuoteFlowQueueItem(
     queueRow({
@@ -171,11 +174,16 @@ function queueRow(overrides = {}) {
       updateScopeCalls += 1;
       for (const [caseId, est] of estimatesByCase.entries()) {
         if (est.id === estimateId) {
-          const rooms = body?.scope?.rooms || [];
+          const patch = body?.scope && typeof body.scope === "object" ? body.scope : {};
+          const rooms = Array.isArray(patch.rooms) ? patch.rooms : est.scope?.rooms || [];
           const next = {
             ...est,
             status: "ready_to_price",
-            scope: { rooms }
+            scope: {
+              ...(est.scope || {}),
+              ...patch,
+              rooms
+            }
           };
           estimatesByCase.set(caseId, next);
           return { estimate: next };
@@ -298,16 +306,20 @@ function queueRow(overrides = {}) {
     organizationId: ORG,
     takeoffJobId: JOB_FAIL,
     confirm: true,
-    rooms: manualRooms
+    rooms: manualRooms,
+    projectName: "Hoskins Williams Job",
+    estimateName: "Hoskins Williams Job"
   });
   assert.equal(manual.ok, true);
   assert.equal(manual.created, true);
   assert.equal(manual.message, "Scope is set for this estimate.");
-  assert.equal(updateScopeCalls, 1);
+  assert.equal(manual.projectName, "Hoskins Williams Job");
+  assert.equal(updateScopeCalls >= 1, true);
   assert.equal(isOfficialScopeSet(estimatesByCase.get("case-fail")), true);
+  assert.equal(estimatesByCase.get("case-fail")?.scope?.projectName, "Hoskins Williams Job");
   assert.equal(manual.sideEffects.calculated, false);
   assert.equal(manual.sideEffects.published, false);
-  console.log("ok: Manual Set Scope creates official scope");
+  console.log("ok: Manual Set Scope creates official scope with estimate name");
 
   const afterManual = await svc.listQueue({ organizationId: ORG });
   assert.equal(
@@ -333,8 +345,21 @@ function queueRow(overrides = {}) {
     takeoffReviewStatus: "needs_review"
   });
   assert.equal(objectLabels.customerDisplay, "Dave Untiedt");
-  assert.equal(objectLabels.projectDisplay, "plan.pdf");
-  assert.doesNotMatch(JSON.stringify(objectLabels), /AAMk|Customer not identified/);
+  assert.equal(objectLabels.defaultEstimateName, "plan");
+  assert.doesNotMatch(JSON.stringify(objectLabels), /AAMk|Unknown contact — Unknown contact/);
+
+  const weak = presentQuoteFlowQueueItem({
+    id: "w",
+    takeoffJobId: "job-w",
+    customerName: "Customer not identified",
+    projectName: "Project not named",
+    subject: "Relihan VanderSchot Finals Plans",
+    workflowStatus: "Takeoff draft ready",
+    takeoffJobStatus: "completed",
+    takeoffReviewStatus: "needs_review"
+  });
+  assert.equal(weak.defaultEstimateName, "Relihan VanderSchot Finals Plans");
+  assert.doesNotMatch(`${weak.customerDisplay} — ${weak.projectDisplay}`, /Unknown contact — Unknown contact/);
 
   const sorted = sortQuoteFlowQueueItems([
     presentQuoteFlowQueueItem(
