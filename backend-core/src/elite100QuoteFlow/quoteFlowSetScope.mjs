@@ -369,6 +369,71 @@ export function createQuoteFlowSetScopeService(deps) {
   }
 
   /**
+   * Persist canonical openEdgeLf onto an estimate's official rooms.
+   * Must run even when getOrCreate already seeded usable rooms (afterEnsure path) —
+   * that path previously returned early and left openEdgeLf at 0.
+   */
+  async function persistOpenEdgeLfOnEstimate({
+    organizationId,
+    takeoffJobId,
+    actorUserId,
+    estimate,
+    takeoffResult = null
+  }) {
+    if (!estimate?.id) return estimate;
+    const priorRooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
+    if (priorRooms.length === 0) return estimate;
+
+    const edgeSource = await resolveTakeoffResultForOpenEdge(
+      organizationId,
+      takeoffJobId,
+      takeoffResult
+    );
+    const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(priorRooms, edgeSource);
+    const normalizedEdgeRooms = validateAndNormalizeOfficialScopeRooms(edgedRooms);
+
+    if (studioEstimateService?.updateScope) {
+      try {
+        const updated = await studioEstimateService.updateScope({
+          organizationId,
+          estimateId: estimate.id,
+          actorUserId,
+          body: {
+            scope: {
+              rooms: normalizedEdgeRooms,
+              ...(estimate.scope?.source != null ? { source: estimate.scope.source } : {}),
+              ...(estimate.scope?.physicalScopeSource != null
+                ? { physicalScopeSource: estimate.scope.physicalScopeSource }
+                : { physicalScopeSource: "takeoff" })
+            }
+          }
+        });
+        const next = updated?.estimate || updated;
+        if (next) {
+          return {
+            ...next,
+            id: next.id || estimate.id,
+            scope: {
+              ...(next.scope || {}),
+              rooms: Array.isArray(next.scope?.rooms) ? next.scope.rooms : normalizedEdgeRooms
+            }
+          };
+        }
+      } catch {
+        /* fall through to in-memory stamp */
+      }
+    }
+
+    return {
+      ...estimate,
+      scope: {
+        ...(estimate.scope || {}),
+        rooms: normalizedEdgeRooms
+      }
+    };
+  }
+
+  /**
    * Freeze reviewed measurements for Quote Flow Set Scope.
    * Accepts optional dirty takeoffResult — saves edits (reopening approved jobs
    * when needed) then approves. When no live payload is provided, approveAndBuildEstimate
@@ -527,20 +592,28 @@ export function createQuoteFlowSetScopeService(deps) {
       });
     }
 
-    // Idempotent: if getOrCreate already seeded usable scope, reuse without re-import.
+    // Idempotent: if getOrCreate already seeded usable scope, still stamp openEdgeLf
+    // from live/saved takeoff (seed historically wrote 0 / early-return skipped stamp).
     const afterEnsure = await alreadyScopedForCase(organizationId, intakeCaseId);
     if (afterEnsure.scoped && afterEnsure.estimate?.id) {
-      const named = displayName
-        ? await applyEstimateDisplayName({
-            organizationId,
-            estimateId: afterEnsure.estimate.id,
-            actorUserId,
-            projectName: displayName,
-            estimate: afterEnsure.estimate
-          })
-        : afterEnsure.estimate;
+      let estimate = await persistOpenEdgeLfOnEstimate({
+        organizationId,
+        takeoffJobId: jobId,
+        actorUserId,
+        estimate: afterEnsure.estimate,
+        takeoffResult
+      });
+      if (displayName) {
+        estimate = await applyEstimateDisplayName({
+          organizationId,
+          estimateId: estimate.id,
+          actorUserId,
+          projectName: displayName,
+          estimate
+        });
+      }
       return scopedSuccessPayload({
-        estimate: named,
+        estimate,
         intakeCaseId,
         takeoffJobId: jobId,
         created: false,
@@ -558,67 +631,13 @@ export function createQuoteFlowSetScopeService(deps) {
     let estimate = refreshed?.estimate || refreshed;
     estimate = { ...estimate, id: estimate?.id || estimateId };
 
-    // Carry open/exposed edge LF from reviewed takeoff → canonical piece.openEdgeLf.
-    // Prefer live client payload; otherwise latest saved draft (Save Draft → Set Scope).
-    const priorRooms = Array.isArray(estimate?.scope?.rooms) ? estimate.scope.rooms : [];
-    if (priorRooms.length > 0) {
-      const edgeSource = await resolveTakeoffResultForOpenEdge(organizationId, jobId, takeoffResult);
-      const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(priorRooms, edgeSource);
-      const normalizedEdgeRooms = validateAndNormalizeOfficialScopeRooms(edgedRooms);
-      if (studioEstimateService?.updateScope) {
-        try {
-          const updated = await studioEstimateService.updateScope({
-            organizationId,
-            estimateId: estimate.id,
-            actorUserId,
-            body: {
-              scope: {
-                rooms: normalizedEdgeRooms,
-                ...(estimate.scope?.source != null ? { source: estimate.scope.source } : {}),
-                ...(estimate.scope?.physicalScopeSource != null
-                  ? { physicalScopeSource: estimate.scope.physicalScopeSource }
-                  : { physicalScopeSource: "takeoff" })
-              }
-            }
-          });
-          const next = updated?.estimate || updated;
-          if (next) {
-            estimate = {
-              ...next,
-              id: next.id || estimate.id,
-              scope: {
-                ...(next.scope || {}),
-                rooms: Array.isArray(next.scope?.rooms) ? next.scope.rooms : normalizedEdgeRooms
-              }
-            };
-          } else {
-            estimate = {
-              ...estimate,
-              scope: {
-                ...(estimate.scope || {}),
-                rooms: normalizedEdgeRooms
-              }
-            };
-          }
-        } catch {
-          estimate = {
-            ...estimate,
-            scope: {
-              ...(estimate.scope || {}),
-              rooms: normalizedEdgeRooms
-            }
-          };
-        }
-      } else {
-        estimate = {
-          ...estimate,
-          scope: {
-            ...(estimate.scope || {}),
-            rooms: normalizedEdgeRooms
-          }
-        };
-      }
-    }
+    estimate = await persistOpenEdgeLfOnEstimate({
+      organizationId,
+      takeoffJobId: jobId,
+      actorUserId,
+      estimate,
+      takeoffResult
+    });
 
     if (displayName) {
       estimate = await applyEstimateDisplayName({

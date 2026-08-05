@@ -181,6 +181,13 @@ console.log("ok: Estimates Quote Library layout; table; modal; Open edge LF; no 
     resolvePieceOpenEdgeLf({ finishedEdge: { totalFinishedEdgeLengthIn: 36 } }),
     3
   );
+  assert.equal(
+    resolvePieceOpenEdgeLf({
+      openEdgeLf: 0,
+      finishedEdge: { totalFinishedEdgeLengthIn: 48.96 }
+    }),
+    4.08
+  );
   assert.equal(resolvePieceOpenEdgeLf({}), 0);
   assert.equal(resolvePieceOpenEdgeLf({ openEdgeLf: "", exposedEdgeLf: null }), 0);
   const summary = summarizeRoomsLocal([

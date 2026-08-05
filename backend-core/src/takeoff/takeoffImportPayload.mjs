@@ -327,6 +327,26 @@ export function buildTakeoffImportPayload(params) {
         // Structured cutout contract — legacy strings/maps normalize here so no
         // downstream consumer ever string-parses cutouts again.
         const { cutouts } = normalizeRunCutouts(run.cutouts);
+        // Review UI displays exposed edge from finishedEdge.totalFinishedEdgeLengthIn
+        // even before approved/confirmed — preserve that LF for Quote Flow Set Scope.
+        const finishedEdgeIn = Number(run.finishedEdge?.totalFinishedEdgeLengthIn);
+        const hasReviewEdgeInches = Number.isFinite(finishedEdgeIn) && finishedEdgeIn > 0;
+        const openEdgeLfFromRun = (() => {
+          for (const c of [
+            run.openEdgeLf,
+            run.exposedEdgeLf,
+            run.finishedEdgeLf,
+            run.finishedEdge?.totalFinishedEdgeLengthLf,
+            run.finishedEdge?.linearFeet
+          ]) {
+            const n = Number(c);
+            if (Number.isFinite(n) && n > 0) return round2(n);
+          }
+          if (hasReviewEdgeInches) return round2(finishedEdgeIn / 12);
+          return 0;
+        })();
+        const edgeApproved =
+          run.finishedEdge?.approved === true || run.finishedEdge?.finishedEdgeConfirmed === true;
         const basePiece = {
           name: run.label,
           pieceType: pt,
@@ -357,6 +377,9 @@ export function buildTakeoffImportPayload(params) {
           frontExposed: run.frontExposed,
           backExposed: run.backExposed,
           finishedEdge: run.finishedEdge || null,
+          openEdgeLf: openEdgeLfFromRun,
+          exposedEdgeLf: openEdgeLfFromRun,
+          finishedEdgeLf: openEdgeLfFromRun,
           backsplashGeometry: run.backsplashGeometry || null,
           waterfall: isWaterfall || undefined,
           // Island waterfall panels are physical Takeoff facts attached to the
@@ -365,8 +388,9 @@ export function buildTakeoffImportPayload(params) {
           backsplash: backsplashMetaForRun(run, area),
           areaType: area.areaType || null
         };
+        // Do not replace real review edge inches with draft_suggestion geometry.
         importRoom.pieces.push(
-          run.finishedEdge?.approved === true || run.finishedEdge?.finishedEdgeConfirmed === true
+          edgeApproved || hasReviewEdgeInches
             ? basePiece
             : attachDraftPieceGeometry(basePiece, {
                 eligible,

@@ -83,16 +83,16 @@ export function resolveRunOpenEdgeLf(run) {
   for (const c of candidates) {
     if (c == null || c === "") continue;
     const n = Number(c);
-    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+    if (Number.isFinite(n) && n > 0) return Math.round(n * 100) / 100;
   }
   const fe = run.finishedEdge;
   if (fe && typeof fe === "object") {
     const totalIn = Number(fe.totalFinishedEdgeLengthIn);
-    if (Number.isFinite(totalIn) && totalIn >= 0) {
+    if (Number.isFinite(totalIn) && totalIn > 0) {
       return Math.round((totalIn / 12) * 100) / 100;
     }
-    const lfAlias = Number(fe.totalFinishedEdgeLengthLf ?? fe.linearFeet);
-    if (Number.isFinite(lfAlias) && lfAlias >= 0) {
+    const lfAlias = Number(fe.totalFinishedEdgeLengthLf ?? fe.linearFeet ?? fe.total);
+    if (Number.isFinite(lfAlias) && lfAlias > 0) {
       return Math.round(lfAlias * 100) / 100;
     }
   }
