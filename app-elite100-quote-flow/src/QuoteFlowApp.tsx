@@ -226,7 +226,7 @@ export default function QuoteFlowApp() {
         onSignOut={() => void signOut()}
       />
 
-      <div className="qf-shell">
+      <div className={mainNav === "inbox" ? "qf-shell qf-shell--command" : "qf-shell"}>
         <nav className="qf-nav" aria-label="Quote Flow" data-testid="qf-nav">
           <button
             type="button"

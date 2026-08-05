@@ -1,6 +1,7 @@
 /**
  * Elite 100 Quote Flow — Inbox + start-takeoff orchestration (Slice 1B).
  * Reuses Shared Inbox + open-estimate; does not calculate/approve/publish/sold.
+ * Dismiss/restore is Quote Flow–only — never deletes Outlook mail.
  */
 
 import { sharedInboxSafeError } from "../elite100EstimateStudio/studioSharedInboxService.mjs";
@@ -10,6 +11,10 @@ import {
   presentQuoteFlowInboxItem,
   sortQuoteFlowInboxItems
 } from "./quoteFlowInboxPresenter.mjs";
+import {
+  createMemoryQuoteFlowInboxStateStore,
+  createQuoteFlowInboxStateStore
+} from "./quoteFlowInboxStateStore.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
 
 export { isOfficialScopeSet } from "./quoteFlowScope.mjs";
@@ -18,6 +23,8 @@ export { isOfficialScopeSet } from "./quoteFlowScope.mjs";
  * @param {{
  *   sharedInboxService: { listInbox: Function, getMessage: Function, sendToAiTakeoff: Function },
  *   estimateRepository?: { getActiveByIntakeCase?: Function }|null,
+ *   inboxStateStore?: ReturnType<typeof createQuoteFlowInboxStateStore>|null,
+ *   getSupabase?: Function|null,
  *   env?: NodeJS.ProcessEnv
  * }} deps
  */
@@ -27,6 +34,11 @@ export function createQuoteFlowService(deps) {
     throw new Error("createQuoteFlowService: sharedInboxService required");
   }
   const estimateRepository = deps.estimateRepository || null;
+  const inboxStateStore =
+    deps.inboxStateStore ||
+    (typeof deps.getSupabase === "function"
+      ? createQuoteFlowInboxStateStore({ getSupabase: deps.getSupabase })
+      : createMemoryQuoteFlowInboxStateStore());
 
   async function alreadyScopedForCase(organizationId, intakeCaseId) {
     const caseId = String(intakeCaseId || "").trim();
@@ -39,17 +51,34 @@ export function createQuoteFlowService(deps) {
     }
   }
 
-  async function enrichItem(organizationId, item) {
+  async function enrichItem(organizationId, item, triageState = null) {
     const scoped = await alreadyScopedForCase(organizationId, item?.intakeCaseId);
-    return presentQuoteFlowInboxItem(item, { alreadyScoped: scoped });
+    const key = String(item?.messageKey || "").trim();
+    const state =
+      triageState ||
+      (await inboxStateStore.readState(organizationId).catch(() => ({
+        dismissedMessageKeys: {},
+        openedMessageKeys: {}
+      })));
+    const dismissed = Boolean(key && state.dismissedMessageKeys?.[key]);
+    const opened = Boolean(key && state.openedMessageKeys?.[key]);
+    return presentQuoteFlowInboxItem(item, {
+      alreadyScoped: scoped,
+      dismissed,
+      opened
+    });
   }
 
   async function listInbox({ organizationId, query = {}, actorUserId = null }) {
     const result = await sharedInbox.listInbox({ organizationId, query, actorUserId });
     const items = Array.isArray(result?.items) ? result.items : [];
+    const triageState = await inboxStateStore.readState(organizationId).catch(() => ({
+      dismissedMessageKeys: {},
+      openedMessageKeys: {}
+    }));
     const presented = [];
     for (const item of items) {
-      presented.push(await enrichItem(organizationId, item));
+      presented.push(await enrichItem(organizationId, item, triageState));
     }
     const sorted = sortQuoteFlowInboxItems(presented);
     const grouped = groupQuoteFlowInboxItems(sorted);
@@ -64,9 +93,16 @@ export function createQuoteFlowService(deps) {
       groups: {
         needs_action: grouped.needs_action,
         active: grouped.active,
-        completed: grouped.completed
+        ready_for_review: grouped.ready_for_review,
+        completed: grouped.completed,
+        dismissed: grouped.dismissed
       },
       stats: grouped.stats,
+      triage: {
+        openedIsMailboxUnread: false,
+        openedIsQuoteFlowLocal: true,
+        dismissDeletesEmail: false
+      },
       sideEffects: {
         calculated: false,
         approved: false,
@@ -85,6 +121,80 @@ export function createQuoteFlowService(deps) {
       item,
       mailboxDisplay: result.mailboxDisplay || null,
       readOnly: true
+    };
+  }
+
+  async function markOpened({ organizationId, messageKey, actorUserId = null }) {
+    const key = String(messageKey || "").trim();
+    if (!key) throw createQuoteFlowError("message_not_found");
+    await inboxStateStore.markOpened({ organizationId, messageKey: key, actorUserId });
+    // Soft-refresh detail with opened flag when mailbox row still available.
+    try {
+      const detail = await getMessage({ organizationId, messageKey: key, actorUserId });
+      return {
+        ok: true,
+        opened: true,
+        mailboxMutated: false,
+        item: detail.item
+      };
+    } catch {
+      return { ok: true, opened: true, mailboxMutated: false, messageKey: key };
+    }
+  }
+
+  async function dismissMessage({ organizationId, messageKey, actorUserId = null }) {
+    const key = String(messageKey || "").trim();
+    if (!key) throw createQuoteFlowError("message_not_found");
+
+    let isActive = false;
+    try {
+      const detail = await sharedInbox.getMessage({ organizationId, messageKey: key, actorUserId });
+      const presented = await enrichItem(organizationId, detail.item);
+      isActive = presented.isActiveTakeoff === true;
+    } catch {
+      // Still allow dismiss by key if detail unavailable.
+    }
+
+    const result = await inboxStateStore.dismiss({
+      organizationId,
+      messageKey: key,
+      actorUserId
+    });
+
+    return {
+      ok: true,
+      dismissed: true,
+      messageKey: key,
+      emailDeleted: false,
+      mailboxMutated: false,
+      takeoffCancelled: false,
+      activeTakeoffHidden: isActive,
+      message: isActive
+        ? "Removed from Quote Flow. Any active AI Takeoff continues in the background."
+        : "Removed from Quote Flow. The original email was not deleted.",
+      ...result
+    };
+  }
+
+  async function restoreMessage({ organizationId, messageKey, actorUserId = null }) {
+    const key = String(messageKey || "").trim();
+    if (!key) throw createQuoteFlowError("message_not_found");
+    await inboxStateStore.restore({ organizationId, messageKey: key });
+    let item = null;
+    try {
+      const detail = await getMessage({ organizationId, messageKey: key, actorUserId });
+      item = detail.item;
+    } catch {
+      item = null;
+    }
+    return {
+      ok: true,
+      restored: true,
+      messageKey: key,
+      emailDeleted: false,
+      mailboxMutated: false,
+      item,
+      message: "Restored to Quote Flow Inbox."
     };
   }
 
@@ -198,6 +308,9 @@ export function createQuoteFlowService(deps) {
     listInbox,
     getMessage,
     startTakeoff,
+    dismissMessage,
+    restoreMessage,
+    markOpened,
     isOfficialScopeSet,
     quoteFlowSafeError
   };

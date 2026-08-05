@@ -3805,3 +3805,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowInboxPresenter`, `quoteFlowService.listInbox` groups/stats, InboxPage, inboxGrouping helper, tests, this doc. |
 | **Protected / unchanged** | Digital Estimate, pricing formulas, Estimate Queue Set Scope, Estimates editor, Studio V2, Internal Estimate, AI Takeoff algorithm. |
 | **Revisit trigger** | Richer takeoff progress events if/when Brain exposes them. |
+
+### 278. Elite 100 Quote Flow Inbox command center + dismiss (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-inbox-command-center-ui` |
+| **Decision** | Quote Flow Inbox is a full-width triage command center (list + detail). **Remove from Quote Flow** dismisses a request from this Inbox only — never deletes Outlook/Graph mail. Persistence: `organization_integration_configs` row `integration_key=quote_flow_inbox` stores `dismissedMessageKeys` + `openedMessageKeys` (no migration). Routes: `POST …/inbox/:messageKey/dismiss|restore|opened`. Opened/unopened is Quote Flow local viewed state (not mailbox unread). Dismissed rows hidden by default; Show removed / Restore. Batch start + background polling preserved. Active takeoffs may be hidden without cancelling the job. |
+| **Why** | Estimators need screen-wide triage and a safe way to clear irrelevant requests without touching the shared mailbox. |
+| **Impacted** | `quoteFlowInboxStateStore`, presenter/service/routes, InboxPage + styles/shell width, tests, this doc. |
+| **Protected / unchanged** | External mailbox delete, Estimate Queue Set Scope, Estimates editor, pricing, Digital Estimate, Studio V2, Internal Estimate, AI Takeoff algorithm. |
+| **Revisit trigger** | Dedicated triage table if key volume exceeds JSON config; optional cancel-on-dismiss for active takeoffs. |

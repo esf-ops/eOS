@@ -137,6 +137,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
       quoteFlowService = createQuoteFlowService({
         sharedInboxService,
         estimateRepository,
+        getSupabase,
         env
       });
     }
@@ -273,6 +274,94 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
       } catch (e) {
         console.error("[elite100-quote-flow] start-takeoff failed", e?.code || e?.message);
         sendSafeError(res, e, "Unable to start AI Takeoff.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/inbox/:messageKey/dismiss",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const messageKey = decodeURIComponent(String(req.params.messageKey || ""));
+        const result = await quoteFlowService.dismissMessage({
+          organizationId,
+          messageKey,
+          actorUserId: req.user?.id ?? null
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "inbox.dismiss",
+            userId: req.user?.id ?? null,
+            messageKey,
+            emailDeleted: false,
+            mailboxMutated: false,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] inbox dismiss failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to remove from Quote Flow.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/inbox/:messageKey/restore",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const messageKey = decodeURIComponent(String(req.params.messageKey || ""));
+        const result = await quoteFlowService.restoreMessage({
+          organizationId,
+          messageKey,
+          actorUserId: req.user?.id ?? null
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "inbox.restore",
+            userId: req.user?.id ?? null,
+            messageKey,
+            emailDeleted: false,
+            mailboxMutated: false,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] inbox restore failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to restore to Quote Flow.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/inbox/:messageKey/opened",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const messageKey = decodeURIComponent(String(req.params.messageKey || ""));
+        const result = await quoteFlowService.markOpened({
+          organizationId,
+          messageKey,
+          actorUserId: req.user?.id ?? null
+        });
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] inbox opened failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to mark request opened.");
       }
     }
   );

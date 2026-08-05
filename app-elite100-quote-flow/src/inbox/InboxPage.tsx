@@ -2,19 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../lib/api";
 import { formatPersonLabel, normalizeInboxItemLabels } from "../lib/formatPersonLabel.mjs";
 import {
+  filterInboxItems,
   groupInboxItems,
   resolveCustomerDisplay,
+  resolveInboxGroupKey,
   resolveInboxProgress,
-  resolveRequestTitle
+  resolveRequestTitle,
+  sortInboxItemsForDisplay
 } from "../lib/inboxGrouping.mjs";
+import { formatBatchResultLine, humanInboxLabel } from "../lib/inboxUiHelpers.mjs";
 import {
-  formatBatchResultLine,
-  humanInboxLabel,
-  shortJobLabel
-} from "../lib/inboxUiHelpers.mjs";
-import {
+  dismissQuoteFlowInboxMessage,
   fetchQuoteFlowInbox,
   fetchQuoteFlowInboxMessage,
+  markQuoteFlowInboxOpened,
+  restoreQuoteFlowInboxMessage,
   startQuoteFlowTakeoff,
   type QuoteFlowAttachment,
   type QuoteFlowInboxItem
@@ -39,6 +41,25 @@ type BatchResult = {
 };
 
 type LoadMode = "initial" | "refresh" | "poll";
+
+type FilterKey =
+  | "all_active"
+  | "new"
+  | "needs_attachment"
+  | "active"
+  | "ready"
+  | "scope_set"
+  | "removed";
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: "all_active", label: "All active" },
+  { key: "new", label: "New / unopened" },
+  { key: "needs_attachment", label: "Needs attachment" },
+  { key: "active", label: "Active takeoffs" },
+  { key: "ready", label: "Ready for review" },
+  { key: "scope_set", label: "Scope set" },
+  { key: "removed", label: "Removed" }
+];
 
 function errorMessage(e: unknown): string {
   if (e instanceof ApiError) {
@@ -67,8 +88,28 @@ function formatReceived(iso: string | null | undefined): string {
   }
 }
 
+function fileTypeLabel(att: QuoteFlowAttachment): string {
+  const ct = String(att.contentType || "").toLowerCase();
+  const name = String(att.filename || "").toLowerCase();
+  if (ct.includes("pdf") || name.endsWith(".pdf")) return "PDF";
+  if (ct.includes("image") || /\.(png|jpe?g|gif|webp)$/i.test(name)) return "Image";
+  if (ct.includes("dwg") || name.endsWith(".dwg")) return "DWG";
+  if (ct) return ct.split("/").pop() || "File";
+  return "File";
+}
+
 function labelHelpers() {
   return { resolveCustomerDisplay, resolveRequestTitle, formatPersonLabel };
+}
+
+function statusPillClass(statusKey: string | undefined): string {
+  const k = String(statusKey || "");
+  if (k === "takeoff_failed") return "qf-pill qf-pill--error";
+  if (k === "takeoff_queued" || k === "takeoff_processing") return "qf-pill qf-pill--active";
+  if (k === "takeoff_returned") return "qf-pill qf-pill--ready";
+  if (k === "already_scoped") return "qf-pill qf-pill--done";
+  if (k === "ready_to_start") return "qf-pill qf-pill--go";
+  return "qf-pill";
 }
 
 function ProgressBar({ item }: { item: QuoteFlowInboxItem }) {
@@ -119,14 +160,22 @@ export default function InboxPage(props: Props) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [dismissBusy, setDismissBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterKey>("all_active");
+  const [search, setSearch] = useState("");
+  const [showRemoved, setShowRemoved] = useState(false);
+  const [menuKey, setMenuKey] = useState<string | null>(null);
+  const [pendingDismissKey, setPendingDismissKey] = useState<string | null>(null);
+  const [undoDismissKey, setUndoDismissKey] = useState<string | null>(null);
 
   const listInFlightRef = useRef(false);
   const selectedKeyRef = useRef<string | null>(null);
   const selectedAttachmentKeyRef = useRef<string | null>(null);
   const selectedAttachmentByMessageRef = useRef<Record<string, string>>({});
   const itemsRef = useRef<QuoteFlowInboxItem[]>([]);
+  const openedPostedRef = useRef<Set<string>>(new Set());
 
   selectedKeyRef.current = selectedKey;
   selectedAttachmentKeyRef.current = selectedAttachmentKey;
@@ -134,6 +183,11 @@ export default function InboxPage(props: Props) {
   itemsRef.current = items;
 
   const grouped = useMemo(() => groupInboxItems(items), [items]);
+  const visibleRows = useMemo(
+    () => sortInboxItemsForDisplay(filterInboxItems(items, filter, search)),
+    [items, filter, search]
+  );
+
   const selectedCount = Object.keys(selectedAttachmentByMessage).length;
   const showSyncing = isRefreshing || isPolling || batchBusy;
 
@@ -174,7 +228,6 @@ export default function InboxPage(props: Props) {
               (a) => a.attachmentKey === attKey
             );
             if (!stillValid) {
-              // Keep prior selection unless attachments prove it gone.
               const fromMap = selectedAttachmentByMessageRef.current[key];
               if (fromMap) {
                 const mapValid = (stillThere.attachments || []).some(
@@ -188,13 +241,12 @@ export default function InboxPage(props: Props) {
       }
     }
 
-    // Drop batch checks for requests that became scoped.
     setSelectedAttachmentByMessage((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const messageKey of Object.keys(next)) {
         const row = rows.find((r) => r.messageKey === messageKey);
-        if (row?.alreadyScoped) {
+        if (row?.alreadyScoped || row?.dismissed) {
           delete next[messageKey];
           changed = true;
         }
@@ -220,7 +272,6 @@ export default function InboxPage(props: Props) {
       );
       applyListRows(rows);
     } catch (e) {
-      // Keep existing rows visible on background refresh failures.
       if (itemsRef.current.length === 0) {
         setError(errorMessage(e));
         setItems([]);
@@ -265,7 +316,7 @@ export default function InboxPage(props: Props) {
 
   function toggleBatchSelection(row: QuoteFlowInboxItem) {
     const messageKey = row.messageKey || "";
-    if (!messageKey || row.alreadyScoped) return;
+    if (!messageKey || row.alreadyScoped || row.dismissed) return;
     if (selectedAttachmentByMessage[messageKey]) {
       clearSelection(messageKey);
       return;
@@ -282,12 +333,25 @@ export default function InboxPage(props: Props) {
     setSelectedKey(messageKey);
     setSelectedAttachmentKey(selectedAttachmentByMessage[messageKey] || null);
     setNotice(null);
+    setMenuKey(null);
     setDetailLoading(true);
     setError(null);
+
+    // Quote Flow local viewed state — does not change Outlook read/unread.
+    setItems((prev) =>
+      prev.map((r) => (r.messageKey === messageKey ? { ...r, opened: true } : r))
+    );
+    if (!openedPostedRef.current.has(messageKey)) {
+      openedPostedRef.current.add(messageKey);
+      void markQuoteFlowInboxOpened(authToken, messageKey).catch(() => {
+        openedPostedRef.current.delete(messageKey);
+      });
+    }
+
     try {
       const res = await fetchQuoteFlowInboxMessage(authToken, messageKey);
       const item = normalizeInboxItemLabels(res.item) as QuoteFlowInboxItem;
-      setDetail(item);
+      setDetail({ ...item, opened: true });
       const existing = selectedAttachmentByMessage[messageKey];
       if (existing) {
         setSelectedAttachmentKey(existing);
@@ -305,6 +369,91 @@ export default function InboxPage(props: Props) {
       setError(errorMessage(e));
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  function requestDismiss(row: QuoteFlowInboxItem) {
+    const key = row.messageKey || "";
+    if (!key) return;
+    setMenuKey(null);
+    const started =
+      row.alreadyScoped ||
+      row.takeoffStatus?.key === "takeoff_returned" ||
+      row.takeoffStatus?.key === "takeoff_queued" ||
+      row.takeoffStatus?.key === "takeoff_processing";
+    if (started) {
+      void runDismiss(key);
+      return;
+    }
+    setPendingDismissKey(key);
+  }
+
+  async function runDismiss(messageKey: string) {
+    setPendingDismissKey(null);
+    setDismissBusy(true);
+    setError(null);
+    try {
+      const res = await dismissQuoteFlowInboxMessage(authToken, messageKey);
+      setItems((prev) =>
+        prev.map((r) =>
+          r.messageKey === messageKey
+            ? {
+                ...r,
+                dismissed: true,
+                group: { key: "dismissed", label: "Removed", sortOrder: 99 },
+                canStartTakeoff: false
+              }
+            : r
+        )
+      );
+      if (selectedKey === messageKey) {
+        setDetail((prev) => (prev ? { ...prev, dismissed: true } : prev));
+      }
+      setUndoDismissKey(messageKey);
+      setNotice(
+        res.message ||
+          "Removed from Quote Flow. This only removes the request from Quote Flow. It does not delete the original email."
+      );
+      clearSelection(messageKey);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setDismissBusy(false);
+    }
+  }
+
+  async function runRestore(messageKey: string) {
+    setDismissBusy(true);
+    setError(null);
+    setMenuKey(null);
+    try {
+      const res = await restoreQuoteFlowInboxMessage(authToken, messageKey);
+      setUndoDismissKey(null);
+      setNotice(res.message || "Restored to Quote Flow Inbox.");
+      if (res.item) {
+        const item = normalizeInboxItemLabels(res.item) as QuoteFlowInboxItem;
+        setItems((prev) =>
+          prev.map((r) => (r.messageKey === messageKey ? { ...item, dismissed: false } : r))
+        );
+        if (selectedKey === messageKey) setDetail({ ...item, dismissed: false });
+      } else {
+        setItems((prev) =>
+          prev.map((r) =>
+            r.messageKey === messageKey
+              ? {
+                  ...r,
+                  dismissed: false,
+                  group: { key: "needs_action", label: "Needs action", sortOrder: 1 }
+                }
+              : r
+          )
+        );
+      }
+      await loadList("refresh");
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setDismissBusy(false);
     }
   }
 
@@ -434,7 +583,7 @@ export default function InboxPage(props: Props) {
     const attachmentCount =
       typeof row.attachmentCount === "number" ? row.attachmentCount : (row.attachments || []).length;
     const nextLabel = row.nextAction?.label || row.takeoffStatus?.label || "Open";
-    const jobShort = shortJobLabel(row.takeoffJobId);
+    const unopened = row.opened !== true && !row.dismissed;
 
     return (
       <li key={key || title} className="qf-inbox__row-wrap">
@@ -444,19 +593,23 @@ export default function InboxPage(props: Props) {
               ? "qf-inbox__row-card is-active"
               : batchSelected
                 ? "qf-inbox__row-card is-batch"
-                : "qf-inbox__row-card"
+                : unopened
+                  ? "qf-inbox__row-card is-unopened"
+                  : "qf-inbox__row-card"
           }
           data-testid="qf-inbox-row"
           data-message-key={key}
-          data-group={row.group?.key || ""}
+          data-group={row.group?.key || resolveInboxGroupKey(row)}
           data-status={row.takeoffStatus?.key || ""}
+          data-opened={row.opened === true ? "1" : "0"}
+          data-dismissed={row.dismissed === true ? "1" : "0"}
         >
           <label className="qf-inbox__batch-check">
             <input
               type="checkbox"
               data-testid="qf-inbox-batch-check"
               checked={batchSelected}
-              disabled={row.alreadyScoped === true || !key}
+              disabled={row.alreadyScoped === true || row.dismissed === true || !key}
               onChange={() => toggleBatchSelection(row)}
               aria-label={`Select ${title} for bulk AI Takeoff`}
             />
@@ -466,7 +619,10 @@ export default function InboxPage(props: Props) {
             className="qf-inbox__row-main"
             onClick={() => key && void openRow(key)}
           >
-            <span className="qf-inbox__row-title">{title}</span>
+            <span className="qf-inbox__row-title-line">
+              {unopened ? <span className="qf-inbox__dot" aria-label="Unopened" /> : null}
+              <span className="qf-inbox__row-title">{title}</span>
+            </span>
             <span className="qf-inbox__row-meta">
               {customer}
               {" · "}
@@ -478,18 +634,82 @@ export default function InboxPage(props: Props) {
                 ? ` · Plan: ${row.bestPlanCandidate.filename}`
                 : ""}
             </span>
-            <span
-              className="qf-inbox__status"
-              data-testid="qf-inbox-row-status"
-              data-status={row.takeoffStatus?.key || ""}
-            >
-              {row.takeoffStatus?.label || "Needs attachment selection"}
-              {" · "}
-              {nextLabel}
-              {jobShort ? ` · ${jobShort}` : ""}
+            <span className="qf-inbox__row-status-line">
+              <span
+                className={statusPillClass(row.takeoffStatus?.key)}
+                data-testid="qf-inbox-row-status"
+                data-status={row.takeoffStatus?.key || ""}
+              >
+                {row.takeoffStatus?.label || "Needs attachment selection"}
+              </span>
+              <span className="qf-inbox__next">{nextLabel}</span>
             </span>
             <ProgressBar item={row} />
           </button>
+          <div className="qf-inbox__row-menu">
+            <button
+              type="button"
+              className="qf-btn-ghost"
+              data-testid="qf-inbox-row-menu"
+              aria-label="Row actions"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuKey((prev) => (prev === key ? null : key));
+              }}
+            >
+              ···
+            </button>
+            {menuKey === key ? (
+              <div className="qf-menu" data-testid="qf-inbox-row-actions">
+                <button type="button" onClick={() => key && void openRow(key)}>
+                  Open
+                </button>
+                {row.viewQueue || row.takeoffStatus?.key === "takeoff_returned" ? (
+                  <button
+                    type="button"
+                    data-testid="qf-inbox-view-queue"
+                    onClick={() => {
+                      setMenuKey(null);
+                      onOpenQueue?.();
+                    }}
+                  >
+                    View in Estimate Queue
+                  </button>
+                ) : null}
+                {row.viewEstimates || row.alreadyScoped ? (
+                  <button
+                    type="button"
+                    data-testid="qf-inbox-view-estimates"
+                    onClick={() => {
+                      setMenuKey(null);
+                      onOpenEstimates?.(row.estimateId);
+                    }}
+                  >
+                    View in Estimates
+                  </button>
+                ) : null}
+                {row.dismissed ? (
+                  <button
+                    type="button"
+                    data-testid="qf-inbox-restore"
+                    disabled={dismissBusy}
+                    onClick={() => key && void runRestore(key)}
+                  >
+                    Restore to Quote Flow
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="qf-inbox-remove"
+                    disabled={dismissBusy}
+                    onClick={() => requestDismiss(row)}
+                  >
+                    Remove from Quote Flow
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
       </li>
     );
@@ -519,36 +739,137 @@ export default function InboxPage(props: Props) {
   }
 
   const showFullLoading = initialLoading && items.length === 0;
-  const showEmpty = !initialLoading && items.length === 0;
-  const showGroups = items.length > 0;
+  const listNeedsAction = visibleRows.filter((r) => resolveInboxGroupKey(r) === "needs_action");
+  const listActive = visibleRows.filter((r) => resolveInboxGroupKey(r) === "active");
+  const listReady = visibleRows.filter((r) => resolveInboxGroupKey(r) === "ready_for_review");
+  const listCompleted = visibleRows.filter((r) => resolveInboxGroupKey(r) === "completed");
+  const listDismissed = visibleRows.filter((r) => resolveInboxGroupKey(r) === "dismissed");
+  const showGroups = visibleRows.length > 0;
+  const showEmpty = !initialLoading && visibleRows.length === 0;
+
+  const stats = {
+    newUnopened: grouped.stats.newUnopened ?? 0,
+    needsAction: grouped.stats.needsAction,
+    activeTakeoffs: grouped.stats.activeTakeoffs,
+    readyForReview: grouped.stats.readyForReview,
+    scopeSet: grouped.stats.scopeSet,
+    dismissed: grouped.stats.dismissed ?? 0
+  };
 
   return (
-    <section className="qf-page" data-testid="qf-inbox-page">
-      <header className="qf-page__header">
-        <h1>Inbox</h1>
-        <p className="qf-muted">
-          New quote requests land here. Select plan attachments, start one or several AI Takeoffs,
-          and track progress before Estimate Queue review.
-        </p>
+    <section className="qf-page qf-page--command" data-testid="qf-inbox-page">
+      <header className="qf-command-header" data-testid="qf-inbox-command-header">
+        <div className="qf-command-header__titles">
+          <h1>Quote Flow Inbox</h1>
+          <p className="qf-muted">
+            Select plan attachments, start AI Takeoff, and track progress before Estimate Queue
+            review.
+          </p>
+        </div>
+        <div className="qf-command-header__actions">
+          {showSyncing ? (
+            <span className="qf-inbox__syncing" data-testid="qf-inbox-syncing">
+              Syncing…
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="qf-btn-primary"
+            data-testid="qf-inbox-start-selected"
+            disabled={batchBusy || selectedCount === 0}
+            onClick={() => void runBatchStart()}
+          >
+            {batchBusy
+              ? "Starting…"
+              : `Start selected AI Takeoffs${selectedCount ? ` (${selectedCount})` : ""}`}
+          </button>
+          <button
+            type="button"
+            className="qf-btn-secondary"
+            data-testid="qf-inbox-refresh"
+            onClick={() => void loadList("refresh")}
+            disabled={initialLoading || isRefreshing}
+          >
+            {isRefreshing ? "Refreshing…" : "Refresh"}
+          </button>
+          <button
+            type="button"
+            className="qf-btn-secondary"
+            data-testid="qf-inbox-toggle-removed"
+            onClick={() => {
+              if (showRemoved || filter === "removed") {
+                setShowRemoved(false);
+                setFilter("all_active");
+              } else {
+                setShowRemoved(true);
+                setFilter("removed");
+              }
+            }}
+          >
+            {showRemoved || filter === "removed" ? "Hide removed" : "Show removed"}
+          </button>
+        </div>
       </header>
 
-      <div className="qf-stats" data-testid="qf-inbox-stats">
+      <div className="qf-stats qf-stats--command" data-testid="qf-inbox-stats">
         <div className="qf-stat">
-          <span className="qf-stat__value">{grouped.stats.needsAction}</span>
+          <span className="qf-stat__value">{stats.newUnopened}</span>
+          <span className="qf-stat__label">New</span>
+        </div>
+        <div className="qf-stat">
+          <span className="qf-stat__value">{stats.needsAction}</span>
           <span className="qf-stat__label">Needs action</span>
         </div>
         <div className="qf-stat">
-          <span className="qf-stat__value">{grouped.stats.activeTakeoffs}</span>
+          <span className="qf-stat__value">{stats.activeTakeoffs}</span>
           <span className="qf-stat__label">Active takeoffs</span>
         </div>
         <div className="qf-stat">
-          <span className="qf-stat__value">{grouped.stats.readyForReview}</span>
+          <span className="qf-stat__value">{stats.readyForReview}</span>
           <span className="qf-stat__label">Ready for review</span>
         </div>
         <div className="qf-stat">
-          <span className="qf-stat__value">{grouped.stats.scopeSet}</span>
+          <span className="qf-stat__value">{stats.scopeSet}</span>
           <span className="qf-stat__label">Scope set</span>
         </div>
+        {showRemoved || filter === "removed" ? (
+          <div className="qf-stat" data-testid="qf-inbox-stat-removed">
+            <span className="qf-stat__value">{stats.dismissed}</span>
+            <span className="qf-stat__label">Removed</span>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="qf-inbox-toolbar" data-testid="qf-inbox-filters">
+        <div className="qf-filter-chips" role="tablist" aria-label="Inbox filters">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              role="tab"
+              className={filter === f.key ? "qf-chip is-active" : "qf-chip"}
+              data-testid={`qf-inbox-filter-${f.key}`}
+              aria-selected={filter === f.key}
+              onClick={() => {
+                setFilter(f.key);
+                if (f.key === "removed") setShowRemoved(true);
+                if (f.key !== "removed" && showRemoved) setShowRemoved(false);
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <label className="qf-inbox-search">
+          <span className="qf-visually-hidden">Search</span>
+          <input
+            type="search"
+            data-testid="qf-inbox-search"
+            placeholder="Search sender, subject, attachment…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
       </div>
 
       {error ? (
@@ -559,6 +880,19 @@ export default function InboxPage(props: Props) {
       {notice ? (
         <p className="qf-notice" data-testid="qf-inbox-notice">
           {notice}
+          {undoDismissKey ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="qf-link-btn"
+                data-testid="qf-inbox-undo-remove"
+                onClick={() => void runRestore(undoDismissKey)}
+              >
+                Undo
+              </button>
+            </>
+          ) : null}
         </p>
       ) : null}
       {batchResults.length ? (
@@ -571,37 +905,42 @@ export default function InboxPage(props: Props) {
         </ul>
       ) : null}
 
-      <div className="qf-inbox qf-inbox--ops" data-testid="qf-inbox">
+      {pendingDismissKey ? (
+        <div className="qf-confirm" data-testid="qf-inbox-dismiss-confirm">
+          <p>
+            Remove this request from Quote Flow? The original email will not be deleted.
+          </p>
+          <p className="qf-muted">
+            This only removes the request from Quote Flow. It does not delete the original email.
+          </p>
+          <div className="qf-confirm__actions">
+            <button
+              type="button"
+              className="qf-btn-secondary"
+              onClick={() => setPendingDismissKey(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="qf-btn-primary"
+              data-testid="qf-inbox-dismiss-confirm-yes"
+              onClick={() => void runDismiss(pendingDismissKey)}
+            >
+              Remove from Quote Flow
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div
+        className="qf-inbox qf-inbox--ops qf-inbox--command"
+        data-testid="qf-inbox"
+      >
         <div className="qf-inbox__list" data-testid="qf-inbox-list">
           <div className="qf-inbox__list-head">
             <h2>Requests</h2>
-            <div className="qf-inbox__list-actions">
-              {showSyncing ? (
-                <span className="qf-inbox__syncing" data-testid="qf-inbox-syncing">
-                  Syncing…
-                </span>
-              ) : null}
-              <button
-                type="button"
-                className="qf-btn-primary"
-                data-testid="qf-inbox-start-selected"
-                disabled={batchBusy || selectedCount === 0}
-                onClick={() => void runBatchStart()}
-              >
-                {batchBusy
-                  ? "Starting…"
-                  : `Start selected AI Takeoffs${selectedCount ? ` (${selectedCount})` : ""}`}
-              </button>
-              <button
-                type="button"
-                className="qf-btn-secondary"
-                data-testid="qf-inbox-refresh"
-                onClick={() => void loadList("refresh")}
-                disabled={initialLoading || isRefreshing}
-              >
-                {isRefreshing ? "Refreshing…" : "Refresh"}
-              </button>
-            </div>
+            <span className="qf-muted">{visibleRows.length} shown</span>
           </div>
           {showFullLoading ? (
             <p className="qf-muted" data-testid="qf-inbox-initial-loading">
@@ -609,60 +948,133 @@ export default function InboxPage(props: Props) {
             </p>
           ) : null}
           {showEmpty ? (
-            <p className="qf-muted" data-testid="qf-inbox-empty">
-              No quote requests right now.
-            </p>
+            <div className="qf-inbox__empty" data-testid="qf-inbox-empty">
+              <p className="qf-muted">
+                {filter === "removed" || showRemoved
+                  ? "No removed requests."
+                  : search
+                    ? "No requests match this search."
+                    : "No quote requests right now."}
+              </p>
+            </div>
           ) : null}
           {showGroups ? (
             <>
               {renderSection(
                 "qf-inbox-group-needs-action",
                 "New / needs action",
-                grouped.needs_action,
+                listNeedsAction,
                 "No new requests needing action."
               )}
               {renderSection(
                 "qf-inbox-group-active",
                 "Active AI Takeoffs",
-                grouped.active,
+                listActive,
                 "No AI Takeoffs running right now."
+              )}
+              {renderSection(
+                "qf-inbox-group-ready",
+                "Ready for review",
+                listReady,
+                "No takeoffs ready for review."
               )}
               {renderSection(
                 "qf-inbox-group-completed",
                 "Completed / already handled",
-                grouped.completed,
+                listCompleted,
                 "No completed requests yet."
               )}
+              {filter === "removed" || showRemoved
+                ? renderSection(
+                    "qf-inbox-group-dismissed",
+                    "Removed",
+                    listDismissed,
+                    "No removed requests."
+                  )
+                : null}
             </>
           ) : null}
         </div>
 
         <div className="qf-inbox__detail" data-testid="qf-inbox-detail">
           {!selectedKey ? (
-            <div className="qf-placeholder">
+            <div className="qf-placeholder qf-placeholder--command">
+              <h2>Request detail</h2>
               <p>Select a request to review attachments and start AI Takeoff.</p>
             </div>
           ) : detailLoading && !detail ? (
             <p className="qf-muted">Loading attachments…</p>
           ) : detail ? (
             <>
-              <h2>{resolveRequestTitle(detail)}</h2>
-              <p className="qf-muted">
-                {resolveCustomerDisplay(detail, formatPersonLabel)}
-                {detail.bodyPreview ? ` — ${detail.bodyPreview}` : ""}
-              </p>
-              <p
-                className="qf-inbox__status qf-inbox__status--detail"
-                data-testid="qf-inbox-detail-status"
-                data-status={detail.takeoffStatus?.key || ""}
-              >
-                {detail.takeoffStatus?.label}
-                {shortJobLabel(detail.takeoffJobId)
-                  ? ` · ${shortJobLabel(detail.takeoffJobId)}`
-                  : ""}
-                {detail.nextAction?.label ? ` · ${detail.nextAction.label}` : ""}
-              </p>
-              <ProgressBar item={detail} />
+              <div className="qf-inbox__detail-sticky">
+                <h2>{resolveRequestTitle(detail)}</h2>
+                <p className="qf-muted">
+                  {resolveCustomerDisplay(detail, formatPersonLabel)}
+                  {" · "}
+                  {formatReceived(detail.receivedAt)}
+                </p>
+                {detail.bodyPreview ? (
+                  <p className="qf-inbox__preview" data-testid="qf-inbox-body-preview">
+                    {detail.bodyPreview}
+                  </p>
+                ) : null}
+                <p
+                  className="qf-inbox__status qf-inbox__status--detail"
+                  data-testid="qf-inbox-detail-status"
+                  data-status={detail.takeoffStatus?.key || ""}
+                >
+                  <span className={statusPillClass(detail.takeoffStatus?.key)}>
+                    {detail.takeoffStatus?.label}
+                  </span>
+                  {detail.nextAction?.label ? (
+                    <span className="qf-inbox__next">{detail.nextAction.label}</span>
+                  ) : null}
+                </p>
+                <ProgressBar item={detail} />
+                <div className="qf-inbox__detail-actions">
+                  {detail.dismissed ? (
+                    <button
+                      type="button"
+                      className="qf-btn-secondary"
+                      data-testid="qf-inbox-restore"
+                      disabled={dismissBusy}
+                      onClick={() => detail.messageKey && void runRestore(detail.messageKey)}
+                    >
+                      Restore to Quote Flow
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="qf-btn-secondary"
+                      data-testid="qf-inbox-remove"
+                      disabled={dismissBusy}
+                      onClick={() => requestDismiss(detail)}
+                    >
+                      Remove from Quote Flow
+                    </button>
+                  )}
+                  {detail.viewQueue || detail.takeoffStatus?.key === "takeoff_returned" ? (
+                    <button
+                      type="button"
+                      className="qf-btn-secondary"
+                      data-testid="qf-inbox-view-queue"
+                      onClick={() => onOpenQueue?.()}
+                    >
+                      View in Estimate Queue
+                    </button>
+                  ) : null}
+                  {detail.viewEstimates || detail.alreadyScoped ? (
+                    <button
+                      type="button"
+                      className="qf-btn-secondary"
+                      data-testid="qf-inbox-view-estimates"
+                      onClick={() => onOpenEstimates?.(detail.estimateId)}
+                    >
+                      View in Estimates
+                    </button>
+                  ) : null}
+                </div>
+              </div>
 
               {detail.alreadyScoped ? (
                 <p className="qf-notice" data-testid="qf-inbox-already-scoped">
@@ -670,9 +1082,21 @@ export default function InboxPage(props: Props) {
                 </p>
               ) : null}
 
+              {detail.dismissed ? (
+                <p className="qf-notice" data-testid="qf-inbox-dismissed-note">
+                  Removed from Quote Flow. The original email was not deleted.
+                </p>
+              ) : null}
+
               {detail.planSelectionRequired ? (
                 <p className="qf-muted" data-testid="qf-inbox-choose-plan">
                   Multiple plan candidates — choose one before starting AI Takeoff.
+                </p>
+              ) : null}
+
+              {detail.bestPlanCandidate?.filename ? (
+                <p className="qf-inbox__selected-plan" data-testid="qf-inbox-selected-plan">
+                  Selected plan: <strong>{detail.bestPlanCandidate.filename}</strong>
                 </p>
               ) : null}
 
@@ -683,8 +1107,12 @@ export default function InboxPage(props: Props) {
                   const selected = selectedAttachmentKey === att.attachmentKey;
                   const canStart =
                     !detail.alreadyScoped &&
+                    !detail.dismissed &&
                     (att.supportedForTakeoff || att.canMarkAsPlan) &&
                     Boolean(att.attachmentKey);
+                  const running =
+                    detail.takeoffStatus?.key === "takeoff_queued" ||
+                    detail.takeoffStatus?.key === "takeoff_processing";
                   return (
                     <li
                       key={key}
@@ -695,7 +1123,7 @@ export default function InboxPage(props: Props) {
                       <div>
                         <strong>{att.filename}</strong>
                         <div className="qf-muted">
-                          {att.contentType || "unknown type"}
+                          {fileTypeLabel(att)}
                           {" · "}
                           {att.supportedForTakeoff
                             ? "Supported plan"
@@ -728,13 +1156,13 @@ export default function InboxPage(props: Props) {
                                 }
                               }}
                             >
-                              {selected ? "Selected" : "Select"}
+                              {selected ? "Selected" : "Select plan"}
                             </button>
                             <button
                               type="button"
                               className="qf-btn-primary"
                               data-testid="qf-inbox-start-takeoff"
-                              disabled={busyKey === att.attachmentKey}
+                              disabled={busyKey === att.attachmentKey || running}
                               onClick={() =>
                                 void runStartTakeoff(
                                   att,
@@ -744,15 +1172,33 @@ export default function InboxPage(props: Props) {
                             >
                               {busyKey === att.attachmentKey
                                 ? "Starting…"
-                                : attachmentActionLabel(
-                                    att,
-                                    selected || !detail.planSelectionRequired
-                                  )}
+                                : running
+                                  ? "Already running"
+                                  : attachmentActionLabel(
+                                      att,
+                                      selected || !detail.planSelectionRequired
+                                    )}
                             </button>
                           </>
+                        ) : detail.viewQueue || detail.takeoffStatus?.key === "takeoff_returned" ? (
+                          <button
+                            type="button"
+                            className="qf-btn-secondary"
+                            onClick={() => onOpenQueue?.()}
+                          >
+                            View in Queue
+                          </button>
+                        ) : detail.alreadyScoped ? (
+                          <button
+                            type="button"
+                            className="qf-btn-secondary"
+                            onClick={() => onOpenEstimates?.(detail.estimateId)}
+                          >
+                            View in Estimates
+                          </button>
                         ) : (
                           <span className="qf-muted" data-testid="qf-inbox-att-disabled">
-                            {detail.alreadyScoped ? "Takeoff not allowed" : "No action"}
+                            {detail.dismissed ? "Removed" : "No action"}
                           </span>
                         )}
                       </div>
@@ -760,29 +1206,6 @@ export default function InboxPage(props: Props) {
                   );
                 })}
               </ul>
-
-              <div className="qf-inbox__detail-actions">
-                {detail.viewQueue || detail.takeoffStatus?.key === "takeoff_returned" ? (
-                  <button
-                    type="button"
-                    className="qf-btn-secondary"
-                    data-testid="qf-inbox-view-queue"
-                    onClick={() => onOpenQueue?.()}
-                  >
-                    View in Estimate Queue
-                  </button>
-                ) : null}
-                {detail.viewEstimates || detail.alreadyScoped ? (
-                  <button
-                    type="button"
-                    className="qf-btn-secondary"
-                    data-testid="qf-inbox-view-estimates"
-                    onClick={() => onOpenEstimates?.(detail.estimateId)}
-                  >
-                    View in Estimates
-                  </button>
-                ) : null}
-              </div>
             </>
           ) : (
             <p className="qf-muted">Unable to load this request.</p>

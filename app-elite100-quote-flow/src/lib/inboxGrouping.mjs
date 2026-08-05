@@ -1,5 +1,5 @@
 /**
- * Client-side Inbox grouping / progress helpers (mirrors Quote Flow presenter).
+ * Client-side Inbox grouping / progress / filter helpers (mirrors Quote Flow presenter).
  */
 
 /**
@@ -18,8 +18,15 @@ function asString(value, fallback = "") {
  * @param {object} item
  */
 export function resolveInboxGroupKey(item) {
+  if (item?.dismissed === true) return "dismissed";
   const fromApi = asString(item?.group?.key);
-  if (fromApi === "needs_action" || fromApi === "active" || fromApi === "completed") {
+  if (
+    fromApi === "needs_action" ||
+    fromApi === "active" ||
+    fromApi === "ready_for_review" ||
+    fromApi === "completed" ||
+    fromApi === "dismissed"
+  ) {
     return fromApi;
   }
   const status = asString(item?.takeoffStatus?.key);
@@ -31,6 +38,7 @@ export function resolveInboxGroupKey(item) {
     return "needs_action";
   }
   if (status === "takeoff_queued" || status === "takeoff_processing") return "active";
+  if (status === "takeoff_returned") return "ready_for_review";
   return "completed";
 }
 
@@ -39,21 +47,145 @@ export function resolveInboxGroupKey(item) {
  */
 export function groupInboxItems(items) {
   const list = Array.isArray(items) ? items : [];
-  /** @type {{ needs_action: object[], active: object[], completed: object[] }} */
-  const groups = { needs_action: [], active: [], completed: [] };
+  /** @type {Record<string, object[]>} */
+  const groups = {
+    needs_action: [],
+    active: [],
+    ready_for_review: [],
+    completed: [],
+    dismissed: []
+  };
   for (const item of list) {
-    groups[resolveInboxGroupKey(item)].push(item);
+    const key = resolveInboxGroupKey(item);
+    if (groups[key]) groups[key].push(item);
+    else groups.completed.push(item);
   }
+  const active = list.filter((i) => i?.dismissed !== true);
   return {
     ...groups,
     stats: {
+      newUnopened: active.filter(
+        (i) => resolveInboxGroupKey(i) === "needs_action" && i?.opened !== true
+      ).length,
       needsAction: groups.needs_action.length,
       activeTakeoffs: groups.active.length,
-      readyForReview: list.filter((i) => i?.takeoffStatus?.key === "takeoff_returned").length,
-      scopeSet: list.filter((i) => i?.takeoffStatus?.key === "already_scoped" || i?.alreadyScoped)
-        .length
+      readyForReview: active.filter((i) => i?.takeoffStatus?.key === "takeoff_returned").length,
+      scopeSet: active.filter(
+        (i) => i?.takeoffStatus?.key === "already_scoped" || i?.alreadyScoped
+      ).length,
+      dismissed: groups.dismissed.length
     }
   };
+}
+
+/**
+ * Filter keys for command-center chips.
+ * @typedef {"all_active"|"new"|"needs_attachment"|"active"|"ready"|"scope_set"|"removed"} InboxFilterKey
+ */
+
+/**
+ * @param {object[]} items
+ * @param {InboxFilterKey} filter
+ * @param {string} [search]
+ */
+export function filterInboxItems(items, filter = "all_active", search = "") {
+  const list = Array.isArray(items) ? items : [];
+  const q = String(search || "")
+    .trim()
+    .toLowerCase();
+
+  let rows = list;
+  switch (filter) {
+    case "removed":
+      rows = list.filter((i) => i?.dismissed === true);
+      break;
+    case "new":
+      rows = list.filter(
+        (i) =>
+          i?.dismissed !== true &&
+          resolveInboxGroupKey(i) === "needs_action" &&
+          i?.opened !== true
+      );
+      break;
+    case "needs_attachment":
+      rows = list.filter(
+        (i) =>
+          i?.dismissed !== true &&
+          (i?.takeoffStatus?.key === "needs_attachment_selection" ||
+            i?.planSelectionRequired === true)
+      );
+      break;
+    case "active":
+      rows = list.filter(
+        (i) => i?.dismissed !== true && resolveInboxGroupKey(i) === "active"
+      );
+      break;
+    case "ready":
+      rows = list.filter(
+        (i) => i?.dismissed !== true && i?.takeoffStatus?.key === "takeoff_returned"
+      );
+      break;
+    case "scope_set":
+      rows = list.filter(
+        (i) =>
+          i?.dismissed !== true &&
+          (i?.alreadyScoped === true || i?.takeoffStatus?.key === "already_scoped")
+      );
+      break;
+    case "all_active":
+    default:
+      rows = list.filter((i) => i?.dismissed !== true);
+      break;
+  }
+
+  if (!q) return rows;
+  return rows.filter((item) => {
+    const hay = [
+      item?.sender,
+      item?.senderLabel,
+      item?.customerDisplay,
+      item?.customerLabel,
+      item?.subject,
+      item?.projectLabel,
+      item?.requestTitle,
+      item?.bestPlanCandidate?.filename,
+      ...(Array.isArray(item?.attachments)
+        ? item.attachments.map((a) => a?.filename)
+        : [])
+    ]
+      .map((v) => asString(v).toLowerCase())
+      .join(" ");
+    return hay.includes(q);
+  });
+}
+
+/**
+ * Sort for list display: unopened / needs action first.
+ * @param {object[]} items
+ */
+export function sortInboxItemsForDisplay(items) {
+  const list = Array.isArray(items) ? [...items] : [];
+  const order = {
+    needs_action: 0,
+    active: 2,
+    ready_for_review: 3,
+    completed: 4,
+    dismissed: 99
+  };
+  list.sort((a, b) => {
+    const ak = resolveInboxGroupKey(a);
+    const bk = resolveInboxGroupKey(b);
+    let ao = order[ak] ?? 50;
+    let bo = order[bk] ?? 50;
+    if (ak === "needs_action" && a?.opened !== true) ao = -1;
+    if (bk === "needs_action" && b?.opened !== true) bo = -1;
+    if (ao !== bo) return ao - bo;
+    const aOpen = a?.opened === true ? 1 : 0;
+    const bOpen = b?.opened === true ? 1 : 0;
+    if (aOpen !== bOpen) return aOpen - bOpen;
+    return String(b?.receivedAt || "").localeCompare(String(a?.receivedAt || ""));
+  });
+  return list;
 }
 
 /**

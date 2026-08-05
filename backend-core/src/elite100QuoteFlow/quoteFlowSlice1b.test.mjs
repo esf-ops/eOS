@@ -618,4 +618,91 @@ async function requestApp(app, path, init = {}) {
   console.log("ok: UI source contracts for Inbox actions");
 }
 
+{
+  const { createMemoryQuoteFlowInboxStateStore } = await import(
+    "./quoteFlowInboxStateStore.mjs"
+  );
+  const store = createMemoryQuoteFlowInboxStateStore();
+  const shared = mockSharedInbox();
+  const svc = createQuoteFlowService({
+    sharedInboxService: shared,
+    estimateRepository: { getActiveByIntakeCase: async () => null },
+    inboxStateStore: store
+  });
+
+  const before = await svc.listInbox({ organizationId: ORG });
+  assert.equal(before.items[0].dismissed, false);
+  assert.equal(before.items[0].opened, false);
+
+  const dismissed = await svc.dismissMessage({
+    organizationId: ORG,
+    messageKey: MSG,
+    actorUserId: "u1"
+  });
+  assert.equal(dismissed.ok, true);
+  assert.equal(dismissed.emailDeleted, false);
+  assert.equal(dismissed.mailboxMutated, false);
+  assert.equal(dismissed.takeoffCancelled, false);
+
+  const afterDismiss = await svc.listInbox({ organizationId: ORG });
+  assert.equal(afterDismiss.items[0].dismissed, true);
+  assert.equal(afterDismiss.items[0].group.key, "dismissed");
+  assert.equal(afterDismiss.stats.dismissed, 1);
+  assert.equal(afterDismiss.triage.dismissDeletesEmail, false);
+  assert.equal(afterDismiss.triage.openedIsQuoteFlowLocal, true);
+
+  const restored = await svc.restoreMessage({
+    organizationId: ORG,
+    messageKey: MSG,
+    actorUserId: "u1"
+  });
+  assert.equal(restored.ok, true);
+  assert.equal(restored.emailDeleted, false);
+  const afterRestore = await svc.listInbox({ organizationId: ORG });
+  assert.equal(afterRestore.items[0].dismissed, false);
+
+  const opened = await svc.markOpened({
+    organizationId: ORG,
+    messageKey: MSG,
+    actorUserId: "u1"
+  });
+  assert.equal(opened.opened, true);
+  assert.equal(opened.mailboxMutated, false);
+  const afterOpen = await svc.listInbox({ organizationId: ORG });
+  assert.equal(afterOpen.items[0].opened, true);
+
+  // Unopened needs-action sorts above opened needs-action.
+  const unopenedItem = presentQuoteFlowInboxItem(
+    {
+      ...baseItem(),
+      messageKey: "m-new",
+      receivedAt: "2026-08-01T10:00:00.000Z"
+    },
+    { opened: false }
+  );
+  const openedItem = presentQuoteFlowInboxItem(
+    {
+      ...baseItem(),
+      messageKey: "m-old",
+      receivedAt: "2026-08-04T10:00:00.000Z"
+    },
+    { opened: true }
+  );
+  const { sortQuoteFlowInboxItems } = await import("./quoteFlowInboxPresenter.mjs");
+  const sortedOpen = sortQuoteFlowInboxItems([openedItem, unopenedItem]);
+  assert.equal(sortedOpen[0].messageKey, "m-new");
+  assert.equal(sortedOpen[0].opened, false);
+
+  const routes = readFileSync(join(__dirname, "elite100QuoteFlowRoutes.js"), "utf8");
+  assert.match(routes, /inbox\/:messageKey\/dismiss/);
+  assert.match(routes, /inbox\/:messageKey\/restore/);
+  assert.match(routes, /inbox\/:messageKey\/opened/);
+  assert.doesNotMatch(routes, /graph\.microsoft\.com.*delete|deleteMessage|mailbox.*delete/i);
+  const storeSrc = readFileSync(join(__dirname, "quoteFlowInboxStateStore.mjs"), "utf8");
+  assert.match(storeSrc, /organization_integration_configs/);
+  assert.match(storeSrc, /quote_flow_inbox/);
+  assert.doesNotMatch(storeSrc, /delete.*mail|graph.*delete/i);
+  console.log("ok: dismiss/restore/opened are Quote Flow–only; no mailbox delete");
+}
+
 console.log("\nquoteFlowSlice1b.test.mjs: ok\n");

@@ -77,16 +77,21 @@ export type QuoteFlowInboxItem = {
   nextAction?: QuoteFlowNextAction;
   canStartTakeoff?: boolean;
   alreadyScoped: boolean;
+  opened?: boolean;
+  dismissed?: boolean;
+  isActiveTakeoff?: boolean;
   viewQueue?: boolean;
   viewEstimates?: boolean;
   queueHint: string | null;
 };
 
 export type QuoteFlowInboxStats = {
+  newUnopened?: number;
   needsAction: number;
   activeTakeoffs: number;
   readyForReview: number;
   scopeSet: number;
+  dismissed?: number;
 };
 
 export async function fetchQuoteFlowInbox(
@@ -105,11 +110,18 @@ export async function fetchQuoteFlowInbox(
     groups?: {
       needs_action: QuoteFlowInboxItem[];
       active: QuoteFlowInboxItem[];
+      ready_for_review?: QuoteFlowInboxItem[];
       completed: QuoteFlowInboxItem[];
+      dismissed?: QuoteFlowInboxItem[];
     };
     stats?: QuoteFlowInboxStats;
     total?: number;
     mailboxDisplay?: string | null;
+    triage?: {
+      openedIsMailboxUnread?: boolean;
+      openedIsQuoteFlowLocal?: boolean;
+      dismissDeletesEmail?: boolean;
+    };
   }>;
 }
 
@@ -153,5 +165,51 @@ export async function startQuoteFlowTakeoff(
     message?: string;
     item?: QuoteFlowInboxItem | null;
     sideEffects?: Record<string, boolean>;
+  }>;
+}
+
+export async function dismissQuoteFlowInboxMessage(token: string, messageKey: string) {
+  return apiPost(
+    `/api/elite100-quote-flow/inbox/${encodeURIComponent(messageKey)}/dismiss`,
+    token,
+    {}
+  ) as Promise<{
+    ok: boolean;
+    dismissed: boolean;
+    messageKey: string;
+    emailDeleted: boolean;
+    mailboxMutated: boolean;
+    takeoffCancelled?: boolean;
+    activeTakeoffHidden?: boolean;
+    message?: string;
+  }>;
+}
+
+export async function restoreQuoteFlowInboxMessage(token: string, messageKey: string) {
+  return apiPost(
+    `/api/elite100-quote-flow/inbox/${encodeURIComponent(messageKey)}/restore`,
+    token,
+    {}
+  ) as Promise<{
+    ok: boolean;
+    restored: boolean;
+    messageKey: string;
+    emailDeleted: boolean;
+    mailboxMutated: boolean;
+    item?: QuoteFlowInboxItem | null;
+    message?: string;
+  }>;
+}
+
+export async function markQuoteFlowInboxOpened(token: string, messageKey: string) {
+  return apiPost(
+    `/api/elite100-quote-flow/inbox/${encodeURIComponent(messageKey)}/opened`,
+    token,
+    {}
+  ) as Promise<{
+    ok: boolean;
+    opened: boolean;
+    mailboxMutated: boolean;
+    item?: QuoteFlowInboxItem | null;
   }>;
 }

@@ -138,31 +138,47 @@ export function mapQuoteFlowTakeoffProgress(input = {}) {
 
 /**
  * @param {string} statusKey
+ * @param {{ dismissed?: boolean, opened?: boolean }} [opts]
  */
-export function mapQuoteFlowInboxGroup(statusKey) {
+export function mapQuoteFlowInboxGroup(statusKey, opts = {}) {
+  if (opts.dismissed === true) {
+    return {
+      key: "dismissed",
+      label: "Removed",
+      sortOrder: 99
+    };
+  }
   const key = String(statusKey || "");
   if (
     key === "needs_attachment_selection" ||
     key === "ready_to_start" ||
     key === "takeoff_failed"
   ) {
+    const unopened = opts.opened !== true;
     return {
       key: "needs_action",
-      label: "New / needs action",
-      sortOrder: 0
+      label: unopened ? "New" : "Needs action",
+      sortOrder: unopened ? 0 : 1
     };
   }
   if (key === "takeoff_queued" || key === "takeoff_processing") {
     return {
       key: "active",
       label: "Active AI Takeoffs",
-      sortOrder: 1
+      sortOrder: 2
+    };
+  }
+  if (key === "takeoff_returned") {
+    return {
+      key: "ready_for_review",
+      label: "Ready for review",
+      sortOrder: 3
     };
   }
   return {
     key: "completed",
     label: "Completed / already handled",
-    sortOrder: 2
+    sortOrder: 4
   };
 }
 
@@ -281,7 +297,7 @@ export function pickBestPlanCandidate(attachments) {
 }
 
 /**
- * Sort inbox items: needs_action → active → completed, then newest first.
+ * Sort inbox items: new/unopened → needs action → active → ready → completed → dismissed.
  * @param {object[]} items
  */
 export function sortQuoteFlowInboxItems(items) {
@@ -290,6 +306,9 @@ export function sortQuoteFlowInboxItems(items) {
     const ao = Number(a?.group?.sortOrder ?? 99);
     const bo = Number(b?.group?.sortOrder ?? 99);
     if (ao !== bo) return ao - bo;
+    const aOpen = a?.opened === true ? 1 : 0;
+    const bOpen = b?.opened === true ? 1 : 0;
+    if (aOpen !== bOpen) return aOpen - bOpen;
     return String(b?.receivedAt || "").localeCompare(String(a?.receivedAt || ""));
   });
   return list;
@@ -304,29 +323,41 @@ export function groupQuoteFlowInboxItems(items) {
   const buckets = {
     needs_action: [],
     active: [],
-    completed: []
+    ready_for_review: [],
+    completed: [],
+    dismissed: []
   };
   for (const item of sorted) {
     const key = item?.group?.key || "completed";
     if (buckets[key]) buckets[key].push(item);
+    else if (key === "ready_for_review") buckets.ready_for_review.push(item);
     else buckets.completed.push(item);
   }
+  const activeVisible = sorted.filter((i) => i?.dismissed !== true);
+  const newUnopened = activeVisible.filter(
+    (i) => i?.group?.key === "needs_action" && i?.opened !== true
+  ).length;
   return {
     needs_action: buckets.needs_action,
     active: buckets.active,
+    ready_for_review: buckets.ready_for_review,
     completed: buckets.completed,
+    dismissed: buckets.dismissed,
     stats: {
+      newUnopened,
       needsAction: buckets.needs_action.length,
       activeTakeoffs: buckets.active.length,
-      readyForReview: sorted.filter((i) => i?.takeoffStatus?.key === "takeoff_returned").length,
-      scopeSet: sorted.filter((i) => i?.takeoffStatus?.key === "already_scoped").length
+      readyForReview: activeVisible.filter((i) => i?.takeoffStatus?.key === "takeoff_returned")
+        .length,
+      scopeSet: activeVisible.filter((i) => i?.takeoffStatus?.key === "already_scoped").length,
+      dismissed: buckets.dismissed.length
     }
   };
 }
 
 /**
  * @param {object} item
- * @param {{ alreadyScoped?: boolean }} [opts]
+ * @param {{ alreadyScoped?: boolean, dismissed?: boolean, opened?: boolean }} [opts]
  */
 export function presentQuoteFlowInboxItem(item, opts = {}) {
   const takeoffStatus = mapQuoteFlowTakeoffStatus(item, opts);
@@ -388,21 +419,27 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
     "Unknown contact";
 
   const ai = item?.aiTakeoff && typeof item.aiTakeoff === "object" ? item.aiTakeoff : {};
+  const dismissed = opts.dismissed === true;
+  const opened = opts.opened === true;
   const progress = mapQuoteFlowTakeoffProgress({
     statusKey: takeoffStatus.key,
     aiState: ai.state,
     aiLabel: ai.label,
     alreadyScoped: opts.alreadyScoped === true
   });
-  const group = mapQuoteFlowInboxGroup(takeoffStatus.key);
+  const group = mapQuoteFlowInboxGroup(takeoffStatus.key, { dismissed, opened });
   const nextAction = mapQuoteFlowNextAction(takeoffStatus.key);
   const estimateId = item?.estimateId || item?.activeEstimateId || null;
 
   const canStartTakeoff =
     opts.alreadyScoped !== true &&
+    dismissed !== true &&
     (takeoffStatus.key === "ready_to_start" ||
       takeoffStatus.key === "needs_attachment_selection" ||
       takeoffStatus.key === "takeoff_failed");
+
+  const isActiveTakeoff =
+    takeoffStatus.key === "takeoff_queued" || takeoffStatus.key === "takeoff_processing";
 
   return {
     messageKey: item?.messageKey || null,
@@ -438,6 +475,9 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
     nextAction,
     canStartTakeoff,
     alreadyScoped: opts.alreadyScoped === true,
+    opened,
+    dismissed,
+    isActiveTakeoff,
     viewQueue:
       takeoffStatus.key === "takeoff_returned" ||
       takeoffStatus.key === "takeoff_queued" ||
