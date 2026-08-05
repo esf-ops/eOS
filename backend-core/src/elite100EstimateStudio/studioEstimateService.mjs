@@ -294,6 +294,27 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
             : meta?.sideSplashRightEligible != null
               ? meta.sideSplashRightEligible === true
               : null;
+        // Canonical open/exposed edge LF for Quote Flow Estimates (and Studio).
+        // Prefer import finishedEdge inches; never leave the field undefined when
+        // geometry exists — Estimates reads piece.openEdgeLf as scope data.
+        const openEdgeLf = (() => {
+          const fe = meta?.finishedEdge;
+          const totalIn = Number(fe?.totalFinishedEdgeLengthIn);
+          if (Number.isFinite(totalIn) && totalIn >= 0) {
+            return Math.round((totalIn / 12) * 100) / 100;
+          }
+          for (const c of [
+            meta?.openEdgeLf,
+            meta?.exposedEdgeLf,
+            meta?.finishedEdgeLf,
+            p.openEdgeLf,
+            p.finishedEdgeLf
+          ]) {
+            const n = Number(c);
+            if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+          }
+          return 0;
+        })();
         pieces.push({
           id: p.id,
           name: p.name,
@@ -321,6 +342,9 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
             : {}),
           ...(meta?.backsplashGeometry ? { backsplashGeometry: meta.backsplashGeometry } : {}),
           ...(meta?.finishedEdge ? { finishedEdge: meta.finishedEdge } : {}),
+          openEdgeLf,
+          finishedEdgeLf: openEdgeLf,
+          exposedEdgeLf: openEdgeLf,
           ...(meta?.leftExposed != null ? { leftExposed: meta.leftExposed === true } : {}),
           ...(meta?.rightExposed != null ? { rightExposed: meta.rightExposed === true } : {}),
           ...(meta?.frontExposed != null ? { frontExposed: meta.frontExposed === true } : {}),

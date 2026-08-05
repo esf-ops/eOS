@@ -36,7 +36,8 @@ import {
   summarizeTakeoffDraftForReady,
   postTakeoffParentMessage,
   loadLocalReviewDraft,
-  saveLocalReviewDraft
+  saveLocalReviewDraft,
+  stampOpenEdgeLfOnTakeoffDraft
 } from "../lib/takeoffReviewReadyContract.mjs";
 import {
   applyDeletionTombstones,
@@ -741,7 +742,9 @@ export default function ConsolidatedTakeoffReview() {
             saveStatusRef.current === "dirty" ||
             saveStatusRef.current === "saving" ||
             unsavedEdgeRunIds.size > 0,
-          takeoffResult: structuredClone(draft),
+          // Stamp openEdgeLf on each run so Quote Flow Set Scope always receives
+          // canonical edge LF from the current review worksheet.
+          takeoffResult: stampOpenEdgeLfOnTakeoffDraft(structuredClone(draft)),
           reviewState: buildReviewState()
         },
         { takeoffJobId, localReview }

@@ -3904,3 +3904,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | EstimatesListPage, estimateGrouping (filter/sort/stats), styles (`qf-el-*`), UI/slice 1d tests, this doc. |
 | **Protected / unchanged** | Modal + official scope editor, Open edge LF PATCH semantics, Inbox, Queue Set Scope, pricing/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`, Quote Library app itself. |
 | **Revisit trigger** | Add server-side pagination when estimate volume requires it. |
+
+### 287. Elite 100 Quote Flow — Open edge LF carry-forward on Set Scope (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `hotfix/quote-flow-open-edge-carry-forward` |
+| **Decision** | AI Set Scope must write canonical **`piece.openEdgeLf`** onto official scope. Drop was: takeoff→scope seed preserved `finishedEdge` but omitted `openEdgeLf`/`finishedEdgeLf`, and Set Scope did not re-stamp after `refreshScopeFromTakeoff`. Fix: (1) seed stamps `openEdgeLf` from finishedEdge inches/aliases; (2) Set Scope applies reviewed takeoffResult edge LF then normalizes/persists; (3) AI Takeoff Set Scope postMessage stamps `openEdgeLf` on each run. Manual scope normalize already preserves `openEdgeLf`. No historical backfill of zeroed estimates without source edge data. |
+| **Why** | Estimates showed 0.0 Open edge LF after Set Scope even when AI Takeoff review had exposed/open edge values — blocking correct pre-pricing scope. |
+| **Impacted** | `quoteFlowOpenEdge.mjs`, `quoteFlowSetScope.mjs`, `seedScopeFromTakeoffPayload`, `takeoffReviewReadyContract.mjs`, `ConsolidatedTakeoffReview.tsx`, slice 1c/1d tests, this doc. |
+| **Protected / unchanged** | Pricing/calculate/approve/publish/accept/sold, Studio V2 product behavior, `app-digital-estimate`, `backend-core/src/digitalEstimate`, Estimates library/table/modal layout. |
+| **Revisit trigger** | None unless edge field naming is unified repo-wide. |
