@@ -2919,6 +2919,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
   const calcAllowsConfigured =
     (displayCalc as { canAcceptAsConfigured?: boolean } | null)?.canAcceptAsConfigured === true;
   const foundationAllowsConfigured = customerConfiguration?.canAcceptAsConfigured === true;
+  // After Send selections, the review DTO is authoritative for selection-only acceptance.
+  const reviewAllowsConfigured = reviewRequest?.canAcceptConfigured === true;
   const reviewBlocksConfiguredAccept =
     Boolean(reviewRequest) &&
     (reviewRequest?.requiresEliteReview === true ||
@@ -2930,8 +2932,8 @@ function ConfigurationViewInner({ state, onState, onFatal, accessToken }: Props)
     !canAcceptPublishedEstimate &&
     !scopeReviewRequired &&
     !reviewBlocksConfiguredAccept &&
-    foundationAllowsConfigured &&
-    (displayCalc == null || calcAllowsConfigured);
+    (foundationAllowsConfigured || reviewAllowsConfigured) &&
+    (displayCalc == null || calcAllowsConfigured || reviewAllowsConfigured);
   const acceptMode: "published" | "configured" | null = canAcceptPublishedEstimate
     ? "published"
     : canAcceptAsConfigured

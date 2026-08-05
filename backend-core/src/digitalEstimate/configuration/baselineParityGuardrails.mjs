@@ -564,10 +564,14 @@ export function hasPriceAffectingCustomerSelections(quantities) {
       k.startsWith("material:") ||
       k.startsWith("edge:") ||
       k.startsWith("backsplash:") ||
-      k.startsWith("sidesplash:") ||
       k.startsWith("waterfall:")
     ) {
       return true;
+    }
+    // Priced side-splash modes affect totals; baseline "none" does not.
+    if (k.startsWith("sidesplash:")) {
+      const mode = String(k.split(":").pop() || "").toLowerCase();
+      if (mode && mode !== "none") return true;
     }
   }
   return false;

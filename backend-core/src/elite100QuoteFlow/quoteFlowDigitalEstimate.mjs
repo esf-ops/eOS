@@ -30,7 +30,11 @@ import { readDigitalEstimatePricingValidDays } from "../digitalEstimate/digitalE
 import {
   buildSyntheticQuoteHeaderFromStudioEstimate
 } from "../elite100EstimateStudio/studioEstimatePublicationAdapter.mjs";
-import { defaultSimplifiedPublishConfiguration } from "../elite100EstimateStudio/studioCustomerChoiceOptions.mjs";
+import { resolveSimplifiedPublishConfiguration } from "../elite100EstimateStudio/studioCustomerChoiceOptions.mjs";
+import {
+  assertStudioV2InteractivePublishResult,
+  studioV2PublishIntendsInteractive
+} from "../elite100EstimateStudio/studioV2Publish.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -574,15 +578,19 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
   function resolvePublishConfiguration(body) {
     const raw =
       body?.configuration && typeof body.configuration === "object" ? body.configuration : null;
-    if (raw) return raw;
-    if (preferInteractive) {
-      return defaultSimplifiedPublishConfiguration();
+    if (!preferInteractive) {
+      if (raw?.enableConfiguration === false || raw?.configurationMode === "document") {
+        return raw;
+      }
+      return {
+        enableConfiguration: false,
+        configurationMode: "document",
+        customerChoiceGroups: []
+      };
     }
-    return {
-      enableConfiguration: false,
-      configurationMode: "document",
-      customerChoiceGroups: []
-    };
+    // Match Studio V2 / simplified-publish: missing/empty → interactive defaults so
+    // the public Digital Estimate Accept + configuration path is available.
+    return resolveSimplifiedPublishConfiguration(raw);
   }
 
   async function getDigitalEstimate({ organizationId, estimateId, actorUserId = null } = {}) {
@@ -737,6 +745,25 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
         statusCode: Number(e?.statusCode) || 503,
         diagnostic: { code: code || null }
       });
+    }
+
+    // Refuse silent document-only success when interactive configuration was intended
+    // (same guard as Studio V2) so public Accept / configure CTAs are not missing.
+    if (preferInteractive && studioV2PublishIntendsInteractive(configuration)) {
+      try {
+        assertStudioV2InteractivePublishResult(result, configuration);
+      } catch (guardErr) {
+        throw createQuoteFlowError("publish_unavailable", {
+          message:
+            guardErr?.message ||
+            "Customer interactive Digital Estimate configuration could not be activated.",
+          statusCode: Number(guardErr?.statusCode) || 422,
+          diagnostic: {
+            code: guardErr?.code || "configuration_envelope_required",
+            details: guardErr?.details || null
+          }
+        });
+      }
     }
 
     // Match Studio simplified publish: after successful R(n) publish, supersede

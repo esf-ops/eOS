@@ -1,6 +1,7 @@
 /**
  * Estimates modal — Digital Estimate tab (customer-facing publish).
- * Requires current internal Review approval. No acceptance, sold, handoff, or email.
+ * Requires current internal Review approval. Customer accepts on the public DE link.
+ * Publishing does not mark sold, create handoff, or send email.
  */
 import React, { useEffect, useState } from "react";
 import { ApiError } from "../lib/api";
@@ -132,7 +133,9 @@ export default function OfficialDigitalEstimatePanel(props: Props) {
           Publish a customer-facing Digital Estimate from an approved Quote Flow estimate.
         </p>
         <p className="qf-muted" data-testid="qf-de-no-acceptance">
-          Does not mark accepted, sold, or send email. Use Activity for publication history. Handoff stays later.
+          Customers accept on the public Digital Estimate link (existing Accept estimate path). Publishing
+          here does not mark sold, create handoff, create a QuickBooks invoice, or send email. Activity
+          shows acceptance status and the accepted-job report after the customer accepts.
         </p>
       </header>
 

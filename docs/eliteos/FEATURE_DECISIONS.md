@@ -4070,4 +4070,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowAcceptedReport.mjs`, Activity payload/UI, `mapQuoteFlowEstimateStatus` Accepted, routes `…/accepted-report`, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Pricing formulas/rates, public DE acceptance APIs, sold/handoff/QB/email, customer-facing DE payloads (internal lines stay staff-only). |
 | **Revisit trigger** | Sold review / QuickBooks invoice creation / handoff. |
+
+### 302. Quote Flow public Digital Estimate Accept button restored (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `main` (hotfix) |
+| **Root cause** | Interactive DE envelopes seed `sidesplash:…:none`. `classifyCustomerConfigurationForReview` treated **any** `sidesplash:` quantity as physical scope, so after customer Save / Send selections the review DTO set `requiresEliteReview` / `canAcceptConfigured: false` and the public Accept CTA hid — even for selection-only edge/material changes. Quote Flow Activity’s “Customer changes need staff review” is a separate staff label and does not mean physical-scope Elite review. |
+| **Decision** | Reuse existing public final acceptance (`POST /api/public-digital-estimate/v2/final-acceptance`, `acceptedAsPublished` / `acceptedAsConfigured`). Classify `sidesplash:…:none` as ignored and priced left/right/both as selection-only. Quote Flow publish uses `resolveSimplifiedPublishConfiguration` + interactive envelope assert (same as Studio V2). Send selections remains separate and must not permanently block selection-only configured acceptance. No sold, handoff, job, QuickBooks invoice, or email automation. |
+| **Why** | Customers must accept Quote Flow–published Digital Estimates on the public link; staff already read acceptance via Activity / accepted-job report. |
+| **Impacted** | `customerConfigurationFoundation.mjs` (+ test), `baselineParityGuardrails.mjs`, `quoteFlowDigitalEstimate.mjs`, `ConfigurationView.tsx`, `OfficialDigitalEstimatePanel.tsx`, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Pricing formulas/rates, sold/handoff/QB/email, internal-only line exclusion, non–Quote-Flow Studio DE acceptance model (same path; bugfix benefits all interactive pubs). |
+| **Revisit trigger** | True physical-scope sidesplash modes beyond left/right/both/none. |
 |

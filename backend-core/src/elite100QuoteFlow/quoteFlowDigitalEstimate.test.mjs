@@ -397,7 +397,10 @@ function harness(customLines = []) {
   const src = readFileSync(join(__dirname, "quoteFlowDigitalEstimate.mjs"), "utf8");
   assert.match(src, /createStudioEstimateDigitalEstimateService|studioDigitalEstimateService\.publish/);
   assert.match(src, /quote_flow_approved_snapshot/);
-  assert.doesNotMatch(src, /markSold|finalAcceptance|sendEmail|notifyCustomer/i);
+  assert.match(src, /resolveSimplifiedPublishConfiguration/);
+  assert.match(src, /assertStudioV2InteractivePublishResult/);
+  assert.doesNotMatch(src, /markSold|sendEmail|notifyCustomer/i);
+  assert.doesNotMatch(src, /acceptFinalEstimate|createStudioFinalAcceptanceService/);
   assert.match(src, /handoffCreated:\s*false/);
   assert.match(src, /sold:\s*false/);
   assert.match(src, /accepted:\s*false/);
@@ -405,14 +408,7 @@ function harness(customLines = []) {
   const routes = readFileSync(join(__dirname, "elite100QuoteFlowRoutes.js"), "utf8");
   assert.match(routes, /digital-estimate\/publish/);
   assert.match(routes, /quoteFlowDigitalEstimateService/);
-  console.log("ok: route/source contracts; Studio DE helper reused; no accept/sold/handoff");
-
-  const deDir = join(root, "backend-core/src/digitalEstimate");
-  const appDe = join(root, "app-digital-estimate");
-  // Contract: this test file does not require editing those trees.
-  assert.ok(deDir);
-  assert.ok(appDe);
-  console.log("ok: digital estimate module edits not required by Quote Flow wrapper");
+  console.log("ok: route/source contracts; Studio DE helper reused; interactive publish; no sold/handoff/email");
 }
 
 {

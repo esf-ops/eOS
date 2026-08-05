@@ -147,6 +147,41 @@ console.log("\ncustomerConfigurationFoundation.test.mjs\n");
 }
 
 {
+  // Baseline sidesplash:…:none is seeded on interactive DE envelopes and must not
+  // force physical_scope / hide Accept after Send selections.
+  const noneOnly = classifyCustomerConfigurationForReview({
+    quantities: {
+      "material:kitchen:e100-carrara-classic": 1,
+      "edge:kitchen:edge_large_ogee": 1,
+      "sink:kitchen:customer_provided": 1,
+      "faucet:kitchen:none": 1,
+      "sidesplash:kitchen:p1:none": 1,
+      "qty-sink": 1
+    }
+  });
+  assert.equal(noneOnly.requiresEliteReview, false);
+  assert.equal(noneOnly.hasPhysicalScopeRequests, false);
+  assert.equal(noneOnly.reviewKind, "selection_only");
+  assert.equal(
+    noneOnly.scopeRequestSummary.some((i) => i.kind === "sidesplash"),
+    false,
+    "sidesplash:none must not become a scope request"
+  );
+
+  const pricedSide = classifyCustomerConfigurationForReview({
+    quantities: {
+      "sidesplash:kitchen:p1:right": 1,
+      "edge:kitchen:edge_eased": 1
+    }
+  });
+  assert.equal(pricedSide.requiresEliteReview, false);
+  assert.equal(pricedSide.reviewKind, "selection_only");
+  assert.ok(pricedSide.selectionSummary.some((i) => i.kind === "sidesplash"));
+  assert.equal(pricedSide.scopeRequestSummary.length, 0);
+  console.log("ok: sidesplash none/priced modes stay selection-owned for acceptance");
+}
+
+{
   const merged = mergeSelectionPayloadMeta(
     { "material:kitchen:color-1": 1 },
     {

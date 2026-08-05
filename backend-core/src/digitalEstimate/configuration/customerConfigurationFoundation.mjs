@@ -694,6 +694,19 @@ export function classifyCustomerConfigurationForReview(input = {}) {
       continue;
     }
     if (optionKey.startsWith("sidesplash:")) {
+      // Live-priced side splash modes are selection-owned (DE.2 catalog).
+      // Baseline / explicit "none" must never force Elite review or hide Accept.
+      const mode = String(optionKey.split(":").pop() || "").toLowerCase();
+      if (mode === "none") {
+        continue;
+      }
+      if (mode === "left" || mode === "right" || mode === "both") {
+        pushUniqueReviewItem(selectionSummary, selectionSeen, {
+          kind: "sidesplash",
+          label: `Side splash: ${mode}`
+        });
+        continue;
+      }
       pushUniqueReviewItem(scopeRequestSummary, scopeSeen, {
         kind: "sidesplash",
         label: "Side splash request",
