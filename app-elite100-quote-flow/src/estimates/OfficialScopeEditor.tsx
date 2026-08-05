@@ -76,6 +76,9 @@ function patchOpenEdgeLf(piece: QuoteFlowScopePiece, lf: number): Partial<QuoteF
         Number((fe as { frontEdgeLengthIn?: number }).frontEdgeLengthIn) > 0
           ? (fe as { frontEdgeLengthIn?: number }).frontEdgeLengthIn
           : inches,
+      // Match working Studio DE publication: approved finishedEdge → room.edgeLinearFeet.
+      approved: true,
+      finishedEdgeConfirmed: true,
       source: "estimator_confirmed"
     }
   };
@@ -91,6 +94,9 @@ export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined):
     included: r.included !== false,
     pieces: (Array.isArray(r.pieces) ? r.pieces : []).map((p) => {
       const openEdgeLf = resolvePieceOpenEdgeLf(p);
+      const inches = Math.round(openEdgeLf * 12 * 100) / 100;
+      const fe =
+        p.finishedEdge && typeof p.finishedEdge === "object" ? { ...p.finishedEdge } : {};
       return {
         ...p,
         id: p.id || rid("piece"),
@@ -101,6 +107,21 @@ export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined):
         quantity: Math.max(1, Math.floor(Number(p.quantity) || 1)),
         openEdgeLf,
         finishedEdgeLf: openEdgeLf,
+        finishedEdge: {
+          ...fe,
+          totalFinishedEdgeLengthIn:
+            Number((fe as { totalFinishedEdgeLengthIn?: number }).totalFinishedEdgeLengthIn) > 0
+              ? (fe as { totalFinishedEdgeLengthIn?: number }).totalFinishedEdgeLengthIn
+              : inches,
+          frontEdgeLengthIn:
+            Number((fe as { frontEdgeLengthIn?: number }).frontEdgeLengthIn) > 0
+              ? (fe as { frontEdgeLengthIn?: number }).frontEdgeLengthIn
+              : inches,
+          approved: true,
+          finishedEdgeConfirmed: true,
+          source:
+            (fe as { source?: string }).source || "estimator_confirmed"
+        },
         included: p.included !== false && p.excluded !== true && p.include !== false
       };
     })

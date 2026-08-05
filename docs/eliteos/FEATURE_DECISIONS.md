@@ -4014,3 +4014,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowDigitalEstimate.mjs` + routes/tests, `quoteFlowReviewMeta` stale publish stamp, Estimates `OfficialDigitalEstimatePanel`, presenter Published/Needs republish labels, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Inbox, Queue/Set Scope, AI Takeoff, pricing formulas, Review gate semantics (except publish-stale metadata), acceptance, sold/handoff, email automation, `app-digital-estimate` UI, `backend-core/src/digitalEstimate` (helpers reused only). |
 | **Revisit trigger** | Force interactive configuration envelope when stack available; customer email send; acceptance/sold. |
+
+### 297. Quote Flow Digital Estimate — official openEdgeLf → finishedEdge approval for edge pricing (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `main` (hotfix) |
+| **Decision** | Quote Flow official scope stamps `openEdgeLf` into Studio-compatible `finishedEdge.{totalFinishedEdgeLengthIn, approved, finishedEdgeConfirmed}` (same shape the working DE path freezes as `room.edgeLinearFeet`). Publish-time normalize before Studio DE publish so already-saved QF estimates price paid edge upgrades against official LF. Takeoff draft stamping does **not** auto-approve. No pricing-engine changes. |
+| **Why** | QF-published DE showed +$0 paid edges because publication only trusts approved `finishedEdge`, while QF wrote LF aliases without approval flags → frozen `edgeLinearFeet=0`. |
+| **Impacted** | `quoteFlowOpenEdge.mjs`, QF pricing/scope stamps, `quoteFlowDigitalEstimate` publish normalize + preview, OfficialScopeEditor, DE publish tests, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Digital Estimate pricing formulas/rates, acceptance/sold/handoff/email, internal-only line exclusion, non-QF Studio DE path behavior (already correct). |
+| **Revisit trigger** | None unless takeoff draft accidentally inherits official approval flags. |

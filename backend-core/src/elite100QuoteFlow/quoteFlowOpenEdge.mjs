@@ -49,10 +49,17 @@ export function resolvePieceOpenEdgeLf(piece) {
 /**
  * Stamp canonical openEdgeLf (+ compatibility aliases) onto a piece.
  * Does not remove existing legacy fields.
+ *
+ * When `opts.confirmOfficial` is true (Quote Flow official scope / publish),
+ * also write Studio-compatible finishedEdge approval flags so Digital Estimate
+ * publication freezes room.edgeLinearFeet the same way as working Studio DE.
+ * Takeoff draft stamping must leave confirmOfficial false.
+ *
  * @param {object} piece
  * @param {number} [explicitLf] when provided, use this LF instead of resolving
+ * @param {{ confirmOfficial?: boolean }} [opts]
  */
-export function stampPieceOpenEdgeLf(piece, explicitLf = undefined) {
+export function stampPieceOpenEdgeLf(piece, explicitLf = undefined, opts = {}) {
   if (!piece || typeof piece !== "object") return piece;
   const value =
     explicitLf != null && Number.isFinite(Number(explicitLf)) && Number(explicitLf) >= 0
@@ -61,23 +68,38 @@ export function stampPieceOpenEdgeLf(piece, explicitLf = undefined) {
   const inches = round2(value * 12);
   const fe =
     piece.finishedEdge && typeof piece.finishedEdge === "object" ? { ...piece.finishedEdge } : {};
+  const totalIn =
+    Number.isFinite(Number(fe.totalFinishedEdgeLengthIn)) && Number(fe.totalFinishedEdgeLengthIn) > 0
+      ? Number(fe.totalFinishedEdgeLengthIn)
+      : inches;
+  const frontIn =
+    Number.isFinite(Number(fe.frontEdgeLengthIn)) && Number(fe.frontEdgeLengthIn) > 0
+      ? Number(fe.frontEdgeLengthIn)
+      : totalIn;
+  /** @type {Record<string, unknown>} */
+  const finishedEdge = {
+    ...fe,
+    totalFinishedEdgeLengthIn: totalIn,
+    frontEdgeLengthIn: frontIn
+  };
+  if (opts.confirmOfficial === true) {
+    // Match working Studio DE publication authority (pieceFinishedEdgeApproved).
+    finishedEdge.approved = true;
+    finishedEdge.finishedEdgeConfirmed = true;
+    finishedEdge.source = fe.source || "estimator_confirmed";
+  }
   return {
     ...piece,
     openEdgeLf: value,
     finishedEdgeLf: value,
     exposedEdgeLf: value,
-    finishedEdge: {
-      ...fe,
-      totalFinishedEdgeLengthIn:
-        Number.isFinite(Number(fe.totalFinishedEdgeLengthIn)) && Number(fe.totalFinishedEdgeLengthIn) > 0
-          ? Number(fe.totalFinishedEdgeLengthIn)
-          : inches
-    }
+    finishedEdge
   };
 }
 
 /**
- * Stamp openEdgeLf on every piece in official scope rooms.
+ * Stamp openEdgeLf on every piece in official scope rooms, with Studio DE
+ * finishedEdge approval flags so publication freezes edgeLinearFeet correctly.
  * @param {unknown} rooms
  */
 export function stampOpenEdgeLfOnOfficialRooms(rooms) {
@@ -85,10 +107,23 @@ export function stampOpenEdgeLfOnOfficialRooms(rooms) {
   return rooms.map((room) => {
     if (!room || typeof room !== "object") return room;
     const pieces = Array.isArray(room.pieces)
-      ? room.pieces.map((p) => stampPieceOpenEdgeLf(p))
+      ? room.pieces.map((p) => stampPieceOpenEdgeLf(p, undefined, { confirmOfficial: true }))
       : [];
     return { ...room, pieces };
   });
+}
+
+/**
+ * Normalize official scope for Digital Estimate publish / freeze preview.
+ * Maps Quote Flow openEdgeLf into the finishedEdge shape the working DE path uses.
+ * @param {object|null|undefined} scope
+ */
+export function normalizeQuoteFlowScopeForDigitalEstimatePublish(scope) {
+  if (!scope || typeof scope !== "object") return scope || {};
+  return {
+    ...scope,
+    rooms: stampOpenEdgeLfOnOfficialRooms(scope.rooms)
+  };
 }
 
 /**
@@ -146,7 +181,7 @@ export function applyTakeoffOpenEdgeLfToOfficialRooms(rooms, takeoffResult = nul
           let explicit;
           if (runId && fromTakeoff.has(`id:${runId}`)) explicit = fromTakeoff.get(`id:${runId}`);
           else if (name && fromTakeoff.has(`name:${name}`)) explicit = fromTakeoff.get(`name:${name}`);
-          return stampPieceOpenEdgeLf(piece, explicit);
+          return stampPieceOpenEdgeLf(piece, explicit, { confirmOfficial: true });
         })
       : [];
     return { ...room, pieces };

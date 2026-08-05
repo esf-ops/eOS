@@ -56,9 +56,11 @@ export function stampOpenEdgeLfOntoScopeForPricing(scope) {
             if (!piece || typeof piece !== "object") return piece;
             const lf = resolvePieceOpenEdgeLf(piece);
             if (!(lf > 0) && !(Number(piece.finishedEdgeLf) > 0)) {
-              return stampPieceOpenEdgeLf(piece, 0);
+              return stampPieceOpenEdgeLf(piece, 0, { confirmOfficial: true });
             }
-            return stampPieceOpenEdgeLf(piece, lf > 0 ? lf : undefined);
+            return stampPieceOpenEdgeLf(piece, lf > 0 ? lf : undefined, {
+              confirmOfficial: true
+            });
           })
         : [];
       return { ...room, pieces };

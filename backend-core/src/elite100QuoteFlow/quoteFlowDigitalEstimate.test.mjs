@@ -52,8 +52,8 @@ function baseRooms() {
           quantity: 1,
           included: true,
           excluded: false,
-          openEdgeLf: 10,
-          finishedEdgeLf: 10
+          openEdgeLf: 37.5,
+          finishedEdgeLf: 37.5
         }
       ]
     }
@@ -413,6 +413,173 @@ function harness(customLines = []) {
   assert.ok(deDir);
   assert.ok(appDe);
   console.log("ok: digital estimate module edits not required by Quote Flow wrapper");
+}
+
+{
+  // Edge LF hotfix: QF openEdgeLf must freeze as room.edgeLinearFeet like working Studio DE.
+  const { buildStudioEstimateRoomsForPublication } = await import(
+    "../elite100EstimateStudio/studioEstimatePublicationAdapter.mjs"
+  );
+  const {
+    resolveEdgeOptionPriceEffect,
+    resolvePremiumEdgeRatePerLf
+  } = await import("../digitalEstimate/catalog/studioEdgeAuthority.mjs");
+  const {
+    normalizeQuoteFlowScopeForDigitalEstimatePublish,
+    stampPieceOpenEdgeLf
+  } = await import("./quoteFlowOpenEdge.mjs");
+  const { buildQuoteFlowCustomerPublishPreview } = await import("./quoteFlowDigitalEstimate.mjs");
+
+  const OPEN_LF = 37.5;
+  const qfPieceOnlyOpenEdge = {
+    id: "p-edge",
+    name: "Island",
+    pieceType: "counter",
+    lengthIn: 96,
+    depthIn: 25.5,
+    quantity: 1,
+    included: true,
+    openEdgeLf: OPEN_LF,
+    finishedEdgeLf: OPEN_LF
+  };
+  const stamped = stampPieceOpenEdgeLf(qfPieceOnlyOpenEdge, OPEN_LF, { confirmOfficial: true });
+  assert.equal(stamped.finishedEdge.approved, true);
+  assert.equal(stamped.finishedEdge.finishedEdgeConfirmed, true);
+  assert.equal(stamped.finishedEdge.totalFinishedEdgeLengthIn, OPEN_LF * 12);
+
+  const unapprovedRooms = buildStudioEstimateRoomsForPublication({
+    id: EST,
+    status: "approved",
+    scope: {
+      rooms: [{ id: "r1", name: "Kitchen", roomType: "Kitchen", included: true, pieces: [qfPieceOnlyOpenEdge] }],
+      pricingBasis: "wholesale",
+      materialGroup: "Group Promo"
+    },
+    approval: { customerDisplayTotal: 5000, calculationFingerprint: "fp" },
+    calculationSnapshot: {
+      fingerprint: "fp",
+      pricingEngine: "elite100-room-pricing-v1",
+      pricingVersion: 4,
+      pricingBasis: "wholesale",
+      totals: { customerDisplayTotal: 5000 }
+    }
+  });
+  assert.equal(Number(unapprovedRooms[0]?.edgeLinearFeet) || 0, 0, "unapproved finishedEdge → 0 LF");
+
+  const normalized = normalizeQuoteFlowScopeForDigitalEstimatePublish({
+    rooms: [{ id: "r1", name: "Kitchen", roomType: "Kitchen", included: true, pieces: [qfPieceOnlyOpenEdge] }],
+    pricingBasis: "wholesale",
+    materialGroup: "Group Promo"
+  });
+  const approvedRooms = buildStudioEstimateRoomsForPublication({
+    id: EST,
+    status: "approved",
+    scope: normalized,
+    approval: { customerDisplayTotal: 5000, calculationFingerprint: "fp" },
+    calculationSnapshot: {
+      fingerprint: "fp",
+      pricingEngine: "elite100-room-pricing-v1",
+      pricingVersion: 4,
+      pricingBasis: "wholesale",
+      totals: { customerDisplayTotal: 5000 }
+    }
+  });
+  assert.equal(Number(approvedRooms[0]?.edgeLinearFeet), OPEN_LF);
+
+  const preview = buildQuoteFlowCustomerPublishPreview({
+    id: EST,
+    organizationId: ORG,
+    status: "approved",
+    scope: {
+      rooms: [{ id: "r1", name: "Kitchen", roomType: "Kitchen", included: true, pieces: [qfPieceOnlyOpenEdge] }],
+      pricingBasis: "wholesale",
+      materialGroup: "Group Promo",
+      quoteFlowPricing: {
+        customLineItems: [
+          {
+            id: "c1",
+            label: "Sink cutout",
+            type: "charge",
+            visibility: "customer",
+            quantity: 1,
+            unitAmount: 100,
+            amount: 100,
+            category: "other",
+            note: "",
+            sortOrder: 1
+          },
+          {
+            id: "i1",
+            label: "Shop scrap",
+            type: "charge",
+            visibility: "internal",
+            quantity: 1,
+            unitAmount: 50,
+            amount: 50,
+            category: "other",
+            note: "",
+            sortOrder: 2
+          }
+        ]
+      }
+    },
+    approval: {
+      customerDisplayTotal: 5000,
+      calculationFingerprint: "fp",
+      quoteFlowInternalApproval: true
+    },
+    calculationSnapshot: {
+      fingerprint: "fp",
+      pricingEngine: "elite100-room-pricing-v1",
+      pricingVersion: 4,
+      pricingBasis: "wholesale",
+      totals: { customerDisplayTotal: 5000, exactInternalTotal: 4800 },
+      fabrication: {
+        customLineItems: [
+          {
+            commercialRole: "customer_charge",
+            customerFacing: true,
+            name: "Sink cutout",
+            lineTotal: 100
+          },
+          {
+            commercialRole: "internal_only",
+            customerFacing: false,
+            name: "Shop scrap",
+            lineTotal: 50
+          }
+        ]
+      }
+    }
+  });
+  assert.equal(preview.edgeLinearFeetTotal, OPEN_LF);
+  assert.ok(!(preview.lineItems || []).some((li) => /shop scrap/i.test(String(li.label || ""))));
+  const previewBlob = JSON.stringify(preview).toLowerCase();
+  assert.equal(previewBlob.includes("exactinternaltotal"), false);
+
+  const rate = resolvePremiumEdgeRatePerLf("wholesale");
+  const eased = resolveEdgeOptionPriceEffect({
+    profileToken: "edge_eased",
+    originalProfileToken: "edge_eased",
+    edgeLinearFeet: OPEN_LF,
+    pricingBasis: "wholesale"
+  });
+  const ogee = resolveEdgeOptionPriceEffect({
+    profileToken: "edge_small_ogee",
+    originalProfileToken: "edge_eased",
+    edgeLinearFeet: OPEN_LF,
+    pricingBasis: "wholesale"
+  });
+  assert.equal(eased.grossPriceEffectCents, 0);
+  assert.ok(Number(ogee.grossPriceEffectCents) > 0);
+  assert.equal(
+    Number(ogee.grossPriceEffectCents),
+    Math.round(rate * OPEN_LF * 100)
+  );
+  const baselineTotal = 5000;
+  const upgradedTotal = baselineTotal + Number(ogee.grossPriceEffectCents) / 100;
+  assert.ok(upgradedTotal > baselineTotal);
+  console.log("ok: QF openEdgeLf freezes as edgeLinearFeet; paid edge changes customer total; free stays +$0");
 }
 
 console.log("\nquoteFlowDigitalEstimate.test.mjs: ok\n");

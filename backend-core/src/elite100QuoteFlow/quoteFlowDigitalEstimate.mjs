@@ -18,6 +18,7 @@ import {
 } from "./quoteFlowCustomLineItems.mjs";
 import { presentQuoteFlowPricingResult } from "./quoteFlowPricing.mjs";
 import { assessQuoteFlowReviewReadiness } from "./quoteFlowReview.mjs";
+import { normalizeQuoteFlowScopeForDigitalEstimatePublish } from "./quoteFlowOpenEdge.mjs";
 import {
   buildPublicationFreezePayloads
 } from "../digitalEstimate/digitalEstimateSnapshot.mjs";
@@ -82,7 +83,11 @@ function readQuoteFlowDigitalEstimateMeta(scope) {
 export function buildQuoteFlowCustomerPublishPreview(row, opts = {}) {
   const organizationId = opts.organizationId || row?.organizationId || null;
   const env = opts.env || process.env;
-  const header = buildSyntheticQuoteHeaderFromStudioEstimate(row, { organizationId });
+  const normalizedRow = {
+    ...row,
+    scope: normalizeQuoteFlowScopeForDigitalEstimatePublish(row?.scope)
+  };
+  const header = buildSyntheticQuoteHeaderFromStudioEstimate(normalizedRow, { organizationId });
   const freeze = buildPublicationFreezePayloads({
     header,
     publishedAt: new Date().toISOString(),
@@ -122,6 +127,17 @@ export function buildQuoteFlowCustomerPublishPreview(row, opts = {}) {
     }
   }
 
+  const internalUi =
+    header?.calculation_snapshot?.internal_ui &&
+    typeof header.calculation_snapshot.internal_ui === "object"
+      ? header.calculation_snapshot.internal_ui
+      : {};
+  const rooms = Array.isArray(internalUi.estimate_rooms) ? internalUi.estimate_rooms : [];
+  const edgeLinearFeetTotal =
+    Number(internalUi.edge_linear_feet_total) >= 0
+      ? Number(internalUi.edge_linear_feet_total)
+      : rooms.reduce((sum, r) => sum + (Number(r?.edgeLinearFeet) || 0), 0);
+
   return {
     customerDisplayTotal:
       publicDto?.totals?.customerDisplayTotal ??
@@ -129,7 +145,16 @@ export function buildQuoteFlowCustomerPublishPreview(row, opts = {}) {
       null,
     lineItems: customerLines,
     roomCount: Array.isArray(publicDto?.rooms) ? publicDto.rooms.length : 0,
-    sourceQuoteFingerprint: freeze.sourceQuoteFingerprint || null
+    sourceQuoteFingerprint: freeze.sourceQuoteFingerprint || null,
+    edgeLinearFeetTotal: Math.round(edgeLinearFeetTotal * 100) / 100,
+    rooms: rooms.map((r) => ({
+      id: r?.id || null,
+      name: r?.name || null,
+      edgeLinearFeet: Number(r?.edgeLinearFeet) || 0
+    })),
+    edgeOptionEffectsSample: Array.isArray(internalUi.edge_option_effects)
+      ? internalUi.edge_option_effects.slice(0, 12)
+      : []
   };
 }
 
@@ -596,7 +621,8 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
         ? {
             customerDisplayTotal: assessed.customerPreview.customerDisplayTotal,
             lineItems: assessed.customerPreview.lineItems,
-            roomCount: assessed.customerPreview.roomCount
+            roomCount: assessed.customerPreview.roomCount,
+            edgeLinearFeetTotal: assessed.customerPreview.edgeLinearFeetTotal ?? null
           }
         : null,
       publication: activePublication
@@ -660,12 +686,29 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
       });
     }
 
+    // Hotfix: persist Studio-compatible finishedEdge approval flags from official
+    // openEdgeLf before Studio DE publish freezes room.edgeLinearFeet.
+    const normalizedScope = normalizeQuoteFlowScopeForDigitalEstimatePublish(
+      row.scope && typeof row.scope === "object" ? row.scope : {}
+    );
+    let publishRow = row;
+    if (estimateRepository?.update) {
+      publishRow = await estimateRepository.update(
+        organizationId,
+        row.id || estimateId,
+        { scope: normalizedScope },
+        actorUserId || null
+      );
+    } else {
+      publishRow = { ...row, scope: normalizedScope };
+    }
+
     const configuration = resolvePublishConfiguration(body);
     let result;
     try {
       result = await studioDigitalEstimateService.publish({
         organizationId,
-        estimateId: row.id || estimateId,
+        estimateId: publishRow.id || estimateId,
         actorUserId: actorUserId || null,
         body: {
           confirm: true,
@@ -704,9 +747,12 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
     const publicationId = publication?.id || publication?.publicationId || null;
     const publishedAt =
       publication?.publishedAt || publication?.published_at || new Date().toISOString();
-    const calc = row.calculationSnapshot || {};
-    const approval = row.approval || {};
-    const priorScope = row.scope && typeof row.scope === "object" ? row.scope : {};
+    const calc = publishRow.calculationSnapshot || row.calculationSnapshot || {};
+    const approval = publishRow.approval || row.approval || {};
+    const priorScope =
+      publishRow.scope && typeof publishRow.scope === "object"
+        ? publishRow.scope
+        : normalizedScope;
     const quoteFlowDigitalEstimate = {
       status: "published",
       publishedAt,
@@ -717,9 +763,10 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
       sourceApprovalFingerprint: approval.calculationFingerprint || null,
       sourceCalculationFingerprint: calc.fingerprint || null,
       sourceScopeFingerprint: approval.scopeFingerprint || null,
-      estimateRevision: row.revision ?? null,
+      estimateRevision: publishRow.revision ?? row.revision ?? null,
       customerDisplayTotal:
         calc.totals?.customerDisplayTotal ?? approval.customerDisplayTotal ?? null,
+      edgeLinearFeetTotal: assessed.customerPreview?.edgeLinearFeetTotal ?? null,
       reused: result?.reused === true,
       staleReason: null,
       staleAt: null
@@ -728,7 +775,7 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
     if (estimateRepository?.update) {
       await estimateRepository.update(
         organizationId,
-        row.id || estimateId,
+        publishRow.id || estimateId,
         {
           scope: {
             ...priorScope,

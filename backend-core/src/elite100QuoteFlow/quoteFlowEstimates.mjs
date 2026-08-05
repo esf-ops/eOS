@@ -106,7 +106,9 @@ export function validateAndNormalizeOfficialScopeRooms(roomsRaw) {
         next.finishedEdge = { ...piece.finishedEdge };
       }
       // Canonical open/exposed edge LF — use shared resolver (0 must not wipe finishedEdge inches).
-      const stamped = stampPieceOpenEdgeLf(next, resolvePieceOpenEdgeLf(piece));
+      const stamped = stampPieceOpenEdgeLf(next, resolvePieceOpenEdgeLf(piece), {
+        confirmOfficial: true
+      });
       next.openEdgeLf = stamped.openEdgeLf;
       next.finishedEdgeLf = stamped.finishedEdgeLf;
       next.exposedEdgeLf = stamped.exposedEdgeLf;
