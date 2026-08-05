@@ -155,7 +155,37 @@ export function filterEstimateItems(items = [], filter = "all", search = "") {
 }
 
 /**
- * Local SF summary from rooms (mirrors presenter when detail is open).
+ * Resolve open/exposed edge linear feet from common scope field names.
+ * Canonical write path is piece.openEdgeLf (also syncs finishedEdgeLf).
+ * @param {object|null|undefined} piece
+ */
+export function resolvePieceOpenEdgeLf(piece) {
+  if (!piece || typeof piece !== "object") return 0;
+  const candidates = [
+    piece.openEdgeLf,
+    piece.exposedEdgeLf,
+    piece.exposedEdgeLinearFeet,
+    piece.openEdgeLinearFeet,
+    piece.edgeLinearFeet,
+    piece.edgeLf,
+    piece.finishedEdgeLf
+  ];
+  for (const c of candidates) {
+    const n = Number(c);
+    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+  }
+  const fe = piece.finishedEdge;
+  if (fe && typeof fe === "object") {
+    const inches = Number(fe.totalFinishedEdgeLengthIn);
+    if (Number.isFinite(inches) && inches >= 0) {
+      return Math.round((inches / 12) * 100) / 100;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Local SF + open-edge summary from rooms (mirrors presenter when detail is open).
  * @param {object[]|undefined} rooms
  */
 export function summarizeRoomsLocal(rooms) {
@@ -165,6 +195,7 @@ export function summarizeRoomsLocal(rooms) {
   let excludedPieceCount = 0;
   let countertopSf = 0;
   let backsplashSf = 0;
+  let openEdgeLf = 0;
   for (const room of list) {
     if (!room) continue;
     const roomIncluded = room.included !== false;
@@ -191,11 +222,16 @@ export function summarizeRoomsLocal(rooms) {
         pieceType === "fhb";
       if (isSplash) backsplashSf += sf;
       else countertopSf += sf;
+      openEdgeLf += resolvePieceOpenEdgeLf(piece) * quantity;
     }
     if (roomIncluded && room.includeBacksplash === true) {
       const h = Number(room.backsplashHeightIn) || 0;
       const len = Number(room.backsplashMeasuredLengthIn) || 0;
       if (h > 0 && len > 0) backsplashSf += (h * len) / 144;
+    }
+    if (roomIncluded && room.openEdgeLf != null && Number.isFinite(Number(room.openEdgeLf))) {
+      // Room-level open edge is rare; include only when pieces did not carry LF.
+      // Prefer piece-level totals already counted above.
     }
   }
   const round2 = (n) => Math.round(n * 100) / 100;
@@ -204,6 +240,7 @@ export function summarizeRoomsLocal(rooms) {
     pieceCount,
     excludedPieceCount,
     countertopSf: round2(countertopSf),
-    backsplashSf: round2(backsplashSf)
+    backsplashSf: round2(backsplashSf),
+    openEdgeLf: round2(openEdgeLf)
   };
 }

@@ -3882,3 +3882,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | EstimatesListPage, OfficialScopeEditor, estimateGrouping, estimates presenter/PATCH (name + edited flags), QuoteFlowApp shell width, styles, UI/slice 1d tests, this doc. |
 | **Protected / unchanged** | Inbox, Estimate Queue filter/Set Scope, AI Takeoff algorithm, pricing, Digital Estimate modules, Studio V2, acceptance, sold. |
 | **Revisit trigger** | Activate Pricing section when Quote Flow pricing slice lands. |
+
+### 285. Elite 100 Quote Flow — Estimates Library + Modal Workspace + Open Edge LF (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-estimates-library-modal-polish` |
+| **Decision** | Estimates main page is **library-first** (stats, filters, estimate cards) like Quote Library — no permanent right-side editor. Clicking an estimate opens a **near-fullscreen modal** with the official estimate workspace (name, summary cards, section tabs; only Scope active). **Open edge LF** is official scope data at piece level (canonical `piece.openEdgeLf`, with read aliases and write sync to `finishedEdgeLf` / `exposedEdgeLf` / `finishedEdge.totalFinishedEdgeLengthIn`). Library rows and modal summary include open-edge rollup. Queue → Open in Estimates still opens Estimates and the modal for that id. Save Scope keeps the modal open and refreshes the library row. |
+| **Why** | The left/right workbench felt unlike Quote Library; open/exposed edge LF is needed as scope before pricing. |
+| **Impacted** | EstimatesListPage (library + modal), OfficialScopeEditor (Open edge LF), estimateGrouping / presenter / PATCH normalize, styles, UI/slice 1d tests, this doc. |
+| **Protected / unchanged** | Inbox, Estimate Queue Set Scope (except modal handoff already wired), AI Takeoff, pricing/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
+| **Revisit trigger** | Activate Pricing (and later sections) inside the same modal when those slices land. |

@@ -6,6 +6,7 @@ export type QuoteFlowScopeSummary = {
   excludedPieceCount?: number;
   countertopSf?: number;
   backsplashSf?: number;
+  openEdgeLf?: number;
   label: string;
 };
 
@@ -46,6 +47,7 @@ export type QuoteFlowScopePiece = {
   finishedEdge?: Record<string, unknown>;
   finishedEdgeLf?: number;
   openEdgeLf?: number;
+  exposedEdgeLf?: number;
   includeBacksplash?: boolean;
   [key: string]: unknown;
 };

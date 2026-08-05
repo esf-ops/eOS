@@ -45,11 +45,7 @@ const SECTIONS: {
   label: string;
   placeholder: string;
 }[] = [
-  {
-    key: "scope",
-    label: "Scope",
-    placeholder: ""
-  },
+  { key: "scope", label: "Scope", placeholder: "" },
   {
     key: "pricing",
     label: "Pricing",
@@ -106,7 +102,8 @@ function roomsFingerprint(rooms: QuoteFlowScopeRoom[]): string {
 export default function EstimatesListPage(props: Props) {
   const { authToken, initialEstimateId = null } = props;
   const [items, setItems] = useState<QuoteFlowEstimateListItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(initialEstimateId);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
   const [detail, setDetail] = useState<QuoteFlowEstimateDetail | null>(null);
   const [rooms, setRooms] = useState<QuoteFlowScopeRoom[]>([]);
   const [estimateName, setEstimateName] = useState("");
@@ -122,6 +119,7 @@ export default function EstimatesListPage(props: Props) {
   const [search, setSearch] = useState("");
   const [section, setSection] = useState<WorkspaceSection>("scope");
   const listInFlightRef = useRef(false);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const stats = useMemo(() => computeEstimateStats(items), [items]);
   const visibleRows = useMemo(
@@ -136,6 +134,7 @@ export default function EstimatesListPage(props: Props) {
   const localSummary = useMemo(() => summarizeRoomsLocal(rooms), [rooms]);
   const dirty =
     Boolean(selectedId) &&
+    modalOpen &&
     (roomsFingerprint(rooms) !== savedRoomsFp ||
       String(estimateName || "").trim() !== String(savedName || "").trim());
   const showSyncing = isRefreshing || saving;
@@ -175,6 +174,7 @@ export default function EstimatesListPage(props: Props) {
 
   async function openEstimate(estimateId: string) {
     setSelectedId(estimateId);
+    setModalOpen(true);
     setSection("scope");
     setDetailLoading(true);
     setError(null);
@@ -192,6 +192,13 @@ export default function EstimatesListPage(props: Props) {
     }
   }
 
+  function closeModal() {
+    setModalOpen(false);
+    setNotice(null);
+    setSection("scope");
+    // Keep selectedId so the library card stays highlighted after close.
+  }
+
   useEffect(() => {
     void loadList("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -203,6 +210,16 @@ export default function EstimatesListPage(props: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialEstimateId, authToken]);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") closeModal();
+    };
+    window.addEventListener("keydown", onKey);
+    closeBtnRef.current?.focus();
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modalOpen]);
 
   async function saveScope() {
     if (!selectedId || saving) return;
@@ -219,7 +236,7 @@ export default function EstimatesListPage(props: Props) {
       });
       applyLoadedEstimate(res.estimate);
       setNotice(res.message || "Scope saved.");
-      // Refresh library in background — keep selected estimate open.
+      // Refresh library behind the open modal — keep modal open.
       void loadList("refresh");
     } catch (e) {
       setError(errorMessage(e) || "Unable to save scope.");
@@ -236,19 +253,26 @@ export default function EstimatesListPage(props: Props) {
     const source = resolveEstimateSource(item);
     const when = formatEstimateTime(item.updatedAt) || formatEstimateTime(item.createdAt);
     const summary = item.scopeSummary?.label || "Scope set";
-    const next = item.nextAction || item.status?.nextAction || "Edit official scope";
+    const openEdge =
+      item.scopeSummary?.openEdgeLf != null && Number(item.scopeSummary.openEdgeLf) > 0
+        ? `${Number(item.scopeSummary.openEdgeLf).toFixed(1)} LF open edge`
+        : null;
 
     return (
       <li key={id || `${item.intakeCaseId}-${item.updatedAt}`}>
-        <div
-          className={active ? "qf-inbox__row-card is-active" : "qf-inbox__row-card"}
+        <article
+          className={
+            active
+              ? "qf-estimates__card is-active"
+              : "qf-estimates__card"
+          }
           data-testid="qf-estimates-row"
           data-estimate-id={id}
           data-source={source.key}
         >
           <button
             type="button"
-            className="qf-inbox__row-main"
+            className="qf-estimates__card-main"
             onClick={() => id && void openEstimate(id)}
           >
             <span className="qf-inbox__row-title">{title}</span>
@@ -264,6 +288,7 @@ export default function EstimatesListPage(props: Props) {
             {when ? <span className="qf-inbox__row-meta">Updated {when}</span> : null}
             <span className="qf-inbox__row-meta" data-testid="qf-estimates-row-summary">
               {summary}
+              {openEdge && !String(summary).includes("open edge") ? ` · ${openEdge}` : ""}
             </span>
             <span className="qf-inbox__row-status-line">
               <span
@@ -273,10 +298,20 @@ export default function EstimatesListPage(props: Props) {
               >
                 {item.status?.label || "Scope set"}
               </span>
-              <span className="qf-inbox__next">{next}</span>
+              <span className="qf-inbox__next">Open estimate</span>
             </span>
           </button>
-        </div>
+          <div className="qf-estimates__card-actions">
+            <button
+              type="button"
+              className="qf-btn-primary"
+              data-testid="qf-estimates-open"
+              onClick={() => id && void openEstimate(id)}
+            >
+              Edit official scope
+            </button>
+          </div>
+        </article>
       </li>
     );
   }
@@ -287,7 +322,7 @@ export default function EstimatesListPage(props: Props) {
 
   return (
     <section
-      className="qf-page qf-page--command qf-estimates--command"
+      className="qf-page qf-page--command qf-estimates--command qf-estimates--library"
       data-testid="qf-estimates-page"
     >
       <header className="qf-command-header" data-testid="qf-estimates-command-header">
@@ -358,19 +393,14 @@ export default function EstimatesListPage(props: Props) {
         </label>
       </div>
 
-      {error ? (
+      {error && !modalOpen ? (
         <div className="qf-error-box" role="alert">
           {error}
         </div>
       ) : null}
-      {notice ? (
-        <p className="qf-notice" data-testid="qf-estimates-notice">
-          {notice}
-        </p>
-      ) : null}
 
-      <div className="qf-estimates qf-estimates--command-layout" data-testid="qf-estimates-layout">
-        <div className="qf-estimates__list" data-testid="qf-estimates-list">
+      <div className="qf-estimates-library" data-testid="qf-estimates-layout">
+        <div className="qf-estimates__list qf-estimates__list--library" data-testid="qf-estimates-list">
           <div className="qf-inbox__list-head">
             <h2>Estimate library</h2>
             <span className="qf-muted">{visibleRows.length} shown</span>
@@ -385,142 +415,159 @@ export default function EstimatesListPage(props: Props) {
               </p>
             </div>
           ) : null}
-          <ul className="qf-inbox__rows">{visibleRows.map((item) => renderRow(item))}</ul>
+          <ul className="qf-estimates__cards">{visibleRows.map((item) => renderRow(item))}</ul>
         </div>
+      </div>
 
+      {modalOpen ? (
         <div
-          className="qf-estimates__detail qf-estimates__detail--command"
-          data-testid="qf-estimates-detail"
+          className="qf-estimates-modal-backdrop"
+          data-testid="qf-estimates-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeModal();
+          }}
         >
-          {!selectedId ? (
-            <div
-              className="qf-placeholder qf-placeholder--command"
-              data-testid="qf-estimates-empty-workspace"
-            >
-              <h2>Select an estimate to review official scope.</h2>
-              <p className="qf-muted">
-                Open a scoped estimate from the library to edit rooms, pieces, and dimensions.
-              </p>
-            </div>
-          ) : null}
-
-          {detailLoading && !workspaceItem ? <p className="qf-muted">Loading estimate…</p> : null}
-
-          {selectedId && workspaceItem ? (
-            <>
-              <div className="qf-estimates__workspace-sticky" data-testid="qf-estimates-workspace">
-                <div className="qf-estimates__detail-head">
-                  <div>
-                    <label className="qf-estimates__name-field" data-testid="qf-estimates-name">
-                      Estimate name
-                      <input
-                        type="text"
-                        value={estimateName}
-                        data-testid="qf-estimates-name-input"
-                        disabled={saving || detailLoading}
-                        onChange={(e) => {
-                          setEstimateName(e.target.value);
-                          setNotice(null);
-                        }}
-                      />
-                    </label>
-                    {workspaceCustomer && workspaceCustomer !== workspaceTitle ? (
-                      <p className="qf-muted" data-testid="qf-estimates-customer">
-                        {workspaceCustomer}
-                      </p>
-                    ) : null}
-                    <p className="qf-muted" data-testid="qf-estimates-provenance">
-                      Source: {workspaceSource.label}
-                      {workspaceItem.planFilename ? ` · Plan: ${workspaceItem.planFilename}` : ""}
-                      {workspaceItem.updatedAt
-                        ? ` · Updated ${formatEstimateTime(workspaceItem.updatedAt)}`
-                        : ""}
-                    </p>
-                    <span
-                      className={statusPillClass(workspaceItem.status?.key)}
-                      data-testid="qf-estimates-detail-status"
-                    >
-                      {dirty ? "Unsaved changes" : workspaceItem.status?.label || "Scope set"}
-                    </span>
-                    <p className="qf-muted qf-estimates__next-hint">
-                      Next: edit official scope, then save. Pricing and customer quote delivery come
-                      later.
-                    </p>
-                  </div>
+          <div
+            className="qf-estimates-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="qf-estimates-modal-title"
+            data-testid="qf-estimates-detail"
+          >
+            <div className="qf-estimates-modal__header" data-testid="qf-estimates-workspace">
+              <div className="qf-estimates-modal__header-top">
+                <div>
+                  <p className="qf-estimates-modal__eyebrow">Official estimate</p>
+                  <h2 id="qf-estimates-modal-title">{workspaceTitle || "Estimate"}</h2>
+                </div>
+                <div className="qf-estimates-modal__header-actions">
                   {section === "scope" ? (
                     <button
                       type="button"
                       className="qf-btn-primary"
                       data-testid="qf-estimates-save-scope"
-                      disabled={saving || !dirty}
+                      disabled={saving || !dirty || detailLoading}
                       onClick={() => void saveScope()}
                     >
                       {saving ? "Saving…" : "Save Scope"}
                     </button>
                   ) : null}
-                </div>
-
-                <div className="qf-estimates__summary-cards" data-testid="qf-estimates-summary">
-                  <div className="qf-estimates__summary-card">
-                    <span className="qf-stat__value">{localSummary.roomCount}</span>
-                    <span className="qf-stat__label">Rooms</span>
-                  </div>
-                  <div className="qf-estimates__summary-card">
-                    <span className="qf-stat__value">{localSummary.pieceCount}</span>
-                    <span className="qf-stat__label">Pieces</span>
-                  </div>
-                  <div className="qf-estimates__summary-card">
-                    <span className="qf-stat__value">
-                      {localSummary.countertopSf > 0
-                        ? localSummary.countertopSf.toFixed(1)
-                        : "—"}
-                    </span>
-                    <span className="qf-stat__label">Countertop SF</span>
-                  </div>
-                  <div className="qf-estimates__summary-card">
-                    <span className="qf-stat__value">
-                      {localSummary.backsplashSf > 0
-                        ? localSummary.backsplashSf.toFixed(1)
-                        : "—"}
-                    </span>
-                    <span className="qf-stat__label">Backsplash SF</span>
-                  </div>
-                  {localSummary.excludedPieceCount > 0 ? (
-                    <div className="qf-estimates__summary-card">
-                      <span className="qf-stat__value">{localSummary.excludedPieceCount}</span>
-                      <span className="qf-stat__label">Excluded pieces</span>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div
-                  className="qf-estimates__section-tabs"
-                  role="tablist"
-                  aria-label="Estimate sections"
-                  data-testid="qf-estimates-sections"
-                >
-                  {SECTIONS.map((s) => (
-                    <button
-                      key={s.key}
-                      type="button"
-                      role="tab"
-                      aria-selected={section === s.key}
-                      className={
-                        section === s.key
-                          ? "qf-estimates__section-tab is-active"
-                          : s.key === "scope"
-                            ? "qf-estimates__section-tab"
-                            : "qf-estimates__section-tab is-later"
-                      }
-                      data-testid={`qf-estimates-tab-${s.key}`}
-                      onClick={() => setSection(s.key)}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
+                  <button
+                    ref={closeBtnRef}
+                    type="button"
+                    className="qf-btn-secondary"
+                    data-testid="qf-estimates-modal-close"
+                    onClick={closeModal}
+                  >
+                    Back to library
+                  </button>
                 </div>
               </div>
 
+              {error ? (
+                <div className="qf-error-box" role="alert">
+                  {error}
+                </div>
+              ) : null}
+              {notice ? (
+                <p className="qf-notice" data-testid="qf-estimates-notice">
+                  {notice}
+                </p>
+              ) : null}
+
+              <label className="qf-estimates__name-field" data-testid="qf-estimates-name">
+                Estimate name
+                <input
+                  type="text"
+                  value={estimateName}
+                  data-testid="qf-estimates-name-input"
+                  disabled={saving || detailLoading}
+                  onChange={(e) => {
+                    setEstimateName(e.target.value);
+                    setNotice(null);
+                  }}
+                />
+              </label>
+              {workspaceCustomer && workspaceCustomer !== workspaceTitle ? (
+                <p className="qf-muted" data-testid="qf-estimates-customer">
+                  {workspaceCustomer}
+                </p>
+              ) : null}
+              <p className="qf-muted" data-testid="qf-estimates-provenance">
+                Source: {workspaceSource.label}
+                {workspaceItem?.planFilename ? ` · Plan: ${workspaceItem.planFilename}` : ""}
+                {workspaceItem?.updatedAt
+                  ? ` · Updated ${formatEstimateTime(workspaceItem.updatedAt)}`
+                  : ""}
+              </p>
+              <span
+                className={statusPillClass(workspaceItem?.status?.key)}
+                data-testid="qf-estimates-detail-status"
+              >
+                {dirty ? "Unsaved changes" : workspaceItem?.status?.label || "Scope set"}
+              </span>
+
+              <div className="qf-estimates__summary-cards" data-testid="qf-estimates-summary">
+                <div className="qf-estimates__summary-card">
+                  <span className="qf-stat__value">{localSummary.roomCount}</span>
+                  <span className="qf-stat__label">Rooms</span>
+                </div>
+                <div className="qf-estimates__summary-card">
+                  <span className="qf-stat__value">{localSummary.pieceCount}</span>
+                  <span className="qf-stat__label">Pieces</span>
+                </div>
+                <div className="qf-estimates__summary-card">
+                  <span className="qf-stat__value">
+                    {localSummary.countertopSf > 0 ? localSummary.countertopSf.toFixed(1) : "—"}
+                  </span>
+                  <span className="qf-stat__label">Countertop SF</span>
+                </div>
+                <div className="qf-estimates__summary-card">
+                  <span className="qf-stat__value">
+                    {localSummary.backsplashSf > 0 ? localSummary.backsplashSf.toFixed(1) : "—"}
+                  </span>
+                  <span className="qf-stat__label">Backsplash SF</span>
+                </div>
+                <div className="qf-estimates__summary-card" data-testid="qf-estimates-summary-open-edge">
+                  <span className="qf-stat__value">
+                    {(localSummary.openEdgeLf || 0).toFixed(1)}
+                  </span>
+                  <span className="qf-stat__label">Open edge LF</span>
+                </div>
+              </div>
+
+              <div
+                className="qf-estimates__section-tabs"
+                role="tablist"
+                aria-label="Estimate sections"
+                data-testid="qf-estimates-sections"
+              >
+                {SECTIONS.map((s) => (
+                  <button
+                    key={s.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={section === s.key}
+                    className={
+                      section === s.key
+                        ? "qf-estimates__section-tab is-active"
+                        : s.key === "scope"
+                          ? "qf-estimates__section-tab"
+                          : "qf-estimates__section-tab is-later"
+                    }
+                    data-testid={`qf-estimates-tab-${s.key}`}
+                    onClick={() => setSection(s.key)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="qf-estimates-modal__body">
+              {detailLoading && !workspaceItem ? (
+                <p className="qf-muted">Loading estimate…</p>
+              ) : null}
               {section === "scope" ? (
                 <section
                   className="qf-estimates__section is-active"
@@ -541,7 +588,10 @@ export default function EstimatesListPage(props: Props) {
                   data-testid={`qf-estimates-section-${section}`}
                   aria-disabled="true"
                 >
-                  <div className="qf-estimates__placeholder-card" data-testid="qf-estimates-section-later">
+                  <div
+                    className="qf-estimates__placeholder-card"
+                    data-testid="qf-estimates-section-later"
+                  >
                     <h3>{SECTIONS.find((s) => s.key === section)?.label}</h3>
                     <p className="qf-muted">
                       {SECTIONS.find((s) => s.key === section)?.placeholder || "Coming later."}
@@ -550,10 +600,10 @@ export default function EstimatesListPage(props: Props) {
                   </div>
                 </section>
               )}
-            </>
-          ) : null}
+            </div>
+          </div>
         </div>
-      </div>
+      ) : null}
     </section>
   );
 }

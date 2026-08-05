@@ -73,6 +73,36 @@ export function resolveScopeSource(scope, meta = {}) {
 }
 
 /**
+ * Resolve open/exposed edge linear feet from common scope field names.
+ * Canonical write path is piece.openEdgeLf.
+ * @param {object|null|undefined} piece
+ */
+export function resolvePieceOpenEdgeLf(piece) {
+  if (!piece || typeof piece !== "object") return 0;
+  const candidates = [
+    piece.openEdgeLf,
+    piece.exposedEdgeLf,
+    piece.exposedEdgeLinearFeet,
+    piece.openEdgeLinearFeet,
+    piece.edgeLinearFeet,
+    piece.edgeLf,
+    piece.finishedEdgeLf
+  ];
+  for (const c of candidates) {
+    const n = Number(c);
+    if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+  }
+  const fe = piece.finishedEdge;
+  if (fe && typeof fe === "object") {
+    const inches = Number(fe.totalFinishedEdgeLengthIn);
+    if (Number.isFinite(inches) && inches >= 0) {
+      return Math.round((inches / 12) * 100) / 100;
+    }
+  }
+  return 0;
+}
+
+/**
  * @param {object|null|undefined} scope
  */
 export function summarizeOfficialScope(scope) {
@@ -82,6 +112,7 @@ export function summarizeOfficialScope(scope) {
   let excludedPieceCount = 0;
   let countertopSf = 0;
   let backsplashSf = 0;
+  let openEdgeLf = 0;
 
   for (const room of rooms) {
     if (!room) continue;
@@ -111,6 +142,7 @@ export function summarizeOfficialScope(scope) {
         pieceType === "fhb";
       if (isSplash) backsplashSf += sf;
       else countertopSf += sf;
+      openEdgeLf += resolvePieceOpenEdgeLf(piece) * quantity;
     }
 
     if (roomIncluded && room.includeBacksplash === true) {
@@ -123,6 +155,7 @@ export function summarizeOfficialScope(scope) {
   const round2 = (n) => Math.round(n * 100) / 100;
   countertopSf = round2(countertopSf);
   backsplashSf = round2(backsplashSf);
+  openEdgeLf = round2(openEdgeLf);
 
   const parts = [
     roomCount === 0
@@ -133,6 +166,7 @@ export function summarizeOfficialScope(scope) {
   ];
   if (countertopSf > 0) parts.push(`${countertopSf.toFixed(1)} SF countertop`);
   if (backsplashSf > 0) parts.push(`${backsplashSf.toFixed(1)} SF backsplash`);
+  if (openEdgeLf > 0) parts.push(`${openEdgeLf.toFixed(1)} LF open edge`);
 
   return {
     roomCount,
@@ -140,6 +174,7 @@ export function summarizeOfficialScope(scope) {
     excludedPieceCount,
     countertopSf,
     backsplashSf,
+    openEdgeLf,
     label: parts.join(" · ")
   };
 }

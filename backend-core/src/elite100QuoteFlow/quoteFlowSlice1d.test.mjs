@@ -52,6 +52,26 @@ const scopedRooms = [
   const summary = summarizeOfficialScope({ rooms: scopedRooms });
   assert.equal(summary.roomCount, 1);
   assert.equal(summary.pieceCount, 1);
+  assert.equal(summary.openEdgeLf, 0);
+  const withEdge = summarizeOfficialScope({
+    rooms: [
+      {
+        ...scopedRooms[0],
+        pieces: [{ ...scopedRooms[0].pieces[0], openEdgeLf: 12.5 }]
+      }
+    ]
+  });
+  assert.equal(withEdge.openEdgeLf, 12.5);
+  assert.match(withEdge.label, /12\.5 LF open edge/);
+  const fromAlias = summarizeOfficialScope({
+    rooms: [
+      {
+        ...scopedRooms[0],
+        pieces: [{ ...scopedRooms[0].pieces[0], exposedEdgeLf: 8 }]
+      }
+    ]
+  });
+  assert.equal(fromAlias.openEdgeLf, 8);
   const item = presentQuoteFlowEstimateListItem({
     id: EST,
     status: "ready_to_price",
@@ -68,6 +88,7 @@ const scopedRooms = [
   assert.equal(item.status.key, "scope_set");
   assert.equal(item.scopeSource?.key, "ai_takeoff");
   assert.equal(item.scopeSummary.countertopSf > 0, true);
+  assert.equal(item.scopeSummary.openEdgeLf, 0);
   assert.equal(
     resolveEstimateDisplayName({
       customerName: "Unknown contact",
@@ -186,7 +207,8 @@ const scopedRooms = [
           name: "Island top",
           lengthIn: 108,
           depthIn: 26,
-          quantity: 2
+          quantity: 2,
+          openEdgeLf: 14.5
         },
         {
           id: "p2",
@@ -194,11 +216,16 @@ const scopedRooms = [
           lengthIn: 72,
           depthIn: 25.5,
           quantity: 1,
-          included: true
+          included: true,
+          exposedEdgeLf: 6
         }
       ]
     }
   ]);
+  assert.equal(patchedRooms[0].pieces[0].openEdgeLf, 14.5);
+  assert.equal(patchedRooms[0].pieces[0].finishedEdgeLf, 14.5);
+  assert.equal(patchedRooms[0].pieces[0].exposedEdgeLf, 14.5);
+  assert.equal(patchedRooms[0].pieces[1].openEdgeLf, 6);
 
   const patched = await svc.patchOfficialScope({
     organizationId: ORG,
@@ -209,6 +236,9 @@ const scopedRooms = [
   assert.equal(updateScopeCalls, 1);
   assert.equal(patched.estimate.scope.rooms[0].name, "Kitchen island zone");
   assert.equal(patched.estimate.scope.rooms[0].pieces[0].lengthIn, 108);
+  assert.equal(patched.estimate.scope.rooms[0].pieces[0].openEdgeLf, 14.5);
+  assert.equal(patched.estimate.scope.rooms[0].pieces[1].openEdgeLf, 6);
+  assert.equal(patched.estimate.scopeSummary.openEdgeLf, 14.5 * 2 + 6);
   assert.equal(patched.estimate.scope.rooms[0].pieces.length, 2);
   assert.equal(patched.estimate.takeoffJobId, JOB);
   assert.equal(patched.estimate.intakeCaseId, CASE);
@@ -295,12 +325,17 @@ const scopedRooms = [
   assert.match(ui, /Manual edits here do not rerun AI Takeoff/);
   assert.match(ui, /Save Scope/);
   assert.match(ui, /qf-page--command|qf-estimates--command/);
+  assert.match(ui, /qf-estimates--library/);
+  assert.match(ui, /qf-estimates-modal/);
+  assert.match(ui, /Back to library/);
+  assert.match(ui, /Open edge LF/);
   assert.match(ui, /qf-estimates-tab-pricing|Pricing/);
   assert.match(ui, /Digital Estimate/);
   assert.doesNotMatch(ui, /takeoff-iframe|ConsolidatedTakeoffReview|quoteFlowSetScope/);
   assert.doesNotMatch(ui, /\bV1\b|\bV2\b|Studio V2/);
   assert.doesNotMatch(ui, /\bSet Scope\b/);
-  console.log("ok: Estimates UI official scope; no takeoff iframe; no V1/V2");
+  assert.doesNotMatch(ui, /qf-estimates--command-layout/);
+  console.log("ok: Estimates library + modal; official scope; Open edge LF; no takeoff iframe; no V1/V2");
 }
 
 {
