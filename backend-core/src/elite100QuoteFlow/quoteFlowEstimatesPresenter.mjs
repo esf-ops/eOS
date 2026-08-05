@@ -310,6 +310,7 @@ export function presentQuoteFlowEstimateListItem(estimate) {
     estimateId: estimate?.id || estimate?.estimateId || null,
     intakeCaseId: estimate?.intakeCaseId || null,
     takeoffJobId: estimate?.takeoffJobId || null,
+    revision: Number(estimate?.revision) || null,
     estimateName,
     displayName: estimateName,
     customerName,

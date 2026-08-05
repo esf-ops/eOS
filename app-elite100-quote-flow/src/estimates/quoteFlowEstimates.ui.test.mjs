@@ -185,10 +185,22 @@ assert.match(dePanel, /excluded from customer payload|Internal-only/);
 assert.match(dePanel, /Needs republish/);
 assert.doesNotMatch(dePanel, /Mark sold|Customer acceptance/i);
 assert.doesNotMatch(dePanel, /\bV1\b|\bV2\b|Studio V2/);
-assert.match(dePanel, /Activity and Handoff stay later/);
-assert.match(page, /key: "activity"[\s\S]*active: false/);
+assert.match(page, /OfficialActivityPanel/);
+assert.match(page, /qf-estimates-section-activity/);
+assert.match(api, /\/activity/);
+assert.match(api, /fetchQuoteFlowEstimateActivity/);
+const activityPanel = readFileSync(join(appRoot, "src/estimates/OfficialActivityPanel.tsx"), "utf8");
+assert.match(activityPanel, /data-testid="qf-official-activity-panel"/);
+assert.match(activityPanel, /qf-activity-summary|Activity/);
+assert.match(activityPanel, /Timeline|qf-activity-timeline/);
+assert.match(activityPanel, /Publication history|qf-activity-publications/);
+assert.match(activityPanel, /Not tracked yet/);
+assert.match(activityPanel, /Open link|Copy link/);
+assert.doesNotMatch(activityPanel, /Mark sold|Create handoff|Send email/i);
+assert.doesNotMatch(activityPanel, /\bV1\b|\bV2\b|Studio V2/);
+assert.match(page, /key: "activity"[\s\S]*active: true/);
 assert.match(page, /key: "handoff"[\s\S]*active: false/);
-console.log("ok: Estimates Quote Library; Pricing + Review + Digital Estimate tabs; no Takeoff/V1/V2");
+console.log("ok: Estimates Quote Library; Pricing + Review + Digital Estimate + Activity tabs; no Takeoff/V1/V2");
 
 {
   const rows = [

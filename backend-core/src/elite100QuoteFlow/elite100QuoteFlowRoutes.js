@@ -27,6 +27,7 @@ import { createQuoteFlowEstimatesService } from "./quoteFlowEstimates.mjs";
 import { createQuoteFlowPricingService } from "./quoteFlowPricing.mjs";
 import { createQuoteFlowReviewService } from "./quoteFlowReview.mjs";
 import { createQuoteFlowDigitalEstimateService } from "./quoteFlowDigitalEstimate.mjs";
+import { createQuoteFlowActivityService } from "./quoteFlowActivity.mjs";
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
 import {
   approveAndBuildEstimate,
@@ -122,6 +123,11 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   let quoteFlowPricingService = deps.quoteFlowPricingService || null;
   let quoteFlowReviewService = deps.quoteFlowReviewService || null;
   let quoteFlowDigitalEstimateService = deps.quoteFlowDigitalEstimateService || null;
+  let quoteFlowActivityService = deps.quoteFlowActivityService || null;
+  /** @type {object|null} */
+  let wiredDigitalEstimateRepository = deps.digitalEstimateRepository || null;
+  /** @type {object|null} */
+  let wiredStudioDigitalEstimateService = deps.studioDigitalEstimateService || null;
 
   if (
     !quoteFlowService ||
@@ -129,7 +135,8 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     !quoteFlowEstimatesService ||
     !quoteFlowPricingService ||
     !quoteFlowReviewService ||
-    !quoteFlowDigitalEstimateService
+    !quoteFlowDigitalEstimateService ||
+    !quoteFlowActivityService
   ) {
     const studioEstimateService =
       deps.studioEstimateService || createStudioEstimateService({ env, getSupabase });
@@ -209,8 +216,9 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
       });
     }
 
-    if (!quoteFlowDigitalEstimateService) {
+    if (!quoteFlowDigitalEstimateService || !quoteFlowActivityService) {
       const deRepository =
+        wiredDigitalEstimateRepository ||
         deps.digitalEstimateRepository ||
         (typeof getSupabase === "function" && getSupabase()
           ? createSupabaseDigitalEstimateRepository({ db: getSupabase() })
@@ -251,6 +259,7 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
       }
 
       const studioDigitalEstimateService =
+        wiredStudioDigitalEstimateService ||
         deps.studioDigitalEstimateService ||
         createStudioEstimateDigitalEstimateService({
           env,
@@ -261,16 +270,41 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
           getSupabase,
           loadTakeoffWorkspace: deps.getTakeoffWorkspace || getTakeoffWorkspace
         });
+      wiredDigitalEstimateRepository = deRepository;
+      wiredStudioDigitalEstimateService = studioDigitalEstimateService;
 
-      quoteFlowDigitalEstimateService = createQuoteFlowDigitalEstimateService({
-        estimateRepository,
-        studioEstimateService,
-        studioDigitalEstimateService,
-        env,
-        // Prefer interactive customer selections when configuration stack is available.
-        preferInteractiveConfiguration: Boolean(configurationStudioService)
-      });
+      if (!quoteFlowDigitalEstimateService) {
+        quoteFlowDigitalEstimateService = createQuoteFlowDigitalEstimateService({
+          estimateRepository,
+          studioEstimateService,
+          studioDigitalEstimateService,
+          env,
+          preferInteractiveConfiguration: Boolean(configurationStudioService)
+        });
+      }
+
+      if (!quoteFlowActivityService) {
+        quoteFlowActivityService = createQuoteFlowActivityService({
+          estimateRepository,
+          studioEstimateService,
+          studioDigitalEstimateService,
+          digitalEstimateRepository: deRepository,
+          env
+        });
+      }
     }
+  }
+
+  if (!quoteFlowActivityService) {
+    quoteFlowActivityService = createQuoteFlowActivityService({
+      estimateRepository: deps.studioEstimateRepository || null,
+      studioEstimateService: deps.studioEstimateService || null,
+      studioDigitalEstimateService:
+        wiredStudioDigitalEstimateService || deps.studioDigitalEstimateService || null,
+      digitalEstimateRepository:
+        wiredDigitalEstimateRepository || deps.digitalEstimateRepository || null,
+      env
+    });
   }
 
   function sendSafeError(res, e, fallback) {
@@ -883,8 +917,28 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get(
+    "/api/elite100-quote-flow/estimates/:estimateId/activity",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await quoteFlowActivityService.getActivity({
+          organizationId,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          actorUserId: req.user?.id ?? null
+        });
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] estimate activity get failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to load activity.");
+      }
+    }
+  );
+
   console.log(
-    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review|digital-estimate"
+    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing|review|digital-estimate|activity"
   );
   return { mounted: true, reason: "ok" };
 }

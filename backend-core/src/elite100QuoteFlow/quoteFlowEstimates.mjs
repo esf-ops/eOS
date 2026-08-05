@@ -11,6 +11,7 @@ import {
 import { resolvePieceOpenEdgeLf, stampPieceOpenEdgeLf } from "./quoteFlowOpenEdge.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
 import { markQuoteFlowReviewStaleOnScope } from "./quoteFlowReviewMeta.mjs";
+import { selectOfficialQuoteFlowLibraryRows } from "./quoteFlowLibraryRows.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -224,11 +225,10 @@ export function createQuoteFlowEstimatesService(deps = {}) {
     const rows = await estimateRepository.listActiveForOrganization(org, {
       includeArchived: false
     });
-    const items = [];
-    for (const row of Array.isArray(rows) ? rows : []) {
-      if (!isOfficialScopeSet(row)) continue;
-      items.push(presentQuoteFlowEstimateListItem(row));
-    }
+    // One official library row per intake case (highest revision). Publication
+    // revisions / sibling estimate rows must not appear as duplicate estimates.
+    const officialRows = selectOfficialQuoteFlowLibraryRows(Array.isArray(rows) ? rows : []);
+    const items = officialRows.map((row) => presentQuoteFlowEstimateListItem(row));
     return { ok: true, items, total: items.length };
   }
 

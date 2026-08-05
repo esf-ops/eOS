@@ -1625,6 +1625,41 @@ body {
   padding-left: 1.1rem;
 }
 
+.qf-activity__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.65rem;
+  margin: 0.85rem 0 1.1rem;
+}
+
+.qf-activity__card {
+  border: 1px solid #d8dee8;
+  background: #f8f9fc;
+  padding: 0.7rem 0.8rem;
+}
+
+.qf-activity__card.is-warn {
+  background: #fff8ea;
+  border-color: #efd9a8;
+}
+
+.qf-activity__timeline ol,
+.qf-activity__pubs ul,
+.qf-activity__notes ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.qf-activity__timeline li,
+.qf-activity__pubs li {
+  margin-bottom: 0.65rem;
+}
+
+.qf-activity__timeline li strong,
+.qf-activity__pubs li strong {
+  display: block;
+}
+
 .qf-review__status--ready_for_review {
   background: #eef6ff;
   border-color: #b7d0ef;

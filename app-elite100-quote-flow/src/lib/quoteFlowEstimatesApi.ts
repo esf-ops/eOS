@@ -443,3 +443,56 @@ export async function publishQuoteFlowDigitalEstimate(token: string, estimateId:
     }
   ) as Promise<QuoteFlowDigitalEstimatePayload>;
 }
+
+export type QuoteFlowActivityTimelineEvent = {
+  id?: string;
+  type?: string;
+  label?: string;
+  at?: string | null;
+  detail?: string | null;
+  tracked?: boolean;
+};
+
+export type QuoteFlowActivityPublication = {
+  publicationId?: string | null;
+  publishedAt?: string | null;
+  publishedByUserId?: string | null;
+  revisionLabel?: string | null;
+  revisionNumber?: number | null;
+  status?: string | null;
+  state?: string | null;
+  customerUrl?: string | null;
+  linkStatus?: string | null;
+};
+
+export type QuoteFlowActivityPayload = {
+  ok?: boolean;
+  estimateId?: string;
+  revision?: number | null;
+  intakeCaseId?: string | null;
+  estimateName?: string | null;
+  summary?: {
+    officialStatus?: { key?: string; label?: string };
+    reviewStatus?: { key?: string; label?: string };
+    publishStatus?: { key?: string; label?: string };
+    latestPublication?: QuoteFlowActivityPublication | null;
+    customerLinkAvailable?: boolean;
+    customerUrl?: string | null;
+    customerSelections?: { key?: string; label?: string; detail?: string | null };
+    needsRereview?: boolean;
+    needsRepublish?: boolean;
+    workflowState?: string;
+  };
+  timeline?: QuoteFlowActivityTimelineEvent[];
+  publicationHistory?: QuoteFlowActivityPublication[];
+  customerSelections?: { key?: string; label?: string; detail?: string | null };
+  unavailableNotes?: string[];
+  sideEffects?: Record<string, boolean>;
+};
+
+export async function fetchQuoteFlowEstimateActivity(token: string, estimateId: string) {
+  return apiGet(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/activity`,
+    token
+  ) as Promise<QuoteFlowActivityPayload>;
+}

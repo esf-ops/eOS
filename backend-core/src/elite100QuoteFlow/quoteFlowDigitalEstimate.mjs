@@ -739,6 +739,23 @@ export function createQuoteFlowDigitalEstimateService(deps = {}) {
       });
     }
 
+    // Match Studio simplified publish: after successful R(n) publish, supersede
+    // older non-superseded sibling revisions so Estimates library stays one row.
+    if (
+      result?.ok !== false &&
+      typeof studioEstimateService?.supersedeOlderRevisionsAfterPublish === "function"
+    ) {
+      try {
+        await studioEstimateService.supersedeOlderRevisionsAfterPublish({
+          organizationId,
+          estimateId: publishRow.id || estimateId,
+          actorUserId: actorUserId || null
+        });
+      } catch {
+        /* publication already succeeded — do not fail the publish response */
+      }
+    }
+
     const publication = result?.publication || null;
     const customerUrl =
       result?.customerUrl ||

@@ -4025,3 +4025,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowOpenEdge.mjs`, QF pricing/scope stamps, `quoteFlowDigitalEstimate` publish normalize + preview, OfficialScopeEditor, DE publish tests, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Digital Estimate pricing formulas/rates, acceptance/sold/handoff/email, internal-only line exclusion, non-QF Studio DE path behavior (already correct). |
 | **Revisit trigger** | None unless takeoff draft accidentally inherits official approval flags. |
+
+### 298. Elite 100 Quote Flow — Activity tab + one library row per official estimate (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `main` |
+| **Decision** | Activate Estimates **Activity** tab (read-only timeline, publication history, customer link/selection status from existing DE data). Collapse Estimates library to **one row per `intakeCaseId`** (highest revision) so sibling revisions / republish history do not appear as duplicate official estimates; history stays on Activity. After QF DE publish, call `supersedeOlderRevisionsAfterPublish` (same as Studio simplified) when available. No sold/handoff/acceptance/email; no destructive cleanup. |
+| **Why** | Staff need post-publish visibility; republish left non-superseded siblings that both passed `isOfficialScopeSet`. |
+| **Impacted** | `quoteFlowActivity.mjs` / `quoteFlowLibraryRows.mjs` + routes/tests, `listEstimates` collapse, QF publish supersede hook, `OfficialActivityPanel`, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Pricing formulas, Review/DE publish rules (except supersede after publish), acceptance/sold/handoff/email, `app-digital-estimate`, DB rows (no delete/merge). |
+| **Revisit trigger** | Handoff / sold; richer amendment timeline UI. |

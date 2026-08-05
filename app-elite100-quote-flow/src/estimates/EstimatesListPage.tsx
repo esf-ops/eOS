@@ -21,6 +21,7 @@ import OfficialScopeEditor, { roomsFromOfficialScope } from "./OfficialScopeEdit
 import OfficialPricingPanel from "./OfficialPricingPanel";
 import OfficialReviewPanel from "./OfficialReviewPanel";
 import OfficialDigitalEstimatePanel from "./OfficialDigitalEstimatePanel";
+import OfficialActivityPanel from "./OfficialActivityPanel";
 
 type Props = {
   authToken: string;
@@ -76,8 +77,8 @@ const SECTIONS: {
   {
     key: "activity",
     label: "Activity",
-    placeholder: "Customer selections and revision activity will appear here later.",
-    active: false
+    placeholder: "",
+    active: true
   },
   {
     key: "handoff",
@@ -888,6 +889,17 @@ export default function EstimatesListPage(props: Props) {
                       Save Scope before publishing so quantities stay in sync.
                     </p>
                   ) : null}
+                </section>
+              ) : section === "activity" && selectedId ? (
+                <section
+                  className="qf-estimates__section is-active"
+                  data-testid="qf-estimates-section-activity"
+                >
+                  <OfficialActivityPanel
+                    authToken={authToken}
+                    estimateId={selectedId}
+                    disabled={saving || detailLoading}
+                  />
                 </section>
               ) : (
                 <section

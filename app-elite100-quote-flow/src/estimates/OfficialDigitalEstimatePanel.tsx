@@ -132,7 +132,7 @@ export default function OfficialDigitalEstimatePanel(props: Props) {
           Publish a customer-facing Digital Estimate from an approved Quote Flow estimate.
         </p>
         <p className="qf-muted" data-testid="qf-de-no-acceptance">
-          Does not mark accepted, sold, or send email. Activity and Handoff stay later.
+          Does not mark accepted, sold, or send email. Use Activity for publication history. Handoff stays later.
         </p>
       </header>
 
