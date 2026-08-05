@@ -3992,3 +3992,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowCustomLineItems.mjs`, `quoteFlowPricing.mjs` + tests, `OfficialPricingPanel`, estimates API/styles, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Inbox, Queue/Set Scope, Scope editor, approval, Digital Estimate publish, acceptance, sold/handoff, Studio V2 layout, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
 | **Revisit trigger** | Review/Publish consuming customer-facing lines; edge profile picker in Quote Flow Pricing. |
+
+### 295. Elite 100 Quote Flow — Estimates Review / internal approval (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-estimates-review-approval` |
+| **Decision** | Activate Review tab as an **internal** approval gate only. Readiness checklist (scope, pieces, pricing draft, current calc, customer total, open-edge warning, custom lines). Approve persists Studio-compatible `status=approved` + `approval` blob and `scope.quoteFlowReview` metadata (no migration). Reopen clears approval. Scope/pricing edits after approval mark re-review / clear approval; do **not** publish Digital Estimate, accept, or mark sold. |
+| **Why** | Estimators need a gate after Pricing before customer-quote prep without enabling publish. |
+| **Impacted** | `quoteFlowReview.mjs` / `quoteFlowReviewMeta.mjs` + routes/tests, Estimates `OfficialReviewPanel`, presenter status labels, pricing/scope stale-after-approval hooks, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Inbox, Queue/Set Scope, Digital Estimate publish, acceptance, sold/handoff, Studio V2 layout, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
+| **Revisit trigger** | Digital Estimate publish consuming approved Quote Flow estimates; stricter edge-profile blocker vs warning. |

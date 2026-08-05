@@ -514,7 +514,7 @@ export default function OfficialPricingPanel(props: Props) {
           Internal pricing only
         </p>
         <p className="qf-muted" data-testid="qf-pricing-review-not-active">
-          Review/Publish is not active yet.
+          Digital Estimate publish is not active yet. Use Review to approve internally when pricing is current.
         </p>
       </header>
 
