@@ -21,6 +21,8 @@ const MESSAGES = {
   estimate_not_found: "Estimate not found.",
   estimate_not_scoped: "Official scope is not set for this estimate yet.",
   scope_invalid: "Official scope is invalid.",
+  pricing_invalid: "Pricing settings are invalid.",
+  pricing_calculate_failed: "Unable to calculate pricing.",
   organization_required: "Organization context unavailable.",
   forbidden: "Forbidden"
 };
@@ -63,7 +65,10 @@ export function createQuoteFlowError(code, opts = {}) {
         ? 404
         : safe.code === "mailbox_unavailable" || safe.code === "takeoff_unavailable"
           ? 503
-          : safe.code === "takeoff_not_ready" || safe.code === "scope_invalid"
+          : safe.code === "takeoff_not_ready" ||
+              safe.code === "scope_invalid" ||
+              safe.code === "pricing_invalid" ||
+              safe.code === "pricing_calculate_failed"
             ? 422
             : 400);
   err.code = safe.code;

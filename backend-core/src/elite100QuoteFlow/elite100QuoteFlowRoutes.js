@@ -1,5 +1,5 @@
 /**
- * Elite 100 Quote Flow Brain API — Slice 1A–1D (shell, Inbox, Queue/Set Scope, Estimates).
+ * Elite 100 Quote Flow Brain API — Slice 1A–1E (shell, Inbox, Queue/Set Scope, Estimates, Pricing).
  */
 
 import express from "express";
@@ -24,6 +24,7 @@ import {
 import { createQuoteFlowService } from "./quoteFlowService.mjs";
 import { createQuoteFlowSetScopeService } from "./quoteFlowSetScope.mjs";
 import { createQuoteFlowEstimatesService } from "./quoteFlowEstimates.mjs";
+import { createQuoteFlowPricingService } from "./quoteFlowPricing.mjs";
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
 import {
   approveAndBuildEstimate,
@@ -45,6 +46,7 @@ const setScopeJsonParser = express.json({ limit: "4mb" });
  *   quoteFlowService?: ReturnType<typeof createQuoteFlowService>,
  *   quoteFlowSetScopeService?: ReturnType<typeof createQuoteFlowSetScopeService>,
  *   quoteFlowEstimatesService?: ReturnType<typeof createQuoteFlowEstimatesService>,
+ *   quoteFlowPricingService?: ReturnType<typeof createQuoteFlowPricingService>,
  *   sharedInboxService?: object,
  *   studioEstimateRepository?: object
  * }} deps
@@ -104,8 +106,14 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
   let quoteFlowService = deps.quoteFlowService || null;
   let quoteFlowSetScopeService = deps.quoteFlowSetScopeService || null;
   let quoteFlowEstimatesService = deps.quoteFlowEstimatesService || null;
+  let quoteFlowPricingService = deps.quoteFlowPricingService || null;
 
-  if (!quoteFlowService || !quoteFlowSetScopeService || !quoteFlowEstimatesService) {
+  if (
+    !quoteFlowService ||
+    !quoteFlowSetScopeService ||
+    !quoteFlowEstimatesService ||
+    !quoteFlowPricingService
+  ) {
     const studioEstimateService =
       deps.studioEstimateService || createStudioEstimateService({ env, getSupabase });
     const quoteIntakeRepository =
@@ -162,6 +170,14 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
 
     if (!quoteFlowEstimatesService) {
       quoteFlowEstimatesService = createQuoteFlowEstimatesService({
+        estimateRepository,
+        studioEstimateService,
+        env
+      });
+    }
+
+    if (!quoteFlowPricingService) {
+      quoteFlowPricingService = createQuoteFlowPricingService({
         estimateRepository,
         studioEstimateService,
         env
@@ -547,8 +563,93 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   );
 
+  app.get(
+    "/api/elite100-quote-flow/estimates/:estimateId/pricing",
+    ...staffStack,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const result = await quoteFlowPricingService.getPricing({
+          organizationId,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          actorUserId: req.user?.id ?? null
+        });
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] estimate pricing get failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to load pricing.");
+      }
+    }
+  );
+
+  app.patch(
+    "/api/elite100-quote-flow/estimates/:estimateId/pricing",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowPricingService.patchPricing({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          body
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "estimates.patch_pricing",
+            userId: req.user?.id ?? null,
+            estimateId: result.estimateId ?? null,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] patch pricing failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to save pricing draft.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/estimates/:estimateId/pricing/calculate",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const body = req.body && typeof req.body === "object" ? req.body : {};
+        const result = await quoteFlowPricingService.calculatePricing({
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          estimateId: decodeURIComponent(String(req.params.estimateId || "")),
+          body
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "estimates.calculate_pricing",
+            userId: req.user?.id ?? null,
+            estimateId: result.estimateId ?? null,
+            persisted: result.persisted === true,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] calculate pricing failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to calculate pricing.");
+      }
+    }
+  );
+
   console.log(
-    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates (Slice 1D)"
+    "[elite100-quote-flow] mounted health|config|inbox|queue|set-scope|estimates|pricing (Slice 1E)"
   );
   return { mounted: true, reason: "ok" };
 }

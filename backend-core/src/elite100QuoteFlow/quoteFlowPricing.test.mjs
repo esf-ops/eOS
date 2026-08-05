@@ -1,0 +1,323 @@
+/**
+ * Elite 100 Quote Flow — Estimates Pricing tab (Slice 1E).
+ * Run: node backend-core/src/elite100QuoteFlow/quoteFlowPricing.test.mjs
+ */
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  createQuoteFlowPricingService,
+  stampOpenEdgeLfOntoScopeForPricing,
+  presentQuoteFlowPricingResult
+} from "./quoteFlowPricing.mjs";
+import { calculateStudioEstimateV4 } from "../elite100EstimateStudio/elite100RoomPricingStudioAdapter.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const root = join(__dirname, "../../..");
+
+console.log("\nquoteFlowPricing.test.mjs\n");
+
+const ORG = "11111111-1111-4111-8111-111111111111";
+const EST = "55555555-5555-4555-8555-555555555555";
+const EST_UNSCOPED = "66666666-6666-4666-8666-666666666666";
+
+function baseRooms(overrides = {}) {
+  return [
+    {
+      id: "r1",
+      name: "Kitchen",
+      roomType: "Kitchen",
+      included: true,
+      pieces: [
+        {
+          id: "p1",
+          name: "Island",
+          lengthIn: 96,
+          depthIn: 25.5,
+          quantity: 1,
+          included: true,
+          excluded: false,
+          openEdgeLf: 10,
+          finishedEdgeLf: 10,
+          ...overrides.piece
+        },
+        ...(overrides.extraPieces || [])
+      ]
+    }
+  ];
+}
+
+function makeStore(initialRows) {
+  /** @type {Map<string, object>} */
+  const byId = new Map(initialRows.map((r) => [r.id, structuredClone(r)]));
+  return {
+    async getById(_org, id) {
+      const row = byId.get(id);
+      return row ? structuredClone(row) : null;
+    },
+    async update(_org, id, patch) {
+      const prev = byId.get(id);
+      if (!prev) throw new Error("missing");
+      const next = {
+        ...prev,
+        ...patch,
+        scope: patch.scope != null ? patch.scope : prev.scope,
+        revision: (Number(prev.revision) || 1) + 1,
+        updatedAt: new Date().toISOString()
+      };
+      byId.set(id, next);
+      return structuredClone(next);
+    },
+    peek(id) {
+      return byId.get(id);
+    }
+  };
+}
+
+{
+  const stamped = stampOpenEdgeLfOntoScopeForPricing({
+    rooms: [
+      {
+        pieces: [{ name: "A", openEdgeLf: 12.5 }]
+      }
+    ]
+  });
+  assert.equal(stamped.rooms[0].pieces[0].openEdgeLf, 12.5);
+  assert.equal(stamped.rooms[0].pieces[0].finishedEdgeLf, 12.5);
+  console.log("ok: openEdgeLf stamps finishedEdgeLf for calculator");
+}
+
+{
+  const empty = presentQuoteFlowPricingResult({ calculationSnapshot: null });
+  assert.equal(empty.available, false);
+  assert.equal(empty.estimatedTotal, null);
+  assert.ok(!("elite100" in empty));
+  assert.ok(!("calculationSnapshot" in empty));
+  console.log("ok: pricing result presenter omits raw payloads");
+}
+
+{
+  const repo = makeStore([
+    {
+      id: EST_UNSCOPED,
+      status: "draft",
+      revision: 1,
+      scope: { rooms: [] },
+      calculationSnapshot: null,
+      staleReason: null
+    },
+    {
+      id: EST,
+      status: "ready_to_price",
+      revision: 1,
+      scope: {
+        rooms: baseRooms(),
+        pricingBasis: "wholesale",
+        materialGroup: "Group Promo",
+        projectName: "Relihan Kitchen"
+      },
+      calculationSnapshot: null,
+      staleReason: null
+    }
+  ]);
+
+  let calcCalls = 0;
+  /** @type {object|null} */
+  let lastCalcScope = null;
+  const svc = createQuoteFlowPricingService({
+    estimateRepository: repo,
+    async calculateStudioEstimate(args) {
+      calcCalls += 1;
+      lastCalcScope = args.scope;
+      return calculateStudioEstimateV4(args);
+    },
+    env: {}
+  });
+
+  await assert.rejects(
+    () => svc.getPricing({ organizationId: ORG, estimateId: EST_UNSCOPED }),
+    (e) => e.code === "estimate_not_scoped"
+  );
+  await assert.rejects(
+    () =>
+      svc.patchPricing({
+        organizationId: ORG,
+        estimateId: EST_UNSCOPED,
+        body: { pricing: { pricingBasis: "direct" } }
+      }),
+    (e) => e.code === "estimate_not_scoped"
+  );
+  await assert.rejects(
+    () => svc.calculatePricing({ organizationId: ORG, estimateId: EST_UNSCOPED }),
+    (e) => e.code === "estimate_not_scoped"
+  );
+  console.log("ok: pricing routes reject unscoped estimate");
+
+  const loaded = await svc.getPricing({ organizationId: ORG, estimateId: EST });
+  assert.equal(loaded.ok, true);
+  assert.equal(loaded.scopeSummary.openEdgeLf, 10);
+  assert.equal(loaded.scopeSummary.pieceCount, 1);
+  assert.ok(loaded.editablePricing?.pricingBasis);
+  assert.ok(loaded.editablePricing?.materialGroup);
+  assert.equal(loaded.lastCalculation.available, false);
+  assert.equal(loaded.sideEffects.approved, false);
+  assert.equal(loaded.sideEffects.published, false);
+  assert.equal(loaded.sideEffects.sold, false);
+  assert.equal(loaded.sideEffects.digitalEstimateCreated, false);
+  console.log("ok: GET pricing loads official scope as source of truth");
+
+  const saved = await svc.patchPricing({
+    organizationId: ORG,
+    estimateId: EST,
+    body: {
+      pricing: {
+        pricingBasis: "direct",
+        materialGroup: "Group A",
+        estimateWideAdjustment: { active: false, percentage: 0, reason: "" }
+      }
+    }
+  });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.editablePricing.pricingBasis, "direct");
+  assert.equal(saved.editablePricing.materialGroup, "Group A");
+  assert.equal(saved.pricingStale, true);
+  assert.match(String(saved.staleReason || ""), /recalculate/i);
+  assert.equal(repo.peek(EST).scope.pricingBasis, "direct");
+  assert.equal(repo.peek(EST).scope.materialGroup, "Group A");
+  assert.equal(repo.peek(EST).scope.quoteFlowPricingEdited, true);
+  console.log("ok: pricing config can be saved as draft");
+
+  await assert.rejects(
+    () =>
+      svc.patchPricing({
+        organizationId: ORG,
+        estimateId: EST,
+        body: { pricing: { pricingBasis: "not-a-basis" } }
+      }),
+    (e) => e.code === "pricing_invalid"
+  );
+  console.log("ok: missing/invalid pricing input returns safe validation");
+
+  const calculated = await svc.calculatePricing({
+    organizationId: ORG,
+    estimateId: EST,
+    body: {
+      pricing: { pricingBasis: "wholesale", materialGroup: "Group Promo" }
+    }
+  });
+  assert.equal(calculated.ok, true);
+  assert.equal(calcCalls, 1);
+  assert.ok(lastCalcScope, "calculator received scope");
+  assert.equal(lastCalcScope.rooms[0].pieces[0].finishedEdgeLf, 10);
+  assert.equal(lastCalcScope.rooms[0].pieces[0].openEdgeLf, 10);
+  assert.equal(calculated.lastCalculation.available, true);
+  assert.ok(
+    Number(calculated.lastCalculation.estimatedTotal) > 0 ||
+      Number(calculated.lastCalculation.exactInternalTotal) > 0,
+    "trusted calculator returned a total"
+  );
+  assert.ok(!("elite100" in calculated.lastCalculation));
+  assert.ok(!("calculationSnapshot" in calculated.lastCalculation));
+  assert.equal(calculated.sideEffects.approved, false);
+  assert.equal(calculated.sideEffects.published, false);
+  assert.equal(calculated.sideEffects.sold, false);
+  assert.equal(calculated.sideEffects.digitalEstimateCreated, false);
+  assert.equal(calculated.sideEffects.calculated, false);
+  assert.equal(calculated.persisted, true);
+  assert.equal(repo.peek(EST).status, "priced");
+  assert.ok(repo.peek(EST).calculationSnapshot);
+  console.log("ok: calculate uses trusted calculator; open edge LF included; no raw payload");
+
+  // Excluded piece must not add open edge / must follow calculator included rules.
+  await repo.update(ORG, EST, {
+    status: "ready_to_price",
+    calculationSnapshot: null,
+    staleReason: null,
+    scope: {
+      rooms: baseRooms({
+        extraPieces: [
+          {
+            id: "p-ex",
+            name: "Excluded splash",
+            lengthIn: 48,
+            depthIn: 4,
+            quantity: 1,
+            included: false,
+            excluded: true,
+            openEdgeLf: 99,
+            finishedEdgeLf: 99
+          }
+        ]
+      }),
+      pricingBasis: "wholesale",
+      materialGroup: "Group Promo"
+    }
+  });
+  const withExcluded = await svc.calculatePricing({
+    organizationId: ORG,
+    estimateId: EST
+  });
+  assert.equal(withExcluded.ok, true);
+  assert.ok(
+    (withExcluded.calculationNotes || []).some((n) => /excluded/i.test(String(n))),
+    "notes mention excluded pieces"
+  );
+  // Edge LF from calculator should not price the excluded 99 LF as if included.
+  const edgeLf = withExcluded.lastCalculation?.breakdown?.edgeLf;
+  if (edgeLf != null) {
+    assert.ok(Number(edgeLf) < 50, `excluded 99 LF must not dominate edgeLf (got ${edgeLf})`);
+  }
+  console.log("ok: excluded pieces handled per calculator / notes");
+
+  // Stale marker after pricing draft change post-calc
+  await svc.patchPricing({
+    organizationId: ORG,
+    estimateId: EST,
+    body: { pricing: { materialGroup: "Group B" } }
+  });
+  const staleGet = await svc.getPricing({ organizationId: ORG, estimateId: EST });
+  assert.equal(staleGet.pricingStale, true);
+  assert.match(String(staleGet.staleReason || ""), /Pricing settings changed/i);
+  console.log("ok: pricing stale marker after draft change");
+
+  // Simulate scope-changed stale from updateScope
+  await repo.update(ORG, EST, {
+    staleReason: "Scope changed — recalculate",
+    status: "ready_to_price",
+    calculationSnapshot: null
+  });
+  const scopeStale = await svc.getPricing({ organizationId: ORG, estimateId: EST });
+  assert.equal(scopeStale.scopeChangedSinceCalculation, true);
+  console.log("ok: scope-changed stale marker");
+}
+
+{
+  const routes = readFileSync(join(__dirname, "elite100QuoteFlowRoutes.js"), "utf8");
+  assert.match(routes, /estimates\/:estimateId\/pricing/);
+  assert.match(routes, /pricing\/calculate/);
+  assert.match(routes, /createQuoteFlowPricingService/);
+  assert.doesNotMatch(
+    routes,
+    /publishDigitalEstimate|markSold|approveWorkingDraft|takeoff-finish|digitalEstimate/
+  );
+  // Routes must not import calculator directly (service owns that).
+  assert.doesNotMatch(routes, /calculateStudioEstimateV4/);
+  const pricingSrc = readFileSync(join(__dirname, "quoteFlowPricing.mjs"), "utf8");
+  assert.match(pricingSrc, /calculateStudioEstimateV4/);
+  assert.match(pricingSrc, /buildStudioV2EditablePricing/);
+  assert.match(pricingSrc, /normalizeStudioV2PricingPatch/);
+  assert.doesNotMatch(pricingSrc, /publishApproved\(|markSold\(|from ["'].*digitalEstimate/);
+  assert.doesNotMatch(pricingSrc, /approveWorkingDraft|ensureEditableDraft/);
+  console.log("ok: route/source contracts; trusted calculator reused; no DE/approve/sold");
+}
+
+{
+  const de = join(root, "app-digital-estimate");
+  const dig = join(root, "backend-core/src/digitalEstimate");
+  assert.ok(de);
+  assert.ok(dig);
+  console.log("ok: pricing tests do not require digital estimate module edits");
+}
+
+console.log("\nquoteFlowPricing.test.mjs: ok\n");

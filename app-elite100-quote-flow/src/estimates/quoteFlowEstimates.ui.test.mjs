@@ -64,6 +64,8 @@ assert.match(page, /key:\s*"digital"|Digital Estimate/);
 assert.match(page, /key:\s*"activity"|Activity/);
 assert.match(page, /key:\s*"handoff"|Handoff/);
 assert.match(page, /Save Scope/);
+assert.match(page, /OfficialPricingPanel/);
+assert.match(page, /qf-estimates-section-pricing/);
 assert.match(page, /Coming later|placeholder/);
 assert.match(page, /Manage scoped estimates before pricing/);
 assert.match(page, /initialEstimateId/);
@@ -79,6 +81,7 @@ assert.match(styles, /qf-estimates-modal\b/);
 assert.match(styles, /qf-el-hero/);
 assert.match(styles, /qf-el-table/);
 assert.match(styles, /qf-el-metrics/);
+assert.match(styles, /qf-pricing/);
 assert.doesNotMatch(styles, /\.qf-estimates__cards\b/);
 assert.match(editor, /data-testid="qf-official-scope-editor"/);
 assert.match(editor, /qf-scope--worksheet/);
@@ -107,6 +110,9 @@ assert.match(api, /\/api\/elite100-quote-flow\/estimates/);
 assert.match(api, /method:\s*["']PATCH["']/);
 assert.match(api, /projectName|estimateName/);
 assert.match(api, /openEdgeLf/);
+assert.match(api, /\/pricing/);
+assert.match(api, /pricing\/calculate/);
+assert.match(api, /fetchQuoteFlowEstimatePricing|patchQuoteFlowEstimatePricing|calculateQuoteFlowEstimatePricing/);
 assert.match(app, /EstimatesListPage/);
 assert.match(app, /authToken=\{sessionToken\}/);
 assert.match(app, /mainNav === "estimates"/);
@@ -121,9 +127,25 @@ assert.doesNotMatch(page, /qf-queue-takeoff-iframe|takeoff-iframe|ConsolidatedTa
 assert.doesNotMatch(editor, /iframe|quoteFlowSetScope|AI Takeoff review/);
 assert.doesNotMatch(page + editor + api, /\bV1\b|\bV2\b|Studio V2|Estimate Workspace/);
 assert.doesNotMatch(page, /\bSet Scope\b/);
-assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish|calculate|approve/);
-assert.doesNotMatch(page, /calculate\(|publishDigital|mark sold|Approve Estimate/i);
-console.log("ok: Estimates Quote Library layout; polished scope worksheet; Open edge LF; no Takeoff/V1/V2");
+assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish|approve/);
+assert.doesNotMatch(page, /publishDigital|mark sold|Approve Estimate/i);
+assert.doesNotMatch(page, /Publish Digital|Customer acceptance|Mark sold/i);
+
+const pricingPanel = readFileSync(join(appRoot, "src/estimates/OfficialPricingPanel.tsx"), "utf8");
+assert.match(pricingPanel, /data-testid="qf-official-pricing-panel"/);
+assert.match(pricingPanel, /Configure pricing for the official scope/);
+assert.match(pricingPanel, /does not rerun AI Takeoff/);
+assert.match(pricingPanel, /Internal pricing only/);
+assert.match(pricingPanel, /Save pricing draft/);
+assert.match(pricingPanel, /Calculate pricing/);
+assert.match(pricingPanel, /Latest calculation/);
+assert.match(pricingPanel, /Open edge LF/);
+assert.match(pricingPanel, /Scope changed since last calculation/);
+assert.match(pricingPanel, /qf-pricing-price-group|Price group/);
+assert.match(pricingPanel, /qf-pricing-basis|Pricing basis/);
+assert.doesNotMatch(pricingPanel, /Approve Estimate|Mark sold|Customer acceptance|Digital Estimate publish/i);
+assert.doesNotMatch(pricingPanel, /\bV1\b|\bV2\b|Studio V2/);
+console.log("ok: Estimates Quote Library layout; Pricing tab active; polished scope; Open edge LF; no Takeoff/V1/V2");
 
 {
   const rows = [

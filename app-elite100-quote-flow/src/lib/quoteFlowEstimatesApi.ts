@@ -125,3 +125,116 @@ export async function patchQuoteFlowEstimateScope(
     sideEffects?: Record<string, boolean>;
   }>;
 }
+
+export type QuoteFlowEditablePricing = {
+  pricingBasis?: string;
+  materialGroup?: string;
+  materialGroupLabel?: string;
+  accountAdjustment?: {
+    active?: boolean;
+    percentage?: number;
+    reason?: string;
+    source?: string;
+    readOnly?: boolean;
+    available?: boolean;
+    spahnTrusted?: boolean;
+  };
+  estimateWideAdjustment?: {
+    active?: boolean;
+    percentage?: number;
+    reason?: string;
+    source?: string;
+    editable?: boolean;
+  };
+  internalMarkupPercent?: number;
+  internalMarkupEditable?: boolean;
+  internalMarkupPlaceholder?: string | null;
+  allowedPricingBases?: string[];
+  allowedMaterialGroups?: string[];
+  allowedInternalMarkupPercents?: number[];
+};
+
+export type QuoteFlowPricingResult = {
+  available?: boolean;
+  calculatedAt?: string | null;
+  pricingVersion?: number | null;
+  pricingEngine?: string | null;
+  estimatedTotal?: number | null;
+  exactInternalTotal?: number | null;
+  customerDisplayTotal?: number | null;
+  openEdgeAmount?: number | null;
+  linePreview?: Array<{ label: string; amount: number | null }>;
+  breakdown?: {
+    measuredStoneSf?: number | null;
+    billedStoneSf?: number | null;
+    materialRatePerSf?: number | null;
+    edgeLf?: number | null;
+    openEdgeAmount?: number | null;
+    pricingBasis?: string | null;
+    materialGroup?: string | null;
+  };
+  warnings?: Array<{ code?: string | null; message?: string }>;
+  unresolvedItems?: Array<{ code?: string | null; message?: string }>;
+};
+
+export type QuoteFlowPricingPayload = {
+  ok?: boolean;
+  estimateId?: string;
+  revision?: number | null;
+  status?: string | null;
+  scopeSummary?: QuoteFlowScopeSummary;
+  editablePricing?: QuoteFlowEditablePricing;
+  lastCalculation?: QuoteFlowPricingResult | null;
+  blockers?: string[];
+  calculationNotes?: string[];
+  staleReason?: string | null;
+  pricingStale?: boolean;
+  scopeChangedSinceCalculation?: boolean;
+  message?: string;
+  persisted?: boolean;
+  sideEffects?: Record<string, boolean>;
+};
+
+export type QuoteFlowPricingDraftBody = {
+  pricingBasis?: string;
+  materialGroup?: string;
+  estimateWideAdjustment?: QuoteFlowEditablePricing["estimateWideAdjustment"];
+  internalMarkupPercent?: number;
+};
+
+export async function fetchQuoteFlowEstimatePricing(token: string, estimateId: string) {
+  return apiGet(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/pricing`,
+    token
+  ) as Promise<QuoteFlowPricingPayload>;
+}
+
+export async function patchQuoteFlowEstimatePricing(
+  token: string,
+  estimateId: string,
+  pricing: QuoteFlowPricingDraftBody
+) {
+  return apiFetch(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/pricing`,
+    token,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ pricing })
+    }
+  ) as Promise<QuoteFlowPricingPayload>;
+}
+
+export async function calculateQuoteFlowEstimatePricing(
+  token: string,
+  estimateId: string,
+  pricing?: QuoteFlowPricingDraftBody
+) {
+  return apiFetch(
+    `/api/elite100-quote-flow/estimates/${encodeURIComponent(estimateId)}/pricing/calculate`,
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify(pricing ? { pricing } : {})
+    }
+  ) as Promise<QuoteFlowPricingPayload>;
+}

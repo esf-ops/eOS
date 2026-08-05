@@ -18,6 +18,7 @@ import {
   type QuoteFlowScopeRoom
 } from "../lib/quoteFlowEstimatesApi";
 import OfficialScopeEditor, { roomsFromOfficialScope } from "./OfficialScopeEditor";
+import OfficialPricingPanel from "./OfficialPricingPanel";
 
 type Props = {
   authToken: string;
@@ -49,32 +50,38 @@ const SECTIONS: {
   key: WorkspaceSection;
   label: string;
   placeholder: string;
+  active: boolean;
 }[] = [
-  { key: "scope", label: "Scope", placeholder: "" },
+  { key: "scope", label: "Scope", placeholder: "", active: true },
   {
     key: "pricing",
     label: "Pricing",
-    placeholder: "Pricing will be added after official scope editing is finalized."
+    placeholder: "",
+    active: true
   },
   {
     key: "review",
     label: "Review",
-    placeholder: "Estimate review and approval will be added in a later slice."
+    placeholder: "Estimate review and approval will be added in a later slice.",
+    active: false
   },
   {
     key: "digital",
     label: "Digital Estimate",
-    placeholder: "Customer quote publishing will be added after pricing and approval."
+    placeholder: "Customer quote publishing will be added after pricing and approval.",
+    active: false
   },
   {
     key: "activity",
     label: "Activity",
-    placeholder: "Customer selections and revision activity will appear here later."
+    placeholder: "Customer selections and revision activity will appear here later.",
+    active: false
   },
   {
     key: "handoff",
     label: "Handoff",
-    placeholder: "Sold job handoff will be added after the customer accepts the quote."
+    placeholder: "Sold job handoff will be added after the customer accepts the quote.",
+    active: false
   }
 ];
 
@@ -787,7 +794,7 @@ export default function EstimatesListPage(props: Props) {
                     className={
                       section === s.key
                         ? "qf-estimates__section-tab is-active"
-                        : s.key === "scope"
+                        : s.active
                           ? "qf-estimates__section-tab"
                           : "qf-estimates__section-tab is-later"
                     }
@@ -817,6 +824,24 @@ export default function EstimatesListPage(props: Props) {
                     }}
                     disabled={saving || detailLoading}
                   />
+                </section>
+              ) : section === "pricing" && selectedId ? (
+                <section
+                  className="qf-estimates__section is-active"
+                  data-testid="qf-estimates-section-pricing"
+                >
+                  <OfficialPricingPanel
+                    authToken={authToken}
+                    estimateId={selectedId}
+                    estimateName={estimateName || resolveEstimateDisplayName(workspaceItem)}
+                    customerLabel={resolveEstimateCustomer(workspaceItem)}
+                    disabled={saving || detailLoading || dirty}
+                  />
+                  {dirty ? (
+                    <p className="qf-muted" data-testid="qf-pricing-scope-dirty-hint">
+                      Save Scope before calculating pricing so quantities stay in sync.
+                    </p>
+                  ) : null}
                 </section>
               ) : (
                 <section

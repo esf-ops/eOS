@@ -3970,3 +3970,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `OfficialScopeEditor.tsx`, `EstimatesListPage.tsx` sticky save, `styles.css`, Estimates UI / slice 1d tests, this doc. |
 | **Protected / unchanged** | Inbox, Estimate Queue Set Scope, pricing/calculate/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`, open-edge carry-forward (§291). |
 | **Revisit trigger** | Activate Pricing tab inside the same modal when that slice lands. |
+
+### 293. Elite 100 Quote Flow — Estimates Pricing tab (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-estimates-pricing` |
+| **Decision** | Activate Pricing inside the Estimates modal only. Persist pricing draft on existing `scope` fields (`pricingBasis`, `materialGroup`, `estimateWideAdjustment`, `quoteFlowPricingEdited`) and calculation on `calculation_snapshot_json` / status `priced` — **no migration**. Calculate via trusted `calculateStudioEstimateV4` + Studio V2 pricing normalize/present helpers. Official scope (incl. open edge LF → `finishedEdgeLf`) is quantity truth. Stale via existing `staleReason` after scope/pricing edits. |
+| **Why** | Estimators need internal pricing after Set Scope without leaving Quote Flow or copying Studio V2 layout / inventing formulas. |
+| **Impacted** | `quoteFlowPricing.mjs` + routes/tests, Estimates `OfficialPricingPanel`, estimates API helpers, styles, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Inbox, Estimate Queue Set Scope, Scope editor behavior (except reading summary), approval, Digital Estimate publish, customer acceptance, sold/handoff, Studio V2 page layout, `app-digital-estimate`, `backend-core/src/digitalEstimate`. |
+| **Revisit trigger** | Estimate Review / approve, Digital Estimate publish, customer-facing totals, or material/color catalog UX beyond price group. |
