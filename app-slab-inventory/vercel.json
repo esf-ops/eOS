@@ -1,3 +1,9 @@
 {
-  "rewrites": [{ "source": "/((?!assets/|product-catalog/|material-textures/).*)", "destination": "/index.html" }]
+  "rewrites": [{ "source": "/((?!assets/|product-catalog/|material-textures/).*)", "destination": "/index.html" }],
+  "git": {
+    "deploymentEnabled": {
+      "main": true,
+      "*": false
+    }
+  }
 }
