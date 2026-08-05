@@ -103,11 +103,38 @@ export function validateAndNormalizeOfficialScopeRooms(roomsRaw) {
       if (piece.finishedEdge && typeof piece.finishedEdge === "object") {
         next.finishedEdge = { ...piece.finishedEdge };
       }
-      if (piece.finishedEdgeLf != null && Number.isFinite(Number(piece.finishedEdgeLf))) {
-        next.finishedEdgeLf = Number(piece.finishedEdgeLf);
-      }
-      if (piece.openEdgeLf != null && Number.isFinite(Number(piece.openEdgeLf))) {
-        next.openEdgeLf = Number(piece.openEdgeLf);
+      // Canonical open/exposed edge LF — preserve aliases when present.
+      const openEdgeLf = (() => {
+        const candidates = [
+          piece.openEdgeLf,
+          piece.exposedEdgeLf,
+          piece.exposedEdgeLinearFeet,
+          piece.openEdgeLinearFeet,
+          piece.edgeLinearFeet,
+          piece.edgeLf,
+          piece.finishedEdgeLf
+        ];
+        for (const c of candidates) {
+          const n = Number(c);
+          if (Number.isFinite(n) && n >= 0) return Math.round(n * 100) / 100;
+        }
+        const fe = piece.finishedEdge;
+        if (fe && typeof fe === "object") {
+          const inches = Number(fe.totalFinishedEdgeLengthIn);
+          if (Number.isFinite(inches) && inches >= 0) {
+            return Math.round((inches / 12) * 100) / 100;
+          }
+        }
+        return 0;
+      })();
+      next.openEdgeLf = openEdgeLf;
+      next.finishedEdgeLf = openEdgeLf;
+      next.exposedEdgeLf = openEdgeLf;
+      if (next.finishedEdge && typeof next.finishedEdge === "object") {
+        next.finishedEdge = {
+          ...next.finishedEdge,
+          totalFinishedEdgeLengthIn: Math.round(openEdgeLf * 12 * 100) / 100
+        };
       }
       if (typeof piece.includeBacksplash === "boolean") {
         next.includeBacksplash = piece.includeBacksplash;

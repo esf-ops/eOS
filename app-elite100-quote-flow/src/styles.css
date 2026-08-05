@@ -747,6 +747,60 @@ body {
   align-items: start;
 }
 
+.qf-estimates--library .qf-estimates-library,
+.qf-estimates-library {
+  width: 100%;
+}
+
+.qf-estimates__list--library {
+  width: 100%;
+  max-width: none;
+  min-height: min(68vh, 880px);
+}
+
+.qf-estimates__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.qf-estimates__card {
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: var(--eos-surface);
+  box-shadow: var(--sh-1);
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.qf-estimates__card.is-active {
+  border-color: var(--eos-ink);
+  box-shadow: 0 0 0 1px var(--eos-ink);
+}
+
+.qf-estimates__card-main {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 14px 14px 8px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.qf-estimates__card-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 14px 14px;
+}
+
 .qf-estimates--command-layout {
   grid-template-columns: minmax(280px, 36%) minmax(0, 1fr);
   gap: 18px;
@@ -756,6 +810,9 @@ body {
 @media (max-width: 960px) {
   .qf-estimates,
   .qf-estimates--command-layout {
+    grid-template-columns: 1fr;
+  }
+  .qf-estimates__cards {
     grid-template-columns: 1fr;
   }
 }
@@ -770,12 +827,73 @@ body {
   min-height: 280px;
 }
 
-.qf-estimates__detail--command {
+.qf-estimates-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(18, 24, 38, 0.48);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 18px;
+}
+
+.qf-estimates-modal {
+  width: min(1180px, 100%);
+  max-height: calc(100vh - 36px);
+  margin: auto;
+  background: var(--eos-surface);
+  border-radius: var(--r-md);
+  box-shadow: 0 18px 48px rgba(16, 24, 40, 0.28);
   display: flex;
   flex-direction: column;
-  min-height: min(72vh, 900px);
-  padding: 0;
   overflow: hidden;
+  border: 1px solid var(--eos-line);
+}
+
+.qf-estimates-modal__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--eos-surface);
+  border-bottom: 1px solid var(--eos-line);
+  padding: 16px 18px 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.qf-estimates-modal__header-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.qf-estimates-modal__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.qf-estimates-modal__eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--eos-ink-soft);
+}
+
+.qf-estimates-modal__header-top h2 {
+  margin: 0;
+  font-size: clamp(1.2rem, 1rem + 0.6vw, 1.55rem);
+}
+
+.qf-estimates-modal__body {
+  overflow: auto;
+  padding: 8px 18px 24px;
+  flex: 1;
 }
 
 .qf-estimates__workspace-sticky {
@@ -870,7 +988,7 @@ body {
 
 .qf-estimates__section {
   border-top: 1px solid var(--eos-line);
-  padding: 16px;
+  padding: 16px 0;
 }
 
 .qf-estimates__section.is-later {

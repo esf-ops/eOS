@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { QuoteFlowScopePiece, QuoteFlowScopeRoom } from "../lib/quoteFlowEstimatesApi";
-import { summarizeRoomsLocal } from "../lib/estimateGrouping.mjs";
+import { resolvePieceOpenEdgeLf, summarizeRoomsLocal } from "../lib/estimateGrouping.mjs";
 
 type Props = {
   rooms: QuoteFlowScopeRoom[];
@@ -24,6 +24,8 @@ function emptyPiece(): QuoteFlowScopePiece {
     lengthIn: 0,
     depthIn: 0,
     quantity: 1,
+    openEdgeLf: 0,
+    finishedEdgeLf: 0,
     included: true,
     excluded: false
   };
@@ -48,20 +50,35 @@ function roomHasBacksplashFields(room: QuoteFlowScopeRoom): boolean {
   );
 }
 
-function pieceHasFinishedEdge(piece: QuoteFlowScopePiece): boolean {
-  return (
-    (piece.finishedEdge && typeof piece.finishedEdge === "object") ||
-    piece.finishedEdgeLf != null ||
-    piece.openEdgeLf != null
-  );
+function pieceSf(piece: QuoteFlowScopePiece): number {
+  const lengthIn = Number(piece.lengthIn) || 0;
+  const depthIn = Number(piece.depthIn) || 0;
+  const quantity = Math.max(1, Math.floor(Number(piece.quantity) || 1));
+  if (!(lengthIn > 0 && depthIn > 0)) return 0;
+  return Math.round(((lengthIn * depthIn * quantity) / 144) * 100) / 100;
 }
 
-function finishedEdgeTotalIn(piece: QuoteFlowScopePiece): number {
-  const fe = piece.finishedEdge && typeof piece.finishedEdge === "object" ? piece.finishedEdge : {};
-  const totalIn = Number((fe as { totalFinishedEdgeLengthIn?: number }).totalFinishedEdgeLengthIn);
-  if (Number.isFinite(totalIn) && totalIn > 0) return totalIn;
-  const lf = Number(piece.openEdgeLf ?? piece.finishedEdgeLf) || 0;
-  return Math.round(lf * 12 * 100) / 100;
+function patchOpenEdgeLf(piece: QuoteFlowScopePiece, lf: number): Partial<QuoteFlowScopePiece> {
+  const value = Math.max(0, Math.round((Number(lf) || 0) * 100) / 100);
+  const inches = Math.round(value * 12 * 100) / 100;
+  const fe =
+    piece.finishedEdge && typeof piece.finishedEdge === "object"
+      ? { ...piece.finishedEdge }
+      : {};
+  return {
+    openEdgeLf: value,
+    finishedEdgeLf: value,
+    exposedEdgeLf: value,
+    finishedEdge: {
+      ...fe,
+      totalFinishedEdgeLengthIn: inches,
+      frontEdgeLengthIn:
+        Number((fe as { frontEdgeLengthIn?: number }).frontEdgeLengthIn) > 0
+          ? (fe as { frontEdgeLengthIn?: number }).frontEdgeLengthIn
+          : inches,
+      source: "estimator_confirmed"
+    }
+  };
 }
 
 export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined): QuoteFlowScopeRoom[] {
@@ -72,16 +89,21 @@ export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined):
     name: r.name || "Room",
     roomType: r.roomType || "Other",
     included: r.included !== false,
-    pieces: (Array.isArray(r.pieces) ? r.pieces : []).map((p) => ({
-      ...p,
-      id: p.id || rid("piece"),
-      name: p.name || "Piece",
-      pieceType: p.pieceType || "counter",
-      lengthIn: Number(p.lengthIn) || 0,
-      depthIn: Number(p.depthIn) || 0,
-      quantity: Math.max(1, Math.floor(Number(p.quantity) || 1)),
-      included: p.included !== false && p.excluded !== true && p.include !== false
-    }))
+    pieces: (Array.isArray(r.pieces) ? r.pieces : []).map((p) => {
+      const openEdgeLf = resolvePieceOpenEdgeLf(p);
+      return {
+        ...p,
+        id: p.id || rid("piece"),
+        name: p.name || "Piece",
+        pieceType: p.pieceType || "counter",
+        lengthIn: Number(p.lengthIn) || 0,
+        depthIn: Number(p.depthIn) || 0,
+        quantity: Math.max(1, Math.floor(Number(p.quantity) || 1)),
+        openEdgeLf,
+        finishedEdgeLf: openEdgeLf,
+        included: p.included !== false && p.excluded !== true && p.include !== false
+      };
+    })
   }));
 }
 
@@ -153,13 +175,11 @@ export default function OfficialScopeEditor(props: Props) {
     <div className="qf-scope" data-testid="qf-official-scope-editor">
       <div className="qf-scope__intro">
         <h2>{heading || "Official scope"}</h2>
-        <p className="qf-muted">
-          {hint || "Manual edits here do not rerun AI Takeoff."}
-        </p>
+        <p className="qf-muted">{hint || "Manual edits here do not rerun AI Takeoff."}</p>
         {showEdgeHint && !heading ? (
           <p className="qf-muted qf-scope__hint">
-            Edit room and piece measurements for this estimate. Finished edge and backsplash fields
-            appear when they already exist on the scope.
+            Edit room and piece measurements for this estimate. Open edge LF is the exposed edge
+            length used later for pricing — it is scope data, not a price.
           </p>
         ) : null}
         <p className="qf-scope__sf-summary" data-testid="qf-scope-sf-summary">
@@ -171,6 +191,7 @@ export default function OfficialScopeEditor(props: Props) {
           {localSummary.backsplashSf > 0
             ? ` · ${localSummary.backsplashSf.toFixed(1)} SF backsplash`
             : ""}
+          {` · ${(localSummary.openEdgeLf || 0).toFixed(1)} LF open edge`}
           {localSummary.excludedPieceCount > 0
             ? ` · ${localSummary.excludedPieceCount} excluded`
             : ""}
@@ -281,6 +302,8 @@ export default function OfficialScopeEditor(props: Props) {
             {(room.pieces || []).map((piece, pieceIndex) => {
               const included =
                 piece.included !== false && piece.excluded !== true && piece.include !== false;
+              const sf = pieceSf(piece);
+              const openLf = resolvePieceOpenEdgeLf(piece);
               return (
                 <li
                   key={piece.id || `piece-${pieceIndex}`}
@@ -343,6 +366,27 @@ export default function OfficialScopeEditor(props: Props) {
                       }
                     />
                   </label>
+                  <label data-testid="qf-scope-piece-sf">
+                    Square feet
+                    <input type="text" value={sf > 0 ? sf.toFixed(2) : "0.00"} readOnly disabled />
+                  </label>
+                  <label data-testid="qf-scope-open-edge-lf">
+                    Open edge LF
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={openLf}
+                      disabled={disabled}
+                      onChange={(e) =>
+                        updatePiece(
+                          roomIndex,
+                          pieceIndex,
+                          patchOpenEdgeLf(piece, Number(e.target.value) || 0)
+                        )
+                      }
+                    />
+                  </label>
                   <label className="qf-scope__check">
                     <input
                       type="checkbox"
@@ -357,34 +401,6 @@ export default function OfficialScopeEditor(props: Props) {
                     />
                     Include
                   </label>
-                  {pieceHasFinishedEdge(piece) ? (
-                    <label data-testid="qf-scope-finished-edge">
-                      Finished edge (in)
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.125}
-                        value={finishedEdgeTotalIn(piece)}
-                        disabled={disabled}
-                        onChange={(e) => {
-                          const totalIn = Number(e.target.value) || 0;
-                          updatePiece(roomIndex, pieceIndex, {
-                            finishedEdge: {
-                              ...(typeof piece.finishedEdge === "object"
-                                ? piece.finishedEdge
-                                : {}),
-                              frontEdgeLengthIn: totalIn,
-                              totalFinishedEdgeLengthIn: totalIn,
-                              approved: true,
-                              source: "estimator_confirmed"
-                            },
-                            openEdgeLf: Math.round((totalIn / 12) * 100) / 100,
-                            finishedEdgeLf: Math.round((totalIn / 12) * 100) / 100
-                          });
-                        }}
-                      />
-                    </label>
-                  ) : null}
                   <button
                     type="button"
                     className="qf-btn-secondary"
