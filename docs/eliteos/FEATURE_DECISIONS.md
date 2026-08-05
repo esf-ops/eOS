@@ -3959,3 +3959,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowSetScope.mjs`, `quoteFlowOpenEdge.mjs`, `quoteFlowEstimates` normalizer, import payload, seed, presenter/grouping resolvers, slice 1c realistic fixture, this doc. |
 | **Protected / unchanged** | Pricing/calculate/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`, Estimates layout. |
 | **Revisit trigger** | Backfill historical zeroed openEdgeLf from takeoff finishedEdge when operators need it. |
+
+### 292. Elite 100 Quote Flow — Official Scope editor worksheet polish (2026-08-04)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-04 · `feature/quote-flow-official-scope-editor-polish` |
+| **Decision** | Estimates modal Scope tab / `OfficialScopeEditor` becomes a compact estimating worksheet: room section cards, piece **table** (name / length / depth / qty / SF / Open edge LF / Included / Actions), compact Include toggles (no large Exclude piece button), metric summary row, and sticky modal footer **Unsaved scope changes → Save Scope**. Data shape, PATCH Save Scope, Open edge LF persistence, library/modal shell unchanged. |
+| **Why** | Scope editor was functional but read as loose form blocks — estimators need a production worksheet feel inside the near-fullscreen modal. |
+| **Impacted** | `OfficialScopeEditor.tsx`, `EstimatesListPage.tsx` sticky save, `styles.css`, Estimates UI / slice 1d tests, this doc. |
+| **Protected / unchanged** | Inbox, Estimate Queue Set Scope, pricing/calculate/approve/publish/accept/sold, Studio V2, `app-digital-estimate`, `backend-core/src/digitalEstimate`, open-edge carry-forward (§291). |
+| **Revisit trigger** | Activate Pricing tab inside the same modal when that slice lands. |

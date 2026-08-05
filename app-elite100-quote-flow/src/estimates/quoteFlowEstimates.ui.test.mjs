@@ -81,17 +81,28 @@ assert.match(styles, /qf-el-table/);
 assert.match(styles, /qf-el-metrics/);
 assert.doesNotMatch(styles, /\.qf-estimates__cards\b/);
 assert.match(editor, /data-testid="qf-official-scope-editor"/);
+assert.match(editor, /qf-scope--worksheet/);
 assert.match(editor, /Official scope/);
 assert.match(editor, /Manual edits here do not rerun AI Takeoff/);
 assert.match(editor, /Open edge LF/);
 assert.match(editor, /data-testid="qf-scope-open-edge-lf"/);
+assert.match(editor, /data-testid="qf-scope-piece-table"/);
+assert.match(editor, /qf-scope__table/);
+assert.match(editor, /qf-scope__metrics/);
 assert.match(editor, /Add room/);
 assert.match(editor, /Add piece/);
-assert.match(editor, /Exclude piece/);
+assert.match(editor, /aria-label="Included"|Included/);
+assert.doesNotMatch(editor, /Exclude piece|qf-scope-exclude-piece/);
 assert.match(editor, /Remove room|qf-scope-remove-room/);
-assert.match(editor, /Remove piece|qf-scope-remove-piece/);
+assert.match(editor, /Remove piece|qf-scope-remove-piece|Remove/);
 assert.match(editor, /qf-scope-sf-summary/);
-assert.match(editor, /LF open edge/);
+assert.match(editor, /Open edge LF/);
+assert.match(page, /qf-estimates-sticky-save/);
+assert.match(page, /Unsaved scope changes/);
+assert.match(page, /qf-estimates-save-scope-sticky/);
+assert.match(styles, /qf-scope__table/);
+assert.match(styles, /qf-estimates-modal__sticky-save/);
+assert.match(styles, /qf-scope--worksheet/);
 assert.match(api, /\/api\/elite100-quote-flow\/estimates/);
 assert.match(api, /method:\s*["']PATCH["']/);
 assert.match(api, /projectName|estimateName/);
@@ -112,7 +123,7 @@ assert.doesNotMatch(page + editor + api, /\bV1\b|\bV2\b|Studio V2|Estimate Works
 assert.doesNotMatch(page, /\bSet Scope\b/);
 assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish|calculate|approve/);
 assert.doesNotMatch(page, /calculate\(|publishDigital|mark sold|Approve Estimate/i);
-console.log("ok: Estimates Quote Library layout; table; modal; Open edge LF; no Takeoff/V1/V2");
+console.log("ok: Estimates Quote Library layout; polished scope worksheet; Open edge LF; no Takeoff/V1/V2");
 
 {
   const rows = [

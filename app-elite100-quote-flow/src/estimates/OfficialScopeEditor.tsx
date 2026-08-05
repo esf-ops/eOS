@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import type { QuoteFlowScopePiece, QuoteFlowScopeRoom } from "../lib/quoteFlowEstimatesApi";
 import { resolvePieceOpenEdgeLf, summarizeRoomsLocal } from "../lib/estimateGrouping.mjs";
 
@@ -109,7 +109,6 @@ export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined):
 
 export default function OfficialScopeEditor(props: Props) {
   const { rooms, onChange, disabled, heading, hint } = props;
-  const [showEdgeHint] = useState(true);
   const localSummary = useMemo(() => summarizeRoomsLocal(rooms), [rooms]);
 
   function updateRoom(index: number, patch: Partial<QuoteFlowScopeRoom>) {
@@ -137,17 +136,6 @@ export default function OfficialScopeEditor(props: Props) {
     onChange(next);
   }
 
-  function excludePiece(roomIndex: number, pieceIndex: number) {
-    const next = rooms.map((r, i) => {
-      if (i !== roomIndex) return r;
-      const pieces = (r.pieces || []).map((p, pi) =>
-        pi === pieceIndex ? { ...p, included: false, excluded: true } : p
-      );
-      return { ...r, pieces };
-    });
-    onChange(next);
-  }
-
   function removePiece(roomIndex: number, pieceIndex: number) {
     const piece = rooms[roomIndex]?.pieces?.[pieceIndex];
     const label = String(piece?.name || "this piece");
@@ -172,279 +160,311 @@ export default function OfficialScopeEditor(props: Props) {
   }
 
   return (
-    <div className="qf-scope" data-testid="qf-official-scope-editor">
-      <div className="qf-scope__intro">
-        <h2>{heading || "Official scope"}</h2>
-        <p className="qf-muted">{hint || "Manual edits here do not rerun AI Takeoff."}</p>
-        {showEdgeHint && !heading ? (
-          <p className="qf-muted qf-scope__hint">
-            Edit room and piece measurements for this estimate. Open edge LF is the exposed edge
-            length used later for pricing — it is scope data, not a price.
-          </p>
-        ) : null}
-        <p className="qf-scope__sf-summary" data-testid="qf-scope-sf-summary">
-          {localSummary.roomCount} room{localSummary.roomCount === 1 ? "" : "s"} ·{" "}
-          {localSummary.pieceCount} piece{localSummary.pieceCount === 1 ? "" : "s"}
-          {localSummary.countertopSf > 0
-            ? ` · ${localSummary.countertopSf.toFixed(1)} SF countertop`
-            : ""}
-          {localSummary.backsplashSf > 0
-            ? ` · ${localSummary.backsplashSf.toFixed(1)} SF backsplash`
-            : ""}
-          {` · ${(localSummary.openEdgeLf || 0).toFixed(1)} LF open edge`}
-          {localSummary.excludedPieceCount > 0
-            ? ` · ${localSummary.excludedPieceCount} excluded`
-            : ""}
-        </p>
-      </div>
-
-      {rooms.map((room, roomIndex) => (
-        <div
-          key={room.id || `room-${roomIndex}`}
-          className="qf-scope__room"
-          data-testid="qf-scope-room"
-        >
-          <div className="qf-scope__room-head">
-            <label>
-              Room name
-              <input
-                type="text"
-                value={String(room.name || "")}
-                disabled={disabled}
-                onChange={(e) => updateRoom(roomIndex, { name: e.target.value })}
-              />
-            </label>
-            <label>
-              Room type
-              <input
-                type="text"
-                value={String(room.roomType || "")}
-                disabled={disabled}
-                onChange={(e) => updateRoom(roomIndex, { roomType: e.target.value })}
-              />
-            </label>
-            <label className="qf-scope__check">
-              <input
-                type="checkbox"
-                checked={room.included !== false}
-                disabled={disabled}
-                onChange={(e) => updateRoom(roomIndex, { included: e.target.checked })}
-              />
-              Include room
-            </label>
-            <button
-              type="button"
-              className="qf-btn-secondary"
-              data-testid="qf-scope-remove-room"
-              disabled={disabled}
-              onClick={() => removeRoom(roomIndex)}
-            >
-              Remove room
-            </button>
+    <div className="qf-scope qf-scope--worksheet" data-testid="qf-official-scope-editor">
+      <header className="qf-scope__intro" data-testid="qf-scope-intro">
+        <div className="qf-scope__intro-copy">
+          <h2>{heading || "Official scope"}</h2>
+          <p className="qf-muted">{hint || "Manual edits here do not rerun AI Takeoff."}</p>
+        </div>
+        <div className="qf-scope__metrics" data-testid="qf-scope-sf-summary" aria-label="Scope summary">
+          <div className="qf-scope__metric">
+            <span className="qf-scope__metric-val">{localSummary.roomCount}</span>
+            <span className="qf-scope__metric-lbl">Rooms</span>
           </div>
+          <div className="qf-scope__metric">
+            <span className="qf-scope__metric-val">{localSummary.pieceCount}</span>
+            <span className="qf-scope__metric-lbl">Pieces</span>
+          </div>
+          <div className="qf-scope__metric">
+            <span className="qf-scope__metric-val">
+              {localSummary.countertopSf > 0 ? localSummary.countertopSf.toFixed(1) : "0.0"}
+            </span>
+            <span className="qf-scope__metric-lbl">Countertop SF</span>
+          </div>
+          <div className="qf-scope__metric">
+            <span className="qf-scope__metric-val">
+              {localSummary.backsplashSf > 0 ? localSummary.backsplashSf.toFixed(1) : "0.0"}
+            </span>
+            <span className="qf-scope__metric-lbl">Backsplash SF</span>
+          </div>
+          <div className="qf-scope__metric" data-testid="qf-scope-summary-open-edge">
+            <span className="qf-scope__metric-val">{(localSummary.openEdgeLf || 0).toFixed(1)}</span>
+            <span className="qf-scope__metric-lbl">Open edge LF</span>
+          </div>
+        </div>
+      </header>
 
-          {roomHasBacksplashFields(room) ? (
-            <div className="qf-scope__backsplash" data-testid="qf-scope-backsplash">
-              <label className="qf-scope__check">
-                <input
-                  type="checkbox"
-                  checked={room.includeBacksplash === true}
+      <div className="qf-scope__rooms">
+        {rooms.map((room, roomIndex) => {
+          const roomIncluded = room.included !== false;
+          return (
+            <section
+              key={room.id || `room-${roomIndex}`}
+              className={roomIncluded ? "qf-scope__room" : "qf-scope__room is-excluded"}
+              data-testid="qf-scope-room"
+            >
+              <div className="qf-scope__room-head">
+                <label className="qf-scope__field qf-scope__field--name">
+                  <span className="qf-scope__field-lbl">Room name</span>
+                  <input
+                    type="text"
+                    value={String(room.name || "")}
+                    disabled={disabled}
+                    onChange={(e) => updateRoom(roomIndex, { name: e.target.value })}
+                  />
+                </label>
+                <label className="qf-scope__field qf-scope__field--type">
+                  <span className="qf-scope__field-lbl">Room type</span>
+                  <input
+                    type="text"
+                    value={String(room.roomType || "")}
+                    disabled={disabled}
+                    onChange={(e) => updateRoom(roomIndex, { roomType: e.target.value })}
+                  />
+                </label>
+                <label className="qf-scope__toggle">
+                  <input
+                    type="checkbox"
+                    checked={roomIncluded}
+                    disabled={disabled}
+                    onChange={(e) => updateRoom(roomIndex, { included: e.target.checked })}
+                  />
+                  <span>Include room</span>
+                </label>
+                <button
+                  type="button"
+                  className="qf-scope__link-btn"
+                  data-testid="qf-scope-remove-room"
                   disabled={disabled}
-                  onChange={(e) =>
-                    updateRoom(roomIndex, {
-                      includeBacksplash: e.target.checked,
-                      backsplashHeightMode: e.target.checked
-                        ? room.backsplashHeightMode || "standard"
-                        : "none"
-                    })
-                  }
-                />
-                Include backsplash
-              </label>
-              {room.includeBacksplash === true ? (
-                <>
-                  <label>
-                    Height (in)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.125}
-                      value={Number(room.backsplashHeightIn) || 0}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        updateRoom(roomIndex, {
-                          backsplashHeightIn: Number(e.target.value) || 0
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Measured length (in)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.125}
-                      value={Number(room.backsplashMeasuredLengthIn) || 0}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        updateRoom(roomIndex, {
-                          backsplashMeasuredLengthIn: Number(e.target.value) || 0
-                        })
-                      }
-                    />
-                  </label>
-                </>
-              ) : null}
-            </div>
-          ) : null}
-
-          <ul className="qf-scope__pieces">
-            {(room.pieces || []).map((piece, pieceIndex) => {
-              const included =
-                piece.included !== false && piece.excluded !== true && piece.include !== false;
-              const sf = pieceSf(piece);
-              const openLf = resolvePieceOpenEdgeLf(piece);
-              return (
-                <li
-                  key={piece.id || `piece-${pieceIndex}`}
-                  className={included ? "qf-scope__piece" : "qf-scope__piece is-excluded"}
-                  data-testid="qf-scope-piece"
+                  onClick={() => removeRoom(roomIndex)}
                 >
-                  <label>
-                    Piece name
-                    <input
-                      type="text"
-                      value={String(piece.name || "")}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        updatePiece(roomIndex, pieceIndex, { name: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Length (in)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.125}
-                      value={Number(piece.lengthIn) || 0}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        updatePiece(roomIndex, pieceIndex, {
-                          lengthIn: Number(e.target.value) || 0
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Depth (in)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.125}
-                      value={Number(piece.depthIn) || 0}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        updatePiece(roomIndex, pieceIndex, {
-                          depthIn: Number(e.target.value) || 0
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Qty
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={Math.max(1, Math.floor(Number(piece.quantity) || 1))}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        updatePiece(roomIndex, pieceIndex, {
-                          quantity: Math.max(1, Math.floor(Number(e.target.value) || 1))
-                        })
-                      }
-                    />
-                  </label>
-                  <label data-testid="qf-scope-piece-sf">
-                    Square feet
-                    <input type="text" value={sf > 0 ? sf.toFixed(2) : "0.00"} readOnly disabled />
-                  </label>
-                  <label data-testid="qf-scope-open-edge-lf">
-                    Open edge LF
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={openLf}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        updatePiece(
-                          roomIndex,
-                          pieceIndex,
-                          patchOpenEdgeLf(piece, Number(e.target.value) || 0)
-                        )
-                      }
-                    />
-                  </label>
-                  <label className="qf-scope__check">
+                  Remove room
+                </button>
+              </div>
+
+              {roomHasBacksplashFields(room) ? (
+                <div className="qf-scope__backsplash" data-testid="qf-scope-backsplash">
+                  <label className="qf-scope__toggle">
                     <input
                       type="checkbox"
-                      checked={included}
+                      checked={room.includeBacksplash === true}
                       disabled={disabled}
                       onChange={(e) =>
-                        updatePiece(roomIndex, pieceIndex, {
-                          included: e.target.checked,
-                          excluded: !e.target.checked
+                        updateRoom(roomIndex, {
+                          includeBacksplash: e.target.checked,
+                          backsplashHeightMode: e.target.checked
+                            ? room.backsplashHeightMode || "standard"
+                            : "none"
                         })
                       }
                     />
-                    Include
+                    <span>Include backsplash</span>
                   </label>
-                  <button
-                    type="button"
-                    className="qf-btn-secondary"
-                    data-testid="qf-scope-exclude-piece"
-                    disabled={disabled}
-                    onClick={() => excludePiece(roomIndex, pieceIndex)}
-                  >
-                    Exclude piece
-                  </button>
-                  <button
-                    type="button"
-                    className="qf-btn-secondary"
-                    data-testid="qf-scope-remove-piece"
-                    disabled={disabled}
-                    onClick={() => removePiece(roomIndex, pieceIndex)}
-                  >
-                    Remove piece
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                  {room.includeBacksplash === true ? (
+                    <>
+                      <label className="qf-scope__field qf-scope__field--compact">
+                        <span className="qf-scope__field-lbl">Height (in)</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.125}
+                          value={Number(room.backsplashHeightIn) || 0}
+                          disabled={disabled}
+                          onChange={(e) =>
+                            updateRoom(roomIndex, {
+                              backsplashHeightIn: Number(e.target.value) || 0
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="qf-scope__field qf-scope__field--compact">
+                        <span className="qf-scope__field-lbl">Measured length (in)</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.125}
+                          value={Number(room.backsplashMeasuredLengthIn) || 0}
+                          disabled={disabled}
+                          onChange={(e) =>
+                            updateRoom(roomIndex, {
+                              backsplashMeasuredLengthIn: Number(e.target.value) || 0
+                            })
+                          }
+                        />
+                      </label>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
 
-          <button
-            type="button"
-            className="qf-btn-secondary"
-            data-testid="qf-scope-add-piece"
-            disabled={disabled}
-            onClick={() => addPiece(roomIndex)}
-          >
-            Add piece
-          </button>
-        </div>
-      ))}
+              <div className="qf-scope__table-wrap">
+                <table className="qf-scope__table" data-testid="qf-scope-piece-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Piece name</th>
+                      <th scope="col">Length in</th>
+                      <th scope="col">Depth in</th>
+                      <th scope="col">Qty</th>
+                      <th scope="col">Square feet</th>
+                      <th scope="col">Open edge LF</th>
+                      <th scope="col">Included</th>
+                      <th scope="col" className="qf-scope__col-actions">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(room.pieces || []).map((piece, pieceIndex) => {
+                      const included =
+                        piece.included !== false &&
+                        piece.excluded !== true &&
+                        piece.include !== false;
+                      const sf = pieceSf(piece);
+                      const openLf = resolvePieceOpenEdgeLf(piece);
+                      return (
+                        <tr
+                          key={piece.id || `piece-${pieceIndex}`}
+                          className={included ? undefined : "is-excluded"}
+                          data-testid="qf-scope-piece"
+                        >
+                          <td data-label="Piece name">
+                            <input
+                              type="text"
+                              aria-label="Piece name"
+                              value={String(piece.name || "")}
+                              disabled={disabled}
+                              onChange={(e) =>
+                                updatePiece(roomIndex, pieceIndex, { name: e.target.value })
+                              }
+                            />
+                          </td>
+                          <td data-label="Length in">
+                            <input
+                              type="number"
+                              aria-label="Length in"
+                              min={0}
+                              step={0.125}
+                              value={Number(piece.lengthIn) || 0}
+                              disabled={disabled}
+                              onChange={(e) =>
+                                updatePiece(roomIndex, pieceIndex, {
+                                  lengthIn: Number(e.target.value) || 0
+                                })
+                              }
+                            />
+                          </td>
+                          <td data-label="Depth in">
+                            <input
+                              type="number"
+                              aria-label="Depth in"
+                              min={0}
+                              step={0.125}
+                              value={Number(piece.depthIn) || 0}
+                              disabled={disabled}
+                              onChange={(e) =>
+                                updatePiece(roomIndex, pieceIndex, {
+                                  depthIn: Number(e.target.value) || 0
+                                })
+                              }
+                            />
+                          </td>
+                          <td data-label="Qty">
+                            <input
+                              type="number"
+                              aria-label="Quantity"
+                              min={1}
+                              step={1}
+                              value={Math.max(1, Math.floor(Number(piece.quantity) || 1))}
+                              disabled={disabled}
+                              onChange={(e) =>
+                                updatePiece(roomIndex, pieceIndex, {
+                                  quantity: Math.max(1, Math.floor(Number(e.target.value) || 1))
+                                })
+                              }
+                            />
+                          </td>
+                          <td data-label="Square feet" data-testid="qf-scope-piece-sf">
+                            <span className="qf-scope__readonly">{sf > 0 ? sf.toFixed(2) : "0.00"}</span>
+                          </td>
+                          <td data-label="Open edge LF" data-testid="qf-scope-open-edge-lf">
+                            <input
+                              type="number"
+                              aria-label="Open edge LF"
+                              min={0}
+                              step={0.01}
+                              value={openLf}
+                              disabled={disabled}
+                              onChange={(e) =>
+                                updatePiece(
+                                  roomIndex,
+                                  pieceIndex,
+                                  patchOpenEdgeLf(piece, Number(e.target.value) || 0)
+                                )
+                              }
+                            />
+                          </td>
+                          <td data-label="Included">
+                            <label className="qf-scope__toggle qf-scope__toggle--compact">
+                              <input
+                                type="checkbox"
+                                aria-label="Included"
+                                checked={included}
+                                disabled={disabled}
+                                onChange={(e) =>
+                                  updatePiece(roomIndex, pieceIndex, {
+                                    included: e.target.checked,
+                                    excluded: !e.target.checked
+                                  })
+                                }
+                              />
+                              <span className="qf-scope__sr-only">Included</span>
+                            </label>
+                          </td>
+                          <td data-label="Actions" className="qf-scope__col-actions">
+                            <button
+                              type="button"
+                              className="qf-scope__link-btn"
+                              data-testid="qf-scope-remove-piece"
+                              disabled={disabled}
+                              onClick={() => removePiece(roomIndex, pieceIndex)}
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-      <button
-        type="button"
-        className="qf-btn-secondary"
-        data-testid="qf-scope-add-room"
-        disabled={disabled}
-        onClick={addRoom}
-      >
-        Add room
-      </button>
+              <div className="qf-scope__room-footer">
+                <button
+                  type="button"
+                  className="qf-btn-secondary qf-scope__add-btn"
+                  data-testid="qf-scope-add-piece"
+                  disabled={disabled}
+                  onClick={() => addPiece(roomIndex)}
+                >
+                  Add piece
+                </button>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      <div className="qf-scope__footer">
+        <button
+          type="button"
+          className="qf-btn-secondary qf-scope__add-btn"
+          data-testid="qf-scope-add-room"
+          disabled={disabled}
+          onClick={addRoom}
+        >
+          Add room
+        </button>
+      </div>
     </div>
   );
 }
