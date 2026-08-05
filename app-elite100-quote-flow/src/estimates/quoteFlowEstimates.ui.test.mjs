@@ -1,5 +1,5 @@
 /**
- * Quote Flow Estimates Library + Modal Workspace UI contracts.
+ * Quote Flow Estimates — Quote Library-style command layout + modal workspace.
  * Run: node app-elite100-quote-flow/src/estimates/quoteFlowEstimates.ui.test.mjs
  */
 import assert from "node:assert/strict";
@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   computeEstimateStats,
+  filterAndSortEstimateItems,
   filterEstimateItems,
   resolveEstimateDisplayName,
   resolvePieceOpenEdgeLf,
@@ -29,13 +30,23 @@ const grouping = readFileSync(join(appRoot, "src/lib/estimateGrouping.mjs"), "ut
 
 assert.match(page, /data-testid="qf-estimates-page"/);
 assert.match(page, /qf-page--command|qf-estimates--command/);
-assert.match(page, /qf-estimates--library/);
+assert.match(page, /qf-estimates--library|qf-estimates--ql/);
+assert.match(page, /qf-el-hero|Estimate command center/);
 assert.match(page, /data-testid="qf-estimates-command-header"/);
 assert.match(page, /data-testid="qf-estimates-stats"/);
 assert.match(page, /data-testid="qf-estimates-list"/);
+assert.match(page, /data-testid="qf-estimates-table"/);
 assert.match(page, /data-testid="qf-estimates-row"/);
-assert.match(page, /Estimate library/);
-assert.match(page, /qf-estimates__cards|qf-estimates__card/);
+assert.match(page, /data-testid="qf-estimates-filters"/);
+assert.match(page, /Search &amp; filters|Search & filters/);
+assert.match(page, /data-testid="qf-estimates-source-filter"/);
+assert.match(page, /data-testid="qf-estimates-status-filter"/);
+assert.match(page, /data-testid="qf-estimates-sort"/);
+assert.match(page, /data-testid="qf-estimates-pagination"/);
+assert.match(page, /qf-el-table/);
+assert.match(page, /Open edge LF/);
+assert.match(page, /data-testid="qf-estimates-row-open-edge"/);
+assert.match(page, /Edit official scope/);
 assert.match(page, /modalOpen/);
 assert.match(page, /qf-estimates-modal-backdrop/);
 assert.match(page, /qf-estimates-modal/);
@@ -54,16 +65,21 @@ assert.match(page, /key:\s*"activity"|Activity/);
 assert.match(page, /key:\s*"handoff"|Handoff/);
 assert.match(page, /Save Scope/);
 assert.match(page, /Coming later|placeholder/);
-assert.match(page, /Manage official scoped estimates/);
+assert.match(page, /Manage scoped estimates before pricing/);
 assert.match(page, /initialEstimateId/);
 assert.match(page, /openEstimate\(initialEstimateId\)/);
 assert.match(page, /Scope saved/);
 assert.doesNotMatch(page, /Select an estimate to review official scope/);
 assert.doesNotMatch(page, /qf-estimates--command-layout/);
 assert.doesNotMatch(page, /qf-estimates__detail--command/);
+assert.doesNotMatch(page, /qf-estimates__cards/);
+assert.doesNotMatch(page, /qf-estimates__card\b/);
 assert.match(styles, /qf-estimates-modal-backdrop/);
 assert.match(styles, /qf-estimates-modal\b/);
-assert.match(styles, /qf-estimates__cards/);
+assert.match(styles, /qf-el-hero/);
+assert.match(styles, /qf-el-table/);
+assert.match(styles, /qf-el-metrics/);
+assert.doesNotMatch(styles, /\.qf-estimates__cards\b/);
 assert.match(editor, /data-testid="qf-official-scope-editor"/);
 assert.match(editor, /Official scope/);
 assert.match(editor, /Manual edits here do not rerun AI Takeoff/);
@@ -87,6 +103,7 @@ assert.match(app, /initialEstimateId=\{openEstimateId\}/);
 assert.match(app, /qf-shell--command/);
 assert.match(grouping, /resolveEstimateDisplayName/);
 assert.match(grouping, /resolvePieceOpenEdgeLf/);
+assert.match(grouping, /filterAndSortEstimateItems/);
 assert.match(grouping, /Untitled estimate/);
 assert.match(grouping, /openEdgeLf/);
 assert.doesNotMatch(page, /qf-queue-takeoff-iframe|takeoff-iframe|ConsolidatedTakeoffReview/);
@@ -95,7 +112,7 @@ assert.doesNotMatch(page + editor + api, /\bV1\b|\bV2\b|Studio V2|Estimate Works
 assert.doesNotMatch(page, /\bSet Scope\b/);
 assert.doesNotMatch(api, /digital-estimate|working-draft|takeoff-finish|calculate|approve/);
 assert.doesNotMatch(page, /calculate\(|publishDigital|mark sold|Approve Estimate/i);
-console.log("ok: Estimates library-first; modal workspace; Open edge LF; no Takeoff/V1/V2");
+console.log("ok: Estimates Quote Library layout; table; modal; Open edge LF; no Takeoff/V1/V2");
 
 {
   const rows = [
@@ -105,10 +122,12 @@ console.log("ok: Estimates library-first; modal workspace; Open edge LF; no Take
       customerName: "Unknown contact",
       planFilename: "finals.pdf",
       scopeSource: { key: "ai_takeoff", label: "AI Takeoff" },
+      status: { key: "scope_set", label: "Scope set" },
       updatedAt: new Date().toISOString(),
       scopeSummary: {
         roomCount: 1,
         pieceCount: 2,
+        countertopSf: 20,
         openEdgeLf: 12.5,
         label: "1 room · 2 pieces · 12.5 LF open edge"
       }
@@ -117,15 +136,32 @@ console.log("ok: Estimates library-first; modal workspace; Open edge LF; no Take
       estimateId: "b",
       projectName: "Manual Job",
       scopeSource: { key: "manual", label: "Manual scope" },
+      status: { key: "scope_edited", label: "Scope edited" },
       updatedAt: "2020-01-01T00:00:00.000Z",
-      scopeSummary: { roomCount: 1, pieceCount: 1, label: "1 room · 1 piece" }
+      scopeSummary: {
+        roomCount: 1,
+        pieceCount: 1,
+        countertopSf: 10,
+        openEdgeLf: 4,
+        label: "1 room · 1 piece"
+      }
     }
   ];
   const stats = computeEstimateStats(rows);
   assert.equal(stats.total, 2);
   assert.equal(stats.aiSourced, 1);
   assert.equal(stats.manual, 1);
+  assert.equal(stats.totalCountertopSf, 30);
+  assert.equal(stats.totalOpenEdgeLf, 16.5);
   assert.equal(filterEstimateItems(rows, "manual").length, 1);
+  assert.equal(
+    filterAndSortEstimateItems(rows, { source: "ai", status: "scope_set" }).length,
+    1
+  );
+  assert.equal(
+    filterAndSortEstimateItems(rows, { sort: "oldest" })[0].estimateId,
+    "b"
+  );
   assert.equal(resolveEstimateDisplayName(rows[0]), "Relihan VanderSchot Finals Plans");
   assert.equal(
     resolveEstimateDisplayName({
@@ -134,7 +170,7 @@ console.log("ok: Estimates library-first; modal workspace; Open edge LF; no Take
     }),
     "NCH-McLain Top Drawing"
   );
-  console.log("ok: estimate labels/filters; no Unknown contact fallback when plan exists");
+  console.log("ok: estimate labels/filters/sort; metrics include SF + open edge LF");
 }
 
 {
@@ -168,7 +204,6 @@ console.log("ok: Estimates library-first; modal workspace; Open edge LF; no Take
       ]
     }
   ]);
-  // 8*1 + 4*2 = 16
   assert.equal(summary.openEdgeLf, 16);
   assert.ok(summary.countertopSf > 0);
   console.log("ok: open/exposed edge LF resolve + rollup");
