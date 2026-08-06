@@ -7,11 +7,18 @@ import assert from "node:assert/strict";
 import { attachHrWorkforceRoutes, computeHasHrHeadAccess, HR_HEAD_SLUG } from "./hrWorkforceApi.js";
 import {
   EXECUTIVE_DASHBOARD_SLUG,
+  MANAGERIAL_FINANCIALS_SLUG,
   hasExecutiveDashboardAssignment,
+  hasManagerialFinancialsAssignment,
   isValidAccessSlug,
   listAssignedDepartmentGroups,
   sectionIdsForDepartments
 } from "./workforceDepartments.js";
+import {
+  MANAGERIAL_LOC_SECTION_ID,
+  isManagerialFinancialSectionId,
+  partitionScorecardRows
+} from "./workforceManagerialFinancials.js";
 import { isManagerRole, isWorkforceManager } from "./workforceGradeEngine.js";
 
 assert.equal(HR_HEAD_SLUG, "hr");
@@ -62,6 +69,9 @@ assert.ok(routes.has("DELETE /api/hr/workforce/mistakes/:id"));
 assert.ok(routes.has("POST /api/hr/workforce/sections/:id/value"));
 assert.ok(routes.has("POST /api/hr/workforce/sections/:id/quick-count"));
 assert.ok(routes.has("POST /api/hr/workforce/report/generate"));
+assert.ok(routes.has("GET /api/hr/workforce/managerial-financials"));
+assert.ok(routes.has("POST /api/hr/workforce/managerial-financials/:sectionId/value"));
+assert.ok(routes.has("POST /api/hr/workforce/managerial-financials/report/generate"));
 assert.ok(routes.has("POST /api/hr/workforce/categories"));
 
 // Eligible-users is server-side only — browser must not query auth.users
@@ -130,11 +140,32 @@ const plumbingOnly = sectionIdsForDepartments(["plumbing"]);
 assert.equal(plumbingOnly.size, 1);
 assert.ok(plumbingOnly.has("b2000001-0001-4001-8001-000000000008"));
 
+// Managerial Financials assignment is a restricted scope (not full executive / not manage)
+assert.equal(isValidAccessSlug(MANAGERIAL_FINANCIALS_SLUG), true);
+assert.equal(hasManagerialFinancialsAssignment([{ slug: MANAGERIAL_FINANCIALS_SLUG }]), true);
+assert.equal(isManagerialFinancialSectionId(MANAGERIAL_LOC_SECTION_ID), true);
+assert.equal(
+  listAssignedDepartmentGroups([{ slug: MANAGERIAL_FINANCIALS_SLUG }, { slug: "plumbing" }]).length,
+  1
+);
+assert.equal(sectionIdsForDepartments([MANAGERIAL_FINANCIALS_SLUG]).size, 0);
+assert.equal(isWorkforceManager({ role: "viewer" }), false, "managerial assignment is not a manager role");
+
+const split = partitionScorecardRows([
+  { sectionId: "b2000001-0001-4001-8001-000000000001" },
+  { sectionId: MANAGERIAL_LOC_SECTION_ID }
+]);
+assert.equal(split.operationalRows.length, 1);
+assert.equal(split.managerialRows.length, 1);
+
 // POST /mistakes guard stack includes auth + head access only (no manager role middleware)
 const mistakeHandlers = routes.get("POST /api/hr/workforce/mistakes");
 assert.equal(mistakeHandlers?.length, 4, "auth + head + json + handler");
 
 const categoryHandlers = routes.get("POST /api/hr/workforce/categories");
 assert.ok(categoryHandlers?.length >= 3);
+
+const mgrReportHandlers = routes.get("POST /api/hr/workforce/managerial-financials/report/generate");
+assert.ok(mgrReportHandlers?.length >= 3);
 
 console.log("hrWorkforceApi.test.mjs: ok");

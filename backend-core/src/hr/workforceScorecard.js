@@ -23,6 +23,10 @@ import {
   weekStartForIsoDate
 } from "./workforceGradeEngine.js";
 import { isMetricTotalSection, mapSectionRow } from "./workforceGradingSections.js";
+import { isManagerialFinancialSectionId } from "./workforceManagerialFinancials.js";
+
+/** Weekly quoting value — operational currency metric (not managerial financials). */
+const QUOTE_VOLUME_SECTION_ID = "b2000001-0001-4001-8001-000000000007";
 
 /**
  * Weekly incident count for grading: max(detail mistakes, quick_count).
@@ -195,9 +199,12 @@ export function buildExecutiveSummary(rows, overallGrade) {
     return (Number(b.incidentCount) || 0) - (Number(a.incidentCount) || 0);
   })[0];
 
-  const productionRow = findRowByMetricKind(rows, "production");
-  const leadTimeRow = findRowByMetricKind(rows, "days");
-  const quoteRow = findRowByMetricKind(rows, "currency");
+  const operationalRows = (rows ?? []).filter((row) => !isManagerialFinancialSectionId(row.sectionId));
+  const productionRow = findRowByMetricKind(operationalRows, "production");
+  const leadTimeRow = findRowByMetricKind(operationalRows, "days");
+  const quoteRow =
+    operationalRows.find((row) => String(row.sectionId) === QUOTE_VOLUME_SECTION_ID) ??
+    findRowByMetricKind(operationalRows, "currency");
 
   return {
     overallGrade: overallGrade ?? null,
