@@ -118,13 +118,10 @@ export const ELITE100_DIRECT_RATE_PER_SF = ESF_DIRECT_PRICE_PER_SQFT;
 /**
  * Wholesale $/SF book for the elite100-room-pricing-v1 engine.
  *
- * DECISION (intentional, isolated new-version divergence — not a bug):
- * Remnant Wholesale is $45/SF here, exactly as specified for this new
- * calculator/pricing version. Legacy pricingVersion 1-3
- * (quoteCalculator.PROTOTYPE_TIER_PRICE_PER_SQFT) keeps Remnant Wholesale at
- * the historically locked $50/SF (see pricingAuthority.contract.test.mjs +
- * studioEstimatePricing.test.mjs) — that legacy table is NOT modified by this
- * module, so old snapshots/tests are unaffected. Do not "fix" this back to $50.
+ * DECISION (aligned with Internal Estimate calculator authority):
+ * Remnant Wholesale is $45/SF (same as Group Promo wholesale $/SF; Remnant remains a distinct group).
+ * Direct/Retail Remnant remains $50/SF via ESF_DIRECT_PRICE_PER_SQFT.
+ * ELITE100_WHOLESALE_RATE_PER_SF spreads PROTOTYPE_TIER and pins Remnant: 45 for clarity.
  */
 export const ELITE100_WHOLESALE_RATE_PER_SF = Object.freeze({
   ...PROTOTYPE_TIER_PRICE_PER_SQFT,

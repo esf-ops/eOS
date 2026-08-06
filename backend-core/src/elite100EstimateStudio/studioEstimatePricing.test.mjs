@@ -26,12 +26,11 @@ const USER_MARKUP = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 console.log("\nstudioEstimatePricing.test.mjs\n");
 
 {
-  // DECISION: Wholesale Remnant = $50 (calculator authority). Product brief $45 equals Promo wholesale
-  // and would shadow Remnant → Promo; pricingAuthority.contract locks $50.
+  // Hunter-approved: Wholesale Remnant = $45 (matches Promo wholesale $/SF); Direct/Retail Remnant = $50.
   assert.equal(ESF_DIRECT_PRICE_PER_SQFT.Remnant, 50);
-  assert.equal(PROTOTYPE_TIER_PRICE_PER_SQFT.Remnant, 50);
-  assert.notEqual(PROTOTYPE_TIER_PRICE_PER_SQFT.Remnant, PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"]);
-  console.log("ok: Remnant Direct+Wholesale = $50 (explicit; not product-brief $45)");
+  assert.equal(PROTOTYPE_TIER_PRICE_PER_SQFT.Remnant, 45);
+  assert.equal(PROTOTYPE_TIER_PRICE_PER_SQFT.Remnant, PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"]);
+  console.log("ok: Remnant Direct $50 + Wholesale $45 (matches Promo wholesale $/SF)");
 }
 
 {
@@ -91,9 +90,9 @@ console.log("\nstudioEstimatePricing.test.mjs\n");
     actorUserId: USER_MARKUP,
     env
   });
-  assert.equal(rem.material.ratePerSf, 50);
-  assert.equal(rem.material.subtotal, 5000);
-  assert.equal(rem.material.useTaxAmount, 100);
+  assert.equal(rem.material.ratePerSf, 45);
+  assert.equal(rem.material.subtotal, 4500);
+  assert.equal(rem.material.useTaxAmount, 90);
   assert.equal(rem.material.useTaxPercent, 2);
 
   const wEdge = await calculateStudioEstimate({

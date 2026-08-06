@@ -95,9 +95,9 @@ console.log("\nelite100RoomPricingCalculator.test.mjs\n");
   assert.equal(result.pricingVersion, 4);
   assert.equal(result.pricingEngine, "elite100-room-pricing-v1");
   assert.equal(result.snapshot.pricingVersion, 4);
-  // Old pricingVersion 1-3 tables are untouched by this module.
-  assert.equal(PROTOTYPE_TIER_PRICE_PER_SQFT.Remnant, 50, "legacy v1-3 wholesale Remnant table must remain $50 (unchanged)");
-  console.log("ok: new calculations report pricingEngine elite100-room-pricing-v1 / pricingVersion 4; legacy v1-3 tables untouched");
+  // Old pricingVersion 1-3 tables: Remnant wholesale now matches Hunter-approved $45 (same as v4 / Promo W).
+  assert.equal(PROTOTYPE_TIER_PRICE_PER_SQFT.Remnant, 45, "calculator wholesale Remnant = $45");
+  console.log("ok: new calculations report pricingEngine elite100-room-pricing-v1 / pricingVersion 4; Remnant wholesale $45");
 }
 
 // =========================================================================
@@ -136,10 +136,10 @@ console.log("\nelite100RoomPricingCalculator.test.mjs\n");
     const r = resolveElite100MaterialRatePerSf({ materialGroup: group, pricingBasis: "wholesale" });
     assert.equal(r.rate, rate, `resolved wholesale ${group}`);
   }
-  // Explicit isolated-version divergence: v4 Wholesale Remnant is $45 (legacy v1-3 stays $50).
+  // Remnant wholesale is $45 across calculator authority and elite100-room-pricing-v1.
   assert.equal(ELITE100_WHOLESALE_RATE_PER_SF.Remnant, 45);
-  assert.notEqual(ELITE100_WHOLESALE_RATE_PER_SF.Remnant, PROTOTYPE_TIER_PRICE_PER_SQFT.Remnant);
-  console.log("ok: every Direct/Retail and Wholesale material group matches the exact rate table; no 25% markup; v4 Wholesale Remnant = $45 (isolated from legacy $50)");
+  assert.equal(ELITE100_WHOLESALE_RATE_PER_SF.Remnant, PROTOTYPE_TIER_PRICE_PER_SQFT.Remnant);
+  console.log("ok: every Direct/Retail and Wholesale material group matches the exact rate table; no 25% markup; Remnant wholesale = $45");
 }
 
 {

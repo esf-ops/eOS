@@ -2,10 +2,9 @@
  * DE.2B — Confirmed Elite 100 business pricing fixtures.
  *
  * IMPORTANT:
- * - These are labeled fixtures / confirmed business rules for the future pricing-policy model.
+ * - These are labeled fixtures / confirmed business rules for the pricing-policy model.
  * - They are NOT seeded into production tables in DE.2B.
- * - They do NOT change calculateQuote() constants (Remnant Wholesale remains 50 there).
- * - Confirmed Remnant Wholesale for future policy: 45 (not calculator's 50).
+ * - Remnant Wholesale $45 / Direct $50 matches calculateQuote() Internal Estimate authority.
  */
 
 /** @typedef {{ groupCode: string, displayName: string, ratePerSqft: number }} MaterialGroupRateFixture */
@@ -23,8 +22,8 @@ export const FIXTURE_ELITE100_DIRECT_RATES_PER_SQFT = Object.freeze({
 });
 
 /**
- * Confirmed Wholesale $/SF (business-approved for future policy).
- * Remnant Wholesale = 45 (corrected vs current calculator PROTOTYPE_TIER Remnant 50).
+ * Confirmed Wholesale $/SF (business-approved).
+ * Remnant Wholesale = 45 (aligned with calculateQuote PROTOTYPE_TIER Remnant).
  */
 export const FIXTURE_ELITE100_WHOLESALE_RATES_PER_SQFT = Object.freeze({
   promo: 45,
@@ -107,13 +106,13 @@ export function buildFixtureMaterialGroupRates(scheduleCode) {
 }
 
 /**
- * Documented conflict: calculateQuote Remnant Wholesale is 50; confirmed future policy is 45.
+ * Remnant rates: calculateQuote and confirmed Elite 100 policy are aligned (W 45 / D 50).
  */
 export const CALCULATOR_VS_CONFIRMED_REMNANT_WHOLESALE = Object.freeze({
-  calculatorWholesaleRemnant: 50,
+  calculatorWholesaleRemnant: 45,
   confirmedPolicyWholesaleRemnant: 45,
   calculatorDirectRemnant: 50,
   confirmedPolicyDirectRemnant: 50,
-  status: "documented_conflict_for_de2c",
-  actionInDe2b: "do_not_change_calculateQuote"
+  status: "aligned",
+  actionInDe2b: "calculateQuote_matches_confirmed_policy"
 });

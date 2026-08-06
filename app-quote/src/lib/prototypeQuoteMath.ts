@@ -470,7 +470,7 @@ export const PROTOTYPE_TIERS: ReadonlyArray<{ n: string; p: number }> = [
   { n: "Group D", p: 85 },
   { n: "Group E", p: 100 },
   { n: "Group F", p: 115 },
-  { n: "Remnant", p: 50 }
+  { n: "Remnant", p: 45 }
 ];
 
 export const VANITY_PRICING: Record<string, { name: string; t1: number; t2: number; b: number }> = {

@@ -493,7 +493,7 @@ async function buildMinimalActiveEnvelope(repo, organizationId = ORG) {
   assert.equal(policy.getBaseRates(ORG, "wholesale").remnant, 45);
   assert.equal(FIXTURE_ELITE100_WHOLESALE_RATES_PER_SQFT.remnant, 45);
   assert.equal(FIXTURE_ELITE100_DIRECT_RATES_PER_SQFT.remnant, 50);
-  assert.equal(CALCULATOR_VS_CONFIRMED_REMNANT_WHOLESALE.calculatorWholesaleRemnant, 50);
+  assert.equal(CALCULATOR_VS_CONFIRMED_REMNANT_WHOLESALE.calculatorWholesaleRemnant, 45);
   assert.equal(CALCULATOR_VS_CONFIRMED_REMNANT_WHOLESALE.confirmedPolicyWholesaleRemnant, 45);
   console.log("ok: Direct/Wholesale distinct + Remnant fixture 45/50");
 }

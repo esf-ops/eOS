@@ -54,7 +54,7 @@ export const WHOLESALE_RATES = {
   "Group D": 85,
   "Group E": 100,
   "Group F": 115,
-  Remnant: 50
+  Remnant: 45
 };
 
 export const DIRECT_RATES = {

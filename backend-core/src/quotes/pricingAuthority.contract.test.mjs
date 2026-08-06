@@ -290,7 +290,7 @@ function withInternalMaterialUseTax(materialSubtotal) {
   console.log("ok: partner_quote resolvePricingStructure fails closed on DB errors");
 }
 
-// ── G. Remnant Direct/Retail rate = $50/sf; no markup in internal mode ────────
+// ── G. Remnant Direct/Retail $50/sf; Wholesale Remnant $45/sf; no markup in internal mode ────────
 
 {
   // Regression guard: Remnant must be in ESF_DIRECT_PRICE_PER_SQFT at $50 (not Group Promo fallback).
@@ -300,12 +300,16 @@ function withInternalMaterialUseTax(materialSubtotal) {
     "Remnant: ESF_DIRECT_PRICE_PER_SQFT['Remnant'] = $50/sf"
   );
 
-  // Wholesale Remnant = $50 (same as Direct). Product brief $45 would equal Group Promo wholesale
-  // and silently shadow Remnant → Promo; calculator authority + this contract lock $50.
+  // Wholesale Remnant = $45 (same $/SF as Group Promo wholesale; Remnant remains a distinct group label).
   assert.equal(
     PROTOTYPE_TIER_PRICE_PER_SQFT["Remnant"],
-    50,
-    "Remnant: PROTOTYPE_TIER_PRICE_PER_SQFT['Remnant'] = $50/sf (explicit; not product-brief $45)"
+    45,
+    "Remnant: PROTOTYPE_TIER_PRICE_PER_SQFT['Remnant'] = $45/sf"
+  );
+  assert.equal(
+    PROTOTYPE_TIER_PRICE_PER_SQFT["Remnant"],
+    PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"],
+    "Remnant wholesale $/SF matches Group Promo wholesale ($45)"
   );
 
   // Direct/Retail Internal Estimate: 10 sf Remnant → $500 material + 2% use tax once.
@@ -328,6 +332,24 @@ function withInternalMaterialUseTax(materialSubtotal) {
   assert.equal(calc.totals.retail, calc.totals.wholesale, "Remnant Direct: no markup on internal_quote (retail = wholesale)");
   assert.equal(calc.totals.profit, 0, "Remnant Direct: zero profit on internal_quote");
 
+  // Wholesale Internal Estimate: 10 sf Remnant → $450 material + 2% use tax once.
+  const calcW = await calculateQuote(
+    internalLegacyInput({
+      materialGroup: "Remnant",
+      areas: { countertopSqft: 10, backsplashSqft: 0 },
+      internalMaterialBasis: "wholesale"
+    }),
+    injectedPricingContext({
+      structure: partnerStructure({ pricing_mode: "internal" }),
+      rules: []
+    })
+  );
+  assert.equal(
+    calcW.totals.wholesale,
+    withInternalMaterialUseTax(450),
+    "Remnant Wholesale: 10 sf × $45 + 2% use tax once"
+  );
+
   // Existing groups Promo–F unchanged: spot-check Group F Direct still $135/sf (+ use tax).
   const calcF = await calculateQuote(
     internalLegacyInput({ materialGroup: "Group F", areas: { countertopSqft: 10, backsplashSqft: 0 }, internalMaterialBasis: "direct" }),
@@ -342,7 +364,7 @@ function withInternalMaterialUseTax(materialSubtotal) {
     "Group F Direct unchanged: 10 sf × $135 + 2% use tax"
   );
 
-  console.log("ok: Remnant Direct $50/sf with no internal markup; existing groups unchanged");
+  console.log("ok: Remnant Direct $50/sf + Wholesale $45/sf; existing groups unchanged");
 }
 
 // TODO(partner-pricing-e2e): Full POST /api/partner-quote/calculate harness with auth + assignment

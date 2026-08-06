@@ -64,10 +64,10 @@ export const PROTOTYPE_TIER_PRICE_PER_SQFT = Object.freeze({
   "Group D": 85,
   "Group E": 100,
   "Group F": 115,
-  // Remnant wholesale = $50 (same as Direct).
-  // DECISION: product brief listed Wholesale Remnant $45, but that equals Group Promo wholesale and
-  // would silently shadow Remnant → Promo. Calculator + pricingAuthority.contract tests lock $50.
-  "Remnant": 50
+  // Remnant wholesale = $45 (same as Group Promo wholesale). Direct/Retail Remnant stays $50 above.
+  // Hunter-approved go-live rule: W $45 / D $50. Remnant remains a distinct group label even when
+  // wholesale $/SF matches Promo.
+  "Remnant": 45
 });
 
 /** Prototype add-on unit prices (legacy global ids). */
