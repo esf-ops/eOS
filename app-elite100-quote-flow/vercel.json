@@ -5,5 +5,6 @@
       "main": true,
       "*": false
     }
-  }
+  },
+  "ignoreCommand": "node ../scripts/vercel-ignore-build.mjs app-elite100-quote-flow"
 }

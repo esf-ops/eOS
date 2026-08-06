@@ -4116,6 +4116,20 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowCutouts.mjs`, Set Scope persist, OpenEdge/addOns sync, estimates normalize, pricing stamp/presenter, Official Scope + Pricing UI, seed/adapter cutouts bridge, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Cutout unit rates, DE rebuild, acceptance/sold/handoff/QB/email, customer acceptance, raw AI overwrite after Set Scope. |
 | **Revisit trigger** | Per-room vanity/cooktop/outlet editors beyond kitchen sink; staff apply-customer-selections into official scope. |
+
+### 307. Vercel — affected-project deployment guard (ignored build step) (2026-08-06)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-06 · `main` |
+| **Decision** | Each Vercel project Root Directory keeps its own `vercel.json` (still **no** repo-root `vercel.json`). Preserve existing `git.deploymentEnabled` `{ "main": true, "*": false }` where already present. Add `ignoreCommand`: `node ../scripts/vercel-ignore-build.mjs <project-root>` so a push to `main` **skips** rebuild when that project’s tree / mapped deps / global package files were not touched. Exit **0** = skip build; exit **1** = build. Detection uses `VERCEL_GIT_PREVIOUS_SHA`…`VERCEL_GIT_COMMIT_SHA` when present, else `HEAD^`…`HEAD`; on failure, **build** (never false-skip). Docs-only changes skip app/backend builds. Root `package.json` / lockfiles / the ignore script itself trigger **all** projects. `backend-core` changes rebuild Brain by default; mapped backend folders may also rebuild a paired frontend (see `PROJECT_DEPENDENCIES` in the script). Unrelated `app-*` folders do not rebuild each other. |
+| **Why** | Every `main` push was rebuilding many/all heads even when only Brain + one app changed, burning Vercel quota. |
+| **Script** | `scripts/vercel-ignore-build.mjs` (+ `scripts/vercel-ignore-build.test.mjs`, `scripts/verify-vercel-ignore-build-policy.mjs`). Existing `scripts/verify-vercel-git-deployment-policy.mjs` still guards non-main suppression. |
+| **How to add a new head** | (1) Add `app-<name>/vercel.json` with `deploymentEnabled` main-only policy + `ignoreCommand` for that folder. (2) If the app depends on specific Brain routes or `shared/eliteos-ui`, add paths under `PROJECT_DEPENDENCIES`. (3) Run both verify scripts. Until `vercel.json` exists, set Dashboard → Git → Ignored Build Step to the same `node ../scripts/…` command (Root Directory = the app folder). |
+| **Global rebuild triggers** | Root `package.json`, lockfiles (npm/pnpm/yarn), `.npmrc`, `scripts/vercel-ignore-build.mjs`. |
+| **Intentional exceptions** | `app-digital-estimate`: `ignoreCommand` in-repo; `deploymentEnabled` remains dashboard-only (§290). `app-hr`, `app-pricing-admin`, `app-internal-estimate`: no in-repo `vercel.json` yet — Dashboard Ignored Build Step required (listed in verify script). |
+| **Protected / unchanged** | App build commands, env vars, product code, non-main preview suppression, Digital Estimate dashboard deploy policy. |
+| **Revisit trigger** | Turbo/Nx affected graph; adding vercel.json for HR / pricing-admin / internal-estimate. |
 |
 
 |
