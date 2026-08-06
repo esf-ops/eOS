@@ -190,16 +190,28 @@ export function sortInboxItemsForDisplay(items) {
 
 /**
  * Coarse progress from status (do not invent finer precision).
+ * In-flight stages are indeterminate — no trustworthy engine percent.
  * @param {object} item
  */
 export function resolveInboxProgress(item) {
-  if (item?.progress && typeof item.progress === "object" && Number.isFinite(item.progress.percent)) {
+  if (item?.progress && typeof item.progress === "object") {
+    const percentRaw = item.progress.percent;
+    const percent =
+      percentRaw == null || percentRaw === ""
+        ? null
+        : Number.isFinite(Number(percentRaw))
+          ? Math.max(0, Math.min(100, Number(percentRaw)))
+          : null;
     return {
-      percent: Math.max(0, Math.min(100, Number(item.progress.percent))),
+      percent,
       stageKey: asString(item.progress.stageKey, "not_started"),
       stageLabel: asString(item.progress.stageLabel, "Not started"),
       isError: item.progress.isError === true,
-      isComplete: item.progress.isComplete === true
+      isComplete: item.progress.isComplete === true,
+      approximate: item.progress.approximate === true || percent == null,
+      indeterminate:
+        item.progress.indeterminate === true ||
+        (percent == null && item.progress.isError !== true && item.progress.isComplete !== true)
     };
   }
 
@@ -210,52 +222,87 @@ export function resolveInboxProgress(item) {
       stageKey: "scope_set",
       stageLabel: "Scope set",
       isError: false,
-      isComplete: true
+      isComplete: true,
+      approximate: false,
+      indeterminate: false
     };
   }
   if (status === "takeoff_failed") {
     return {
-      percent: 0,
+      percent: null,
       stageKey: "failed",
-      stageLabel: "Takeoff failed",
+      stageLabel: "Failed / needs decision",
       isError: true,
-      isComplete: false
+      isComplete: false,
+      approximate: false,
+      indeterminate: false
     };
   }
   if (status === "takeoff_returned") {
     return {
       percent: 100,
       stageKey: "returned",
-      stageLabel: "Ready for review",
+      stageLabel: "Takeoff returned",
       isError: false,
-      isComplete: true
+      isComplete: true,
+      approximate: false,
+      indeterminate: false
     };
   }
   if (status === "takeoff_processing") {
     return {
-      percent: 55,
+      percent: null,
       stageKey: "processing",
-      stageLabel: "Processing takeoff",
+      stageLabel: "AI Takeoff processing",
       isError: false,
-      isComplete: false
+      isComplete: false,
+      approximate: true,
+      indeterminate: true
     };
   }
   if (status === "takeoff_queued") {
     return {
-      percent: 10,
+      percent: null,
       stageKey: "queued",
       stageLabel: "Queued",
       isError: false,
-      isComplete: false
+      isComplete: false,
+      approximate: true,
+      indeterminate: true
     };
   }
   return {
-    percent: 0,
+    percent: null,
     stageKey: "not_started",
-    stageLabel: "Not started",
+    stageLabel: "Ready to start",
     isError: false,
-    isComplete: false
+    isComplete: false,
+    approximate: false,
+    indeterminate: false
   };
+}
+
+/**
+ * @param {number|null|undefined} seconds
+ */
+export function formatElapsedLabel(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds)) || Number(seconds) < 0) return null;
+  const s = Math.floor(Number(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+/**
+ * @param {string|null|undefined} iso
+ */
+export function formatClockTime(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 /**

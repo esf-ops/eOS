@@ -481,6 +481,112 @@ body {
   background: var(--eos-accent);
 }
 
+.qf-progress.is-indeterminate .qf-progress__fill {
+  width: 40%;
+  animation: qf-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes qf-progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+.qf-progress__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 0.75rem;
+  color: var(--eos-ink-muted);
+}
+
+.qf-progress__stale,
+.qf-pill--warn {
+  color: #8a5a00;
+  background: rgba(212, 160, 23, 0.16);
+}
+
+.qf-inbox__row-error {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--eos-accent);
+  font-weight: 600;
+}
+
+.qf-inbox__batch-banner {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: 10px;
+  background: rgba(46, 105, 184, 0.06);
+}
+
+.qf-inbox__timeline {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.qf-inbox__timeline-step {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border-left: 3px solid var(--eos-line);
+}
+
+.qf-inbox__timeline-step.is-done {
+  border-left-color: #2e69b8;
+}
+
+.qf-inbox__timeline-step.is-active {
+  border-left-color: #d4a017;
+}
+
+.qf-inbox__timeline-step.is-error {
+  border-left-color: var(--eos-accent);
+}
+
+.qf-inbox__failure-card {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(163, 19, 47, 0.28);
+  border-radius: 10px;
+  background: rgba(163, 19, 47, 0.05);
+  display: grid;
+  gap: 8px;
+}
+
+.qf-inbox__failure-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.qf-inbox__failure-meta dt {
+  color: var(--eos-ink-muted);
+  font-weight: 600;
+}
+
+.qf-inbox__failure-meta dd {
+  margin: 0;
+}
+
+.qf-inbox__failure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .qf-inbox__att {
   display: flex;
   justify-content: space-between;
@@ -528,11 +634,8 @@ body {
 
 .qf-inbox__batch-results {
   list-style: none;
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--eos-line);
-  background: var(--eos-surface);
+  margin: 8px 0 0;
+  padding: 0;
   display: grid;
   gap: 4px;
   font-size: 0.85rem;

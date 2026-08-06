@@ -236,42 +236,102 @@ export function deriveAiTakeoffSummary(queueRow) {
       state: "not_started",
       takeoffJobId: null,
       reviewReady: false,
-      label: "Not started"
+      label: "Not started",
+      startedAt: null,
+      updatedAt: null,
+      failedAt: null,
+      errorMessage: null,
+      errorCode: null,
+      failureStage: null,
+      planFilename: null
     };
   }
   const opKey = String(queueRow.operationalState?.key || "");
   const workflow = String(queueRow.workflowStatus || "");
   const takeoffJobId = queueRow.takeoffJobId || null;
   const display = String(queueRow.aiTakeoffStatus || "");
+  const planFilename = Array.isArray(queueRow.attachmentSummary?.filenames)
+    ? String(queueRow.attachmentSummary.filenames[0] || "").trim() || null
+    : null;
+  const startedAt = queueRow.takeoffStartedAt || null;
+  const updatedAt = queueRow.takeoffUpdatedAt || queueRow.lastActivityAt || null;
+  const timing = {
+    startedAt,
+    updatedAt,
+    failedAt: null,
+    errorMessage: queueRow.takeoffErrorMessage || null,
+    errorCode: null,
+    failureStage: queueRow.takeoffFailureStage || null,
+    planFilename
+  };
 
   if (display.includes("Manual scope")) {
     return {
       state: "not_applicable",
       takeoffJobId,
       reviewReady: false,
-      label: "Not applicable"
+      label: "Not applicable",
+      ...timing
     };
   }
   if (opKey === "takeoff_failed" || workflow === "Takeoff failed" || /fail/i.test(display)) {
-    return { state: "failed", takeoffJobId, reviewReady: false, label: "Failed" };
+    return {
+      state: "failed",
+      takeoffJobId,
+      reviewReady: false,
+      label: "Failed",
+      ...timing,
+      failedAt: queueRow.takeoffCompletedAt || updatedAt || null
+    };
   }
   if (opKey === "takeoff_processing" || /processing|queued/i.test(workflow + display)) {
-    return { state: "processing", takeoffJobId, reviewReady: false, label: "Processing" };
+    const queued = /queued/i.test(workflow + display);
+    return {
+      state: "processing",
+      takeoffJobId,
+      reviewReady: false,
+      label: queued ? "Queued" : "Processing",
+      ...timing
+    };
   }
   if (
     opKey === "needs_takeoff_review" ||
     opKey === "needs_plan_review" ||
     /review|draft ready|AI findings/i.test(workflow + display)
   ) {
-    return { state: "needs_review", takeoffJobId, reviewReady: true, label: "Needs review" };
+    return {
+      state: "needs_review",
+      takeoffJobId,
+      reviewReady: true,
+      label: "Needs review",
+      ...timing
+    };
   }
   if (/approved/i.test(display) || workflow === "Scope in progress") {
-    return { state: "approved", takeoffJobId, reviewReady: false, label: "Approved" };
+    return {
+      state: "approved",
+      takeoffJobId,
+      reviewReady: false,
+      label: "Approved",
+      ...timing
+    };
   }
   if (!takeoffJobId) {
-    return { state: "not_started", takeoffJobId: null, reviewReady: false, label: "Not started" };
+    return {
+      state: "not_started",
+      takeoffJobId: null,
+      reviewReady: false,
+      label: "Not started",
+      ...timing
+    };
   }
-  return { state: "not_started", takeoffJobId, reviewReady: false, label: display || "Not started" };
+  return {
+    state: "not_started",
+    takeoffJobId,
+    reviewReady: false,
+    label: display || "Not started",
+    ...timing
+  };
 }
 
 /**

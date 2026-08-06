@@ -22,11 +22,13 @@ export type QuoteFlowTakeoffStatus = {
 };
 
 export type QuoteFlowProgress = {
-  percent: number;
+  percent: number | null;
   stageKey: string;
   stageLabel: string;
   isError: boolean;
   isComplete: boolean;
+  approximate?: boolean;
+  indeterminate?: boolean;
 };
 
 export type QuoteFlowInboxGroup = {
@@ -38,6 +40,13 @@ export type QuoteFlowInboxGroup = {
 export type QuoteFlowNextAction = {
   key: string;
   label: string;
+};
+
+export type QuoteFlowTakeoffTimelineStep = {
+  key: string;
+  label: string;
+  at?: string | null;
+  tone?: string;
 };
 
 /** Production Shared Inbox may still send this object before presenter normalization. */
@@ -71,11 +80,28 @@ export type QuoteFlowInboxItem = {
   } | null;
   attachments: QuoteFlowAttachment[];
   takeoffStatus: QuoteFlowTakeoffStatus;
+  takeoffStatusLabel?: string | null;
   takeoffJobId: string | null;
+  takeoffProgress?: QuoteFlowProgress;
   progress?: QuoteFlowProgress;
+  takeoffStartedAt?: string | null;
+  takeoffUpdatedAt?: string | null;
+  takeoffElapsedSeconds?: number | null;
+  takeoffErrorCode?: string | null;
+  takeoffErrorMessageSafe?: string | null;
+  takeoffFailureStage?: string | null;
+  takeoffFailedAt?: string | null;
+  takeoffPlanFilename?: string | null;
+  queueItemKey?: string | null;
+  isStaleProcessing?: boolean;
+  isLongRunning?: boolean;
+  staleLabel?: string | null;
+  takeoffTimeline?: QuoteFlowTakeoffTimelineStep[];
   group?: QuoteFlowInboxGroup;
   nextAction?: QuoteFlowNextAction;
+  nextRecommendedAction?: QuoteFlowNextAction;
   canStartTakeoff?: boolean;
+  canRetryTakeoff?: boolean;
   alreadyScoped: boolean;
   opened?: boolean;
   dismissed?: boolean;

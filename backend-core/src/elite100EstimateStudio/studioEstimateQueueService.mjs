@@ -213,7 +213,7 @@ export function createStudioEstimateQueueService(deps = {}) {
     if (!supabase || !jobIds.length) return new Map();
     const { data, error } = await supabase
       .from("quote_takeoff_jobs")
-      .select("id,status,review_status,updated_at,result_summary")
+      .select("id,status,review_status,updated_at,created_at,started_at,completed_at,error_message,result_summary")
       .eq("organization_id", organizationId)
       .in("id", jobIds);
     if (error) return new Map();
@@ -323,7 +323,7 @@ export function createStudioEstimateQueueService(deps = {}) {
     if (!supabase || !takeoffJobId) return null;
     const { data: job } = await supabase
       .from("quote_takeoff_jobs")
-      .select("id,status,review_status,result_summary,updated_at")
+      .select("id,status,review_status,result_summary,updated_at,created_at,started_at,completed_at,error_message")
       .eq("organization_id", organizationId)
       .eq("id", takeoffJobId)
       .maybeSingle();
@@ -337,7 +337,10 @@ export function createStudioEstimateQueueService(deps = {}) {
       backsplashSf: Number(summary.backsplashExactSf ?? summary.backsplashSf ?? 0) || 0,
       roomCount: Number(summary.roomCount ?? 0) || null,
       pieceCount: Number(summary.pieceCount ?? 0) || null,
-      updatedAt: job.updated_at
+      updatedAt: job.updated_at,
+      startedAt: job.started_at || job.created_at || null,
+      completedAt: job.completed_at || null,
+      errorMessage: job.error_message || null
     };
   }
 
@@ -492,6 +495,25 @@ export function createStudioEstimateQueueService(deps = {}) {
       caseRow.received_at ||
       null;
 
+    const takeoffErrorRaw =
+      takeoffJob?.error_message ||
+      takeoffJob?.errorMessage ||
+      (typeof resultSummary.errorMessage === "string" ? resultSummary.errorMessage : null) ||
+      (typeof resultSummary.error === "string" ? resultSummary.error : null) ||
+      null;
+    const takeoffStartedAt =
+      takeoffJob?.started_at ||
+      takeoffJob?.startedAt ||
+      takeoffJob?.created_at ||
+      takeoffJob?.createdAt ||
+      null;
+    const takeoffUpdatedAt = takeoffJob?.updated_at || takeoffJob?.updatedAt || null;
+    const takeoffCompletedAt = takeoffJob?.completed_at || takeoffJob?.completedAt || null;
+    const takeoffFailureStage =
+      takeoffJobStatus === "failed" || takeoffJobStatus === "error"
+        ? String(resultSummary.failureStage || resultSummary.stage || "").trim() || null
+        : null;
+
     return stripForbidden({
       id: caseRow.id,
       customerName: customerDisplay.label,
@@ -528,6 +550,13 @@ export function createStudioEstimateQueueService(deps = {}) {
       attentionReasons: operationalState.attentionReasons,
       primaryAction: operationalState.primaryAction,
       lastActivityAt,
+      takeoffJobStatus,
+      takeoffReviewStatus,
+      takeoffStartedAt,
+      takeoffUpdatedAt,
+      takeoffCompletedAt,
+      takeoffErrorMessage: takeoffErrorRaw ? String(takeoffErrorRaw).slice(0, 240) : null,
+      takeoffFailureStage,
       assignedEstimatorUserId: caseRow.assigned_estimator_user_id || caseRow.assignedEstimatorUserId || null,
       assignedEstimatorLabel: estimatorDisplay.label,
       priority: caseRow.priority || "normal",

@@ -4093,4 +4093,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `quoteFlowQueueStateStore.mjs`, presenter key helpers, `quoteFlowSetScope` list/archive/restore, routes, Estimate Queue UI/API, archive tests, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Set Scope, AI Takeoff start/cancel, pricing/publish/acceptance/sold/handoff, Inbox dismiss model (separate key), DB row deletes. |
 | **Revisit trigger** | Explicit “cancel live AI job” action; org-wide queue purge tooling. |
+
+### 304. Elite 100 Quote Flow — Inbox AI Takeoff progress visibility (2026-08-06)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-06 · `main` |
+| **Decision** | Quote Flow Inbox surfaces clear takeoff progress without DevTools: status labels (ready / starting / queued / sending / processing / returned / failed / scoped / removed), started/elapsed/updated times, plan filename, indeterminate progress (no fake %), safe failure message + stage/code when available, stale warnings (15m / 60m), batch start summary banner (selected / started / already running / failed), detail timeline, and Retry AI Takeoff via existing `startFresh` start-takeoff. Returned rows emphasize **View in Estimate Queue**. Persistence uses existing job timestamps/`error_message` on queue rows; no takeoff-engine changes. |
+| **Why** | Staff could not tell what was happening after Start selected AI Takeoffs; failures showed only “Error.” |
+| **Impacted** | Inbox presenter + progress helpers, Shared Inbox `aiTakeoff` timing fields, queue job select enrichment, Inbox UI/CSS/API, progress tests, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | AI Takeoff math/engine, Estimate Queue Set Scope, pricing/publish/acceptance/sold/handoff, QB/email, mailbox delete. |
+| **Revisit trigger** | Real engine percent events; safe cancel for live AI jobs. |
 |

@@ -145,8 +145,10 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
   const returned = mapQuoteFlowTakeoffProgress({ statusKey: "takeoff_returned" });
   const failed = mapQuoteFlowTakeoffProgress({ statusKey: "takeoff_failed" });
   const scopeSet = mapQuoteFlowTakeoffProgress({ alreadyScoped: true });
-  assert.equal(queued.percent, 10);
-  assert.equal(processing.percent, 55);
+  assert.equal(queued.indeterminate, true);
+  assert.equal(queued.percent, null);
+  assert.equal(processing.indeterminate, true);
+  assert.equal(processing.percent, null);
   assert.equal(returned.percent, 100);
   assert.equal(failed.isError, true);
   assert.equal(scopeSet.stageKey, "scope_set");
@@ -172,11 +174,13 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
       takeoffStatus: { key: "takeoff_processing", label: "Takeoff processing" },
       group: { key: "active" },
       progress: {
-        percent: 55,
+        percent: null,
         stageKey: "processing",
-        stageLabel: "Processing takeoff",
+        stageLabel: "AI Takeoff processing",
         isError: false,
-        isComplete: false
+        isComplete: false,
+        indeterminate: true,
+        approximate: true
       }
     },
     {
@@ -191,7 +195,8 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
   assert.equal(grouped.active[0].messageKey, "c");
   assert.equal(grouped.completed[0].messageKey, "a");
   assert.equal(grouped.dismissed[0].messageKey, "d");
-  assert.equal(resolveInboxProgress(rows[2]).percent, 55);
+  assert.equal(resolveInboxProgress(rows[2]).indeterminate, true);
+  assert.equal(resolveInboxProgress(rows[2]).percent, null);
   assert.equal(resolveInboxProgress({ takeoffStatus: { key: "takeoff_returned" } }).percent, 100);
   assert.equal(resolveInboxProgress({ alreadyScoped: true }).stageKey, "scope_set");
 
@@ -266,8 +271,18 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
   assert.match(inbox, /Promise\.all/);
   assert.match(inbox, /alreadyScoped/);
   assert.match(inbox, /qf-inbox-batch-results/);
+  assert.match(inbox, /qf-inbox-batch-banner|summarizeBatchStartResults/);
   assert.match(inbox, /formatBatchResultLine|humanInboxLabel/);
   assert.match(inbox, /reused/);
+  assert.match(inbox, /qf-inbox-takeoff-timeline|TakeoffTimeline/);
+  assert.match(inbox, /qf-inbox-failure-card|FailureCard/);
+  assert.match(inbox, /Retry AI Takeoff/);
+  assert.match(inbox, /Starting takeoff/);
+  assert.match(inbox, /Processing…/);
+  assert.match(inbox, /qf-inbox-stale|staleLabel/);
+  assert.match(inbox, /Takeoff returned/);
+  assert.match(inbox, /View in Estimate Queue/);
+  assert.doesNotMatch(inbox, /publish|mark sold|accept quote|QuickBooks/i);
   // Full-page loading copy only for initial empty load — not polled blanking.
   assert.match(inbox, /showFullLoading = initialLoading && items\.length === 0/);
   assert.doesNotMatch(
@@ -320,6 +335,15 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
     }),
     "Blocked: scope already set"
   );
+  assert.match(
+    formatBatchResultLine({
+      ok: false,
+      kind: "failed",
+      label: "Kitchen",
+      error: "Plan attachment missing"
+    }),
+    /Failed to start: Kitchen — Plan attachment missing/
+  );
   const batchLine = formatBatchResultLine({
     ok: true,
     reused: false,
@@ -328,6 +352,19 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
   });
   assert.doesNotMatch(batchLine, /AAMk/);
   assert.doesNotMatch(batchLine, /462abe28-aaaa/);
+  const {
+    summarizeBatchStartResults
+  } = await import(join(appRoot, "src/lib/inboxUiHelpers.mjs"));
+  const summary = summarizeBatchStartResults([
+    { ok: true, reused: false, kind: "started" },
+    { ok: true, reused: true, kind: "already_running" },
+    { ok: false, kind: "failed" }
+  ]);
+  assert.equal(summary.selected, 3);
+  assert.equal(summary.started, 1);
+  assert.equal(summary.alreadyRunning, 1);
+  assert.equal(summary.failed, 1);
+  assert.match(summary.summaryLine, /3 selected/);
   console.log("ok: batch results are human readable; no raw Graph keys");
 }
 

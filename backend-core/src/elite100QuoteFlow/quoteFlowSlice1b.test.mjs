@@ -600,10 +600,12 @@ async function requestApp(app, path, init = {}) {
   const routes = readFileSync(join(__dirname, "elite100QuoteFlowRoutes.js"), "utf8");
   assert.match(routes, /\/api\/elite100-quote-flow\/inbox/);
   assert.match(routes, /start-takeoff/);
-  assert.doesNotMatch(routes, /publishDigitalEstimate|markSold|calculateStudio|approveWorkingDraft/);
   const svc = readFileSync(join(__dirname, "quoteFlowService.mjs"), "utf8");
   assert.match(svc, /already_scoped|isOfficialScopeSet/);
   assert.match(svc, /sendToAiTakeoff/);
+  // Inbox service itself must not publish/sold/calculate — later Quote Flow
+  // slices mount DE publish on the shared routes file (allowed outside Inbox).
+  assert.doesNotMatch(svc, /publishDigitalEstimate|markSold|calculateStudio|approveWorkingDraft/);
   console.log("ok: route/source contracts");
 }
 

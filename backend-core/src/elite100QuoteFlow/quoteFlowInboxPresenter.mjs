@@ -3,6 +3,11 @@
  * Product statuses only — no V1/V2 language.
  */
 
+/** Soft warning when processing exceeds this (ms). */
+export const QUOTE_FLOW_INBOX_PROCESSING_WARN_MS = 15 * 60 * 1000;
+/** Stale when processing exceeds this (ms). */
+export const QUOTE_FLOW_INBOX_PROCESSING_STALE_MS = 60 * 60 * 1000;
+
 /**
  * Shared Inbox may send sender/customer as
  * `{ displayName, safeAddressLabel, emailPresent }` — never pass that object to React.
@@ -39,7 +44,114 @@ export function formatQuoteFlowPersonLabel(value, fallback = "Unknown contact") 
 }
 
 /**
+ * Strip secrets / stack traces from takeoff error text for staff UI.
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+export function sanitizeTakeoffErrorMessage(value) {
+  if (value == null) return null;
+  let s = String(value).trim();
+  if (!s) return null;
+  s = s.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "[redacted]");
+  s = s.replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}/g, "[redacted]");
+  s = s.replace(/service[_-]?role[^\s]*/gi, "[redacted]");
+  s = s.replace(/supabase\.co\/[^\s]+/gi, "[redacted]");
+  s = s.replace(/at\s+\S+\s+\([^)]+\)/g, "");
+  s = s.replace(/\s{2,}/g, " ").trim();
+  if (!s || s.length < 3) return null;
+  if (s.length > 220) s = `${s.slice(0, 217)}…`;
+  return s;
+}
+
+/**
+ * @param {string|null|undefined} iso
+ * @param {number} [nowMs]
+ * @returns {number|null}
+ */
+export function resolveTakeoffElapsedSeconds(iso, nowMs = Date.now()) {
+  if (!iso) return null;
+  const started = Date.parse(String(iso));
+  if (!Number.isFinite(started)) return null;
+  const elapsed = Math.floor((nowMs - started) / 1000);
+  return elapsed >= 0 ? elapsed : 0;
+}
+
+/**
+ * @param {{
+ *   statusKey?: string,
+ *   startedAt?: string|null,
+ *   updatedAt?: string|null,
+ *   now?: number,
+ *   warnMs?: number,
+ *   staleMs?: number
+ * }} input
+ */
+export function resolveInboxStaleProcessing(input = {}) {
+  const statusKey = String(input.statusKey || "");
+  if (statusKey !== "takeoff_queued" && statusKey !== "takeoff_processing") {
+    return {
+      isStaleProcessing: false,
+      isLongRunning: false,
+      staleLabel: null
+    };
+  }
+  const warnMs =
+    Number.isFinite(Number(input.warnMs)) && Number(input.warnMs) > 0
+      ? Number(input.warnMs)
+      : QUOTE_FLOW_INBOX_PROCESSING_WARN_MS;
+  const staleMs =
+    Number.isFinite(Number(input.staleMs)) && Number(input.staleMs) > 0
+      ? Number(input.staleMs)
+      : QUOTE_FLOW_INBOX_PROCESSING_STALE_MS;
+  const now = Number.isFinite(Number(input.now)) ? Number(input.now) : Date.now();
+  const raw = input.startedAt || input.updatedAt || null;
+  const started = raw ? Date.parse(String(raw)) : NaN;
+  if (!Number.isFinite(started)) {
+    return {
+      isStaleProcessing: false,
+      isLongRunning: true,
+      staleLabel: "Processing longer than expected"
+    };
+  }
+  const age = now - started;
+  if (age >= staleMs) {
+    return {
+      isStaleProcessing: true,
+      isLongRunning: true,
+      staleLabel: "Possibly stale"
+    };
+  }
+  if (age >= warnMs) {
+    return {
+      isStaleProcessing: false,
+      isLongRunning: true,
+      staleLabel: "Processing longer than expected"
+    };
+  }
+  return {
+    isStaleProcessing: false,
+    isLongRunning: false,
+    staleLabel: null
+  };
+}
+
+/**
+ * Stable queue handoff key (matches Estimate Queue archive key).
+ * @param {{ takeoffJobId?: string|null, intakeCaseId?: string|null, messageKey?: string|null }} row
+ */
+export function resolveInboxQueueItemKey(row = {}) {
+  const takeoff = String(row?.takeoffJobId || "").trim();
+  if (takeoff) return `takeoff:${takeoff}`;
+  const intake = String(row?.intakeCaseId || "").trim();
+  if (intake) return `intake:${intake}`;
+  const message = String(row?.messageKey || "").trim();
+  if (message) return `message:${message}`;
+  return null;
+}
+
+/**
  * Stage progress for Inbox (coarse mapping — not fake precision).
+ * In-flight stages are indeterminate (no trustworthy percent from the engine).
  * @param {{ statusKey?: string, aiState?: string, aiLabel?: string, alreadyScoped?: boolean }} input
  */
 export function mapQuoteFlowTakeoffProgress(input = {}) {
@@ -49,7 +161,9 @@ export function mapQuoteFlowTakeoffProgress(input = {}) {
       stageKey: "scope_set",
       stageLabel: "Scope set",
       isError: false,
-      isComplete: true
+      isComplete: true,
+      approximate: false,
+      indeterminate: false
     };
   }
 
@@ -60,11 +174,13 @@ export function mapQuoteFlowTakeoffProgress(input = {}) {
 
   if (statusKey === "takeoff_failed" || aiState === "failed" || /fail/.test(blob)) {
     return {
-      percent: 0,
+      percent: null,
       stageKey: "failed",
-      stageLabel: "Takeoff failed",
+      stageLabel: "Failed / needs decision",
       isError: true,
-      isComplete: false
+      isComplete: false,
+      approximate: false,
+      indeterminate: false
     };
   }
 
@@ -77,29 +193,35 @@ export function mapQuoteFlowTakeoffProgress(input = {}) {
     return {
       percent: 100,
       stageKey: "returned",
-      stageLabel: "Ready for review",
+      stageLabel: "Takeoff returned",
       isError: false,
-      isComplete: true
+      isComplete: true,
+      approximate: false,
+      indeterminate: false
     };
   }
 
   if (/building.?measurement|importing|import/.test(blob)) {
     return {
-      percent: 80,
+      percent: null,
       stageKey: "building_measurements",
-      stageLabel: "Building measurements",
+      stageLabel: "AI Takeoff processing",
       isError: false,
-      isComplete: false
+      isComplete: false,
+      approximate: true,
+      indeterminate: true
     };
   }
 
-  if (/fetching|preparing|prepare|download/.test(blob)) {
+  if (/fetching|preparing|prepare|download|sending/.test(blob)) {
     return {
-      percent: 25,
+      percent: null,
       stageKey: "preparing",
-      stageLabel: "Preparing plan",
+      stageLabel: "Sending plan to AI Takeoff",
       isError: false,
-      isComplete: false
+      isComplete: false,
+      approximate: true,
+      indeterminate: true
     };
   }
 
@@ -109,30 +231,36 @@ export function mapQuoteFlowTakeoffProgress(input = {}) {
     /processing|running|in.?progress/.test(blob)
   ) {
     return {
-      percent: 55,
+      percent: null,
       stageKey: "processing",
-      stageLabel: "Processing takeoff",
+      stageLabel: "AI Takeoff processing",
       isError: false,
-      isComplete: false
+      isComplete: false,
+      approximate: true,
+      indeterminate: true
     };
   }
 
   if (statusKey === "takeoff_queued" || aiState === "queued" || /queue/.test(blob)) {
     return {
-      percent: 10,
+      percent: null,
       stageKey: "queued",
       stageLabel: "Queued",
       isError: false,
-      isComplete: false
+      isComplete: false,
+      approximate: true,
+      indeterminate: true
     };
   }
 
   return {
-    percent: 0,
+    percent: null,
     stageKey: "not_started",
-    stageLabel: "Not started",
+    stageLabel: "Ready to start",
     isError: false,
-    isComplete: false
+    isComplete: false,
+    approximate: false,
+    indeterminate: false
   };
 }
 
@@ -171,7 +299,7 @@ export function mapQuoteFlowInboxGroup(statusKey, opts = {}) {
   if (key === "takeoff_returned") {
     return {
       key: "ready_for_review",
-      label: "Ready for review",
+      label: "Takeoff returned",
       sortOrder: 3
     };
   }
@@ -193,11 +321,11 @@ export function mapQuoteFlowNextAction(statusKey) {
       return { key: "start_takeoff", label: "Start AI Takeoff" };
     case "takeoff_queued":
     case "takeoff_processing":
-      return { key: "track_progress", label: "Track progress" };
+      return { key: "track_progress", label: "Waiting on AI Takeoff" };
     case "takeoff_returned":
       return { key: "view_queue", label: "View in Estimate Queue" };
     case "takeoff_failed":
-      return { key: "retry_plan", label: "Choose plan & retry" };
+      return { key: "retry_takeoff", label: "Retry AI Takeoff" };
     case "already_scoped":
       return { key: "view_estimates", label: "View in Estimates" };
     default:
@@ -213,7 +341,7 @@ export function mapQuoteFlowTakeoffStatus(item, opts = {}) {
   if (opts.alreadyScoped === true) {
     return {
       key: "already_scoped",
-      label: "Scope already set",
+      label: "Already scoped",
       takeoffJobId: item?.aiTakeoff?.takeoffJobId || null
     };
   }
@@ -227,15 +355,13 @@ export function mapQuoteFlowTakeoffStatus(item, opts = {}) {
     : 0;
 
   if (state === "failed") {
-    return { key: "takeoff_failed", label: "Takeoff failed", takeoffJobId };
+    return { key: "takeoff_failed", label: "Failed / needs decision", takeoffJobId };
   }
   if (state === "processing") {
-    const label = /queue/i.test(String(ai.label || ""))
-      ? "Takeoff queued"
-      : "Takeoff processing";
+    const queued = /queue/i.test(String(ai.label || ""));
     return {
-      key: /queue/i.test(label) ? "takeoff_queued" : "takeoff_processing",
-      label,
+      key: queued ? "takeoff_queued" : "takeoff_processing",
+      label: queued ? "Queued" : "AI Takeoff processing",
       takeoffJobId
     };
   }
@@ -243,19 +369,25 @@ export function mapQuoteFlowTakeoffStatus(item, opts = {}) {
     return { key: "takeoff_returned", label: "Takeoff returned", takeoffJobId };
   }
   if (takeoffJobId && state !== "not_started") {
-    // Prefer finer labels from ai.label when present.
     const progress = mapQuoteFlowTakeoffProgress({
       aiState: state,
       aiLabel: ai.label,
       statusKey: "takeoff_processing"
     });
     if (progress.stageKey === "queued") {
-      return { key: "takeoff_queued", label: "Takeoff queued", takeoffJobId };
+      return { key: "takeoff_queued", label: "Queued", takeoffJobId };
     }
-    return { key: "takeoff_processing", label: "Takeoff processing", takeoffJobId };
+    if (progress.stageKey === "preparing") {
+      return {
+        key: "takeoff_processing",
+        label: "Sending plan to AI Takeoff",
+        takeoffJobId
+      };
+    }
+    return { key: "takeoff_processing", label: "AI Takeoff processing", takeoffJobId };
   }
   if (takeoffJobId) {
-    return { key: "takeoff_queued", label: "Takeoff queued", takeoffJobId };
+    return { key: "takeoff_queued", label: "Queued", takeoffJobId };
   }
   if (planSelectionRequired || supportedCount > 1) {
     return {
@@ -276,6 +408,84 @@ export function mapQuoteFlowTakeoffStatus(item, opts = {}) {
     label: "Needs attachment selection",
     takeoffJobId: null
   };
+}
+
+/**
+ * Build a short staff-facing timeline for the detail panel.
+ * @param {object} input
+ */
+export function buildInboxTakeoffTimeline(input = {}) {
+  /** @type {{ key: string, label: string, at?: string|null, tone?: string }[]} */
+  const steps = [];
+  if (input.receivedAt) {
+    steps.push({
+      key: "received",
+      label: "Request received",
+      at: input.receivedAt,
+      tone: "done"
+    });
+  }
+  if (input.planFilename) {
+    steps.push({
+      key: "plan",
+      label: `Plan selected: ${input.planFilename}`,
+      at: null,
+      tone: "done"
+    });
+  }
+  if (input.startedAt) {
+    steps.push({
+      key: "started",
+      label: "Takeoff started",
+      at: input.startedAt,
+      tone: "done"
+    });
+  }
+
+  const statusKey = String(input.statusKey || "");
+  if (statusKey === "takeoff_queued") {
+    steps.push({ key: "queued", label: "AI Takeoff queued", at: input.updatedAt, tone: "active" });
+  } else if (statusKey === "takeoff_processing") {
+    steps.push({
+      key: "processing",
+      label: input.progressLabel || "AI Takeoff processing",
+      at: input.updatedAt,
+      tone: "active"
+    });
+  } else if (statusKey === "takeoff_failed") {
+    steps.push({
+      key: "failed",
+      label: input.errorMessage
+        ? `Failed: ${input.errorMessage}`
+        : "Failed: AI Takeoff failed, but no detailed reason was returned.",
+      at: input.failedAt || input.updatedAt,
+      tone: "error"
+    });
+  } else if (statusKey === "takeoff_returned") {
+    steps.push({
+      key: "returned",
+      label: "Returned: ready for Estimate Queue",
+      at: input.updatedAt,
+      tone: "done"
+    });
+  } else if (statusKey === "already_scoped") {
+    steps.push({
+      key: "scoped",
+      label: "Already scoped — open in Estimates",
+      at: input.updatedAt,
+      tone: "done"
+    });
+  } else if (statusKey === "ready_to_start") {
+    steps.push({ key: "ready", label: "Ready to start AI Takeoff", at: null, tone: "pending" });
+  } else if (statusKey === "needs_attachment_selection") {
+    steps.push({ key: "select", label: "Needs plan selection", at: null, tone: "pending" });
+  }
+
+  if (input.dismissed === true) {
+    steps.push({ key: "removed", label: "Removed from Quote Flow", at: null, tone: "muted" });
+  }
+
+  return steps;
 }
 
 /**
@@ -441,6 +651,62 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
   const isActiveTakeoff =
     takeoffStatus.key === "takeoff_queued" || takeoffStatus.key === "takeoff_processing";
 
+  const takeoffJobId = takeoffStatus.takeoffJobId || null;
+  const takeoffPlanFilename =
+    String(ai.planFilename || bestPlan?.filename || "").trim() || null;
+  const takeoffStartedAt = ai.startedAt || item?.takeoffStartedAt || null;
+  const takeoffUpdatedAt = ai.updatedAt || item?.takeoffUpdatedAt || item?.lastActivityAt || null;
+  const takeoffFailedAt =
+    takeoffStatus.key === "takeoff_failed"
+      ? ai.failedAt || item?.takeoffCompletedAt || takeoffUpdatedAt || null
+      : null;
+  const importError = item?.lastImportError && typeof item.lastImportError === "object"
+    ? item.lastImportError
+    : null;
+  const takeoffErrorMessageSafe =
+    sanitizeTakeoffErrorMessage(ai.errorMessage) ||
+    sanitizeTakeoffErrorMessage(item?.takeoffErrorMessage) ||
+    sanitizeTakeoffErrorMessage(importError?.message) ||
+    null;
+  const takeoffErrorCode =
+    String(ai.errorCode || importError?.code || "").trim() || null;
+  const takeoffFailureStage =
+    String(ai.failureStage || item?.takeoffFailureStage || "").trim() || null;
+  const takeoffElapsedSeconds = resolveTakeoffElapsedSeconds(
+    takeoffStartedAt || (isActiveTakeoff ? takeoffUpdatedAt : null)
+  );
+  const stale = resolveInboxStaleProcessing({
+    statusKey: takeoffStatus.key,
+    startedAt: takeoffStartedAt,
+    updatedAt: takeoffUpdatedAt
+  });
+  const queueItemKey = resolveInboxQueueItemKey({
+    takeoffJobId,
+    intakeCaseId: item?.intakeCaseId || null,
+    messageKey: item?.messageKey || null
+  });
+
+  const nextRecommendedAction = nextAction;
+  const takeoffTimeline = buildInboxTakeoffTimeline({
+    receivedAt: item?.receivedAt || null,
+    planFilename: takeoffPlanFilename,
+    startedAt: takeoffStartedAt,
+    updatedAt: takeoffUpdatedAt,
+    failedAt: takeoffFailedAt,
+    statusKey: takeoffStatus.key,
+    progressLabel: progress.stageLabel,
+    errorMessage: takeoffErrorMessageSafe,
+    dismissed
+  });
+
+  const canRetryTakeoff =
+    takeoffStatus.key === "takeoff_failed" &&
+    canStartTakeoff &&
+    Boolean(
+      bestPlan?.attachmentKey ||
+        attachments.some((a) => a.supportedForTakeoff && a.attachmentKey)
+    );
+
   return {
     messageKey: item?.messageKey || null,
     receivedAt: item?.receivedAt || null,
@@ -469,11 +735,32 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
       : null,
     attachments,
     takeoffStatus,
-    takeoffJobId: takeoffStatus.takeoffJobId,
+    takeoffStatusLabel: takeoffStatus.label,
+    takeoffJobId,
+    takeoffProgress: progress,
     progress,
+    takeoffStartedAt,
+    takeoffUpdatedAt,
+    takeoffElapsedSeconds,
+    takeoffErrorCode,
+    takeoffErrorMessageSafe:
+      takeoffStatus.key === "takeoff_failed"
+        ? takeoffErrorMessageSafe ||
+          "AI Takeoff failed, but no detailed reason was returned."
+        : takeoffErrorMessageSafe,
+    takeoffFailureStage,
+    takeoffFailedAt,
+    takeoffPlanFilename,
+    queueItemKey,
+    isStaleProcessing: stale.isStaleProcessing,
+    isLongRunning: stale.isLongRunning,
+    staleLabel: stale.staleLabel,
+    takeoffTimeline,
     group,
     nextAction,
+    nextRecommendedAction,
     canStartTakeoff,
+    canRetryTakeoff,
     alreadyScoped: opts.alreadyScoped === true,
     opened,
     dismissed,
