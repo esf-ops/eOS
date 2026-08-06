@@ -584,6 +584,78 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   });
 
+  app.post(
+    "/api/elite100-quote-flow/queue/:queueItemKey/archive",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const queueItemKey = decodeURIComponent(String(req.params.queueItemKey || ""));
+        const result = await quoteFlowSetScopeService.archiveQueueItem({
+          organizationId,
+          queueItemKey,
+          actorUserId: req.user?.id ?? null
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "queue.archive",
+            userId: req.user?.id ?? null,
+            queueItemKey,
+            takeoffCancelled: false,
+            takeoffDeleted: false,
+            intakeDeleted: false,
+            estimateDeleted: false,
+            emailDeleted: false,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] queue archive failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to archive queue item.");
+      }
+    }
+  );
+
+  app.post(
+    "/api/elite100-quote-flow/queue/:queueItemKey/restore",
+    ...staffStack,
+    jsonParser,
+    async (req, res) => {
+      res.set("Cache-Control", "no-store");
+      try {
+        const organizationId = await orgIdFor(req);
+        const queueItemKey = decodeURIComponent(String(req.params.queueItemKey || ""));
+        const result = await quoteFlowSetScopeService.restoreQueueItem({
+          organizationId,
+          queueItemKey,
+          actorUserId: req.user?.id ?? null
+        });
+        console.info(
+          "[elite100-quote-flow][audit]",
+          JSON.stringify({
+            action: "queue.restore",
+            userId: req.user?.id ?? null,
+            queueItemKey,
+            takeoffCancelled: false,
+            takeoffDeleted: false,
+            intakeDeleted: false,
+            estimateDeleted: false,
+            emailDeleted: false,
+            at: new Date().toISOString()
+          })
+        );
+        res.json(result);
+      } catch (e) {
+        console.error("[elite100-quote-flow] queue restore failed", e?.code || e?.message);
+        sendSafeError(res, e, "Unable to restore queue item.");
+      }
+    }
+  );
+
   app.get("/api/elite100-quote-flow/queue/:takeoffJobId", ...staffStack, async (req, res) => {
     res.set("Cache-Control", "no-store");
     try {

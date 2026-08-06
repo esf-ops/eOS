@@ -13,8 +13,10 @@ import {
   resolveQueueTitle
 } from "../lib/queueGrouping.mjs";
 import {
+  archiveQuoteFlowQueueItem,
   fetchQuoteFlowQueue,
   fetchQuoteFlowQueueDetail,
+  restoreQuoteFlowQueueItem,
   setQuoteFlowManualScope,
   setQuoteFlowScope,
   type QuoteFlowQueueItem
@@ -34,6 +36,7 @@ type Props = {
 
 type DetailMode = "idle" | "review" | "manual" | "success";
 type FilterKey = "all_active" | "ready" | "manual" | "processing" | "failed";
+type ArchiveView = "active" | "archived" | "all";
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all_active", label: "All active" },
@@ -42,6 +45,24 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "processing", label: "Processing" },
   { key: "failed", label: "Failed" }
 ];
+
+const ARCHIVE_VIEWS: { key: ArchiveView; label: string }[] = [
+  { key: "active", label: "Active" },
+  { key: "archived", label: "Archived" },
+  { key: "all", label: "All" }
+];
+
+function resolveClientQueueItemKey(row: QuoteFlowQueueItem): string {
+  const existing = String(row.queueItemKey || "").trim();
+  if (existing) return existing;
+  const takeoff = String(row.takeoffJobId || "").trim();
+  if (takeoff) return `takeoff:${takeoff}`;
+  const intake = String(row.intakeCaseId || "").trim();
+  if (intake) return `intake:${intake}`;
+  const message = String(row.messageKey || "").trim();
+  if (message) return `message:${message}`;
+  return "";
+}
 
 function errorMessage(e: unknown): string {
   if (e instanceof ApiError) {
@@ -78,11 +99,15 @@ export default function EstimateQueuePage(props: Props) {
   const [estimateId, setEstimateId] = useState<string | null>(null);
   const [successName, setSuccessName] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all_active");
+  const [archiveView, setArchiveView] = useState<ArchiveView>("active");
   const [search, setSearch] = useState("");
   const [estimateName, setEstimateName] = useState("");
   const [manualRooms, setManualRooms] = useState<QuoteFlowScopeRoom[]>(() =>
     roomsFromOfficialScope([])
   );
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveConfirmKey, setArchiveConfirmKey] = useState<string | null>(null);
+  const archiveViewRef = useRef<ArchiveView>("active");
   const inFlightRef = useRef(false);
   const listInFlightRef = useRef(false);
   const successJobIdRef = useRef<string | null>(null);
@@ -93,6 +118,7 @@ export default function EstimateQueuePage(props: Props) {
 
   selectedJobIdRef.current = selectedJobId;
   detailModeRef.current = detailMode;
+  archiveViewRef.current = archiveView;
 
   const allGrouped = useMemo(() => groupQueueItems(items), [items]);
   const visibleRows = useMemo(
@@ -144,7 +170,10 @@ export default function EstimateQueuePage(props: Props) {
     setError(null);
     try {
       // Default active filter — already-scoped items excluded by API.
-      const res = await fetchQuoteFlowQueue(authToken, { filter: "active" });
+      const res = await fetchQuoteFlowQueue(authToken, {
+        filter: "active",
+        archiveView: archiveViewRef.current
+      });
       const rows = Array.isArray(res.items) ? res.items : [];
       setItems(rows);
 
@@ -175,10 +204,91 @@ export default function EstimateQueuePage(props: Props) {
     }
   }
 
+  const archiveViewBootRef = useRef(true);
+
   useEffect(() => {
+    archiveViewRef.current = archiveView;
     void loadList("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
+
+  useEffect(() => {
+    archiveViewRef.current = archiveView;
+    if (archiveViewBootRef.current) {
+      archiveViewBootRef.current = false;
+      return;
+    }
+    void loadList("refresh");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archiveView]);
+
+  async function runArchive(queueItemKey: string, skipConfirm = false) {
+    const key = String(queueItemKey || "").trim();
+    if (!key || archiveBusy) return;
+    const row = items.find((r) => resolveClientQueueItemKey(r) === key) || null;
+    if (!skipConfirm && row?.recentProcessing === true) {
+      setArchiveConfirmKey(key);
+      return;
+    }
+    setArchiveBusy(true);
+    setArchiveConfirmKey(null);
+    setError(null);
+    try {
+      const res = await archiveQuoteFlowQueueItem(authToken, key);
+      setNotice("Removed from active Estimate Queue.");
+      if (archiveViewRef.current === "active") {
+        setItems((prev) => prev.filter((r) => resolveClientQueueItemKey(r) !== key));
+      } else {
+        setItems((prev) =>
+          prev.map((r) =>
+            resolveClientQueueItemKey(r) === key
+              ? {
+                  ...r,
+                  archived: true,
+                  archivedAt: res.archivedAt || new Date().toISOString()
+                }
+              : r
+          )
+        );
+      }
+      const jobId = row?.takeoffJobId;
+      if (jobId && selectedJobIdRef.current === jobId && archiveViewRef.current === "active") {
+        setSelectedJobId(null);
+        setDetail(null);
+        setDetailMode("idle");
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
+  async function runRestore(queueItemKey: string) {
+    const key = String(queueItemKey || "").trim();
+    if (!key || archiveBusy) return;
+    setArchiveBusy(true);
+    setError(null);
+    try {
+      await restoreQuoteFlowQueueItem(authToken, key);
+      setNotice("Restored to active Estimate Queue.");
+      if (archiveViewRef.current === "archived") {
+        setItems((prev) => prev.filter((r) => resolveClientQueueItemKey(r) !== key));
+      } else {
+        setItems((prev) =>
+          prev.map((r) =>
+            resolveClientQueueItemKey(r) === key
+              ? { ...r, archived: false, archivedAt: null }
+              : r
+          )
+        );
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
 
   function applyScopeSuccess(res: {
     estimateId?: string | null;
@@ -424,6 +534,7 @@ export default function EstimateQueuePage(props: Props) {
 
   function renderRow(row: QuoteFlowQueueItem) {
     const jobId = row.takeoffJobId || "";
+    const queueItemKey = resolveClientQueueItemKey(row);
     const active = Boolean(jobId && jobId === selectedJobId);
     const title = resolveQueueTitle(row);
     const customer = resolveQueueCustomer(row);
@@ -434,13 +545,16 @@ export default function EstimateQueuePage(props: Props) {
       formatQueueTime(row.startedAt);
     const nextLabel = row.nextAction?.label || row.actionLabel || row.status?.label || "Open";
     const rowAction = row.rowAction || row.action;
+    const isArchived = row.archived === true;
 
     return (
-      <li key={jobId || row.intakeCaseId || title}>
+      <li key={queueItemKey || jobId || row.intakeCaseId || title}>
         <div
           className={active ? "qf-inbox__row-card is-active" : "qf-inbox__row-card"}
           data-testid="qf-queue-row"
           data-takeoff-job-id={jobId}
+          data-queue-item-key={queueItemKey}
+          data-archived={isArchived ? "1" : "0"}
           data-status={row.status?.key || ""}
           data-group={resolveQueueGroupKey(row)}
           data-row-action={rowAction || ""}
@@ -468,11 +582,16 @@ export default function EstimateQueuePage(props: Props) {
               >
                 {row.status?.label || "Ready for review"}
               </span>
+              {isArchived ? (
+                <span className="qf-pill" data-testid="qf-queue-archived-badge">
+                  Archived
+                </span>
+              ) : null}
               <span className="qf-inbox__next">{nextLabel}</span>
             </span>
           </button>
           <div className="qf-queue__row-actions">
-            {rowAction === "review_takeoff" && jobId ? (
+            {rowAction === "review_takeoff" && jobId && !isArchived ? (
               <button
                 type="button"
                 className="qf-btn-primary"
@@ -482,7 +601,7 @@ export default function EstimateQueuePage(props: Props) {
                 Review Takeoff
               </button>
             ) : null}
-            {rowAction === "create_manual_scope" ? (
+            {rowAction === "create_manual_scope" && !isArchived ? (
               <button
                 type="button"
                 className="qf-btn-primary"
@@ -492,7 +611,7 @@ export default function EstimateQueuePage(props: Props) {
                 Create Manual Scope
               </button>
             ) : null}
-            {rowAction === "needs_decision" ? (
+            {rowAction === "needs_decision" && !isArchived ? (
               <button
                 type="button"
                 className="qf-btn-secondary"
@@ -502,11 +621,32 @@ export default function EstimateQueuePage(props: Props) {
                 Needs decision
               </button>
             ) : null}
-            {rowAction === "waiting" ? (
+            {rowAction === "waiting" && !isArchived ? (
               <span className="qf-muted" data-testid="qf-queue-waiting">
                 Waiting on AI Takeoff
               </span>
             ) : null}
+            {isArchived ? (
+              <button
+                type="button"
+                className="qf-btn-secondary"
+                data-testid="qf-queue-restore"
+                disabled={archiveBusy || !queueItemKey}
+                onClick={() => void runRestore(queueItemKey)}
+              >
+                Restore
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="qf-btn-secondary"
+                data-testid="qf-queue-archive"
+                disabled={archiveBusy || !queueItemKey}
+                onClick={() => void runArchive(queueItemKey)}
+              >
+                Remove from queue
+              </button>
+            )}
           </div>
         </div>
       </li>
@@ -607,6 +747,21 @@ export default function EstimateQueuePage(props: Props) {
       </div>
 
       <div className="qf-inbox-toolbar" data-testid="qf-queue-filters">
+        <div className="qf-filter-chips" role="tablist" aria-label="Queue archive view">
+          {ARCHIVE_VIEWS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              role="tab"
+              className={archiveView === f.key ? "qf-chip is-active" : "qf-chip"}
+              data-testid={`qf-queue-archive-view-${f.key}`}
+              aria-selected={archiveView === f.key}
+              onClick={() => setArchiveView(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
         <div className="qf-filter-chips" role="tablist" aria-label="Queue filters">
           {FILTERS.map((f) => (
             <button
@@ -645,6 +800,34 @@ export default function EstimateQueuePage(props: Props) {
         </p>
       ) : null}
 
+      {archiveConfirmKey ? (
+        <div className="qf-confirm" data-testid="qf-queue-archive-confirm">
+          <p>
+            Archive this item from the queue? This does not cancel the AI job.
+          </p>
+          <div className="qf-confirm__actions">
+            <button
+              type="button"
+              className="qf-btn-secondary"
+              data-testid="qf-queue-archive-confirm-no"
+              onClick={() => setArchiveConfirmKey(null)}
+              disabled={archiveBusy}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="qf-btn-primary"
+              data-testid="qf-queue-archive-confirm-yes"
+              disabled={archiveBusy}
+              onClick={() => void runArchive(archiveConfirmKey, true)}
+            >
+              Archive
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="qf-queue qf-queue--scope qf-queue--command" data-testid="qf-queue">
         <div className="qf-queue__list" data-testid="qf-queue-list">
           <div className="qf-inbox__list-head">
@@ -663,7 +846,11 @@ export default function EstimateQueuePage(props: Props) {
                   ? "No requests match this search."
                   : filter !== "all_active"
                     ? "No requests in this filter."
-                    : "No requests need scope creation. Start AI Takeoff from Inbox, or check Estimates for scoped work."}
+                    : archiveView === "archived"
+                      ? "No archived queue items."
+                      : archiveView === "all"
+                        ? "No queue items."
+                        : "No active queue items."}
               </p>
             </div>
           ) : null}

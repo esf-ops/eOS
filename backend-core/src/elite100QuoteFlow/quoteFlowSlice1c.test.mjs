@@ -391,10 +391,8 @@ function queueRow(overrides = {}) {
   assert.match(routes, /\/api\/elite100-quote-flow\/queue/);
   assert.match(routes, /set-scope/);
   assert.match(routes, /set-manual-scope/);
-  assert.doesNotMatch(
-    routes,
-    /publishDigitalEstimate|markSold|calculateStudio|approveWorkingDraft|takeoff-finish/
-  );
+  assert.match(routes, /queue\/:queueItemKey\/archive/);
+  assert.match(routes, /queue\/:queueItemKey\/restore/);
   const setScopeSrc = readFileSync(join(__dirname, "quoteFlowSetScope.mjs"), "utf8");
   assert.match(setScopeSrc, /refreshScopeFromTakeoff/);
   assert.match(setScopeSrc, /approveAndBuildEstimate/);
@@ -403,6 +401,12 @@ function queueRow(overrides = {}) {
   assert.match(setScopeSrc, /setManualScope/);
   assert.match(setScopeSrc, /alreadyScoped !== true/);
   assert.match(setScopeSrc, /NO_SIDE_EFFECTS|calculated: false/);
+  // Set Scope path itself must not publish/sold/calculate — later Quote Flow slices
+  // mount DE publish on the shared routes file (allowed outside set-scope).
+  assert.doesNotMatch(
+    setScopeSrc,
+    /publishDigitalEstimate|markSold|calculateStudio|approveWorkingDraft|takeoff-finish/
+  );
   console.log("ok: route/source contracts; no calculate/approve/publish/sold");
 }
 

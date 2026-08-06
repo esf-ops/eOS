@@ -13,8 +13,13 @@ import { validateAndNormalizeOfficialScopeRooms } from "./quoteFlowEstimates.mjs
 import {
   groupQuoteFlowQueueItems,
   presentQuoteFlowQueueItem,
+  resolveQuoteFlowQueueItemKey,
   sortQuoteFlowQueueItems
 } from "./quoteFlowQueuePresenter.mjs";
+import {
+  createMemoryQuoteFlowQueueStateStore,
+  createQuoteFlowQueueStateStore
+} from "./quoteFlowQueueStateStore.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
@@ -24,7 +29,12 @@ const NO_SIDE_EFFECTS = Object.freeze({
   sold: false,
   accepted: false,
   digitalEstimateCreated: false,
-  takeoffRerun: false
+  takeoffRerun: false,
+  takeoffCancelled: false,
+  takeoffDeleted: false,
+  intakeDeleted: false,
+  estimateDeleted: false,
+  emailDeleted: false
 });
 
 const QUEUE_STATUS_KEYS = new Set([
@@ -49,6 +59,7 @@ const QUEUE_STATUS_KEYS = new Set([
  *   reopenTakeoffJobForMeasurementRevision?: Function|null,
  *   getTakeoffWorkspace?: Function|null,
  *   getLatestTakeoffResult?: Function|null,
+ *   queueStateStore?: ReturnType<typeof createQuoteFlowQueueStateStore>|null,
  *   getSupabase?: Function|null,
  *   env?: NodeJS.ProcessEnv
  * }} deps
@@ -67,6 +78,11 @@ export function createQuoteFlowSetScopeService(deps) {
   const getTakeoffWorkspace = deps.getTakeoffWorkspace || null;
   const getLatestTakeoffResult = deps.getLatestTakeoffResult || null;
   const getSupabase = deps.getSupabase || null;
+  const queueStateStore =
+    deps.queueStateStore ||
+    (typeof getSupabase === "function"
+      ? createQuoteFlowQueueStateStore({ getSupabase })
+      : createMemoryQuoteFlowQueueStateStore());
 
   async function alreadyScopedForCase(organizationId, intakeCaseId) {
     const caseId = String(intakeCaseId || "").trim();
@@ -97,6 +113,8 @@ export function createQuoteFlowSetScopeService(deps) {
 
   async function listQueue({ organizationId, actorUserId = null, query = {} }) {
     const cases = await loadQueueCases(organizationId, actorUserId);
+    const archiveState = await queueStateStore.readState(organizationId);
+    const archivedMap = archiveState?.archivedQueueItemKeys || {};
     const items = [];
     for (const row of cases) {
       if (!row?.takeoffJobId) continue;
@@ -105,8 +123,16 @@ export function createQuoteFlowSetScopeService(deps) {
         alreadyScoped: scoped,
         estimateId: estimate?.id || row.studioEstimateId || null
       });
-      if (QUEUE_STATUS_KEYS.has(presented.status.key) || presented.status.key === "scope_set") {
-        items.push(presented);
+      const queueItemKey = presented.queueItemKey || resolveQuoteFlowQueueItemKey(presented);
+      const archiveMeta = archivedMap[queueItemKey] || null;
+      const withArchive = {
+        ...presented,
+        queueItemKey,
+        archived: Boolean(archiveMeta),
+        archivedAt: archiveMeta?.at || null
+      };
+      if (QUEUE_STATUS_KEYS.has(withArchive.status.key) || withArchive.status.key === "scope_set") {
+        items.push(withArchive);
       }
     }
 
@@ -132,6 +158,16 @@ export function createQuoteFlowSetScopeService(deps) {
       );
     }
 
+    // Archive view is orthogonal to scope/status filter (default: hide archived).
+    const archiveView = String(query.archiveView || "active").toLowerCase();
+    if (archiveView === "archived") {
+      filtered = filtered.filter((i) => i.archived === true);
+    } else if (archiveView === "all") {
+      // keep both
+    } else {
+      filtered = filtered.filter((i) => i.archived !== true);
+    }
+
     const sorted = sortQuoteFlowQueueItems(filtered);
     const grouped = groupQuoteFlowQueueItems(sorted);
 
@@ -146,6 +182,54 @@ export function createQuoteFlowSetScopeService(deps) {
       },
       stats: grouped.stats,
       total: sorted.length,
+      archiveView:
+        archiveView === "archived" || archiveView === "all" ? archiveView : "active",
+      sideEffects: { ...NO_SIDE_EFFECTS }
+    };
+  }
+
+  async function archiveQueueItem({
+    organizationId,
+    queueItemKey,
+    actorUserId = null
+  }) {
+    const key = String(queueItemKey || "").trim();
+    if (!key) {
+      throw createQuoteFlowError("queue_item_key_required", {
+        statusCode: 400,
+        message: "Queue item key required"
+      });
+    }
+    const result = await queueStateStore.archive({
+      organizationId,
+      queueItemKey: key,
+      actorUserId
+    });
+    return {
+      ...result,
+      sideEffects: { ...NO_SIDE_EFFECTS }
+    };
+  }
+
+  async function restoreQueueItem({
+    organizationId,
+    queueItemKey,
+    actorUserId = null
+  }) {
+    const key = String(queueItemKey || "").trim();
+    if (!key) {
+      throw createQuoteFlowError("queue_item_key_required", {
+        statusCode: 400,
+        message: "Queue item key required"
+      });
+    }
+    const result = await queueStateStore.restore({
+      organizationId,
+      queueItemKey: key,
+      actorUserId
+    });
+    return {
+      ...result,
       sideEffects: { ...NO_SIDE_EFFECTS }
     };
   }
@@ -780,6 +864,8 @@ export function createQuoteFlowSetScopeService(deps) {
     listQueue,
     getQueueDetail,
     setScope,
-    setManualScope
+    setManualScope,
+    archiveQueueItem,
+    restoreQueueItem
   };
 }

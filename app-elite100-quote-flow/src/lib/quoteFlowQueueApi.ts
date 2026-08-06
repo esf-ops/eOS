@@ -6,6 +6,7 @@ export type QuoteFlowQueueItem = {
   intakeCaseId: string | null;
   estimateId: string | null;
   messageKey?: string | null;
+  queueItemKey?: string | null;
   customerName: string | null;
   projectName: string | null;
   customerDisplay?: string | null;
@@ -32,6 +33,9 @@ export type QuoteFlowQueueItem = {
   failureReason?: string | null;
   alreadyScoped: boolean;
   reviewReady: boolean;
+  archived?: boolean;
+  archivedAt?: string | null;
+  recentProcessing?: boolean;
   canCreateManualScope?: boolean;
   canReviewTakeoff?: boolean;
   rowAction?: string | null;
@@ -140,4 +144,34 @@ export async function setQuoteFlowManualScope(
       estimateName: opts.estimateName || opts.projectName || undefined
     }
   ) as Promise<QuoteFlowSetScopeResult>;
+}
+
+export type QuoteFlowQueueArchiveResult = {
+  ok: boolean;
+  archived?: boolean;
+  restored?: boolean;
+  queueItemKey: string;
+  archivedAt?: string;
+  takeoffCancelled?: boolean;
+  takeoffDeleted?: boolean;
+  intakeDeleted?: boolean;
+  estimateDeleted?: boolean;
+  emailDeleted?: boolean;
+  sideEffects?: Record<string, boolean>;
+};
+
+export async function archiveQuoteFlowQueueItem(token: string, queueItemKey: string) {
+  return apiPost(
+    `/api/elite100-quote-flow/queue/${encodeURIComponent(queueItemKey)}/archive`,
+    token,
+    {}
+  ) as Promise<QuoteFlowQueueArchiveResult>;
+}
+
+export async function restoreQuoteFlowQueueItem(token: string, queueItemKey: string) {
+  return apiPost(
+    `/api/elite100-quote-flow/queue/${encodeURIComponent(queueItemKey)}/restore`,
+    token,
+    {}
+  ) as Promise<QuoteFlowQueueArchiveResult>;
 }

@@ -50,6 +50,17 @@ assert.match(queue, /Review measurements\. Save draft if needed, then Set Scope 
 assert.match(queue, /Scope is set for this estimate/);
 assert.match(queue, /Open in Estimates/);
 assert.match(queue, /filter:\s*["']active["']/);
+assert.match(queue, /archiveView/);
+assert.match(queue, /data-testid="qf-queue-archive"/);
+assert.match(queue, /data-testid="qf-queue-restore"/);
+assert.match(queue, /qf-queue-archive-view-\$\{f\.key\}|qf-queue-archive-view-active/);
+assert.match(queue, /data-testid="qf-queue-archived-badge"/);
+assert.match(queue, /No active queue items/);
+assert.match(queue, /No archived queue items/);
+assert.match(queue, /Archive this item from the queue\? This does not cancel the AI job/);
+assert.match(queue, /Remove from queue/);
+assert.match(api, /queue\/\$\{encodeURIComponent\(queueItemKey\)\}\/archive/);
+assert.match(api, /queue\/\$\{encodeURIComponent\(queueItemKey\)\}\/restore/);
 assert.match(queue, /projectName:\s*name|estimateName:\s*name/);
 assert.match(queue, /takeoffResult:\s*payload\?\.takeoffResult \|\| undefined/);
 assert.match(queue, /backend uses latest|saved reviewed takeoff/);

@@ -4082,4 +4082,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `customerConfigurationFoundation.mjs` (+ test), `baselineParityGuardrails.mjs`, `quoteFlowDigitalEstimate.mjs`, `ConfigurationView.tsx`, `OfficialDigitalEstimatePanel.tsx`, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Pricing formulas/rates, sold/handoff/QB/email, internal-only line exclusion, non–Quote-Flow Studio DE acceptance model (same path; bugfix benefits all interactive pubs). |
 | **Revisit trigger** | True physical-scope sidesplash modes beyond left/right/both/none. |
+
+### 303. Elite 100 Quote Flow — Estimate Queue archive / remove from queue (2026-08-06)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-06 · `main` |
+| **Decision** | Staff can **Archive / Remove from queue** Estimate Queue rows (ready, manual, failed, processing, waiting). Hides the item from the default Active queue without deleting takeoff jobs, intake cases, estimates, or emails, and without cancelling AI jobs. Persistence mirrors Inbox dismiss: `organization_integration_configs` `integration_key=quote_flow_queue` stores `archivedQueueItemKeys` map (`{ [queueItemKey]: { at, by } }`). Stable key: `takeoff:{id}` → `intake:{id}` → `message:{key}` → deterministic fallback. Routes: `POST …/queue/:queueItemKey/archive|restore`. UI: Active / Archived / All chips, Archived badge, Restore, confirm for recent processing (“does not cancel the AI job”). |
+| **Why** | Stale test / abandoned queue rows cluttered Active without a non-destructive cleanup path. |
+| **Impacted** | `quoteFlowQueueStateStore.mjs`, presenter key helpers, `quoteFlowSetScope` list/archive/restore, routes, Estimate Queue UI/API, archive tests, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Set Scope, AI Takeoff start/cancel, pricing/publish/acceptance/sold/handoff, Inbox dismiss model (separate key), DB row deletes. |
+| **Revisit trigger** | Explicit “cancel live AI job” action; org-wide queue purge tooling. |
 |

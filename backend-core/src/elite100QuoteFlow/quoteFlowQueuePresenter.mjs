@@ -5,6 +5,45 @@
 
 import { formatQuoteFlowPersonLabel } from "./quoteFlowInboxPresenter.mjs";
 
+/** Processing / queued rows newer than this are treated as "recent" for archive confirm. */
+export const QUOTE_FLOW_QUEUE_RECENT_PROCESSING_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Stable archive key for a queue row. Prefer takeoff job → intake case → message → fallback.
+ * @param {object|null|undefined} row
+ */
+export function resolveQuoteFlowQueueItemKey(row = {}) {
+  const takeoff = String(row?.takeoffJobId || "").trim();
+  if (takeoff) return `takeoff:${takeoff}`;
+  const intake = String(row?.intakeCaseId || row?.id || "").trim();
+  if (intake) return `intake:${intake}`;
+  const message = String(row?.messageKey || row?.graphMessageKey || row?.mailboxMessageKey || "").trim();
+  if (message) return `message:${message}`;
+  const status = String(row?.status?.key || row?.workflowStatus || "unknown").trim();
+  const when = String(row?.receivedAt || row?.startedAt || row?.returnedAt || "").trim();
+  const project = String(row?.projectName || row?.subject || "").trim().slice(0, 40);
+  return `fallback:${status}:${when}:${project}`;
+}
+
+/**
+ * True when the row is actively waiting on AI and started recently.
+ * @param {object|null|undefined} item
+ * @param {{ now?: number, recentMs?: number }} [opts]
+ */
+export function isRecentQueueProcessing(item, opts = {}) {
+  const status = String(item?.status?.key || "");
+  if (status !== "takeoff_processing" && status !== "takeoff_queued") return false;
+  const recentMs =
+    Number.isFinite(Number(opts.recentMs)) && Number(opts.recentMs) > 0
+      ? Number(opts.recentMs)
+      : QUOTE_FLOW_QUEUE_RECENT_PROCESSING_MS;
+  const now = Number.isFinite(Number(opts.now)) ? Number(opts.now) : Date.now();
+  const raw = item?.startedAt || item?.receivedAt || item?.returnedAt || null;
+  const started = raw ? Date.parse(String(raw)) : NaN;
+  if (!Number.isFinite(started)) return true; // fail closed → confirm
+  return now - started < recentMs;
+}
+
 /**
  * @param {string} workflowStatus
  * @param {{ alreadyScoped?: boolean, reviewReady?: boolean, takeoffJobStatus?: string, manualScope?: boolean }} opts
@@ -295,11 +334,12 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
       ? String(opts.failureReason || row?.failureReason || row?.takeoffError || "").trim() || null
       : null;
 
-  return {
+  const item = {
     takeoffJobId,
     intakeCaseId: row?.id || row?.intakeCaseId || null,
     estimateId: opts.estimateId || row?.studioEstimateId || null,
     messageKey: row?.messageKey || row?.graphMessageKey || row?.mailboxMessageKey || null,
+    queueItemKey: null,
     customerName: customerDisplay,
     projectName: projectDisplay,
     customerDisplay,
@@ -331,6 +371,9 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
     failureReason,
     alreadyScoped: opts.alreadyScoped === true,
     reviewReady: status.key === "ready_for_review",
+    archived: false,
+    archivedAt: null,
+    recentProcessing: false,
     canCreateManualScope:
       status.key === "manual_scope_needed" ||
       status.key === "takeoff_failed" ||
@@ -359,6 +402,25 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
               : null,
     actionLabel: nextAction.label
   };
+
+  return finalizeQuoteFlowQueueItem(item, {
+    archived: opts.archived === true,
+    archivedAt: opts.archivedAt || null
+  });
+}
+
+/**
+ * Finalize presenter fields that depend on the assembled row.
+ * @param {ReturnType<typeof presentQuoteFlowQueueItem>} item
+ * @param {{ archived?: boolean, archivedAt?: string|null }} [archive]
+ */
+export function finalizeQuoteFlowQueueItem(item, archive = {}) {
+  const next = { ...item };
+  next.queueItemKey = resolveQuoteFlowQueueItemKey(next);
+  next.archived = archive.archived === true;
+  next.archivedAt = archive.archivedAt || null;
+  next.recentProcessing = isRecentQueueProcessing(next);
+  return next;
 }
 
 /**
