@@ -815,6 +815,22 @@ export default function OfficialPricingPanel(props: Props) {
                 </div>
               ) : null}
             </div>
+            {lastCalculation.cutoutLines?.length ? (
+              <ul className="qf-pricing__cutouts" data-testid="qf-pricing-cutout-lines">
+                {lastCalculation.cutoutLines.map((line, idx) => (
+                  <li key={`${line.label}-${idx}`}>
+                    <span>{line.label}</span>
+                    <span>
+                      {line.amount != null
+                        ? money(line.amount)
+                        : line.quantity != null
+                          ? `×${line.quantity}`
+                          : "—"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {lastCalculation.linePreview?.length ? (
               <ul className="qf-pricing__lines" data-testid="qf-pricing-line-preview">
                 {lastCalculation.linePreview.map((line, idx) => (

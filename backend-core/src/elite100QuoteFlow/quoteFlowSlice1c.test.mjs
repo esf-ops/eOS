@@ -1167,7 +1167,7 @@ function queueRow(overrides = {}) {
   const reviewLf = [4.08, 6.0, 24.5, 12.25, 5.71, 2.76];
   const reviewRuns = reviewLf.map((lf, i) => ({
     id: `run-${i + 1}`,
-    label: `Piece ${i + 1}`,
+    label: i === 0 ? "Sink run" : `Piece ${i + 1}`,
     included: true,
     lengthIn: 60 + i * 6,
     depthIn: 25.5,
@@ -1177,7 +1177,15 @@ function queueRow(overrides = {}) {
       // Often present in review WITHOUT approved=true until Confirm
       approved: false,
       finishedEdgeConfirmed: false
-    }
+    },
+    // Estimator-confirmed kitchen sink cutout on Sink run (takeoff shape).
+    ...(i === 0
+      ? {
+          cutouts: [
+            { type: "kitchen_sink", quantity: 1, source: "estimator_confirmed" }
+          ]
+        }
+      : {})
   }));
   const reviewDraft = {
     schemaVersion: "1.0",
@@ -1356,6 +1364,12 @@ function queueRow(overrides = {}) {
     assert.equal(pieces[i].finishedEdgeLf, reviewLf[i]);
     assert.ok(Number(pieces[i].finishedEdge.totalFinishedEdgeLengthIn) > 0);
   }
+  assert.equal(
+    pieces[0].kitchenSinkCutouts,
+    1,
+    "afterEnsure Set Scope stamps Studio kitchenSinkCutouts from takeoff cutouts[]"
+  );
+  assert.equal(scoped.scope.addOns?.["qty-sink"], 1, "afterEnsure syncs qty-sink into official addOns");
   const summary = summarizeOfficialScope(scoped.scope);
   assert.equal(summary.openEdgeLf, 55.3);
   assert.equal(summary.pieceCount, 6);

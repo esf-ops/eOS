@@ -49,6 +49,12 @@ export type QuoteFlowScopePiece = {
   openEdgeLf?: number;
   exposedEdgeLf?: number;
   includeBacksplash?: boolean;
+  /** Kitchen sink cutout count (physical fabrication scope). */
+  kitchenSinkCutouts?: number;
+  vanityBarSinkCutouts?: number;
+  cooktopCutouts?: number;
+  outletCutouts?: number;
+  cutouts?: Array<{ type?: string; quantity?: number; source?: string }>;
   [key: string]: unknown;
 };
 
@@ -207,6 +213,8 @@ export type QuoteFlowPricingResult = {
     summary?: QuoteFlowCustomLineSummary;
   };
   linePreview?: Array<{ label: string; amount: number | null }>;
+  cutoutLines?: Array<{ label: string; amount: number | null; quantity?: number | null }>;
+  fabricationAddOns?: Record<string, number | unknown>;
   breakdown?: {
     measuredStoneSf?: number | null;
     billedStoneSf?: number | null;

@@ -26,8 +26,46 @@ function emptyPiece(): QuoteFlowScopePiece {
     quantity: 1,
     openEdgeLf: 0,
     finishedEdgeLf: 0,
+    kitchenSinkCutouts: 0,
     included: true,
     excluded: false
+  };
+}
+
+/** Resolve kitchen sink cutout count from Studio fields or takeoff cutouts[]. */
+function resolveKitchenSinkCutouts(piece: QuoteFlowScopePiece): number {
+  if (piece.kitchenSinkCutouts != null && Number.isFinite(Number(piece.kitchenSinkCutouts))) {
+    return Math.max(0, Math.floor(Number(piece.kitchenSinkCutouts) || 0));
+  }
+  if (Array.isArray(piece.cutouts)) {
+    let n = 0;
+    for (const c of piece.cutouts) {
+      if (String(c?.type || "") === "kitchen_sink") {
+        n += Math.max(0, Math.floor(Number(c?.quantity) || 0));
+      }
+    }
+    return n;
+  }
+  return 0;
+}
+
+function patchKitchenSinkCutouts(
+  piece: QuoteFlowScopePiece,
+  qty: number
+): Partial<QuoteFlowScopePiece> {
+  const quantity = Math.max(0, Math.floor(Number(qty) || 0));
+  const otherCutouts = Array.isArray(piece.cutouts)
+    ? piece.cutouts.filter((c) => String(c?.type || "") !== "kitchen_sink")
+    : [];
+  return {
+    kitchenSinkCutouts: quantity,
+    cutouts:
+      quantity > 0
+        ? [
+            ...otherCutouts,
+            { type: "kitchen_sink", quantity, source: "estimator_confirmed" }
+          ]
+        : otherCutouts
   };
 }
 
@@ -107,6 +145,8 @@ export function roomsFromOfficialScope(rooms: QuoteFlowScopeRoom[] | undefined):
         quantity: Math.max(1, Math.floor(Number(p.quantity) || 1)),
         openEdgeLf,
         finishedEdgeLf: openEdgeLf,
+        kitchenSinkCutouts: resolveKitchenSinkCutouts(p),
+        cutouts: Array.isArray(p.cutouts) ? p.cutouts : undefined,
         finishedEdge: {
           ...fe,
           totalFinishedEdgeLengthIn:
@@ -328,6 +368,7 @@ export default function OfficialScopeEditor(props: Props) {
                       <th scope="col">Qty</th>
                       <th scope="col">Square feet</th>
                       <th scope="col">Open edge LF</th>
+                      <th scope="col">Sink cutout</th>
                       <th scope="col">Included</th>
                       <th scope="col" className="qf-scope__col-actions">
                         Actions
@@ -420,6 +461,23 @@ export default function OfficialScopeEditor(props: Props) {
                                   roomIndex,
                                   pieceIndex,
                                   patchOpenEdgeLf(piece, Number(e.target.value) || 0)
+                                )
+                              }
+                            />
+                          </td>
+                          <td data-label="Sink cutout" data-testid="qf-scope-sink-cutout">
+                            <input
+                              type="number"
+                              aria-label="Kitchen sink cutout"
+                              min={0}
+                              step={1}
+                              value={resolveKitchenSinkCutouts(piece)}
+                              disabled={disabled}
+                              onChange={(e) =>
+                                updatePiece(
+                                  roomIndex,
+                                  pieceIndex,
+                                  patchKitchenSinkCutouts(piece, Number(e.target.value) || 0)
                                 )
                               }
                             />

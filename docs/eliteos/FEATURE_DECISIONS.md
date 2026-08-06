@@ -4104,4 +4104,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | Inbox presenter + progress helpers, Shared Inbox `aiTakeoff` timing fields, queue job select enrichment, Inbox UI/CSS/API, progress tests, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | AI Takeoff math/engine, Estimate Queue Set Scope, pricing/publish/acceptance/sold/handoff, QB/email, mailbox delete. |
 | **Revisit trigger** | Real engine percent events; safe cancel for live AI jobs. |
+
+### 305. Elite 100 Quote Flow — Set Scope imports estimator sink cutouts (2026-08-06)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-06 · `main` (hotfix) |
+| **Root cause** | Reviewed takeoff stores openings as `run.cutouts[]` / `piece.cutouts[]` (`kitchen_sink`, …). Studio V2 / Pricing expect `kitchenSinkCutouts` + `scope.addOns["qty-sink"]`. Set Scope `afterEnsure` (getOrCreate already seeded rooms) persisted open edge but did not bridge cutouts → Studio openings / addOns, so Official Scope, Pricing Latest calculation, and Digital Estimate baseline omitted Kitchen sink cutout. |
+| **Decision** | During Set Scope (including afterEnsure), map takeoff cutouts into Studio piece openings + `qty-sink` via `quoteFlowCutouts.mjs` + existing `syncPieceOpeningsIntoOfficialScopeAddOns`. Official Scope UI shows editable Sink cutout count. Pricing stamp/presenter surfaces Kitchen sink cutout / Fabrication add-ons (not only Other/adjustments). Existing §300 DE freeze + no-duplicate customer sink behavior applies once openings/addOns exist. No pricing formula/rate changes; no sold/handoff/QB/email; no AI refresh after Set Scope. |
+| **Why** | Estimator-defined physical cutout belongs in original internal price and published customer baseline; sink product selection is separate. |
+| **Impacted** | `quoteFlowCutouts.mjs`, Set Scope persist, OpenEdge/addOns sync, estimates normalize, pricing stamp/presenter, Official Scope + Pricing UI, seed/adapter cutouts bridge, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Cutout unit rates, DE rebuild, acceptance/sold/handoff/QB/email, customer acceptance, raw AI overwrite after Set Scope. |
+| **Revisit trigger** | Per-room vanity/cooktop/outlet editors beyond kitchen sink; staff apply-customer-selections into official scope. |
 |

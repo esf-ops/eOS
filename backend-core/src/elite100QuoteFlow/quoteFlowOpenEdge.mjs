@@ -3,6 +3,8 @@
  * Canonical write field: piece.openEdgeLf (LF). Compatibility aliases synced on stamp.
  */
 
+import { resolvePieceOpeningCounts } from "./quoteFlowCutouts.mjs";
+
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
@@ -119,6 +121,8 @@ export function stampOpenEdgeLfOnOfficialRooms(rooms) {
  * leaving addOns empty — DE publish freezes and envelope baseline flags need
  * qty-sink / qty-bar / qty-cook / qty-outlet on scope.addOns.
  *
+ * Accepts Studio V2 fields (`kitchenSinkCutouts`) and takeoff `piece.cutouts[]`.
+ *
  * @param {object|null|undefined} scope
  * @returns {object}
  */
@@ -134,23 +138,13 @@ export function syncPieceOpeningsIntoOfficialScopeAddOns(scope) {
     if (!room || room.included === false) continue;
     for (const p of Array.isArray(room.pieces) ? room.pieces : []) {
       if (!p || p.included === false || p.excluded === true) continue;
-      if (
-        p.kitchenSinkCutouts == null &&
-        p.vanityBarSinkCutouts == null &&
-        p.cooktopCutouts == null &&
-        p.outletCutouts == null &&
-        p.electricalOutletCutouts == null
-      ) {
-        continue;
-      }
+      const counts = resolvePieceOpeningCounts(p);
+      if (!counts.hasExplicit) continue;
       hasPieceOpenings = true;
-      kitchenSink += Math.max(0, Math.floor(Number(p.kitchenSinkCutouts) || 0));
-      vanityBar += Math.max(0, Math.floor(Number(p.vanityBarSinkCutouts) || 0));
-      cooktop += Math.max(0, Math.floor(Number(p.cooktopCutouts) || 0));
-      outlet += Math.max(
-        0,
-        Math.floor(Number(p.outletCutouts ?? p.electricalOutletCutouts) || 0)
-      );
+      kitchenSink += counts.kitchenSinkCutouts;
+      vanityBar += counts.vanityBarSinkCutouts;
+      cooktop += counts.cooktopCutouts;
+      outlet += counts.outletCutouts;
     }
   }
   if (!hasPieceOpenings) return scope;

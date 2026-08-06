@@ -137,6 +137,59 @@ function makeStore(initialRows) {
 }
 
 {
+  // Takeoff-shaped pieces may only have cutouts[] (no Studio kitchenSinkCutouts yet).
+  const scope = stampOpenEdgeLfOntoScopeForPricing({
+    addOns: {},
+    rooms: [
+      {
+        id: "kitchen",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        included: true,
+        pieces: [
+          {
+            id: "sink-run",
+            name: "Sink run",
+            lengthIn: 96,
+            depthIn: 25.5,
+            quantity: 1,
+            included: true,
+            openEdgeLf: 10,
+            cutouts: [{ type: "kitchen_sink", quantity: 1, source: "estimator_confirmed" }]
+          }
+        ]
+      }
+    ]
+  });
+  assert.equal(scope.rooms[0].pieces[0].kitchenSinkCutouts, 1, "pricing stamp bridges cutouts[]");
+  assert.equal(scope.addOns?.["qty-sink"], 1);
+  const calc = await calculateStudioEstimateV4({ scope, env: {} });
+  assert.equal(calc.fabrication?.addOns?.["qty-sink"], 1);
+  const cutoutRoom = (calc.elite100?.rooms || []).find(
+    (r) => (Number(r?.cutouts?.kitchenSinkQty) || 0) >= 1
+  );
+  assert.ok(cutoutRoom);
+  assert.ok((Number(cutoutRoom?.cutouts?.kitchenSinkCharge) || 0) >= 200);
+  const presented = presentQuoteFlowPricingResult({
+    scope,
+    calculationSnapshot: calc
+  });
+  assert.ok(
+    presented.cutoutLines?.some((l) => /kitchen\s*sink\s*cutout/i.test(String(l.label))),
+    "Latest calculation exposes Kitchen sink cutout line"
+  );
+  assert.ok(
+    presented.linePreview?.some(
+      (l) =>
+        /kitchen\s*sink\s*cutout/i.test(String(l.label)) ||
+        /fabrication\s*add-?ons/i.test(String(l.label))
+    ),
+    "linePreview visibly includes Kitchen sink cutout / Fabrication add-ons"
+  );
+  console.log("ok: pricing from cutouts[] only includes and displays Kitchen sink cutout");
+}
+
+{
   const empty = presentQuoteFlowPricingResult({ calculationSnapshot: null });
   assert.equal(empty.available, false);
   assert.equal(empty.estimatedTotal, null);

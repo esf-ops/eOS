@@ -12,6 +12,7 @@ import {
   stampPieceOpenEdgeLf,
   syncPieceOpeningsIntoOfficialScopeAddOns
 } from "./quoteFlowOpenEdge.mjs";
+import { stampStudioOpeningsOntoPiece } from "./quoteFlowCutouts.mjs";
 import {
   buildStudioV2EditablePricing,
   normalizeStudioV2PricingPatch,
@@ -31,6 +32,8 @@ import {
   summarizeQuoteFlowCustomLineItems
 } from "./quoteFlowCustomLineItems.mjs";
 import { markQuoteFlowReviewStaleOnScope } from "./quoteFlowReviewMeta.mjs";
+import { customerSafeCutoutLinesFromCharges } from "../elite100EstimateStudio/customerSafeCutoutPresentation.mjs";
+import { mergePricedCutoutsIntoFabricationAddOns } from "../elite100EstimateStudio/elite100RoomPricingStudioAdapter.mjs";
 
 const NO_SIDE_EFFECTS = Object.freeze({
   calculated: false,
@@ -50,7 +53,23 @@ const NO_SIDE_EFFECTS = Object.freeze({
  */
 export function stampOpenEdgeLfOntoScopeForPricing(scope) {
   if (!scope || typeof scope !== "object") return scope || {};
-  const withOpenings = syncPieceOpeningsIntoOfficialScopeAddOns(scope);
+  // Ensure Studio openings exist before aggregating addOns (bridges cutouts[]).
+  const roomsStamped = Array.isArray(scope.rooms)
+    ? scope.rooms.map((room) => {
+        if (!room || typeof room !== "object") return room;
+        const pieces = Array.isArray(room.pieces)
+          ? room.pieces.map((piece) => {
+              if (!piece || typeof piece !== "object") return piece;
+              return stampStudioOpeningsOntoPiece(piece);
+            })
+          : [];
+        return { ...room, pieces };
+      })
+    : [];
+  const withOpenings = syncPieceOpeningsIntoOfficialScopeAddOns({
+    ...scope,
+    rooms: roomsStamped
+  });
   const rooms = Array.isArray(withOpenings.rooms) ? withOpenings.rooms : [];
   return {
     ...withOpenings,
@@ -115,6 +134,59 @@ export function presentQuoteFlowPricingResult(estimate, calcOverride = null) {
     edgeProfileLabel: edge.profileLabel || null
   });
 
+  // Visible fabrication cutouts — prefer calculator room charges; fall back to fab.addOns qty.
+  const pricedRooms = Array.isArray(snap?.rooms)
+    ? snap.rooms
+    : Array.isArray(snap?.elite100?.rooms)
+      ? snap.elite100.rooms
+      : [];
+  /** @type {Array<{ label: string, amount: number|null, quantity?: number|null }>} */
+  const cutoutLines = [];
+  for (const room of pricedRooms) {
+    for (const line of customerSafeCutoutLinesFromCharges(room?.cutouts)) {
+      cutoutLines.push({ label: line.label, amount: line.amount });
+    }
+  }
+  const fabAddOns =
+    fab.addOns && typeof fab.addOns === "object"
+      ? fab.addOns
+      : mergePricedCutoutsIntoFabricationAddOns(scope.addOns, pricedRooms);
+  const qtySink = Math.max(0, Math.floor(Number(fabAddOns["qty-sink"]) || 0));
+  if (qtySink > 0 && !cutoutLines.some((l) => /kitchen\s*sink\s*cutout/i.test(String(l.label)))) {
+    cutoutLines.push({
+      label: "Kitchen sink cutout",
+      amount: null,
+      quantity: qtySink
+    });
+  }
+
+  /** Ensure Latest calculation linePreview surfaces cutouts (not only Other/adjustments). */
+  let linePreview = Array.isArray(built.customerSafeLinePreview)
+    ? built.customerSafeLinePreview.map((g) => ({
+        label: String(g?.label || g?.name || "Line"),
+        amount:
+          g?.amount != null && Number.isFinite(Number(g.amount))
+            ? Math.round(Number(g.amount) * 100) / 100
+            : null
+      }))
+    : [];
+  for (const cut of cutoutLines) {
+    const already = linePreview.some(
+      (l) =>
+        String(l.label).toLowerCase() === String(cut.label).toLowerCase() ||
+        (/fabrication\s*add-?ons/i.test(String(l.label)) && /sink\s*cutout/i.test(String(cut.label)))
+    );
+    if (already) continue;
+    if (cut.amount != null && Number(cut.amount) > 0) {
+      linePreview.push({ label: cut.label, amount: cut.amount });
+    } else if (cut.quantity != null && cut.quantity > 0) {
+      linePreview.push({
+        label: `Fabrication add-ons — ${cut.label} ×${cut.quantity}`,
+        amount: null
+      });
+    }
+  }
+
   return {
     available: built.available === true,
     calculatedAt: built.calculatedAt || null,
@@ -148,15 +220,9 @@ export function presentQuoteFlowPricingResult(estimate, calcOverride = null) {
         netCustomAdjustment: customSummary.netCustomAdjustment
       }
     },
-    linePreview: Array.isArray(built.customerSafeLinePreview)
-      ? built.customerSafeLinePreview.map((g) => ({
-          label: String(g?.label || g?.name || "Line"),
-          amount:
-            g?.amount != null && Number.isFinite(Number(g.amount))
-              ? Math.round(Number(g.amount) * 100) / 100
-              : null
-        }))
-      : [],
+    fabricationAddOns: fabAddOns,
+    cutoutLines,
+    linePreview,
     breakdown: {
       measuredStoneSf:
         breakdown.measuredStoneSf != null ? Number(breakdown.measuredStoneSf) : null,

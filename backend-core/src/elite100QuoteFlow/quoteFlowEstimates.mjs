@@ -4,6 +4,7 @@
  */
 
 import { createQuoteFlowError } from "./quoteFlowErrors.mjs";
+import { stampStudioOpeningsOntoPiece } from "./quoteFlowCutouts.mjs";
 import {
   presentQuoteFlowEstimateDetail,
   presentQuoteFlowEstimateListItem
@@ -120,6 +121,13 @@ export function validateAndNormalizeOfficialScopeRooms(roomsRaw) {
       if (stamped.finishedEdge && typeof stamped.finishedEdge === "object") {
         next.finishedEdge = stamped.finishedEdge;
       }
+      // Bridge takeoff cutouts[] → Studio V2 opening fields for pricing / DE.
+      const withOpenings = stampStudioOpeningsOntoPiece(next);
+      next.kitchenSinkCutouts = withOpenings.kitchenSinkCutouts;
+      next.vanityBarSinkCutouts = withOpenings.vanityBarSinkCutouts;
+      next.cooktopCutouts = withOpenings.cooktopCutouts;
+      next.outletCutouts = withOpenings.outletCutouts;
+      if (Array.isArray(withOpenings.cutouts)) next.cutouts = withOpenings.cutouts;
       if (typeof piece.includeBacksplash === "boolean") {
         next.includeBacksplash = piece.includeBacksplash;
       }

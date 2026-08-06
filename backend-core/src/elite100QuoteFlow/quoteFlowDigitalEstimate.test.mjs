@@ -666,4 +666,61 @@ function harness(customLines = []) {
   console.log("ok: DE publish freezes sink cutout in baseline; customer sink does not duplicate cutout");
 }
 
+{
+  // Takeoff cutouts[] only (no kitchenSinkCutouts) still freezes into DE baseline.
+  const { normalizeFabricationAddOnsForSnapshot } = await import(
+    "../digitalEstimate/configuration/roomPricingPublishSnapshot.mjs"
+  );
+  const { calculateStudioEstimateV4 } = await import(
+    "../elite100EstimateStudio/elite100RoomPricingStudioAdapter.mjs"
+  );
+  const { normalizeQuoteFlowScopeForDigitalEstimatePublish } = await import(
+    "./quoteFlowOpenEdge.mjs"
+  );
+  const { stampStudioOpeningsOntoPiece } = await import("./quoteFlowCutouts.mjs");
+
+  const piece = stampStudioOpeningsOntoPiece({
+    id: "sink-run",
+    name: "Sink run",
+    lengthIn: 96,
+    depthIn: 25.5,
+    quantity: 1,
+    included: true,
+    openEdgeLf: 12,
+    cutouts: [{ type: "kitchen_sink", quantity: 1, source: "estimator_confirmed" }]
+  });
+  assert.equal(piece.kitchenSinkCutouts, 1);
+
+  const scoped = normalizeQuoteFlowScopeForDigitalEstimatePublish({
+    pricingBasis: "wholesale",
+    materialGroup: "Group Promo",
+    addOns: {},
+    rooms: [
+      {
+        id: "kitchen",
+        name: "Kitchen",
+        roomType: "Kitchen",
+        included: true,
+        pieces: [piece]
+      }
+    ]
+  });
+  assert.equal(scoped.addOns?.["qty-sink"], 1);
+
+  const calc = await calculateStudioEstimateV4({ scope: scoped, env: {} });
+  assert.equal(calc.fabrication?.addOns?.["qty-sink"], 1);
+  const fabLines = normalizeFabricationAddOnsForSnapshot(calc.fabrication.addOns, [
+    { roomId: "kitchen", roomName: "Kitchen", roomType: "Kitchen" }
+  ]);
+  assert.ok(
+    fabLines.some(
+      (l) =>
+        l.category === "sink_cutout" &&
+        /kitchen sink cutout/i.test(String(l.label || l.name || ""))
+    ),
+    "cutouts[] path freezes Kitchen sink cutout into publish snapshot"
+  );
+  console.log("ok: DE publish freezes Kitchen sink cutout from cutouts[] bridge");
+}
+
 console.log("\nquoteFlowDigitalEstimate.test.mjs: ok\n");

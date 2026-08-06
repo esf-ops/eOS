@@ -427,20 +427,57 @@ export function mapStudioScopeToElite100Configuration(scope, opts = {}) {
     let roomHas = false;
     for (const p of Array.isArray(room.pieces) ? room.pieces : []) {
       if (!p || p.included === false) continue;
-      if (
-        p.kitchenSinkCutouts == null &&
-        p.vanityBarSinkCutouts == null &&
-        p.cooktopCutouts == null &&
-        p.outletCutouts == null
-      ) {
-        continue;
+      const hasStudioFields =
+        p.kitchenSinkCutouts != null ||
+        p.vanityBarSinkCutouts != null ||
+        p.cooktopCutouts != null ||
+        p.outletCutouts != null ||
+        p.electricalOutletCutouts != null;
+      const hasCutoutsArray = Array.isArray(p.cutouts) && p.cutouts.length > 0;
+      if (!hasStudioFields && !hasCutoutsArray) continue;
+
+      let pieceSink = Math.max(0, Math.floor(Number(p.kitchenSinkCutouts) || 0));
+      let pieceBar = Math.max(0, Math.floor(Number(p.vanityBarSinkCutouts) || 0));
+      let pieceCook = Math.max(0, Math.floor(Number(p.cooktopCutouts) || 0));
+      let pieceOutlet = Math.max(
+        0,
+        Math.floor(Number(p.outletCutouts ?? p.electricalOutletCutouts) || 0)
+      );
+
+      if (!hasStudioFields && hasCutoutsArray) {
+        for (const c of p.cutouts) {
+          const qty = Math.max(0, Math.floor(Number(c?.quantity) || 0));
+          if (qty <= 0) continue;
+          switch (String(c?.type || "")) {
+            case "kitchen_sink":
+            case "sink":
+              pieceSink += qty;
+              break;
+            case "vanity_bar_sink":
+            case "vanity":
+            case "bar":
+              pieceBar += qty;
+              break;
+            case "cooktop":
+            case "cook":
+              pieceCook += qty;
+              break;
+            case "electrical_outlet":
+            case "outlet":
+              pieceOutlet += qty;
+              break;
+            default:
+              break;
+          }
+        }
       }
+
       roomHas = true;
       hasPieceOpenings = true;
-      sink += Math.max(0, Math.floor(Number(p.kitchenSinkCutouts) || 0));
-      bar += Math.max(0, Math.floor(Number(p.vanityBarSinkCutouts) || 0));
-      cook += Math.max(0, Math.floor(Number(p.cooktopCutouts) || 0));
-      outlet += Math.max(0, Math.floor(Number(p.outletCutouts) || 0));
+      sink += pieceSink;
+      bar += pieceBar;
+      cook += pieceCook;
+      outlet += pieceOutlet;
     }
     if (roomHas) pieceOpeningsByRoom.set(roomId, { sink, bar, cook, outlet });
   }

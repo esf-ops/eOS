@@ -333,6 +333,40 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
           ...(Array.isArray(meta?.cutouts) && meta.cutouts.length
             ? { cutouts: meta.cutouts }
             : {}),
+          // Studio V2 opening fields — pricing/DE syncPieceOpenings expect these.
+          ...(() => {
+            if (!Array.isArray(meta?.cutouts) || !meta.cutouts.length) return {};
+            let kitchenSinkCutouts = 0;
+            let vanityBarSinkCutouts = 0;
+            let cooktopCutouts = 0;
+            let outletCutouts = 0;
+            for (const c of meta.cutouts) {
+              const qty = Math.max(0, Math.floor(Number(c?.quantity) || 0));
+              if (qty <= 0) continue;
+              switch (String(c?.type || "")) {
+                case "kitchen_sink":
+                  kitchenSinkCutouts += qty;
+                  break;
+                case "vanity_bar_sink":
+                  vanityBarSinkCutouts += qty;
+                  break;
+                case "cooktop":
+                  cooktopCutouts += qty;
+                  break;
+                case "electrical_outlet":
+                  outletCutouts += qty;
+                  break;
+                default:
+                  break;
+              }
+            }
+            return {
+              kitchenSinkCutouts,
+              vanityBarSinkCutouts,
+              cooktopCutouts,
+              outletCutouts
+            };
+          })(),
           ...(leftEligible != null ? { sideSplashLeftEligible: leftEligible } : {}),
           ...(rightEligible != null ? { sideSplashRightEligible: rightEligible } : {}),
           // Preserve estimator-confirmed finished-edge + backsplash geometry —

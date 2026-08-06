@@ -5,9 +5,11 @@
  */
 
 import { createQuoteFlowError } from "./quoteFlowErrors.mjs";
+import { applyTakeoffCutoutsToOfficialRooms } from "./quoteFlowCutouts.mjs";
 import {
   applyTakeoffOpenEdgeLfToOfficialRooms,
-  stampOpenEdgeLfOnTakeoffResult
+  stampOpenEdgeLfOnTakeoffResult,
+  syncPieceOpeningsIntoOfficialScopeAddOns
 } from "./quoteFlowOpenEdge.mjs";
 import { validateAndNormalizeOfficialScopeRooms } from "./quoteFlowEstimates.mjs";
 import {
@@ -453,9 +455,9 @@ export function createQuoteFlowSetScopeService(deps) {
   }
 
   /**
-   * Persist canonical openEdgeLf onto an estimate's official rooms.
+   * Persist canonical openEdgeLf + sink/fabrication cutouts onto official rooms.
    * Must run even when getOrCreate already seeded usable rooms (afterEnsure path) —
-   * that path previously returned early and left openEdgeLf at 0.
+   * that path previously returned early and left openEdgeLf at 0 / dropped cutouts.
    */
   async function persistOpenEdgeLfOnEstimate({
     organizationId,
@@ -474,7 +476,12 @@ export function createQuoteFlowSetScopeService(deps) {
       takeoffResult
     );
     const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(priorRooms, edgeSource);
-    const normalizedEdgeRooms = validateAndNormalizeOfficialScopeRooms(edgedRooms);
+    const withCutouts = applyTakeoffCutoutsToOfficialRooms(edgedRooms, edgeSource);
+    const normalizedEdgeRooms = validateAndNormalizeOfficialScopeRooms(withCutouts);
+    const scopeWithAddOns = syncPieceOpeningsIntoOfficialScopeAddOns({
+      ...(estimate.scope && typeof estimate.scope === "object" ? estimate.scope : {}),
+      rooms: normalizedEdgeRooms
+    });
 
     if (studioEstimateService?.updateScope) {
       try {
@@ -485,6 +492,9 @@ export function createQuoteFlowSetScopeService(deps) {
           body: {
             scope: {
               rooms: normalizedEdgeRooms,
+              ...(scopeWithAddOns.addOns && typeof scopeWithAddOns.addOns === "object"
+                ? { addOns: scopeWithAddOns.addOns }
+                : {}),
               ...(estimate.scope?.source != null ? { source: estimate.scope.source } : {}),
               ...(estimate.scope?.physicalScopeSource != null
                 ? { physicalScopeSource: estimate.scope.physicalScopeSource }
@@ -499,7 +509,11 @@ export function createQuoteFlowSetScopeService(deps) {
             id: next.id || estimate.id,
             scope: {
               ...(next.scope || {}),
-              rooms: Array.isArray(next.scope?.rooms) ? next.scope.rooms : normalizedEdgeRooms
+              rooms: Array.isArray(next.scope?.rooms) ? next.scope.rooms : normalizedEdgeRooms,
+              addOns:
+                next.scope?.addOns && typeof next.scope.addOns === "object"
+                  ? next.scope.addOns
+                  : scopeWithAddOns.addOns
             }
           };
         }
@@ -512,7 +526,10 @@ export function createQuoteFlowSetScopeService(deps) {
       ...estimate,
       scope: {
         ...(estimate.scope || {}),
-        rooms: normalizedEdgeRooms
+        rooms: normalizedEdgeRooms,
+        ...(scopeWithAddOns.addOns && typeof scopeWithAddOns.addOns === "object"
+          ? { addOns: scopeWithAddOns.addOns }
+          : {})
       }
     };
   }
