@@ -34,14 +34,26 @@ import {
   ACCESS_ASSIGNMENT_OPTIONS,
   DEPARTMENT_GROUPS,
   EXECUTIVE_DASHBOARD_SLUG,
+  MANAGERIAL_FINANCIALS_SLUG,
   accessOptionName,
+  accessOptionType,
   departmentSlugForSection,
   hasExecutiveDashboardAssignment,
-  isExecutiveDashboardSlug,
+  hasManagerialFinancialsAssignment,
   isValidAccessSlug,
   listAssignedDepartmentGroups,
   sectionIdsForDepartments
 } from "./workforceDepartments.js";
+import {
+  MANAGERIAL_FINANCIAL_SECTION_IDS,
+  MANAGERIAL_FINANCIAL_SECTIONS,
+  buildCurrencyWeekComparison,
+  buildManagerialFinancialReportHtml,
+  buildManagerialFinancialReportText,
+  ensureManagerialFinancialSections,
+  isManagerialFinancialSectionId,
+  partitionScorecardRows
+} from "./workforceManagerialFinancials.js";
 import {
   buildMetricValueFromBody,
   buildQuickCountLogEntry,
@@ -409,8 +421,10 @@ async function resolveScorecardAccess(db, user, organizationId) {
     return {
       fullAccess: true,
       executiveDashboardAccess: true,
+      managerialFinancialsAccess: true,
       canManageDepartments: true,
       canGenerateReport: true,
+      canGenerateManagerialFinancialReport: true,
       viewMode: "executive",
       departmentSlugs: DEPARTMENT_GROUPS.map((g) => g.slug),
       departments: departmentsAll,
@@ -420,13 +434,16 @@ async function resolveScorecardAccess(db, user, organizationId) {
 
   const assignments = await loadUserDepartmentAssignments(db, organizationId, String(user.id));
   const executiveDashboardAccess = hasExecutiveDashboardAssignment(assignments);
+  const managerialFinancialsAccess = hasManagerialFinancialsAssignment(assignments);
 
   if (executiveDashboardAccess) {
     return {
       fullAccess: true,
       executiveDashboardAccess: true,
+      managerialFinancialsAccess,
       canManageDepartments: false,
       canGenerateReport: true,
+      canGenerateManagerialFinancialReport: managerialFinancialsAccess,
       viewMode: "executive",
       departmentSlugs: DEPARTMENT_GROUPS.map((g) => g.slug),
       departments: departmentsAll,
@@ -441,13 +458,20 @@ async function resolveScorecardAccess(db, user, organizationId) {
   }));
   const departmentSlugs = departments.map((d) => d.slug);
   const allowedSectionIds = sectionIdsForDepartments(departmentSlugs);
+  if (managerialFinancialsAccess) {
+    for (const id of MANAGERIAL_FINANCIAL_SECTION_IDS) allowedSectionIds.add(id);
+  }
+
+  const onlyManagerial = managerialFinancialsAccess && departments.length === 0;
 
   return {
     fullAccess: false,
     executiveDashboardAccess: false,
+    managerialFinancialsAccess,
     canManageDepartments: false,
     canGenerateReport: false,
-    viewMode: "department",
+    canGenerateManagerialFinancialReport: managerialFinancialsAccess,
+    viewMode: onlyManagerial ? "managerial_financials" : "department",
     departmentSlugs,
     departments,
     allowedSectionIds
@@ -460,9 +484,79 @@ async function resolveScorecardAccess(db, user, organizationId) {
  */
 function canAccessSection(access, sectionId) {
   if (!access) return false;
+  if (isManagerialFinancialSectionId(sectionId)) {
+    return Boolean(access.managerialFinancialsAccess);
+  }
   if (access.fullAccess) return true;
   if (!(access.allowedSectionIds instanceof Set)) return false;
   return access.allowedSectionIds.has(String(sectionId));
+}
+
+/**
+ * Load managerial financial metrics with prior-week comparison for a week.
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} organizationId
+ * @param {string} weekStart
+ * @param {object} settings
+ */
+async function loadManagerialFinancialMetrics(db, organizationId, weekStart, settings) {
+  await ensureManagerialFinancialSections(db, organizationId, isMissingTableError);
+  const sections = await loadGradingSections(db, organizationId);
+  const managerialSections = MANAGERIAL_FINANCIAL_SECTIONS.map((template) => {
+    const fromDb = sections.find((s) => s.sectionId === template.id);
+    return fromDb
+      ? { ...fromDb, slug: template.slug }
+      : {
+          sectionId: template.id,
+          name: template.name,
+          slug: template.slug,
+          goalDisplay: template.goalDisplay,
+          goalNumeric: template.goalNumeric,
+          metricKind: template.metricKind,
+          gradingEnabled: false,
+          sortOrder: template.sortOrder,
+          unitLabel: template.unitLabel,
+          isActive: true
+        };
+  });
+
+  const currentValues = await loadSectionWeekValues(db, organizationId, weekStart);
+  const priorWeekStart = shiftWeekStart(weekStart, -1, SCORECARD_WEEK_START_DAY);
+  const allWeeks = listScorecardWeekStartsThrough(weekStart, settings.timezone || "America/Chicago");
+  const priorWeekExists = allWeeks.includes(priorWeekStart);
+  const priorValues = priorWeekExists
+    ? await loadSectionWeekValues(db, organizationId, priorWeekStart)
+    : new Map();
+
+  return managerialSections.map((section) => {
+    const currentWv = currentValues.get(section.sectionId) ?? {};
+    const priorWv = priorValues.get(section.sectionId) ?? {};
+    const currentRaw =
+      currentWv.actualNumeric != null
+        ? Number(currentWv.actualNumeric)
+        : currentWv.valuePayload?.currency != null
+          ? Number(currentWv.valuePayload.currency)
+          : null;
+    const priorRaw =
+      priorWv.actualNumeric != null
+        ? Number(priorWv.actualNumeric)
+        : priorWv.valuePayload?.currency != null
+          ? Number(priorWv.valuePayload.currency)
+          : null;
+    const comparison = buildCurrencyWeekComparison(currentRaw, priorRaw, { priorWeekExists });
+    return {
+      sectionId: section.sectionId,
+      slug: section.slug,
+      name: section.name,
+      metricKind: "currency",
+      gradingEnabled: false,
+      isManagerialFinancial: true,
+      weekStart,
+      priorWeekStart: priorWeekExists ? priorWeekStart : null,
+      weekValue: currentWv,
+      ...comparison
+    };
+  });
 }
 
 /**
@@ -1042,6 +1136,9 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const canManageCategories = isWorkforceManager(user);
       const settings = await loadGradeSettings(db(), organizationId);
       const sectionSeed = await ensureDefaultGradingSections(db(), organizationId, isMissingTableError);
+      if (access.managerialFinancialsAccess) {
+        await ensureManagerialFinancialSections(db(), organizationId, isMissingTableError);
+      }
       await closePastSectionSnapshots(db(), organizationId, settings);
 
       const weekStart = resolveRequestedWeekStart(req, settings);
@@ -1056,6 +1153,19 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         lastWeekStart
       });
 
+      const accessFlags = {
+        canManageCategories,
+        canManageDepartments: access.canManageDepartments,
+        fullAccess: access.fullAccess,
+        executiveDashboardAccess: access.executiveDashboardAccess,
+        managerialFinancialsAccess: access.managerialFinancialsAccess,
+        canGenerateReport: access.canGenerateReport,
+        canGenerateManagerialFinancialReport: access.canGenerateManagerialFinancialReport,
+        departments: access.departments,
+        gradingMode: "scorecard",
+        viewMode: access.viewMode
+      };
+
       let payload;
       try {
         payload = await loadScorecardPayload(db(), organizationId, weekStart, settings);
@@ -1063,19 +1173,13 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         if (isMissingTableError(e)) {
           return res.json({
             ok: true,
-            canManageCategories,
-            canManageDepartments: access.canManageDepartments,
-            fullAccess: access.fullAccess,
-            executiveDashboardAccess: access.executiveDashboardAccess,
-            canGenerateReport: access.canGenerateReport,
-            departments: access.departments,
-            gradingMode: "scorecard",
-            viewMode: access.viewMode,
+            ...accessFlags,
             weekStart,
             weekEnd,
             weekLabel,
             weekOptions,
             rows: [],
+            managerialFinancials: [],
             overallGrade: null,
             schemaReady: false,
             warning: "Apply workforce quality SQL migrations to enable section grading."
@@ -1085,23 +1189,31 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       }
 
       let rows = payload.rows ?? [];
+      const { operationalRows, managerialRows: _ignored } = partitionScorecardRows(rows);
+      rows = operationalRows;
+
       if (!access.fullAccess) {
-        if (!(access.allowedSectionIds instanceof Set) || access.allowedSectionIds.size === 0) {
+        const hasOperational =
+          access.allowedSectionIds instanceof Set &&
+          [...access.allowedSectionIds].some((id) => !isManagerialFinancialSectionId(id));
+        if (!hasOperational && !access.managerialFinancialsAccess) {
           return res.json({
             ok: true,
-            canManageCategories,
+            ...accessFlags,
             canManageDepartments: false,
             fullAccess: false,
             executiveDashboardAccess: false,
+            managerialFinancialsAccess: false,
             canGenerateReport: false,
+            canGenerateManagerialFinancialReport: false,
             departments: [],
-            gradingMode: "scorecard",
             viewMode: "department",
             weekStart,
             weekEnd,
             weekLabel,
             weekOptions,
             rows: [],
+            managerialFinancials: [],
             overallGrade: null,
             executiveSummary: null,
             narrative: null,
@@ -1110,29 +1222,37 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
               "No department groups are assigned to your account. Ask an HR manager or admin to grant Department Access."
           });
         }
-        rows = rows.filter((row) => access.allowedSectionIds.has(row.sectionId));
+        if (access.allowedSectionIds instanceof Set) {
+          rows = rows.filter((row) => access.allowedSectionIds.has(row.sectionId));
+        }
       }
+
+      let managerialFinancials = [];
+      if (access.managerialFinancialsAccess) {
+        managerialFinancials = await loadManagerialFinancialMetrics(
+          db(),
+          organizationId,
+          weekStart,
+          settings
+        );
+      }
+
+      const showExecutiveExtras = Boolean(access.fullAccess);
 
       res.json({
         ok: true,
-        canManageCategories,
-        canManageDepartments: access.canManageDepartments,
-        fullAccess: access.fullAccess,
-        executiveDashboardAccess: access.executiveDashboardAccess,
-        canGenerateReport: access.canGenerateReport,
-        departments: access.departments,
-        gradingMode: "scorecard",
-        viewMode: access.viewMode,
+        ...accessFlags,
         schemaReady: sectionSeed.schemaReady,
         weekStart,
         weekEnd,
         weekLabel,
         weekOptions,
-        overallGrade: access.fullAccess ? payload.overallGrade : null,
-        executiveSummary: access.fullAccess ? payload.executiveSummary : null,
-        narrative: access.fullAccess ? payload.narrative : null,
+        overallGrade: showExecutiveExtras ? payload.overallGrade : null,
+        executiveSummary: showExecutiveExtras ? payload.executiveSummary : null,
+        narrative: showExecutiveExtras ? payload.narrative : null,
         rows,
-        mistakes: access.fullAccess
+        managerialFinancials,
+        mistakes: showExecutiveExtras
           ? (payload.mistakes ?? []).map((m) =>
               mapIncidentRow({
                 ...m,
@@ -1156,8 +1276,10 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         ok: true,
         fullAccess: access.fullAccess,
         executiveDashboardAccess: access.executiveDashboardAccess,
+        managerialFinancialsAccess: access.managerialFinancialsAccess,
         canManageDepartments: access.canManageDepartments,
         canGenerateReport: access.canGenerateReport,
+        canGenerateManagerialFinancialReport: access.canGenerateManagerialFinancialReport,
         viewMode: access.viewMode,
         departments: access.departments,
         departmentGroups: DEPARTMENT_GROUPS.map((g) => ({
@@ -1231,7 +1353,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
           userEmail: profile?.email ?? null,
           departmentSlug: slug,
           departmentName: accessOptionName(slug),
-          accessType: isExecutiveDashboardSlug(slug) ? "executive_dashboard" : "department",
+          accessType: accessOptionType(slug),
           hasHrHeadAccess: hrFlags.get(String(row.user_id)) === true,
           isActive: Boolean(row.is_active),
           createdAt: row.created_at ?? null
@@ -1278,7 +1400,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       if (!isValidAccessSlug(departmentSlug)) {
         return res.status(400).json({
           ok: false,
-          error: `Invalid department_slug. Use a department group or ${EXECUTIVE_DASHBOARD_SLUG}.`
+          error: `Invalid department_slug. Use a department group, ${EXECUTIVE_DASHBOARD_SLUG}, or ${MANAGERIAL_FINANCIALS_SLUG}.`
         });
       }
 
@@ -1324,7 +1446,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
           return res.status(503).json({
             ok: false,
             error:
-              "Apply eliteos_workforce_executive_dashboard_access_v1.sql to enable Executive Dashboard assignments."
+              "Apply eliteos_workforce_managerial_financials_v1.sql (or executive_dashboard migration) to enable this access assignment."
           });
         }
         throw error;
@@ -1340,7 +1462,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         metadata: {
           user_id: targetUserId,
           department_slug: departmentSlug,
-          access_type: isExecutiveDashboardSlug(departmentSlug) ? "executive_dashboard" : "department"
+          access_type: accessOptionType(departmentSlug)
         },
         req
       });
@@ -1348,7 +1470,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       res.status(201).json({
         ok: true,
         assignment: data,
-        accessType: isExecutiveDashboardSlug(departmentSlug) ? "executive_dashboard" : "department"
+        accessType: accessOptionType(departmentSlug)
       });
     } catch (e) {
       respondServerError(res, e, HR_CLIENT_ERRORS.save);
@@ -1486,6 +1608,12 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       if (!sectionId) {
         return res.status(400).json({ ok: false, error: "section_id is required." });
+      }
+      if (isManagerialFinancialSectionId(sectionId)) {
+        return res.status(400).json({
+          ok: false,
+          error: "Managerial financial metrics do not accept mistake entries."
+        });
       }
 
       const access = await resolveScorecardAccess(db(), user, organizationId);
@@ -1876,7 +2004,16 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
 
       await ensureDefaultGradingSections(db(), organizationId, isMissingTableError);
-      const sections = await loadGradingSections(db(), organizationId);
+      const access = await resolveScorecardAccess(db(), req.user, organizationId);
+      if (access.managerialFinancialsAccess) {
+        await ensureManagerialFinancialSections(db(), organizationId, isMissingTableError);
+      }
+      let sections = await loadGradingSections(db(), organizationId);
+      if (!access.managerialFinancialsAccess) {
+        sections = sections.filter((s) => !isManagerialFinancialSectionId(s.sectionId));
+      } else if (!access.fullAccess && access.allowedSectionIds instanceof Set) {
+        sections = sections.filter((s) => access.allowedSectionIds.has(s.sectionId));
+      }
 
       res.json({ ok: true, sections, schemaReady: sections.length > 0 });
     } catch (e) {
@@ -2091,6 +2228,197 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
     }
   });
 
+  app.get("/api/hr/workforce/managerial-financials", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+      const access = await resolveScorecardAccess(db(), req.user, organizationId);
+      if (!access.managerialFinancialsAccess) {
+        return res.status(403).json({ ok: false, error: "You do not have access to Managerial Financials." });
+      }
+
+      const settings = await loadGradeSettings(db(), organizationId);
+      const weekStart = resolveRequestedWeekStart(req, settings);
+      const { weekEnd, weekLabel } = scorecardWeekMeta(weekStart);
+      const metrics = await loadManagerialFinancialMetrics(db(), organizationId, weekStart, settings);
+
+      res.json({
+        ok: true,
+        weekStart,
+        weekEnd,
+        weekLabel,
+        managerialFinancialsAccess: true,
+        canGenerateManagerialFinancialReport: access.canGenerateManagerialFinancialReport,
+        metrics
+      });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
+    }
+  });
+
+  app.post("/api/hr/workforce/managerial-financials/:sectionId/value", ...guard, jsonParser, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const user = req.user;
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+
+      const sectionId = pickStr(req.params?.sectionId ?? req.params?.id);
+      if (!isManagerialFinancialSectionId(sectionId)) {
+        return res.status(400).json({ ok: false, error: "Invalid managerial financial section." });
+      }
+
+      const access = await resolveScorecardAccess(db(), user, organizationId);
+      if (!canAccessSection(access, sectionId)) {
+        return res.status(403).json({ ok: false, error: "You do not have access to Managerial Financials." });
+      }
+
+      const body = req.body ?? {};
+      const weekStartParam = pickStr(body.week_start ?? body.weekStart);
+      const settings = await loadGradeSettings(db(), organizationId);
+      const weekStart = clampScorecardWeekStart(
+        weekStartParam || todayIsoInTimezone(new Date(), settings.timezone),
+        SCORECARD_WEEK_START_DAY
+      );
+
+      await ensureManagerialFinancialSections(db(), organizationId, isMissingTableError);
+
+      const { data: section, error: sectionErr } = await db()
+        .from("workforce_grading_sections")
+        .select("id, name, metric_kind, goal_numeric, goal_display, grading_enabled, unit_label, sort_order")
+        .eq("organization_id", organizationId)
+        .eq("id", sectionId)
+        .maybeSingle();
+      if (sectionErr) throw sectionErr;
+      if (!section) return res.status(404).json({ ok: false, error: "Section not found." });
+
+      const mapped = mapSectionRow(section);
+      const existingWeekValue = await loadExistingWeekValue(db(), organizationId, sectionId, weekStart);
+      const existingPayload =
+        existingWeekValue?.valuePayload && typeof existingWeekValue.valuePayload === "object"
+          ? existingWeekValue.valuePayload
+          : {};
+      const { payload, actualNumeric, actualDisplay } = buildMetricValueFromBody(mapped, body);
+      const mergedPayload = { ...existingPayload, ...payload };
+
+      const row = {
+        organization_id: organizationId,
+        section_id: sectionId,
+        week_start: weekStart,
+        actual_numeric: actualNumeric,
+        actual_display: actualDisplay,
+        value_payload: mergedPayload,
+        logged_by_user_id: String(user.id),
+        updated_at: new Date().toISOString()
+      };
+
+      let upsertResult = await db()
+        .from("workforce_section_week_values")
+        .upsert(row, { onConflict: "organization_id,section_id,week_start" })
+        .select("*")
+        .single();
+      if (upsertResult.error) {
+        const msg = String(upsertResult.error.message ?? "").toLowerCase();
+        if (msg.includes("value_payload")) {
+          delete row.value_payload;
+          upsertResult = await db()
+            .from("workforce_section_week_values")
+            .upsert(row, { onConflict: "organization_id,section_id,week_start" })
+            .select("*")
+            .single();
+        }
+      }
+      const { data, error } = upsertResult;
+      if (error) {
+        if (isMissingTableError(error)) {
+          return res.status(503).json({
+            ok: false,
+            error: "Apply eliteos_workforce_managerial_financials_v1.sql to enable managerial financial metrics."
+          });
+        }
+        throw error;
+      }
+
+      await logAction({
+        user,
+        head: HR_HEAD_SLUG,
+        actionType: "workforce_managerial_financial_value_saved",
+        entityType: "workforce_section_week_values",
+        entityId: sectionId,
+        entityLabel: mapped.name,
+        metadata: { section_id: sectionId, week_start: weekStart, currency: actualNumeric },
+        req
+      });
+
+      const metrics = await loadManagerialFinancialMetrics(db(), organizationId, weekStart, settings);
+      const metric = metrics.find((m) => m.sectionId === sectionId) ?? null;
+
+      res.json({ ok: true, value: data, metric, weekStart });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.save);
+    }
+  });
+
+  app.post("/api/hr/workforce/managerial-financials/report/generate", ...guard, jsonParser, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const user = req.user;
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+
+      const access = await resolveScorecardAccess(db(), user, organizationId);
+      if (!access.canGenerateManagerialFinancialReport) {
+        return res.status(403).json({
+          ok: false,
+          error: "You do not have access to generate the Managerial Financial Report."
+        });
+      }
+
+      const settings = await loadGradeSettings(db(), organizationId);
+      const weekStart = resolveRequestedWeekStart(req, settings);
+      const { weekEnd, weekLabel } = scorecardWeekMeta(weekStart);
+      const metrics = await loadManagerialFinancialMetrics(db(), organizationId, weekStart, settings);
+      const generatedAt = new Date().toISOString();
+      const reportText = buildManagerialFinancialReportText(metrics, {
+        weekLabel,
+        weekStart,
+        weekEnd,
+        generatedAt
+      });
+      const reportHtml = buildManagerialFinancialReportHtml(metrics, {
+        weekLabel,
+        weekStart,
+        weekEnd,
+        generatedAt
+      });
+
+      await logAction({
+        user,
+        head: HR_HEAD_SLUG,
+        actionType: "workforce_managerial_financial_report_generated",
+        entityType: "workforce_managerial_financials",
+        entityId: weekStart,
+        entityLabel: weekLabel,
+        metadata: { week_start: weekStart, metric_count: metrics.length },
+        req
+      });
+
+      res.json({
+        ok: true,
+        weekStart,
+        weekEnd,
+        weekLabel,
+        generatedAt,
+        reportText,
+        reportHtml,
+        metrics
+      });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.save);
+    }
+  });
+
   app.post("/api/hr/workforce/report/generate", ...guard, jsonParser, async (req, res) => {
     try {
       jsonNoStore(res);
@@ -2112,23 +2440,24 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const { weekEnd, weekLabel } = scorecardWeekMeta(weekStart);
 
       const payload = await loadScorecardPayload(db(), organizationId, weekStart, settings);
-      if (!payload.rows.length) {
+      const { operationalRows } = partitionScorecardRows(payload.rows ?? []);
+      if (!operationalRows.length) {
         return res.status(400).json({ ok: false, error: "No grading sections configured for this organization." });
       }
 
-      await upsertWeekSnapshots(db(), organizationId, weekStart, payload.rows);
+      await upsertWeekSnapshots(db(), organizationId, weekStart, operationalRows);
       const mistakesSummary = (payload.mistakes ?? []).map((m) => {
         const section = payload.sections.find((s) => s.sectionId === String(m.section_id));
         return mapIncidentRow({ ...m, section_name: section?.name ?? null });
       });
-      const reportText = buildScorecardReportText(payload.rows, {
+      const reportText = buildScorecardReportText(operationalRows, {
         weekLabel,
         overallGrade: payload.overallGrade,
         executiveSummary: payload.executiveSummary,
         narrative: payload.narrative,
         mistakesSummary
       });
-      const reportHtml = buildScorecardReportHtml(payload.rows, {
+      const reportHtml = buildScorecardReportHtml(operationalRows, {
         weekLabel,
         overallGrade: payload.overallGrade,
         executiveSummary: payload.executiveSummary,
@@ -2146,7 +2475,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         metadata: {
           week_start: weekStart,
           overall_grade: payload.overallGrade,
-          section_count: payload.rows.length
+          section_count: operationalRows.length
         },
         req
       });
@@ -2160,7 +2489,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         overallGrade: payload.overallGrade,
         reportText,
         reportHtml,
-        rows: payload.rows
+        rows: operationalRows
       });
     } catch (e) {
       respondServerError(res, e, HR_CLIENT_ERRORS.save);

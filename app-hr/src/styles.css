@@ -964,6 +964,97 @@ body {
   color: var(--eos-ink-muted);
 }
 
+.hr-managerial-section {
+  margin: 0 0 28px;
+  padding: 18px 18px 20px;
+  border: 1px solid #c9b89a;
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, #fbf7ef 0%, #f3eee4 100%);
+}
+
+.hr-managerial-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.hr-managerial-intro {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+  color: var(--eos-ink-muted);
+  max-width: 52ch;
+}
+
+.hr-managerial-actions {
+  margin: 0;
+}
+
+.hr-managerial-grid {
+  margin-top: 4px;
+}
+
+.hr-managerial-card {
+  border-color: #d2c4a8;
+  background: #fffdf8;
+}
+
+.hr-managerial-current {
+  margin: 0;
+  font-size: 1.65rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.hr-managerial-meta {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.hr-managerial-meta div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.82rem;
+}
+
+.hr-managerial-meta dt {
+  color: var(--eos-ink-muted);
+}
+
+.hr-managerial-meta dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-managerial-trend {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--eos-ink-soft);
+}
+
+.hr-managerial-dir {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  font-size: 1rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-managerial-dir--up,
+.hr-managerial-dir--down,
+.hr-managerial-dir--same {
+  color: var(--eos-ink-soft);
+}
+
+.hr-managerial-report {
+  margin-top: 18px;
+}
+
 .hr-section-card {
   display: flex;
   flex-direction: column;

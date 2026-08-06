@@ -4117,3 +4117,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Protected / unchanged** | Cutout unit rates, DE rebuild, acceptance/sold/handoff/QB/email, customer acceptance, raw AI overwrite after Set Scope. |
 | **Revisit trigger** | Per-room vanity/cooktop/outlet editors beyond kitchen sink; staff apply-customer-selections into official scope. |
 |
+
+|
+
+### 306. HR Managerial Financial Metrics + restricted report (2026-08-06)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-06 · `cursor/hr-managerial-financials-1946` |
+| **Decision** | Add restricted **Managerial Financials** access scope (`managerial_financials`) with three non-graded currency sections: Line of Credit Balance, Accounts Receivable over 45 Days, Accounts Payable over 30 Days. Role-based full-access users (`admin` / `executive` / `hr` / `super_admin`) see and edit them on the CEO dashboard. Assigned users get a focused Managerial Financials view + **Managerial Financial Report** only — not Executive Dashboard, mistakes, standard weekly report, or Department Access management. Executive Dashboard assignment alone does **not** grant managerial financials. Metrics use existing `workforce_grading_sections` / `workforce_section_week_values`, prior-week neutral comparisons, and are excluded from the standard weekly report. |
+| **Why** | Leadership needs LOC / aged AR / aged AP visibility without exposing those figures to department operators or the broad weekly report distribution. |
+| **SQL** | Manual apply: `backend-core/supabase/eliteos_workforce_managerial_financials_v1.sql` (CHECK widen + ESF section seed). |
+| **Ops** | Apply SQL → redeploy **backend-core** + **app-hr**. Assign Managerial Financials under HR → Department Access for the selected leadership user. |
+| **Out of scope** | Letter grades/thresholds for these metrics; combining managerial + standard reports; auto-apply migration; System Admin grants. |

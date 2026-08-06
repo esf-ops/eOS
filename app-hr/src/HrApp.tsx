@@ -78,13 +78,32 @@ type DepartmentInfo = {
   sectionIds: string[];
 };
 
+type ManagerialFinancialMetric = {
+  sectionId: string;
+  slug?: string;
+  name: string;
+  currentValue?: number | null;
+  priorValue?: number | null;
+  currentDisplay?: string | null;
+  priorDisplay?: string | null;
+  dollarChange?: number | null;
+  percentChange?: number | null;
+  direction?: "up" | "down" | "same" | "none";
+  dollarChangeText?: string | null;
+  percentChangeText?: string | null;
+  trendText?: string | null;
+  weekValue?: { actualNumeric?: number | null; valuePayload?: Record<string, unknown> };
+};
+
 type ScorecardPayload = {
   ok?: boolean;
-  viewMode?: "executive" | "department";
+  viewMode?: "executive" | "department" | "managerial_financials";
   fullAccess?: boolean;
   executiveDashboardAccess?: boolean;
+  managerialFinancialsAccess?: boolean;
   canManageDepartments?: boolean;
   canGenerateReport?: boolean;
+  canGenerateManagerialFinancialReport?: boolean;
   departments?: DepartmentInfo[];
   weekStart?: string;
   weekLabel?: string;
@@ -93,6 +112,7 @@ type ScorecardPayload = {
   executiveSummary?: ExecutiveSummary;
   narrative?: string;
   rows?: SectionRow[];
+  managerialFinancials?: ManagerialFinancialMetric[];
   warning?: string;
   schemaReady?: boolean;
 };
@@ -112,7 +132,7 @@ type DepartmentAssignment = {
   userEmail?: string | null;
   departmentSlug: string;
   departmentName: string;
-  accessType?: "executive_dashboard" | "department";
+  accessType?: "executive_dashboard" | "managerial_financials" | "department";
   hasHrHeadAccess?: boolean;
   isActive?: boolean;
 };
@@ -120,7 +140,7 @@ type DepartmentAssignment = {
 type AccessOption = {
   slug: string;
   name: string;
-  accessType: "executive_dashboard" | "department";
+  accessType: "executive_dashboard" | "managerial_financials" | "department";
   description: string;
   sectionIds?: string[];
 };
@@ -179,13 +199,25 @@ function isMetricTotalSection(row: SectionRow): boolean {
   return row.isMetricTotal === true || ["days", "currency", "production", "hours"].includes(row.metricKind);
 }
 
-function metricActionLabel(kind: string): string {
+function metricActionLabel(kind: string, sectionName = ""): string {
   if (kind === "days") return "Update Lead Times";
-  if (kind === "currency") return "Update Quoting Value";
+  if (kind === "currency") {
+    const name = String(sectionName || "").toLowerCase();
+    if (name.includes("line of credit") || name.includes("receivable") || name.includes("payable")) {
+      return "Update Value";
+    }
+    return "Update Quoting Value";
+  }
   if (kind === "production") return "Update Production";
   if (kind === "hours") return "Update Downtime";
   return "Update Metric";
 }
+
+const MANAGERIAL_SECTION_IDS = new Set([
+  "b2000001-0001-4001-8001-000000000014",
+  "b2000001-0001-4001-8001-000000000015",
+  "b2000001-0001-4001-8001-000000000016"
+]);
 
 function payloadFromWeekValue(row: SectionRow): Record<string, unknown> {
   return row.weekValue?.valuePayload ?? {};
@@ -227,6 +259,10 @@ export default function HrApp() {
   const [selectedWeekStart, setSelectedWeekStart] = useState("");
   const [reportText, setReportText] = useState("");
   const [reportHtml, setReportHtml] = useState("");
+  const [mgrReportText, setMgrReportText] = useState("");
+  const [mgrReportHtml, setMgrReportHtml] = useState("");
+  const [mgrReportBusy, setMgrReportBusy] = useState(false);
+  const [editingManagerial, setEditingManagerial] = useState<ManagerialFinancialMetric | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
 
   const [mistakesLog, setMistakesLog] = useState<MistakeLogWeek[]>([]);
@@ -441,6 +477,7 @@ export default function HrApp() {
     setModalKind(null);
     setActiveSection(null);
     setEditingMistake(null);
+    setEditingManagerial(null);
   };
 
   const openMistakeModal = (section: SectionRow) => {
@@ -468,6 +505,7 @@ export default function HrApp() {
   };
 
   const openMetricModal = (section: SectionRow) => {
+    setEditingManagerial(null);
     setActiveSection(section);
     setModalKind("metric");
     const payload = payloadFromWeekValue(section);
@@ -477,6 +515,20 @@ export default function HrApp() {
     setMetricWeeklySf(payload.weekly_sf != null ? String(payload.weekly_sf) : "");
     setMetricDailySf(payload.daily_sf != null ? String(payload.daily_sf) : "");
     setMetricHours(payload.hours != null ? String(payload.hours) : section.incidentCount != null ? String(section.incidentCount) : "");
+  };
+
+  const openManagerialModal = (metric: ManagerialFinancialMetric) => {
+    setActiveSection(null);
+    setEditingManagerial(metric);
+    setModalKind("metric");
+    const fromPayload = metric.weekValue?.valuePayload?.currency;
+    const prefill =
+      fromPayload != null
+        ? String(fromPayload)
+        : metric.currentValue != null
+          ? String(metric.currentValue)
+          : "";
+    setMetricCurrency(prefill);
   };
 
   const refreshAfterChange = useCallback(async () => {
@@ -594,25 +646,39 @@ export default function HrApp() {
   );
 
   const submitMetric = useCallback(async () => {
-    if (!sessionToken || !activeSection) return;
+    if (!sessionToken) return;
+    if (!activeSection && !editingManagerial) return;
     setSaveBusy(true);
     setErr(null);
     try {
       const body: Record<string, unknown> = { week_start: scorecard?.weekStart ?? selectedWeekStart };
-      const kind = activeSection.metricKind;
-      if (kind === "days") {
-        body.median_days = metricMedian;
-        body.average_days = metricAverage;
-      } else if (kind === "currency") {
+      if (editingManagerial) {
         body.currency = metricCurrency;
-      } else if (kind === "production") {
-        body.weekly_sf = metricWeeklySf;
-        body.daily_sf = metricDailySf || undefined;
-      } else if (kind === "hours") {
-        body.hours = metricHours;
+        await apiPost(
+          `/api/hr/workforce/managerial-financials/${editingManagerial.sectionId}/value`,
+          sessionToken,
+          body
+        );
+        setSuccess(`${editingManagerial.name} updated.`);
+      } else if (activeSection) {
+        const kind = activeSection.metricKind;
+        if (kind === "days") {
+          body.median_days = metricMedian;
+          body.average_days = metricAverage;
+        } else if (kind === "currency") {
+          body.currency = metricCurrency;
+        } else if (kind === "production") {
+          body.weekly_sf = metricWeeklySf;
+          body.daily_sf = metricDailySf || undefined;
+        } else if (kind === "hours") {
+          body.hours = metricHours;
+        }
+        const endpoint = MANAGERIAL_SECTION_IDS.has(activeSection.sectionId)
+          ? `/api/hr/workforce/managerial-financials/${activeSection.sectionId}/value`
+          : `/api/hr/workforce/sections/${activeSection.sectionId}/value`;
+        await apiPost(endpoint, sessionToken, body);
+        setSuccess(`${activeSection.name} updated.`);
       }
-      await apiPost(`/api/hr/workforce/sections/${activeSection.sectionId}/value`, sessionToken, body);
-      setSuccess(`${activeSection.name} updated.`);
       closeModal();
       await refreshAfterChange();
     } catch (e: unknown) {
@@ -623,6 +689,7 @@ export default function HrApp() {
   }, [
     sessionToken,
     activeSection,
+    editingManagerial,
     scorecard?.weekStart,
     selectedWeekStart,
     metricMedian,
@@ -645,7 +712,11 @@ export default function HrApp() {
         department_slug: assignDeptSlug
       });
       const label =
-        assignDeptSlug === "executive_dashboard" ? "Executive Dashboard access" : "Department access";
+        assignDeptSlug === "executive_dashboard"
+          ? "Executive Dashboard access"
+          : assignDeptSlug === "managerial_financials"
+            ? "Managerial Financials access"
+            : "Department access";
       setSuccess(`${label} assigned.`);
       setAssignUserId("");
       setAssignDeptSlug("");
@@ -695,6 +766,25 @@ export default function HrApp() {
     }
   }, [sessionToken, scorecard?.weekStart, selectedWeekStart]);
 
+  const generateManagerialReport = useCallback(async () => {
+    if (!sessionToken) return;
+    setMgrReportBusy(true);
+    setErr(null);
+    setSuccess(null);
+    try {
+      const res = (await apiPost("/api/hr/workforce/managerial-financials/report/generate", sessionToken, {
+        week_start: scorecard?.weekStart ?? selectedWeekStart
+      })) as { reportText?: string; reportHtml?: string };
+      setMgrReportText(res.reportText ?? "");
+      setMgrReportHtml(res.reportHtml ?? "");
+      setSuccess("Managerial Financial Report generated.");
+    } catch (e: unknown) {
+      setErr(hrApiErrorMessage(e, "Unable to generate Managerial Financial Report."));
+    } finally {
+      setMgrReportBusy(false);
+    }
+  }, [sessionToken, scorecard?.weekStart, selectedWeekStart]);
+
   const copyReport = useCallback(async () => {
     if (!reportText) return;
     try {
@@ -722,9 +812,14 @@ export default function HrApp() {
   const narrative = scorecard?.narrative ?? "";
   const gradeCounts = executiveSummary?.gradeCounts ?? { A: 0, B: 0, C: 0, D: 0, F: 0 };
 
-  const viewMode = scorecard?.viewMode ?? (scorecard?.fullAccess ? "executive" : "department");
+  const viewMode =
+    scorecard?.viewMode ??
+    (scorecard?.fullAccess ? "executive" : scorecard?.managerialFinancialsAccess ? "managerial_financials" : "department");
+  const isManagerialOnlyView = viewMode === "managerial_financials";
   const isDepartmentView = viewMode === "department";
   const isExecutiveView = viewMode === "executive" || Boolean(scorecard?.fullAccess);
+  const managerialMetrics = scorecard?.managerialFinancials ?? [];
+  const canShowManagerial = Boolean(scorecard?.managerialFinancialsAccess) && managerialMetrics.length > 0;
   const departmentNames = (scorecard?.departments ?? []).map((d) => d.name).join(", ");
   const heroWeekLabel =
     weekOptions.find((w) => w.weekStart === (scorecard?.weekStart ?? selectedWeekStart))?.weekLabel ??
@@ -891,7 +986,7 @@ export default function HrApp() {
         ) : null}
         {variant === "metric" ? (
           <button type="button" className="btn btn-primary btn-sm" onClick={() => openMetricModal(row)}>
-            {metricActionLabel(row.metricKind)}
+            {metricActionLabel(row.metricKind, row.name)}
           </button>
         ) : null}
       </footer>
@@ -1061,13 +1156,21 @@ export default function HrApp() {
               <div>
                 <p className="hero-eyebrow">HR Head · Operations</p>
                 <h1 className="hero-title">
-                  {isDepartmentView ? "Department Quality Entry" : "Weekly Operations Scorecard"}
+                  {isManagerialOnlyView
+                    ? "Managerial Financials"
+                    : isDepartmentView
+                      ? "Department Quality Entry"
+                      : "Weekly Operations Scorecard"}
                 </h1>
                 <p className="hero-sub">
-                  {isDepartmentView
-                    ? [departmentNames, heroWeekLabel].filter(Boolean).join(" · ") ||
-                      "Enter weekly counts and log detailed mistakes for your assigned departments."
-                    : "Enter weekly counts and metrics, log detailed mistakes, and freeze the end-of-week report."}
+                  {isManagerialOnlyView
+                    ? [heroWeekLabel, "Restricted financial metrics for executive and selected leadership review."]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : isDepartmentView
+                      ? [departmentNames, heroWeekLabel].filter(Boolean).join(" · ") ||
+                        "Enter weekly counts and log detailed mistakes for your assigned departments."
+                      : "Enter weekly counts and metrics, log detailed mistakes, and freeze the end-of-week report."}
                 </p>
               </div>
               <div className="hr-scorecard-controls">
@@ -1081,7 +1184,7 @@ export default function HrApp() {
                     ))}
                   </select>
                 </label>
-                {!isDepartmentView && scorecard?.overallGrade ? (
+                {!isDepartmentView && !isManagerialOnlyView && scorecard?.overallGrade ? (
                   <div className="hr-overall-grade">
                     <span>Overall company grade</span>
                     <strong className={`hr-grade-badge hr-grade-badge--sm hr-grade-badge--${scorecard.overallGrade.toLowerCase()}`}>
@@ -1096,7 +1199,7 @@ export default function HrApp() {
             {err ? <div className="banner banner-error">{err}</div> : null}
             {success ? <EosAlertBanner tone="success">{success}</EosAlertBanner> : null}
 
-            {!isDepartmentView && executiveSummary ? (
+            {!isDepartmentView && !isManagerialOnlyView && executiveSummary ? (
               <section className="hr-exec-summary">
                 <h2 className="hr-scorecard-section-title">Executive Summary</h2>
                 <div className="hr-exec-summary-grid">
@@ -1136,7 +1239,7 @@ export default function HrApp() {
               </section>
             ) : null}
 
-            {!isDepartmentView && scorecard?.canGenerateReport !== false ? (
+            {!isDepartmentView && !isManagerialOnlyView && scorecard?.canGenerateReport !== false ? (
             <div className="hr-scorecard-actions">
               <button type="button" className="btn btn-primary" disabled={reportBusy || busy} onClick={() => void generateReport()}>
                 {reportBusy ? "Generating…" : "Generate Weekly Report"}
@@ -1154,7 +1257,7 @@ export default function HrApp() {
             </div>
             ) : null}
 
-            {!isDepartmentView && (reportText || reportHtml) ? (
+            {!isDepartmentView && !isManagerialOnlyView && (reportText || reportHtml) ? (
               <section className="hr-report-panel">
                 <h2 className="hr-report-title">Weekly report</h2>
                 {reportHtml ? (
@@ -1162,6 +1265,91 @@ export default function HrApp() {
                 ) : (
                   <pre className="hr-report-text">{reportText}</pre>
                 )}
+              </section>
+            ) : null}
+
+            {canShowManagerial ? (
+              <section className="hr-managerial-section">
+                <div className="hr-managerial-head">
+                  <div>
+                    <h2 className="hr-scorecard-section-title">Managerial Financials</h2>
+                    <p className="hr-managerial-intro">
+                      Restricted financial metrics for executive and selected leadership review. Not graded. Not included
+                      in the standard weekly report.
+                    </p>
+                  </div>
+                  {scorecard?.canGenerateManagerialFinancialReport ? (
+                    <div className="hr-scorecard-actions hr-managerial-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={mgrReportBusy || busy}
+                        onClick={() => void generateManagerialReport()}
+                      >
+                        {mgrReportBusy ? "Generating…" : "Generate Managerial Financial Report"}
+                      </button>
+                      {mgrReportText ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => void navigator.clipboard.writeText(mgrReportText).then(() => setSuccess("Managerial report copied."))}
+                          >
+                            Copy
+                          </button>
+                          <button type="button" className="btn btn-secondary" onClick={() => window.print()}>
+                            Print
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="hr-scorecard-grid hr-managerial-grid">
+                  {managerialMetrics.map((metric) => (
+                    <article key={metric.sectionId} className="hr-section-card hr-managerial-card">
+                      <header className="hr-section-card-head">
+                        <h3>{metric.name}</h3>
+                        <span className={`hr-managerial-dir hr-managerial-dir--${metric.direction ?? "none"}`}>
+                          {metric.direction === "up" ? "↑" : metric.direction === "down" ? "↓" : metric.direction === "same" ? "→" : "—"}
+                        </span>
+                      </header>
+                      <p className="hr-managerial-current">{metric.currentDisplay ?? "—"}</p>
+                      <dl className="hr-managerial-meta">
+                        <div>
+                          <dt>Last week</dt>
+                          <dd>{metric.priorDisplay ?? "—"}</dd>
+                        </div>
+                        <div>
+                          <dt>Change</dt>
+                          <dd>{metric.dollarChangeText ?? "—"}</dd>
+                        </div>
+                        {metric.percentChangeText ? (
+                          <div>
+                            <dt>Percent</dt>
+                            <dd>{metric.percentChangeText}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                      <p className="hr-managerial-trend">{metric.trendText ?? "No prior week"}</p>
+                      <footer className="hr-section-card-foot">
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => openManagerialModal(metric)}>
+                          {metric.currentValue != null ? "Update Value" : "Enter Value"}
+                        </button>
+                      </footer>
+                    </article>
+                  ))}
+                </div>
+                {mgrReportHtml || mgrReportText ? (
+                  <section className="hr-report-panel hr-managerial-report">
+                    <h2 className="hr-report-title">Managerial Financial Report</h2>
+                    {mgrReportHtml ? (
+                      <div className="hr-report-html" dangerouslySetInnerHTML={{ __html: mgrReportHtml }} />
+                    ) : (
+                      <pre className="hr-report-text">{mgrReportText}</pre>
+                    )}
+                  </section>
+                ) : null}
               </section>
             ) : null}
 
@@ -1187,6 +1375,10 @@ export default function HrApp() {
                       <p>
                         <strong>Executive Dashboard</strong> — Full company scorecard, all mistakes, executive summary,
                         and weekly report access.
+                      </p>
+                      <p>
+                        <strong>Managerial Financials</strong> — Restricted access to Line of Credit, aged Accounts
+                        Receivable, aged Accounts Payable, and the Managerial Financial Report.
                       </p>
                       <p>
                         <strong>Department groups</strong> — Limited entry and visibility for assigned operational
@@ -1220,6 +1412,13 @@ export default function HrApp() {
                                   accessType: "executive_dashboard" as const,
                                   description: "Full company scorecard access."
                                 },
+                                {
+                                  slug: "managerial_financials",
+                                  name: "Managerial Financials",
+                                  accessType: "managerial_financials" as const,
+                                  description:
+                                    "Restricted access to Line of Credit, aged Accounts Receivable, aged Accounts Payable, and the Managerial Financial Report."
+                                },
                                 ...(deptGroups.length ? deptGroups : scorecard?.departments ?? []).map((g) => ({
                                   slug: g.slug,
                                   name: g.name,
@@ -1229,7 +1428,11 @@ export default function HrApp() {
                               ]
                           ).map((opt) => (
                             <option key={opt.slug} value={opt.slug}>
-                              {opt.accessType === "executive_dashboard" ? `${opt.name} (full access)` : opt.name}
+                              {opt.accessType === "executive_dashboard"
+                                ? `${opt.name} (full access)`
+                                : opt.accessType === "managerial_financials"
+                                  ? `${opt.name} (restricted)`
+                                  : opt.name}
                             </option>
                           ))}
                         </select>
@@ -1256,7 +1459,9 @@ export default function HrApp() {
                         {(accessOptions.find((o) => o.slug === assignDeptSlug)?.description ??
                           (assignDeptSlug === "executive_dashboard"
                             ? "Full company scorecard, all mistakes, executive summary, and weekly report access."
-                            : "Limited entry and visibility for assigned operational sections."))}
+                            : assignDeptSlug === "managerial_financials"
+                              ? "Restricted access to Line of Credit, aged Accounts Receivable, aged Accounts Payable, and the Managerial Financial Report."
+                              : "Limited entry and visibility for assigned operational sections."))}
                       </p>
                     ) : null}
                     {deptAccessBusy ? <p className="hr-dept-access-meta">Loading assignments…</p> : null}
@@ -1268,7 +1473,11 @@ export default function HrApp() {
                               <strong>{a.userName}</strong>
                               <span>
                                 {a.departmentName}
-                                {a.accessType === "executive_dashboard" ? " · Full scorecard" : ""}
+                                {a.accessType === "executive_dashboard"
+                                  ? " · Full scorecard"
+                                  : a.accessType === "managerial_financials"
+                                    ? " · Managerial financials"
+                                    : ""}
                                 {a.userEmail ? ` · ${a.userEmail}` : ""}
                                 {a.hasHrHeadAccess === false ? " · No HR Head access" : ""}
                               </span>
@@ -1292,20 +1501,21 @@ export default function HrApp() {
               </section>
             ) : null}
 
-            {gradeRows.length ? (
+            {!isManagerialOnlyView && gradeRows.length ? (
             <section className="hr-scorecard-section">
               <h2 className="hr-scorecard-section-title">{isDepartmentView ? "Your sections" : "Grades"}</h2>
               <div className="hr-scorecard-grid">{gradeRows.map((row) => renderSectionCard(row, "grade"))}</div>
             </section>
             ) : null}
 
-            {metricRows.length ? (
+            {!isManagerialOnlyView && metricRows.length ? (
             <section className="hr-scorecard-section">
               <h2 className="hr-scorecard-section-title">Totals / Metrics</h2>
               <div className="hr-scorecard-grid">{metricRows.map((row) => renderSectionCard(row, "metric"))}</div>
             </section>
             ) : null}
 
+            {!isManagerialOnlyView ? (
             <section className="hr-mistakes-log">
               <div className="hr-mistakes-log-head">
                 <h2 className="hr-scorecard-section-title">Mistakes Log</h2>
@@ -1335,11 +1545,12 @@ export default function HrApp() {
                 </div>
               ) : null}
             </section>
+            ) : null}
           </>
         )}
       </main>
 
-      {modalKind && (activeSection || editingMistake) ? (
+      {modalKind && (activeSection || editingMistake || editingManagerial) ? (
         <div className="hr-modal-backdrop" onClick={closeModal} role="presentation">
           <div className="hr-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <header className="hr-modal-head">
@@ -1348,7 +1559,7 @@ export default function HrApp() {
                   ? `Log mistake — ${activeSection?.name ?? ""}`
                   : modalKind === "editMistake"
                     ? "Edit mistake"
-                    : activeSection?.name ?? ""}
+                    : editingManagerial?.name ?? activeSection?.name ?? ""}
               </h2>
               <button type="button" className="hr-modal-close" onClick={closeModal} aria-label="Close">
                 ×
@@ -1402,9 +1613,13 @@ export default function HrApp() {
                     </label>
                   </>
                 ) : null}
-                {activeSection?.metricKind === "currency" ? (
+                {editingManagerial || activeSection?.metricKind === "currency" ? (
                   <label className="field hr-field-full">
-                    Weekly quoting value (USD)
+                    {editingManagerial
+                      ? "Amount (USD)"
+                      : MANAGERIAL_SECTION_IDS.has(activeSection?.sectionId ?? "")
+                        ? "Amount (USD)"
+                        : "Weekly quoting value (USD)"}
                     <input type="number" step="0.01" value={metricCurrency} onChange={(e) => setMetricCurrency(e.target.value)} />
                   </label>
                 ) : null}
