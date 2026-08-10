@@ -1,4 +1,4 @@
-# READ-ONLY DIAGNOSTIC — NO QUICKBOOKS WRITES
+# READ-ONLY DIAGNOSTIC - NO QUICKBOOKS WRITES
 #
 # live-read-smoke.ps1
 #
@@ -33,8 +33,8 @@ function Write-SmokeBanner {
     Write-Host ""
     Write-Host "============================================================"
     Write-Host " EliteOS QuickBooks LIVE READ SMOKE (PowerShell 5.1)"
-    Write-Host " READ-ONLY DIAGNOSTIC — NO QUICKBOOKS WRITES"
-    Write-Host " LOCALHOST-ONLY — self-signed TLS bypass is NOT for remote use"
+    Write-Host " READ-ONLY DIAGNOSTIC - NO QUICKBOOKS WRITES"
+    Write-Host " LOCALHOST-ONLY - self-signed TLS bypass is NOT for remote use"
     Write-Host "============================================================"
     Write-Host ""
 }
@@ -279,7 +279,7 @@ function ConvertTo-SanitizedSmokeResult {
         linkedTransactions    = @()
         error                 = $null
         notes                 = @(
-            "READ-ONLY DIAGNOSTIC — NO QUICKBOOKS WRITES",
+            "READ-ONLY DIAGNOSTIC - NO QUICKBOOKS WRITES",
             "Exactly one EstimateQueryRq was sent.",
             "Customer names, addresses, phones, emails, descriptions, and memos are omitted."
         )
@@ -413,7 +413,7 @@ function Save-SmokeResult {
     Set-Content -LiteralPath $Path -Value $json -Encoding UTF8
 }
 
-# ── main ──────────────────────────────────────────────────────────────────────
+# --- main ---
 Write-SmokeBanner
 
 $gatewayUrl = $DefaultGatewayUrl

@@ -338,7 +338,7 @@ function fakeTransportRouter() {
   const ps1Path = path.join(repoRoot, "quickbooks-sdk-connector", "live-read-smoke.ps1");
   const ps1 = await fs.readFile(ps1Path, "utf8");
 
-  assert.match(ps1, /READ-ONLY DIAGNOSTIC — NO QUICKBOOKS WRITES/);
+  assert.match(ps1, /READ-ONLY DIAGNOSTIC - NO QUICKBOOKS WRITES/);
   assert.match(ps1, /LOCALHOST-ONLY/);
   assert.match(ps1, /https:\/\/127\.0\.0\.1:8166/);
   assert.match(ps1, /C:\\ThryveIntegration\\slabOS-live-read-smoke\.json/);
@@ -358,6 +358,18 @@ function fakeTransportRouter() {
   assert.match(ps1, /TxnDelRq/);
   assert.match(ps1, /ListDelRq/);
 
+  // PowerShell 5.1 without BOM mis-parses UTF-8; file must be pure ASCII (bytes 0x00-0x7F).
+  const ps1Bytes = await fs.readFile(ps1Path);
+  assert.equal(ps1Bytes[0] === 0xef && ps1Bytes[1] === 0xbb && ps1Bytes[2] === 0xbf, false, "ps1 must not have UTF-8 BOM");
+  const nonAsciiOffsets = [];
+  for (let i = 0; i < ps1Bytes.length; i += 1) {
+    if (ps1Bytes[i] > 0x7f) nonAsciiOffsets.push(i);
+  }
+  assert.equal(
+    nonAsciiOffsets.length,
+    0,
+    `ps1 must be ASCII-only; non-ASCII bytes at offsets: ${nonAsciiOffsets.slice(0, 20).join(", ")}`
+  );
   // Must not embed write request payloads / write helpers
   assert.equal(/EstimateAddRq[\s>]/.test(ps1), false);
   assert.equal(/InvoiceAddRq[\s>]/.test(ps1), false);
