@@ -94,3 +94,19 @@ Artifacts keep opaque ListID/TxnID/amounts/link types only — no customer names
 
 Public client methods are query/ping/describe/executeReadOnlyQbXml only.  
 QBXML allowlist rejects `EstimateAdd` / `InvoiceAdd` / `SalesOrderAdd` / `ReceivePaymentAdd` / `TxnDel` / list add-mod tags before send.
+
+## Windows VM smoke (no Node)
+
+On the QuickBooks production VM (PowerShell 5.1, no Git/Node required), copy only:
+
+`quickbooks-sdk-connector/live-read-smoke.ps1`
+
+Then run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\live-read-smoke.ps1
+```
+
+Defaults to `https://127.0.0.1:8166`, prompts for Gateway username/password (SecureString), sends **exactly one** read-only `EstimateQueryRq` (`MaxReturned=1`, `IncludeLinkedTxns=true`) using the **same** HTTP headers/Basic Auth/QBXML envelope as the Node transport, and writes sanitized JSON to `C:\ThryveIntegration\slabOS-live-read-smoke.json`.
+
+TLS certificate bypass is **localhost-only** and must not be reused for remote/production networking.
