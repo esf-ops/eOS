@@ -484,7 +484,9 @@ $sanitized = ConvertTo-SanitizedSmokeResult `
 
 if (-not [string]::IsNullOrWhiteSpace($failError) -and $sanitized.result -ne "PASS") {
     $sanitized.result = "FAIL"
-    if ([string]::IsNullOrWhiteSpace([string]$sanitized.error)) {
+    # Transport exceptions leave httpStatus=0 and ConvertTo-SanitizedSmokeResult
+    # pre-fills "Gateway HTTP status 0"; prefer the caught message for diagnosis.
+    if ($httpStatus -eq 0 -or [string]::IsNullOrWhiteSpace([string]$sanitized.error)) {
         $sanitized.error = $failError
     }
 }

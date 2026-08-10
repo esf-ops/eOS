@@ -418,6 +418,13 @@ function fakeTransportRouter() {
   assert.match(ps1, /Accept\s*=\s*"application\/x-qbxml, text\/xml, application\/xml, text\/plain, \*\/\*"/);
   assert.match(ps1, /Connection\s*=\s*"close"/);
 
+  // Transport failure diagnostics: httpStatus=0 must surface caught $failError
+  // (not leave the pre-filled "Gateway HTTP status 0"), with Basic auth redacted.
+  assert.match(ps1, /\$httpStatus\s*-eq\s*0/);
+  assert.match(ps1, /\$sanitized\.error\s*=\s*\$failError/);
+  assert.match(ps1, /auth header redacted/i);
+  assert.match(ps1, /\(\?i\)basic\\s\+/);
+
   console.log("ok: PowerShell live-read-smoke.ps1 static safety + protocol parity");
 }
 
