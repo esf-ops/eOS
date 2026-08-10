@@ -332,4 +332,81 @@ function fakeTransportRouter() {
   console.log("ok: source has no write implementations");
 }
 
+// ── PowerShell live-read-smoke.ps1 static safety + protocol parity ────────────
+{
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+  const ps1Path = path.join(repoRoot, "quickbooks-sdk-connector", "live-read-smoke.ps1");
+  const ps1 = await fs.readFile(ps1Path, "utf8");
+
+  assert.match(ps1, /READ-ONLY DIAGNOSTIC — NO QUICKBOOKS WRITES/);
+  assert.match(ps1, /LOCALHOST-ONLY/);
+  assert.match(ps1, /https:\/\/127\.0\.0\.1:8166/);
+  assert.match(ps1, /C:\\ThryveIntegration\\slabOS-live-read-smoke\.json/);
+  assert.match(ps1, /Read-Host.*-AsSecureString/s);
+  assert.match(ps1, /Content-Type.*application\/x-qbxml|ContentType "application\/x-qbxml"/);
+  assert.match(ps1, /application\/x-qbxml, text\/xml, application\/xml, text\/plain, \*\/*/);
+  assert.match(ps1, /Connection\s*=\s*"close"|Connection\s+"close"/);
+  assert.match(ps1, /Basic /);
+  assert.match(ps1, /IncludeLinkedTxns>true</);
+  assert.match(ps1, /MaxReturned>1</);
+  assert.match(ps1, /IncludeLineItems>false</);
+  assert.match(ps1, /OwnerID>0</);
+  assert.match(ps1, /EstimateQueryRq/);
+  assert.match(ps1, /Assert-ReadOnlyQbXml/);
+  assert.match(ps1, /AddRq/);
+  assert.match(ps1, /ModRq/);
+  assert.match(ps1, /TxnDelRq/);
+  assert.match(ps1, /ListDelRq/);
+
+  // Must not embed write request payloads / write helpers
+  assert.equal(/EstimateAddRq[\s>]/.test(ps1), false);
+  assert.equal(/InvoiceAddRq[\s>]/.test(ps1), false);
+  assert.equal(/SalesOrderAddRq[\s>]/.test(ps1), false);
+  assert.equal(/ReceivePaymentAddRq[\s>]/.test(ps1), false);
+  assert.equal(/function\s+Invoke-GatewayQbXml(Add|Write|Mod)/i.test(ps1), false);
+  assert.equal(/Send-RawQbXml|Invoke-RawQbXml|Execute-ArbitraryQbXml/i.test(ps1), false);
+  assert.match(ps1, /no arbitrary-QBXML escape hatch/i);
+
+  // Exactly one query construction path: EstimateQueryRq only allowlist
+  assert.match(ps1, /permits only EstimateQueryRq/);
+
+  // Protocol parity: Node builder with MaxReturned=1 must share the same envelope tokens
+  const nodeXml = buildEstimateLinkedQuery({
+    qbXmlVersion: "16.0",
+    maxReturned: 1,
+    fromTxnDate: "2024-01-01",
+  });
+  for (const token of [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<QBXML><QBXMLMsgsRq onError=\"stopOnError\">",
+    "<MaxReturned>1</MaxReturned>",
+    "<IncludeLineItems>false</IncludeLineItems>",
+    "<IncludeLinkedTxns>true</IncludeLinkedTxns>",
+    "<OwnerID>0</OwnerID>",
+    "</EstimateQueryRq>",
+    "</QBXMLMsgsRs></QBXML>".replace("MsgsRs", "MsgsRq"), // closing msgs request tag
+  ]) {
+    assert.equal(nodeXml.includes(token), true, `node xml missing ${token}`);
+  }
+  // Closing envelope token as actually emitted by Node wrapQbXmlRequest:
+  assert.equal(nodeXml.includes("</QBXMLMsgsRq></QBXML>"), true);
+
+  // PS1 source constructs the same literals (version interpolated via $QbXmlVersion).
+  assert.match(ps1, /<\?xml version="1\.0" encoding="utf-8"\?>/);
+  assert.match(ps1, /<\?qbxml version="/);
+  assert.match(ps1, /\$QbXmlVersion/);
+  assert.match(ps1, /<QBXML><QBXMLMsgsRq onError="stopOnError">/);
+  assert.match(ps1, /"<MaxReturned>1<\/MaxReturned>"/);
+  assert.match(ps1, /"<IncludeLineItems>false<\/IncludeLineItems>"/);
+  assert.match(ps1, /"<IncludeLinkedTxns>true<\/IncludeLinkedTxns>"/);
+  assert.match(ps1, /"<OwnerID>0<\/OwnerID>"/);
+  assert.match(ps1, /<\/EstimateQueryRq>/);
+  assert.match(ps1, /<\/QBXMLMsgsRq><\/QBXML>/);
+  assert.match(ps1, /ContentType "application\/x-qbxml"/);
+  assert.match(ps1, /Accept\s*=\s*"application\/x-qbxml, text\/xml, application\/xml, text\/plain, \*\/\*"/);
+  assert.match(ps1, /Connection\s*=\s*"close"/);
+
+  console.log("ok: PowerShell live-read-smoke.ps1 static safety + protocol parity");
+}
+
 console.log("All QuickBooks live read tests passed.");
