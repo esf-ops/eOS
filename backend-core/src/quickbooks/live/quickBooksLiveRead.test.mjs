@@ -345,7 +345,9 @@ function fakeTransportRouter() {
   assert.match(ps1, /Read-Host.*-AsSecureString/s);
   assert.match(ps1, /Content-Type.*application\/x-qbxml|ContentType "application\/x-qbxml"/);
   assert.match(ps1, /application\/x-qbxml, text\/xml, application\/xml, text\/plain, \*\/*/);
-  assert.match(ps1, /Connection\s*=\s*"close"|Connection\s+"close"/);
+  // Keep-alive semantic parity: Node uses Connection: close; PS 5.1 uses -DisableKeepAlive.
+  assert.match(ps1, /-DisableKeepAlive/);
+  assert.equal(/Connection\s*=\s*"close"/i.test(ps1), false, "PS 5.1 must not set Connection header");
   assert.match(ps1, /Basic /);
   assert.match(ps1, /IncludeLinkedTxns>true</);
   assert.match(ps1, /MaxReturned>1</);
@@ -416,7 +418,15 @@ function fakeTransportRouter() {
   assert.match(ps1, /<\/QBXMLMsgsRq><\/QBXML>/);
   assert.match(ps1, /ContentType "application\/x-qbxml"/);
   assert.match(ps1, /Accept\s*=\s*"application\/x-qbxml, text\/xml, application\/xml, text\/plain, \*\/\*"/);
-  assert.match(ps1, /Connection\s*=\s*"close"/);
+  // Keep-alive: Node axios Connection: close <-> PowerShell 5.1 -DisableKeepAlive
+  const nodeTransportPath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "quickBooksGatewayHttpTransport.js"
+  );
+  const nodeTransport = await fs.readFile(nodeTransportPath, "utf8");
+  assert.match(nodeTransport, /Connection:\s*"close"/);
+  assert.match(ps1, /-DisableKeepAlive/);
+  assert.equal(/Connection\s*=\s*"close"/i.test(ps1), false);
 
   // Transport failure diagnostics: httpStatus=0 must surface caught $failError
   // (not leave the pre-filled "Gateway HTTP status 0"), with Basic auth redacted.

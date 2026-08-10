@@ -171,15 +171,15 @@ function Invoke-GatewayQbXmlPost {
         [GC]::Collect()
     }
 
-    # Headers must match Node quickBooksGatewayHttpTransport.postQbXml exactly:
+    # Headers match Node quickBooksGatewayHttpTransport.postQbXml for auth/body:
     #   Authorization: Basic <base64(user:pass)>
     #   Content-Type: application/x-qbxml
     #   Accept: application/x-qbxml, text/xml, application/xml, text/plain, */*
-    #   Connection: close
+    # Keep-alive parity: Node sets Connection: close; Windows PowerShell 5.1
+    # rejects Connection in -Headers, so use -DisableKeepAlive instead.
     $headers = @{
         Authorization = $authHeader
         Accept        = "application/x-qbxml, text/xml, application/xml, text/plain, */*"
-        Connection    = "close"
     }
 
     try {
@@ -190,6 +190,7 @@ function Invoke-GatewayQbXmlPost {
             -Body $QbXml `
             -ContentType "application/x-qbxml" `
             -TimeoutSec $RequestTimeoutSec `
+            -DisableKeepAlive `
             -UseBasicParsing
 
         return @{
