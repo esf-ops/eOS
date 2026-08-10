@@ -1,0 +1,32 @@
+{
+  "entityType": "estimates",
+  "batchNumber": 1,
+  "recordCount": 1,
+  "records": [
+    {
+      "@elementName": "EstimateRet",
+      "TxnID": { "@elementName": "TxnID", "#text": "FAKE-EST-FIXTURE-1" },
+      "RefNumber": { "#text": "24-9001" },
+      "TxnDate": { "#text": "2024-06-01" },
+      "CustomerRef": { "ListID": { "#text": "FAKE-CUST-FIXTURE" }, "FullName": { "#text": "<redacted:12>" } },
+      "ClassRef": { "ListID": { "#text": "FAKE-CLASS-FIXTURE" }, "FullName": { "#text": "<redacted:8>" } },
+      "TemplateRef": { "ListID": { "#text": "FAKE-TMPL-FIXTURE" }, "FullName": { "#text": "<redacted:9>" } },
+      "IsActive": { "#text": "true" },
+      "Subtotal": { "#text": "2500.00" },
+      "SalesTaxTotal": { "#text": "0.00" },
+      "TotalAmount": { "#text": "2500.00" },
+      "EstimateLineRet": [
+        {
+          "@elementName": "EstimateLineRet",
+          "TxnLineID": { "#text": "FAKE-LINE-1" },
+          "ItemRef": { "ListID": { "#text": "FAKE-ITEM-1" }, "FullName": { "#text": "<redacted:6>" } },
+          "Desc": { "#text": "<redacted:22>" },
+          "Quantity": { "#text": "50" },
+          "Rate": { "#text": "50.00" },
+          "Amount": { "#text": "2500.00" }
+        }
+      ]
+    }
+  ],
+  "_privacy": "Synthetic sanitized fixture — no real customer PII."
+}
