@@ -185,7 +185,7 @@ These cannot be answered faithfully from the July 10, 2026 materialized export a
 4. Confirm whether Invoice `TotalAmount` is omitted only by this extract path or by company-file query options (discovery currently derives `Subtotal + SalesTaxTotal`).  
 5. Any Estimate “fully invoiced” / closed-state fields available in the live company file version.
 
-**Phase 2 live read foundation:** see [`ELITE_STONE_QUICKBOOKS_LIVE_READ.md`](./ELITE_STONE_QUICKBOOKS_LIVE_READ.md) for the Gateway HTTP+QBXML probe that requests these gaps (still read-only).
+**Phase 2 live read:** see [`ELITE_STONE_QUICKBOOKS_LIVE_READ.md`](./ELITE_STONE_QUICKBOOKS_LIVE_READ.md). Raw CData Gateway HTTP+QBXML POST was **not** validated on the production VM (HTTP 200 empty body). Prefer the Desktop SDK COM smoke `quickbooks-sdk-connector/live-sdk-linked-smoke.ps1` for live linked-txn validation (still read-only; **no Sales Dashboard changes**).
 
 ---
 

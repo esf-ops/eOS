@@ -18,6 +18,16 @@ Transport boundary under `backend-core/src/quickbooks/live/`:
 
 Reuses `estimateSalesTruth` helpers and intelligence `extractLinkedTxnRefs` / money parsers. Does **not** create a parallel accounting subsystem.
 
+## Transport status (important)
+
+**Raw QBXML HTTP POST to the CData Remote Connector / Desktop Gateway root endpoint was not validated on the production QuickBooks VM.** Observed behavior: HTTP **200** with an **empty body**, so that path must **not** be treated as a production transport without a supported CData client/protocol (driver or documented Gateway API).
+
+Phase 2 Node + `live-read-smoke.ps1` Gateway code remains in the repo for reference, but **production live linked-transaction validation on the QB VM uses the Intuit Desktop SDK COM Request Processor** instead:
+
+`quickbooks-sdk-connector/live-sdk-linked-smoke.ps1` → `QBXMLRP2.RequestProcessor` (same app identity as the eliteOS SDK connector).
+
+Do **not** extend the raw CData HTTP approach until a supported client/protocol is confirmed.
+
 ## Dependency model
 
 **Already in this repo (no purchase/install required for Node):**
@@ -97,16 +107,28 @@ QBXML allowlist rejects `EstimateAdd` / `InvoiceAdd` / `SalesOrderAdd` / `Receiv
 
 ## Windows VM smoke (no Node)
 
-On the QuickBooks production VM (PowerShell 5.1, no Git/Node required), copy only:
+### Preferred: direct Desktop SDK COM (validated path)
 
-`quickbooks-sdk-connector/live-read-smoke.ps1`
+On the QuickBooks production VM (PowerShell 5.1, no Git/Node required), copy:
 
-Then run:
+`quickbooks-sdk-connector/live-sdk-linked-smoke.ps1`
+
+QuickBooks Desktop must be running with the company file open (Multi-User Mode is OK). Then:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\live-sdk-linked-smoke.ps1
+```
+
+Uses ProgID `QBXMLRP2.RequestProcessor`, app name `EliteOS QuickBooks SDK Connector`, `OpenConnection2` + `BeginSession` with `qbFileOpenDoNotCare`, sends **exactly one** read-only `EstimateQueryRq` (`MaxReturned=1`, `IncludeLinkedTxns=true`, last ~90 days), and writes sanitized JSON to `C:\ThryveIntegration\slabOS-sdk-linked-smoke.json`.
+
+Optional env overrides (same as the .NET connector): `QB_APP_NAME`, `QB_APP_ID`, `QBXML_VERSION` (default `13.0`), `QB_COMPANY_FILE` (empty = currently open).
+
+### Legacy: CData Gateway HTTP smoke (not production-validated)
+
+`quickbooks-sdk-connector/live-read-smoke.ps1` still mirrors the Node Gateway HTTP+QBXML client for localhost experiments. **Do not use it as production transport** until a supported CData client/protocol is confirmed (raw root POST returned HTTP 200 with an empty body on the production VM).
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\live-read-smoke.ps1
 ```
 
-Defaults to `https://127.0.0.1:8166`, prompts for Gateway username/password (SecureString), sends **exactly one** read-only `EstimateQueryRq` (`MaxReturned=1`, `IncludeLinkedTxns=true`) using the **same** HTTP headers/Basic Auth/QBXML envelope as the Node transport, and writes sanitized JSON to `C:\ThryveIntegration\slabOS-live-read-smoke.json`.
-
-TLS certificate bypass is **localhost-only** and must not be reused for remote/production networking.
+Defaults to `https://127.0.0.1:8166`, prompts for Gateway username/password (SecureString). TLS certificate bypass is **localhost-only** and must not be reused for remote/production networking.

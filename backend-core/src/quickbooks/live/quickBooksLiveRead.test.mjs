@@ -438,4 +438,78 @@ function fakeTransportRouter() {
   console.log("ok: PowerShell live-read-smoke.ps1 static safety + protocol parity");
 }
 
+// ── PowerShell live-sdk-linked-smoke.ps1 (COM RequestProcessor) ───────────────
+{
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+  const ps1Path = path.join(repoRoot, "quickbooks-sdk-connector", "live-sdk-linked-smoke.ps1");
+  const ps1 = await fs.readFile(ps1Path, "utf8");
+  const ps1Bytes = await fs.readFile(ps1Path);
+
+  assert.match(ps1, /READ-ONLY DIAGNOSTIC - NO QUICKBOOKS WRITES/);
+  assert.match(ps1, /QBXMLRP2\.RequestProcessor/);
+  assert.match(ps1, /EliteOS QuickBooks SDK Connector/);
+  assert.match(ps1, /\{A1B2C3D4-E5F6-7890-ABCD-EF1234567890\}/);
+  assert.match(ps1, /OpenConnection2/);
+  assert.match(ps1, /BeginSession/);
+  assert.match(ps1, /ProcessRequest/);
+  assert.match(ps1, /EndSession/);
+  assert.match(ps1, /CloseConnection/);
+  assert.match(ps1, /ReleaseComObject/);
+  assert.match(ps1, /qbFileOpenDoNotCare|OpenModeDontCare\s*=\s*2/);
+  assert.match(ps1, /\$OpenModeDontCare\s*=\s*2/);
+  assert.match(ps1, /\$OpenConnectionTypeLocalQbd\s*=\s*1/);
+  assert.match(ps1, /C:\\ThryveIntegration\\slabOS-sdk-linked-smoke\.json/);
+  assert.match(ps1, /EstimateQueryRq/);
+  assert.match(ps1, /MaxReturned>1</);
+  assert.match(ps1, /IncludeLineItems>false</);
+  assert.match(ps1, /IncludeLinkedTxns>true</);
+  assert.match(ps1, /OwnerID>0</);
+  assert.match(ps1, /\$QbXmlVersion\s*=\s*"13\.0"/);
+  assert.match(ps1, /onError="continueOnError"/);
+  assert.match(ps1, /Assert-ReadOnlyQbXml/);
+  assert.match(ps1, /AddRq/);
+  assert.match(ps1, /ModRq/);
+  assert.match(ps1, /TxnDelRq/);
+  assert.match(ps1, /ListDelRq/);
+  assert.match(ps1, /permits only EstimateQueryRq/);
+  assert.match(ps1, /no arbitrary-QBXML escape hatch/i);
+  assert.match(ps1, /finally/);
+
+  // No CData Gateway / credentials path in this script
+  assert.equal(/8166|QB_GATEWAY|Invoke-WebRequest|Basic Auth/i.test(ps1), false);
+  assert.equal(/Read-Host.*password/i.test(ps1), false);
+  assert.match(ps1, /No CData Gateway/i);
+
+  // Must not embed write request payloads / write helpers
+  assert.equal(/EstimateAddRq[\s>]/.test(ps1), false);
+  assert.equal(/InvoiceAddRq[\s>]/.test(ps1), false);
+  assert.equal(/SalesOrderAddRq[\s>]/.test(ps1), false);
+  assert.equal(/ReceivePaymentAddRq[\s>]/.test(ps1), false);
+  assert.equal(/Send-RawQbXml|Invoke-RawQbXml|Execute-ArbitraryQbXml/i.test(ps1), false);
+  assert.equal(/qbFileOpenSingleUser|OpenModeSingleUser/i.test(ps1), false);
+  assert.match(ps1, /Multi-User Mode OK/);
+  assert.match(ps1, /do not force single-user/i);
+
+  // PowerShell 5.1: pure ASCII, no BOM
+  assert.equal(ps1Bytes[0] === 0xef && ps1Bytes[1] === 0xbb && ps1Bytes[2] === 0xbf, false, "sdk smoke ps1 must not have UTF-8 BOM");
+  const nonAsciiOffsets = [];
+  for (let i = 0; i < ps1Bytes.length; i += 1) {
+    if (ps1Bytes[i] > 0x7f) nonAsciiOffsets.push(i);
+  }
+  assert.equal(
+    nonAsciiOffsets.length,
+    0,
+    `sdk smoke ps1 must be ASCII-only; non-ASCII bytes at offsets: ${nonAsciiOffsets.slice(0, 20).join(", ")}`
+  );
+
+  // Identity parity with .NET connector defaults
+  const settingsPath = path.join(repoRoot, "quickbooks-sdk-connector", "Configuration", "ConnectorSettings.cs");
+  const settings = await fs.readFile(settingsPath, "utf8");
+  assert.match(settings, /EliteOS QuickBooks SDK Connector/);
+  assert.match(settings, /\{A1B2C3D4-E5F6-7890-ABCD-EF1234567890\}/);
+  assert.match(settings, /"13\.0"/);
+
+  console.log("ok: PowerShell live-sdk-linked-smoke.ps1 static safety + COM identity");
+}
+
 console.log("All QuickBooks live read tests passed.");

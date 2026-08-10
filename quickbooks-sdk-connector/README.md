@@ -193,6 +193,19 @@ is fixed and the extract is re-run, the preview output should show:
 
 Until both gates pass, the export is **not suitable for Phase 2 staging**.
 
+## Read-only linked-transaction smoke (PowerShell, no .NET build)
+
+On the QuickBooks VM with Desktop open (Multi-User OK):
+
+```powershell
+cd C:\eliteOS\quickbooks-sdk-connector
+powershell -NoProfile -ExecutionPolicy Bypass -File .\live-sdk-linked-smoke.ps1
+```
+
+Uses `QBXMLRP2.RequestProcessor` with the same app name/ID defaults as this connector, sends one `EstimateQueryRq` (`MaxReturned=1`, `IncludeLinkedTxns=true`), and writes sanitized JSON to `C:\ThryveIntegration\slabOS-sdk-linked-smoke.json`.
+
+Do **not** use `live-read-smoke.ps1` (CData Gateway HTTP) as production transport until a supported CData client/protocol is confirmed.
+
 ## Exit codes
 
 | Code | Meaning |
