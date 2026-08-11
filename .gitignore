@@ -16,6 +16,9 @@ dist/
 !**/.env.example
 !.env.local.example
 !**/.env.local.example
+# Account Directory QB customer sync secrets (Windows persistent config copies)
+**/ad-qb-customer-sync.env
+!**/ad-qb-customer-sync.env.example
 
 # Pipeline / Moraware dumps and generated import-test snapshots (often large; may contain operational data — keep local only)
 out*.json
