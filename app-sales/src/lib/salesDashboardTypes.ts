@@ -274,6 +274,23 @@ export type SalesDashboardResponse = {
   };
   insightSummaryText?: string;
   executiveSummary?: ExecutiveSummary;
+  quickbooks_financial_truth?: {
+    status?: string;
+    source?: string;
+    refreshed_at?: string | null;
+    date_range?: { start_date?: string | null; end_date?: string | null };
+    estimates?: { count?: number | null; amount?: number | null };
+    sales_orders?: { count?: number | null; amount?: number | null };
+    invoices?: { count?: number | null; amount?: number | null };
+    payments?: { count?: number | null; amount?: number | null };
+    open_ar?: {
+      invoice_count?: number | null;
+      amount?: number | null;
+      basis?: string | null;
+      basis_note?: string | null;
+    };
+    warnings?: string[];
+  } | null;
 };
 
 export type DashboardDetailResponse = {

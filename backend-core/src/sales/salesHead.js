@@ -15,7 +15,12 @@ import {
   methodLabelForDisplay
 } from "./salesAttribution.js";
 import { loadLatestCompleteImportGroup } from "../moraware/morawareSyncHealth.js";
-import { buildCompanyWideSqftActuals, buildProductionReportReconciliation, extractSqftFromMorawareJob } from "./morawareSqftActuals.js";
+import {
+  buildCompanyWideSqftActuals,
+  buildProductionReportReconciliation,
+  extractSqftFromMorawareJob,
+  parseSqftActualsFilters
+} from "./morawareSqftActuals.js";
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 import {
   executeMorawareSalesQuery,
@@ -24,6 +29,7 @@ import {
 } from "./morawareSalesQuery.js";
 import { salesDashboardHandler } from "./salesDashboardApi.js";
 import { salesDashboardDetailHandler } from "./salesDashboardDetailApi.js";
+import { getQuickBooksFinancialTruthSafe } from "./quickbooksFinancialTruth/index.js";
 
 const salesJsonParser = express.json({ limit: "256kb" });
 
@@ -2750,6 +2756,11 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     reconciliationComputeMs = elapsedMs(reconciliationStartedAt);
   }
   const latestGroupComplete = syncHealth.latest_group?.complete !== false;
+  const sqftFiltersForQb = parseSqftActualsFilters(req.query || {});
+  const quickbooksFinancialTruth = await getQuickBooksFinancialTruthSafe({
+    startDate: sqftFiltersForQb.startDate || null,
+    endDate: sqftFiltersForQb.endDate || null
+  });
   const responseBuildStartedAt = Date.now();
   const syncedSqftActuals = {
     ...syncedSqftActualsBase,
@@ -2806,6 +2817,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       synced_sqft_actuals: syncedSqftActuals,
       attribution_coverage: attributionCoverage,
       quote_pipeline: quotePipeline,
+      quickbooks_financial_truth: quickbooksFinancialTruth,
       data_contract: {
         actuals: "Moraware Brain tables provide job/account/activity/status/process actuals.",
         company_sqft_actuals:
@@ -2815,7 +2827,9 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         account_branch_attribution:
           "Trusted account -> branch/location/salesperson attribution must come from approved Sales Account Mapping Admin rows, not local fallback rules.",
         attribution_status: "preview_needs_approved_mapping",
-        no_frontend_sources: "Frontend reads this backend aggregate only; it never calls Moraware or receives credentials."
+        no_frontend_sources: "Frontend reads this backend aggregate only; it never calls Moraware or receives credentials.",
+        quickbooks_financial_truth:
+          "Additive QuickBooks Desktop financial layer (Beta). Fail-soft; never blocks Moraware KPIs. Sales Orders $ is not renamed Booked/Sold. Open A/R is as-of refresh when live."
       },
       gaps: [
         ...(latestGroupComplete

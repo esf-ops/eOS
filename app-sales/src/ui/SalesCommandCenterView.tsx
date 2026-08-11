@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ApiError, apiFetch } from "../lib/api";
+import QuickBooksFinancialTruthBeta, { type QuickBooksFinancialTruthPayload } from "./QuickBooksFinancialTruthBeta";
 
 type CountRow = { [key: string]: string | number | null | undefined; count?: number | null };
 
@@ -152,6 +153,7 @@ type SalesDashboardFoundation = {
     quote_forecast_events_error?: string | null;
     status_breakdown?: CountRow[];
   };
+  quickbooks_financial_truth?: QuickBooksFinancialTruthPayload | null;
   data_contract?: Record<string, string>;
   gaps?: string[];
 };
@@ -509,6 +511,8 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
           </p>
           {sqftActuals?.gated_filter_warning ? <p className="sales-filter-warning">{sqftActuals.gated_filter_warning}</p> : null}
         </section>
+
+        <QuickBooksFinancialTruthBeta truth={data?.quickbooks_financial_truth} />
 
         <section className="sales-command-hero" aria-label="Sales command center summary">
           <div className="sales-command-hero__main">

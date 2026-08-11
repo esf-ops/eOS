@@ -13,6 +13,7 @@ import {
   getCachedDashboardMetrics,
   setCachedDashboardMetrics
 } from "./salesDashboardCache.js";
+import { getQuickBooksFinancialTruthSafe } from "./quickbooksFinancialTruth/index.js";
 
 export async function salesDashboardHandler(req, supabaseGetter) {
   const timer = createDashboardTimer();
@@ -89,10 +90,17 @@ export async function salesDashboardHandler(req, supabaseGetter) {
       }
     }
 
+    const quickbooksFinancialTruth = await getQuickBooksFinancialTruthSafe({
+      startDate: filters.dateRange?.start ?? null,
+      endDate: filters.dateRange?.end ?? null
+    });
+    timer.mark("quickbooks_financial_truth");
+
     const responseBody = {
       ok: true,
       organization_id: organizationId,
-      ...sliced
+      ...sliced,
+      quickbooks_financial_truth: quickbooksFinancialTruth
     };
     timer.mark("serialize_ready");
 

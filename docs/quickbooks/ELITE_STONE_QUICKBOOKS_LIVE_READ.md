@@ -22,9 +22,14 @@ Reuses `estimateSalesTruth` helpers and intelligence `extractLinkedTxnRefs` / mo
 
 **Raw QBXML HTTP POST to the CData Remote Connector / Desktop Gateway root endpoint was not validated on the production QuickBooks VM.** Observed behavior: HTTP **200** with an **empty body**, so that path must **not** be treated as a production transport without a supported CData client/protocol (driver or documented Gateway API).
 
-Phase 2 Node + `live-read-smoke.ps1` Gateway code remains in the repo for reference, but **production live linked-transaction validation on the QB VM uses the Intuit Desktop SDK COM Request Processor** instead:
+**Sales Dashboard QuickBooks Financial Truth — Beta** (`backend-core/src/sales/quickbooksFinancialTruth/`) exposes a fail-soft provider contract and UI strip. It stays **disabled** until:
 
-`quickbooks-sdk-connector/live-sdk-linked-smoke.ps1` → `QBXMLRP2.RequestProcessor` (same app identity as the eliteOS SDK connector).
+1. A licensed/supported CData QuickBooks client is installed in the runtime that will query QB, and
+2. That runtime has an **approved stable egress IP** allowlisted to Gateway port 8166 (do not open firewall to Any). Vercel-hosted `backend-core` does **not** provide stable egress.
+
+Phase 2 Node + `live-read-smoke.ps1` Gateway code remains for reference. Prefer Desktop SDK COM smoke for VM-side linked-txn checks:
+
+`quickbooks-sdk-connector/live-sdk-linked-smoke.ps1` → `QBXMLRP2.RequestProcessor`.
 
 Do **not** extend the raw CData HTTP approach until a supported client/protocol is confirmed.
 

@@ -4144,3 +4144,13 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **SQL** | Manual apply: `backend-core/supabase/eliteos_workforce_managerial_financials_v1.sql` (CHECK widen + ESF section seed). |
 | **Ops** | Apply SQL → redeploy **backend-core** + **app-hr**. Assign Managerial Financials under HR → Department Access for the selected leadership user. |
 | **Out of scope** | Letter grades/thresholds for these metrics; combining managerial + standard reports; auto-apply migration; System Admin grants. |
+
+### 308. Sales Dashboard QuickBooks Financial Truth Beta (2026-08-11)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-11 |
+| **Decision** | Additive **QuickBooks Financial Truth — Beta** on Sales Dashboard (`quickbooks_financial_truth` on `/api/sales/dashboard-foundation` and `/api/sales/dashboard`). Fail-soft; Moraware KPIs unchanged. Sales Orders $ is **not** renamed Booked/Sold. Open A/R is **as-of refresh** when live (no fake historical A/R). Default `QB_FINANCIAL_TRUTH_ENABLED=0`. Live reads require a **supported CData QuickBooks client** plus a host with **approved stable egress** to Gateway 8166 — raw HTTP QBXML POST is not production transport. Vercel Brain has no stable egress; do not broaden firewall to Any. |
+| **Why** | `slabos_ro` is authorized read-only on Remote Connector, but this repo has no licensed CData client and production Brain cannot be allowlisted by IP today. |
+| **Impacted** | `backend-core/src/sales/quickbooksFinancialTruth/`, Sales foundation + dashboard handlers, `SalesCommandCenterView` / live panel Beta strip, `docs/quickbooks/ELITE_STONE_QUICKBOOKS_LIVE_READ.md`. |
+| **Revisit** | CData client installed on a Windows/static-egress worker; adapter wired; finance confirms Booked/Sold definition. |

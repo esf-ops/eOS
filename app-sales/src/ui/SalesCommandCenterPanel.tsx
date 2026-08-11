@@ -20,6 +20,7 @@ import { useSalesDashboard } from "./sales-dashboard/SalesDashboardContext";
 import CommandCenterControls from "./sales-dashboard/CommandCenterControls";
 import SalesExportMenu from "./sales-dashboard/SalesExportMenu";
 import { CHART_COLORS, EmptyState, LoadingSkeleton } from "./sales-dashboard/components";
+import QuickBooksFinancialTruthBeta from "./QuickBooksFinancialTruthBeta";
 
 const CHART_GRID = "rgba(15, 23, 42, 0.06)";
 
@@ -159,6 +160,8 @@ export default function SalesCommandCenterPanel() {
         </div>
 
         <CommandCenterControls />
+
+        <QuickBooksFinancialTruthBeta truth={data?.quickbooks_financial_truth} />
 
         {loading && !data ? (
           <LoadingSkeleton rows={10} />

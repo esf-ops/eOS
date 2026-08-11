@@ -275,6 +275,109 @@
   margin-bottom: 1.25rem;
 }
 
+.qb-truth-beta {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.95), rgba(241, 245, 249, 0.9));
+}
+
+.qb-truth-beta__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.qb-truth-beta__eyebrow {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.qb-truth-beta__meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.qb-truth-beta__status {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.qb-truth-beta__status--ok {
+  background: rgba(22, 163, 74, 0.12);
+  color: #166534;
+}
+
+.qb-truth-beta__status--off {
+  background: rgba(180, 83, 9, 0.12);
+  color: #9a3412;
+}
+
+.qb-truth-beta__warning {
+  margin: 0.75rem 0 0;
+  font-size: 0.88rem;
+  color: #9a3412;
+}
+
+.qb-truth-beta__cards {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.qb-truth-beta__card {
+  padding: 0.75rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.qb-truth-beta__card span {
+  display: block;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.qb-truth-beta__card strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 1.15rem;
+  color: #0f172a;
+}
+
+.qb-truth-beta__note {
+  margin: 0.65rem 0 0;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+@media (max-width: 960px) {
+  .qb-truth-beta__cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .qb-truth-beta__head {
+    flex-direction: column;
+  }
+
+  .qb-truth-beta__cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sales-command-hero__main,
 .sales-command-kpi,
 .sales-command-panel {

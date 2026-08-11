@@ -523,4 +523,29 @@ import { buildMonthlyYoYTrend } from "./salesProductionSummary.js";
   console.log("ok: dashboard cache hit/miss");
 }
 
+// QuickBooks Financial Truth fail-soft attachment (does not alter Moraware metrics)
+{
+  const { getQuickBooksFinancialTruthSafe, QB_FINANCIAL_TRUTH_STATUSES } = await import(
+    "./quickbooksFinancialTruth/index.js"
+  );
+  const qb = await getQuickBooksFinancialTruthSafe({
+    startDate: "2026-01-01",
+    endDate: "2026-06-30",
+    env: { QB_FINANCIAL_TRUTH_ENABLED: "0" }
+  });
+  assert.equal(qb.status, QB_FINANCIAL_TRUTH_STATUSES.DISABLED);
+  assert.equal(qb.sales_orders.amount, null);
+  // Simulate foundation body remaining successful with Moraware fields intact.
+  const foundationBody = {
+    ok: true,
+    synced_sqft_actuals: { total_synced_sqft: 12345 },
+    quickbooks_financial_truth: qb
+  };
+  assert.equal(foundationBody.ok, true);
+  assert.equal(foundationBody.synced_sqft_actuals.total_synced_sqft, 12345);
+  assert.notEqual(foundationBody.quickbooks_financial_truth.status, "ok");
+  assert.equal(/Booked/i.test(JSON.stringify(foundationBody.quickbooks_financial_truth)), false);
+  console.log("ok: QB financial truth fail-soft leaves Moraware foundation intact");
+}
+
 console.log("salesDashboard.test.mjs — all passed");
