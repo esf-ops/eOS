@@ -207,6 +207,8 @@ Implementation references: `backend-core/src/quotes/quoteCalculator.js`, `backen
 
 **Sales Command Center overview reads:** `GET /api/sales/dashboard` with `loadProfile=overview` SQL date-scopes prepared job/worksheet facts to the discrete current + prior comparison windows (not full history filtered only in memory), skips explorer-only activity/calendar loads when `includeDetails=false`, and overlaps prepared QuickBooks Financial Truth with Moraware source load. See `FEATURE_DECISIONS.md` §310.
 
+**Account Directory QuickBooks customer enrichment (v1 Phases 0–2):** Separate Windows ODBC worker posts prepared customer/job facts to `POST /api/internal/account-directory/quickbooks-customer-sync` (`ad_qb_customer_facts` / `ad_qb_customer_sync_runs` / `ad_qb_link_suggestions`). Account Directory identity tables are not overwritten; confirmed links remain `quickbooks_desktop` external links via existing `link-quickbooks`. Jobs stay facts only. See `FEATURE_DECISIONS.md` §311.
+
 **Future mapping domains (org-scoped):**
 
 - Statuses, activity types, resources/machines, custom fields  

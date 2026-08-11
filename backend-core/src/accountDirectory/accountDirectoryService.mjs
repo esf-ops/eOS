@@ -2,6 +2,12 @@ import { normalizeAccountDirectorySearch } from "./accountDirectoryMemoryStore.m
 import { ACCOUNT_DIRECTORY_CAPABILITIES, roleHasCapability } from "./accountDirectoryAuth.mjs";
 import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
 import { isAccountQuickbooksLinked } from "./accountDirectoryQuickbooksLinkage.mjs";
+import {
+  indexSuggestionsByAccountId,
+  listAdQbLinkSuggestions,
+  markSuggestionLinked,
+  resolveAccountQbEnrichmentLabel
+} from "./qbCustomerEnrichment/feedStatus.js";
 
 export { AccountDirectoryError };
 
@@ -137,8 +143,35 @@ export function createAccountDirectoryService(deps) {
       source: account.source,
       hasPrimaryContact: Boolean(primaryContact),
       hasPrimaryLocation: Boolean(primaryLoc),
-      hasAliases
+      hasAliases,
+      qbEnrichment: resolveAccountQbEnrichmentLabel({ quickbooksLinked: qbLinked }, null)
     };
+  }
+
+  function attachEnrichment(item, suggestionByAccount) {
+    const suggestion = suggestionByAccount?.get(String(item.id)) || null;
+    const qbEnrichment = resolveAccountQbEnrichmentLabel(item, suggestion);
+    return {
+      ...item,
+      qbEnrichment,
+      qbEnrichmentLabel: qbEnrichment.label,
+      qbEnrichmentCode: qbEnrichment.code
+    };
+  }
+
+  async function loadSuggestionIndex(organizationId) {
+    if (typeof deps.getSupabase !== "function") return new Map();
+    try {
+      const supabase = deps.getSupabase();
+      const listed = await listAdQbLinkSuggestions(supabase, organizationId, {
+        statuses: ["open", "needs_review", "conflict"],
+        limit: 500
+      });
+      if (!listed.ok) return new Map();
+      return indexSuggestionsByAccountId(listed.items);
+    } catch {
+      return new Map();
+    }
   }
 
   function groupByAccountId(rows) {
@@ -396,7 +429,9 @@ export function createAccountDirectoryService(deps) {
         filtered.map((r) => r.item),
         sort
       );
-      return paginationResult(sortedItems, pageNum, limit);
+      const suggestionByAccount = await loadSuggestionIndex(organizationId);
+      const enriched = sortedItems.map((item) => attachEnrichment(item, suggestionByAccount));
+      return paginationResult(enriched, pageNum, limit);
     },
 
     async getSummary({ organizationId, role }) {
@@ -405,6 +440,7 @@ export function createAccountDirectoryService(deps) {
         statusIn: null,
         includeArchived: true
       });
+      const suggestionByAccount = await loadSuggestionIndex(organizationId);
       const summary = {
         total: rows.length,
         active: 0,
@@ -412,6 +448,8 @@ export function createAccountDirectoryService(deps) {
         needsReview: 0,
         archived: 0,
         quickbooksLinked: 0,
+        qbSuggestedMatch: 0,
+        qbNeedsReview: 0,
         missingPrimaryContact: 0,
         missingPrimaryLocation: 0
       };
@@ -423,6 +461,11 @@ export function createAccountDirectoryService(deps) {
         else if (status === "active" || status === "inactive") summary.active += 1;
 
         if (row.item.quickbooksLinked) summary.quickbooksLinked += 1;
+        else {
+          const enr = attachEnrichment(row.item, suggestionByAccount).qbEnrichment;
+          if (enr.code === "suggested_match") summary.qbSuggestedMatch += 1;
+          if (enr.code === "needs_review") summary.qbNeedsReview += 1;
+        }
         if (!row.item.hasPrimaryContact) summary.missingPrimaryContact += 1;
         if (!row.item.hasPrimaryLocation) summary.missingPrimaryLocation += 1;
       }
@@ -433,7 +476,9 @@ export function createAccountDirectoryService(deps) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW);
       const account = await store.getAccount(organizationId, accountId);
       if (!account) throw new AccountDirectoryError("not_found", "Account not found.", 404);
-      return hydrateDetail(organizationId, account, { includeAudit: true, role });
+      const detail = await hydrateDetail(organizationId, account, { includeAudit: true, role });
+      const suggestionByAccount = await loadSuggestionIndex(organizationId);
+      return attachEnrichment(detail, suggestionByAccount);
     },
 
     async createAccount({ organizationId, role, actorUserId, requestId, payload, asProspect }) {
@@ -892,7 +937,21 @@ export function createAccountDirectoryService(deps) {
         requestId,
         role
       });
-      return hydrateDetail(organizationId, account, { includeAudit: true, role });
+      // Suggestion status only — never creates links. Confirmed link already written above.
+      if (typeof deps.getSupabase === "function") {
+        try {
+          await markSuggestionLinked(deps.getSupabase(), {
+            organizationId,
+            qbListId: externalId,
+            accountId,
+            actorUserId
+          });
+        } catch {
+          /* fail-soft */
+        }
+      }
+      const detail = await hydrateDetail(organizationId, account, { includeAudit: true, role });
+      return attachEnrichment(detail, await loadSuggestionIndex(organizationId));
     },
 
     async deactivateExternalLink({ organizationId, role, actorUserId, requestId, accountId, linkId }) {

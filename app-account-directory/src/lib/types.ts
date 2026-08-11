@@ -15,6 +15,14 @@ export type AccountListItem = {
   postalCode?: string | null;
   status: AccountStatus;
   quickbooksLinked?: boolean;
+  qbEnrichment?: {
+    code?: "linked" | "not_linked" | "suggested_match" | "needs_review" | string;
+    label?: string;
+    suggestionId?: string | null;
+    suggestionStatus?: string | null;
+  };
+  qbEnrichmentLabel?: string | null;
+  qbEnrichmentCode?: string | null;
   updatedAt?: string | null;
   rowVersion?: number | null;
   source?: string | null;
@@ -94,6 +102,8 @@ export type AccountSummary = {
   needsReview: number;
   archived: number;
   quickbooksLinked: number;
+  qbSuggestedMatch?: number;
+  qbNeedsReview?: number;
   missingPrimaryContact: number;
   missingPrimaryLocation: number;
 };

@@ -22,7 +22,7 @@ import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
 import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
 import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
 import { attachInstallDashboardRoutes } from "./install/installDashboardApi.js";
-import { attachAccountDirectoryRoutes } from "./accountDirectory/accountDirectoryApi.js";
+import { attachAccountDirectoryRoutes, resolveAccountDirectoryStore } from "./accountDirectory/accountDirectoryApi.js";
 import { attachHrWorkforceRoutes } from "./hr/hrWorkforceApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { attachTakeoffInternalRoutes } from "./takeoff/takeoffInternalRoutes.js";
@@ -34,6 +34,7 @@ import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansT
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
 import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
 import { attachQuickBooksSalesSyncRoutes } from "./sales/quickbooksFinancialTruth/quickbooksSalesSyncApi.js";
+import { attachAdQbCustomerSyncRoutes } from "./accountDirectory/qbCustomerEnrichment/qbCustomerSyncApi.js";
 import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
 import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoutes.js";
 import { maybeAttachQuoteIntakeRoutes } from "./quoteIntake/quoteIntakeRoutes.js";
@@ -601,6 +602,11 @@ attachMorawareSyncRoutes(app, {
 
 attachQuickBooksSalesSyncRoutes(app, {
   getSupabase: supabaseServerClient
+});
+
+attachAdQbCustomerSyncRoutes(app, {
+  getSupabase: supabaseServerClient,
+  resolveAccountDirectoryStore: () => resolveAccountDirectoryStore({ getSupabase: supabaseServerClient })
 });
 
 // Executive Head: read-only aggregates (admin/executive only)

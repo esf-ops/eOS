@@ -149,6 +149,35 @@ function statusPillClass(status: string): string {
   return "status-pill status-pill-default";
 }
 
+function qbEnrichmentBadge(item: {
+  quickbooksLinked?: boolean;
+  qbEnrichment?: { code?: string; label?: string } | null;
+  qbEnrichmentCode?: string | null;
+  qbEnrichmentLabel?: string | null;
+}) {
+  const code = item.qbEnrichment?.code || item.qbEnrichmentCode || (item.quickbooksLinked ? "linked" : "not_linked");
+  const label =
+    item.qbEnrichment?.label ||
+    item.qbEnrichmentLabel ||
+    (code === "linked"
+      ? "QuickBooks Linked"
+      : code === "suggested_match"
+        ? "Suggested Match"
+        : code === "needs_review"
+          ? "Needs Review"
+          : "QuickBooks Not Linked");
+  if (code === "linked") {
+    return <span className="qb-badge">{label}</span>;
+  }
+  if (code === "suggested_match") {
+    return <span className="chip" title={label}>{label}</span>;
+  }
+  if (code === "needs_review") {
+    return <span className="status-pill status-pill-needs-review">{label}</span>;
+  }
+  return <span className="ad-cell-muted">{label}</span>;
+}
+
 function monogramClass(status: string): string {
   if (status === "active") return "monogram monogram-active";
   if (status === "prospect") return "monogram monogram-prospect";
@@ -1120,18 +1149,7 @@ export default function AccountDirectoryApp() {
                               <td>
                                 <span className={statusPillClass(item.status)}>{statusLabel(item.status)}</span>
                               </td>
-                              <td>
-                                {item.quickbooksLinked ? (
-                                  <span className="qb-badge">
-                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-                                      <polyline points="20 6 9 17 4 12" />
-                                    </svg>
-                                    Linked
-                                  </span>
-                                ) : (
-                                  <span className="ad-cell-muted">—</span>
-                                )}
-                              </td>
+                              <td>{qbEnrichmentBadge(item)}</td>
                               <td>{formatUpdatedAt(item.updatedAt)}</td>
                             </tr>
                           ))}
@@ -1391,6 +1409,18 @@ function SummaryStrip({
     { key: "needsReview", label: "Needs review", count: summary.needsReview, patch: { tab: "needs_review", status: "", linked: "", missingContact: "", missingLocation: "" } },
     { key: "archived", label: "Archived", count: summary.archived, patch: { tab: "archived", status: "", linked: "", missingContact: "", missingLocation: "" } },
     { key: "qbLinked", label: "QB linked", count: summary.quickbooksLinked, patch: { linked: "true", missingContact: "", missingLocation: "" } },
+    {
+      key: "qbSuggested",
+      label: "Suggested Match",
+      count: summary.qbSuggestedMatch ?? 0,
+      patch: { linked: "false", missingContact: "", missingLocation: "" }
+    },
+    {
+      key: "qbNeedsReview",
+      label: "QB Needs Review",
+      count: summary.qbNeedsReview ?? 0,
+      patch: { linked: "false", missingContact: "", missingLocation: "" }
+    },
     { key: "noContact", label: "No contact", count: summary.missingPrimaryContact, patch: { missingContact: "true", missingLocation: "", linked: "" } },
     { key: "noLocation", label: "No location", count: summary.missingPrimaryLocation, patch: { missingLocation: "true", missingContact: "", linked: "" } }
   ];
@@ -1699,13 +1729,7 @@ function ProfilePanel({
                     <span className={statusPillClass(detail.status)}>{statusLabel(detail.status)}</span>
                   </dd>
                   <dt>QuickBooks</dt>
-                  <dd>
-                    {detail.quickbooksLinked ? (
-                      <span className="qb-badge">Linked</span>
-                    ) : (
-                      <span className="chip chip-muted">Not linked</span>
-                    )}
-                  </dd>
+                  <dd>{qbEnrichmentBadge(detail)}</dd>
                   {detail.source ? (
                     <>
                       <dt>Source</dt>

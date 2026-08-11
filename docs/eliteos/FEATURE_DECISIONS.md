@@ -4175,3 +4175,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Sales math/attribution changes; Moraware ingestion; QuickBooks Windows sync worker / backfill; dashboard UI redesign. |
 | **Impacted** | `salesDashboardDataSources.js`, `salesDashboardApi.js`, `salesDashboardFilters.js` (`resolveRequiredLoadDateWindow`), `salesDashboardAggregates.js`, `salesDashboardCache.js`, `salesDashboardTiming.js`, `salesDashboard.test.mjs`. |
 | **Revisit** | Date-scope quotes/forecasts similarly if they become a hotspot; optional SQL OR filter instead of dual window queries. |
+
+### 311. Account Directory QuickBooks Customer Enrichment v1 (Phases 0–2) (2026-08-11)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-11 |
+| **Decision** | Additive **live ODBC → prepared facts** lane for QuickBooks Desktop customers/jobs into Account Directory enrichment — **not** into AD identity columns. Tables: `ad_qb_customer_facts`, `ad_qb_customer_sync_runs`, `ad_qb_link_suggestions`. Separate Windows worker + ingest token from Sales Financial Truth. Root ListID is the only canonical `quickbooks_desktop` external link; jobs are prepared facts only. Reconciliation: exact ListID = reconciled; unlinked roots = suggestions; fuzzy name ranks suggestions only; **never auto-link / never auto-merge**. Confirmed links remain `POST …/link-quickbooks` only. Create-and-link from a suggestion is an explicit secondary API action. No financial facts in this phase. |
+| **Why** | Sales ODBC feed has txn/Open A/R by CustomerName without ListID; AD needs ListID-keyed customer/job context and a safe suggestion queue without polluting identity or estimate snapshots. |
+| **SQL** | Manual: `backend-core/supabase/eliteos_account_directory_qb_customer_enrichment_v1.sql` (not applied in this change). |
+| **Out of scope** | Financial facts; Internal Estimate / Quote Library / `customer_identity_snapshot`; Sales Dashboard; QB writes; auto Task Scheduler registration; production import. |
+| **Impacted** | `backend-core/src/accountDirectory/qbCustomerEnrichment/*`, AD API/service/UI badges, `quickbooks-sdk-connector/account-directory-sync/`, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
+| **Revisit** | Phase 3 financial facts by ListID; optional ListID columns on `sales_quickbooks_*`; scheduled-task installer after proven manual runs. |

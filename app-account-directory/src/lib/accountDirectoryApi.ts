@@ -148,3 +148,33 @@ export async function linkQuickBooks(
     payload
   )) as AccountDetailResponse;
 }
+
+export async function fetchQbEnrichmentStatus(token: string) {
+  return (await apiGet(`${BASE}/qb-enrichment/status`, token)) as {
+    ok: boolean;
+    feed?: {
+      status?: string;
+      open_suggestions?: number;
+      needs_review?: number;
+      conflict?: number;
+      reason?: string | null;
+    };
+  };
+}
+
+export async function fetchQbEnrichmentSuggestions(token: string) {
+  return (await apiGet(`${BASE}/qb-enrichment/suggestions`, token)) as {
+    ok: boolean;
+    unavailable?: boolean;
+    items?: Array<{
+      id: string;
+      qbListId: string;
+      qbFullName?: string | null;
+      qbName?: string | null;
+      status: string;
+      suggestedAccountId?: string | null;
+      rankScore?: number | null;
+      candidateAccounts?: Array<{ accountId: string; displayName?: string | null; score?: number }>;
+    }>;
+  };
+}
