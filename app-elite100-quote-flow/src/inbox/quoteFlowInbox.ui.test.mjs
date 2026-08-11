@@ -260,10 +260,15 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
 }
 
 {
-  assert.match(inbox, /qf-inbox-select-attachment|Select/);
-  assert.match(inbox, /planSelectionRequired/);
-  assert.match(inbox, /Multiple plan candidates|Choose the plan|Choose plan/);
-  console.log("ok: attachment selection contracts");
+assert.match(inbox, /qf-inbox-select-attachment|Select|Add to packet/);
+assert.match(inbox, /planSelectionRequired/);
+assert.match(inbox, /Select the plan files to include in this takeoff packet/);
+assert.match(inbox, /qf-inbox-preview-attachment|Preview/);
+assert.match(inbox, /qf-inbox-preview-modal/);
+assert.match(inbox, /selectedAttachmentKeys/);
+assert.match(api, /attachmentKeys/);
+assert.match(api, /attachments\/.*preview/);
+console.log("ok: attachment selection contracts");
 }
 
 {

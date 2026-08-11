@@ -75,7 +75,8 @@ console.log("\nquoteIntakePlanAttachmentSupport.test.mjs\n");
     classifyPlanFileSupport({
       mimeType: "image/jpeg",
       name: "IMG_1234.jpg",
-      isFileAttachment: true
+      isFileAttachment: true,
+      sizeBytes: 250_000
     }),
     "image_needs_review"
   );
@@ -85,10 +86,21 @@ console.log("\nquoteIntakePlanAttachmentSupport.test.mjs\n");
       id: "att-photo",
       name: "vacation.png",
       contentType: "image/png",
-      size: 900,
+      size: 250000,
       isInline: false
     }).support,
     "image_needs_review"
+  );
+  assert.equal(
+    classifyAttachmentMeta({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      id: "att-tiny",
+      name: "image001.jpg",
+      contentType: "image/jpeg",
+      size: 900,
+      isInline: false
+    }).support,
+    "likely_inline_image"
   );
   assert.equal(filenameLooksPlanLike("vacation.png"), false);
   assert.equal(canMarkAsPlanForTakeoff("image_needs_review"), true);

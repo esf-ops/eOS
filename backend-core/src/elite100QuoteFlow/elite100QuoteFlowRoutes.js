@@ -30,6 +30,8 @@ import { createQuoteFlowDigitalEstimateService } from "./quoteFlowDigitalEstimat
 import { createQuoteFlowActivityService } from "./quoteFlowActivity.mjs";
 import { createQuoteFlowAcceptedReportService } from "./quoteFlowAcceptedReport.mjs";
 import { quoteFlowSafeError } from "./quoteFlowErrors.mjs";
+import { createStudioSecurePlanViewerService } from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
+import { normalizeStartTakeoffAttachmentKeys } from "./quoteFlowTakeoffPacket.mjs";
 import { resolveStudioLifecycleRepositoryForRoutes } from "../elite100EstimateStudio/studioLifecycleRepositoryFactory.mjs";
 import {
   approveAndBuildEstimate,
@@ -185,9 +187,22 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
               }))
         });
 
+      const planViewerService =
+        deps.planViewerService ||
+        createStudioSecurePlanViewerService({
+          env,
+          quoteIntakeRepository,
+          graphClient: deps.graphClient || null,
+          graphFetchImpl: deps.graphFetchImpl || undefined,
+          getSupabase
+        });
+
       quoteFlowService = createQuoteFlowService({
         sharedInboxService,
         estimateRepository,
+        quoteIntakeRepository,
+        planViewerService,
+        openEstimate: deps.openEstimate || openEstimateForIntakeCase,
         getSupabase,
         env
       });
@@ -439,6 +454,50 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
     }
   });
 
+  async function sendAttachmentBytes(req, res, disposition) {
+    res.set("Cache-Control", "private, no-store");
+    try {
+      const organizationId = await orgIdFor(req);
+      const result = await quoteFlowService.getAttachmentContent({
+        organizationId,
+        messageKey: decodeURIComponent(String(req.params.messageKey || "")),
+        attachmentKey: decodeURIComponent(String(req.params.attachmentKey || "")),
+        disposition
+      });
+      for (const [k, v] of Object.entries(result.headers || {})) {
+        res.set(k, v);
+      }
+      res.status(200).end(result.bytes);
+    } catch (e) {
+      console.error(
+        "[elite100-quote-flow] attachment content failed",
+        e?.code || e?.message
+      );
+      const status = Number(e?.statusCode) || 500;
+      const code = String(e?.code || "attachment_content_unavailable");
+      res.status(status).json({
+        ok: false,
+        error:
+          status < 500
+            ? e?.message || "Unable to load attachment."
+            : "Unable to load attachment.",
+        code
+      });
+    }
+  }
+
+  app.get(
+    "/api/elite100-quote-flow/inbox/:messageKey/attachments/:attachmentKey/preview",
+    ...staffStack,
+    (req, res) => sendAttachmentBytes(req, res, "inline")
+  );
+
+  app.get(
+    "/api/elite100-quote-flow/inbox/:messageKey/attachments/:attachmentKey/download",
+    ...staffStack,
+    (req, res) => sendAttachmentBytes(req, res, "attachment")
+  );
+
   app.post(
     "/api/elite100-quote-flow/inbox/:messageKey/start-takeoff",
     ...staffStack,
@@ -450,15 +509,21 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
         const body = req.body && typeof req.body === "object" ? req.body : {};
         const idempotencyKey =
           String(req.get("idempotency-key") || body.idempotencyKey || "").trim() || null;
+        const keys = normalizeStartTakeoffAttachmentKeys(body);
         const result = await quoteFlowService.startTakeoff({
           organizationId,
           actorUserId: req.user?.id ?? null,
           messageKey: decodeURIComponent(String(req.params.messageKey || "")),
-          attachmentKey: body.attachmentKey ? String(body.attachmentKey) : null,
+          attachmentKey: keys[0] || null,
+          attachmentKeys: keys,
           markAsPlan: body.markAsPlan === true || body.markAsPlan === "true",
           manualPlanOverride:
-            body.manualPlanOverride === true || body.manualPlanOverride === "true",
+            body.manualPlanOverride === true ||
+            body.manualPlanOverride === "true" ||
+            body.useAttachmentAsPlan === true ||
+            body.useAttachmentAsPlan === "true",
           confirm: body.confirm === true || body.confirm === "true",
+          startFresh: body.startFresh !== false && body.startFresh !== "false",
           idempotencyKey
         });
         console.info(
@@ -468,6 +533,10 @@ export function attachElite100QuoteFlowRoutes(app, deps) {
             userId: req.user?.id ?? null,
             intakeCaseId: result.intakeCaseId ?? null,
             takeoffJobId: result.takeoffJobId ?? null,
+            attachmentCount: Array.isArray(result.attachmentKeys)
+              ? result.attachmentKeys.length
+              : 1,
+            packetMerged: result.packetMerged === true,
             reused: result.reused === true,
             at: new Date().toISOString()
           })

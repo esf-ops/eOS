@@ -7,11 +7,15 @@ export type QuoteFlowAttachment = {
   attachmentKey: string | null;
   filename: string;
   contentType: string | null;
+  sizeBytes?: number | null;
   support: string | null;
   supportLabel?: string | null;
   detectionReason?: string | null;
   supportedForTakeoff: boolean;
   canMarkAsPlan: boolean;
+  previewSupported?: boolean;
+  isInline?: boolean;
+  likelyInlineImage?: boolean;
   action: string;
 };
 
@@ -162,22 +166,32 @@ export async function startQuoteFlowTakeoff(
   token: string,
   messageKey: string,
   opts: {
-    attachmentKey: string;
+    attachmentKey?: string;
+    attachmentKeys?: string[];
     manualPlanOverride?: boolean;
     idempotencyKey?: string;
+    startFresh?: boolean;
   }
 ) {
   const headers: Record<string, string> = {};
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
+  const keys =
+    Array.isArray(opts.attachmentKeys) && opts.attachmentKeys.length
+      ? opts.attachmentKeys.map((k) => String(k || "").trim()).filter(Boolean)
+      : opts.attachmentKey
+        ? [String(opts.attachmentKey).trim()].filter(Boolean)
+        : [];
   const manual = opts.manualPlanOverride === true;
   return apiPost(
     `/api/elite100-quote-flow/inbox/${encodeURIComponent(messageKey)}/start-takeoff`,
     token,
     {
       confirm: true,
-      attachmentKey: opts.attachmentKey,
+      attachmentKey: keys[0] || undefined,
+      attachmentKeys: keys,
       manualPlanOverride: manual,
       markAsPlan: manual,
+      startFresh: opts.startFresh !== false,
       idempotencyKey: opts.idempotencyKey || undefined
     },
     { headers }
@@ -189,9 +203,21 @@ export async function startQuoteFlowTakeoff(
     reused: boolean;
     alreadyRunning?: boolean;
     message?: string;
+    packetMerged?: boolean;
+    packetFilename?: string | null;
+    attachmentKeys?: string[];
     item?: QuoteFlowInboxItem | null;
     sideEffects?: Record<string, boolean>;
   }>;
+}
+
+/** Staff-only authenticated attachment preview URL (browser fetch with bearer). */
+export function quoteFlowAttachmentPreviewUrl(messageKey: string, attachmentKey: string) {
+  return `/api/elite100-quote-flow/inbox/${encodeURIComponent(messageKey)}/attachments/${encodeURIComponent(attachmentKey)}/preview`;
+}
+
+export function quoteFlowAttachmentDownloadUrl(messageKey: string, attachmentKey: string) {
+  return `/api/elite100-quote-flow/inbox/${encodeURIComponent(messageKey)}/attachments/${encodeURIComponent(attachmentKey)}/download`;
 }
 
 export async function dismissQuoteFlowInboxMessage(token: string, messageKey: string) {

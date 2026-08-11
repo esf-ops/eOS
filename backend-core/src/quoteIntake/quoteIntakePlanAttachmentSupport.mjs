@@ -24,10 +24,20 @@ export const IMAGE_PLAN_MIME_TYPES = Object.freeze([
 
 /** Filename cues that a customer likely sent a measurement / layout plan. */
 const PLAN_LIKE_NAME_RE =
-  /\b(plan|plans|drawing|layout|measure|measurement|counter(?:top)?|kitchen|bath(?:room)?|vanity|island|sketch|scan|scanned|blueprint|floor[\s_-]?plan|elevation|cabinet|template|field[\s_-]?measure|as[\s_-]?built)\b/i;
+  /\b(plan|plans|drawing|layout|measure|measurement|counter(?:top)?s?|kitchen|bath(?:room)?s?|vanity|island|sketch|scan|scanned|blueprint|floor[\s_-]?plan|elevation|cabinet|template|field[\s_-]?measure|as[\s_-]?built)\b/i;
 
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp)$/i;
 const PDF_EXT_RE = /\.pdf$/i;
+
+/** Outlook / mail client default inline filenames (weak signal — combine with size). */
+const INLINE_NAME_RE =
+  /^(image0*\d+|img0*\d+|logo|signature|sig|icon|spacer|pixel|facebook|linkedin|twitter|instagram)[-_]?\d*\.(jpe?g|png|gif|webp)$/i;
+
+/** Tiny images are almost never measurement plans. */
+export const LIKELY_INLINE_MAX_BYTES = 100 * 1024;
+export const TINY_IMAGE_MAX_BYTES = 15 * 1024;
+/** Staff-promoted plans should clear a minimum size when only a weak name signal exists. */
+export const MANUAL_PLAN_MIN_BYTES = 40 * 1024;
 
 /**
  * @param {string|null|undefined} mime
@@ -75,6 +85,36 @@ export function attachmentLooksImage(att = {}) {
 }
 
 /**
+ * Heuristic: likely signature / logo / tracking pixel rather than a plan scan.
+ * Graph `isInline` is authoritative when true; size + name are secondary.
+ * @param {{
+ *   isInline?: boolean,
+ *   inline?: boolean,
+ *   name?: string|null,
+ *   filename?: string|null,
+ *   safeFilename?: string|null,
+ *   sizeBytes?: number|null,
+ *   size?: number|null,
+ *   forcePlan?: boolean
+ * }} att
+ */
+export function looksLikeLikelyInlineEmailImage(att = {}) {
+  if (att.isInline === true || att.inline === true) return true;
+  if (att.forcePlan === true) return false;
+  const name = String(att.name || att.filename || att.safeFilename || "").trim();
+  const size = Number(att.sizeBytes ?? att.size);
+  const hasSize = Number.isFinite(size) && size > 0;
+
+  if (hasSize && size <= TINY_IMAGE_MAX_BYTES && attachmentLooksImage(att)) {
+    return true;
+  }
+  if (INLINE_NAME_RE.test(name)) {
+    if (!hasSize || size <= LIKELY_INLINE_MAX_BYTES) return true;
+  }
+  return false;
+}
+
+/**
  * Classify a file attachment's plan support (after inline/item gates).
  * @param {{
  *   mimeType?: string|null,
@@ -84,9 +124,11 @@ export function attachmentLooksImage(att = {}) {
  *   isInline?: boolean,
  *   isItemAttachment?: boolean,
  *   isFileAttachment?: boolean,
- *   forcePlan?: boolean
+ *   forcePlan?: boolean,
+ *   sizeBytes?: number|null,
+ *   size?: number|null
  * }} att
- * @returns {"direct_pdf"|"direct_image_plan"|"image_needs_review"|null}
+ * @returns {"direct_pdf"|"direct_image_plan"|"image_needs_review"|"likely_inline_image"|null}
  *   null = not a plan candidate (caller keeps prior support)
  */
 export function classifyPlanFileSupport(att = {}) {
@@ -98,7 +140,18 @@ export function classifyPlanFileSupport(att = {}) {
   if (!attachmentLooksImage(att)) return null;
 
   const name = String(att.name || att.filename || att.safeFilename || "");
-  if (att.forcePlan === true || filenameLooksPlanLike(name)) {
+  if (att.forcePlan === true) {
+    return filenameLooksPlanLike(name) || attachmentLooksImage(att)
+      ? "direct_image_plan"
+      : "image_needs_review";
+  }
+
+  // Signature / logo / tiny inline-style images: not default plan candidates.
+  if (looksLikeLikelyInlineEmailImage(att) && !filenameLooksPlanLike(name)) {
+    return "likely_inline_image";
+  }
+
+  if (filenameLooksPlanLike(name)) {
     return "direct_image_plan";
   }
   return "image_needs_review";
@@ -116,6 +169,10 @@ export function planSupportLabel(support) {
       return "Supported image plan";
     case "image_needs_review":
       return "Attachment needs review";
+    case "likely_inline_image":
+      return "Image · likely inline email image";
+    case "inline_ignored":
+      return "Image · likely inline email image";
     case "too_large":
       return "Plan too large";
     default:
@@ -146,7 +203,7 @@ export function summarizeRowPlanSupport(attachments = []) {
   if (possiblePlanCount > 1) {
     return {
       key: "choose_plan",
-      label: "Choose plan",
+      label: "Select plan files for takeoff packet",
       supported: supportedCount > 0,
       planSelectionRequired: true
     };
@@ -181,8 +238,16 @@ export function isAutoSupportedTakeoffSupport(support) {
  * @param {object} [att]
  */
 export function canMarkAsPlanForTakeoff(support, att = {}) {
-  if (String(support || "") === "image_needs_review") return true;
+  const s = String(support || "");
+  if (s === "image_needs_review") return true;
   if (isAutoSupportedTakeoffSupport(support)) return false;
+  if (att.isInline === true || att.inline === true) return false;
+  if (s === "likely_inline_image" || s === "inline_ignored") {
+    // Staff may promote only when the blob clears a minimum size (real scan, not logo).
+    const size = Number(att.sizeBytes ?? att.size);
+    if (Number.isFinite(size) && size > 0 && size < MANUAL_PLAN_MIN_BYTES) return false;
+    return attachmentLooksImage(att);
+  }
   if (att.isInline) return false;
   return attachmentLooksImage(att);
 }
@@ -204,6 +269,10 @@ export function isSafeManualPlanImageOverride(att = {}) {
   if (!att || att.isInline) return false;
   const support = String(att.support || "");
   if (support === "inline_ignored" || support === "unsupported_item") return false;
+  if (support === "likely_inline_image") {
+    const size = Number(att.sizeBytes ?? att.size);
+    if (Number.isFinite(size) && size > 0 && size < MANUAL_PLAN_MIN_BYTES) return false;
+  }
   return attachmentLooksImage(att);
 }
 

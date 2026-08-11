@@ -23,6 +23,8 @@ import {
   fetchQuoteFlowInbox,
   fetchQuoteFlowInboxMessage,
   markQuoteFlowInboxOpened,
+  quoteFlowAttachmentDownloadUrl,
+  quoteFlowAttachmentPreviewUrl,
   restoreQuoteFlowInboxMessage,
   startQuoteFlowTakeoff,
   type QuoteFlowAttachment,
@@ -81,11 +83,31 @@ function errorMessage(e: unknown): string {
 }
 
 function attachmentActionLabel(att: QuoteFlowAttachment, selected: boolean): string {
-  if (att.action === "unsupported") return "Unsupported";
-  if (att.action === "mark_as_plan") {
-    return selected ? "Start AI Takeoff (mark as plan)" : "Mark as plan";
+  if (att.canMarkAsPlan && !att.supportedForTakeoff) {
+    return selected ? "Start AI Takeoff with selected files" : "Mark as plan & select";
   }
-  return selected ? "Start AI Takeoff" : "Select for AI Takeoff";
+  return selected ? "Start AI Takeoff with selected files" : "Select for takeoff packet";
+}
+
+function attachmentSupportCopy(att: QuoteFlowAttachment): string {
+  if (att.likelyInlineImage || att.support === "likely_inline_image" || att.support === "inline_ignored") {
+    return "Likely inline email image — preview only unless manually selected.";
+  }
+  if (att.supportedForTakeoff) return "Supported for AI Takeoff";
+  if (att.canMarkAsPlan) return "Needs mark as plan";
+  return "Unsupported for AI Takeoff. You can preview/download if available.";
+}
+
+function isPreviewableAttachment(att: QuoteFlowAttachment): boolean {
+  if (att.previewSupported === true) return true;
+  const ct = String(att.contentType || "").toLowerCase();
+  const name = String(att.filename || "").toLowerCase();
+  return (
+    ct.includes("pdf") ||
+    /\.pdf$/i.test(name) ||
+    ct.startsWith("image/") ||
+    /\.(jpe?g|png|webp)$/i.test(name)
+  );
 }
 
 function formatReceived(iso: string | null | undefined): string {
@@ -312,11 +334,15 @@ export default function InboxPage(props: Props) {
   const [items, setItems] = useState<QuoteFlowInboxItem[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<QuoteFlowInboxItem | null>(null);
-  const [selectedAttachmentKey, setSelectedAttachmentKey] = useState<string | null>(null);
-  /** messageKey → attachmentKey for bulk start */
+  const [selectedAttachmentKeys, setSelectedAttachmentKeys] = useState<string[]>([]);
+  /** messageKey → attachmentKeys for bulk start (first key retained for batch compat) */
   const [selectedAttachmentByMessage, setSelectedAttachmentByMessage] = useState<
     Record<string, string>
   >({});
+  const [previewAtt, setPreviewAtt] = useState<QuoteFlowAttachment | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -336,13 +362,14 @@ export default function InboxPage(props: Props) {
 
   const listInFlightRef = useRef(false);
   const selectedKeyRef = useRef<string | null>(null);
-  const selectedAttachmentKeyRef = useRef<string | null>(null);
+  const selectedAttachmentKeysRef = useRef<string[]>([]);
   const selectedAttachmentByMessageRef = useRef<Record<string, string>>({});
   const itemsRef = useRef<QuoteFlowInboxItem[]>([]);
   const openedPostedRef = useRef<Set<string>>(new Set());
+  const previewObjectUrlRef = useRef<string | null>(null);
 
   selectedKeyRef.current = selectedKey;
-  selectedAttachmentKeyRef.current = selectedAttachmentKey;
+  selectedAttachmentKeysRef.current = selectedAttachmentKeys;
   selectedAttachmentByMessageRef.current = selectedAttachmentByMessage;
   itemsRef.current = items;
 
@@ -364,7 +391,7 @@ export default function InboxPage(props: Props) {
       if (!stillThere) {
         setSelectedKey(null);
         setDetail(null);
-        setSelectedAttachmentKey(null);
+        setSelectedAttachmentKeys([]);
       } else {
         // Soft-merge status onto open detail without wiping the panel.
         setDetail((prev) => {
@@ -379,27 +406,19 @@ export default function InboxPage(props: Props) {
           };
         });
         if (stillThere.alreadyScoped) {
-          setSelectedAttachmentKey(null);
+          setSelectedAttachmentKeys([]);
           setSelectedAttachmentByMessage((prev) => {
             const next = { ...prev };
             delete next[key];
             return next;
           });
         } else {
-          const attKey = selectedAttachmentKeyRef.current;
-          if (attKey) {
-            const stillValid = (stillThere.attachments || []).some(
-              (a) => a.attachmentKey === attKey
+          const attKeys = selectedAttachmentKeysRef.current;
+          if (attKeys.length) {
+            const valid = attKeys.filter((attKey) =>
+              (stillThere.attachments || []).some((a) => a.attachmentKey === attKey)
             );
-            if (!stillValid) {
-              const fromMap = selectedAttachmentByMessageRef.current[key];
-              if (fromMap) {
-                const mapValid = (stillThere.attachments || []).some(
-                  (a) => a.attachmentKey === fromMap
-                );
-                if (!mapValid) setSelectedAttachmentKey(null);
-              }
-            }
+            if (valid.length !== attKeys.length) setSelectedAttachmentKeys(valid);
           }
         }
       }
@@ -479,12 +498,90 @@ export default function InboxPage(props: Props) {
     setSelectedAttachmentByMessage((prev) => ({ ...prev, [messageKey]: attachmentKey }));
   }
 
+  function toggleAttachmentSelection(attachmentKey: string | null) {
+    if (!attachmentKey) return;
+    setSelectedAttachmentKeys((prev) => {
+      if (prev.includes(attachmentKey)) return prev.filter((k) => k !== attachmentKey);
+      return [...prev, attachmentKey];
+    });
+    if (detail?.messageKey) rememberSelection(detail.messageKey, attachmentKey);
+  }
+
   function clearSelection(messageKey: string) {
     setSelectedAttachmentByMessage((prev) => {
       const next = { ...prev };
       delete next[messageKey];
       return next;
     });
+  }
+
+  function closePreview() {
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = null;
+    }
+    setPreviewAtt(null);
+    setPreviewUrl(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
+  }
+
+  async function openAttachmentPreview(att: QuoteFlowAttachment) {
+    if (!detail?.messageKey || !att.attachmentKey) return;
+    closePreview();
+    setPreviewAtt(att);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const path = quoteFlowAttachmentPreviewUrl(detail.messageKey, att.attachmentKey);
+      const res = await fetch(path, {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      if (!res.ok) {
+        let msg = "Preview unavailable";
+        try {
+          const body = (await res.json()) as { error?: string };
+          if (body?.error) msg = body.error;
+        } catch {
+          /* ignore */
+        }
+        setPreviewError(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      previewObjectUrlRef.current = url;
+      setPreviewUrl(url);
+    } catch {
+      setPreviewError("Preview unavailable");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function downloadAttachment(att: QuoteFlowAttachment) {
+    if (!detail?.messageKey || !att.attachmentKey) return;
+    try {
+      const path = quoteFlowAttachmentDownloadUrl(detail.messageKey, att.attachmentKey);
+      const res = await fetch(path, {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      if (!res.ok) {
+        setError("Download unavailable for this attachment.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = att.filename || "attachment";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Download unavailable for this attachment.");
+    }
   }
 
   function toggleBatchSelection(row: QuoteFlowInboxItem) {
@@ -504,11 +601,13 @@ export default function InboxPage(props: Props) {
 
   async function openRow(messageKey: string) {
     setSelectedKey(messageKey);
-    setSelectedAttachmentKey(selectedAttachmentByMessage[messageKey] || null);
+    const existing = selectedAttachmentByMessage[messageKey];
+    setSelectedAttachmentKeys(existing ? [existing] : []);
     setNotice(null);
     setMenuKey(null);
     setDetailLoading(true);
     setError(null);
+    closePreview();
 
     // Quote Flow local viewed state — does not change Outlook read/unread.
     setItems((prev) =>
@@ -525,16 +624,18 @@ export default function InboxPage(props: Props) {
       const res = await fetchQuoteFlowInboxMessage(authToken, messageKey);
       const item = normalizeInboxItemLabels(res.item) as QuoteFlowInboxItem;
       setDetail({ ...item, opened: true });
-      const existing = selectedAttachmentByMessage[messageKey];
-      if (existing) {
-        setSelectedAttachmentKey(existing);
+      const mapped = selectedAttachmentByMessage[messageKey];
+      if (mapped) {
+        setSelectedAttachmentKeys([mapped]);
       } else {
         const supported = (item.attachments || []).filter((a) => a.supportedForTakeoff);
         if (supported.length === 1 && supported[0].attachmentKey) {
-          setSelectedAttachmentKey(supported[0].attachmentKey);
+          setSelectedAttachmentKeys([supported[0].attachmentKey]);
           rememberSelection(messageKey, supported[0].attachmentKey);
         } else if (item.bestPlanCandidate?.attachmentKey && !item.planSelectionRequired) {
-          setSelectedAttachmentKey(item.bestPlanCandidate.attachmentKey);
+          setSelectedAttachmentKeys([item.bestPlanCandidate.attachmentKey]);
+        } else {
+          setSelectedAttachmentKeys([]);
         }
       }
     } catch (e) {
@@ -636,13 +737,14 @@ export default function InboxPage(props: Props) {
       setError("Scope is already set. Open in Estimates.");
       return;
     }
-    const needsChoice =
-      detail.planSelectionRequired ||
-      (detail.attachments || []).filter((a) => a.supportedForTakeoff).length > 1;
-    if (needsChoice && selectedAttachmentKey !== att.attachmentKey) {
-      setSelectedAttachmentKey(att.attachmentKey);
-      rememberSelection(detail.messageKey, att.attachmentKey);
-      setNotice("Attachment selected. Click Start AI Takeoff to continue.");
+
+    let keys = selectedAttachmentKeys.filter(Boolean);
+    if (!keys.includes(att.attachmentKey)) {
+      keys = [...keys, att.attachmentKey];
+      setSelectedAttachmentKeys(keys);
+    }
+    if (!keys.length) {
+      setError("Select the plan files to include in this takeoff packet.");
       return;
     }
 
@@ -650,22 +752,33 @@ export default function InboxPage(props: Props) {
     setError(null);
     setNotice(null);
     try {
+      const needsManual = (detail.attachments || []).some(
+        (a) =>
+          a.attachmentKey &&
+          keys.includes(a.attachmentKey) &&
+          a.canMarkAsPlan &&
+          !a.supportedForTakeoff
+      );
       const res = await startQuoteFlowTakeoff(authToken, detail.messageKey, {
-        attachmentKey: att.attachmentKey,
-        manualPlanOverride: markAsPlan,
-        idempotencyKey: `qf-start-${detail.messageKey}-${att.attachmentKey}`
+        attachmentKeys: keys,
+        attachmentKey: keys[0],
+        manualPlanOverride: markAsPlan || needsManual,
+        idempotencyKey: `qf-start-${detail.messageKey}-${keys.join("+").slice(0, 80)}`
       });
       setNotice(
         res.message ||
           (res.alreadyRunning || res.reused
             ? "AI Takeoff is already running."
-            : "AI Takeoff started.")
+            : keys.length > 1
+              ? "AI Takeoff started with selected plan packet."
+              : "AI Takeoff started.")
       );
       if (res.item) setDetail(normalizeInboxItemLabels(res.item) as QuoteFlowInboxItem);
+      setSelectedAttachmentKeys([]);
       clearSelection(detail.messageKey);
       await loadList("refresh");
     } catch (e) {
-      setError(errorMessage(e));
+      setError(errorMessage(e) || "AI Takeoff could not start for the selected plan packet.");
     } finally {
       setBusyKey(null);
     }
@@ -1226,7 +1339,7 @@ export default function InboxPage(props: Props) {
                   onRetry={() => {
                     const att =
                       (detail.attachments || []).find(
-                        (a) => a.attachmentKey === selectedAttachmentKey
+                        (a) => a.attachmentKey && selectedAttachmentKeys.includes(a.attachmentKey)
                       ) ||
                       (detail.attachments || []).find((a) => a.supportedForTakeoff) ||
                       (detail.attachments || []).find((a) => a.canMarkAsPlan) ||
@@ -1322,13 +1435,26 @@ export default function InboxPage(props: Props) {
 
               {detail.planSelectionRequired ? (
                 <p className="qf-muted" data-testid="qf-inbox-choose-plan">
-                  Multiple plan candidates — choose one before starting AI Takeoff.
+                  Select the plan files to include in this takeoff packet. PDFs and real plan
+                  images are supported.
                 </p>
               ) : null}
 
-              {detail.bestPlanCandidate?.filename ? (
+              {selectedAttachmentKeys.length ? (
                 <p className="qf-inbox__selected-plan" data-testid="qf-inbox-selected-plan">
-                  Selected plan: <strong>{detail.bestPlanCandidate.filename}</strong>
+                  Selected for packet ({selectedAttachmentKeys.length}):{" "}
+                  <strong>
+                    {(detail.attachments || [])
+                      .filter(
+                        (a) => a.attachmentKey && selectedAttachmentKeys.includes(a.attachmentKey)
+                      )
+                      .map((a) => a.filename)
+                      .join(", ") || "—"}
+                  </strong>
+                </p>
+              ) : detail.bestPlanCandidate?.filename ? (
+                <p className="qf-inbox__selected-plan" data-testid="qf-inbox-selected-plan">
+                  Suggested plan: <strong>{detail.bestPlanCandidate.filename}</strong>
                 </p>
               ) : null}
 
@@ -1336,8 +1462,10 @@ export default function InboxPage(props: Props) {
               <ul className="qf-inbox__attachments" data-testid="qf-inbox-attachments">
                 {(detail.attachments || []).map((att) => {
                   const key = att.attachmentKey || att.filename;
-                  const selected = selectedAttachmentKey === att.attachmentKey;
-                  const canStart =
+                  const selected = Boolean(
+                    att.attachmentKey && selectedAttachmentKeys.includes(att.attachmentKey)
+                  );
+                  const canSelect =
                     !detail.alreadyScoped &&
                     !detail.dismissed &&
                     (att.supportedForTakeoff || att.canMarkAsPlan) &&
@@ -1357,11 +1485,7 @@ export default function InboxPage(props: Props) {
                         <div className="qf-muted">
                           {fileTypeLabel(att)}
                           {" · "}
-                          {att.supportedForTakeoff
-                            ? "Supported plan"
-                            : att.canMarkAsPlan
-                              ? "Needs mark as plan"
-                              : "Not supported for AI Takeoff"}
+                          {attachmentSupportCopy(att)}
                         </div>
                         {att.detectionReason || att.supportLabel || att.support ? (
                           <div className="qf-muted qf-inbox__detection">
@@ -1370,25 +1494,44 @@ export default function InboxPage(props: Props) {
                         ) : null}
                         {selected ? (
                           <div className="qf-inbox__selected-pill" data-testid="qf-inbox-att-selected">
-                            Selected
+                            In takeoff packet
                           </div>
                         ) : null}
                       </div>
                       <div className="qf-inbox__att-actions">
-                        {canStart ? (
+                        {isPreviewableAttachment(att) && att.attachmentKey ? (
+                          <>
+                            <button
+                              type="button"
+                              className="qf-btn-secondary"
+                              data-testid="qf-inbox-preview-attachment"
+                              onClick={() => void openAttachmentPreview(att)}
+                            >
+                              Preview
+                            </button>
+                            <button
+                              type="button"
+                              className="qf-btn-secondary"
+                              data-testid="qf-inbox-download-attachment"
+                              onClick={() => void downloadAttachment(att)}
+                            >
+                              Download
+                            </button>
+                          </>
+                        ) : (
+                          <span className="qf-muted" data-testid="qf-inbox-preview-unavailable">
+                            Preview unavailable
+                          </span>
+                        )}
+                        {canSelect ? (
                           <>
                             <button
                               type="button"
                               className="qf-btn-secondary"
                               data-testid="qf-inbox-select-attachment"
-                              onClick={() => {
-                                setSelectedAttachmentKey(att.attachmentKey);
-                                if (detail.messageKey && att.attachmentKey) {
-                                  rememberSelection(detail.messageKey, att.attachmentKey);
-                                }
-                              }}
+                              onClick={() => toggleAttachmentSelection(att.attachmentKey)}
                             >
-                              {selected ? "Selected" : "Select plan"}
+                              {selected ? "Remove from packet" : "Add to packet"}
                             </button>
                             <button
                               type="button"
@@ -1408,10 +1551,9 @@ export default function InboxPage(props: Props) {
                                   ? "Already running"
                                   : detail.takeoffStatus?.key === "takeoff_failed"
                                     ? "Retry AI Takeoff"
-                                    : attachmentActionLabel(
-                                        att,
-                                        selected || !detail.planSelectionRequired
-                                      )}
+                                    : selectedAttachmentKeys.length > 1
+                                      ? `Start AI Takeoff with ${selectedAttachmentKeys.length} files`
+                                      : attachmentActionLabel(att, selected)}
                             </button>
                           </>
                         ) : detail.viewQueue || detail.takeoffStatus?.key === "takeoff_returned" ? (
@@ -1446,6 +1588,43 @@ export default function InboxPage(props: Props) {
           )}
         </div>
       </div>
+
+      {previewAtt ? (
+        <div className="qf-inbox__preview-modal" data-testid="qf-inbox-preview-modal" role="dialog">
+          <div className="qf-inbox__preview-panel">
+            <div className="qf-inbox__preview-head">
+              <strong>{previewAtt.filename}</strong>
+              <button type="button" className="qf-btn-secondary" onClick={closePreview}>
+                Close
+              </button>
+            </div>
+            {previewLoading ? <p className="qf-muted">Loading preview…</p> : null}
+            {previewError ? (
+              <p className="qf-error" data-testid="qf-inbox-preview-error">
+                {previewError}
+              </p>
+            ) : null}
+            {previewUrl && !previewError ? (
+              String(previewAtt.contentType || "").includes("pdf") ||
+              /\.pdf$/i.test(previewAtt.filename || "") ? (
+                <iframe
+                  title={previewAtt.filename}
+                  src={previewUrl}
+                  className="qf-inbox__preview-frame"
+                  data-testid="qf-inbox-preview-pdf"
+                />
+              ) : (
+                <img
+                  src={previewUrl}
+                  alt={previewAtt.filename}
+                  className="qf-inbox__preview-image"
+                  data-testid="qf-inbox-preview-image"
+                />
+              )
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

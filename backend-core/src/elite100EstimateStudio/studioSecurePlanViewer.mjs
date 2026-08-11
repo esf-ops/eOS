@@ -135,7 +135,9 @@ export function isPreviewSupportedMeta(meta = {}) {
   if (
     support === "direct_pdf" ||
     support === "direct_image_plan" ||
-    support === "image_needs_review"
+    support === "image_needs_review" ||
+    support === "likely_inline_image" ||
+    support === "inline_ignored"
   ) {
     return support !== "too_large";
   }

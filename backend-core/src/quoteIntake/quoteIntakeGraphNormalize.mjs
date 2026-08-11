@@ -100,7 +100,8 @@ export function classifyAttachmentMeta(att) {
           name,
           isInline,
           isItemAttachment,
-          isFileAttachment: true
+          isFileAttachment: true,
+          sizeBytes: Number.isFinite(size) ? size : null
         })
       : null;
 
@@ -110,6 +111,7 @@ export function classifyAttachmentMeta(att) {
   else if (planSupport === "direct_pdf") kind = "pdf_candidate";
   else if (planSupport === "direct_image_plan") kind = "image_plan_candidate";
   else if (planSupport === "image_needs_review") kind = "image_review_candidate";
+  else if (planSupport === "likely_inline_image") kind = "likely_inline_image";
 
   let support = "metadata_only";
   if (isItemAttachment) support = "unsupported_item";

@@ -575,17 +575,36 @@ export function presentQuoteFlowInboxItem(item, opts = {}) {
     attachmentKey: a.attachmentKey || a.id || null,
     filename: a.filename || a.name || "Attachment",
     contentType: a.contentType || a.mimeType || null,
+    sizeBytes: Number.isFinite(Number(a.sizeBytes)) ? Number(a.sizeBytes) : null,
     support: a.support || null,
     supportLabel: a.supportLabel || null,
-    detectionReason: a.supportLabel || a.detectionReason || a.support || null,
+    detectionReason:
+      a.detectionReason ||
+      a.supportLabel ||
+      a.support ||
+      null,
     supportedForTakeoff: a.supportedForTakeoff === true,
     canMarkAsPlan: a.canMarkAsPlan === true,
+    previewSupported:
+      a.previewSupported === true ||
+      a.supportedForTakeoff === true ||
+      a.support === "image_needs_review" ||
+      a.support === "likely_inline_image" ||
+      a.support === "inline_ignored" ||
+      /pdf|image\/(jpeg|jpg|png|webp)/i.test(String(a.contentType || a.mimeType || "")),
+    isInline: a.isInline === true,
+    likelyInlineImage:
+      a.likelyInlineImage === true ||
+      a.support === "likely_inline_image" ||
+      a.support === "inline_ignored",
     action:
       a.supportedForTakeoff === true
         ? "start_takeoff"
         : a.canMarkAsPlan === true
           ? "mark_as_plan"
-          : "unsupported"
+          : a.likelyInlineImage || a.support === "likely_inline_image" || a.support === "inline_ignored"
+            ? "inline_preview"
+            : "unsupported"
   }));
 
   const bestPlan = pickBestPlanCandidate(attachments);

@@ -6,6 +6,7 @@
 
 import { createQuoteFlowError } from "./quoteFlowErrors.mjs";
 import { applyTakeoffCutoutsToOfficialRooms } from "./quoteFlowCutouts.mjs";
+import { normalizeVanityQuotedDepth } from "./quoteFlowVanityDepth.mjs";
 import {
   applyTakeoffOpenEdgeLfToOfficialRooms,
   stampOpenEdgeLfOnTakeoffResult,
@@ -477,7 +478,20 @@ export function createQuoteFlowSetScopeService(deps) {
     );
     const edgedRooms = applyTakeoffOpenEdgeLfToOfficialRooms(priorRooms, edgeSource);
     const withCutouts = applyTakeoffCutoutsToOfficialRooms(edgedRooms, edgeSource);
-    const normalizedEdgeRooms = validateAndNormalizeOfficialScopeRooms(withCutouts);
+    const withVanity = withCutouts.map((room) => {
+      if (!room || typeof room !== "object") return room;
+      const pieces = Array.isArray(room.pieces)
+        ? room.pieces.map((p) =>
+            normalizeVanityQuotedDepth(p, {
+              roomName: room.name,
+              roomType: room.roomType,
+              planFilename: estimate?.scope?.planFilename || null
+            })
+          )
+        : [];
+      return { ...room, pieces };
+    });
+    const normalizedEdgeRooms = validateAndNormalizeOfficialScopeRooms(withVanity);
     const scopeWithAddOns = syncPieceOpeningsIntoOfficialScopeAddOns({
       ...(estimate.scope && typeof estimate.scope === "object" ? estimate.scope : {}),
       rooms: normalizedEdgeRooms

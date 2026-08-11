@@ -384,6 +384,7 @@ export default function OfficialScopeEditor(props: Props) {
                       const sf = pieceSf(piece);
                       const openLf = resolvePieceOpenEdgeLf(piece);
                       return (
+                      <>
                         <tr
                           key={piece.id || `piece-${pieceIndex}`}
                           className={included ? undefined : "is-excluded"}
@@ -425,7 +426,11 @@ export default function OfficialScopeEditor(props: Props) {
                               disabled={disabled}
                               onChange={(e) =>
                                 updatePiece(roomIndex, pieceIndex, {
-                                  depthIn: Number(e.target.value) || 0
+                                  depthIn: Number(e.target.value) || 0,
+                                  depthStaffEdited: true,
+                                  depthSource: "staff",
+                                  normalizationNote: undefined,
+                                  normalizedBy: undefined
                                 })
                               }
                             />
@@ -511,6 +516,18 @@ export default function OfficialScopeEditor(props: Props) {
                             </button>
                           </td>
                         </tr>
+                        {typeof piece.normalizationNote === "string" && piece.normalizationNote ? (
+                          <tr
+                            key={`${piece.id || pieceIndex}-vanity-note`}
+                            className="qf-scope__note-row"
+                            data-testid="qf-scope-vanity-depth-note"
+                          >
+                            <td colSpan={9}>
+                              <span className="qf-muted">{String(piece.normalizationNote)}</span>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </>
                       );
                     })}
                   </tbody>

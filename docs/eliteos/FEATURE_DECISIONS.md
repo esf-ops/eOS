@@ -4188,3 +4188,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Financial facts; Internal Estimate / Quote Library / `customer_identity_snapshot`; Sales Dashboard; QB writes; automatic Task Scheduler registration; automatic production ingest. |
 | **Impacted** | `backend-core/src/accountDirectory/qbCustomerEnrichment/*`, AD API/service/UI badges, `quickbooks-sdk-connector/account-directory-sync/`, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
 | **Revisit** | Phase 3 financial facts by ListID; optional ListID columns on `sales_quickbooks_*`; enable nightly task only after proven manual wrapper PASS. |
+
+### 312. Quote Flow Inbox — attachment preview + multi-plan takeoff packet + vanity depth (2026-08-11)
+
+| Field | Value |
+|-------|--------|
+| **Date / branch** | 2026-08-11 · `main` |
+| **Decision** | Quote Flow Inbox staff can **Preview / Download** attachments via authenticated Brain routes that stream bytes (reuse Studio secure plan viewer; never expose Graph tokens/URLs). Plan candidates include PDF + plan-like JPG/PNG/WEBP; tiny / `image###` / logo-named images classify as **likely inline** (not default-selected; preview still allowed). Staff may multi-select supported plans; `POST …/start-takeoff` accepts `attachmentKeys[]` (singular `attachmentKey` remains). Multiple files merge into one PDF packet via `pdf-lib` and submit as one AI Takeoff job; packet build failure does not create a misleading queue item. Vanity tops with raw depth **21.0–21.75** normalize to **22.5** quoted overhang depth at seed/Set Scope (audit: `rawAiDepthIn`, `normalizedBy`), not kitchen/pantry/island; staff depth edits win. |
+| **Why** | Staff could not preview multi-PDF requests, multi-select errored, signature JPGs competed with real plans, and vanity cabinet depth (21.5) under-quoted tops vs 22.5 overhang rule. |
+| **Impacted** | Inbox presenter/API/UI, plan attachment support, takeoff packet builder, vanity depth helper, Set Scope / seedScope, routes preview+download, FEATURE_DECISIONS (this entry). |
+| **Protected / unchanged** | Pricing formulas/rates, Digital Estimate, Review/Acceptance, sold/handoff/QB/email automation, customer-facing surfaces. |
+| **Revisit trigger** | WebP multi-page embed; staff “merge plans” upload; AI prompt default vanity quoted depth 22.5. |

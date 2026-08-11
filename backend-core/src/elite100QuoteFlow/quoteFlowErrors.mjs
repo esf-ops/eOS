@@ -9,6 +9,9 @@ const MESSAGES = {
   attachment_required: "Select a plan attachment to start AI Takeoff.",
   attachment_not_supported:
     "That attachment is not a supported plan PDF or image for AI Takeoff.",
+  packet_build_failed: "AI Takeoff could not start for the selected plan packet.",
+  packet_unsupported:
+    "Multi-file takeoff packets are not supported yet. Select one file or merge plans before upload.",
   takeoff_unavailable: "AI Takeoff is temporarily unavailable.",
   import_failed:
     "AI Takeoff could not import this file. Try another plan attachment.",

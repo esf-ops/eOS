@@ -16,6 +16,22 @@ import {
   createQuoteFlowInboxStateStore
 } from "./quoteFlowInboxStateStore.mjs";
 import { isOfficialScopeSet } from "./quoteFlowScope.mjs";
+import {
+  buildTakeoffPacketPdf,
+  normalizeStartTakeoffAttachmentKeys,
+  sanitizeTakeoffPacketFilename
+} from "./quoteFlowTakeoffPacket.mjs";
+import {
+  contentDispositionInline,
+  planViewerError
+} from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
+import {
+  isAutoSupportedTakeoffSupport,
+  isSafeManualPlanImageOverride,
+  requestHasManualPlanOverride,
+  findScopedAttachment
+} from "../quoteIntake/quoteIntakePlanAttachmentSupport.mjs";
+import { openEstimateForIntakeCase } from "../takeoff/intakeOpenEstimateService.mjs";
 
 export { isOfficialScopeSet } from "./quoteFlowScope.mjs";
 
@@ -24,6 +40,8 @@ export { isOfficialScopeSet } from "./quoteFlowScope.mjs";
  *   sharedInboxService: { listInbox: Function, getMessage: Function, sendToAiTakeoff: Function },
  *   estimateRepository?: { getActiveByIntakeCase?: Function }|null,
  *   inboxStateStore?: ReturnType<typeof createQuoteFlowInboxStateStore>|null,
+ *   planViewerService?: { getSharedInboxAttachmentContent?: Function }|null,
+ *   openEstimate?: Function|null,
  *   getSupabase?: Function|null,
  *   env?: NodeJS.ProcessEnv
  * }} deps
@@ -34,6 +52,11 @@ export function createQuoteFlowService(deps) {
     throw new Error("createQuoteFlowService: sharedInboxService required");
   }
   const estimateRepository = deps.estimateRepository || null;
+  const planViewerService = deps.planViewerService || null;
+  const openEstimateFn = deps.openEstimate || openEstimateForIntakeCase;
+  const quoteIntakeRepository = deps.quoteIntakeRepository || null;
+  const env = deps.env || process.env;
+  const getSupabase = deps.getSupabase || null;
   const inboxStateStore =
     deps.inboxStateStore ||
     (typeof deps.getSupabase === "function"
@@ -198,21 +221,59 @@ export function createQuoteFlowService(deps) {
     };
   }
 
+  async function getAttachmentContent({
+    organizationId,
+    messageKey,
+    attachmentKey,
+    disposition = "inline"
+  }) {
+    if (!planViewerService?.getSharedInboxAttachmentContent) {
+      throw createQuoteFlowError("takeoff_unavailable", {
+        message: "Attachment preview is temporarily unavailable.",
+        statusCode: 503
+      });
+    }
+    try {
+      const result = await planViewerService.getSharedInboxAttachmentContent({
+        organizationId,
+        messageKey,
+        attachmentKey
+      });
+      const headers = { ...(result.headers || {}) };
+      if (disposition === "attachment") {
+        const filename = String(result.filename || "attachment").replace(/"/g, "");
+        headers["Content-Disposition"] = `attachment; filename="${filename.replace(/[^\x20-\x7E]/g, "_") || "attachment"}"`;
+      } else if (!headers["Content-Disposition"]) {
+        headers["Content-Disposition"] = contentDispositionInline(result.filename || "plan");
+      }
+      return { ...result, headers };
+    } catch (e) {
+      if (e?.code && e?.statusCode) throw e;
+      throw planViewerError(
+        e?.message || "Unable to load attachment.",
+        Number(e?.statusCode) || 500,
+        e?.code || "attachment_content_unavailable"
+      );
+    }
+  }
+
   async function startTakeoff({
     organizationId,
     messageKey,
     actorUserId = null,
     attachmentKey = null,
+    attachmentKeys = null,
     markAsPlan = false,
     manualPlanOverride = false,
     confirm = false,
-    idempotencyKey = null
+    idempotencyKey = null,
+    startFresh = true
   }) {
     if (confirm !== true && confirm !== "true") {
       throw createQuoteFlowError("import_confirm_required");
     }
-    const attKey = String(attachmentKey || "").trim();
-    if (!attKey) {
+    const keys = normalizeStartTakeoffAttachmentKeys({ attachmentKey, attachmentKeys });
+    if (!keys.length) {
       throw createQuoteFlowError("attachment_required");
     }
 
@@ -230,58 +291,280 @@ export function createQuoteFlowService(deps) {
       });
     }
 
-    let result;
-    try {
-      result = await sharedInbox.sendToAiTakeoff({
-        organizationId,
-        messageKey,
-        actorUserId,
-        attachmentKey: attKey,
-        markAsPlan,
-        manualPlanOverride,
-        confirm: true,
-        idempotencyKey,
-        // Inbox intentional starts: never reuse old returned/failed jobs.
-        startFresh: true
-      });
-    } catch (e) {
-      const code = String(e?.code || "takeoff_unavailable");
-      const err = createQuoteFlowError(code, {
-        message: e?.message,
-        statusCode: Number(e?.statusCode) || undefined
-      });
-      if (e?.diagnostic) err.diagnostic = e.diagnostic;
-      // Prefer Shared Inbox safe messages when known.
-      const shared = sharedInboxSafeError(code, e?.message);
-      if (shared?.error) err.message = shared.error;
-      if (code === "already_scoped") {
-        err.message = "Scope is already set. Open in Estimates.";
+    // Single attachment — existing Shared Inbox path (backward compatible).
+    if (keys.length === 1) {
+      let result;
+      try {
+        result = await sharedInbox.sendToAiTakeoff({
+          organizationId,
+          messageKey,
+          actorUserId,
+          attachmentKey: keys[0],
+          markAsPlan,
+          manualPlanOverride,
+          confirm: true,
+          idempotencyKey,
+          startFresh: startFresh !== false
+        });
+      } catch (e) {
+        const code = String(e?.code || "takeoff_unavailable");
+        const err = createQuoteFlowError(code, {
+          message: e?.message,
+          statusCode: Number(e?.statusCode) || undefined
+        });
+        if (e?.diagnostic) err.diagnostic = e.diagnostic;
+        const shared = sharedInboxSafeError(code, e?.message);
+        if (shared?.error) err.message = shared.error;
+        if (code === "already_scoped") {
+          err.message = "Scope is already set. Open in Estimates.";
+        }
+        if (
+          code === "packet_build_failed" ||
+          code === "packet_unsupported" ||
+          code === "attachment_not_supported"
+        ) {
+          err.message =
+            e?.message ||
+            "AI Takeoff could not start for the selected plan packet.";
+        }
+        throw err;
       }
+
+      const item = result?.item ? await enrichItem(organizationId, result.item) : null;
+      const alreadyRunning =
+        result.alreadyRunning === true || (result.reused === true && result.created !== true);
+      const created = result.created === true && !alreadyRunning;
+      return {
+        ok: true,
+        intakeCaseId: result.intakeCaseId || null,
+        takeoffJobId: result.takeoffJobId || null,
+        created,
+        reused: alreadyRunning,
+        alreadyRunning,
+        attachmentKey: result.attachmentKey || keys[0],
+        attachmentKeys: keys,
+        attachmentName: result.attachmentName || null,
+        packetMerged: false,
+        item,
+        message: alreadyRunning ? "AI Takeoff is already running." : "AI Takeoff started.",
+        sideEffects: {
+          calculated: false,
+          approved: false,
+          published: false,
+          sold: false,
+          accepted: false,
+          digitalEstimateCreated: false,
+          studioEstimateEnsured: false,
+          ...(result.sideEffects && typeof result.sideEffects === "object"
+            ? {
+                calculated: result.sideEffects.calculated === true,
+                approved: result.sideEffects.approved === true,
+                published: result.sideEffects.published === true,
+                sold: result.sideEffects.sold === true,
+                digitalEstimateCreated: result.sideEffects.digitalEstimateCreated === true,
+                studioEstimateEnsured: result.sideEffects.studioEstimateEnsured === true
+              }
+            : {})
+        }
+      };
+    }
+
+    // Multi-file: build one packet, then open estimate with prefetched bytes (no queue item on failure).
+    if (!planViewerService?.getSharedInboxAttachmentContent) {
+      const err = createQuoteFlowError("packet_unsupported", {
+        statusCode: 400,
+        message:
+          "Multi-file takeoff packets are not supported yet. Select one file or merge plans before upload."
+      });
       throw err;
     }
 
-    const item = result?.item
-      ? await enrichItem(organizationId, result.item)
-      : null;
+    const messageAttachments = Array.isArray(detail?.item?.attachments)
+      ? detail.item.attachments
+      : [];
+    const overrideRequested = requestHasManualPlanOverride({
+      markAsPlan,
+      manualPlanOverride
+    });
 
-    const alreadyRunning =
-      result.alreadyRunning === true ||
-      (result.reused === true && result.created !== true);
-    const created = result.created === true && !alreadyRunning;
+    /** @type {Array<{ bytes: Buffer, filename: string|null, declaredMime: string|null }>} */
+    const parts = [];
+    for (const key of keys) {
+      const att = findScopedAttachment(messageAttachments, {
+        attachmentKey: key,
+        allowFilenameFallback: false
+      });
+      if (!att) {
+        throw createQuoteFlowError("attachment_not_supported", {
+          statusCode: 400,
+          message: "AI Takeoff could not start for the selected plan packet."
+        });
+      }
+      const autoOk = isAutoSupportedTakeoffSupport(att.support);
+      const manualOk =
+        overrideRequested &&
+        isSafeManualPlanImageOverride({
+          ...att,
+          name: att.filename,
+          support: att.support,
+          isInline: att.isInline === true
+        });
+      if (!autoOk && !manualOk) {
+        throw createQuoteFlowError("attachment_not_supported", {
+          statusCode: 400,
+          message: "AI Takeoff could not start for the selected plan packet."
+        });
+      }
+      let content;
+      try {
+        content = await planViewerService.getSharedInboxAttachmentContent({
+          organizationId,
+          messageKey,
+          attachmentKey: key
+        });
+      } catch {
+        throw createQuoteFlowError("packet_build_failed", {
+          statusCode: 400,
+          message: "AI Takeoff could not start for the selected plan packet."
+        });
+      }
+      parts.push({
+        bytes: content.bytes,
+        filename: content.filename || att.filename || null,
+        declaredMime: content.contentType || att.contentType || null
+      });
+    }
 
+    const packetNameBase =
+      detail?.item?.requestTitle ||
+      detail?.item?.projectLabel ||
+      detail?.item?.subject ||
+      "quote";
+    let packet;
+    try {
+      packet = await buildTakeoffPacketPdf({
+        parts,
+        packetFilename: sanitizeTakeoffPacketFilename(`${packetNameBase}-takeoff-packet`)
+      });
+    } catch (e) {
+      throw createQuoteFlowError(e?.code || "packet_build_failed", {
+        statusCode: Number(e?.statusCode) || 400,
+        message:
+          e?.message ||
+          "AI Takeoff could not start for the selected plan packet."
+      });
+    }
+
+    // Import message first (same as Shared Inbox), then open estimate with packet bytes.
+    let caseId = intakeCaseId;
+    if (!caseId && typeof sharedInbox.importMessage === "function") {
+      try {
+        const imported = await sharedInbox.importMessage({
+          organizationId,
+          messageKey,
+          actorUserId,
+          confirm: true,
+          idempotencyKey: idempotencyKey
+            ? `qf-packet-import:${idempotencyKey}`
+            : `qf-packet-import:${organizationId}:${messageKey}`
+        });
+        caseId = imported?.intakeCaseId || null;
+      } catch (e) {
+        throw createQuoteFlowError("import_failed", {
+          statusCode: Number(e?.statusCode) || 400,
+          message: "AI Takeoff could not start for the selected plan packet."
+        });
+      }
+    }
+    if (!caseId) {
+      // Fall back: single-file path cannot apply; require import via first key start.
+      // Try sendToAiTakeoff on first key only would create wrong single-file job — fail safe.
+      throw createQuoteFlowError("import_failed", {
+        statusCode: 400,
+        message: "AI Takeoff could not start for the selected plan packet."
+      });
+    }
+
+    const liveManualAttachment = {
+      id: `live:packet:${keys[0].slice(0, 24)}`,
+      sourceAttachmentId: keys[0],
+      providerMessageId: String(detail?.item?.messageKey || messageKey || "").trim() || null,
+      safeFilename: packet.filename,
+      name: packet.filename,
+      filename: packet.filename,
+      mimeType: packet.mimeType,
+      contentType: packet.mimeType,
+      sizeBytes: packet.bytes.length,
+      isInline: false,
+      support: "direct_pdf",
+      kind: "pdf_candidate",
+      retrievalState: "pending",
+      liveManualCandidate: true,
+      takeoffPacket: true,
+      takeoffPacketAttachmentKeys: keys
+    };
+
+    let openResult;
+    try {
+      if (!quoteIntakeRepository) {
+        throw createQuoteFlowError("takeoff_unavailable", {
+          statusCode: 503,
+          message: "AI Takeoff could not start for the selected plan packet."
+        });
+      }
+      openResult = await openEstimateFn({
+        repository: quoteIntakeRepository,
+        organizationId,
+        intakeCaseId: caseId,
+        actorUserId,
+        getSupabase,
+        env,
+        body: {
+          attachmentKey: keys[0],
+          attachmentFilename: packet.filename,
+          markAsPlan: false,
+          manualPlanOverride: false
+        },
+        liveManualAttachment,
+        fetchAttachmentBytes: async () => ({ bytes: packet.bytes }),
+        initiationMode: "manual",
+        startFresh: startFresh !== false
+      });
+    } catch (e) {
+      if (e?.code && String(e.code).startsWith("packet")) throw e;
+      throw createQuoteFlowError(
+        e?.code === "multi_pdf_ambiguous" ? "attachment_not_supported" : e?.code || "takeoff_unavailable",
+        {
+          statusCode: Number(e?.statusCode) || 400,
+          message: "AI Takeoff could not start for the selected plan packet."
+        }
+      );
+    }
+
+    let item = null;
+    try {
+      const after = await sharedInbox.getMessage({ organizationId, messageKey, actorUserId });
+      item = after?.item ? await enrichItem(organizationId, after.item) : null;
+    } catch {
+      item = null;
+    }
+
+    const takeoffJobId = openResult?.takeoffJobId ? String(openResult.takeoffJobId) : null;
+    const reused = openResult?.alreadyRunning === true || openResult?.reused === true;
     return {
       ok: true,
-      intakeCaseId: result.intakeCaseId || null,
-      takeoffJobId: result.takeoffJobId || null,
-      created,
-      reused: alreadyRunning,
-      alreadyRunning,
-      attachmentKey: result.attachmentKey || attKey,
-      attachmentName: result.attachmentName || null,
+      intakeCaseId: caseId,
+      takeoffJobId,
+      created: openResult?.created === true && !reused,
+      reused,
+      alreadyRunning: reused,
+      attachmentKey: keys[0],
+      attachmentKeys: keys,
+      attachmentName: packet.filename,
+      packetMerged: packet.merged === true,
+      packetFilename: packet.filename,
       item,
-      message: alreadyRunning
-        ? "AI Takeoff is already running."
-        : "AI Takeoff started.",
+      message: reused ? "AI Takeoff is already running." : "AI Takeoff started.",
       sideEffects: {
         calculated: false,
         approved: false,
@@ -289,17 +572,7 @@ export function createQuoteFlowService(deps) {
         sold: false,
         accepted: false,
         digitalEstimateCreated: false,
-        studioEstimateEnsured: false,
-        ...(result.sideEffects && typeof result.sideEffects === "object"
-          ? {
-              calculated: result.sideEffects.calculated === true,
-              approved: result.sideEffects.approved === true,
-              published: result.sideEffects.published === true,
-              sold: result.sideEffects.sold === true,
-              digitalEstimateCreated: result.sideEffects.digitalEstimateCreated === true,
-              studioEstimateEnsured: result.sideEffects.studioEstimateEnsured === true
-            }
-          : {})
+        studioEstimateEnsured: false
       }
     };
   }
@@ -307,6 +580,7 @@ export function createQuoteFlowService(deps) {
   return {
     listInbox,
     getMessage,
+    getAttachmentContent,
     startTakeoff,
     dismissMessage,
     restoreMessage,

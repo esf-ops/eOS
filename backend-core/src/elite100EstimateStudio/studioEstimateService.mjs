@@ -22,6 +22,7 @@ import {
   deriveFabricationQuantitiesFromImportPayload,
   normalizeRunCutouts
 } from "../takeoff/takeoffCutoutScope.mjs";
+import { normalizeVanityQuotedDepth } from "../elite100QuoteFlow/quoteFlowVanityDepth.mjs";
 import {
   attachDraftPieceGeometry,
   buildGeometryAuthoritySummary,
@@ -404,13 +405,26 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
         });
       }
     }
-    const countertopSqft = pieces
+    const planFilename =
+      importPayload?.planFilename ||
+      importPayload?.sourceFilename ||
+      importPayload?.filename ||
+      baseScope?.planFilename ||
+      null;
+    const normalizedPieces = pieces.map((piece) =>
+      normalizeVanityQuotedDepth(piece, {
+        roomName: d.name,
+        roomType: d.roomType || "Kitchen",
+        planFilename
+      })
+    );
+    const countertopSqft = normalizedPieces
       .filter((p) => !String(p.pieceType).toLowerCase().includes("backsplash"))
       .reduce((s, p) => s + (Number(p.sqft) || 0), 0);
     const fromImport = deriveRoomBacksplashFromImportRoom(
       importRoomsByName.get(String(d.name || "")) || {
         name: d.name,
-        pieces: pieces.map((p) => ({
+        pieces: normalizedPieces.map((p) => ({
           name: p.name,
           pieceType: p.pieceType,
           lengthIn: p.lengthIn,
@@ -426,7 +440,7 @@ export function seedScopeFromTakeoffPayload(importPayload, baseScope = null) {
       included: true,
       countertopSqft,
       ...fromImport,
-      pieces,
+      pieces: normalizedPieces,
       notes: ""
     };
   });

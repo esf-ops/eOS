@@ -139,12 +139,24 @@ function mapAttachment(att = {}) {
     canMarkAsPlan: canMarkAsPlanForTakeoff(support, {
       mimeType: att.mimeType || att.contentType,
       name: att.name || att.filename,
-      isInline: att.isInline
+      isInline: att.isInline,
+      sizeBytes: att.sizeBytes
     }),
     supportLabel: planSupportLabel(support),
+    detectionReason:
+      support === "likely_inline_image" || support === "inline_ignored"
+        ? "Likely inline email image — preview only unless manually selected."
+        : support === "image_needs_review"
+          ? "Image needs review before AI Takeoff."
+          : support === "direct_image_plan"
+            ? "Supported image plan"
+            : support === "direct_pdf"
+              ? "Supported plan PDF"
+              : planSupportLabel(support),
     support,
     kind: att.kind || null,
-    isInline: Boolean(att.isInline),
+    isInline: Boolean(att.isInline) || support === "likely_inline_image",
+    likelyInlineImage: support === "likely_inline_image" || support === "inline_ignored",
     sizeExceeded: att.sizeExceeded === true || support === "too_large"
   };
 }
