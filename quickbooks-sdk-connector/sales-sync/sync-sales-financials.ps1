@@ -111,7 +111,8 @@ function Invoke-ReadOnlyOdbcQuery {
         if ($null -ne $reader) { $reader.Close(); $reader.Dispose() }
         $cmd.Dispose()
     }
-    return @($rows)
+    # PS 5.1: @($genericList) throws "Argument types do not match"; use ToArray().
+    return $rows.ToArray()
 }
 
 function Get-MonthWindows {
@@ -133,7 +134,7 @@ function Get-MonthWindows {
         }) | Out-Null
         $cursor = $cursor.AddMonths(1)
     }
-    return @($windows)
+    return $windows.ToArray()
 }
 
 function Format-UsDate {
@@ -173,18 +174,22 @@ function Send-TransactionChunks {
     param(
         $Url, $Token, $OrganizationId, $SyncRunId, $Rows, [int]$ChunkSize, [switch]$DryRun
     )
-    $total = @($Rows).Count
+    # Normalize input to a true array (never @($Generic.List)).
+    $rowArray = [array]$Rows
+    if ($null -eq $rowArray) { $rowArray = @() }
+    $total = $rowArray.Length
     $upserted = 0
     for ($i = 0; $i -lt $total; $i += $ChunkSize) {
-        $chunk = @($Rows | Select-Object -Skip $i -First $ChunkSize)
+        $chunk = [array]($rowArray | Select-Object -Skip $i -First $ChunkSize)
+        if ($null -eq $chunk) { $chunk = @() }
         $payload = @{
             action = "upsert_transactions"
             organization_id = $OrganizationId
             sync_run_id = $SyncRunId
-            transactions = @($chunk)
+            transactions = $chunk
         }
         if ($DryRun) {
-            Write-Host ("  DryRun chunk transactions {0}-{1}" -f $i, ($i + $chunk.Count - 1))
+            Write-Host ("  DryRun chunk transactions {0}-{1}" -f $i, ($i + $chunk.Length - 1))
         } else {
             $resp = Invoke-Ingest -Url $Url -Token $Token -Body $payload
             $upserted += [int]($resp.upserted)
@@ -255,8 +260,9 @@ try {
     $conn = New-OdbcConnection -Dsn $Dsn
 
     $companyRows = Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql "SELECT Name FROM CompanyInfo"
-    if (@($companyRows).Count -lt 1) { throw "CompanyInfo returned no rows." }
-    $companyName = [string]$companyRows[0].Name
+    $companyRowArray = [array]$companyRows
+    if ($null -eq $companyRowArray -or $companyRowArray.Length -lt 1) { throw "CompanyInfo returned no rows." }
+    $companyName = [string]$companyRowArray[0].Name
     if ($companyName -ne $ExpectedCompany) {
         throw ("Company gate failed. Expected '{0}' but ODBC returned '{1}'." -f $ExpectedCompany, $companyName)
     }
@@ -369,16 +375,17 @@ WHERE Date >= '$startUs'
     Write-Host ("Invoices: {0} rows" -f $invoiceRows.Count)
     Write-Host ("Payments: {0} rows" -f $paymentRows.Count)
 
-    $allTxn = @()
-    $allTxn += $estimateRows
-    $allTxn += $salesOrderRows
-    $allTxn += $invoiceRows
-    $allTxn += $paymentRows
+    $allTxn = New-Object System.Collections.Generic.List[object]
+    if ($estimateRows.Count -gt 0) { $allTxn.AddRange($estimateRows) }
+    if ($salesOrderRows.Count -gt 0) { $allTxn.AddRange($salesOrderRows) }
+    if ($invoiceRows.Count -gt 0) { $allTxn.AddRange($invoiceRows) }
+    if ($paymentRows.Count -gt 0) { $allTxn.AddRange($paymentRows) }
+    $allTxnArray = $allTxn.ToArray()
 
     if (-not $DryRun) {
-        [void](Send-TransactionChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Rows $allTxn -ChunkSize $ChunkSize)
+        [void](Send-TransactionChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Rows $allTxnArray -ChunkSize $ChunkSize)
     } else {
-        [void](Send-TransactionChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Rows $allTxn -ChunkSize $ChunkSize -DryRun)
+        [void](Send-TransactionChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Rows $allTxnArray -ChunkSize $ChunkSize -DryRun)
     }
 
     $arSql = @"
@@ -406,7 +413,7 @@ WHERE IsPaid = false
             action = "replace_open_ar"
             organization_id = $OrganizationId
             sync_run_id = $syncRunId
-            open_ar = @($openArRows)
+            open_ar = $openArRows.ToArray()
             allow_empty_open_ar = $false
         }
         [void](Invoke-Ingest -Url $IngestUrl -Token $IngestToken -Body $arPayload)
@@ -424,7 +431,7 @@ WHERE IsPaid = false
             invoices_count = $invoiceRows.Count
             payments_count = $paymentRows.Count
             open_ar_count = $openArRows.Count
-            warnings = @($warnings)
+            warnings = $warnings.ToArray()
         })
         Write-Host "Upload complete"
     } else {

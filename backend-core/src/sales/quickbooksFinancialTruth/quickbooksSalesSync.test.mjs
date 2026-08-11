@@ -376,8 +376,24 @@ function mockRes() {
   assert.match(ps1, /New-Object System\.Data\.Odbc\.OdbcConnection\s*$/m);
   assert.match(ps1, /\$conn\.ConnectionString\s*=\s*"DSN=\$Dsn"/);
   assert.equal(/New-Object System\.Data\.Odbc\.OdbcConnection\s*\(\s*"DSN=/i.test(ps1), false);
+  // PS 5.1: never wrap Generic.List vars with @($list) — use .ToArray() / [array].
+  assert.match(ps1, /\$rows\.ToArray\(\)/);
+  assert.match(ps1, /\$windows\.ToArray\(\)/);
+  const listVars = [
+    ...ps1.matchAll(/\$([A-Za-z_][A-Za-z0-9_]*)\s*=\s*New-Object\s+System\.Collections\.Generic\.List/g)
+  ].map((m) => m[1]);
+  assert.ok(listVars.length >= 5, `expected Generic.List locals, got ${listVars.join(",")}`);
+  for (const name of listVars) {
+    assert.equal(
+      new RegExp(`@\\(\\$${name}\\)`).test(ps1),
+      false,
+      `must not wrap $${name} with @() (PS 5.1 Generic.List bug)`
+    );
+  }
+  assert.equal(/return\s+@\(\$/m.test(ps1), false);
   console.log("ok: worker is ASCII + SELECT-only + correct invoice Amount mapping");
   console.log("ok: ODBC connection uses PS 5.1 ConnectionString property form");
+  console.log("ok: no @($Generic.List) wrapping; uses ToArray/[array]");
 }
 
 {
