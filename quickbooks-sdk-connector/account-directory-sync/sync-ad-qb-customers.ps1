@@ -27,7 +27,7 @@
 #
 # CData Desktop Customers columns used by this worker:
 #   Id (ListID), Name, FullName, ParentId, Sublevel, IsActive, BillingCity, BillingState
-# Job detection: ParentId present and/or Sublevel > 0 → child job; else root customer.
+# Job detection: ParentId present and/or Sublevel > 0 -> child job; else root customer.
 # Canonical prepared identity: ListID (Id). The Job boolean column is not used.
 
 #Requires -Version 5.1
@@ -194,7 +194,7 @@ ORDER BY ColumnName
         if ($missing.Count -gt 0) {
             throw ("DiagnoseColumns: missing required Customers columns: {0}" -f ($missing -join ", "))
         }
-        Write-Host "RESULT: PASS (DiagnoseColumns — required columns present)"
+        Write-Host "RESULT: PASS (DiagnoseColumns - required columns present)"
         exit 0
     }
 
