@@ -1,9 +1,12 @@
 /**
  * Build a single AI Takeoff packet PDF from one or more plan attachments.
  * PDFs are appended; JPEG/PNG become full-page images. WebP multi is not embeddable.
+ *
+ * IMPORTANT: Do not top-level-import `pdf-lib`. Vercel backend-core Root Directory
+ * installs only backend-core/package.json — a missing package must not crash
+ * Quote Flow route registration /health. Load pdf-lib only when merging.
  */
 
-import { PDFDocument } from "pdf-lib";
 import { validatePlanBytes } from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
 
 /**
@@ -29,11 +32,29 @@ export function sanitizeTakeoffPacketFilename(name, max = 160) {
 }
 
 /**
+ * Lazy-load pdf-lib only when a multi-file merge is required.
+ * @returns {Promise<typeof import("pdf-lib")>}
+ */
+async function loadPdfLib() {
+  try {
+    return await import("pdf-lib");
+  } catch {
+    const err = new Error(
+      "Multi-file takeoff packets are temporarily unavailable. Select one file or merge plans before upload."
+    );
+    err.statusCode = 400;
+    err.code = "packet_unsupported";
+    err.safeReason = "packet_dependency_unavailable";
+    throw err;
+  }
+}
+
+/**
  * @param {{
  *   parts: Array<{ bytes: Buffer, filename?: string|null, declaredMime?: string|null }>,
  *   packetFilename?: string|null
  * }} input
- * @returns {Promise<{ bytes: Buffer, filename: string, mimeType: string, pageCount: number, partCount: number }>}
+ * @returns {Promise<{ bytes: Buffer, filename: string, mimeType: string, pageCount: number|null, partCount: number, merged: boolean }>}
  */
 export async function buildTakeoffPacketPdf(input = {}) {
   const parts = Array.isArray(input.parts) ? input.parts : [];
@@ -77,14 +98,13 @@ export async function buildTakeoffPacketPdf(input = {}) {
     return { ...meta, bytes: part.bytes, filename: part.filename || `part-${idx + 1}` };
   });
 
-  // Single validated plan (PDF or image) — no merge needed.
+  // Single validated plan (PDF or image) — no merge / pdf-lib needed.
   if (validated.length === 1) {
     const one = validated[0];
     const filename =
       one.kind === "pdf"
         ? sanitizeTakeoffPacketFilename(one.filename || input.packetFilename || "plan.pdf")
         : sanitizeTakeoffPacketFilename(input.packetFilename || one.filename || "plan");
-    // Images stay as-is for the single-file worker path (Gemini accepts images).
     if (one.kind !== "pdf") {
       return {
         bytes: one.bytes,
@@ -103,6 +123,20 @@ export async function buildTakeoffPacketPdf(input = {}) {
       partCount: 1,
       merged: false
     };
+  }
+
+  let PDFDocument;
+  try {
+    ({ PDFDocument } = await loadPdfLib());
+  } catch (e) {
+    if (e?.code === "packet_unsupported") throw e;
+    const err = new Error(
+      "Multi-file takeoff packets are temporarily unavailable. Select one file or merge plans before upload."
+    );
+    err.statusCode = 400;
+    err.code = "packet_unsupported";
+    err.safeReason = "packet_dependency_unavailable";
+    throw err;
   }
 
   try {
@@ -150,6 +184,7 @@ export async function buildTakeoffPacketPdf(input = {}) {
 
 /**
  * Normalize start-takeoff attachment key args (singular + plural).
+ * Pure helper — safe to import from routes without loading pdf-lib.
  * @param {{ attachmentKey?: unknown, attachmentKeys?: unknown }} body
  * @returns {string[]}
  */
@@ -158,7 +193,6 @@ export function normalizeStartTakeoffAttachmentKeys(body = {}) {
     ? body.attachmentKeys.map((k) => String(k || "").trim()).filter(Boolean)
     : [];
   if (fromArray.length) {
-    // Preserve order; de-dupe.
     const seen = new Set();
     const out = [];
     for (const k of fromArray) {

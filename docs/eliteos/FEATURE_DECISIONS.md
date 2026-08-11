@@ -4199,3 +4199,5 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | Inbox presenter/API/UI, plan attachment support, takeoff packet builder, vanity depth helper, Set Scope / seedScope, routes preview+download, FEATURE_DECISIONS (this entry). |
 | **Protected / unchanged** | Pricing formulas/rates, Digital Estimate, Review/Acceptance, sold/handoff/QB/email automation, customer-facing surfaces. |
 | **Revisit trigger** | WebP multi-page embed; staff “merge plans” upload; AI prompt default vanity quoted depth 22.5. |
+
+**Hotfix (same day):** Production Quote Flow API went down because `pdf-lib` was only declared in the monorepo root `package.json`. Vercel **backend-core** Root Directory installs `backend-core/package.json` only, and a top-level `import` of `pdf-lib` in `quoteFlowTakeoffPacket.mjs` crashed module load → Quote Flow routes failed to register → `/health` 500 and Inbox CORS/runtime failures. Fix: declare `pdf-lib` in `backend-core/package.json` (+ lockfile) and **lazy-load** it only inside multi-file packet merge so missing dep cannot take down health/inbox.
