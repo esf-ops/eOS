@@ -33,8 +33,32 @@ export async function salesDashboardHandler(req, supabaseGetter) {
   const { mode, includeDetails, loadProfile } = filters;
 
   try {
-    const sources = await loadDashboardDataSources(supabase, organizationId, { loadProfile });
+    // Start QuickBooks prepared-facts read in parallel with Moraware source load.
+    const quickbooksPromise = getQuickBooksFinancialTruthSafe({
+      startDate: filters.dateRange?.start ?? null,
+      endDate: filters.dateRange?.end ?? null,
+      organizationId,
+      supabase
+    });
+
+    const sources = await loadDashboardDataSources(supabase, organizationId, {
+      loadProfile,
+      includeDetails,
+      filters
+    });
     timer.mark("load_dashboard_sources");
+    const loadStats = sources?._loadStats;
+    if (loadStats?.jobFacts) {
+      timer.note("job_facts_rows", loadStats.jobFacts.rows ?? 0);
+      timer.note("worksheet_facts_rows", loadStats.worksheetFacts?.rows ?? 0);
+      timer.note("date_scoped", loadStats.dateScoped ? 1 : 0);
+    }
+    if (loadStats?.timingsMs) {
+      timer.note("prepared_moraware_sql_ms", loadStats.timingsMs.prepared_moraware_sql ?? 0);
+      timer.note("worksheet_fact_reads_ms", loadStats.timingsMs.worksheet_fact_reads ?? 0);
+      timer.note("enrichment_aggregation_ms", loadStats.timingsMs.enrichment_aggregation ?? 0);
+      timer.note("intelligence_bundle_ms", loadStats.timingsMs.intelligence_bundle ?? 0);
+    }
 
     const metricsKey = buildMetricsCacheKey(sources, filters, mode);
     let body = getCachedDashboardMetrics(metricsKey);
@@ -82,21 +106,15 @@ export async function salesDashboardHandler(req, supabaseGetter) {
     const sliced = sliceDashboardPayload(body, { mode, tab: filters.tab, includeDetails });
     timer.mark("slice_payload");
 
-    const debugTiming = timer.finish();
+    const quickbooksFinancialTruth = await quickbooksPromise;
+    timer.mark("quickbooks_financial_truth");
+
     if (sliced.meta) {
       sliced.meta.cacheHit = Boolean(sources._cacheHit);
-      if (isDashboardTimingEnabled()) {
-        sliced.meta.debugTiming = debugTiming;
+      if (sources._loadStats) {
+        sliced.meta.loadStats = sources._loadStats;
       }
     }
-
-    const quickbooksFinancialTruth = await getQuickBooksFinancialTruthSafe({
-      startDate: filters.dateRange?.start ?? null,
-      endDate: filters.dateRange?.end ?? null,
-      organizationId,
-      supabase
-    });
-    timer.mark("quickbooks_financial_truth");
 
     const responseBody = {
       ok: true,
@@ -105,6 +123,11 @@ export async function salesDashboardHandler(req, supabaseGetter) {
       quickbooks_financial_truth: quickbooksFinancialTruth
     };
     timer.mark("serialize_ready");
+
+    const debugTiming = timer.finish();
+    if (responseBody.meta && isDashboardTimingEnabled()) {
+      responseBody.meta.debugTiming = debugTiming;
+    }
 
     return {
       status: 200,

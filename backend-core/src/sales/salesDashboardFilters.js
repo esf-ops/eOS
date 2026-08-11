@@ -275,6 +275,52 @@ export function parseDashboardFilters(query = {}) {
 }
 
 /**
+ * Inclusive load windows covering current range + prior-year comparison range.
+ * Used to date-scope prepared Moraware SQL without dropping YoY inputs.
+ *
+ * Returns discrete `windows` (current + prior) so SQL does not pull the gap
+ * between prior-end and current-start (e.g. late prior-year months for YTD).
+ * `startDate`/`endDate` remain the overall bounds for diagnostics/cache tokens.
+ *
+ * @param {{ dateRange?: { start?: string, end?: string }, priorRange?: { start?: string, end?: string } }} filters
+ * @returns {{
+ *   startDate: string,
+ *   endDate: string,
+ *   windows: Array<{ label: string, startDate: string, endDate: string }>,
+ *   currentRange: object,
+ *   priorRange: object
+ * }|null}
+ */
+export function resolveRequiredLoadDateWindow(filters) {
+  const current = filters?.dateRange;
+  const prior = filters?.priorRange;
+  const ymd = (v) => {
+    const s = String(v ?? "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  };
+  const windows = [];
+  const curStart = ymd(current?.start);
+  const curEnd = ymd(current?.end);
+  const priStart = ymd(prior?.start);
+  const priEnd = ymd(prior?.end);
+  if (curStart && curEnd) windows.push({ label: "current", startDate: curStart, endDate: curEnd });
+  if (priStart && priEnd) {
+    const sameAsCurrent = curStart === priStart && curEnd === priEnd;
+    if (!sameAsCurrent) windows.push({ label: "prior", startDate: priStart, endDate: priEnd });
+  }
+  if (!windows.length) return null;
+  const starts = windows.map((w) => w.startDate).sort();
+  const ends = windows.map((w) => w.endDate).sort();
+  return {
+    startDate: starts[0],
+    endDate: ends[ends.length - 1],
+    windows,
+    currentRange: current,
+    priorRange: prior
+  };
+}
+
+/**
  * Payload / cache request options (not row filters).
  * @param {Record<string, unknown>} query
  */

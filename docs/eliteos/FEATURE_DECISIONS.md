@@ -4164,3 +4164,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Why** | Live ODBC reads proven on QB Server; Vercel cannot/should not dial QuickBooks; Gateway raw HTTP is not slabOS transport. |
 | **SQL** | Manual: `backend-core/supabase/eliteos_sales_quickbooks_financial_truth_v1.sql` |
 | **Revisit** | Historical as-of A/R; Booked/Sold definition; unattended Task Scheduler account validation. |
+
+### 310. Sales Command Center overview date-scoped prepared reads (2026-08-11)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-11 |
+| **Decision** | For `GET /api/sales/dashboard` with `loadProfile=overview` (Command Center), prepared Moraware reads are **SQL date-scoped** to the discrete **current + prior-year comparison** windows required by existing dashboard math — not full import-group history filtered only in memory. Worksheet prepared facts are loaded for those job IDs. Explorer-only signals (`brain_moraware_job_activities`, `moraware_calendar_schedule_rows`) are skipped when `includeDetails=false`. Prepared QuickBooks Financial Truth is started **concurrently** with Moraware source load. Intelligence bundle built during source load is **reused** on metrics cache miss (no second build). `loadProfile=full` retains unscoped history for Explorer/detail surfaces. Response contract unchanged. |
+| **Why** | Overview YTD was paging the entire `sales_moraware_job_facts` + worksheet history then discarding most rows; QB truth waited serially after Moraware aggregation. |
+| **Out of scope** | Sales math/attribution changes; Moraware ingestion; QuickBooks Windows sync worker / backfill; dashboard UI redesign. |
+| **Impacted** | `salesDashboardDataSources.js`, `salesDashboardApi.js`, `salesDashboardFilters.js` (`resolveRequiredLoadDateWindow`), `salesDashboardAggregates.js`, `salesDashboardCache.js`, `salesDashboardTiming.js`, `salesDashboard.test.mjs`. |
+| **Revisit** | Date-scope quotes/forecasts similarly if they become a hotspot; optional SQL OR filter instead of dual window queries. |

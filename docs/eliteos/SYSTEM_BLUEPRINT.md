@@ -205,6 +205,8 @@ Implementation references: `backend-core/src/quotes/quoteCalculator.js`, `backen
 
 **Report feeds (additive lane):** Saved Moraware report CSV exports + rendered HTML identity links (`/sys/job/<id>`, `/sys/account/<id>`) may be imported as org-scoped prepared facts **beside** the API sync — not as a replacement. See [`moraware-report-feeds.md`](./moraware-report-feeds.md) and draft SQL `backend-core/supabase/eliteos_moraware_report_feeds.sql`. Local-file POC only until live download automation is explicitly approved.
 
+**Sales Command Center overview reads:** `GET /api/sales/dashboard` with `loadProfile=overview` SQL date-scopes prepared job/worksheet facts to the discrete current + prior comparison windows (not full history filtered only in memory), skips explorer-only activity/calendar loads when `includeDetails=false`, and overlaps prepared QuickBooks Financial Truth with Moraware source load. See `FEATURE_DECISIONS.md` §310.
+
 **Future mapping domains (org-scoped):**
 
 - Statuses, activity types, resources/machines, custom fields  

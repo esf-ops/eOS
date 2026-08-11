@@ -19,12 +19,24 @@ export function getDashboardCacheTtlMs() {
 /**
  * @param {string} organizationId
  * @param {object} syncHealth
+ * @param {{ loadProfile?: string, dateWindow?: { startDate?: string, endDate?: string }|null }} [opts]
  */
-export function buildDashboardCacheKey(organizationId, syncHealth) {
+export function buildDashboardCacheKey(organizationId, syncHealth, opts = {}) {
   const org = String(organizationId ?? "").trim();
   const group = String(syncHealth?.latestGroupId ?? "").trim();
   const syncAt = String(syncHealth?.lastSyncAt ?? "").trim();
-  return `${org}::${group}::${syncAt}`;
+  const profile = String(opts.loadProfile ?? "full").trim() || "full";
+  const win = opts.dateWindow;
+  let windowToken = "all";
+  if (Array.isArray(win?.windows) && win.windows.length) {
+    windowToken = win.windows
+      .map((w) => `${w.startDate}_${w.endDate}`)
+      .sort()
+      .join("+");
+  } else if (win?.startDate && win?.endDate) {
+    windowToken = `${win.startDate}_${win.endDate}`;
+  }
+  return `${org}::${group}::${syncAt}::${profile}::${windowToken}`;
 }
 
 /**

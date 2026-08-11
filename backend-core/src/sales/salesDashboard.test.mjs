@@ -548,4 +548,312 @@ import { buildMonthlyYoYTrend } from "./salesProductionSummary.js";
   console.log("ok: QB financial truth fail-soft leaves Moraware foundation intact");
 }
 
+// Date-scoped load windows: current + prior (not continuous gap span)
+{
+  const { resolveRequiredLoadDateWindow } = await import("./salesDashboardFilters.js");
+  const f = parseDashboardFilters({
+    quickRange: "custom",
+    start: "2026-01-01",
+    end: "2026-08-11"
+  });
+  assert.equal(f.ok, true);
+  const win = resolveRequiredLoadDateWindow(f);
+  assert.ok(win);
+  assert.equal(win.windows.length, 2);
+  assert.deepEqual(
+    win.windows.map((w) => `${w.label}:${w.startDate}:${w.endDate}`),
+    ["current:2026-01-01:2026-08-11", "prior:2025-01-01:2025-08-11"]
+  );
+  // Overall bounds still cover both, but discrete windows exclude 2025-08-12..2025-12-31.
+  assert.equal(win.startDate, "2025-01-01");
+  assert.equal(win.endDate, "2026-08-11");
+  console.log("ok: resolveRequiredLoadDateWindow discrete current+prior");
+}
+
+// Date-scoped rows preserve dashboard KPIs / attribution / comparisons vs full history
+{
+  const { buildSalesIntelligenceBundle } = await import("./salesIntelligenceFacts.js");
+  const { buildSalesDashboardResponse } = await import("./salesDashboardAggregates.js");
+  const { resolveRequiredLoadDateWindow } = await import("./salesDashboardFilters.js");
+
+  const filters = parseDashboardFilters({
+    quickRange: "custom",
+    start: "2026-01-01",
+    end: "2026-06-30",
+    tab: "command_center",
+    loadProfile: "overview",
+    includeDetails: "false"
+  });
+  const win = resolveRequiredLoadDateWindow(filters);
+  assert.ok(win?.windows?.length === 2);
+
+  const inWindow = (d) =>
+    win.windows.some((w) => d >= w.startDate && d <= w.endDate);
+
+  const allFacts = [
+    {
+      source_job_id: "cur",
+      account_name: "Fox",
+      created_at_source: "2026-03-15",
+      worksheet_sqft: 200,
+      reportDate: "2026-03-15",
+      attributionStatus: "approved_mapped",
+      normalizedSalesperson: "Casey",
+      assignedSalesperson: "Casey",
+      branch: "Lisbon",
+      status_name: "Complete"
+    },
+    {
+      source_job_id: "pri",
+      account_name: "Fox",
+      created_at_source: "2025-03-15",
+      worksheet_sqft: 150,
+      reportDate: "2025-03-15",
+      attributionStatus: "approved_mapped",
+      normalizedSalesperson: "Casey",
+      assignedSalesperson: "Casey",
+      branch: "Lisbon",
+      status_name: "Complete"
+    },
+    {
+      source_job_id: "gap",
+      account_name: "Other",
+      created_at_source: "2025-11-01",
+      worksheet_sqft: 999,
+      reportDate: "2025-11-01",
+      attributionStatus: "approved_mapped",
+      normalizedSalesperson: "OtherRep",
+      assignedSalesperson: "OtherRep",
+      branch: "Lisbon",
+      status_name: "Complete"
+    },
+    {
+      source_job_id: "old",
+      account_name: "Ancient",
+      created_at_source: "2024-02-01",
+      worksheet_sqft: 5000,
+      reportDate: "2024-02-01",
+      attributionStatus: "needs_review_unmapped",
+      normalizedSalesperson: "Legacy",
+      assignedSalesperson: "Legacy",
+      branch: "Lisbon",
+      status_name: "Complete"
+    }
+  ];
+  const scopedFacts = allFacts.filter((r) => inWindow(r.reportDate));
+  assert.equal(scopedFacts.length, 2);
+  assert.ok(!scopedFacts.some((r) => r.source_job_id === "gap"));
+
+  const allWs = [
+    {
+      id: "w1",
+      job_id: "cur",
+      color: "Antique Gray",
+      stone: "ESF",
+      total_worksheet_sqft: 200,
+      job_creation_date: "3/15/2026",
+      account_name: "Fox"
+    },
+    {
+      id: "w2",
+      job_id: "pri",
+      color: "Antique Gray",
+      stone: "ESF",
+      total_worksheet_sqft: 150,
+      job_creation_date: "3/15/2025",
+      account_name: "Fox"
+    },
+    {
+      id: "w3",
+      job_id: "gap",
+      color: "Mystery",
+      stone: "X",
+      total_worksheet_sqft: 999,
+      job_creation_date: "11/1/2025",
+      account_name: "Other"
+    }
+  ];
+  const scopedWs = allWs.filter((w) => scopedFacts.some((j) => j.source_job_id === w.job_id));
+
+  function snapshot(body) {
+    const kpi = (id) => body.commandCenter.kpis.find((k) => k.id === id)?.value;
+    return {
+      producedSqft: kpi("produced_sqft"),
+      yoyPct: kpi("yoy_pct"),
+      yoySqft: kpi("yoy_sqft"),
+      currentSqft: body.salesPerformance?.currentSqft ?? kpi("produced_sqft"),
+      priorSqft: body.salesPerformance?.priorSqft ?? null,
+      monthlyYoY: body.salesPerformance?.monthlyYoY ?? body.commandCenter?.charts?.monthlyYoY,
+      repNames: (body.salesPerformance?.repSummary ?? [])
+        .map((r) => r.salesperson || r.rep_name || r.normalizedSalesperson || r.name)
+        .filter(Boolean)
+        .sort(),
+      accountNames: (body.accounts?.topAccounts ?? body.accounts?.allAccounts ?? [])
+        .map((a) => a.account_name || a.account || a.name)
+        .filter(Boolean)
+        .sort(),
+      priorSqftFromReps: (body.salesPerformance?.repSummary ?? []).reduce((s, r) => s + (r.priorSqft || 0), 0)
+    };
+  }
+
+  function buildFrom(facts, worksheets) {
+    const bundle = buildSalesIntelligenceBundle({
+      organizationId: "org",
+      syncHealth: { latestGroupComplete: true, lastSyncAt: "2026-06-01" },
+      mappings: { aliasesByNormMoraware: new Map() },
+      facts: { available: true, rows: facts },
+      enrichedFacts: facts,
+      worksheet: { rows: worksheets, available: true },
+      quotes: [],
+      forecasts: [],
+      activities: [],
+      calendarRows: [],
+      colorCatalog: null
+    });
+    return buildSalesDashboardResponse({
+      sources: {
+        organizationId: "org",
+        enrichedFacts: facts,
+        intelligenceRows: bundle.worksheetMaterial,
+        intelligenceBundle: bundle,
+        worksheet: { rows: worksheets, available: true },
+        quotes: [],
+        forecasts: [],
+        activities: [],
+        calendarRows: [],
+        mappings: { aliasesByNormMoraware: new Map() },
+        syncHealth: { latestGroupComplete: true, lastSyncAt: "2026-06-01" },
+        facts: { available: true, rows: facts }
+      },
+      filters,
+      includeDetails: false,
+      payloadMode: "overview"
+    });
+  }
+
+  const fullBody = buildFrom(allFacts, allWs);
+  const scopedBody = buildFrom(scopedFacts, scopedWs);
+  const fullSnap = snapshot(fullBody);
+  const scopedSnap = snapshot(scopedBody);
+
+  assert.equal(scopedSnap.producedSqft, 200);
+  assert.equal(fullSnap.producedSqft, scopedSnap.producedSqft);
+  assert.equal(fullSnap.yoyPct, scopedSnap.yoyPct);
+  assert.equal(fullSnap.yoySqft, scopedSnap.yoySqft);
+  assert.deepEqual(fullSnap.repNames, scopedSnap.repNames);
+  assert.ok(scopedSnap.repNames.includes("Casey"));
+  assert.ok(!scopedSnap.repNames.includes("Legacy"));
+  assert.ok(!scopedSnap.repNames.includes("OtherRep"));
+  // Prior-period comparison preserved (200 vs 150).
+  assert.equal(scopedSnap.priorSqftFromReps, 150);
+  const priorFromMonthly = (scopedSnap.monthlyYoY || []).reduce((s, m) => s + (m.priorSqft || 0), 0);
+  assert.equal(priorFromMonthly, 150);
+  assert.deepEqual(fullSnap.accountNames, scopedSnap.accountNames);
+  console.log("ok: date-scoped load preserves dashboard KPIs vs full history");
+}
+
+// Reuse intelligence bundle on metrics build (no double aggregation)
+{
+  const { buildSalesIntelligenceBundle } = await import("./salesIntelligenceFacts.js");
+  const { buildSalesDashboardResponse } = await import("./salesDashboardAggregates.js");
+  const filters = parseDashboardFilters({ quickRange: "ytd", tab: "command_center" });
+  const facts = [
+    {
+      source_job_id: "j1",
+      account_name: "Fox",
+      created_at_source: "2026-05-01",
+      worksheet_sqft: 100,
+      reportDate: "2026-05-01",
+      attributionStatus: "approved_mapped",
+      normalizedSalesperson: "Casey"
+    }
+  ];
+  const bundle = buildSalesIntelligenceBundle({
+    organizationId: "org",
+    syncHealth: { latestGroupComplete: true, lastSyncAt: "2026-05-01" },
+    mappings: { aliasesByNormMoraware: new Map() },
+    facts: { available: true, rows: facts },
+    enrichedFacts: facts,
+    worksheet: { rows: [], available: false },
+    quotes: [],
+    forecasts: [],
+    activities: [],
+    calendarRows: [],
+    colorCatalog: null
+  });
+  const marker = Symbol("bundle");
+  bundle.__marker = marker;
+  const body = buildSalesDashboardResponse({
+    sources: {
+      organizationId: "org",
+      enrichedFacts: facts,
+      intelligenceBundle: bundle,
+      intelligenceRows: bundle.worksheetMaterial,
+      worksheet: { rows: [], available: false },
+      quotes: [],
+      forecasts: [],
+      activities: [],
+      calendarRows: [],
+      mappings: { aliasesByNormMoraware: new Map() },
+      syncHealth: { latestGroupComplete: true, lastSyncAt: "2026-05-01" },
+      facts: { available: true, rows: facts }
+    },
+    filters
+  });
+  assert.equal(body.commandCenter.kpis.find((k) => k.id === "produced_sqft")?.value, 100);
+  assert.equal(bundle.__marker, marker);
+  console.log("ok: intelligence bundle reused when present on sources");
+}
+
+// loadPreparedJobFacts applies discrete windows (mock supabase)
+{
+  const { loadPreparedJobFacts } = await import("./salesDashboardDataSources.js");
+  const calls = [];
+  function makeQuery() {
+    const state = { filters: [], range: null };
+    const api = {
+      select() {
+        return api;
+      },
+      eq() {
+        return api;
+      },
+      gte(col, v) {
+        state.filters.push(["gte", col, v]);
+        return api;
+      },
+      lte(col, v) {
+        state.filters.push(["lte", col, v]);
+        return api;
+      },
+      order() {
+        return api;
+      },
+      async range(from, to) {
+        state.range = [from, to];
+        calls.push({ ...state, filters: [...state.filters] });
+        return { data: [], error: null };
+      }
+    };
+    return api;
+  }
+  const supabase = {
+    from(table) {
+      assert.equal(table, "sales_moraware_job_facts");
+      return makeQuery();
+    }
+  };
+  const syncHealth = { latestGroupComplete: true, latestGroupId: "ig-1" };
+  await loadPreparedJobFacts(supabase, "00000000-0000-4000-8000-000000000001", syncHealth, {
+    windows: [
+      { label: "current", startDate: "2026-01-01", endDate: "2026-08-11" },
+      { label: "prior", startDate: "2025-01-01", endDate: "2025-08-11" }
+    ]
+  });
+  assert.equal(calls.length, 2);
+  const starts = calls.map((c) => c.filters.find((f) => f[0] === "gte")?.[2]).sort();
+  assert.deepEqual(starts, ["2025-01-01", "2026-01-01"]);
+  console.log("ok: loadPreparedJobFacts SQL date-scopes discrete windows");
+}
+
 console.log("salesDashboard.test.mjs — all passed");

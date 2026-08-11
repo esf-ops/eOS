@@ -6,7 +6,7 @@ import { loadLatestCompleteImportGroup } from "../moraware/morawareSyncHealth.js
 import { loadApprovedSalesAttributionMappings, classifySalesJob } from "./salesAttribution.js";
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 import { dashboardReportDateForMorawareJob } from "./morawareSqftActuals.js";
-import { dateInInclusiveRange } from "./salesDashboardFilters.js";
+import { dateInInclusiveRange, resolveRequiredLoadDateWindow } from "./salesDashboardFilters.js";
 import { buildSalesIntelligenceBundle } from "./salesIntelligenceFacts.js";
 import { configureSalesColorCatalog } from "./salesColorClassification.js";
 import { loadSalesColorCatalog } from "./salesColorCatalogLoader.js";
@@ -17,6 +17,7 @@ import {
 } from "./salesDashboardCache.js";
 
 const PAGE = 1000;
+const WORKSHEET_JOB_ID_CHUNK = 200;
 
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? "").trim());
@@ -26,6 +27,12 @@ function isMissingRelationError(error) {
   const msg = String(error?.message || "");
   const code = String(error?.code || "");
   return code === "42P01" || msg.toLowerCase().includes("does not exist") || msg.toLowerCase().includes("relation");
+}
+
+function chunkArray(values, size) {
+  const out = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
 }
 
 export function resolveDashboardOrganizationId(req) {
@@ -105,38 +112,112 @@ export async function loadMorawareSyncHealth(supabase, organizationId) {
   };
 }
 
-export async function loadPreparedJobFacts(supabase, organizationId, syncHealth) {
+function normalizeLoadWindows(options = {}) {
+  if (Array.isArray(options.windows) && options.windows.length) {
+    return options.windows
+      .map((w) => ({
+        label: String(w?.label ?? "range"),
+        startDate: String(w?.startDate ?? "").slice(0, 10),
+        endDate: String(w?.endDate ?? "").slice(0, 10)
+      }))
+      .filter((w) => /^\d{4}-\d{2}-\d{2}$/.test(w.startDate) && /^\d{4}-\d{2}-\d{2}$/.test(w.endDate));
+  }
+  const startDate = String(options.startDate ?? "").slice(0, 10);
+  const endDate = String(options.endDate ?? "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(startDate) && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+    return [{ label: "range", startDate, endDate }];
+  }
+  return [];
+}
+
+async function pagePreparedJobFacts(supabase, organizationId, effectiveGroupId, window = null) {
+  const rows = [];
+  let pages = 0;
+  let from = 0;
+  while (true) {
+    let q = supabase
+      .from("sales_moraware_job_facts")
+      .select(
+        "source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,worksheet_sqft,sqft_found,report_month_created"
+      )
+      .eq("organization_id", organizationId)
+      .eq("import_group_id", effectiveGroupId)
+      .order("created_at_source", { ascending: true });
+    if (window) {
+      // Report date primary field is created_at_source (see dashboardReportDateForMorawareJob).
+      q = q.gte("created_at_source", window.startDate).lte("created_at_source", `${window.endDate}T23:59:59.999`);
+    }
+    const { data, error } = await q.range(from, from + PAGE - 1);
+    if (error) throw error;
+    pages += 1;
+    if (!data?.length) break;
+    rows.push(...data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return { rows, pages };
+}
+
+export async function loadPreparedJobFacts(supabase, organizationId, syncHealth, options = {}) {
   const group = syncHealth?.latestGroupComplete ? { id: syncHealth.latestGroupId } : syncHealth?.latestCompleteGroup;
   let effectiveGroupId = String(group?.import_group_id ?? syncHealth?.latestGroupId ?? "").trim();
   if (!effectiveGroupId && syncHealth?.latestCompleteGroup?.import_group_id) {
     effectiveGroupId = String(syncHealth.latestCompleteGroup.import_group_id).trim();
   }
   if (!effectiveGroupId) {
-    return { rows: [], available: false, warning: "No complete Moraware import group available." };
+    return {
+      rows: [],
+      available: false,
+      warning: "No complete Moraware import group available.",
+      loadStats: { rows: 0, pages: 0, dateScoped: false, windows: [], startDate: null, endDate: null }
+    };
   }
 
-  const rows = [];
+  const windows = normalizeLoadWindows(options);
+  const dateScoped = windows.length > 0;
+
+  let rows = [];
+  let pages = 0;
   try {
-    let from = 0;
-    while (true) {
-      const { data, error } = await supabase
-        .from("sales_moraware_job_facts")
-        .select(
-          "source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,worksheet_sqft,sqft_found,report_month_created"
-        )
-        .eq("organization_id", organizationId)
-        .eq("import_group_id", effectiveGroupId)
-        .order("created_at_source", { ascending: true })
-        .range(from, from + PAGE - 1);
-      if (error) throw error;
-      if (!data?.length) break;
-      rows.push(...data);
-      if (data.length < PAGE) break;
-      from += PAGE;
+    if (!dateScoped) {
+      const page = await pagePreparedJobFacts(supabase, organizationId, effectiveGroupId, null);
+      rows = page.rows;
+      pages = page.pages;
+    } else if (windows.length === 1) {
+      const page = await pagePreparedJobFacts(supabase, organizationId, effectiveGroupId, windows[0]);
+      rows = page.rows;
+      pages = page.pages;
+    } else {
+      // Discrete current + prior windows (avoid gap months between prior-end and current-start).
+      const parts = await Promise.all(
+        windows.map((w) => pagePreparedJobFacts(supabase, organizationId, effectiveGroupId, w))
+      );
+      const byId = new Map();
+      for (const part of parts) {
+        pages += part.pages;
+        for (const row of part.rows) {
+          const id = String(row?.source_job_id ?? "").trim();
+          if (id) byId.set(id, row);
+          else rows.push(row);
+        }
+      }
+      rows = [...byId.values(), ...rows];
     }
   } catch (e) {
     if (isMissingRelationError(e)) {
-      return { rows: [], available: false, warning: "sales_moraware_job_facts table not installed." };
+      return {
+        rows: [],
+        available: false,
+        warning: "sales_moraware_job_facts table not installed.",
+        loadStats: {
+          rows: 0,
+          pages,
+          dateScoped,
+          windows,
+          startDate: dateScoped ? windows.map((w) => w.startDate).sort()[0] : null,
+          endDate: dateScoped ? windows.map((w) => w.endDate).sort().slice(-1)[0] : null
+        }
+      };
     }
     throw e;
   }
@@ -145,32 +226,91 @@ export async function loadPreparedJobFacts(supabase, organizationId, syncHealth)
     rows,
     available: rows.length > 0,
     importGroupId: effectiveGroupId,
-    warning: rows.length ? null : "Prepared facts empty for latest import group."
+    warning: rows.length ? null : "Prepared facts empty for latest import group.",
+    loadStats: {
+      rows: rows.length,
+      pages,
+      dateScoped,
+      windows,
+      startDate: dateScoped ? windows.map((w) => w.startDate).sort()[0] : null,
+      endDate: dateScoped ? windows.map((w) => w.endDate).sort().slice(-1)[0] : null
+    }
   };
 }
 
-export async function loadWorksheetColorRows(supabase, organizationId) {
+export async function loadWorksheetColorRows(supabase, organizationId, options = {}) {
+  const jobIds = Array.isArray(options.jobIds) ? [...new Set(options.jobIds.map((id) => String(id ?? "").trim()).filter(Boolean))] : null;
   try {
+    if (jobIds) {
+      if (!jobIds.length) {
+        return {
+          rows: [],
+          available: false,
+          loadStats: { rows: 0, pages: 0, scopedByJobIds: true, jobIdCount: 0 }
+        };
+      }
+      const rows = [];
+      let pages = 0;
+      for (const idChunk of chunkArray(jobIds, WORKSHEET_JOB_ID_CHUNK)) {
+        let from = 0;
+        while (true) {
+          let q = supabase
+            .from("moraware_prepared_sales_worksheet_facts")
+            .select(
+              "id,row_hash,account_name,color,stone,room,total_worksheet_sqft,job_creation_date,job_salesperson,branch_or_process,job_id,job_name,job_status"
+            )
+            .eq("is_active", true)
+            .in("job_id", idChunk)
+            .order("job_creation_date", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, from + PAGE - 1);
+          if (organizationId) q = q.eq("organization_id", organizationId);
+          const { data, error } = await q;
+          if (error) throw error;
+          pages += 1;
+          if (!data?.length) break;
+          rows.push(...data);
+          if (data.length < PAGE) break;
+          from += PAGE;
+        }
+      }
+      return {
+        rows,
+        available: rows.length > 0,
+        loadStats: { rows: rows.length, pages, scopedByJobIds: true, jobIdCount: jobIds.length }
+      };
+    }
+
     const rows = [];
+    let pages = 0;
     let from = 0;
     while (true) {
       let q = supabase
         .from("moraware_prepared_sales_worksheet_facts")
-        .select("id,row_hash,account_name,color,stone,room,total_worksheet_sqft,job_creation_date,job_salesperson,branch_or_process,job_id,job_name,job_status")
+        .select(
+          "id,row_hash,account_name,color,stone,room,total_worksheet_sqft,job_creation_date,job_salesperson,branch_or_process,job_id,job_name,job_status"
+        )
         .eq("is_active", true)
         .order("job_creation_date", { ascending: true })
         .range(from, from + PAGE - 1);
       if (organizationId) q = q.eq("organization_id", organizationId);
       const { data, error } = await q;
       if (error) throw error;
+      pages += 1;
       if (!data?.length) break;
       rows.push(...data);
       if (data.length < PAGE) break;
       from += PAGE;
     }
-    return { rows, available: rows.length > 0 };
+    return {
+      rows,
+      available: rows.length > 0,
+      loadStats: { rows: rows.length, pages, scopedByJobIds: false, jobIdCount: null }
+    };
   } catch (e) {
-    if (isMissingRelationError(e)) return { rows: [], available: false };
+    if (isMissingRelationError(e)) {
+      return { rows: [], available: false, loadStats: { rows: 0, pages: 0, scopedByJobIds: Boolean(jobIds), jobIdCount: jobIds?.length ?? null } };
+    }
     throw e;
   }
 }
@@ -306,36 +446,60 @@ export function partitionJobsByRange(enrichedRows, currentRange, priorRange) {
 }
 
 export async function loadDashboardDataSources(supabase, organizationId, options = {}) {
-  void options;
+  const loadProfile = options.loadProfile === "full" ? "full" : "overview";
+  const includeDetails = Boolean(options.includeDetails);
+  const filters = options.filters && options.filters.ok !== false ? options.filters : null;
+  const dateWindow = filters ? resolveRequiredLoadDateWindow(filters) : null;
+  const dateScope = loadProfile === "overview" && dateWindow ? dateWindow : null;
+  const skipExplorerSignals = loadProfile === "overview" && !includeDetails;
 
   const syncHealth = await loadMorawareSyncHealth(supabase, organizationId);
-  const cacheKey = buildDashboardCacheKey(organizationId, syncHealth);
+  const cacheKey = buildDashboardCacheKey(organizationId, syncHealth, {
+    loadProfile,
+    dateWindow: dateScope
+  });
   const cached = getCachedDashboardSources(cacheKey);
   if (cached) {
     configureSalesColorCatalog(cached.colorCatalog);
     return { ...cached, _cacheHit: true, _cacheKey: cacheKey };
   }
 
+  const t0 = performance.now();
   const [mappings, quotes] = await Promise.all([
     loadApprovedSalesAttributionMappings(supabase),
     loadQuoteHeaders(supabase, organizationId)
   ]);
 
   const quoteIds = quotes.map((q) => q.id).filter(Boolean);
-  const [forecasts, facts, worksheet, activities, calendarRows, colorCatalog] = await Promise.all([
+  const jobFactsStarted = performance.now();
+  const [forecasts, facts, colorCatalog, activities, calendarRows] = await Promise.all([
     loadForecastEvents(supabase, organizationId, quoteIds),
-    loadPreparedJobFacts(supabase, organizationId, syncHealth),
-    loadWorksheetColorRows(supabase, organizationId),
-    loadJobActivities(supabase, organizationId),
-    loadCalendarScheduleRows(supabase, organizationId),
-    loadSalesColorCatalog(supabase, organizationId)
+    loadPreparedJobFacts(supabase, organizationId, syncHealth, {
+      windows: dateScope?.windows,
+      startDate: dateScope?.startDate,
+      endDate: dateScope?.endDate
+    }),
+    loadSalesColorCatalog(supabase, organizationId),
+    skipExplorerSignals ? Promise.resolve([]) : loadJobActivities(supabase, organizationId),
+    skipExplorerSignals ? Promise.resolve([]) : loadCalendarScheduleRows(supabase, organizationId)
   ]);
+  const jobFactsMs = Math.round((performance.now() - jobFactsStarted) * 10) / 10;
+
+  const jobIds = facts.rows.map((r) => r.source_job_id).filter(Boolean);
+  const worksheetStarted = performance.now();
+  const worksheet = dateScope
+    ? await loadWorksheetColorRows(supabase, organizationId, { jobIds })
+    : await loadWorksheetColorRows(supabase, organizationId);
+  const worksheetFactsMs = Math.round((performance.now() - worksheetStarted) * 10) / 10;
 
   configureSalesColorCatalog(colorCatalog);
 
+  const enrichStarted = performance.now();
   const aliasByNorm = mappings?.aliasesByNormMoraware ?? new Map();
   const enrichedFacts = facts.rows.map((f) => enrichPreparedFactRow(f, mappings, aliasByNorm));
+  const enrichmentMs = Math.round((performance.now() - enrichStarted) * 10) / 10;
 
+  const intelligenceStarted = performance.now();
   const intelligenceBundle = buildSalesIntelligenceBundle({
     organizationId,
     syncHealth,
@@ -349,6 +513,33 @@ export async function loadDashboardDataSources(supabase, organizationId, options
     calendarRows,
     colorCatalog
   });
+  const intelligenceBundleMs = Math.round((performance.now() - intelligenceStarted) * 10) / 10;
+
+  const loadStats = {
+    loadProfile,
+    includeDetails,
+    dateScoped: Boolean(dateScope),
+    dateWindow: dateScope
+      ? {
+          startDate: dateScope.startDate,
+          endDate: dateScope.endDate,
+          windows: dateScope.windows
+        }
+      : null,
+    jobFacts: facts.loadStats ?? { rows: facts.rows.length },
+    worksheetFacts: worksheet.loadStats ?? { rows: worksheet.rows?.length ?? 0 },
+    skippedActivities: skipExplorerSignals,
+    skippedCalendar: skipExplorerSignals,
+    quoteRows: quotes.length,
+    forecastRows: forecasts.length,
+    timingsMs: {
+      prepared_moraware_sql: jobFactsMs,
+      worksheet_fact_reads: worksheetFactsMs,
+      enrichment_aggregation: enrichmentMs,
+      intelligence_bundle: intelligenceBundleMs,
+      source_load_total: Math.round((performance.now() - t0) * 10) / 10
+    }
+  };
 
   const sources = {
     organizationId,
@@ -364,6 +555,7 @@ export async function loadDashboardDataSources(supabase, organizationId, options
     activities,
     calendarRows,
     colorCatalog,
+    _loadStats: loadStats,
     _cacheHit: false,
     _cacheKey: cacheKey
   };

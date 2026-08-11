@@ -10,7 +10,11 @@ import { buildSalesIntelligenceBundle, finalizeIntelligenceBundle } from "./sale
  */
 export function buildSalesDashboardResponse({ sources, filters, includeDetails = false, payloadMode = "full" }) {
   const organizationId = sources.organizationId ?? sources.facts?.organizationId ?? "";
-  const bundle = finalizeIntelligenceBundle(buildSalesIntelligenceBundle({ ...sources, organizationId }), filters);
+  // Reuse bundle built during source load when present (avoid duplicate aggregation).
+  const baseBundle =
+    sources.intelligenceBundle ??
+    buildSalesIntelligenceBundle({ ...sources, organizationId });
+  const bundle = finalizeIntelligenceBundle(baseBundle, filters);
   const response = computeDashboardFromIntelligence(bundle, filters, { includeDetails, payloadMode });
 
   response.commandCenter.bentoCards = buildBentoCards(response);

@@ -10,11 +10,17 @@ export function isDashboardTimingEnabled() {
 }
 
 /**
- * @returns {{ mark: (label: string) => void, finish: () => Record<string, number> }}
+ * @returns {{
+ *   mark: (label: string) => void,
+ *   note: (label: string, value: number) => void,
+ *   finish: () => Record<string, number>
+ * }}
  */
 export function createDashboardTimer(enabled = isDashboardTimingEnabled()) {
   const steps = [];
+  const notes = {};
   let last = enabled ? performance.now() : 0;
+  const startedAt = enabled ? performance.now() : 0;
 
   return {
     mark(label) {
@@ -23,10 +29,14 @@ export function createDashboardTimer(enabled = isDashboardTimingEnabled()) {
       steps.push({ label, ms: Math.round((now - last) * 10) / 10 });
       last = now;
     },
+    note(label, value) {
+      if (!enabled) return;
+      notes[label] = Number(value);
+    },
     finish() {
       if (!enabled) return { totalMs: 0, steps: [] };
-      const totalMs = Math.round(steps.reduce((s, x) => s + x.ms, 0) * 10) / 10;
-      const out = {};
+      const totalMs = Math.round((performance.now() - startedAt) * 10) / 10;
+      const out = { ...notes };
       for (const { label, ms } of steps) out[label] = ms;
       out.totalMs = totalMs;
       if (isDashboardTimingEnabled()) {
