@@ -74,7 +74,10 @@ function Convert-ToNumber {
 
 function New-OdbcConnection {
     param([Parameter(Mandatory = $true)][string]$Dsn)
-    $conn = New-Object System.Data.Odbc.OdbcConnection("DSN=$Dsn")
+    # Windows PowerShell 5.1: constructor-argument form throws "Argument types do not match".
+    # Set ConnectionString after New-Object (proven on QB Server).
+    $conn = New-Object System.Data.Odbc.OdbcConnection
+    $conn.ConnectionString = "DSN=$Dsn"
     $conn.Open()
     return $conn
 }

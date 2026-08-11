@@ -372,7 +372,12 @@ function mockRes() {
   assert.equal(/QBXMLRP2|Remote Connector|8166|Thryve/i.test(ps1), false);
   assert.match(ps1, /Assert-SelectOnlySql/);
   assert.match(ps1, /\(\?i\)SELECT\\b/);
+  // Windows PowerShell 5.1: must set ConnectionString after New-Object (not ctor arg).
+  assert.match(ps1, /New-Object System\.Data\.Odbc\.OdbcConnection\s*$/m);
+  assert.match(ps1, /\$conn\.ConnectionString\s*=\s*"DSN=\$Dsn"/);
+  assert.equal(/New-Object System\.Data\.Odbc\.OdbcConnection\s*\(\s*"DSN=/i.test(ps1), false);
   console.log("ok: worker is ASCII + SELECT-only + correct invoice Amount mapping");
+  console.log("ok: ODBC connection uses PS 5.1 ConnectionString property form");
 }
 
 {
