@@ -20,11 +20,11 @@ import {
 } from "../lib/inboxUiHelpers.mjs";
 import {
   dismissQuoteFlowInboxMessage,
+  fetchQuoteFlowAttachmentDownload,
+  fetchQuoteFlowAttachmentPreview,
   fetchQuoteFlowInbox,
   fetchQuoteFlowInboxMessage,
   markQuoteFlowInboxOpened,
-  quoteFlowAttachmentDownloadUrl,
-  quoteFlowAttachmentPreviewUrl,
   restoreQuoteFlowInboxMessage,
   startQuoteFlowTakeoff,
   type QuoteFlowAttachment,
@@ -341,6 +341,7 @@ export default function InboxPage(props: Props) {
   >({});
   const [previewAtt, setPreviewAtt] = useState<QuoteFlowAttachment | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewContentType, setPreviewContentType] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
@@ -522,6 +523,7 @@ export default function InboxPage(props: Props) {
     }
     setPreviewAtt(null);
     setPreviewUrl(null);
+    setPreviewContentType(null);
     setPreviewError(null);
     setPreviewLoading(false);
   }
@@ -533,27 +535,21 @@ export default function InboxPage(props: Props) {
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      const path = quoteFlowAttachmentPreviewUrl(detail.messageKey, att.attachmentKey);
-      const res = await fetch(path, {
-        headers: { Authorization: `Bearer ${authToken}` }
-      });
-      if (!res.ok) {
-        let msg = "Preview unavailable";
-        try {
-          const body = (await res.json()) as { error?: string };
-          if (body?.error) msg = body.error;
-        } catch {
-          /* ignore */
-        }
-        setPreviewError(msg);
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const result = await fetchQuoteFlowAttachmentPreview(
+        authToken,
+        detail.messageKey,
+        att.attachmentKey
+      );
+      const url = URL.createObjectURL(result.blob);
       previewObjectUrlRef.current = url;
       setPreviewUrl(url);
-    } catch {
-      setPreviewError("Preview unavailable");
+      setPreviewContentType(result.contentType || result.blob.type || att.contentType || null);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setPreviewError(e.message || "Attachment could not be loaded.");
+      } else {
+        setPreviewError("Attachment could not be loaded.");
+      }
     } finally {
       setPreviewLoading(false);
     }
@@ -562,25 +558,25 @@ export default function InboxPage(props: Props) {
   async function downloadAttachment(att: QuoteFlowAttachment) {
     if (!detail?.messageKey || !att.attachmentKey) return;
     try {
-      const path = quoteFlowAttachmentDownloadUrl(detail.messageKey, att.attachmentKey);
-      const res = await fetch(path, {
-        headers: { Authorization: `Bearer ${authToken}` }
-      });
-      if (!res.ok) {
-        setError("Download unavailable for this attachment.");
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const result = await fetchQuoteFlowAttachmentDownload(
+        authToken,
+        detail.messageKey,
+        att.attachmentKey
+      );
+      const url = URL.createObjectURL(result.blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = att.filename || "attachment";
+      a.download = result.filename || att.filename || "attachment";
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      setError("Download unavailable for this attachment.");
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? e.message || "Download unavailable for this attachment."
+          : "Download unavailable for this attachment."
+      );
     }
   }
 
@@ -1520,7 +1516,7 @@ export default function InboxPage(props: Props) {
                           </>
                         ) : (
                           <span className="qf-muted" data-testid="qf-inbox-preview-unavailable">
-                            Preview unavailable
+                            Preview unavailable for this file type. Use Download if needed.
                           </span>
                         )}
                         {canSelect ? (
@@ -1594,9 +1590,22 @@ export default function InboxPage(props: Props) {
           <div className="qf-inbox__preview-panel">
             <div className="qf-inbox__preview-head">
               <strong>{previewAtt.filename}</strong>
-              <button type="button" className="qf-btn-secondary" onClick={closePreview}>
-                Close
-              </button>
+              <div className="qf-inbox__preview-actions">
+                {previewUrl && !previewError ? (
+                  <a
+                    className="qf-btn-secondary"
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="qf-inbox-preview-open-tab"
+                  >
+                    Open in new tab
+                  </a>
+                ) : null}
+                <button type="button" className="qf-btn-secondary" onClick={closePreview}>
+                  Close
+                </button>
+              </div>
             </div>
             {previewLoading ? <p className="qf-muted">Loading preview…</p> : null}
             {previewError ? (
@@ -1604,24 +1613,40 @@ export default function InboxPage(props: Props) {
                 {previewError}
               </p>
             ) : null}
-            {previewUrl && !previewError ? (
-              String(previewAtt.contentType || "").includes("pdf") ||
-              /\.pdf$/i.test(previewAtt.filename || "") ? (
-                <iframe
-                  title={previewAtt.filename}
-                  src={previewUrl}
-                  className="qf-inbox__preview-frame"
-                  data-testid="qf-inbox-preview-pdf"
-                />
-              ) : (
-                <img
-                  src={previewUrl}
-                  alt={previewAtt.filename}
-                  className="qf-inbox__preview-image"
-                  data-testid="qf-inbox-preview-image"
-                />
-              )
-            ) : null}
+            {previewUrl && !previewError
+              ? (() => {
+                  const ct = String(previewContentType || previewAtt.contentType || "").toLowerCase();
+                  const name = String(previewAtt.filename || "").toLowerCase();
+                  const isPdf = ct.includes("pdf") || /\.pdf$/i.test(name);
+                  const isImage =
+                    ct.startsWith("image/") || /\.(jpe?g|png|gif|webp)$/i.test(name);
+                  if (isPdf) {
+                    return (
+                      <iframe
+                        title={previewAtt.filename}
+                        src={previewUrl}
+                        className="qf-inbox__preview-frame"
+                        data-testid="qf-inbox-preview-pdf"
+                      />
+                    );
+                  }
+                  if (isImage) {
+                    return (
+                      <img
+                        src={previewUrl}
+                        alt={previewAtt.filename}
+                        className="qf-inbox__preview-image"
+                        data-testid="qf-inbox-preview-image"
+                      />
+                    );
+                  }
+                  return (
+                    <p className="qf-muted" data-testid="qf-inbox-preview-unsupported">
+                      Preview unavailable for this file type. Use Download if needed.
+                    </p>
+                  );
+                })()
+              : null}
           </div>
         </div>
       ) : null}

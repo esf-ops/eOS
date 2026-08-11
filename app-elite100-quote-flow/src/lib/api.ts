@@ -1,4 +1,4 @@
-function backendBase(): string {
+export function backendBase(): string {
   return String(import.meta.env.VITE_BACKEND_URL || "http://localhost:3001")
     .trim()
     .replace(/\/+$/, "")
@@ -56,4 +56,43 @@ export function apiPost(path: string, token: string, json?: unknown, init: Reque
     body: json !== undefined ? JSON.stringify(json) : undefined,
     headers: init.headers
   });
+}
+
+/**
+ * Authenticated binary fetch against VITE_BACKEND_URL (not the SPA origin).
+ * Used for staff attachment preview/download — never returns provider URLs.
+ */
+export async function apiFetchBlob(
+  path: string,
+  token: string,
+  init: RequestInit = {}
+): Promise<{ blob: Blob; contentType: string; filename: string | null; status: number }> {
+  const base = backendBase();
+  const url = `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(url, { ...init, method: init.method || "GET", headers, cache: "no-store" });
+  if (!res.ok) {
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    const msg =
+      body && typeof body === "object" && body !== null && "error" in body
+        ? String((body as { error?: unknown }).error ?? res.statusText)
+        : res.statusText || "Request failed";
+    throw new ApiError(res.status, msg || "Request failed", body);
+  }
+  const blob = await res.blob();
+  const contentType = res.headers.get("content-type") || blob.type || "application/octet-stream";
+  const disposition = res.headers.get("content-disposition") || "";
+  const match = /filename="([^"]+)"/i.exec(disposition);
+  return {
+    blob,
+    contentType,
+    filename: match ? match[1] : null,
+    status: res.status
+  };
 }

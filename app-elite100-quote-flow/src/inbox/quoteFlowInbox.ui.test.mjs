@@ -260,15 +260,27 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
 }
 
 {
-assert.match(inbox, /qf-inbox-select-attachment|Select|Add to packet/);
-assert.match(inbox, /planSelectionRequired/);
-assert.match(inbox, /Select the plan files to include in this takeoff packet/);
-assert.match(inbox, /qf-inbox-preview-attachment|Preview/);
-assert.match(inbox, /qf-inbox-preview-modal/);
-assert.match(inbox, /selectedAttachmentKeys/);
-assert.match(api, /attachmentKeys/);
-assert.match(api, /attachments\/.*preview/);
-console.log("ok: attachment selection contracts");
+  const apiLib = readFileSync(join(appRoot, "src/lib/api.ts"), "utf8");
+  assert.match(inbox, /qf-inbox-select-attachment|Select|Add to packet/);
+  assert.match(inbox, /planSelectionRequired/);
+  assert.match(inbox, /Select the plan files to include in this takeoff packet/);
+  assert.match(inbox, /qf-inbox-preview-attachment|Preview/);
+  assert.match(inbox, /qf-inbox-preview-modal/);
+  assert.match(inbox, /qf-inbox-preview-pdf|qf-inbox-preview-image/);
+  assert.match(inbox, /fetchQuoteFlowAttachmentPreview/);
+  assert.match(inbox, /fetchQuoteFlowAttachmentDownload/);
+  assert.match(inbox, /Preview unavailable for this file type/);
+  assert.match(inbox, /Attachment could not be loaded/);
+  assert.match(inbox, /selectedAttachmentKeys/);
+  assert.match(api, /attachmentKeys/);
+  assert.match(api, /attachments\/.*preview/);
+  assert.match(api, /encodeURIComponent\(messageKey\)/);
+  assert.match(api, /encodeURIComponent\(attachmentKey\)/);
+  assert.match(api, /apiFetchBlob/);
+  assert.match(api, /fetchQuoteFlowAttachmentPreview/);
+  assert.match(apiLib, /export async function apiFetchBlob/);
+  assert.match(apiLib, /VITE_BACKEND_URL/);
+  console.log("ok: attachment selection + preview contracts");
 }
 
 {

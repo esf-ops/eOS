@@ -649,6 +649,13 @@ body {
   margin-bottom: 12px;
 }
 
+.qf-inbox__preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .qf-inbox__preview-frame {
   width: 100%;
   min-height: 70vh;

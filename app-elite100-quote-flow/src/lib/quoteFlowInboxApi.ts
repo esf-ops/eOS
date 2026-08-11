@@ -1,7 +1,7 @@
 /**
  * Quote Flow Inbox API — org/actor never sent from the browser.
  */
-import { apiGet, apiPost } from "./api";
+import { ApiError, apiFetchBlob, apiGet, apiPost } from "./api";
 
 export type QuoteFlowAttachment = {
   attachmentKey: string | null;
@@ -211,13 +211,74 @@ export async function startQuoteFlowTakeoff(
   }>;
 }
 
-/** Staff-only authenticated attachment preview URL (browser fetch with bearer). */
+/** Staff-only authenticated attachment preview path (encode keys; pair with apiFetchBlob). */
 export function quoteFlowAttachmentPreviewUrl(messageKey: string, attachmentKey: string) {
   return `/api/elite100-quote-flow/inbox/${encodeURIComponent(messageKey)}/attachments/${encodeURIComponent(attachmentKey)}/preview`;
 }
 
 export function quoteFlowAttachmentDownloadUrl(messageKey: string, attachmentKey: string) {
   return `/api/elite100-quote-flow/inbox/${encodeURIComponent(messageKey)}/attachments/${encodeURIComponent(attachmentKey)}/download`;
+}
+
+function safeAttachmentLoadMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403) {
+      return "You do not have access to this attachment.";
+    }
+    if (err.status === 404) {
+      return "Attachment could not be loaded.";
+    }
+    if (err.status === 415) {
+      return "Preview unavailable for this file type. Use Download if needed.";
+    }
+    if (err.status === 502 || err.status === 503 || err.status === 504) {
+      return "Attachment bytes unavailable from mailbox provider.";
+    }
+    if (err.message && !/failed to fetch|networkerror/i.test(err.message)) {
+      return err.message;
+    }
+    return `Preview route returned ${err.status}.`;
+  }
+  return fallback;
+}
+
+/** Staff-only: stream attachment bytes from backend-core (never SPA-relative). */
+export async function fetchQuoteFlowAttachmentPreview(
+  token: string,
+  messageKey: string,
+  attachmentKey: string
+) {
+  try {
+    return await apiFetchBlob(quoteFlowAttachmentPreviewUrl(messageKey, attachmentKey), token);
+  } catch (e) {
+    if (!(e instanceof ApiError)) {
+      throw new ApiError(0, "Attachment could not be loaded.", null);
+    }
+    throw new ApiError(
+      e.status,
+      safeAttachmentLoadMessage(e, "Attachment could not be loaded."),
+      e.body
+    );
+  }
+}
+
+export async function fetchQuoteFlowAttachmentDownload(
+  token: string,
+  messageKey: string,
+  attachmentKey: string
+) {
+  try {
+    return await apiFetchBlob(quoteFlowAttachmentDownloadUrl(messageKey, attachmentKey), token);
+  } catch (e) {
+    if (!(e instanceof ApiError)) {
+      throw new ApiError(0, "Download unavailable for this attachment.", null);
+    }
+    throw new ApiError(
+      e.status,
+      safeAttachmentLoadMessage(e, "Download unavailable for this attachment."),
+      e.body
+    );
+  }
 }
 
 export async function dismissQuoteFlowInboxMessage(token: string, messageKey: string) {
