@@ -563,6 +563,129 @@ async function main() {
     assert.equal(typeof summary.prospects, "number");
   }
 
+  // qbEnrichment filter aligns with summary counts; native needs_review unchanged
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const suggestionByAccount = new Map();
+    const service = createAccountDirectoryService({
+      store,
+      loadSuggestionIndex: async () => suggestionByAccount
+    });
+
+    const needsReviewAcct = await service.createAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      payload: { displayName: "QB Needs Review Co", status: "active" }
+    });
+    const suggestedAcct = await service.createAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      payload: { displayName: "QB Suggested Co", status: "active" }
+    });
+    const nativeReview = await service.createAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      payload: { displayName: "Native Account Needs Review", status: "needs_review" }
+    });
+    const plainUnlinked = await service.createAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      payload: { displayName: "Plain Unlinked Co", status: "active" }
+    });
+
+    suggestionByAccount.set(needsReviewAcct.id, {
+      id: "sug-nr",
+      status: "needs_review",
+      suggestedAccountId: needsReviewAcct.id,
+      rankScore: 0.9,
+      candidateAccounts: [{ accountId: needsReviewAcct.id, score: 0.9 }]
+    });
+    suggestionByAccount.set(suggestedAcct.id, {
+      id: "sug-open",
+      status: "open",
+      suggestedAccountId: suggestedAcct.id,
+      rankScore: 0.95,
+      candidateAccounts: [{ accountId: suggestedAcct.id, score: 0.95 }]
+    });
+
+    const beforeName = needsReviewAcct.displayName;
+    const beforeLinks = (needsReviewAcct.externalLinks || []).length;
+
+    const summary = await service.getSummary({ organizationId: ORG, role: "admin" });
+    assert.equal(summary.qbNeedsReview, 1);
+    assert.equal(summary.qbSuggestedMatch, 1);
+    assert.ok(summary.needsReview >= 1);
+
+    const qbNeeds = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      tab: "accounts",
+      qbEnrichment: "needs_review",
+      page: 1,
+      pageSize: 100
+    });
+    assert.equal(qbNeeds.total, summary.qbNeedsReview);
+    assert.ok(qbNeeds.items.every((i) => i.qbEnrichmentCode === "needs_review"));
+    assert.ok(qbNeeds.items.some((i) => i.id === needsReviewAcct.id));
+    assert.ok(!qbNeeds.items.some((i) => i.id === suggestedAcct.id));
+    assert.ok(!qbNeeds.items.some((i) => i.id === nativeReview.id));
+
+    const qbSuggested = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      tab: "accounts",
+      qbEnrichment: "suggested_match",
+      page: 1,
+      pageSize: 100
+    });
+    assert.equal(qbSuggested.total, summary.qbSuggestedMatch);
+    assert.ok(qbSuggested.items.every((i) => i.qbEnrichmentCode === "suggested_match"));
+    assert.ok(qbSuggested.items.some((i) => i.id === suggestedAcct.id));
+
+    const nativeTab = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      tab: "needs_review",
+      page: 1,
+      pageSize: 100
+    });
+    assert.ok(nativeTab.items.every((i) => i.status === "needs_review"));
+    assert.ok(nativeTab.items.some((i) => i.id === nativeReview.id));
+    assert.ok(!nativeTab.items.some((i) => i.id === needsReviewAcct.id));
+
+    const notLinked = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      tab: "accounts",
+      qbEnrichment: "not_linked",
+      page: 1,
+      pageSize: 100
+    });
+    assert.ok(notLinked.items.every((i) => i.qbEnrichmentCode === "not_linked"));
+    assert.ok(notLinked.items.some((i) => i.id === plainUnlinked.id));
+
+    const linkedStillWorks = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      linked: "false",
+      page: 1,
+      pageSize: 100
+    });
+    assert.ok(linkedStillWorks.items.every((i) => !i.quickbooksLinked));
+
+    const after = await service.getAccount({
+      organizationId: ORG,
+      role: "admin",
+      accountId: needsReviewAcct.id
+    });
+    assert.equal(after.displayName, beforeName);
+    assert.equal((after.externalLinks || []).filter((l) => l.isActive !== false).length, beforeLinks);
+  }
+
   console.log("accountDirectoryService.test.mjs: ok");
 }
 

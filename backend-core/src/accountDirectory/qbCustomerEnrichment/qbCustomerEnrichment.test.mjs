@@ -25,6 +25,7 @@ import {
   emptyEnrichmentFeedStatus,
   getAdQbCustomerEnrichmentFeedStatus,
   indexSuggestionsByAccountId,
+  listAllAdQbLinkSuggestionsForIndex,
   resolveAccountQbEnrichmentLabel
 } from "./feedStatus.js";
 import { constantTimeEqualString, requireAdQbCustomerSyncToken } from "./syncAuth.js";
@@ -355,6 +356,64 @@ import { createAccountDirectoryService } from "../accountDirectoryService.mjs";
   const empty = emptyEnrichmentFeedStatus({ status: AD_QB_ENRICHMENT_STATUSES.UNAVAILABLE, reason: "x" });
   assert.equal(empty.status, AD_QB_ENRICHMENT_STATUSES.UNAVAILABLE);
   console.log("ok: feed status fail-soft");
+}
+
+{
+  // Paginated index loader must not silently stop at the inbox 500-row cap.
+  const pageSize = 1000;
+  const totalRows = 2500;
+  let rangeCalls = 0;
+  const fakeSupabase = {
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        in() {
+          return this;
+        },
+        order() {
+          return this;
+        },
+        async range(from, to) {
+          rangeCalls += 1;
+          const start = from;
+          const end = Math.min(to, totalRows - 1);
+          if (start >= totalRows) return { data: [], error: null };
+          const data = [];
+          for (let i = start; i <= end; i += 1) {
+            data.push({
+              id: `id-${i}`,
+              qb_list_id: `L-${i}`,
+              qb_full_name: `Name ${i}`,
+              qb_name: `Name ${i}`,
+              status: i % 50 === 0 ? "needs_review" : "open",
+              suggested_account_id: `acct-${i}`,
+              rank_score: 0.8,
+              rank_method: "exact_norm_name",
+              conflict_reason: null,
+              candidate_accounts: [{ accountId: `acct-${i}`, score: 0.8 }],
+              updated_at: "2026-08-11T00:00:00.000Z"
+            });
+          }
+          return { data, error: null };
+        }
+      };
+    }
+  };
+  const listed = await listAllAdQbLinkSuggestionsForIndex(fakeSupabase, "org", {
+    pageSize,
+    maxRows: 100000
+  });
+  assert.equal(listed.ok, true);
+  assert.equal(listed.items.length, totalRows);
+  assert.ok(rangeCalls >= 3, "must page beyond a single 500/1000 window");
+  const idx = indexSuggestionsByAccountId(listed.items);
+  assert.equal(idx.size, totalRows);
+  console.log("ok: suggestion index loads beyond 500-row inbox cap");
 }
 
 // Sync/reconcile cannot modify AD identity; links only via explicit linkQuickBooks

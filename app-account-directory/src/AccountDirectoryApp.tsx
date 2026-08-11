@@ -49,7 +49,7 @@ const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 const NAV_TABS: { id: string; label: string }[] = [
   { id: "accounts", label: "Accounts" },
   { id: "prospects", label: "Prospects" },
-  { id: "needs_review", label: "Needs review" },
+  { id: "needs_review", label: "Account Needs Review" },
   { id: "archived", label: "Archived" }
 ];
 
@@ -137,7 +137,7 @@ function formatUpdatedAt(iso?: string | null): string {
 }
 
 function statusLabel(status: string): string {
-  if (status === "needs_review") return "Needs review";
+  if (status === "needs_review") return "Account Needs Review";
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -202,16 +202,27 @@ function emptyForm(): ModalFormState {
 }
 
 function hasActiveFilters(u: UrlState): boolean {
-  return Boolean(u.search || u.status || u.linked || u.missingContact || u.missingLocation);
+  return Boolean(
+    u.search || u.status || u.linked || u.missingContact || u.missingLocation || u.qbEnrichment
+  );
 }
 
 type FilterChipDef = { key: string; label: string };
+
+function qbEnrichmentFilterLabel(code: string): string {
+  if (code === "suggested_match") return "Suggested Match";
+  if (code === "needs_review") return "QB Needs Review";
+  if (code === "not_linked") return "QB Not Linked";
+  return code;
+}
 
 function activeFilterChips(u: UrlState): FilterChipDef[] {
   const chips: FilterChipDef[] = [];
   if (u.search) chips.push({ key: "search", label: `"${u.search}"` });
   if (u.status) chips.push({ key: "status", label: statusLabel(u.status) });
   if (u.linked === "true") chips.push({ key: "linked", label: "QB linked" });
+  if (u.linked === "false") chips.push({ key: "linked", label: "QB not linked" });
+  if (u.qbEnrichment) chips.push({ key: "qbEnrichment", label: qbEnrichmentFilterLabel(u.qbEnrichment) });
   if (u.missingContact === "true") chips.push({ key: "missingContact", label: "Missing contact" });
   if (u.missingLocation === "true") chips.push({ key: "missingLocation", label: "Missing location" });
   return chips;
@@ -280,6 +291,7 @@ export default function AccountDirectoryApp() {
         linked: urlState.linked,
         missingContact: urlState.missingContact,
         missingLocation: urlState.missingLocation,
+        qbEnrichment: urlState.qbEnrichment,
         sort: urlState.sort
       }),
     [urlState]
@@ -393,7 +405,8 @@ export default function AccountDirectoryApp() {
         sort: urlState.sort !== "name_asc" ? urlState.sort : undefined,
         linked: urlState.linked || undefined,
         missingContact: urlState.missingContact || undefined,
-        missingLocation: urlState.missingLocation || undefined
+        missingLocation: urlState.missingLocation || undefined,
+        qbEnrichment: urlState.qbEnrichment || undefined
       });
       const next = res.items ?? [];
       setItems(next);
@@ -481,6 +494,7 @@ export default function AccountDirectoryApp() {
       linked: "",
       missingContact: "",
       missingLocation: "",
+      qbEnrichment: "",
       page: 1
     }));
   }
@@ -856,6 +870,7 @@ export default function AccountDirectoryApp() {
                     missingContact: "",
                     missingLocation: "",
                     status: "",
+                    qbEnrichment: "",
                     ...patch,
                     page: 1
                   }));
@@ -871,7 +886,7 @@ export default function AccountDirectoryApp() {
                   type="button"
                   className={urlState.tab === tab.id ? "ad-nav-tab ad-nav-tab-active" : "ad-nav-tab"}
                   aria-current={urlState.tab === tab.id ? "page" : undefined}
-                  onClick={() => updateFilters({ tab: tab.id, status: "", page: 1 })}
+                  onClick={() => updateFilters({ tab: tab.id, status: "", qbEnrichment: "", page: 1 })}
                 >
                   {tab.label}
                 </button>
@@ -910,7 +925,7 @@ export default function AccountDirectoryApp() {
                   <option value="">All statuses</option>
                   <option value="active">Active</option>
                   <option value="prospect">Prospect</option>
-                  <option value="needs_review">Needs review</option>
+                  <option value="needs_review">Account Needs Review</option>
                   <option value="archived">Archived</option>
                 </select>
               </label>
@@ -924,6 +939,19 @@ export default function AccountDirectoryApp() {
                   <option value="">All</option>
                   <option value="true">Linked only</option>
                   <option value="false">Not linked</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>QB enrichment</span>
+                <select
+                  value={urlState.qbEnrichment}
+                  aria-label="Filter by QuickBooks enrichment"
+                  onChange={(e) => updateFilters({ qbEnrichment: e.target.value })}
+                >
+                  <option value="">All</option>
+                  <option value="suggested_match">Suggested Match</option>
+                  <option value="needs_review">QB Needs Review</option>
+                  <option value="not_linked">QB Not Linked</option>
                 </select>
               </label>
               <label className="field">
@@ -1060,7 +1088,7 @@ export default function AccountDirectoryApp() {
                       {urlState.tab === "prospects"
                         ? "No prospects yet"
                         : urlState.tab === "needs_review"
-                          ? "No accounts need review"
+                          ? "No accounts need account review"
                           : urlState.tab === "archived"
                             ? "No archived accounts"
                             : "No accounts yet"}
@@ -1069,7 +1097,7 @@ export default function AccountDirectoryApp() {
                       {urlState.tab === "prospects"
                         ? "Create a prospect to track early-stage relationships."
                         : urlState.tab === "needs_review"
-                          ? "Accounts flagged for review will appear here."
+                          ? "Accounts with Account Directory status Needs Review will appear here."
                           : urlState.tab === "archived"
                             ? "Archived accounts will appear here."
                             : "Create your first account to get started."}
@@ -1403,34 +1431,121 @@ function SummaryStrip({
   onApply: (patch: Partial<UrlState>) => void;
 }) {
   const items: { key: string; label: string; count: number; patch: Partial<UrlState> }[] = [
-    { key: "total", label: "Total", count: summary.total, patch: { tab: "accounts", status: "", linked: "", missingContact: "", missingLocation: "" } },
-    { key: "active", label: "Active", count: summary.active, patch: { tab: "accounts", status: "active", linked: "", missingContact: "", missingLocation: "" } },
-    { key: "prospects", label: "Prospects", count: summary.prospects, patch: { tab: "prospects", status: "", linked: "", missingContact: "", missingLocation: "" } },
-    { key: "needsReview", label: "Needs review", count: summary.needsReview, patch: { tab: "needs_review", status: "", linked: "", missingContact: "", missingLocation: "" } },
-    { key: "archived", label: "Archived", count: summary.archived, patch: { tab: "archived", status: "", linked: "", missingContact: "", missingLocation: "" } },
-    { key: "qbLinked", label: "QB linked", count: summary.quickbooksLinked, patch: { linked: "true", missingContact: "", missingLocation: "" } },
+    {
+      key: "total",
+      label: "Total",
+      count: summary.total,
+      patch: { tab: "accounts", status: "", linked: "", missingContact: "", missingLocation: "", qbEnrichment: "" }
+    },
+    {
+      key: "active",
+      label: "Active",
+      count: summary.active,
+      patch: {
+        tab: "accounts",
+        status: "active",
+        linked: "",
+        missingContact: "",
+        missingLocation: "",
+        qbEnrichment: ""
+      }
+    },
+    {
+      key: "prospects",
+      label: "Prospects",
+      count: summary.prospects,
+      patch: { tab: "prospects", status: "", linked: "", missingContact: "", missingLocation: "", qbEnrichment: "" }
+    },
+    {
+      key: "needsReview",
+      label: "Account Needs Review",
+      count: summary.needsReview,
+      patch: {
+        tab: "needs_review",
+        status: "",
+        linked: "",
+        missingContact: "",
+        missingLocation: "",
+        qbEnrichment: ""
+      }
+    },
+    {
+      key: "archived",
+      label: "Archived",
+      count: summary.archived,
+      patch: { tab: "archived", status: "", linked: "", missingContact: "", missingLocation: "", qbEnrichment: "" }
+    },
+    {
+      key: "qbLinked",
+      label: "QB linked",
+      count: summary.quickbooksLinked,
+      patch: { tab: "accounts", linked: "true", missingContact: "", missingLocation: "", qbEnrichment: "" }
+    },
     {
       key: "qbSuggested",
       label: "Suggested Match",
       count: summary.qbSuggestedMatch ?? 0,
-      patch: { linked: "false", missingContact: "", missingLocation: "" }
+      patch: {
+        tab: "accounts",
+        qbEnrichment: "suggested_match",
+        linked: "",
+        missingContact: "",
+        missingLocation: "",
+        status: ""
+      }
     },
     {
       key: "qbNeedsReview",
       label: "QB Needs Review",
       count: summary.qbNeedsReview ?? 0,
-      patch: { linked: "false", missingContact: "", missingLocation: "" }
+      patch: {
+        tab: "accounts",
+        qbEnrichment: "needs_review",
+        linked: "",
+        missingContact: "",
+        missingLocation: "",
+        status: ""
+      }
     },
-    { key: "noContact", label: "No contact", count: summary.missingPrimaryContact, patch: { missingContact: "true", missingLocation: "", linked: "" } },
-    { key: "noLocation", label: "No location", count: summary.missingPrimaryLocation, patch: { missingLocation: "true", missingContact: "", linked: "" } }
+    {
+      key: "noContact",
+      label: "No contact",
+      count: summary.missingPrimaryContact,
+      patch: { missingContact: "true", missingLocation: "", linked: "", qbEnrichment: "" }
+    },
+    {
+      key: "noLocation",
+      label: "No location",
+      count: summary.missingPrimaryLocation,
+      patch: { missingLocation: "true", missingContact: "", linked: "", qbEnrichment: "" }
+    }
   ];
 
   function isActive(patch: Partial<UrlState>): boolean {
+    if (patch.qbEnrichment) {
+      return (
+        urlState.tab === (patch.tab || "accounts") &&
+        urlState.qbEnrichment === patch.qbEnrichment &&
+        !urlState.status &&
+        !urlState.linked
+      );
+    }
     if (patch.missingContact === "true") return urlState.missingContact === "true";
     if (patch.missingLocation === "true") return urlState.missingLocation === "true";
-    if (patch.linked === "true") return urlState.linked === "true";
-    if (patch.status === "active") return urlState.tab === "accounts" && urlState.status === "active";
-    if (patch.tab) return urlState.tab === patch.tab && !urlState.status && !urlState.linked && !urlState.missingContact && !urlState.missingLocation;
+    if (patch.linked === "true") return urlState.linked === "true" && !urlState.qbEnrichment;
+    if (patch.status === "active") {
+      return urlState.tab === "accounts" && urlState.status === "active" && !urlState.qbEnrichment;
+    }
+    if (patch.tab) {
+      return (
+        urlState.tab === patch.tab &&
+        !urlState.status &&
+        !urlState.linked &&
+        !urlState.missingContact &&
+        !urlState.missingLocation &&
+        !urlState.qbEnrichment
+      );
+    }
     return false;
   }
 

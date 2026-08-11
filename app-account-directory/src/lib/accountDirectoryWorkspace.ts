@@ -12,6 +12,7 @@ export type UrlState = {
   linked: string;
   missingContact: string;
   missingLocation: string;
+  qbEnrichment: string;
   sort: string;
   account: string | null;
 };

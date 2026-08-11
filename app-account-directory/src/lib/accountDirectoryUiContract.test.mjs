@@ -34,12 +34,17 @@ console.log("ok: Account Directory uses shared EliteosTopbar / shell tokens");
 assert.ok(app.includes('className="ad-nav"'));
 assert.ok(app.includes("Accounts"));
 assert.ok(app.includes("Prospects"));
-assert.ok(app.includes("Needs review"));
+assert.ok(app.includes("Account Needs Review"));
 assert.ok(app.includes("Archived"));
 assert.ok(app.includes("New account"));
 assert.ok(app.includes("QuickBooks restricted"));
 assert.ok(app.includes("permission-denied"));
-console.log("ok: nav tabs, list actions, and permission states present");
+assert.ok(app.includes("qbEnrichment=suggested_match") || app.includes('qbEnrichment: "suggested_match"'));
+assert.ok(app.includes("qbEnrichment=needs_review") || app.includes('qbEnrichment: "needs_review"'));
+assert.ok(app.includes("QB Needs Review"));
+assert.ok(workspace.includes("qbEnrichment"));
+assert.ok(api.includes("qbEnrichment"));
+console.log("ok: nav tabs, qbEnrichment filter, and Account Needs Review labeling");
 
 // ── API client ─────────────────────────────────────────────────────────────
 assert.ok(api.includes('const BASE = "/api/account-directory"'));

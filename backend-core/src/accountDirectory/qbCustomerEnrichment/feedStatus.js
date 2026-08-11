@@ -196,7 +196,27 @@ export function resolveAccountQbEnrichmentLabel(account, suggestion) {
   };
 }
 
+function mapSuggestionRow(row) {
+  return {
+    id: row.id,
+    qbListId: row.qb_list_id,
+    qbFullName: row.qb_full_name,
+    qbName: row.qb_name,
+    status: row.status,
+    suggestedAccountId: row.suggested_account_id,
+    rankScore: row.rank_score,
+    rankMethod: row.rank_method,
+    conflictReason: row.conflict_reason,
+    candidateAccounts: row.candidate_accounts || [],
+    updatedAt: row.updated_at
+  };
+}
+
+const SUGGESTION_SELECT =
+  "id,qb_list_id,qb_full_name,qb_name,status,suggested_account_id,rank_score,rank_method,conflict_reason,candidate_accounts,updated_at";
+
 /**
+ * Operator inbox listing (capped). Prefer listAllAdQbLinkSuggestionsForIndex for AD list/summary badges.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} organizationId
  * @param {{ statuses?: string[], limit?: number }} [opts]
@@ -209,9 +229,7 @@ export async function listAdQbLinkSuggestions(supabase, organizationId, opts = {
   try {
     const { data, error } = await supabase
       .from("ad_qb_link_suggestions")
-      .select(
-        "id,qb_list_id,qb_full_name,qb_name,status,suggested_account_id,rank_score,rank_method,conflict_reason,candidate_accounts,updated_at"
-      )
+      .select(SUGGESTION_SELECT)
       .eq("organization_id", organizationId)
       .in("status", statuses)
       .order("updated_at", { ascending: false })
@@ -222,20 +240,60 @@ export async function listAdQbLinkSuggestions(supabase, organizationId, opts = {
     }
     return {
       ok: true,
-      items: (data || []).map((row) => ({
-        id: row.id,
-        qbListId: row.qb_list_id,
-        qbFullName: row.qb_full_name,
-        qbName: row.qb_name,
-        status: row.status,
-        suggestedAccountId: row.suggested_account_id,
-        rankScore: row.rank_score,
-        rankMethod: row.rank_method,
-        conflictReason: row.conflict_reason,
-        candidateAccounts: row.candidate_accounts || [],
-        updatedAt: row.updated_at
-      }))
+      items: (data || []).map(mapSuggestionRow)
     };
+  } catch (e) {
+    return { ok: false, unavailable: true, items: [], error: String(e?.message ?? e).slice(0, 200) };
+  }
+}
+
+/** Page size for complete enrichment index loads (must exceed production open suggestion volume). */
+export const AD_QB_SUGGESTION_INDEX_PAGE_SIZE = 1000;
+export const AD_QB_SUGGESTION_INDEX_MAX_ROWS = 100000;
+
+/**
+ * Load all open/review/conflict suggestions for account enrichment indexing.
+ * Paginates past the inbox 500-row cap so summary counts and list filters stay aligned.
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} organizationId
+ * @param {{ statuses?: string[], pageSize?: number, maxRows?: number }} [opts]
+ */
+export async function listAllAdQbLinkSuggestionsForIndex(supabase, organizationId, opts = {}) {
+  const statuses = opts.statuses?.length
+    ? opts.statuses
+    : ["open", "needs_review", "conflict"];
+  const pageSize = Math.min(
+    Math.max(Number(opts.pageSize) || AD_QB_SUGGESTION_INDEX_PAGE_SIZE, 1),
+    AD_QB_SUGGESTION_INDEX_PAGE_SIZE
+  );
+  const maxRows = Math.min(
+    Math.max(Number(opts.maxRows) || AD_QB_SUGGESTION_INDEX_MAX_ROWS, pageSize),
+    AD_QB_SUGGESTION_INDEX_MAX_ROWS
+  );
+  /** @type {Array<object>} */
+  const items = [];
+  let from = 0;
+  try {
+    while (from < maxRows) {
+      const to = Math.min(from + pageSize - 1, maxRows - 1);
+      const { data, error } = await supabase
+        .from("ad_qb_link_suggestions")
+        .select(SUGGESTION_SELECT)
+        .eq("organization_id", organizationId)
+        .in("status", statuses)
+        .order("qb_list_id", { ascending: true })
+        .range(from, to);
+      if (error) {
+        if (isMissingRelationError(error)) return { ok: false, unavailable: true, items: [] };
+        throw error;
+      }
+      if (!data?.length) break;
+      items.push(...data.map(mapSuggestionRow));
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+    return { ok: true, items, truncated: items.length >= maxRows };
   } catch (e) {
     return { ok: false, unavailable: true, items: [], error: String(e?.message ?? e).slice(0, 200) };
   }

@@ -6,6 +6,7 @@
 const VALID_TABS = ["accounts", "prospects", "needs_review", "archived"];
 const VALID_PAGE_SIZES = [25, 50, 100];
 const VALID_SORTS = ["name_asc", "name_desc", "updated_desc", "updated_asc"];
+const VALID_QB_ENRICHMENT = ["suggested_match", "needs_review", "not_linked"];
 
 /**
  * Parse URLSearchParams string → structured URL state.
@@ -27,6 +28,9 @@ export function parseUrlState(searchStr) {
   const rawSort = p.get("sort") ?? "";
   const sort = VALID_SORTS.includes(rawSort) ? rawSort : "name_asc";
 
+  const rawQbEnrichment = p.get("qbEnrichment") ?? "";
+  const qbEnrichment = VALID_QB_ENRICHMENT.includes(rawQbEnrichment) ? rawQbEnrichment : "";
+
   return {
     tab,
     page,
@@ -36,6 +40,7 @@ export function parseUrlState(searchStr) {
     linked: p.get("linked") ?? "",
     missingContact: p.get("missingContact") ?? "",
     missingLocation: p.get("missingLocation") ?? "",
+    qbEnrichment,
     sort,
     account: p.get("account") ?? null,
   };
@@ -55,6 +60,7 @@ export function serializeUrlState(state) {
   if (state.linked) p.set("linked", state.linked);
   if (state.missingContact) p.set("missingContact", state.missingContact);
   if (state.missingLocation) p.set("missingLocation", state.missingLocation);
+  if (state.qbEnrichment) p.set("qbEnrichment", state.qbEnrichment);
   if (state.sort && state.sort !== "name_asc") p.set("sort", state.sort);
   if (state.account) p.set("account", state.account);
   const q = p.toString();

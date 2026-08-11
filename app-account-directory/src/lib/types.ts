@@ -123,6 +123,7 @@ export type AccountListParams = {
   linked?: string;
   missingContact?: string;
   missingLocation?: string;
+  qbEnrichment?: string;
 };
 
 export type AccountListResponse = {

@@ -160,7 +160,8 @@ export function attachAccountDirectoryRoutes(app, deps) {
         sort: req.query?.sort,
         linked: req.query?.linked,
         missingContact: req.query?.missingContact,
-        missingLocation: req.query?.missingLocation
+        missingLocation: req.query?.missingLocation,
+        qbEnrichment: req.query?.qbEnrichment
       });
       res.json({ ok: true, ...data });
     });

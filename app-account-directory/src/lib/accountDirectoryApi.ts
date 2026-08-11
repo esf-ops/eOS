@@ -43,7 +43,8 @@ export async function listAccounts(token: string, opts: AccountListParams) {
       sort: opts.sort,
       linked: opts.linked,
       missingContact: opts.missingContact,
-      missingLocation: opts.missingLocation
+      missingLocation: opts.missingLocation,
+      qbEnrichment: opts.qbEnrichment
     })}`,
     token
   )) as AccountListResponse;

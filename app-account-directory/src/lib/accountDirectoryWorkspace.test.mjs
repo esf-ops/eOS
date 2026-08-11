@@ -26,6 +26,7 @@ assert.equal(defaultState.status, "", "default status = ''");
 assert.equal(defaultState.linked, "", "default linked = ''");
 assert.equal(defaultState.missingContact, "", "default missingContact = ''");
 assert.equal(defaultState.missingLocation, "", "default missingLocation = ''");
+assert.equal(defaultState.qbEnrichment, "", "default qbEnrichment = ''");
 assert.equal(defaultState.sort, "name_asc", "default sort = name_asc");
 assert.equal(defaultState.account, null, "default account = null");
 console.log("ok: parseUrlState defaults");
@@ -40,7 +41,16 @@ assert.equal(fullState.linked, "true");
 assert.equal(fullState.missingContact, "true");
 assert.equal(fullState.sort, "updated_desc");
 assert.equal(fullState.account, "abc123");
+assert.equal(fullState.qbEnrichment, "");
 console.log("ok: parseUrlState full params");
+
+const qbEnrichState = parseUrlState("?tab=accounts&qbEnrichment=needs_review");
+assert.equal(qbEnrichState.tab, "accounts");
+assert.equal(qbEnrichState.qbEnrichment, "needs_review");
+const qbInvalid = parseUrlState("?qbEnrichment=bogus&tab=needs_review");
+assert.equal(qbInvalid.qbEnrichment, "", "invalid qbEnrichment ignored");
+assert.equal(qbInvalid.tab, "needs_review", "native needs_review tab unchanged");
+console.log("ok: parseUrlState qbEnrichment");
 
 // Invalid values fall back safely
 const invalidState = parseUrlState("?tab=invalid&page=-5&pageSize=999&sort=badSort");
@@ -52,11 +62,11 @@ console.log("ok: parseUrlState invalid params fall back safely");
 
 // ── serializeUrlState ──────────────────────────────────────────────────────
 
-const emptySerial = serializeUrlState({ tab: "accounts", page: 1, pageSize: 50, search: "", status: "", linked: "", missingContact: "", missingLocation: "", sort: "name_asc", account: null });
+const emptySerial = serializeUrlState({ tab: "accounts", page: 1, pageSize: 50, search: "", status: "", linked: "", missingContact: "", missingLocation: "", qbEnrichment: "", sort: "name_asc", account: null });
 assert.equal(emptySerial, "", "defaults serialize to empty string");
 console.log("ok: serializeUrlState omits defaults");
 
-const fullSerial = serializeUrlState({ tab: "prospects", page: 3, pageSize: 25, search: "Smith", status: "active", linked: "true", missingContact: "", missingLocation: "", sort: "updated_desc", account: "abc" });
+const fullSerial = serializeUrlState({ tab: "prospects", page: 3, pageSize: 25, search: "Smith", status: "active", linked: "true", missingContact: "", missingLocation: "", qbEnrichment: "", sort: "updated_desc", account: "abc" });
 assert.ok(fullSerial.includes("tab=prospects"));
 assert.ok(fullSerial.includes("page=3"));
 assert.ok(fullSerial.includes("pageSize=25"));
@@ -66,6 +76,23 @@ assert.ok(fullSerial.includes("linked=true"));
 assert.ok(fullSerial.includes("sort=updated_desc"));
 assert.ok(fullSerial.includes("account=abc"));
 console.log("ok: serializeUrlState includes non-default values");
+
+const qbSerial = serializeUrlState({
+  tab: "accounts",
+  page: 1,
+  pageSize: 50,
+  search: "",
+  status: "",
+  linked: "",
+  missingContact: "",
+  missingLocation: "",
+  qbEnrichment: "suggested_match",
+  sort: "name_asc",
+  account: null
+});
+assert.equal(qbSerial, "?qbEnrichment=suggested_match");
+assert.equal(parseUrlState(qbSerial).qbEnrichment, "suggested_match");
+console.log("ok: serializeUrlState qbEnrichment round-trip");
 
 // round-trip
 const rt = parseUrlState(serializeUrlState(fullState));

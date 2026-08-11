@@ -4,10 +4,16 @@ import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
 import { isAccountQuickbooksLinked } from "./accountDirectoryQuickbooksLinkage.mjs";
 import {
   indexSuggestionsByAccountId,
-  listAdQbLinkSuggestions,
+  listAllAdQbLinkSuggestionsForIndex,
   markSuggestionLinked,
   resolveAccountQbEnrichmentLabel
 } from "./qbCustomerEnrichment/feedStatus.js";
+
+export const AD_QB_ENRICHMENT_FILTERS = Object.freeze([
+  "suggested_match",
+  "needs_review",
+  "not_linked"
+]);
 
 export { AccountDirectoryError };
 
@@ -160,18 +166,37 @@ export function createAccountDirectoryService(deps) {
   }
 
   async function loadSuggestionIndex(organizationId) {
+    if (typeof deps.loadSuggestionIndex === "function") {
+      return deps.loadSuggestionIndex(organizationId);
+    }
     if (typeof deps.getSupabase !== "function") return new Map();
     try {
       const supabase = deps.getSupabase();
-      const listed = await listAdQbLinkSuggestions(supabase, organizationId, {
-        statuses: ["open", "needs_review", "conflict"],
-        limit: 500
+      const listed = await listAllAdQbLinkSuggestionsForIndex(supabase, organizationId, {
+        statuses: ["open", "needs_review", "conflict"]
       });
       if (!listed.ok) return new Map();
       return indexSuggestionsByAccountId(listed.items);
     } catch {
       return new Map();
     }
+  }
+
+  /**
+   * Filter enriched list rows by qbEnrichment code (after attachEnrichment, before pagination).
+   * @param {Array<object>} enrichedItems
+   * @param {string|null|undefined} qbEnrichment
+   */
+  function filterByQbEnrichment(enrichedItems, qbEnrichment) {
+    const code = String(qbEnrichment ?? "")
+      .trim()
+      .toLowerCase();
+    if (!code) return enrichedItems;
+    if (!AD_QB_ENRICHMENT_FILTERS.includes(code)) return enrichedItems;
+    return enrichedItems.filter((item) => {
+      const itemCode = String(item.qbEnrichmentCode || item.qbEnrichment?.code || "").trim();
+      return itemCode === code;
+    });
   }
 
   function groupByAccountId(rows) {
@@ -412,7 +437,8 @@ export function createAccountDirectoryService(deps) {
       sort,
       linked,
       missingContact,
-      missingLocation
+      missingLocation,
+      qbEnrichment
     }) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW);
       const limit = Math.min(Math.max(Number(pageSize) || DEFAULT_PAGE, 1), MAX_PAGE);
@@ -431,7 +457,8 @@ export function createAccountDirectoryService(deps) {
       );
       const suggestionByAccount = await loadSuggestionIndex(organizationId);
       const enriched = sortedItems.map((item) => attachEnrichment(item, suggestionByAccount));
-      return paginationResult(enriched, pageNum, limit);
+      const enrichmentFiltered = filterByQbEnrichment(enriched, qbEnrichment);
+      return paginationResult(enrichmentFiltered, pageNum, limit);
     },
 
     async getSummary({ organizationId, role }) {
@@ -455,13 +482,15 @@ export function createAccountDirectoryService(deps) {
       };
       for (const row of rows) {
         const status = row.item.status;
-        if (status === "archived" || row.account.archivedAt) summary.archived += 1;
+        const isArchived = status === "archived" || Boolean(row.account.archivedAt);
+        if (isArchived) summary.archived += 1;
         else if (status === "prospect") summary.prospects += 1;
         else if (status === "needs_review") summary.needsReview += 1;
         else if (status === "active" || status === "inactive") summary.active += 1;
 
         if (row.item.quickbooksLinked) summary.quickbooksLinked += 1;
-        else {
+        else if (!isArchived) {
+          // Align with tab=accounts + qbEnrichment=* (accounts tab excludes archived).
           const enr = attachEnrichment(row.item, suggestionByAccount).qbEnrichment;
           if (enr.code === "suggested_match") summary.qbSuggestedMatch += 1;
           if (enr.code === "needs_review") summary.qbNeedsReview += 1;
