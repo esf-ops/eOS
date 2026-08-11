@@ -6,6 +6,10 @@ import assert from "node:assert/strict";
 import {
   parseUrlState,
   serializeUrlState,
+  applySummaryCardPreset,
+  isSummaryCardActive,
+  applyToolbarFilterPatch,
+  SUMMARY_CARD_PRESETS,
   formatResultRange,
   buildPageNumbers,
   activityLabel,
@@ -103,6 +107,126 @@ assert.equal(rt.search, fullState.search);
 assert.equal(rt.sort, fullState.sort);
 assert.equal(rt.account, fullState.account);
 console.log("ok: serializeUrlState round-trip");
+
+// ── Exclusive summary card presets ─────────────────────────────────────────
+
+const dirtyState = {
+  tab: "prospects",
+  page: 4,
+  pageSize: 25,
+  search: "leftover",
+  status: "active",
+  linked: "true",
+  missingContact: "true",
+  missingLocation: "true",
+  qbEnrichment: "needs_review",
+  sort: "updated_desc",
+  account: "acct-open"
+};
+
+const expectedScopes = {
+  total: { tab: "accounts", status: "", linked: "", qbEnrichment: "", missingContact: "", missingLocation: "" },
+  active: { tab: "accounts", status: "active", linked: "", qbEnrichment: "", missingContact: "", missingLocation: "" },
+  prospects: { tab: "prospects", status: "", linked: "", qbEnrichment: "", missingContact: "", missingLocation: "" },
+  needsReview: { tab: "needs_review", status: "", linked: "", qbEnrichment: "", missingContact: "", missingLocation: "" },
+  archived: { tab: "archived", status: "", linked: "", qbEnrichment: "", missingContact: "", missingLocation: "" },
+  qbLinked: { tab: "accounts", status: "", linked: "true", qbEnrichment: "", missingContact: "", missingLocation: "" },
+  qbSuggested: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "suggested_match",
+    missingContact: "",
+    missingLocation: ""
+  },
+  qbNeedsReview: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "needs_review",
+    missingContact: "",
+    missingLocation: ""
+  },
+  noContact: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "true",
+    missingLocation: ""
+  },
+  noLocation: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "",
+    missingLocation: "true"
+  }
+};
+
+for (const [cardKey, scope] of Object.entries(expectedScopes)) {
+  const next = applySummaryCardPreset(dirtyState, cardKey);
+  assert.equal(next.search, "", `${cardKey} clears search`);
+  assert.equal(next.page, 1, `${cardKey} resets page`);
+  assert.equal(next.account, null, `${cardKey} clears account selection`);
+  assert.equal(next.tab, scope.tab, `${cardKey} tab`);
+  assert.equal(next.status, scope.status, `${cardKey} status`);
+  assert.equal(next.linked, scope.linked, `${cardKey} linked`);
+  assert.equal(next.qbEnrichment, scope.qbEnrichment, `${cardKey} qbEnrichment`);
+  assert.equal(next.missingContact, scope.missingContact, `${cardKey} missingContact`);
+  assert.equal(next.missingLocation, scope.missingLocation, `${cardKey} missingLocation`);
+  assert.equal(next.pageSize, 25, `${cardKey} preserves pageSize`);
+  assert.equal(next.sort, "updated_desc", `${cardKey} preserves sort`);
+  assert.equal(isSummaryCardActive(next, cardKey), true, `${cardKey} active after apply`);
+  // Same exclusive scope whether prior filters were dirty or clean
+  const fromClean = applySummaryCardPreset(
+    { ...dirtyState, search: "", status: "", linked: "", missingContact: "", missingLocation: "", qbEnrichment: "", page: 1, account: null, tab: "accounts" },
+    cardKey
+  );
+  assert.equal(serializeUrlState({ ...next, pageSize: 50, sort: "name_asc" }), serializeUrlState({ ...fromClean, pageSize: 50, sort: "name_asc" }));
+}
+assert.equal(Object.keys(SUMMARY_CARD_PRESETS).length, Object.keys(expectedScopes).length);
+console.log("ok: summary cards are exclusive presets and do not inherit prior filters");
+
+// Toolbar remains stackable except contradictory QB filters
+const stacked = applyToolbarFilterPatch(
+  parseUrlState("?status=active"),
+  { missingContact: "true" }
+);
+assert.equal(stacked.status, "active");
+assert.equal(stacked.missingContact, "true");
+assert.equal(stacked.page, 1);
+
+const linkedClearsEnrichment = applyToolbarFilterPatch(
+  parseUrlState("?qbEnrichment=needs_review"),
+  { linked: "true" }
+);
+assert.equal(linkedClearsEnrichment.linked, "true");
+assert.equal(linkedClearsEnrichment.qbEnrichment, "");
+
+const enrichmentClearsLinked = applyToolbarFilterPatch(
+  parseUrlState("?linked=true"),
+  { qbEnrichment: "suggested_match" }
+);
+assert.equal(enrichmentClearsLinked.qbEnrichment, "suggested_match");
+assert.equal(enrichmentClearsLinked.linked, "");
+
+const pageOnly = applyToolbarFilterPatch(parseUrlState("?page=2&status=active"), { page: 3 });
+assert.equal(pageOnly.page, 3);
+assert.equal(pageOnly.status, "active");
+console.log("ok: toolbar stackable filters + contradictory QB mutual exclusion");
+
+// Dirty leftover filters mean summary card is not active
+assert.equal(
+  isSummaryCardActive(parseUrlState("?qbEnrichment=needs_review&search=x"), "qbNeedsReview"),
+  false
+);
+assert.equal(
+  isSummaryCardActive(parseUrlState("?qbEnrichment=needs_review"), "qbNeedsReview"),
+  true
+);
+console.log("ok: isSummaryCardActive requires exclusive match");
 
 // ── formatResultRange ──────────────────────────────────────────────────────
 

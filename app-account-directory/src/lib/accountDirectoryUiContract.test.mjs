@@ -39,12 +39,16 @@ assert.ok(app.includes("Archived"));
 assert.ok(app.includes("New account"));
 assert.ok(app.includes("QuickBooks restricted"));
 assert.ok(app.includes("permission-denied"));
-assert.ok(app.includes("qbEnrichment=suggested_match") || app.includes('qbEnrichment: "suggested_match"'));
-assert.ok(app.includes("qbEnrichment=needs_review") || app.includes('qbEnrichment: "needs_review"'));
+assert.ok(app.includes("qbEnrichment=suggested_match") || app.includes('qbEnrichment: "suggested_match"') || workspace.includes('qbEnrichment: "suggested_match"'));
+assert.ok(app.includes("qbEnrichment=needs_review") || app.includes('qbEnrichment: "needs_review"') || workspace.includes('qbEnrichment: "needs_review"'));
 assert.ok(app.includes("QB Needs Review"));
 assert.ok(workspace.includes("qbEnrichment"));
+assert.ok(workspace.includes("applySummaryCardPreset"));
+assert.ok(workspace.includes("applyToolbarFilterPatch"));
+assert.ok(app.includes("applySummaryCard"));
+assert.ok(app.includes("onApplyCard"));
 assert.ok(api.includes("qbEnrichment"));
-console.log("ok: nav tabs, qbEnrichment filter, and Account Needs Review labeling");
+console.log("ok: nav tabs, qbEnrichment filter, exclusive summary presets, and Account Needs Review labeling");
 
 // ── API client ─────────────────────────────────────────────────────────────
 assert.ok(api.includes('const BASE = "/api/account-directory"'));

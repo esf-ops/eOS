@@ -684,6 +684,52 @@ async function main() {
     });
     assert.equal(after.displayName, beforeName);
     assert.equal((after.externalLinks || []).filter((l) => l.isActive !== false).length, beforeLinks);
+
+    // Exclusive summary-card scopes (no leftover filters) match summary counts for aligned cards
+    const exclusiveQbNeeds = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      tab: "accounts",
+      status: "",
+      search: "",
+      linked: "",
+      missingContact: "",
+      missingLocation: "",
+      qbEnrichment: "needs_review",
+      page: 1,
+      pageSize: 100
+    });
+    assert.equal(exclusiveQbNeeds.total, summary.qbNeedsReview);
+
+    const exclusiveQbSuggested = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      tab: "accounts",
+      status: "",
+      search: "",
+      linked: "",
+      missingContact: "",
+      missingLocation: "",
+      qbEnrichment: "suggested_match",
+      page: 1,
+      pageSize: 100
+    });
+    assert.equal(exclusiveQbSuggested.total, summary.qbSuggestedMatch);
+
+    const exclusiveNativeReview = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      tab: "needs_review",
+      status: "",
+      search: "",
+      linked: "",
+      missingContact: "",
+      missingLocation: "",
+      qbEnrichment: "",
+      page: 1,
+      pageSize: 100
+    });
+    assert.equal(exclusiveNativeReview.total, summary.needsReview);
   }
 
   console.log("accountDirectoryService.test.mjs: ok");

@@ -8,6 +8,90 @@ const VALID_PAGE_SIZES = [25, 50, 100];
 const VALID_SORTS = ["name_asc", "name_desc", "updated_desc", "updated_asc"];
 const VALID_QB_ENRICHMENT = ["suggested_match", "needs_review", "not_linked"];
 
+/** Summary strip cards — exclusive presets (not stackable with leftover filters). */
+export const SUMMARY_CARD_PRESETS = Object.freeze({
+  total: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "",
+    missingLocation: ""
+  },
+  active: {
+    tab: "accounts",
+    status: "active",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "",
+    missingLocation: ""
+  },
+  prospects: {
+    tab: "prospects",
+    status: "",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "",
+    missingLocation: ""
+  },
+  needsReview: {
+    tab: "needs_review",
+    status: "",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "",
+    missingLocation: ""
+  },
+  archived: {
+    tab: "archived",
+    status: "",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "",
+    missingLocation: ""
+  },
+  qbLinked: {
+    tab: "accounts",
+    status: "",
+    linked: "true",
+    qbEnrichment: "",
+    missingContact: "",
+    missingLocation: ""
+  },
+  qbSuggested: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "suggested_match",
+    missingContact: "",
+    missingLocation: ""
+  },
+  qbNeedsReview: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "needs_review",
+    missingContact: "",
+    missingLocation: ""
+  },
+  noContact: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "true",
+    missingLocation: ""
+  },
+  noLocation: {
+    tab: "accounts",
+    status: "",
+    linked: "",
+    qbEnrichment: "",
+    missingContact: "",
+    missingLocation: "true"
+  }
+});
+
 /**
  * Parse URLSearchParams string → structured URL state.
  * Falls back safely for invalid/missing values.
@@ -65,6 +149,89 @@ export function serializeUrlState(state) {
   if (state.account) p.set("account", state.account);
   const q = p.toString();
   return q ? `?${q}` : "";
+}
+
+/**
+ * Apply an exclusive summary-card preset: clear search/filters/page/account, then set only that card's scope.
+ * Preserves pageSize + sort.
+ * @param {ReturnType<typeof parseUrlState>} prev
+ * @param {keyof typeof SUMMARY_CARD_PRESETS} cardKey
+ */
+export function applySummaryCardPreset(prev, cardKey) {
+  const preset = SUMMARY_CARD_PRESETS[cardKey];
+  if (!preset) {
+    return {
+      ...prev,
+      search: "",
+      status: "",
+      linked: "",
+      qbEnrichment: "",
+      missingContact: "",
+      missingLocation: "",
+      page: 1,
+      account: null
+    };
+  }
+  return {
+    ...prev,
+    search: "",
+    page: 1,
+    account: null,
+    tab: preset.tab,
+    status: preset.status,
+    linked: preset.linked,
+    qbEnrichment: preset.qbEnrichment,
+    missingContact: preset.missingContact,
+    missingLocation: preset.missingLocation
+  };
+}
+
+/**
+ * True when URL state matches exactly that summary card's exclusive preset (no leftover filters/search).
+ * @param {ReturnType<typeof parseUrlState>} state
+ * @param {keyof typeof SUMMARY_CARD_PRESETS} cardKey
+ */
+export function isSummaryCardActive(state, cardKey) {
+  const preset = SUMMARY_CARD_PRESETS[cardKey];
+  if (!preset || !state) return false;
+  return (
+    !state.search &&
+    state.tab === preset.tab &&
+    (state.status || "") === preset.status &&
+    (state.linked || "") === preset.linked &&
+    (state.qbEnrichment || "") === preset.qbEnrichment &&
+    (state.missingContact || "") === preset.missingContact &&
+    (state.missingLocation || "") === preset.missingLocation
+  );
+}
+
+/**
+ * Toolbar filter patch: stackable, except contradictory QB linked vs qbEnrichment.
+ * - linked=true clears qbEnrichment
+ * - non-empty qbEnrichment clears linked
+ * @param {ReturnType<typeof parseUrlState>} prev
+ * @param {Partial<ReturnType<typeof parseUrlState>>} patch
+ */
+export function applyToolbarFilterPatch(prev, patch) {
+  const keys = Object.keys(patch || {});
+  const isPageOnly = keys.length > 0 && keys.every((k) => k === "page");
+  /** @type {ReturnType<typeof parseUrlState>} */
+  const next = {
+    ...prev,
+    ...patch,
+    page: isPageOnly ? (patch.page ?? prev.page) : 1
+  };
+
+  if (Object.prototype.hasOwnProperty.call(patch, "linked") && String(patch.linked) === "true") {
+    next.qbEnrichment = "";
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(patch, "qbEnrichment") &&
+    String(patch.qbEnrichment || "").trim()
+  ) {
+    next.linked = "";
+  }
+  return next;
 }
 
 /**
