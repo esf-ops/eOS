@@ -6,12 +6,18 @@
  * - Conflict flags when name matches an account already linked to a different ListID
  * - Jobs never become suggestions or AD links
  * - Never auto-link, never mutate AD identity fields
+ * - Human terminal statuses (dismissed, linked) are preserved across syncs;
+ *   ranking/context may refresh without reopening those rows. Exact ListID
+ *   match may upgrade to reconciled (still terminal).
  */
 
 import { ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM } from "../accountDirectoryQuickbooksLinkage.mjs";
 import { rankAccountCandidates } from "./nameRank.js";
 
 const SUGGESTION_PAGE = 1000;
+
+/** Intentional human/system terminal statuses that must not reopen to open/needs_review/conflict. */
+export const AD_QB_HUMAN_TERMINAL_STATUSES = new Set(["dismissed", "linked"]);
 
 function isMissingRelationError(error) {
   const msg = String(error?.message || "");
@@ -20,22 +26,49 @@ function isMissingRelationError(error) {
 }
 
 /**
+ * Preserve human terminal suggestion decisions while allowing ranking/context refresh.
+ * Exact ListID match (planned reconciled) may upgrade dismissed/linked → reconciled.
+ *
+ * @param {object} planned
+ * @param {object|null|undefined} existing
+ */
+export function applySuggestionUpsertPreservation(planned, existing) {
+  if (!existing) return planned;
+  const existingStatus = String(existing.status ?? "").trim();
+  if (!AD_QB_HUMAN_TERMINAL_STATUSES.has(existingStatus)) {
+    return planned;
+  }
+  if (planned.status === "reconciled") {
+    return planned;
+  }
+  return {
+    ...planned,
+    status: existingStatus,
+    resolved_at: existing.resolved_at ?? existing.resolvedAt ?? null,
+    resolution_action: existing.resolution_action ?? existing.resolutionAction ?? null
+  };
+}
+
+/**
  * Pure reconciliation planner (no I/O) — used by tests.
  *
  * @param {{
  *   rootFacts: Array<object>,
  *   linksByListId: Map<string, { accountId: string, externalId: string }>,
- *   accounts: Array<object>
+ *   accounts: Array<object>,
+ *   existingSuggestionsByListId?: Map<string, object>
  * }} input
  */
 export function planAdQbCustomerReconciliation(input) {
-  const { rootFacts, linksByListId, accounts } = input;
+  const { rootFacts, linksByListId, accounts, existingSuggestionsByListId } = input;
+  const existingMap = existingSuggestionsByListId || new Map();
   /** @type {Array<object>} */
   const upserts = [];
   let reconciled = 0;
   let open = 0;
   let needsReview = 0;
   let conflict = 0;
+  let preservedTerminal = 0;
   let skippedInactive = 0;
   let skippedJobs = 0;
 
@@ -47,10 +80,12 @@ export function planAdQbCustomerReconciliation(input) {
     const listId = String(fact.qb_list_id ?? "").trim();
     if (!listId) continue;
 
+    const existing = existingMap.get(listId) || null;
     const existingLink = linksByListId.get(listId);
+    /** @type {object} */
+    let planned;
     if (existingLink) {
-      reconciled += 1;
-      upserts.push({
+      planned = {
         qb_list_id: listId,
         qb_full_name: fact.full_name ?? null,
         qb_name: fact.name ?? null,
@@ -68,57 +103,84 @@ export function planAdQbCustomerReconciliation(input) {
         ],
         resolved_at: new Date().toISOString(),
         resolution_action: "exact_list_id_match"
-      });
-      continue;
-    }
-
-    if (fact.is_active === false) {
-      skippedInactive += 1;
-      continue;
-    }
-
-    const ranked = rankAccountCandidates(
-      { fullName: fact.full_name, name: fact.name },
-      accounts
-    );
-    const top = ranked[0] || null;
-    const conflictHit = ranked.find(
-      (c) => c.accountAlreadyQbLinked && c.accountLinkedListId && c.accountLinkedListId !== listId
-    );
-
-    let status = "open";
-    let conflictReason = null;
-    if (conflictHit) {
-      status = "conflict";
-      conflictReason = "name_matches_account_linked_to_different_list_id";
-      conflict += 1;
-    } else if (!top) {
-      status = "open";
-      open += 1;
-    } else if (ranked.filter((c) => c.score >= 0.85).length > 1) {
-      status = "needs_review";
-      needsReview += 1;
-    } else if (top.score < 0.85) {
-      status = "needs_review";
-      needsReview += 1;
+      };
+    } else if (fact.is_active === false) {
+      // Inactive unlinked roots: if a human terminal row exists, refresh context only.
+      if (existing && AD_QB_HUMAN_TERMINAL_STATUSES.has(String(existing.status ?? ""))) {
+        planned = {
+          qb_list_id: listId,
+          qb_full_name: fact.full_name ?? null,
+          qb_name: fact.name ?? null,
+          status: "open",
+          suggested_account_id: existing.suggested_account_id ?? existing.suggestedAccountId ?? null,
+          rank_score: existing.rank_score ?? existing.rankScore ?? null,
+          rank_method: existing.rank_method ?? existing.rankMethod ?? null,
+          conflict_reason: null,
+          candidate_accounts: existing.candidate_accounts ?? existing.candidateAccounts ?? [],
+          resolved_at: null,
+          resolution_action: null
+        };
+      } else {
+        skippedInactive += 1;
+        continue;
+      }
     } else {
-      status = "open";
-      open += 1;
+      const ranked = rankAccountCandidates(
+        { fullName: fact.full_name, name: fact.name },
+        accounts
+      );
+      const top = ranked[0] || null;
+      const conflictHit = ranked.find(
+        (c) => c.accountAlreadyQbLinked && c.accountLinkedListId && c.accountLinkedListId !== listId
+      );
+
+      let status = "open";
+      let conflictReason = null;
+      if (conflictHit) {
+        status = "conflict";
+        conflictReason = "name_matches_account_linked_to_different_list_id";
+      } else if (!top) {
+        status = "open";
+      } else if (ranked.filter((c) => c.score >= 0.85).length > 1) {
+        status = "needs_review";
+      } else if (top.score < 0.85) {
+        status = "needs_review";
+      } else {
+        status = "open";
+      }
+
+      planned = {
+        qb_list_id: listId,
+        qb_full_name: fact.full_name ?? null,
+        qb_name: fact.name ?? null,
+        status,
+        suggested_account_id: top?.accountId ?? null,
+        rank_score: top?.score ?? null,
+        rank_method: top?.method ?? null,
+        conflict_reason: conflictReason,
+        candidate_accounts: ranked,
+        resolved_at: null,
+        resolution_action: null
+      };
     }
 
-    upserts.push({
-      qb_list_id: listId,
-      qb_full_name: fact.full_name ?? null,
-      qb_name: fact.name ?? null,
-      status,
-      suggested_account_id: top?.accountId ?? null,
-      rank_score: top?.score ?? null,
-      rank_method: top?.method ?? null,
-      conflict_reason: conflictReason,
-      candidate_accounts: ranked,
-      resolved_at: null,
-      resolution_action: null
-    });
+    const finalRow = applySuggestionUpsertPreservation(planned, existing);
+    if (
+      existing &&
+      AD_QB_HUMAN_TERMINAL_STATUSES.has(String(existing.status ?? "")) &&
+      finalRow.status !== "reconciled" &&
+      finalRow.status === String(existing.status ?? "")
+    ) {
+      preservedTerminal += 1;
+    }
+
+    if (finalRow.status === "reconciled") reconciled += 1;
+    else if (finalRow.status === "conflict") conflict += 1;
+    else if (finalRow.status === "needs_review") needsReview += 1;
+    else if (finalRow.status === "open") open += 1;
+    // dismissed / linked do not count toward open inbox
+
+    upserts.push(finalRow);
   }
 
   return {
@@ -128,6 +190,7 @@ export function planAdQbCustomerReconciliation(input) {
       open,
       needsReview,
       conflict,
+      preservedTerminal,
       skippedInactive,
       skippedJobs,
       openCount: open + needsReview + conflict
@@ -157,6 +220,36 @@ async function loadRootFacts(supabase, organizationId) {
     from += SUGGESTION_PAGE;
   }
   return rows;
+}
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} organizationId
+ * @returns {Promise<Map<string, object>>}
+ */
+async function loadExistingSuggestionsByListId(supabase, organizationId) {
+  /** @type {Map<string, object>} */
+  const map = new Map();
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("ad_qb_link_suggestions")
+      .select(
+        "qb_list_id,status,suggested_account_id,rank_score,rank_method,conflict_reason,candidate_accounts,resolved_at,resolution_action"
+      )
+      .eq("organization_id", organizationId)
+      .order("qb_list_id", { ascending: true })
+      .range(from, from + SUGGESTION_PAGE - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+    for (const row of data) {
+      const listId = String(row.qb_list_id ?? "").trim();
+      if (listId) map.set(listId, row);
+    }
+    if (data.length < SUGGESTION_PAGE) break;
+    from += SUGGESTION_PAGE;
+  }
+  return map;
 }
 
 /**
@@ -308,6 +401,16 @@ export async function runAdQbCustomerReconciliation(supabase, params) {
     loaded = await loadLinksAndAccountsFromSupabase(supabase, organizationId);
   }
 
+  let existingSuggestionsByListId;
+  try {
+    existingSuggestionsByListId = await loadExistingSuggestionsByListId(supabase, organizationId);
+  } catch (e) {
+    if (isMissingRelationError(e)) {
+      return { ok: false, unavailable: true, error: "ad_qb_link_suggestions missing", openCount: 0 };
+    }
+    throw e;
+  }
+
   /** @type {Map<string, { accountId: string, externalId: string }>} */
   const linksByListId = new Map();
   for (const link of loaded.links || []) {
@@ -323,7 +426,8 @@ export async function runAdQbCustomerReconciliation(supabase, params) {
   const plan = planAdQbCustomerReconciliation({
     rootFacts,
     linksByListId,
-    accounts: loaded.accounts || []
+    accounts: loaded.accounts || [],
+    existingSuggestionsByListId
   });
 
   const now = new Date().toISOString();

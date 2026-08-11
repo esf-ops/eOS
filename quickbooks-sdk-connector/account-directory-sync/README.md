@@ -15,10 +15,24 @@
 #   QB_AD_CUSTOMER_SYNC_INGEST_URL=https://<brain>/api/internal/account-directory/quickbooks-customer-sync
 #   QB_AD_CUSTOMER_SYNC_INGEST_TOKEN=<secret>   # NOT QB_SALES_SYNC_INGEST_TOKEN
 #
+# Live DSN column verification (read-only; run before first ingest):
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-ad-qb-customers.ps1 -DiagnoseColumns
+#
+# Equivalent SQL (same DSN / company file):
+#   SELECT ColumnName, DataType, Length, IsNullable
+#   FROM sys_tablecolumns
+#   WHERE TableName = 'Customers'
+#   ORDER BY ColumnName
+#
+# Expected Customers columns for this worker:
+#   Id, Name, FullName, ParentId, Sublevel, IsActive, BillingCity, BillingState
+# Job detection uses ParentId and/or Sublevel > 0 (not the Job column).
+# Canonical prepared identity: ListID (Id).
+#
 # Dry-run:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-ad-qb-customers.ps1 -DryRun
 #
-# Live ingest (after SQL + token configured):
+# Live ingest (after SQL + token configured + DiagnoseColumns PASS):
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-ad-qb-customers.ps1
 #
 # Optional scheduled task installer is intentionally NOT included in v1 —

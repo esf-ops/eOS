@@ -89,7 +89,19 @@ export function validateCustomerChunk(body) {
         continue;
       }
       const parentListId = pickStr(row?.parent_list_id ?? row?.ParentId, 200);
-      const isJob = toBool(row?.is_job ?? row?.Job, Boolean(parentListId));
+      const sublevelRaw = row?.sublevel ?? row?.Sublevel;
+      const sublevelNum =
+        sublevelRaw == null || sublevelRaw === "" ? null : Number(sublevelRaw);
+      const childBySublevel = Number.isFinite(sublevelNum) && sublevelNum > 0;
+      // Prefer explicit is_job; else ParentId / Sublevel (CData Desktop). Do not require Job column.
+      let isJob;
+      if (row?.is_job != null && row?.is_job !== "") {
+        isJob = toBool(row.is_job, Boolean(parentListId) || childBySublevel);
+      } else if (parentListId || childBySublevel) {
+        isJob = true;
+      } else {
+        isJob = false;
+      }
       // Jobs must carry parent; roots must not invent a parent.
       if (isJob && !parentListId) {
         errors.push(`customers[${i}].parent_list_id required for jobs`);
@@ -103,8 +115,14 @@ export function validateCustomerChunk(body) {
         name: pickStr(row?.name ?? row?.Name, 300),
         full_name: pickStr(row?.full_name ?? row?.FullName, 500),
         is_active: toBool(row?.is_active ?? row?.IsActive, true),
-        bill_city: pickStr(row?.bill_city ?? row?.BillAddress_City, 120),
-        bill_state: pickStr(row?.bill_state ?? row?.BillAddress_State, 64),
+        bill_city: pickStr(
+          row?.bill_city ?? row?.BillingCity ?? row?.BillAddress_City,
+          120
+        ),
+        bill_state: pickStr(
+          row?.bill_state ?? row?.BillingState ?? row?.BillAddress_State,
+          64
+        ),
         synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
@@ -158,6 +176,28 @@ export function validateCompletePayload(body) {
 }
 
 /**
+ * Defense in depth: upsert/complete must target a sync run owned by the org.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} organizationId
+ * @param {string} syncRunId
+ */
+export async function assertSyncRunBelongsToOrg(supabase, organizationId, syncRunId) {
+  const { data, error } = await supabase
+    .from("ad_qb_customer_sync_runs")
+    .select("id,organization_id,status")
+    .eq("id", syncRunId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    const err = new Error("sync_run_id does not belong to organization_id");
+    err.code = "sync_run_org_mismatch";
+    throw err;
+  }
+  return data;
+}
+
+/**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {{ organizationId: string, workerVersion: string, companyName: string|null }} value
  */
@@ -180,8 +220,12 @@ export async function beginSyncRun(supabase, value) {
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {Array<object>} customers
+ * @param {{ organizationId?: string, syncRunId?: string }} [opts]
  */
-export async function upsertCustomerFacts(supabase, customers) {
+export async function upsertCustomerFacts(supabase, customers, opts = {}) {
+  if (opts.organizationId && opts.syncRunId) {
+    await assertSyncRunBelongsToOrg(supabase, opts.organizationId, opts.syncRunId);
+  }
   if (!customers.length) return { upserted: 0 };
   const { error } = await supabase.from("ad_qb_customer_facts").upsert(customers, {
     onConflict: "organization_id,qb_list_id"
@@ -196,6 +240,8 @@ export async function upsertCustomerFacts(supabase, customers) {
  * @param {{ accountDirectoryStore?: any }} [opts]
  */
 export async function completeSyncRun(supabase, value, opts = {}) {
+  await assertSyncRunBelongsToOrg(supabase, value.organizationId, value.syncRunId);
+
   const patch = {
     status: value.status,
     completed_at: new Date().toISOString(),

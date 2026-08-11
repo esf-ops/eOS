@@ -6,6 +6,15 @@
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-ad-qb-customers.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-ad-qb-customers.ps1 -DryRun
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-ad-qb-customers.ps1 -DiagnoseColumns
+#
+# Live DSN column verification (read-only; run before first ingest):
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-ad-qb-customers.ps1 -DiagnoseColumns
+#   # Equivalent SQL against the System DSN:
+#   SELECT ColumnName, DataType, Length, IsNullable
+#   FROM sys_tablecolumns
+#   WHERE TableName = 'Customers'
+#   ORDER BY ColumnName
 #
 # Required env:
 #   QB_AD_CUSTOMER_DSN=slabOS_QuickBooks_Local_RO
@@ -15,15 +24,21 @@
 #   QB_AD_CUSTOMER_SYNC_INGEST_TOKEN=<secret>
 # Optional:
 #   QB_AD_CUSTOMER_SYNC_CHUNK_SIZE=400
+#
+# CData Desktop Customers columns used by this worker:
+#   Id (ListID), Name, FullName, ParentId, Sublevel, IsActive, BillingCity, BillingState
+# Job detection: ParentId present and/or Sublevel > 0 → child job; else root customer.
+# Canonical prepared identity: ListID (Id). The Job boolean column is not used.
 
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$DiagnoseColumns
 )
 
 $ErrorActionPreference = "Stop"
-$WorkerVersion = "1.0.0"
+$WorkerVersion = "1.0.1"
 
 function Get-EnvOrDefault {
     param([string]$Name, [string]$Default = "")
@@ -96,6 +111,25 @@ function Convert-ToBool {
     return $Default
 }
 
+function Test-IsChildJob {
+    param(
+        $ParentId,
+        $Sublevel
+    )
+    $hasParent = $false
+    if ($null -ne $ParentId -and -not [string]::IsNullOrWhiteSpace([string]$ParentId)) {
+        $hasParent = $true
+    }
+    $childSublevel = $false
+    if ($null -ne $Sublevel) {
+        $n = 0
+        if ([int]::TryParse([string]$Sublevel, [ref]$n)) {
+            if ($n -gt 0) { $childSublevel = $true }
+        }
+    }
+    return ($hasParent -or $childSublevel)
+}
+
 function Invoke-Ingest {
     param(
         [Parameter(Mandatory = $true)][string]$Url,
@@ -131,18 +165,45 @@ $chunkRaw = Get-EnvOrDefault "QB_AD_CUSTOMER_SYNC_CHUNK_SIZE" "400"
 if ($chunkSize -lt 50) { $chunkSize = 50 }
 if ($chunkSize -gt 500) { $chunkSize = 500 }
 
-if ([string]::IsNullOrWhiteSpace($orgId)) { throw "QB_AD_CUSTOMER_ORGANIZATION_ID is required." }
-if (-not $DryRun) {
-    if ([string]::IsNullOrWhiteSpace($ingestUrl)) { throw "QB_AD_CUSTOMER_SYNC_INGEST_URL is required." }
-    if ([string]::IsNullOrWhiteSpace($token)) { throw "QB_AD_CUSTOMER_SYNC_INGEST_TOKEN is required." }
-}
-
-Write-Host "AD QB customer sync worker $WorkerVersion starting (DryRun=$DryRun)"
+Write-Host "AD QB customer sync worker $WorkerVersion starting (DryRun=$DryRun DiagnoseColumns=$DiagnoseColumns)"
 
 $conn = $null
 $syncRunId = $null
 try {
     $conn = New-OdbcConnection -Dsn $dsn
+
+    if ($DiagnoseColumns) {
+        $diagSql = @"
+SELECT ColumnName, DataType, Length, IsNullable
+FROM sys_tablecolumns
+WHERE TableName = 'Customers'
+ORDER BY ColumnName
+"@
+        $cols = Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql $diagSql
+        Write-Host ("sys_tablecolumns Customers count={0}" -f $cols.Length)
+        foreach ($c in $cols) {
+            Write-Host ("  {0}`t{1}`t{2}`t{3}" -f $c.ColumnName, $c.DataType, $c.Length, $c.IsNullable)
+        }
+        $needed = @("Id", "Name", "FullName", "ParentId", "Sublevel", "IsActive", "BillingCity", "BillingState")
+        $names = @{}
+        foreach ($c in $cols) { $names[[string]$c.ColumnName] = $true }
+        $missing = @()
+        foreach ($n in $needed) {
+            if (-not $names.ContainsKey($n)) { $missing += $n }
+        }
+        if ($missing.Count -gt 0) {
+            throw ("DiagnoseColumns: missing required Customers columns: {0}" -f ($missing -join ", "))
+        }
+        Write-Host "RESULT: PASS (DiagnoseColumns — required columns present)"
+        exit 0
+    }
+
+    if ([string]::IsNullOrWhiteSpace($orgId)) { throw "QB_AD_CUSTOMER_ORGANIZATION_ID is required." }
+    if (-not $DryRun) {
+        if ([string]::IsNullOrWhiteSpace($ingestUrl)) { throw "QB_AD_CUSTOMER_SYNC_INGEST_URL is required." }
+        if ([string]::IsNullOrWhiteSpace($token)) { throw "QB_AD_CUSTOMER_SYNC_INGEST_TOKEN is required." }
+    }
+
     $companyRows = Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql "SELECT Name FROM CompanyInfo"
     $companyName = $null
     if ($companyRows.Length -gt 0) {
@@ -155,9 +216,9 @@ try {
         throw ("Company gate failed. Expected '{0}' got '{1}'." -f $expectedCompany, $companyName)
     }
 
-    # CData Customers: Id=ListID. ParentId / Job distinguish roots vs jobs.
+    # CData Desktop Customers: Id=ListID. Job detection via ParentId / Sublevel (not Job column).
     $sql = @"
-SELECT Id, Name, FullName, ParentId, Job, IsActive, BillAddress_City, BillAddress_State
+SELECT Id, Name, FullName, ParentId, Sublevel, IsActive, BillingCity, BillingState
 FROM Customers
 "@
     $rawRows = Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql $sql
@@ -173,8 +234,7 @@ FROM Customers
         if ($null -ne $r.ParentId -and -not [string]::IsNullOrWhiteSpace([string]$r.ParentId)) {
             $parentId = [string]$r.ParentId
         }
-        $isJob = Convert-ToBool -Value $r.Job -Default:$false
-        if (-not $isJob -and $null -ne $parentId) { $isJob = $true }
+        $isJob = Test-IsChildJob -ParentId $r.ParentId -Sublevel $r.Sublevel
         if ($isJob) { $jobs++ } else { $roots++ }
         [void]$customers.Add([ordered]@{
             qb_list_id = $listId
@@ -183,8 +243,8 @@ FROM Customers
             name = $(if ($null -ne $r.Name) { [string]$r.Name } else { $null })
             full_name = $(if ($null -ne $r.FullName) { [string]$r.FullName } else { $null })
             is_active = (Convert-ToBool -Value $r.IsActive -Default:$true)
-            bill_city = $(if ($null -ne $r.BillAddress_City) { [string]$r.BillAddress_City } else { $null })
-            bill_state = $(if ($null -ne $r.BillAddress_State) { [string]$r.BillAddress_State } else { $null })
+            bill_city = $(if ($null -ne $r.BillingCity) { [string]$r.BillingCity } else { $null })
+            bill_state = $(if ($null -ne $r.BillingState) { [string]$r.BillingState } else { $null })
         })
     }
 
@@ -236,7 +296,7 @@ FROM Customers
     if ($msg -match '(?i)bearer\s+[a-z0-9+/=_-]{8,}|password\s*[:=]') {
         $msg = "Sync failed (secret material redacted)."
     }
-    if (-not $DryRun -and -not [string]::IsNullOrWhiteSpace($syncRunId) -and -not [string]::IsNullOrWhiteSpace($ingestUrl) -and -not [string]::IsNullOrWhiteSpace($token)) {
+    if (-not $DryRun -and -not $DiagnoseColumns -and -not [string]::IsNullOrWhiteSpace($syncRunId) -and -not [string]::IsNullOrWhiteSpace($ingestUrl) -and -not [string]::IsNullOrWhiteSpace($token)) {
         try {
             Invoke-Ingest -Url $ingestUrl -Token $token -Body @{
                 action = "complete"

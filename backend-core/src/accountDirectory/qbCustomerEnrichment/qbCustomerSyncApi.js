@@ -59,14 +59,24 @@ export function attachAdQbCustomerSyncRoutes(app, { getSupabase, resolveAccountD
             details: ["ingest may only upsert prepared customer facts"]
           });
         }
-        const result = await upsertCustomerFacts(supabase, parsed.value.customers);
-        return res.status(200).json({
-          ok: true,
-          action: "upsert_customers",
-          sync_run_id: parsed.value.syncRunId,
-          upserted: result.upserted,
-          received: parsed.value.customers.length
-        });
+        try {
+          const result = await upsertCustomerFacts(supabase, parsed.value.customers, {
+            organizationId: parsed.value.organizationId,
+            syncRunId: parsed.value.syncRunId
+          });
+          return res.status(200).json({
+            ok: true,
+            action: "upsert_customers",
+            sync_run_id: parsed.value.syncRunId,
+            upserted: result.upserted,
+            received: parsed.value.customers.length
+          });
+        } catch (err) {
+          if (err?.code === "sync_run_org_mismatch") {
+            return res.status(403).json({ ok: false, error: "sync_run_org_mismatch" });
+          }
+          throw err;
+        }
       }
 
       if (action === "complete") {
@@ -75,24 +85,31 @@ export function attachAdQbCustomerSyncRoutes(app, { getSupabase, resolveAccountD
           return res.status(400).json({ ok: false, error: "invalid_payload", details: parsed.errors });
         }
         const store = typeof resolveAccountDirectoryStore === "function" ? resolveAccountDirectoryStore() : null;
-        const { run, reconcile } = await completeSyncRun(supabase, parsed.value, {
-          accountDirectoryStore: store
-        });
-        return res.status(200).json({
-          ok: true,
-          action: "complete",
-          sync_run_id: run.id,
-          status: run.status,
-          completed_at: run.completed_at,
-          suggestions_open_count: run.suggestions_open_count ?? null,
-          reconcile: reconcile
-            ? {
-                ok: reconcile.ok,
-                open_count: reconcile.openCount,
-                stats: reconcile.stats ?? null
-              }
-            : null
-        });
+        try {
+          const { run, reconcile } = await completeSyncRun(supabase, parsed.value, {
+            accountDirectoryStore: store
+          });
+          return res.status(200).json({
+            ok: true,
+            action: "complete",
+            sync_run_id: run.id,
+            status: run.status,
+            completed_at: run.completed_at,
+            suggestions_open_count: run.suggestions_open_count ?? null,
+            reconcile: reconcile
+              ? {
+                  ok: reconcile.ok,
+                  open_count: reconcile.openCount,
+                  stats: reconcile.stats ?? null
+                }
+              : null
+          });
+        } catch (err) {
+          if (err?.code === "sync_run_org_mismatch") {
+            return res.status(403).json({ ok: false, error: "sync_run_org_mismatch" });
+          }
+          throw err;
+        }
       }
 
       return res.status(400).json({

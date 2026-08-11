@@ -9,7 +9,10 @@ import {
   rankAccountCandidates,
   scoreDisplayNameSimilarity
 } from "./nameRank.js";
-import { planAdQbCustomerReconciliation } from "./reconcile.js";
+import {
+  applySuggestionUpsertPreservation,
+  planAdQbCustomerReconciliation
+} from "./reconcile.js";
 import {
   computeCustomerFactHash,
   validateBeginPayload,
@@ -95,6 +98,35 @@ import { createAccountDirectoryService } from "../accountDirectoryService.mjs";
     customers: [{ qb_list_id: "J2", is_job: true }]
   });
   assert.equal(badJob.ok, false);
+  const billingAlias = validateCustomerChunk({
+    organization_id: "00000000-0000-4000-8000-000000000001",
+    sync_run_id: "00000000-0000-4000-8000-000000000002",
+    customers: [
+      {
+        qb_list_id: "R2",
+        Name: "Root2",
+        FullName: "Root2",
+        ParentId: null,
+        Sublevel: 0,
+        BillingCity: "Austin",
+        BillingState: "TX",
+        IsActive: true
+      },
+      {
+        qb_list_id: "J3",
+        Name: "Kitchen",
+        FullName: "Root2:Kitchen",
+        ParentId: "R2",
+        Sublevel: 1,
+        BillingCity: "Austin",
+        BillingState: "TX"
+      }
+    ]
+  });
+  assert.equal(billingAlias.ok, true);
+  assert.equal(billingAlias.value.customers[0].is_job, false);
+  assert.equal(billingAlias.value.customers[0].bill_city, "Austin");
+  assert.equal(billingAlias.value.customers[1].is_job, true);
   assert.ok(computeCustomerFactHash(chunk.value.customers[0]));
   const complete = validateCompletePayload({
     organization_id: "00000000-0000-4000-8000-000000000001",
@@ -106,6 +138,151 @@ import { createAccountDirectoryService } from "../accountDirectoryService.mjs";
   });
   assert.equal(complete.ok, true);
   console.log("ok: ingest payload validation");
+}
+
+{
+  const preserved = applySuggestionUpsertPreservation(
+    {
+      qb_list_id: "L1",
+      status: "open",
+      qb_full_name: "Updated Name",
+      rank_score: 0.92,
+      resolved_at: null,
+      resolution_action: null
+    },
+    {
+      status: "dismissed",
+      resolved_at: "2026-01-01T00:00:00.000Z",
+      resolution_action: "dismiss"
+    }
+  );
+  assert.equal(preserved.status, "dismissed");
+  assert.equal(preserved.qb_full_name, "Updated Name");
+  assert.equal(preserved.rank_score, 0.92);
+  assert.equal(preserved.resolved_at, "2026-01-01T00:00:00.000Z");
+  assert.equal(preserved.resolution_action, "dismiss");
+
+  const upgrade = applySuggestionUpsertPreservation(
+    {
+      qb_list_id: "L2",
+      status: "reconciled",
+      resolution_action: "exact_list_id_match",
+      resolved_at: "2026-08-11T00:00:00.000Z"
+    },
+    { status: "linked", resolved_at: "2026-01-02T00:00:00.000Z", resolution_action: "link" }
+  );
+  assert.equal(upgrade.status, "reconciled");
+
+  const plan1 = planAdQbCustomerReconciliation({
+    rootFacts: [
+      {
+        qb_list_id: "L-DISMISS",
+        full_name: "Dismiss Co",
+        name: "Dismiss Co",
+        is_job: false,
+        is_active: true
+      },
+      {
+        qb_list_id: "L-LINKED-SUG",
+        full_name: "Linked Sug Co",
+        name: "Linked Sug Co",
+        is_job: false,
+        is_active: true
+      },
+      {
+        qb_list_id: "L-OPEN",
+        full_name: "Open Co",
+        name: "Open Co",
+        is_job: false,
+        is_active: true
+      }
+    ],
+    linksByListId: new Map(),
+    accounts: [
+      { id: "a-d", displayName: "Dismiss Co", quickbooksLinked: false },
+      { id: "a-l", displayName: "Linked Sug Co", quickbooksLinked: false },
+      { id: "a-o", displayName: "Open Co", quickbooksLinked: false }
+    ],
+    existingSuggestionsByListId: new Map([
+      [
+        "L-DISMISS",
+        {
+          status: "dismissed",
+          resolved_at: "2026-01-01T00:00:00.000Z",
+          resolution_action: "dismiss"
+        }
+      ],
+      [
+        "L-LINKED-SUG",
+        {
+          status: "linked",
+          resolved_at: "2026-01-02T00:00:00.000Z",
+          resolution_action: "link_quickbooks"
+        }
+      ]
+    ])
+  });
+  const d = plan1.upserts.find((u) => u.qb_list_id === "L-DISMISS");
+  const l = plan1.upserts.find((u) => u.qb_list_id === "L-LINKED-SUG");
+  const o = plan1.upserts.find((u) => u.qb_list_id === "L-OPEN");
+  assert.equal(d.status, "dismissed");
+  assert.equal(d.resolution_action, "dismiss");
+  assert.equal(l.status, "linked");
+  assert.equal(l.resolution_action, "link_quickbooks");
+  assert.equal(o.status, "open");
+  assert.equal(plan1.stats.preservedTerminal, 2);
+  assert.equal(plan1.stats.openCount, 1);
+
+  // Idempotent second pass with refreshed names still preserves terminals
+  const plan2 = planAdQbCustomerReconciliation({
+    rootFacts: [
+      {
+        qb_list_id: "L-DISMISS",
+        full_name: "Dismiss Co Renamed",
+        name: "Dismiss Co Renamed",
+        is_job: false,
+        is_active: true
+      },
+      {
+        qb_list_id: "L-LINKED-SUG",
+        full_name: "Linked Sug Co Renamed",
+        name: "Linked Sug Co Renamed",
+        is_job: false,
+        is_active: true
+      }
+    ],
+    linksByListId: new Map(),
+    accounts: [
+      { id: "a-d", displayName: "Dismiss Co Renamed", quickbooksLinked: false },
+      { id: "a-l", displayName: "Linked Sug Co Renamed", quickbooksLinked: false }
+    ],
+    existingSuggestionsByListId: new Map([
+      [
+        "L-DISMISS",
+        {
+          status: "dismissed",
+          resolved_at: "2026-01-01T00:00:00.000Z",
+          resolution_action: "dismiss"
+        }
+      ],
+      [
+        "L-LINKED-SUG",
+        {
+          status: "linked",
+          resolved_at: "2026-01-02T00:00:00.000Z",
+          resolution_action: "link_quickbooks"
+        }
+      ]
+    ])
+  });
+  assert.equal(plan2.upserts.find((u) => u.qb_list_id === "L-DISMISS").status, "dismissed");
+  assert.equal(plan2.upserts.find((u) => u.qb_list_id === "L-LINKED-SUG").status, "linked");
+  assert.equal(
+    plan2.upserts.find((u) => u.qb_list_id === "L-DISMISS").qb_full_name,
+    "Dismiss Co Renamed"
+  );
+  assert.equal(plan2.stats.openCount, 0);
+  console.log("ok: terminal suggestion preservation + idempotent sync");
 }
 
 {

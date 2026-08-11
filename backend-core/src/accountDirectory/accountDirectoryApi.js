@@ -25,7 +25,6 @@ import {
   getAdQbCustomerEnrichmentFeedStatus,
   listAdQbLinkSuggestions
 } from "./qbCustomerEnrichment/feedStatus.js";
-import { ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM } from "./accountDirectoryQuickbooksLinkage.mjs";
 
 const jsonParser = express.json({ limit: "256kb" });
 
@@ -384,77 +383,8 @@ export function attachAccountDirectoryRoutes(app, deps) {
     }
   );
 
-  /**
-   * Explicit secondary action: create AD account/prospect from suggestion, then link via
-   * the existing linkQuickBooks authority. Never called by sync.
-   */
-  app.post(
-    "/api/account-directory/qb-enrichment/suggestions/:suggestionId/create-and-link",
-    ...writeGuard,
-    async (req, res) => {
-      await withOrg(req, res, async (ctx) => {
-        if (!roleHasCapability(ctx.role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK)) {
-          return res.status(403).json({ ok: false, error: "Permission denied." });
-        }
-        if (!roleHasCapability(ctx.role, ACCOUNT_DIRECTORY_CAPABILITIES.EDIT)) {
-          return res.status(403).json({ ok: false, error: "Permission denied." });
-        }
-        const supabase = getSupabase();
-        const { data: suggestion, error } = await supabase
-          .from("ad_qb_link_suggestions")
-          .select("id,qb_list_id,qb_full_name,qb_name,status")
-          .eq("organization_id", ctx.organizationId)
-          .eq("id", String(req.params.suggestionId))
-          .maybeSingle();
-        if (error || !suggestion) {
-          return res.status(404).json({ ok: false, error: "Suggestion not found." });
-        }
-        if (!["open", "needs_review", "conflict"].includes(String(suggestion.status))) {
-          return res.status(409).json({ ok: false, error: "Suggestion is not open for linking." });
-        }
-        // Jobs must never become AD links — suggestions are roots only, but double-check facts.
-        const { data: fact } = await supabase
-          .from("ad_qb_customer_facts")
-          .select("is_job,qb_list_id")
-          .eq("organization_id", ctx.organizationId)
-          .eq("qb_list_id", suggestion.qb_list_id)
-          .maybeSingle();
-        if (fact?.is_job) {
-          return res.status(400).json({
-            ok: false,
-            code: "job_list_id_forbidden",
-            error: "Child/job ListIDs cannot become Account Directory QuickBooks links."
-          });
-        }
-        const asProspect = Boolean(req.body?.asProspect);
-        const displayName = String(
-          req.body?.displayName || suggestion.qb_full_name || suggestion.qb_name || ""
-        ).trim();
-        if (!displayName) {
-          return res.status(400).json({ ok: false, error: "displayName is required." });
-        }
-        const created = await service.createAccount({
-          ...ctx,
-          payload: {
-            displayName,
-            legalName: req.body?.legalName || null,
-            source: "qb_customer_enrichment_suggestion"
-          },
-          asProspect
-        });
-        const linked = await service.linkQuickBooks({
-          ...ctx,
-          accountId: created.id,
-          payload: {
-            externalId: suggestion.qb_list_id,
-            externalDisplayName: suggestion.qb_full_name || suggestion.qb_name || null,
-            externalSystem: ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM
-          }
-        });
-        res.status(201).json({ ok: true, account: linked, createdFromSuggestion: true });
-      });
-    }
-  );
+  // v1: create-and-link is intentionally omitted (orphan risk if create succeeds and
+  // link fails). Production confirmation path is POST …/accounts/:id/link-quickbooks only.
 
   app.post(
     "/api/account-directory/accounts/:accountId/external-links/:linkId/deactivate",
