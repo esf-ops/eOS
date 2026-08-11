@@ -1,9 +1,8 @@
 /**
  * QuickBooks Financial Truth — Sales Dashboard Beta (read-only).
  *
- * Live CData access requires a supported QuickBooks client/provider.
- * This package does NOT invent or reverse-engineer the Remote Connector
- * wire protocol. Raw HTTP QBXML POST is not a validated production transport.
+ * Production transport: Windows PowerShell ODBC worker → ingest → prepared facts.
+ * Backend does not connect to QuickBooks Desktop or Remote Connector.
  */
 
 export {
@@ -19,7 +18,19 @@ export { createFixtureQuickBooksFinancialTruthProvider } from "./fixtureProvider
 export { sanitizeFinancialTruthDiagnostics } from "./sanitize.js";
 export {
   QB_FINANCIAL_TRUTH_SOURCE,
+  QB_FINANCIAL_TRUTH_SOURCE_ODBC,
   QB_FINANCIAL_TRUTH_STATUSES,
   emptyQuickBooksFinancialTruth,
   OPEN_AR_BASIS_AS_OF_REFRESH
 } from "./contract.js";
+export { getPreparedQuickBooksFinancialTruth } from "./preparedFactsProvider.js";
+export { attachQuickBooksSalesSyncRoutes } from "./quickbooksSalesSyncApi.js";
+export {
+  validateBeginPayload,
+  validateTransactionChunk,
+  validateOpenArReplacePayload,
+  validateCompletePayload,
+  upsertFinancialTransactions,
+  replaceOpenArSnapshot
+} from "./syncIngest.js";
+export { constantTimeEqualString, requireQuickBooksSalesSyncToken } from "./syncAuth.js";

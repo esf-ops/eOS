@@ -4154,3 +4154,13 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Why** | `slabos_ro` is authorized read-only on Remote Connector, but this repo has no licensed CData client and production Brain cannot be allowlisted by IP today. |
 | **Impacted** | `backend-core/src/sales/quickbooksFinancialTruth/`, Sales foundation + dashboard handlers, `SalesCommandCenterView` / live panel Beta strip, `docs/quickbooks/ELITE_STONE_QUICKBOOKS_LIVE_READ.md`. |
 | **Revisit** | CData client installed on a Windows/static-egress worker; adapter wired; finance confirms Booked/Sold definition. |
+
+### 309. Sales QuickBooks ODBC prepared-facts sync worker (2026-08-11)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-11 |
+| **Decision** | Sales QuickBooks Financial Truth uses **Windows CData ODBC** DSN `slabOS_QuickBooks_Local_RO` + PowerShell worker + `POST /api/internal/sales/quickbooks-sync` prepared facts. Backend never connects to QB. Thryve/Remote Connector untouched. Open A/R is current as-of refresh; Sales Orders $ not Booked/Sold. |
+| **Why** | Live ODBC reads proven on QB Server; Vercel cannot/should not dial QuickBooks; Gateway raw HTTP is not slabOS transport. |
+| **SQL** | Manual: `backend-core/supabase/eliteos_sales_quickbooks_financial_truth_v1.sql` |
+| **Revisit** | Historical as-of A/R; Booked/Sold definition; unattended Task Scheduler account validation. |

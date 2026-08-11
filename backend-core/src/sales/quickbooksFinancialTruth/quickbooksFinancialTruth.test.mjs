@@ -41,17 +41,14 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
   console.log("ok: QB disabled returns null amounts (not fake $0) + no credentials");
 }
 
-// Enabled without supported client → unavailable (not ok, not zeros)
+// Enabled without prepared-facts context → unavailable (not ok, not zeros)
 {
   const row = await getQuickBooksFinancialTruth({
     startDate: "2026-01-01",
     endDate: "2026-03-31",
     env: {
       QB_FINANCIAL_TRUTH_ENABLED: "1",
-      QB_GATEWAY_URL: "https://qb-host:8166",
-      QB_GATEWAY_USER: "slabos_ro",
-      QB_GATEWAY_PASSWORD: "super-secret-should-never-leak",
-      QB_GATEWAY_SSL_SERVER_CERT: "insecure"
+      QB_SALES_SYNC_INGEST_TOKEN: "super-secret-should-never-leak"
     }
   });
   assert.equal(row.status, QB_FINANCIAL_TRUTH_STATUSES.UNAVAILABLE);
@@ -60,12 +57,8 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
   assert.notEqual(row.estimates.amount, 0);
   const json = JSON.stringify(row);
   assert.equal(/super-secret-should-never-leak/.test(json), false);
-  assert.equal(/QB_GATEWAY_PASSWORD\s*[:=]/.test(json), false);
-  assert.match(String(row.warnings[0] || ""), /unavailable|supported CData/i);
-  assert.equal(row.diagnostics?.config?.gateway_password_configured, true);
-  assert.equal(row.diagnostics?.config?.gateway_user_configured, true);
-  assert.ok(!("password" in (row.diagnostics?.config || {})));
-  console.log("ok: enabled without client is unavailable; password never in response");
+  assert.match(String(row.warnings[0] || ""), /unavailable|prepared-facts|organization/i);
+  console.log("ok: enabled without prepared facts is unavailable; token never in response");
 }
 
 // Fixture maps five financial fields; Sales Orders not Booked

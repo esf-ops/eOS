@@ -3,11 +3,13 @@
  */
 
 export const QB_FINANCIAL_TRUTH_SOURCE = "quickbooks_desktop";
+export const QB_FINANCIAL_TRUTH_SOURCE_ODBC = "quickbooks_desktop_odbc";
 
-/** @typedef {"ok"|"unavailable"|"disabled"} QuickBooksFinancialTruthStatus */
+/** @typedef {"ok"|"stale"|"unavailable"|"disabled"} QuickBooksFinancialTruthStatus */
 
 export const QB_FINANCIAL_TRUTH_STATUSES = Object.freeze({
   OK: "ok",
+  STALE: "stale",
   UNAVAILABLE: "unavailable",
   DISABLED: "disabled"
 });

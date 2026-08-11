@@ -2759,7 +2759,9 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
   const sqftFiltersForQb = parseSqftActualsFilters(req.query || {});
   const quickbooksFinancialTruth = await getQuickBooksFinancialTruthSafe({
     startDate: sqftFiltersForQb.startDate || null,
-    endDate: sqftFiltersForQb.endDate || null
+    endDate: sqftFiltersForQb.endDate || null,
+    organizationId,
+    supabase
   });
   const responseBuildStartedAt = Date.now();
   const syncedSqftActuals = {
@@ -2829,7 +2831,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         attribution_status: "preview_needs_approved_mapping",
         no_frontend_sources: "Frontend reads this backend aggregate only; it never calls Moraware or receives credentials.",
         quickbooks_financial_truth:
-          "Additive QuickBooks Desktop financial layer (Beta). Fail-soft; never blocks Moraware KPIs. Sales Orders $ is not renamed Booked/Sold. Open A/R is as-of refresh when live."
+          "Additive QuickBooks Desktop financial layer (Beta) from Windows ODBC prepared facts. Fail-soft; never blocks Moraware KPIs. Sales Orders $ is not renamed Booked/Sold. Open A/R is current unpaid balances as of latest refresh."
       },
       gaps: [
         ...(latestGroupComplete

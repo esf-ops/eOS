@@ -92,7 +92,9 @@ export async function salesDashboardHandler(req, supabaseGetter) {
 
     const quickbooksFinancialTruth = await getQuickBooksFinancialTruthSafe({
       startDate: filters.dateRange?.start ?? null,
-      endDate: filters.dateRange?.end ?? null
+      endDate: filters.dateRange?.end ?? null,
+      organizationId,
+      supabase
     });
     timer.mark("quickbooks_financial_truth");
 

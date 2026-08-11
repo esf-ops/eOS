@@ -1,21 +1,29 @@
 /**
  * Orchestrates QuickBooks Financial Truth for Sales Dashboard (fail-soft).
+ *
+ * Preferred production path: prepared Supabase facts from the Windows ODBC worker.
+ * Does not connect to QuickBooks from Vercel/backend-core.
  */
 
-import { createRequire } from "node:module";
 import {
   emptyQuickBooksFinancialTruth,
   OPEN_AR_BASIS_AS_OF_REFRESH,
   QB_FINANCIAL_TRUTH_STATUSES
 } from "./contract.js";
-import { detectSupportedCDataQuickBooksClient, readQuickBooksFinancialTruthConfig } from "./config.js";
+import { readQuickBooksFinancialTruthConfig } from "./config.js";
 import { createFixtureQuickBooksFinancialTruthProvider } from "./fixtureProvider.js";
+import { getPreparedQuickBooksFinancialTruth } from "./preparedFactsProvider.js";
 import { sanitizeErrorMessage, sanitizeFinancialTruthDiagnostics } from "./sanitize.js";
 
-const require = createRequire(import.meta.url);
-
 /**
- * @param {{ startDate?: string|null, endDate?: string|null, env?: NodeJS.ProcessEnv, provider?: { getQuickBooksFinancialTruth: Function }|null }} [params]
+ * @param {{
+ *   startDate?: string|null,
+ *   endDate?: string|null,
+ *   organizationId?: string|null,
+ *   supabase?: import('@supabase/supabase-js').SupabaseClient|null,
+ *   env?: NodeJS.ProcessEnv,
+ *   provider?: { getQuickBooksFinancialTruth: Function }|null
+ * }} [params]
  */
 export async function getQuickBooksFinancialTruth(params = {}) {
   const startDate = params.startDate ?? null;
@@ -35,14 +43,17 @@ export async function getQuickBooksFinancialTruth(params = {}) {
         reason: "feature_flag_off",
         config: config.summary,
         open_ar_basis: OPEN_AR_BASIS_AS_OF_REFRESH,
-        deployment_blocker:
-          "Production Brain on Vercel has no stable egress IP for Gateway allowlists. Prefer a Windows worker with approved static egress once a supported CData client is installed."
+        transport: "windows_odbc_worker_prepared_facts"
       })
     });
   }
 
   if (params.provider) {
-    const row = await params.provider.getQuickBooksFinancialTruth({ startDate, endDate });
+    const row = await params.provider.getQuickBooksFinancialTruth({
+      startDate,
+      endDate,
+      organizationId: params.organizationId
+    });
     return finalizePublicRow(row, startDate, endDate);
   }
 
@@ -52,56 +63,40 @@ export async function getQuickBooksFinancialTruth(params = {}) {
     return finalizePublicRow(row, startDate, endDate);
   }
 
-  const client = detectSupportedCDataQuickBooksClient({
-    env,
-    requireResolve: (id) => require.resolve(id)
-  });
-
-  if (!client.available) {
-    return emptyQuickBooksFinancialTruth({
-      status: QB_FINANCIAL_TRUTH_STATUSES.UNAVAILABLE,
-      refreshed_at: new Date().toISOString(),
-      date_range: { start_date: startDate, end_date: endDate },
-      warnings: [
-        "QuickBooks Financial Truth is unavailable: no supported CData QuickBooks client is installed in this runtime."
-      ],
-      diagnostics: sanitizeFinancialTruthDiagnostics({
-        reason: "missing_supported_cdata_client",
-        client_reason: client.reason,
-        config: config.summary,
-        open_ar_basis: OPEN_AR_BASIS_AS_OF_REFRESH,
-        next_actions: [
-          "Install a licensed/supported CData QuickBooks client (JDBC/ODBC/ADO.NET or documented Gateway client) into the backend runtime that will call QuickBooks.",
-          "Do not use raw HTTP QBXML POST to the Remote Connector root endpoint as production transport (previously observed HTTP 200 with empty body).",
-          "Deploy the live reader on a host with an approved stable egress IP allowlisted to the QB Gateway (port 8166). Do not broaden firewall to Any.",
-          "Keep slabos_ro read-only; never authorize personal-data fields for this Sales Beta."
-        ],
-        deployment_blocker:
-          "backend-core on Vercel has no stable egress IP; Gateway allowlisting requires a separate worker/bridge with approved static egress."
-      })
+  if (params.supabase && params.organizationId) {
+    const row = await getPreparedQuickBooksFinancialTruth({
+      supabase: params.supabase,
+      organizationId: params.organizationId,
+      startDate,
+      endDate,
+      env
     });
+    return finalizePublicRow(row, startDate, endDate);
   }
 
-  // A supported client module resolved, but no production adapter is wired yet.
   return emptyQuickBooksFinancialTruth({
     status: QB_FINANCIAL_TRUTH_STATUSES.UNAVAILABLE,
     refreshed_at: new Date().toISOString(),
     date_range: { start_date: startDate, end_date: endDate },
     warnings: [
-      `Supported client detected (${client.clientId}) but no production QuickBooks Financial Truth adapter is wired yet.`
+      "QuickBooks Financial Truth is enabled but prepared-facts context is missing (organization or database client)."
     ],
     diagnostics: sanitizeFinancialTruthDiagnostics({
-      reason: "adapter_not_wired",
-      supported_client_id: client.clientId,
+      reason: "missing_prepared_facts_context",
       config: config.summary,
-      open_ar_basis: OPEN_AR_BASIS_AS_OF_REFRESH
+      open_ar_basis: OPEN_AR_BASIS_AS_OF_REFRESH,
+      next_actions: [
+        "Apply eliteos_sales_quickbooks_financial_truth_v1.sql in Supabase.",
+        "Run the Windows ODBC worker against DSN slabOS_QuickBooks_Local_RO.",
+        "Set QB_SALES_SYNC_INGEST_TOKEN and worker ingest URL/token env vars."
+      ]
     })
   });
 }
 
 /**
  * Fail-soft wrapper: never throws into Sales dashboard handlers.
- * @param {{ startDate?: string|null, endDate?: string|null, env?: NodeJS.ProcessEnv, provider?: object|null }} [params]
+ * @param {Parameters<typeof getQuickBooksFinancialTruth>[0]} [params]
  */
 export async function getQuickBooksFinancialTruthSafe(params = {}) {
   try {
@@ -131,7 +126,6 @@ function finalizePublicRow(row, startDate, endDate) {
     },
     diagnostics: sanitizeFinancialTruthDiagnostics(row?.diagnostics || {})
   });
-  // Ensure Sales Orders label semantics stay in diagnostics, never "Booked".
   if (out.diagnostics && typeof out.diagnostics === "object") {
     out.diagnostics.label_sales_orders = "Sales Orders $";
   }

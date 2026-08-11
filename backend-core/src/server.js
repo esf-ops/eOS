@@ -33,6 +33,7 @@ import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
 import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
+import { attachQuickBooksSalesSyncRoutes } from "./sales/quickbooksFinancialTruth/quickbooksSalesSyncApi.js";
 import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
 import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoutes.js";
 import { maybeAttachQuoteIntakeRoutes } from "./quoteIntake/quoteIntakeRoutes.js";
@@ -595,6 +596,10 @@ attachMorawareSyncRoutes(app, {
   requireAuth,
   requireRole,
   requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachQuickBooksSalesSyncRoutes(app, {
   getSupabase: supabaseServerClient
 });
 

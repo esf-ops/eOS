@@ -204,7 +204,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\live-sdk-linked-smoke.ps1
 
 Uses `QBXMLRP2.RequestProcessor` with the same app name/ID defaults as this connector, sends one `EstimateQueryRq` (`MaxReturned=1`, `IncludeLinkedTxns=true`), and writes sanitized JSON to `C:\ThryveIntegration\slabOS-sdk-linked-smoke.json`.
 
-Do **not** use `live-read-smoke.ps1` (CData Gateway HTTP) as production transport until a supported CData client/protocol is confirmed.
+## Sales Financial Truth ODBC sync worker
+
+For Sales Dashboard prepared facts, use:
+
+`sales-sync/sync-sales-financials.ps1`
+
+See `sales-sync/README.md`. Transport is CData ODBC DSN `slabOS_QuickBooks_Local_RO` (not Gateway HTTP).
 
 ## Exit codes
 

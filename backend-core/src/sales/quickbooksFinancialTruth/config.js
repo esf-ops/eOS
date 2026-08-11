@@ -10,11 +10,13 @@ const defaultRequire = createRequire(import.meta.url);
 
 export const QB_FINANCIAL_TRUTH_ENV_VARS = Object.freeze([
   "QB_FINANCIAL_TRUTH_ENABLED",
+  "QB_FINANCIAL_TRUTH_PROVIDER",
+  "QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS",
+  "QB_SALES_SYNC_INGEST_TOKEN",
   "QB_GATEWAY_URL",
   "QB_GATEWAY_USER",
   "QB_GATEWAY_PASSWORD",
-  "QB_GATEWAY_SSL_SERVER_CERT",
-  "QB_FINANCIAL_TRUTH_PROVIDER"
+  "QB_GATEWAY_SSL_SERVER_CERT"
 ]);
 
 /**
@@ -90,6 +92,7 @@ export function readQuickBooksFinancialTruthConfig(env = process.env) {
   const gatewayUser = String(env.QB_GATEWAY_USER || "").trim() || null;
   const hasPassword = Boolean(String(env.QB_GATEWAY_PASSWORD || "").trim());
   const sslServerCertConfigured = Boolean(String(env.QB_GATEWAY_SSL_SERVER_CERT || "").trim());
+  const ingestTokenConfigured = Boolean(String(env.QB_SALES_SYNC_INGEST_TOKEN || "").trim());
   const providerName = String(env.QB_FINANCIAL_TRUTH_PROVIDER || "").trim().toLowerCase() || "auto";
   const client = detectSupportedCDataQuickBooksClient({ env });
 
@@ -99,6 +102,7 @@ export function readQuickBooksFinancialTruthConfig(env = process.env) {
     gatewayUserConfigured: Boolean(gatewayUser),
     gatewayPasswordConfigured: hasPassword,
     sslServerCertConfigured,
+    ingestTokenConfigured,
     providerName,
     supportedClientAvailable: client.available,
     supportedClientId: client.clientId,
@@ -106,6 +110,8 @@ export function readQuickBooksFinancialTruthConfig(env = process.env) {
     // Never include password or full URL userinfo in summary objects returned to callers that may serialize to the UI.
     summary: {
       enabled,
+      transport: "windows_odbc_prepared_facts",
+      ingest_token_configured: ingestTokenConfigured,
       gateway_url_configured: Boolean(gatewayUrl),
       gateway_user_configured: Boolean(gatewayUser),
       gateway_password_configured: hasPassword,

@@ -20,18 +20,11 @@ Reuses `estimateSalesTruth` helpers and intelligence `extractLinkedTxnRefs` / mo
 
 ## Transport status (important)
 
-**Raw QBXML HTTP POST to the CData Remote Connector / Desktop Gateway root endpoint was not validated on the production QuickBooks VM.** Observed behavior: HTTP **200** with an **empty body**, so that path must **not** be treated as a production transport without a supported CData client/protocol (driver or documented Gateway API).
+**Supported slabOS Sales Financial Truth transport:** Windows Server **CData ODBC** System DSN `slabOS_QuickBooks_Local_RO` (`ConnectDirectly=True`, `Readonly=True`, `QBXMLVersion=16.0`) via `quickbooks-sdk-connector/sales-sync/sync-sales-financials.ps1` → `POST /api/internal/sales/quickbooks-sync` → Supabase prepared facts.
 
-**Sales Dashboard QuickBooks Financial Truth — Beta** (`backend-core/src/sales/quickbooksFinancialTruth/`) exposes a fail-soft provider contract and UI strip. It stays **disabled** until:
+**Raw QBXML HTTP POST to the CData Remote Connector / Desktop Gateway is not used for slabOS.** Thryve Remote Connector configuration is separate and untouched. Backend/Vercel never opens a QuickBooks connection.
 
-1. A licensed/supported CData QuickBooks client is installed in the runtime that will query QB, and
-2. That runtime has an **approved stable egress IP** allowlisted to Gateway port 8166 (do not open firewall to Any). Vercel-hosted `backend-core` does **not** provide stable egress.
-
-Phase 2 Node + `live-read-smoke.ps1` Gateway code remains for reference. Prefer Desktop SDK COM smoke for VM-side linked-txn checks:
-
-`quickbooks-sdk-connector/live-sdk-linked-smoke.ps1` → `QBXMLRP2.RequestProcessor`.
-
-Do **not** extend the raw CData HTTP approach until a supported client/protocol is confirmed.
+Open A/R in Sales Beta is **current unpaid invoice balances as of the latest worker refresh** (not historical as-of dashboard end date). **Sales Orders $** is not renamed Booked/Sold yet.
 
 ## Dependency model
 
