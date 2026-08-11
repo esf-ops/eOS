@@ -2,7 +2,7 @@
 # READ-ONLY ODBC (slabOS_QuickBooks_Local_RO) -> HTTPS ingest. No QB writes.
 # Separate from Sales Financial Truth (never uses QB_SALES_*).
 #
-# Manual verification (before Task Scheduler) — from the eOS working copy on the QB Server:
+# Manual verification (before Task Scheduler) - from the eOS working copy on the QB Server:
 #   cd C:\Users\Administrator\Documents\GitHub\eOS\quickbooks-sdk-connector\account-directory-sync
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\run-ad-qb-customer-sync.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\run-ad-qb-customer-sync.ps1 -DryRun
@@ -11,7 +11,7 @@
 # Worker is resolved as Join-Path $PSScriptRoot sync-ad-qb-customers.ps1 (no second repo at C:\eliteOS).
 # Runtime config/logs remain under C:\eliteOS\config and C:\eliteOS\logs (outside git).
 #
-# Do NOT register Task Scheduler from this script — use install-ad-qb-customer-sync-task.ps1 (preview by default).
+# Do NOT register Task Scheduler from this script - use install-ad-qb-customer-sync-task.ps1 (preview by default).
 
 #Requires -Version 5.1
 [CmdletBinding()]

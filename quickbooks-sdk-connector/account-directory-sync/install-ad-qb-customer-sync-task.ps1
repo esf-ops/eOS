@@ -181,7 +181,7 @@ $arg = "-NoProfile -ExecutionPolicy Bypass -File `"$WrapperPath`" -ConfigPath `"
 $actionDisplay = "powershell.exe $arg"
 
 Write-Host ""
-Write-Host "Proposed Task Scheduler registration (AD customer enrichment — not Sales)"
+Write-Host "Proposed Task Scheduler registration (AD customer enrichment - not Sales)"
 Write-Host ("  ScriptRoot: {0}" -f $PSScriptRoot)
 Write-Host ("  Wrapper   : {0}" -f $WrapperPath)
 Write-Host ("  Worker    : {0}" -f $workerPath)
@@ -194,7 +194,7 @@ Write-Host "  Logs      : C:\eliteOS\logs\account-directory-qb-customer-sync\"
 Write-Host "  Secrets   : ingest token in config/env only; Windows password never on CLI / never logged"
 Write-Host "  Note      : Separate from 'eliteOS QuickBooks Sales Sync'. Never reuse QB_SALES_SYNC_INGEST_TOKEN."
 Write-Host "  Note      : Thryve Remote Connector untouched. QuickBooks writes forbidden."
-Write-Host "  Note      : Repo path is this working copy — do not require C:\eliteOS as a second eOS clone."
+Write-Host "  Note      : Repo path is this working copy - do not require C:\eliteOS as a second eOS clone."
 Write-Host ""
 
 Show-AdQbTaskPreflight -Name $TaskName -ProposedDailyAt $DailyAt
@@ -267,7 +267,7 @@ if (-not [string]::IsNullOrWhiteSpace($RunAsUser)) {
         -Settings $taskSettings | Out-Null
     Write-Host ("Registered task '{0}' as interactive user '{1}'." -f $TaskName, $env:USERNAME)
     Write-Host "For production unattended QB access, either:"
-    Write-Host "  1) Task Scheduler UI → task Properties → 'Run whether user is logged on or not' + dedicated account, or"
+    Write-Host "  1) Task Scheduler UI -> task Properties -> 'Run whether user is logged on or not' + dedicated account, or"
     Write-Host "  2) Re-run: -Apply -RunAsUser DOMAIN\qb-sync-user  (secure prompt; no CLI password)."
 }
 
