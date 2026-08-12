@@ -85,7 +85,13 @@ export function flattenPieces(result, excludedRunIds) {
           note: String(run.notes?.[0] ?? run.note ?? ""),
           lowConfidence:
             Boolean(run.requiresEstimatorReview) ||
-            String(run.confidence ?? "").toLowerCase() === "low"
+            String(run.confidence ?? "").toLowerCase() === "low",
+          // Pass through only when AI/metadata already provided pages — never invent.
+          sourcePages: Array.isArray(run.sourcePages)
+            ? run.sourcePages
+                .map((p) => Number(p))
+                .filter((n) => Number.isFinite(n) && n > 0)
+            : undefined
         });
       }
     }

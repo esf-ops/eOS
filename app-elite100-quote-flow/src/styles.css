@@ -1047,7 +1047,7 @@ body {
 
 .qf-queue__frame-wrap--command {
   flex: 1 1 auto;
-  min-height: min(78vh, 920px);
+  min-height: min(82vh, 980px);
   margin-top: 8px;
 }
 
@@ -1060,7 +1060,7 @@ body {
 }
 
 .qf-queue__frame-wrap--command .qf-queue__frame {
-  min-height: min(78vh, 920px);
+  min-height: min(82vh, 980px);
 }
 
 .qf-queue-manual-builder {

@@ -89,6 +89,16 @@ import { getSupabase } from "../lib/supabase";
 import TakeoffPlanPreviewPanel, {
   type PlanPreviewFileMeta
 } from "./TakeoffPlanPreviewPanel";
+import {
+  CTR_SPLIT_DEFAULT_RATIO,
+  clampReviewSplitRatio,
+  ratioFromPointerClientX,
+  readStoredReviewSplitRatio,
+  resolveReviewSplitPreset,
+  writeStoredReviewSplitRatio
+} from "../lib/reviewSplitLayout.mjs";
+
+const CTR_NARROW_MQ = "(max-width: 1100px)";
 
 type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error" | "conflict";
 type ApproveStatus = "idle" | "approving" | "approved" | "error";
@@ -148,6 +158,8 @@ type PieceRow = {
   sideSplashRightEligible: boolean;
   note: string;
   lowConfidence: boolean;
+  /** Present only when takeoff metadata already includes pages — never invented. */
+  sourcePages?: number[];
 };
 
 /**
@@ -322,6 +334,10 @@ export default function ConsolidatedTakeoffReview() {
   const [retryBusy, setRetryBusy] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [planCollapsed, setPlanCollapsed] = useState(false);
+  const [splitRatio, setSplitRatio] = useState(CTR_SPLIT_DEFAULT_RATIO);
+  const [splitNarrow, setSplitNarrow] = useState(false);
+  const [focusedPieceKey, setFocusedPieceKey] = useState<string | null>(null);
+  const [planFocusPage, setPlanFocusPage] = useState<number | null>(null);
   const [aiAppendNotice, setAiAppendNotice] = useState<string | null>(null);
   const [edgeDialogRunId, setEdgeDialogRunId] = useState<string | null>(null);
   const [unsavedEdgeRunIds, setUnsavedEdgeRunIds] = useState<Set<string>>(() => new Set());
@@ -347,6 +363,11 @@ export default function ConsolidatedTakeoffReview() {
   const pollAbortRef = useRef<AbortController | null>(null);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
   const edgeTriggerFocusRef = useRef<string | null>(null);
+  const splitLayoutRef = useRef<HTMLDivElement | null>(null);
+  const planPaneRef = useRef<HTMLAsideElement | null>(null);
+  const splitDraggingRef = useRef(false);
+  const splitRatioRef = useRef(splitRatio);
+  splitRatioRef.current = splitRatio;
   draftRef.current = draft;
   excludedRef.current = excludedRunIds;
   deletedRoomIdsRef.current = deletedRoomIds;
@@ -1262,6 +1283,110 @@ export default function ConsolidatedTakeoffReview() {
     }
   }, [roomOptions, selectedRoomId]);
 
+  useEffect(() => {
+    setSplitRatio(readStoredReviewSplitRatio(typeof window !== "undefined" ? window.localStorage : null));
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(CTR_NARROW_MQ);
+    const sync = () => setSplitNarrow(Boolean(mq.matches));
+    sync();
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", sync);
+      return () => mq.removeEventListener("change", sync);
+    }
+    mq.addListener(sync);
+    return () => mq.removeListener(sync);
+  }, []);
+
+  const applySplitRatio = useCallback((next: number, persist = true) => {
+    const width = splitLayoutRef.current?.getBoundingClientRect()?.width ?? 0;
+    const clamped = clampReviewSplitRatio(next, width);
+    setSplitRatio(clamped);
+    splitRatioRef.current = clamped;
+    if (persist && typeof window !== "undefined") {
+      writeStoredReviewSplitRatio(window.localStorage, clamped);
+    }
+  }, []);
+
+  const applySplitPreset = useCallback(
+    (preset: "split" | "largerPlan" | "largerWorksheet" | "reset") => {
+      const width = splitLayoutRef.current?.getBoundingClientRect()?.width ?? 0;
+      applySplitRatio(resolveReviewSplitPreset(preset, width), true);
+      if (planCollapsed) setPlanCollapsed(false);
+    },
+    [applySplitRatio, planCollapsed]
+  );
+
+  const onSplitPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (splitNarrow || planCollapsed) return;
+    e.preventDefault();
+    splitDraggingRef.current = true;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    document.body.classList.add("ctr-split-dragging");
+  }, [splitNarrow, planCollapsed]);
+
+  const onSplitPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!splitDraggingRef.current || !splitLayoutRef.current) return;
+      const rect = splitLayoutRef.current.getBoundingClientRect();
+      applySplitRatio(ratioFromPointerClientX(e.clientX, rect), false);
+    },
+    [applySplitRatio]
+  );
+
+  const endSplitDrag = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!splitDraggingRef.current) return;
+      splitDraggingRef.current = false;
+      document.body.classList.remove("ctr-split-dragging");
+      try {
+        if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        /* ignore */
+      }
+      if (typeof window !== "undefined") {
+        writeStoredReviewSplitRatio(window.localStorage, splitRatioRef.current);
+      }
+    },
+    []
+  );
+
+  const focusPieceRow = useCallback((row: PieceRow) => {
+    setFocusedPieceKey(row.key);
+    setSelectedRoomId(row.roomId);
+    const page = Array.isArray(row.sourcePages) ? Number(row.sourcePages[0]) : NaN;
+    if (Number.isFinite(page) && page > 0) {
+      setPlanFocusPage(Math.floor(page));
+    }
+  }, []);
+
+  const handlePlanFullscreen = useCallback(() => {
+    const el = planPaneRef.current;
+    if (el && typeof el.requestFullscreen === "function") {
+      void el.requestFullscreen().catch(() => {
+        /* browser may deny; Open plan remains available */
+      });
+      return;
+    }
+  }, []);
+
+  const focusedPiece = useMemo(
+    () => (focusedPieceKey ? rows.find((r) => r.key === focusedPieceKey) ?? null : null),
+    [focusedPieceKey, rows]
+  );
+
+  const reviewingLabel = focusedPiece
+    ? `Reviewing: ${focusedPiece.roomName} / ${focusedPiece.pieceName}`
+    : null;
+
   const localSummary = useMemo(() => {
     const included = rows.filter((r) => r.included);
     return {
@@ -1627,24 +1752,122 @@ export default function ConsolidatedTakeoffReview() {
         </div>
       ) : null}
 
-      <div className="ctr-plan-toolbar">
-        <button
-          type="button"
-          className="ctr-btn-secondary"
-          data-testid="ctr-toggle-plan"
-          aria-pressed={planCollapsed}
-          onClick={() => setPlanCollapsed((v) => !v)}
-        >
-          {planCollapsed ? "Show plan preview" : "Hide plan preview"}
-        </button>
+      <div className="ctr-plan-toolbar" data-testid="ctr-plan-toolbar">
+        <div className="ctr-plan-toolbar__presets" role="group" aria-label="Review layout presets">
+          <button
+            type="button"
+            className="ctr-btn-secondary"
+            data-testid="ctr-layout-split"
+            onClick={() => applySplitPreset("split")}
+          >
+            Split view
+          </button>
+          <button
+            type="button"
+            className="ctr-btn-secondary"
+            data-testid="ctr-layout-larger-plan"
+            onClick={() => applySplitPreset("largerPlan")}
+          >
+            Larger plan
+          </button>
+          <button
+            type="button"
+            className="ctr-btn-secondary"
+            data-testid="ctr-layout-larger-worksheet"
+            onClick={() => applySplitPreset("largerWorksheet")}
+          >
+            Larger worksheet
+          </button>
+          <button
+            type="button"
+            className="ctr-btn-secondary"
+            data-testid="ctr-layout-reset"
+            onClick={() => applySplitPreset("reset")}
+          >
+            Reset layout
+          </button>
+        </div>
+        <div className="ctr-plan-toolbar__toggles">
+          <button
+            type="button"
+            className="ctr-btn-secondary"
+            data-testid="ctr-toggle-plan"
+            aria-pressed={planCollapsed}
+            onClick={() => setPlanCollapsed((v) => !v)}
+          >
+            {planCollapsed ? "Show plan" : "Hide plan"}
+          </button>
+          {!planCollapsed ? (
+            <button
+              type="button"
+              className="ctr-btn-secondary"
+              data-testid="ctr-plan-fullscreen"
+              onClick={handlePlanFullscreen}
+            >
+              Full-screen plan
+            </button>
+          ) : null}
+        </div>
       </div>
 
-      <div className={planCollapsed ? "ctr-layout ctr-layout--plan-collapsed" : "ctr-layout"}>
-          <aside className="ctr-plan" data-testid="ctr-plan-preview">
-            <TakeoffPlanPreviewPanel token={authToken} file={planFile} refreshKey={takeoffJobId} />
-          </aside>
+      {reviewingLabel ? (
+        <div className="ctr-reviewing" data-testid="ctr-reviewing-label" role="status">
+          {reviewingLabel}
+          {focusedPiece?.sourcePages?.[0] != null ? (
+            <span className="ctr-reviewing__page"> · p. {focusedPiece.sourcePages[0]}</span>
+          ) : null}
+        </div>
+      ) : null}
 
-          <main className="ctr-main">
+      <div
+        ref={splitLayoutRef}
+        className={[
+          "ctr-layout",
+          planCollapsed ? "ctr-layout--plan-collapsed" : "",
+          splitNarrow ? "ctr-layout--narrow" : "",
+          splitNarrow && !planCollapsed ? "ctr-layout--stacked" : ""
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        style={
+          !planCollapsed && !splitNarrow
+            ? ({ ["--ctr-plan-ratio" as string]: String(splitRatio) } as React.CSSProperties)
+            : undefined
+        }
+        data-testid="ctr-split-layout"
+        data-split-ratio={String(splitRatio)}
+      >
+          {!planCollapsed ? (
+            <aside
+              ref={planPaneRef}
+              className="ctr-plan"
+              data-testid="ctr-plan-preview"
+            >
+              <TakeoffPlanPreviewPanel
+                token={authToken}
+                file={planFile}
+                refreshKey={takeoffJobId}
+                focusPage={planFocusPage}
+              />
+            </aside>
+          ) : null}
+
+          {!planCollapsed && !splitNarrow ? (
+            <div
+              className="ctr-split-divider"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize plan and worksheet panes"
+              data-testid="ctr-split-divider"
+              tabIndex={-1}
+              onPointerDown={onSplitPointerDown}
+              onPointerMove={onSplitPointerMove}
+              onPointerUp={endSplitDrag}
+              onPointerCancel={endSplitDrag}
+            />
+          ) : null}
+
+          <main className="ctr-main" data-testid="ctr-worksheet-pane">
             <div className="ctr-summary" data-testid="ctr-summary">
               <span>{localSummary.rooms} rooms</span>
               <span>{localSummary.includedPieces} pieces</span>
@@ -1779,10 +2002,18 @@ export default function ConsolidatedTakeoffReview() {
                       key={row.key}
                       className={[
                         row.included ? "" : "ctr-row--excluded",
-                        row.lowConfidence ? "ctr-row--low" : ""
+                        row.lowConfidence ? "ctr-row--low" : "",
+                        focusedPieceKey === row.key ? "ctr-row--focused" : ""
                       ]
                         .filter(Boolean)
                         .join(" ")}
+                      data-testid="ctr-piece-row"
+                      data-piece-key={row.key}
+                      data-source-page={
+                        row.sourcePages?.[0] != null ? String(row.sourcePages[0]) : undefined
+                      }
+                      onClick={() => focusPieceRow(row)}
+                      onFocusCapture={() => focusPieceRow(row)}
                     >
                       <td className="ctr-col-room">
                         <select
@@ -1825,6 +2056,11 @@ export default function ConsolidatedTakeoffReview() {
                             )
                           }
                         />
+                        {row.sourcePages?.[0] != null ? (
+                          <span className="ctr-piece-page" data-testid="ctr-piece-page">
+                            p. {row.sourcePages[0]}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="ctr-col-dim">
                         <input

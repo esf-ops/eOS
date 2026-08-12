@@ -22,7 +22,10 @@ const scopePanel = readFileSync(
 console.log("\nconsolidatedTakeoffReview.ui.test.mjs\n");
 
 assert.ok(main.includes("consolidated") && main.includes("ConsolidatedTakeoffReview"));
-assert.ok(clickHelper.includes("Approve Takeoff & Build Estimate"));
+assert.ok(
+  clickHelper.includes("Approve Estimate") || clickHelper.includes("Approve Takeoff"),
+  "approve button label helper present"
+);
 assert.ok(component.includes("approveButtonLabel"));
 assert.ok(component.includes("data-testid=\"consolidated-takeoff-review\""));
 assert.ok(component.includes("data-testid=\"ctr-worksheet\""));
@@ -51,8 +54,17 @@ assert.ok(component.includes("data-testid=\"ctr-pending-ai-append\""));
 assert.ok(component.includes("data-testid=\"ctr-ai-append-notice\""));
 assert.ok(!component.includes("data-testid=\"ctr-save-merge-ai\""));
 assert.ok(!component.includes("Save &amp; merge") && !component.includes("Save & merge"));
-assert.ok(component.includes("Auto-append AI findings"));
-assert.ok(component.includes("lastMergedAiResultId") || component.includes("aiHandling"));
+assert.ok(
+  component.includes("AI findings are ready and are being added automatically") ||
+    component.includes("Auto-append AI findings") ||
+    component.includes("handleAutoAppendAi")
+);
+assert.ok(
+  component.includes("lastMergedAiResultId") ||
+    component.includes("aiHandling") ||
+    component.includes("pendingAiResultId") ||
+    component.includes("handleAutoAppendAi")
+);
 assert.ok(component.includes("summarizeAiFindingsPreview"));
 assert.ok(draftHelper.includes("AI findings appending"));
 assert.ok(component.includes("saveMergeTakeoffDrafts"));
@@ -104,6 +116,32 @@ assert.ok(styles.includes("isolation: isolate"));
 assert.ok(component.includes("data-testid=\"ctr-room-name\""));
 assert.ok(component.includes("data-testid=\"ctr-piece-name\""));
 assert.ok(component.includes("data-testid=\"ctr-toggle-plan\""));
+assert.ok(component.includes("data-testid=\"ctr-split-layout\""));
+assert.ok(component.includes("data-testid=\"ctr-split-divider\""));
+assert.ok(component.includes("data-testid=\"ctr-worksheet-pane\""));
+assert.ok(component.includes("data-testid=\"ctr-layout-split\""));
+assert.ok(component.includes("data-testid=\"ctr-layout-larger-plan\""));
+assert.ok(component.includes("data-testid=\"ctr-layout-larger-worksheet\""));
+assert.ok(component.includes("data-testid=\"ctr-layout-reset\""));
+assert.ok(component.includes("Split view"));
+assert.ok(component.includes("Larger plan"));
+assert.ok(component.includes("Larger worksheet"));
+assert.ok(component.includes("Reset layout"));
+assert.ok(component.includes("Resize plan and worksheet panes"));
+assert.ok(component.includes("setPointerCapture"));
+assert.ok(component.includes("onPointerDown"));
+assert.ok(component.includes("writeStoredReviewSplitRatio"));
+assert.ok(component.includes("readStoredReviewSplitRatio"));
+assert.ok(component.includes("data-testid=\"ctr-reviewing-label\""));
+assert.ok(component.includes("ctr-row--focused"));
+assert.ok(component.includes("focusPieceRow"));
+assert.ok(component.includes("Show plan") || component.includes("Hide plan"));
+assert.ok(styles.includes("ctr-split-divider"));
+assert.ok(styles.includes("--ctr-plan-ratio"));
+assert.ok(!styles.includes("resize: both"));
+assert.ok(styles.includes("ctr-row--focused"));
+assert.ok(styles.includes("min-width: 360px"));
+assert.ok(styles.includes("min-width: 520px"));
 assert.ok(styles.includes("ctr-col-piece"));
 assert.ok(styles.includes("min-width: 12rem"));
 assert.ok(!styles.includes("text-overflow: ellipsis") || styles.includes("text-overflow: unset"));

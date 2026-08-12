@@ -4553,46 +4553,132 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-signin label { display: grid; gap: 4px; font-size: 0.85rem; }
 .ctr-signin input { padding: 8px 10px; }
 .ctr-layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.85fr) minmax(480px, 1.6fr);
-  gap: 12px;
-  margin-top: 12px;
-  align-items: start;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin-top: 8px;
+  min-height: min(70vh, 720px);
+  height: min(78vh, 880px);
+  --ctr-plan-ratio: 0.4;
 }
-.ctr-layout--plan-collapsed { grid-template-columns: 1fr; }
-@media (max-width: 1200px) { .ctr-layout { grid-template-columns: 1fr; } }
+.ctr-layout--plan-collapsed {
+  display: block;
+  height: auto;
+  min-height: 0;
+}
+.ctr-layout--narrow,
+.ctr-layout--stacked {
+  flex-direction: column;
+  height: auto;
+  min-height: 0;
+}
 .ctr-plan {
-  position: sticky;
-  top: 8px;
-  z-index: 0;
-  min-width: 0;
-  resize: both;
+  flex: 0 0 calc(var(--ctr-plan-ratio) * 100%);
+  width: calc(var(--ctr-plan-ratio) * 100%);
+  min-width: 360px;
+  max-width: calc(100% - 520px - 12px);
+  min-height: 0;
   overflow: auto;
-  max-width: 100%;
-  max-height: min(70vh, 760px);
   border: 1px solid var(--eos-line);
   border-radius: 10px;
   background: var(--eos-surface);
   padding: 6px;
+  /* CSS resize removed — unreliable on Windows; use pointer divider instead. */
 }
 .ctr-layout--plan-collapsed .ctr-plan { display: none; }
+.ctr-layout--narrow .ctr-plan,
+.ctr-layout--stacked .ctr-plan {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  max-height: min(42vh, 420px);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.ctr-split-divider {
+  flex: 0 0 12px;
+  width: 12px;
+  margin: 0 2px;
+  border-radius: 6px;
+  background:
+    linear-gradient(90deg, transparent 4px, var(--eos-line) 4px, var(--eos-line) 8px, transparent 8px);
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  align-self: stretch;
+}
+.ctr-split-divider:hover,
+.ctr-split-divider:focus-visible,
+body.ctr-split-dragging .ctr-split-divider {
+  background:
+    linear-gradient(90deg, transparent 3px, var(--eos-accent, #1a4d38) 3px, var(--eos-accent, #1a4d38) 9px, transparent 9px);
+}
+body.ctr-split-dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+body.ctr-split-dragging iframe,
+body.ctr-split-dragging object,
+body.ctr-split-dragging img {
+  pointer-events: none;
+}
 .ctr-plan-toolbar {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+.ctr-plan-toolbar__presets,
+.ctr-plan-toolbar__toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.ctr-reviewing {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--eos-ink);
+  background: var(--eos-bg-soft, #eef3f0);
+  border: 1px solid var(--eos-line);
+  border-left: 3px solid var(--eos-accent, #1a4d38);
+  border-radius: 6px;
+}
+.ctr-reviewing__page,
+.ctr-piece-page {
+  font-weight: 500;
+  color: var(--eos-ink-muted);
+  font-size: 0.8rem;
+}
+.ctr-piece-page {
+  display: inline-block;
+  margin-top: 2px;
 }
 /* Keep the worksheet above a resized sticky plan panel so plan chrome cannot
    intercept clicks on Backsplash / Cutouts / Notes. */
 .ctr-main {
   position: relative;
   z-index: 1;
+  flex: 1 1 auto;
+  min-width: 520px;
+  min-height: 0;
+  overflow: auto;
   background: var(--eos-surface);
   border: 1px solid var(--eos-line);
   border-radius: 10px;
   padding: 12px;
-  min-width: 0;
   isolation: isolate;
+  display: flex;
+  flex-direction: column;
   /* Canonical worksheet column track — header + body share these mins. */
   --ctr-col-room: 120px;
   --ctr-col-piece: 150px;
@@ -4607,6 +4693,16 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   --ctr-col-actions: 110px;
   --ctr-worksheet-min-width: 1398px;
 }
+.ctr-layout--plan-collapsed .ctr-main,
+.ctr-layout--narrow .ctr-main,
+.ctr-layout--stacked .ctr-main {
+  min-width: 0;
+  width: 100%;
+}
+@media (max-width: 1100px) {
+  .ctr-split-divider { display: none; }
+  .ctr-plan-toolbar__presets { display: none; }
+}
 .ctr-summary { display: flex; flex-wrap: wrap; gap: 10px 16px; font-size: 0.85rem; margin-bottom: 10px; position: sticky; top: 0; background: var(--eos-surface); padding: 8px 0; z-index: 2; }
 .ctr-badge { padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; }
 .ctr-badge--block { background: var(--eos-danger-soft); color: var(--eos-danger); }
@@ -4620,6 +4716,10 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   z-index: 1;
   padding-bottom: 8px;
   margin-bottom: 4px;
+}
+/* Desktop split: one worksheet-pane scroll — avoid nested scroll traps. */
+.ctr-layout:not(.ctr-layout--narrow):not(.ctr-layout--stacked):not(.ctr-layout--plan-collapsed) .ctr-table-wrap {
+  max-height: none;
 }
 .ctr-table {
   width: max-content;
@@ -4776,18 +4876,27 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .ctr-sf { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctr-row--excluded { opacity: 0.45; }
 .ctr-row--low { background: var(--eos-warn-soft); }
-/* Action bar sits after the scrollable worksheet — never overlays piece rows. */
+.ctr-row--focused {
+  background: var(--eos-bg-soft, #eef3f0);
+  box-shadow: inset 3px 0 0 var(--eos-accent, #1a4d38);
+}
+.ctr-row--focused.ctr-row--low {
+  background: var(--eos-warn-soft);
+  box-shadow: inset 3px 0 0 var(--eos-accent, #1a4d38);
+}
+/* Action bar sits after the scrollable worksheet — sticky so Save/Set Scope stay reachable. */
 .ctr-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   margin-top: 12px;
-  position: relative;
+  position: sticky;
+  bottom: 0;
   background: var(--eos-surface);
   padding: 10px 0 4px;
   border-top: 1px solid var(--eos-line);
-  z-index: 2;
+  z-index: 3;
 }
 .ctr-btn-primary { background: var(--eos-accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 600; cursor: pointer; }
 .ctr-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }

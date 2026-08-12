@@ -19,6 +19,11 @@ export interface TakeoffPlanPreviewPanelProps {
   file: PlanPreviewFileMeta | null;
   /** Bust signed URL fetch when workspace or file changes. */
   refreshKey?: string | number | null;
+  /**
+   * Optional 1-based PDF page hint when piece metadata includes sourcePages.
+   * Appended as `#page=N` for browsers that honor it; ignored for images.
+   */
+  focusPage?: number | null;
 }
 
 type PreviewMode = "image" | "pdf" | "external";
@@ -35,6 +40,7 @@ export default function TakeoffPlanPreviewPanel({
   token,
   file,
   refreshKey,
+  focusPage = null,
 }: TakeoffPlanPreviewPanelProps) {
   const [loading, setLoading] = useState(false);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
@@ -45,6 +51,14 @@ export default function TakeoffPlanPreviewPanel({
     () => (file ? resolvePreviewMode(file) : null),
     [file]
   );
+
+  const pdfPreviewUrl = useMemo(() => {
+    if (!signedUrl || previewMode !== "pdf") return signedUrl;
+    const page = Number(focusPage);
+    if (!Number.isFinite(page) || page < 1) return signedUrl;
+    const base = signedUrl.split("#")[0];
+    return `${base}#page=${Math.floor(page)}`;
+  }, [signedUrl, previewMode, focusPage]);
 
   useEffect(() => {
     if (!file || !token || file.status === "archived") {
@@ -202,13 +216,13 @@ export default function TakeoffPlanPreviewPanel({
       {!loading && !error && signedUrl && previewMode === "pdf" ? (
         <div className="plan-preview-frame plan-preview-frame--pdf">
           <object
-            data={signedUrl}
+            data={pdfPreviewUrl || signedUrl}
             type="application/pdf"
             className="plan-preview-object"
             aria-label={`Plan PDF: ${file.originalFilename}`}
           >
             <iframe
-              src={signedUrl}
+              src={pdfPreviewUrl || signedUrl}
               title={`Plan PDF: ${file.originalFilename}`}
               className="plan-preview-iframe"
             />

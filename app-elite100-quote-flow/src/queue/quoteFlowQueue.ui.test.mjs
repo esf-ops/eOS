@@ -217,6 +217,29 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
 }
 
 {
+  const takeoffUi = readFileSync(
+    join(repoRoot, "app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
+    "utf8"
+  );
+  const takeoffStyles = readFileSync(join(repoRoot, "app-ai-takeoff/src/styles.css"), "utf8");
+  assert.match(takeoffUi, /data-testid="ctr-split-layout"/);
+  assert.match(takeoffUi, /data-testid="ctr-plan-preview"/);
+  assert.match(takeoffUi, /data-testid="ctr-worksheet-pane"/);
+  assert.match(takeoffUi, /data-testid="ctr-split-divider"/);
+  assert.match(takeoffUi, /setPointerCapture/);
+  assert.match(takeoffUi, /Split view/);
+  assert.match(takeoffUi, /Larger plan/);
+  assert.match(takeoffUi, /Larger worksheet/);
+  assert.match(takeoffUi, /Reset layout/);
+  assert.match(takeoffUi, /data-testid="ctr-save-draft"/);
+  assert.match(takeoffUi, /ctr-row--focused/);
+  assert.match(takeoffStyles, /ctr-split-divider/);
+  assert.match(takeoffStyles, /--ctr-plan-ratio/);
+  assert.doesNotMatch(takeoffStyles, /\.ctr-plan\s*\{[^}]*resize:\s*both/);
+  console.log("ok: Review Takeoff split plan/worksheet layout contracts");
+}
+
+{
   const { presentQuoteFlowQueueItem, resolveDefaultEstimateName: backendName } = await import(
     join(repoRoot, "backend-core/src/elite100QuoteFlow/quoteFlowQueuePresenter.mjs")
   );
