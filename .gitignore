@@ -19,6 +19,8 @@ dist/
 # Account Directory QB customer sync secrets (Windows persistent config copies)
 **/ad-qb-customer-sync.env
 !**/ad-qb-customer-sync.env.example
+**/sales-qb-sync.env
+!**/sales-qb-sync.env.example
 
 # Pipeline / Moraware dumps and generated import-test snapshots (often large; may contain operational data — keep local only)
 out*.json

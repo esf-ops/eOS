@@ -4160,10 +4160,11 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | Field | Value |
 |-------|--------|
 | **Date** | 2026-08-11 |
-| **Decision** | Sales QuickBooks Financial Truth uses **Windows CData ODBC** DSN `slabOS_QuickBooks_Local_RO` + PowerShell worker + `POST /api/internal/sales/quickbooks-sync` prepared facts. Backend never connects to QB. Thryve/Remote Connector untouched. Open A/R is current as-of refresh; Sales Orders $ not Booked/Sold. |
-| **Why** | Live ODBC reads proven on QB Server; Vercel cannot/should not dial QuickBooks; Gateway raw HTTP is not slabOS transport. |
+| **Decision** | Sales QuickBooks Financial Truth uses **Windows CData ODBC** DSN `slabOS_QuickBooks_Local_RO` + PowerShell worker + `POST /api/internal/sales/quickbooks-sync` prepared facts. Backend never connects to QB. Thryve/Remote Connector untouched. Open A/R is current as-of refresh; Sales Orders $ not Booked/Sold. Production unattended path: `run-sales-qb-sync.ps1` (persistent `C:\eliteOS\config\sales-qb-sync.env`, dedicated logs, non-overlap lock; `$PSScriptRoot` worker; default incremental **60-day** lookback; `-Backfill` explicit only) and optional Task Scheduler task **`eliteOS QuickBooks Sales Sync`** (every **2 hours**; installer preview/`-Preflight` only unless `-Apply`; no CLI Windows password). Completely separate from Account Directory `QB_AD_CUSTOMER_*` (never reuse AD ingest token). |
+| **Why** | Live ODBC reads proven on QB Server; Vercel cannot/should not dial QuickBooks; Gateway raw HTTP is not slabOS transport; Sales Dashboard goes stale without recurring sync + persistent `QB_SALES_*`. |
 | **SQL** | Manual: `backend-core/supabase/eliteos_sales_quickbooks_financial_truth_v1.sql` |
-| **Revisit** | Historical as-of A/R; Booked/Sold definition; unattended Task Scheduler account validation. |
+| **Windows ops** | Scripts: `quickbooks-sdk-connector/sales-sync/` in the QB Server eOS working copy. Config: `C:\eliteOS\config\sales-qb-sync.env`. Logs: `C:\eliteOS\logs\sales-qb-sync\`. Installer: `install-sales-qb-sync-task.ps1`. |
+| **Revisit** | Historical as-of A/R; Booked/Sold definition; unattended Task Scheduler account validation; cadence after ops proves 2h load. |
 
 ### 310. Sales Command Center overview date-scoped prepared reads (2026-08-11)
 
