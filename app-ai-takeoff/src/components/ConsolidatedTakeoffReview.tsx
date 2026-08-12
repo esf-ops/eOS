@@ -29,9 +29,11 @@ import { buildLocalReviewTakeoffDraft } from "../lib/localReviewTakeoffFixture.m
 import {
   TAKEOFF_REVIEW_READY,
   TAKEOFF_REVIEW_DRAFT_SAVED,
+  TAKEOFF_REVIEW_DIRTY,
   TAKEOFF_WATERFALL_CHANGED,
   QUOTE_FLOW_REQUEST_SET_SCOPE,
   QUOTE_FLOW_SET_SCOPE_PAYLOAD,
+  QUOTE_FLOW_REQUEST_SAVE_DRAFT,
   summarizeTakeoffDraftForReady,
   postTakeoffParentMessage,
   loadLocalReviewDraft,
@@ -774,6 +776,20 @@ export default function ConsolidatedTakeoffReview() {
     return () => window.removeEventListener("message", onQuoteFlowSetScopeRequest);
   }, [quoteFlowSetScope, takeoffJobId, buildReviewState, localReview, unsavedEdgeRunIds.size]);
 
+  // Keep Quote Flow review modal informed of unsaved worksheet edits.
+  useEffect(() => {
+    if (!quoteFlowSetScope || !takeoffJobId) return;
+    const dirty =
+      saveStatus === "dirty" ||
+      saveStatus === "saving" ||
+      unsavedEdgeRunIds.size > 0;
+    postTakeoffParentMessage(
+      TAKEOFF_REVIEW_DIRTY,
+      { dirty },
+      { takeoffJobId, localReview }
+    );
+  }, [quoteFlowSetScope, takeoffJobId, saveStatus, unsavedEdgeRunIds.size, localReview]);
+
   // Estimate Options → Takeoff: add left/right waterfall on first eligible island.
   useEffect(() => {
     function onStudioMessage(ev: MessageEvent) {
@@ -966,6 +982,20 @@ export default function ConsolidatedTakeoffReview() {
     urlWorkspace.mode,
     quoteFlowSetScope
   ]);
+
+  // Quote Flow modal sticky "Save Draft" → same persistDraft path as worksheet button.
+  useEffect(() => {
+    if (!quoteFlowSetScope || !takeoffJobId) return;
+    function onQuoteFlowSaveDraftRequest(ev: MessageEvent) {
+      const data = ev.data;
+      if (!data || typeof data !== "object") return;
+      if (data.type !== QUOTE_FLOW_REQUEST_SAVE_DRAFT) return;
+      if (String(data.takeoffJobId || "") !== String(takeoffJobId)) return;
+      void persistDraft();
+    }
+    window.addEventListener("message", onQuoteFlowSaveDraftRequest);
+    return () => window.removeEventListener("message", onQuoteFlowSaveDraftRequest);
+  }, [quoteFlowSetScope, takeoffJobId, persistDraft]);
 
   /** Confirm exposed edges — local draft only; zero correction requests. */
   const confirmExposedEdges = useCallback(

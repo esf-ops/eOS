@@ -217,6 +217,35 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
 }
 
 {
+  const takeoffStyles = readFileSync(join(repoRoot, "app-ai-takeoff/src/styles.css"), "utf8");
+  const styles = readFileSync(join(appRoot, "src/styles.css"), "utf8");
+  assert.match(queue, /data-testid="qf-queue-review-modal"/);
+  assert.match(queue, /data-testid="qf-queue-review-modal-backdrop"/);
+  assert.match(queue, /data-testid="qf-queue-review-workspace"/);
+  assert.match(queue, /data-testid="qf-queue-review-modal-title"/);
+  assert.match(queue, /data-testid="qf-queue-review-modal-actions"/);
+  assert.match(queue, /data-testid="qf-queue-review-save-draft"/);
+  assert.match(queue, /data-testid="qf-queue-review-modal-close"/);
+  assert.match(queue, /data-testid="qf-queue-takeoff-iframe"/);
+  assert.match(queue, /data-testid="qf-queue-set-scope"/);
+  assert.match(queue, /Back to Queue/);
+  assert.match(queue, /Discard unsaved review changes\?|REVIEW_DISCARD_CONFIRM/);
+  assert.match(queue, /closeReviewWorkspace/);
+  assert.match(queue, /reviewDirty/);
+  assert.match(queue, /QUOTE_FLOW_REQUEST_SAVE_DRAFT/);
+  assert.match(queue, /TAKEOFF_REVIEW_DIRTY/);
+  assert.match(queue, /data-testid="qf-queue-review-open-hint"/);
+  // Iframe lives in the modal workspace, not the squeezed detail pane frame.
+  assert.match(queue, /qf-queue__frame-wrap--review-modal/);
+  assert.doesNotMatch(queue, /detailMode === "review" && takeoffSrc \? \([\s\S]*?qf-queue__frame-wrap--command/);
+  assert.match(styles, /qf-queue-review-modal-backdrop/);
+  assert.match(styles, /qf-queue-review-modal\b/);
+  assert.match(styles, /@media \(max-width: 860px\)/);
+  assert.match(takeoffStyles, /ctr-split-divider/);
+  console.log("ok: Review Takeoff full-screen modal workspace contracts");
+}
+
+{
   const takeoffUi = readFileSync(
     join(repoRoot, "app-ai-takeoff/src/components/ConsolidatedTakeoffReview.tsx"),
     "utf8"
@@ -233,6 +262,8 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
   assert.match(takeoffUi, /Reset layout/);
   assert.match(takeoffUi, /data-testid="ctr-save-draft"/);
   assert.match(takeoffUi, /ctr-row--focused/);
+  assert.match(takeoffUi, /QUOTE_FLOW_REQUEST_SAVE_DRAFT/);
+  assert.match(takeoffUi, /TAKEOFF_REVIEW_DIRTY/);
   assert.match(takeoffStyles, /ctr-split-divider/);
   assert.match(takeoffStyles, /--ctr-plan-ratio/);
   assert.doesNotMatch(takeoffStyles, /\.ctr-plan\s*\{[^}]*resize:\s*both/);

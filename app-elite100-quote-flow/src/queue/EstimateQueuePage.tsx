@@ -25,7 +25,11 @@ import {
   aiTakeoffHeadUrl,
   isAllowedTakeoffMessageOrigin,
   isValidTakeoffApprovedMessage,
-  requestSetScopePayloadFromIframe
+  requestSetScopePayloadFromIframe,
+  TAKEOFF_REVIEW_DIRTY,
+  TAKEOFF_REVIEW_DRAFT_SAVED,
+  QUOTE_FLOW_REQUEST_SAVE_DRAFT,
+  REVIEW_DISCARD_CONFIRM
 } from "../lib/takeoffPostMessageOrigins.mjs";
 
 type Props = {
@@ -185,6 +189,8 @@ export default function EstimateQueuePage(props: Props) {
   );
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [archiveConfirmKey, setArchiveConfirmKey] = useState<string | null>(null);
+  const [reviewDirty, setReviewDirty] = useState(false);
+  const [reviewSaveBusy, setReviewSaveBusy] = useState(false);
   const archiveViewRef = useRef<ArchiveView>("active");
   const inFlightRef = useRef(false);
   const listInFlightRef = useRef(false);
@@ -193,10 +199,13 @@ export default function EstimateQueuePage(props: Props) {
   const detailModeRef = useRef<DetailMode>("idle");
   const estimateNameByJobRef = useRef<Record<string, string>>({});
   const takeoffIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const reviewDirtyRef = useRef(false);
+  const reviewCloseBtnRef = useRef<HTMLButtonElement | null>(null);
 
   selectedJobIdRef.current = selectedJobId;
   detailModeRef.current = detailMode;
   archiveViewRef.current = archiveView;
+  reviewDirtyRef.current = reviewDirty;
 
   const allGrouped = useMemo(() => groupQueueItems(items), [items]);
   const visibleRows = useMemo(
@@ -385,6 +394,8 @@ export default function EstimateQueuePage(props: Props) {
     setNotice(res.message || "Scope is set for this estimate.");
     setError(null);
     setDetailMode("success");
+    setReviewDirty(false);
+    setReviewSaveBusy(false);
     successJobIdRef.current = selectedJobId;
     setDetail((prev) =>
       prev
@@ -406,6 +417,8 @@ export default function EstimateQueuePage(props: Props) {
   async function openReview(takeoffJobId: string, seedItem?: QuoteFlowQueueItem | null) {
     setSelectedJobId(takeoffJobId);
     setDetailMode("review");
+    setReviewDirty(false);
+    setReviewSaveBusy(false);
     setNotice(null);
     setEstimateId(null);
     successJobIdRef.current = null;
@@ -434,6 +447,33 @@ export default function EstimateQueuePage(props: Props) {
     } finally {
       setDetailLoading(false);
     }
+  }
+
+  function requestReviewSaveDraft() {
+    if (!selectedJobId || !takeoffIframeRef.current?.contentWindow) return;
+    setReviewSaveBusy(true);
+    try {
+      takeoffIframeRef.current.contentWindow.postMessage(
+        { type: QUOTE_FLOW_REQUEST_SAVE_DRAFT, takeoffJobId: selectedJobId },
+        "*"
+      );
+    } catch {
+      setReviewSaveBusy(false);
+    }
+    window.setTimeout(() => setReviewSaveBusy(false), 4000);
+  }
+
+  function closeReviewWorkspace(opts: { force?: boolean } = {}) {
+    if (!opts.force && reviewDirtyRef.current) {
+      const ok =
+        typeof window !== "undefined" &&
+        window.confirm(REVIEW_DISCARD_CONFIRM);
+      if (!ok) return false;
+    }
+    setDetailMode("idle");
+    setReviewDirty(false);
+    setReviewSaveBusy(false);
+    return true;
   }
 
   async function openManualScope(row: QuoteFlowQueueItem) {
@@ -473,6 +513,16 @@ export default function EstimateQueuePage(props: Props) {
   function selectRow(row: QuoteFlowQueueItem) {
     const jobId = row.takeoffJobId || "";
     if (!jobId) return;
+    if (
+      detailModeRef.current === "review" &&
+      reviewDirtyRef.current &&
+      jobId !== selectedJobIdRef.current
+    ) {
+      if (typeof window !== "undefined" && !window.confirm(REVIEW_DISCARD_CONFIRM)) {
+        return;
+      }
+      setReviewDirty(false);
+    }
     setSelectedJobId(jobId);
     setDetail(row);
     setNotice(null);
@@ -600,8 +650,25 @@ export default function EstimateQueuePage(props: Props) {
     if (!selectedJobId || detailMode !== "review") return;
     function onMessage(event: MessageEvent) {
       if (!isAllowedTakeoffMessageOrigin(event.origin)) return;
+      const data = event.data;
+      if (!data || typeof data !== "object") return;
+      if (
+        data.type === TAKEOFF_REVIEW_DIRTY &&
+        String(data.takeoffJobId || "") === String(selectedJobId)
+      ) {
+        setReviewDirty(data.dirty === true);
+        return;
+      }
+      if (
+        data.type === TAKEOFF_REVIEW_DRAFT_SAVED &&
+        String(data.takeoffJobId || "") === String(selectedJobId)
+      ) {
+        setReviewDirty(false);
+        setReviewSaveBusy(false);
+        return;
+      }
       // Legacy approved handoff only — footer Set Scope trigger is removed.
-      if (isValidTakeoffApprovedMessage(event.data, selectedJobId)) {
+      if (isValidTakeoffApprovedMessage(data, selectedJobId)) {
         void runSetScope();
       }
     }
@@ -609,6 +676,33 @@ export default function EstimateQueuePage(props: Props) {
     return () => window.removeEventListener("message", onMessage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken, selectedJobId, detailMode, estimateName]);
+
+  useEffect(() => {
+    if (detailMode !== "review") return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [detailMode]);
+
+  useEffect(() => {
+    if (detailMode !== "review") return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeReviewWorkspace();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailMode]);
+
+  useEffect(() => {
+    if (detailMode === "review") {
+      reviewCloseBtnRef.current?.focus?.();
+    }
+  }, [detailMode, selectedJobId]);
 
   function renderRow(row: QuoteFlowQueueItem) {
     const jobId = row.takeoffJobId || "";
@@ -1121,23 +1215,7 @@ export default function EstimateQueuePage(props: Props) {
                           Choose another plan
                         </button>
                       ) : null}
-                      {detailMode === "review" ? (
-                        <button
-                          type="button"
-                          className="qf-btn-primary"
-                          data-testid="qf-queue-set-scope"
-                          disabled={setScopeBusy || workspaceItem?.alreadyScoped === true}
-                          onClick={() => void runSetScope()}
-                          title="Save verified measurements as official estimate scope"
-                        >
-                          {setScopeBusy
-                            ? "Setting scope…"
-                            : workspaceItem?.alreadyScoped
-                              ? "Scope is set"
-                              : "Set Scope"}
-                        </button>
-                      ) : null}
-                      {detailMode === "manual" ? (
+                      {detailMode === "review" ? null : detailMode === "manual" ? (
                         <button
                           type="button"
                           className="qf-btn-primary"
@@ -1162,6 +1240,12 @@ export default function EstimateQueuePage(props: Props) {
                     <p className="qf-muted" data-testid="qf-queue-set-scope-hint">
                       Review measurements. Save draft if needed, then Set Scope from the Quote Flow
                       header.
+                    </p>
+                  ) : null}
+                  {detailMode === "review" ? (
+                    <p className="qf-muted" data-testid="qf-queue-review-open-hint">
+                      Review Takeoff is open in the full workspace. Close it to return to the queue
+                      list.
                     </p>
                   ) : null}
                   {detailMode === "manual" ? (
@@ -1201,23 +1285,146 @@ export default function EstimateQueuePage(props: Props) {
                   />
                 </div>
               ) : null}
-
-              {detailMode === "review" && takeoffSrc ? (
-                <div className="qf-queue__frame-wrap qf-queue__frame-wrap--command">
-                  <iframe
-                    ref={takeoffIframeRef}
-                    title="Takeoff review"
-                    src={takeoffSrc}
-                    className="qf-queue__frame"
-                    data-testid="qf-queue-takeoff-iframe"
-                    allow="fullscreen"
-                  />
-                </div>
-              ) : null}
             </>
           )}
         </div>
       </div>
+
+      {detailMode === "review" && takeoffSrc ? (
+        <div
+          className="qf-queue-review-modal-backdrop"
+          data-testid="qf-queue-review-modal-backdrop"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (reviewDirtyRef.current) return;
+            closeReviewWorkspace();
+          }}
+        >
+          <div
+            className="qf-queue-review-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="qf-queue-review-modal-title"
+            data-testid="qf-queue-review-modal"
+          >
+            <header className="qf-queue-review-modal__header" data-testid="qf-queue-review-workspace">
+              <div className="qf-queue-review-modal__header-top">
+                <div>
+                  <p className="qf-queue-review-modal__eyebrow">Review Takeoff</p>
+                  <h2 id="qf-queue-review-modal-title" data-testid="qf-queue-review-modal-title">
+                    {workspaceTitle}
+                  </h2>
+                  {workspaceSubtitle ? (
+                    <p className="qf-muted" data-testid="qf-queue-review-modal-subtitle">
+                      {workspaceSubtitle}
+                    </p>
+                  ) : null}
+                  <div className="qf-queue-review-modal__meta">
+                    <span
+                      className={statusPillClass(workspaceItem?.status?.key)}
+                      data-testid="qf-queue-review-modal-status"
+                    >
+                      {workspaceItem?.status?.label || "AI Takeoff returned"}
+                    </span>
+                    {workspaceItem?.senderLabel || workspaceItem?.customerDisplay ? (
+                      <span className="qf-muted" data-testid="qf-queue-review-modal-sender">
+                        {workspaceItem.senderLabel || workspaceItem.customerDisplay}
+                      </span>
+                    ) : null}
+                    {workspaceItem?.selectedPlanFilename ||
+                    workspaceItem?.takeoffPlanFilename ||
+                    workspaceItem?.planFilename ||
+                    workspaceItem?.packetSummaryLabel ? (
+                      <span className="qf-muted" data-testid="qf-queue-review-modal-plan">
+                        {workspaceItem.packetSummaryLabel ||
+                          workspaceItem.selectedPlanFilename ||
+                          workspaceItem.takeoffPlanFilename ||
+                          workspaceItem.planFilename}
+                      </span>
+                    ) : null}
+                    {reviewDirty ? (
+                      <span className="qf-queue-review-modal__dirty" data-testid="qf-queue-review-dirty">
+                        Unsaved changes
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <div
+                  className="qf-queue-review-modal__actions"
+                  data-testid="qf-queue-review-modal-actions"
+                >
+                  <button
+                    type="button"
+                    className="qf-btn-secondary"
+                    data-testid="qf-queue-review-save-draft"
+                    disabled={setScopeBusy || reviewSaveBusy}
+                    onClick={() => requestReviewSaveDraft()}
+                    aria-label="Save draft"
+                  >
+                    {reviewSaveBusy ? "Saving…" : "Save Draft"}
+                  </button>
+                  <button
+                    type="button"
+                    className="qf-btn-primary"
+                    data-testid="qf-queue-set-scope"
+                    disabled={setScopeBusy || workspaceItem?.alreadyScoped === true}
+                    onClick={() => void runSetScope()}
+                    title="Save verified measurements as official estimate scope"
+                    aria-label="Set Scope"
+                  >
+                    {setScopeBusy
+                      ? "Setting scope…"
+                      : workspaceItem?.alreadyScoped
+                        ? "Scope is set"
+                        : "Set Scope"}
+                  </button>
+                  <button
+                    ref={reviewCloseBtnRef}
+                    type="button"
+                    className="qf-btn-secondary"
+                    data-testid="qf-queue-review-modal-close"
+                    onClick={() => closeReviewWorkspace()}
+                    aria-label="Back to Queue"
+                  >
+                    Back to Queue
+                  </button>
+                </div>
+              </div>
+
+              {error ? (
+                <div className="qf-error-box" role="alert">
+                  {error}
+                </div>
+              ) : null}
+              {notice ? (
+                <p className="qf-notice" data-testid="qf-queue-review-notice">
+                  {notice}
+                </p>
+              ) : null}
+
+              <div className="qf-queue-review-modal__name-row">
+                {renderEstimateNameField()}
+                <p className="qf-muted qf-queue-review-modal__hint" data-testid="qf-queue-set-scope-hint">
+                  Review measurements beside the plan. Save Draft if needed, then Set Scope.
+                </p>
+              </div>
+            </header>
+
+            <div className="qf-queue-review-modal__body">
+              <div className="qf-queue__frame-wrap qf-queue__frame-wrap--review-modal">
+                <iframe
+                  ref={takeoffIframeRef}
+                  title="Takeoff review"
+                  src={takeoffSrc}
+                  className="qf-queue__frame"
+                  data-testid="qf-queue-takeoff-iframe"
+                  allow="fullscreen"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

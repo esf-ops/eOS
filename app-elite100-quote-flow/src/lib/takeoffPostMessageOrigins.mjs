@@ -7,6 +7,14 @@ export const TAKEOFF_APPROVED_MESSAGE_TYPE = "eliteos-takeoff-approved";
 export const QUOTE_FLOW_REQUEST_SET_SCOPE = "eliteos-quote-flow-request-set-scope";
 /** iframe → parent: reviewed takeoffResult (+ reviewState) ready for Set Scope. */
 export const QUOTE_FLOW_SET_SCOPE_PAYLOAD = "eliteos-quote-flow-set-scope-payload";
+/** iframe → parent: worksheet dirty flag for Review Takeoff modal close guards. */
+export const TAKEOFF_REVIEW_DIRTY = "eliteos-takeoff-review-dirty";
+/** iframe → parent: draft saved successfully. */
+export const TAKEOFF_REVIEW_DRAFT_SAVED = "TAKEOFF_REVIEW_DRAFT_SAVED";
+/** Parent → iframe: trigger Save draft from Quote Flow sticky actions. */
+export const QUOTE_FLOW_REQUEST_SAVE_DRAFT = "eliteos-quote-flow-request-save-draft";
+/** Confirm copy when closing a dirty Review Takeoff workspace. */
+export const REVIEW_DISCARD_CONFIRM = "Discard unsaved review changes?";
 
 export const LOCAL_TAKEOFF_ORIGINS = Object.freeze([
   "http://localhost:5186",

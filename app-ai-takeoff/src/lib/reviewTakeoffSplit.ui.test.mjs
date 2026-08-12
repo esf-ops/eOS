@@ -56,6 +56,8 @@ assert.match(component, /data-testid="ctr-save-draft"/);
 assert.match(component, /data-testid="ctr-add-room"/);
 assert.match(component, /data-testid="ctr-add-piece"/);
 assert.match(component, /ctr-layout--narrow|ctr-layout--stacked/);
+assert.match(component, /QUOTE_FLOW_REQUEST_SAVE_DRAFT/);
+assert.match(component, /TAKEOFF_REVIEW_DIRTY/);
 assert.match(styles, /ctr-split-divider/);
 assert.match(styles, /--ctr-plan-ratio/);
 assert.match(styles, /min-width:\s*360px/);

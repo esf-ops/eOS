@@ -6,10 +6,14 @@
 export const TAKEOFF_REVIEW_READY = "TAKEOFF_REVIEW_READY";
 export const TAKEOFF_REVIEW_DRAFT_SAVED = "TAKEOFF_REVIEW_DRAFT_SAVED";
 export const TAKEOFF_WATERFALL_CHANGED = "TAKEOFF_WATERFALL_CHANGED";
+/** iframe → Quote Flow parent: worksheet dirty flag for modal close guards. */
+export const TAKEOFF_REVIEW_DIRTY = "eliteos-takeoff-review-dirty";
 /** Quote Flow parent → iframe: request current reviewed measurements for Set Scope. */
 export const QUOTE_FLOW_REQUEST_SET_SCOPE = "eliteos-quote-flow-request-set-scope";
 /** Quote Flow iframe → parent: reviewed takeoffResult ready for Set Scope. */
 export const QUOTE_FLOW_SET_SCOPE_PAYLOAD = "eliteos-quote-flow-set-scope-payload";
+/** Quote Flow parent → iframe: trigger Save draft from modal sticky actions. */
+export const QUOTE_FLOW_REQUEST_SAVE_DRAFT = "eliteos-quote-flow-request-save-draft";
 
 /**
  * @param {object} draft
@@ -211,10 +215,12 @@ export function resolveTakeoffParentOrigin(opts = {}) {
 export function postTakeoffParentMessage(type, payload, opts = {}) {
   try {
     if (typeof window === "undefined" || !window.parent || window.parent === window) return false;
-    // Quote Flow Set Scope payload must reach the embedding parent reliably.
+    // Quote Flow Set Scope / dirty / saved signals must reach the embedding parent.
     // Parent validates event.origin against the Takeoff allowlist.
     let origin =
-      type === QUOTE_FLOW_SET_SCOPE_PAYLOAD
+      type === QUOTE_FLOW_SET_SCOPE_PAYLOAD ||
+      type === TAKEOFF_REVIEW_DIRTY ||
+      type === TAKEOFF_REVIEW_DRAFT_SAVED
         ? "*"
         : resolveTakeoffParentOrigin({ localReview: opts.localReview });
     if (!origin) return false;
