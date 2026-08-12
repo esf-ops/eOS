@@ -13,8 +13,11 @@ import {
   sortInboxItemsForDisplay
 } from "../lib/inboxGrouping.mjs";
 import {
+  ACTIVE_TAKEOFF_STAGE_CHIPS,
   formatBatchResultLine,
-  humanInboxLabel,
+  resolveActiveTakeoffStageIndex,
+  resolveBatchRequestIdentity,
+  resolveTrackedBatchCompletion,
   shortJobLabel,
   summarizeBatchStartResults
 } from "../lib/inboxUiHelpers.mjs";
@@ -44,6 +47,9 @@ type Props = {
 type BatchResult = {
   messageKey: string;
   label: string;
+  subject?: string | null;
+  planFilename?: string | null;
+  customerLabel?: string | null;
   ok: boolean;
   reused?: boolean;
   takeoffJobId?: string | null;
@@ -168,9 +174,11 @@ function ProgressBar({ item }: { item: QuoteFlowInboxItem }) {
   const updatedClock = formatClockTime(item.takeoffUpdatedAt);
   const rightLabel = progress.isError
     ? "Failed"
-    : progress.indeterminate || progress.percent == null
-      ? "Processing…"
-      : `${progress.percent}%`;
+    : progress.isComplete
+      ? "Ready for review"
+      : progress.indeterminate || progress.percent == null
+        ? "Processing plan"
+        : `${progress.percent}%`;
   return (
     <div
       className={
@@ -234,6 +242,178 @@ function TakeoffTimeline({ item }: { item: QuoteFlowInboxItem }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+function TakeoffStageChips({ item }: { item: QuoteFlowInboxItem }) {
+  const progress = resolveInboxProgress(item);
+  const idx = resolveActiveTakeoffStageIndex(item.takeoffStatus?.key, progress.stageKey);
+  return (
+    <ol className="qf-inbox__stage-chips" data-testid="qf-inbox-stage-chips" aria-label="Takeoff stages">
+      {ACTIVE_TAKEOFF_STAGE_CHIPS.map((chip, i) => {
+        const tone = idx < 0 ? "pending" : i < idx ? "done" : i === idx ? "active" : "pending";
+        return (
+          <li key={chip.key} className={`qf-inbox__stage-chip is-${tone}`} data-stage={chip.key}>
+            {chip.label}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function ActiveTakeoffCard({
+  item,
+  onOpen,
+  onOpenQueue,
+  onRetry,
+  onRemove,
+  busy,
+  dismissBusy
+}: {
+  item: QuoteFlowInboxItem;
+  onOpen: () => void;
+  onOpenQueue?: () => void;
+  onRetry?: () => void;
+  onRemove?: () => void;
+  busy?: boolean;
+  dismissBusy?: boolean;
+}) {
+  const progress = resolveInboxProgress(item);
+  const identity = resolveBatchRequestIdentity(item, labelHelpers());
+  const statusKey = item.takeoffStatus?.key || "";
+  const isReturned = statusKey === "takeoff_returned";
+  const isFailed = statusKey === "takeoff_failed";
+  const isActive =
+    statusKey === "takeoff_queued" ||
+    statusKey === "takeoff_processing" ||
+    item.isActiveTakeoff === true;
+  const elapsed =
+    formatElapsedLabel(item.takeoffElapsedSeconds) ||
+    (item.takeoffStartedAt
+      ? formatElapsedLabel(
+          Math.max(
+            0,
+            Math.floor((Date.now() - Date.parse(String(item.takeoffStartedAt))) / 1000)
+          )
+        )
+      : null);
+  const updatedClock = formatClockTime(item.takeoffUpdatedAt);
+  const statusLabel = isReturned
+    ? "Ready for review"
+    : isFailed
+      ? "Failed"
+      : progress.stageLabel === "AI Takeoff processing"
+        ? "Processing plan"
+        : progress.stageLabel === "Sending plan to AI Takeoff"
+          ? "Sending plan"
+          : progress.stageLabel || item.takeoffStatusLabel || item.takeoffStatus?.label || "Processing";
+
+  return (
+    <article
+      className={
+        isFailed
+          ? "qf-inbox__active-card is-failed"
+          : isReturned
+            ? "qf-inbox__active-card is-ready"
+            : "qf-inbox__active-card"
+      }
+      data-testid="qf-inbox-active-card"
+      data-status={statusKey}
+      data-message-key={item.messageKey || ""}
+    >
+      <div className="qf-inbox__active-card-head">
+        <div>
+          <h3 data-testid="qf-inbox-active-title">{identity.subject || identity.primaryLabel}</h3>
+          <p className="qf-muted" data-testid="qf-inbox-active-meta">
+            {[identity.planFilename ? `Plan: ${identity.planFilename}` : null, identity.customerLabel]
+              .filter(Boolean)
+              .join(" · ") || "AI Takeoff"}
+          </p>
+        </div>
+        <span className={statusPillClass(statusKey)} data-testid="qf-inbox-active-status">
+          {statusLabel}
+        </span>
+      </div>
+      {isActive || isReturned ? <TakeoffStageChips item={item} /> : null}
+      {isActive ? (
+        <div
+          className={
+            progress.indeterminate ? "qf-progress is-indeterminate" : "qf-progress"
+          }
+          data-testid="qf-inbox-active-progress"
+          data-indeterminate={progress.indeterminate ? "1" : "0"}
+        >
+          <div className="qf-progress__meta">
+            <span>{statusLabel}</span>
+            <span>{progress.isComplete ? "100%" : "Processing plan"}</span>
+          </div>
+          <div className="qf-progress__track" aria-hidden="true">
+            <div
+              className="qf-progress__fill"
+              style={
+                progress.indeterminate || progress.percent == null
+                  ? undefined
+                  : { width: `${progress.percent}%` }
+              }
+            />
+          </div>
+          <div className="qf-progress__details">
+            {elapsed ? <span>Elapsed {elapsed}</span> : null}
+            {updatedClock ? <span>Updated {updatedClock}</span> : null}
+            {item.staleLabel ? <span className="qf-progress__stale">{item.staleLabel}</span> : null}
+          </div>
+        </div>
+      ) : null}
+      {isReturned ? (
+        <p className="qf-inbox__active-ready" data-testid="qf-inbox-active-ready">
+          Returned from AI Takeoff — ready for Estimate Queue review.
+        </p>
+      ) : null}
+      {isFailed ? (
+        <p className="qf-error" data-testid="qf-inbox-active-error">
+          {item.takeoffErrorMessageSafe ||
+            "AI Takeoff failed, but no detailed reason was returned."}
+        </p>
+      ) : null}
+      <TakeoffTimeline item={item} />
+      <div className="qf-inbox__active-card-actions">
+        <button type="button" className="qf-btn-secondary" onClick={onOpen}>
+          Open request
+        </button>
+        {isReturned && onOpenQueue ? (
+          <button
+            type="button"
+            className="qf-btn-primary"
+            data-testid="qf-inbox-active-view-queue"
+            onClick={onOpenQueue}
+          >
+            View in Estimate Queue
+          </button>
+        ) : null}
+        {isFailed && onRetry ? (
+          <button
+            type="button"
+            className="qf-btn-primary"
+            data-testid="qf-inbox-active-retry"
+            disabled={busy}
+            onClick={onRetry}
+          >
+            {busy ? "Starting takeoff…" : "Retry AI Takeoff"}
+          </button>
+        ) : null}
+        {(isReturned || isFailed) && onRemove ? (
+          <button
+            type="button"
+            className="qf-btn-secondary"
+            disabled={dismissBusy}
+            onClick={onRemove}
+          >
+            Remove from Inbox
+          </button>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
@@ -345,6 +525,8 @@ export default function InboxPage(props: Props) {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+  const [trackedBatchKeys, setTrackedBatchKeys] = useState<string[]>([]);
+  const [batchCompleteDismissed, setBatchCompleteDismissed] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
@@ -484,15 +666,24 @@ export default function InboxPage(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMessageKey, items.length]);
 
-  // Background poll while active takeoffs exist — never blanks the list.
+  // Background poll while active takeoffs exist (or tracked batch still in flight).
   useEffect(() => {
-    if (grouped.active.length === 0) return;
+    const trackedActive = trackedBatchKeys.some((key) => {
+      const row = itemsRef.current.find((i) => i.messageKey === key);
+      const status = row?.takeoffStatus?.key;
+      return (
+        status === "takeoff_queued" ||
+        status === "takeoff_processing" ||
+        row?.isActiveTakeoff === true
+      );
+    });
+    if (grouped.active.length === 0 && !trackedActive) return;
     const id = window.setInterval(() => {
       void loadList("poll");
     }, 12000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grouped.active.length, authToken]);
+  }, [grouped.active.length, trackedBatchKeys.join("|"), authToken]);
 
   function rememberSelection(messageKey: string, attachmentKey: string | null) {
     if (!messageKey || !attachmentKey) return;
@@ -727,6 +918,45 @@ export default function InboxPage(props: Props) {
     }
   }
 
+  async function runRetryTakeoffForItem(row: QuoteFlowInboxItem) {
+    const messageKey = row.messageKey || "";
+    const att =
+      (row.attachments || []).find((a) => a.supportedForTakeoff && a.attachmentKey) ||
+      (row.attachments || []).find(
+        (a) => a.attachmentKey && a.attachmentKey === row.bestPlanCandidate?.attachmentKey
+      ) ||
+      (row.attachments || []).find((a) => a.canMarkAsPlan && a.attachmentKey) ||
+      null;
+    if (!messageKey || !att?.attachmentKey) {
+      setError("Select a plan attachment to retry AI Takeoff.");
+      if (messageKey) void openRow(messageKey);
+      return;
+    }
+    setBusyKey(att.attachmentKey);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await startQuoteFlowTakeoff(authToken, messageKey, {
+        attachmentKey: att.attachmentKey,
+        manualPlanOverride: Boolean(att.canMarkAsPlan && !att.supportedForTakeoff),
+        idempotencyKey: `qf-retry-${messageKey}-${att.attachmentKey}`
+      });
+      setNotice(
+        res.message ||
+          (res.alreadyRunning || res.reused
+            ? "AI Takeoff is already running."
+            : "AI Takeoff started.")
+      );
+      clearSelection(messageKey);
+      await loadList("refresh");
+      void openRow(messageKey);
+    } catch (e) {
+      setError(errorMessage(e) || "AI Takeoff could not start.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function runStartTakeoff(att: QuoteFlowAttachment, markAsPlan = false) {
     if (!detail?.messageKey || !att.attachmentKey) return;
     if (detail.alreadyScoped) {
@@ -787,16 +1017,20 @@ export default function InboxPage(props: Props) {
     setError(null);
     setNotice(null);
     setBatchResults([]);
+    setBatchCompleteDismissed(false);
     const results: BatchResult[] = [];
 
     await Promise.all(
       entries.map(async ([messageKey, attachmentKey]) => {
         const row = itemsRef.current.find((i) => i.messageKey === messageKey);
-        const label = humanInboxLabel(row, labelHelpers());
+        const identity = resolveBatchRequestIdentity(row, labelHelpers());
         if (row?.alreadyScoped) {
           results.push({
             messageKey,
-            label,
+            label: identity.primaryLabel,
+            subject: identity.subject,
+            planFilename: identity.planFilename,
+            customerLabel: identity.customerLabel,
             ok: false,
             kind: "blocked",
             error: "Scope is already set. Open in Estimates."
@@ -811,9 +1045,13 @@ export default function InboxPage(props: Props) {
             idempotencyKey: `qf-batch-${messageKey}-${attachmentKey}`
           });
           const reused = res.alreadyRunning === true || res.reused === true;
+          const planFromAtt = att?.filename || identity.planFilename;
           results.push({
             messageKey,
-            label,
+            label: identity.primaryLabel,
+            subject: identity.subject,
+            planFilename: planFromAtt,
+            customerLabel: identity.customerLabel,
             ok: true,
             reused,
             takeoffJobId: res.takeoffJobId,
@@ -823,7 +1061,10 @@ export default function InboxPage(props: Props) {
           const msg = errorMessage(e);
           results.push({
             messageKey,
-            label,
+            label: identity.primaryLabel,
+            subject: identity.subject,
+            planFilename: identity.planFilename,
+            customerLabel: identity.customerLabel,
             ok: false,
             error: msg,
             kind: /scope already set|already_scoped|Open in Estimates/i.test(msg)
@@ -835,8 +1076,10 @@ export default function InboxPage(props: Props) {
     );
 
     setBatchResults(results);
-    const summary = summarizeBatchStartResults(results);
-    setNotice(summary.summaryLine);
+    const trackingKeys = results
+      .filter((r) => r.ok && (r.kind === "started" || r.kind === "already_running"))
+      .map((r) => r.messageKey);
+    setTrackedBatchKeys(trackingKeys);
     setSelectedAttachmentByMessage((prev) => {
       const next = { ...prev };
       for (const r of results) {
@@ -844,6 +1087,10 @@ export default function InboxPage(props: Props) {
       }
       return next;
     });
+    const detailKey = selectedKeyRef.current;
+    if (detailKey && results.some((r) => r.messageKey === detailKey && (r.ok || r.kind === "blocked"))) {
+      setSelectedAttachmentKeys([]);
+    }
     await loadList("refresh");
     setBatchBusy(false);
   }
@@ -1031,6 +1278,31 @@ export default function InboxPage(props: Props) {
   const showGroups = visibleRows.length > 0;
   const showEmpty = !initialLoading && visibleRows.length === 0;
 
+  const batchSummary = batchResults.length ? summarizeBatchStartResults(batchResults) : null;
+  const trackedCompletion = resolveTrackedBatchCompletion(items, trackedBatchKeys);
+  const showBatchComplete =
+    !batchCompleteDismissed &&
+    trackedBatchKeys.length > 0 &&
+    trackedCompletion.allReturned;
+
+  const progressPanelItems = (() => {
+    const byKey = new Map<string, QuoteFlowInboxItem>();
+    for (const row of items) {
+      const key = row.messageKey || "";
+      if (!key) continue;
+      const status = row.takeoffStatus?.key || "";
+      const isLive =
+        status === "takeoff_queued" ||
+        status === "takeoff_processing" ||
+        row.isActiveTakeoff === true;
+      const inTracked =
+        trackedBatchKeys.includes(key) &&
+        (status === "takeoff_returned" || status === "takeoff_failed");
+      if (isLive || inTracked) byKey.set(key, row);
+    }
+    return Array.from(byKey.values());
+  })();
+
   const stats = {
     newUnopened: grouped.stats.newUnopened ?? 0,
     needsAction: grouped.stats.needsAction,
@@ -1179,19 +1451,111 @@ export default function InboxPage(props: Props) {
           ) : null}
         </p>
       ) : null}
-      {batchResults.length ? (
-        <div className="qf-inbox__batch-banner" data-testid="qf-inbox-batch-banner">
-          <p className="qf-notice" data-testid="qf-inbox-batch-summary">
-            {summarizeBatchStartResults(batchResults).summaryLine}
-          </p>
+
+      {batchResults.length && batchSummary ? (
+        <div className="qf-inbox__batch-panel" data-testid="qf-inbox-batch-banner">
+          <div className="qf-inbox__batch-panel-head">
+            <p data-testid="qf-inbox-batch-summary">{batchSummary.summaryLine}</p>
+            <button
+              type="button"
+              className="qf-link-btn"
+              data-testid="qf-inbox-batch-dismiss"
+              onClick={() => setBatchResults([])}
+            >
+              Dismiss
+            </button>
+          </div>
           <ul className="qf-inbox__batch-results" data-testid="qf-inbox-batch-results">
             {batchResults.map((r) => (
               <li key={r.messageKey} data-ok={r.ok ? "1" : "0"} data-kind={r.kind}>
-                {formatBatchResultLine(r)}
+                <div className="qf-inbox__batch-result-main">{formatBatchResultLine(r)}</div>
+                {r.subject || r.planFilename || r.customerLabel ? (
+                  <div className="qf-muted qf-inbox__batch-result-meta" data-testid="qf-inbox-batch-result-meta">
+                    {[r.subject, r.planFilename ? `Plan: ${r.planFilename}` : null, r.customerLabel]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                ) : null}
+                {!r.ok && r.error ? (
+                  <div className="qf-error qf-inbox__batch-result-error" data-testid="qf-inbox-batch-result-error">
+                    {r.error}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {showBatchComplete ? (
+        <div className="qf-inbox__batch-complete" data-testid="qf-inbox-batch-complete">
+          <p data-testid="qf-inbox-batch-complete-copy">
+            {trackedCompletion.returnedCount === 1
+              ? "1 takeoff returned and is ready for review."
+              : `${trackedCompletion.returnedCount} takeoffs returned and are ready for review.`}
+          </p>
+          <div className="qf-inbox__batch-complete-actions">
+            <button
+              type="button"
+              className="qf-btn-primary"
+              data-testid="qf-inbox-batch-view-queue"
+              onClick={() => {
+                setBatchCompleteDismissed(true);
+                onOpenQueue?.();
+              }}
+            >
+              View Estimate Queue
+            </button>
+            <button
+              type="button"
+              className="qf-btn-secondary"
+              onClick={() => {
+                setBatchCompleteDismissed(true);
+                setTrackedBatchKeys([]);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {progressPanelItems.length ? (
+        <section className="qf-inbox__active-panel" data-testid="qf-inbox-active-panel">
+          <div className="qf-inbox__active-panel-head">
+            <h2>Active AI Takeoffs</h2>
+            <span className="qf-muted">
+              {stats.activeTakeoffs
+                ? `${stats.activeTakeoffs} processing`
+                : "Tracking progress"}
+              {stats.readyForReview ? ` · ${stats.readyForReview} ready for review` : ""}
+            </span>
+          </div>
+          <div className="qf-inbox__active-cards">
+            {progressPanelItems.map((row) => {
+              const key = row.messageKey || "";
+              return (
+                <ActiveTakeoffCard
+                  key={key || row.subject}
+                  item={row}
+                  busy={Boolean(busyKey)}
+                  dismissBusy={dismissBusy}
+                  onOpen={() => {
+                    if (key) void openRow(key);
+                  }}
+                  onOpenQueue={onOpenQueue}
+                  onRetry={
+                    row.takeoffStatus?.key === "takeoff_failed" &&
+                    (row.canRetryTakeoff || row.canStartTakeoff)
+                      ? () => void runRetryTakeoffForItem(row)
+                      : undefined
+                  }
+                  onRemove={key ? () => requestDismiss(row) : undefined}
+                />
+              );
+            })}
+          </div>
+        </section>
       ) : null}
 
       {pendingDismissKey ? (

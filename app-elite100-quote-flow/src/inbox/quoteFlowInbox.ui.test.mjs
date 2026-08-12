@@ -289,17 +289,24 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
   assert.match(inbox, /alreadyScoped/);
   assert.match(inbox, /qf-inbox-batch-results/);
   assert.match(inbox, /qf-inbox-batch-banner|summarizeBatchStartResults/);
-  assert.match(inbox, /formatBatchResultLine|humanInboxLabel/);
+  assert.match(inbox, /formatBatchResultLine|resolveBatchRequestIdentity/);
+  assert.match(inbox, /qf-inbox-active-panel|ActiveTakeoffCard/);
+  assert.match(inbox, /qf-inbox-stage-chips|ACTIVE_TAKEOFF_STAGE_CHIPS/);
+  assert.match(inbox, /qf-inbox-batch-complete|View Estimate Queue/);
+  assert.match(inbox, /setBatchBusy\(true\)/);
+  assert.match(inbox, /disabled=\{batchBusy \|\| selectedCount === 0\}/);
+  assert.match(inbox, /delete next\[r\.messageKey\]/);
   assert.match(inbox, /reused/);
   assert.match(inbox, /qf-inbox-takeoff-timeline|TakeoffTimeline/);
   assert.match(inbox, /qf-inbox-failure-card|FailureCard/);
   assert.match(inbox, /Retry AI Takeoff/);
   assert.match(inbox, /Starting takeoff/);
-  assert.match(inbox, /Processing…/);
+  assert.match(inbox, /Processing plan/);
   assert.match(inbox, /qf-inbox-stale|staleLabel/);
-  assert.match(inbox, /Takeoff returned/);
+  assert.match(inbox, /Ready for review|Takeoff returned/);
   assert.match(inbox, /View in Estimate Queue/);
   assert.doesNotMatch(inbox, /publish|mark sold|accept quote|QuickBooks/i);
+  assert.doesNotMatch(inbox, /setNotice\(summary\.summaryLine\)/);
   // Full-page loading copy only for initial empty load — not polled blanking.
   assert.match(inbox, /showFullLoading = initialLoading && items\.length === 0/);
   assert.doesNotMatch(
@@ -314,7 +321,10 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
     formatBatchResultLine,
     humanInboxLabel,
     looksLikeGraphKey,
-    shortJobLabel
+    resolveBatchRequestIdentity,
+    resolveTrackedBatchCompletion,
+    shortJobLabel,
+    summarizeBatchStartResults
   } = await import(join(appRoot, "src/lib/inboxUiHelpers.mjs"));
 
   assert.equal(looksLikeGraphKey("AAMkAGI2ExampleGraphKeyThatIsLong=="), true);
@@ -324,8 +334,8 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
   const graphRow = {
     messageKey: "AAMkAGI2ExampleGraphKeyThatIsLong==",
     senderLabel: "Amanda Rushton",
-    subject: "Kitchen",
-    bestPlanCandidate: { filename: "plan.pdf" }
+    subject: "Kitchen remodel with island",
+    bestPlanCandidate: { filename: "KITCHEN.pdf" }
   };
   const label = humanInboxLabel(graphRow, {
     resolveCustomerDisplay,
@@ -335,53 +345,107 @@ console.log("ok: Inbox command-center contracts; no V1/V2 copy");
   assert.equal(label, "Amanda Rushton");
   assert.doesNotMatch(label, /AAMk/);
 
-  assert.equal(
-    formatBatchResultLine({ ok: true, reused: false, label: "Vanderschot Project" }),
-    "Started: Vanderschot Project"
+  const identity = resolveBatchRequestIdentity(graphRow, {
+    resolveCustomerDisplay,
+    resolveRequestTitle,
+    formatPersonLabel
+  });
+  assert.equal(identity.subject, "Kitchen remodel with island");
+  assert.equal(identity.planFilename, "KITCHEN.pdf");
+  assert.match(
+    formatBatchResultLine({
+      ok: true,
+      reused: true,
+      kind: "already_running",
+      label: identity.primaryLabel,
+      subject: identity.subject,
+      planFilename: identity.planFilename,
+      customerLabel: identity.customerLabel
+    }),
+    /Already processing · Kitchen remodel with island · KITCHEN\.pdf/
   );
+  assert.doesNotMatch(
+    formatBatchResultLine({
+      ok: true,
+      reused: true,
+      kind: "already_running",
+      label: "Chris Henely",
+      subject: "FW: 2436 Wooster Rd",
+      planFilename: "KITCHEN.pdf",
+      customerLabel: "Chris Henely"
+    }),
+    /^Already running: Chris Henely$/
+  );
+
   assert.equal(
-    formatBatchResultLine({ ok: true, reused: true, label: "Fashion Par Sales" }),
-    "Already running: Fashion Par Sales"
+    formatBatchResultLine({ ok: true, reused: false, label: "Vanderschot Project", subject: "Vanderschot Project" }),
+    "Started · Vanderschot Project"
   );
   assert.equal(
     formatBatchResultLine({
       ok: false,
       kind: "blocked",
       label: "Done Co",
+      subject: "Done Co kitchen",
       error: "Scope is already set. Open in Estimates."
     }),
-    "Blocked: scope already set"
+    "Blocked · Done Co kitchen — scope already set"
   );
   assert.match(
     formatBatchResultLine({
       ok: false,
       kind: "failed",
       label: "Kitchen",
+      subject: "Kitchen",
       error: "Plan attachment missing"
     }),
-    /Failed to start: Kitchen — Plan attachment missing/
+    /Could not start · Kitchen — Plan attachment missing/
   );
   const batchLine = formatBatchResultLine({
     ok: true,
     reused: false,
     label,
+    subject: "Kitchen",
     takeoffJobId: "462abe28-aaaa-bbbb-cccc-dddddddddddd"
   });
   assert.doesNotMatch(batchLine, /AAMk/);
   assert.doesNotMatch(batchLine, /462abe28-aaaa/);
-  const {
-    summarizeBatchStartResults
-  } = await import(join(appRoot, "src/lib/inboxUiHelpers.mjs"));
-  const summary = summarizeBatchStartResults([
+
+  const allAlready = summarizeBatchStartResults([
+    { ok: true, reused: true, kind: "already_running" },
+    { ok: true, reused: true, kind: "already_running" }
+  ]);
+  assert.equal(allAlready.selected, 2);
+  assert.equal(allAlready.started, 0);
+  assert.equal(allAlready.alreadyRunning, 2);
+  assert.match(allAlready.summaryLine, /already being processed/i);
+  assert.doesNotMatch(allAlready.summaryLine, /2 selected ·/);
+
+  const mixed = summarizeBatchStartResults([
     { ok: true, reused: false, kind: "started" },
     { ok: true, reused: true, kind: "already_running" },
     { ok: false, kind: "failed" }
   ]);
-  assert.equal(summary.selected, 3);
-  assert.equal(summary.started, 1);
-  assert.equal(summary.alreadyRunning, 1);
-  assert.equal(summary.failed, 1);
-  assert.match(summary.summaryLine, /3 selected/);
+  assert.equal(mixed.started, 1);
+  assert.equal(mixed.alreadyRunning, 1);
+  assert.equal(mixed.failed, 1);
+  assert.match(mixed.summaryLine, /could not start/i);
+
+  const startedOnly = summarizeBatchStartResults([
+    { ok: true, reused: false, kind: "started" },
+    { ok: true, reused: false, kind: "started" }
+  ]);
+  assert.equal(startedOnly.summaryLine, "AI Takeoff started for 2 requests.");
+
+  const completion = resolveTrackedBatchCompletion(
+    [
+      { messageKey: "m1", takeoffStatus: { key: "takeoff_returned" } },
+      { messageKey: "m2", takeoffStatus: { key: "takeoff_returned" } }
+    ],
+    ["m1", "m2"]
+  );
+  assert.equal(completion.allReturned, true);
+  assert.equal(completion.returnedCount, 2);
   console.log("ok: batch results are human readable; no raw Graph keys");
 }
 
