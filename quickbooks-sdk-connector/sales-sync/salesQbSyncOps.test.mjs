@@ -52,6 +52,15 @@ assert.equal(installer.includes("C:\\eliteOS\\quickbooks-sdk-connector"), false)
 assert.ok(installer.includes("Do not schedule") || installer.includes("not schedule"));
 assert.ok(!/\$arg\s*=.*Backfill/i.test(installer), "scheduled action must not pass -Backfill");
 assert.ok(!/New-ScheduledTaskAction[\s\S]{0,200}-Backfill/i.test(installer));
+// Task Scheduler rejects unbounded TimeSpan repetition duration (P99999999DT23H59M59S).
+assert.equal(installer.includes("[TimeSpan]::MaxValue"), false);
+assert.equal(installer.includes("TimeSpan]::MaxValue"), false);
+assert.equal(/RepetitionDuration\s*=/.test(installer), false);
+assert.equal(/-RepetitionDuration\b/.test(installer), false);
+assert.ok(installer.includes("RepetitionInterval"));
+assert.ok(installer.includes("New-ScheduledTaskTrigger -Once"));
+assert.ok(installer.includes("ExecutionTimeLimit") || installer.includes("New-TimeSpan -Hours 2"));
+assert.ok(installer.includes("P99999999") === false || installer.includes("rejects"));
 
 assert.ok(envExample.includes("QB_SALES_DSN=slabOS_QuickBooks_Local_RO"));
 assert.ok(envExample.includes("QB_SALES_SYNC_INGEST_TOKEN="));

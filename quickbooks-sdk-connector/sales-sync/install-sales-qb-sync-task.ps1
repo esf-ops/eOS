@@ -209,7 +209,11 @@ if ($null -ne $existing) {
 $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg
 
 $start = (Get-Date).AddMinutes(5)
-$taskTrigger = New-ScheduledTaskTrigger -Once -At $start -RepetitionInterval (New-TimeSpan -Hours $hours) -RepetitionDuration ([TimeSpan]::MaxValue)
+# Once + RepetitionInterval only. Omit RepetitionDuration so Task Scheduler treats
+# repetition as indefinite. Never set an unbounded TimeSpan duration (Task Scheduler
+# rejects the XML duration P99999999DT23H59M59S as out of range).
+$taskTrigger = New-ScheduledTaskTrigger -Once -At $start
+$taskTrigger.RepetitionInterval = (New-TimeSpan -Hours $hours)
 
 $taskSettings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
