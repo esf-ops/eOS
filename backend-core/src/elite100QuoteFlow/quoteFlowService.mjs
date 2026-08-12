@@ -22,6 +22,10 @@ import {
   sanitizeTakeoffPacketFilename
 } from "./quoteFlowTakeoffPacket.mjs";
 import {
+  buildQuoteFlowTakeoffSourceMeta,
+  persistQuoteFlowTakeoffSourceMeta
+} from "./quoteFlowQueueSourceMeta.mjs";
+import {
   contentDispositionInline,
   planViewerError
 } from "../elite100EstimateStudio/studioSecurePlanViewer.mjs";
@@ -89,6 +93,64 @@ export function createQuoteFlowService(deps) {
       alreadyScoped: scoped,
       dismissed,
       opened
+    });
+  }
+
+  /**
+   * Best-effort: stamp staff queue identity onto takeoff job metadata.
+   */
+  async function stampTakeoffSourceMeta({
+    organizationId,
+    takeoffJobId,
+    messageKey,
+    inboxItem = null,
+    attachmentKeys = [],
+    attachments = [],
+    packetFilename = null,
+    packetMerged = false,
+    selectedPlanFilename = null
+  }) {
+    if (!takeoffJobId || !getSupabase) return;
+    const keys = Array.isArray(attachmentKeys) ? attachmentKeys.filter(Boolean) : [];
+    const atts = Array.isArray(attachments) ? attachments : [];
+    const byKey = new Map(
+      atts
+        .filter((a) => a?.attachmentKey)
+        .map((a) => [String(a.attachmentKey), a])
+    );
+    const packetFiles = keys.length
+      ? keys.map((k) => {
+          const hit = byKey.get(String(k));
+          return {
+            filename: hit?.filename || hit?.name || null,
+            attachmentKey: k
+          };
+        })
+      : selectedPlanFilename
+        ? [{ filename: selectedPlanFilename, attachmentKey: keys[0] || null }]
+        : [];
+
+    const quoteFlow = buildQuoteFlowTakeoffSourceMeta({
+      requestSubject:
+        inboxItem?.requestTitle || inboxItem?.subject || inboxItem?.projectLabel || null,
+      senderLabel: inboxItem?.senderLabel || inboxItem?.sender || null,
+      customerLabel:
+        inboxItem?.customerDisplay || inboxItem?.customerLabel || inboxItem?.senderLabel || null,
+      selectedPlanFilename:
+        selectedPlanFilename ||
+        (!packetMerged && packetFiles[0]?.filename) ||
+        null,
+      packetFilename,
+      packetMerged,
+      packetFiles,
+      messageKey: messageKey || inboxItem?.messageKey || null,
+      sourceMailboxLabel: inboxItem?.mailboxLabel || inboxItem?.sourceMailboxLabel || null
+    });
+    await persistQuoteFlowTakeoffSourceMeta({
+      getSupabase,
+      organizationId,
+      takeoffJobId,
+      quoteFlow
     });
   }
 
@@ -334,6 +396,20 @@ export function createQuoteFlowService(deps) {
       const alreadyRunning =
         result.alreadyRunning === true || (result.reused === true && result.created !== true);
       const created = result.created === true && !alreadyRunning;
+      const attName = result.attachmentName || null;
+      if (result.takeoffJobId) {
+        await stampTakeoffSourceMeta({
+          organizationId,
+          takeoffJobId: result.takeoffJobId,
+          messageKey,
+          inboxItem: detail?.item || item,
+          attachmentKeys: keys,
+          attachments: detail?.item?.attachments || item?.attachments || [],
+          packetFilename: null,
+          packetMerged: false,
+          selectedPlanFilename: attName
+        });
+      }
       return {
         ok: true,
         intakeCaseId: result.intakeCaseId || null,
@@ -343,7 +419,7 @@ export function createQuoteFlowService(deps) {
         alreadyRunning,
         attachmentKey: result.attachmentKey || keys[0],
         attachmentKeys: keys,
-        attachmentName: result.attachmentName || null,
+        attachmentName: attName,
         packetMerged: false,
         item,
         message: alreadyRunning ? "AI Takeoff is already running." : "AI Takeoff started.",
@@ -551,6 +627,26 @@ export function createQuoteFlowService(deps) {
 
     const takeoffJobId = openResult?.takeoffJobId ? String(openResult.takeoffJobId) : null;
     const reused = openResult?.alreadyRunning === true || openResult?.reused === true;
+    if (takeoffJobId) {
+      const orderedPacketFiles = parts.map((p, idx) => ({
+        filename: p.filename || null,
+        attachmentKey: keys[idx] || null
+      }));
+      await stampTakeoffSourceMeta({
+        organizationId,
+        takeoffJobId,
+        messageKey,
+        inboxItem: detail?.item || item,
+        attachmentKeys: keys,
+        attachments: orderedPacketFiles.map((f) => ({
+          attachmentKey: f.attachmentKey,
+          filename: f.filename
+        })),
+        packetFilename: packet.filename,
+        packetMerged: packet.merged === true,
+        selectedPlanFilename: packet.merged ? null : packet.filename
+      });
+    }
     return {
       ok: true,
       intakeCaseId: caseId,

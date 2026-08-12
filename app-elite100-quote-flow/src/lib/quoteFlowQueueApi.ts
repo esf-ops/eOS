@@ -3,6 +3,7 @@ import type { QuoteFlowScopeRoom } from "./quoteFlowEstimatesApi";
 
 export type QuoteFlowQueueItem = {
   takeoffJobId: string | null;
+  takeoffJobIdShort?: string | null;
   intakeCaseId: string | null;
   estimateId: string | null;
   messageKey?: string | null;
@@ -12,18 +13,31 @@ export type QuoteFlowQueueItem = {
   customerDisplay?: string | null;
   projectDisplay?: string | null;
   requestTitle?: string | null;
+  requestSubject?: string | null;
+  subject?: string | null;
   defaultEstimateName?: string | null;
   estimateName?: string | null;
   senderLabel?: string | null;
+  sourceMailboxLabel?: string | null;
   planFilename?: string | null;
   planLabel?: string | null;
+  selectedPlanFilename?: string | null;
+  takeoffPlanFilename?: string | null;
+  packetFilename?: string | null;
+  packetMerged?: boolean;
+  packetFileCount?: number;
+  packetFiles?: Array<{ filename?: string | null; attachmentKey?: string | null }>;
+  packetSummaryLabel?: string | null;
   receivedAt?: string | null;
   returnedAt?: string | null;
   startedAt?: string | null;
+  takeoffStartedAt?: string | null;
+  takeoffReturnedAt?: string | null;
   workflowStatus?: string;
   status: { key: string; label: string };
   group?: { key: string; label: string; sortOrder?: number };
   nextAction?: { key: string; label: string };
+  nextActionHelper?: string | null;
   summary?: {
     roomCount?: number | null;
     pieceCount?: number | null;

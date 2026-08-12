@@ -4,9 +4,17 @@
  */
 
 import { formatQuoteFlowPersonLabel } from "./quoteFlowInboxPresenter.mjs";
+import {
+  filenameWithoutExtension as packetFilenameWithoutExtension,
+  isOpaquePlanFilename,
+  readQuoteFlowTakeoffSourceMeta,
+  sanitizeQueueSourceText
+} from "./quoteFlowQueueSourceMeta.mjs";
 
 /** Processing / queued rows newer than this are treated as "recent" for archive confirm. */
 export const QUOTE_FLOW_QUEUE_RECENT_PROCESSING_MS = 6 * 60 * 60 * 1000;
+
+export { isOpaquePlanFilename };
 
 /**
  * Stable archive key for a queue row. Prefer takeoff job → intake case → message → fallback.
@@ -127,14 +135,23 @@ export function mapQuoteFlowQueueNextAction(statusKey) {
  * @param {string|null|undefined} filename
  */
 export function filenameWithoutExtension(filename) {
-  const s = String(filename || "").trim();
-  if (!s) return "";
-  return s.replace(/\.[a-z0-9]{2,5}$/i, "") || s;
+  return packetFilenameWithoutExtension(filename);
+}
+
+/**
+ * Short takeoff job id for staff display (never Graph keys).
+ * @param {string|null|undefined} jobId
+ */
+export function shortTakeoffJobLabel(jobId) {
+  const s = String(jobId || "").trim();
+  if (!s) return null;
+  if (s.length <= 12) return s;
+  return `${s.slice(0, 8)}…`;
 }
 
 /**
  * Default editable Estimate / Job name for Set Scope.
- * Order: existing project → subject/project → plan basename → sender → short id → Untitled.
+ * Order: edited name → subject → packet/plan (non-opaque) → sender → short id.
  * @param {object} row
  * @param {ReturnType<typeof resolveQueueRowLabels>|null} [labels]
  */
@@ -151,9 +168,20 @@ export function resolveDefaultEstimateName(row = {}, labels = null) {
     return existing;
   }
 
-  const subject = String(row.subject || "").trim();
-  if (subject && subject !== "(no subject)" && !/not named|not identified/i.test(subject)) {
+  const subject = String(
+    row.requestSubject || row.subject || L.requestSubject || ""
+  ).trim();
+  if (
+    subject &&
+    subject !== "(no subject)" &&
+    !/not named|not identified/i.test(subject) &&
+    !isOpaquePlanFilename(subject)
+  ) {
     return subject;
+  }
+
+  if (L.packetMerged && L.packetFilename && !isOpaquePlanFilename(L.packetFilename)) {
+    return filenameWithoutExtension(L.packetFilename) || L.packetFilename;
   }
 
   const project = String(L.projectDisplay || "").trim();
@@ -161,7 +189,8 @@ export function resolveDefaultEstimateName(row = {}, labels = null) {
     project &&
     project !== "Quote request" &&
     !/not named|not identified/i.test(project) &&
-    !isWeakQueueLabel(project)
+    !isWeakQueueLabel(project) &&
+    !isOpaquePlanFilename(project)
   ) {
     if (L.planFilename && project === L.planFilename) {
       return filenameWithoutExtension(L.planFilename) || project;
@@ -169,10 +198,12 @@ export function resolveDefaultEstimateName(row = {}, labels = null) {
     return project;
   }
 
-  const planBase = filenameWithoutExtension(L.planFilename);
-  if (planBase) return planBase;
+  const selected = String(L.selectedPlanFilename || L.planFilename || "").trim();
+  if (selected && !isOpaquePlanFilename(selected)) {
+    return filenameWithoutExtension(selected) || selected;
+  }
 
-  const customer = String(L.customerDisplay || "").trim();
+  const customer = String(L.customerDisplay || L.senderLabel || "").trim();
   if (customer && !isWeakQueueLabel(customer) && !/^Plan:/i.test(customer)) {
     return customer;
   }
@@ -197,16 +228,23 @@ function isWeakQueueLabel(value) {
 }
 
 /**
- * Safe display labels — prefer sender / subject / plan before "Unknown contact".
+ * Safe display labels — prefer subject / sender / human plan names before opaque ids.
  * @param {object} row
  */
 export function resolveQueueRowLabels(row = {}) {
+  const sourceMeta =
+    row.quoteFlowSource ||
+    readQuoteFlowTakeoffSourceMeta(row) ||
+    readQuoteFlowTakeoffSourceMeta({ metadata: { quoteFlow: row.quoteFlow } });
+
   const candidates = [
     row.customerName,
     row.customer,
     row.customerLabel,
+    sourceMeta?.customerLabel,
     row.sender,
     row.senderLabel,
+    sourceMeta?.senderLabel,
     row.senderDisplayName,
     row.contact,
     row.requester,
@@ -221,7 +259,12 @@ export function resolveQueueRowLabels(row = {}) {
     }
   }
 
-  const projectRaw = row.projectName ?? row.projectLabel ?? row.subject ?? row.requestTitle ?? null;
+  const requestSubject =
+    sanitizeQueueSourceText(row.requestSubject || row.subject || sourceMeta?.requestSubject, 320) ||
+    null;
+
+  const projectRaw =
+    row.projectName ?? row.projectLabel ?? requestSubject ?? row.requestTitle ?? null;
   let project =
     projectRaw == null || projectRaw === ""
       ? ""
@@ -229,39 +272,106 @@ export function resolveQueueRowLabels(row = {}) {
         ? String(projectRaw).trim()
         : formatQuoteFlowPersonLabel(projectRaw, "");
   if (/not named|not identified|unknown project/i.test(project)) project = "";
+  if (isOpaquePlanFilename(project)) project = "";
 
   const attachmentFiles = Array.isArray(row?.attachmentSummary?.filenames)
     ? row.attachmentSummary.filenames
     : Array.isArray(row?.attachments)
       ? row.attachments.map((a) => a?.filename || a?.name).filter(Boolean)
       : [];
+
+  const packetFilesRaw = Array.isArray(row.packetFiles)
+    ? row.packetFiles
+    : Array.isArray(sourceMeta?.packetFiles)
+      ? sourceMeta.packetFiles
+      : [];
+  const packetFiles = packetFilesRaw
+    .map((f) => {
+      if (typeof f === "string") {
+        const filename = sanitizeQueueSourceText(f, 180);
+        return filename ? { filename, attachmentKey: null } : null;
+      }
+      const filename = sanitizeQueueSourceText(f?.filename || f?.name || f?.safeFilename, 180);
+      if (!filename) return null;
+      return {
+        filename,
+        attachmentKey: String(f?.attachmentKey || "").trim() || null
+      };
+    })
+    .filter(Boolean);
+
+  const packetMerged =
+    row.packetMerged === true ||
+    sourceMeta?.packetMerged === true ||
+    packetFiles.length > 1;
+  const packetFilename =
+    sanitizeQueueSourceText(row.packetFilename || sourceMeta?.packetFilename, 180) || null;
+  const selectedPlanFilename =
+    sanitizeQueueSourceText(
+      row.selectedPlanFilename || sourceMeta?.selectedPlanFilename,
+      180
+    ) || null;
+
+  const humanAttachment =
+    attachmentFiles.find((f) => f && !isOpaquePlanFilename(f)) || null;
+
   const planFilename = String(
-    row.planFilename ||
+    selectedPlanFilename ||
+      (!packetMerged ? packetFilename : null) ||
+      row.planFilename ||
       row.attachmentName ||
       row.sourcePlanName ||
       row.planName ||
       row.bestPlanFilename ||
+      humanAttachment ||
       attachmentFiles[0] ||
       ""
   ).trim();
 
+  const senderLabel = (() => {
+    const s = formatQuoteFlowPersonLabel(
+      sourceMeta?.senderLabel ?? row.senderLabel ?? row.senderDisplayName ?? row.sender,
+      ""
+    );
+    return s && !isWeakQueueLabel(s) ? s : null;
+  })();
+
   const customerDisplay =
     customer ||
-    (planFilename ? `Plan: ${filenameWithoutExtension(planFilename) || planFilename}` : null) ||
+    senderLabel ||
+    (planFilename && !isOpaquePlanFilename(planFilename)
+      ? `Plan: ${filenameWithoutExtension(planFilename) || planFilename}`
+      : null) ||
     (project && !isWeakQueueLabel(project) ? project : null) ||
     null;
 
   const projectDisplay =
+    (requestSubject && !isOpaquePlanFilename(requestSubject) ? requestSubject : null) ||
     project ||
-    (planFilename ? filenameWithoutExtension(planFilename) || planFilename : null) ||
+    (planFilename && !isOpaquePlanFilename(planFilename)
+      ? filenameWithoutExtension(planFilename) || planFilename
+      : null) ||
     (customer || null) ||
     null;
 
   return {
     customerDisplay,
     projectDisplay,
-    requestTitle: null, // filled after defaultEstimateName
-    planFilename: planFilename || null
+    requestSubject,
+    requestTitle: null,
+    planFilename: planFilename || null,
+    selectedPlanFilename: selectedPlanFilename || (packetMerged ? null : planFilename) || null,
+    packetFilename,
+    packetMerged,
+    packetFileCount:
+      Number(row.packetFileCount) ||
+      Number(sourceMeta?.packetFileCount) ||
+      packetFiles.length ||
+      (packetMerged ? Math.max(2, packetFiles.length) : planFilename ? 1 : 0),
+    packetFiles,
+    senderLabel,
+    sourceMailboxLabel:
+      sanitizeQueueSourceText(row.sourceMailboxLabel || sourceMeta?.sourceMailboxLabel, 120) || null
   };
 }
 
@@ -334,8 +444,19 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
       ? String(opts.failureReason || row?.failureReason || row?.takeoffError || "").trim() || null
       : null;
 
+  const packetMerged = labels.packetMerged === true;
+  const nextActionHelper =
+    status.key === "ready_for_review"
+      ? "Review the returned AI measurements, then Set Scope to create the official estimate."
+      : status.key === "takeoff_queued" || status.key === "takeoff_processing"
+        ? "Waiting on AI Takeoff. Progress updates here when the job returns."
+        : status.key === "takeoff_failed"
+          ? "Review the failure details, then retry AI Takeoff or create a manual scope."
+          : null;
+
   const item = {
     takeoffJobId,
+    takeoffJobIdShort: shortTakeoffJobLabel(takeoffJobId),
     intakeCaseId: row?.id || row?.intakeCaseId || null,
     estimateId: opts.estimateId || row?.studioEstimateId || null,
     messageKey: row?.messageKey || row?.graphMessageKey || row?.mailboxMessageKey || null,
@@ -345,23 +466,37 @@ export function presentQuoteFlowQueueItem(row, opts = {}) {
     customerDisplay,
     projectDisplay,
     requestTitle: defaultEstimateName,
+    requestSubject: labels.requestSubject,
+    subject: labels.requestSubject,
     defaultEstimateName,
     estimateName: defaultEstimateName,
-    senderLabel: (() => {
-      const s = formatQuoteFlowPersonLabel(row?.senderLabel ?? row?.senderDisplayName ?? row?.sender, "");
-      return s && !isWeakQueueLabel(s) ? s : null;
-    })(),
+    senderLabel: labels.senderLabel,
+    sourceMailboxLabel: labels.sourceMailboxLabel,
     planFilename: labels.planFilename,
     planLabel: labels.planFilename
       ? filenameWithoutExtension(labels.planFilename) || labels.planFilename
       : null,
+    selectedPlanFilename: labels.selectedPlanFilename,
+    takeoffPlanFilename: labels.selectedPlanFilename || labels.planFilename,
+    packetFilename: labels.packetFilename,
+    packetMerged,
+    packetFileCount: labels.packetFileCount,
+    packetFiles: labels.packetFiles,
+    packetSummaryLabel: packetMerged
+      ? `AI Takeoff packet: ${labels.packetFileCount || labels.packetFiles.length || 0} files`
+      : labels.selectedPlanFilename || labels.planFilename
+        ? `Plan processed: ${labels.selectedPlanFilename || labels.planFilename}`
+        : null,
     receivedAt: row?.receivedAt || row?.createdAt || row?.updatedAt || null,
-    returnedAt: row?.returnedAt || row?.takeoffReturnedAt || null,
+    returnedAt: row?.returnedAt || row?.takeoffReturnedAt || row?.takeoffCompletedAt || null,
     startedAt: row?.takeoffStartedAt || row?.startedAt || null,
+    takeoffStartedAt: row?.takeoffStartedAt || row?.startedAt || null,
+    takeoffReturnedAt: row?.returnedAt || row?.takeoffReturnedAt || row?.takeoffCompletedAt || null,
     workflowStatus,
     status,
     group,
     nextAction,
+    nextActionHelper,
     summary: {
       roomCount: Number.isFinite(roomCount) ? roomCount : null,
       pieceCount: Number.isFinite(pieceCount) ? pieceCount : null,

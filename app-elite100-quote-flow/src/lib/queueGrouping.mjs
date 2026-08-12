@@ -42,6 +42,21 @@ export function filenameWithoutExtension(filename) {
 }
 
 /**
+ * Opaque numeric / Graph-like filenames should not be primary titles.
+ * @param {string|null|undefined} name
+ */
+export function isOpaquePlanFilename(name) {
+  const raw = String(name || "").trim();
+  if (!raw) return true;
+  const base = filenameWithoutExtension(raw);
+  if (!base) return true;
+  if (/^\d{8,}$/.test(base)) return true;
+  if (/^AAMk/i.test(base) || /^AAMk/i.test(raw)) return true;
+  if (/^[A-Za-z0-9+/=_-]{32,}$/.test(base) && !/\s/.test(base)) return true;
+  return false;
+}
+
+/**
  * @param {object} item
  */
 export function resolveQueueGroupKey(item) {
@@ -149,25 +164,47 @@ export function filterQueueItems(items, filter = "all_active", search = "") {
  */
 export function resolveDefaultEstimateName(item) {
   const fromApi = asString(item?.estimateName || item?.defaultEstimateName || item?.requestTitle);
-  if (fromApi && !isWeakLabel(fromApi) && !/^AAMk/i.test(fromApi) && !/unknown contact/i.test(fromApi)) {
+  if (
+    fromApi &&
+    !isWeakLabel(fromApi) &&
+    !/^AAMk/i.test(fromApi) &&
+    !/unknown contact/i.test(fromApi) &&
+    !isOpaquePlanFilename(fromApi)
+  ) {
     return fromApi;
   }
 
-  const subject = asString(item?.subject);
-  if (subject && subject !== "(no subject)" && !/not named|not identified/i.test(subject)) {
+  const subject = asString(item?.requestSubject || item?.subject);
+  if (
+    subject &&
+    subject !== "(no subject)" &&
+    !/not named|not identified/i.test(subject) &&
+    !isOpaquePlanFilename(subject)
+  ) {
     return subject;
   }
 
+  if (item?.packetMerged && item?.packetFilename && !isOpaquePlanFilename(item.packetFilename)) {
+    return filenameWithoutExtension(item.packetFilename) || asString(item.packetFilename);
+  }
+
   const project = asString(item?.projectDisplay || item?.projectName);
-  if (project && !isWeakLabel(project) && !/not named|not identified/i.test(project)) {
+  if (
+    project &&
+    !isWeakLabel(project) &&
+    !/not named|not identified/i.test(project) &&
+    !isOpaquePlanFilename(project)
+  ) {
     if (item?.planFilename && project === item.planFilename) {
       return filenameWithoutExtension(item.planFilename) || project;
     }
     return project;
   }
 
-  const planBase = filenameWithoutExtension(item?.planFilename || item?.planLabel);
-  if (planBase && !/^AAMk/i.test(planBase)) return planBase;
+  const selected = asString(item?.selectedPlanFilename || item?.takeoffPlanFilename || item?.planFilename);
+  if (selected && !isOpaquePlanFilename(selected) && !/^AAMk/i.test(selected)) {
+    return filenameWithoutExtension(selected) || selected;
+  }
 
   const customer = resolveQueueCustomer(item, { allowUntitled: false });
   if (customer && !isWeakLabel(customer) && !/^Plan:/i.test(customer)) return customer;
@@ -198,9 +235,11 @@ export function resolveQueueCustomer(item, opts = {}) {
     const v = asString(c);
     if (v && !isWeakLabel(v) && !/not identified/i.test(v) && !/^AAMk/i.test(v)) return v;
   }
-  const plan = filenameWithoutExtension(item?.planFilename) || asString(item?.planFilename);
-  if (plan && !/^AAMk/i.test(plan)) return `Plan: ${plan}`;
-  const project = asString(item?.projectDisplay || item?.projectName || item?.subject);
+  const plan =
+    filenameWithoutExtension(item?.selectedPlanFilename || item?.planFilename) ||
+    asString(item?.selectedPlanFilename || item?.planFilename);
+  if (plan && !/^AAMk/i.test(plan) && !isOpaquePlanFilename(plan)) return `Plan: ${plan}`;
+  const project = asString(item?.projectDisplay || item?.projectName || item?.requestSubject || item?.subject);
   if (project && !isWeakLabel(project) && !/not named|not identified/i.test(project)) {
     return project;
   }
@@ -224,10 +263,21 @@ export function resolveQueueTitle(item) {
 export function resolveQueueSubtitle(item, estimateName = "") {
   const name = String(estimateName || resolveDefaultEstimateName(item)).trim();
   const customer = resolveQueueCustomer(item);
-  const plan = filenameWithoutExtension(item?.planFilename) || asString(item?.planFilename);
+  const plan =
+    filenameWithoutExtension(item?.selectedPlanFilename || item?.planFilename) ||
+    asString(item?.selectedPlanFilename || item?.planFilename);
   const parts = [];
-  if (customer && customer !== name && !/^Plan:/i.test(customer)) parts.push(customer);
-  if (plan && plan !== name && `Plan: ${plan}` !== customer) parts.push(plan);
+  if (customer && customer !== name && !/^Plan:/i.test(customer) && !isWeakLabel(customer)) {
+    parts.push(customer);
+  }
+  if (
+    plan &&
+    plan !== name &&
+    `Plan: ${plan}` !== customer &&
+    !isOpaquePlanFilename(plan)
+  ) {
+    parts.push(plan);
+  }
   return parts.join(" · ");
 }
 

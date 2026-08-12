@@ -185,7 +185,35 @@ console.log("ok: Queue UX contracts; one Set Scope; estimate name; no V1/V2");
   assert.doesNotMatch(subtitle, /Unknown contact/);
   assert.doesNotMatch(`${resolveQueueTitle(rows[1])} — ${subtitle}`, /Unknown contact — Unknown contact/);
   assert.equal(resolveQueueCustomer({ customerName: "Customer not identified", planFilename: "x.pdf" }), "Plan: x");
+  assert.equal(
+    resolveQueueTitle({
+      planFilename: "20260429163807042.pdf",
+      takeoffJobId: "abcd1234-ffff-ffff-ffff-ffffffffffff"
+    }),
+    "Quote abcd1234"
+  );
+  assert.equal(
+    resolveQueueTitle({
+      requestSubject: "FW: Renewed-Mercer Preliminary Drawings",
+      planFilename: "20260429163807042.pdf",
+      senderLabel: "Hunter Robinson"
+    }),
+    "FW: Renewed-Mercer Preliminary Drawings"
+  );
   console.log("ok: estimate name fallbacks; no Unknown contact — Unknown contact");
+}
+
+{
+  assert.match(queue, /qf-queue-row-title|qf-queue-row-sender|qf-queue-row-source/);
+  assert.match(queue, /Plan processed:/);
+  assert.match(queue, /AI Takeoff packet:/);
+  assert.match(queue, /ProcessedPlanPacketCard|qf-queue-packet-card/);
+  assert.match(queue, /Next action:/);
+  assert.match(queue, /nextActionHelper|Review the returned AI measurements/);
+  assert.match(queue, /qf-queue-takeoff-iframe/);
+  assert.match(api, /packetFiles|packetMerged|requestSubject/);
+  assert.match(grouping, /isOpaquePlanFilename/);
+  console.log("ok: queue clarity contracts — title/source/packet card");
 }
 
 {

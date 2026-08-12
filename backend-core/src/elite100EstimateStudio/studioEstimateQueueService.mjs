@@ -158,7 +158,7 @@ export function createStudioEstimateQueueService(deps = {}) {
     const { data, error, count } = await supabase
       .from("quote_intake_cases")
       .select(
-        "id,organization_id,status,source_type,mailbox_identity,received_at,created_at,updated_at,priority,assigned_estimator_user_id,first_opened_at,last_opened_at,last_activity_at,last_estimator_action,created_by_user_id",
+        "id,organization_id,status,source_type,mailbox_identity,graph_immutable_message_id,received_at,created_at,updated_at,priority,assigned_estimator_user_id,first_opened_at,last_opened_at,last_activity_at,last_estimator_action,created_by_user_id",
         { count: "exact" }
       )
       .eq("organization_id", organizationId)
@@ -213,7 +213,7 @@ export function createStudioEstimateQueueService(deps = {}) {
     if (!supabase || !jobIds.length) return new Map();
     const { data, error } = await supabase
       .from("quote_takeoff_jobs")
-      .select("id,status,review_status,updated_at,created_at,started_at,completed_at,error_message,result_summary")
+      .select("id,status,review_status,updated_at,created_at,started_at,completed_at,error_message,result_summary,metadata")
       .eq("organization_id", organizationId)
       .in("id", jobIds);
     if (error) return new Map();
@@ -323,12 +323,19 @@ export function createStudioEstimateQueueService(deps = {}) {
     if (!supabase || !takeoffJobId) return null;
     const { data: job } = await supabase
       .from("quote_takeoff_jobs")
-      .select("id,status,review_status,result_summary,updated_at,created_at,started_at,completed_at,error_message")
+      .select("id,status,review_status,result_summary,metadata,updated_at,created_at,started_at,completed_at,error_message")
       .eq("organization_id", organizationId)
       .eq("id", takeoffJobId)
       .maybeSingle();
     if (!job) return null;
     const summary = job.result_summary && typeof job.result_summary === "object" ? job.result_summary : {};
+    const meta = job.metadata && typeof job.metadata === "object" ? job.metadata : {};
+    const quoteFlow =
+      meta.quoteFlow && typeof meta.quoteFlow === "object"
+        ? meta.quoteFlow
+        : summary.quoteFlow && typeof summary.quoteFlow === "object"
+          ? summary.quoteFlow
+          : null;
     return {
       takeoffJobId: job.id,
       jobStatus: job.status,
@@ -340,7 +347,8 @@ export function createStudioEstimateQueueService(deps = {}) {
       updatedAt: job.updated_at,
       startedAt: job.started_at || job.created_at || null,
       completedAt: job.completed_at || null,
-      errorMessage: job.error_message || null
+      errorMessage: job.error_message || null,
+      quoteFlowSource: quoteFlow
     };
   }
 
@@ -514,6 +522,34 @@ export function createStudioEstimateQueueService(deps = {}) {
         ? String(resultSummary.failureStage || resultSummary.stage || "").trim() || null
         : null;
 
+    const jobMeta =
+      takeoffJob?.metadata && typeof takeoffJob.metadata === "object" ? takeoffJob.metadata : {};
+    const quoteFlowSource =
+      (jobMeta.quoteFlow && typeof jobMeta.quoteFlow === "object" ? jobMeta.quoteFlow : null) ||
+      (resultSummary.quoteFlow && typeof resultSummary.quoteFlow === "object"
+        ? resultSummary.quoteFlow
+        : null);
+
+    const messageKey =
+      String(
+        quoteFlowSource?.messageKey ||
+          caseRow.graph_immutable_message_id ||
+          caseRow.graphImmutableMessageId ||
+          ""
+      ).trim() || null;
+
+    const qfSubject = String(quoteFlowSource?.requestSubject || "").trim() || null;
+    const qfSender = String(quoteFlowSource?.senderLabel || "").trim() || null;
+    const qfCustomer = String(quoteFlowSource?.customerLabel || "").trim() || null;
+    const qfSelectedPlan = String(quoteFlowSource?.selectedPlanFilename || "").trim() || null;
+    const qfPacketFilename = String(quoteFlowSource?.packetFilename || "").trim() || null;
+    const qfPacketFiles = Array.isArray(quoteFlowSource?.packetFiles)
+      ? quoteFlowSource.packetFiles
+      : [];
+    const qfPacketMerged =
+      quoteFlowSource?.packetMerged === true || qfPacketFiles.length > 1;
+    const qfPacketCount = Number(quoteFlowSource?.packetFileCount) || qfPacketFiles.length || 0;
+
     return stripForbidden({
       id: caseRow.id,
       customerName: customerDisplay.label,
@@ -524,11 +560,29 @@ export function createStudioEstimateQueueService(deps = {}) {
       sourceType: sourceType || null,
       sourceBadge: isManualStaff ? "Manual" : sourceType === "graph_mailbox" ? "Email" : null,
       estimateOrigin: estimateOrigin || (isManualStaff ? "manual_staff" : null),
+      subject: qfSubject,
+      requestSubject: qfSubject,
       senderLabel: isManualStaff
         ? "Manual estimate"
-        : caseRow.mailbox_identity
-          ? "Inbound mailbox"
-          : "Inbound sender",
+        : qfSender ||
+          (caseRow.mailbox_identity ? "Inbound mailbox" : "Inbound sender"),
+      senderDisplayName: qfSender,
+      customerLabel: qfCustomer || customerDisplay.label || null,
+      planFilename:
+        qfSelectedPlan ||
+        qfPacketFilename ||
+        (Array.isArray(att.filenames) ? att.filenames[0] : null) ||
+        null,
+      selectedPlanFilename: qfSelectedPlan,
+      takeoffPlanFilename: qfSelectedPlan || qfPacketFilename || null,
+      packetFilename: qfPacketFilename,
+      packetMerged: qfPacketMerged,
+      packetFileCount: qfPacketCount || (qfPacketMerged ? qfPacketFiles.length : 0),
+      packetFiles: qfPacketFiles,
+      sourceMailboxLabel:
+        String(quoteFlowSource?.sourceMailboxLabel || caseRow.mailbox_identity || "").trim() || null,
+      messageKey,
+      graphMessageKey: messageKey,
       salespersonLabel: null,
       receivedAt: caseRow.received_at || caseRow.receivedAt || caseRow.created_at || null,
       attachmentStatus: att.count
@@ -540,6 +594,7 @@ export function createStudioEstimateQueueService(deps = {}) {
         blockedCount: att.blockedCount,
         filenames: att.filenames
       },
+      attachmentName: qfPacketFilename || qfSelectedPlan || null,
       aiTakeoffStatus: takeoffDisplay,
       estimateStatus: estimateStatus || "none",
       digitalEstimateStatus: publicationStatus || "none",
@@ -555,6 +610,8 @@ export function createStudioEstimateQueueService(deps = {}) {
       takeoffStartedAt,
       takeoffUpdatedAt,
       takeoffCompletedAt,
+      takeoffReturnedAt: takeoffCompletedAt,
+      returnedAt: takeoffCompletedAt,
       takeoffErrorMessage: takeoffErrorRaw ? String(takeoffErrorRaw).slice(0, 240) : null,
       takeoffFailureStage,
       assignedEstimatorUserId: caseRow.assigned_estimator_user_id || caseRow.assignedEstimatorUserId || null,
@@ -578,12 +635,18 @@ export function createStudioEstimateQueueService(deps = {}) {
       searchText: [
         customerName,
         projectName,
+        qfSubject,
+        qfSender,
+        qfCustomer,
+        qfSelectedPlan,
+        qfPacketFilename,
         caseRow.status,
         workflowStatus,
         takeoffDisplay,
         estimateStatus,
         publicationStatus,
-        ...(att.filenames || [])
+        ...(att.filenames || []),
+        ...(qfPacketFiles.map((f) => f?.filename).filter(Boolean) || [])
       ]
         .filter(Boolean)
         .join(" ")

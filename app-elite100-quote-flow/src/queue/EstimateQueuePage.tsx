@@ -84,6 +84,84 @@ function statusPillClass(statusKey: string | undefined): string {
   return "qf-pill";
 }
 
+function ProcessedPlanPacketCard({ item }: { item: QuoteFlowQueueItem | null }) {
+  if (!item) return null;
+  const packetMerged = item.packetMerged === true || (item.packetFileCount || 0) > 1;
+  const files = Array.isArray(item.packetFiles) ? item.packetFiles : [];
+  const planName = item.selectedPlanFilename || item.takeoffPlanFilename || item.planFilename;
+  if (!packetMerged && !planName && !item.requestSubject && !item.senderLabel) return null;
+
+  return (
+    <div className="qf-queue__packet-card" data-testid="qf-queue-packet-card">
+      <h3>Processed plan packet</h3>
+      <dl className="qf-queue__packet-dl">
+        <dt>Type</dt>
+        <dd data-testid="qf-queue-packet-type">
+          {packetMerged ? "Multi-file packet" : "Single file"}
+        </dd>
+        {item.requestSubject || item.subject ? (
+          <>
+            <dt>Source request</dt>
+            <dd data-testid="qf-queue-packet-source">{item.requestSubject || item.subject}</dd>
+          </>
+        ) : null}
+        {item.senderLabel || item.customerDisplay ? (
+          <>
+            <dt>Sender</dt>
+            <dd>{item.senderLabel || item.customerDisplay}</dd>
+          </>
+        ) : null}
+        {packetMerged ? (
+          <>
+            <dt>Files included</dt>
+            <dd>
+              <ul className="qf-queue__packet-files" data-testid="qf-queue-packet-files">
+                {(files.length ? files : [{ filename: planName }]).map((f, idx) => (
+                  <li key={`${f?.filename || "f"}-${idx}`}>{f?.filename || "Attachment"}</li>
+                ))}
+              </ul>
+            </dd>
+            {item.packetFilename ? (
+              <>
+                <dt>Packet file</dt>
+                <dd>{item.packetFilename}</dd>
+              </>
+            ) : null}
+          </>
+        ) : planName ? (
+          <>
+            <dt>Plan processed</dt>
+            <dd data-testid="qf-queue-packet-plan">{planName}</dd>
+          </>
+        ) : null}
+        {item.takeoffStartedAt || item.startedAt ? (
+          <>
+            <dt>Started</dt>
+            <dd>{formatQueueTime(item.takeoffStartedAt || item.startedAt)}</dd>
+          </>
+        ) : null}
+        {item.takeoffReturnedAt || item.returnedAt ? (
+          <>
+            <dt>Returned</dt>
+            <dd>{formatQueueTime(item.takeoffReturnedAt || item.returnedAt)}</dd>
+          </>
+        ) : null}
+        {item.takeoffJobIdShort || item.takeoffJobId ? (
+          <>
+            <dt>Takeoff job</dt>
+            <dd>{item.takeoffJobIdShort || String(item.takeoffJobId).slice(0, 8) + "…"}</dd>
+          </>
+        ) : null}
+      </dl>
+      {item.nextActionHelper ? (
+        <p className="qf-muted" data-testid="qf-queue-packet-helper">
+          {item.nextActionHelper}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function EstimateQueuePage(props: Props) {
   const { authToken, onOpenEstimates, onOpenInbox } = props;
   const [items, setItems] = useState<QuoteFlowQueueItem[]>([]);
@@ -538,14 +616,16 @@ export default function EstimateQueuePage(props: Props) {
     const active = Boolean(jobId && jobId === selectedJobId);
     const title = resolveQueueTitle(row);
     const customer = resolveQueueCustomer(row);
-    const subtitle = resolveQueueSubtitle(row, title);
     const when =
-      formatQueueTime(row.returnedAt) ||
+      formatQueueTime(row.returnedAt || row.takeoffReturnedAt) ||
       formatQueueTime(row.receivedAt) ||
-      formatQueueTime(row.startedAt);
+      formatQueueTime(row.startedAt || row.takeoffStartedAt);
     const nextLabel = row.nextAction?.label || row.actionLabel || row.status?.label || "Open";
     const rowAction = row.rowAction || row.action;
     const isArchived = row.archived === true;
+    const sourceSubject = row.requestSubject || row.subject || null;
+    const packetMerged = row.packetMerged === true || (row.packetFileCount || 0) > 1;
+    const packetFiles = Array.isArray(row.packetFiles) ? row.packetFiles : [];
 
     return (
       <li key={queueItemKey || jobId || row.intakeCaseId || title}>
@@ -558,16 +638,50 @@ export default function EstimateQueuePage(props: Props) {
           data-status={row.status?.key || ""}
           data-group={resolveQueueGroupKey(row)}
           data-row-action={rowAction || ""}
+          data-packet-merged={packetMerged ? "1" : "0"}
         >
           <button type="button" className="qf-inbox__row-main" onClick={() => selectRow(row)}>
-            <span className="qf-inbox__row-title">{title}</span>
-            {subtitle ? <span className="qf-inbox__row-meta">{subtitle}</span> : null}
-            {!subtitle && customer ? (
-              <span className="qf-inbox__row-meta">{customer}</span>
+            <span className="qf-inbox__row-title" data-testid="qf-queue-row-title">
+              {title}
+            </span>
+            {customer ? (
+              <span className="qf-inbox__row-meta" data-testid="qf-queue-row-sender">
+                Sender: {customer}
+              </span>
             ) : null}
-            {when ? <span className="qf-inbox__row-meta">{when}</span> : null}
-            {row.planFilename ? (
-              <span className="qf-inbox__row-meta">Plan: {row.planFilename}</span>
+            {when ? (
+              <span className="qf-inbox__row-meta" data-testid="qf-queue-row-received">
+                {row.returnedAt || row.takeoffReturnedAt ? "Returned: " : "Received: "}
+                {when}
+              </span>
+            ) : null}
+            {sourceSubject ? (
+              <span className="qf-inbox__row-meta" data-testid="qf-queue-row-source">
+                Source: {sourceSubject}
+              </span>
+            ) : null}
+            {row.sourceMailboxLabel ? (
+              <span className="qf-inbox__row-meta">Inbox: {row.sourceMailboxLabel}</span>
+            ) : null}
+            {packetMerged ? (
+              <span className="qf-inbox__row-meta" data-testid="qf-queue-row-packet">
+                {row.packetSummaryLabel ||
+                  `AI Takeoff packet: ${row.packetFileCount || packetFiles.length || 0} files`}
+              </span>
+            ) : row.selectedPlanFilename || row.planFilename ? (
+              <span className="qf-inbox__row-meta" data-testid="qf-queue-row-plan">
+                Plan processed: {row.selectedPlanFilename || row.planFilename}
+              </span>
+            ) : null}
+            {packetMerged && packetFiles.length ? (
+              <ul className="qf-queue__packet-files" data-testid="qf-queue-row-packet-files">
+                {packetFiles.map((f, idx) => (
+                  <li key={`${f.filename || "file"}-${idx}`}>{f.filename || "Attachment"}</li>
+                ))}
+              </ul>
+            ) : null}
+            {packetMerged && row.packetFilename ? (
+              <span className="qf-inbox__row-meta qf-muted">Packet file: {row.packetFilename}</span>
             ) : null}
             {row.summary?.label ? (
               <span className="qf-inbox__row-meta" data-testid="qf-queue-row-summary">
@@ -587,8 +701,15 @@ export default function EstimateQueuePage(props: Props) {
                   Archived
                 </span>
               ) : null}
-              <span className="qf-inbox__next">{nextLabel}</span>
+              <span className="qf-inbox__next" data-testid="qf-queue-row-next">
+                Next action: {nextLabel}
+              </span>
             </span>
+            {row.nextActionHelper ? (
+              <span className="qf-inbox__row-meta qf-queue__next-helper" data-testid="qf-queue-row-helper">
+                {row.nextActionHelper}
+              </span>
+            ) : null}
           </button>
           <div className="qf-queue__row-actions">
             {rowAction === "review_takeoff" && jobId && !isArchived ? (
@@ -1029,6 +1150,8 @@ export default function EstimateQueuePage(props: Props) {
                       ) : null}
                     </div>
                   </div>
+
+                  <ProcessedPlanPacketCard item={workspaceItem} />
 
                   {(detailMode === "review" || detailMode === "manual" || detailMode === "idle") &&
                   workspaceItem
