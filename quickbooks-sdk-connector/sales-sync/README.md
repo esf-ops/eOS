@@ -30,10 +30,12 @@ QuickBooks Desktop
 | ConnectDirectly | `True` |
 | Readonly | `True` |
 | Customer identity | ODBC `CustomerId` (= `Customers.Id`) stored as `qb_customer_list_id`; root resolved on Brain |
+| Invoice aging fields | ODBC `DueDate` / `Terms` / `TermsId` → `due_date` / `terms_name` / `terms_list_id` (TermsId never in browser) |
 | Backend | Never connects to QuickBooks |
 | Thryve / Remote Connector | Separate; **untouched** |
 | AD customer sync | Separate scripts/token (`QB_AD_CUSTOMER_*`) |
-| AD Financial UI | Not in Phase 1 — ListID enrichment only (FEATURE_DECISIONS §313) |
+| AD Financial UI | Slice A+B — ListID join + DueDate aging (FEATURE_DECISIONS §313–§315) |
+| Planned backfill | One-time `2025-01-01` → current (ops-approved); recurring remains 60-day incremental |
 
 ## Persistent configuration
 

@@ -1003,6 +1003,106 @@ a.detail-list-title:hover {
   margin-top: 2px;
 }
 
+.financials-aging {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.financials-aging-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.financials-aging-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.financials-aging-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: var(--eos-bg-subtle);
+}
+
+.financials-aging-count {
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+}
+
+.financials-aging-unknown {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px dashed var(--eos-line);
+  border-radius: var(--r-md);
+  font-size: 0.85rem;
+  color: var(--eos-ink-soft);
+}
+
+.financials-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid var(--eos-line);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--eos-ink-muted);
+  cursor: help;
+  vertical-align: middle;
+}
+
+.collection-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  border: 1px solid transparent;
+}
+
+.collection-status-current {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.collection-status-watch {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+.collection-status-attention {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fdba74;
+}
+
+.collection-status-priority {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.collection-status-unknown {
+  background: var(--eos-bg-subtle);
+  color: var(--eos-ink-muted);
+  border-color: var(--eos-line);
+}
+
 .financials-activity {
   display: flex;
   flex-direction: column;

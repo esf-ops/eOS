@@ -26,7 +26,7 @@ export const AD_FINANCIALS_PAGE_SIZE = PREPARED_FACTS_PAGE_SIZE;
 export const AD_FINANCIALS_RECENT_LIMIT = 20;
 
 const FORBIDDEN_RESPONSE_KEY =
-  /^(qb_customer_list_id|qb_root_customer_list_id|external_id|externalId|list_id|listId|qb_list_id|source_id|source_invoice_id)$/i;
+  /^(qb_customer_list_id|qb_root_customer_list_id|external_id|externalId|list_id|listId|qb_list_id|source_id|source_invoice_id|terms_list_id|termsListId)$/i;
 
 /**
  * @param {unknown} value
@@ -72,6 +72,169 @@ export function daysBetweenYmd(fromDate, toDate) {
   return Math.max(0, Math.floor((t1 - t0) / 86400000));
 }
 
+function emptyAgingBucket() {
+  return { balance: 0, count: 0 };
+}
+
+/**
+ * Classify one open invoice by QuickBooks DueDate vs asOfDate.
+ * Never infers due date from invoice Date or Terms.
+ *
+ * @param {string|null|undefined} dueDate
+ * @param {string|null|undefined} asOfDate
+ * @returns {{ bucket: 'current'|'1_30'|'31_60'|'61_90'|'90_plus'|'unknown', daysOverdue: number|null }}
+ */
+export function classifyArAgingBucket(dueDate, asOfDate) {
+  const due = toYmd(dueDate);
+  const asOf = toYmd(asOfDate);
+  if (!due || !asOf) {
+    return { bucket: "unknown", daysOverdue: null };
+  }
+  if (due >= asOf) {
+    return { bucket: "current", daysOverdue: 0 };
+  }
+  const daysOverdue = daysBetweenYmd(due, asOf);
+  if (daysOverdue == null) return { bucket: "unknown", daysOverdue: null };
+  if (daysOverdue <= 30) return { bucket: "1_30", daysOverdue };
+  if (daysOverdue <= 60) return { bucket: "31_60", daysOverdue };
+  if (daysOverdue <= 90) return { bucket: "61_90", daysOverdue };
+  return { bucket: "90_plus", daysOverdue };
+}
+
+/**
+ * @param {Array<{ balance?: unknown, due_date?: unknown, invoice_date?: unknown, reference_number?: unknown, original_amount?: unknown, customer_name?: unknown }>} rows
+ * @param {string|null} asOfDate
+ */
+export function buildOpenArAging(rows, asOfDate) {
+  const aging = {
+    current: emptyAgingBucket(),
+    days1to30: emptyAgingBucket(),
+    days31to60: emptyAgingBucket(),
+    days61to90: emptyAgingBucket(),
+    days90Plus: emptyAgingBucket(),
+    unknown: emptyAgingBucket()
+  };
+  const keyFor = {
+    current: "current",
+    "1_30": "days1to30",
+    "31_60": "days31to60",
+    "61_90": "days61to90",
+    "90_plus": "days90Plus",
+    unknown: "unknown"
+  };
+
+  let overdueBalance = 0;
+  let overdueInvoiceCount = 0;
+  /** @type {object|null} */
+  let oldestOverdueInvoice = null;
+  let maxDaysOverdue = null;
+  let knownDueCount = 0;
+  let unknownDueCount = 0;
+
+  for (const row of rows || []) {
+    const bal = Number(row.balance);
+    if (!Number.isFinite(bal) || bal <= 0) continue;
+    const { bucket, daysOverdue } = classifyArAgingBucket(row.due_date, asOfDate);
+    const key = keyFor[bucket];
+    aging[key].balance = Math.round((aging[key].balance + bal) * 100) / 100;
+    aging[key].count += 1;
+
+    if (bucket === "unknown") {
+      unknownDueCount += 1;
+    } else {
+      knownDueCount += 1;
+    }
+
+    if (bucket !== "current" && bucket !== "unknown") {
+      overdueBalance = Math.round((overdueBalance + bal) * 100) / 100;
+      overdueInvoiceCount += 1;
+      if (daysOverdue != null && (maxDaysOverdue == null || daysOverdue > maxDaysOverdue)) {
+        maxDaysOverdue = daysOverdue;
+        oldestOverdueInvoice = {
+          date: toYmd(row.invoice_date),
+          dueDate: toYmd(row.due_date),
+          referenceNumber: row.reference_number ? String(row.reference_number) : null,
+          originalAmount: toMoney(row.original_amount),
+          balance: toMoney(bal),
+          customerName: row.customer_name ? String(row.customer_name) : null,
+          daysOverdue
+        };
+      }
+    }
+  }
+
+  /** @type {{ code: string, label: string, reason: string }} */
+  let collectionAttention;
+  if ((rows || []).length === 0) {
+    collectionAttention = {
+      code: "current",
+      label: "Current",
+      reason: "No open QuickBooks invoice balances."
+    };
+  } else if (knownDueCount === 0) {
+    collectionAttention = {
+      code: "unknown",
+      label: "Unknown",
+      reason: "Open A/R exists but no usable QuickBooks due dates are available."
+    };
+  } else if (overdueInvoiceCount === 0) {
+    collectionAttention = {
+      code: "current",
+      label: "Current",
+      reason: "No overdue QuickBooks invoice balances based on due date."
+    };
+  } else if (maxDaysOverdue != null && maxDaysOverdue <= 30) {
+    collectionAttention = {
+      code: "watch",
+      label: "Watch",
+      reason: `Oldest overdue invoice is ${maxDaysOverdue} day(s) past due.`
+    };
+  } else if (maxDaysOverdue != null && maxDaysOverdue <= 60) {
+    collectionAttention = {
+      code: "attention",
+      label: "Attention",
+      reason: `Oldest overdue invoice is ${maxDaysOverdue} day(s) past due.`
+    };
+  } else {
+    collectionAttention = {
+      code: "priority",
+      label: "Priority",
+      reason: `Oldest overdue invoice is ${maxDaysOverdue ?? "61+"} day(s) past due.`
+    };
+  }
+
+  return {
+    aging,
+    overdueBalance,
+    overdueInvoiceCount,
+    oldestOverdueInvoice,
+    collectionAttention,
+    knownDueCount,
+    unknownDueCount
+  };
+}
+
+/**
+ * Resolve staff-safe payment terms for linked root(s).
+ * @param {string[]} termsCandidates
+ * @returns {{ paymentTerms: string|null, warning: string|null }}
+ */
+export function resolvePaymentTermsLabel(termsCandidates) {
+  const unique = [
+    ...new Set(
+      (termsCandidates || [])
+        .map((t) => String(t ?? "").trim())
+        .filter(Boolean)
+    )
+  ];
+  if (unique.length === 0) return { paymentTerms: null, warning: null };
+  if (unique.length === 1) return { paymentTerms: unique[0], warning: null };
+  return {
+    paymentTerms: "Multiple",
+    warning: "Linked QuickBooks customer records have different payment terms."
+  };
+}
+
 /**
  * Empty / fail-soft profile — amounts null (never fake $0).
  * @param {Partial<object>} [overrides]
@@ -95,6 +258,12 @@ export function emptyFinancialsProfile(overrides = {}) {
     lastPayment: null,
     daysSinceLastPayment: null,
     oldestOpenInvoice: null,
+    oldestOverdueInvoice: null,
+    paymentTerms: null,
+    overdueBalance: null,
+    overdueInvoiceCount: null,
+    aging: null,
+    collectionAttention: null,
     recentActivity: [],
     coverage: {
       workerCoverageStartDate: null,
@@ -205,7 +374,7 @@ export async function sumLinkedOpenAr(supabase, { organizationId, rootListIds })
   for (;;) {
     const q = supabase
       .from("sales_quickbooks_open_ar_current")
-      .select("balance, invoice_date, reference_number, customer_name, original_amount")
+      .select("balance, invoice_date, due_date, terms_name, reference_number, customer_name, original_amount")
       .eq("organization_id", organizationId)
       .in("qb_root_customer_list_id", roots)
       .order("source_invoice_id", { ascending: true })
@@ -247,7 +416,7 @@ async function loadLatestTransaction(supabase, { organizationId, rootListIds, tr
   if (!roots.length) return null;
   const { data, error } = await supabase
     .from("sales_quickbooks_financial_transactions")
-    .select("transaction_date, reference_number, amount, customer_name")
+    .select("transaction_date, reference_number, amount, customer_name, terms_name")
     .eq("organization_id", organizationId)
     .eq("transaction_type", transactionType)
     .in("qb_root_customer_list_id", roots)
@@ -261,8 +430,45 @@ async function loadLatestTransaction(supabase, { organizationId, rootListIds, tr
     date: toYmd(row.transaction_date),
     referenceNumber: row.reference_number ? String(row.reference_number) : null,
     amount: toMoney(row.amount),
-    customerName: row.customer_name ? String(row.customer_name) : null
+    customerName: row.customer_name ? String(row.customer_name) : null,
+    termsName: row.terms_name ? String(row.terms_name).trim() : null
   };
+}
+
+/**
+ * Latest nonblank terms_name per linked root (exact ListID), then reconcile.
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {{ organizationId: string, rootListIds: string[], openArRows?: Array<object> }} args
+ */
+async function resolveLinkedPaymentTerms(supabase, { organizationId, rootListIds, openArRows = [] }) {
+  const roots = [...new Set((rootListIds || []).map((id) => String(id).trim()).filter(Boolean))];
+  /** @type {string[]} */
+  const fromInvoices = [];
+
+  await Promise.all(
+    roots.map(async (rootId) => {
+      const { data, error } = await supabase
+        .from("sales_quickbooks_financial_transactions")
+        .select("terms_name, transaction_date, source_id")
+        .eq("organization_id", organizationId)
+        .eq("transaction_type", "invoice")
+        .eq("qb_root_customer_list_id", rootId)
+        .order("transaction_date", { ascending: false })
+        .order("source_id", { ascending: false })
+        .limit(40);
+      if (error) throw new Error(error.message);
+      const hit = (data || []).find((r) => String(r.terms_name ?? "").trim());
+      if (hit) fromInvoices.push(String(hit.terms_name).trim());
+    })
+  );
+
+  let resolved = resolvePaymentTermsLabel(fromInvoices);
+  if (resolved.paymentTerms) return resolved;
+
+  const fromOpenAr = (openArRows || [])
+    .map((r) => String(r.terms_name ?? "").trim())
+    .filter(Boolean);
+  return resolvePaymentTermsLabel(fromOpenAr);
 }
 
 /**
@@ -455,6 +661,22 @@ export async function getAccountDirectoryFinancials(params) {
       oldestOpenInvoice = best;
     }
 
+    const agingBuilt = buildOpenArAging(openAr.rows, asOfDate);
+    if (agingBuilt.unknownDueCount > 0 && agingBuilt.knownDueCount > 0) {
+      warnings.push(
+        `Some open A/R invoices are missing QuickBooks due dates (${agingBuilt.unknownDueCount}). Aging uses DueDate only.`
+      );
+    } else if (agingBuilt.unknownDueCount > 0 && openAr.rows.length > 0) {
+      warnings.push("Open A/R invoices are missing QuickBooks due dates. Aging cannot be classified.");
+    }
+
+    const termsResolved = await resolveLinkedPaymentTerms(supabase, {
+      organizationId,
+      rootListIds,
+      openArRows: openAr.rows
+    });
+    if (termsResolved.warning) warnings.push(termsResolved.warning);
+
     if (isStale) {
       warnings.push(
         `QuickBooks financial data is stale (last success ${ageSeconds}s ago; threshold ${staleAfter}s). Showing last prepared values.`
@@ -478,10 +700,30 @@ export async function getAccountDirectoryFinancials(params) {
         salesOrdersYtd: salesOrders.amount,
         quotedYtd: quoted.amount
       },
-      lastInvoice,
-      lastPayment,
+      lastInvoice: lastInvoice
+        ? {
+            date: lastInvoice.date,
+            referenceNumber: lastInvoice.referenceNumber,
+            amount: lastInvoice.amount,
+            customerName: lastInvoice.customerName
+          }
+        : null,
+      lastPayment: lastPayment
+        ? {
+            date: lastPayment.date,
+            referenceNumber: lastPayment.referenceNumber,
+            amount: lastPayment.amount,
+            customerName: lastPayment.customerName
+          }
+        : null,
       daysSinceLastPayment: daysBetweenYmd(lastPayment?.date ?? null, asOfDate),
       oldestOpenInvoice,
+      oldestOverdueInvoice: agingBuilt.oldestOverdueInvoice,
+      paymentTerms: termsResolved.paymentTerms,
+      overdueBalance: agingBuilt.overdueBalance,
+      overdueInvoiceCount: agingBuilt.overdueInvoiceCount,
+      aging: agingBuilt.aging,
+      collectionAttention: agingBuilt.collectionAttention,
       recentActivity,
       coverage: {
         workerCoverageStartDate: toYmd(latest.coverage_start_date),

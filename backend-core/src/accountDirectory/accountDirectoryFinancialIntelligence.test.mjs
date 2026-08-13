@@ -6,9 +6,12 @@
 import assert from "node:assert/strict";
 import {
   AD_FINANCIALS_PAGE_SIZE,
+  buildOpenArAging,
+  classifyArAgingBucket,
   collectActiveQuickbooksRootListIds,
   emptyFinancialsProfile,
   getAccountDirectoryFinancials,
+  resolvePaymentTermsLabel,
   scrubFinancialIds,
   sumLinkedOpenAr,
   sumLinkedTransactionsInRange,
@@ -24,7 +27,12 @@ const RUN_ID = "22222222-2222-4222-8222-222222222222";
 
 function assertNoIds(payload) {
   const json = JSON.stringify(payload);
-  assert.equal(/qb_customer_list_id|qb_root_customer_list_id|external_id|80010327|80010E11|99999999/i.test(json), false);
+  assert.equal(
+    /qb_customer_list_id|qb_root_customer_list_id|external_id|terms_list_id|80010327|80010E11|99999999/i.test(
+      json
+    ),
+    false
+  );
 }
 
 /**
@@ -541,6 +549,219 @@ function okSync(overrides = {}) {
   assert.equal(empty.summary.openAr, null);
   assert.equal(AD_FINANCIALS_PAGE_SIZE, 1000);
   console.log("ok: empty template uses nulls");
+}
+
+// Slice B — DueDate aging / collection attention / terms
+{
+  const asOf = "2026-08-13";
+  const cases = [
+    ["2026-08-13", "current"],
+    ["2026-08-14", "current"],
+    ["2026-08-12", "1_30"],
+    ["2026-07-14", "1_30"], // exactly 30 days
+    ["2026-07-13", "31_60"], // 31
+    ["2026-06-14", "31_60"], // 60
+    ["2026-06-13", "61_90"], // 61
+    ["2026-05-15", "61_90"], // 90
+    ["2026-05-14", "90_plus"], // 91
+    [null, "unknown"]
+  ];
+  for (const [due, expected] of cases) {
+    assert.equal(classifyArAgingBucket(due, asOf).bucket, expected, `${due} → ${expected}`);
+  }
+  console.log("ok: A–I DueDate bucket boundaries");
+}
+
+{
+  const asOf = "2026-08-13";
+  const rows = [
+    { balance: 100, due_date: "2026-09-01" }, // current
+    { balance: 50, due_date: "2026-08-01" }, // 12d → 1_30
+    { balance: 25, due_date: "2026-07-01" }, // 43d → 31_60
+    { balance: 10, due_date: "2026-06-01" }, // 73d → 61_90
+    { balance: 5, due_date: "2026-04-01" }, // 134d → 90+
+    { balance: 7, due_date: null } // unknown
+  ];
+  const built = buildOpenArAging(rows, asOf);
+  const sumBal =
+    built.aging.current.balance +
+    built.aging.days1to30.balance +
+    built.aging.days31to60.balance +
+    built.aging.days61to90.balance +
+    built.aging.days90Plus.balance +
+    built.aging.unknown.balance;
+  assert.equal(Math.round(sumBal * 100) / 100, 197);
+  assert.equal(built.overdueBalance, 90);
+  assert.equal(built.overdueInvoiceCount, 4);
+  assert.equal(built.aging.unknown.count, 1);
+  assert.equal(built.collectionAttention.code, "priority");
+  console.log("ok: J aging balances reconcile to Open A/R; K priority when 90+");
+}
+
+{
+  assert.equal(buildOpenArAging([{ balance: 10, due_date: "2026-09-01" }], "2026-08-13").collectionAttention.code, "current");
+  assert.equal(buildOpenArAging([{ balance: 10, due_date: "2026-08-01" }], "2026-08-13").collectionAttention.code, "watch");
+  assert.equal(buildOpenArAging([{ balance: 10, due_date: "2026-07-01" }], "2026-08-13").collectionAttention.code, "attention");
+  assert.equal(buildOpenArAging([{ balance: 10, due_date: "2026-06-01" }], "2026-08-13").collectionAttention.code, "priority");
+  assert.equal(buildOpenArAging([{ balance: 10, due_date: null }], "2026-08-13").collectionAttention.code, "unknown");
+  console.log("ok: K collection attention codes");
+}
+
+{
+  assert.deepEqual(resolvePaymentTermsLabel(["Net 30", "Net 30"]), {
+    paymentTerms: "Net 30",
+    warning: null
+  });
+  const multi = resolvePaymentTermsLabel(["Net 30", "Due on receipt"]);
+  assert.equal(multi.paymentTerms, "Multiple");
+  assert.match(String(multi.warning), /different payment terms/i);
+  console.log("ok: L/M payment terms single vs Multiple");
+}
+
+{
+  const scrubbed = scrubFinancialIds({
+    paymentTerms: "Net 30",
+    terms_list_id: "TERM-1",
+    termsListId: "TERM-2"
+  });
+  assert.equal(scrubbed.paymentTerms, "Net 30");
+  assert.equal(scrubbed.terms_list_id, undefined);
+  assert.equal(scrubbed.termsListId, undefined);
+  console.log("ok: N terms_list_id scrubbed from API payload");
+}
+
+{
+  const { validateTransactionChunk, validateOpenArReplacePayload } = await import(
+    "../sales/quickbooksFinancialTruth/syncIngest.js"
+  );
+  const txn = validateTransactionChunk({
+    organization_id: ORG,
+    sync_run_id: RUN_ID,
+    transactions: [
+      {
+        transaction_type: "invoice",
+        source_id: "I1",
+        transaction_date: "2026-08-04",
+        amount: 1370,
+        due_date: "2026-09-03",
+        terms_name: "Net 30",
+        terms_list_id: "TERM-X",
+        qb_customer_list_id: ROOT_A
+      },
+      {
+        transaction_type: "payment",
+        source_id: "P1",
+        transaction_date: "2026-08-05",
+        amount: 10,
+        due_date: "2026-09-03",
+        terms_name: "Net 30"
+      }
+    ]
+  });
+  assert.equal(txn.ok, true);
+  assert.equal(txn.value.transactions[0].due_date, "2026-09-03");
+  assert.equal(txn.value.transactions[0].terms_name, "Net 30");
+  assert.equal(txn.value.transactions[0].terms_list_id, "TERM-X");
+  assert.equal(txn.value.transactions[1].due_date, null);
+  assert.equal(txn.value.transactions[1].terms_name, null);
+
+  const ar = validateOpenArReplacePayload({
+    organization_id: ORG,
+    sync_run_id: RUN_ID,
+    open_ar: [
+      {
+        source_invoice_id: "AR1",
+        balance: 1370,
+        invoice_date: "2026-08-04",
+        due_date: "2026-09-03",
+        terms_name: "Net 30",
+        terms_list_id: "TERM-X"
+      }
+    ]
+  });
+  assert.equal(ar.ok, true);
+  assert.equal(ar.value.openAr[0].due_date, "2026-09-03");
+  assert.equal(ar.value.openAr[0].terms_name, "Net 30");
+  console.log("ok: ingest accepts invoice/open-AR DueDate+Terms; non-invoice terms null");
+}
+
+{
+  // Integration: linked profile returns aging + never exposes terms_list_id
+  const transactions = [
+    {
+      organization_id: ORG,
+      transaction_type: "invoice",
+      transaction_date: "2026-08-04",
+      source_id: "I-E55104",
+      amount: 1370,
+      terms_name: "Net 30",
+      terms_list_id: "SECRET-TERM",
+      qb_root_customer_list_id: ROOT_A
+    }
+  ];
+  const openAr = [
+    {
+      organization_id: ORG,
+      source_invoice_id: "AR1",
+      balance: 1370,
+      invoice_date: "2026-08-04",
+      due_date: "2026-09-03",
+      terms_name: "Net 30",
+      terms_list_id: "SECRET-TERM",
+      reference_number: "E55104",
+      customer_name: "319 Decor + Design:Kleins",
+      original_amount: 1370,
+      qb_root_customer_list_id: ROOT_A
+    }
+  ];
+  const { supabase } = createFakeSupabase({ syncRun: okSync(), transactions, openAr });
+  const profile = await getAccountDirectoryFinancials({
+    supabase,
+    store: makeStore({
+      links: [{ isActive: true, externalSystem: "quickbooks_desktop", externalId: ROOT_A }]
+    }),
+    organizationId: ORG,
+    accountId: ACCOUNT,
+    role: "sales",
+    env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "999999" },
+    now: new Date("2026-08-13T18:00:00.000Z")
+  });
+  assert.equal(profile.paymentTerms, "Net 30");
+  assert.equal(profile.aging.current.balance, 1370);
+  assert.equal(profile.collectionAttention.code, "current");
+  assert.equal(profile.overdueBalance, 0);
+  assertNoIds(profile);
+  assert.equal(/SECRET-TERM|terms_list_id/i.test(JSON.stringify(profile)), false);
+  console.log("ok: linked profile aging/terms; O identity scrub still holds");
+}
+
+{
+  const openAr = [];
+  for (let i = 0; i < 1205; i += 1) {
+    openAr.push({
+      organization_id: ORG,
+      source_invoice_id: `AR-${String(i).padStart(5, "0")}`,
+      balance: 1,
+      invoice_date: "2026-01-01",
+      due_date: i % 2 === 0 ? "2026-09-01" : "2026-07-01",
+      qb_root_customer_list_id: ROOT_A
+    });
+  }
+  const { supabase, rangeCalls } = createFakeSupabase({ syncRun: okSync(), transactions: [], openAr });
+  const sum = await sumLinkedOpenAr(supabase, { organizationId: ORG, rootListIds: [ROOT_A] });
+  assert.equal(sum.invoice_count, 1205);
+  const built = buildOpenArAging(sum.rows, "2026-08-13");
+  assert.equal(
+    built.aging.current.count +
+      built.aging.days1to30.count +
+      built.aging.days31to60.count +
+      built.aging.days61to90.count +
+      built.aging.days90Plus.count +
+      built.aging.unknown.count,
+    1205
+  );
+  assert.ok(rangeCalls.length >= 2);
+  console.log("ok: P >1000 open A/R paging still works with aging fields");
 }
 
 console.log("accountDirectoryFinancialIntelligence.test.mjs — all passed");

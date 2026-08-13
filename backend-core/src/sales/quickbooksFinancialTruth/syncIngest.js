@@ -38,6 +38,35 @@ function pickQbRootCustomerListId(row) {
   );
 }
 
+/**
+ * Optional invoice DueDate (YYYY-MM-DD). Never inferred from Terms + invoice date.
+ * @param {unknown} row
+ * @returns {string|null}
+ */
+function pickDueDate(row) {
+  const raw = pickStr(row?.due_date ?? row?.DueDate, 16);
+  if (raw && isYmd(raw)) return raw;
+  return null;
+}
+
+/**
+ * Optional payment terms display name (Invoices.Terms).
+ * @param {unknown} row
+ * @returns {string|null}
+ */
+function pickTermsName(row) {
+  return pickStr(row?.terms_name ?? row?.Terms, 200);
+}
+
+/**
+ * Optional TermsId — stored only; never returned to browser.
+ * @param {unknown} row
+ * @returns {string|null}
+ */
+function pickTermsListId(row) {
+  return pickStr(row?.terms_list_id ?? row?.TermsId, 200);
+}
+
 function isUuid(v) {
   return UUID_RE.test(String(v ?? "").trim());
 }
@@ -124,6 +153,12 @@ export function validateTransactionChunk(body) {
         errors.push(`transactions[${i}].amount must be numeric`);
         continue;
       }
+      const dueDateRaw = pickStr(row?.due_date ?? row?.DueDate, 16);
+      if (dueDateRaw && !isYmd(dueDateRaw)) {
+        errors.push(`transactions[${i}].due_date must be YYYY-MM-DD`);
+        continue;
+      }
+      const isInvoice = transactionType === "invoice";
       transactions.push({
         organization_id: organizationId,
         transaction_type: transactionType,
@@ -135,6 +170,10 @@ export function validateTransactionChunk(body) {
         qb_customer_list_id: pickQbCustomerListId(row),
         // May be overwritten by server-side root resolution from ad_qb_customer_facts.
         qb_root_customer_list_id: pickQbRootCustomerListId(row),
+        // Invoice DueDate/Terms only (other txn types stay null).
+        due_date: isInvoice ? pickDueDate(row) : null,
+        terms_name: isInvoice ? pickTermsName(row) : null,
+        terms_list_id: isInvoice ? pickTermsListId(row) : null,
         amount,
         synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -185,11 +224,19 @@ export function validateOpenArReplacePayload(body) {
         errors.push(`open_ar[${i}].invoice_date must be YYYY-MM-DD`);
         continue;
       }
+      const dueDateRaw = pickStr(row?.due_date ?? row?.DueDate, 16);
+      if (dueDateRaw && !isYmd(dueDateRaw)) {
+        errors.push(`open_ar[${i}].due_date must be YYYY-MM-DD`);
+        continue;
+      }
       openAr.push({
         organization_id: organizationId,
         source_invoice_id: sourceInvoiceId,
         reference_number: pickStr(row?.reference_number, 120),
         invoice_date: invoiceDate,
+        due_date: pickDueDate(row),
+        terms_name: pickTermsName(row),
+        terms_list_id: pickTermsListId(row),
         customer_name: pickStr(row?.customer_name, 300),
         qb_customer_list_id: pickQbCustomerListId(row),
         qb_root_customer_list_id: pickQbRootCustomerListId(row),

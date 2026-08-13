@@ -2040,7 +2040,92 @@ function FinancialsPanel({
             </div>
           </div>
 
+          {financials.aging ? (
+            <section className="financials-aging" aria-label="A/R aging">
+              <div className="financials-aging-head">
+                <h4 className="financials-subtitle">A/R Aging</h4>
+                <p className="financials-meta muted">Based on QuickBooks invoice due dates</p>
+              </div>
+              <div className="financials-aging-grid">
+                {(
+                  [
+                    ["Current", financials.aging.current],
+                    ["1–30 overdue", financials.aging.days1to30],
+                    ["31–60 overdue", financials.aging.days31to60],
+                    ["61–90 overdue", financials.aging.days61to90],
+                    ["90+ overdue", financials.aging.days90Plus]
+                  ] as const
+                ).map(([label, bucket]) => (
+                  <div key={label} className="financials-aging-cell">
+                    <span className="financials-metric-label">{label}</span>
+                    <span className="financials-metric-value">{formatMoney(bucket?.balance ?? 0)}</span>
+                    <span className="financials-aging-count">
+                      {bucket?.count ?? 0} invoice{(bucket?.count ?? 0) === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {(financials.aging.unknown?.count ?? 0) > 0 ? (
+                <div className="financials-aging-unknown">
+                  <span className="financials-metric-label">Due date unavailable</span>
+                  <span>
+                    {formatMoney(financials.aging.unknown?.balance ?? 0)} ·{" "}
+                    {financials.aging.unknown?.count ?? 0} invoice
+                    {(financials.aging.unknown?.count ?? 0) === 1 ? "" : "s"}
+                  </span>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           <dl className="detail-dl financials-facts">
+            <dt>Payment terms</dt>
+            <dd>{financials.paymentTerms || "—"}</dd>
+            <dt>Overdue balance</dt>
+            <dd>
+              {formatMoney(financials.overdueBalance)}
+              {financials.overdueInvoiceCount != null
+                ? ` · ${financials.overdueInvoiceCount} invoice${financials.overdueInvoiceCount === 1 ? "" : "s"}`
+                : ""}
+            </dd>
+            <dt>Oldest overdue</dt>
+            <dd>
+              {financials.oldestOverdueInvoice
+                ? [
+                    financials.oldestOverdueInvoice.dueDate
+                      ? `due ${financials.oldestOverdueInvoice.dueDate}`
+                      : null,
+                    financials.oldestOverdueInvoice.referenceNumber,
+                    formatMoney(financials.oldestOverdueInvoice.balance),
+                    financials.oldestOverdueInvoice.daysOverdue != null
+                      ? `${financials.oldestOverdueInvoice.daysOverdue} days overdue`
+                      : null
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : "—"}
+            </dd>
+            <dt>
+              Collection status
+              <span
+                className="financials-help"
+                title="Collection status is based only on current QuickBooks invoice due dates and unpaid balances."
+              >
+                ?
+              </span>
+            </dt>
+            <dd>
+              {financials.collectionAttention ? (
+                <span
+                  className={`collection-status collection-status-${financials.collectionAttention.code || "unknown"}`}
+                  title={financials.collectionAttention.reason || undefined}
+                >
+                  {financials.collectionAttention.label || financials.collectionAttention.code}
+                </span>
+              ) : (
+                "—"
+              )}
+            </dd>
             <dt>Last invoice</dt>
             <dd>
               {financials.lastInvoice

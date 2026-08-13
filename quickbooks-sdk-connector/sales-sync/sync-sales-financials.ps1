@@ -28,7 +28,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$WorkerVersion = "1.1.0"
+$WorkerVersion = "1.2.0"
 
 function Get-EnvOrDefault {
     param([string]$Name, [string]$Default = "")
@@ -217,7 +217,7 @@ Write-Host ""
 Write-Host "============================================================"
 Write-Host " EliteOS QuickBooks Sales ODBC Sync Worker $WorkerVersion"
 Write-Host " READ-ONLY - DSN $Dsn"
-Write-Host " CustomerId ListID enrichment enabled (qb_customer_list_id)"
+Write-Host " CustomerId ListID enrichment + Invoice DueDate/Terms aging fields"
 Write-Host "============================================================"
 Write-Host ""
 
@@ -333,7 +333,7 @@ WHERE Date >= '$startUs'
         }
 
         $invSql = @"
-SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, Amount
+SELECT Id, ReferenceNumber, Date, DueDate, Terms, TermsId, CustomerId, CustomerName, Amount
 FROM Invoices
 WHERE Date >= '$startUs'
   AND Date <= '$endUs'
@@ -347,6 +347,9 @@ WHERE Date >= '$startUs'
                 source_id = [string]$r.Id
                 reference_number = $(if ($null -ne $r.ReferenceNumber) { [string]$r.ReferenceNumber } else { $null })
                 transaction_date = $dt
+                due_date = Convert-ToYmd $r.DueDate
+                terms_name = $(if ($null -ne $r.Terms -and -not [string]::IsNullOrWhiteSpace([string]$r.Terms)) { [string]$r.Terms } else { $null })
+                terms_list_id = $(if ($null -ne $r.TermsId -and -not [string]::IsNullOrWhiteSpace([string]$r.TermsId)) { [string]$r.TermsId } else { $null })
                 customer_name = $(if ($null -ne $r.CustomerName) { [string]$r.CustomerName } else { $null })
                 qb_customer_list_id = $(if ($null -ne $r.CustomerId -and -not [string]::IsNullOrWhiteSpace([string]$r.CustomerId)) { [string]$r.CustomerId } else { $null })
                 amount = $amt
@@ -394,7 +397,7 @@ WHERE Date >= '$startUs'
     }
 
     $arSql = @"
-SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, Amount, Balance, IsPaid
+SELECT Id, ReferenceNumber, Date, DueDate, Terms, TermsId, CustomerId, CustomerName, Amount, Balance, IsPaid
 FROM Invoices
 WHERE IsPaid = false
 "@
@@ -406,6 +409,9 @@ WHERE IsPaid = false
             source_invoice_id = [string]$r.Id
             reference_number = $(if ($null -ne $r.ReferenceNumber) { [string]$r.ReferenceNumber } else { $null })
             invoice_date = Convert-ToYmd $r.Date
+            due_date = Convert-ToYmd $r.DueDate
+            terms_name = $(if ($null -ne $r.Terms -and -not [string]::IsNullOrWhiteSpace([string]$r.Terms)) { [string]$r.Terms } else { $null })
+            terms_list_id = $(if ($null -ne $r.TermsId -and -not [string]::IsNullOrWhiteSpace([string]$r.TermsId)) { [string]$r.TermsId } else { $null })
             customer_name = $(if ($null -ne $r.CustomerName) { [string]$r.CustomerName } else { $null })
             qb_customer_list_id = $(if ($null -ne $r.CustomerId -and -not [string]::IsNullOrWhiteSpace([string]$r.CustomerId)) { [string]$r.CustomerId } else { $null })
             original_amount = Convert-ToNumber $r.Amount
@@ -422,14 +428,28 @@ WHERE IsPaid = false
         }
     }
     $arWithCustomerId = 0
+    $arWithDueDate = 0
+    $arWithTerms = 0
     foreach ($a in $openArRows.ToArray()) {
         if ($null -ne $a.qb_customer_list_id -and -not [string]::IsNullOrWhiteSpace([string]$a.qb_customer_list_id)) {
             $arWithCustomerId++
         }
+        if ($null -ne $a.due_date -and -not [string]::IsNullOrWhiteSpace([string]$a.due_date)) {
+            $arWithDueDate++
+        }
+        if ($null -ne $a.terms_name -and -not [string]::IsNullOrWhiteSpace([string]$a.terms_name)) {
+            $arWithTerms++
+        }
     }
     $warnings.Add(("worker_customer_id_coverage:txn={0}/{1};open_ar={2}/{3}" -f $txnWithCustomerId, $allTxnArray.Length, $arWithCustomerId, $openArRows.Count)) | Out-Null
+    $warnings.Add(("worker_open_ar_due_date_coverage:{0}/{1}" -f $arWithDueDate, $openArRows.Count)) | Out-Null
+    $warnings.Add(("worker_open_ar_terms_coverage:{0}/{1}" -f $arWithTerms, $openArRows.Count)) | Out-Null
     Write-Host ("CustomerId coverage: txn {0}/{1}, open_ar {2}/{3} (root ListID resolved on Brain)" -f $txnWithCustomerId, $allTxnArray.Length, $arWithCustomerId, $openArRows.Count)
-
+    Write-Host ("Open A/R DueDate coverage: {0}/{1}" -f $arWithDueDate, $openArRows.Count)
+    Write-Host ("Open A/R Terms coverage: {0}/{1}" -f $arWithTerms, $openArRows.Count)
+    if ($openArRows.Count -gt 0 -and $arWithDueDate -lt $openArRows.Count) {
+        $warnings.Add(("open_ar_missing_due_date:{0}" -f ($openArRows.Count - $arWithDueDate))) | Out-Null
+    }
     if (-not $DryRun) {
         $arPayload = @{
             action = "replace_open_ar"

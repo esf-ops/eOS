@@ -185,6 +185,31 @@ export type AccountFinancials = {
     customerName?: string | null;
     ageDays?: number | null;
   } | null;
+  oldestOverdueInvoice?: {
+    date?: string | null;
+    dueDate?: string | null;
+    referenceNumber?: string | null;
+    originalAmount?: number | null;
+    balance?: number | null;
+    customerName?: string | null;
+    daysOverdue?: number | null;
+  } | null;
+  paymentTerms?: string | null;
+  overdueBalance?: number | null;
+  overdueInvoiceCount?: number | null;
+  aging?: {
+    current?: { balance?: number; count?: number };
+    days1to30?: { balance?: number; count?: number };
+    days31to60?: { balance?: number; count?: number };
+    days61to90?: { balance?: number; count?: number };
+    days90Plus?: { balance?: number; count?: number };
+    unknown?: { balance?: number; count?: number };
+  } | null;
+  collectionAttention?: {
+    code?: "current" | "watch" | "attention" | "priority" | "unknown" | string;
+    label?: string;
+    reason?: string;
+  } | null;
   recentActivity?: AccountFinancialActivityItem[];
   coverage?: {
     workerCoverageStartDate?: string | null;

@@ -4240,3 +4240,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `accountDirectoryFinancialIntelligence.mjs`, `accountDirectoryApi.js`, Account Directory Financials UI/types/API client, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
 | **Revisit** | Slice B after DueDate/Terms on prepared facts; optional summary cache. |
 
+### 315. Account Directory Financial Intelligence v1 — Slice B aging/terms (2026-08-13)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-13 |
+| **Decision** | True QuickBooks **A/R aging**, **payment terms**, and deterministic **collection attention** on Account Directory Financials. Aging uses **Invoices.DueDate only** (never invoice Date + Net-N inference). Terms from Invoices.Terms (display); TermsId stored internally and never returned to the browser. Collection attention is rules-based (`current` / `watch` / `attention` / `priority` / `unknown`) — not AI and not a credit score. Missing DueDate → `unknown` bucket (excluded from overdue). |
+| **SQL** | Manual: `backend-core/supabase/eliteos_sales_quickbooks_financial_truth_aging_v3.sql` — nullable `due_date` / `terms_name` / `terms_list_id` on open A/R + invoice transactions. |
+| **Worker** | `sync-sales-financials.ps1` v1.2.0 SELECTs DueDate/Terms/TermsId on invoice + open A/R; coverage diagnostics for DueDate/Terms. |
+| **Planned ops (not in this coding pass)** | One-time Sales Financial Truth **backfill 2025-01-01 → current** for full 2025 + 2026 YTD / YoY / T12 account intelligence. Recurring sync remains **60-day incremental**. |
+| **Out of scope** | Sales Dashboard definition changes; AD identity/link/suggestion changes; Internal Estimate; Quote Library; Moraware; Thryve; applying SQL / production ingest in this change. |
+| **Impacted** | Sales worker + ingest, AD financial intelligence + Financials UI, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
+| **Revisit** | Apply v3 SQL → deploy Brain → QB Server worker 1.2.0 → DryRun → incremental ingest → optional 2025-01-01 backfill. |
+
