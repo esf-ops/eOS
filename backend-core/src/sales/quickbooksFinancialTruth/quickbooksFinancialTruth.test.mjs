@@ -15,6 +15,11 @@ import {
   QB_FINANCIAL_TRUTH_STATUSES,
   sanitizeFinancialTruthDiagnostics
 } from "./index.js";
+import {
+  PREPARED_FACTS_PAGE_SIZE,
+  sumCurrentOpenAr,
+  sumTransactionsInRange
+} from "./preparedFactsProvider.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -155,6 +160,214 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
   assert.equal(row.open_ar.basis, "as_of_refresh");
   assert.match(row.open_ar.basis_note, /as of refresh/i);
   console.log("ok: Open A/R basis documented as as-of refresh");
+}
+
+// --- Prepared-facts paging (would fail under single uncapped PostgREST select) ---
+
+/**
+ * Fake Supabase client that supports the prepared-facts paging chain and
+ * returns only the requested .range() slice (simulating PostgREST max-rows).
+ */
+function createPagingSupabase({ table, rows, idKey }) {
+  const sorted = [...rows].sort((a, b) => String(a[idKey]).localeCompare(String(b[idKey])));
+  /** @type {{ from: number, to: number }[]} */
+  const rangeCalls = [];
+
+  function makeBuilder() {
+    /** @type {{ filters: Record<string, unknown>, gte: Record<string, unknown>, lte: Record<string, unknown>, orderCol: string|null, from: number|null, to: number|null }} */
+    const state = {
+      filters: {},
+      gte: {},
+      lte: {},
+      orderCol: null,
+      from: null,
+      to: null
+    };
+    const api = {
+      select() {
+        return api;
+      },
+      eq(col, val) {
+        state.filters[col] = val;
+        return api;
+      },
+      gte(col, val) {
+        state.gte[col] = val;
+        return api;
+      },
+      lte(col, val) {
+        state.lte[col] = val;
+        return api;
+      },
+      order(col) {
+        state.orderCol = col;
+        return api;
+      },
+      range(from, to) {
+        state.from = from;
+        state.to = to;
+        rangeCalls.push({ from, to });
+        return api;
+      },
+      then(onFulfilled, onRejected) {
+        let filtered = sorted.filter((row) => {
+          for (const [col, val] of Object.entries(state.filters)) {
+            if (row[col] !== val) return false;
+          }
+          for (const [col, val] of Object.entries(state.gte)) {
+            if (String(row[col]) < String(val)) return false;
+          }
+          for (const [col, val] of Object.entries(state.lte)) {
+            if (String(row[col]) > String(val)) return false;
+          }
+          return true;
+        });
+        if (state.orderCol) {
+          filtered = [...filtered].sort((a, b) =>
+            String(a[state.orderCol]).localeCompare(String(b[state.orderCol]))
+          );
+        }
+        const from = state.from ?? 0;
+        const to = state.to ?? filtered.length - 1;
+        const page = filtered.slice(from, to + 1);
+        return Promise.resolve({ data: page, error: null }).then(onFulfilled, onRejected);
+      }
+    };
+    return api;
+  }
+
+  return {
+    rangeCalls,
+    supabase: {
+      from(name) {
+        assert.equal(name, table);
+        return makeBuilder();
+      }
+    }
+  };
+}
+
+// A. Transaction paging >1000 rows
+{
+  const orgId = "11111111-1111-4111-8111-111111111111";
+  const total = 1575;
+  const rows = [];
+  let expectedAmount = 0;
+  for (let i = 0; i < total; i += 1) {
+    const amount = (i % 17) + 1; // 1..17 deterministic
+    expectedAmount += amount;
+    rows.push({
+      organization_id: orgId,
+      transaction_type: "invoice",
+      transaction_date: "2026-06-15",
+      source_id: `INV-${String(i).padStart(5, "0")}`,
+      amount
+    });
+  }
+  expectedAmount = Math.round(expectedAmount * 100) / 100;
+
+  const { supabase, rangeCalls } = createPagingSupabase({
+    table: "sales_quickbooks_financial_transactions",
+    rows,
+    idKey: "source_id"
+  });
+
+  const result = await sumTransactionsInRange(supabase, {
+    organizationId: orgId,
+    startDate: "2026-01-01",
+    endDate: "2026-12-31",
+    transactionType: "invoice"
+  });
+
+  assert.equal(result.count, total);
+  assert.equal(result.amount, expectedAmount);
+  assert.ok(rangeCalls.length >= 2, `expected multiple pages, got ${rangeCalls.length}`);
+  assert.deepEqual(rangeCalls[0], { from: 0, to: PREPARED_FACTS_PAGE_SIZE - 1 });
+  assert.deepEqual(rangeCalls[1], {
+    from: PREPARED_FACTS_PAGE_SIZE,
+    to: PREPARED_FACTS_PAGE_SIZE * 2 - 1
+  });
+  // Old single-query (first 1000 only) would under-count:
+  const firstPageOnly = rows.slice(0, PREPARED_FACTS_PAGE_SIZE).reduce((s, r) => s + r.amount, 0);
+  assert.notEqual(result.amount, Math.round(firstPageOnly * 100) / 100);
+  assert.ok(result.count > PREPARED_FACTS_PAGE_SIZE);
+  console.log("ok: A transaction paging sums all 1575 rows across multiple .range() pages");
+}
+
+// B. Open A/R paging >1000 rows
+{
+  const orgId = "11111111-1111-4111-8111-111111111111";
+  const total = 1205;
+  const rows = [];
+  let expectedAmount = 0;
+  for (let i = 0; i < total; i += 1) {
+    const balance = (i % 11) + 0.25;
+    expectedAmount += balance;
+    rows.push({
+      organization_id: orgId,
+      source_invoice_id: `AR-${String(i).padStart(5, "0")}`,
+      balance
+    });
+  }
+  expectedAmount = Math.round(expectedAmount * 100) / 100;
+
+  const { supabase, rangeCalls } = createPagingSupabase({
+    table: "sales_quickbooks_open_ar_current",
+    rows,
+    idKey: "source_invoice_id"
+  });
+
+  const result = await sumCurrentOpenAr(supabase, orgId);
+  assert.equal(result.invoice_count, total);
+  assert.equal(result.amount, expectedAmount);
+  assert.ok(rangeCalls.length >= 2, `expected multiple pages, got ${rangeCalls.length}`);
+  assert.deepEqual(rangeCalls[0], { from: 0, to: PREPARED_FACTS_PAGE_SIZE - 1 });
+  const firstPageOnly = rows.slice(0, PREPARED_FACTS_PAGE_SIZE).reduce((s, r) => s + r.balance, 0);
+  assert.notEqual(result.amount, Math.round(firstPageOnly * 100) / 100);
+  console.log("ok: B open A/R paging sums all 1205 balances across multiple .range() pages");
+}
+
+// C. Small result set (<1000) still works; single page
+{
+  const orgId = "11111111-1111-4111-8111-111111111111";
+  const rows = [
+    {
+      organization_id: orgId,
+      transaction_type: "payment",
+      transaction_date: "2026-07-01",
+      source_id: "P-1",
+      amount: 10.1
+    },
+    {
+      organization_id: orgId,
+      transaction_type: "payment",
+      transaction_date: "2026-07-02",
+      source_id: "P-2",
+      amount: 20.2
+    },
+    {
+      organization_id: orgId,
+      transaction_type: "payment",
+      transaction_date: "2026-07-03",
+      source_id: "P-3",
+      amount: 30.3
+    }
+  ];
+  const { supabase, rangeCalls } = createPagingSupabase({
+    table: "sales_quickbooks_financial_transactions",
+    rows,
+    idKey: "source_id"
+  });
+  const result = await sumTransactionsInRange(supabase, {
+    organizationId: orgId,
+    startDate: null,
+    endDate: null,
+    transactionType: "payment"
+  });
+  assert.equal(result.count, 3);
+  assert.equal(result.amount, 60.6);
+  assert.equal(rangeCalls.length, 1);
+  console.log("ok: C small result set (<1000) returns correct total on a single page");
 }
 
 console.log("All QuickBooks Financial Truth Beta tests passed.");

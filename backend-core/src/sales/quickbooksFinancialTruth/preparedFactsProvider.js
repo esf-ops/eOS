@@ -42,27 +42,43 @@ export async function loadLatestSuccessfulQbSyncRun(supabase, organizationId) {
   return data || null;
 }
 
+/** PostgREST default max rows; page below this so totals never silently truncate. */
+export const PREPARED_FACTS_PAGE_SIZE = 1000;
+
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {{ organizationId: string, startDate: string|null, endDate: string|null, transactionType: string }} args
  */
 export async function sumTransactionsInRange(supabase, { organizationId, startDate, endDate, transactionType }) {
-  let q = supabase
-    .from("sales_quickbooks_financial_transactions")
-    .select("amount")
-    .eq("organization_id", organizationId)
-    .eq("transaction_type", transactionType);
-  if (startDate) q = q.gte("transaction_date", startDate);
-  if (endDate) q = q.lte("transaction_date", endDate);
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  const rows = data || [];
+  const pageSize = PREPARED_FACTS_PAGE_SIZE;
+  let count = 0;
   let amount = 0;
-  for (const row of rows) {
-    const n = Number(row.amount);
-    if (Number.isFinite(n)) amount += n;
+  let from = 0;
+
+  for (;;) {
+    // Rebuild the query each page (Supabase builders are not safely reused after await).
+    let q = supabase
+      .from("sales_quickbooks_financial_transactions")
+      .select("amount")
+      .eq("organization_id", organizationId)
+      .eq("transaction_type", transactionType);
+    if (startDate) q = q.gte("transaction_date", startDate);
+    if (endDate) q = q.lte("transaction_date", endDate);
+    q = q.order("source_id", { ascending: true }).range(from, from + pageSize - 1);
+
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const rows = data || [];
+    for (const row of rows) {
+      const n = Number(row.amount);
+      if (Number.isFinite(n)) amount += n;
+    }
+    count += rows.length;
+    if (rows.length < pageSize) break;
+    from += pageSize;
   }
-  return { count: rows.length, amount: Math.round(amount * 100) / 100 };
+
+  return { count, amount: Math.round(amount * 100) / 100 };
 }
 
 /**
@@ -70,18 +86,32 @@ export async function sumTransactionsInRange(supabase, { organizationId, startDa
  * @param {string} organizationId
  */
 export async function sumCurrentOpenAr(supabase, organizationId) {
-  const { data, error } = await supabase
-    .from("sales_quickbooks_open_ar_current")
-    .select("balance")
-    .eq("organization_id", organizationId);
-  if (error) throw new Error(error.message);
-  const rows = data || [];
+  const pageSize = PREPARED_FACTS_PAGE_SIZE;
+  let invoiceCount = 0;
   let amount = 0;
-  for (const row of rows) {
-    const n = Number(row.balance);
-    if (Number.isFinite(n) && n > 0) amount += n;
+  let from = 0;
+
+  for (;;) {
+    const q = supabase
+      .from("sales_quickbooks_open_ar_current")
+      .select("balance")
+      .eq("organization_id", organizationId)
+      .order("source_invoice_id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const rows = data || [];
+    for (const row of rows) {
+      const n = Number(row.balance);
+      if (Number.isFinite(n) && n > 0) amount += n;
+    }
+    invoiceCount += rows.length;
+    if (rows.length < pageSize) break;
+    from += pageSize;
   }
-  return { invoice_count: rows.length, amount: Math.round(amount * 100) / 100 };
+
+  return { invoice_count: invoiceCount, amount: Math.round(amount * 100) / 100 };
 }
 
 /**

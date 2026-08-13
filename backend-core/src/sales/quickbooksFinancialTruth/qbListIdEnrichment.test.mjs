@@ -201,6 +201,12 @@ function factsMap(rows) {
       lte() {
         return api;
       },
+      order() {
+        return api;
+      },
+      range() {
+        return api;
+      },
       then(onFulfilled) {
         return Promise.resolve({ data: rows, error: null }).then(onFulfilled);
       }
