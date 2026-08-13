@@ -11,6 +11,33 @@ export const QB_SALES_SYNC_MAX_TRANSACTIONS = 500;
 export const QB_SALES_SYNC_MAX_OPEN_AR = 5000;
 export const QB_SALES_SYNC_WORKER_VERSION_DEFAULT = "1.0.0";
 
+/**
+ * Optional ODBC CustomerId / ListID. Never derived from customer_name.
+ * @param {unknown} row
+ * @returns {string|null}
+ */
+function pickQbCustomerListId(row) {
+  return (
+    pickStr(row?.qb_customer_list_id, 200) ||
+    pickStr(row?.CustomerId, 200) ||
+    pickStr(row?.customer_id, 200) ||
+    null
+  );
+}
+
+/**
+ * Optional client-supplied root ListID (ignored when server resolves from facts).
+ * @param {unknown} row
+ * @returns {string|null}
+ */
+function pickQbRootCustomerListId(row) {
+  return (
+    pickStr(row?.qb_root_customer_list_id, 200) ||
+    pickStr(row?.root_customer_list_id, 200) ||
+    null
+  );
+}
+
 function isUuid(v) {
   return UUID_RE.test(String(v ?? "").trim());
 }
@@ -104,6 +131,10 @@ export function validateTransactionChunk(body) {
         reference_number: pickStr(row?.reference_number, 120),
         transaction_date: transactionDate,
         customer_name: pickStr(row?.customer_name, 300),
+        // Nullable ListID enrichment — Sales Dashboard totals ignore these.
+        qb_customer_list_id: pickQbCustomerListId(row),
+        // May be overwritten by server-side root resolution from ad_qb_customer_facts.
+        qb_root_customer_list_id: pickQbRootCustomerListId(row),
         amount,
         synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -160,6 +191,8 @@ export function validateOpenArReplacePayload(body) {
         reference_number: pickStr(row?.reference_number, 120),
         invoice_date: invoiceDate,
         customer_name: pickStr(row?.customer_name, 300),
+        qb_customer_list_id: pickQbCustomerListId(row),
+        qb_root_customer_list_id: pickQbRootCustomerListId(row),
         original_amount: toNumber(row?.original_amount),
         balance,
         synced_at: new Date().toISOString(),
@@ -195,6 +228,11 @@ export function validateCompletePayload(body) {
   const warnings = Array.isArray(body?.warnings)
     ? body.warnings.map((w) => pickStr(w, 400)).filter(Boolean).slice(0, 50)
     : [];
+  /** Optional ListID coverage diagnostics from worker/server (merged into warnings jsonb). */
+  const identityCoverage =
+    body?.identity_coverage && typeof body.identity_coverage === "object"
+      ? body.identity_coverage
+      : null;
   return {
     ok: errors.length === 0,
     errors,
@@ -211,6 +249,7 @@ export function validateCompletePayload(body) {
       paymentsCount: toNumber(body?.payments_count),
       openArCount: toNumber(body?.open_ar_count),
       warnings,
+      identityCoverage,
       errorSummary: pickStr(body?.error_summary, 500)
     }
   };
@@ -323,6 +362,20 @@ export async function replaceOpenArSnapshot(supabase, organizationId, rows) {
  * @param {object} value
  */
 export async function completeSyncRun(supabase, value) {
+  const warnings = [...(value.warnings || [])];
+  if (value.identityCoverage) {
+    const c = value.identityCoverage;
+    warnings.push(
+      `listid_coverage:total=${c.total_rows ?? "?"};with_customer=${c.rows_with_qb_customer_list_id ?? "?"};with_root=${c.rows_with_qb_root_customer_list_id ?? "?"};unresolved_root=${c.unresolved_root_count ?? "?"}`
+    );
+    if (c.by_transaction_type && typeof c.by_transaction_type === "object") {
+      for (const [type, stats] of Object.entries(c.by_transaction_type)) {
+        warnings.push(
+          `listid_coverage_by_type:${type}:total=${stats.total ?? 0};with_customer=${stats.with_customer_list_id ?? 0};with_root=${stats.with_root_customer_list_id ?? 0}`
+        );
+      }
+    }
+  }
   const { data, error } = await supabase
     .from("sales_quickbooks_sync_runs")
     .update({
@@ -336,7 +389,7 @@ export async function completeSyncRun(supabase, value) {
       invoices_count: value.invoicesCount,
       payments_count: value.paymentsCount,
       open_ar_count: value.openArCount,
-      warnings: value.warnings,
+      warnings: warnings.slice(0, 80),
       error_summary: value.errorSummary,
       updated_at: new Date().toISOString()
     })
@@ -347,3 +400,24 @@ export async function completeSyncRun(supabase, value) {
   if (error) throw new Error(error.message);
   return data;
 }
+
+/**
+ * Tables financial ingest is allowed to write. Used by regression tests.
+ * ad_qb_customer_facts is SELECT-only for root resolution.
+ */
+export const QB_SALES_SYNC_WRITE_TABLES = Object.freeze([
+  "sales_quickbooks_sync_runs",
+  "sales_quickbooks_financial_transactions",
+  "sales_quickbooks_open_ar_current"
+]);
+
+export const QB_SALES_SYNC_FORBIDDEN_WRITE_TABLES = Object.freeze([
+  "account_directory_accounts",
+  "account_directory_contacts",
+  "account_directory_locations",
+  "account_directory_aliases",
+  "account_directory_external_links",
+  "ad_qb_customer_facts",
+  "ad_qb_link_suggestions",
+  "ad_qb_customer_sync_runs"
+]);

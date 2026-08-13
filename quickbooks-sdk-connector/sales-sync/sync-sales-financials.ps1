@@ -28,7 +28,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$WorkerVersion = "1.0.0"
+$WorkerVersion = "1.1.0"
 
 function Get-EnvOrDefault {
     param([string]$Name, [string]$Default = "")
@@ -217,6 +217,7 @@ Write-Host ""
 Write-Host "============================================================"
 Write-Host " EliteOS QuickBooks Sales ODBC Sync Worker $WorkerVersion"
 Write-Host " READ-ONLY - DSN $Dsn"
+Write-Host " CustomerId ListID enrichment enabled (qb_customer_list_id)"
 Write-Host "============================================================"
 Write-Host ""
 
@@ -290,7 +291,7 @@ try {
         Write-Host ("Window {0} -> {1}" -f $w.Start.ToString("yyyy-MM-dd"), $w.End.ToString("yyyy-MM-dd"))
 
         $estSql = @"
-SELECT Id, ReferenceNumber, Date, CustomerName, TotalAmount
+SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, TotalAmount
 FROM Estimates
 WHERE Date >= '$startUs'
   AND Date <= '$endUs'
@@ -305,12 +306,13 @@ WHERE Date >= '$startUs'
                 reference_number = $(if ($null -ne $r.ReferenceNumber) { [string]$r.ReferenceNumber } else { $null })
                 transaction_date = $dt
                 customer_name = $(if ($null -ne $r.CustomerName) { [string]$r.CustomerName } else { $null })
+                qb_customer_list_id = $(if ($null -ne $r.CustomerId -and -not [string]::IsNullOrWhiteSpace([string]$r.CustomerId)) { [string]$r.CustomerId } else { $null })
                 amount = $amt
             }) | Out-Null
         }
 
         $soSql = @"
-SELECT Id, ReferenceNumber, Date, CustomerName, TotalAmount
+SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, TotalAmount
 FROM SalesOrders
 WHERE Date >= '$startUs'
   AND Date <= '$endUs'
@@ -325,12 +327,13 @@ WHERE Date >= '$startUs'
                 reference_number = $(if ($null -ne $r.ReferenceNumber) { [string]$r.ReferenceNumber } else { $null })
                 transaction_date = $dt
                 customer_name = $(if ($null -ne $r.CustomerName) { [string]$r.CustomerName } else { $null })
+                qb_customer_list_id = $(if ($null -ne $r.CustomerId -and -not [string]::IsNullOrWhiteSpace([string]$r.CustomerId)) { [string]$r.CustomerId } else { $null })
                 amount = $amt
             }) | Out-Null
         }
 
         $invSql = @"
-SELECT Id, ReferenceNumber, Date, CustomerName, Amount
+SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, Amount
 FROM Invoices
 WHERE Date >= '$startUs'
   AND Date <= '$endUs'
@@ -345,12 +348,13 @@ WHERE Date >= '$startUs'
                 reference_number = $(if ($null -ne $r.ReferenceNumber) { [string]$r.ReferenceNumber } else { $null })
                 transaction_date = $dt
                 customer_name = $(if ($null -ne $r.CustomerName) { [string]$r.CustomerName } else { $null })
+                qb_customer_list_id = $(if ($null -ne $r.CustomerId -and -not [string]::IsNullOrWhiteSpace([string]$r.CustomerId)) { [string]$r.CustomerId } else { $null })
                 amount = $amt
             }) | Out-Null
         }
 
         $paySql = @"
-SELECT Id, ReferenceNumber, Date, CustomerName, Amount, UnusedPayment
+SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, Amount, UnusedPayment
 FROM ReceivePayments
 WHERE Date >= '$startUs'
   AND Date <= '$endUs'
@@ -365,6 +369,7 @@ WHERE Date >= '$startUs'
                 reference_number = $(if ($null -ne $r.ReferenceNumber) { [string]$r.ReferenceNumber } else { $null })
                 transaction_date = $dt
                 customer_name = $(if ($null -ne $r.CustomerName) { [string]$r.CustomerName } else { $null })
+                qb_customer_list_id = $(if ($null -ne $r.CustomerId -and -not [string]::IsNullOrWhiteSpace([string]$r.CustomerId)) { [string]$r.CustomerId } else { $null })
                 amount = $amt
             }) | Out-Null
         }
@@ -389,7 +394,7 @@ WHERE Date >= '$startUs'
     }
 
     $arSql = @"
-SELECT Id, ReferenceNumber, Date, CustomerName, Amount, Balance, IsPaid
+SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, Amount, Balance, IsPaid
 FROM Invoices
 WHERE IsPaid = false
 "@
@@ -402,11 +407,28 @@ WHERE IsPaid = false
             reference_number = $(if ($null -ne $r.ReferenceNumber) { [string]$r.ReferenceNumber } else { $null })
             invoice_date = Convert-ToYmd $r.Date
             customer_name = $(if ($null -ne $r.CustomerName) { [string]$r.CustomerName } else { $null })
+            qb_customer_list_id = $(if ($null -ne $r.CustomerId -and -not [string]::IsNullOrWhiteSpace([string]$r.CustomerId)) { [string]$r.CustomerId } else { $null })
             original_amount = Convert-ToNumber $r.Amount
             balance = $bal
         }) | Out-Null
     }
     Write-Host ("Open A/R: {0} rows" -f $openArRows.Count)
+
+    # Worker-side CustomerId coverage (root resolution is server-side via ad_qb_customer_facts).
+    $txnWithCustomerId = 0
+    foreach ($t in $allTxnArray) {
+        if ($null -ne $t.qb_customer_list_id -and -not [string]::IsNullOrWhiteSpace([string]$t.qb_customer_list_id)) {
+            $txnWithCustomerId++
+        }
+    }
+    $arWithCustomerId = 0
+    foreach ($a in $openArRows.ToArray()) {
+        if ($null -ne $a.qb_customer_list_id -and -not [string]::IsNullOrWhiteSpace([string]$a.qb_customer_list_id)) {
+            $arWithCustomerId++
+        }
+    }
+    $warnings.Add(("worker_customer_id_coverage:txn={0}/{1};open_ar={2}/{3}" -f $txnWithCustomerId, $allTxnArray.Length, $arWithCustomerId, $openArRows.Count)) | Out-Null
+    Write-Host ("CustomerId coverage: txn {0}/{1}, open_ar {2}/{3} (root ListID resolved on Brain)" -f $txnWithCustomerId, $allTxnArray.Length, $arWithCustomerId, $openArRows.Count)
 
     if (-not $DryRun) {
         $arPayload = @{
@@ -432,6 +454,19 @@ WHERE IsPaid = false
             payments_count = $paymentRows.Count
             open_ar_count = $openArRows.Count
             warnings = $warnings.ToArray()
+            identity_coverage = @{
+                total_rows = ($allTxnArray.Length + $openArRows.Count)
+                rows_with_qb_customer_list_id = ($txnWithCustomerId + $arWithCustomerId)
+                rows_with_qb_root_customer_list_id = $null
+                unresolved_root_count = $null
+                by_transaction_type = @{
+                    estimate = @{ total = $estimateRows.Count }
+                    sales_order = @{ total = $salesOrderRows.Count }
+                    invoice = @{ total = $invoiceRows.Count }
+                    payment = @{ total = $paymentRows.Count }
+                    open_ar = @{ total = $openArRows.Count }
+                }
+            }
         })
         Write-Host "Upload complete"
     } else {

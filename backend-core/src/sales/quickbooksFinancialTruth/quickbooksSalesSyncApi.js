@@ -1,6 +1,10 @@
 /**
  * POST /api/internal/sales/quickbooks-sync — Windows ODBC worker ingest.
  * Auth: Authorization: Bearer <QB_SALES_SYNC_INGEST_TOKEN>
+ *
+ * ListID enrichment: worker may send qb_customer_list_id (ODBC CustomerId).
+ * qb_root_customer_list_id is resolved server-side from ad_qb_customer_facts
+ * (exact ParentId walk). Never writes Account Directory identity / links.
  */
 
 import express from "express";
@@ -15,6 +19,7 @@ import {
   validateOpenArReplacePayload,
   validateTransactionChunk
 } from "./syncIngest.js";
+import { enrichFinancialRowsWithRootListIds } from "./resolveQbRootCustomerListId.js";
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -50,13 +55,21 @@ export function attachQuickBooksSalesSyncRoutes(app, { getSupabase }) {
         if (!parsed.ok) {
           return res.status(400).json({ ok: false, error: "invalid_payload", details: parsed.errors });
         }
-        const result = await upsertFinancialTransactions(supabase, parsed.value.transactions);
+        const enriched = await enrichFinancialRowsWithRootListIds(
+          supabase,
+          parsed.value.organizationId,
+          parsed.value.transactions
+        );
+        const result = await upsertFinancialTransactions(supabase, enriched.rows);
         return res.status(200).json({
           ok: true,
           action: "upsert_transactions",
           sync_run_id: parsed.value.syncRunId,
           upserted: result.upserted,
-          received: parsed.value.transactions.length
+          received: enriched.rows.length,
+          identity_coverage: enriched.coverage,
+          unresolved_root_count: enriched.unresolvedCount,
+          warnings: enriched.warnings
         });
       }
 
@@ -65,17 +78,31 @@ export function attachQuickBooksSalesSyncRoutes(app, { getSupabase }) {
         if (!parsed.ok) {
           return res.status(400).json({ ok: false, error: "invalid_payload", details: parsed.errors });
         }
+        // Tag open A/R rows for coverage by_type (not a transaction_type column).
+        const tagged = parsed.value.openAr.map((r) => ({ ...r, transaction_type: "open_ar" }));
+        const enriched = await enrichFinancialRowsWithRootListIds(
+          supabase,
+          parsed.value.organizationId,
+          tagged
+        );
+        const rowsForStore = enriched.rows.map((r) => {
+          const { transaction_type: _t, ...rest } = r;
+          return rest;
+        });
         const result = await replaceOpenArSnapshot(
           supabase,
           parsed.value.organizationId,
-          parsed.value.openAr
+          rowsForStore
         );
         return res.status(200).json({
           ok: true,
           action: "replace_open_ar",
           sync_run_id: parsed.value.syncRunId,
           upserted: result.upserted,
-          deleted: result.deleted
+          deleted: result.deleted,
+          identity_coverage: enriched.coverage,
+          unresolved_root_count: enriched.unresolvedCount,
+          warnings: enriched.warnings
         });
       }
 

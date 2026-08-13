@@ -18,9 +18,9 @@
 ```
 QuickBooks Desktop
   -> CData ODBC DSN slabOS_QuickBooks_Local_RO
-  -> sync-sales-financials.ps1 (read-only SELECT; unchanged calculation/query behavior)
+  -> sync-sales-financials.ps1 (read-only SELECT; includes CustomerId)
   -> HTTPS POST /api/internal/sales/quickbooks-sync
-  -> Supabase prepared facts
+  -> Supabase prepared facts (+ server-side qb_root_customer_list_id via ad_qb_customer_facts)
   -> Sales QuickBooks Financial Truth Beta
 ```
 
@@ -29,9 +29,11 @@ QuickBooks Desktop
 | DSN | `slabOS_QuickBooks_Local_RO` (64-bit **System** DSN) |
 | ConnectDirectly | `True` |
 | Readonly | `True` |
+| Customer identity | ODBC `CustomerId` (= `Customers.Id`) stored as `qb_customer_list_id`; root resolved on Brain |
 | Backend | Never connects to QuickBooks |
 | Thryve / Remote Connector | Separate; **untouched** |
 | AD customer sync | Separate scripts/token (`QB_AD_CUSTOMER_*`) |
+| AD Financial UI | Not in Phase 1 — ListID enrichment only (FEATURE_DECISIONS §313) |
 
 ## Persistent configuration
 

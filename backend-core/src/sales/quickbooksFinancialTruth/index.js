@@ -23,7 +23,7 @@ export {
   emptyQuickBooksFinancialTruth,
   OPEN_AR_BASIS_AS_OF_REFRESH
 } from "./contract.js";
-export { getPreparedQuickBooksFinancialTruth } from "./preparedFactsProvider.js";
+export { getPreparedQuickBooksFinancialTruth, sumTransactionsInRange, sumCurrentOpenAr } from "./preparedFactsProvider.js";
 export { attachQuickBooksSalesSyncRoutes } from "./quickbooksSalesSyncApi.js";
 export {
   validateBeginPayload,
@@ -31,6 +31,16 @@ export {
   validateOpenArReplacePayload,
   validateCompletePayload,
   upsertFinancialTransactions,
-  replaceOpenArSnapshot
+  replaceOpenArSnapshot,
+  completeSyncRun,
+  QB_SALES_SYNC_WRITE_TABLES,
+  QB_SALES_SYNC_FORBIDDEN_WRITE_TABLES
 } from "./syncIngest.js";
 export { constantTimeEqualString, requireQuickBooksSalesSyncToken } from "./syncAuth.js";
+export {
+  resolveQbRootCustomerListId,
+  applyRootListIdsToRows,
+  summarizeListIdCoverage,
+  enrichFinancialRowsWithRootListIds,
+  QB_ROOT_RESOLVE_MAX_DEPTH
+} from "./resolveQbRootCustomerListId.js";

@@ -366,7 +366,12 @@ function mockRes() {
   assert.match(ps1, /FROM ReceivePayments/);
   assert.match(ps1, /IsPaid = false/);
   assert.match(ps1, /TotalAmount/);
-  assert.match(ps1, /SELECT Id, ReferenceNumber, Date, CustomerName, Amount\s+FROM Invoices/s);
+  assert.match(ps1, /SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, Amount\s+FROM Invoices/s);
+  assert.match(ps1, /SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, TotalAmount\s+FROM Estimates/s);
+  assert.match(ps1, /SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, TotalAmount\s+FROM SalesOrders/s);
+  assert.match(ps1, /SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName, Amount, UnusedPayment\s+FROM ReceivePayments/s);
+  assert.match(ps1, /qb_customer_list_id/);
+  assert.match(ps1, /CustomerId/);
   assert.equal(/SELECT Id, ReferenceNumber, Date, CustomerName, TotalAmount\s+FROM Invoices/s.test(ps1), false);
   assert.equal(/\bINSERT INTO\b|\bUPDATE\s+\w+\s+SET\b|\bDELETE FROM\b/i.test(ps1), false);
   assert.equal(/QBXMLRP2|Remote Connector|8166|Thryve/i.test(ps1), false);
@@ -391,7 +396,7 @@ function mockRes() {
     );
   }
   assert.equal(/return\s+@\(\$/m.test(ps1), false);
-  console.log("ok: worker is ASCII + SELECT-only + correct invoice Amount mapping");
+  console.log("ok: worker is ASCII + SELECT-only + CustomerId ListID enrichment + correct invoice Amount mapping");
   console.log("ok: ODBC connection uses PS 5.1 ConnectionString property form");
   console.log("ok: no @($Generic.List) wrapping; uses ToArray/[array]");
 }

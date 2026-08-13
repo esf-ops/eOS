@@ -81,5 +81,10 @@ assert.equal(readme.includes("every 15 minutes"), false);
 
 assert.ok(worker.includes("QB_SALES_SYNC_LOOKBACK_DAYS"));
 assert.ok(worker.includes("Assert-SelectOnlySql") || worker.includes("SELECT"));
+assert.ok(worker.includes("CustomerId"));
+assert.ok(worker.includes("qb_customer_list_id"));
+assert.ok(/SELECT Id, ReferenceNumber, Date, CustomerId, CustomerName/.test(worker));
+assert.equal(worker.toLowerCase().includes("thryve"), false);
+assert.equal(/fuzzy|auto-link|CustomerName.*join/i.test(worker), false);
 
 console.log("salesQbSyncOps.test.mjs — all passed");

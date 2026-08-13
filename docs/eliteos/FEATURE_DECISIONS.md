@@ -4188,7 +4188,7 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Windows ops** | Scripts run from the QB Server eOS working copy (`…\GitHub\eOS\quickbooks-sdk-connector\account-directory-sync`; `$PSScriptRoot` — no second clone at `C:\eliteOS`). Runtime config: `C:\eliteOS\config\ad-qb-customer-sync.env` (token never committed). Logs: `C:\eliteOS\logs\account-directory-qb-customer-sync\`. Wrapper: `run-ad-qb-customer-sync.ps1`. Task installer: `install-ad-qb-customer-sync-task.ps1` (preview/`-Preflight` read-only; `-Apply` explicit; no CLI Windows password — `Get-Credential` or Task Scheduler UI). |
 | **Out of scope** | Financial facts; Internal Estimate / Quote Library / `customer_identity_snapshot`; Sales Dashboard; QB writes; automatic Task Scheduler registration; automatic production ingest. |
 | **Impacted** | `backend-core/src/accountDirectory/qbCustomerEnrichment/*`, AD API/service/UI badges, `quickbooks-sdk-connector/account-directory-sync/`, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
-| **Revisit** | Phase 3 financial facts by ListID; optional ListID columns on `sales_quickbooks_*`; enable nightly task only after proven manual wrapper PASS. |
+| **Revisit** | Phase 3 AD financial profile UI; enable nightly task only after proven manual wrapper PASS. Phase 1 ListID enrichment: see §313. |
 
 ### 312. Quote Flow Inbox — attachment preview + multi-plan takeoff packet + vanity depth (2026-08-11)
 
@@ -4208,3 +4208,20 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 **UX (2026-08-12):** Inbox batch start no longer shows duplicate debug banners (`N selected · …`). One batch panel uses staff-friendly copy + subject/plan identity; Active AI Takeoffs panel shows stage chips + indeterminate progress (no fake %); returned batch completion CTA → Estimate Queue.
 
 **UX (Estimate Queue clarity, 2026-08-12):** Queue rows prefer email subject / human plan names over opaque numeric attachment ids. Multi-file takeoffs persist ordered `packetFiles` + subject/sender onto `quote_takeoff_jobs.metadata.quoteFlow` at start (staff-only; no intake-case subject storage change). Detail pane shows a **Processed plan packet** card before Review Takeoff.
+
+### 313. Account Directory Financial Intelligence — Phase 1 Sales ListID enrichment (2026-08-13)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-13 |
+| **Decision** | **Phase 1 only:** extend prepared Sales QuickBooks Financial Truth facts with nullable `qb_customer_list_id` + `qb_root_customer_list_id` so Account Directory can later join financials by **exact** QuickBooks ListID. No AD Financial UI yet. No Internal Estimate / Quote Library changes. No AD identity mutation from financial sync. |
+| **Phase 0 production proof** | CData DSN `slabOS_QuickBooks_Local_RO`: `CustomerId` exists on Invoices, SalesOrders, ReceivePayments, Estimates; `DueDate` / `Terms` / `TermsId` exist on Invoice/SO/Estimate (not ingested in Phase 1). Production samples prove `Invoices.CustomerId` **equals** `Customers.Id` (e.g. Gates, Bryan `80010327-1759266211`; West, Ernie `80010E11-1770822810`; both roots with blank `ParentId` / `Sublevel=0`). |
+| **Join rule** | Exact ListID only. Never join by `CustomerName`. Never fuzzy. Never auto-link AD accounts. Never invent root IDs. |
+| **Root resolution** | **Server-side** on Sales ingest: `qb_customer_list_id` = ODBC `CustomerId`; `qb_root_customer_list_id` resolved via `ad_qb_customer_facts` ParentId walk (cycle detection, max depth 16). Unresolved → null + warning. Sales worker does **not** query AD tables (keeps Sales ODBC worker decoupled). |
+| **Sales Dashboard** | Org-level Quoted / Sales Orders / Invoiced / Collected / Open A/R math unchanged — selects `amount` / `balance` only; ListID columns are enrichment. |
+| **SQL** | Manual (not applied in this change): `backend-core/supabase/eliteos_sales_quickbooks_financial_truth_listid_v2.sql` |
+| **Do not touch** | `InternalEstimateApp.tsx`; IE save/revision/hydration; `customer_identity_snapshot`; Quote Library search/history/archive/delivery/PDF/email; AD accounts/contacts/locations/aliases/external_links; Thryve Remote Connector; QB writeback. |
+| **Out of scope (later phases)** | AD Financial Intelligence UI; `ad_qb_account_financial_summary`; DueDate/Terms ingest; collection-attention flag. |
+| **Impacted** | `sync-sales-financials.ps1` (CustomerId SELECT), `syncIngest.js`, `resolveQbRootCustomerListId.js`, `quickbooksSalesSyncApi.js`, Sales sync tests, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
+| **Revisit** | Apply SQL + deploy Brain + one DryRun/ingest after ops approval; then Phase 2 AD financial-profile service. |
+
