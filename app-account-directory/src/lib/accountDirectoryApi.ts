@@ -1,6 +1,7 @@
 import { apiGet, apiPatch, apiPost } from "./api";
 import type {
   AccountDetailResponse,
+  AccountFinancialsResponse,
   AccountListParams,
   AccountListResponse,
   AccountSummaryResponse,
@@ -52,6 +53,13 @@ export async function listAccounts(token: string, opts: AccountListParams) {
 
 export async function getAccount(token: string, accountId: string) {
   return (await apiGet(`${BASE}/accounts/${encodeURIComponent(accountId)}`, token)) as AccountDetailResponse;
+}
+
+export async function getAccountFinancials(token: string, accountId: string) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/financials`,
+    token
+  )) as AccountFinancialsResponse;
 }
 
 export async function createAccount(token: string, payload: CreateAccountPayload) {

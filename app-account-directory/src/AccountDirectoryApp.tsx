@@ -10,6 +10,7 @@ import {
   fetchAccountDirectoryPermissions,
   fetchAccountDirectorySummary,
   getAccount,
+  getAccountFinancials,
   linkQuickBooks,
   listAccounts,
   restoreAccount,
@@ -19,6 +20,7 @@ import { getSupabase } from "./lib/supabase";
 import type {
   AccountDetail,
   AccountDirectoryPermissions,
+  AccountFinancials,
   AccountListItem,
   AccountSummary
 } from "./lib/types";
@@ -58,6 +60,7 @@ const NAV_TABS: { id: string; label: string }[] = [
 
 const DETAIL_TABS = [
   "Overview",
+  "Financials",
   "Contacts",
   "Locations",
   "Aliases",
@@ -1232,6 +1235,7 @@ export default function AccountDirectoryApp() {
               {urlState.account ? (
                 <ProfilePanel
                   accountId={urlState.account}
+                  sessionToken={sessionToken}
                   detail={detail}
                   detailBusy={detailBusy}
                   detailError={detailError}
@@ -1542,8 +1546,29 @@ function PaginationBar({
   );
 }
 
+function formatMoney(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
+}
+
+function financialActivityLabel(type: string | undefined): string {
+  switch (String(type || "")) {
+    case "invoice":
+      return "Invoice";
+    case "payment":
+      return "Payment";
+    case "sales_order":
+      return "Sales order";
+    case "estimate":
+      return "Estimate";
+    default:
+      return type || "Activity";
+  }
+}
+
 function ProfilePanel({
   accountId,
+  sessionToken,
   detail,
   detailBusy,
   detailError,
@@ -1564,6 +1589,7 @@ function ProfilePanel({
   onRetry
 }: {
   accountId: string;
+  sessionToken: string | null;
   detail: AccountDetail | null;
   detailBusy: boolean;
   detailError: string | null;
@@ -1586,6 +1612,41 @@ function ProfilePanel({
   const name = detail?.displayName ?? detail?.name ?? "Loading…";
   const legalName = detail?.legalName;
   const showLegal = legalName && legalName !== name;
+
+  const [financials, setFinancials] = useState<AccountFinancials | null>(null);
+  const [financialsBusy, setFinancialsBusy] = useState(false);
+  const [financialsError, setFinancialsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFinancials(null);
+    setFinancialsError(null);
+  }, [accountId]);
+
+  useEffect(() => {
+    if (detailTab !== "Financials") return;
+    if (!sessionToken || !accountId) return;
+
+    let cancelled = false;
+    setFinancialsBusy(true);
+    setFinancialsError(null);
+    void getAccountFinancials(sessionToken, accountId)
+      .then((res) => {
+        if (cancelled) return;
+        setFinancials(res.financials ?? null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setFinancials(null);
+        setFinancialsError(err instanceof ApiError ? err.message : "Could not load financials.");
+      })
+      .finally(() => {
+        if (!cancelled) setFinancialsBusy(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detailTab, sessionToken, accountId]);
 
   return (
     <aside className="profile-panel" aria-label="Account profile">
@@ -1750,6 +1811,30 @@ function ProfilePanel({
               </>
             ) : null}
 
+            {detailTab === "Financials" ? (
+              <FinancialsPanel
+                financials={financials}
+                busy={financialsBusy}
+                error={financialsError}
+                onRetry={() => {
+                  setFinancials(null);
+                  setFinancialsError(null);
+                  // Force reload by toggling via accountId dependency: re-invoke fetch.
+                  if (sessionToken) {
+                    setFinancialsBusy(true);
+                    void getAccountFinancials(sessionToken, accountId)
+                      .then((res) => setFinancials(res.financials ?? null))
+                      .catch((err) =>
+                        setFinancialsError(
+                          err instanceof ApiError ? err.message : "Could not load financials."
+                        )
+                      )
+                      .finally(() => setFinancialsBusy(false));
+                  }
+                }}
+              />
+            ) : null}
+
             {detailTab === "Contacts" ? (
               <DetailList
                 empty="No contacts on file."
@@ -1833,6 +1918,204 @@ function ProfilePanel({
         ) : null}
       </div>
     </aside>
+  );
+}
+
+function FinancialsPanel({
+  financials,
+  busy,
+  error,
+  onRetry
+}: {
+  financials: AccountFinancials | null;
+  busy: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  if (busy && !financials) {
+    return (
+      <div className="skeleton-rows" aria-busy="true">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton-row">
+            <div className="skeleton-block" style={{ height: 14, flex: 1, borderRadius: 4 }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="banner banner-error" role="alert">
+        {error}
+        <button type="button" className="btn btn-secondary btn-sm banner-dismiss" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!financials) {
+    return <p className="muted">Financials are not available.</p>;
+  }
+
+  if (financials.status === "unlinked" || financials.linked === false) {
+    return (
+      <div className="financials-panel">
+        <h3 className="financials-title">QuickBooks Financials</h3>
+        <p className="financials-empty">
+          QuickBooks financials are unavailable until this Account Directory record is linked to
+          QuickBooks.
+        </p>
+      </div>
+    );
+  }
+
+  if (financials.status === "unavailable") {
+    return (
+      <div className="financials-panel">
+        <h3 className="financials-title">QuickBooks Financials</h3>
+        {(financials.warnings ?? []).map((w) => (
+          <div key={w} className="banner banner-warn" role="status">
+            {w}
+          </div>
+        ))}
+        <p className="financials-empty">Financial data is unavailable. Account identity is unaffected.</p>
+      </div>
+    );
+  }
+
+  const s = financials.summary ?? {};
+  const showAmounts = financials.status === "ok" || financials.status === "stale";
+
+  return (
+    <div className="financials-panel">
+      <div className="financials-head">
+        <h3 className="financials-title">QuickBooks Financials</h3>
+        <p className="financials-meta muted">
+          {[
+            financials.asOfDate ? `As of ${financials.asOfDate}` : null,
+            financials.refreshedAt ? `Refreshed ${formatUpdatedAt(financials.refreshedAt)}` : null,
+            financials.status === "stale" ? "Stale" : null
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      </div>
+
+      {(financials.warnings ?? []).map((w) => (
+        <div key={w} className="banner banner-warn" role="status">
+          {w}
+        </div>
+      ))}
+
+      {showAmounts ? (
+        <>
+          <div className="financials-metrics" aria-label="Financial summary">
+            <div className="financials-metric">
+              <span className="financials-metric-label">Open A/R</span>
+              <span className="financials-metric-value">{formatMoney(s.openAr)}</span>
+            </div>
+            <div className="financials-metric">
+              <span className="financials-metric-label">Open invoices</span>
+              <span className="financials-metric-value">
+                {s.openInvoiceCount == null ? "—" : String(s.openInvoiceCount)}
+              </span>
+            </div>
+            <div className="financials-metric">
+              <span className="financials-metric-label">Invoiced YTD</span>
+              <span className="financials-metric-value">{formatMoney(s.invoicedYtd)}</span>
+            </div>
+            <div className="financials-metric">
+              <span className="financials-metric-label">Collected YTD</span>
+              <span className="financials-metric-value">{formatMoney(s.collectedYtd)}</span>
+            </div>
+            <div className="financials-metric">
+              <span className="financials-metric-label">Sales Orders $ YTD</span>
+              <span className="financials-metric-value">{formatMoney(s.salesOrdersYtd)}</span>
+            </div>
+            <div className="financials-metric">
+              <span className="financials-metric-label">Quoted YTD</span>
+              <span className="financials-metric-value">{formatMoney(s.quotedYtd)}</span>
+            </div>
+          </div>
+
+          <dl className="detail-dl financials-facts">
+            <dt>Last invoice</dt>
+            <dd>
+              {financials.lastInvoice
+                ? [
+                    financials.lastInvoice.date,
+                    financials.lastInvoice.referenceNumber,
+                    formatMoney(financials.lastInvoice.amount)
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : "—"}
+            </dd>
+            <dt>Last payment</dt>
+            <dd>
+              {financials.lastPayment
+                ? [
+                    financials.lastPayment.date,
+                    financials.lastPayment.referenceNumber,
+                    formatMoney(financials.lastPayment.amount)
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : "—"}
+            </dd>
+            <dt>Days since last payment</dt>
+            <dd>
+              {financials.daysSinceLastPayment == null ? "—" : String(financials.daysSinceLastPayment)}
+            </dd>
+            <dt>Oldest open invoice</dt>
+            <dd>
+              {financials.oldestOpenInvoice
+                ? [
+                    financials.oldestOpenInvoice.date,
+                    financials.oldestOpenInvoice.referenceNumber,
+                    formatMoney(financials.oldestOpenInvoice.balance),
+                    financials.oldestOpenInvoice.ageDays != null
+                      ? `invoice age ${financials.oldestOpenInvoice.ageDays} days`
+                      : null
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : "—"}
+            </dd>
+          </dl>
+
+          <h4 className="financials-subtitle">Recent financial activity</h4>
+          {(financials.recentActivity ?? []).length > 0 ? (
+            <div className="financials-activity" role="table" aria-label="Recent financial activity">
+              <div className="financials-activity-head" role="row">
+                <span role="columnheader">Date</span>
+                <span role="columnheader">Type</span>
+                <span role="columnheader">Reference</span>
+                <span role="columnheader">Customer / job</span>
+                <span role="columnheader">Amount</span>
+              </div>
+              {(financials.recentActivity ?? []).map((row, idx) => (
+                <div
+                  key={`${row.type}-${row.date}-${row.referenceNumber}-${idx}`}
+                  className="financials-activity-row"
+                  role="row"
+                >
+                  <span role="cell">{row.date || "—"}</span>
+                  <span role="cell">{financialActivityLabel(row.type)}</span>
+                  <span role="cell">{row.referenceNumber || "—"}</span>
+                  <span role="cell">{row.customerName || "—"}</span>
+                  <span role="cell">{formatMoney(row.amount)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No recent prepared financial activity for this linked customer.</p>
+          )}
+        </>
+      ) : null}
+    </div>
   );
 }
 

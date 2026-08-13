@@ -20,6 +20,7 @@ import { createAccountDirectoryMemoryStore } from "./accountDirectoryMemoryStore
 import { createAccountDirectorySupabaseStore } from "./accountDirectorySupabaseStore.mjs";
 import { AccountDirectoryError, createAccountDirectoryService } from "./accountDirectoryService.mjs";
 import { normalizeAccountWritePayload } from "./accountDirectoryPayload.mjs";
+import { getAccountDirectoryFinancials } from "./accountDirectoryFinancialIntelligence.mjs";
 import {
   dismissSuggestion,
   getAdQbCustomerEnrichmentFeedStatus,
@@ -174,6 +175,23 @@ export function attachAccountDirectoryRoutes(app, deps) {
         accountId: String(req.params.accountId)
       });
       res.json({ ok: true, account });
+    });
+  });
+
+  // Read-only QuickBooks Financial Intelligence (Slice A). Exact quickbooks_desktop
+  // external_id → qb_root_customer_list_id. Never joins by name.
+  app.get("/api/account-directory/accounts/:accountId/financials", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const financials = await getAccountDirectoryFinancials({
+        supabase: getSupabase(),
+        store,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        env: process.env,
+        now: new Date()
+      });
+      res.json({ ok: true, financials });
     });
   });
 

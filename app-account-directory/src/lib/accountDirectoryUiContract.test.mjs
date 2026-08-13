@@ -81,6 +81,12 @@ assert.ok(app.includes("300"), "300ms debounce present");
 assert.ok(app.includes("ProfilePanel"), "ProfilePanel component present");
 assert.ok(app.includes("profile-panel"), "profile-panel class present");
 assert.ok(app.includes("Data health"), "data health section present");
+assert.ok(app.includes('"Financials"') || app.includes("Financials"), "Financials profile tab present");
+assert.ok(app.includes("FinancialsPanel") || app.includes("QuickBooks Financials"), "Financials panel present");
+assert.ok(api.includes("/financials"), "financials API client present");
+assert.ok(css.includes("financials-panel"), "financials styles present");
+assert.equal(app.includes("qb_root_customer_list_id"), false, "must not expose root ListIDs in UI");
+assert.equal(app.includes("qb_customer_list_id"), false, "must not expose customer ListIDs in UI");
 // Activity labels
 assert.ok(app.includes("activityLabel"), "activityLabel helper used");
 assert.ok(app.includes("Activity"), "Activity tab present");

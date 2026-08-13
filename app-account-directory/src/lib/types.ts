@@ -142,6 +142,62 @@ export type AccountDetailResponse = {
   account?: AccountDetail;
 };
 
+export type AccountFinancialActivityItem = {
+  type: "invoice" | "payment" | "sales_order" | "estimate" | string;
+  date?: string | null;
+  referenceNumber?: string | null;
+  customerName?: string | null;
+  amount?: number | null;
+};
+
+export type AccountFinancials = {
+  status: "ok" | "stale" | "unlinked" | "unavailable" | string;
+  linked?: boolean;
+  asOfDate?: string | null;
+  refreshedAt?: string | null;
+  warnings?: string[];
+  summary?: {
+    openAr?: number | null;
+    openInvoiceCount?: number | null;
+    invoicedYtd?: number | null;
+    collectedYtd?: number | null;
+    salesOrdersYtd?: number | null;
+    quotedYtd?: number | null;
+  };
+  lastInvoice?: {
+    date?: string | null;
+    referenceNumber?: string | null;
+    amount?: number | null;
+    customerName?: string | null;
+  } | null;
+  lastPayment?: {
+    date?: string | null;
+    referenceNumber?: string | null;
+    amount?: number | null;
+    customerName?: string | null;
+  } | null;
+  daysSinceLastPayment?: number | null;
+  oldestOpenInvoice?: {
+    date?: string | null;
+    referenceNumber?: string | null;
+    originalAmount?: number | null;
+    balance?: number | null;
+    customerName?: string | null;
+    ageDays?: number | null;
+  } | null;
+  recentActivity?: AccountFinancialActivityItem[];
+  coverage?: {
+    workerCoverageStartDate?: string | null;
+    workerCoverageEndDate?: string | null;
+    latestSyncStatus?: string | null;
+  };
+};
+
+export type AccountFinancialsResponse = {
+  ok?: boolean;
+  financials?: AccountFinancials;
+};
+
 export type PermissionsResponse = {
   ok?: boolean;
   permissions?: AccountDirectoryPermissions;

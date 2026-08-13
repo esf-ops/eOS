@@ -4221,7 +4221,22 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Sales Dashboard** | Org-level Quoted / Sales Orders / Invoiced / Collected / Open A/R math unchanged — selects `amount` / `balance` only; ListID columns are enrichment. |
 | **SQL** | Manual (not applied in this change): `backend-core/supabase/eliteos_sales_quickbooks_financial_truth_listid_v2.sql` |
 | **Do not touch** | `InternalEstimateApp.tsx`; IE save/revision/hydration; `customer_identity_snapshot`; Quote Library search/history/archive/delivery/PDF/email; AD accounts/contacts/locations/aliases/external_links; Thryve Remote Connector; QB writeback. |
-| **Out of scope (later phases)** | AD Financial Intelligence UI; `ad_qb_account_financial_summary`; DueDate/Terms ingest; collection-attention flag. |
+| **Out of scope (later phases)** | True due-date aging / terms / collection attention; `ad_qb_account_financial_summary`. Slice A UI: see §314. |
 | **Impacted** | `sync-sales-financials.ps1` (CustomerId SELECT), `syncIngest.js`, `resolveQbRootCustomerListId.js`, `quickbooksSalesSyncApi.js`, Sales sync tests, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
-| **Revisit** | Apply SQL + deploy Brain + one DryRun/ingest after ops approval; then Phase 2 AD financial-profile service. |
+| **Revisit** | Apply SQL + deploy Brain + one DryRun/ingest after ops approval; Slice A AD financial profile (§314). |
+
+### 314. Account Directory Financial Intelligence v1 — Slice A (2026-08-13)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-13 |
+| **Decision** | Read-only **Financials** tab on Account Directory account detail. Prepared Sales QuickBooks facts attach **only** through active `account_directory_external_links` where `external_system = quickbooks_desktop`; `external_id` is the canonical QB **root** Customer ListID matched to `qb_root_customer_list_id`. Never join by name/fuzzy/alias. Never write AD identity or auto-link. Multiple explicitly linked roots roll up with a staff-safe warning (ListIDs never returned to the browser). |
+| **Endpoint** | `GET /api/account-directory/accounts/:accountId/financials` — same auth/head/org/VIEW gates as account detail. |
+| **Metrics (Slice A)** | Open A/R + open invoice count; Invoiced / Collected / Sales Orders $ / Quoted YTD (as-of worker coverage end); last invoice/payment; days since last payment; oldest open invoice **invoice age** (days); recent activity. Sales Orders $ is not renamed Sold. |
+| **Deferred** | True Current/1–30/… aging, payment terms, collection attention — require DueDate/Terms enrichment (Slice B). Do not fake due-date aging from invoice_date. |
+| **Fail-soft** | `unlinked` / `unavailable` / `stale`: identity still loads; never fake $0 when unlinked/unavailable; stale keeps prepared totals + warning. |
+| **Paging** | Linked txn/open-AR aggregation pages at 1000 with deterministic order (same PostgREST-cap lesson as Sales Dashboard). |
+| **Out of scope** | SQL migration; QB worker/ODBC; Internal Estimate; Quote Library; Sales Dashboard math; Moraware; Thryve. |
+| **Impacted** | `accountDirectoryFinancialIntelligence.mjs`, `accountDirectoryApi.js`, Account Directory Financials UI/types/API client, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
+| **Revisit** | Slice B after DueDate/Terms on prepared facts; optional summary cache. |
 
