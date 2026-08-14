@@ -184,6 +184,36 @@ function mockRes() {
 }
 
 {
+  const xfer = validateUpsertPayload({
+    organization_id: org,
+    sync_run_id: runId,
+    dataset: "transfers",
+    rows: [
+      {
+        qb_transfer_id: "XFER-1",
+        txn_date: "2026-08-04",
+        from_account_id: "ACC-FROM",
+        from_account_name: "Checking",
+        to_account_id: "ACC-TO",
+        to_account_name: "Savings",
+        amount: 100
+      }
+    ]
+  });
+  assert.equal(xfer.ok, true);
+  assert.equal(xfer.value.rows[0].from_account_id, "ACC-FROM");
+  assert.equal(xfer.value.rows[0].to_account_name, "Savings");
+  const guessed = validateUpsertPayload({
+    organization_id: org,
+    sync_run_id: runId,
+    dataset: "transfers",
+    rows: [{ ID: "XFER-2", Date: "2026-08-04", TransferFromAccountId: "ACC-FROM", Amount: 50 }]
+  });
+  assert.equal(guessed.ok, false);
+  console.log("ok: transfers ingest uses canonical fields only");
+}
+
+{
   const classified = classifyCashEvent({
     source_txn_type: "DepositLineItem",
     item_txn_type: "ReceivePayment",

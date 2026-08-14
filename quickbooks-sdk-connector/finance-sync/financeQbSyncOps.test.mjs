@@ -55,6 +55,22 @@ assert.ok(worker.includes("vendor_type_name = $r.Type"), "map Type -> vendor_typ
 assert.equal(worker.includes("CompanyName"), false, "do not SELECT/map CData CompanyName");
 assert.equal(worker.includes("VendorType"), false, "do not SELECT/map CData VendorType");
 
+assert.ok(worker.includes("TransferFromAccountRef_ListID"), "Transfers SELECT must use live from-account ListID");
+assert.ok(worker.includes("TransferFromAccountRef_FullName"), "Transfers SELECT must use live from-account name");
+assert.ok(worker.includes("TransferToAccountRef_ListID"), "Transfers SELECT must use live to-account ListID");
+assert.ok(worker.includes("TransferToAccountRef_FullName"), "Transfers SELECT must use live to-account name");
+assert.ok(worker.includes("WHERE TxnDate >="), "Transfers must filter TxnDate");
+assert.ok(worker.includes("Convert-ToYmd $r.TxnDate"), "map TxnDate -> txn_date");
+assert.ok(worker.includes("from_account_id = $r.TransferFromAccountRef_ListID"));
+assert.ok(worker.includes("from_account_name = $r.TransferFromAccountRef_FullName"));
+assert.ok(worker.includes("to_account_id = $r.TransferToAccountRef_ListID"));
+assert.ok(worker.includes("to_account_name = $r.TransferToAccountRef_FullName"));
+assert.equal(worker.includes("TransferFromAccountId"), false, "do not query invalid TransferFromAccountId");
+assert.equal(worker.includes("TransferToAccountId"), false, "do not query invalid TransferToAccountId");
+assert.equal(worker.includes("FromAccountName"), false, "do not use invalid Transfers fallback FromAccountName");
+assert.equal(worker.includes("ToAccountName"), false, "do not use invalid Transfers fallback ToAccountName");
+assert.equal(worker.includes("retrying with From/To column names"), false, "do not keep invalid Transfers fallback query");
+
 assert.ok(envExample.includes("QB_FINANCE_DSN=slabOS_QuickBooks_Local_RO"));
 assert.ok(envExample.includes("QB_FINANCE_SYNC_INGEST_TOKEN="));
 assert.equal(envExample.includes("QB_SALES_SYNC_INGEST_TOKEN="), false);

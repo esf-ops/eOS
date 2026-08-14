@@ -515,22 +515,31 @@ WHERE Date >= '$startUs' AND Date <= '$endUs'
             [void](Send-UpsertChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Dataset "checks" -Rows $checks -ChunkSize $ChunkSize -DryRun:$DryRun)
 
             $xferSql = @"
-SELECT ID, Date, Amount, TimeCreated, TimeModified, TransferFromAccount, TransferFromAccountId, TransferToAccount, TransferToAccountId, Memo
+SELECT ID, TxnDate, Amount, TimeCreated, TimeModified,
+       TransferFromAccountRef_ListID,
+       TransferFromAccountRef_FullName,
+       TransferToAccountRef_ListID,
+       TransferToAccountRef_FullName,
+       Memo
 FROM Transfers
-WHERE Date >= '$startUs' AND Date <= '$endUs'
+WHERE TxnDate >= '$startUs' AND TxnDate <= '$endUs'
 "@
-            try {
-                $xfers = Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql $xferSql
-            } catch {
-                $warnings.Add("Transfers query failed; retrying with From/To column names")
-                $xferSql = @"
-SELECT ID, Date, Amount, TimeCreated, TimeModified, FromAccountName, FromAccountId, ToAccountName, ToAccountId, Memo
-FROM Transfers
-WHERE Date >= '$startUs' AND Date <= '$endUs'
-"@
-                $xfers = Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql $xferSql
+            $xfers = New-Object System.Collections.Generic.List[object]
+            foreach ($r in (Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql $xferSql)) {
+                $xfers.Add([ordered]@{
+                    qb_transfer_id = [string]$r.ID
+                    txn_date = (Convert-ToYmd $r.TxnDate)
+                    from_account_id = $r.TransferFromAccountRef_ListID
+                    from_account_name = $r.TransferFromAccountRef_FullName
+                    to_account_id = $r.TransferToAccountRef_ListID
+                    to_account_name = $r.TransferToAccountRef_FullName
+                    amount = (Convert-ToNumber $r.Amount)
+                    memo = $r.Memo
+                    time_created = $r.TimeCreated
+                    time_modified = $r.TimeModified
+                }) | Out-Null
             }
-            [void](Send-UpsertChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Dataset "transfers" -Rows $xfers -ChunkSize $ChunkSize -DryRun:$DryRun)
+            [void](Send-UpsertChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Dataset "transfers" -Rows $xfers.ToArray() -ChunkSize $ChunkSize -DryRun:$DryRun)
 
             if ($Window.End.Date -eq $coverageEnd) {
                 $undepSql = "SELECT ID, TxnType, TxnDate, CustomerRef_ListID, CustomerRef_FullName, Amount, RefNumber FROM ReceivePaymentToDeposit"

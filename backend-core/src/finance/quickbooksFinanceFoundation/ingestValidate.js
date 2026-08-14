@@ -416,7 +416,7 @@ function mapTransfers(organizationId, rows, errors) {
   const out = [];
   for (let i = 0; i < rows.length; i += 1) {
     const r = rows[i];
-    const qbTransferId = pickStr(r.qb_transfer_id ?? r.ID ?? r.Id, 200);
+    const qbTransferId = pickStr(r.qb_transfer_id, 200);
     if (!qbTransferId) {
       errors.push(`rows[${i}].qb_transfer_id required`);
       continue;
@@ -424,15 +424,15 @@ function mapTransfers(organizationId, rows, errors) {
     out.push({
       ...stamp(organizationId),
       qb_transfer_id: qbTransferId,
-      txn_date: pickStr(r.txn_date ?? r.Date, 16),
-      from_account_id: pickStr(r.from_account_id ?? r.FromAccountId ?? r.TransferFromAccountId, 200),
-      from_account_name: pickStr(r.from_account_name ?? r.FromAccountName ?? r.TransferFromAccount, 300),
-      to_account_id: pickStr(r.to_account_id ?? r.ToAccountId ?? r.TransferToAccountId, 200),
-      to_account_name: pickStr(r.to_account_name ?? r.ToAccountName ?? r.TransferToAccount, 300),
-      amount: toNumber(r.amount ?? r.Amount),
-      memo: pickStr(r.memo ?? r.Memo, 2000),
-      time_created: pickStr(r.time_created ?? r.TimeCreated, 40),
-      time_modified: pickStr(r.time_modified ?? r.TimeModified, 40)
+      txn_date: pickStr(r.txn_date, 16),
+      from_account_id: pickStr(r.from_account_id, 200),
+      from_account_name: pickStr(r.from_account_name, 300),
+      to_account_id: pickStr(r.to_account_id, 200),
+      to_account_name: pickStr(r.to_account_name, 300),
+      amount: toNumber(r.amount),
+      memo: pickStr(r.memo, 2000),
+      time_created: pickStr(r.time_created, 40),
+      time_modified: pickStr(r.time_modified, 40)
     });
   }
   return out;
