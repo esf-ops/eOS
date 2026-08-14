@@ -333,14 +333,14 @@ try {
             }
             [void](Send-UpsertChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Dataset "accounts" -Rows $accts -ChunkSize $ChunkSize -DryRun:$DryRun)
             [void](Send-UpsertChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Dataset "account_balances_current" -Rows $accts -ChunkSize $ChunkSize -DryRun:$DryRun)
-            $vendSql = "SELECT ID, Name, CompanyName, VendorType, IsActive, AccountNumber, TimeModified FROM Vendors"
+            $vendSql = "SELECT ID, Name, Company, Type, IsActive, AccountNumber, TimeModified FROM Vendors"
             $vendors = @()
             foreach ($r in (Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql $vendSql)) {
                 $vendors += [ordered]@{
                     qb_vendor_id = [string]$r.ID
                     name = $r.Name
-                    company_name = $r.CompanyName
-                    vendor_type_name = $r.VendorType
+                    company_name = $r.Company
+                    vendor_type_name = $r.Type
                     is_active = $r.IsActive
                     account_number = $r.AccountNumber
                     time_modified = $r.TimeModified

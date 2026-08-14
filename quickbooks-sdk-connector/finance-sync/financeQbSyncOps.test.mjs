@@ -46,6 +46,15 @@ assert.ok(worker.includes("Do not use ReturnRows") || worker.includes("no Return
 assert.equal(worker.toLowerCase().includes("thryve"), false);
 assert.ok(!/INSERT INTO|UPDATE |DELETE FROM/i.test(worker.replace(/Assert-SelectOnlySql[\s\S]*?throw/g, "")));
 
+assert.ok(
+  worker.includes("SELECT ID, Name, Company, Type, IsActive, AccountNumber, TimeModified FROM Vendors"),
+  "Vendors SELECT must use live CData columns Company and Type"
+);
+assert.ok(worker.includes("company_name = $r.Company"), "map Company -> company_name");
+assert.ok(worker.includes("vendor_type_name = $r.Type"), "map Type -> vendor_type_name");
+assert.equal(worker.includes("CompanyName"), false, "do not SELECT/map CData CompanyName");
+assert.equal(worker.includes("VendorType"), false, "do not SELECT/map CData VendorType");
+
 assert.ok(envExample.includes("QB_FINANCE_DSN=slabOS_QuickBooks_Local_RO"));
 assert.ok(envExample.includes("QB_FINANCE_SYNC_INGEST_TOKEN="));
 assert.equal(envExample.includes("QB_SALES_SYNC_INGEST_TOKEN="), false);
