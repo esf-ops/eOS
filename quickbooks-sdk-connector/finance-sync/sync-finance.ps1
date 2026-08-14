@@ -74,6 +74,28 @@ function Convert-ToNumber {
     return $null
 }
 
+# PowerShell 5.1 ConvertTo-Json emits Windows DateTime JSON that PostgreSQL rejects.
+# Convert at ODBC read so every domain (including raw-row ingest) sends canonical strings.
+function Convert-OdbcFieldValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$ColumnName,
+        $Value
+    )
+    if ($null -eq $Value) { return $null }
+    if ($Value -isnot [datetime]) { return $Value }
+    if ($ColumnName -match 'Date$') {
+        return $Value.ToString("yyyy-MM-dd")
+    }
+    $dt = $Value
+    if ($dt.Kind -eq [DateTimeKind]::Unspecified) {
+        $dt = [DateTime]::SpecifyKind($dt, [DateTimeKind]::Local)
+    }
+    if ($dt.Kind -eq [DateTimeKind]::Utc) {
+        return $dt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+    }
+    return $dt.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz")
+}
+
 function New-OdbcConnection {
     param([Parameter(Mandatory = $true)][string]$Dsn)
     $conn = New-Object System.Data.Odbc.OdbcConnection
@@ -100,7 +122,7 @@ function Invoke-ReadOnlyOdbcQuery {
             for ($i = 0; $i -lt $reader.FieldCount; $i++) {
                 $name = $reader.GetName($i)
                 if ($reader.IsDBNull($i)) { $map[$name] = $null }
-                else { $map[$name] = $reader.GetValue($i) }
+                else { $map[$name] = Convert-OdbcFieldValue -ColumnName $name -Value ($reader.GetValue($i)) }
             }
             $rows.Add([pscustomobject]$map) | Out-Null
         }

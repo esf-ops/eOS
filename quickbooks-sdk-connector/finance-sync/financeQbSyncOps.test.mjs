@@ -104,6 +104,40 @@ assert.equal(
   "do not SELECT SalesReceipts DepositToAccountId"
 );
 
+function odbcDateTimeJsonKind(columnName) {
+  return /Date$/.test(columnName) ? "date" : "timestamptz";
+}
+assert.equal(odbcDateTimeJsonKind("Date"), "date");
+assert.equal(odbcDateTimeJsonKind("DueDate"), "date");
+assert.equal(odbcDateTimeJsonKind("TxnDate"), "date");
+assert.equal(odbcDateTimeJsonKind("AppliedToTxnDate"), "date");
+assert.equal(odbcDateTimeJsonKind("TimeCreated"), "timestamptz");
+assert.equal(odbcDateTimeJsonKind("TimeModified"), "timestamptz");
+
+assert.ok(worker.includes("function Convert-OdbcFieldValue"), "DateTime conversion must be centralized");
+assert.ok(
+  /\$map\[\$name\] = Convert-OdbcFieldValue -ColumnName \$name -Value \(\$reader\.GetValue\(\$i\)\)/.test(worker),
+  "Invoke-ReadOnlyOdbcQuery must convert DateTime before rows leave the reader"
+);
+assert.equal(
+  /\$map\[\$name\] = \$reader\.GetValue\(\$i\)/.test(worker),
+  false,
+  "raw ODBC DateTime must not be stored on rows"
+);
+assert.ok(
+  /\$ColumnName -match 'Date\$'/.test(worker),
+  "date-only columns ending in Date must serialize as yyyy-MM-dd"
+);
+assert.ok(worker.includes('ToString("yyyy-MM-dd")'));
+assert.ok(
+  worker.includes('ToString("yyyy-MM-ddTHH:mm:ss.fffZ")') &&
+    worker.includes('ToString("yyyy-MM-ddTHH:mm:ss.fffzzz")'),
+  "TimeCreated/TimeModified must serialize as offset-aware ISO-8601"
+);
+const convertToJsonCalls = worker.match(/\| ConvertTo-Json/g) || [];
+assert.equal(convertToJsonCalls.length, 1, "ConvertTo-Json only in Invoke-Ingest after ODBC conversion");
+assert.ok(/function Invoke-Ingest[\s\S]*\| ConvertTo-Json[\s\S]*function Send-UpsertChunks/.test(worker));
+
 assert.ok(envExample.includes("QB_FINANCE_DSN=slabOS_QuickBooks_Local_RO"));
 assert.ok(envExample.includes("QB_FINANCE_SYNC_INGEST_TOKEN="));
 assert.equal(envExample.includes("QB_SALES_SYNC_INGEST_TOKEN="), false);
