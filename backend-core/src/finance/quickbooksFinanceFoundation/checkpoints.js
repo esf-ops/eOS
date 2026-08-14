@@ -1,7 +1,13 @@
 /**
  * Domain × dataset × month-window checkpoints for resumable finance sync.
  * Failed 2025-08 AP must not force restart of 2025-01 Sales or other domains.
+ *
+ * Skip is run-kind aware:
+ * - window (historical): reuse successful checkpoints unless force
+ * - incremental: never skip; always reread the rolling lookback
  */
+
+const HISTORICAL_RESUME_RUN_KINDS = new Set(["window"]);
 
 export function checkpointNaturalKey({ organizationId, domain, dataset, periodStart, periodEnd }) {
   return {
@@ -15,12 +21,15 @@ export function checkpointNaturalKey({ organizationId, domain, dataset, periodSt
 
 /**
  * @param {{ status?: string } | null} existing
- * @param {{ force?: boolean }} [opts]
+ * @param {{ force?: boolean, runKind?: string }} [opts]
  */
 export function shouldSkipCheckpoint(existing, opts = {}) {
   if (opts.force) return false;
   if (!existing) return false;
-  return existing.status === "success";
+  if (existing.status !== "success") return false;
+  const runKind = String(opts.runKind ?? "").trim();
+  if (runKind === "incremental") return false;
+  return HISTORICAL_RESUME_RUN_KINDS.has(runKind);
 }
 
 /**
@@ -41,14 +50,15 @@ export function isResumableFailed(existing) {
 
 /**
  * Given ordered windows and checkpoint rows, return windows still needing work.
+ * Defaults to historical/window resume (skip successful periods) unless runKind is incremental.
  */
-export function remainingWindows(windows, checkpoints, { force = false } = {}) {
+export function remainingWindows(windows, checkpoints, { force = false, runKind = "window" } = {}) {
   const byPeriod = new Map();
   for (const c of checkpoints || []) {
     byPeriod.set(`${c.period_start}|${c.period_end}`, c);
   }
   return (windows || []).filter((w) => {
     const existing = byPeriod.get(`${w.period_start}|${w.period_end}`);
-    return !shouldSkipCheckpoint(existing, { force });
+    return !shouldSkipCheckpoint(existing, { force, runKind });
   });
 }

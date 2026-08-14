@@ -33,4 +33,4 @@ export {
 } from "./reconcileReports.js";
 export { shouldSkipCheckpoint, remainingWindows, nextCheckpointStatus } from "./checkpoints.js";
 export { scrubFinanceIdsForBrowser } from "./sanitize.js";
-export { upsertDatasetRows } from "./ingestStore.js";
+export { upsertDatasetRows, getSyncRun, loadCheckpointSkipContext } from "./ingestStore.js";

@@ -22,7 +22,7 @@ import {
   beginSyncRun,
   upsertDatasetRows,
   upsertCheckpoint,
-  getCheckpoint,
+  loadCheckpointSkipContext,
   replaceOpenApSnapshot,
   replaceUndepositedSnapshot,
   insertReportSnapshot,
@@ -60,14 +60,18 @@ export function attachQuickBooksFinanceSyncRoutes(app, { getSupabase }) {
         if (!parsed.ok) {
           return res.status(400).json({ ok: false, error: "invalid_payload", details: parsed.errors });
         }
-        const existing = await getCheckpoint(supabase, parsed.value);
         const force = Boolean(req.body?.force);
-        if (parsed.value.status === "running" && shouldSkipCheckpoint(existing, { force })) {
+        const { existing, runKind } = await loadCheckpointSkipContext(supabase, parsed.value);
+        if (
+          parsed.value.status === "running" &&
+          shouldSkipCheckpoint(existing, { force, runKind })
+        ) {
           return res.status(200).json({
             ok: true,
             action: "checkpoint",
             skipped: true,
             reason: "already_success",
+            run_kind: runKind,
             checkpoint: existing
           });
         }

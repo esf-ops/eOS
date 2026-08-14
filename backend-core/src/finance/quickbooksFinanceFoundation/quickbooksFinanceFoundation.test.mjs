@@ -4,6 +4,9 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   requireQuickBooksFinanceSyncToken,
   constantTimeEqualString,
@@ -24,6 +27,8 @@ import {
   nextCheckpointStatus,
   scrubFinanceIdsForBrowser,
   upsertDatasetRows,
+  getSyncRun,
+  loadCheckpointSkipContext,
   QB_FINANCE_WRITE_TABLES,
   QB_FINANCE_FORBIDDEN_WRITE_TABLES,
   QB_FINANCE_OPENING_AS_OF_DATE,
@@ -292,20 +297,113 @@ function mockRes() {
 }
 
 {
-  assert.equal(shouldSkipCheckpoint({ status: "success" }, { force: false }), true);
-  assert.equal(shouldSkipCheckpoint({ status: "failed" }, { force: false }), false);
-  assert.equal(shouldSkipCheckpoint({ status: "success" }, { force: true }), false);
-  const remaining = remainingWindows(
-    [
-      { period_start: "2025-01-01", period_end: "2025-01-31" },
-      { period_start: "2025-08-01", period_end: "2025-08-31" }
-    ],
-    [{ period_start: "2025-01-01", period_end: "2025-01-31", status: "success" }]
-  );
-  assert.equal(remaining.length, 1);
-  assert.equal(remaining[0].period_start, "2025-08-01");
+  const success = { status: "success" };
+  const failed = { status: "failed" };
+  assert.equal(shouldSkipCheckpoint(success, { force: false, runKind: "window" }), true);
+  assert.equal(shouldSkipCheckpoint(success, { force: false, runKind: "incremental" }), false);
+  assert.equal(shouldSkipCheckpoint(failed, { force: false, runKind: "incremental" }), false);
+  assert.equal(shouldSkipCheckpoint(success, { force: true, runKind: "window" }), false);
+  assert.equal(shouldSkipCheckpoint(success, { force: false }), false);
+  assert.equal(shouldSkipCheckpoint(null, { runKind: "window" }), false);
+
+  const windows = [
+    { period_start: "2025-01-01", period_end: "2025-01-31" },
+    { period_start: "2025-08-01", period_end: "2025-08-31" }
+  ];
+  const checkpoints = [{ period_start: "2025-01-01", period_end: "2025-01-31", status: "success" }];
+  const remainingHistorical = remainingWindows(windows, checkpoints);
+  assert.equal(remainingHistorical.length, 1);
+  assert.equal(remainingHistorical[0].period_start, "2025-08-01");
+  const remainingIncremental = remainingWindows(windows, checkpoints, { runKind: "incremental" });
+  assert.equal(remainingIncremental.length, 2);
   assert.equal(nextCheckpointStatus("pending", "start"), "running");
-  console.log("ok: checkpoint resume skips successful months only");
+  console.log("ok: checkpoint skip is run-kind aware; historical resume preserved");
+}
+
+{
+  const orgId = org;
+  const checkpointValue = {
+    organizationId: orgId,
+    syncRunId: runId,
+    domain: "revenue_ar",
+    dataset: "credit_memos",
+    periodStart: "2026-07-01",
+    periodEnd: "2026-07-31"
+  };
+  const existingSuccess = {
+    id: "ckpt-1",
+    status: "success",
+    period_start: "2026-07-01",
+    period_end: "2026-07-31",
+    dataset: "credit_memos",
+    domain: "revenue_ar"
+  };
+
+  function mockFinanceStore({ checkpoint, run }) {
+    return {
+      from(table) {
+        const api = {
+          select() {
+            return api;
+          },
+          eq() {
+            return api;
+          },
+          maybeSingle: async () => {
+            if (table === "qb_finance_sync_checkpoints") return { data: checkpoint, error: null };
+            if (table === "qb_finance_sync_runs") return { data: run, error: null };
+            return { data: null, error: null };
+          }
+        };
+        return api;
+      }
+    };
+  }
+
+  const windowCtx = await loadCheckpointSkipContext(
+    mockFinanceStore({
+      checkpoint: existingSuccess,
+      run: { id: runId, organization_id: orgId, domain: "revenue_ar", run_kind: "window", status: "running" }
+    }),
+    checkpointValue
+  );
+  assert.equal(windowCtx.runKind, "window");
+  assert.equal(shouldSkipCheckpoint(windowCtx.existing, { force: false, runKind: windowCtx.runKind }), true);
+
+  const incrementalCtx = await loadCheckpointSkipContext(
+    mockFinanceStore({
+      checkpoint: existingSuccess,
+      run: { id: runId, organization_id: orgId, domain: "revenue_ar", run_kind: "incremental", status: "running" }
+    }),
+    checkpointValue
+  );
+  assert.equal(incrementalCtx.runKind, "incremental");
+  assert.equal(
+    shouldSkipCheckpoint(incrementalCtx.existing, { force: false, runKind: incrementalCtx.runKind }),
+    false
+  );
+
+  await assert.rejects(
+    () =>
+      getSyncRun(
+        mockFinanceStore({
+          checkpoint: existingSuccess,
+          run: { id: runId, organization_id: orgId, domain: "ap", run_kind: "incremental", status: "running" }
+        }),
+        checkpointValue
+      ),
+    /domain mismatch/
+  );
+
+  const apiSrc = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "quickbooksFinanceSyncApi.js"),
+    "utf8"
+  );
+  assert.ok(apiSrc.includes("loadCheckpointSkipContext"));
+  assert.ok(apiSrc.includes("shouldSkipCheckpoint(existing, { force, runKind })"));
+  assert.equal(apiSrc.includes("req.body?.run_kind"), false);
+  assert.equal(apiSrc.includes("body.run_kind"), false);
+  console.log("ok: checkpoint skip uses backend sync-run run_kind, not client-supplied kind");
 }
 
 {

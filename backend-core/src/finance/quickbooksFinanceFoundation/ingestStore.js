@@ -80,6 +80,21 @@ export async function upsertCheckpoint(supabase, value) {
   return data;
 }
 
+export async function getSyncRun(supabase, value) {
+  const { data, error } = await supabase
+    .from("qb_finance_sync_runs")
+    .select("id, organization_id, domain, run_kind, status")
+    .eq("id", value.syncRunId)
+    .eq("organization_id", value.organizationId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("sync run not found");
+  if (value.domain && data.domain !== value.domain) {
+    throw new Error("sync run domain mismatch");
+  }
+  return data;
+}
+
 export async function getCheckpoint(supabase, value) {
   const { data, error } = await supabase
     .from("qb_finance_sync_checkpoints")
@@ -92,6 +107,16 @@ export async function getCheckpoint(supabase, value) {
     .maybeSingle();
   if (error) throw new Error(error.message);
   return data;
+}
+
+export async function loadCheckpointSkipContext(supabase, value) {
+  const existing = await getCheckpoint(supabase, value);
+  const run = await getSyncRun(supabase, value);
+  return {
+    existing,
+    runKind: run.run_kind,
+    run
+  };
 }
 
 export async function replaceOpenApSnapshot(supabase, organizationId, rows) {
