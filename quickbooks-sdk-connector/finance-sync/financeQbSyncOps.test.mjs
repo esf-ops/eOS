@@ -25,8 +25,12 @@ assert.ok(wrapper.includes("***REDACTED***"));
 assert.ok(wrapper.includes("sync-finance.ps1"));
 assert.ok(wrapper.includes("$PSScriptRoot"));
 assert.ok(wrapper.includes("must not equal QB_SALES_SYNC_INGEST_TOKEN"));
-assert.ok(wrapper.includes("HistoricalBackfill not passed"));
-assert.equal(wrapper.includes("-HistoricalBackfill"), false);
+assert.ok(wrapper.includes("[switch]$HistoricalBackfill"));
+assert.ok(wrapper.includes("QB_FINANCE_ALLOW_HISTORICAL_BACKFILL"));
+assert.ok(wrapper.includes('if ($HistoricalBackfill) { $argList += "-HistoricalBackfill" }') || wrapper.includes("if ($HistoricalBackfill) { $argList += \"-HistoricalBackfill\" }"));
+assert.ok(wrapper.includes("HistoricalBackfill={4}") || wrapper.includes("HistoricalBackfill="));
+assert.equal(wrapper.includes("HistoricalBackfill not passed"), false);
+assert.ok(wrapper.includes("-HistoricalBackfill requires QB_FINANCE_ALLOW_HISTORICAL_BACKFILL=1"));
 assert.equal(wrapper.toLowerCase().includes("thryve"), false);
 assert.equal(/SetEnvironmentVariable\([^\)]*QB_SALES_/i.test(wrapper), false);
 

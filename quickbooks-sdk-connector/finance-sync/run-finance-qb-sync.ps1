@@ -1,5 +1,6 @@
 # Production wrapper for eliteOS QuickBooks Full Finance Foundation sync.
-# READ-ONLY ODBC -> HTTPS ingest. No QB writes. No 2025 historical backfill in Phase 1.
+# READ-ONLY ODBC -> HTTPS ingest. No QB writes.
+# Historical backfill is explicit opt-in (-HistoricalBackfill + QB_FINANCE_ALLOW_HISTORICAL_BACKFILL=1).
 #
 # Single-flight CData lock is shared with Sales (qb-cdata-odbc.lock) plus peer lock checks.
 
@@ -13,7 +14,8 @@ param(
     [switch]$DryRun,
     [switch]$CaptureOpening,
     [switch]$ForceCheckpoint,
-    [switch]$SkipLock
+    [switch]$SkipLock,
+    [switch]$HistoricalBackfill
 )
 
 $ErrorActionPreference = "Stop"
@@ -148,7 +150,7 @@ try {
     if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
     $logFile = Join-Path $logDir ("finance-qb-sync-{0}-{1}.log" -f $Domain, (Get-Date -Format "yyyyMMdd-HHmmss"))
 
-    Write-FinanceQbLog -LogFile $logFile -Message ("Finance QB sync wrapper {0} domain={1} DryRun={2} CaptureOpening={3}" -f $WrapperVersion, $Domain, [bool]$DryRun, [bool]$CaptureOpening)
+    Write-FinanceQbLog -LogFile $logFile -Message ("Finance QB sync wrapper {0} domain={1} DryRun={2} CaptureOpening={3} HistoricalBackfill={4}" -f $WrapperVersion, $Domain, [bool]$DryRun, [bool]$CaptureOpening, [bool]$HistoricalBackfill)
     Write-FinanceQbLog -LogFile $logFile -Message ("Worker={0}" -f $workerPath)
     Write-FinanceQbLog -LogFile $logFile -Message "IngestToken=(set but never logged)"
 
@@ -163,6 +165,13 @@ try {
     if ($fin -and $sales -and ($fin -eq $sales)) { throw "QB_FINANCE_SYNC_INGEST_TOKEN must not equal QB_SALES_SYNC_INGEST_TOKEN." }
     if ($fin -and $ad -and ($fin -eq $ad)) { throw "QB_FINANCE_SYNC_INGEST_TOKEN must not equal QB_AD_CUSTOMER_SYNC_INGEST_TOKEN." }
 
+    if ($HistoricalBackfill) {
+        $allowHistorical = Get-EnvTrimmed "QB_FINANCE_ALLOW_HISTORICAL_BACKFILL"
+        if ($allowHistorical -ne "1") {
+            throw "Historical backfill is opt-in. -HistoricalBackfill requires QB_FINANCE_ALLOW_HISTORICAL_BACKFILL=1."
+        }
+    }
+
     if (-not $SkipLock) {
         Test-PeerQbLock -Path "C:\eliteOS\logs\sales-qb-sync\sales-qb-sync.lock" -Label "Sales" -LogFile $logFile
         Test-PeerQbLock -Path "C:\eliteOS\logs\account-directory-qb-customer-sync\ad-qb-customer-sync.lock" -Label "AD customer" -LogFile $logFile
@@ -175,8 +184,9 @@ try {
     if ($DryRun) { $argList += "-DryRun" }
     if ($CaptureOpening) { $argList += "-CaptureOpening" }
     if ($ForceCheckpoint) { $argList += "-ForceCheckpoint" }
+    if ($HistoricalBackfill) { $argList += "-HistoricalBackfill" }
 
-    Write-FinanceQbLog -LogFile $logFile -Message "Invoking sync-finance.ps1 (HistoricalBackfill not passed)"
+    Write-FinanceQbLog -LogFile $logFile -Message ("Invoking sync-finance.ps1 Domain={0} DryRun={1} CaptureOpening={2} ForceCheckpoint={3} HistoricalBackfill={4}" -f $Domain, [bool]$DryRun, [bool]$CaptureOpening, [bool]$ForceCheckpoint, [bool]$HistoricalBackfill)
     $output = & powershell.exe @argList 2>&1
     $exitCode = [int]$LASTEXITCODE
     foreach ($item in @($output)) {
