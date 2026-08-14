@@ -149,9 +149,12 @@ export const HEAD_LAUNCHER_CATALOG = [
   {
     slug: "finance",
     label: "eliteOS Finance Head",
-    description: "Financial reporting tie-ins.",
+    description:
+      "Governed Accrual P&L, Balance Sheet, A/R, A/P, cash, and reconciliation from QuickBooks prepared facts (read-only).",
     category: "Finance & supply",
-    href: "/finance"
+    href: "/finance",
+    roleNote:
+      "Requires finance head access. Roles: admin, super_admin, executive, finance, accounting. QuickBooks remains read-only. Distinct from QuickBooks Intelligence."
   },
   {
     slug: "quickbooks_intelligence",

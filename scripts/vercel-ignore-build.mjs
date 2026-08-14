@@ -41,6 +41,7 @@ export const PROJECT_DEPENDENCIES = Object.freeze({
   "app-quote-library": ["backend-core/src/elite100EstimateStudio", "shared/eliteos-ui"],
   "app-quote": ["shared/eliteos-ui"],
   "app-hr": ["backend-core/src/hr", "shared/eliteos-ui"],
+  "app-finance": ["backend-core/src/finance", "shared/eliteos-ui"],
   "app-home": ["shared/eliteos-ui"],
   "app-kiosk": ["shared/eliteos-ui"],
   "app-sales": ["shared/eliteos-ui"],

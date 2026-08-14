@@ -70,6 +70,7 @@ Optional Vite env: **`VITE_ELITEOS_AUTH_COOKIE_DOMAIN`** — set to `false` to f
 | **Install Dashboard Head (`app-install-dashboard`)** | Recommended **`https://install.eliteosfab.com`**; set **`HEAD_URL_INSTALL_DASHBOARD`**. **eliteOS Install Dashboard** — slug **`install_dashboard`**; staff auth + head access; **read-only Installer Day View** via **`GET /api/install-dashboard/*`**. **No** schedule editing, route optimization, or Moraware writeback in v1. |
 | **HR Head (`app-hr`)** | **`https://hr.eliteosfab.com`**; set **`HEAD_URL_HR`**. **eliteOS HR Head** — slug **`hr`**; workforce quality grading (supervisor-logged mistakes, weekly letter grades, performance history). |
 | **QuickBooks Intelligence Head (`app-quickbooks-intelligence`)** | Recommended **`https://qb.eliteosfab.com`** (or chosen finance host); set **`HEAD_URL_QUICKBOOKS_INTELLIGENCE`**. **eliteOS QuickBooks Intelligence** — slug **`quickbooks_intelligence`**; staff auth + head access; read-only executive snapshot from QuickBooks staging via Brain. No AI, no writeback, no `raw_payload` in the browser. |
+| **Finance Head (`app-finance`)** | Hostname **not defined in-repo**. Set **`HEAD_URL_FINANCE`** to the Vercel (or DNS) origin after the project exists. **eliteOS Finance Head** — slug **`finance`**; staff auth + head access; governed Accrual P&L/BS (YTD derived from contiguous monthly snapshots), A/R, A/P, cash, reconciliation via `GET /api/finance/*`. Distinct from QuickBooks Intelligence. |
 | **eliteOS Brain / API** | https://backend-core-six.vercel.app |
 | **Future API hostname** | `api.eliteosfab.com` — **if/when** DNS and Vercel project wiring are configured |
 
@@ -254,6 +255,7 @@ See also: `docs/EOS_REPO_SECRET_AUDIT.md`, `.cursor/rules/security-audit.mdc`.
 | When | Command / action |
 |------|------------------|
 | **`app-quote` changed** | `npm run build --prefix app-quote` |
+| **`app-finance` changed** | `npm install --prefix app-finance` (first clone) then `npm run build --prefix app-finance`; `npm run eos:test:finance-read` |
 | **`app-internal-estimate` changed** | `npm install --prefix app-internal-estimate` (first clone) then `npm run build --prefix app-internal-estimate` |
 | **`app-pricing-admin` changed** | `npm install --prefix app-pricing-admin` (first clone) then `npm run build --prefix app-pricing-admin` |
 | **`app-elite100-quote-flow` changed** | `npm install --prefix app-elite100-quote-flow` (first clone) then `npm run build --prefix app-elite100-quote-flow` |

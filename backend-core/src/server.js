@@ -35,6 +35,7 @@ import { attachSalesHeadRoutes } from "./sales/salesHead.js";
 import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
 import { attachQuickBooksSalesSyncRoutes } from "./sales/quickbooksFinancialTruth/quickbooksSalesSyncApi.js";
 import { attachQuickBooksFinanceSyncRoutes } from "./finance/quickbooksFinanceFoundation/quickbooksFinanceSyncApi.js";
+import { attachFinanceReadRoutes } from "./finance/financeRead/financeReadApi.js";
 import { attachAdQbCustomerSyncRoutes } from "./accountDirectory/qbCustomerEnrichment/qbCustomerSyncApi.js";
 import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
 import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoutes.js";
@@ -459,7 +460,8 @@ const fixedEliteOsOrigins = [
   "https://visualizer.eliteosfab.com",
   "http://localhost:5177",
   "http://localhost:5185",
-  "http://localhost:5190"
+  "http://localhost:5190",
+  "http://localhost:5194"
 ];
 
 /** Localhost origins are development-only; exclude in production to reduce attack surface. */
@@ -602,6 +604,13 @@ attachMorawareSyncRoutes(app, {
 });
 
 attachQuickBooksSalesSyncRoutes(app, {
+  getSupabase: supabaseServerClient
+});
+
+attachFinanceReadRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
   getSupabase: supabaseServerClient
 });
 
@@ -1796,6 +1805,13 @@ if (shouldStartLocalHttpServer()) {
     console.log("- GET /api/moraware-sync/status");
     console.log("- GET /api/admin/moraware/health (and mirror explorer, data-quality, prepared-facts)");
     console.log("- GET /api/admin/quickbooks/intelligence/executive");
+    console.log("- GET /api/finance/overview");
+    console.log("- GET /api/finance/pnl");
+    console.log("- GET /api/finance/balance-sheet");
+    console.log("- GET /api/finance/ar");
+    console.log("- GET /api/finance/ap");
+    console.log("- GET /api/finance/cash");
+    console.log("- GET /api/finance/reconciliation");
     console.log("- GET /api/executive/summary");
     console.log("- GET /api/executive/salesperson-performance");
     console.log("- GET /api/executive/account-performance");

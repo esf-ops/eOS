@@ -4263,5 +4263,36 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Windows ops** | `quickbooks-sdk-connector/finance-sync/` — `run-finance-qb-sync.ps1 -Domain …`; config `C:\eliteOS\config\finance-qb-sync.env`; default 14-day lookback; `-CaptureOpening` for 2024-12-31 BS; `-HistoricalBackfill` refused unless `QB_FINANCE_ALLOW_HISTORICAL_BACKFILL=1`. |
 | **Do not touch** | Sales Dashboard definitions; existing Sales worker datasets/math; Internal Estimate; Quote Library; pricing; Moraware; Thryve; AD identity / `customer_identity_snapshot`; QuickBooks writeback; Finance Command Center UI. |
 | **Out of scope this pass** | 2025 historical backfill; UI; applying SQL; production ingest. |
-| **Revisit** | Apply SQL → deploy Brain with `QB_FINANCE_SYNC_INGEST_TOKEN` → small DryRun per domain → small live ingest + idempotent rerun → opening capture → then backfill GO checklist in `QUICKBOOKS_FINANCE_BACKFILL_READINESS.md`. |
+| **Revisit** | Apply SQL → deploy Brain with `QB_FINANCE_SYNC_INGEST_TOKEN` → small DryRun per domain → small live ingest + idempotent rerun → opening capture → then backfill GO checklist in `QUICKBOOKS_FINANCE_BACKFILL_READINESS.md`. Staff read APIs + Finance Head: §317. |
+
+### 317. eliteOS Finance Head v1 — governed reads + UI (2026-08-14)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-14 |
+| **Decision** | First visible **eliteOS Finance Head** (`app-finance/`, slug **`finance`**) reads **only** through Brain `GET /api/finance/*`. QuickBooks stays read-only. Browser never queries `qb_finance_*`. Official P&L/BS come from stored Accrual `ProfitAndLossStandard` / `BalanceSheetStandard` snapshots. Open A/R reuses Sales Financial Truth current snapshot (DueDate aging only). Open A/P uses `qb_finance_open_ap_current`. Cash keeps receipt vs deposit as separate event roles and never adds them. Missing facts render **unavailable**, never fake $0. Visual language is Finance-local (`--fin-*`, Geist) under shared `EliteosTopbar`; other heads are not restyled. **`quickbooks_intelligence` remains a separate head.** |
+| **Auth** | `requireAuth` + `requireRole(["admin","super_admin","executive","finance","accounting"])` + `requireHeadAccess("finance")`. Organization scope is the authenticated user's `organization_id` only (no query-org override, no default-org fallback). |
+| **Env** | Frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_BACKEND_URL`, `VITE_HOME_URL`. Brain: `HEAD_URL_FINANCE` (launcher + CORS). Optional `QB_FINANCE_STALE_AFTER_SECONDS` (default 4h). |
+| **Out of scope** | 13-week forecast, collections automation, bill-pay recommendations, credit-risk scoring, Ask Finance, email reminders, bank feeds, isolved, Moraware joins, Customer 360, QuickBooks writeback, extract-pipeline changes, historical backfill, migrations. |
+| **Impacted** | `backend-core/src/finance/financeRead/*`, `app-finance/`, `server.js`, `launcherHeads.js`, SYSTEM_BLUEPRINT, head map. |
+| **Revisit** | Create Vercel project for `app-finance`, set `HEAD_URL_FINANCE`, redeploy Brain, grant head access, then optional DNS `finance.eliteosfab.com` if chosen. |
+
+### 317a. Finance Head YTD is derived from monthly Accrual snapshots (2026-08-14)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-14 |
+| **Decision** | Finance Head **YTD / prior-YTD** are **derived** from contiguous same-calendar-month Accrual `ProfitAndLossStandard` snapshots (including a partial current month). A monthly snapshot is never labeled YTD. Control totals are summed from stored report **lines**, not invoices. Detailed YTD hierarchy is **unavailable** until lines have a stable account identity. Prior-YTD comparison is shown only when an **equivalent** prior window can be constructed (`period_end` must match). Overview and P&L UI must display the actual `period_start` / `period_end`. |
+| **Why** | Stored QB P&Ls are monthly windows. Selecting `period_start = Jan 1` previously fell back to January and labeled it YTD. |
+| **Out of scope** | Extract-pipeline changes, inventing a fuzzy line matcher, fabricating missing months, summing invoices to recreate P&L. |
+
+### 317b. Finance Head premium drilldowns remain a governed presentation layer (2026-08-14)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-14 |
+| **Decision** | Overview Revenue, Gross Profit, Gross Margin, Net Income, accounting cash, Open A/R, Open A/P, and Balance Sheet identity open accessible editorial drilldowns before navigating to the full Finance tab. Supporting facts are fetched only from existing org-scoped `GET /api/finance/*` routes. P&L monthly contribution uses the exact stored monthly windows that compose governed YTD. Insight statements are deterministic frontend presentation helpers and disappear when required inputs are unavailable. |
+| **Data safety** | No new financial definition, endpoint, permission, source query, or write path. Cash event roles remain separate; receipt + deposit anti-double-count guidance stays prominent. QuickBooks internal IDs remain scrubbed by Brain. U+FFFD cleanup is display-only for isolated separator characters in statement labels. |
+| **Accessibility** | Modal shell uses dialog semantics, Escape close, contained Tab focus, prior-focus restoration, backdrop close, mobile full-screen treatment, and complete `prefers-reduced-motion` fallbacks. |
+| **Out of scope** | AI narration, Customer 360, collection or bill-pay recommendations, bank feeds, backend aggregation changes, QuickBooks extraction changes, migrations, and production configuration. |
 
