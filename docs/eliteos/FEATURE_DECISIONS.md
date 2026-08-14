@@ -4253,3 +4253,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | Sales worker + ingest, AD financial intelligence + Financials UI, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
 | **Revisit** | Apply v3 SQL → deploy Brain → QB Server worker 1.2.0 → DryRun → incremental ingest → optional 2025-01-01 backfill. |
 
+### 316. QuickBooks Full Finance Foundation Phase 1 (2026-08-14)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-14 |
+| **Decision** | Additive **Full Finance Foundation** beside Sales Financial Truth. Isolated SELECT-only domains (**master**, **revenue_ar**, **ap**, **cash**, **accounting**) post to `POST /api/internal/finance/quickbooks-sync` (`QB_FINANCE_SYNC_INGEST_TOKEN` — never reuse Sales or AD tokens). Canonical v1 report basis is **Accrual**. Official P&L / Balance Sheet are stored QuickBooks report snapshots (`ProfitAndLossStandard`, `BalanceSheetStandard`), not manufactured from invoices/bills. Opening accounting state is Accrual Balance Sheet **as-of 2024-12-31**. Historical transaction target remains 2025-01-01 → current but **is not executed in Phase 1**. `Transactions` is an activity/index only (live: summarized Bill rows, blank `TxnLineId`, AP account) — not a double-entry ledger. Cash: `DepositLineItems.ItemTxnType='ReceivePayment'` and `ItemRefId` = ReceivePayment TxnID; never sum receipt + deposit as two inflows. Single-flight CData lock `C:\eliteOS\logs\qb-odbc\qb-cdata-odbc.lock` shared with Sales wrapper. |
+| **SQL** | Manual: `backend-core/supabase/eliteos_qb_finance_foundation_v1.sql` |
+| **Windows ops** | `quickbooks-sdk-connector/finance-sync/` — `run-finance-qb-sync.ps1 -Domain …`; config `C:\eliteOS\config\finance-qb-sync.env`; default 14-day lookback; `-CaptureOpening` for 2024-12-31 BS; `-HistoricalBackfill` refused unless `QB_FINANCE_ALLOW_HISTORICAL_BACKFILL=1`. |
+| **Do not touch** | Sales Dashboard definitions; existing Sales worker datasets/math; Internal Estimate; Quote Library; pricing; Moraware; Thryve; AD identity / `customer_identity_snapshot`; QuickBooks writeback; Finance Command Center UI. |
+| **Out of scope this pass** | 2025 historical backfill; UI; applying SQL; production ingest. |
+| **Revisit** | Apply SQL → deploy Brain with `QB_FINANCE_SYNC_INGEST_TOKEN` → small DryRun per domain → small live ingest + idempotent rerun → opening capture → then backfill GO checklist in `QUICKBOOKS_FINANCE_BACKFILL_READINESS.md`. |
+

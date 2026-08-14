@@ -21,6 +21,7 @@ assert.ok(existsSync(join(here, "sales-qb-sync.env.example")));
 assert.ok(wrapper.includes("QB_SALES_"));
 assert.ok(wrapper.includes("sales-qb-sync"));
 assert.ok(wrapper.includes("sales-qb-sync.lock"));
+assert.ok(wrapper.includes("qb-cdata-odbc.lock"));
 assert.ok(wrapper.includes("Non-overlap") || wrapper.includes("already running"));
 assert.ok(wrapper.includes("***REDACTED***"));
 assert.ok(wrapper.includes("sync-sales-financials.ps1"));

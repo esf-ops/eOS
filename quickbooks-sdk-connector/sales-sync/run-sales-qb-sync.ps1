@@ -29,6 +29,7 @@ $WrapperVersion = "1.0.0"
 $DefaultConfigPath = "C:\eliteOS\config\sales-qb-sync.env"
 $DefaultLogDir = "C:\eliteOS\logs\sales-qb-sync"
 $LockFileName = "sales-qb-sync.lock"
+$SharedCdataLockPath = "C:\eliteOS\logs\qb-odbc\qb-cdata-odbc.lock"
 $WorkerScriptName = "sync-sales-financials.ps1"
 
 function Write-SalesQbLog {
@@ -230,6 +231,7 @@ $logDir = $DefaultLogDir
 $lockDir = $DefaultLogDir
 $logFile = $null
 $lockPath = $null
+$sharedLockPath = $null
 $exitCode = 1
 
 try {
@@ -273,6 +275,9 @@ try {
         $lockPath = Join-Path $lockDir $LockFileName
         Enter-SalesQbSyncLock -LockPath $lockPath -LogFile $logFile
         Write-SalesQbLog -LogFile $logFile -Message ("Lock acquired pid={0} path={1}" -f $PID, $lockPath)
+        $sharedLockPath = $SharedCdataLockPath
+        Enter-SalesQbSyncLock -LockPath $sharedLockPath -LogFile $logFile
+        Write-SalesQbLog -LogFile $logFile -Message ("Shared CData single-flight lock acquired path={0}" -f $sharedLockPath)
     }
 
     $argList = @(
@@ -307,6 +312,7 @@ try {
     Write-SalesQbLog -LogFile $logFile -Message ("RESULT: FAIL - {0}" -f $msg)
     $exitCode = 1
 } finally {
+    Exit-SalesQbSyncLock -LockPath $sharedLockPath
     Exit-SalesQbSyncLock -LockPath $lockPath
     if (-not [string]::IsNullOrWhiteSpace($logFile)) {
         Write-SalesQbLog -LogFile $logFile -Message ("Wrapper finished exitCode={0} log={1}" -f $exitCode, $logFile)

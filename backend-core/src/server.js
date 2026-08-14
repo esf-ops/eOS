@@ -34,6 +34,7 @@ import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansT
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
 import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
 import { attachQuickBooksSalesSyncRoutes } from "./sales/quickbooksFinancialTruth/quickbooksSalesSyncApi.js";
+import { attachQuickBooksFinanceSyncRoutes } from "./finance/quickbooksFinanceFoundation/quickbooksFinanceSyncApi.js";
 import { attachAdQbCustomerSyncRoutes } from "./accountDirectory/qbCustomerEnrichment/qbCustomerSyncApi.js";
 import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
 import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoutes.js";
@@ -601,6 +602,10 @@ attachMorawareSyncRoutes(app, {
 });
 
 attachQuickBooksSalesSyncRoutes(app, {
+  getSupabase: supabaseServerClient
+});
+
+attachQuickBooksFinanceSyncRoutes(app, {
   getSupabase: supabaseServerClient
 });
 

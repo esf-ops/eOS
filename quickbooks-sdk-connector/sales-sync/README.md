@@ -98,7 +98,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-sales-financials.ps1 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-sales-financials.ps1
 ```
 
-Non-overlap lock: `C:\eliteOS\logs\sales-qb-sync\sales-qb-sync.lock`
+Non-overlap lock: `C:\eliteOS\logs\sales-qb-sync\sales-qb-sync.lock` plus shared CData single-flight lock `C:\eliteOS\logs\qb-odbc\qb-cdata-odbc.lock` (shared with Full Finance Foundation workers).
 
 ## Task Scheduler (do NOT register automatically)
 
