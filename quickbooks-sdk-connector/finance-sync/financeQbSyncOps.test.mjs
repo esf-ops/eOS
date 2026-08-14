@@ -71,6 +71,39 @@ assert.equal(worker.includes("FromAccountName"), false, "do not use invalid Tran
 assert.equal(worker.includes("ToAccountName"), false, "do not use invalid Transfers fallback ToAccountName");
 assert.equal(worker.includes("retrying with From/To column names"), false, "do not keep invalid Transfers fallback query");
 
+assert.ok(
+  /SELECT ID, ReferenceNumber, Date, CustomerId, CustomerName,\s*Amount, CreditRemaining, Memo, TimeModified\s*FROM CreditMemos/.test(worker),
+  "CreditMemos SELECT must use live Amount and CreditRemaining"
+);
+assert.ok(worker.includes("open_amount = (Convert-ToNumber $r.CreditRemaining)"), "map CreditRemaining -> open_amount");
+assert.equal(
+  /TotalAmount[\s\S]{0,120}FROM CreditMemos/.test(worker),
+  false,
+  "do not SELECT CreditMemos TotalAmount"
+);
+assert.equal(
+  /OpenAmount[\s\S]{0,120}FROM CreditMemos/.test(worker),
+  false,
+  "do not SELECT CreditMemos OpenAmount"
+);
+
+assert.ok(
+  /SELECT ID, ReferenceNumber, Date, CustomerId, CustomerName,\s*TotalAmount, DepositAccount, DepositAccountId, Memo, TimeModified\s*FROM SalesReceipts/.test(worker),
+  "SalesReceipts SELECT must use live DepositAccount / DepositAccountId"
+);
+assert.ok(worker.includes("deposit_to_account_name = $r.DepositAccount"));
+assert.ok(worker.includes("deposit_to_account_id = $r.DepositAccountId"));
+assert.equal(
+  /DepositToAccount, DepositToAccountId[\s\S]{0,80}FROM SalesReceipts/.test(worker),
+  false,
+  "do not SELECT SalesReceipts DepositToAccount / DepositToAccountId"
+);
+assert.equal(
+  /DepositToAccountId[\s\S]{0,80}FROM SalesReceipts/.test(worker),
+  false,
+  "do not SELECT SalesReceipts DepositToAccountId"
+);
+
 assert.ok(envExample.includes("QB_FINANCE_DSN=slabOS_QuickBooks_Local_RO"));
 assert.ok(envExample.includes("QB_FINANCE_SYNC_INGEST_TOKEN="));
 assert.equal(envExample.includes("QB_SALES_SYNC_INGEST_TOKEN="), false);

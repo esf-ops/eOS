@@ -361,12 +361,14 @@ FROM ReceivePaymentsAppliedTo
 WHERE Date >= '$startUs' AND Date <= '$endUs'
 "@ },
                 @{ Name = "credit_memos"; Sql = @"
-SELECT ID, ReferenceNumber, Date, CustomerId, CustomerName, TotalAmount, OpenAmount, Memo, TimeModified
+SELECT ID, ReferenceNumber, Date, CustomerId, CustomerName,
+       Amount, CreditRemaining, Memo, TimeModified
 FROM CreditMemos
 WHERE Date >= '$startUs' AND Date <= '$endUs'
 "@ },
                 @{ Name = "sales_receipts"; Sql = @"
-SELECT ID, ReferenceNumber, Date, CustomerId, CustomerName, TotalAmount, DepositToAccount, DepositToAccountId, Memo, TimeModified
+SELECT ID, ReferenceNumber, Date, CustomerId, CustomerName,
+       TotalAmount, DepositAccount, DepositAccountId, Memo, TimeModified
 FROM SalesReceipts
 WHERE Date >= '$startUs' AND Date <= '$endUs'
 "@ }
@@ -376,7 +378,34 @@ WHERE Date >= '$startUs' AND Date <= '$endUs'
                 if ($ck.skipped) { Write-Host ("  skip {0} (checkpoint success)" -f $ds.Name); continue }
                 $mapped = New-Object System.Collections.Generic.List[object]
                 foreach ($r in (Invoke-ReadOnlyOdbcQuery -Connection $conn -Sql $ds.Sql)) {
-                    $mapped.Add($r) | Out-Null
+                    if ($ds.Name -eq "credit_memos") {
+                        $mapped.Add([ordered]@{
+                            qb_txn_id = [string]$r.ID
+                            reference_number = $r.ReferenceNumber
+                            txn_date = (Convert-ToYmd $r.Date)
+                            qb_customer_list_id = $r.CustomerId
+                            customer_name = $r.CustomerName
+                            amount = (Convert-ToNumber $r.Amount)
+                            open_amount = (Convert-ToNumber $r.CreditRemaining)
+                            memo = $r.Memo
+                            time_modified = $r.TimeModified
+                        }) | Out-Null
+                    } elseif ($ds.Name -eq "sales_receipts") {
+                        $mapped.Add([ordered]@{
+                            qb_txn_id = [string]$r.ID
+                            reference_number = $r.ReferenceNumber
+                            txn_date = (Convert-ToYmd $r.Date)
+                            qb_customer_list_id = $r.CustomerId
+                            customer_name = $r.CustomerName
+                            amount = (Convert-ToNumber $r.TotalAmount)
+                            deposit_to_account_name = $r.DepositAccount
+                            deposit_to_account_id = $r.DepositAccountId
+                            memo = $r.Memo
+                            time_modified = $r.TimeModified
+                        }) | Out-Null
+                    } else {
+                        $mapped.Add($r) | Out-Null
+                    }
                 }
                 $arr = $mapped.ToArray()
                 [void](Send-UpsertChunks -Url $IngestUrl -Token $IngestToken -OrganizationId $OrganizationId -SyncRunId $syncRunId -Dataset $ds.Name -Rows $arr -ChunkSize $ChunkSize -DryRun:$DryRun)
