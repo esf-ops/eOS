@@ -4351,3 +4351,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `backend-core/src/accountDirectory/accountDirectoryStatusReconciliation*.mjs`, dry-run script, this doc, SYSTEM_BLUEPRINT, head map. |
 | **Revisit** | Controlled write phase only after reviewing the live dry-run matrix. |
 
+### 321. Account Directory status review queue is admin-only and one-account (2026-08-14)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-14 |
+| **Decision** | Phase 4B adds an ADMIN-only Status Review workstation for the Phase 4 **exception set** only (Active→Needs Review, Prospect→Needs Review, Active→Prospect). Consistent Active/Prospect/Archived rows stay out of the queue. Humans resolve **one account at a time**. There is no Apply All, auto-link, auto-merge, bulk archive, or bulk delete. |
+| **Persistence** | Human decisions persist as `account_directory_audit_events.action = status_reconciliation_reviewed` with `new_values` `{ decision, currentStatus, recommendedStatus, reasonCodes, evidenceFingerprint, classifierVersion, keepReason, note }`. No migration. `keep_current` plus an unchanged evidence fingerprint suppresses the same recommendation from Needs decision. Material identity/lifecycle evidence change (exact QB link, QB active, sold/accepted, suggestion state) changes the fingerprint and reopens review. Prior review remains in audit history. |
+| **Writes** | Status changes go through existing `updateAccount` (auth, org, ADMIN, `row_version`, actor, request id, audit). Stale `row_version` or fingerprint → 409, refresh, do not overwrite. Accept recommendation may not set Active from a QB name suggestion (`fuzzy_active_forbidden`). Confirming a suggested QB customer uses the existing governed `link-quickbooks` workflow only. |
+| **Keep Active** | Active→Prospect is a conservative recommendation, not “this is not a customer.” Keep Active requires `keepReason` (`known_customer_awaiting_qb` / `strategic_manual` / `historical_customer` / `other`) plus optional note. |
+| **Auth** | `account_directory_admin` (`admin`, `super_admin`, `executive`). VIEW/EDIT (sales, office, customer service, estimator) cannot load or decide the review API. |
+| **Staff-safe** | Queue payloads omit owner-sensitive finance and raw QB ListIDs/TxnIDs. |
+| **Impacted** | `accountDirectoryStatusReview.mjs`, review routes, `app-account-directory` Status Review tab, this doc, SYSTEM_BLUEPRINT, head map. |
+| **Revisit** | Optional reviewer display-name join; later inactive-QB queue if that cohort appears. |
+

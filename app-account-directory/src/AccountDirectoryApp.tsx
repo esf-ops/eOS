@@ -27,6 +27,7 @@ import {
   RelationshipWorkspace,
   loadRelationship
 } from "./ui/Account360Panels";
+import { StatusReviewSurface } from "./ui/AccountStatusReview";
 import type {
   AccountDetail,
   AccountDirectoryPermissions,
@@ -211,7 +212,8 @@ function defaultPermissions(): AccountDirectoryPermissions {
     canEdit: true,
     canArchive: true,
     canRestore: true,
-    canLinkQuickBooks: false
+    canLinkQuickBooks: false,
+    canReviewStatus: false
   };
 }
 
@@ -393,7 +395,12 @@ export default function AccountDirectoryApp() {
     if (!sessionToken) return;
     try {
       const res = await fetchAccountDirectoryPermissions(sessionToken);
-      setPermissions({ ...defaultPermissions(), ...(res.permissions ?? {}) });
+      const incoming = res.permissions ?? {};
+      setPermissions({
+        ...defaultPermissions(),
+        ...incoming,
+        canReviewStatus: incoming.canReviewStatus ?? Boolean(incoming.canArchive)
+      });
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 403) {
         setPermissions({ canView: false });
@@ -716,6 +723,11 @@ export default function AccountDirectoryApp() {
   }, [loadDetail, loadList, loadSummary, urlState.account, sessionToken]); // eslint-disable-line
 
   /* ─── Topbar ─── */
+  const navTabs = useMemo(() => {
+    const tabs = [...NAV_TABS];
+    if (permissions.canReviewStatus) tabs.push({ id: "status_review", label: "Status Review" });
+    return tabs;
+  }, [permissions.canReviewStatus]);
   const userDisplayName = userMetaName || deriveDisplayNameFromEmail(userEmail) || userEmail || "Staff";
   const userDisplayInitials = useMemo(() => userInitialsFor(userMetaName, userEmail), [userMetaName, userEmail]);
   const chipSubtitle = useMemo(() => {
@@ -809,7 +821,7 @@ export default function AccountDirectoryApp() {
         />
       )}
 
-      <main className="main" role="main">
+      <main className={urlState.tab === "status_review" ? "main ad-status-review-mode" : "main"} role="main">
         {/* Supabase config warning */}
         {!supabase ? (
           <div className="banner banner-warn" role="alert">
@@ -900,7 +912,7 @@ export default function AccountDirectoryApp() {
 
             {/* ─── Nav tabs ─── */}
             <nav className="ad-nav" aria-label="Account views">
-              {NAV_TABS.map((tab) => (
+              {navTabs.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
@@ -921,6 +933,24 @@ export default function AccountDirectoryApp() {
                   ✕
                 </button>
               </div>
+            ) : null}
+
+            {urlState.tab === "status_review" ? (
+              !permissionsLoaded ? (
+                <p className="muted">Loading status review…</p>
+              ) : permissions.canReviewStatus ? (
+                <StatusReviewSurface
+                  sessionToken={sessionToken}
+                  canLinkQuickBooks={permissions.canLinkQuickBooks}
+                  onMessage={setActionMessage}
+                  onReviewQuickBooks={(accountId, displayName) => {
+                    updateFilters({ tab: "accounts", account: accountId, page: 1 });
+                    openModal("link-qb", { displayName });
+                  }}
+                />
+              ) : (
+                <p className="permission-denied">Status Review is limited to Account Directory admins.</p>
+              )
             ) : null}
 
             {/* ─── Sticky toolbar ─── */}

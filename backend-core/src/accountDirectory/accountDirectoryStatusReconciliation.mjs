@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * Account Directory customer-status reconciliation (Phase 4) — read-only classifier.
  *
@@ -16,6 +18,21 @@ export const AD_STATUSES = Object.freeze([
 ]);
 
 export const STATUS_RECONCILE_VERSION = "ad_status_reconcile_v1";
+
+export const STATUS_REVIEW_ACTION = "status_reconciliation_reviewed";
+
+export const EXCEPTION_TRANSITIONS = Object.freeze([
+  ["active", "needs_review"],
+  ["prospect", "needs_review"],
+  ["active", "prospect"]
+]);
+
+export const KEEP_CURRENT_REASONS = Object.freeze([
+  "known_customer_awaiting_qb",
+  "strategic_manual",
+  "historical_customer",
+  "other"
+]);
 
 export const ESTABLISHED_ESTIMATE_STATUSES = Object.freeze([
   "sold",
@@ -517,6 +534,117 @@ export function formatStatusReconcileConsole(summary, extra = {}) {
 /**
  * @param {object[]} classified
  */
+export function isExceptionTransition(currentStatus, proposedStatus) {
+  return EXCEPTION_TRANSITIONS.some(([from, to]) => from === currentStatus && to === proposedStatus);
+}
+
+/**
+ * Deterministic fingerprint of evidence that produced the recommendation.
+ * Material identity/lifecycle changes must change this value.
+ *
+ * @param {object} classified
+ */
+export function evidenceFingerprint(classified) {
+  const qb = classified?.evidence?.qb || {};
+  const elite = classified?.evidence?.eliteos || {};
+  const payload = [
+    classified?.version || STATUS_RECONCILE_VERSION,
+    classified?.proposedStatus || "",
+    classified?.reasonCode || "",
+    qb.exactLinked ? "1" : "0",
+    qb.rootExists ? "1" : "0",
+    qb.qbActive === true ? "1" : qb.qbActive === false ? "0" : "u",
+    String(qb.enrichmentState || ""),
+    elite.acceptedOrSoldEvidence ? "1" : "0"
+  ].join("|");
+  return createSha256(payload);
+}
+
+function createSha256(value) {
+  return createHash("sha256").update(String(value), "utf8").digest("hex").slice(0, 32);
+}
+
+export function reviewCategory(reasonCode) {
+  const code = String(reasonCode || "");
+  if (code === "qb_suggestion") return "possible_qb_match";
+  if (code === "qb_enrichment_needs_review") return "ambiguous_qb_match";
+  if (code === "sold_without_qb") return "established_without_qb";
+  if (code === "seed_unlinked_qb_workbook") return "imported_unconfirmed";
+  if (
+    code === "qb_conflict" ||
+    code === "qb_job_hierarchy" ||
+    code === "qb_shared_root" ||
+    code === "qb_root_missing"
+  ) {
+    return "structural_conflict";
+  }
+  if (code === "prospect_candidate" || code === "presale_only") return "unlinked_directory_identity";
+  return "needs_human_review";
+}
+
+export function rankMethodLabel(method) {
+  const m = String(method || "");
+  if (m === "exact_norm_name") return "Close name match — not a confirmed QuickBooks link";
+  if (m === "substring" || m === "token_overlap") return "Similar name — not a confirmed QuickBooks link";
+  if (m === "exact_list_id") return "Exact QuickBooks identity";
+  if (!m) return null;
+  return "Name ranking requires confirmation";
+}
+
+/**
+ * Staff-safe business copy for the human review card.
+ *
+ * @param {object} classified
+ */
+export function buildStatusReviewCopy(classified) {
+  const current = classified?.currentStatus;
+  const proposed = classified?.proposedStatus;
+  const code = classified?.reasonCode;
+  const category = reviewCategory(code);
+  if (code === "qb_suggestion" || code === "qb_enrichment_needs_review") {
+    return {
+      category,
+      headline: "A possible QuickBooks customer match exists, but no exact accounting identity has been confirmed.",
+      bullets: [
+        "No exact QuickBooks link",
+        "QuickBooks match requires confirmation",
+        "A name match cannot establish Active automatically"
+      ]
+    };
+  }
+  if (current === "active" && proposed === "prospect") {
+    return {
+      category,
+      headline:
+        "This relationship exists in Account Directory but there is no confirmed QuickBooks customer and no established-customer lifecycle evidence.",
+      bullets: [
+        "No exact QuickBooks link",
+        "No accepted or sold estimate on this identity",
+        "This is a recommendation, not a statement that they are not a customer"
+      ]
+    };
+  }
+  if (code === "sold_without_qb") {
+    return {
+      category,
+      headline: "Established-customer evidence exists, but accounting identity is unresolved.",
+      bullets: ["No exact QuickBooks link", "Accepted or sold estimate is on file", "Needs a confirmed QuickBooks customer link"]
+    };
+  }
+  if (code === "seed_unlinked_qb_workbook") {
+    return {
+      category,
+      headline: "This identity came from the QuickBooks workbook import without a confirmed exact link.",
+      bullets: ["Imported/workbook provenance", "No exact QuickBooks link", "Do not auto-link by name"]
+    };
+  }
+  return {
+    category,
+    headline: (classified?.reasons || [])[0] || "This account needs a human lifecycle decision.",
+    bullets: ["Review the recommendation before changing status"]
+  };
+}
+
 export function assertNoSensitivePayload(classified) {
   const json = JSON.stringify(classified);
   if (

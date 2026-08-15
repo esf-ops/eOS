@@ -107,7 +107,7 @@ export async function loadStatusReconciliationEvidence(args) {
     const sugPage = await pageSupabase(
       supabase,
       "ad_qb_link_suggestions",
-      "suggested_account_id,status,rank_score",
+      "suggested_account_id,status,rank_score,rank_method,qb_full_name,qb_name",
       organizationId
     );
     if (sugPage.unavailable) warnings.push("ad_qb_link_suggestions unavailable");
@@ -230,6 +230,7 @@ export async function loadStatusReconciliationEvidence(args) {
       status: account.status,
       archivedAt: account.archivedAt,
       source: account.source,
+      rowVersion: account.rowVersion,
       contactCount: contactCount.get(account.id) || 0,
       locationCount: locationCount.get(account.id) || 0,
       aliasCount: aliasCount.get(account.id) || 0,
@@ -241,6 +242,10 @@ export async function loadStatusReconciliationEvidence(args) {
         qbActive: fact ? fact.is_active !== false : null,
         isJob: Boolean(fact?.is_job),
         suggestionStatus: suggestion?.status || null,
+        suggestionDisplayName: suggestion?.qb_full_name || suggestion?.qb_name || null,
+        suggestionRankMethod: suggestion?.rank_method || null,
+        suggestionRankScore:
+          suggestion?.rank_score == null ? null : Number(suggestion.rank_score),
         enrichmentState: resolveEnrichmentState({
           exactLinked,
           suggestionStatus: suggestion?.status || null

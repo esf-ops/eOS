@@ -29,6 +29,10 @@ import {
   getAccountDirectoryTrend
 } from "./accountDirectory360.mjs";
 import {
+  listStatusReviewQueue,
+  decideStatusReview
+} from "./accountDirectoryStatusReview.mjs";
+import {
   dismissSuggestion,
   getAdQbCustomerEnrichmentFeedStatus,
   listAdQbLinkSuggestions
@@ -512,6 +516,48 @@ export function attachAccountDirectoryRoutes(app, deps) {
       ok: false,
       code: "hard_delete_unavailable",
       error: "Hard delete is not available. Archive the account instead."
+    });
+  });
+
+  app.get("/api/account-directory/status-review", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const data = await listStatusReviewQueue({
+        store,
+        supabase: getSupabase(),
+        organizationId: ctx.organizationId,
+        role: ctx.role,
+        query: {
+          search: req.query?.search,
+          proposedStatus: req.query?.proposedStatus,
+          currentStatus: req.query?.currentStatus,
+          reasonCode: req.query?.reasonCode,
+          category: req.query?.category,
+          qbState: req.query?.qbState,
+          reviewed: req.query?.reviewed
+        }
+      });
+      res.json(data);
+    });
+  });
+
+  app.post("/api/account-directory/status-review/:accountId/decision", ...writeGuard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const result = await decideStatusReview({
+        store,
+        service,
+        supabase: getSupabase(),
+        organizationId: ctx.organizationId,
+        role: ctx.role,
+        actorUserId: ctx.actorUserId,
+        requestId: ctx.requestId,
+        accountId: String(req.params.accountId),
+        decision: req.body?.decision,
+        rowVersion: req.body?.rowVersion,
+        evidenceFingerprint: req.body?.evidenceFingerprint,
+        keepReason: req.body?.keepReason,
+        note: req.body?.note
+      });
+      res.json(result);
     });
   });
 }

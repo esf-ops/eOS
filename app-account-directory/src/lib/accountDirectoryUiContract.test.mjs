@@ -43,6 +43,16 @@ assert.ok(app.includes("permission-denied"));
 assert.ok(app.includes("qbEnrichment=suggested_match") || app.includes('qbEnrichment: "suggested_match"') || workspace.includes('qbEnrichment: "suggested_match"'));
 assert.ok(app.includes("qbEnrichment=needs_review") || app.includes('qbEnrichment: "needs_review"') || workspace.includes('qbEnrichment: "needs_review"'));
 assert.ok(app.includes("QB Needs Review"));
+assert.ok(app.includes("Status Review"));
+assert.ok(app.includes("canReviewStatus"));
+assert.ok(app.includes("StatusReviewSurface"));
+assert.ok(api.includes("/status-review"));
+assert.ok(css.includes(".status-review"));
+assert.equal(app.includes("Apply All"), false, "must not offer Apply All");
+assert.equal(
+  readFileSync(join(root, "app-account-directory/src/ui/AccountStatusReview.tsx"), "utf8").includes("Apply All"),
+  false
+);
 assert.ok(workspace.includes("qbEnrichment"));
 assert.ok(workspace.includes("applySummaryCardPreset"));
 assert.ok(workspace.includes("applyToolbarFilterPatch"));

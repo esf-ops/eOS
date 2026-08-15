@@ -251,3 +251,47 @@ export async function fetchQbEnrichmentSuggestions(token: string) {
     }>;
   };
 }
+
+export async function fetchAccountStatusReview(
+  token: string,
+  opts: {
+    search?: string;
+    proposedStatus?: string;
+    currentStatus?: string;
+    reasonCode?: string;
+    category?: string;
+    qbState?: string;
+    reviewed?: string;
+  } = {}
+) {
+  return (await apiGet(
+    `${BASE}/status-review${qs({
+      search: opts.search,
+      proposedStatus: opts.proposedStatus,
+      currentStatus: opts.currentStatus,
+      reasonCode: opts.reasonCode,
+      category: opts.category,
+      qbState: opts.qbState,
+      reviewed: opts.reviewed
+    })}`,
+    token
+  )) as import("./types").StatusReviewQueueResponse;
+}
+
+export async function decideAccountStatusReview(
+  token: string,
+  accountId: string,
+  payload: {
+    decision: "accept_recommendation" | "keep_current" | "mark_needs_review";
+    rowVersion?: number | null;
+    evidenceFingerprint?: string;
+    keepReason?: string;
+    note?: string;
+  }
+) {
+  return apiPost(
+    `${BASE}/status-review/${encodeURIComponent(accountId)}/decision`,
+    token,
+    payload
+  );
+}

@@ -3,7 +3,7 @@
  * Exported for Node tests and TypeScript re-export shell.
  */
 
-const VALID_TABS = ["accounts", "prospects", "needs_review", "archived"];
+const VALID_TABS = ["accounts", "prospects", "needs_review", "archived", "status_review"];
 const VALID_PAGE_SIZES = [25, 50, 100];
 const VALID_SORTS = ["name_asc", "name_desc", "updated_desc", "updated_asc"];
 const VALID_QB_ENRICHMENT = ["suggested_match", "needs_review", "not_linked"];

@@ -99,6 +99,7 @@ export type AccountDirectoryPermissions = {
   canArchive?: boolean;
   canRestore?: boolean;
   canLinkQuickBooks?: boolean;
+  canReviewStatus?: boolean;
 };
 
 export type AccountSummary = {
@@ -439,4 +440,50 @@ export type AddLocationPayload = {
 export type AddAliasPayload = {
   alias: string;
   source?: string;
+};
+
+export type StatusReviewItem = {
+  accountId: string;
+  displayName: string;
+  currentStatus: string;
+  recommendedStatus: string;
+  reasonCode: string;
+  category: string;
+  confidence?: string;
+  why: string;
+  evidenceBullets: string[];
+  evidenceFingerprint: string;
+  classifierVersion: string;
+  rowVersion?: number | null;
+  qb: {
+    exactLinked: boolean;
+    enrichmentState: string;
+    matchDisplayName?: string | null;
+    matchExplanation?: string | null;
+  };
+  eliteos: {
+    hasQuotesOrEstimates: boolean;
+    acceptedOrSoldEvidence: boolean;
+  };
+  suppressed: boolean;
+  evidenceChanged: boolean;
+  review?: {
+    decision?: string | null;
+    keepReason?: string | null;
+    note?: string | null;
+    actorUserId?: string | null;
+    at?: string | null;
+  } | null;
+};
+
+export type StatusReviewQueueResponse = {
+  ok?: boolean;
+  classifierVersion?: string;
+  counts?: {
+    needsDecision: number;
+    needsReview: number;
+    prospectRecommendations: number;
+    reviewed: number;
+  };
+  items: StatusReviewItem[];
 };

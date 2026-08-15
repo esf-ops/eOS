@@ -60,6 +60,7 @@ export function permissionsForRole(role) {
     canRestore: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN),
     canLinkQuickBooks: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK),
     canViewAudit: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN),
+    canReviewStatus: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN),
     capabilities: Array.from(caps)
   };
 }

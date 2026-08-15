@@ -750,6 +750,18 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         .limit(limit);
       if (error) throw dbError(error, "Could not list audit history.");
       return (data || []).map(mapAudit);
+    },
+
+    async listAuditEventsByAction(organizationId, action, { limit = 1000 } = {}) {
+      const { data, error } = await db()
+        .from("account_directory_audit_events")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("action", action)
+        .order("created_at", { ascending: false })
+        .limit(Math.min(Number(limit) || 1000, 5000));
+      if (error) throw dbError(error, "Could not list audit history.");
+      return (data || []).map(mapAudit);
     }
   };
 }

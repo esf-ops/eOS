@@ -36,6 +36,9 @@ assert.equal(defaultState.sort, "name_asc", "default sort = name_asc");
 assert.equal(defaultState.account, null, "default account = null");
 console.log("ok: parseUrlState defaults");
 
+assert.equal(parseUrlState("?tab=status_review").tab, "status_review");
+console.log("ok: parseUrlState status_review tab");
+
 const fullState = parseUrlState("?tab=prospects&page=3&pageSize=25&search=Smith&status=active&linked=true&missingContact=true&sort=updated_desc&account=abc123");
 assert.equal(fullState.tab, "prospects");
 assert.equal(fullState.page, 3);

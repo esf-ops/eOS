@@ -454,6 +454,14 @@ export function createAccountDirectoryMemoryStore() {
         .map(clone);
     },
 
+    async listAuditEventsByAction(organizationId, action, { limit = 1000 } = {}) {
+      return auditEvents
+        .filter((e) => e.organizationId === organizationId && e.action === action)
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+        .slice(0, limit)
+        .map(clone);
+    },
+
     /** Test helper — proves dry-run path never touches store. */
     __stats() {
       return {
