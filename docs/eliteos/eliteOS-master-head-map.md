@@ -106,7 +106,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 
 ### Sales / Accounts
 
-- **Account Directory Head** (`app-account-directory/`, slug **`account_directory`**) — identity spine for customers/accounts (canonical name, contacts, locations, aliases, exact QuickBooks links) plus **Account 360** customer relationship context (staff-safe open A/R, customer quotes/sales orders/invoices/payments, available commercial history, relationship timeline, estimates with stored `account_directory_account_id`). Not a CRM replacement and **not** company Finance (P&L / Balance Sheet / cash / A/P / GL / profitability). Exact identity only — never fuzzy name joins. See `FEATURE_DECISIONS.md` §318–§319.
+- **Account Directory Head** (`app-account-directory/`, slug **`account_directory`**) — identity spine for customers/accounts (canonical name, contacts, locations, aliases, exact QuickBooks links) plus **Account 360** customer relationship context (staff-safe open A/R, customer quotes/sales orders/invoices/payments, available commercial history, relationship timeline, estimates with stored `account_directory_account_id`). Not a CRM replacement and **not** company Finance (P&L / Balance Sheet / cash / A/P / GL / profitability). Exact identity only — never fuzzy name joins. Status semantics: QuickBooks is authority for established customer vs inactive; Account Directory remains lifecycle authority. Phase 4 status reconciliation is dry-run only (`FEATURE_DECISIONS.md` §318–§320).
 - Sales Performance Head
 - Sales Account Mapping Admin Head  
 - Account Performance Head  

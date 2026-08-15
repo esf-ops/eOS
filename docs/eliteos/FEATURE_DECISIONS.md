@@ -4339,3 +4339,15 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `backend-core/src/accountDirectory/*`, `app-account-directory/`, this doc, SYSTEM_BLUEPRINT, head map. |
 | **Revisit** | Sales worker `-Backfill` if Sales facts should also hold 2025+; optional `entity_id` index; formal Sold = Sales Order policy. |
 
+### 320. Account Directory customer status reconciliation is dry-run only (2026-08-14)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-14 |
+| **Decision** | Account Directory remains lifecycle identity authority. QuickBooks is authority for whether an identity is an **established accounting customer**. Phase 4 ships a **read-only** classifier and `npm run account-directory:status:reconcile:dry-run`. No status writes, archives, deletes, merges, or auto-links. |
+| **Statuses** | Existing `active`, `prospect`, `inactive`, `needs_review`, `archived` are sufficient. Active = exact `quickbooks_desktop` root link + QB `is_active`. Inactive = exact link + QB `is_active = false`. Prospect = unlinked pre-sale only. Needs Review = suggestions/conflicts, sold/accepted estimate without exact QB link, unlinked workbook seed, hierarchy/shared-root conflicts. Archived stays archived. |
+| **Identity** | Exact UUID → active `quickbooks_desktop` link → QB root ListID only. Name rank / suggestions may set Needs Review, never Active. QB jobs (`is_job`) never establish a separate customer. Sales Order is not Sold. Quote Flow and Moraware are not UUID-linked to Account Directory yet. |
+| **Writes** | Forbidden this phase. JSON reports go to gitignored `local-imports/account-directory/status-reconciliation/`. No admin Apply UI. |
+| **Impacted** | `backend-core/src/accountDirectory/accountDirectoryStatusReconciliation*.mjs`, dry-run script, this doc, SYSTEM_BLUEPRINT, head map. |
+| **Revisit** | Controlled write phase only after reviewing the live dry-run matrix. |
+
