@@ -14,7 +14,9 @@ import {
   buildPageNumbers,
   activityLabel,
   initials,
-  ACTIVITY_LABELS
+  ACTIVITY_LABELS,
+  panelFromTab,
+  tabFromPanel
 } from "./accountDirectoryWorkspace.mjs";
 
 console.log("\naccountDirectoryWorkspace.test.mjs\n");
@@ -122,7 +124,13 @@ assert.ok(panelSerial.includes("account=abc"));
 assert.ok(panelSerial.includes("panel=insights"));
 assert.equal(parseUrlState(panelSerial).panel, "insights");
 assert.equal(parseUrlState("?account=abc").panel, null);
-console.log("ok: workspace panel deep link");
+assert.equal(panelFromTab("Overview"), "overview");
+assert.equal(panelFromTab("Relationship"), "relationship");
+assert.equal(panelFromTab("Financials"), "financials");
+assert.equal(tabFromPanel("relationship"), "Relationship");
+assert.equal(parseUrlState("?account=abc&panel=relationship").panel, "relationship");
+assert.equal(parseUrlState("?account=abc&panel=financials").panel, "financials");
+console.log("ok: Overview → Relationship → Financials URL panel mapping");
 
 // round-trip
 const rt = parseUrlState(serializeUrlState(fullState));

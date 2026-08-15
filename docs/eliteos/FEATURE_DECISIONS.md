@@ -4378,3 +4378,11 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | Account Directory head, `accountDirectoryInsights.mjs`, financial freshness, this doc, SYSTEM_BLUEPRINT, head map. |
 | **Revisit** | Lost/declined dispositions across Studio/DE; invoice–payment application linking; numeric outlook after longer coverage. |
 
+### 323. Account Directory Phase 5.1 — workspace UX + Relationship reliability (2026-08-15)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-15 |
+| **Decision** | Presentation-only pass on Account Directory / Account 360. Directory list desktop max width ~1500px. Account 360 keeps the near-full-screen overlay with identity header, sticky tab bar, and tab content layers. Relationship must never blank the workspace: nested optional relationship fields are read through a safe view-model; missing history uses a designed empty state. No lifecycle, QuickBooks linking, financial math, Status Review classifier, or migration changes. |
+| **Impacted** | Account Directory UI, Relationship view-model tests, this doc, SYSTEM_BLUEPRINT. |
+

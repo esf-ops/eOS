@@ -2,7 +2,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type HTMLAttributes,
   type ReactNode
 } from "react";
@@ -68,8 +67,8 @@ export function useViewportOnce<T extends HTMLElement>(
 }
 
 export function AccountReveal({
-  motionKey,
-  delay = 0,
+  motionKey: _motionKey,
+  delay: _delay = 0,
   className = "",
   children,
   ...props
@@ -79,14 +78,8 @@ export function AccountReveal({
   className?: string;
   children: ReactNode;
 } & HTMLAttributes<HTMLElement>) {
-  const { ref, visible } = useViewportOnce<HTMLElement>(motionKey);
   return (
-    <section
-      ref={ref}
-      className={`ad-reveal${visible ? " is-visible" : ""}${className ? ` ${className}` : ""}`}
-      style={{ "--ad-delay": `${delay}ms` } as CSSProperties}
-      {...props}
-    >
+    <section className={className} {...props}>
       {children}
     </section>
   );
@@ -95,9 +88,8 @@ export function AccountReveal({
 export function AnimatedNumber({
   value,
   format,
-  animationKey,
-  className,
-  duration = 820
+  animationKey: _animationKey,
+  className
 }: {
   value: number | null | undefined;
   format: (value: number | null | undefined) => string;
@@ -106,37 +98,10 @@ export function AnimatedNumber({
   duration?: number;
 }) {
   const exact = value == null || !Number.isFinite(Number(value)) ? null : Number(value);
-  const { ref, visible, reduced } = useViewportOnce<HTMLSpanElement>(`number:${animationKey}`);
-  const [display, setDisplay] = useState<number | null>(() =>
-    reduced || completedMotionKeys.has(`number:${animationKey}`) ? exact : exact == null ? null : 0
-  );
-
-  useEffect(() => {
-    if (exact == null) {
-      setDisplay(null);
-      return;
-    }
-    if (!visible || reduced) {
-      if (visible || reduced) setDisplay(exact);
-      return;
-    }
-    let frame = 0;
-    let start = 0;
-    const tick = (time: number) => {
-      if (!start) start = time;
-      const progress = Math.min(1, (time - start) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(progress === 1 ? exact : exact * eased);
-      if (progress < 1) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [duration, exact, reduced, visible]);
-
   const finalLabel = format(exact);
   return (
-    <span ref={ref} className={className} aria-label={finalLabel}>
-      <span aria-hidden="true">{format(display)}</span>
+    <span className={className} aria-label={finalLabel}>
+      {finalLabel}
     </span>
   );
 }

@@ -60,7 +60,12 @@ export function ContactsMaintain({
           {error}
         </div>
       ) : null}
-      {!active.length ? <p className="muted">No active contacts on file.</p> : null}
+      {!active.length ? (
+        <div className="ad-empty-state">
+          <h3>No active contacts</h3>
+          <p>Add a contact to keep estimating and collections conversations attached to this account.</p>
+        </div>
+      ) : null}
       <ul className="ad-card-list">
         {active.map((c) => (
           <li key={c.id} className="ad-person-card">
@@ -257,7 +262,12 @@ export function LocationsMaintain({
           {error}
         </div>
       ) : null}
-      {!active.length ? <p className="muted">No active locations on file.</p> : null}
+      {!active.length ? (
+        <div className="ad-empty-state">
+          <h3>No active locations</h3>
+          <p>Add a billing, shipping, or account location so this customer has a governed address on file.</p>
+        </div>
+      ) : null}
       <ul className="ad-card-list">
         {active.map((l) => (
           <li key={l.id} className="ad-person-card">
@@ -417,41 +427,71 @@ export function ConnectionsWithIdentity({
 }) {
   return (
     <div className="ad-connections">
-      <h3>Connections</h3>
-      {!links?.length ? <p className="muted">No external links on file.</p> : null}
-      <ul className="ad-card-list">
-        {(links || []).map((link) => (
-          <li key={link.id} className="ad-person-card">
-            <strong>{link.system || "External system"}</strong>
-            <p className="muted">
-              {[link.isActive === false ? "Inactive" : "Linked", link.externalDisplayName].filter(Boolean).join(" · ")}
-            </p>
-          </li>
-        ))}
-      </ul>
-      <h3>Identity aliases</h3>
-      {!aliases?.length ? <p className="muted">No aliases on file.</p> : null}
-      <ul className="ad-card-list">
-        {(aliases || []).map((a) => (
-          <li key={a.id} className="ad-person-card">
-            <strong>{a.alias}</strong>
-            {a.source ? <p className="muted">Source: {a.source}</p> : null}
-          </li>
-        ))}
-      </ul>
-      <h3>Directory activity</h3>
-      {!auditHistory?.length ? <p className="muted">No directory activity yet.</p> : null}
-      <ol className="activity-list" aria-label="Account activity">
-        {(auditHistory || []).map((entry) => (
-          <li key={entry.id} className="activity-item">
-            <span className="activity-dot" aria-hidden="true" />
-            <div>
-              <div className="activity-label">{activityLabel(entry.action)}</div>
-              <div className="activity-meta">{[entry.at, entry.actor, entry.detail].filter(Boolean).join(" · ")}</div>
-            </div>
-          </li>
-        ))}
-      </ol>
+      <section className="ad-section">
+        <header className="ad-section-head">
+          <p className="ad-kicker">QuickBooks</p>
+          <h3>Linkage</h3>
+        </header>
+        {!links?.length ? (
+          <div className="ad-empty-state">
+            <p>No QuickBooks or external links on file for this account.</p>
+          </div>
+        ) : (
+          <ul className="ad-card-list">
+            {(links || []).map((link) => (
+              <li key={link.id} className="ad-person-card">
+                <strong>{link.system || "External system"}</strong>
+                <p className="muted">
+                  {[link.isActive === false ? "Inactive" : "Linked", link.externalDisplayName].filter(Boolean).join(" · ")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="ad-section">
+        <header className="ad-section-head">
+          <p className="ad-kicker">Identity</p>
+          <h3>Aliases</h3>
+        </header>
+        {!aliases?.length ? (
+          <div className="ad-empty-state">
+            <p>No aliases on file.</p>
+          </div>
+        ) : (
+          <ul className="ad-card-list">
+            {(aliases || []).map((a) => (
+              <li key={a.id} className="ad-person-card">
+                <strong>{a.alias}</strong>
+                {a.source ? <p className="muted">Source: {a.source}</p> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="ad-section">
+        <header className="ad-section-head">
+          <p className="ad-kicker">Audit</p>
+          <h3>Directory activity</h3>
+        </header>
+        {!auditHistory?.length ? (
+          <div className="ad-empty-state">
+            <p>No directory activity recorded yet.</p>
+          </div>
+        ) : (
+          <ol className="activity-list" aria-label="Account activity">
+            {(auditHistory || []).map((entry) => (
+              <li key={entry.id} className="activity-item">
+                <span className="activity-dot" aria-hidden="true" />
+                <div>
+                  <div className="activity-label">{activityLabel(entry.action)}</div>
+                  <div className="activity-meta">{[entry.at, entry.actor, entry.detail].filter(Boolean).join(" · ")}</div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
     </div>
   );
 }

@@ -1,0 +1,138 @@
+/**
+ * Relationship tab regression: missing/partial payloads must not crash Account 360.
+ * Run: node app-account-directory/src/lib/accountDirectoryRelationshipUi.test.mjs
+ */
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  buildRelationshipView,
+  formatWhen,
+  COMMERCIAL_EMPTY,
+  RELATIONSHIP_EMPTY_TIMELINE
+} from "./accountDirectoryRelationshipUi.mjs";
+import { panelFromTab, parseUrlState, serializeUrlState, tabFromPanel } from "./accountDirectoryWorkspace.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const panels = readFileSync(join(here, "../ui/Account360Panels.tsx"), "utf8");
+const app = readFileSync(join(here, "../AccountDirectoryApp.tsx"), "utf8");
+
+console.log("\naccountDirectoryRelationshipUi.test.mjs\n");
+
+assert.ok(formatWhen("2026-01-15"), "formatWhen formats ISO dates");
+assert.equal(formatWhen(null), null);
+assert.equal(formatWhen(""), null);
+assert.ok(panels.includes("buildRelationshipView"), "Relationship panel uses the safe view-model");
+assert.ok(panels.includes("formatWhen"), "Relationship panel formats dates via formatWhen");
+assert.equal(panels.includes("relationship?.estimates.internal"), false, "must not unguard estimates.internal");
+assert.equal(panels.includes("relationship?.jobs.notes"), false, "must not unguard jobs.notes");
+assert.ok(panels.includes(RELATIONSHIP_EMPTY_TIMELINE) || panels.includes("emptyCopy"), "designed empty timeline copy");
+assert.ok(panels.includes("timelineRecencyLabel"), "timeline recency is labeled separately");
+assert.ok(panels.includes("commercialRecencyLabel"), "commercial recency is labeled separately");
+const relChunk = panels.slice(panels.indexOf("export function RelationshipWorkspace"));
+assert.equal(relChunk.includes("<RelationshipHealthPanel"), false, "Relationship tab must not duplicate health panel");
+assert.ok(app.includes("profile-more"), "secondary header actions use More overflow");
+assert.ok(app.includes("+ Alias") && app.includes("Link QB") && app.includes("Archive"), "More menu preserves Alias, Link QB, Archive");
+console.log("ok: Relationship source no longer accesses unguarded nested fields");
+
+assert.doesNotThrow(() => buildRelationshipView(null, null));
+assert.doesNotThrow(() => buildRelationshipView(undefined, undefined));
+const missing = buildRelationshipView(null, null);
+assert.equal(missing.emptyTimeline, true);
+assert.equal(missing.emptyCopy, RELATIONSHIP_EMPTY_TIMELINE);
+assert.equal(missing.internal.hasItems, false);
+assert.equal(missing.studio.hasItems, false);
+assert.equal(missing.signals.length, 0);
+assert.ok(missing.jobsNotes);
+console.log("ok: missing relationship data does not crash");
+
+const emptyTimelineWithCommercial = buildRelationshipView(
+  {
+    estimates: {
+      internal: {
+        state: "available",
+        items: [{ quote_number: "Q-1", status: "draft", updated_at: "2026-08-15" }]
+      }
+    }
+  },
+  { items: [] },
+  { lastInvoiceDate: "2026-08-04", lastPaymentDate: "2026-07-31" }
+);
+assert.equal(emptyTimelineWithCommercial.emptyTimeline, true);
+assert.equal(emptyTimelineWithCommercial.timelineRecencyLabel, RELATIONSHIP_EMPTY_TIMELINE);
+assert.match(emptyTimelineWithCommercial.commercialRecencyLabel, /^Most recent commercial activity: /);
+assert.ok(emptyTimelineWithCommercial.commercialRecencyLabel.includes(formatWhen("2026-08-15")));
+assert.equal(emptyTimelineWithCommercial.timelineItems.length, 0, "must not synthesize timeline events from invoices/estimates");
+console.log("ok: empty timeline + existing commercial activity stays distinct");
+
+const emptyBoth = buildRelationshipView(null, { items: [] }, {});
+assert.equal(emptyBoth.timelineRecencyLabel, RELATIONSHIP_EMPTY_TIMELINE);
+assert.equal(emptyBoth.commercialRecencyLabel, COMMERCIAL_EMPTY);
+console.log("ok: empty timeline + no commercial activity");
+
+const partial = buildRelationshipView(
+  { health: { label: "Watch" }, estimates: {}, jobs: null },
+  { items: [{ id: "e1", at: "not-a-date", title: "Linked" }] }
+);
+assert.equal(partial.healthLabel, "Watch");
+assert.equal(partial.signals.length, 0);
+assert.equal(partial.internal.items.length, 0);
+assert.equal(partial.emptyTimeline, false);
+assert.ok(partial.timelineItems[0].title);
+assert.doesNotThrow(() => formatWhen(partial.timelineItems[0].at));
+console.log("ok: malformed/partial optional relationship data does not crash");
+
+const withData = buildRelationshipView(
+  {
+    health: { label: "Healthy", signals: [{ code: "ok", label: "OK", detail: "Fine", severity: "watch", target: "Overview" }] },
+    estimates: {
+      internal: { state: "available", items: [{ quote_number: "Q-1", status: "open", amount: 10, updated_at: "2026-02-01" }] },
+      studio: { state: "unavailable", items: [], notes: "No studio estimates." }
+    },
+    jobs: { notes: "Jobs unavailable." }
+  },
+  { items: [{ id: "t1", at: "2026-03-01T12:00:00Z", title: "Invoice", source: "QuickBooks" }] },
+  { primaryContact: "Pat", qbState: "QB Linked" }
+);
+assert.equal(withData.internal.hasItems, true);
+assert.equal(withData.studio.hasItems, false);
+assert.equal(withData.signals.length, 1);
+assert.equal(withData.primaryContact, "Pat");
+assert.ok(withData.timelineRecencyLabel);
+assert.notEqual(withData.timelineRecencyLabel, RELATIONSHIP_EMPTY_TIMELINE);
+assert.match(withData.commercialRecencyLabel, /Most recent commercial activity/);
+console.log("ok: Relationship tab renders governed data when present");
+
+const sequence = ["Overview", "Relationship", "Financials"].map((tab) => panelFromTab(tab));
+assert.deepEqual(sequence, ["overview", "relationship", "financials"]);
+assert.equal(tabFromPanel("relationship"), "Relationship");
+assert.equal(tabFromPanel("financials"), "Financials");
+assert.ok(app.includes('detailTab === "Relationship"'));
+assert.ok(app.includes('detailTab === "Financials"'));
+assert.ok(app.includes("changeWorkspaceTab"));
+console.log("ok: Overview → Relationship → Financials panel routing");
+
+const url = serializeUrlState({
+  tab: "accounts",
+  page: 1,
+  pageSize: 50,
+  search: "",
+  status: "",
+  linked: "",
+  missingContact: "",
+  missingLocation: "",
+  qbEnrichment: "",
+  intelligence: "",
+  sort: "name_asc",
+  account: "acct-1",
+  panel: "relationship"
+});
+assert.ok(url.includes("account=acct-1"));
+assert.ok(url.includes("panel=relationship"));
+assert.equal(parseUrlState(url).panel, "relationship");
+assert.equal(parseUrlState(url).account, "acct-1");
+assert.equal(parseUrlState("?account=acct-1&panel=financials").panel, "financials");
+console.log("ok: URL panel state remains correct for Relationship");
+
+console.log("\nAll Relationship UI regression checks passed.\n");

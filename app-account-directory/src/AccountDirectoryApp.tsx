@@ -20,13 +20,12 @@ import { getSupabase } from "./lib/supabase";
 import {
   FinancialsPanel,
   Overview360,
-  RelationshipHealthPanel,
   RelationshipWorkspace,
   loadRelationship
 } from "./ui/Account360Panels";
 import { ConnectionsWithIdentity, ContactsMaintain, LocationsMaintain } from "./ui/AccountMaintain";
 import { InsightsPanel, OverviewInsightStrip } from "./ui/AccountInsights";
-import { StatusReviewSurface } from "./ui/AccountStatusReview";
+import { WorkspaceTabBoundary } from "./ui/WorkspaceTabBoundary";
 import type {
   AccountDetail,
   AccountDirectoryPermissions,
@@ -1239,7 +1238,7 @@ export default function AccountDirectoryApp() {
                                   </div>
                                 </div>
                               </td>
-                              <td>
+                              <td className="ad-num">
                                 {item.financialIntel?.openAr != null ? (
                                   <span className={item.financialIntel.overdue ? "ad-overdue" : undefined}>
                                     {formatMoney(item.financialIntel.openAr)}
@@ -1540,24 +1539,35 @@ function SummaryStrip({
 
   return (
     <div className="summary-strip" role="list" aria-label="Account directory overview">
-      {items.map((item, idx) => {
-        const active = isSummaryCardActive(urlState, item.key);
-        return (
-          <React.Fragment key={item.key}>
-            {idx === 5 ? <div className="summary-sep" aria-hidden="true" /> : null}
-            <button
-              type="button"
-              className={active ? "summary-item summary-item-active" : "summary-item"}
-              role="listitem"
-              aria-pressed={active}
-              onClick={() => onApplyCard(item.key)}
-            >
-              <span className="summary-count">{item.count.toLocaleString()}</span>
-              <span className="summary-label">{item.label}</span>
-            </button>
-          </React.Fragment>
-        );
-      })}
+      {[
+        { group: "Total", keys: ["total"] },
+        { group: "Lifecycle", keys: ["active", "prospects", "needsReview", "archived"] },
+        { group: "QuickBooks", keys: ["qbLinked", "qbSuggested", "qbNeedsReview"] },
+        { group: "Completeness", keys: ["noContact", "noLocation"] }
+      ].map((group, gIdx) => (
+        <div key={group.group} className="summary-group" role="group" aria-label={group.group}>
+          {gIdx > 0 ? <div className="summary-sep" aria-hidden="true" /> : null}
+          <span className="summary-group-label">{group.group}</span>
+          {group.keys.map((key) => {
+            const item = items.find((row) => row.key === key);
+            if (!item) return null;
+            const active = isSummaryCardActive(urlState, item.key);
+            return (
+              <button
+                key={item.key}
+                type="button"
+                className={active ? "summary-item summary-item-active" : "summary-item"}
+                role="listitem"
+                aria-pressed={active}
+                onClick={() => onApplyCard(item.key)}
+              >
+                <span className="summary-count">{item.count.toLocaleString()}</span>
+                <span className="summary-label">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -1748,7 +1758,7 @@ function ProfilePanel({
   }, [onClose]);
 
   useEffect(() => {
-    if (!["Overview", "Financials"].includes(detailTab)) return;
+    if (!["Overview", "Financials", "Relationship"].includes(detailTab)) return;
     if (!sessionToken || !accountId) return;
 
     let cancelled = false;
@@ -1818,65 +1828,88 @@ function ProfilePanel({
               </div>
             ) : null}
             {detail ? (
-              <p className="profile-subline muted">
+              <p className="profile-subline">
                 {[locationLine !== "—" ? locationLine : null, detail.primaryContact, financials?.paymentTerms]
                   .filter(Boolean)
                   .join(" · ")}
               </p>
             ) : null}
           </div>
-          <button ref={closeBtnRef} type="button" className="profile-close" onClick={onClose} aria-label="Close account workspace">
-            ✕ Close
-          </button>
-        </div>
-
-        {/* Action buttons */}
-        {detail ? (
-          <div className="profile-actions">
-            {permissions.canEdit ? (
-              <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}>
-                Edit
-              </button>
+          <div className="profile-head-tools">
+            {detail ? (
+              <div className="profile-actions">
+                {permissions.canEdit ? (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}>
+                    Edit
+                  </button>
+                ) : null}
+                {permissions.canEdit ? (
+                  <>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={onAddContact}>
+                      + Contact
+                    </button>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={onAddLocation}>
+                      + Location
+                    </button>
+                  </>
+                ) : null}
+                <details
+                  className="profile-more"
+                  onToggle={(event) => {
+                    const el = event.currentTarget;
+                    if (el.open) el.setAttribute("data-ad-child-modal", "true");
+                    else el.removeAttribute("data-ad-child-modal");
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    const el = event.currentTarget;
+                    if (!el.open) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    el.open = false;
+                    el.removeAttribute("data-ad-child-modal");
+                  }}
+                >
+                  <summary className="btn btn-ghost btn-sm">More</summary>
+                  <div className="profile-more-menu" role="group" aria-label="More account actions">
+                    {permissions.canEdit ? (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={onAddAlias}>
+                        + Alias
+                      </button>
+                    ) : null}
+                    {permissions.canLinkQuickBooks ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={formBusy}
+                        onClick={onLinkQb}
+                      >
+                        Link QB
+                      </button>
+                    ) : (
+                      <span className="chip chip-muted" title="You do not have permission to link QuickBooks">
+                        QuickBooks restricted
+                      </span>
+                    )}
+                    {activeTab === "archived" && permissions.canRestore ? (
+                      <button type="button" className="btn btn-primary btn-sm" disabled={formBusy} onClick={onRestore}>
+                        Restore
+                      </button>
+                    ) : null}
+                    {activeTab !== "archived" && permissions.canArchive ? (
+                      <button type="button" className="btn btn-ghost btn-sm profile-archive" onClick={onArchive}>
+                        Archive
+                      </button>
+                    ) : null}
+                  </div>
+                </details>
+              </div>
             ) : null}
-            {permissions.canEdit ? (
-              <>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={onAddContact}>
-                  + Contact
-                </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={onAddLocation}>
-                  + Location
-                </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={onAddAlias}>
-                  + Alias
-                </button>
-              </>
-            ) : null}
-            {permissions.canLinkQuickBooks ? (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                disabled={formBusy}
-                onClick={onLinkQb}
-              >
-                Link QB
-              </button>
-            ) : (
-              <span className="chip chip-muted" title="You do not have permission to link QuickBooks">
-                QuickBooks restricted
-              </span>
-            )}
-            {activeTab === "archived" && permissions.canRestore ? (
-              <button type="button" className="btn btn-primary btn-sm" disabled={formBusy} onClick={onRestore}>
-                Restore
-              </button>
-            ) : null}
-            {activeTab !== "archived" && permissions.canArchive ? (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}>
-                Archive
-              </button>
-            ) : null}
+            <button ref={closeBtnRef} type="button" className="profile-close" onClick={onClose} aria-label="Close account workspace">
+              ✕ Close
+            </button>
           </div>
-        ) : null}
+        </div>
 
         {/* Profile tabs */}
         <nav className="profile-tabs" aria-label="Profile sections">
@@ -1924,11 +1957,11 @@ function ProfilePanel({
         {detail && !detailBusy ? (
           <>
             {detailTab === "Overview" ? (
-              <>
-                <DataHealth detail={detail} />
+              <WorkspaceTabBoundary panel="Overview">
                 <Overview360
                   detail={detail}
                   financials={financials}
+                  relationship={relationship}
                   busy={financialsBusy}
                   onOpenTab={(tab) => onTabChange(tab as DetailTab)}
                   insightStrip={
@@ -1943,14 +1976,11 @@ function ProfilePanel({
                     />
                   }
                 />
-                <RelationshipHealthPanel
-                  relationship={relationship}
-                  onOpenTab={(tab) => onTabChange(tab as DetailTab)}
-                />
-              </>
+              </WorkspaceTabBoundary>
             ) : null}
 
             {detailTab === "Financials" ? (
+              <WorkspaceTabBoundary panel="Financials">
               <FinancialsPanel
                 financials={financials}
                 busy={financialsBusy}
@@ -1973,18 +2003,34 @@ function ProfilePanel({
                   }
                 }}
               />
+              </WorkspaceTabBoundary>
             ) : null}
 
             {detailTab === "Relationship" ? (
+              <WorkspaceTabBoundary panel="Relationship">
               <RelationshipWorkspace
+                key={accountId}
                 sessionToken={sessionToken}
                 accountId={accountId}
                 relationship={relationship}
                 onOpenTab={(tab) => onTabChange(tab as DetailTab)}
+                context={{
+                  primaryContact: detail.primaryContact,
+                  primaryLocation: formatCityState(detail.city, detail.state),
+                  qbState: detail.quickbooksLinked ? "QB Linked" : "QB not linked",
+                  lastInvoice: financials?.lastInvoice?.date
+                    ? `${financials.lastInvoice.date}${financials.lastInvoice.referenceNumber ? ` · ${financials.lastInvoice.referenceNumber}` : ""}`
+                    : null,
+                  lastInvoiceDate: financials?.lastInvoice?.date || null,
+                  lastPayment: financials?.lastPayment?.date ? financials.lastPayment.date : null,
+                  lastPaymentDate: financials?.lastPayment?.date || null
+                }}
               />
+              </WorkspaceTabBoundary>
             ) : null}
 
             {detailTab === "Contacts" ? (
+              <WorkspaceTabBoundary panel="Contacts">
               <ContactsMaintain
                 sessionToken={sessionToken}
                 accountId={accountId}
@@ -1993,9 +2039,11 @@ function ProfilePanel({
                 onChanged={onDetailChanged}
                 onAdd={onAddContact}
               />
+              </WorkspaceTabBoundary>
             ) : null}
 
             {detailTab === "Locations" ? (
+              <WorkspaceTabBoundary panel="Locations">
               <LocationsMaintain
                 sessionToken={sessionToken}
                 accountId={accountId}
@@ -2004,87 +2052,33 @@ function ProfilePanel({
                 onChanged={onDetailChanged}
                 onAdd={onAddLocation}
               />
+              </WorkspaceTabBoundary>
             ) : null}
 
             {detailTab === "Connections" ? (
+              <WorkspaceTabBoundary panel="Connections">
               <ConnectionsWithIdentity
                 links={detail.externalLinks}
                 aliases={detail.aliases}
                 auditHistory={detail.auditHistory}
               />
+              </WorkspaceTabBoundary>
             ) : null}
 
             {detailTab === "Insights" ? (
+              <WorkspaceTabBoundary panel="Insights">
               <InsightsPanel
                 sessionToken={sessionToken}
                 accountId={accountId}
                 pendingInsightId={pendingInsightId}
                 onPendingConsumed={() => setPendingInsightId(null)}
               />
+              </WorkspaceTabBoundary>
             ) : null}
           </>
         ) : null}
       </div>
     </div>
     </div>
-  );
-}
-
-
-function DataHealth({ detail }: { detail: AccountDetail }) {
-  const hasPrimaryContact =
-    detail.hasPrimaryContact != null
-      ? detail.hasPrimaryContact
-      : Boolean(detail.contacts?.some((c) => c.isPrimary) || detail.primaryContact);
-  const hasPrimaryLocation =
-    detail.hasPrimaryLocation != null
-      ? detail.hasPrimaryLocation
-      : Boolean(detail.locations?.some((l) => l.isPrimary) || detail.city);
-  const isQbLinked = Boolean(detail.quickbooksLinked);
-
-  return (
-    <div className="data-health">
-      <p className="data-health-title">Data health</p>
-      <div className="data-health-row">
-        <span className={`health-item ${hasPrimaryContact ? "health-ok" : "health-warn"}`}>
-          {hasPrimaryContact ? "✓" : "✗"} Primary contact
-        </span>
-        <span className={`health-item ${hasPrimaryLocation ? "health-ok" : "health-warn"}`}>
-          {hasPrimaryLocation ? "✓" : "✗"} Primary location
-        </span>
-        <span className={`health-item ${isQbLinked ? "health-ok" : "health-warn"}`}>
-          {isQbLinked ? "✓" : "✗"} QB linked
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function DetailList({
-  empty,
-  items
-}: {
-  empty: string;
-  items: { id: string; title: string; meta?: string; href?: string; badge?: string }[];
-}) {
-  if (!items.length) return <p className="muted">{empty}</p>;
-  return (
-    <ul className="detail-list">
-      {items.map((item) => (
-        <li key={item.id} className="detail-list-item">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            {item.href ? (
-              <a href={item.href} target="_blank" rel="noreferrer" className="detail-list-title">
-                {item.title}
-              </a>
-            ) : (
-              <span className="detail-list-title">{item.title}</span>
-            )}
-            {item.badge ? <span className="chip chip-muted" style={{ fontSize: "0.68rem" }}>{item.badge}</span> : null}
-          </div>
-          {item.meta ? <span className="detail-list-meta">{item.meta}</span> : null}
-        </li>
-      ))}
-    </ul>
   );
 }

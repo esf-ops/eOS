@@ -382,13 +382,13 @@ export type AccountRelationship = {
     state?: string;
     label?: string;
     reason?: string | null;
-    signals: AccountHealthSignal[];
+    signals?: AccountHealthSignal[];
   };
-  estimates: {
-    internal: { state: string; notes?: string | null; items: Array<{ quote_number?: string | null; status?: string | null; amount?: number | null; updated_at?: string | null }> };
-    studio: { state: string; notes?: string | null; items: Array<{ name?: string | null; status?: string | null; updated_at?: string | null }> };
+  estimates?: {
+    internal?: { state?: string; notes?: string | null; items?: Array<{ quote_number?: string | null; status?: string | null; amount?: number | null; updated_at?: string | null }> };
+    studio?: { state?: string; notes?: string | null; items?: Array<{ name?: string | null; status?: string | null; updated_at?: string | null }> };
   };
-  jobs: { state: string; notes?: string | null };
+  jobs?: { state?: string; notes?: string | null };
   quoteFlow?: { state: string; notes?: string | null };
 };
 

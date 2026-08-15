@@ -94,7 +94,9 @@ assert.ok(app.includes("ProfilePanel"), "ProfilePanel component present");
 assert.ok(app.includes("account-workspace"), "Account Workspace overlay present");
 assert.ok(css.includes("account-workspace"), "workspace styles present");
 assert.equal(css.includes("minmax(340px, 440px)"), false, "must not keep the narrow 360 drawer");
-assert.ok(app.includes("Data health"), "data health section present");
+assert.ok(panels.includes("Account health") || app.includes("Data health"), "account health section present");
+assert.ok(app.includes("WorkspaceTabBoundary"), "tab error boundary present");
+assert.ok(app.includes("summary-group"), "grouped summary strip present");
 assert.ok(app.includes('"Financials"') || app.includes("Financials"), "Financials profile tab present");
 assert.ok(app.includes('"Insights"') || app.includes("Insights"), "Insights tab present");
 assert.ok(app.includes("FinancialsPanel") || app.includes("QuickBooks Financials") || panels.includes("FinancialsPanel"), "Financials panel present");
@@ -123,7 +125,13 @@ assert.ok(workspace.includes("export function parseUrlState"), "parseUrlState ex
 assert.ok(workspace.includes("export function formatResultRange"), "formatResultRange exported");
 assert.ok(workspace.includes("export function activityLabel"), "activityLabel exported");
 assert.ok(workspace.includes("export function initials"), "initials exported");
-console.log("ok: premium workspace features present (summary strip, pagination, URL state, profile panel)");
+assert.ok(css.includes("max-width: 1500px") || css.includes("max-width:1480px") || css.includes("max-width: 1480px"), "directory list uses wide desktop shell");
+assert.ok(css.includes("ad-freshness-strip"), "source-specific freshness strip");
+assert.ok(css.includes("ad-empty-state"), "designed empty states");
+assert.ok(panels.includes("buildRelationshipView"), "Relationship uses safe view-model");
+assert.ok(panels.includes("No recorded timeline activity") || panels.includes("emptyCopy"), "Relationship empty copy");
+assert.ok(panels.includes("Most recent commercial activity") || panels.includes("commercialRecencyLabel"));
+console.log("ok: Phase 5.1 workspace UX + Relationship reliability");
 
 // ── Design tokens ─────────────────────────────────────────────────────────
 assert.ok(css.includes("IBM Plex Sans"), "IBM Plex Sans font present");

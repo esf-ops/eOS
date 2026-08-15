@@ -21,8 +21,13 @@ const SERIES: Array<{ key: SeriesKey; label: string; color: string }> = [
 
 function monthLabel(month: string): string {
   if (!/^\d{4}-\d{2}$/.test(month)) return month;
-  const [y, m] = month.split("-");
-  return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]} ${y}`;
+  const y = month.slice(0, 4);
+  return `${axisMonthLabel(month)} ${y}`;
+}
+
+function axisMonthLabel(month: string): string {
+  if (!/^\d{4}-\d{2}$/.test(month)) return month;
+  return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(month.slice(5, 7)) - 1];
 }
 
 export function CustomerTrendChart({
@@ -68,7 +73,7 @@ export function CustomerTrendChart({
   const yFor = (value: number) => pad.t + innerH - (value / max) * innerH;
 
   return (
-    <div ref={ref} className="ad-chart">
+    <div ref={ref} className="ad-chart ad-section">
       <div className="ad-chart-toggles" role="group" aria-label="Trend series">
         {SERIES.map((series) => (
           <button
@@ -83,6 +88,17 @@ export function CustomerTrendChart({
         ))}
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Customer monthly financial trend">
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+          <line
+            key={t}
+            x1={pad.l}
+            x2={width - pad.r}
+            y1={pad.t + innerH * (1 - t)}
+            y2={pad.t + innerH * (1 - t)}
+            stroke="rgba(11,26,51,0.08)"
+            strokeWidth="1"
+          />
+        ))}
         {SERIES.filter((series) => enabled[series.key]).map((series) => {
           const d = points
             .map((point, i) => `${i === 0 ? "M" : "L"} ${xFor(i)} ${yFor(Number(point[series.key] || 0))}`)
@@ -118,7 +134,7 @@ export function CustomerTrendChart({
         )}
         {points.map((point, i) => (
           <text key={point.month} x={xFor(i)} y={height - 8} textAnchor="middle" className="ad-chart-label">
-            {point.month.slice(5)}
+            {axisMonthLabel(point.month)}
           </text>
         ))}
       </svg>
@@ -129,7 +145,7 @@ export function CustomerTrendChart({
           <span>{formatMoney(hover.amount)}</span>
         </div>
       ) : (
-        <p className="muted">Hover a point for month, metric, and exact amount. Months with no activity show $0 inside available history.</p>
+        <p className="ad-footnote">Hover a point for month, metric, and exact amount. No interpolation — missing months in the window are not invented.</p>
       )}
       <details className="ad-chart-table">
         <summary>Tabular monthly amounts</summary>

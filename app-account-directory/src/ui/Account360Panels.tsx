@@ -18,6 +18,10 @@ import type {
   AccountTimelineResponse,
   ExternalLink
 } from "../lib/types";
+import {
+  buildRelationshipView,
+  formatWhen
+} from "../lib/accountDirectoryRelationshipUi";
 import { CustomerTrendChart } from "./AccountCharts";
 import { formatCount, formatMoney } from "./accountFormat";
 import { AccountReveal, AnimatedNumber } from "./accountMotion";
@@ -53,7 +57,7 @@ function Metric({
 }) {
   const available = value != null && Number.isFinite(Number(value));
   return (
-    <article className="ad-metric-card">
+    <article className="ad-metric-card ad-metric-compact">
       <p className="ad-kicker">{label}</p>
       {available ? (
         <AnimatedNumber
@@ -69,84 +73,67 @@ function Metric({
   );
 }
 
+function completenessLine(detail: AccountDetail): string {
+  return (
+    [
+      detail.status === "needs_review" ? "Needs review" : null,
+      detail.hasPrimaryContact === false ? "Missing primary contact" : null,
+      detail.hasPrimaryLocation === false ? "Missing primary location" : null
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Ready"
+  );
+}
+
 export function Overview360({
   detail,
   financials,
   busy,
   onOpenTab,
-  insightStrip
+  insightStrip,
+  relationship
 }: {
   detail: AccountDetail;
   financials: AccountFinancials | null;
   busy: boolean;
   onOpenTab: (tab: string) => void;
   insightStrip?: ReactNode;
+  relationship?: AccountRelationship | null;
 }) {
   const s = financials?.summary;
   const showMoney = financials?.status === "ok" || financials?.status === "stale";
+  const history = financials?.customerHistory;
   return (
-    <div className="ad-360">
-      <AccountReveal motionKey="ad-identity" className="ad-identity">
-        <div>
-          <p className="ad-kicker">Account</p>
-          <h2>{detail.displayName ?? detail.name}</h2>
-          <p className="muted">
-            {[detail.city, detail.state].filter(Boolean).join(", ") || "Location not on file"}
-          </p>
-        </div>
-        <dl className="ad-identity-meta">
-          <div>
-            <dt>Status</dt>
-            <dd>
-              {detail.status === "needs_review"
-                ? "Needs review"
-                : String(detail.status || "—")
-                    .replace(/_/g, " ")
-                    .replace(/\b\w/g, (c) => c.toUpperCase())}
-            </dd>
-          </div>
-          <div>
-            <dt>Primary contact</dt>
-            <dd>{detail.primaryContact || "—"}</dd>
-          </div>
-          <div>
-            <dt>Phone</dt>
-            <dd>
-              {detail.primaryPhone ? <a href={`tel:${detail.primaryPhone}`}>{detail.primaryPhone}</a> : "—"}
-            </dd>
-          </div>
-          <div>
-            <dt>Email</dt>
-            <dd>
-              {detail.primaryEmail ? <a href={`mailto:${detail.primaryEmail}`}>{detail.primaryEmail}</a> : "—"}
-            </dd>
-          </div>
-          <div>
-            <dt>QuickBooks</dt>
-            <dd>{detail.qbEnrichment?.label || (detail.quickbooksLinked ? "Linked" : "Not linked")}</dd>
-          </div>
-          <div>
-            <dt>Completeness</dt>
-            <dd>
-              {[
-                detail.status === "needs_review" ? "Needs review" : null,
-                detail.hasPrimaryContact === false ? "Missing primary contact" : null,
-                detail.hasPrimaryLocation === false ? "Missing primary location" : null
-              ]
-                .filter(Boolean)
-                .join(" · ") || "Ready"}
-            </dd>
-          </div>
-        </dl>
+    <div className="ad-360 ad-snapshot">
+      <AccountReveal motionKey="ad-health-row" className="ad-health-inline">
+        <p className="ad-kicker">Account health</p>
+        <ul>
+          <li>
+            <span>Primary contact</span>
+            <strong>{detail.primaryContact || "Not on file"}</strong>
+          </li>
+          <li>
+            <span>Primary location</span>
+            <strong>{[detail.city, detail.state].filter(Boolean).join(", ") || "Not on file"}</strong>
+          </li>
+          <li>
+            <span>QuickBooks</span>
+            <strong>{detail.qbEnrichment?.label || (detail.quickbooksLinked ? "Linked" : "Not linked")}</strong>
+          </li>
+          <li>
+            <span>Completeness</span>
+            <strong>{completenessLine(detail)}</strong>
+          </li>
+        </ul>
       </AccountReveal>
 
-      <AccountReveal motionKey="ad-snapshot">
+      <AccountReveal motionKey="ad-snapshot" className="ad-section">
         <header className="ad-section-head">
-          <p className="ad-kicker">Account snapshot</p>
+          <p className="ad-kicker">Customer snapshot</p>
           <h3>Who they are to us this year</h3>
         </header>
         {busy && !financials ? <p className="muted">Loading customer financials…</p> : null}
-        <div className="ad-metric-grid">
+        <div className="ad-metric-grid ad-metric-grid-dense">
           <Metric label="YTD invoiced" value={showMoney ? s?.invoicedYtd : null} animationKey="ytd-inv" />
           <Metric label="YTD collected" value={showMoney ? s?.collectedYtd : null} animationKey="ytd-col" />
           <Metric label="YTD quoted" value={showMoney ? s?.quotedYtd : null} animationKey="ytd-q" />
@@ -161,7 +148,7 @@ export function Overview360({
             count
           />
         </div>
-        <p className="muted">
+        <p className="ad-footnote">
           {[
             financials?.lastInvoice?.date ? `Last invoice ${financials.lastInvoice.date}` : null,
             financials?.lastPayment?.date ? `Last payment ${financials.lastPayment.date}` : null,
@@ -174,14 +161,36 @@ export function Overview360({
             .join(" · ") || "Customer financials appear after this account is linked to QuickBooks."}
         </p>
         {financials?.coverage?.historyLabel ? (
-          <p className="muted">{financials.coverage.historyLabel} This is available history, not a proven lifetime.</p>
+          <p className="ad-footnote">
+            {financials.coverage.historyLabel} Available history, not a proven lifetime. Collected is cash
+            timing. Sales Orders are not Sold.
+          </p>
         ) : null}
       </AccountReveal>
 
-      {showMoney && financials?.customerHistory ? (
-        <CustomerPerformance history={financials.customerHistory} financials={financials} />
-      ) : null}
-      {insightStrip}
+      <div className="ad-overview-split">
+        <div className="ad-overview-main">
+          {showMoney && history ? (
+            <CustomerPerformance history={history} financials={financials} />
+          ) : (
+            <section className="ad-section">
+              <header className="ad-section-head">
+                <p className="ad-kicker">Commercial activity</p>
+                <h3>Available history for this relationship</h3>
+              </header>
+              <p className="muted">
+                {financials?.status === "unlinked" || financials?.linked === false
+                  ? "This account is not linked to QuickBooks yet, so commercial history is unavailable — not zero."
+                  : "Commercial activity will appear here when customer history is available."}
+              </p>
+            </section>
+          )}
+        </div>
+        <aside className="ad-overview-side">
+          <RelationshipHealthPanel relationship={relationship ?? null} onOpenTab={onOpenTab} />
+          {insightStrip}
+        </aside>
+      </div>
     </div>
   );
 }
@@ -209,7 +218,7 @@ function CustomerPerformance({
     : "Prior period";
   const activity = history.commercialActivity;
   return (
-    <AccountReveal motionKey="ad-performance">
+    <AccountReveal motionKey="ad-performance" className="ad-section">
       <header className="ad-section-head">
         <p className="ad-kicker">Customer performance</p>
         <h3>Available history for this relationship</h3>
@@ -262,7 +271,7 @@ function CustomerPerformance({
           </tbody>
         </table>
       </div>
-      <p className="muted">Collected is cash timing, not a sales-performance score. Sales Orders are not labeled Sold.</p>
+      <p className="ad-footnote">Collected is cash timing, not a sales-performance score. Sales Orders are not labeled Sold. This is not a job-level conversion funnel.</p>
       {activity ? (
         <section className="ad-commercial">
           <h4 className="financials-subtitle">{activity.label || "Commercial activity"}</h4>
@@ -306,8 +315,19 @@ export function RelationshipHealthPanel({
   relationship: AccountRelationship | null;
   onOpenTab: (tab: string) => void;
 }) {
-  if (!relationship?.health) return null;
+  if (!relationship?.health) {
+    return (
+      <AccountReveal motionKey="ad-health" className="ad-health">
+        <header className="ad-section-head">
+          <p className="ad-kicker">Relationship health</p>
+          <h3>No relationship status yet</h3>
+          <p className="muted">Relationship health appears when governed collection or completeness signals exist.</p>
+        </header>
+      </AccountReveal>
+    );
+  }
   const health = relationship.health;
+  const signals = Array.isArray(health.signals) ? health.signals : [];
   return (
     <AccountReveal motionKey="ad-health" className="ad-health">
       <header className="ad-section-head">
@@ -316,14 +336,18 @@ export function RelationshipHealthPanel({
         <p className="muted">{health.reason || "No collection or completeness issues on this account."}</p>
       </header>
       <ul className="ad-signal-list">
-        {health.signals.map((signal) => (
-          <li key={signal.code}>
-            <button type="button" className={`ad-signal ad-signal-${signal.severity}`} onClick={() => onOpenTab(signal.target)}>
-              <strong>{signal.label}</strong>
-              <span>{signal.detail}</span>
-            </button>
-          </li>
-        ))}
+        {signals.length ? (
+          signals.map((signal) => (
+            <li key={signal.code || signal.label}>
+              <button type="button" className={`ad-signal ad-signal-${signal.severity || "watch"}`} onClick={() => onOpenTab(signal.target || "Overview")}>
+                <strong>{signal.label}</strong>
+                <span>{signal.detail}</span>
+              </button>
+            </li>
+          ))
+        ) : (
+          <li className="muted">No relationship signals on file for this account.</li>
+        )}
       </ul>
     </AccountReveal>
   );
@@ -429,8 +453,9 @@ export function FinancialsPanel({
     return (
       <div className="financials-panel">
         <h3 className="financials-title">Customer financials</h3>
-        <p className="financials-empty">
+        <p className="financials-empty ad-empty-state">
           This account is not linked to QuickBooks yet, so invoices, payments, and A/R are not connected.
+          Unavailable is not the same as zero.
         </p>
       </div>
     );
@@ -464,17 +489,27 @@ export function FinancialsPanel({
             .join(" · ")}
         </p>
       </div>
-      {recv ? (
-        <p className="muted">
-          Open receivables
-          {recv.asOfDate ? ` as of ${formatHumanDate(recv.asOfDate)}` : ""} · {freshnessLine(recv)}
-        </p>
-      ) : null}
-      {hist ? (
-        <p className="muted">
-          Commercial history
-          {hist.asOfDate ? ` through ${formatHumanDate(hist.asOfDate)}` : ""} · {freshnessLine(hist)}
-        </p>
+      {recv || hist ? (
+        <div className="ad-freshness-strip" aria-label="Financial freshness">
+          {recv ? (
+            <div className={`ad-freshness-item${recv.isStale ? " is-stale" : ""}`}>
+              <p className="ad-kicker">Open receivables</p>
+              <strong>
+                {recv.asOfDate ? `Snapshot ${formatHumanDate(recv.asOfDate)}` : "Snapshot date unavailable"}
+              </strong>
+              <span>{freshnessLine(recv)}</span>
+            </div>
+          ) : null}
+          {hist ? (
+            <div className={`ad-freshness-item${hist.isStale ? " is-stale" : ""}`}>
+              <p className="ad-kicker">Commercial history</p>
+              <strong>
+                {hist.asOfDate ? `Through ${formatHumanDate(hist.asOfDate)}` : "Through date unavailable"}
+              </strong>
+              <span>{freshnessLine(hist)}</span>
+            </div>
+          ) : null}
+        </div>
       ) : null}
       {(financials.warnings ?? []).map((w) => (
         <div key={w} className="banner banner-warn" role="status">
@@ -483,7 +518,7 @@ export function FinancialsPanel({
       ))}
       {showAmounts ? (
         <>
-          <div className="ad-metric-grid" aria-label="Financial summary">
+          <div className="ad-metric-grid ad-metric-grid-dense" aria-label="Financial summary">
             <Metric label="Open A/R" value={s.openAr} animationKey="fin-ar" />
             <Metric label="Overdue" value={financials.overdueBalance} animationKey="fin-od" />
             <Metric label="Open invoices" value={s.openInvoiceCount} animationKey="fin-n" count />
@@ -507,7 +542,7 @@ export function FinancialsPanel({
               .join(" · ")}
           </p>
           {financials.aging ? (
-            <section className="financials-aging" aria-label="A/R Aging">
+            <section className="ad-section financials-aging" aria-label="A/R Aging">
               <div className="financials-aging-head">
                 <h4 className="financials-subtitle">A/R Aging</h4>
                 <p className="financials-meta muted">Based on QuickBooks invoice due dates</p>
@@ -536,7 +571,7 @@ export function FinancialsPanel({
               </div>
             </section>
           ) : null}
-          <section>
+          <section className="ad-section">
             <div className="financials-aging-head">
               <h4 className="financials-subtitle">Collection status</h4>
               <p
@@ -547,7 +582,7 @@ export function FinancialsPanel({
               </p>
             </div>
           </section>
-          <section>
+          <section className="ad-section">
             <div className="ad-toolbar-row">
               <h4 className="financials-subtitle">Customer trend</h4>
               <div className="ad-period-tabs">
@@ -583,7 +618,7 @@ export function FinancialsPanel({
             ) : null}
             <p className="muted">Current open A/R is a snapshot. It is not drawn as historical balance.</p>
           </section>
-          <section>
+          <section className="ad-section">
             <h4 className="financials-subtitle">Open invoices</h4>
             {(invoices?.items || []).length ? (
               <div className="table-wrap">
@@ -605,9 +640,9 @@ export function FinancialsPanel({
                         <td>{row.invoice_date || "—"}</td>
                         <td>{row.due_date || "—"}</td>
                         <td>{row.reference_number || "—"}</td>
-                        <td>{formatMoney(row.original_amount)}</td>
-                        <td>{formatMoney(row.open_amount)}</td>
-                        <td>{row.days_overdue ?? "—"}</td>
+                        <td className="ad-num">{formatMoney(row.original_amount)}</td>
+                        <td className="ad-num">{formatMoney(row.open_amount)}</td>
+                        <td className="ad-num">{row.days_overdue ?? "—"}</td>
                         <td>{row.status}</td>
                       </tr>
                     ))}
@@ -623,7 +658,7 @@ export function FinancialsPanel({
               </button>
             ) : null}
           </section>
-          <section>
+          <section className="ad-section">
             <div className="ad-toolbar-row">
               <h4 className="financials-subtitle">Transaction history</h4>
               <div className="ad-period-tabs">
@@ -700,32 +735,188 @@ export function RelationshipWorkspace({
   sessionToken,
   accountId,
   relationship,
-  onOpenTab
+  onOpenTab,
+  context
 }: {
   sessionToken: string | null;
   accountId: string;
   relationship: AccountRelationship | null;
   onOpenTab: (tab: string) => void;
+  context?: {
+    primaryContact?: string | null;
+    primaryLocation?: string | null;
+    qbState?: string | null;
+    lastInvoice?: string | null;
+    lastInvoiceDate?: string | null;
+    lastPayment?: string | null;
+    lastPaymentDate?: string | null;
+    openOpportunity?: string | null;
+  };
 }) {
   const [family, setFamily] = useState("all");
   const [timeline, setTimeline] = useState<AccountTimelineResponse | null>(null);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
+    setTimeline(null);
+    setPage(1);
+    setFamily("all");
+  }, [accountId]);
+
+  useEffect(() => {
     if (!sessionToken) return;
+    let cancelled = false;
     void getAccountTimeline(sessionToken, accountId, { family, page, limit: 25 })
       .then((res) => {
+        if (cancelled) return;
         setTimeline((prev) =>
           page === 1 ? res : { ...res, items: [...(prev?.items || []), ...(res.items || [])] }
         );
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled && page === 1) setTimeline({ items: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [accountId, family, page, sessionToken]);
 
+  const view = buildRelationshipView(relationship, timeline, context);
+
   return (
-    <div className="ad-360">
-      <RelationshipHealthPanel relationship={relationship} onOpenTab={onOpenTab} />
-      <section>
+    <div className="ad-360 ad-relationship">
+      <section className="ad-section">
+        <header className="ad-section-head">
+          <p className="ad-kicker">Relationship summary</p>
+          <h3>{view.healthLabel}</h3>
+          <p className="muted">
+            {view.healthReason || "How active is our relationship with this customer — from governed records only."}
+          </p>
+        </header>
+        <ul className="ad-health-inline ad-health-inline-block">
+          <li>
+            <span>Relationship timeline</span>
+            <strong>{view.timelineRecencyLabel}</strong>
+          </li>
+          <li>
+            <span>Recent commercial activity</span>
+            <strong>{view.commercialRecencyLabel}</strong>
+          </li>
+          <li>
+            <span>Primary contact</span>
+            <strong>{view.primaryContact || "Not on file"}</strong>
+          </li>
+          <li>
+            <span>Primary location</span>
+            <strong>{view.primaryLocation || "Not on file"}</strong>
+          </li>
+          <li>
+            <span>QuickBooks</span>
+            <strong>{view.qbState || "Unknown"}</strong>
+          </li>
+        </ul>
+        {view.signals.length ? (
+          <ul className="ad-signal-list">
+            {view.signals.map((signal) => (
+              <li key={signal.code || signal.label}>
+                <button
+                  type="button"
+                  className={`ad-signal ad-signal-${signal.severity || "watch"}`}
+                  onClick={() => onOpenTab(signal.target || "Overview")}
+                >
+                  <strong>{signal.label}</strong>
+                  <span>{signal.detail}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      <section className="ad-section">
+        <div className="ad-toolbar-row">
+          <header className="ad-section-head">
+            <p className="ad-kicker">Recent activity</p>
+            <h3>Relationship timeline</h3>
+          </header>
+          <select
+            value={family}
+            onChange={(e) => {
+              setFamily(e.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter timeline"
+          >
+            <option value="all">All events</option>
+            <option value="directory">Directory</option>
+            <option value="quickbooks">QuickBooks</option>
+            <option value="estimate">Estimates</option>
+          </select>
+        </div>
+        {view.emptyTimeline ? (
+          <div className="ad-empty-state">
+            <p>{view.emptyCopy}</p>
+          </div>
+        ) : (
+          <ol className="activity-list" aria-label="Account relationship timeline">
+            {view.timelineItems.map((entry, i) => (
+              <li key={entry.id || `evt-${i}`} className="activity-item">
+                <span className="activity-dot" aria-hidden="true" />
+                <div>
+                  <div className="activity-label">{entry.title || entry.type || "Activity"}</div>
+                  <div className="activity-meta">
+                    {[
+                      formatWhen(entry.at),
+                      entry.source,
+                      entry.detail,
+                      entry.amount != null ? formatMoney(entry.amount) : null
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+        {timeline?.pagination?.has_more ? (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPage((p) => p + 1)}>
+            Load more
+          </button>
+        ) : null}
+      </section>
+
+      <section className="ad-section">
+        <header className="ad-section-head">
+          <p className="ad-kicker">Customer context</p>
+          <h3>Recent commercial signals</h3>
+          <p className="ad-footnote">Concise context only — full amounts live on Financials.</p>
+        </header>
+        <ul className="ad-context-list">
+          <li>
+            <span>Recent quote activity</span>
+            <strong>
+              {view.internal.hasItems
+                ? `${view.internal.items[0]?.quote_number || "Internal estimate"} · ${view.internal.items[0]?.status || ""}`
+                : view.internal.notes || "No UUID-linked quotes on file"}
+            </strong>
+          </li>
+          <li>
+            <span>Recent invoice</span>
+            <strong>{view.lastInvoice || "Not in this workspace load"}</strong>
+          </li>
+          <li>
+            <span>Recent payment</span>
+            <strong>{view.lastPayment || "Not in this workspace load"}</strong>
+          </li>
+          <li>
+            <span>Open opportunity</span>
+            <strong>{view.openOpportunity || "See Insights for open opportunity status"}</strong>
+          </li>
+        </ul>
+      </section>
+
+      <section className="ad-section">
         <header className="ad-section-head">
           <p className="ad-kicker">Estimates</p>
           <h3>Estimates linked to this account</h3>
@@ -733,9 +924,9 @@ export function RelationshipWorkspace({
         <div className="ad-split">
           <article>
             <h4>Internal estimates</h4>
-            {relationship?.estimates.internal.state === "available" && relationship.estimates.internal.items.length ? (
+            {view.internal.hasItems ? (
               <ul className="ad-plain-list">
-                {relationship.estimates.internal.items.map((item, i) => (
+                {view.internal.items.map((item, i) => (
                   <li key={`${item.quote_number}-${i}`}>
                     <strong>{item.quote_number || "Estimate"}</strong>
                     <span>
@@ -747,16 +938,14 @@ export function RelationshipWorkspace({
                 ))}
               </ul>
             ) : (
-              <p className="muted">
-                {relationship?.estimates.internal.notes || "No internal estimates linked to this account."}
-              </p>
+              <p className="muted">{view.internal.notes || "No internal estimates linked to this account."}</p>
             )}
           </article>
           <article>
             <h4>Studio estimates</h4>
-            {relationship?.estimates.studio.state === "available" && relationship.estimates.studio.items.length ? (
+            {view.studio.hasItems ? (
               <ul className="ad-plain-list">
-                {relationship.estimates.studio.items.map((item, i) => (
+                {view.studio.items.map((item, i) => (
                   <li key={`${item.name}-${i}`}>
                     <strong>{item.name || "Studio estimate"}</strong>
                     <span>{[item.status, formatWhen(item.updated_at)].filter(Boolean).join(" · ")}</span>
@@ -764,48 +953,12 @@ export function RelationshipWorkspace({
                 ))}
               </ul>
             ) : (
-              <p className="muted">{relationship?.estimates.studio.notes || "No studio estimates linked to this account."}</p>
+              <p className="muted">{view.studio.notes || "No studio estimates linked to this account."}</p>
             )}
           </article>
         </div>
-        <p className="muted">
-          {relationship?.jobs.notes || "Moraware job history is not connected to Account Directory yet."}
-        </p>
-        <p className="muted">
-          {relationship?.quoteFlow?.notes || "Quote Flow history is not connected to Account Directory yet."}
-        </p>
-      </section>
-      <section>
-        <div className="ad-toolbar-row">
-          <h3>Relationship timeline</h3>
-          <select value={family} onChange={(e) => { setFamily(e.target.value); setPage(1); }} aria-label="Filter timeline">
-            <option value="all">All events</option>
-            <option value="directory">Directory</option>
-            <option value="quickbooks">QuickBooks</option>
-            <option value="estimate">Estimates</option>
-          </select>
-        </div>
-        <ol className="activity-list" aria-label="Account relationship timeline">
-          {(timeline?.items || []).map((entry) => (
-            <li key={entry.id} className="activity-item">
-              <span className="activity-dot" aria-hidden="true" />
-              <div>
-                <div className="activity-label">{entry.title}</div>
-                <div className="activity-meta">
-                  {[formatWhen(entry.at), entry.source, entry.detail, entry.amount != null ? formatMoney(entry.amount) : null]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ol>
-        {!timeline?.items?.length ? <p className="muted">No linked relationship events yet.</p> : null}
-        {timeline?.pagination?.has_more ? (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPage((p) => p + 1)}>
-            Load more
-          </button>
-        ) : null}
+        <p className="ad-footnote">{view.jobsNotes}</p>
+        <p className="ad-footnote">{view.quoteFlowNotes}</p>
       </section>
     </div>
   );

@@ -7,7 +7,7 @@ import {
 import type { AccountInsightCard, AccountInsightEvidenceResponse, AccountInsightsResponse } from "../lib/types";
 
 function formatValue(card: AccountInsightCard): string {
-  if (card.value == null || card.value === "") return "Unavailable";
+  if (card.state === "unavailable" || card.value == null || card.value === "") return "Unavailable";
   if (card.valueType === "percent") return `${card.value}%`;
   return String(card.value);
 }
@@ -90,17 +90,33 @@ export function InsightsPanel({
           {error}
         </div>
       ) : null}
+      {!busy && !error && !(data?.cards || []).length ? (
+        <div className="ad-empty-state">
+          <h3>No insight cards yet</h3>
+          <p>Deterministic insights appear when governed estimate, QuickBooks, or relationship evidence exists for this account.</p>
+        </div>
+      ) : null}
       <div className="ad-insight-grid">
         {(data?.cards || []).map((card) => (
-          <article key={card.id} className="ad-insight-card">
+          <article
+            key={card.id}
+            className={`ad-insight-card${card.state === "unavailable" ? " is-unavailable" : ""}`}
+          >
             <p className="ad-kicker">{card.title}</p>
             <p className="ad-insight-value">{formatValue(card)}</p>
-            <p className="muted">{card.interpretation}</p>
+            <p className="ad-insight-copy">
+              {card.interpretation ||
+                (card.state === "unavailable"
+                  ? "Not enough governed evidence yet."
+                  : "See evidence for how this was calculated.")}
+            </p>
             {card.evidenceAvailable ? (
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => void openEvidence(card.id)}>
                 View evidence
               </button>
-            ) : null}
+            ) : (
+              <p className="ad-footnote">Evidence is not available for this card.</p>
+            )}
           </article>
         ))}
       </div>
