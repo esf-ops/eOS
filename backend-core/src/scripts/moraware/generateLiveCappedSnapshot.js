@@ -87,9 +87,12 @@ async function main() {
   setDefaultEnv(
     "MORAWARE_TINY_OUTPUT_FILE",
     baseline2026
-      ? "debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json"
+      ? "debug/moraware/baseline-2026/chunked/manifest.json"
       : "debug/moraware/live-capped/live-capped-moraware-snapshot.json"
   );
+  if (baseline2026) {
+    setDefaultEnv("MORAWARE_CHUNKED_OUTPUT_DIR", "debug/moraware/baseline-2026/chunked");
+  }
   if (baseline2026) {
     process.env.MORAWARE_SYNC_START_DATE = baselineRange.startDate;
     process.env.MORAWARE_SYNC_END_DATE = baselineRange.endDate;

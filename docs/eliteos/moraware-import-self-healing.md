@@ -57,7 +57,7 @@ Every time `npm run eos:moraware:run-scheduled-pipeline` starts (in live mode, n
    - `resume_group_id` / `resume_start_chunk_index`
 
 3. **If `incomplete_latest_group === true`** and `first_missing_chunk >= 2`:
-   - Check if the snapshot file (`debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json`) still exists on the worker
+   - Check if the snapshot file (`debug/moraware/baseline-2026/chunked/manifest.json`) still exists on the worker
    - **Snapshot exists** → set `MORAWARE_IMPORT_RESUME_GROUP_ID` + `MORAWARE_IMPORT_START_CHUNK_INDEX` in `process.env`, log `auto_resume_triggered`, skip generate, continue import from the first missing chunk
    - **Snapshot missing** → log `auto_resume_skipped_no_snapshot`, proceed with fresh generate + import (new group ID)
 

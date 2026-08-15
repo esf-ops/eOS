@@ -3,8 +3,12 @@ import "dotenv/config";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-const BATCH_KEYS = ["accounts", "jobs", "job_activities", "job_forms", "job_files", "assignees"];
+import { BATCH_KEYS as CANONICAL_BATCH_KEYS, isChunkedManifest } from "./morawareSnapshotCanonical.js";
+import { printOperatorSummary } from "./generateChunkedFoundationSnapshot.js";
+
+const BATCH_KEYS = CANONICAL_BATCH_KEYS;
 const DEFAULT_MAX_PAYLOAD_BYTES = 3_500_000;
 const LARGE_SNAPSHOT_THRESHOLDS = Object.freeze({
   fileBytes: 25 * 1024 * 1024,
@@ -27,10 +31,8 @@ function backendBase() {
     .replace(/\/api$/i, "");
 }
 
-function redact(raw) {
-  const s = String(raw ?? "");
-  if (!s) return "";
-  return s.length <= 8 ? "[REDACTED]" : `${s.slice(0, 4)}...${s.slice(-4)}`;
+function secretConfigured(secret) {
+  return Boolean(String(secret ?? "").trim());
 }
 
 function envTruthy(v) {
@@ -93,6 +95,15 @@ function rowCounts(rows) {
 
 function hasEnvValue(name) {
   return process.env[name] != null && String(process.env[name]).trim() !== "";
+}
+
+export function pickImportSecret({ dryRun = false } = {}) {
+  if (dryRun) return "";
+  const importSecret = String(process.env.MORAWARE_SYNC_IMPORT_SECRET ?? "").trim();
+  if (importSecret) return importSecret;
+  const cronSecret = String(process.env.EOS_CRON_SECRET ?? "").trim();
+  if (cronSecret) return cronSecret;
+  throw new Error("Missing required env var: MORAWARE_SYNC_IMPORT_SECRET or EOS_CRON_SECRET");
 }
 
 function chunkLimits({ largeBaseline = false } = {}) {
@@ -392,7 +403,8 @@ async function postImport({ url, secret, body, label }) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-moraware-sync-secret": secret
+      "x-moraware-sync-secret": secret,
+      "x-eos-cron-secret": secret
     },
     body: JSON.stringify(body)
   });
@@ -414,32 +426,292 @@ async function postImport({ url, secret, body, label }) {
   return parsed;
 }
 
-async function main() {
-  const file = requiredEnv("MORAWARE_SYNC_IMPORT_FILE");
-  const dryRun = envTruthy(process.env.MORAWARE_IMPORT_DRY_RUN);
-  const chunked = dryRun || envTruthy(process.env.MORAWARE_IMPORT_CHUNKED);
-  const secret = dryRun ? "" : requiredEnv("MORAWARE_SYNC_IMPORT_SECRET");
-  const { abs, fileBytes, json } = await readJsonFile(file);
-  const body = normalizePayload(json);
-  const url = `${backendBase()}/api/internal/moraware-sync/import`;
+export function validateChunkedManifest(manifest, { manifestDir } = {}) {
+  if (!isChunkedManifest(manifest)) {
+    throw new Error("Not a Moraware chunked foundation manifest (missing format/chunks).");
+  }
+  if (!Number.isInteger(manifest.chunk_count) || manifest.chunk_count < 0) {
+    throw new Error("Manifest chunk_count is invalid.");
+  }
+  if (manifest.chunks.length !== manifest.chunk_count) {
+    throw new Error(`Manifest chunk_count ${manifest.chunk_count} does not match chunks.length ${manifest.chunks.length}.`);
+  }
+  const totals = manifest.totals && typeof manifest.totals === "object" ? manifest.totals : {};
+  for (const key of BATCH_KEYS) {
+    if (totals[key] == null) throw new Error(`Manifest totals missing ${key}.`);
+  }
+  const seenIndexes = new Set();
+  for (const [i, chunk] of manifest.chunks.entries()) {
+    if (!chunk || typeof chunk !== "object") throw new Error(`Manifest chunk ${i + 1} is invalid.`);
+    const idx = Number(chunk.chunk_index);
+    if (!Number.isInteger(idx) || idx !== i + 1) {
+      throw new Error(`Manifest chunks must be in deterministic order; expected chunk_index ${i + 1}, got ${chunk.chunk_index}.`);
+    }
+    if (seenIndexes.has(idx)) throw new Error(`Duplicate chunk_index ${idx}.`);
+    seenIndexes.add(idx);
+    if (!chunk.file || String(chunk.file).includes("..") || path.isAbsolute(chunk.file)) {
+      throw new Error(`Chunk ${idx} file must be a relative filename inside the manifest directory.`);
+    }
+  }
+  return true;
+}
 
+async function sha256File(abs) {
+  const buf = await fs.readFile(abs);
+  return { buf, sha256: crypto.createHash("sha256").update(buf).digest("hex"), byteSize: buf.length };
+}
+
+function addCounts(target, add) {
+  for (const key of BATCH_KEYS) target[key] = (Number(target[key]) || 0) + (Number(add?.[key]) || 0);
+}
+
+function assertCountsEqual(actual, expected, label) {
+  for (const key of BATCH_KEYS) {
+    const a = Number(actual[key]) || 0;
+    const e = Number(expected[key]) || 0;
+    if (a !== e) throw new Error(`${label}: ${key} count mismatch (chunk aggregate ${a} vs manifest ${e}).`);
+  }
+}
+
+export async function importChunkedManifest({
+  manifestAbs,
+  manifest,
+  dryRun,
+  secret,
+  url,
+  postFn = postImport
+}) {
+  const manifestDir = path.dirname(manifestAbs);
+  validateChunkedManifest(manifest, { manifestDir });
+  const maxPayloadBytes = bytesEnv("MORAWARE_IMPORT_MAX_PAYLOAD_BYTES", DEFAULT_MAX_PAYLOAD_BYTES);
+  const importGroupId = resolveImportGroupId();
+  const startChunkIndex = resolveStartChunkIndex();
+  const resumeGroupId = String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim();
+  if (startChunkIndex > 1 && !resumeGroupId) {
+    throw new Error("MORAWARE_IMPORT_START_CHUNK_INDEX > 1 requires MORAWARE_IMPORT_RESUME_GROUP_ID so resumed chunks stay in the original import group.");
+  }
+
+  const parentCounts = Object.fromEntries(BATCH_KEYS.map((k) => [k, Number(manifest.totals[k]) || 0]));
+  const largeReasons = largeSnapshotReasons({
+    body: { metadata: { snapshot_mode: manifest.snapshot_mode }, mode: manifest.mode },
+    counts: parentCounts,
+    fileBytes: Number(manifest.largest_chunk_bytes) || 0
+  });
+  assertLargeSnapshotAllowed({ largeReasons, dryRun, chunked: true });
+
+  console.log("Moraware chunked manifest import starting:", {
+    file: manifestAbs,
+    url,
+    secret_configured: dryRun ? false : secretConfigured(secret),
+    organization_id: manifest.organization_id || "(unset)",
+    dry_run: dryRun ? "1" : "0",
+    import_group_id: importGroupId,
+    start_chunk_index: startChunkIndex,
+    chunk_count: manifest.chunk_count,
+    counts: parentCounts,
+    cap_warnings: manifest.cap_warnings || []
+  });
+
+  const aggregate = emptyCountBag();
+  let httpRequests = 0;
+  const results = [];
+  let largestValidatedBytes = 0;
+
+  for (const chunkMeta of manifest.chunks) {
+    const chunkIndex = Number(chunkMeta.chunk_index);
+    const chunkAbs = path.resolve(manifestDir, chunkMeta.file);
+    let stat;
+    try {
+      stat = await fs.stat(chunkAbs);
+    } catch {
+      throw new Error(`Missing chunk file: ${chunkMeta.file}`);
+    }
+    const { buf, sha256, byteSize } = await sha256File(chunkAbs);
+    if (chunkMeta.sha256 && sha256 !== chunkMeta.sha256) {
+      throw new Error(`Checksum mismatch for ${chunkMeta.file}: expected ${chunkMeta.sha256}, got ${sha256}.`);
+    }
+    if (Number(chunkMeta.byte_size) && byteSize !== Number(chunkMeta.byte_size)) {
+      throw new Error(`Byte size mismatch for ${chunkMeta.file}: expected ${chunkMeta.byte_size}, got ${byteSize}.`);
+    }
+    largestValidatedBytes = Math.max(largestValidatedBytes, byteSize);
+    let parsed;
+    try {
+      parsed = JSON.parse(buf.toString("utf8"));
+    } catch (e) {
+      throw new Error(`Malformed chunk JSON ${chunkMeta.file}: ${e?.message || e}`);
+    }
+    const batches = batchRows(parsed);
+    const chunkCounts = rowCounts(batches);
+    if (chunkMeta.row_counts) {
+      assertCountsEqual(chunkCounts, chunkMeta.row_counts, `Chunk ${chunkIndex} row_counts`);
+    }
+    addCounts(aggregate, chunkCounts);
+
+    const payload = finalizeChunkPayload(
+      {
+        organization_id: parsed.organization_id || manifest.organization_id,
+        mode: parsed.mode || manifest.mode || "baseline_2026-real-snapshot",
+        runner: parsed.runner || manifest.runner || "local-chunked-importer"
+      },
+      batches,
+      {
+        import_group_id: importGroupId,
+        chunk_index: chunkIndex,
+        chunk_count: manifest.chunk_count,
+        import_status: chunkImportStatus(chunkIndex, manifest.chunk_count),
+        import_resumed: Boolean(resumeGroupId),
+        resumed_from_chunk_index: startChunkIndex > 1 ? startChunkIndex : null,
+        chunk_counts: chunkCounts,
+        parent_snapshot_counts: parentCounts,
+        max_payload_bytes: maxPayloadBytes,
+        chunk_file: chunkMeta.file,
+        chunk_sha256: sha256
+      }
+    );
+    const estimated = estimatePayloadBytes(payload);
+    if (estimated > maxPayloadBytes) {
+      const onlyOneRow = BATCH_KEYS.reduce((n, k) => n + chunkCounts[k], 0) === 1;
+      if (!onlyOneRow) {
+        throw new Error(
+          `Chunk ${chunkIndex} payload ${estimated} bytes exceeds MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=${maxPayloadBytes}.`
+        );
+      }
+      console.warn("Single-row chunk exceeds MORAWARE_IMPORT_MAX_PAYLOAD_BYTES; sending alone:", {
+        chunk_index: chunkIndex,
+        estimated_payload_bytes: estimated,
+        max_payload_bytes: maxPayloadBytes
+      });
+    }
+
+    const chunkLabel = `Chunk ${chunkIndex}/${manifest.chunk_count}`;
+    if (chunkIndex < startChunkIndex) {
+      console.log(`${chunkLabel} validated and skipped for resume`, {
+        import_group_id: importGroupId,
+        start_chunk_index: startChunkIndex
+      });
+      parsed = null;
+      continue;
+    }
+
+    if (dryRun) {
+      console.log(`${chunkLabel} dry-run ok:`, {
+        estimated_payload_bytes: estimated,
+        estimated_payload_size: humanBytes(estimated),
+        chunk_counts: chunkCounts,
+        byte_size: byteSize || stat.size
+      });
+      parsed = null;
+      continue;
+    }
+
+    console.log(`${chunkLabel} import starting:`, {
+      import_group_id: importGroupId,
+      estimated_payload_bytes: estimated,
+      chunk_counts: chunkCounts
+    });
+    try {
+      const posted = await postFn({ url, secret, body: payload, label: chunkLabel });
+      httpRequests += 1;
+      results.push(posted);
+      console.log(`${chunkLabel} import complete:`, {
+        sync_run_id: posted?.sync_run_id || null,
+        status: posted?.status || null,
+        row_counts: posted?.row_counts || null
+      });
+    } catch (e) {
+      console.error(`${chunkLabel} import failed:`, {
+        import_group_id: importGroupId,
+        failed_chunk_index: chunkIndex,
+        chunk_count: manifest.chunk_count,
+        error: String(e?.message || e)
+      });
+      console.error(
+        "Suggested resume command:",
+        [
+          `MORAWARE_IMPORT_RESUME_GROUP_ID=${importGroupId}`,
+          `MORAWARE_IMPORT_START_CHUNK_INDEX=${chunkIndex}`,
+          "MORAWARE_PIPELINE_SKIP_GENERATE=1",
+          "MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1",
+          "MORAWARE_IMPORT_CHUNKED=1",
+          `MORAWARE_SYNC_IMPORT_FILE=${manifestAbs}`,
+          "npm run eos:moraware:import-snapshot"
+        ].join(" \\\n")
+      );
+      throw e;
+    }
+    parsed = null;
+  }
+
+  assertCountsEqual(aggregate, parentCounts, "Manifest totals");
+
+  if (dryRun) {
+    printOperatorSummary(
+      { ...manifest, largest_chunk_bytes: largestValidatedBytes || manifest.largest_chunk_bytes },
+      { httpRequests: 0, supabaseWrites: 0, result: "SAFE_TO_IMPORT" }
+    );
+    console.log("Moraware import dry-run complete: no HTTP requests were sent.");
+    return {
+      dryRun: true,
+      httpRequests: 0,
+      supabaseWrites: 0,
+      import_group_id: importGroupId,
+      counts: parentCounts,
+      chunk_count: manifest.chunk_count,
+      cap_warnings: manifest.cap_warnings || []
+    };
+  }
+
+  console.log("Moraware chunked snapshot import complete:", {
+    import_group_id: importGroupId,
+    chunk_count: manifest.chunk_count,
+    http_requests: httpRequests,
+    sync_run_ids: results.map((r) => r?.sync_run_id).filter(Boolean)
+  });
+  return { dryRun: false, httpRequests, results, import_group_id: importGroupId };
+}
+
+function emptyCountBag() {
+  return Object.fromEntries(BATCH_KEYS.map((key) => [key, 0]));
+}
+
+export async function runMorawareSnapshotImport(options = {}) {
+  const file = options.file || requiredEnv("MORAWARE_SYNC_IMPORT_FILE");
+  const dryRun = options.dryRun ?? envTruthy(process.env.MORAWARE_IMPORT_DRY_RUN);
+  const chunkedFlag = dryRun || envTruthy(process.env.MORAWARE_IMPORT_CHUNKED);
+  const secret = options.secret ?? pickImportSecret({ dryRun });
+  const { abs, fileBytes, json } = await readJsonFile(file);
+  const url = options.url || `${backendBase()}/api/internal/moraware-sync/import`;
+  const postFn = options.postFn || postImport;
+
+  if (isChunkedManifest(json)) {
+    return importChunkedManifest({
+      manifestAbs: abs,
+      manifest: json,
+      dryRun,
+      secret,
+      url,
+      postFn
+    });
+  }
+
+  const body = normalizePayload(json);
   const counts = rowCounts(batchRows(body));
   const largeReasons = largeSnapshotReasons({ body, counts, fileBytes });
-  assertLargeSnapshotAllowed({ largeReasons, dryRun, chunked });
+  assertLargeSnapshotAllowed({ largeReasons, dryRun, chunked: chunkedFlag });
   console.log("Moraware snapshot import starting:", {
     file: abs,
     file_bytes: fileBytes,
     file_size: humanBytes(fileBytes),
     url,
-    secret: dryRun ? "(not required for dry-run)" : redact(secret),
+    secret_configured: dryRun ? false : secretConfigured(secret),
     organization_id: body.organization_id || "(unset)",
     dry_run: dryRun ? "1" : "0",
-    chunked: chunked ? "1" : "0",
+    chunked: chunkedFlag ? "1" : "0",
     allow_large_baseline: envTruthy(process.env.MORAWARE_IMPORT_ALLOW_LARGE_BASELINE) ? "1" : "0",
     counts
   });
 
-  if (chunked) {
+  if (chunkedFlag) {
     const importGroupId = resolveImportGroupId();
     const startChunkIndex = resolveStartChunkIndex();
     const resumeGroupId = String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim();
@@ -464,7 +736,7 @@ async function main() {
 
     if (dryRun) {
       console.log("Moraware import dry-run complete: no HTTP requests were sent.");
-      return;
+      return { dryRun: true, httpRequests: 0, planned_chunks: chunks.length, counts };
     }
 
     const results = [];
@@ -485,7 +757,7 @@ async function main() {
         chunk_counts: chunk.metadata.chunk_counts
       });
       try {
-        const parsed = await postImport({ url, secret, body: chunk, label: chunkLabel });
+        const parsed = await postFn({ url, secret, body: chunk, label: chunkLabel });
         results.push(parsed);
         console.log(`${chunkLabel} import complete:`, {
           sync_run_id: parsed?.sync_run_id || null,
@@ -502,47 +774,24 @@ async function main() {
           chunk_counts: chunk.metadata.chunk_counts,
           error: String(e?.message || e)
         });
-        console.error(
-          "Suggested resume command:",
-          [
-            `MORAWARE_IMPORT_RESUME_GROUP_ID=${chunk.metadata.import_group_id}`,
-            `MORAWARE_IMPORT_START_CHUNK_INDEX=${chunkIndex}`,
-            "MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1",
-            "MORAWARE_IMPORT_CHUNKED=1",
-            `MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=${bytesEnv("MORAWARE_IMPORT_MAX_PAYLOAD_BYTES", DEFAULT_MAX_PAYLOAD_BYTES)}`,
-            `MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).jobs}`,
-            `MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).job_activities}`,
-            `MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).job_forms}`,
-            `MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).job_files}`,
-            `MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).assignees}`,
-            `MORAWARE_SYNC_IMPORT_FILE=${file}`,
-            "npm run eos:moraware:import-snapshot"
-          ].join(" \\\n")
-        );
         throw e;
       }
     }
-    console.log(
-      "Moraware chunked snapshot import complete:",
-      JSON.stringify(
-        {
-          import_group_id: chunks[0]?.metadata?.import_group_id,
-          chunk_count: chunks.length,
-          sync_run_ids: results.map((r) => r?.sync_run_id).filter(Boolean),
-          results
-        },
-        null,
-        2
-      )
-    );
-    return;
+    return { dryRun: false, results, import_group_id: chunks[0]?.metadata?.import_group_id };
   }
 
-  const parsed = await postImport({ url, secret, body, label: "Import" });
+  const parsed = await postFn({ url, secret, body, label: "Import" });
   console.log("Moraware snapshot import complete:", JSON.stringify(parsed, null, 2));
+  return parsed;
 }
 
-main().catch((e) => {
-  console.error(e?.stack || e);
-  process.exitCode = 1;
-});
+async function main() {
+  await runMorawareSnapshotImport();
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+  main().catch((e) => {
+    console.error(e?.stack || e);
+    process.exitCode = 1;
+  });
+}

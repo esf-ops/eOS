@@ -318,10 +318,24 @@ npm run eos:moraware:generate-live-capped-snapshot
 
 If `MORAWARE_BASELINE_END_DATE` is omitted, the runner uses today's local date. The runner maps the baseline range to `MORAWARE_SYNC_START_DATE`, `MORAWARE_SYNC_END_DATE`, and `MORAWARE_SYNC_YEAR=2026` before discovery so job detail/form ingestion is limited to matching 2026 jobs. `baseline_2026` refuses missing or invalid start dates, start dates before `2026-01-01`, and inverted ranges.
 
-Inspect counts only before import:
+The live crawl still writes per-job artifacts under `debug/moraware/latest/`. **`baseline_2026` serialization is chunked on disk** (`debug/moraware/baseline-2026/chunked/manifest.json` + `chunk-NNNNNN.json`). Do not build one monolithic JSON snapshot: field-level `job_forms` at production scale exceeds `JSON.stringify` string limits.
+
+Rebuild chunks from an existing local crawl (no Moraware API, no Supabase):
 
 ```bash
-node -e "const fs=require('fs'); const p='debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json'; const x=JSON.parse(fs.readFileSync(p,'utf8')); const b=x.batches||{}; console.log(Object.fromEntries(Object.entries(b).map(([k,v])=>[k,Array.isArray(v)?v.length:0]))); console.log({mode:x.mode, range:{start:x.metadata?.baseline_start_date,end:x.metadata?.baseline_end_date}, cap_warnings:x.metadata?.cap_warnings||[], jobs_with_status:(b.jobs||[]).filter(j=>String(j.status_name||j.jobStatus||j.status||'').trim()).length,jobs_with_process:(b.jobs||[]).filter(j=>String(j.process_name||j.processName||j.process||'').trim()).length,jobs_with_sqft:(b.jobs||[]).filter(j=>JSON.stringify(j.raw_payload||{}).match(/sq\\.?\\s*ft/i)).length});"
+MORAWARE_SNAPSHOT_MODE=baseline_2026 \
+MORAWARE_TINY_SOURCE_FILE=debug/moraware/latest/jobs/index.json \
+MORAWARE_CHUNKED_OUTPUT_DIR=debug/moraware/baseline-2026/chunked \
+MORAWARE_BASELINE_MAX_JOBS=5000 \
+MORAWARE_BASELINE_MAX_ACTIVITIES=200000 \
+MORAWARE_BASELINE_MAX_FORMS=500000 \
+npm run eos:moraware:generate-chunked-snapshot
+```
+
+Inspect counts from the **manifest only** (never parse all chunks into one object):
+
+```bash
+node -e "const fs=require('fs'); const x=JSON.parse(fs.readFileSync('debug/moraware/baseline-2026/chunked/manifest.json','utf8')); console.log({format:x.format, totals:x.totals, actual_form_count:x.actual_form_count, chunk_count:x.chunk_count, largest_chunk_bytes:x.largest_chunk_bytes, cap_warnings:x.cap_warnings, failed_reads:x.failed_source_reads});"
 ```
 
 If `cap_warnings` is non-empty, do not import until the cap is understood. Increase the relevant `MORAWARE_BASELINE_MAX_*` value and regenerate, or document why the cap is intentionally limiting the baseline.
@@ -339,7 +353,7 @@ MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=1000 \
 MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=250 \
 MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=250 \
 MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
-MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/chunked/manifest.json \
 npm run eos:moraware:import-snapshot
 ```
 
@@ -364,7 +378,7 @@ MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=250 \
 BACKEND_URL=https://backend-core-six.vercel.app \
 MORAWARE_SYNC_IMPORT_SECRET=... \
 MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
-MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/chunked/manifest.json \
 npm run eos:moraware:import-snapshot
 ```
 
@@ -384,7 +398,7 @@ MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=250 \
 BACKEND_URL=https://backend-core-six.vercel.app \
 MORAWARE_SYNC_IMPORT_SECRET=... \
 MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
-MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/chunked/manifest.json \
 npm run eos:moraware:import-snapshot
 ```
 

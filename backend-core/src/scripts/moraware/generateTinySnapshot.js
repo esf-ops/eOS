@@ -4,157 +4,38 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import {
+  BATCH_KEYS,
+  appendCanonicalRowsFromJob,
+  capWarningsFromCounts,
+  collectStatusRows,
+  createSeenSets,
+  emptyBatches,
+  emptyCounts,
+  extractJobProcess,
+  extractJobStatus,
+  jobIdFrom,
+  pickStr,
+  resolveArtifact,
+  resolveSnapshotCaps,
+  resolveSnapshotMode,
+  sourceRootFor
+} from "./morawareSnapshotCanonical.js";
+
+export { extractJobProcess, extractJobStatus };
+
 const DEFAULT_SOURCE = "debug/moraware/latest/jobs/index.json";
-const SNAPSHOT_MODE_RAW = String(process.env.MORAWARE_SNAPSHOT_MODE || "tiny")
-  .trim()
-  .toLowerCase();
-const SNAPSHOT_MODE = ["baseline", "baseline_2026"].includes(SNAPSHOT_MODE_RAW) ? SNAPSHOT_MODE_RAW : "tiny";
-const DEFAULT_OUT =
-  SNAPSHOT_MODE === "baseline_2026"
-    ? "debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json"
-    : SNAPSHOT_MODE === "baseline"
-    ? "debug/moraware/baseline-tests/capped-baseline-moraware-snapshot.json"
-    : "debug/moraware/import-tests/tiny-real-moraware-snapshot.json";
 
-function toIntEnv(name, fallback) {
-  const n = Number.parseInt(String(process.env[name] ?? ""), 10);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-
-const CAPS = Object.freeze({
-  accounts:
-    SNAPSHOT_MODE === "baseline_2026"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_ACCOUNTS", toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 5000))
-      : SNAPSHOT_MODE === "baseline"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_ACCOUNTS", toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 50))
-      : 5,
-  jobs: SNAPSHOT_MODE === "baseline_2026" ? toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 5000) : SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 50) : 10,
-  job_activities:
-    SNAPSHOT_MODE === "baseline_2026"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_ACTIVITIES", 50000)
-      : SNAPSHOT_MODE === "baseline"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_ACTIVITIES", 250)
-      : 25,
-  job_forms:
-    SNAPSHOT_MODE === "baseline_2026"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_FORMS", 50000)
-      : SNAPSHOT_MODE === "baseline"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_FORMS", 250)
-      : 25,
-  job_files:
-    SNAPSHOT_MODE === "baseline_2026"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_FILES", 10000)
-      : SNAPSHOT_MODE === "baseline"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_FILES", 250)
-      : 25,
-  assignees:
-    SNAPSHOT_MODE === "baseline_2026"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_ASSIGNEES", 1000)
-      : SNAPSHOT_MODE === "baseline"
-      ? toIntEnv("MORAWARE_BASELINE_MAX_ASSIGNEES", 100)
-      : 25
-});
-
-function pickStr(v) {
-  if (v && typeof v === "object" && !Array.isArray(v)) {
-    return firstNonempty(v._text, v["#text"], v.name, v.value, v.label, v.id);
-  }
-  return v == null ? "" : String(v).trim();
+function defaultOutFile(mode) {
+  if (mode === "baseline_2026") return "debug/moraware/baseline-2026/chunked/manifest.json";
+  if (mode === "baseline") return "debug/moraware/baseline-tests/capped-baseline-moraware-snapshot.json";
+  return "debug/moraware/import-tests/tiny-real-moraware-snapshot.json";
 }
 
 function asArray(v) {
   if (Array.isArray(v)) return v;
   if (v == null) return [];
   return [v];
-}
-
-function firstNonempty(...values) {
-  for (const v of values) {
-    const s = pickStr(v);
-    if (s) return s;
-  }
-  return "";
-}
-
-export function extractJobStatus(row) {
-  const raw = row?.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload : row?.raw;
-  const rawJob = raw?.job || raw?.jobNode || raw?.MorawareResponse?.jobQuery?.job;
-  const info = row?.jobInfo && typeof row.jobInfo === "object" ? row.jobInfo : {};
-  return firstNonempty(
-    row?.status_name,
-    row?.statusName,
-    row?.job_status,
-    row?.jobStatus,
-    row?.status,
-    row?.currentStatus,
-    row?.processStatus,
-    info.jobStatus,
-    info.status,
-    info.statusName,
-    raw?.status_name,
-    raw?.job_status,
-    raw?.jobStatus,
-    raw?.status,
-    rawJob?._attributes?.jobStatus,
-    rawJob?.jobStatus,
-    rawJob?.status,
-    rawJob?.processStatus
-  );
-}
-
-export function extractJobProcess(row) {
-  const raw = row?.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload : row?.raw;
-  const rawJob = raw?.job || raw?.jobNode || raw?.MorawareResponse?.jobQuery?.job;
-  const info = row?.jobInfo && typeof row.jobInfo === "object" ? row.jobInfo : {};
-  return firstNonempty(
-    row?.process_name,
-    row?.processName,
-    row?.process,
-    row?.jobProcess,
-    info.processName,
-    info.process,
-    raw?.process_name,
-    raw?.processName,
-    raw?.process,
-    rawJob?._attributes?.process,
-    rawJob?.process?.name,
-    rawJob?.process,
-    rawJob?.jobProcess
-  );
-}
-
-function mergeStatusFields(base, statusSource) {
-  if (!statusSource || typeof statusSource !== "object") return base;
-  const status = extractJobStatus(statusSource);
-  const process = extractJobProcess(statusSource);
-  if (!status && !process) return base;
-  return {
-    ...base,
-    status_name: firstNonempty(base?.status_name, base?.statusName, base?.job_status, base?.jobStatus, base?.status, status),
-    process_name: firstNonempty(base?.process_name, base?.processName, base?.process, process),
-    raw_payload: {
-      ...(base?.raw_payload && typeof base.raw_payload === "object" ? base.raw_payload : {}),
-      status_source: {
-        has_status: Boolean(status),
-        has_process: Boolean(process),
-        source_record_id: jobIdFrom(statusSource)
-      }
-    }
-  };
-}
-
-function uniqPush(rows, row, keyFn, cap) {
-  if (!row || typeof row !== "object" || rows.length >= cap) return;
-  const key = keyFn(row);
-  if (!key) return;
-  if (rows.some((r) => keyFn(r) === key)) return;
-  rows.push(row);
-}
-
-function capWarnings(batches) {
-  return Object.entries(CAPS)
-    .filter(([key, cap]) => Array.isArray(batches[key]) && batches[key].length >= cap)
-    .map(([key, cap]) => `${key} reached cap ${cap}; snapshot may be truncated. Increase MORAWARE_BASELINE_MAX_* and regenerate before import.`);
 }
 
 async function readJson(filePath) {
@@ -171,182 +52,18 @@ async function readJsonIfExists(filePath) {
   }
 }
 
-function sourceRootFor(sourceAbs) {
-  const dir = path.dirname(sourceAbs);
-  if (path.basename(sourceAbs) === "index.json" && path.basename(dir) === "jobs") return path.dirname(dir);
-  return dir;
-}
-
-function resolveArtifact(root, artifactPath) {
-  const p = pickStr(artifactPath);
-  if (!p) return "";
-  return path.isAbsolute(p) ? p : path.resolve(root, p);
-}
-
-function normalizeExistingBatches(input) {
+function normalizeExistingBatches(input, caps) {
   const batches = input?.batches && typeof input.batches === "object" ? input.batches : input;
   if (!batches || typeof batches !== "object") return null;
-  const keys = Object.keys(CAPS);
-  if (!keys.some((k) => Array.isArray(batches[k]))) return null;
-  return Object.fromEntries(keys.map((k) => [k, asArray(batches[k]).slice(0, CAPS[k])]));
+  if (!BATCH_KEYS.some((k) => Array.isArray(batches[k]))) return null;
+  return Object.fromEntries(BATCH_KEYS.map((k) => [k, asArray(batches[k]).slice(0, caps[k])]));
 }
 
-function jobIdFrom(row, fallback = "") {
-  return firstNonempty(row?.source_record_id, row?.source_job_id, row?.job_id, row?.jobId, row?.source?.jobId, row?.jobInfo?.jobId, fallback);
-}
-
-function accountIdFrom(row) {
-  return firstNonempty(row?.source_account_id, row?.account_id, row?.accountId, row?.source?.accountId, row?.jobInfo?.accountId);
-}
-
-function accountNameFrom(row) {
-  return firstNonempty(row?.account_name, row?.accountName, row?.jobInfo?.accountName, row?.customer_name, row?.name);
-}
-
-function mapAccountFromJob(job) {
-  const accountId = accountIdFrom(job);
-  const accountName = accountNameFrom(job);
-  if (!accountId && !accountName) return null;
-  return {
-    source_record_id: accountId || `account-name:${accountName}`,
-    account_id: accountId,
-    account_name: accountName,
-    raw_payload: {
-      accountId,
-      accountName,
-      source: "derived-from-job-header"
-    }
-  };
-}
-
-function mapJob(job, fallbackJobId = "") {
-  const jobId = jobIdFrom(job, fallbackJobId);
-  if (!jobId) return null;
-  const info = job.jobInfo && typeof job.jobInfo === "object" ? job.jobInfo : {};
-  const source = job.source && typeof job.source === "object" ? job.source : {};
-  return {
-    source_record_id: jobId,
-    job_id: jobId,
-    account_id: firstNonempty(job.account_id, job.accountId, source.accountId, info.accountId),
-    account_name: firstNonempty(job.account_name, job.accountName, info.accountName),
-    job_name: firstNonempty(job.job_name, job.jobName, info.jobName, job.name),
-    job_number: firstNonempty(job.job_number, job.jobNumber),
-    process_name: extractJobProcess(job),
-    status_name: extractJobStatus(job),
-    salesperson_name: firstNonempty(job.salesperson_name, job.salespersonName, info.salespersonName),
-    created_at: firstNonempty(job.created_at, job.creation_date, job.creationDate, info.creationDate),
-    modified_at: firstNonempty(job.modified_at, job.modifiedDate),
-    raw_payload: job
-  };
-}
-
-function mapActivity(activity, fallbackJobId, index) {
-  const jobId = firstNonempty(activity.jobId, activity.job_id, activity.source_job_id, fallbackJobId);
-  const sourceId = firstNonempty(activity.source_record_id, activity.activity_id, activity.activityId, jobId ? `${jobId}:activity:${activity.activityIndex ?? index}` : "");
-  if (!sourceId) return null;
-  return {
-    source_record_id: sourceId,
-    activity_id: sourceId,
-    job_id: jobId,
-    activity_type_name: firstNonempty(activity.activity_type_name, activity.activityTypeName, activity.activityType, activity.type),
-    activity_status_name: firstNonempty(activity.activity_status_name, activity.activityStatusName, activity.activityStatus, activity.status),
-    phase_name: firstNonempty(activity.phase_name, activity.phaseName),
-    scheduled_date: firstNonempty(activity.scheduled_date, activity.startDate, activity.date),
-    scheduled_time: firstNonempty(activity.scheduled_time, activity.schedTime),
-    duration_minutes: firstNonempty(activity.duration_minutes, activity.duration),
-    raw_payload: activity.raw && typeof activity.raw === "object" ? activity.raw : activity
-  };
-}
-
-function mapFormOrField(form, fallbackJobId, formIndex, field, fieldIndex) {
-  const formId = firstNonempty(form.formId, form.form_id, form.id, form.source_record_id, `${fallbackJobId}:form:${formIndex}`);
-  const fieldId = field ? firstNonempty(field.fieldId, field.field_id, field.id, `${formId}:field:${fieldIndex}`) : "";
-  const sourceId = field ? `${formId}:${fieldId}` : formId;
-  return {
-    source_record_id: sourceId,
-    form_id: formId,
-    field_id: fieldId,
-    job_id: firstNonempty(form.jobId, form.job_id, fallbackJobId),
-    form_name: firstNonempty(form.formName, form.form_name, form.name),
-    field_label: field ? firstNonempty(field.label, field.name, field.fieldName) : "",
-    field_value: field ? firstNonempty(field.value, field.fieldValue) : "",
-    raw_payload: field
-      ? {
-          form: {
-            formId,
-            formName: firstNonempty(form.formName, form.form_name, form.name)
-          },
-          field
-        }
-      : form
-  };
-}
-
-function collectFilesFromNode(node, fallbackJobId, out) {
-  if (!node || typeof node !== "object" || out.length >= CAPS.job_files) return;
-  if (Array.isArray(node)) {
-    for (const item of node) collectFilesFromNode(item, fallbackJobId, out);
-    return;
-  }
-  for (const [key, value] of Object.entries(node)) {
-    const lower = key.toLowerCase();
-    if ((lower === "file" || lower === "files" || lower.includes("attachment")) && value) {
-      for (const file of asArray(value?.file ?? value?.attachment ?? value)) {
-        if (!file || typeof file !== "object" || out.length >= CAPS.job_files) continue;
-        const fileId = firstNonempty(file.id, file.fileId, file.name, file.fileName, `${fallbackJobId}:file:${out.length}`);
-        uniqPush(
-          out,
-          {
-            source_record_id: fileId,
-            file_id: fileId,
-            job_id: fallbackJobId,
-            file_name: firstNonempty(file.fileName, file.name),
-            raw_payload: file
-          },
-          (r) => r.source_record_id,
-          CAPS.job_files
-        );
-      }
-    }
-    if (value && typeof value === "object") collectFilesFromNode(value, fallbackJobId, out);
-  }
-}
-
-function collectAssigneesFromNode(node, out) {
-  if (!node || typeof node !== "object" || out.length >= CAPS.assignees) return;
-  if (Array.isArray(node)) {
-    for (const item of node) collectAssigneesFromNode(item, out);
-    return;
-  }
-  for (const [key, value] of Object.entries(node)) {
-    const lower = key.toLowerCase();
-    if ((lower.includes("assignee") || lower.includes("resource")) && value) {
-      for (const resource of asArray(value?.assignee ?? value?.resource ?? value)) {
-        if (!resource || typeof resource !== "object" || out.length >= CAPS.assignees) continue;
-        const id = firstNonempty(resource.id, resource.assigneeId, resource.resourceId, resource.name, `${lower}:${out.length}`);
-        uniqPush(
-          out,
-          {
-            source_record_id: id,
-            assignee_id: id,
-            resource_name: firstNonempty(resource.name, resource.resourceName, resource.assigneeName),
-            resource_type: firstNonempty(resource.type, resource.resourceType),
-            raw_payload: resource
-          },
-          (r) => r.source_record_id,
-          CAPS.assignees
-        );
-      }
-    }
-    if (value && typeof value === "object") collectAssigneesFromNode(value, out);
-  }
-}
-
-async function loadJobsFromIndex(indexRows, sourceAbs) {
+async function loadJobsFromIndex(indexRows, sourceAbs, jobCap) {
   const root = sourceRootFor(sourceAbs);
   const jobs = [];
   const operationalByJob = new Map();
-  for (const row of indexRows.slice(0, CAPS.jobs)) {
+  for (const row of indexRows.slice(0, jobCap)) {
     const jid = jobIdFrom(row);
     const artifact = resolveArtifact(root, row.artifactPath || (jid ? `jobs/${jid}.json` : ""));
     const loaded = artifact ? await readJsonIfExists(artifact) : null;
@@ -358,27 +75,13 @@ async function loadJobsFromIndex(indexRows, sourceAbs) {
   return { jobs, operationalByJob };
 }
 
-function collectStatusRows(node, rows = []) {
-  if (!node) return rows;
-  if (Array.isArray(node)) {
-    rows.push(...node.filter((r) => r && typeof r === "object" && !Array.isArray(r)));
-    return rows;
-  }
-  if (typeof node !== "object") return rows;
-  if (Array.isArray(node.jobs)) return collectStatusRows(node.jobs, rows);
-  if (Array.isArray(node.rows)) return collectStatusRows(node.rows, rows);
-  if (node.batches?.jobs) return collectStatusRows(node.batches.jobs, rows);
-  rows.push(node);
-  return rows;
-}
-
 async function loadStatusSourceMap() {
   const statusSourceFile = process.env.MORAWARE_TINY_STATUS_SOURCE_FILE || "";
   if (!statusSourceFile) return { map: new Map(), sourceFile: "" };
   const loaded = await readJson(statusSourceFile);
   const map = new Map();
   for (const row of collectStatusRows(loaded.json)) {
-    const id = jobIdFrom(row) || firstNonempty(row.id, row.source_record_id);
+    const id = jobIdFrom(row) || pickStr(row.id);
     if (!id) continue;
     const status = extractJobStatus(row);
     const process = extractJobProcess(row);
@@ -387,8 +90,8 @@ async function loadStatusSourceMap() {
   return { map, sourceFile: path.relative(process.cwd(), loaded.abs) };
 }
 
-async function buildSnapshotFromSource(sourceAbs, input, statusSourceMap = new Map()) {
-  const existing = normalizeExistingBatches(input);
+export async function buildSnapshotFromSource(sourceAbs, input, statusSourceMap = new Map(), caps = resolveSnapshotCaps()) {
+  const existing = normalizeExistingBatches(input, caps);
   if (existing) {
     return { batches: existing, sourceShape: "existing-import-batches" };
   }
@@ -398,12 +101,12 @@ async function buildSnapshotFromSource(sourceAbs, input, statusSourceMap = new M
   let sourceShape = "generic-json";
 
   if (Array.isArray(input)) {
-    const loaded = await loadJobsFromIndex(input, sourceAbs);
+    const loaded = await loadJobsFromIndex(input, sourceAbs, caps.jobs);
     jobEntries = loaded.jobs;
     operationalByJob = loaded.operationalByJob;
     sourceShape = "jobs-index-array";
   } else if (Array.isArray(input?.jobs)) {
-    jobEntries = input.jobs.slice(0, CAPS.jobs).map((job) => ({ job, jobId: jobIdFrom(job) }));
+    jobEntries = input.jobs.slice(0, caps.jobs).map((job) => ({ job, jobId: jobIdFrom(job) }));
     sourceShape = "jobs-array";
   } else if (input?.jobInfo || input?.source || input?.forms) {
     jobEntries = [{ job: input, jobId: jobIdFrom(input) }];
@@ -415,85 +118,76 @@ async function buildSnapshotFromSource(sourceAbs, input, statusSourceMap = new M
     sourceShape = "single-operational-job";
   }
 
-  const batches = {
-    accounts: [],
-    jobs: [],
-    job_activities: [],
-    job_forms: [],
-    job_files: [],
-    assignees: []
+  const batches = emptyBatches();
+  const counts = emptyCounts();
+  const seen = createSeenSets();
+  const emit = (key, row) => {
+    batches[key].push(row);
   };
 
   for (const entry of jobEntries) {
-    if (batches.jobs.length >= CAPS.jobs) break;
+    if (counts.jobs >= caps.jobs) break;
     const rawJob = entry.indexRow ? { ...entry.indexRow, ...(entry.job || {}) } : entry.job || {};
     const jid = jobIdFrom(rawJob, entry.jobId);
     const statusSource = statusSourceMap.get(jid) || operationalByJob.get(jid);
-    const job = mergeStatusFields(rawJob, statusSource);
-    const mappedJob = mapJob(job, jid);
-    uniqPush(batches.jobs, mappedJob, (r) => r.source_record_id, CAPS.jobs);
-    uniqPush(batches.accounts, mapAccountFromJob(job), (r) => r.source_record_id, CAPS.accounts);
-
-    for (const [formIndex, form] of asArray(job.forms).entries()) {
-      if (batches.job_forms.length >= CAPS.job_forms) break;
-      const fields = asArray(form?.fields);
-      if (fields.length) {
-        for (const [fieldIndex, field] of fields.entries()) {
-          if (batches.job_forms.length >= CAPS.job_forms) break;
-          batches.job_forms.push(mapFormOrField(form, jid, formIndex, field, fieldIndex));
-        }
-      } else {
-        batches.job_forms.push(mapFormOrField(form, jid, formIndex));
-      }
-    }
-
-    collectFilesFromNode(job.raw || job.raw_payload || job, jid, batches.job_files);
-    collectAssigneesFromNode(job.raw || job.raw_payload || job, batches.assignees);
-
-    const op = operationalByJob.get(jid);
-    if (op) {
-      for (const [activityIndex, activity] of asArray(op.activities).entries()) {
-        if (batches.job_activities.length >= CAPS.job_activities) break;
-        const mapped = mapActivity(activity, jid, activityIndex);
-        uniqPush(batches.job_activities, mapped, (r) => r.source_record_id, CAPS.job_activities);
-      }
-      collectFilesFromNode(op.raw || op, jid, batches.job_files);
-      collectAssigneesFromNode(op.raw || op, batches.assignees);
-    }
+    appendCanonicalRowsFromJob({
+      rawJob,
+      operational: operationalByJob.get(jid) || null,
+      statusSource,
+      fallbackJobId: jid,
+      caps,
+      counts,
+      seen,
+      emit
+    });
   }
 
   if (Array.isArray(input?.activities)) {
-    for (const [i, activity] of input.activities.entries()) {
-      if (batches.job_activities.length >= CAPS.job_activities) break;
-      uniqPush(batches.job_activities, mapActivity(activity, pickStr(input.jobId), i), (r) => r.source_record_id, CAPS.job_activities);
-    }
+    appendCanonicalRowsFromJob({
+      rawJob: { jobId: pickStr(input.jobId) },
+      extraActivities: input.activities,
+      skipJobEntities: true,
+      caps,
+      counts,
+      seen,
+      emit
+    });
   }
-  collectAssigneesFromNode(input, batches.assignees);
 
-  return { batches, sourceShape };
+  return { batches, sourceShape, counts };
 }
 
 export async function generateSnapshotFile(options = {}) {
+  const mode = resolveSnapshotMode();
+  if (mode === "baseline_2026") {
+    const { generateChunkedFoundationSnapshot } = await import("./generateChunkedFoundationSnapshot.js");
+    return generateChunkedFoundationSnapshot({
+      sourceFile: options.sourceFile,
+      outDir: options.outDir || process.env.MORAWARE_CHUNKED_OUTPUT_DIR
+    });
+  }
+
+  const caps = resolveSnapshotCaps(mode);
   const sourceFile = options.sourceFile || process.env.MORAWARE_TINY_SOURCE_FILE || process.env.MORAWARE_SYNC_SOURCE_FILE || DEFAULT_SOURCE;
-  const outFile = options.outFile || process.env.MORAWARE_TINY_OUTPUT_FILE || DEFAULT_OUT;
+  const outFile = options.outFile || process.env.MORAWARE_TINY_OUTPUT_FILE || defaultOutFile(mode);
   const { abs: sourceAbs, json } = await readJson(sourceFile);
   const { map: statusSourceMap, sourceFile: statusSourceFile } = await loadStatusSourceMap();
-  const { batches, sourceShape } = await buildSnapshotFromSource(sourceAbs, json, statusSourceMap);
+  const { batches, sourceShape, counts } = await buildSnapshotFromSource(sourceAbs, json, statusSourceMap, caps);
   const body = {
     organization_id: process.env.MORAWARE_DEFAULT_ORGANIZATION_ID || undefined,
-    mode: `${SNAPSHOT_MODE}-real-snapshot`,
+    mode: `${mode}-real-snapshot`,
     runner: "local-generator",
     metadata: {
       generated_by: "backend-core/src/scripts/moraware/generateTinySnapshot.js",
       generated_at: new Date().toISOString(),
-      snapshot_mode: SNAPSHOT_MODE,
+      snapshot_mode: mode,
       source_file: path.relative(process.cwd(), sourceAbs),
       status_source_file: statusSourceFile || null,
       source_shape: sourceShape,
-      caps: CAPS,
+      caps,
       baseline_start_date: process.env.MORAWARE_BASELINE_START_DATE || process.env.MORAWARE_SYNC_START_DATE || null,
       baseline_end_date: process.env.MORAWARE_BASELINE_END_DATE || process.env.MORAWARE_SYNC_END_DATE || null,
-      cap_warnings: capWarnings(batches)
+      cap_warnings: capWarningsFromCounts(counts || Object.fromEntries(Object.entries(batches).map(([k, v]) => [k, v.length])), caps)
     },
     batches
   };
@@ -501,18 +195,18 @@ export async function generateSnapshotFile(options = {}) {
   const outAbs = path.resolve(process.cwd(), outFile);
   await fs.mkdir(path.dirname(outAbs), { recursive: true });
   await fs.writeFile(outAbs, JSON.stringify(body, null, 2), "utf8");
-  const counts = Object.fromEntries(Object.entries(batches).map(([k, v]) => [k, v.length]));
-  const warnings = capWarnings(batches);
-  console.log(`${SNAPSHOT_MODE} Moraware snapshot generated:`, {
+  const rowCounts = counts || Object.fromEntries(Object.entries(batches).map(([k, v]) => [k, v.length]));
+  const warnings = capWarningsFromCounts(rowCounts, caps);
+  console.log(`${mode} Moraware snapshot generated:`, {
     source: path.relative(process.cwd(), sourceAbs),
     statusSource: statusSourceFile || "(per-job operational artifacts when present)",
     sourceShape,
     output: path.relative(process.cwd(), outAbs),
-    caps: CAPS,
-    counts,
+    caps,
+    counts: rowCounts,
     warnings
   });
-  return { output: outAbs, source: sourceAbs, sourceShape, counts, caps: CAPS, mode: SNAPSHOT_MODE, warnings };
+  return { output: outAbs, source: sourceAbs, sourceShape, counts: rowCounts, caps, mode, warnings };
 }
 
 async function main() {

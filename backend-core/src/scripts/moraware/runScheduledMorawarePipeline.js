@@ -14,7 +14,7 @@ const PIPELINE_DRY_RUN_AT_STARTUP = (() => {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const GENERATE_SCRIPT = path.join(REPO_ROOT, "backend-core/src/scripts/moraware/generateLiveCappedSnapshot.js");
 const IMPORT_SCRIPT = path.join(REPO_ROOT, "backend-core/src/scripts/moraware/importSnapshotToBrain.js");
-const DEFAULT_SNAPSHOT_FILE = "debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json";
+const DEFAULT_SNAPSHOT_FILE = "debug/moraware/baseline-2026/chunked/manifest.json";
 const DEFAULT_SUMMARY_FILE = "debug/moraware/baseline-2026/baseline-2026-summary.json";
 const LOCK_FILE = path.join(REPO_ROOT, "debug/moraware/.pipeline.lock");
 const BLOCKING_CAP_KEYS = Object.freeze(["jobs", "job_activities", "job_forms"]);
@@ -153,11 +153,17 @@ async function readCapWarnings() {
     const warnings = summary?.snapshot?.warnings;
     if (Array.isArray(warnings) && warnings.length) return warnings;
   } catch {
-    /* fall through to snapshot metadata */
+    /* fall through */
   }
 
   const snapshotPath = path.resolve(REPO_ROOT, process.env.MORAWARE_SYNC_IMPORT_FILE || DEFAULT_SNAPSHOT_FILE);
+  const stat = await fs.stat(snapshotPath).catch(() => null);
+  if (!stat) return [];
+  if (stat.size > 8 * 1024 * 1024) {
+    return [];
+  }
   const snapshot = JSON.parse(await fs.readFile(snapshotPath, "utf8"));
+  if (Array.isArray(snapshot?.cap_warnings)) return snapshot.cap_warnings;
   const warnings = snapshot?.metadata?.cap_warnings;
   return Array.isArray(warnings) ? warnings : [];
 }
