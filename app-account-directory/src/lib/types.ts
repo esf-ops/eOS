@@ -220,14 +220,96 @@ export type AccountFinancials = {
   recentActivity?: AccountFinancialActivityItem[];
   openInvoices?: AccountInvoicePage;
   monthlyTrend?: AccountTrend;
+  customerHistory?: AccountCustomerHistory | null;
   coverage?: {
     workerCoverageStartDate?: string | null;
     workerCoverageEndDate?: string | null;
     latestSyncStatus?: string | null;
+    historyLabel?: string | null;
+    arIsSnapshot?: boolean;
   };
 };
 
-export type AccountInvoiceRow = {
+export type AccountHistoryFamily = {
+  count?: number;
+  amount?: number;
+};
+
+export type AccountHistoryChange = {
+  status?: string;
+  percent?: number | null;
+  text?: string;
+};
+
+export type AccountCustomerHistory = {
+  coverage?: {
+    startDate?: string | null;
+    endDate?: string | null;
+    label?: string | null;
+    provenComplete?: boolean;
+  };
+  summary?: {
+    estimates?: AccountHistoryFamily;
+    salesOrders?: AccountHistoryFamily;
+    invoices?: AccountHistoryFamily;
+    payments?: AccountHistoryFamily;
+  };
+  ytd?: {
+    start?: string | null;
+    end?: string | null;
+    estimates?: AccountHistoryFamily;
+    salesOrders?: AccountHistoryFamily;
+    invoices?: AccountHistoryFamily;
+    payments?: AccountHistoryFamily;
+  };
+  comparable?: {
+    available?: boolean;
+    reason?: string | null;
+    current?: { start?: string | null; end?: string | null };
+    prior?: { start?: string | null; end?: string | null } | null;
+    currentTotals?: {
+      estimates?: AccountHistoryFamily;
+      salesOrders?: AccountHistoryFamily;
+      invoices?: AccountHistoryFamily;
+      payments?: AccountHistoryFamily;
+    };
+    priorTotals?: {
+      estimates?: AccountHistoryFamily;
+      salesOrders?: AccountHistoryFamily;
+      invoices?: AccountHistoryFamily;
+      payments?: AccountHistoryFamily;
+    } | null;
+    change?: {
+      quotes?: AccountHistoryChange;
+      salesOrders?: AccountHistoryChange;
+      invoiced?: AccountHistoryChange;
+      collected?: AccountHistoryChange;
+    };
+  };
+  commercialActivity?: {
+    label?: string;
+    notes?: string;
+    estimates?: AccountHistoryFamily;
+    salesOrders?: AccountHistoryFamily;
+    invoices?: AccountHistoryFamily;
+    payments?: AccountHistoryFamily;
+  };
+};
+
+export type AccountHistoryTransaction = {
+  type?: string;
+  date?: string | null;
+  referenceNumber?: string | null;
+  amount?: number | null;
+  customerName?: string | null;
+};
+
+export type AccountHistoryTransactionPage = {
+  ok?: boolean;
+  status?: string;
+  items?: AccountHistoryTransaction[];
+  pagination?: { page?: number; limit?: number; has_more?: boolean };
+};
   invoice_date?: string | null;
   due_date?: string | null;
   reference_number?: string | null;

@@ -453,6 +453,7 @@ function storeFor(links) {
     "/api/account-directory/accounts/:accountId/financials",
     "/api/account-directory/accounts/:accountId/financials/trend",
     "/api/account-directory/accounts/:accountId/financials/invoices",
+    "/api/account-directory/accounts/:accountId/financials/transactions",
     "/api/account-directory/accounts/:accountId/relationship",
     "/api/account-directory/accounts/:accountId/timeline"
   ]) {

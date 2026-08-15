@@ -38,8 +38,8 @@ export function CustomerTrendChart({
   const [enabled, setEnabled] = useState<Record<SeriesKey, boolean>>({
     invoiced: true,
     collected: true,
-    sales_orders: false,
-    quoted: false
+    sales_orders: true,
+    quoted: true
   });
   const [hover, setHover] = useState<{ month: string; key: SeriesKey; amount: number } | null>(null);
 
@@ -129,8 +129,33 @@ export function CustomerTrendChart({
           <span>{formatMoney(hover.amount)}</span>
         </div>
       ) : (
-        <p className="muted">Hover a point for month, metric, and exact amount.</p>
+        <p className="muted">Hover a point for month, metric, and exact amount. Months with no activity show $0 inside available history.</p>
       )}
+      <details className="ad-chart-table">
+        <summary>Tabular monthly amounts</summary>
+        <div className="table-wrap">
+          <table className="ad-table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                {SERIES.map((series) => (
+                  <th key={series.key}>{series.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {points.map((point) => (
+                <tr key={point.month}>
+                  <td>{monthLabel(point.month)}</td>
+                  {SERIES.map((series) => (
+                    <td key={series.key}>{formatMoney(point[series.key])}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { ApiError } from "../lib/api";
 import {
   getAccountFinancialsTrend,
+  getAccountHistoryTransactions,
   getAccountOpenInvoices,
   getAccountRelationship,
   getAccountTimeline
@@ -10,6 +11,7 @@ import type {
   AccountContact,
   AccountDetail,
   AccountFinancials,
+  AccountHistoryTransactionPage,
   AccountLocation,
   AccountRelationship,
   AccountTimelineResponse,
@@ -157,8 +159,128 @@ export function Overview360({
             .filter(Boolean)
             .join(" · ") || "Customer financials appear after this account is linked to QuickBooks."}
         </p>
+        {financials?.coverage?.historyLabel ? (
+          <p className="muted">{financials.coverage.historyLabel} This is available history, not a proven lifetime.</p>
+        ) : null}
       </AccountReveal>
+
+      {showMoney && financials?.customerHistory ? (
+        <CustomerPerformance history={financials.customerHistory} financials={financials} />
+      ) : null}
     </div>
+  );
+}
+
+function ChangeCell({ change }: { change?: { status?: string; text?: string } | null }) {
+  if (!change || change.status === "unavailable") {
+    return <span className="muted">Unavailable</span>;
+  }
+  return <span>{change.text || "—"}</span>;
+}
+
+function CustomerPerformance({
+  history,
+  financials
+}: {
+  history: NonNullable<AccountFinancials["customerHistory"]>;
+  financials: AccountFinancials;
+}) {
+  const comparable = history.comparable?.available === true;
+  const current = history.comparable?.currentTotals || history.ytd;
+  const prior = history.comparable?.priorTotals;
+  const currentLabel = history.ytd?.end ? `${String(history.ytd.end).slice(0, 4)} YTD` : "Current YTD";
+  const priorLabel = comparable && history.comparable?.prior?.end
+    ? `Comparable ${String(history.comparable.prior.start).slice(0, 4)}`
+    : "Prior period";
+  const activity = history.commercialActivity;
+  return (
+    <AccountReveal motionKey="ad-performance">
+      <header className="ad-section-head">
+        <p className="ad-kicker">Customer performance</p>
+        <h3>Available history for this relationship</h3>
+        <p className="muted">
+          {[
+            financials.coverage?.historyLabel,
+            "Open A/R is current, not historical.",
+            comparable ? null : history.comparable?.reason || "Comparable prior-year change is unavailable."
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        </p>
+      </header>
+      <div className="ad-metric-grid">
+        <Metric label="Quoted YTD" value={history.ytd?.estimates?.amount} animationKey="perf-q" />
+        <Metric label="Sales Orders YTD" value={history.ytd?.salesOrders?.amount} animationKey="perf-so" />
+        <Metric label="Invoiced YTD" value={history.ytd?.invoices?.amount} animationKey="perf-inv" />
+        <Metric label="Collected YTD" value={history.ytd?.payments?.amount} animationKey="perf-col" />
+        <Metric label="Open A/R" value={financials.summary?.openAr} animationKey="perf-ar" />
+        <Metric label="Overdue" value={financials.overdueBalance} animationKey="perf-od" />
+      </div>
+      <div className="table-wrap ad-performance-table">
+        <table className="ad-table">
+          <thead>
+            <tr>
+              <th>Activity</th>
+              <th>{priorLabel}</th>
+              <th>{currentLabel}</th>
+              <th>Comparable change</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(
+              [
+                ["Quotes", prior?.estimates?.amount, current?.estimates?.amount, history.comparable?.change?.quotes],
+                ["Sales Orders", prior?.salesOrders?.amount, current?.salesOrders?.amount, history.comparable?.change?.salesOrders],
+                ["Invoiced", prior?.invoices?.amount, current?.invoices?.amount, history.comparable?.change?.invoiced],
+                ["Collected", prior?.payments?.amount, current?.payments?.amount, history.comparable?.change?.collected]
+              ] as const
+            ).map(([label, priorAmt, currentAmt, change]) => (
+              <tr key={label}>
+                <td>{label}</td>
+                <td>{comparable ? formatMoney(priorAmt) : "Unavailable"}</td>
+                <td>{formatMoney(currentAmt)}</td>
+                <td>
+                  <ChangeCell change={change} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted">Collected is cash timing, not a sales-performance score. Sales Orders are not labeled Sold.</p>
+      {activity ? (
+        <section className="ad-commercial">
+          <h4 className="financials-subtitle">{activity.label || "Commercial activity"}</h4>
+          <p className="muted">{activity.notes}</p>
+          <ol className="ad-commercial-flow">
+            <li>
+              <strong>Quotes / Estimates</strong>
+              <span>
+                {formatCount(activity.estimates?.count)} · {formatMoney(activity.estimates?.amount)}
+              </span>
+            </li>
+            <li>
+              <strong>Sales Orders</strong>
+              <span>
+                {formatCount(activity.salesOrders?.count)} · {formatMoney(activity.salesOrders?.amount)}
+              </span>
+            </li>
+            <li>
+              <strong>Invoices</strong>
+              <span>
+                {formatCount(activity.invoices?.count)} · {formatMoney(activity.invoices?.amount)}
+              </span>
+            </li>
+            <li>
+              <strong>Payments</strong>
+              <span>
+                {formatCount(activity.payments?.count)} · {formatMoney(activity.payments?.amount)}
+              </span>
+            </li>
+          </ol>
+        </section>
+      ) : null}
+    </AccountReveal>
   );
 }
 
@@ -213,35 +335,66 @@ export function FinancialsPanel({
   const [trend, setTrend] = useState(financials?.monthlyTrend || null);
   const [invoices, setInvoices] = useState(financials?.openInvoices || null);
   const [invoicePage, setInvoicePage] = useState(1);
+  const [historyType, setHistoryType] = useState("all");
+  const [historyPage, setHistoryPage] = useState(1);
+  const [history, setHistory] = useState<AccountHistoryTransactionPage | null>(null);
 
   useEffect(() => {
     setTrend(financials?.monthlyTrend || null);
     setInvoices(financials?.openInvoices || null);
     setInvoicePage(1);
+    setHistoryPage(1);
   }, [financials]);
 
   useEffect(() => {
     if (!sessionToken) return;
-    if (period === "trailing_12") {
-      setTrend(financials?.monthlyTrend || null);
-      return;
-    }
+    let cancelled = false;
     void getAccountFinancialsTrend(sessionToken, accountId, period)
-      .then((res) => setTrend(res.trend || null))
+      .then((res) => {
+        if (!cancelled) setTrend(res.trend || null);
+      })
       .catch(() => undefined);
-  }, [accountId, financials?.monthlyTrend, period, sessionToken]);
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, period, sessionToken]);
 
   useEffect(() => {
     if (!sessionToken || invoicePage <= 1) return;
+    let cancelled = false;
     void getAccountOpenInvoices(sessionToken, accountId, { page: invoicePage, limit: 50 })
-      .then((res) =>
+      .then((res) => {
+        if (cancelled) return;
         setInvoices((prev) => ({
           ...res,
           items: [...(prev?.items || []), ...(res.items || [])]
-        }))
-      )
+        }));
+      })
       .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [accountId, invoicePage, sessionToken]);
+
+  useEffect(() => {
+    if (!sessionToken) return;
+    let cancelled = false;
+    void getAccountHistoryTransactions(sessionToken, accountId, {
+      page: historyPage,
+      limit: 25,
+      type: historyType
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setHistory((prev) =>
+          historyPage === 1 ? res : { ...res, items: [...(prev?.items || []), ...(res.items || [])] }
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, historyPage, historyType, sessionToken]);
 
   if (busy && !financials) {
     return <p className="muted">Loading customer financials…</p>;
@@ -284,6 +437,7 @@ export function FinancialsPanel({
         <p className="financials-meta muted">
           {[
             financials.asOfDate ? `As of ${financials.asOfDate}` : null,
+            financials.coverage?.historyLabel,
             financials.status === "stale" ? "Figures may be stale" : null,
             "This customer only — not company profit and loss"
           ]
@@ -369,8 +523,9 @@ export function FinancialsPanel({
                 {[
                   ["trailing_12", "12M"],
                   ["ytd", "YTD"],
-                  ["2025", "2025"],
-                  ["2026", "2026"]
+                  ["prior_year", "Prior year"],
+                  ["current_year", "Current year"],
+                  ["available", "Available history"]
                 ].map(([value, label]) => (
                   <button
                     key={value}
@@ -434,6 +589,71 @@ export function FinancialsPanel({
             {invoices?.pagination?.has_more ? (
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => setInvoicePage((p) => p + 1)}>
                 Load more invoices
+              </button>
+            ) : null}
+          </section>
+          <section>
+            <div className="ad-toolbar-row">
+              <h4 className="financials-subtitle">Transaction history</h4>
+              <div className="ad-period-tabs">
+                {[
+                  ["all", "All"],
+                  ["estimate", "Quotes"],
+                  ["sales_order", "Sales Orders"],
+                  ["invoice", "Invoices"],
+                  ["payment", "Payments"]
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={historyType === value ? "is-on" : ""}
+                    onClick={() => {
+                      setHistoryType(value);
+                      setHistoryPage(1);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {(history?.items || []).length ? (
+              <div className="table-wrap">
+                <table className="ad-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Reference</th>
+                      <th>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(history?.items || []).map((row, i) => (
+                      <tr key={`${row.type}-${row.date}-${row.referenceNumber || i}`}>
+                        <td>{row.date || "—"}</td>
+                        <td>
+                          {row.type === "sales_order"
+                            ? "Sales order"
+                            : row.type === "estimate"
+                              ? "Quote"
+                              : row.type === "payment"
+                                ? "Payment"
+                                : "Invoice"}
+                        </td>
+                        <td>{row.referenceNumber || "—"}</td>
+                        <td>{formatMoney(row.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted">No transactions in available history for this filter.</p>
+            )}
+            {history?.pagination?.has_more ? (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setHistoryPage((p) => p + 1)}>
+                Load more history
               </button>
             ) : null}
           </section>

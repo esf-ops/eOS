@@ -11,6 +11,10 @@
  */
 
 import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
+import { scrubAccount360Payload as scrubFinancialIds } from "./accountDirectoryStaffSafeFinancials.mjs";
+import { loadCustomerHistoryBundle } from "./accountDirectoryCustomerHistory.mjs";
+
+export { scrubFinancialIds };
 import {
   ACCOUNT_DIRECTORY_CAPABILITIES,
   roleHasCapability
@@ -31,8 +35,6 @@ import {
 export const AD_FINANCIALS_PAGE_SIZE = PREPARED_FACTS_PAGE_SIZE;
 export const AD_FINANCIALS_RECENT_LIMIT = 20;
 
-const FORBIDDEN_RESPONSE_KEY =
-  /^(qb_customer_list_id|qb_root_customer_list_id|external_id|externalId|list_id|listId|qb_list_id|source_id|source_invoice_id|terms_list_id|termsListId)$/i;
 
 /**
  * @param {unknown} value
@@ -291,6 +293,7 @@ export function emptyFinancialsProfile(overrides = {}) {
     recentActivity: [],
     openInvoices: { status: "unavailable", items: [], pagination: { page: 1, limit: 50, has_more: false } },
     monthlyTrend: { status: "unavailable", period: "trailing_12", points: [], notes: null },
+    customerHistory: null,
     coverage: {
       workerCoverageStartDate: null,
       workerCoverageEndDate: null,
@@ -298,22 +301,6 @@ export function emptyFinancialsProfile(overrides = {}) {
     },
     ...overrides
   };
-}
-
-/**
- * Strip any QB ListID / external id keys from a JSON-safe tree.
- * @param {unknown} value
- */
-export function scrubFinancialIds(value) {
-  if (Array.isArray(value)) return value.map(scrubFinancialIds);
-  if (!value || typeof value !== "object") return value;
-  /** @type {Record<string, unknown>} */
-  const out = {};
-  for (const [k, v] of Object.entries(value)) {
-    if (FORBIDDEN_RESPONSE_KEY.test(k)) continue;
-    out[k] = scrubFinancialIds(v);
-  }
-  return out;
 }
 
 /**
@@ -637,74 +624,72 @@ export async function getAccountDirectoryFinancials(params) {
 
   const asOfDate =
     toYmd(latest.coverage_end_date) || toYmd(String(latest.completed_at).slice(0, 10));
-  const ytdStart = ytdStartForAsOf(asOfDate || String(now.toISOString()).slice(0, 10));
-  const ytdEnd = asOfDate;
 
   const completedAt = new Date(latest.completed_at);
   const ageSeconds = Math.max(0, Math.floor((now.getTime() - completedAt.getTime()) / 1000));
   const staleAfter = readStaleAfterSeconds(env);
-  const isStale = ageSeconds > staleAfter;
-  const trendWindow = resolveCustomerTrendWindow(
-    "trailing_12",
-    asOfDate,
-    toYmd(latest.coverage_start_date),
-    toYmd(latest.coverage_end_date)
-  );
+  let isStale = ageSeconds > staleAfter;
 
   try {
-    const [quoted, salesOrders, invoiced, collected, openAr, lastInvoice, lastPayment, recentActivity, trendRows] =
-      await Promise.all([
-        sumLinkedTransactionsInRange(supabase, {
-          organizationId,
-          rootListIds,
-          transactionType: "estimate",
-          startDate: ytdStart,
-          endDate: ytdEnd
-        }),
-        sumLinkedTransactionsInRange(supabase, {
-          organizationId,
-          rootListIds,
-          transactionType: "sales_order",
-          startDate: ytdStart,
-          endDate: ytdEnd
-        }),
-        sumLinkedTransactionsInRange(supabase, {
-          organizationId,
-          rootListIds,
-          transactionType: "invoice",
-          startDate: ytdStart,
-          endDate: ytdEnd
-        }),
-        sumLinkedTransactionsInRange(supabase, {
-          organizationId,
-          rootListIds,
-          transactionType: "payment",
-          startDate: ytdStart,
-          endDate: ytdEnd
-        }),
-        sumLinkedOpenAr(supabase, { organizationId, rootListIds }),
-        loadLatestTransaction(supabase, {
+    const [openAr, historyBundle] = await Promise.all([
+      sumLinkedOpenAr(supabase, { organizationId, rootListIds }),
+      loadCustomerHistoryBundle({
+        supabase,
+        organizationId,
+        rootListIds,
+        env,
+        now
+      })
+    ]);
+    const history = historyBundle.history;
+    const historyAsOf = historyBundle.asOf || asOfDate;
+    if (history?.coverage?.freshness?.isStale) isStale = true;
+
+    const ytd = history?.ytd || null;
+    const lastInvoiceFromHistory = (historyBundle.rows || []).find((r) => r.type === "invoice") || null;
+    const lastPaymentFromHistory = (historyBundle.rows || []).find((r) => r.type === "payment") || null;
+    const lastInvoice = lastInvoiceFromHistory
+      ? {
+          date: lastInvoiceFromHistory.date,
+          referenceNumber: lastInvoiceFromHistory.referenceNumber,
+          amount: lastInvoiceFromHistory.amount,
+          customerName: lastInvoiceFromHistory.customerName
+        }
+      : await loadLatestTransaction(supabase, {
           organizationId,
           rootListIds,
           transactionType: "invoice",
           ascending: false
-        }),
-        loadLatestTransaction(supabase, {
+        });
+    const lastPayment = lastPaymentFromHistory
+      ? {
+          date: lastPaymentFromHistory.date,
+          referenceNumber: lastPaymentFromHistory.referenceNumber,
+          amount: lastPaymentFromHistory.amount,
+          customerName: lastPaymentFromHistory.customerName
+        }
+      : await loadLatestTransaction(supabase, {
           organizationId,
           rootListIds,
           transactionType: "payment",
           ascending: false
-        }),
-        loadRecentActivity(supabase, { organizationId, rootListIds }),
-        trendWindow.ok
-          ? loadLinkedTransactionsForTrend(supabase, {
-              organizationId,
-              rootListIds,
-              startDate: trendWindow.start,
-              endDate: trendWindow.end
-            })
-          : Promise.resolve([])
-      ]);
+        });
+    const recentActivity = (historyBundle.rows || []).slice(0, AD_FINANCIALS_RECENT_LIMIT).map((row) => ({
+      type: row.type,
+      date: row.date,
+      referenceNumber: row.referenceNumber,
+      customerName: row.customerName,
+      amount: row.amount
+    }));
+
+    const coverageStart = history?.coverage?.startDate || toYmd(latest.coverage_start_date);
+    const coverageEnd = history?.coverage?.endDate || toYmd(latest.coverage_end_date) || asOfDate;
+    const trendWindow = resolveCustomerTrendWindow("trailing_12", historyAsOf, coverageStart, coverageEnd);
+    const trendRows = (historyBundle.rows || []).map((row) => ({
+      transaction_type: row.type,
+      transaction_date: row.date,
+      amount: row.amount
+    }));
 
     /** @type {object|null} */
     let oldestOpenInvoice = null;
@@ -744,8 +729,9 @@ export async function getAccountDirectoryFinancials(params) {
     if (termsResolved.warning) warnings.push(termsResolved.warning);
 
     if (isStale) {
+      const hours = Math.max(1, Math.round(ageSeconds / 3600));
       warnings.push(
-        `QuickBooks financial data is stale (last success ${ageSeconds}s ago; threshold ${staleAfter}s). Showing last prepared values.`
+        `Financial activity is stale (last refreshed about ${hours} hour${hours === 1 ? "" : "s"} ago). Showing last prepared values.`
       );
     }
     if (latest.status === "partial") {
@@ -755,16 +741,16 @@ export async function getAccountDirectoryFinancials(params) {
     return scrubFinancialIds({
       status: isStale ? "stale" : "ok",
       linked: true,
-      asOfDate,
-      refreshedAt: completedAt.toISOString(),
+      asOfDate: historyAsOf || asOfDate,
+      refreshedAt: history?.coverage?.freshness?.refreshedAt || completedAt.toISOString(),
       warnings,
       summary: {
         openAr: openAr.amount,
         openInvoiceCount: openAr.invoice_count,
-        invoicedYtd: invoiced.amount,
-        collectedYtd: collected.amount,
-        salesOrdersYtd: salesOrders.amount,
-        quotedYtd: quoted.amount
+        invoicedYtd: ytd?.invoices?.amount ?? 0,
+        collectedYtd: ytd?.payments?.amount ?? 0,
+        salesOrdersYtd: ytd?.salesOrders?.amount ?? 0,
+        quotedYtd: ytd?.estimates?.amount ?? 0
       },
       lastInvoice: lastInvoice
         ? {
@@ -782,7 +768,7 @@ export async function getAccountDirectoryFinancials(params) {
             customerName: lastPayment.customerName
           }
         : null,
-      daysSinceLastPayment: daysBetweenYmd(lastPayment?.date ?? null, asOfDate),
+      daysSinceLastPayment: daysBetweenYmd(lastPayment?.date ?? null, historyAsOf || asOfDate),
       oldestOpenInvoice,
       oldestOverdueInvoice: agingBuilt.oldestOverdueInvoice,
       paymentTerms: termsResolved.paymentTerms,
@@ -816,10 +802,13 @@ export async function getAccountDirectoryFinancials(params) {
             notes: trendWindow.notes,
             points: []
           },
+      customerHistory: history,
       coverage: {
-        workerCoverageStartDate: toYmd(latest.coverage_start_date),
-        workerCoverageEndDate: toYmd(latest.coverage_end_date),
-        latestSyncStatus: latest.status || null
+        workerCoverageStartDate: coverageStart,
+        workerCoverageEndDate: coverageEnd,
+        latestSyncStatus: latest.status || null,
+        historyLabel: history?.coverage?.label || null,
+        arIsSnapshot: true
       }
     });
   } catch (err) {

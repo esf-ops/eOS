@@ -26,6 +26,12 @@ import {
   resolveCustomerTrendWindow
 } from "./accountDirectoryCustomerTrend.mjs";
 import { loadLatestSuccessfulQbSyncRun } from "../sales/quickbooksFinancialTruth/preparedFactsProvider.js";
+import {
+  AD_HISTORY_TIMELINE_CAP,
+  AD_HISTORY_TXN_PAGE_DEFAULT,
+  AD_HISTORY_TXN_PAGE_MAX,
+  loadStaffSafeCustomerTransactions
+} from "./accountDirectoryCustomerHistory.mjs";
 import { resolveAccountQbEnrichmentLabel } from "./qbCustomerEnrichment/feedStatus.js";
 
 export const AD_360_PAGE_DEFAULT = 25;
@@ -207,30 +213,22 @@ export function buildRelationshipHealth({ account, financials, qbEnrichment }) {
   };
 }
 
-async function loadLinkedTransactions(supabase, { organizationId, rootListIds, startDate, endDate }) {
-  const roots = [...new Set((rootListIds || []).map((id) => String(id).trim()).filter(Boolean))];
-  if (!roots.length) return [];
-  const pageSize = AD_FINANCIALS_PAGE_SIZE;
-  const all = [];
-  let from = 0;
-  for (;;) {
-    let q = supabase
-      .from("sales_quickbooks_financial_transactions")
-      .select("transaction_type, transaction_date, reference_number, amount, customer_name, source_id")
-      .eq("organization_id", organizationId)
-      .in("qb_root_customer_list_id", roots)
-      .in("transaction_type", ["invoice", "payment", "sales_order", "estimate"]);
-    if (startDate) q = q.gte("transaction_date", startDate);
-    if (endDate) q = q.lte("transaction_date", endDate);
-    q = q.order("transaction_date", { ascending: false }).order("source_id", { ascending: false }).range(from, from + pageSize - 1);
-    const { data, error } = await q;
-    if (error) throw error;
-    const rows = data || [];
-    all.push(...rows);
-    if (rows.length < pageSize) break;
-    from += pageSize;
-  }
-  return all;
+async function loadLinkedTransactions(supabase, { organizationId, rootListIds, startDate, endDate, limit }) {
+  const loaded = await loadStaffSafeCustomerTransactions({
+    supabase,
+    organizationId,
+    rootListIds,
+    startDate,
+    endDate,
+    limit: limit || null
+  });
+  return (loaded.rows || []).map((row) => ({
+    transaction_type: row.type,
+    transaction_date: row.date,
+    reference_number: row.referenceNumber,
+    amount: row.amount,
+    customer_name: row.customerName
+  }));
 }
 
 export async function getAccountDirectoryTrend(params) {
@@ -426,9 +424,10 @@ export async function getAccountDirectoryTimeline(params) {
         organizationId: params.organizationId,
         rootListIds,
         startDate: null,
-        endDate: null
+        endDate: null,
+        limit: AD_HISTORY_TIMELINE_CAP
       });
-      txns.slice(0, 200).forEach((row, i) => events.push(mapFinancialTimelineEvent(row, i)));
+      txns.forEach((row, i) => events.push(mapFinancialTimelineEvent(row, i)));
     }
   } catch {
     /* fail-soft: financial timeline omitted */
@@ -689,3 +688,61 @@ export function listIntelPublic(snapshot) {
 }
 
 export { emptyFinancialsProfile, classifyArAgingBucket };
+
+export async function getAccountDirectoryHistoryTransactions(params) {
+  if (!roleHasCapability(params.role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW)) {
+    throw new AccountDirectoryError("forbidden", "Permission denied for this Account Directory action.", 403);
+  }
+  const { page, limit, offset } = boundedPage(
+    params.page,
+    params.limit,
+    AD_HISTORY_TXN_PAGE_DEFAULT,
+    AD_HISTORY_TXN_PAGE_MAX
+  );
+  const type = String(params.type || "all").trim() || "all";
+  const account = await params.store.getAccount(params.organizationId, params.accountId);
+  if (!account) throw new AccountDirectoryError("not_found", "Account not found.", 404);
+  const links = await params.store.listExternalLinks(params.organizationId, params.accountId);
+  const rootListIds = collectActiveQuickbooksRootListIds(links);
+  if (!rootListIds.length) {
+    return scrubFinancialIds({
+      status: "unlinked",
+      items: [],
+      pagination: { page, limit, has_more: false }
+    });
+  }
+  try {
+    const loaded = await loadStaffSafeCustomerTransactions({
+      supabase: params.supabase,
+      organizationId: params.organizationId,
+      rootListIds
+    });
+    const allowed = new Set(["estimate", "sales_order", "invoice", "payment"]);
+    let rows = loaded.rows || [];
+    if (type !== "all" && allowed.has(type)) {
+      rows = rows.filter((row) => row.type === type);
+    }
+    const slice = rows.slice(offset, offset + limit);
+    return scrubFinancialIds({
+      status: "ok",
+      filter: { type },
+      pagination: { page, limit, has_more: rows.length > offset + limit },
+      items: slice.map((row) => ({
+        type: row.type,
+        date: row.date,
+        referenceNumber: row.referenceNumber,
+        amount: row.amount,
+        customerName: row.customerName
+      }))
+    });
+  } catch (err) {
+    return scrubFinancialIds({
+      status: "unavailable",
+      items: [],
+      pagination: { page, limit, has_more: false },
+      notes: isMissingRelation(err)
+        ? "Customer history is not available yet."
+        : "Customer history could not be loaded."
+    });
+  }
+}

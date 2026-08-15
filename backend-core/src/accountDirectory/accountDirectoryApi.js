@@ -22,6 +22,7 @@ import { AccountDirectoryError, createAccountDirectoryService } from "./accountD
 import { normalizeAccountWritePayload } from "./accountDirectoryPayload.mjs";
 import { getAccountDirectoryFinancials } from "./accountDirectoryFinancialIntelligence.mjs";
 import {
+  getAccountDirectoryHistoryTransactions,
   getAccountDirectoryOpenInvoices,
   getAccountDirectoryRelationship,
   getAccountDirectoryTimeline,
@@ -215,6 +216,22 @@ export function attachAccountDirectoryRoutes(app, deps) {
         period: req.query?.period
       });
       res.json({ ok: true, trend });
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/financials/transactions", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const transactions = await getAccountDirectoryHistoryTransactions({
+        supabase: getSupabase(),
+        store,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        page: req.query?.page,
+        limit: req.query?.limit ?? req.query?.pageSize,
+        type: req.query?.type
+      });
+      res.json({ ok: true, ...transactions });
     });
   });
 

@@ -10,7 +10,15 @@ const SERIES_TYPES = Object.freeze({
   estimate: "quoted"
 });
 
-export const TREND_PERIODS = Object.freeze(["trailing_12", "ytd", "2025", "2026"]);
+export const TREND_PERIODS = Object.freeze([
+  "trailing_12",
+  "ytd",
+  "prior_year",
+  "current_year",
+  "available",
+  "2025",
+  "2026"
+]);
 
 function toYmd(value) {
   const s = String(value ?? "").trim();
@@ -63,8 +71,13 @@ export function resolveCustomerTrendWindow(period, asOfDate, coverageStart, cove
 
   const end = covEnd || asOf;
   let start = null;
-  if (key === "ytd") {
+  if (key === "ytd" || key === "current_year") {
     start = `${String(end).slice(0, 4)}-01-01`;
+  } else if (key === "prior_year") {
+    const y = Number(String(end).slice(0, 4)) - 1;
+    start = `${y}-01-01`;
+  } else if (key === "available") {
+    start = covStart || `${String(end).slice(0, 4)}-01-01`;
   } else if (key === "2025") {
     start = "2025-01-01";
   } else if (key === "2026") {
@@ -76,7 +89,10 @@ export function resolveCustomerTrendWindow(period, asOfDate, coverageStart, cove
   }
 
   let windowEnd = end;
-  if (key === "2025") windowEnd = "2025-12-31";
+  if (key === "2025" || key === "prior_year") {
+    const y = key === "2025" ? 2025 : Number(String(end).slice(0, 4)) - 1;
+    windowEnd = `${y}-12-31`;
+  }
   if (key === "2026") windowEnd = "2026-12-31";
 
   const clippedStart = covStart && start < covStart ? covStart : start;

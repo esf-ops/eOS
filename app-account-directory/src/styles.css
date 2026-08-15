@@ -1621,12 +1621,12 @@ a.detail-list-title:hover {
   overscroll-behavior: contain;
 }
 
-.ad-360 { display: grid; gap: 22px; }
+.ad-360 { display: grid; gap: 22px; min-width: 0; }
 .ad-kicker { margin: 0 0 4px; color: var(--eos-ink-muted); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .ad-identity h2 { margin: 0; font-size: 1.55rem; letter-spacing: -0.03em; }
 .ad-identity-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin: 16px 0 0; }
 .ad-identity-meta dt { color: var(--eos-ink-muted); font-size: 0.68rem; }
-.ad-identity-meta dd { margin: 2px 0 0; }
+.ad-identity-meta dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .ad-metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .ad-metric-card { min-height: 92px; padding: 12px 14px; border: 1px solid var(--eos-line); border-radius: var(--r-md); background: rgba(255,255,255,0.78); box-shadow: var(--sh-1); }
 .ad-kpi { display: block; font-variant-numeric: tabular-nums; font-weight: 650; font-size: 1.15rem; letter-spacing: -0.03em; }
@@ -1663,6 +1663,18 @@ a.detail-list-title:hover {
 .ad-reveal { opacity: 0; transform: translateY(8px); transition: opacity 420ms var(--eos-ease), transform 420ms var(--eos-ease); transition-delay: var(--ad-delay, 0ms); }
 .ad-reveal.is-visible { opacity: 1; transform: none; }
 .ad-empty { padding: 16px; color: var(--eos-ink-muted); }
+.ad-commercial-flow { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.ad-commercial-flow li { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--eos-line); border-radius: var(--r-md); background: #fff; }
+.ad-commercial-flow li strong { font-size: 0.88rem; }
+.ad-performance-table { margin-top: 12px; }
+.ad-chart-table { margin-top: 8px; font-size: 0.82rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ad-chart-line, .ad-chart-point, .ad-reveal, .ad-meter i { transition: none; }
+  .ad-chart-line { stroke-dasharray: none; stroke-dashoffset: 0; }
+  .ad-chart-point { opacity: 1; }
+  .ad-reveal { opacity: 1; transform: none; }
+}
 
 @media (min-width: 900px) {
   .ad-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }

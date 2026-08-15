@@ -9,6 +9,7 @@ import type {
   AccountTimelineResponse,
   AccountTrendResponse,
   AccountInvoicePage,
+  AccountHistoryTransactionPage,
   AddAliasPayload,
   AddContactPayload,
   AddLocationPayload,
@@ -72,6 +73,21 @@ export async function getAccountFinancialsTrend(token: string, accountId: string
     `${BASE}/accounts/${encodeURIComponent(accountId)}/financials/trend${qs({ period })}`,
     token
   )) as AccountTrendResponse;
+}
+
+export async function getAccountHistoryTransactions(
+  token: string,
+  accountId: string,
+  opts: { page?: number; limit?: number; type?: string }
+) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/financials/transactions${qs({
+      page: opts.page,
+      limit: opts.limit,
+      type: opts.type
+    })}`,
+    token
+  )) as AccountHistoryTransactionPage;
 }
 
 export async function getAccountOpenInvoices(
