@@ -19,7 +19,8 @@ import type {
   UpdateContactPayload,
   UpdateLocationPayload,
   AccountInsightsResponse,
-  AccountInsightEvidenceResponse
+  AccountInsightEvidenceResponse,
+  MorawareReconciliationResponse
 } from "./types";
 
 const BASE = "/api/account-directory";
@@ -250,6 +251,49 @@ export async function linkQuickBooks(
     token,
     payload
   )) as AccountDetailResponse;
+}
+
+export async function linkMoraware(
+  token: string,
+  accountId: string,
+  payload: { externalId: string; externalDisplayName?: string }
+) {
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/link-moraware`,
+    token,
+    payload
+  )) as AccountDetailResponse;
+}
+
+export async function unlinkExternal(token: string, accountId: string, linkId: string) {
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/external-links/${encodeURIComponent(linkId)}/deactivate`,
+    token
+  )) as AccountDetailResponse;
+}
+
+export async function unlinkMoraware(token: string, accountId: string, linkId: string) {
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/external-links/${encodeURIComponent(linkId)}/deactivate`,
+    token,
+    { expectedSystem: "moraware" }
+  )) as AccountDetailResponse;
+}
+
+export async function fetchMorawareReconciliation(
+  token: string,
+  opts: { classification?: string; linked?: string; search?: string; page?: number; pageSize?: number }
+) {
+  return (await apiGet(
+    `${BASE}/moraware-reconciliation${qs({
+      classification: opts.classification,
+      linked: opts.linked,
+      search: opts.search,
+      page: opts.page,
+      pageSize: opts.pageSize
+    })}`,
+    token
+  )) as MorawareReconciliationResponse;
 }
 
 export async function fetchQbEnrichmentStatus(token: string) {

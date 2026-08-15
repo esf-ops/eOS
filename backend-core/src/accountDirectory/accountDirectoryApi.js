@@ -36,6 +36,7 @@ import {
   listStatusReviewQueue,
   decideStatusReview
 } from "./accountDirectoryStatusReview.mjs";
+import { listMorawareReconciliationQueue } from "./accountDirectoryMorawareReconciliation.mjs";
 import {
   dismissSuggestion,
   getAdQbCustomerEnrichmentFeedStatus,
@@ -269,6 +270,10 @@ export function attachAccountDirectoryRoutes(app, deps) {
         env: process.env,
         now: new Date()
       });
+      const json = JSON.stringify(relationship);
+      if (/raw_payload|rawPayload/i.test(json)) {
+        return res.status(500).json({ ok: false, error: "Unsafe Moraware payload blocked." });
+      }
       res.json({ ok: true, relationship });
     });
   });
@@ -482,6 +487,34 @@ export function attachAccountDirectoryRoutes(app, deps) {
     });
   });
 
+  app.post("/api/account-directory/accounts/:accountId/link-moraware", ...writeGuard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const account = await service.linkMoraware({
+        ...ctx,
+        accountId: String(req.params.accountId),
+        payload: req.body || {}
+      });
+      res.status(201).json({ ok: true, account });
+    });
+  });
+
+  app.get("/api/account-directory/moraware-reconciliation", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const data = await listMorawareReconciliationQueue({
+        store,
+        supabase: getSupabase(),
+        organizationId: ctx.organizationId,
+        role: ctx.role,
+        query: req.query || {}
+      });
+      const json = JSON.stringify(data);
+      if (/raw_payload|rawPayload/i.test(json)) {
+        return res.status(500).json({ ok: false, error: "Unsafe Moraware payload blocked." });
+      }
+      res.json(data);
+    });
+  });
+
   app.get("/api/account-directory/qb-enrichment/status", ...guard, async (req, res) => {
     await withOrg(req, res, async (ctx) => {
       if (!roleHasCapability(ctx.role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW)) {
@@ -540,7 +573,8 @@ export function attachAccountDirectoryRoutes(app, deps) {
         const account = await service.deactivateExternalLink({
           ...ctx,
           accountId: String(req.params.accountId),
-          linkId: String(req.params.linkId)
+          linkId: String(req.params.linkId),
+          expectedSystem: req.body?.expectedSystem ? String(req.body.expectedSystem).trim() : null
         });
         res.json({ ok: true, account });
       });

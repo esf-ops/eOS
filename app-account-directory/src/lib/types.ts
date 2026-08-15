@@ -105,6 +105,7 @@ export type AccountDirectoryPermissions = {
   canArchive?: boolean;
   canRestore?: boolean;
   canLinkQuickBooks?: boolean;
+  canLinkMoraware?: boolean;
   canReviewStatus?: boolean;
 };
 
@@ -389,6 +390,16 @@ export type AccountRelationship = {
     studio?: { state?: string; notes?: string | null; items?: Array<{ name?: string | null; status?: string | null; updated_at?: string | null }> };
   };
   jobs?: { state?: string; notes?: string | null };
+  moraware?: {
+    linked?: boolean;
+    accounts?: Array<{
+      source_account_id?: string;
+      display_name?: string | null;
+      job_count?: number | null;
+    }>;
+    total_job_count?: number | null;
+    jobs_state?: "available" | "unavailable";
+  };
   quoteFlow?: { state: string; notes?: string | null };
 };
 
@@ -550,4 +561,51 @@ export type StatusReviewQueueResponse = {
     reviewed: number;
   };
   items: StatusReviewItem[];
+};
+
+export type MorawareReconciliationItem = {
+  morawareAccountId: string;
+  morawareName: string;
+  jobCount?: number;
+  jobs2026?: number;
+  earliestJobDate?: string | null;
+  latestJobDate?: string | null;
+  classification: string;
+  reason?: string;
+  internalBucket?: boolean;
+  proposedAccountId?: string | null;
+  proposedAccountName?: string | null;
+  qbLinked?: boolean;
+  qbDisplayName?: string | null;
+  evidence?: string[];
+  contradictions?: string[];
+  alternatives?: Array<{ accountId: string; accountName: string; evidence?: string[] }>;
+  currentLink?: {
+    linked?: boolean;
+    accountId?: string | null;
+    accountName?: string | null;
+    linkId?: string | null;
+  };
+  siblingMorawareIds?: string[];
+  confirmAllowed?: boolean;
+  multipleMorawareIdsExpected?: boolean;
+};
+
+export type MorawareReconciliationResponse = {
+  ok?: boolean;
+  summary?: {
+    totalMorawareAccounts: number;
+    alreadyLinked: number;
+    highConfidenceUnlinked: number;
+    reviewRequired: number;
+    unmatched: number;
+    conflicts: number;
+    internalBuckets?: number;
+  };
+  items?: MorawareReconciliationItem[];
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  showingFrom?: number;
+  showingTo?: number;
 };

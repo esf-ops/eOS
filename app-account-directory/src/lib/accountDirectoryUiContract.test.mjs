@@ -47,7 +47,21 @@ assert.ok(app.includes("QB Needs Review"));
 assert.ok(app.includes("Status Review"));
 assert.ok(app.includes("canReviewStatus"));
 assert.ok(app.includes("StatusReviewSurface"));
+assert.ok(api.includes("link-moraware"));
+assert.ok(api.includes("unlinkMoraware") || api.includes("expectedSystem"));
+assert.ok(api.includes("pageSize"));
+assert.ok(app.includes("MorawareReviewSurface"));
+assert.ok(app.includes("moraware_review"));
 assert.ok(api.includes("/status-review"));
+assert.ok(api.includes("moraware-reconciliation"));
+assert.equal(app.includes("Confirm All"), false, "must not offer Confirm All for Moraware");
+assert.equal(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Confirm All"),
+  false
+);
+assert.ok(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Showing")
+);
 assert.ok(css.includes(".status-review"));
 assert.equal(app.includes("Apply All"), false, "must not offer Apply All");
 assert.equal(

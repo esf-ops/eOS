@@ -9,6 +9,7 @@ import {
   roleHasCapability
 } from "./accountDirectoryAuth.mjs";
 import { ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM } from "./accountDirectoryQuickbooksLinkage.mjs";
+import { buildMorawareRelationship } from "./accountDirectoryMorawareLinkage.mjs";
 import {
   AD_FINANCIALS_PAGE_SIZE,
   buildOpenArAging,
@@ -530,6 +531,35 @@ async function loadAccountQbEnrichment(supabase, { organizationId, accountId, qu
   }
 }
 
+async function loadMorawareRelationship(supabase, organizationId, links) {
+  const unavailable = buildMorawareRelationship(links, null, { jobsState: "unavailable" });
+  if (!unavailable.linked || !supabase || !unavailable.accounts.length) return unavailable;
+  const ids = unavailable.accounts.map((a) => a.source_account_id);
+  const counts = new Map(ids.map((id) => [id, 0]));
+  try {
+    let from = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from("brain_moraware_jobs")
+        .select("source_account_id")
+        .eq("organization_id", organizationId)
+        .in("source_account_id", ids)
+        .range(from, from + 999);
+      if (error) return unavailable;
+      const batch = data || [];
+      for (const row of batch) {
+        const id = String(row.source_account_id || "");
+        if (counts.has(id)) counts.set(id, counts.get(id) + 1);
+      }
+      if (batch.length < 1000) break;
+      from += 1000;
+    }
+  } catch {
+    return unavailable;
+  }
+  return buildMorawareRelationship(links, counts, { jobsState: "available" });
+}
+
 export async function getAccountDirectoryRelationship(params) {
   if (!roleHasCapability(params.role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW)) {
     throw new AccountDirectoryError("forbidden", "Permission denied for this Account Directory action.", 403);
@@ -563,6 +593,7 @@ export async function getAccountDirectoryRelationship(params) {
     qbEnrichment
   });
   const estimates = await loadExactAccountEstimates(params.supabase, params.organizationId, params.accountId);
+  const moraware = await loadMorawareRelationship(params.supabase, params.organizationId, links);
   return scrubFinancialIds({
     health,
     estimates: {
@@ -592,8 +623,11 @@ export async function getAccountDirectoryRelationship(params) {
     },
     jobs: {
       state: "unavailable",
-      notes: "Moraware job history is not connected to Account Directory yet."
+      notes: moraware.linked
+        ? "Moraware identity is linked. Operational job history is not shown in this phase."
+        : "Moraware job history is not connected to Account Directory yet."
     },
+    moraware,
     quoteFlow: {
       state: "unavailable",
       notes: "Quote Flow history is not connected to Account Directory yet."

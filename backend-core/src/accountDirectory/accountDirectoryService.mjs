@@ -3,6 +3,11 @@ import { ACCOUNT_DIRECTORY_CAPABILITIES, roleHasCapability } from "./accountDire
 import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
 import { isAccountQuickbooksLinked } from "./accountDirectoryQuickbooksLinkage.mjs";
 import {
+  ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+  isInternalMorawareAccountName,
+  loadCanonicalMorawareAccount
+} from "./accountDirectoryMorawareLinkage.mjs";
+import {
   indexSuggestionsByAccountId,
   listAllAdQbLinkSuggestionsForIndex,
   markSuggestionLinked,
@@ -73,11 +78,12 @@ export function createAccountDirectoryService(deps) {
     oldValues,
     newValues,
     requestId,
-    role
+    role,
+    required = false
   }) {
     const safeOld = scrubAuditValues(oldValues);
     const safeNew = scrubAuditValues(newValues);
-    await store.insertAuditEvent({
+    const row = await store.insertAuditEvent({
       organizationId,
       accountId,
       entityType,
@@ -89,6 +95,13 @@ export function createAccountDirectoryService(deps) {
       newValues: safeNew,
       requestId: requestId ?? null
     });
+    if (required && !row) {
+      throw new AccountDirectoryError(
+        "audit_write_failed",
+        "The Moraware identity change was recorded but the Account Directory audit event could not be saved. Refresh and confirm the link state before retrying.",
+        500
+      );
+    }
     if (typeof deps.logAction === "function" && deps.getSupabase) {
       try {
         await deps.logAction({
@@ -105,9 +118,44 @@ export function createAccountDirectoryService(deps) {
           }
         });
       } catch {
-        /* audit best-effort */
+        /* platform action log is best-effort */
       }
     }
+    return row;
+  }
+
+  async function resolveCanonicalMorawareAccount(organizationId, sourceAccountId) {
+    if (typeof deps.loadCanonicalMorawareAccount === "function") {
+      return deps.loadCanonicalMorawareAccount(organizationId, sourceAccountId);
+    }
+    if (typeof deps.getSupabase === "function") {
+      return loadCanonicalMorawareAccount(deps.getSupabase(), organizationId, sourceAccountId);
+    }
+    return null;
+  }
+
+  async function throwMorawareDuplicate(organizationId, externalId, fallbackExisting) {
+    let existingAccountId = fallbackExisting?.accountId || null;
+    let linkId = fallbackExisting?.id || null;
+    if (!existingAccountId) {
+      try {
+        const active = await store.listActiveExternalLinksByExternalId(
+          organizationId,
+          ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+          externalId
+        );
+        existingAccountId = active[0]?.accountId || null;
+        linkId = active[0]?.id || null;
+      } catch {
+        /* still return a governed 409 */
+      }
+    }
+    throw new AccountDirectoryError(
+      "duplicate_external_id",
+      "That Moraware Account ID is already linked to another Account Directory account.",
+      409,
+      existingAccountId ? { existingAccountId, linkId } : {}
+    );
   }
 
   function scrubAuditValues(values) {
@@ -402,7 +450,12 @@ export function createAccountDirectoryService(deps) {
         const canSeeExternalId = roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
         return {
           id: l.id,
-          system: l.externalSystem === "quickbooks_desktop" ? "QuickBooks Desktop" : l.externalSystem,
+          system:
+            l.externalSystem === "quickbooks_desktop"
+              ? "QuickBooks Desktop"
+              : l.externalSystem === "moraware"
+                ? "Moraware"
+                : l.externalSystem,
           externalSystem: l.externalSystem,
           externalId: canSeeExternalId ? l.externalId : undefined,
           externalDisplayName: l.externalDisplayName,
@@ -984,6 +1037,134 @@ export function createAccountDirectoryService(deps) {
       return hydrateDetail(organizationId, account, { includeAudit: true, role });
     },
 
+    async linkMoraware({ organizationId, role, actorUserId, requestId, accountId, payload }) {
+      requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
+      const account = await store.getAccount(organizationId, accountId);
+      if (!account) throw new AccountDirectoryError("not_found", "Account not found.", 404);
+      const externalId = String(payload?.externalId ?? payload?.sourceAccountId ?? "").trim();
+      if (!externalId) {
+        throw new AccountDirectoryError("external_id_required", "Moraware Account ID is required.");
+      }
+
+      const canonical = await resolveCanonicalMorawareAccount(organizationId, externalId);
+      if (!canonical?.sourceAccountId) {
+        throw new AccountDirectoryError(
+          "moraware_account_not_found",
+          "That Moraware Account ID is not in the canonical Moraware account list for this organization.",
+          404
+        );
+      }
+      if (isInternalMorawareAccountName(canonical.accountName)) {
+        throw new AccountDirectoryError(
+          "internal_identity_policy",
+          "This Moraware account is an internal/house bucket and cannot be linked until an identity policy exists.",
+          409
+        );
+      }
+      const displayName = canonical.accountName || null;
+
+      const active = await store.listActiveExternalLinksByExternalId(
+        organizationId,
+        ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        canonical.sourceAccountId
+      );
+      if (active.length) {
+        const existing = active[0];
+        if (existing.accountId !== accountId) {
+          await throwMorawareDuplicate(organizationId, canonical.sourceAccountId, existing);
+        }
+        return hydrateDetail(organizationId, account, { includeAudit: true, role });
+      }
+
+      const existingRows = await store.listExternalLinks(organizationId, accountId);
+      const inactiveSame = existingRows.find(
+        (l) =>
+          l.externalSystem === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM &&
+          l.externalId === canonical.sourceAccountId &&
+          l.isActive === false
+      );
+      if (inactiveSame) {
+        const result = await store.updateExternalLink(organizationId, inactiveSame.id, {
+          isActive: true,
+          externalDisplayName: displayName ?? inactiveSame.externalDisplayName
+        });
+        if (!result.ok && result.code === "duplicate_external_id") {
+          await throwMorawareDuplicate(organizationId, canonical.sourceAccountId, result.existing);
+        }
+        if (!result.ok) {
+          throw new AccountDirectoryError("not_found", "External link not found on this account.", 404);
+        }
+        await writeAudit({
+          organizationId,
+          accountId,
+          entityType: "external_link",
+          entityId: inactiveSame.id,
+          action: "relink_moraware",
+          actorUserId,
+          changedFields: ["isActive"],
+          newValues: {
+            externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+            externalId: canonical.sourceAccountId,
+            isActive: true
+          },
+          requestId,
+          role,
+          required: true
+        });
+        return hydrateDetail(organizationId, account, { includeAudit: true, role });
+      }
+
+      const result = await store.insertExternalLink({
+        organizationId,
+        accountId,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: canonical.sourceAccountId,
+        externalDisplayName: displayName,
+        linkedBy: actorUserId
+      });
+      if (!result.ok && result.code === "duplicate_external_id") {
+        await throwMorawareDuplicate(organizationId, canonical.sourceAccountId, result.existing);
+      }
+      if (!result.ok || !result.link) {
+        throw new AccountDirectoryError(
+          "duplicate_external_id",
+          "That Moraware Account ID is already linked to another Account Directory account.",
+          409
+        );
+      }
+      await writeAudit({
+        organizationId,
+        accountId,
+        entityType: "external_link",
+        entityId: result.link.id,
+        action: "link_moraware",
+        actorUserId,
+        changedFields: ["externalId"],
+        newValues: {
+          externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+          externalId: canonical.sourceAccountId
+        },
+        requestId,
+        role,
+        required: true
+      });
+      return hydrateDetail(organizationId, account, { includeAudit: true, role });
+    },
+
+    async resolveMorawareAccount({ organizationId, role, sourceAccountId }) {
+      requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW);
+      const id = String(sourceAccountId || "").trim();
+      if (!id) return { linked: false, accountId: null };
+      const active = await store.listActiveExternalLinksByExternalId(
+        organizationId,
+        ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        id
+      );
+      if (!active.length) return { linked: false, accountId: null, account: null };
+      const account = await store.getAccount(organizationId, active[0].accountId);
+      return { linked: true, accountId: active[0].accountId, account, linkId: active[0].id };
+    },
+
     async linkQuickBooks({ organizationId, role, actorUserId, requestId, accountId, payload }) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
       const account = await store.getAccount(organizationId, accountId);
@@ -1039,25 +1220,52 @@ export function createAccountDirectoryService(deps) {
       return attachEnrichment(detail, await loadSuggestionIndex(organizationId));
     },
 
-    async deactivateExternalLink({ organizationId, role, actorUserId, requestId, accountId, linkId }) {
+    async deactivateExternalLink({
+      organizationId,
+      role,
+      actorUserId,
+      requestId,
+      accountId,
+      linkId,
+      expectedSystem
+    }) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
       const account = await store.getAccount(organizationId, accountId);
       if (!account) throw new AccountDirectoryError("not_found", "Account not found.", 404);
+      const current =
+        typeof store.getExternalLink === "function"
+          ? await store.getExternalLink(organizationId, linkId)
+          : null;
+      if (!current) throw new AccountDirectoryError("not_found", "External link not found on this account.", 404);
+      if (current.accountId !== accountId) {
+        throw new AccountDirectoryError("not_found", "External link not found on this account.", 404);
+      }
+      if (expectedSystem && current.externalSystem !== expectedSystem) {
+        throw new AccountDirectoryError(
+          "external_system_mismatch",
+          "That external link does not belong to the requested system.",
+          409
+        );
+      }
       const result = await store.updateExternalLink(organizationId, linkId, { isActive: false });
       if (!result.ok || result.link.accountId !== accountId) {
         throw new AccountDirectoryError("not_found", "External link not found on this account.", 404);
       }
+      const system = result.link.externalSystem;
+      const action =
+        system === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM ? "deactivate_moraware_link" : "deactivate_external_link";
       await writeAudit({
         organizationId,
         accountId,
         entityType: "external_link",
         entityId: linkId,
-        action: "deactivate_external_link",
+        action,
         actorUserId,
         changedFields: ["isActive"],
-        newValues: { isActive: false },
+        newValues: { isActive: false, externalSystem: system },
         requestId,
-        role
+        role,
+        required: system === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM
       });
       return hydrateDetail(organizationId, account, { includeAudit: true, role });
     },

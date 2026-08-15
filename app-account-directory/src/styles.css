@@ -1867,9 +1867,25 @@ a.detail-list-title:hover {
 
 .ad-status-review-mode .summary-strip,
 .ad-status-review-mode .list-toolbar,
-.ad-status-review-mode .filter-chips,
-.ad-status-review-mode .ad-layout {
+.ad-status-review-mode .ad-layout,
+.ad-status-review-mode > .pagination {
   display: none;
+}
+
+.moraware-review .status-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.moraware-review-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .status-review {

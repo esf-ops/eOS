@@ -385,6 +385,8 @@ async function main() {
     assert.equal(roleHasCapability("installer", ACCOUNT_DIRECTORY_CAPABILITIES.VIEW), true);
     assert.equal(roleHasCapability("installer", ACCOUNT_DIRECTORY_CAPABILITIES.EDIT), false);
     assert.equal(permissionsForRole("sales").canLinkQuickBooks, false);
+    assert.equal(permissionsForRole("sales").canLinkMoraware, false);
+    assert.equal(permissionsForRole("admin").canLinkMoraware, true);
   }
 
   // 19–20. responses contain no raw QB payload / financial fields

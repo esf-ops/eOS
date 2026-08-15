@@ -59,6 +59,7 @@ export function permissionsForRole(role) {
     canArchive: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN),
     canRestore: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN),
     canLinkQuickBooks: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK),
+    canLinkMoraware: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK),
     canViewAudit: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN),
     canReviewStatus: caps.has(ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN),
     capabilities: Array.from(caps)

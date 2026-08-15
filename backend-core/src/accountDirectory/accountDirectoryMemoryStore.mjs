@@ -373,6 +373,11 @@ export function createAccountDirectoryMemoryStore() {
         .map(clone);
     },
 
+    async getExternalLink(organizationId, linkId) {
+      const current = assertOrg(externalLinks.get(linkId), organizationId);
+      return current ? clone(current) : null;
+    },
+
     async updateExternalLink(organizationId, linkId, patch) {
       const current = assertOrg(externalLinks.get(linkId), organizationId);
       if (!current) return { ok: false, code: "not_found" };

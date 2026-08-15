@@ -40,7 +40,8 @@ assert.equal(defaultState.panel, null, "default panel = null");
 console.log("ok: parseUrlState defaults");
 
 assert.equal(parseUrlState("?tab=status_review").tab, "status_review");
-console.log("ok: parseUrlState status_review tab");
+assert.equal(parseUrlState("?tab=moraware_review").tab, "moraware_review");
+console.log("ok: parseUrlState status_review and moraware_review tabs");
 
 const fullState = parseUrlState("?tab=prospects&page=3&pageSize=25&search=Smith&status=active&linked=true&missingContact=true&sort=updated_desc&account=abc123");
 assert.equal(fullState.tab, "prospects");

@@ -372,11 +372,42 @@ function storeFor(links) {
   assert.equal(relationship.estimates.internal.items[0].quote_number, "ESF-W-000001");
   assert.equal(relationship.jobs.state, "unavailable");
   assert.equal(relationship.jobs.notes, "Moraware job history is not connected to Account Directory yet.");
+  assert.equal(relationship.moraware.linked, false);
+  assert.equal(relationship.moraware.jobs_state, "unavailable");
+  assert.equal(relationship.moraware.total_job_count, null);
+  assert.equal(JSON.stringify(relationship).includes('"job_count":0'), false);
   assert.equal(relationship.quoteFlow.state, "unavailable");
   assert.equal(JSON.stringify(relationship).includes("net_income"), false);
   assert.equal(JSON.stringify(relationship).includes("account_id"), false);
   assertNoIds(relationship);
-  console.log("ok: timeline order/filter/bounds + exact estimate identity; Moraware withheld");
+
+  const linkedRelationship = await getAccountDirectoryRelationship({
+    supabase,
+    store: storeFor([
+      {
+        isActive: true,
+        externalSystem: "moraware",
+        externalId: "635",
+        externalDisplayName: "Dyersville- Broihahn Custom Woodworks"
+      }
+    ]),
+    organizationId: ORG,
+    accountId: ACCOUNT,
+    role: "sales",
+    env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "999999" },
+    now: new Date("2026-08-13T18:00:00.000Z")
+  });
+  assert.equal(linkedRelationship.jobs.state, "unavailable");
+  assert.match(linkedRelationship.jobs.notes, /identity is linked/);
+  assert.equal(linkedRelationship.moraware.linked, true);
+  assert.equal(linkedRelationship.moraware.accounts[0].source_account_id, "635");
+  assert.equal(linkedRelationship.moraware.jobs_state, "unavailable");
+  assert.equal(linkedRelationship.moraware.accounts[0].job_count, null);
+  assert.equal(linkedRelationship.moraware.total_job_count, null);
+  assert.equal(JSON.stringify(linkedRelationship).includes('"job_count":0'), false);
+  assert.equal(JSON.stringify(linkedRelationship).includes("raw_payload"), false);
+  assertNoIds(linkedRelationship);
+  console.log("ok: timeline order/filter/bounds + exact estimate identity; Moraware withheld until linked");
 }
 
 {

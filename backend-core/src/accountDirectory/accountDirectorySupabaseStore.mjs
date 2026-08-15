@@ -639,6 +639,17 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return (data || []).map(mapLink);
     },
 
+    async getExternalLink(organizationId, linkId) {
+      const { data, error } = await db()
+        .from("account_directory_external_links")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", linkId)
+        .maybeSingle();
+      if (error) throw dbError(error, "Could not load external link.");
+      return data ? mapLink(data) : null;
+    },
+
     async updateExternalLink(organizationId, linkId, patch) {
       const { data: currentRow, error: loadErr } = await db()
         .from("account_directory_external_links")

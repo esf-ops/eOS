@@ -814,6 +814,15 @@ export function RelationshipWorkspace({
             <span>QuickBooks</span>
             <strong>{view.qbState || "Unknown"}</strong>
           </li>
+          {relationship?.moraware?.linked ? (
+            <li>
+              <span>Moraware</span>
+              <strong>
+                {relationship.moraware.accounts?.length || 0} linked ID
+                {(relationship.moraware.accounts?.length || 0) === 1 ? "" : "s"}
+              </strong>
+            </li>
+          ) : null}
         </ul>
         {view.signals.length ? (
           <ul className="ad-signal-list">

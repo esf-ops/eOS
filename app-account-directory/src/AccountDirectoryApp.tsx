@@ -26,6 +26,8 @@ import {
 import { ConnectionsWithIdentity, ContactsMaintain, LocationsMaintain } from "./ui/AccountMaintain";
 import { InsightsPanel, OverviewInsightStrip } from "./ui/AccountInsights";
 import { WorkspaceTabBoundary } from "./ui/WorkspaceTabBoundary";
+import { StatusReviewSurface } from "./ui/AccountStatusReview";
+import { MorawareReviewSurface } from "./ui/MorawareReview";
 import type {
   AccountDetail,
   AccountDirectoryPermissions,
@@ -211,6 +213,7 @@ function defaultPermissions(): AccountDirectoryPermissions {
     canArchive: true,
     canRestore: true,
     canLinkQuickBooks: false,
+    canLinkMoraware: false,
     canReviewStatus: false
   };
 }
@@ -729,8 +732,11 @@ export default function AccountDirectoryApp() {
   const navTabs = useMemo(() => {
     const tabs = [...NAV_TABS];
     if (permissions.canReviewStatus) tabs.push({ id: "status_review", label: "Status Review" });
+    if (permissions.canLinkQuickBooks || permissions.canLinkMoraware) {
+      tabs.push({ id: "moraware_review", label: "Moraware Links" });
+    }
     return tabs;
-  }, [permissions.canReviewStatus]);
+  }, [permissions.canReviewStatus, permissions.canLinkQuickBooks, permissions.canLinkMoraware]);
   const userDisplayName = userMetaName || deriveDisplayNameFromEmail(userEmail) || userEmail || "Staff";
   const userDisplayInitials = useMemo(() => userInitialsFor(userMetaName, userEmail), [userMetaName, userEmail]);
   const chipSubtitle = useMemo(() => {
@@ -824,7 +830,14 @@ export default function AccountDirectoryApp() {
         />
       )}
 
-      <main className={urlState.tab === "status_review" ? "main ad-status-review-mode" : "main"} role="main">
+      <main
+        className={
+          urlState.tab === "status_review" || urlState.tab === "moraware_review"
+            ? "main ad-status-review-mode"
+            : "main"
+        }
+        role="main"
+      >
         {/* Supabase config warning */}
         {!supabase ? (
           <div className="banner banner-warn" role="alert">
@@ -936,6 +949,23 @@ export default function AccountDirectoryApp() {
                   ✕
                 </button>
               </div>
+            ) : null}
+
+            {urlState.tab === "moraware_review" ? (
+              !permissionsLoaded ? (
+                <p className="muted">Loading Moraware review…</p>
+              ) : permissions.canLinkQuickBooks || permissions.canLinkMoraware ? (
+                <MorawareReviewSurface
+                  sessionToken={sessionToken}
+                  canLink={Boolean(permissions.canLinkQuickBooks || permissions.canLinkMoraware)}
+                  onMessage={setActionMessage}
+                  onOpenAccount={(accountId) => {
+                    updateFilters({ tab: "accounts", account: accountId, page: 1 });
+                  }}
+                />
+              ) : (
+                <p className="permission-denied">Moraware linking is limited to Account Directory admins.</p>
+              )
             ) : null}
 
             {urlState.tab === "status_review" ? (
