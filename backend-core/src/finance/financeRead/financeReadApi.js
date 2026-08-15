@@ -7,6 +7,11 @@
  * GET /api/finance/ar
  * GET /api/finance/ap
  * GET /api/finance/cash
+ * GET /api/finance/ar/invoices
+ * GET /api/finance/ap/bills
+ * GET /api/finance/accounts
+ * GET /api/finance/journal-entries
+ * GET /api/finance/transaction-activity
  * GET /api/finance/reconciliation
  *
  * Auth: requireAuth + requireRole(finance roles) + requireHeadAccess("finance")
@@ -104,6 +109,51 @@ export function attachFinanceReadRoutes(app, deps) {
     } catch (e) {
       sendError(res, 500, "Finance cash failed.");
       console.error("GET /api/finance/cash", e);
+    }
+  });
+
+  app.get("/api/finance/ar/invoices", ...stack, async (req, res) => {
+    try {
+      send(res, await service.getArInvoices(req, req.query || {}));
+    } catch (e) {
+      sendError(res, 500, "Finance invoice detail failed.");
+      console.error("GET /api/finance/ar/invoices", e);
+    }
+  });
+
+  app.get("/api/finance/ap/bills", ...stack, async (req, res) => {
+    try {
+      send(res, await service.getApBills(req, req.query || {}));
+    } catch (e) {
+      sendError(res, 500, "Finance bill detail failed.");
+      console.error("GET /api/finance/ap/bills", e);
+    }
+  });
+
+  app.get("/api/finance/accounts", ...stack, async (req, res) => {
+    try {
+      send(res, await service.getAccounts(req, req.query || {}));
+    } catch (e) {
+      sendError(res, 500, "Finance account detail failed.");
+      console.error("GET /api/finance/accounts", e);
+    }
+  });
+
+  app.get("/api/finance/journal-entries", ...stack, async (req, res) => {
+    try {
+      send(res, await service.getJournalEntries(req, req.query || {}));
+    } catch (e) {
+      sendError(res, 500, "Finance journal detail failed.");
+      console.error("GET /api/finance/journal-entries", e);
+    }
+  });
+
+  app.get("/api/finance/transaction-activity", ...stack, async (req, res) => {
+    try {
+      send(res, await service.getTransactionActivity(req, req.query || {}));
+    } catch (e) {
+      sendError(res, 500, "Finance transaction activity failed.");
+      console.error("GET /api/finance/transaction-activity", e);
     }
   });
 

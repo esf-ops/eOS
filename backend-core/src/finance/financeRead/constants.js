@@ -36,6 +36,8 @@ export const FINANCE_PAGE_SIZE = 1000;
 export const FINANCE_MAX_PAGES = 20;
 export const FINANCE_LIST_LIMIT = 25;
 export const FINANCE_BILL_LIST_LIMIT = 50;
+export const FINANCE_DETAIL_DEFAULT_LIMIT = 50;
+export const FINANCE_DETAIL_MAX_LIMIT = 100;
 export const FINANCE_DUE_DATE_COVERAGE_MIN = 0.8;
 
 export const BANK_ACCOUNT_TYPES = Object.freeze(["bank", "bank account"]);

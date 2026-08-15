@@ -28,6 +28,7 @@ export default function FinanceDrilldown({
 }: Props) {
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
 
   const requestClose = () => {
@@ -42,8 +43,17 @@ export default function FinanceDrilldown({
 
   useEffect(() => {
     const priorFocus = document.activeElement as HTMLElement | null;
+    const scrollY = window.scrollY;
     const priorOverflow = document.body.style.overflow;
+    const priorHtmlOverflow = document.documentElement.style.overflow;
+    const priorPosition = document.body.style.position;
+    const priorTop = document.body.style.top;
+    const priorWidth = document.body.style.width;
     document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
     window.requestAnimationFrame(() => closeRef.current?.focus());
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -73,8 +83,13 @@ export default function FinanceDrilldown({
     window.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = priorOverflow;
+      document.documentElement.style.overflow = priorHtmlOverflow;
+      document.body.style.position = priorPosition;
+      document.body.style.top = priorTop;
+      document.body.style.width = priorWidth;
       window.removeEventListener("keydown", onKeyDown);
-      priorFocus?.focus();
+      window.scrollTo(0, scrollY);
+      priorFocus?.focus({ preventScroll: true });
     };
   }, []);
 
@@ -92,6 +107,23 @@ export default function FinanceDrilldown({
         aria-modal="true"
         aria-labelledby="fin-drilldown-title"
         tabIndex={-1}
+        onKeyDown={(event) => {
+          const scroller = scrollRef.current;
+          if (!scroller) return;
+          if (event.key === "PageDown") {
+            event.preventDefault();
+            scroller.scrollBy({ top: scroller.clientHeight * 0.85, behavior: "auto" });
+          } else if (event.key === "PageUp") {
+            event.preventDefault();
+            scroller.scrollBy({ top: -scroller.clientHeight * 0.85, behavior: "auto" });
+          } else if (event.key === "Home" && event.currentTarget === event.target) {
+            event.preventDefault();
+            scroller.scrollTo({ top: 0, behavior: "auto" });
+          } else if (event.key === "End" && event.currentTarget === event.target) {
+            event.preventDefault();
+            scroller.scrollTo({ top: scroller.scrollHeight, behavior: "auto" });
+          }
+        }}
       >
         <div className="fin-drilldown-grain" aria-hidden="true" />
         <aside className="fin-drilldown-rail" aria-hidden="true">
@@ -109,7 +141,7 @@ export default function FinanceDrilldown({
           <span aria-hidden="true" />
           Close
         </button>
-        <div className="fin-drilldown-scroll">
+        <div ref={scrollRef} className="fin-drilldown-scroll" tabIndex={0}>
           <header className="fin-drilldown-heading">
             <div>
               <p className="fin-kicker">{kicker}</p>

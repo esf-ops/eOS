@@ -160,7 +160,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 ### Finance / Accounting
 
 - Accounting Head  
-- **Finance Head** (`app-finance/`, slug **`finance`**, env **`HEAD_URL_FINANCE`**) — governed Accrual P&L, Balance Sheet, A/R, A/P, cash, and reconciliation via `GET /api/finance/*`. Roles: admin, super_admin, executive, finance, accounting + head access. QuickBooks read-only. Browser never queries `qb_finance_*`. Distinct from QuickBooks Intelligence.  
+- **Finance Head** (`app-finance/`, slug **`finance`**, env **`HEAD_URL_FINANCE`**) — eliteOS owner command center for governed Accrual P&L, Balance Sheet, A/R, A/P, cash, reconciliation, monthly statement exploration, and bounded account/transaction detail via `GET /api/finance/*`. Roles: admin, super_admin, executive, finance, accounting + head access. QuickBooks read-only; browser never queries `qb_finance_*` or receives QuickBooks/internal IDs. Historical views require stored snapshots and equivalent-period coverage. Distinct from QuickBooks Intelligence.
 - Job Costing Head  
 - Payroll Prep / Workforce Cost Head  
 - **QuickBooks Intelligence Head** (`app-quickbooks-intelligence/`, slug **`quickbooks_intelligence`**, env **`HEAD_URL_QUICKBOOKS_INTELLIGENCE`**) — Phase 4D read-only AR/revenue/payment/estimate-flow insights via `GET /api/admin/quickbooks/intelligence/executive`. Roles: admin, super_admin, executive, finance, accounting + head access. **System Admin** assigns access only — it does **not** host this page. No AI, no `raw_payload`, no writeback.  

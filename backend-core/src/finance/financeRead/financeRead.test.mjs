@@ -42,12 +42,25 @@ function createMemorySupabase(tables) {
           state.filters.push((r) => vals.includes(r[col]));
           return api;
         },
+        ilike(col, pattern) {
+          const needle = String(pattern ?? "").replaceAll("%", "").toLowerCase();
+          state.filters.push((r) => String(r[col] ?? "").toLowerCase().includes(needle));
+          return api;
+        },
         gte(col, val) {
           state.filters.push((r) => String(r[col] ?? "") >= String(val));
           return api;
         },
+        lt(col, val) {
+          state.filters.push((r) => r[col] != null && String(r[col]) < String(val));
+          return api;
+        },
         lte(col, val) {
           state.filters.push((r) => String(r[col] ?? "") <= String(val));
+          return api;
+        },
+        is(col, val) {
+          state.filters.push((r) => (val == null ? r[col] == null : r[col] === val));
           return api;
         },
         order(col, opts = {}) {
@@ -78,13 +91,16 @@ function createMemorySupabase(tables) {
           });
         }
         let out = rows.filter((r) => state.filters.every((f) => f(r)));
-        for (const o of state.orders) {
+        if (state.orders.length) {
           out.sort((a, b) => {
-            const av = a[o.col];
-            const bv = b[o.col];
-            if (av === bv) return 0;
-            const cmp = String(av ?? "") < String(bv ?? "") ? -1 : 1;
-            return o.ascending ? cmp : -cmp;
+            for (const o of state.orders) {
+              const av = a[o.col];
+              const bv = b[o.col];
+              if (av === bv) continue;
+              const cmp = String(av ?? "") < String(bv ?? "") ? -1 : 1;
+              return o.ascending ? cmp : -cmp;
+            }
+            return 0;
           });
         }
         if (state.range) out = out.slice(state.range[0], state.range[1] + 1);
@@ -524,6 +540,46 @@ function baseTables() {
     ],
     qb_finance_undeposited_current: [
       { organization_id: ORG_A, amount: 400, customer_name: "Fixture Customer Alpha", txn_date: "2026-08-13" }
+    ],
+    qb_finance_accounts: [
+      {
+        organization_id: ORG_A,
+        name: "Checking",
+        full_name: "Operating Checking",
+        account_number: "1000",
+        account_type: "Bank",
+        is_active: true,
+        current_balance: 88000,
+        synced_at: "2026-08-14T14:00:00Z",
+        qb_account_id: "ACCOUNT-SECRET"
+      }
+    ],
+    qb_finance_journal_entry_lines: [
+      {
+        organization_id: ORG_A,
+        line_type: "Debit",
+        txn_date: "2026-08-12",
+        time_modified: "2026-08-12T15:30:00Z",
+        line_account_name: "Operating Checking",
+        line_amount: 1250,
+        entity_name: "Fixture Entity",
+        memo: "Fixture journal",
+        qb_txn_id: "JOURNAL-SECRET"
+      }
+    ],
+    qb_finance_transaction_index: [
+      {
+        organization_id: ORG_A,
+        txn_type: "Deposit",
+        txn_date: "2026-08-13",
+        entity_name: "Fixture Customer Alpha",
+        account_name: "Operating Checking",
+        reference_number: "DEP-100",
+        amount: 2500,
+        amount_in_home_currency: 2500,
+        memo: "Fixture deposit",
+        source_txn_id: "TXN-SECRET"
+      }
     ]
   };
 }
@@ -847,6 +903,49 @@ const staffReq = { user: { id: "user-a", role: "finance", organization_id: ORG_A
 }
 
 {
+  const service = serviceFor();
+  const invoices = await service.getArInvoices(staffReq, {
+    search: "Fixture",
+    sort: "due_date",
+    limit: "1"
+  });
+  assert.equal(invoices.state, "available");
+  assert.equal(invoices.pagination.limit, 1);
+  assert.equal(invoices.items.length, 1);
+  assert.equal(invoices.items[0].customer_name, "Fixture Customer Beta");
+  assertNoForbiddenKeys(invoices);
+
+  const overdueInvoices = await service.getArInvoices(staffReq, { state: "overdue", sort: "name" });
+  assert.equal(overdueInvoices.filter.state, "overdue");
+  assert.equal(overdueInvoices.items.every((row) => row.due_date < "2026-08-14"), true);
+
+  const bills = await service.getApBills(staffReq, { state: "open", limit: "500" });
+  assert.equal(bills.pagination.limit, 100);
+  assert.equal(bills.items.every((row) => row.is_paid === false), true);
+  assertNoForbiddenKeys(bills);
+
+  const accounts = await service.getAccounts(staffReq, { search: "Operating", active: "true" });
+  assert.equal(accounts.items[0].name, "Operating Checking");
+  assert.equal(accounts.items[0].balance, 88000);
+  assertNoForbiddenKeys(accounts);
+
+  const journals = await service.getJournalEntries(staffReq, {
+    search: "Checking",
+    from: "2026-08-01",
+    to: "2026-08-31"
+  });
+  assert.equal(journals.items[0].amount, 1250);
+  assert.equal(journals.items[0].modified_at, "2026-08-12T15:30:00Z");
+  assert.equal(journals.date_basis, "time_modified");
+  assertNoForbiddenKeys(journals);
+
+  const activity = await service.getTransactionActivity(staffReq, { type: "Deposit" });
+  assert.equal(activity.items[0].transaction_type, "Deposit");
+  assert.equal(activity.items[0].amount, 2500);
+  assertNoForbiddenKeys(activity);
+}
+
+{
   const routes = new Map();
   const app = {
     get(path, ...handlers) {
@@ -955,7 +1054,12 @@ const staffReq = { user: { id: "user-a", role: "finance", organization_id: ORG_A
     "/api/finance/ar",
     "/api/finance/ap",
     "/api/finance/cash",
-    "/api/finance/reconciliation"
+    "/api/finance/reconciliation",
+    "/api/finance/ar/invoices",
+    "/api/finance/ap/bills",
+    "/api/finance/accounts",
+    "/api/finance/journal-entries",
+    "/api/finance/transaction-activity"
   ]) {
     assert.ok(routes.has(`GET ${p}`), p);
   }

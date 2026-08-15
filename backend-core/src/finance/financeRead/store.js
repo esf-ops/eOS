@@ -23,6 +23,16 @@ async function runSelect(query) {
   return { data: data || [], error };
 }
 
+async function runBoundedPage(query, limit) {
+  const { data, error } = await query;
+  const rows = data || [];
+  return {
+    rows: rows.slice(0, limit),
+    hasMore: rows.length > limit,
+    error
+  };
+}
+
 export async function pageRows(buildQuery, { pageSize = FINANCE_PAGE_SIZE, maxPages = FINANCE_MAX_PAGES } = {}) {
   const rows = [];
   let truncated = false;
@@ -115,6 +125,27 @@ export function createFinanceReadStore(supabase) {
       return { rows: result.rows, error: storeError(result.error, "sales_quickbooks_open_ar_current"), truncated: result.truncated };
     },
 
+    async loadOpenArPage(
+      organizationId,
+      { search, dueState, asOf, sortColumn, ascending, offset, limit }
+    ) {
+      let q = supabase
+        .from("sales_quickbooks_open_ar_current")
+        .select("id, customer_name, balance, due_date, invoice_date, reference_number, original_amount, synced_at")
+        .eq("organization_id", organizationId);
+      if (search) q = q.ilike("customer_name", `%${search}%`);
+      if (dueState === "overdue") q = q.lt("due_date", asOf);
+      if (dueState === "current") q = q.gte("due_date", asOf);
+      if (dueState === "unknown") q = q.is("due_date", null);
+      q = q.order(sortColumn, { ascending }).order("id", { ascending: true }).range(offset, offset + limit);
+      const result = await runBoundedPage(q, limit);
+      return {
+        rows: result.rows,
+        hasMore: result.hasMore,
+        error: storeError(result.error, "sales_quickbooks_open_ar_current")
+      };
+    },
+
     async loadPaymentApplications(organizationId) {
       const { data, error } = await runSelect(
         supabase
@@ -157,6 +188,25 @@ export function createFinanceReadStore(supabase) {
       return { rows: data, error: storeError(error, "qb_finance_bills") };
     },
 
+    async loadBillPage(organizationId, { search, state, sortColumn, ascending, offset, limit }) {
+      let q = supabase
+        .from("qb_finance_bills")
+        .select(
+          "id, reference_number, txn_date, due_date, terms_name, vendor_name, amount, open_amount, is_paid, ap_account_name"
+        )
+        .eq("organization_id", organizationId);
+      if (search) q = q.ilike("vendor_name", `%${search}%`);
+      if (state === "open") q = q.eq("is_paid", false);
+      if (state === "paid") q = q.eq("is_paid", true);
+      q = q.order(sortColumn, { ascending }).order("id", { ascending: true }).range(offset, offset + limit);
+      const result = await runBoundedPage(q, limit);
+      return {
+        rows: result.rows,
+        hasMore: result.hasMore,
+        error: storeError(result.error, "qb_finance_bills")
+      };
+    },
+
     async loadBillApplications(organizationId) {
       const { data, error } = await runSelect(
         supabase
@@ -197,6 +247,18 @@ export function createFinanceReadStore(supabase) {
       return { rows: data, error: storeError(error, "qb_finance_deposits") };
     },
 
+    async loadAllDeposits(organizationId) {
+      const result = await pageRows((from, to) =>
+        supabase
+          .from("qb_finance_deposits")
+          .select("txn_date, deposit_to_account_name, total_deposit, memo")
+          .eq("organization_id", organizationId)
+          .order("txn_date", { ascending: false })
+          .range(from, to)
+      );
+      return { rows: result.rows, error: storeError(result.error, "qb_finance_deposits"), truncated: result.truncated };
+    },
+
     async loadChecks(organizationId) {
       const { data, error } = await runSelect(
         supabase
@@ -209,6 +271,18 @@ export function createFinanceReadStore(supabase) {
       return { rows: data, error: storeError(error, "qb_finance_checks") };
     },
 
+    async loadAllChecks(organizationId) {
+      const result = await pageRows((from, to) =>
+        supabase
+          .from("qb_finance_checks")
+          .select("reference_number, txn_date, payee_name, bank_account_name, amount, memo")
+          .eq("organization_id", organizationId)
+          .order("txn_date", { ascending: false })
+          .range(from, to)
+      );
+      return { rows: result.rows, error: storeError(result.error, "qb_finance_checks"), truncated: result.truncated };
+    },
+
     async loadTransfers(organizationId) {
       const { data, error } = await runSelect(
         supabase
@@ -219,6 +293,18 @@ export function createFinanceReadStore(supabase) {
           .limit(25)
       );
       return { rows: data, error: storeError(error, "qb_finance_transfers") };
+    },
+
+    async loadAllTransfers(organizationId) {
+      const result = await pageRows((from, to) =>
+        supabase
+          .from("qb_finance_transfers")
+          .select("txn_date, from_account_name, to_account_name, amount, memo")
+          .eq("organization_id", organizationId)
+          .order("txn_date", { ascending: false })
+          .range(from, to)
+      );
+      return { rows: result.rows, error: storeError(result.error, "qb_finance_transfers"), truncated: result.truncated };
     },
 
     async loadAccountBalances(organizationId) {
@@ -241,6 +327,62 @@ export function createFinanceReadStore(supabase) {
           .limit(200)
       );
       return { rows: data, error: storeError(error, "qb_finance_undeposited_current") };
+    },
+
+    async loadAccountsPage(organizationId, { search, accountType, active, sortColumn, ascending, offset, limit }) {
+      let q = supabase
+        .from("qb_finance_accounts")
+        .select(
+          "id, name, full_name, account_number, account_type, special_type, parent_account_name, cash_flow_classification, is_active, current_balance, account_balance, synced_at"
+        )
+        .eq("organization_id", organizationId);
+      if (search) q = q.ilike("full_name", `%${search}%`);
+      if (accountType) q = q.eq("account_type", accountType);
+      if (active === true || active === false) q = q.eq("is_active", active);
+      q = q.order(sortColumn, { ascending }).order("id", { ascending: true }).range(offset, offset + limit);
+      const result = await runBoundedPage(q, limit);
+      return {
+        rows: result.rows,
+        hasMore: result.hasMore,
+        error: storeError(result.error, "qb_finance_accounts")
+      };
+    },
+
+    async loadJournalEntryPage(organizationId, { search, from, to, sortColumn, ascending, offset, limit }) {
+      let q = supabase
+        .from("qb_finance_journal_entry_lines")
+        .select("id, line_type, line_account_name, line_amount, time_modified")
+        .eq("organization_id", organizationId);
+      if (search) q = q.ilike("line_account_name", `%${search}%`);
+      if (from) q = q.gte("time_modified", `${from}T00:00:00.000Z`);
+      if (to) q = q.lte("time_modified", `${to}T23:59:59.999Z`);
+      q = q.order(sortColumn, { ascending }).order("id", { ascending: true }).range(offset, offset + limit);
+      const result = await runBoundedPage(q, limit);
+      return {
+        rows: result.rows,
+        hasMore: result.hasMore,
+        error: storeError(result.error, "qb_finance_journal_entry_lines")
+      };
+    },
+
+    async loadTransactionActivityPage(
+      organizationId,
+      { transactionType, from, to, sortColumn, ascending, offset, limit }
+    ) {
+      let q = supabase
+        .from("qb_finance_transaction_index")
+        .select("id, txn_type, txn_date, entity_name, account_name, reference_number, amount, amount_in_home_currency")
+        .eq("organization_id", organizationId);
+      if (transactionType) q = q.eq("txn_type", transactionType);
+      if (from) q = q.gte("txn_date", from);
+      if (to) q = q.lte("txn_date", to);
+      q = q.order(sortColumn, { ascending }).order("id", { ascending: true }).range(offset, offset + limit);
+      const result = await runBoundedPage(q, limit);
+      return {
+        rows: result.rows,
+        hasMore: result.hasMore,
+        error: storeError(result.error, "qb_finance_transaction_index")
+      };
     }
   };
 }

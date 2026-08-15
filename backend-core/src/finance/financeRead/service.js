@@ -10,6 +10,8 @@ import {
   BANK_ACCOUNT_TYPES,
   DEFAULT_FINANCE_STALE_AFTER_SECONDS,
   FINANCE_BILL_LIST_LIMIT,
+  FINANCE_DETAIL_DEFAULT_LIMIT,
+  FINANCE_DETAIL_MAX_LIMIT,
   FINANCE_DUE_DATE_COVERAGE_MIN,
   FINANCE_LIST_LIMIT,
   FINANCE_METRIC_STATES,
@@ -157,6 +159,51 @@ function roundBuckets(buckets) {
   const out = {};
   for (const [k, v] of Object.entries(buckets)) out[k] = roundMoney(v) || 0;
   return out;
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function safeSearch(value) {
+  return String(value ?? "")
+    .replace(/[%_]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function safeDate(value) {
+  const text = String(value ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+export function resolveFinanceDetailQuery(query = {}, options = {}) {
+  const page = boundedInteger(query.page, 1, 1, 10000);
+  const limit = boundedInteger(
+    query.limit,
+    FINANCE_DETAIL_DEFAULT_LIMIT,
+    1,
+    FINANCE_DETAIL_MAX_LIMIT
+  );
+  const allowedSorts = options.sorts || {};
+  const requestedSort = String(query.sort || options.defaultSort || "");
+  const sortColumn = allowedSorts[requestedSort] || allowedSorts[options.defaultSort] || Object.values(allowedSorts)[0];
+  const direction = String(query.direction || "desc").toLowerCase();
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit,
+    search: safeSearch(query.q),
+    sort: Object.keys(allowedSorts).find((key) => allowedSorts[key] === sortColumn) || options.defaultSort || null,
+    sortColumn,
+    ascending: direction === "asc",
+    direction: direction === "asc" ? "asc" : "desc",
+    from: safeDate(query.from),
+    to: safeDate(query.to)
+  };
 }
 
 function snapshotMeta(snap) {
@@ -332,16 +379,16 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
 
   async function loadBsBundle(store, organizationId, asOf) {
     const { rows: snaps, error } = await store.loadReportSnapshots(organizationId, "balance_sheet");
-    if (error) return { error, snapshot: null, opening: null, lines: [] };
+    if (error) return { error, snapshot: null, opening: null, lines: [], snapshots: [] };
     const snapshot = selectBalanceSheetSnapshot(snaps, { asOf, allowOpening: false });
     const opening = selectOpeningBalanceSheet(snaps);
     let lines = [];
     if (snapshot) {
       const loaded = await store.loadReportLines(organizationId, snapshot.id);
-      if (loaded.error) return { error: loaded.error, snapshot, opening, lines: [] };
+      if (loaded.error) return { error: loaded.error, snapshot, opening, lines: [], snapshots: snaps };
       lines = loaded.rows;
     }
-    return { error: null, snapshot, opening, lines };
+    return { error: null, snapshot, opening, lines, snapshots: snaps };
   }
 
   async function getOverview(req, query = {}) {
@@ -460,6 +507,20 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
       metrics,
       pnl_trend: await monthlyPnlTrend(ctx.store, ctx.organizationId),
       working_capital: workingCapital(ar.total, ap.total),
+      ar_summary: {
+        aging: ar.aging,
+        customers: ar.customers,
+        recent_payments: ar.payments
+      },
+      ap_summary: {
+        aging: ap.aging,
+        vendors: ap.vendors,
+        applications: ap.applications
+      },
+      cash_summary: {
+        by_event_role: cash.by_event_role,
+        trend: cash.trend
+      },
       ar_attention: ar.attention,
       ap_attention: ap.attention,
       balance_sheet_identity: identity
@@ -496,17 +557,86 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     }
     const points = [...byStart.values()]
       .sort((a, b) => String(a.period_start).localeCompare(String(b.period_start)))
-      .slice(-6)
-      .map((s) => ({
-        period_start: s.period_start,
-        period_end: s.period_end,
-        revenue: roundMoney(s.control_totals?.total_income),
-        net_income: roundMoney(s.control_totals?.net_income)
-      }));
+      .map((s) => {
+        const revenue = roundMoney(s.control_totals?.total_income);
+        const cogs = roundMoney(s.control_totals?.total_cogs);
+        const grossProfit =
+          revenue != null && cogs != null ? roundMoney(Number(revenue) - Number(cogs)) : null;
+        return {
+          period_start: s.period_start,
+          period_end: s.period_end,
+          revenue,
+          cogs,
+          gross_profit: grossProfit,
+          gross_margin_pct:
+            revenue != null && revenue !== 0 && grossProfit != null
+              ? Math.round((Number(grossProfit) / Number(revenue)) * 1000) / 10
+              : null,
+          operating_expenses: roundMoney(s.control_totals?.total_expense),
+          net_income: roundMoney(s.control_totals?.net_income),
+          coverage_key: monthlyCoverageKey(s.period_start, s.period_end)
+        };
+      });
     if (points.length < 2) {
       return { state: "unavailable", points, notes: "Need at least two monthly Accrual P&L snapshots for a trend." };
     }
-    return { state: "available", points, notes: null };
+    const byYearMonth = new Map(
+      points.map((point) => [
+        `${String(point.period_start).slice(0, 4)}-${String(point.period_start).slice(5, 7)}`,
+        point
+      ])
+    );
+    const latestYear = points.reduce(
+      (max, point) => Math.max(max, Number(String(point.period_start).slice(0, 4)) || 0),
+      0
+    );
+    const comparisons = points
+      .filter((point) => Number(String(point.period_start).slice(0, 4)) === latestYear)
+      .map((point) => {
+        const year = Number(String(point.period_start).slice(0, 4));
+        const month = String(point.period_start).slice(5, 7);
+        const prior = byYearMonth.get(`${year - 1}-${month}`) || null;
+        const comparable = Boolean(prior && prior.coverage_key === point.coverage_key);
+        const comparableDelta = (currentValue, priorValue) =>
+          comparable && currentValue != null && priorValue != null
+            ? roundMoney(Number(currentValue) - Number(priorValue))
+            : null;
+        return {
+          period_start: point.period_start,
+          comparison_period_start: prior?.period_start || null,
+          comparable,
+          revenue_variance: comparableDelta(point.revenue, prior?.revenue),
+          gross_profit_variance: comparableDelta(point.gross_profit, prior?.gross_profit),
+          gross_margin_point_change:
+            comparable && point.gross_margin_pct != null && prior?.gross_margin_pct != null
+              ? Math.round((Number(point.gross_margin_pct) - Number(prior.gross_margin_pct)) * 10) / 10
+              : null,
+          net_income_variance: comparableDelta(point.net_income, prior?.net_income),
+          notes:
+            prior && !comparable
+              ? "YoY comparison suppressed because the stored monthly periods do not have equivalent coverage."
+              : prior
+                ? null
+                : "No prior-year month is stored."
+        };
+      });
+    return {
+      state: "available",
+      points,
+      comparisons,
+      years: [...new Set(points.map((point) => String(point.period_start).slice(0, 4)))],
+      notes: null
+    };
+  }
+
+  function monthlyCoverageKey(periodStart, periodEnd) {
+    const start = String(periodStart || "");
+    const end = String(periodEnd || "");
+    if (!/^\d{4}-\d{2}-01$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return "non_monthly";
+    const [year, month] = start.split("-").map(Number);
+    const finalDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const endDay = Number(end.slice(8, 10));
+    return endDay === finalDay ? "full_month" : `through_day_${String(endDay).padStart(2, "0")}`;
   }
 
   function workingCapital(arMetric, apMetric) {
@@ -546,9 +676,18 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     const byCustomer = new Map();
     for (const row of openRows) {
       const name = String(row.customer_name || "").trim() || "Unnamed customer";
-      const cur = byCustomer.get(name) || { customer_name: name, open_amount: 0, overdue_amount: 0, invoice_count: 0 };
+      const cur = byCustomer.get(name) || {
+        customer_name: name,
+        open_amount: 0,
+        overdue_amount: 0,
+        invoice_count: 0,
+        oldest_due_date: null
+      };
       cur.open_amount += Number(row.balance) || 0;
       if (row.due_date && row.due_date < asOf) cur.overdue_amount += Number(row.balance) || 0;
+      if (row.due_date && (!cur.oldest_due_date || row.due_date < cur.oldest_due_date)) {
+        cur.oldest_due_date = row.due_date;
+      }
       cur.invoice_count += 1;
       byCustomer.set(name, cur);
     }
@@ -559,7 +698,8 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         customer_name: c.customer_name,
         open_amount: roundMoney(c.open_amount),
         overdue_amount: roundMoney(c.overdue_amount),
-        invoice_count: c.invoice_count
+        invoice_count: c.invoice_count,
+        oldest_due_date: c.oldest_due_date
       }));
     const invoices = openRows.slice(0, FINANCE_LIST_LIMIT).map((r) => ({
       customer_name: r.customer_name || "Unnamed customer",
@@ -647,9 +787,18 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     const byVendor = new Map();
     for (const row of openRows) {
       const name = String(row.vendor_name || "").trim() || "Unnamed vendor";
-      const cur = byVendor.get(name) || { vendor_name: name, open_amount: 0, overdue_amount: 0, bill_count: 0 };
+      const cur = byVendor.get(name) || {
+        vendor_name: name,
+        open_amount: 0,
+        overdue_amount: 0,
+        bill_count: 0,
+        oldest_due_date: null
+      };
       cur.open_amount += Number(row.open_amount) || 0;
       if (row.due_date && row.due_date < asOf) cur.overdue_amount += Number(row.open_amount) || 0;
+      if (row.due_date && (!cur.oldest_due_date || row.due_date < cur.oldest_due_date)) {
+        cur.oldest_due_date = row.due_date;
+      }
       cur.bill_count += 1;
       byVendor.set(name, cur);
     }
@@ -660,7 +809,8 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         vendor_name: v.vendor_name,
         open_amount: roundMoney(v.open_amount),
         overdue_amount: roundMoney(v.overdue_amount),
-        bill_count: v.bill_count
+        bill_count: v.bill_count,
+        oldest_due_date: v.oldest_due_date
       }));
     const billRows = await ctx.store.loadBills(ctx.organizationId);
     const bills = (billRows.rows || [])
@@ -724,9 +874,9 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
   async function buildCash(ctx) {
     const [events, deposits, checks, transfers, balances, undeposited] = await Promise.all([
       ctx.store.loadCashEvents(ctx.organizationId),
-      ctx.store.loadDeposits(ctx.organizationId),
-      ctx.store.loadChecks(ctx.organizationId),
-      ctx.store.loadTransfers(ctx.organizationId),
+      ctx.store.loadAllDeposits(ctx.organizationId),
+      ctx.store.loadAllChecks(ctx.organizationId),
+      ctx.store.loadAllTransfers(ctx.organizationId),
       ctx.store.loadAccountBalances(ctx.organizationId),
       ctx.store.loadUndeposited(ctx.organizationId)
     ]);
@@ -743,6 +893,39 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     }
     for (const role of Object.keys(byRole)) {
       byRole[role].amount = roundMoney(byRole[role].amount);
+    }
+    if ((byRole.bank_deposit?.count || 0) === 0 && !deposits.error) {
+      byRole.bank_deposit = {
+        event_role: "bank_deposit",
+        count: deposits.rows.length,
+        amount: roundMoney(deposits.rows.reduce((sum, row) => sum + Number(row.total_deposit || 0), 0)),
+        source: "qb_finance_deposits"
+      };
+    }
+    if ((byRole.bank_disbursement?.count || 0) === 0 && !checks.error) {
+      byRole.bank_disbursement = {
+        event_role: "bank_disbursement",
+        count: checks.rows.length,
+        amount: roundMoney(checks.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)),
+        source: "qb_finance_checks"
+      };
+    }
+    if ((byRole.transfer?.count || 0) === 0 && !transfers.error) {
+      byRole.transfer = {
+        event_role: "transfer",
+        count: transfers.rows.length,
+        amount: roundMoney(transfers.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)),
+        source: "qb_finance_transfers"
+      };
+    }
+    for (const role of Object.keys(byRole)) {
+      if ((byRole[role].count || 0) > 0) {
+        byRole[role].state = "available";
+      } else {
+        byRole[role].state = "unavailable";
+        byRole[role].amount = null;
+        byRole[role].notes = "No governed events for this role are stored in the completed sync coverage.";
+      }
     }
 
     const collisions = detectReceivePaymentDepositDoubleCount(events.rows || []);
@@ -772,22 +955,77 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     );
 
     const trendMap = new Map();
-    for (const e of events.rows || []) {
-      if (e.event_role !== "bank_deposit" && e.event_role !== "bank_disbursement") continue;
-      const month = String(e.txn_date || "").slice(0, 7);
-      if (!month) continue;
-      const cur = trendMap.get(month) || { month, bank_deposit: 0, bank_disbursement: 0 };
-      cur[e.event_role] += Number(e.amount) || 0;
+    const addTrendValue = (date, role, amount) => {
+      const month = String(date || "").slice(0, 7);
+      if (!month) return;
+      const cur = trendMap.get(month) || {
+        month,
+        bank_deposit: 0,
+        bank_disbursement: 0,
+        customer_receipt: 0,
+        transfer: 0
+      };
+      cur[role] += Number(amount) || 0;
       trendMap.set(month, cur);
+    };
+    for (const row of deposits.rows || []) addTrendValue(row.txn_date, "bank_deposit", row.total_deposit);
+    for (const row of checks.rows || []) addTrendValue(row.txn_date, "bank_disbursement", row.amount);
+    for (const row of transfers.rows || []) addTrendValue(row.txn_date, "transfer", row.amount);
+    for (const row of events.rows || []) {
+      if (row.event_role === "customer_receipt") {
+        addTrendValue(row.txn_date, "customer_receipt", row.amount);
+      }
     }
     const trendPoints = [...trendMap.values()]
       .sort((a, b) => a.month.localeCompare(b.month))
-      .slice(-6)
       .map((p) => ({
         month: p.month,
         bank_deposit: roundMoney(p.bank_deposit),
-        bank_disbursement: roundMoney(p.bank_disbursement)
+        bank_disbursement: roundMoney(p.bank_disbursement),
+        customer_receipt: roundMoney(p.customer_receipt),
+        transfer: roundMoney(p.transfer)
       }));
+    const recentActivity = [
+      ...(deposits.rows || []).map((row) => ({
+        event_role: "bank_deposit",
+        txn_date: row.txn_date,
+        counterparty: row.deposit_to_account_name || null,
+        reference_number: null,
+        amount: roundMoney(row.total_deposit),
+        memo: row.memo || null
+      })),
+      ...(checks.rows || []).map((row) => ({
+        event_role: "bank_disbursement",
+        txn_date: row.txn_date,
+        counterparty: row.payee_name || row.bank_account_name || null,
+        reference_number: row.reference_number || null,
+        amount: roundMoney(row.amount),
+        memo: row.memo || null
+      })),
+      ...(transfers.rows || []).map((row) => ({
+        event_role: "transfer",
+        txn_date: row.txn_date,
+        counterparty:
+          row.from_account_name || row.to_account_name
+            ? `${row.from_account_name || "Account"} → ${row.to_account_name || "Account"}`
+            : null,
+        reference_number: null,
+        amount: roundMoney(row.amount),
+        memo: row.memo || null
+      })),
+      ...(events.rows || [])
+        .filter((row) => row.event_role === "customer_receipt")
+        .map((row) => ({
+          event_role: "customer_receipt",
+          txn_date: row.txn_date,
+          counterparty: row.account_name || null,
+          reference_number: null,
+          amount: roundMoney(row.amount),
+          memo: row.memo || null
+        }))
+    ]
+      .sort((a, b) => String(b.txn_date || "").localeCompare(String(a.txn_date || "")))
+      .slice(0, 100);
 
     return {
       position,
@@ -805,30 +1043,41 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         notes:
           "Customer receipts and bank deposits are different cash events. Deposit lines may reference the same ReceivePayment. Never add receipt + deposit as two inflows."
       },
-      recent_deposits: (deposits.rows || []).map((d) => ({
+      recent_deposits: (deposits.rows || []).slice(0, 25).map((d) => ({
         txn_date: d.txn_date,
         deposit_to_account_name: d.deposit_to_account_name || null,
         amount: roundMoney(d.total_deposit),
         memo: d.memo || null
       })),
-      recent_checks: (checks.rows || []).map((c) => ({
+      recent_checks: (checks.rows || []).slice(0, 25).map((c) => ({
         txn_date: c.txn_date,
         payee_name: c.payee_name || null,
         bank_account_name: c.bank_account_name || null,
         reference_number: c.reference_number || null,
         amount: roundMoney(c.amount)
       })),
-      recent_transfers: (transfers.rows || []).map((t) => ({
+      recent_transfers: (transfers.rows || []).slice(0, 25).map((t) => ({
         txn_date: t.txn_date,
         from_account_name: t.from_account_name || null,
         to_account_name: t.to_account_name || null,
         amount: roundMoney(t.amount)
       })),
       trend: trendPoints.length
-        ? { state: "available", points: trendPoints }
+        ? {
+            state: "available",
+            points: trendPoints,
+            available_roles: Object.values(byRole)
+              .filter((role) => role.state === "available")
+              .map((role) => role.event_role)
+          }
         : { state: "unavailable", points: [], notes: "No cash-event dates available for a trend." },
+      recent_activity: recentActivity,
       source_label: "QuickBooks accounting cash",
-      truncated: events.truncated === true,
+      truncated:
+        events.truncated === true ||
+        deposits.truncated === true ||
+        checks.truncated === true ||
+        transfers.truncated === true,
       error: events.error
     };
   }
@@ -847,7 +1096,10 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
   async function getPnl(req, query) {
     const ctx = await context(req);
     if (ctx.missingOrg) return { ...emptyPayload("missing_organization"), lines: [], headline: null };
-    const current = await loadPnlBundle(ctx.store, ctx.organizationId, query.period);
+    const [current, monthlyTrend] = await Promise.all([
+      loadPnlBundle(ctx.store, ctx.organizationId, query.period),
+      monthlyPnlTrend(ctx.store, ctx.organizationId)
+    ]);
     const representedStart = current.period_start || query.period?.period_start || null;
     const representedEnd = current.period_end || null;
     let compare = emptyPnlBundle({});
@@ -921,7 +1173,8 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         lines: [],
         hierarchy: [],
         hierarchy_state: "unavailable",
-        contributing_windows: current.windows || []
+        contributing_windows: current.windows || [],
+        monthly_trend: monthlyTrend
       };
     }
 
@@ -962,7 +1215,8 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
       hierarchy: current.hierarchy_available ? buildReportHierarchy(current.lines) : [],
       hierarchy_state: current.hierarchy_available ? "available" : "unavailable",
       hierarchy_notes: current.hierarchy_available ? null : current.hierarchy_notes || null,
-      contributing_windows: current.windows || []
+      contributing_windows: current.windows || [],
+      monthly_trend: monthlyTrend
     };
   }
 
@@ -971,6 +1225,26 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     if (ctx.missingOrg) return { ...emptyPayload("missing_organization") };
     const asOf = query.as_of;
     const bundle = await loadBsBundle(ctx.store, ctx.organizationId, asOf);
+    const historyByDate = new Map();
+    for (const snapshot of bundle.snapshots || []) {
+      if (snapshot.is_opening === true || !snapshot.as_of_date) continue;
+      if (!historyByDate.has(snapshot.as_of_date)) historyByDate.set(snapshot.as_of_date, snapshot);
+    }
+    const historyPoints = [...historyByDate.values()]
+      .sort((a, b) => String(a.as_of_date).localeCompare(String(b.as_of_date)))
+      .map((snapshot) => ({
+        as_of_date: snapshot.as_of_date,
+        total_assets: roundMoney(snapshot.control_totals?.total_assets),
+        total_liabilities_and_equity: roundMoney(snapshot.control_totals?.total_liabilities_and_equity)
+      }));
+    const history =
+      historyPoints.length >= 2
+        ? { state: "available", points: historyPoints, notes: null }
+        : {
+            state: "unavailable",
+            points: historyPoints,
+            notes: "A Balance Sheet trend needs at least two distinct current statement dates. The opening reference is not treated as a comparable current period."
+          };
     if (!bundle.snapshot) {
       return {
         ok: true,
@@ -987,7 +1261,8 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         assets: [],
         liabilities: [],
         equity: [],
-        hierarchy: []
+        hierarchy: [],
+        history
       };
     }
     const presented = balanceSheetPresentation(bundle.lines);
@@ -1014,7 +1289,8 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
       assets: presented.assets,
       liabilities: presented.liabilities,
       equity: presented.equity,
-      hierarchy: presented.hierarchy
+      hierarchy: presented.hierarchy,
+      history
     };
   }
 
@@ -1077,7 +1353,229 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
       recent_deposits: cash.recent_deposits,
       recent_checks: cash.recent_checks,
       recent_transfers: cash.recent_transfers,
+      recent_activity: cash.recent_activity,
       trend: cash.trend
+    };
+  }
+
+  function pageMeta(query, result) {
+    return {
+      page: query.page,
+      limit: query.limit,
+      has_more: result.hasMore === true,
+      sort: query.sort,
+      direction: query.direction
+    };
+  }
+
+  async function getArInvoices(req, rawQuery = {}) {
+    const ctx = await context(req);
+    if (ctx.missingOrg) return { ...emptyPayload("missing_organization"), items: [] };
+    const query = resolveFinanceDetailQuery(rawQuery, {
+      defaultSort: "balance",
+      sorts: {
+        balance: "balance",
+        due_date: "due_date",
+        invoice_date: "invoice_date",
+        customer: "customer_name",
+        name: "customer_name"
+      }
+    });
+    const dueState = ["overdue", "current", "unknown"].includes(
+      String(rawQuery.state || "").toLowerCase()
+    )
+      ? String(rawQuery.state).toLowerCase()
+      : "all";
+    const result = await ctx.store.loadOpenArPage(ctx.organizationId, {
+      ...query,
+      dueState,
+      asOf: ymdUtc(ctx.at)
+    });
+    return {
+      ok: true,
+      as_of: ymdUtc(ctx.at),
+      state: result.error ? "unavailable" : "available",
+      notes: result.error ? "Invoice detail is unavailable." : null,
+      filter: { search: query.search || null, state: dueState },
+      pagination: pageMeta(query, result),
+      items: result.error
+        ? []
+        : result.rows.map((row) => ({
+            customer_name: row.customer_name || "Unnamed customer",
+            reference_number: row.reference_number || null,
+            invoice_date: row.invoice_date || null,
+            due_date: row.due_date || null,
+            original_amount: roundMoney(row.original_amount),
+            open_amount: roundMoney(row.balance)
+          }))
+    };
+  }
+
+  async function getApBills(req, rawQuery = {}) {
+    const ctx = await context(req);
+    if (ctx.missingOrg) return { ...emptyPayload("missing_organization"), items: [] };
+    const query = resolveFinanceDetailQuery(rawQuery, {
+      defaultSort: "open_amount",
+      sorts: {
+        open_amount: "open_amount",
+        due_date: "due_date",
+        bill_date: "txn_date",
+        vendor: "vendor_name"
+      }
+    });
+    const state = ["open", "paid", "all"].includes(String(rawQuery.state || "").toLowerCase())
+      ? String(rawQuery.state).toLowerCase()
+      : "open";
+    const result = await ctx.store.loadBillPage(ctx.organizationId, { ...query, state });
+    return {
+      ok: true,
+      as_of: ymdUtc(ctx.at),
+      state: result.error ? "unavailable" : "available",
+      notes: result.error ? "Bill detail is unavailable." : null,
+      filter: { search: query.search || null, state },
+      pagination: pageMeta(query, result),
+      items: result.error
+        ? []
+        : result.rows.map((row) => ({
+            vendor_name: row.vendor_name || "Unnamed vendor",
+            reference_number: row.reference_number || null,
+            bill_date: row.txn_date || null,
+            due_date: row.due_date || null,
+            terms_name: row.terms_name || null,
+            original_amount: roundMoney(row.amount),
+            open_amount: roundMoney(row.open_amount),
+            is_paid: row.is_paid === true,
+            ap_account_name: row.ap_account_name || null
+          }))
+    };
+  }
+
+  async function getAccounts(req, rawQuery = {}) {
+    const ctx = await context(req);
+    if (ctx.missingOrg) return { ...emptyPayload("missing_organization"), items: [] };
+    const query = resolveFinanceDetailQuery(rawQuery, {
+      defaultSort: "name",
+      sorts: {
+        name: "full_name",
+        account_number: "account_number",
+        type: "account_type",
+        balance: "current_balance"
+      }
+    });
+    const activeRaw = String(rawQuery.active || "true").toLowerCase();
+    const active = activeRaw === "all" ? null : activeRaw !== "false";
+    const accountType = safeSearch(rawQuery.account_type).slice(0, 60) || null;
+    const result = await ctx.store.loadAccountsPage(ctx.organizationId, {
+      ...query,
+      accountType,
+      active
+    });
+    return {
+      ok: true,
+      state: result.error ? "unavailable" : "available",
+      notes: result.error ? "Chart of Accounts detail is unavailable." : null,
+      filter: {
+        search: query.search || null,
+        account_type: accountType,
+        active: active == null ? "all" : active
+      },
+      pagination: pageMeta(query, result),
+      items: result.error
+        ? []
+        : result.rows.map((row) => ({
+            name: row.full_name || row.name || "Unnamed account",
+            account_number: row.account_number || null,
+            account_type: row.account_type || null,
+            special_type: row.special_type || null,
+            parent_account_name: row.parent_account_name || null,
+            cash_flow_classification: row.cash_flow_classification || null,
+            is_active: row.is_active === true,
+            balance: roundMoney(row.current_balance ?? row.account_balance),
+            synced_at: row.synced_at || null
+          }))
+    };
+  }
+
+  async function getJournalEntries(req, rawQuery = {}) {
+    const ctx = await context(req);
+    if (ctx.missingOrg) return { ...emptyPayload("missing_organization"), items: [] };
+    const query = resolveFinanceDetailQuery(rawQuery, {
+      defaultSort: "date",
+      sorts: {
+        date: "time_modified",
+        modified: "time_modified",
+        account: "line_account_name",
+        amount: "line_amount"
+      }
+    });
+    const result = await ctx.store.loadJournalEntryPage(ctx.organizationId, query);
+    return {
+      ok: true,
+      state: result.error ? "unavailable" : "available",
+      notes: result.error ? "Journal-entry lines are unavailable." : null,
+      definition:
+        "Explicit QuickBooks journal-entry lines captured by TimeModified. This is a subset of accounting activity, not a complete general ledger.",
+      date_basis: "time_modified",
+      filter: { search: query.search || null, from: query.from, to: query.to },
+      pagination: pageMeta(query, result),
+      items: result.error
+        ? []
+        : result.rows.map((row) => ({
+            line_type: row.line_type || null,
+            account_name: row.line_account_name || null,
+            amount: roundMoney(row.line_amount),
+            modified_at: row.time_modified || null
+          }))
+    };
+  }
+
+  async function getTransactionActivity(req, rawQuery = {}) {
+    const ctx = await context(req);
+    if (ctx.missingOrg) return { ...emptyPayload("missing_organization"), items: [] };
+    const query = resolveFinanceDetailQuery(rawQuery, {
+      defaultSort: "date",
+      sorts: {
+        date: "txn_date",
+        amount: "amount",
+        type: "txn_type"
+      }
+    });
+    const allowedTypes = new Set([
+      "Bill",
+      "Check",
+      "Invoice",
+      "BillPaymentCheck",
+      "Deposit",
+      "ReceivePayment",
+      "VendorCredit",
+      "JournalEntry",
+      "CreditMemo",
+      "SalesTaxPaymentCheck",
+      "ARRefundCreditCard"
+    ]);
+    const transactionType = allowedTypes.has(String(rawQuery.type || "")) ? String(rawQuery.type) : null;
+    const result = await ctx.store.loadTransactionActivityPage(ctx.organizationId, {
+      ...query,
+      transactionType
+    });
+    return {
+      ok: true,
+      state: result.error ? "unavailable" : "available",
+      definition:
+        "Cross-transaction QuickBooks activity index. This is bounded investigative detail, not a double-entry general ledger.",
+      notes: result.error ? "Transaction activity is unavailable." : null,
+      filter: { type: transactionType, from: query.from, to: query.to },
+      pagination: pageMeta(query, result),
+      items: result.error
+        ? []
+        : result.rows.map((row) => ({
+            transaction_type: row.txn_type || null,
+            txn_date: row.txn_date || null,
+            entity_name: row.entity_name || null,
+            account_name: row.account_name || null,
+            reference_number: row.reference_number || null,
+            amount: roundMoney(row.amount_in_home_currency ?? row.amount)
+          }))
     };
   }
 
@@ -1124,5 +1622,18 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     };
   }
 
-  return { getOverview, getPnl, getBalanceSheet, getAr, getAp, getCash, getReconciliation };
+  return {
+    getOverview,
+    getPnl,
+    getBalanceSheet,
+    getAr,
+    getAp,
+    getCash,
+    getArInvoices,
+    getApBills,
+    getAccounts,
+    getJournalEntries,
+    getTransactionActivity,
+    getReconciliation
+  };
 }
