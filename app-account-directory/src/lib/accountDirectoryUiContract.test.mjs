@@ -16,6 +16,7 @@ const css = readFileSync(join(root, "app-account-directory/src/styles.css"), "ut
 const install = readFileSync(join(root, "app-install-dashboard/src/InstallDashboardApp.tsx"), "utf8");
 const topbar = readFileSync(join(root, "shared/eliteos-ui/EliteosTopbar.tsx"), "utf8");
 const workspace = readFileSync(join(root, "app-account-directory/src/lib/accountDirectoryWorkspace.mjs"), "utf8");
+const maintain = readFileSync(join(root, "app-account-directory/src/ui/AccountMaintain.tsx"), "utf8");
 
 console.log("\naccountDirectoryUiContract.test.mjs\n");
 
@@ -90,9 +91,12 @@ assert.ok(app.includes("searchDebounceRef"), "debounced search ref present");
 assert.ok(app.includes("300"), "300ms debounce present");
 // Profile panel
 assert.ok(app.includes("ProfilePanel"), "ProfilePanel component present");
-assert.ok(app.includes("profile-panel"), "profile-panel class present");
+assert.ok(app.includes("account-workspace"), "Account Workspace overlay present");
+assert.ok(css.includes("account-workspace"), "workspace styles present");
+assert.equal(css.includes("minmax(340px, 440px)"), false, "must not keep the narrow 360 drawer");
 assert.ok(app.includes("Data health"), "data health section present");
 assert.ok(app.includes('"Financials"') || app.includes("Financials"), "Financials profile tab present");
+assert.ok(app.includes('"Insights"') || app.includes("Insights"), "Insights tab present");
 assert.ok(app.includes("FinancialsPanel") || app.includes("QuickBooks Financials") || panels.includes("FinancialsPanel"), "Financials panel present");
 assert.ok(panels.includes("Customer performance") || panels.includes("Customer Performance"), "Customer performance section present");
 assert.ok(panels.includes("Sales Orders"), "Sales Orders label present");
@@ -104,14 +108,16 @@ assert.ok(app.includes("A/R Aging") || app.includes("financials-aging") || panel
 assert.ok(app.includes("Collection status") || app.includes("collectionAttention") || panels.includes("Collection status"), "collection status present");
 assert.ok(app.includes("due dates and unpaid balances") || app.includes("Collection status is based only") || panels.includes("Collection status is based only"), "collection help copy present");
 assert.ok(api.includes("/financials"), "financials API client present");
+assert.ok(api.includes("/insights"), "insights API client present");
 assert.ok(css.includes("financials-panel"), "financials styles present");
 assert.ok(css.includes("collection-status"), "collection status styles present");
 assert.equal(app.includes("qb_root_customer_list_id"), false, "must not expose root ListIDs in UI");
 assert.equal(app.includes("qb_customer_list_id"), false, "must not expose customer ListIDs in UI");
 assert.equal(app.includes("terms_list_id"), false, "must not expose TermsId in UI");
-// Activity labels
-assert.ok(app.includes("activityLabel"), "activityLabel helper used");
-assert.ok(app.includes("Activity"), "Activity tab present");
+assert.equal(/profit and loss|P&L|profitability|gross profit|gross margin|COGS/i.test(app + panels), false, "must not advertise company P&L language to staff");
+assert.ok(app.includes("activity-list") || maintain.includes("activityLabel"), "directory activity preserved");
+assert.ok(app.includes("ContactsMaintain") || maintain.includes("Deactivate"), "contact maintainability present");
+assert.ok(maintain.includes("Former locations") || maintain.includes("Deactivate"), "location maintainability present");
 // Workspace helpers exported
 assert.ok(workspace.includes("export function parseUrlState"), "parseUrlState exported");
 assert.ok(workspace.includes("export function formatResultRange"), "formatResultRange exported");

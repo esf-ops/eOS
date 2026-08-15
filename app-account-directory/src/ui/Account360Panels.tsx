@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { ApiError } from "../lib/api";
 import {
   getAccountFinancialsTrend,
@@ -14,6 +14,7 @@ import type {
   AccountHistoryTransactionPage,
   AccountLocation,
   AccountRelationship,
+  AccountSourceFreshness,
   AccountTimelineResponse,
   ExternalLink
 } from "../lib/types";
@@ -21,11 +22,22 @@ import { CustomerTrendChart } from "./AccountCharts";
 import { formatCount, formatMoney } from "./accountFormat";
 import { AccountReveal, AnimatedNumber } from "./accountMotion";
 
-function formatWhen(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
-  return d.toLocaleString(undefined, { dateStyle: "medium" });
+function formatHumanDate(ymd?: string | null): string | null {
+  if (!ymd) return null;
+  const d = new Date(`${String(ymd).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return String(ymd).slice(0, 10);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function freshnessLine(source?: AccountSourceFreshness | null) {
+  if (!source) return null;
+  const hours = source.hoursAgo;
+  if (source.isStale) {
+    return hours != null ? `Last refreshed ${hours}h ago · Update delayed` : "Update delayed";
+  }
+  if (hours == null) return "Refresh time unavailable";
+  if (hours < 2) return "Refreshed recently";
+  return `Refreshed ${hours}h ago`;
 }
 
 function Metric({
@@ -61,12 +73,14 @@ export function Overview360({
   detail,
   financials,
   busy,
-  onOpenTab
+  onOpenTab,
+  insightStrip
 }: {
   detail: AccountDetail;
   financials: AccountFinancials | null;
   busy: boolean;
   onOpenTab: (tab: string) => void;
+  insightStrip?: ReactNode;
 }) {
   const s = financials?.summary;
   const showMoney = financials?.status === "ok" || financials?.status === "stale";
@@ -167,6 +181,7 @@ export function Overview360({
       {showMoney && financials?.customerHistory ? (
         <CustomerPerformance history={financials.customerHistory} financials={financials} />
       ) : null}
+      {insightStrip}
     </div>
   );
 }
@@ -423,6 +438,9 @@ export function FinancialsPanel({
 
   const s = financials.summary ?? {};
   const showAmounts = financials.status === "ok" || financials.status === "stale";
+  const recv = financials.freshness?.receivables;
+  const hist = financials.freshness?.commercialHistory;
+  const activityThrough = formatHumanDate(financials.coverage?.historyAsOf || financials.asOfDate);
   const agingMax = Math.max(
     0,
     ...["current", "days1to30", "days31to60", "days61to90", "days90Plus"].map(
@@ -436,15 +454,28 @@ export function FinancialsPanel({
         <h3 className="financials-title">Customer financials</h3>
         <p className="financials-meta muted">
           {[
-            financials.asOfDate ? `As of ${financials.asOfDate}` : null,
-            financials.coverage?.historyLabel,
-            financials.status === "stale" ? "Figures may be stale" : null,
-            "This customer only — not company profit and loss"
+            activityThrough ? `Customer activity through ${activityThrough}` : null,
+            financials.coverage?.historyLabel ||
+              (financials.coverage?.workerCoverageStartDate
+                ? `History available from ${formatHumanDate(financials.coverage.workerCoverageStartDate)}`
+                : null)
           ]
             .filter(Boolean)
             .join(" · ")}
         </p>
       </div>
+      {recv ? (
+        <p className="muted">
+          Open receivables
+          {recv.asOfDate ? ` as of ${formatHumanDate(recv.asOfDate)}` : ""} · {freshnessLine(recv)}
+        </p>
+      ) : null}
+      {hist ? (
+        <p className="muted">
+          Commercial history
+          {hist.asOfDate ? ` through ${formatHumanDate(hist.asOfDate)}` : ""} · {freshnessLine(hist)}
+        </p>
+      ) : null}
       {(financials.warnings ?? []).map((w) => (
         <div key={w} className="banner banner-warn" role="status">
           {w}

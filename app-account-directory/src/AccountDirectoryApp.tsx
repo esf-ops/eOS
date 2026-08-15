@@ -18,15 +18,14 @@ import {
 } from "./lib/accountDirectoryApi";
 import { getSupabase } from "./lib/supabase";
 import {
-  ConnectionsSurface,
-  ContactsSurface,
   FinancialsPanel,
-  LocationsSurface,
   Overview360,
   RelationshipHealthPanel,
   RelationshipWorkspace,
   loadRelationship
 } from "./ui/Account360Panels";
+import { ConnectionsWithIdentity, ContactsMaintain, LocationsMaintain } from "./ui/AccountMaintain";
+import { InsightsPanel, OverviewInsightStrip } from "./ui/AccountInsights";
 import { StatusReviewSurface } from "./ui/AccountStatusReview";
 import type {
   AccountDetail,
@@ -44,7 +43,6 @@ import {
   type AccountWriteDraft
 } from "./lib/accountDirectoryForm";
 import {
-  activityLabel,
   applySummaryCardPreset,
   applyToolbarFilterPatch,
   buildPageNumbers,
@@ -53,7 +51,9 @@ import {
   isSummaryCardActive,
   parseUrlState,
   serializeUrlState,
-  type UrlState
+  type UrlState,
+  panelFromTab,
+  tabFromPanel
 } from "./lib/accountDirectoryWorkspace";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
@@ -76,9 +76,8 @@ const DETAIL_TABS = [
   "Relationship",
   "Contacts",
   "Locations",
-  "Aliases",
   "Connections",
-  "Activity"
+  "Insights"
 ] as const;
 
 type DetailTab = (typeof DETAIL_TABS)[number];
@@ -497,7 +496,7 @@ export default function AccountDirectoryApp() {
       return;
     }
     void loadDetail(urlState.account);
-    setDetailTab("Overview");
+    setDetailTab(tabFromPanel(urlState.panel) as DetailTab);
   }, [urlState.account, sessionToken]); // eslint-disable-line
 
   /* ─── Filter/pagination helpers ─── */
@@ -506,7 +505,12 @@ export default function AccountDirectoryApp() {
   }
 
   function selectAccount(id: string | null) {
-    setUrlState((prev) => ({ ...prev, account: id }));
+    setUrlState((prev) => ({ ...prev, account: id, panel: id ? "overview" : null }));
+  }
+
+  function changeWorkspaceTab(tab: DetailTab) {
+    setDetailTab(tab);
+    setUrlState((prev) => ({ ...prev, panel: panelFromTab(tab) }));
   }
 
   function applySummaryCard(cardKey: string) {
@@ -1097,7 +1101,7 @@ export default function AccountDirectoryApp() {
             </div>
 
             {/* ─── Layout split ─── */}
-            <div className={urlState.account ? "ad-layout ad-layout-split" : "ad-layout"}>
+            <div className="ad-layout">
               {/* ─── List panel ─── */}
               <section
                 className="list-panel"
@@ -1207,6 +1211,7 @@ export default function AccountDirectoryApp() {
                           {items.map((item) => (
                             <tr
                               key={item.id}
+                              data-account-row={item.id}
                               className={
                                 urlState.account === item.id ? "ad-row ad-row-selected" : "ad-row"
                               }
@@ -1271,6 +1276,7 @@ export default function AccountDirectoryApp() {
                       {items.map((item) => (
                         <div
                           key={item.id}
+                          data-account-row={item.id}
                           className={
                             urlState.account === item.id
                               ? "account-card account-card-selected"
@@ -1338,8 +1344,9 @@ export default function AccountDirectoryApp() {
                   formError={formError}
                   permissions={permissions}
                   activeTab={urlState.tab}
-                  onTabChange={setDetailTab}
+                  onTabChange={changeWorkspaceTab}
                   onClose={() => selectAccount(null)}
+                  onDetailChanged={setDetail}
                   onEdit={() => openModal("edit")}
                   onAddContact={() => openModal("add-contact")}
                   onAddLocation={() => openModal("add-location")}
@@ -1359,7 +1366,7 @@ export default function AccountDirectoryApp() {
 
       {/* ─── Modal ─── */}
       {modal ? (
-        <div className="modal-backdrop" role="presentation" onClick={closeModal}>
+        <div className="modal-backdrop" data-ad-modal="true" role="presentation" onClick={closeModal}>
           <div
             className="modal-panel"
             role="dialog"
@@ -1454,7 +1461,7 @@ export default function AccountDirectoryApp() {
                     </label>
                   </>
                 ) : null}
-                {modal === "new-account" || modal === "new-prospect" || modal === "edit" ? (
+                {modal === "new-account" || modal === "new-prospect" || modal === "edit" || modal === "add-location" ? (
                   <>
                     <label className="field">
                       City
@@ -1658,6 +1665,7 @@ function ProfilePanel({
   activeTab,
   onTabChange,
   onClose,
+  onDetailChanged,
   onEdit,
   onAddContact,
   onAddLocation,
@@ -1679,6 +1687,7 @@ function ProfilePanel({
   activeTab: string;
   onTabChange: (tab: DetailTab) => void;
   onClose: () => void;
+  onDetailChanged: (detail: AccountDetail) => void;
   onEdit: () => void;
   onAddContact: () => void;
   onAddLocation: () => void;
@@ -1696,15 +1705,50 @@ function ProfilePanel({
   const [financialsBusy, setFinancialsBusy] = useState(false);
   const [financialsError, setFinancialsError] = useState<string | null>(null);
   const [relationship, setRelationship] = useState<AccountRelationship | null>(null);
+  const [pendingInsightId, setPendingInsightId] = useState<string | null>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     setFinancials(null);
     setFinancialsError(null);
     setRelationship(null);
+    setPendingInsightId(null);
   }, [accountId]);
 
   useEffect(() => {
-    if (!["Overview", "Financials", "Relationship"].includes(detailTab)) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeBtnRef.current?.focus();
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      const row = document.querySelector(`[data-account-row="${accountId}"]`) as HTMLElement | null;
+      row?.focus();
+    };
+  }, [accountId]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (document.querySelector("[data-ad-modal], [data-ad-child-modal]")) return;
+      event.preventDefault();
+      onClose();
+    }
+    function onFocus(event: FocusEvent) {
+      const root = workspaceRef.current;
+      if (!root || root.contains(event.target as Node)) return;
+      closeBtnRef.current?.focus();
+    }
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocus);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocus);
+    };
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!["Overview", "Financials"].includes(detailTab)) return;
     if (!sessionToken || !accountId) return;
 
     let cancelled = false;
@@ -1724,19 +1768,37 @@ function ProfilePanel({
         if (!cancelled) setFinancialsBusy(false);
       });
 
-    void loadRelationship(sessionToken, accountId)
-      .then((rel) => {
-        if (!cancelled) setRelationship(rel);
-      })
-      .catch(() => undefined);
-
     return () => {
       cancelled = true;
     };
   }, [detailTab, sessionToken, accountId]);
 
+  useEffect(() => {
+    if (!["Overview", "Relationship"].includes(detailTab)) return;
+    if (!sessionToken || !accountId) return;
+    let cancelled = false;
+    void loadRelationship(sessionToken, accountId)
+      .then((rel) => {
+        if (!cancelled) setRelationship(rel);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [detailTab, sessionToken, accountId]);
+
+  const locationLine = detail ? formatCityState(detail.city, detail.state) : "";
+  const qbState = detail?.quickbooksLinked ? "QB Linked" : "QB not linked";
+
   return (
-    <aside className="profile-panel" aria-label="Account profile">
+    <div className="account-workspace-backdrop" role="presentation">
+    <div
+      ref={workspaceRef}
+      className="account-workspace profile-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="account-workspace-title"
+    >
       <div className="profile-head">
         <div className="profile-head-row">
           {detail ? (
@@ -1747,16 +1809,23 @@ function ProfilePanel({
             <span className="monogram monogram-lg monogram-default" aria-hidden="true">?</span>
           )}
           <div className="profile-head-info">
-            <h2 className="profile-name">{name}</h2>
+            <h2 id="account-workspace-title" className="profile-name">{name}</h2>
             {showLegal ? <p className="profile-legal">{legalName}</p> : null}
             {detail ? (
               <div className="profile-status-row">
                 <span className={statusPillClass(detail.status)}>{statusLabel(detail.status)}</span>
-                {detail.quickbooksLinked ? <span className="qb-badge">QB</span> : null}
+                <span className="chip chip-muted">{qbState}</span>
               </div>
             ) : null}
+            {detail ? (
+              <p className="profile-subline muted">
+                {[locationLine !== "—" ? locationLine : null, detail.primaryContact, financials?.paymentTerms]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            ) : null}
           </div>
-          <button type="button" className="profile-close" onClick={onClose} aria-label="Close profile">
+          <button ref={closeBtnRef} type="button" className="profile-close" onClick={onClose} aria-label="Close account workspace">
             ✕ Close
           </button>
         </div>
@@ -1862,6 +1931,17 @@ function ProfilePanel({
                   financials={financials}
                   busy={financialsBusy}
                   onOpenTab={(tab) => onTabChange(tab as DetailTab)}
+                  insightStrip={
+                    <OverviewInsightStrip
+                      sessionToken={sessionToken}
+                      accountId={accountId}
+                      onOpenInsights={() => onTabChange("Insights")}
+                      onOpenEvidence={(id) => {
+                        setPendingInsightId(id);
+                        onTabChange("Insights");
+                      }}
+                    />
+                  }
                 />
                 <RelationshipHealthPanel
                   relationship={relationship}
@@ -1904,48 +1984,49 @@ function ProfilePanel({
               />
             ) : null}
 
-            {detailTab === "Contacts" ? <ContactsSurface contacts={detail.contacts ?? []} /> : null}
-
-            {detailTab === "Locations" ? <LocationsSurface locations={detail.locations ?? []} /> : null}
-
-            {detailTab === "Aliases" ? (
-              <DetailList
-                empty="No aliases on file."
-                items={(detail.aliases ?? []).map((a) => ({
-                  id: a.id,
-                  title: a.alias,
-                  meta: a.source ? `Source: ${a.source}` : ""
-                }))}
+            {detailTab === "Contacts" ? (
+              <ContactsMaintain
+                sessionToken={sessionToken}
+                accountId={accountId}
+                contacts={detail.contacts ?? []}
+                canEdit={Boolean(permissions.canEdit)}
+                onChanged={onDetailChanged}
+                onAdd={onAddContact}
               />
             ) : null}
 
-            {detailTab === "Connections" ? <ConnectionsSurface links={detail.externalLinks ?? []} /> : null}
+            {detailTab === "Locations" ? (
+              <LocationsMaintain
+                sessionToken={sessionToken}
+                accountId={accountId}
+                locations={detail.locations ?? []}
+                canEdit={Boolean(permissions.canEdit)}
+                onChanged={onDetailChanged}
+                onAdd={onAddLocation}
+              />
+            ) : null}
 
-            {detailTab === "Activity" ? (
-              detail.auditHistory && detail.auditHistory.length > 0 ? (
-                <ol className="activity-list" aria-label="Account activity">
-                  {detail.auditHistory.map((entry) => (
-                    <li key={entry.id} className="activity-item">
-                      <span className="activity-dot" aria-hidden="true" />
-                      <div>
-                        <div className="activity-label">{activityLabel(entry.action)}</div>
-                        <div className="activity-meta">
-                          {[formatUpdatedAt(entry.at), entry.actor, entry.detail]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <p className="muted">No activity recorded yet.</p>
-              )
+            {detailTab === "Connections" ? (
+              <ConnectionsWithIdentity
+                links={detail.externalLinks}
+                aliases={detail.aliases}
+                auditHistory={detail.auditHistory}
+              />
+            ) : null}
+
+            {detailTab === "Insights" ? (
+              <InsightsPanel
+                sessionToken={sessionToken}
+                accountId={accountId}
+                pendingInsightId={pendingInsightId}
+                onPendingConsumed={() => setPendingInsightId(null)}
+              />
             ) : null}
           </>
         ) : null}
       </div>
-    </aside>
+    </div>
+    </div>
   );
 }
 

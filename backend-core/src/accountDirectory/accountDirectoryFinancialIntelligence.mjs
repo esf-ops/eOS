@@ -35,6 +35,39 @@ import {
 export const AD_FINANCIALS_PAGE_SIZE = PREPARED_FACTS_PAGE_SIZE;
 export const AD_FINANCIALS_RECENT_LIMIT = 20;
 
+export const DEFAULT_HISTORY_STALE_AFTER_SECONDS = 26 * 60 * 60;
+
+export function readHistoryStaleAfterSeconds(env = process.env) {
+  const n = Number.parseInt(String(env.QB_FINANCE_HISTORY_STALE_AFTER_SECONDS ?? ""), 10);
+  if (Number.isFinite(n) && n >= 60) return n;
+  return DEFAULT_HISTORY_STALE_AFTER_SECONDS;
+}
+
+export function buildSourceFreshness({
+  label,
+  refreshedAt,
+  asOfDate,
+  now,
+  staleAfterSeconds
+}) {
+  const completed = refreshedAt ? new Date(refreshedAt) : null;
+  const ageSeconds =
+    completed && Number.isFinite(completed.getTime())
+      ? Math.max(0, Math.floor((now.getTime() - completed.getTime()) / 1000))
+      : null;
+  const isStale = ageSeconds != null ? ageSeconds > staleAfterSeconds : false;
+  const hoursAgo = ageSeconds != null ? Math.max(1, Math.round(ageSeconds / 3600)) : null;
+  return {
+    label,
+    refreshedAt: completed && Number.isFinite(completed.getTime()) ? completed.toISOString() : null,
+    asOfDate: asOfDate || null,
+    ageSeconds,
+    hoursAgo,
+    staleAfterSeconds,
+    isStale
+  };
+}
+
 
 /**
  * @param {unknown} value
@@ -628,7 +661,13 @@ export async function getAccountDirectoryFinancials(params) {
   const completedAt = new Date(latest.completed_at);
   const ageSeconds = Math.max(0, Math.floor((now.getTime() - completedAt.getTime()) / 1000));
   const staleAfter = readStaleAfterSeconds(env);
-  let isStale = ageSeconds > staleAfter;
+  const receivablesFresh = buildSourceFreshness({
+    label: "Open receivables",
+    refreshedAt: completedAt.toISOString(),
+    asOfDate,
+    now,
+    staleAfterSeconds: staleAfter
+  });
 
   try {
     const [openAr, historyBundle] = await Promise.all([
@@ -643,7 +682,14 @@ export async function getAccountDirectoryFinancials(params) {
     ]);
     const history = historyBundle.history;
     const historyAsOf = historyBundle.asOf || asOfDate;
-    if (history?.coverage?.freshness?.isStale) isStale = true;
+    const historyFresh = buildSourceFreshness({
+      label: "Commercial history",
+      refreshedAt: history?.coverage?.freshness?.refreshedAt || null,
+      asOfDate: historyAsOf,
+      now,
+      staleAfterSeconds: readHistoryStaleAfterSeconds(env)
+    });
+    const isStale = receivablesFresh.isStale || historyFresh.isStale;
 
     const ytd = history?.ytd || null;
     const lastInvoiceFromHistory = (historyBundle.rows || []).find((r) => r.type === "invoice") || null;
@@ -728,12 +774,6 @@ export async function getAccountDirectoryFinancials(params) {
     });
     if (termsResolved.warning) warnings.push(termsResolved.warning);
 
-    if (isStale) {
-      const hours = Math.max(1, Math.round(ageSeconds / 3600));
-      warnings.push(
-        `Financial activity is stale (last refreshed about ${hours} hour${hours === 1 ? "" : "s"} ago). Showing last prepared values.`
-      );
-    }
     if (latest.status === "partial") {
       warnings.push("Latest QuickBooks financial sync completed with partial status.");
     }
@@ -743,6 +783,10 @@ export async function getAccountDirectoryFinancials(params) {
       linked: true,
       asOfDate: historyAsOf || asOfDate,
       refreshedAt: history?.coverage?.freshness?.refreshedAt || completedAt.toISOString(),
+      freshness: {
+        receivables: receivablesFresh,
+        commercialHistory: historyFresh
+      },
       warnings,
       summary: {
         openAr: openAr.amount,
@@ -808,7 +852,9 @@ export async function getAccountDirectoryFinancials(params) {
         workerCoverageEndDate: coverageEnd,
         latestSyncStatus: latest.status || null,
         historyLabel: history?.coverage?.label || null,
-        arIsSnapshot: true
+        arIsSnapshot: true,
+        receivablesAsOf: asOfDate,
+        historyAsOf
       }
     });
   } catch (err) {

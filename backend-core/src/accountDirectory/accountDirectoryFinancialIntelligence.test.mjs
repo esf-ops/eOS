@@ -470,10 +470,10 @@ function okSync(overrides = {}) {
     env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "3600" },
     now: new Date("2026-08-13T18:00:00.000Z")
   });
-  assert.equal(profile.status, "stale");
+  assert.equal(profile.freshness.receivables.isStale, true);
   assert.equal(profile.summary.invoicedYtd, 88);
-  assert.match(profile.warnings.join(" "), /stale/i);
-  console.log("ok: 8 stale keeps real totals + warning");
+  assert.equal(/Financial activity is stale/.test(profile.warnings.join(" ")), false);
+  console.log("ok: 8 stale keeps real totals; source freshness without blanket warning");
 }
 
 // 9. Query failure → unavailable, not zeros

@@ -34,6 +34,7 @@ assert.equal(defaultState.qbEnrichment, "", "default qbEnrichment = ''");
 assert.equal(defaultState.intelligence, "", "default intelligence = ''");
 assert.equal(defaultState.sort, "name_asc", "default sort = name_asc");
 assert.equal(defaultState.account, null, "default account = null");
+assert.equal(defaultState.panel, null, "default panel = null");
 console.log("ok: parseUrlState defaults");
 
 assert.equal(parseUrlState("?tab=status_review").tab, "status_review");
@@ -101,6 +102,27 @@ const qbSerial = serializeUrlState({
 assert.equal(qbSerial, "?qbEnrichment=suggested_match");
 assert.equal(parseUrlState(qbSerial).qbEnrichment, "suggested_match");
 console.log("ok: serializeUrlState qbEnrichment round-trip");
+
+const panelSerial = serializeUrlState({
+  tab: "accounts",
+  page: 1,
+  pageSize: 50,
+  search: "",
+  status: "",
+  linked: "",
+  missingContact: "",
+  missingLocation: "",
+  qbEnrichment: "",
+  intelligence: "",
+  sort: "name_asc",
+  account: "abc",
+  panel: "insights"
+});
+assert.ok(panelSerial.includes("account=abc"));
+assert.ok(panelSerial.includes("panel=insights"));
+assert.equal(parseUrlState(panelSerial).panel, "insights");
+assert.equal(parseUrlState("?account=abc").panel, null);
+console.log("ok: workspace panel deep link");
 
 // round-trip
 const rt = parseUrlState(serializeUrlState(fullState));

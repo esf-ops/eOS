@@ -15,7 +15,11 @@ import type {
   AddLocationPayload,
   CreateAccountPayload,
   PermissionsResponse,
-  UpdateAccountPayload
+  UpdateAccountPayload,
+  UpdateContactPayload,
+  UpdateLocationPayload,
+  AccountInsightsResponse,
+  AccountInsightEvidenceResponse
 } from "./types";
 
 const BASE = "/api/account-directory";
@@ -180,9 +184,35 @@ export async function addContact(token: string, accountId: string, payload: AddC
   )) as AccountDetailResponse;
 }
 
+export async function updateContact(
+  token: string,
+  accountId: string,
+  contactId: string,
+  payload: UpdateContactPayload
+) {
+  return (await apiPatch(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/contacts/${encodeURIComponent(contactId)}`,
+    token,
+    payload
+  )) as AccountDetailResponse;
+}
+
 export async function addLocation(token: string, accountId: string, payload: AddLocationPayload) {
   return (await apiPost(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/locations`,
+    token,
+    payload
+  )) as AccountDetailResponse;
+}
+
+export async function updateLocation(
+  token: string,
+  accountId: string,
+  locationId: string,
+  payload: UpdateLocationPayload
+) {
+  return (await apiPatch(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/locations/${encodeURIComponent(locationId)}`,
     token,
     payload
   )) as AccountDetailResponse;
@@ -294,4 +324,23 @@ export async function decideAccountStatusReview(
     token,
     payload
   );
+}
+
+export async function getAccountInsights(token: string, accountId: string, period?: string) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/insights${qs({ period })}`,
+    token
+  )) as AccountInsightsResponse;
+}
+
+export async function getAccountInsightEvidence(
+  token: string,
+  accountId: string,
+  insightId: string,
+  period?: string
+) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/insights/${encodeURIComponent(insightId)}/evidence${qs({ period })}`,
+    token
+  )) as AccountInsightEvidenceResponse;
 }

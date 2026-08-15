@@ -16,6 +16,7 @@ export type UrlState = {
   intelligence: string;
   sort: string;
   account: string | null;
+  panel: string | null;
 };
 
 export {
@@ -30,4 +31,7 @@ export {
   activityLabel,
   initials,
   ACTIVITY_LABELS,
+  panelFromTab,
+  tabFromPanel,
+  WORKSPACE_PANEL_TABS,
 } from "./accountDirectoryWorkspace.mjs";

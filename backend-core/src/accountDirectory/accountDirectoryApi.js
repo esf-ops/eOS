@@ -29,6 +29,10 @@ import {
   getAccountDirectoryTrend
 } from "./accountDirectory360.mjs";
 import {
+  getAccountDirectoryInsightEvidence,
+  getAccountDirectoryInsights
+} from "./accountDirectoryInsights.mjs";
+import {
   listStatusReviewQueue,
   decideStatusReview
 } from "./accountDirectoryStatusReview.mjs";
@@ -282,6 +286,39 @@ export function attachAccountDirectoryRoutes(app, deps) {
         family: req.query?.family ?? req.query?.type
       });
       res.json({ ok: true, ...timeline });
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/insights", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const insights = await getAccountDirectoryInsights({
+        supabase: getSupabase(),
+        store,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        env: process.env,
+        now: new Date(),
+        period: req.query?.period
+      });
+      res.json(insights);
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/insights/:insightId/evidence", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const evidence = await getAccountDirectoryInsightEvidence({
+        supabase: getSupabase(),
+        store,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        env: process.env,
+        now: new Date(),
+        period: req.query?.period,
+        insightId: String(req.params.insightId)
+      });
+      res.json(evidence);
     });
   });
 

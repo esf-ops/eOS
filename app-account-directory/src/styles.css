@@ -367,7 +367,7 @@ body {
 }
 
 .ad-layout-split {
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 440px);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .list-panel {
@@ -699,6 +699,112 @@ body {
   overflow: auto;
   display: flex;
   flex-direction: column;
+}
+
+.account-workspace-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(28, 22, 18, 0.46);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3vh 2vw;
+}
+
+.account-workspace.profile-panel {
+  width: min(96vw, 1480px);
+  height: 94vh;
+  max-height: 94vh;
+  position: relative;
+  top: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.account-workspace .profile-head {
+  flex: 0 0 auto;
+}
+
+.account-workspace .profile-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 18px 22px 28px;
+}
+
+.profile-subline {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+}
+
+.ad-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.ad-insight-card {
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+  background: var(--eos-bg-subtle);
+  text-align: left;
+}
+
+.ad-insight-value {
+  margin: 4px 0 8px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.ad-insight-mini {
+  cursor: pointer;
+}
+
+.ad-evidence-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(28, 22, 18, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  z-index: 8;
+}
+
+.ad-evidence-panel {
+  width: min(420px, 100%);
+  height: 100%;
+  overflow: auto;
+  background: var(--eos-surface);
+  border-left: 1px solid var(--eos-line-strong);
+  padding: 18px;
+}
+
+.ad-evidence-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ad-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ad-former {
+  margin-top: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-workspace-backdrop,
+  .account-workspace {
+    transition: none;
+  }
 }
 
 .profile-head {
@@ -1550,13 +1656,20 @@ a.detail-list-title:hover {
     grid-template-columns: 1fr;
   }
 
+  .account-workspace-backdrop {
+    padding: 0;
+  }
+
+  .account-workspace.profile-panel,
   .profile-panel {
     position: fixed;
     inset: 0;
     top: 0;
+    width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
     z-index: 50;
     border-radius: 0;
-    max-height: 100dvh;
     box-shadow: none;
   }
 }

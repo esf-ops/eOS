@@ -168,6 +168,65 @@ async function main() {
     assert.equal(detail.locations.find((l) => l.isPrimary).city, "Dallas");
   }
 
+  {
+    const { service } = svc();
+    const created = await service.createAccount({
+      organizationId: ORG,
+      role: "sales",
+      actorUserId: ACTOR,
+      payload: { displayName: "Maintain Co", primaryContactName: "Pat" }
+    });
+    const contact = created.contacts[0];
+    const edited = await service.updateContact({
+      organizationId: ORG,
+      role: "sales",
+      actorUserId: ACTOR,
+      accountId: created.id,
+      contactId: contact.id,
+      payload: { role: "Project Manager", contactType: "project", rowVersion: contact.rowVersion }
+    });
+    const after = edited.contacts.find((c) => c.id === contact.id);
+    assert.equal(after.role, "Project Manager");
+    assert.equal(after.contactType, "project");
+    const deactivated = await service.updateContact({
+      organizationId: ORG,
+      role: "sales",
+      actorUserId: ACTOR,
+      accountId: created.id,
+      contactId: contact.id,
+      payload: { isActive: false, rowVersion: after.rowVersion }
+    });
+    assert.equal(deactivated.contacts.find((c) => c.id === contact.id).isActive, false);
+    await assert.rejects(
+      () =>
+        service.updateContact({
+          organizationId: ORG,
+          role: "finance",
+          actorUserId: ACTOR,
+          accountId: created.id,
+          contactId: contact.id,
+          payload: { role: "Nope" }
+        }),
+      () => true
+    );
+    const loc = created.locations[0];
+    if (loc) {
+      const locEdited = await service.updateLocation({
+        organizationId: ORG,
+        role: "sales",
+        actorUserId: ACTOR,
+        accountId: created.id,
+        locationId: loc.id,
+        payload: { locationType: "billing", rowVersion: loc.rowVersion }
+      });
+      assert.equal(locEdited.locations.find((l) => l.id === loc.id).locationType, "billing");
+    }
+    const events = await service.getAccount({ organizationId: ORG, role: "admin", accountId: created.id });
+    assert.ok((events.auditHistory || []).some((e) => e.action === "update_contact"));
+    assert.ok((events.auditHistory || []).some((e) => e.action === "deactivate_contact"));
+    console.log("ok: contact/location edit, deactivate, audit");
+  }
+
   // 13. aliases searchable
   {
     const { service } = svc();

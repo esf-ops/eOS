@@ -460,7 +460,7 @@ async function loadExactAccountEstimates(supabase, organizationId, accountId) {
   try {
     const { data, error } = await supabase
       .from("quote_headers")
-      .select("id, quote_number, quote_status, customer_name, grand_total, updated_at, created_at, account_directory_account_id")
+      .select("id, quote_number, quote_status, customer_name, grand_total, updated_at, created_at, account_directory_account_id, is_current_revision")
       .eq("organization_id", organizationId)
       .eq("account_directory_account_id", accountId)
       .is("archived_at", null)
@@ -572,9 +572,12 @@ export async function getAccountDirectoryRelationship(params) {
         items: estimates.internal.items.map((row) => ({
           quote_number: row.quote_number || null,
           status: row.quote_status || null,
+          quote_status: row.quote_status || null,
           customer_name: row.customer_name || null,
           amount: toMoney(row.grand_total),
-          updated_at: row.updated_at || row.created_at || null
+          grand_total: toMoney(row.grand_total),
+          updated_at: row.updated_at || row.created_at || null,
+          is_current_revision: row.is_current_revision !== false
         }))
       },
       studio: {

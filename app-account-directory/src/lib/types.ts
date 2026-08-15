@@ -43,7 +43,10 @@ export type AccountContact = {
   email?: string | null;
   phone?: string | null;
   role?: string | null;
+  contactType?: string | null;
   isPrimary?: boolean;
+  isActive?: boolean;
+  rowVersion?: number | null;
 };
 
 export type AccountLocation = {
@@ -54,7 +57,10 @@ export type AccountLocation = {
   city?: string | null;
   state?: string | null;
   postalCode?: string | null;
+  locationType?: string | null;
   isPrimary?: boolean;
+  isActive?: boolean;
+  rowVersion?: number | null;
 };
 
 export type AccountAlias = {
@@ -228,7 +234,23 @@ export type AccountFinancials = {
     latestSyncStatus?: string | null;
     historyLabel?: string | null;
     arIsSnapshot?: boolean;
+    receivablesAsOf?: string | null;
+    historyAsOf?: string | null;
   };
+  freshness?: {
+    receivables?: AccountSourceFreshness;
+    commercialHistory?: AccountSourceFreshness;
+  };
+};
+
+export type AccountSourceFreshness = {
+  label?: string;
+  refreshedAt?: string | null;
+  asOfDate?: string | null;
+  ageSeconds?: number | null;
+  hoursAgo?: number | null;
+  staleAfterSeconds?: number | null;
+  isStale?: boolean;
 };
 
 export type AccountHistoryFamily = {
@@ -311,6 +333,8 @@ export type AccountHistoryTransactionPage = {
   items?: AccountHistoryTransaction[];
   pagination?: { page?: number; limit?: number; has_more?: boolean };
 };
+
+export type AccountInvoiceRow = {
   invoice_date?: string | null;
   due_date?: string | null;
   reference_number?: string | null;
@@ -400,6 +424,34 @@ export type AccountRelationshipResponse = {
   relationship?: AccountRelationship;
 };
 
+export type AccountInsightCard = {
+  id: string;
+  title: string;
+  state?: string;
+  value?: string | number | null;
+  valueType?: string;
+  interpretation?: string;
+  period?: string | null;
+  evidenceSummary?: string[];
+  evidenceAvailable?: boolean;
+  limitations?: string[];
+};
+
+export type AccountInsightsResponse = {
+  ok?: boolean;
+  status?: string;
+  coverage?: Record<string, unknown>;
+  cards?: AccountInsightCard[];
+  overview?: AccountInsightCard[];
+};
+
+export type AccountInsightEvidenceResponse = {
+  ok?: boolean;
+  insightId?: string;
+  card?: AccountInsightCard;
+  evidence?: Record<string, unknown> | null;
+};
+
 export type PermissionsResponse = {
   ok?: boolean;
   permissions?: AccountDirectoryPermissions;
@@ -425,6 +477,13 @@ export type AddContactPayload = {
   phone?: string;
   role?: string;
   isPrimary?: boolean;
+  contactType?: string;
+  isActive?: boolean;
+  rowVersion?: number;
+};
+
+export type UpdateContactPayload = Partial<AddContactPayload> & {
+  displayName?: string;
 };
 
 export type AddLocationPayload = {
@@ -435,7 +494,12 @@ export type AddLocationPayload = {
   state?: string;
   postalCode?: string;
   isPrimary?: boolean;
+  locationType?: string;
+  isActive?: boolean;
+  rowVersion?: number;
 };
+
+export type UpdateLocationPayload = Partial<AddLocationPayload>;
 
 export type AddAliasPayload = {
   alias: string;

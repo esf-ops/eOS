@@ -333,6 +333,7 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       if (patch.phoneNormalized !== undefined) update.phone_normalized = patch.phoneNormalized;
       if (patch.isPrimaryEstimating !== undefined) update.is_primary_estimating = patch.isPrimaryEstimating;
       if (patch.isActive !== undefined) update.is_active = patch.isActive;
+      if (patch.contactType !== undefined) update.contact_type = patch.contactType;
 
       let q = db()
         .from("account_directory_contacts")
@@ -439,6 +440,7 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         update.is_primary_account_location = patch.isPrimaryAccountLocation;
       }
       if (patch.isActive !== undefined) update.is_active = patch.isActive;
+      if (patch.locationType !== undefined) update.location_type = patch.locationType;
 
       let q = db()
         .from("account_directory_locations")

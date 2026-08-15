@@ -455,7 +455,9 @@ function storeFor(links) {
     "/api/account-directory/accounts/:accountId/financials/invoices",
     "/api/account-directory/accounts/:accountId/financials/transactions",
     "/api/account-directory/accounts/:accountId/relationship",
-    "/api/account-directory/accounts/:accountId/timeline"
+    "/api/account-directory/accounts/:accountId/timeline",
+    "/api/account-directory/accounts/:accountId/insights",
+    "/api/account-directory/accounts/:accountId/insights/:insightId/evidence"
   ]) {
     assert.ok(routes.has(`GET ${p}`), p);
   }

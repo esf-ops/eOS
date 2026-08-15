@@ -3,6 +3,27 @@
  * Exported for Node tests and TypeScript re-export shell.
  */
 
+const VALID_PANELS = ["overview", "financials", "relationship", "contacts", "locations", "connections", "insights"];
+
+export const WORKSPACE_PANEL_TABS = Object.freeze({
+  overview: "Overview",
+  financials: "Financials",
+  relationship: "Relationship",
+  contacts: "Contacts",
+  locations: "Locations",
+  connections: "Connections",
+  insights: "Insights"
+});
+
+export function panelFromTab(tab) {
+  const found = Object.entries(WORKSPACE_PANEL_TABS).find(([, label]) => label === tab);
+  return found ? found[0] : "overview";
+}
+
+export function tabFromPanel(panel) {
+  return WORKSPACE_PANEL_TABS[panel] || "Overview";
+}
+
 const VALID_TABS = ["accounts", "prospects", "needs_review", "archived", "status_review"];
 const VALID_PAGE_SIZES = [25, 50, 100];
 const VALID_SORTS = ["name_asc", "name_desc", "updated_desc", "updated_asc"];
@@ -118,6 +139,9 @@ export function parseUrlState(searchStr) {
   const rawIntelligence = p.get("intelligence") ?? "";
   const intelligence = VALID_INTELLIGENCE.includes(rawIntelligence) ? rawIntelligence : "";
 
+  const rawPanel = p.get("panel") ?? "";
+  const panel = VALID_PANELS.includes(rawPanel) ? rawPanel : null;
+
   return {
     tab,
     page,
@@ -131,6 +155,7 @@ export function parseUrlState(searchStr) {
     intelligence,
     sort,
     account: p.get("account") ?? null,
+    panel
   };
 }
 
@@ -152,6 +177,7 @@ export function serializeUrlState(state) {
   if (state.intelligence) p.set("intelligence", state.intelligence);
   if (state.sort && state.sort !== "name_asc") p.set("sort", state.sort);
   if (state.account) p.set("account", state.account);
+  if (state.account && state.panel && state.panel !== "overview") p.set("panel", state.panel);
   const q = p.toString();
   return q ? `?${q}` : "";
 }
@@ -175,7 +201,8 @@ export function applySummaryCardPreset(prev, cardKey) {
       missingLocation: "",
       intelligence: "",
       page: 1,
-      account: null
+      account: null,
+      panel: null
     };
   }
   return {
@@ -183,6 +210,7 @@ export function applySummaryCardPreset(prev, cardKey) {
     search: "",
     page: 1,
     account: null,
+    panel: null,
     tab: preset.tab,
     status: preset.status,
     linked: preset.linked,

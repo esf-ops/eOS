@@ -4365,3 +4365,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `accountDirectoryStatusReview.mjs`, review routes, `app-account-directory` Status Review tab, this doc, SYSTEM_BLUEPRINT, head map. |
 | **Revisit** | Optional reviewer display-name join; later inactive-QB queue if that cohort appears. |
 
+### 322. Account 360 is the staff-safe customer operating workspace (2026-08-15)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-15 |
+| **Decision** | Account 360 is the **staff-safe customer operating workspace** inside Account Directory. Account Directory owns identity and lifecycle. QuickBooks confirms accounting customer identity via exact root links. Finance owns restricted company financial truth. Account 360 Insights are deterministic, customer-specific, and evidence-backed. No AI-generated financial truth. No customer profitability, margin, COGS, or company P&L in Account 360. |
+| **Workspace** | Near-full-screen overlay (~94–96vw × 92–94vh) over the still-mounted directory list. Tabs: Overview, Financials, Relationship, Contacts, Locations, Connections, Insights. Aliases and directory audit activity live under Connections. URL `account` + `panel` preserve deep links. |
+| **Contacts / locations** | Governed PATCH via backend-core. Edit, primary, type, deactivate. No hard-delete in normal UI. Frozen estimate snapshots are not rewritten. |
+| **Freshness** | Open receivables use Sales prepared facts (`sales_quickbooks_sync_runs`). Commercial history uses the Finance transaction index clock. Thresholds are independent (Sales default 4h; history default 26h for nightly accounting sync). Staff copy is source-specific. Do not blanket-stale the whole account. |
+| **Insights** | `GET /api/account-directory/accounts/:id/insights` and `.../insights/:insightId/evidence`. Backend allowlisted math. True Estimate Win Rate only when Internal sold+lost both exist. Quote-to-Order is an aggregate dollar ratio, never a close/win/conversion rate. Numeric 90-day forecast is rejected until comparable history, a non-overlapping target, and a backtest exist; Outlook reuses momentum labels. |
+| **Impacted** | Account Directory head, `accountDirectoryInsights.mjs`, financial freshness, this doc, SYSTEM_BLUEPRINT, head map. |
+| **Revisit** | Lost/declined dispositions across Studio/DE; invoice–payment application linking; numeric outlook after longer coverage. |
+

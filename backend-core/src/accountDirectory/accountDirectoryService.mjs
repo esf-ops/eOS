@@ -372,6 +372,7 @@ export function createAccountDirectoryService(deps) {
         email: c.email,
         phone: c.phone,
         role: c.titleRole,
+        contactType: c.contactType || null,
         isPrimary: c.isPrimaryEstimating,
         isActive: c.isActive,
         rowVersion: c.rowVersion
@@ -385,6 +386,7 @@ export function createAccountDirectoryService(deps) {
         state: l.state,
         postalCode: l.postalCode,
         sourceAddressRaw: l.sourceAddressRaw,
+        locationType: l.locationType || "account",
         isPrimary: l.isPrimaryAccountLocation,
         isActive: l.isActive,
         rowVersion: l.rowVersion
@@ -769,6 +771,7 @@ export function createAccountDirectoryService(deps) {
         email,
         phone,
         phoneNormalized: normalizePhoneForMatch(phone),
+        contactType: payload?.contactType ? String(payload.contactType).trim() : null,
         isPrimaryEstimating: Boolean(payload?.isPrimary),
         createdBy: actorUserId,
         updatedBy: actorUserId
@@ -806,6 +809,15 @@ export function createAccountDirectoryService(deps) {
       }
       if (payload?.isPrimary !== undefined) patch.isPrimaryEstimating = Boolean(payload.isPrimary);
       if (payload?.isActive !== undefined) patch.isActive = Boolean(payload.isActive);
+      if (payload?.contactType !== undefined) {
+        patch.contactType = payload.contactType ? String(payload.contactType).trim() : null;
+      }
+      if (payload?.firstName !== undefined) {
+        patch.firstName = payload.firstName ? String(payload.firstName).trim() : null;
+      }
+      if (payload?.lastName !== undefined) {
+        patch.lastName = payload.lastName ? String(payload.lastName).trim() : null;
+      }
       patch.updatedBy = actorUserId;
 
       const result = await store.updateContact(organizationId, contactId, patch, payload?.rowVersion);
@@ -844,6 +856,9 @@ export function createAccountDirectoryService(deps) {
         state: payload?.state ? String(payload.state).trim() : null,
         postalCode: payload?.postalCode ? String(payload.postalCode).trim() : null,
         sourceAddressRaw: payload?.sourceAddressRaw ?? null,
+        locationType: ["account", "billing", "shipping", "other"].includes(String(payload?.locationType || ""))
+          ? String(payload.locationType)
+          : "account",
         isPrimaryAccountLocation: Boolean(payload?.isPrimary),
         createdBy: actorUserId,
         updatedBy: actorUserId
@@ -878,6 +893,13 @@ export function createAccountDirectoryService(deps) {
       }
       if (payload?.isPrimary !== undefined) patch.isPrimaryAccountLocation = Boolean(payload.isPrimary);
       if (payload?.isActive !== undefined) patch.isActive = Boolean(payload.isActive);
+      if (payload?.locationType !== undefined) {
+        const t = String(payload.locationType || "").trim();
+        if (!["account", "billing", "shipping", "other"].includes(t)) {
+          throw new AccountDirectoryError("invalid_location_type", "Location type is invalid.");
+        }
+        patch.locationType = t;
+      }
       patch.updatedBy = actorUserId;
 
       const result = await store.updateLocation(organizationId, locationId, patch, payload?.rowVersion);
