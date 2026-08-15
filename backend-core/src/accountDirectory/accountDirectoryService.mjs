@@ -8,6 +8,7 @@ import {
   markSuggestionLinked,
   resolveAccountQbEnrichmentLabel
 } from "./qbCustomerEnrichment/feedStatus.js";
+import { listIntelPublic, loadListFinancialIntel } from "./accountDirectory360.mjs";
 
 export const AD_QB_ENRICHMENT_FILTERS = Object.freeze([
   "suggested_match",
@@ -438,7 +439,8 @@ export function createAccountDirectoryService(deps) {
       linked,
       missingContact,
       missingLocation,
-      qbEnrichment
+      qbEnrichment,
+      intelligence
     }) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW);
       const limit = Math.min(Math.max(Number(pageSize) || DEFAULT_PAGE, 1), MAX_PAGE);
@@ -457,8 +459,40 @@ export function createAccountDirectoryService(deps) {
       );
       const suggestionByAccount = await loadSuggestionIndex(organizationId);
       const enriched = sortedItems.map((item) => attachEnrichment(item, suggestionByAccount));
-      const enrichmentFiltered = filterByQbEnrichment(enriched, qbEnrichment);
-      return paginationResult(enrichmentFiltered, pageNum, limit);
+      let working = filterByQbEnrichment(enriched, qbEnrichment);
+      /** @type {Map<string, object>} */
+      let intelByAccount = new Map();
+      if (typeof deps.getSupabase === "function") {
+        try {
+          const loaded = await loadListFinancialIntel(deps.getSupabase(), {
+            organizationId,
+            directoryRows: filtered
+          });
+          intelByAccount = loaded.byAccount || new Map();
+          const intelFilter = String(intelligence || "").trim();
+          if (!loaded.unavailable && intelFilter) {
+            working = working.filter((item) => {
+              const snap = intelByAccount.get(item.id);
+              if (intelFilter === "overdue") return snap?.overdue === true;
+              if (intelFilter === "collection") {
+                return ["watch", "attention", "priority"].includes(String(snap?.collectionAttention || ""));
+              }
+              if (intelFilter === "financially_active") return snap?.financiallyActive === true;
+              return true;
+            });
+          }
+        } catch {
+          intelByAccount = new Map();
+        }
+      }
+      const paged = paginationResult(working, pageNum, limit);
+      return {
+        ...paged,
+        items: paged.items.map((item) => ({
+          ...item,
+          financialIntel: listIntelPublic(intelByAccount.get(item.id) || null)
+        }))
+      };
     },
 
     async getSummary({ organizationId, role }) {

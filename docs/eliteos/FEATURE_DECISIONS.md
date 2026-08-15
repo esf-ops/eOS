@@ -4309,3 +4309,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Impacted** | `backend-core/src/finance/financeRead/*`, `app-finance/src/ui/*`, Finance tests, `SYSTEM_BLUEPRINT.md`, and the Finance head map entry. |
 | **Revisit** | Add historical working-capital snapshots only when governed history exists; add account-identity-backed detailed YTD hierarchy only when the extraction contract provides stable identity; evaluate frontend code splitting if the Finance bundle grows materially. |
 
+### 318. Account Directory Account 360 is customer context, not company Finance (2026-08-14)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-14 |
+| **Decision** | Account Directory remains the **identity spine** (canonical display name, contacts, locations, aliases, status, exact external mappings). Phase 2 adds **Account 360**: a customer relationship workspace assembled only from governed, exactly linked sources. **Finance Head** remains company accounting truth (P&L, Balance Sheet, cash, A/P, GL). Account 360 may show customer open/overdue A/R, invoices, payments, quoted/sales-order/invoiced YTD, and payment terms. It must not expose company-wide Finance data. |
+| **Identity** | Exact Account Directory UUID, exact active `quickbooks_desktop` root ListID, and stored `account_directory_account_id` on estimates. Never join ABC Builders to ABC Builders LLC by similar names. Unresolved linkage stays needs-review / unavailable. |
+| **Reads** | Extends existing Account Directory Brain routes. New GETs: `/financials/trend`, `/financials/invoices`, `/relationship`, `/timeline`. Same auth/head/org/VIEW gates. Bounded/paginated. Browser payloads scrub QuickBooks/internal IDs. List intelligence uses one org-scoped open-A/R read keyed by exact root IDs — no N+1 from the browser. |
+| **Trends** | Monthly customer invoiced/collected/sales-order/quoted series from prepared Sales QuickBooks transactions inside worker coverage. Current open A/R is a snapshot, not historical A/R. Months outside coverage are omitted, not zero-filled as if known. |
+| **Estimates / jobs** | Internal Estimate and Studio estimates appear only when `account_directory_account_id` is stored. Moraware jobs are **unavailable** until an exact Account Directory identity column exists. Quote Flow has no AD identity bridge in this phase. |
+| **Out of scope** | SQL migrations; QuickBooks writes; Finance definition changes; AI/Qwen; fuzzy identity; maps/geocoding; collections automation; production configuration. |
+| **Impacted** | `backend-core/src/accountDirectory/*`, `app-account-directory/`, FEATURE_DECISIONS, SYSTEM_BLUEPRINT, head map. |
+| **Revisit** | Store Moraware `account_directory_account_id`; Quote Flow identity; optional summary cache if list intel becomes heavy; Account Intelligence agent on these deterministic payloads. |
+

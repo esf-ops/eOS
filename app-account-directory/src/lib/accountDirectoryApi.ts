@@ -4,7 +4,11 @@ import type {
   AccountFinancialsResponse,
   AccountListParams,
   AccountListResponse,
+  AccountRelationshipResponse,
   AccountSummaryResponse,
+  AccountTimelineResponse,
+  AccountTrendResponse,
+  AccountInvoicePage,
   AddAliasPayload,
   AddContactPayload,
   AddLocationPayload,
@@ -45,7 +49,8 @@ export async function listAccounts(token: string, opts: AccountListParams) {
       linked: opts.linked,
       missingContact: opts.missingContact,
       missingLocation: opts.missingLocation,
-      qbEnrichment: opts.qbEnrichment
+      qbEnrichment: opts.qbEnrichment,
+      intelligence: opts.intelligence
     })}`,
     token
   )) as AccountListResponse;
@@ -60,6 +65,49 @@ export async function getAccountFinancials(token: string, accountId: string) {
     `${BASE}/accounts/${encodeURIComponent(accountId)}/financials`,
     token
   )) as AccountFinancialsResponse;
+}
+
+export async function getAccountFinancialsTrend(token: string, accountId: string, period: string) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/financials/trend${qs({ period })}`,
+    token
+  )) as AccountTrendResponse;
+}
+
+export async function getAccountOpenInvoices(
+  token: string,
+  accountId: string,
+  opts: { page?: number; limit?: number }
+) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/financials/invoices${qs({
+      page: opts.page,
+      limit: opts.limit
+    })}`,
+    token
+  )) as AccountInvoicePage;
+}
+
+export async function getAccountRelationship(token: string, accountId: string) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/relationship`,
+    token
+  )) as AccountRelationshipResponse;
+}
+
+export async function getAccountTimeline(
+  token: string,
+  accountId: string,
+  opts: { family?: string; page?: number; limit?: number }
+) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/timeline${qs({
+      family: opts.family,
+      page: opts.page,
+      limit: opts.limit
+    })}`,
+    token
+  )) as AccountTimelineResponse;
 }
 
 export async function createAccount(token: string, payload: CreateAccountPayload) {

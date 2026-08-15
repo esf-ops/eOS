@@ -7,6 +7,7 @@ const VALID_TABS = ["accounts", "prospects", "needs_review", "archived"];
 const VALID_PAGE_SIZES = [25, 50, 100];
 const VALID_SORTS = ["name_asc", "name_desc", "updated_desc", "updated_asc"];
 const VALID_QB_ENRICHMENT = ["suggested_match", "needs_review", "not_linked"];
+const VALID_INTELLIGENCE = ["overdue", "collection", "financially_active"];
 
 /** Summary strip cards — exclusive presets (not stackable with leftover filters). */
 export const SUMMARY_CARD_PRESETS = Object.freeze({
@@ -114,6 +115,8 @@ export function parseUrlState(searchStr) {
 
   const rawQbEnrichment = p.get("qbEnrichment") ?? "";
   const qbEnrichment = VALID_QB_ENRICHMENT.includes(rawQbEnrichment) ? rawQbEnrichment : "";
+  const rawIntelligence = p.get("intelligence") ?? "";
+  const intelligence = VALID_INTELLIGENCE.includes(rawIntelligence) ? rawIntelligence : "";
 
   return {
     tab,
@@ -125,6 +128,7 @@ export function parseUrlState(searchStr) {
     missingContact: p.get("missingContact") ?? "",
     missingLocation: p.get("missingLocation") ?? "",
     qbEnrichment,
+    intelligence,
     sort,
     account: p.get("account") ?? null,
   };
@@ -145,6 +149,7 @@ export function serializeUrlState(state) {
   if (state.missingContact) p.set("missingContact", state.missingContact);
   if (state.missingLocation) p.set("missingLocation", state.missingLocation);
   if (state.qbEnrichment) p.set("qbEnrichment", state.qbEnrichment);
+  if (state.intelligence) p.set("intelligence", state.intelligence);
   if (state.sort && state.sort !== "name_asc") p.set("sort", state.sort);
   if (state.account) p.set("account", state.account);
   const q = p.toString();
@@ -168,6 +173,7 @@ export function applySummaryCardPreset(prev, cardKey) {
       qbEnrichment: "",
       missingContact: "",
       missingLocation: "",
+      intelligence: "",
       page: 1,
       account: null
     };
@@ -182,7 +188,8 @@ export function applySummaryCardPreset(prev, cardKey) {
     linked: preset.linked,
     qbEnrichment: preset.qbEnrichment,
     missingContact: preset.missingContact,
-    missingLocation: preset.missingLocation
+    missingLocation: preset.missingLocation,
+    intelligence: ""
   };
 }
 
@@ -201,7 +208,8 @@ export function isSummaryCardActive(state, cardKey) {
     (state.linked || "") === preset.linked &&
     (state.qbEnrichment || "") === preset.qbEnrichment &&
     (state.missingContact || "") === preset.missingContact &&
-    (state.missingLocation || "") === preset.missingLocation
+    (state.missingLocation || "") === preset.missingLocation &&
+    !(state.intelligence || "")
   );
 }
 

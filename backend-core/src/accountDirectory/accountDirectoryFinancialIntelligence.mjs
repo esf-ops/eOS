@@ -21,6 +21,12 @@ import {
   PREPARED_FACTS_PAGE_SIZE,
   readStaleAfterSeconds
 } from "../sales/quickbooksFinancialTruth/preparedFactsProvider.js";
+import {
+  buildCustomerMonthlyPoints,
+  mapOpenInvoiceRow,
+  monthKeysInclusive,
+  resolveCustomerTrendWindow
+} from "./accountDirectoryCustomerTrend.mjs";
 
 export const AD_FINANCIALS_PAGE_SIZE = PREPARED_FACTS_PAGE_SIZE;
 export const AD_FINANCIALS_RECENT_LIMIT = 20;
@@ -105,6 +111,29 @@ export function classifyArAgingBucket(dueDate, asOfDate) {
  * @param {Array<{ balance?: unknown, due_date?: unknown, invoice_date?: unknown, reference_number?: unknown, original_amount?: unknown, customer_name?: unknown }>} rows
  * @param {string|null} asOfDate
  */
+function formatUsdCompact(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "$0";
+  const fraction = Math.abs(n % 1) > 0.0005 ? 2 : 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: fraction,
+    maximumFractionDigits: 2
+  }).format(n);
+}
+
+export function formatOverdueCollectionReason({ overdueInvoiceCount, overdueBalance, maxDaysOverdue }) {
+  const count = Number(overdueInvoiceCount) || 0;
+  const invoiceWord = count === 1 ? "invoice" : "invoices";
+  const verb = count === 1 ? "is" : "are";
+  const days =
+    maxDaysOverdue == null
+      ? "an unknown number of days"
+      : `${maxDaysOverdue} day${maxDaysOverdue === 1 ? "" : "s"}`;
+  return `${count} ${invoiceWord} totaling ${formatUsdCompact(overdueBalance)} ${verb} overdue; oldest is ${days} past due.`;
+}
+
 export function buildOpenArAging(rows, asOfDate) {
   const aging = {
     current: emptyAgingBucket(),
@@ -169,38 +198,33 @@ export function buildOpenArAging(rows, asOfDate) {
     collectionAttention = {
       code: "current",
       label: "Current",
-      reason: "No open QuickBooks invoice balances."
+      reason: "No open invoice balances."
     };
   } else if (knownDueCount === 0) {
     collectionAttention = {
       code: "unknown",
       label: "Unknown",
-      reason: "Open A/R exists but no usable QuickBooks due dates are available."
+      reason: "Open A/R exists, but invoice due dates are missing so overdue aging cannot be confirmed."
     };
   } else if (overdueInvoiceCount === 0) {
     collectionAttention = {
       code: "current",
       label: "Current",
-      reason: "No overdue QuickBooks invoice balances based on due date."
-    };
-  } else if (maxDaysOverdue != null && maxDaysOverdue <= 30) {
-    collectionAttention = {
-      code: "watch",
-      label: "Watch",
-      reason: `Oldest overdue invoice is ${maxDaysOverdue} day(s) past due.`
-    };
-  } else if (maxDaysOverdue != null && maxDaysOverdue <= 60) {
-    collectionAttention = {
-      code: "attention",
-      label: "Attention",
-      reason: `Oldest overdue invoice is ${maxDaysOverdue} day(s) past due.`
+      reason: "Open invoices exist, and none are past due."
     };
   } else {
-    collectionAttention = {
-      code: "priority",
-      label: "Priority",
-      reason: `Oldest overdue invoice is ${maxDaysOverdue ?? "61+"} day(s) past due.`
-    };
+    const overdueReason = formatOverdueCollectionReason({
+      overdueInvoiceCount,
+      overdueBalance,
+      maxDaysOverdue
+    });
+    if (maxDaysOverdue != null && maxDaysOverdue <= 30) {
+      collectionAttention = { code: "watch", label: "Watch", reason: overdueReason };
+    } else if (maxDaysOverdue != null && maxDaysOverdue <= 60) {
+      collectionAttention = { code: "attention", label: "Attention", reason: overdueReason };
+    } else {
+      collectionAttention = { code: "priority", label: "Priority", reason: overdueReason };
+    }
   }
 
   return {
@@ -265,6 +289,8 @@ export function emptyFinancialsProfile(overrides = {}) {
     aging: null,
     collectionAttention: null,
     recentActivity: [],
+    openInvoices: { status: "unavailable", items: [], pagination: { page: 1, limit: 50, has_more: false } },
+    monthlyTrend: { status: "unavailable", period: "trailing_12", points: [], notes: null },
     coverage: {
       workerCoverageStartDate: null,
       workerCoverageEndDate: null,
@@ -497,6 +523,32 @@ async function loadRecentActivity(supabase, { organizationId, rootListIds, limit
   }));
 }
 
+async function loadLinkedTransactionsForTrend(supabase, { organizationId, rootListIds, startDate, endDate }) {
+  const roots = [...new Set((rootListIds || []).map((id) => String(id).trim()).filter(Boolean))];
+  if (!roots.length) return [];
+  const pageSize = AD_FINANCIALS_PAGE_SIZE;
+  const all = [];
+  let from = 0;
+  for (;;) {
+    let q = supabase
+      .from("sales_quickbooks_financial_transactions")
+      .select("transaction_type, transaction_date, amount")
+      .eq("organization_id", organizationId)
+      .in("qb_root_customer_list_id", roots)
+      .in("transaction_type", ["invoice", "payment", "sales_order", "estimate"]);
+    if (startDate) q = q.gte("transaction_date", startDate);
+    if (endDate) q = q.lte("transaction_date", endDate);
+    q = q.order("source_id", { ascending: true }).range(from, from + pageSize - 1);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const rows = data || [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 /**
  * @param {object} params
  * @param {import('@supabase/supabase-js').SupabaseClient} params.supabase
@@ -592,9 +644,15 @@ export async function getAccountDirectoryFinancials(params) {
   const ageSeconds = Math.max(0, Math.floor((now.getTime() - completedAt.getTime()) / 1000));
   const staleAfter = readStaleAfterSeconds(env);
   const isStale = ageSeconds > staleAfter;
+  const trendWindow = resolveCustomerTrendWindow(
+    "trailing_12",
+    asOfDate,
+    toYmd(latest.coverage_start_date),
+    toYmd(latest.coverage_end_date)
+  );
 
   try {
-    const [quoted, salesOrders, invoiced, collected, openAr, lastInvoice, lastPayment, recentActivity] =
+    const [quoted, salesOrders, invoiced, collected, openAr, lastInvoice, lastPayment, recentActivity, trendRows] =
       await Promise.all([
         sumLinkedTransactionsInRange(supabase, {
           organizationId,
@@ -637,7 +695,15 @@ export async function getAccountDirectoryFinancials(params) {
           transactionType: "payment",
           ascending: false
         }),
-        loadRecentActivity(supabase, { organizationId, rootListIds })
+        loadRecentActivity(supabase, { organizationId, rootListIds }),
+        trendWindow.ok
+          ? loadLinkedTransactionsForTrend(supabase, {
+              organizationId,
+              rootListIds,
+              startDate: trendWindow.start,
+              endDate: trendWindow.end
+            })
+          : Promise.resolve([])
       ]);
 
     /** @type {object|null} */
@@ -725,6 +791,31 @@ export async function getAccountDirectoryFinancials(params) {
       aging: agingBuilt.aging,
       collectionAttention: agingBuilt.collectionAttention,
       recentActivity,
+      openInvoices: {
+        status: "ok",
+        pagination: { page: 1, limit: 50, has_more: openAr.rows.length > 50 },
+        items: [...openAr.rows]
+          .sort((a, b) => String(b.invoice_date || "").localeCompare(String(a.invoice_date || "")))
+          .slice(0, 50)
+          .map((row) => mapOpenInvoiceRow(row, asOfDate))
+      },
+      monthlyTrend: trendWindow.ok
+        ? {
+            status: isStale ? "stale" : "ok",
+            period: trendWindow.period,
+            start: trendWindow.start,
+            end: trendWindow.end,
+            notes: trendWindow.notes,
+            points: buildCustomerMonthlyPoints(trendRows, monthKeysInclusive(trendWindow.start, trendWindow.end))
+          }
+        : {
+            status: "unavailable",
+            period: trendWindow.period,
+            start: trendWindow.start,
+            end: trendWindow.end,
+            notes: trendWindow.notes,
+            points: []
+          },
       coverage: {
         workerCoverageStartDate: toYmd(latest.coverage_start_date),
         workerCoverageEndDate: toYmd(latest.coverage_end_date),

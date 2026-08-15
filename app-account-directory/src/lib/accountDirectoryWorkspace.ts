@@ -13,6 +13,7 @@ export type UrlState = {
   missingContact: string;
   missingLocation: string;
   qbEnrichment: string;
+  intelligence: string;
   sort: string;
   account: string | null;
 };

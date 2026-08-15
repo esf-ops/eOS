@@ -17,11 +17,22 @@ import {
   updateAccount
 } from "./lib/accountDirectoryApi";
 import { getSupabase } from "./lib/supabase";
+import {
+  ConnectionsSurface,
+  ContactsSurface,
+  FinancialsPanel,
+  LocationsSurface,
+  Overview360,
+  RelationshipHealthPanel,
+  RelationshipWorkspace,
+  loadRelationship
+} from "./ui/Account360Panels";
 import type {
   AccountDetail,
   AccountDirectoryPermissions,
   AccountFinancials,
   AccountListItem,
+  AccountRelationship,
   AccountSummary
 } from "./lib/types";
 import {
@@ -61,10 +72,11 @@ const NAV_TABS: { id: string; label: string }[] = [
 const DETAIL_TABS = [
   "Overview",
   "Financials",
+  "Relationship",
   "Contacts",
   "Locations",
   "Aliases",
-  "External links",
+  "Connections",
   "Activity"
 ] as const;
 
@@ -209,7 +221,7 @@ function emptyForm(): ModalFormState {
 
 function hasActiveFilters(u: UrlState): boolean {
   return Boolean(
-    u.search || u.status || u.linked || u.missingContact || u.missingLocation || u.qbEnrichment
+    u.search || u.status || u.linked || u.missingContact || u.missingLocation || u.qbEnrichment || u.intelligence
   );
 }
 
@@ -231,6 +243,9 @@ function activeFilterChips(u: UrlState): FilterChipDef[] {
   if (u.qbEnrichment) chips.push({ key: "qbEnrichment", label: qbEnrichmentFilterLabel(u.qbEnrichment) });
   if (u.missingContact === "true") chips.push({ key: "missingContact", label: "Missing contact" });
   if (u.missingLocation === "true") chips.push({ key: "missingLocation", label: "Missing location" });
+  if (u.intelligence === "overdue") chips.push({ key: "intelligence", label: "Overdue A/R" });
+  if (u.intelligence === "collection") chips.push({ key: "intelligence", label: "Collection watch+" });
+  if (u.intelligence === "financially_active") chips.push({ key: "intelligence", label: "Financially active" });
   return chips;
 }
 
@@ -298,6 +313,7 @@ export default function AccountDirectoryApp() {
         missingContact: urlState.missingContact,
         missingLocation: urlState.missingLocation,
         qbEnrichment: urlState.qbEnrichment,
+        intelligence: urlState.intelligence,
         sort: urlState.sort
       }),
     [urlState]
@@ -412,7 +428,8 @@ export default function AccountDirectoryApp() {
         linked: urlState.linked || undefined,
         missingContact: urlState.missingContact || undefined,
         missingLocation: urlState.missingLocation || undefined,
-        qbEnrichment: urlState.qbEnrichment || undefined
+        qbEnrichment: urlState.qbEnrichment || undefined,
+        intelligence: urlState.intelligence || undefined
       });
       const next = res.items ?? [];
       setItems(next);
@@ -502,6 +519,7 @@ export default function AccountDirectoryApp() {
       missingContact: "",
       missingLocation: "",
       qbEnrichment: "",
+      intelligence: "",
       page: 1
     }));
   }
@@ -575,6 +593,15 @@ export default function AccountDirectoryApp() {
     setModal(null);
     setFormError(null);
   }, [formBusy]);
+
+  useEffect(() => {
+    if (!modal) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeModal();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [closeModal, modal]);
 
   const submitForm = useCallback(async () => {
     if (!sessionToken || !modal || formBusy) return;
@@ -966,6 +993,19 @@ export default function AccountDirectoryApp() {
                 </select>
               </label>
               <label className="field">
+                <span>Intelligence</span>
+                <select
+                  value={urlState.intelligence}
+                  aria-label="Filter by customer intelligence"
+                  onChange={(e) => updateFilters({ intelligence: e.target.value })}
+                >
+                  <option value="">All</option>
+                  <option value="overdue">Overdue A/R</option>
+                  <option value="collection">Collection watch+</option>
+                  <option value="financially_active">Financially active</option>
+                </select>
+              </label>
+              <label className="field">
                 <span>Sort</span>
                 <select
                   value={urlState.sort}
@@ -1123,12 +1163,13 @@ export default function AccountDirectoryApp() {
                         <thead>
                           <tr>
                             <th scope="col">Account</th>
-                            <th scope="col">Primary contact</th>
-                            <th scope="col">Email</th>
-                            <th scope="col">Phone</th>
-                            <th scope="col">Location</th>
+                            <th scope="col">A/R</th>
                             <th scope="col">Status</th>
                             <th scope="col">QuickBooks</th>
+                            <th scope="col">Primary contact</th>
+                            <th scope="col">Location</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Phone</th>
                             <th scope="col">Last updated</th>
                           </tr>
                         </thead>
@@ -1163,14 +1204,31 @@ export default function AccountDirectoryApp() {
                                   </div>
                                 </div>
                               </td>
-                              <td>{item.primaryContact || <span className="ad-cell-muted">—</span>}</td>
-                              <td>{item.primaryEmail || <span className="ad-cell-muted">—</span>}</td>
-                              <td>{item.primaryPhone || <span className="ad-cell-muted">—</span>}</td>
-                              <td>{formatCityState(item.city, item.state)}</td>
+                              <td>
+                                {item.financialIntel?.openAr != null ? (
+                                  <span className={item.financialIntel.overdue ? "ad-overdue" : undefined}>
+                                    {formatMoney(item.financialIntel.openAr)}
+                                    {item.financialIntel.overdue ? " overdue" : ""}
+                                    {["watch", "attention", "priority"].includes(
+                                      String(item.financialIntel.collectionAttention || "")
+                                    )
+                                      ? ` · ${String(item.financialIntel.collectionAttention).replace(/^./, (c) =>
+                                          c.toUpperCase()
+                                        )}`
+                                      : ""}
+                                  </span>
+                                ) : (
+                                  <span className="ad-cell-muted">—</span>
+                                )}
+                              </td>
                               <td>
                                 <span className={statusPillClass(item.status)}>{statusLabel(item.status)}</span>
                               </td>
                               <td>{qbEnrichmentBadge(item)}</td>
+                              <td>{item.primaryContact || <span className="ad-cell-muted">—</span>}</td>
+                              <td>{formatCityState(item.city, item.state)}</td>
+                              <td>{item.primaryEmail || <span className="ad-cell-muted">—</span>}</td>
+                              <td>{item.primaryPhone || <span className="ad-cell-muted">—</span>}</td>
                               <td>{formatUpdatedAt(item.updatedAt)}</td>
                             </tr>
                           ))}
@@ -1205,7 +1263,13 @@ export default function AccountDirectoryApp() {
                           <div className="account-card-info">
                             <div className="account-card-name">{item.displayName ?? item.name}</div>
                             <div className="account-card-meta">
-                              {[item.primaryContact, formatCityState(item.city, item.state)]
+                              {[
+                                item.primaryContact,
+                                formatCityState(item.city, item.state),
+                                item.financialIntel?.openAr != null
+                                  ? `${formatMoney(item.financialIntel.openAr)}${item.financialIntel.overdue ? " overdue" : ""}`
+                                  : null
+                              ]
                                 .filter((x) => x && x !== "—")
                                 .join(" · ") || formatCityState(item.city, item.state)}
                             </div>
@@ -1551,21 +1615,6 @@ function formatMoney(value: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
 }
 
-function financialActivityLabel(type: string | undefined): string {
-  switch (String(type || "")) {
-    case "invoice":
-      return "Invoice";
-    case "payment":
-      return "Payment";
-    case "sales_order":
-      return "Sales order";
-    case "estimate":
-      return "Estimate";
-    default:
-      return type || "Activity";
-  }
-}
-
 function ProfilePanel({
   accountId,
   sessionToken,
@@ -1616,14 +1665,16 @@ function ProfilePanel({
   const [financials, setFinancials] = useState<AccountFinancials | null>(null);
   const [financialsBusy, setFinancialsBusy] = useState(false);
   const [financialsError, setFinancialsError] = useState<string | null>(null);
+  const [relationship, setRelationship] = useState<AccountRelationship | null>(null);
 
   useEffect(() => {
     setFinancials(null);
     setFinancialsError(null);
+    setRelationship(null);
   }, [accountId]);
 
   useEffect(() => {
-    if (detailTab !== "Financials") return;
+    if (!["Overview", "Financials", "Relationship"].includes(detailTab)) return;
     if (!sessionToken || !accountId) return;
 
     let cancelled = false;
@@ -1642,6 +1693,12 @@ function ProfilePanel({
       .finally(() => {
         if (!cancelled) setFinancialsBusy(false);
       });
+
+    void loadRelationship(sessionToken, accountId)
+      .then((rel) => {
+        if (!cancelled) setRelationship(rel);
+      })
+      .catch(() => undefined);
 
     return () => {
       cancelled = true;
@@ -1770,44 +1827,16 @@ function ProfilePanel({
             {detailTab === "Overview" ? (
               <>
                 <DataHealth detail={detail} />
-                <dl className="detail-dl">
-                  <dt>Account name</dt>
-                  <dd>{detail.displayName ?? detail.name}</dd>
-                  {showLegal ? (
-                    <>
-                      <dt>Legal name</dt>
-                      <dd>{legalName}</dd>
-                    </>
-                  ) : null}
-                  <dt>Primary contact</dt>
-                  <dd>{detail.primaryContact || "—"}</dd>
-                  <dt>Primary email</dt>
-                  <dd>{detail.primaryEmail || "—"}</dd>
-                  <dt>Primary phone</dt>
-                  <dd>{detail.primaryPhone || "—"}</dd>
-                  <dt>Location</dt>
-                  <dd>{formatCityState(detail.city, detail.state)}</dd>
-                  <dt>Status</dt>
-                  <dd>
-                    <span className={statusPillClass(detail.status)}>{statusLabel(detail.status)}</span>
-                  </dd>
-                  <dt>QuickBooks</dt>
-                  <dd>{qbEnrichmentBadge(detail)}</dd>
-                  {detail.source ? (
-                    <>
-                      <dt>Source</dt>
-                      <dd>{detail.source}</dd>
-                    </>
-                  ) : null}
-                  <dt>Last updated</dt>
-                  <dd>{formatUpdatedAt(detail.updatedAt)}</dd>
-                  {detail.notes ? (
-                    <>
-                      <dt>Notes</dt>
-                      <dd>{detail.notes}</dd>
-                    </>
-                  ) : null}
-                </dl>
+                <Overview360
+                  detail={detail}
+                  financials={financials}
+                  busy={financialsBusy}
+                  onOpenTab={(tab) => onTabChange(tab as DetailTab)}
+                />
+                <RelationshipHealthPanel
+                  relationship={relationship}
+                  onOpenTab={(tab) => onTabChange(tab as DetailTab)}
+                />
               </>
             ) : null}
 
@@ -1816,10 +1845,11 @@ function ProfilePanel({
                 financials={financials}
                 busy={financialsBusy}
                 error={financialsError}
+                sessionToken={sessionToken}
+                accountId={accountId}
                 onRetry={() => {
                   setFinancials(null);
                   setFinancialsError(null);
-                  // Force reload by toggling via accountId dependency: re-invoke fetch.
                   if (sessionToken) {
                     setFinancialsBusy(true);
                     void getAccountFinancials(sessionToken, accountId)
@@ -1835,31 +1865,18 @@ function ProfilePanel({
               />
             ) : null}
 
-            {detailTab === "Contacts" ? (
-              <DetailList
-                empty="No contacts on file."
-                items={(detail.contacts ?? []).map((c) => ({
-                  id: c.id,
-                  title: c.name,
-                  meta: [c.role, c.email, c.phone].filter(Boolean).join(" · "),
-                  badge: c.isPrimary ? "Primary" : undefined
-                }))}
+            {detailTab === "Relationship" ? (
+              <RelationshipWorkspace
+                sessionToken={sessionToken}
+                accountId={accountId}
+                relationship={relationship}
+                onOpenTab={(tab) => onTabChange(tab as DetailTab)}
               />
             ) : null}
 
-            {detailTab === "Locations" ? (
-              <DetailList
-                empty="No locations on file."
-                items={(detail.locations ?? []).map((l) => ({
-                  id: l.id,
-                  title: l.label || l.line1 || "Location",
-                  meta: [l.line1, l.line2, formatCityState(l.city, l.state), l.postalCode]
-                    .filter(Boolean)
-                    .join(" · "),
-                  badge: l.isPrimary ? "Primary" : undefined
-                }))}
-              />
-            ) : null}
+            {detailTab === "Contacts" ? <ContactsSurface contacts={detail.contacts ?? []} /> : null}
+
+            {detailTab === "Locations" ? <LocationsSurface locations={detail.locations ?? []} /> : null}
 
             {detailTab === "Aliases" ? (
               <DetailList
@@ -1872,26 +1889,7 @@ function ProfilePanel({
               />
             ) : null}
 
-            {detailTab === "External links" ? (
-              <DetailList
-                empty="No external links on file."
-                items={(detail.externalLinks ?? []).map((link) => ({
-                  id: link.id,
-                  title: link.system || "External system",
-                  meta: [
-                    link.isActive === false ? "Inactive" : "Linked",
-                    link.externalDisplayName || null,
-                    link.sourceSnapshotDate ? `Snapshot ${formatUpdatedAt(link.sourceSnapshotDate)}` : null,
-                    link.linkedAt ? `Linked ${formatUpdatedAt(link.linkedAt)}` : null,
-                    link.linkedBy || null,
-                    link.externalId ? `ID ${link.externalId}` : null
-                  ]
-                    .filter(Boolean)
-                    .join(" · "),
-                  href: link.url || undefined
-                }))}
-              />
-            ) : null}
+            {detailTab === "Connections" ? <ConnectionsSurface links={detail.externalLinks ?? []} /> : null}
 
             {detailTab === "Activity" ? (
               detail.auditHistory && detail.auditHistory.length > 0 ? (
@@ -1921,288 +1919,6 @@ function ProfilePanel({
   );
 }
 
-function FinancialsPanel({
-  financials,
-  busy,
-  error,
-  onRetry
-}: {
-  financials: AccountFinancials | null;
-  busy: boolean;
-  error: string | null;
-  onRetry: () => void;
-}) {
-  if (busy && !financials) {
-    return (
-      <div className="skeleton-rows" aria-busy="true">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="skeleton-row">
-            <div className="skeleton-block" style={{ height: 14, flex: 1, borderRadius: 4 }} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="banner banner-error" role="alert">
-        {error}
-        <button type="button" className="btn btn-secondary btn-sm banner-dismiss" onClick={onRetry}>
-          Retry
-        </button>
-      </div>
-    );
-  }
-
-  if (!financials) {
-    return <p className="muted">Financials are not available.</p>;
-  }
-
-  if (financials.status === "unlinked" || financials.linked === false) {
-    return (
-      <div className="financials-panel">
-        <h3 className="financials-title">QuickBooks Financials</h3>
-        <p className="financials-empty">
-          QuickBooks financials are unavailable until this Account Directory record is linked to
-          QuickBooks.
-        </p>
-      </div>
-    );
-  }
-
-  if (financials.status === "unavailable") {
-    return (
-      <div className="financials-panel">
-        <h3 className="financials-title">QuickBooks Financials</h3>
-        {(financials.warnings ?? []).map((w) => (
-          <div key={w} className="banner banner-warn" role="status">
-            {w}
-          </div>
-        ))}
-        <p className="financials-empty">Financial data is unavailable. Account identity is unaffected.</p>
-      </div>
-    );
-  }
-
-  const s = financials.summary ?? {};
-  const showAmounts = financials.status === "ok" || financials.status === "stale";
-
-  return (
-    <div className="financials-panel">
-      <div className="financials-head">
-        <h3 className="financials-title">QuickBooks Financials</h3>
-        <p className="financials-meta muted">
-          {[
-            financials.asOfDate ? `As of ${financials.asOfDate}` : null,
-            financials.refreshedAt ? `Refreshed ${formatUpdatedAt(financials.refreshedAt)}` : null,
-            financials.status === "stale" ? "Stale" : null
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </p>
-      </div>
-
-      {(financials.warnings ?? []).map((w) => (
-        <div key={w} className="banner banner-warn" role="status">
-          {w}
-        </div>
-      ))}
-
-      {showAmounts ? (
-        <>
-          <div className="financials-metrics" aria-label="Financial summary">
-            <div className="financials-metric">
-              <span className="financials-metric-label">Open A/R</span>
-              <span className="financials-metric-value">{formatMoney(s.openAr)}</span>
-            </div>
-            <div className="financials-metric">
-              <span className="financials-metric-label">Open invoices</span>
-              <span className="financials-metric-value">
-                {s.openInvoiceCount == null ? "—" : String(s.openInvoiceCount)}
-              </span>
-            </div>
-            <div className="financials-metric">
-              <span className="financials-metric-label">Invoiced YTD</span>
-              <span className="financials-metric-value">{formatMoney(s.invoicedYtd)}</span>
-            </div>
-            <div className="financials-metric">
-              <span className="financials-metric-label">Collected YTD</span>
-              <span className="financials-metric-value">{formatMoney(s.collectedYtd)}</span>
-            </div>
-            <div className="financials-metric">
-              <span className="financials-metric-label">Sales Orders $ YTD</span>
-              <span className="financials-metric-value">{formatMoney(s.salesOrdersYtd)}</span>
-            </div>
-            <div className="financials-metric">
-              <span className="financials-metric-label">Quoted YTD</span>
-              <span className="financials-metric-value">{formatMoney(s.quotedYtd)}</span>
-            </div>
-          </div>
-
-          {financials.aging ? (
-            <section className="financials-aging" aria-label="A/R aging">
-              <div className="financials-aging-head">
-                <h4 className="financials-subtitle">A/R Aging</h4>
-                <p className="financials-meta muted">Based on QuickBooks invoice due dates</p>
-              </div>
-              <div className="financials-aging-grid">
-                {(
-                  [
-                    ["Current", financials.aging.current],
-                    ["1–30 overdue", financials.aging.days1to30],
-                    ["31–60 overdue", financials.aging.days31to60],
-                    ["61–90 overdue", financials.aging.days61to90],
-                    ["90+ overdue", financials.aging.days90Plus]
-                  ] as const
-                ).map(([label, bucket]) => (
-                  <div key={label} className="financials-aging-cell">
-                    <span className="financials-metric-label">{label}</span>
-                    <span className="financials-metric-value">{formatMoney(bucket?.balance ?? 0)}</span>
-                    <span className="financials-aging-count">
-                      {bucket?.count ?? 0} invoice{(bucket?.count ?? 0) === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {(financials.aging.unknown?.count ?? 0) > 0 ? (
-                <div className="financials-aging-unknown">
-                  <span className="financials-metric-label">Due date unavailable</span>
-                  <span>
-                    {formatMoney(financials.aging.unknown?.balance ?? 0)} ·{" "}
-                    {financials.aging.unknown?.count ?? 0} invoice
-                    {(financials.aging.unknown?.count ?? 0) === 1 ? "" : "s"}
-                  </span>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
-          <dl className="detail-dl financials-facts">
-            <dt>Payment terms</dt>
-            <dd>{financials.paymentTerms || "—"}</dd>
-            <dt>Overdue balance</dt>
-            <dd>
-              {formatMoney(financials.overdueBalance)}
-              {financials.overdueInvoiceCount != null
-                ? ` · ${financials.overdueInvoiceCount} invoice${financials.overdueInvoiceCount === 1 ? "" : "s"}`
-                : ""}
-            </dd>
-            <dt>Oldest overdue</dt>
-            <dd>
-              {financials.oldestOverdueInvoice
-                ? [
-                    financials.oldestOverdueInvoice.dueDate
-                      ? `due ${financials.oldestOverdueInvoice.dueDate}`
-                      : null,
-                    financials.oldestOverdueInvoice.referenceNumber,
-                    formatMoney(financials.oldestOverdueInvoice.balance),
-                    financials.oldestOverdueInvoice.daysOverdue != null
-                      ? `${financials.oldestOverdueInvoice.daysOverdue} days overdue`
-                      : null
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                : "—"}
-            </dd>
-            <dt>
-              Collection status
-              <span
-                className="financials-help"
-                title="Collection status is based only on current QuickBooks invoice due dates and unpaid balances."
-              >
-                ?
-              </span>
-            </dt>
-            <dd>
-              {financials.collectionAttention ? (
-                <span
-                  className={`collection-status collection-status-${financials.collectionAttention.code || "unknown"}`}
-                  title={financials.collectionAttention.reason || undefined}
-                >
-                  {financials.collectionAttention.label || financials.collectionAttention.code}
-                </span>
-              ) : (
-                "—"
-              )}
-            </dd>
-            <dt>Last invoice</dt>
-            <dd>
-              {financials.lastInvoice
-                ? [
-                    financials.lastInvoice.date,
-                    financials.lastInvoice.referenceNumber,
-                    formatMoney(financials.lastInvoice.amount)
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                : "—"}
-            </dd>
-            <dt>Last payment</dt>
-            <dd>
-              {financials.lastPayment
-                ? [
-                    financials.lastPayment.date,
-                    financials.lastPayment.referenceNumber,
-                    formatMoney(financials.lastPayment.amount)
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                : "—"}
-            </dd>
-            <dt>Days since last payment</dt>
-            <dd>
-              {financials.daysSinceLastPayment == null ? "—" : String(financials.daysSinceLastPayment)}
-            </dd>
-            <dt>Oldest open invoice</dt>
-            <dd>
-              {financials.oldestOpenInvoice
-                ? [
-                    financials.oldestOpenInvoice.date,
-                    financials.oldestOpenInvoice.referenceNumber,
-                    formatMoney(financials.oldestOpenInvoice.balance),
-                    financials.oldestOpenInvoice.ageDays != null
-                      ? `invoice age ${financials.oldestOpenInvoice.ageDays} days`
-                      : null
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                : "—"}
-            </dd>
-          </dl>
-
-          <h4 className="financials-subtitle">Recent financial activity</h4>
-          {(financials.recentActivity ?? []).length > 0 ? (
-            <div className="financials-activity" role="table" aria-label="Recent financial activity">
-              <div className="financials-activity-head" role="row">
-                <span role="columnheader">Date</span>
-                <span role="columnheader">Type</span>
-                <span role="columnheader">Reference</span>
-                <span role="columnheader">Customer / job</span>
-                <span role="columnheader">Amount</span>
-              </div>
-              {(financials.recentActivity ?? []).map((row, idx) => (
-                <div
-                  key={`${row.type}-${row.date}-${row.referenceNumber}-${idx}`}
-                  className="financials-activity-row"
-                  role="row"
-                >
-                  <span role="cell">{row.date || "—"}</span>
-                  <span role="cell">{financialActivityLabel(row.type)}</span>
-                  <span role="cell">{row.referenceNumber || "—"}</span>
-                  <span role="cell">{row.customerName || "—"}</span>
-                  <span role="cell">{formatMoney(row.amount)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="muted">No recent prepared financial activity for this linked customer.</p>
-          )}
-        </>
-      ) : null}
-    </div>
-  );
-}
 
 function DataHealth({ detail }: { detail: AccountDetail }) {
   const hasPrimaryContact =

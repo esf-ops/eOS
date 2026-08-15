@@ -106,7 +106,8 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 
 ### Sales / Accounts
 
-- Sales Performance Head  
+- **Account Directory Head** (`app-account-directory/`, slug **`account_directory`**) — identity spine for customers/accounts (canonical name, contacts, locations, aliases, exact QuickBooks links) plus **Account 360** customer relationship context (open A/R, customer invoices/payments, monthly customer activity, estimates with stored `account_directory_account_id`). Not a CRM replacement and **not** company Finance (P&L / Balance Sheet / cash / A/P / GL). Exact identity only — never fuzzy name joins.
+- Sales Performance Head
 - Sales Account Mapping Admin Head  
 - Account Performance Head  
 - Dealer / Builder / Partner Account Head  
@@ -160,7 +161,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 ### Finance / Accounting
 
 - Accounting Head  
-- **Finance Head** (`app-finance/`, slug **`finance`**, env **`HEAD_URL_FINANCE`**) — eliteOS owner command center for governed Accrual P&L, Balance Sheet, A/R, A/P, cash, reconciliation, monthly statement exploration, and bounded account/transaction detail via `GET /api/finance/*`. Roles: admin, super_admin, executive, finance, accounting + head access. QuickBooks read-only; browser never queries `qb_finance_*` or receives QuickBooks/internal IDs. Historical views require stored snapshots and equivalent-period coverage. Distinct from QuickBooks Intelligence.
+- **Finance Head** (`app-finance/`, slug **`finance`**, env **`HEAD_URL_FINANCE`**) — eliteOS owner command center for governed Accrual P&L, Balance Sheet, A/R, A/P, cash, reconciliation, monthly statement exploration, and bounded account/transaction detail via `GET /api/finance/*`. Roles: admin, super_admin, executive, finance, accounting + head access. QuickBooks read-only; browser never queries `qb_finance_*` or receives QuickBooks/internal IDs. Historical views require stored snapshots and equivalent-period coverage. Distinct from QuickBooks Intelligence and from **Account Directory Account 360** (customer-specific facts only).
 - Job Costing Head  
 - Payroll Prep / Workforce Cost Head  
 - **QuickBooks Intelligence Head** (`app-quickbooks-intelligence/`, slug **`quickbooks_intelligence`**, env **`HEAD_URL_QUICKBOOKS_INTELLIGENCE`**) — Phase 4D read-only AR/revenue/payment/estimate-flow insights via `GET /api/admin/quickbooks/intelligence/executive`. Roles: admin, super_admin, executive, finance, accounting + head access. **System Admin** assigns access only — it does **not** host this page. No AI, no `raw_payload`, no writeback.  

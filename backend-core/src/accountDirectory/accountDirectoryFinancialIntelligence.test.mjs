@@ -336,6 +336,14 @@ function okSync(overrides = {}) {
   assert.equal(profile.summary.openAr, 25);
   assert.equal(profile.summary.openInvoiceCount, 1);
   assert.equal(profile.oldestOpenInvoice?.ageDays != null, true);
+  assert.equal(profile.openInvoices.items.length, 1);
+  assert.equal(profile.openInvoices.items[0].open_amount, 25);
+  assert.equal(profile.monthlyTrend.status, "ok");
+  const june = profile.monthlyTrend.points.find((p) => p.month === "2026-06");
+  assert.equal(june.collected, 40);
+  assert.equal(june.invoiced, 0);
+  assert.equal(JSON.stringify(profile).includes("total_assets"), false);
+  assert.equal(JSON.stringify(profile).includes("net_income"), false);
   assertNoIds(profile);
   console.log("ok: 2/3/4 linked root + job included; name twin other root excluded");
 }
@@ -595,6 +603,10 @@ function okSync(overrides = {}) {
   assert.equal(built.overdueInvoiceCount, 4);
   assert.equal(built.aging.unknown.count, 1);
   assert.equal(built.collectionAttention.code, "priority");
+  assert.equal(
+    built.collectionAttention.reason,
+    "4 invoices totaling $90 are overdue; oldest is 134 days past due."
+  );
   console.log("ok: J aging balances reconcile to Open A/R; K priority when 90+");
 }
 

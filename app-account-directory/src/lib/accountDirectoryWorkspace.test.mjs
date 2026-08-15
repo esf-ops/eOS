@@ -31,6 +31,7 @@ assert.equal(defaultState.linked, "", "default linked = ''");
 assert.equal(defaultState.missingContact, "", "default missingContact = ''");
 assert.equal(defaultState.missingLocation, "", "default missingLocation = ''");
 assert.equal(defaultState.qbEnrichment, "", "default qbEnrichment = ''");
+assert.equal(defaultState.intelligence, "", "default intelligence = ''");
 assert.equal(defaultState.sort, "name_asc", "default sort = name_asc");
 assert.equal(defaultState.account, null, "default account = null");
 console.log("ok: parseUrlState defaults");
@@ -66,7 +67,7 @@ console.log("ok: parseUrlState invalid params fall back safely");
 
 // ── serializeUrlState ──────────────────────────────────────────────────────
 
-const emptySerial = serializeUrlState({ tab: "accounts", page: 1, pageSize: 50, search: "", status: "", linked: "", missingContact: "", missingLocation: "", qbEnrichment: "", sort: "name_asc", account: null });
+const emptySerial = serializeUrlState({ tab: "accounts", page: 1, pageSize: 50, search: "", status: "", linked: "", missingContact: "", missingLocation: "", qbEnrichment: "", intelligence: "", sort: "name_asc", account: null });
 assert.equal(emptySerial, "", "defaults serialize to empty string");
 console.log("ok: serializeUrlState omits defaults");
 

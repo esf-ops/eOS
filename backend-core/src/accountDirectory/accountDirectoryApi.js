@@ -22,6 +22,12 @@ import { AccountDirectoryError, createAccountDirectoryService } from "./accountD
 import { normalizeAccountWritePayload } from "./accountDirectoryPayload.mjs";
 import { getAccountDirectoryFinancials } from "./accountDirectoryFinancialIntelligence.mjs";
 import {
+  getAccountDirectoryOpenInvoices,
+  getAccountDirectoryRelationship,
+  getAccountDirectoryTimeline,
+  getAccountDirectoryTrend
+} from "./accountDirectory360.mjs";
+import {
   dismissSuggestion,
   getAdQbCustomerEnrichmentFeedStatus,
   listAdQbLinkSuggestions
@@ -162,7 +168,8 @@ export function attachAccountDirectoryRoutes(app, deps) {
         linked: req.query?.linked,
         missingContact: req.query?.missingContact,
         missingLocation: req.query?.missingLocation,
-        qbEnrichment: req.query?.qbEnrichment
+        qbEnrichment: req.query?.qbEnrichment,
+        intelligence: req.query?.intelligence
       });
       res.json({ ok: true, ...data });
     });
@@ -192,6 +199,68 @@ export function attachAccountDirectoryRoutes(app, deps) {
         now: new Date()
       });
       res.json({ ok: true, financials });
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/financials/trend", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const trend = await getAccountDirectoryTrend({
+        supabase: getSupabase(),
+        store,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        env: process.env,
+        now: new Date(),
+        period: req.query?.period
+      });
+      res.json({ ok: true, trend });
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/financials/invoices", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const invoices = await getAccountDirectoryOpenInvoices({
+        supabase: getSupabase(),
+        store,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        page: req.query?.page,
+        limit: req.query?.limit ?? req.query?.pageSize
+      });
+      res.json({ ok: true, ...invoices });
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/relationship", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const relationship = await getAccountDirectoryRelationship({
+        supabase: getSupabase(),
+        store,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        env: process.env,
+        now: new Date()
+      });
+      res.json({ ok: true, relationship });
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/timeline", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const timeline = await getAccountDirectoryTimeline({
+        supabase: getSupabase(),
+        store,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        page: req.query?.page,
+        limit: req.query?.limit ?? req.query?.pageSize,
+        family: req.query?.family ?? req.query?.type
+      });
+      res.json({ ok: true, ...timeline });
     });
   });
 

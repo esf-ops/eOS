@@ -29,6 +29,12 @@ export type AccountListItem = {
   hasPrimaryContact?: boolean | null;
   hasPrimaryLocation?: boolean | null;
   hasAliases?: boolean | null;
+  financialIntel?: {
+    openAr?: number | null;
+    overdue?: boolean;
+    collectionAttention?: string | null;
+    financiallyActive?: boolean;
+  } | null;
 };
 
 export type AccountContact = {
@@ -124,6 +130,7 @@ export type AccountListParams = {
   missingContact?: string;
   missingLocation?: string;
   qbEnrichment?: string;
+  intelligence?: string;
 };
 
 export type AccountListResponse = {
@@ -211,6 +218,8 @@ export type AccountFinancials = {
     reason?: string;
   } | null;
   recentActivity?: AccountFinancialActivityItem[];
+  openInvoices?: AccountInvoicePage;
+  monthlyTrend?: AccountTrend;
   coverage?: {
     workerCoverageStartDate?: string | null;
     workerCoverageEndDate?: string | null;
@@ -218,9 +227,94 @@ export type AccountFinancials = {
   };
 };
 
+export type AccountInvoiceRow = {
+  invoice_date?: string | null;
+  due_date?: string | null;
+  reference_number?: string | null;
+  original_amount?: number | null;
+  open_amount?: number | null;
+  days_overdue?: number | null;
+  status?: string;
+  customer_name?: string | null;
+};
+
+export type AccountInvoicePage = {
+  status?: string;
+  items?: AccountInvoiceRow[];
+  pagination?: { page?: number; limit?: number; has_more?: boolean };
+  notes?: string | null;
+};
+
+export type AccountTrendPoint = {
+  month: string;
+  invoiced?: number;
+  collected?: number;
+  sales_orders?: number;
+  quoted?: number;
+};
+
+export type AccountTrend = {
+  status?: string;
+  period?: string;
+  start?: string | null;
+  end?: string | null;
+  notes?: string | null;
+  points?: AccountTrendPoint[];
+};
+
+export type AccountHealthSignal = {
+  code: string;
+  severity: string;
+  label: string;
+  detail: string;
+  target: string;
+};
+
+export type AccountRelationship = {
+  health?: {
+    state?: string;
+    label?: string;
+    reason?: string | null;
+    signals: AccountHealthSignal[];
+  };
+  estimates: {
+    internal: { state: string; notes?: string | null; items: Array<{ quote_number?: string | null; status?: string | null; amount?: number | null; updated_at?: string | null }> };
+    studio: { state: string; notes?: string | null; items: Array<{ name?: string | null; status?: string | null; updated_at?: string | null }> };
+  };
+  jobs: { state: string; notes?: string | null };
+  quoteFlow?: { state: string; notes?: string | null };
+};
+
+export type AccountTimelineItem = {
+  id: string;
+  at?: string | null;
+  family?: string;
+  type?: string;
+  source?: string;
+  title?: string;
+  detail?: string | null;
+  amount?: number | null;
+};
+
+export type AccountTimelineResponse = {
+  ok?: boolean;
+  items?: AccountTimelineItem[];
+  pagination?: { page?: number; limit?: number; has_more?: boolean };
+};
+
 export type AccountFinancialsResponse = {
   ok?: boolean;
   financials?: AccountFinancials;
+};
+
+export type AccountTrendResponse = {
+  ok?: boolean;
+  trend?: AccountTrend;
+};
+
+export type AccountRelationshipResponse = {
+  ok?: boolean;
+  relationship?: AccountRelationship;
 };
 
 export type PermissionsResponse = {
