@@ -450,6 +450,8 @@ async function main() {
     });
     assert.equal(ops.jobs_state, "available");
     assert.equal(ops.job_count_2026, 2);
+    assert.equal(ops.sqft_state, "available");
+    assert.equal(ops.sqft_2026, 0);
     assert.equal(ops.earliest_job_date, "2026-03-01");
     assert.equal(ops.latest_job_date, "2026-06-15");
     assert.equal(ops.recent_jobs[0].source_job_id, "j2");
@@ -462,7 +464,10 @@ async function main() {
     const failed = buildTrustedMorawareOperations({ links, jobs: null, jobsState: "unavailable" });
     assert.equal(failed.jobs_state, "unavailable");
     assert.equal(failed.job_count_2026, null);
+    assert.equal(failed.sqft_state, "unavailable");
+    assert.equal(failed.sqft_2026, null);
     assert.equal(JSON.stringify(failed).includes('"job_count_2026":0'), false);
+    assert.equal(JSON.stringify(failed).includes('"sqft_2026":0'), false);
     console.log("ok: trusted ops union, dedupe, exclude unrelated, 2026-only, unavailable is not zero");
   }
 
@@ -608,6 +613,141 @@ async function main() {
     assert.equal(ops.accounts.find((a) => a.source_account_id === "553").job_count, 1);
     assert.equal(ops.accounts.find((a) => a.source_account_id === "635").job_count, 2);
     console.log("ok: CURRENT_MORAWARE_JOB_SET excludes stale, keeps census+incremental overlay, unions IDs");
+  }
+
+  {
+    function wsJob(id, accountId, sqft, lastSeen, date = "2026-03-15") {
+      return {
+        source_job_id: id,
+        source_account_id: accountId,
+        job_name: `Job ${id}`,
+        status_name: "complete",
+        created_at_source: date,
+        last_seen_at: lastSeen,
+        raw_payload: {
+          forms: [
+            {
+              formTemplateName: "Job Worksheet",
+              fields: [{ label: "Sq.Ft.", numericValue: sqft }]
+            },
+            {
+              formTemplateName: "Accounting Form",
+              fields: [{ label: "Sq.Ft.", numericValue: 9999 }]
+            }
+          ]
+        }
+      };
+    }
+    const links553 = [
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "553",
+        externalDisplayName: "Broihahn A"
+      }
+    ];
+    const linksBoth = [
+      ...links553,
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "635",
+        externalDisplayName: "Broihahn B"
+      }
+    ];
+    const exact553 = [120, 100, 110, 90, 123];
+    const exact635 = [100, 80, 90, 95, 85, 110, 90.5, 90];
+    assert.equal(exact553.reduce((a, b) => a + b, 0), 543);
+    assert.equal(exact635.reduce((a, b) => a + b, 0), 740.5);
+
+    const one = buildTrustedMorawareOperations({
+      links: links553,
+      jobs: exact553.map((sqft, i) => wsJob(`553-${i + 1}`, "553", sqft, "2026-08-15T12:00:00.000Z")),
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
+    assert.equal(one.job_count_2026, 5);
+    assert.equal(one.sqft_2026, 543);
+    console.log("ok: one Moraware ID SqFt aggregates correctly");
+
+    const broihahn = buildTrustedMorawareOperations({
+      links: linksBoth,
+      jobs: [
+        ...exact553.map((sqft, i) => wsJob(`553-${i + 1}`, "553", sqft, "2026-08-15T12:00:00.000Z")),
+        ...exact635.map((sqft, i) => wsJob(`635-${i + 1}`, "635", sqft, "2026-08-15T12:00:00.000Z")),
+        wsJob("stale", "553", 917.5, "2026-05-18T16:00:00.000Z"),
+        wsJob("unrelated", "999", 5000, "2026-08-15T12:00:00.000Z"),
+        wsJob("prior-year", "635", 400, "2026-08-15T12:00:00.000Z", "2025-11-01")
+      ],
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
+    assert.equal(broihahn.job_count_2026, 13);
+    assert.equal(broihahn.sqft_state, "available");
+    assert.equal(broihahn.sqft_2026, 1283.5);
+    assert.equal(JSON.stringify(broihahn).includes("raw_payload"), false);
+    assert.equal(JSON.stringify(broihahn).includes("9999"), false);
+    console.log("ok: Broihahn fixture returns 13 jobs / 1,283.5 SqFt; multi-ID sum; stale/unrelated/prior-year excluded");
+
+    const deduped = buildTrustedMorawareOperations({
+      links: links553,
+      jobs: [
+        wsJob("same", "553", 999, "2026-08-15T08:00:00.000Z"),
+        wsJob("same", "553", 150, "2026-08-16T08:00:00.000Z")
+      ],
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
+    assert.equal(deduped.job_count_2026, 1);
+    assert.equal(deduped.sqft_2026, 150);
+    console.log("ok: same source_job_id cannot double-count SqFt");
+
+    const incremental = buildTrustedMorawareOperations({
+      links: linksBoth,
+      jobs: [
+        wsJob("census", "553", 200, "2026-08-15T12:00:00.000Z"),
+        wsJob("updated", "635", 300, "2026-08-16T09:00:00.000Z"),
+        wsJob("new", "635", 40.5, "2026-08-16T10:00:00.000Z"),
+        wsJob("stale-left", "553", 917.5, "2026-06-01T00:00:00.000Z")
+      ],
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
+    assert.equal(incremental.job_count_2026, 3);
+    assert.equal(incremental.sqft_2026, 540.5);
+    console.log("ok: incremental-updated/current jobs remain included; stale pre-watermark excluded");
+
+    const zero = buildTrustedMorawareOperations({
+      links: links553,
+      jobs: [
+        {
+          source_job_id: "no-ws",
+          source_account_id: "553",
+          created_at_source: "2026-04-01",
+          last_seen_at: "2026-08-15T12:00:00.000Z",
+          raw_payload: {
+            forms: [{ formTemplateName: "Accounting Form", fields: [{ label: "Sq.Ft.", numericValue: 50 }] }]
+          }
+        }
+      ],
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
+    assert.equal(zero.jobs_state, "available");
+    assert.equal(zero.job_count_2026, 1);
+    assert.equal(zero.sqft_state, "available");
+    assert.equal(zero.sqft_2026, 0);
+    console.log("ok: genuine zero SqFt remains available/0");
+
+    const noPop = buildTrustedMorawareOperations({
+      links: links553,
+      jobs: exact553.map((sqft, i) => wsJob(`x-${i}`, "553", sqft, "2026-08-15T12:00:00.000Z")),
+      jobsState: "unavailable",
+      currentPopulation: null
+    });
+    assert.equal(noPop.sqft_state, "unavailable");
+    assert.equal(noPop.sqft_2026, null);
+    console.log("ok: unavailable current population returns null/unavailable, not zero");
   }
 
   {

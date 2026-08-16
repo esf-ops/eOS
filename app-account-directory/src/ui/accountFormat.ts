@@ -7,3 +7,14 @@ export function formatCount(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(Number(value))) return "—";
   return String(Math.round(Number(value)));
 }
+
+/** Trusted Moraware worksheet SqFt for Account 360 (e.g. 1,283.5 SF). */
+export function formatSqft(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  const n = Number(value);
+  const text = n.toLocaleString("en-US", {
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 1,
+    maximumFractionDigits: 1
+  });
+  return `${text} SF`;
+}

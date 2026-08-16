@@ -6,6 +6,7 @@
  */
 
 import { jobInCurrentMorawareSet } from "../moraware/morawareCurrentPopulation.mjs";
+import { extractJobWorksheetCensusSqft } from "../sales/morawareSqftActuals.js";
 
 export const ACCOUNT_DIRECTORY_MORAWARE_SYSTEM = "moraware";
 
@@ -75,7 +76,26 @@ function safeJobRow(job) {
     job_date: date,
     status_name: job?.status_name ?? job?.statusName ?? null,
     salesperson_name: job?.salesperson_name ?? job?.salespersonName ?? null,
-    last_seen_at: toYmd(job?.last_seen_at ?? job?.lastSeenAt)
+    last_seen_at: job?.last_seen_at ?? job?.lastSeenAt ?? null
+  };
+}
+
+function roundTrustedSqft(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 10) / 10;
+}
+
+function unavailableTrustedOps(identity) {
+  return {
+    ...identity,
+    job_count_2026: null,
+    sqft_state: "unavailable",
+    sqft_2026: null,
+    earliest_job_date: null,
+    latest_job_date: null,
+    recent_jobs: [],
+    job_date_rule: MORAWARE_JOB_DATE_RULE
   };
 }
 
@@ -83,6 +103,7 @@ function safeJobRow(job) {
  * TRUSTED_NOW Account 360 Moraware operations from exact links + typed Brain jobs.
  * Uses CURRENT_MORAWARE_JOB_SET (last_seen_at >= last full-census start) when
  * currentPopulation is provided. Incremental last_seen mix does not shrink history.
+ * SqFt = Job Worksheet Sq.Ft. on the same 2026 current set (raw_payload never returned).
  * jobs == null or jobsState unavailable → never a factual zero.
  */
 export function buildTrustedMorawareOperations({
@@ -94,69 +115,54 @@ export function buildTrustedMorawareOperations({
   currentPopulation = null
 } = {}) {
   const identity = buildMorawareRelationship(links, null, { jobsState: "unavailable" });
-  const emptyRecent = [];
-  if (!identity.linked) {
-    return {
-      ...identity,
-      job_count_2026: null,
-      earliest_job_date: null,
-      latest_job_date: null,
-      recent_jobs: emptyRecent,
-      job_date_rule: MORAWARE_JOB_DATE_RULE
-    };
-  }
-  if (jobsState === "unavailable" || jobs == null) {
-    return {
-      ...identity,
-      job_count_2026: null,
-      earliest_job_date: null,
-      latest_job_date: null,
-      recent_jobs: emptyRecent,
-      job_date_rule: MORAWARE_JOB_DATE_RULE
-    };
-  }
+  if (!identity.linked) return unavailableTrustedOps(identity);
+  if (jobsState === "unavailable" || jobs == null) return unavailableTrustedOps(identity);
 
   const linkedIds = new Set(identity.accounts.map((a) => a.source_account_id));
   const mapped = (Array.isArray(jobs) ? jobs : [])
-    .map(safeJobRow)
-    .filter((j) => j.source_job_id && linkedIds.has(j.source_account_id))
-    .filter((j) => (currentPopulation ? jobInCurrentMorawareSet(j, currentPopulation) : true));
+    .map((job) => ({ safe: safeJobRow(job), original: job }))
+    .filter((row) => row.safe.source_job_id && linkedIds.has(row.safe.source_account_id))
+    .filter((row) => (currentPopulation ? jobInCurrentMorawareSet(row.safe, currentPopulation) : true));
   // One durable Brain row per (organization_id, source_job_id). Do not cohort-filter
   // by account-level latest last_seen_at — incremental sync only refreshes changed jobs.
   const byJobId = new Map();
   for (const row of mapped) {
-    const prev = byJobId.get(row.source_job_id);
-    if (!prev || String(row.last_seen_at || "") > String(prev.last_seen_at || "")) {
-      byJobId.set(row.source_job_id, row);
+    const prev = byJobId.get(row.safe.source_job_id);
+    if (!prev || String(row.safe.last_seen_at || "") > String(prev.safe.last_seen_at || "")) {
+      byJobId.set(row.safe.source_job_id, row);
     }
   }
   const unique = [...byJobId.values()];
   const yearPrefix = `${year}-`;
-  const inYear = unique.filter((j) => j.job_date && j.job_date.startsWith(yearPrefix));
-  const dates = inYear.map((j) => j.job_date).sort();
+  const inYear = unique.filter((row) => row.safe.job_date && row.safe.job_date.startsWith(yearPrefix));
+  const dates = inYear.map((row) => row.safe.job_date).sort();
   const counts = new Map(identity.accounts.map((a) => [a.source_account_id, 0]));
+  let sqftTotal = 0;
   for (const row of inYear) {
-    counts.set(row.source_account_id, (counts.get(row.source_account_id) || 0) + 1);
+    counts.set(row.safe.source_account_id, (counts.get(row.safe.source_account_id) || 0) + 1);
+    sqftTotal += extractJobWorksheetCensusSqft(row.original).totalSqft || 0;
   }
   const shaped = buildMorawareRelationship(links, counts, { jobsState: "available" });
   const recent = [...inYear]
     .sort(
       (a, b) =>
-        String(b.job_date).localeCompare(String(a.job_date)) ||
-        String(b.source_job_id).localeCompare(String(a.source_job_id))
+        String(b.safe.job_date).localeCompare(String(a.safe.job_date)) ||
+        String(b.safe.source_job_id).localeCompare(String(a.safe.source_job_id))
     )
     .slice(0, recentLimit)
-    .map((j) => ({
-      source_job_id: j.source_job_id,
-      job_name: j.job_name,
-      job_date: j.job_date,
-      status_name: j.status_name,
-      salesperson_name: j.salesperson_name
+    .map((row) => ({
+      source_job_id: row.safe.source_job_id,
+      job_name: row.safe.job_name,
+      job_date: row.safe.job_date,
+      status_name: row.safe.status_name,
+      salesperson_name: row.safe.salesperson_name
     }));
   return {
     ...shaped,
     job_count_2026: inYear.length,
     total_job_count: inYear.length,
+    sqft_state: "available",
+    sqft_2026: roundTrustedSqft(sqftTotal),
     earliest_job_date: dates[0] || null,
     latest_job_date: dates[dates.length - 1] || null,
     recent_jobs: recent,

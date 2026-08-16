@@ -97,9 +97,14 @@ export function buildRelationshipView(relationship, timeline, context = {}) {
       relationship?.quoteFlow?.notes || "Quote Flow history is not connected to Account Directory yet.",
     morawareLinked: Boolean(relationship?.moraware?.linked),
     morawareJobsState: relationship?.moraware?.jobs_state || "unavailable",
+    morawareSqftState: relationship?.moraware?.sqft_state || "unavailable",
     morawareAccounts: asItems(relationship?.moraware?.accounts),
     jobCount2026:
       relationship?.moraware?.jobs_state === "available" ? Number(relationship?.moraware?.job_count_2026 ?? 0) : null,
+    sqft2026:
+      relationship?.moraware?.sqft_state === "available"
+        ? Number(relationship?.moraware?.sqft_2026 ?? 0)
+        : null,
     earliestJobDate: relationship?.moraware?.earliest_job_date || null,
     latestJobDate: relationship?.moraware?.latest_job_date || null,
     recentMorawareJobs: asItems(relationship?.moraware?.recent_jobs),

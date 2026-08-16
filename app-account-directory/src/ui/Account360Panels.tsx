@@ -23,7 +23,7 @@ import {
   formatWhen
 } from "../lib/accountDirectoryRelationshipUi";
 import { CustomerTrendChart } from "./AccountCharts";
-import { formatCount, formatMoney } from "./accountFormat";
+import { formatCount, formatMoney, formatSqft } from "./accountFormat";
 import { AccountReveal, AnimatedNumber } from "./accountMotion";
 
 function formatHumanDate(ymd?: string | null): string | null {
@@ -948,6 +948,12 @@ export function RelationshipWorkspace({
               <li>
                 <span>2026 Jobs</span>
                 <strong>{view.jobCount2026}</strong>
+              </li>
+              <li>
+                <span>2026 SqFt</span>
+                <strong>
+                  {view.morawareSqftState === "available" ? formatSqft(view.sqft2026) : "Unavailable"}
+                </strong>
               </li>
               <li>
                 <span>Most Recent Job</span>

@@ -112,6 +112,8 @@ const morawareOps = buildRelationshipView(
       linked: true,
       jobs_state: "available",
       job_count_2026: 2,
+      sqft_state: "available",
+      sqft_2026: 1283.5,
       latest_job_date: "2026-06-15",
       accounts: [{ source_account_id: "635" }, { source_account_id: "553" }],
       recent_jobs: [
@@ -129,13 +131,19 @@ const morawareOps = buildRelationshipView(
 );
 assert.equal(morawareOps.morawareLinked, true);
 assert.equal(morawareOps.jobCount2026, 2);
+assert.equal(morawareOps.sqft2026, 1283.5);
+assert.equal(morawareOps.morawareSqftState, "available");
 assert.equal(morawareOps.recentMorawareJobs[0].salesperson_name, "Drew");
 const morawareDown = buildRelationshipView(
-  { moraware: { linked: true, jobs_state: "unavailable", job_count_2026: null } },
+  { moraware: { linked: true, jobs_state: "unavailable", job_count_2026: null, sqft_state: "unavailable", sqft_2026: null } },
   { items: [] }
 );
 assert.equal(morawareDown.jobCount2026, null);
+assert.equal(morawareDown.sqft2026, null);
 assert.equal(morawareDown.morawareJobsState, "unavailable");
+assert.equal(morawareDown.morawareSqftState, "unavailable");
+assert.ok(panels.includes("2026 SqFt"), "2026 SqFt shown in Moraware Operations");
+assert.ok(panels.includes("formatSqft"), "SqFt uses formatSqft");
 console.log("ok: Moraware operations view distinguishes zero jobs from unavailable");
 
 const sequence = ["Overview", "Relationship", "Financials"].map((tab) => panelFromTab(tab));

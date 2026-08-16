@@ -533,7 +533,7 @@ async function loadAccountQbEnrichment(supabase, { organizationId, accountId, qu
 }
 
 const MORAWARE_JOB_SELECT =
-  "source_job_id,source_account_id,job_name,status_name,salesperson_name,created_at_source,install_at_source,completed_at_source,last_seen_at";
+  "source_job_id,source_account_id,job_name,status_name,salesperson_name,created_at_source,install_at_source,completed_at_source,last_seen_at,raw_payload";
 
 function morawareJobsNotes(moraware) {
   if (!moraware?.linked) {
@@ -542,7 +542,7 @@ function morawareJobsNotes(moraware) {
   if (moraware.jobs_state !== "available") {
     return "Moraware identity is linked. Operational job history is temporarily unavailable.";
   }
-  return "2026 Moraware jobs from linked Account IDs. Job salesperson is recorded on the Moraware job, not Account Directory ownership.";
+  return "2026 Moraware jobs and Job Worksheet Sq.Ft. from linked Account IDs on the current Moraware population. Job salesperson is recorded on the Moraware job, not Account Directory ownership.";
 }
 
 async function loadMorawareRelationship(supabase, organizationId, links, currentPopulation) {

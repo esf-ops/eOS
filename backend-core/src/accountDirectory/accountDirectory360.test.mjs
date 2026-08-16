@@ -412,6 +412,8 @@ function storeFor(links) {
   assert.equal(relationship.moraware.jobs_state, "unavailable");
   assert.equal(relationship.moraware.total_job_count, null);
   assert.equal(relationship.moraware.job_count_2026, null);
+  assert.equal(relationship.moraware.sqft_state, "unavailable");
+  assert.equal(relationship.moraware.sqft_2026, null);
   assert.equal(JSON.stringify(relationship).includes('"job_count":0'), false);
   assert.equal(relationship.quoteFlow.state, "unavailable");
   assert.equal(JSON.stringify(relationship).includes("net_income"), false);
@@ -441,6 +443,8 @@ function storeFor(links) {
   assert.equal(linkedRelationship.moraware.accounts[0].source_account_id, "635");
   assert.equal(linkedRelationship.moraware.jobs_state, "available");
   assert.equal(linkedRelationship.moraware.job_count_2026, 0);
+  assert.equal(linkedRelationship.moraware.sqft_state, "available");
+  assert.equal(linkedRelationship.moraware.sqft_2026, 0);
   assert.equal(linkedRelationship.moraware.accounts[0].job_count, 0);
   assert.equal(linkedRelationship.moraware.recent_jobs.length, 0);
   assert.equal(JSON.stringify(linkedRelationship).includes("raw_payload"), false);
@@ -487,7 +491,14 @@ function storeFor(links) {
       salesperson_name: "Casey",
       created_at_source: "2026-02-10",
       last_seen_at: "2026-08-15T12:00:00.000Z",
-      raw_payload: { forms: [] }
+      raw_payload: {
+        forms: [
+          {
+            formTemplateName: "Job Worksheet",
+            fields: [{ label: "Sq.Ft.", numericValue: 543 }]
+          }
+        ]
+      }
     },
     {
       organization_id: ORG,
@@ -495,7 +506,10 @@ function storeFor(links) {
       source_account_id: "635",
       job_name: "Fox leftover",
       created_at_source: "2026-04-01",
-      last_seen_at: "2026-05-18T16:00:00.000Z"
+      last_seen_at: "2026-05-18T16:00:00.000Z",
+      raw_payload: {
+        forms: [{ formTemplateName: "Job Worksheet", fields: [{ label: "Sq.Ft.", numericValue: 917.5 }] }]
+      }
     },
     {
       organization_id: ORG,
@@ -505,7 +519,15 @@ function storeFor(links) {
       status_name: "complete",
       salesperson_name: "Drew",
       install_at_source: "2026-05-20",
-      last_seen_at: "2026-08-15T12:00:00.000Z"
+      last_seen_at: "2026-08-15T12:00:00.000Z",
+      raw_payload: {
+        forms: [
+          {
+            formTemplateName: "Job Worksheet",
+            fields: [{ label: "Sq.Ft.", numericValue: 740.5 }]
+          }
+        ]
+      }
     },
     {
       organization_id: ORG,
@@ -513,7 +535,10 @@ function storeFor(links) {
       source_account_id: "635",
       job_name: "Vanity duplicate",
       created_at_source: "2026-02-10",
-      last_seen_at: "2026-08-14T12:00:00.000Z"
+      last_seen_at: "2026-08-14T12:00:00.000Z",
+      raw_payload: {
+        forms: [{ formTemplateName: "Job Worksheet", fields: [{ label: "Sq.Ft.", numericValue: 9999 }] }]
+      }
     },
     {
       organization_id: ORG,
@@ -521,7 +546,10 @@ function storeFor(links) {
       source_account_id: "111",
       job_name: "Other customer",
       created_at_source: "2026-04-01",
-      last_seen_at: "2026-08-15T12:00:00.000Z"
+      last_seen_at: "2026-08-15T12:00:00.000Z",
+      raw_payload: {
+        forms: [{ formTemplateName: "Job Worksheet", fields: [{ label: "Sq.Ft.", numericValue: 5000 }] }]
+      }
     },
     {
       organization_id: ORG_B,
@@ -529,7 +557,10 @@ function storeFor(links) {
       source_account_id: "635",
       job_name: "Other org",
       created_at_source: "2026-04-02",
-      last_seen_at: "2026-08-15T12:00:00.000Z"
+      last_seen_at: "2026-08-15T12:00:00.000Z",
+      raw_payload: {
+        forms: [{ formTemplateName: "Job Worksheet", fields: [{ label: "Sq.Ft.", numericValue: 8000 }] }]
+      }
     },
     {
       organization_id: ORG,
@@ -537,7 +568,10 @@ function storeFor(links) {
       source_account_id: "635",
       job_name: "Prior year",
       created_at_source: "2025-11-01",
-      last_seen_at: "2026-08-15T12:00:00.000Z"
+      last_seen_at: "2026-08-15T12:00:00.000Z",
+      raw_payload: {
+        forms: [{ formTemplateName: "Job Worksheet", fields: [{ label: "Sq.Ft.", numericValue: 400 }] }]
+      }
     }
   ];
   const dual = await getAccountDirectoryRelationship({
@@ -564,12 +598,15 @@ function storeFor(links) {
     currentMorawarePopulation: CURRENT_MORAWARE_POPULATION
   });
   assert.equal(dual.moraware.job_count_2026, 2);
+  assert.equal(dual.moraware.sqft_state, "available");
+  assert.equal(dual.moraware.sqft_2026, 1283.5);
   assert.equal(dual.moraware.recent_jobs[0].job_name, "Island");
   assert.equal(dual.moraware.recent_jobs[0].salesperson_name, "Drew");
   assert.equal(dual.moraware.recent_jobs[1].job_name, "Vanity");
   assert.equal(JSON.stringify(dual).includes("Fox leftover"), false);
   assert.equal(JSON.stringify(dual).includes("Other org"), false);
   assert.equal(JSON.stringify(dual).includes("raw_payload"), false);
+  assert.equal(JSON.stringify(dual).includes("9999"), false);
   assert.equal(JSON.stringify(dual).includes("Account Owner"), false);
   assert.ok(dual.estimates);
   assert.ok(dual.health);
@@ -597,6 +634,8 @@ function storeFor(links) {
   });
   assert.equal(errored.moraware.jobs_state, "unavailable");
   assert.equal(errored.moraware.job_count_2026, null);
+  assert.equal(errored.moraware.sqft_state, "unavailable");
+  assert.equal(errored.moraware.sqft_2026, null);
   assert.equal(JSON.stringify(errored).includes('"job_count_2026":0'), false);
   assert.match(errored.jobs.notes, /temporarily unavailable/);
   console.log("ok: Moraware ops union/dedupe/org isolation; query error is not zero");
