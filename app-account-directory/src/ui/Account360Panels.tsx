@@ -925,6 +925,60 @@ export function RelationshipWorkspace({
         </ul>
       </section>
 
+      <section className="ad-section" aria-label="Moraware Operations">
+        <header className="ad-section-head">
+          <p className="ad-kicker">Moraware</p>
+          <h3>Moraware Operations</h3>
+        </header>
+        {!view.morawareLinked ? (
+          <p className="muted">No Moraware identity is linked.</p>
+        ) : view.morawareJobsState !== "available" ? (
+          <p className="muted">
+            Moraware identity is linked, but job history is temporarily unavailable. This is not a zero-job count.
+          </p>
+        ) : (
+          <>
+            <ul className="ad-context-list">
+              <li>
+                <span>Linked Moraware Account IDs</span>
+                <strong>
+                  {view.morawareAccounts.map((a) => a.source_account_id).filter(Boolean).join(", ") || "Linked"}
+                </strong>
+              </li>
+              <li>
+                <span>2026 Jobs</span>
+                <strong>{view.jobCount2026}</strong>
+              </li>
+              <li>
+                <span>Most Recent Job</span>
+                <strong>{view.latestJobDate ? formatWhen(view.latestJobDate) : "No 2026 Moraware jobs"}</strong>
+              </li>
+            </ul>
+            <h4>Recent Jobs</h4>
+            {view.recentMorawareJobs.length ? (
+              <ul className="ad-plain-list">
+                {view.recentMorawareJobs.map((job) => (
+                  <li key={job.source_job_id}>
+                    <strong>{job.job_name || `Job ${job.source_job_id}`}</strong>
+                    <span>
+                      {[
+                        formatWhen(job.job_date),
+                        job.status_name,
+                        job.salesperson_name ? `Job salesperson: ${job.salesperson_name}` : null
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">No 2026 Moraware jobs on linked accounts.</p>
+            )}
+          </>
+        )}
+      </section>
+
       <section className="ad-section">
         <header className="ad-section-head">
           <p className="ad-kicker">Estimates</p>

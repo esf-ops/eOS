@@ -9,6 +9,7 @@ import { rankMorawareDirectoryCandidates } from "./accountDirectoryMorawareMatch
 import {
   ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
   buildMorawareRelationship,
+  buildTrustedMorawareOperations,
   isInternalMorawareAccountName
 } from "./accountDirectoryMorawareLinkage.mjs";
 import { readFileSync } from "node:fs";
@@ -374,6 +375,152 @@ async function main() {
     assert.equal(zeroReal.jobs_state, "available");
     assert.equal(zeroReal.accounts[0].job_count, 0);
     console.log("ok: relationship shape has no raw Moraware payload; unavailable is not zero");
+  }
+
+  {
+    const links = [
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "635",
+        externalDisplayName: "Broihahn A"
+      },
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "553",
+        externalDisplayName: "Broihahn B"
+      }
+    ];
+    const jobs = [
+      {
+        source_job_id: "j1",
+        source_account_id: "635",
+        job_name: "Kitchen A",
+        status_name: "complete",
+        salesperson_name: "Alex",
+        created_at_source: "2026-03-01",
+        last_seen_at: "2026-08-15",
+        raw_payload: { secret: true }
+      },
+      {
+        source_job_id: "j2",
+        source_account_id: "553",
+        job_name: "Kitchen B",
+        status_name: "active",
+        salesperson_name: "Blair",
+        created_at_source: "2026-06-15",
+        last_seen_at: "2026-08-15"
+      },
+      {
+        source_job_id: "j1",
+        source_account_id: "635",
+        job_name: "Kitchen A dup",
+        created_at_source: "2026-03-01",
+        last_seen_at: "2026-08-14"
+      },
+      {
+        source_job_id: "j-other",
+        source_account_id: "999",
+        job_name: "Unrelated",
+        created_at_source: "2026-07-01",
+        last_seen_at: "2026-08-15"
+      },
+      {
+        source_job_id: "j-old",
+        source_account_id: "635",
+        job_name: "Old",
+        created_at_source: "2025-12-01",
+        last_seen_at: "2026-08-15"
+      }
+    ];
+    const ops = buildTrustedMorawareOperations({ links, jobs, jobsState: "available" });
+    assert.equal(ops.jobs_state, "available");
+    assert.equal(ops.job_count_2026, 2);
+    assert.equal(ops.earliest_job_date, "2026-03-01");
+    assert.equal(ops.latest_job_date, "2026-06-15");
+    assert.equal(ops.recent_jobs[0].source_job_id, "j2");
+    assert.equal(ops.recent_jobs[0].salesperson_name, "Blair");
+    assert.equal(ops.recent_jobs[1].source_job_id, "j1");
+    assert.equal(ops.accounts.find((a) => a.source_account_id === "635").job_count, 1);
+    assert.equal(ops.accounts.find((a) => a.source_account_id === "553").job_count, 1);
+    assert.equal(JSON.stringify(ops).includes("raw_payload"), false);
+    assert.equal(JSON.stringify(ops).includes("secret"), false);
+    const failed = buildTrustedMorawareOperations({ links, jobs: null, jobsState: "unavailable" });
+    assert.equal(failed.jobs_state, "unavailable");
+    assert.equal(failed.job_count_2026, null);
+    assert.equal(JSON.stringify(failed).includes('"job_count_2026":0'), false);
+    console.log("ok: trusted ops union, dedupe, exclude unrelated, 2026-only, unavailable is not zero");
+  }
+
+  {
+    const links = [
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "635",
+        externalDisplayName: "Incremental Co"
+      }
+    ];
+    const jobs = Array.from({ length: 13 }, (_, i) => ({
+      source_job_id: `inc-${i + 1}`,
+      source_account_id: "635",
+      job_name: `Job ${i + 1}`,
+      status_name: "complete",
+      salesperson_name: "Pat",
+      created_at_source: `2026-03-${String((i % 28) + 1).padStart(2, "0")}`,
+      last_seen_at: i === 12 ? "2026-08-16" : "2026-08-15"
+    }));
+    const ops = buildTrustedMorawareOperations({ links, jobs, jobsState: "available" });
+    assert.equal(ops.job_count_2026, 13);
+    assert.equal(ops.accounts[0].job_count, 13);
+    assert.equal(ops.recent_jobs.length, 8);
+    console.log("ok: incremental last_seen_at mix does not shrink 2026 job count");
+  }
+
+  {
+    const links = [
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "635",
+        externalDisplayName: "A"
+      },
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "553",
+        externalDisplayName: "B"
+      }
+    ];
+    const jobs = [
+      {
+        source_job_id: "a1",
+        source_account_id: "635",
+        job_name: "A stale",
+        created_at_source: "2026-01-10",
+        last_seen_at: "2026-08-15"
+      },
+      {
+        source_job_id: "a2",
+        source_account_id: "635",
+        job_name: "A fresh",
+        created_at_source: "2026-04-10",
+        last_seen_at: "2026-08-16"
+      },
+      {
+        source_job_id: "b1",
+        source_account_id: "553",
+        job_name: "B stale",
+        created_at_source: "2026-02-10",
+        last_seen_at: "2026-08-14"
+      }
+    ];
+    const ops = buildTrustedMorawareOperations({ links, jobs, jobsState: "available" });
+    assert.equal(ops.job_count_2026, 3);
+    assert.equal(ops.accounts.find((a) => a.source_account_id === "635").job_count, 2);
+    assert.equal(ops.accounts.find((a) => a.source_account_id === "553").job_count, 1);
+    console.log("ok: multi-Moraware IDs keep jobs across different last_seen_at dates");
   }
 
   {

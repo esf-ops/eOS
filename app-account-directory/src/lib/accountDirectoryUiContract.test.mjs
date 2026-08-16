@@ -145,6 +145,12 @@ assert.ok(css.includes("ad-empty-state"), "designed empty states");
 assert.ok(panels.includes("buildRelationshipView"), "Relationship uses safe view-model");
 assert.ok(panels.includes("No recorded timeline activity") || panels.includes("emptyCopy"), "Relationship empty copy");
 assert.ok(panels.includes("Most recent commercial activity") || panels.includes("commercialRecencyLabel"));
+assert.ok(panels.includes("Moraware Operations"), "Moraware Operations section present");
+assert.ok(panels.includes("2026 Jobs"), "2026 job count label present");
+assert.ok(panels.includes("Job salesperson"), "salesperson labeled as job fact");
+assert.equal(panels.includes("Account Owner"), false, "must not treat Moraware salesperson as account owner");
+assert.equal(panels.includes("SqFt"), false);
+assert.equal(panels.includes("install completion"), false);
 console.log("ok: Phase 5.1 workspace UX + Relationship reliability");
 
 // ── Design tokens ─────────────────────────────────────────────────────────

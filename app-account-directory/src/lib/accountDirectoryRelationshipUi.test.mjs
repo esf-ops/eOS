@@ -45,6 +45,8 @@ assert.equal(missing.internal.hasItems, false);
 assert.equal(missing.studio.hasItems, false);
 assert.equal(missing.signals.length, 0);
 assert.ok(missing.jobsNotes);
+assert.equal(missing.morawareLinked, false);
+assert.equal(missing.jobCount2026, null);
 console.log("ok: missing relationship data does not crash");
 
 const emptyTimelineWithCommercial = buildRelationshipView(
@@ -103,6 +105,38 @@ assert.ok(withData.timelineRecencyLabel);
 assert.notEqual(withData.timelineRecencyLabel, RELATIONSHIP_EMPTY_TIMELINE);
 assert.match(withData.commercialRecencyLabel, /Most recent commercial activity/);
 console.log("ok: Relationship tab renders governed data when present");
+
+const morawareOps = buildRelationshipView(
+  {
+    moraware: {
+      linked: true,
+      jobs_state: "available",
+      job_count_2026: 2,
+      latest_job_date: "2026-06-15",
+      accounts: [{ source_account_id: "635" }, { source_account_id: "553" }],
+      recent_jobs: [
+        {
+          source_job_id: "j2",
+          job_name: "Island",
+          job_date: "2026-06-15",
+          status_name: "complete",
+          salesperson_name: "Drew"
+        }
+      ]
+    }
+  },
+  { items: [] }
+);
+assert.equal(morawareOps.morawareLinked, true);
+assert.equal(morawareOps.jobCount2026, 2);
+assert.equal(morawareOps.recentMorawareJobs[0].salesperson_name, "Drew");
+const morawareDown = buildRelationshipView(
+  { moraware: { linked: true, jobs_state: "unavailable", job_count_2026: null } },
+  { items: [] }
+);
+assert.equal(morawareDown.jobCount2026, null);
+assert.equal(morawareDown.morawareJobsState, "unavailable");
+console.log("ok: Moraware operations view distinguishes zero jobs from unavailable");
 
 const sequence = ["Overview", "Relationship", "Financials"].map((tab) => panelFromTab(tab));
 assert.deepEqual(sequence, ["overview", "relationship", "financials"]);

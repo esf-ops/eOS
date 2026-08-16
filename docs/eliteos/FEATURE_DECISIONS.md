@@ -4398,3 +4398,16 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope this phase** | Salesperson ownership, View 222, sales dashboards, Moraware writeback, QuickBooks write/read-behavior changes, Account 360 operational job metrics beyond the staff-safe `moraware` relationship shape. |
 | **Impacted** | `accountDirectoryService` Moraware link ops, reconciliation queue, Account Directory Moraware Links tab, Account 360 `relationship.moraware`, this doc, SYSTEM_BLUEPRINT. |
 
+### 325. Account 360 Moraware Operations — TRUSTED_NOW 2026 jobs (2026-08-16)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-16 |
+| **Decision** | Account 360 may show **TRUSTED_NOW** Moraware operational facts for an Account Directory UUID: linked Moraware Account IDs, 2026 job count, earliest/latest job date, and a bounded recent-jobs list. Identity remains Option B exact links. No SqFt, material, color, room, edge, install-completion KPI, or “active = in production” interpretation. QuickBooks financial cards are unchanged. |
+| **Aggregation** | Active `account_directory_external_links` where `external_system = moraware`. Typed `brain_moraware_jobs` for `organization_id` + `source_account_id IN` those IDs. `brain_moraware_jobs` is unique on `(organization_id, source_job_id)` and upserts in place, so incremental sync updates `last_seen_at` on changed jobs only. Account 360 uses **all** current rows for the linked IDs (defense-in-depth: keep the newest row per `source_job_id`). Do **not** filter to the account's latest `last_seen_at` day. Count jobs whose typed date year is 2026. Union across multiple Moraware IDs on the same AD UUID. `accounts[].job_count` is that Moraware ID's 2026 job count. |
+| **Date rule** | Typed only, never `raw_payload`: `created_at_source` if present, else `install_at_source`, else `completed_at_source`. Year is the `YYYY` prefix of that date. |
+| **Failure** | Jobs query error → `jobs_state = unavailable`, `job_count_2026 = null` (never a false zero). Unlinked → unavailable. Linked with zero 2026 jobs → `jobs_state = available`, count 0. |
+| **Salesperson** | `salesperson_name` is a **job fact** only, not Account Directory ownership. |
+| **Out of scope** | `sales_moraware_job_facts` rebuild, View 222, Moraware/QB writes, identity changes. |
+| **Impacted** | `accountDirectoryMorawareLinkage`, `accountDirectory360`, Account 360 Relationship UI, this doc, SYSTEM_BLUEPRINT. |
+

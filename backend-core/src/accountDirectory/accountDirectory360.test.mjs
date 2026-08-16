@@ -41,7 +41,9 @@ function createFakeSupabase({
   transactions = [],
   openAr = [],
   quotes = [],
-  studio = []
+  studio = [],
+  morawareJobs = [],
+  morawareJobsError = null
 }) {
   function makeBuilder(allRows) {
     const state = {
@@ -141,6 +143,28 @@ function createFakeSupabase({
       if (table === "sales_quickbooks_open_ar_current") return makeBuilder(openAr);
       if (table === "quote_headers") return makeBuilder(quotes);
       if (table === "studio_estimates") return makeBuilder(studio);
+      if (table === "brain_moraware_jobs") {
+        if (morawareJobsError) {
+          return {
+            select() {
+              return this;
+            },
+            eq() {
+              return this;
+            },
+            in() {
+              return this;
+            },
+            range() {
+              return this;
+            },
+            then(onFulfilled, onRejected) {
+              return Promise.resolve({ data: null, error: morawareJobsError }).then(onFulfilled, onRejected);
+            }
+          };
+        }
+        return makeBuilder(morawareJobs);
+      }
       throw new Error(`unexpected table ${table}`);
     }
   };
@@ -375,6 +399,7 @@ function storeFor(links) {
   assert.equal(relationship.moraware.linked, false);
   assert.equal(relationship.moraware.jobs_state, "unavailable");
   assert.equal(relationship.moraware.total_job_count, null);
+  assert.equal(relationship.moraware.job_count_2026, null);
   assert.equal(JSON.stringify(relationship).includes('"job_count":0'), false);
   assert.equal(relationship.quoteFlow.state, "unavailable");
   assert.equal(JSON.stringify(relationship).includes("net_income"), false);
@@ -397,17 +422,17 @@ function storeFor(links) {
     env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "999999" },
     now: new Date("2026-08-13T18:00:00.000Z")
   });
-  assert.equal(linkedRelationship.jobs.state, "unavailable");
-  assert.match(linkedRelationship.jobs.notes, /identity is linked/);
+  assert.equal(linkedRelationship.jobs.state, "available");
+  assert.match(linkedRelationship.jobs.notes, /Job salesperson/);
   assert.equal(linkedRelationship.moraware.linked, true);
   assert.equal(linkedRelationship.moraware.accounts[0].source_account_id, "635");
-  assert.equal(linkedRelationship.moraware.jobs_state, "unavailable");
-  assert.equal(linkedRelationship.moraware.accounts[0].job_count, null);
-  assert.equal(linkedRelationship.moraware.total_job_count, null);
-  assert.equal(JSON.stringify(linkedRelationship).includes('"job_count":0'), false);
+  assert.equal(linkedRelationship.moraware.jobs_state, "available");
+  assert.equal(linkedRelationship.moraware.job_count_2026, 0);
+  assert.equal(linkedRelationship.moraware.accounts[0].job_count, 0);
+  assert.equal(linkedRelationship.moraware.recent_jobs.length, 0);
   assert.equal(JSON.stringify(linkedRelationship).includes("raw_payload"), false);
   assertNoIds(linkedRelationship);
-  console.log("ok: timeline order/filter/bounds + exact estimate identity; Moraware withheld until linked");
+  console.log("ok: timeline + estimates; linked Moraware with zero 2026 jobs is available not unavailable");
 }
 
 {
@@ -436,6 +461,122 @@ function storeFor(links) {
   assert.equal(pub.overdue, true);
   assert.equal(JSON.stringify(pub).includes(ROOT_A), false);
   console.log("ok: list intel batch + scrub");
+}
+
+{
+  const morawareJobs = [
+    {
+      organization_id: ORG,
+      source_job_id: "100",
+      source_account_id: "635",
+      job_name: "Vanity",
+      status_name: "complete",
+      salesperson_name: "Casey",
+      created_at_source: "2026-02-10",
+      last_seen_at: "2026-08-15T12:00:00.000Z",
+      raw_payload: { forms: [] }
+    },
+    {
+      organization_id: ORG,
+      source_job_id: "101",
+      source_account_id: "553",
+      job_name: "Island",
+      status_name: "complete",
+      salesperson_name: "Drew",
+      install_at_source: "2026-05-20",
+      last_seen_at: "2026-08-15T12:00:00.000Z"
+    },
+    {
+      organization_id: ORG,
+      source_job_id: "100",
+      source_account_id: "635",
+      job_name: "Vanity duplicate",
+      created_at_source: "2026-02-10",
+      last_seen_at: "2026-08-14T12:00:00.000Z"
+    },
+    {
+      organization_id: ORG,
+      source_job_id: "777",
+      source_account_id: "111",
+      job_name: "Other customer",
+      created_at_source: "2026-04-01",
+      last_seen_at: "2026-08-15T12:00:00.000Z"
+    },
+    {
+      organization_id: ORG_B,
+      source_job_id: "900",
+      source_account_id: "635",
+      job_name: "Other org",
+      created_at_source: "2026-04-02",
+      last_seen_at: "2026-08-15T12:00:00.000Z"
+    },
+    {
+      organization_id: ORG,
+      source_job_id: "102",
+      source_account_id: "635",
+      job_name: "Prior year",
+      created_at_source: "2025-11-01",
+      last_seen_at: "2026-08-15T12:00:00.000Z"
+    }
+  ];
+  const dual = await getAccountDirectoryRelationship({
+    supabase: createFakeSupabase({ syncRun, morawareJobs }),
+    store: storeFor([
+      {
+        isActive: true,
+        externalSystem: "moraware",
+        externalId: "635",
+        externalDisplayName: "Broihahn A"
+      },
+      {
+        isActive: true,
+        externalSystem: "moraware",
+        externalId: "553",
+        externalDisplayName: "Broihahn B"
+      }
+    ]),
+    organizationId: ORG,
+    accountId: ACCOUNT,
+    role: "sales",
+    env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "999999" },
+    now: new Date("2026-08-13T18:00:00.000Z")
+  });
+  assert.equal(dual.moraware.job_count_2026, 2);
+  assert.equal(dual.moraware.recent_jobs[0].job_name, "Island");
+  assert.equal(dual.moraware.recent_jobs[0].salesperson_name, "Drew");
+  assert.equal(dual.moraware.recent_jobs[1].job_name, "Vanity");
+  assert.equal(JSON.stringify(dual).includes("Other customer"), false);
+  assert.equal(JSON.stringify(dual).includes("Other org"), false);
+  assert.equal(JSON.stringify(dual).includes("raw_payload"), false);
+  assert.equal(JSON.stringify(dual).includes("Account Owner"), false);
+  assert.ok(dual.estimates);
+  assert.ok(dual.health);
+  assert.equal(JSON.stringify(dual).includes("net_income"), false);
+
+  const errored = await getAccountDirectoryRelationship({
+    supabase: createFakeSupabase({
+      syncRun,
+      morawareJobsError: { message: "relation brain_moraware_jobs does not exist" }
+    }),
+    store: storeFor([
+      {
+        isActive: true,
+        externalSystem: "moraware",
+        externalId: "635",
+        externalDisplayName: "Broihahn A"
+      }
+    ]),
+    organizationId: ORG,
+    accountId: ACCOUNT,
+    role: "sales",
+    env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "999999" },
+    now: new Date("2026-08-13T18:00:00.000Z")
+  });
+  assert.equal(errored.moraware.jobs_state, "unavailable");
+  assert.equal(errored.moraware.job_count_2026, null);
+  assert.equal(JSON.stringify(errored).includes('"job_count_2026":0'), false);
+  assert.match(errored.jobs.notes, /temporarily unavailable/);
+  console.log("ok: Moraware ops union/dedupe/org isolation; query error is not zero");
 }
 
 {

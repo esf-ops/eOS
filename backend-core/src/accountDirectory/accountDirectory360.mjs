@@ -9,7 +9,7 @@ import {
   roleHasCapability
 } from "./accountDirectoryAuth.mjs";
 import { ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM } from "./accountDirectoryQuickbooksLinkage.mjs";
-import { buildMorawareRelationship } from "./accountDirectoryMorawareLinkage.mjs";
+import { buildTrustedMorawareOperations } from "./accountDirectoryMorawareLinkage.mjs";
 import {
   AD_FINANCIALS_PAGE_SIZE,
   buildOpenArAging,
@@ -531,33 +531,51 @@ async function loadAccountQbEnrichment(supabase, { organizationId, accountId, qu
   }
 }
 
+const MORAWARE_JOB_SELECT =
+  "source_job_id,source_account_id,job_name,status_name,salesperson_name,created_at_source,install_at_source,completed_at_source,last_seen_at";
+
+function morawareJobsNotes(moraware) {
+  if (!moraware?.linked) {
+    return "Moraware job history is not connected to Account Directory yet.";
+  }
+  if (moraware.jobs_state !== "available") {
+    return "Moraware identity is linked. Operational job history is temporarily unavailable.";
+  }
+  return "2026 Moraware jobs from linked Account IDs. Job salesperson is recorded on the Moraware job, not Account Directory ownership.";
+}
+
 async function loadMorawareRelationship(supabase, organizationId, links) {
-  const unavailable = buildMorawareRelationship(links, null, { jobsState: "unavailable" });
+  const unavailable = buildTrustedMorawareOperations({
+    links,
+    jobs: null,
+    jobsState: "unavailable"
+  });
   if (!unavailable.linked || !supabase || !unavailable.accounts.length) return unavailable;
   const ids = unavailable.accounts.map((a) => a.source_account_id);
-  const counts = new Map(ids.map((id) => [id, 0]));
+  const jobs = [];
   try {
     let from = 0;
     for (;;) {
       const { data, error } = await supabase
         .from("brain_moraware_jobs")
-        .select("source_account_id")
+        .select(MORAWARE_JOB_SELECT)
         .eq("organization_id", organizationId)
         .in("source_account_id", ids)
         .range(from, from + 999);
       if (error) return unavailable;
       const batch = data || [];
-      for (const row of batch) {
-        const id = String(row.source_account_id || "");
-        if (counts.has(id)) counts.set(id, counts.get(id) + 1);
-      }
+      jobs.push(...batch);
       if (batch.length < 1000) break;
       from += 1000;
     }
   } catch {
     return unavailable;
   }
-  return buildMorawareRelationship(links, counts, { jobsState: "available" });
+  return buildTrustedMorawareOperations({
+    links,
+    jobs,
+    jobsState: "available"
+  });
 }
 
 export async function getAccountDirectoryRelationship(params) {
@@ -622,10 +640,8 @@ export async function getAccountDirectoryRelationship(params) {
       }
     },
     jobs: {
-      state: "unavailable",
-      notes: moraware.linked
-        ? "Moraware identity is linked. Operational job history is not shown in this phase."
-        : "Moraware job history is not connected to Account Directory yet."
+      state: moraware.linked ? moraware.jobs_state : "unavailable",
+      notes: morawareJobsNotes(moraware)
     },
     moraware,
     quoteFlow: {

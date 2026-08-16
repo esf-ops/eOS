@@ -40,6 +40,125 @@ export function isInternalMorawareAccountName(name) {
 
 const CANONICAL_MORAWARE_ID_RE = /^\d+$/;
 
+export const MORAWARE_TRUSTED_JOB_YEAR = 2026;
+export const MORAWARE_RECENT_JOB_LIMIT = 8;
+/** Typed date only — never raw_payload. created_at_source, else install_at_source, else completed_at_source. */
+export const MORAWARE_JOB_DATE_RULE = "created_at_source|install_at_source|completed_at_source";
+
+function toYmd(value) {
+  const s = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return null;
+}
+
+/**
+ * Staff-safe Moraware job date. Does not read raw_payload.
+ * @param {{ created_at_source?: string|null, install_at_source?: string|null, completed_at_source?: string|null }} job
+ */
+export function typedMorawareJobDate(job) {
+  if (!job || typeof job !== "object") return null;
+  return (
+    toYmd(job.created_at_source ?? job.createdAtSource) ||
+    toYmd(job.install_at_source ?? job.installAtSource) ||
+    toYmd(job.completed_at_source ?? job.completedAtSource)
+  );
+}
+
+function safeJobRow(job) {
+  const date = typedMorawareJobDate(job);
+  return {
+    source_job_id: String(job?.source_job_id ?? job?.sourceJobId ?? "").trim(),
+    source_account_id: String(job?.source_account_id ?? job?.sourceAccountId ?? "").trim(),
+    job_name: job?.job_name ?? job?.jobName ?? null,
+    job_date: date,
+    status_name: job?.status_name ?? job?.statusName ?? null,
+    salesperson_name: job?.salesperson_name ?? job?.salespersonName ?? null,
+    last_seen_at: toYmd(job?.last_seen_at ?? job?.lastSeenAt)
+  };
+}
+
+/**
+ * TRUSTED_NOW Account 360 Moraware operations from exact links + typed Brain jobs.
+ * Uses every current Brain job for the linked Moraware IDs (incremental-safe).
+ * jobs == null or jobsState unavailable → never a factual zero.
+ */
+export function buildTrustedMorawareOperations({
+  links,
+  jobs = null,
+  jobsState = "unavailable",
+  year = MORAWARE_TRUSTED_JOB_YEAR,
+  recentLimit = MORAWARE_RECENT_JOB_LIMIT
+} = {}) {
+  const identity = buildMorawareRelationship(links, null, { jobsState: "unavailable" });
+  const emptyRecent = [];
+  if (!identity.linked) {
+    return {
+      ...identity,
+      job_count_2026: null,
+      earliest_job_date: null,
+      latest_job_date: null,
+      recent_jobs: emptyRecent,
+      job_date_rule: MORAWARE_JOB_DATE_RULE
+    };
+  }
+  if (jobsState === "unavailable" || jobs == null) {
+    return {
+      ...identity,
+      job_count_2026: null,
+      earliest_job_date: null,
+      latest_job_date: null,
+      recent_jobs: emptyRecent,
+      job_date_rule: MORAWARE_JOB_DATE_RULE
+    };
+  }
+
+  const linkedIds = new Set(identity.accounts.map((a) => a.source_account_id));
+  const mapped = (Array.isArray(jobs) ? jobs : [])
+    .map(safeJobRow)
+    .filter((j) => j.source_job_id && linkedIds.has(j.source_account_id));
+  // One durable Brain row per (organization_id, source_job_id). Do not cohort-filter
+  // by account-level latest last_seen_at — incremental sync only refreshes changed jobs.
+  const byJobId = new Map();
+  for (const row of mapped) {
+    const prev = byJobId.get(row.source_job_id);
+    if (!prev || String(row.last_seen_at || "") > String(prev.last_seen_at || "")) {
+      byJobId.set(row.source_job_id, row);
+    }
+  }
+  const unique = [...byJobId.values()];
+  const yearPrefix = `${year}-`;
+  const inYear = unique.filter((j) => j.job_date && j.job_date.startsWith(yearPrefix));
+  const dates = inYear.map((j) => j.job_date).sort();
+  const counts = new Map(identity.accounts.map((a) => [a.source_account_id, 0]));
+  for (const row of inYear) {
+    counts.set(row.source_account_id, (counts.get(row.source_account_id) || 0) + 1);
+  }
+  const shaped = buildMorawareRelationship(links, counts, { jobsState: "available" });
+  const recent = [...inYear]
+    .sort(
+      (a, b) =>
+        String(b.job_date).localeCompare(String(a.job_date)) ||
+        String(b.source_job_id).localeCompare(String(a.source_job_id))
+    )
+    .slice(0, recentLimit)
+    .map((j) => ({
+      source_job_id: j.source_job_id,
+      job_name: j.job_name,
+      job_date: j.job_date,
+      status_name: j.status_name,
+      salesperson_name: j.salesperson_name
+    }));
+  return {
+    ...shaped,
+    job_count_2026: inYear.length,
+    total_job_count: inYear.length,
+    earliest_job_date: dates[0] || null,
+    latest_job_date: dates[dates.length - 1] || null,
+    recent_jobs: recent,
+    job_date_rule: MORAWARE_JOB_DATE_RULE
+  };
+}
+
 /**
  * Resolve the canonical Brain Moraware account for an exact numeric Account ID.
  * SELECT-only. Never returns raw_payload.
