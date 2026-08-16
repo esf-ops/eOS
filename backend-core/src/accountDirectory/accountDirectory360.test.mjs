@@ -27,6 +27,15 @@ const ORG_B = "22222222-2222-4222-8222-222222222222";
 const ACCOUNT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ROOT_A = "80010327-1759266211";
 const ROOT_OTHER = "99999999-9999999999";
+const CURRENT_MORAWARE_POPULATION = {
+  available: true,
+  census_scope: "full",
+  complete: true,
+  uncapped: true,
+  full_census_import_group_id: "census-epoch",
+  full_census_started_at: "2026-08-15T00:00:00.000Z",
+  full_census_completed_at: "2026-08-15T18:00:00.000Z"
+};
 
 function assertNoIds(payload) {
   const json = JSON.stringify(payload);
@@ -153,6 +162,9 @@ function createFakeSupabase({
               return this;
             },
             in() {
+              return this;
+            },
+            gte() {
               return this;
             },
             range() {
@@ -420,7 +432,8 @@ function storeFor(links) {
     accountId: ACCOUNT,
     role: "sales",
     env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "999999" },
-    now: new Date("2026-08-13T18:00:00.000Z")
+    now: new Date("2026-08-13T18:00:00.000Z"),
+    currentMorawarePopulation: CURRENT_MORAWARE_POPULATION
   });
   assert.equal(linkedRelationship.jobs.state, "available");
   assert.match(linkedRelationship.jobs.notes, /Job salesperson/);
@@ -475,6 +488,14 @@ function storeFor(links) {
       created_at_source: "2026-02-10",
       last_seen_at: "2026-08-15T12:00:00.000Z",
       raw_payload: { forms: [] }
+    },
+    {
+      organization_id: ORG,
+      source_job_id: "stale-fox",
+      source_account_id: "635",
+      job_name: "Fox leftover",
+      created_at_source: "2026-04-01",
+      last_seen_at: "2026-05-18T16:00:00.000Z"
     },
     {
       organization_id: ORG,
@@ -539,13 +560,14 @@ function storeFor(links) {
     accountId: ACCOUNT,
     role: "sales",
     env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "999999" },
-    now: new Date("2026-08-13T18:00:00.000Z")
+    now: new Date("2026-08-13T18:00:00.000Z"),
+    currentMorawarePopulation: CURRENT_MORAWARE_POPULATION
   });
   assert.equal(dual.moraware.job_count_2026, 2);
   assert.equal(dual.moraware.recent_jobs[0].job_name, "Island");
   assert.equal(dual.moraware.recent_jobs[0].salesperson_name, "Drew");
   assert.equal(dual.moraware.recent_jobs[1].job_name, "Vanity");
-  assert.equal(JSON.stringify(dual).includes("Other customer"), false);
+  assert.equal(JSON.stringify(dual).includes("Fox leftover"), false);
   assert.equal(JSON.stringify(dual).includes("Other org"), false);
   assert.equal(JSON.stringify(dual).includes("raw_payload"), false);
   assert.equal(JSON.stringify(dual).includes("Account Owner"), false);
@@ -570,7 +592,8 @@ function storeFor(links) {
     accountId: ACCOUNT,
     role: "sales",
     env: { QB_FINANCIAL_TRUTH_STALE_AFTER_SECONDS: "999999" },
-    now: new Date("2026-08-13T18:00:00.000Z")
+    now: new Date("2026-08-13T18:00:00.000Z"),
+    currentMorawarePopulation: CURRENT_MORAWARE_POPULATION
   });
   assert.equal(errored.moraware.jobs_state, "unavailable");
   assert.equal(errored.moraware.job_count_2026, null);

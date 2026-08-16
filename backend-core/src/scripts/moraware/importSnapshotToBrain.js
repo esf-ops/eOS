@@ -7,6 +7,17 @@ import { pathToFileURL } from "node:url";
 
 import { BATCH_KEYS as CANONICAL_BATCH_KEYS, isChunkedManifest } from "./morawareSnapshotCanonical.js";
 import { printOperatorSummary } from "./generateChunkedFoundationSnapshot.js";
+import {
+  buildMorawareCensusImportMetadata,
+  pickCensusScope
+} from "../../moraware/morawareCurrentPopulation.mjs";
+import {
+  createMorawarePopulationLockOwnerToken,
+  MORAWARE_POPULATION_LOCK_OWNER_ENV,
+  MORAWARE_POPULATION_LOCK_OWNER_HEADER,
+  postMorawarePopulationLock,
+  requireLiveCensusScope
+} from "../../moraware/morawarePopulationLock.mjs";
 
 const BATCH_KEYS = CANONICAL_BATCH_KEYS;
 const DEFAULT_MAX_PAYLOAD_BYTES = 3_500_000;
@@ -315,6 +326,66 @@ function buildChunkPayloads(body, options = {}) {
   return useSizeAware ? buildSizeAwareChunkPayloads(body, options) : buildLegacyChunkPayloads(body, options);
 }
 
+function resolveCensusScopeForImport(manifest) {
+  const envScope = pickCensusScope(process.env.MORAWARE_CENSUS_SCOPE);
+  if (envScope) return envScope;
+  return pickCensusScope(manifest?.census_scope ?? manifest?.metadata?.census_scope);
+}
+
+function censusMetadataFromManifest(manifest) {
+  const scope = resolveCensusScopeForImport(manifest);
+  if (!scope) return {};
+  return buildMorawareCensusImportMetadata({
+    censusScope: scope,
+    snapshotMode: manifest?.snapshot_mode || null,
+    capWarnings: manifest?.cap_warnings || [],
+    baselineStartDate: manifest?.baseline_start_date || null,
+    baselineEndDate: manifest?.baseline_end_date || null
+  });
+}
+
+function assertLiveCensusScope(manifest, dryRun) {
+  if (dryRun) return;
+  const scope = resolveCensusScopeForImport(manifest);
+  const required = requireLiveCensusScope(scope);
+  if (!required.ok) {
+    const err = new Error(required.error);
+    err.code = required.code;
+    throw err;
+  }
+}
+
+async function withStandalonePopulationLock({ dryRun, usesInjectedPostFn }, fn) {
+  if (dryRun || usesInjectedPostFn) return fn();
+  const existing = String(process.env[MORAWARE_POPULATION_LOCK_OWNER_ENV] ?? "").trim();
+  if (existing) return fn();
+  const secret = pickImportSecret({ dryRun: false });
+  const ownerToken = createMorawarePopulationLockOwnerToken();
+  const url = `${backendBase()}/api/internal/moraware-sync/population-lock`;
+  const acquired = await postMorawarePopulationLock({
+    url,
+    secret,
+    action: "acquire",
+    ownerToken,
+    lockedBy: `importSnapshotToBrain:${process.pid}`,
+    metadata: { runner: "standalone-importer" }
+  });
+  if (!acquired?.acquired) {
+    throw new Error("Could not acquire moraware_population lock for live import.");
+  }
+  process.env[MORAWARE_POPULATION_LOCK_OWNER_ENV] = ownerToken;
+  try {
+    return await fn();
+  } finally {
+    try {
+      await postMorawarePopulationLock({ url, secret, action: "release", ownerToken });
+    } catch {
+      /* release best-effort */
+    }
+    delete process.env[MORAWARE_POPULATION_LOCK_OWNER_ENV];
+  }
+}
+
 function resolveImportGroupId() {
   const resumeGroupId = String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim();
   return resumeGroupId || crypto.randomUUID();
@@ -404,7 +475,10 @@ async function postImport({ url, secret, body, label }) {
     headers: {
       "content-type": "application/json",
       "x-moraware-sync-secret": secret,
-      "x-eos-cron-secret": secret
+      "x-eos-cron-secret": secret,
+      ...(process.env[MORAWARE_POPULATION_LOCK_OWNER_ENV]
+        ? { [MORAWARE_POPULATION_LOCK_OWNER_HEADER]: process.env[MORAWARE_POPULATION_LOCK_OWNER_ENV] }
+        : {})
     },
     body: JSON.stringify(body)
   });
@@ -498,6 +572,7 @@ export async function importChunkedManifest({
     fileBytes: Number(manifest.largest_chunk_bytes) || 0
   });
   assertLargeSnapshotAllowed({ largeReasons, dryRun, chunked: true });
+  assertLiveCensusScope(manifest, dryRun);
 
   console.log("Moraware chunked manifest import starting:", {
     file: manifestAbs,
@@ -565,7 +640,8 @@ export async function importChunkedManifest({
         parent_snapshot_counts: parentCounts,
         max_payload_bytes: maxPayloadBytes,
         chunk_file: chunkMeta.file,
-        chunk_sha256: sha256
+        chunk_sha256: sha256,
+        ...censusMetadataFromManifest(manifest)
       }
     );
     const estimated = estimatePayloadBytes(payload);
@@ -682,19 +758,43 @@ export async function runMorawareSnapshotImport(options = {}) {
   const { abs, fileBytes, json } = await readJsonFile(file);
   const url = options.url || `${backendBase()}/api/internal/moraware-sync/import`;
   const postFn = options.postFn || postImport;
+  const usesInjectedPostFn = Boolean(options.postFn);
 
-  if (isChunkedManifest(json)) {
-    return importChunkedManifest({
-      manifestAbs: abs,
-      manifest: json,
-      dryRun,
-      secret,
-      url,
-      postFn
-    });
-  }
+  return withStandalonePopulationLock({ dryRun, usesInjectedPostFn }, async () => {
+    if (isChunkedManifest(json)) {
+      assertLiveCensusScope(json, dryRun);
+      return importChunkedManifest({
+        manifestAbs: abs,
+        manifest: json,
+        dryRun,
+        secret,
+        url,
+        postFn
+      });
+    }
 
-  const body = normalizePayload(json);
+    const body = normalizePayload(json);
+    assertLiveCensusScope(
+      {
+        census_scope: body?.metadata?.census_scope,
+        snapshot_mode: body?.metadata?.snapshot_mode,
+        mode: body?.mode,
+        metadata: body?.metadata
+      },
+      dryRun
+    );
+    body.metadata = {
+      ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+      ...censusMetadataFromManifest({
+        census_scope: body?.metadata?.census_scope,
+        snapshot_mode: body?.metadata?.snapshot_mode,
+        mode: body?.mode,
+        metadata: body?.metadata,
+        cap_warnings: body?.metadata?.cap_warnings,
+        baseline_start_date: body?.metadata?.baseline_start_date,
+        baseline_end_date: body?.metadata?.baseline_end_date
+      })
+    };
   const counts = rowCounts(batchRows(body));
   const largeReasons = largeSnapshotReasons({ body, counts, fileBytes });
   assertLargeSnapshotAllowed({ largeReasons, dryRun, chunked: chunkedFlag });
@@ -783,6 +883,7 @@ export async function runMorawareSnapshotImport(options = {}) {
   const parsed = await postFn({ url, secret, body, label: "Import" });
   console.log("Moraware snapshot import complete:", JSON.stringify(parsed, null, 2));
   return parsed;
+  });
 }
 
 async function main() {

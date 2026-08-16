@@ -1800,6 +1800,7 @@ if (shouldStartLocalHttpServer()) {
     console.log("- GET /api/brain/sync-health");
     console.log("- GET /api/brain/sync-plan");
     console.log("- POST /api/internal/moraware-sync/import");
+    console.log("- POST /api/internal/moraware-sync/population-lock");
     console.log("- POST /api/internal/moraware-sync/rebuild-prepared-facts");
     console.log("- GET  /api/internal/moraware-sync/group-health");
     console.log("- GET /api/moraware-sync/status");

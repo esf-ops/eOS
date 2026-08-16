@@ -18,6 +18,14 @@ import { fileURLToPath } from "node:url";
 const ORG = "00000000-0000-4000-8000-000000000001";
 const ORG_B = "00000000-0000-4000-8000-000000000002";
 const ACTOR = "00000000-0000-4000-8000-000000000099";
+const CURRENT_POP = {
+  available: true,
+  census_scope: "full",
+  complete: true,
+  uncapped: true,
+  full_census_import_group_id: "census-epoch",
+  full_census_started_at: "2026-08-15T00:00:00.000Z"
+};
 
 const CANONICAL = new Map([
   ["635", { sourceAccountId: "635", accountName: "Dyersville- Broihahn Custom Woodworks" }],
@@ -434,7 +442,12 @@ async function main() {
         last_seen_at: "2026-08-15"
       }
     ];
-    const ops = buildTrustedMorawareOperations({ links, jobs, jobsState: "available" });
+    const ops = buildTrustedMorawareOperations({
+      links,
+      jobs,
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
     assert.equal(ops.jobs_state, "available");
     assert.equal(ops.job_count_2026, 2);
     assert.equal(ops.earliest_job_date, "2026-03-01");
@@ -471,7 +484,12 @@ async function main() {
       created_at_source: `2026-03-${String((i % 28) + 1).padStart(2, "0")}`,
       last_seen_at: i === 12 ? "2026-08-16" : "2026-08-15"
     }));
-    const ops = buildTrustedMorawareOperations({ links, jobs, jobsState: "available" });
+    const ops = buildTrustedMorawareOperations({
+      links,
+      jobs,
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
     assert.equal(ops.job_count_2026, 13);
     assert.equal(ops.accounts[0].job_count, 13);
     assert.equal(ops.recent_jobs.length, 8);
@@ -513,14 +531,83 @@ async function main() {
         source_account_id: "553",
         job_name: "B stale",
         created_at_source: "2026-02-10",
-        last_seen_at: "2026-08-14"
+        last_seen_at: "2026-08-15"
       }
     ];
-    const ops = buildTrustedMorawareOperations({ links, jobs, jobsState: "available" });
+    const ops = buildTrustedMorawareOperations({
+      links,
+      jobs,
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
     assert.equal(ops.job_count_2026, 3);
     assert.equal(ops.accounts.find((a) => a.source_account_id === "635").job_count, 2);
     assert.equal(ops.accounts.find((a) => a.source_account_id === "553").job_count, 1);
     console.log("ok: multi-Moraware IDs keep jobs across different last_seen_at dates");
+  }
+
+  {
+    const links = [
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "553",
+        externalDisplayName: "Broihahn A"
+      },
+      {
+        isActive: true,
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        externalId: "635",
+        externalDisplayName: "Broihahn B"
+      }
+    ];
+    const jobs = [
+      {
+        source_job_id: "stale-pre-census",
+        source_account_id: "553",
+        job_name: "Stale leftover",
+        created_at_source: "2026-04-01",
+        last_seen_at: "2026-05-18T16:08:47.722Z"
+      },
+      {
+        source_job_id: "full-untouched",
+        source_account_id: "553",
+        job_name: "Census member",
+        created_at_source: "2026-02-01",
+        last_seen_at: "2026-08-15T12:00:00.000Z"
+      },
+      {
+        source_job_id: "incremental-updated",
+        source_account_id: "635",
+        job_name: "Updated after census",
+        created_at_source: "2026-03-01",
+        last_seen_at: "2026-08-16T09:00:00.000Z"
+      },
+      {
+        source_job_id: "incremental-new",
+        source_account_id: "635",
+        job_name: "New after census",
+        created_at_source: "2026-08-16",
+        last_seen_at: "2026-08-16T10:00:00.000Z"
+      }
+    ];
+    const ops = buildTrustedMorawareOperations({
+      links,
+      jobs,
+      jobsState: "available",
+      currentPopulation: CURRENT_POP
+    });
+    assert.equal(ops.job_count_2026, 3);
+    assert.equal(
+      ops.recent_jobs.some((j) => j.source_job_id === "stale-pre-census"),
+      false
+    );
+    assert.ok(ops.recent_jobs.some((j) => j.source_job_id === "full-untouched"));
+    assert.ok(ops.recent_jobs.some((j) => j.source_job_id === "incremental-updated"));
+    assert.ok(ops.recent_jobs.some((j) => j.source_job_id === "incremental-new"));
+    assert.equal(ops.accounts.find((a) => a.source_account_id === "553").job_count, 1);
+    assert.equal(ops.accounts.find((a) => a.source_account_id === "635").job_count, 2);
+    console.log("ok: CURRENT_MORAWARE_JOB_SET excludes stale, keeps census+incremental overlay, unions IDs");
   }
 
   {

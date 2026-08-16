@@ -5,6 +5,8 @@
  * Moraware IDs never attach to account_directory_locations.
  */
 
+import { jobInCurrentMorawareSet } from "../moraware/morawareCurrentPopulation.mjs";
+
 export const ACCOUNT_DIRECTORY_MORAWARE_SYSTEM = "moraware";
 
 export const INTERNAL_MORAWARE_ACCOUNT_KEYS = Object.freeze([
@@ -79,7 +81,8 @@ function safeJobRow(job) {
 
 /**
  * TRUSTED_NOW Account 360 Moraware operations from exact links + typed Brain jobs.
- * Uses every current Brain job for the linked Moraware IDs (incremental-safe).
+ * Uses CURRENT_MORAWARE_JOB_SET (last_seen_at >= last full-census start) when
+ * currentPopulation is provided. Incremental last_seen mix does not shrink history.
  * jobs == null or jobsState unavailable → never a factual zero.
  */
 export function buildTrustedMorawareOperations({
@@ -87,7 +90,8 @@ export function buildTrustedMorawareOperations({
   jobs = null,
   jobsState = "unavailable",
   year = MORAWARE_TRUSTED_JOB_YEAR,
-  recentLimit = MORAWARE_RECENT_JOB_LIMIT
+  recentLimit = MORAWARE_RECENT_JOB_LIMIT,
+  currentPopulation = null
 } = {}) {
   const identity = buildMorawareRelationship(links, null, { jobsState: "unavailable" });
   const emptyRecent = [];
@@ -115,7 +119,8 @@ export function buildTrustedMorawareOperations({
   const linkedIds = new Set(identity.accounts.map((a) => a.source_account_id));
   const mapped = (Array.isArray(jobs) ? jobs : [])
     .map(safeJobRow)
-    .filter((j) => j.source_job_id && linkedIds.has(j.source_account_id));
+    .filter((j) => j.source_job_id && linkedIds.has(j.source_account_id))
+    .filter((j) => (currentPopulation ? jobInCurrentMorawareSet(j, currentPopulation) : true));
   // One durable Brain row per (organization_id, source_job_id). Do not cohort-filter
   // by account-level latest last_seen_at — incremental sync only refreshes changed jobs.
   const byJobId = new Map();

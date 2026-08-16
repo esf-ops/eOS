@@ -837,8 +837,56 @@ import { buildMonthlyYoYTrend } from "./salesProductionSummary.js";
     };
     return api;
   }
+  const censusRun = {
+    id: "r1",
+    status: "success",
+    started_at: "2026-08-15T00:00:00.000Z",
+    finished_at: "2026-08-15T12:00:00.000Z",
+    mode: "baseline_2026-real-snapshot",
+    metadata: {
+      import_group_id: "ig-1",
+      census_scope: "full",
+      chunk_index: 1,
+      chunk_count: 1,
+      uncapped: true,
+      snapshot_mode: "baseline_2026"
+    }
+  };
+  function makeCensusQuery() {
+    const api = {
+      select() {
+        return api;
+      },
+      eq() {
+        return api;
+      },
+      not() {
+        return api;
+      },
+      filter() {
+        return api;
+      },
+      or() {
+        return api;
+      },
+      order() {
+        return api;
+      },
+      limit() {
+        return api;
+      },
+      range() {
+        return api;
+      },
+      then(onFulfilled, onRejected) {
+        return Promise.resolve({ data: [censusRun], error: null }).then(onFulfilled, onRejected);
+      }
+    };
+    return api;
+  }
   const supabase = {
     from(table) {
+      if (table === "moraware_sync_runs") return makeCensusQuery();
       assert.equal(table, "sales_moraware_job_facts");
       return makeQuery();
     }

@@ -31,6 +31,8 @@ async function main() {
 
   const lockName = "moraware_retry_failed_sync";
   const lockedBy = `${process.env.MORAWARE_USERNAME}@${process.pid}`;
+  // Discovery retry only — does not upsert brain_moraware_jobs. Canonical population
+  // writers must hold eos_sync_locks.moraware_population instead.
   const lockRes = await acquireSyncLock({ lockName, lockedBy, ttlMs: 2 * 60 * 60 * 1000, metadata: { kind: "retry" } });
   if (!lockRes.acquired) {
     console.log("Moraware retry already running.");

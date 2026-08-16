@@ -21,6 +21,7 @@ import {
   resolveSnapshotMode,
   sourceRootFor
 } from "./morawareSnapshotCanonical.js";
+import { CENSUS_SCOPE_FULL, pickCensusScope } from "../../moraware/morawareCurrentPopulation.mjs";
 
 export { extractJobProcess, extractJobStatus };
 
@@ -181,6 +182,7 @@ export async function generateSnapshotFile(options = {}) {
       generated_by: "backend-core/src/scripts/moraware/generateTinySnapshot.js",
       generated_at: new Date().toISOString(),
       snapshot_mode: mode,
+      census_scope: pickCensusScope(process.env.MORAWARE_CENSUS_SCOPE) || CENSUS_SCOPE_FULL,
       source_file: path.relative(process.cwd(), sourceAbs),
       status_source_file: statusSourceFile || null,
       source_shape: sourceShape,

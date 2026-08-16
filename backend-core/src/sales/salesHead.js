@@ -15,10 +15,11 @@ import {
   methodLabelForDisplay
 } from "./salesAttribution.js";
 import { loadLatestCompleteImportGroup } from "../moraware/morawareSyncHealth.js";
+import { resolveCurrentMorawarePopulation } from "../moraware/morawareCurrentPopulation.mjs";
 import {
   buildCompanyWideSqftActuals,
   buildProductionReportReconciliation,
-  extractSqftFromMorawareJob,
+  extractJobWorksheetCensusSqft,
   parseSqftActualsFilters
 } from "./morawareSqftActuals.js";
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
@@ -1917,63 +1918,21 @@ async function fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHea
 
 async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth) {
   const pageSize = 1000;
-  const group = syncHealth.latest_group;
-  const latestGroupId = String(group?.import_group_id ?? "").trim();
+  const population = await resolveCurrentMorawarePopulation(supabase, organizationId);
+  const effectiveGroupId = String(population?.full_census_import_group_id ?? "").trim();
+  const latestGroupId = String(syncHealth?.latest_group?.import_group_id ?? "").trim();
 
-  // Resolve the effective group: fall back to the last complete group when the
-  // latest group is still in-progress (incomplete). This ensures the Sales Dashboard
-  // shows yesterday's data instead of NOT AVAILABLE during a daily re-import.
-  let effectiveGroupId = latestGroupId;
-  let fallbackUsed = false;
-  let fallbackGroup = null;
-
-  if (group?.import_group_id && group.complete === false) {
-    fallbackGroup = syncHealth.latest_complete_group ?? null;
-    const fallbackId = String(fallbackGroup?.import_group_id ?? "").trim();
-    if (fallbackId) {
-      effectiveGroupId = fallbackId;
-      fallbackUsed = true;
-    } else {
-      // No complete fallback — return NOT AVAILABLE with clear diagnostic
-      return {
-        rows: [],
-        available: false,
-        fallback_used: false,
-        latest_import_group_id: latestGroupId || null,
-        latest_import_group_complete: false,
-        used_import_group_id: null,
-        warning:
-          "Latest Moraware group is incomplete and no previous complete group is available; prepared Sales facts were not used.",
-        diagnostics: {
-          rows_scanned: 0,
-          query_page_count: 0,
-          source_group_complete: false,
-          source_import_group_id: latestGroupId || null,
-          source_sync_run_count: 0,
-          scoped_to_latest_complete_group: false,
-          used_precomputed_rollup: false
-        }
-      };
-    }
-  }
-
-  if (!effectiveGroupId) {
+  if (!population?.available || !effectiveGroupId) {
     return {
       rows: [],
       available: false,
-      fallback_used: false,
-      latest_import_group_id: null,
-      latest_import_group_complete: null,
-      used_import_group_id: null,
-      warning: "No latest complete import group is available for prepared Sales facts.",
+      warning: "No successful complete uncapped full Moraware census is available.",
       diagnostics: {
-        rows_scanned: 0,
-        query_page_count: 0,
-        source_group_complete: null,
-        source_import_group_id: null,
-        source_sync_run_count: 0,
-        scoped_to_latest_complete_group: false,
-        used_precomputed_rollup: false
+        latest_import_group_id: latestGroupId || null,
+        latest_import_group_complete: Boolean(syncHealth?.latest_group?.complete),
+        used_import_group_id: null,
+        used_full_census: true,
+        fallback_used: false
       }
     };
   }
@@ -2004,18 +1963,18 @@ async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHe
       return {
         rows: [],
         available: false,
-        fallback_used: fallbackUsed,
+        fallback_used: false,
         latest_import_group_id: latestGroupId || null,
-        latest_import_group_complete: Boolean(group?.complete),
+        latest_import_group_complete: Boolean(syncHealth?.latest_group?.complete),
         used_import_group_id: effectiveGroupId,
         warning: "Prepared Sales Moraware facts table is not installed yet.",
         diagnostics: {
           rows_scanned: 0,
           query_page_count: queryPageCount,
-          source_group_complete: Boolean(group?.complete),
+          source_group_complete: Boolean(population.complete),
           source_import_group_id: effectiveGroupId,
           source_sync_run_count: 0,
-          scoped_to_latest_complete_group: false,
+          scoped_to_full_census_epoch: true,
           used_precomputed_rollup: false
         }
       };
@@ -2024,36 +1983,27 @@ async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHe
   }
 
   const available = rows.length > 0;
-
-  let warning = null;
-  if (!available) {
-    warning = "Prepared Sales Moraware facts have not been built for the latest complete import group.";
-  } else if (fallbackUsed) {
-    const fallbackDate = String(fallbackGroup?.finished_at ?? fallbackGroup?.started_at ?? "").slice(0, 10) || null;
-    warning = fallbackDate
-      ? `Latest Moraware import is incomplete; showing data from the last complete import (${fallbackDate}).`
-      : "Latest Moraware import is incomplete; showing data from the last complete import.";
-  }
-
   return {
     rows,
     available,
-    fallback_used: fallbackUsed,
+    fallback_used: false,
     latest_import_group_id: latestGroupId || null,
-    latest_import_group_complete: group?.import_group_id ? Boolean(group.complete) : null,
+    latest_import_group_complete: Boolean(syncHealth?.latest_group?.complete),
     used_import_group_id: effectiveGroupId,
-    warning,
+    warning: available
+      ? null
+      : "Prepared Sales Moraware facts have not been built for the current full-census population.",
     diagnostics: {
       rows_scanned: rows.length,
       query_page_count: queryPageCount,
-      source_group_complete: fallbackUsed ? true : Boolean(group?.complete),
+      source_group_complete: Boolean(population.complete),
       source_import_group_id: effectiveGroupId,
-      source_sync_run_count: Array.isArray(group?.successful_sync_run_ids) ? group.successful_sync_run_ids.length : 0,
-      scoped_to_latest_complete_group: true,
+      source_sync_run_count: 0,
+      scoped_to_full_census_epoch: true,
       used_precomputed_rollup: available,
-      fallback_used: fallbackUsed,
+      fallback_used: false,
       latest_import_group_id: latestGroupId || null,
-      latest_import_group_complete: group?.import_group_id ? Boolean(group.complete) : null
+      latest_import_group_complete: Boolean(syncHealth?.latest_group?.complete)
     }
   };
 }
@@ -2340,13 +2290,13 @@ async function upsertRowsInChunks(supabase, table, rows, onConflict, size = 250)
 
 async function buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId, syncHealth) {
   const startedAt = Date.now();
-  const group = syncHealth.latest_group;
-  const importGroupId = String(group?.import_group_id ?? "").trim();
-  const runIds = Array.isArray(group?.successful_sync_run_ids) ? group.successful_sync_run_ids.map(String).filter(Boolean) : [];
-  if (!importGroupId || !group?.complete || !runIds.length) {
+  const population = await resolveCurrentMorawarePopulation(supabase, organizationId);
+  const importGroupId = String(population?.full_census_import_group_id ?? "").trim();
+  const watermark = population?.full_census_started_at;
+  if (!population?.available || !importGroupId || !watermark) {
     return {
       ok: false,
-      status: "latest_group_not_ready",
+      status: "full_census_not_ready",
       import_group_id: importGroupId || null,
       jobs_scanned: 0,
       facts_upserted: 0,
@@ -2397,55 +2347,56 @@ async function buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId
 
   // Dashboard requests must never do this raw-payload extraction. This builder
   // is the controlled path to refresh prepared facts after an import/sync.
-  for (const runIdGroup of chunkArray(runIds, 1)) {
-    let from = 0;
-    while (true) {
-      let q = supabase
-        .from("brain_moraware_jobs")
-        .select(
-          "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,modified_at_source,scheduled_at_source,completed_at_source,install_at_source,raw_payload"
-        )
-        .eq("organization_id", organizationId)
-        .in("sync_run_id", runIdGroup)
-        .order("id", { ascending: true })
-        .range(from, from + pageSize - 1);
-      const { data, error } = await q;
-      queryPageCount += 1;
-      if (error) throw error;
-      if (!data?.length) break;
-      jobsScanned += data.length;
-      const facts = data.map((job) => {
-        const extracted = extractSqftFromMorawareJob(job);
-        return {
-          organization_id: organizationId,
-          import_group_id: importGroupId,
-          sync_run_id: job.sync_run_id,
-          source_job_id: String(job.source_job_id ?? ""),
-          source_account_id: job.source_account_id ?? null,
-          account_name: job.account_name ?? null,
-          status_name: job.status_name ?? null,
-          process_name: job.process_name ?? null,
-          salesperson_name: job.salesperson_name ?? null,
-          created_at_source: job.created_at_source ?? null,
-          modified_at_source: job.modified_at_source ?? null,
-          scheduled_at_source: job.scheduled_at_source ?? null,
-          completed_at_source: job.completed_at_source ?? null,
-          install_at_source: job.install_at_source ?? null,
-          worksheet_sqft: extracted.hasSqft ? extracted.totalSqft : null,
-          sqft_found: Boolean(extracted.hasSqft),
-          sqft_source: extracted.sources?.[0]?.source ?? null,
-          report_month_created: monthFromDate(job.created_at_source),
-          report_month_completed: monthFromDate(job.completed_at_source),
-          report_month_install: monthFromDate(job.install_at_source),
-          updated_at: new Date().toISOString()
-        };
-      });
-      await upsertRowsInChunks(supabase, "sales_moraware_job_facts", facts, "organization_id,import_group_id,source_job_id", 100);
-      factsUpserted += facts.length;
-      for (const fact of facts) addRollupFact(fact);
-      if (data.length < pageSize) break;
-      from += pageSize;
-    }
+  // Scan CURRENT_MORAWARE_JOB_SET (last_seen_at >= full census start), not the
+  // latest import group's sync_run_ids (those may be a 17-job incremental).
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("brain_moraware_jobs")
+      .select(
+        "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,modified_at_source,scheduled_at_source,completed_at_source,install_at_source,raw_payload"
+      )
+      .eq("organization_id", organizationId)
+      .gte("last_seen_at", watermark)
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    queryPageCount += 1;
+    if (error) throw error;
+    if (!data?.length) break;
+    jobsScanned += data.length;
+    const facts = data.map((job) => {
+      const extracted = extractJobWorksheetCensusSqft(job);
+      const totalSqft = extracted.totalSqft;
+      const hasSqft = Number(totalSqft) > 0;
+      return {
+        organization_id: organizationId,
+        import_group_id: importGroupId,
+        sync_run_id: job.sync_run_id,
+        source_job_id: String(job.source_job_id ?? ""),
+        source_account_id: job.source_account_id ?? null,
+        account_name: job.account_name ?? null,
+        status_name: job.status_name ?? null,
+        process_name: job.process_name ?? null,
+        salesperson_name: job.salesperson_name ?? null,
+        created_at_source: job.created_at_source ?? null,
+        modified_at_source: job.modified_at_source ?? null,
+        scheduled_at_source: job.scheduled_at_source ?? null,
+        completed_at_source: job.completed_at_source ?? null,
+        install_at_source: job.install_at_source ?? null,
+        worksheet_sqft: hasSqft ? totalSqft : null,
+        sqft_found: hasSqft,
+        sqft_source: hasSqft ? "brain_moraware_jobs.raw_payload.forms Job Worksheet Sq.Ft." : null,
+        report_month_created: monthFromDate(job.created_at_source),
+        report_month_completed: monthFromDate(job.completed_at_source),
+        report_month_install: monthFromDate(job.install_at_source),
+        updated_at: new Date().toISOString()
+      };
+    });
+    await upsertRowsInChunks(supabase, "sales_moraware_job_facts", facts, "organization_id,import_group_id,source_job_id", 100);
+    factsUpserted += facts.length;
+    for (const fact of facts) addRollupFact(fact);
+    if (data.length < pageSize) break;
+    from += pageSize;
   }
   const rollups = [...rollupsByAccount.values()].map((row) => ({ ...row, total_sqft: Math.round(row.total_sqft * 100) / 100 }));
   await upsertRowsInChunks(supabase, "sales_moraware_account_rollups", rollups, "organization_id,import_group_id,normalized_moraware_name", 100);
@@ -2528,11 +2479,9 @@ function syncHealthFromCompleteImportGroup(completeGroup) {
   };
 }
 
-/** Rebuild prepared Sales facts from the latest **complete** Moraware import group. */
+/** Rebuild prepared Sales facts for CURRENT_MORAWARE_JOB_SET (full-census epoch). */
 export async function rebuildSalesMorawarePreparedFacts(supabase, organizationId) {
-  const completeGroup = await loadLatestCompleteImportGroup(supabase, organizationId);
-  const syncHealth = syncHealthFromCompleteImportGroup(completeGroup);
-  return buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId, syncHealth);
+  return buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId, null);
 }
 
 export async function salesRebuildMorawareFactsHandler(req, supabaseGetter) {

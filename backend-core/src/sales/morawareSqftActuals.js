@@ -2,18 +2,22 @@ import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNor
 
 const SQFT_LABEL_RE = /^(sq\.?\s*ft\.?|square\s*(feet|foot|ft)|total\s*sq\.?\s*ft\.?|worksheet\s*sq\.?\s*ft\.?)$/i;
 
-function parseSqftNumber(raw) {
+function parseSqftNumberAllowZero(raw) {
   if (raw == null || raw === "") return null;
-  if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? raw : null;
-  const cleaned = String(raw)
-    .replace(/,/g, "")
-    .replace(/\b(sq\.?\s*ft\.?|square\s*(feet|foot|ft))\b/gi, "")
-    .trim();
-  if (!cleaned) return null;
-  const m = cleaned.match(/-?\d+(?:\.\d+)?/);
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const lower = s.toLowerCase();
+  if (lower === "true" || lower === "false" || lower === "yes" || lower === "no") return null;
+  const m = s.match(/[\d,]+(?:\.\d+)?/);
   if (!m) return null;
-  const n = Number(m[0]);
-  if (!Number.isFinite(n) || n <= 0) return null;
+  const n = Number.parseFloat(m[0].replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseSqftNumber(raw) {
+  const n = parseSqftNumberAllowZero(raw);
+  if (n == null || n <= 0) return null;
   return n;
 }
 
@@ -36,6 +40,10 @@ function isSqftField(field) {
   return labels.some((label) => SQFT_LABEL_RE.test(label));
 }
 
+function isExactJobWorksheetTemplate(form) {
+  return String(form?.formTemplateName || form?.templateName || "") === "Job Worksheet";
+}
+
 function isWorksheetForm(form) {
   const text = [form?.formTemplateName, form?.templateName, form?.formName, form?.name].join(" ").toLowerCase();
   return text.includes("worksheet");
@@ -46,6 +54,42 @@ function fieldsForForm(form) {
   if (Array.isArray(form.fields)) return form.fields;
   if (form.fieldsByLabel && typeof form.fieldsByLabel === "object") return Object.values(form.fieldsByLabel);
   return [];
+}
+
+function unwrapJobRaw(job) {
+  const raw = job?.raw_payload && typeof job.raw_payload === "object" ? job.raw_payload : job && typeof job === "object" ? job : {};
+  if (Array.isArray(raw.forms)) return raw;
+  if (raw.raw_payload && typeof raw.raw_payload === "object" && Array.isArray(raw.raw_payload.forms)) return raw.raw_payload;
+  return raw;
+}
+
+/**
+ * Validated worksheet SqFt authority: Job Worksheet template only, Sq.Ft. fields summed.
+ * Does not use View 222 or moraware_raw_job_forms.
+ */
+export function extractJobWorksheetCensusSqft(job) {
+  const raw = unwrapJobRaw(job);
+  const forms = Array.isArray(raw.forms) ? raw.forms : [];
+  let total = 0;
+  let fieldCount = 0;
+  for (const form of forms) {
+    if (!isExactJobWorksheetTemplate(form)) continue;
+    for (const field of fieldsForForm(form)) {
+      if (!isSqftField(field)) continue;
+      const n =
+        parseSqftNumberAllowZero(field.numericValue) ??
+        parseSqftNumberAllowZero(field.value) ??
+        parseSqftNumberAllowZero(field.answer);
+      if (n == null) continue;
+      total += n;
+      fieldCount += 1;
+    }
+  }
+  return { totalSqft: total, fieldCount, formCount: forms.filter(isExactJobWorksheetTemplate).length };
+}
+
+export function sumJobWorksheetCensusSqft(jobs) {
+  return (Array.isArray(jobs) ? jobs : []).reduce((s, job) => s + (extractJobWorksheetCensusSqft(job).totalSqft || 0), 0);
 }
 
 export function extractSqftFromMorawareJob(job) {

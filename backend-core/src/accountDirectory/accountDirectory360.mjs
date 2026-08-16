@@ -9,7 +9,7 @@ import {
   roleHasCapability
 } from "./accountDirectoryAuth.mjs";
 import { ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM } from "./accountDirectoryQuickbooksLinkage.mjs";
-import { buildTrustedMorawareOperations } from "./accountDirectoryMorawareLinkage.mjs";
+import { buildTrustedMorawareOperations, ACCOUNT_DIRECTORY_MORAWARE_SYSTEM } from "./accountDirectoryMorawareLinkage.mjs";
 import {
   AD_FINANCIALS_PAGE_SIZE,
   buildOpenArAging,
@@ -34,6 +34,7 @@ import {
   loadStaffSafeCustomerTransactions
 } from "./accountDirectoryCustomerHistory.mjs";
 import { resolveAccountQbEnrichmentLabel } from "./qbCustomerEnrichment/feedStatus.js";
+import { resolveCurrentMorawarePopulation } from "../moraware/morawareCurrentPopulation.mjs";
 
 export const AD_360_PAGE_DEFAULT = 25;
 export const AD_360_PAGE_MAX = 50;
@@ -544,24 +545,28 @@ function morawareJobsNotes(moraware) {
   return "2026 Moraware jobs from linked Account IDs. Job salesperson is recorded on the Moraware job, not Account Directory ownership.";
 }
 
-async function loadMorawareRelationship(supabase, organizationId, links) {
+async function loadMorawareRelationship(supabase, organizationId, links, currentPopulation) {
   const unavailable = buildTrustedMorawareOperations({
     links,
     jobs: null,
-    jobsState: "unavailable"
+    jobsState: "unavailable",
+    currentPopulation
   });
   if (!unavailable.linked || !supabase || !unavailable.accounts.length) return unavailable;
+  if (!currentPopulation?.available || !currentPopulation.full_census_started_at) return unavailable;
   const ids = unavailable.accounts.map((a) => a.source_account_id);
   const jobs = [];
   try {
     let from = 0;
     for (;;) {
-      const { data, error } = await supabase
+      let q = supabase
         .from("brain_moraware_jobs")
         .select(MORAWARE_JOB_SELECT)
         .eq("organization_id", organizationId)
         .in("source_account_id", ids)
+        .gte("last_seen_at", currentPopulation.full_census_started_at)
         .range(from, from + 999);
+      const { data, error } = await q;
       if (error) return unavailable;
       const batch = data || [];
       jobs.push(...batch);
@@ -574,7 +579,8 @@ async function loadMorawareRelationship(supabase, organizationId, links) {
   return buildTrustedMorawareOperations({
     links,
     jobs,
-    jobsState: "available"
+    jobsState: "available",
+    currentPopulation
   });
 }
 
@@ -611,7 +617,14 @@ export async function getAccountDirectoryRelationship(params) {
     qbEnrichment
   });
   const estimates = await loadExactAccountEstimates(params.supabase, params.organizationId, params.accountId);
-  const moraware = await loadMorawareRelationship(params.supabase, params.organizationId, links);
+  const hasMorawareLink = (links || []).some(
+    (l) => l?.isActive !== false && String(l.externalSystem || "").toLowerCase() === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM
+  );
+  let currentPopulation = params.currentMorawarePopulation;
+  if (currentPopulation === undefined && hasMorawareLink) {
+    currentPopulation = await resolveCurrentMorawarePopulation(params.supabase, params.organizationId);
+  }
+  const moraware = await loadMorawareRelationship(params.supabase, params.organizationId, links, currentPopulation);
   return scrubFinancialIds({
     health,
     estimates: {

@@ -3,6 +3,7 @@
  */
 
 import { loadLatestCompleteImportGroup } from "../moraware/morawareSyncHealth.js";
+import { resolveCurrentMorawarePopulation } from "../moraware/morawareCurrentPopulation.mjs";
 import { loadApprovedSalesAttributionMappings, classifySalesJob } from "./salesAttribution.js";
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 import { dashboardReportDateForMorawareJob } from "./morawareSqftActuals.js";
@@ -159,16 +160,13 @@ async function pagePreparedJobFacts(supabase, organizationId, effectiveGroupId, 
 }
 
 export async function loadPreparedJobFacts(supabase, organizationId, syncHealth, options = {}) {
-  const group = syncHealth?.latestGroupComplete ? { id: syncHealth.latestGroupId } : syncHealth?.latestCompleteGroup;
-  let effectiveGroupId = String(group?.import_group_id ?? syncHealth?.latestGroupId ?? "").trim();
-  if (!effectiveGroupId && syncHealth?.latestCompleteGroup?.import_group_id) {
-    effectiveGroupId = String(syncHealth.latestCompleteGroup.import_group_id).trim();
-  }
+  const population = await resolveCurrentMorawarePopulation(supabase, organizationId);
+  let effectiveGroupId = String(population?.full_census_import_group_id ?? "").trim();
   if (!effectiveGroupId) {
     return {
       rows: [],
       available: false,
-      warning: "No complete Moraware import group available.",
+      warning: "No successful complete uncapped full Moraware census is available.",
       loadStats: { rows: 0, pages: 0, dateScoped: false, windows: [], startDate: null, endDate: null }
     };
   }
@@ -226,7 +224,7 @@ export async function loadPreparedJobFacts(supabase, organizationId, syncHealth,
     rows,
     available: rows.length > 0,
     importGroupId: effectiveGroupId,
-    warning: rows.length ? null : "Prepared facts empty for latest import group.",
+    warning: rows.length ? null : "Prepared facts empty for the current full-census population.",
     loadStats: {
       rows: rows.length,
       pages,

@@ -122,6 +122,8 @@ async function main() {
     throw new Error(`backend-core production sync only supports global-sync right now (got: ${discoveryMode})`);
   }
 
+  // Discovery/file ingest only — does not upsert brain_moraware_jobs.
+  // Canonical population writers must hold moraware_population instead.
   const lockName = "moraware_global_sync";
   const lockedBy = `${user}@${process.pid}`;
   const lockRes = await acquireSyncLock({ lockName, lockedBy, ttlMs: 2 * 60 * 60 * 1000, metadata: { mode: discoveryMode } });

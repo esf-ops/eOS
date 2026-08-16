@@ -31,6 +31,7 @@ import {
   resolveSnapshotMode,
   sourceRootFor
 } from "./morawareSnapshotCanonical.js";
+import { CENSUS_SCOPE_FULL, pickCensusScope } from "../../moraware/morawareCurrentPopulation.mjs";
 
 const DEFAULT_SOURCE = "debug/moraware/latest/jobs/index.json";
 const DEFAULT_CHUNKED_DIR = "debug/moraware/baseline-2026/chunked";
@@ -282,6 +283,7 @@ export async function generateChunkedFoundationSnapshot(options = {}) {
     format: CHUNKED_MANIFEST_FORMAT,
     version: CHUNKED_MANIFEST_VERSION,
     generated_at: new Date().toISOString(),
+    census_scope: pickCensusScope(process.env.MORAWARE_CENSUS_SCOPE) || CENSUS_SCOPE_FULL,
     snapshot_mode: mode,
     organization_id: organizationId || undefined,
     mode: snapshotModeLabel,

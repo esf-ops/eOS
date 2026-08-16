@@ -2,6 +2,12 @@ import express from "express";
 
 import { logAction } from "../auth/auditLog.js";
 import { resolveHeadAccessContext } from "../me/launcherHeads.js";
+import {
+  guardLiveMorawarePopulationWrite,
+  handleMorawarePopulationLockAction,
+  MORAWARE_POPULATION_LOCK_LEASE_MS,
+  pickMorawarePopulationLockOwnerFromRequest
+} from "./morawarePopulationLock.mjs";
 
 const jsonParser = express.json({ limit: "15mb" });
 const SOURCE_SYSTEM = "moraware";
@@ -189,102 +195,122 @@ async function upsertRows(db, table, rows, onConflict) {
   return { count };
 }
 
+function withMorawareMirrorObservationTimestamps(row, now) {
+  // Omit first_seen_at: Postgres DEFAULT now() on insert; PostgREST conflict
+  // updates only columns present in the payload, so the original first_seen_at is preserved.
+  return {
+    ...row,
+    last_seen_at: now,
+    updated_at: now
+  };
+}
+
 function buildRawRows(entity, rows, { organizationId, syncRunId }) {
   const now = new Date().toISOString();
   return rows.map((row, index) => {
     const payload = rawPayload(row);
-    return {
-      organization_id: organizationId,
-      sync_run_id: syncRunId,
-      source_system: SOURCE_SYSTEM,
-      source_record_id: sourceId(row, entity, index),
-      source_modified_at: toIsoOrNull(row.source_modified_at ?? row.modified_at ?? row.last_modified_at ?? payload.modifiedAt ?? payload.modified_at),
-      raw_payload: payload,
-      first_seen_at: now,
-      last_seen_at: now,
-      updated_at: now
-    };
+    return withMorawareMirrorObservationTimestamps(
+      {
+        organization_id: organizationId,
+        sync_run_id: syncRunId,
+        source_system: SOURCE_SYSTEM,
+        source_record_id: sourceId(row, entity, index),
+        source_modified_at: toIsoOrNull(row.source_modified_at ?? row.modified_at ?? row.last_modified_at ?? payload.modifiedAt ?? payload.modified_at),
+        raw_payload: payload
+      },
+      now
+    );
   });
 }
 
 function normalizeAccounts(rows, { organizationId, syncRunId }) {
   const now = new Date().toISOString();
-  return rows.map((row, index) => ({
-    organization_id: organizationId,
-    sync_run_id: syncRunId,
-    source_system: SOURCE_SYSTEM,
-    source_account_id: sourceId(row, "account", index),
-    account_name: firstNonempty(row.account_name, row.name, row.customer_name, rawPayload(row).name),
-    raw_payload: rawPayload(row),
-    first_seen_at: now,
-    last_seen_at: now,
-    updated_at: now
-  }));
+  return rows.map((row, index) =>
+    withMorawareMirrorObservationTimestamps(
+      {
+        organization_id: organizationId,
+        sync_run_id: syncRunId,
+        source_system: SOURCE_SYSTEM,
+        source_account_id: sourceId(row, "account", index),
+        account_name: firstNonempty(row.account_name, row.name, row.customer_name, rawPayload(row).name),
+        raw_payload: rawPayload(row)
+      },
+      now
+    )
+  );
 }
 
 function normalizeJobs(rows, { organizationId, syncRunId }) {
   const now = new Date().toISOString();
-  return rows.map((row, index) => ({
-    organization_id: organizationId,
-    sync_run_id: syncRunId,
-    source_system: SOURCE_SYSTEM,
-    source_job_id: sourceId(row, "job", index),
-    source_account_id: firstNonempty(row.source_account_id, row.account_id, row.jobInfo?.accountId, rawPayload(row).accountId),
-    account_name: firstNonempty(row.account_name, row.jobInfo?.accountName, rawPayload(row).accountName),
-    job_name: firstNonempty(row.job_name, row.name, row.jobInfo?.jobName, rawPayload(row).name),
-    job_number: firstNonempty(row.job_number, row.number, row.jobInfo?.jobNumber, rawPayload(row).number),
-    process_name: extractJobProcess(row),
-    status_name: extractJobStatus(row),
-    salesperson_name: firstNonempty(row.salesperson_name, row.sales_rep, row.jobInfo?.salespersonName),
-    created_at_source: toIsoOrNull(row.created_at ?? row.creation_date ?? row.jobInfo?.creationDate),
-    modified_at_source: toIsoOrNull(row.modified_at ?? row.source_modified_at ?? row.jobInfo?.modifiedDate),
-    scheduled_at_source: toIsoOrNull(row.scheduled_at ?? row.schedule_date),
-    completed_at_source: toIsoOrNull(row.completed_at ?? row.complete_date),
-    install_at_source: toIsoOrNull(row.install_at ?? row.install_date),
-    raw_payload: rawPayload(row),
-    first_seen_at: now,
-    last_seen_at: now,
-    updated_at: now
-  }));
+  return rows.map((row, index) =>
+    withMorawareMirrorObservationTimestamps(
+      {
+        organization_id: organizationId,
+        sync_run_id: syncRunId,
+        source_system: SOURCE_SYSTEM,
+        source_job_id: sourceId(row, "job", index),
+        source_account_id: firstNonempty(row.source_account_id, row.account_id, row.jobInfo?.accountId, rawPayload(row).accountId),
+        account_name: firstNonempty(row.account_name, row.jobInfo?.accountName, rawPayload(row).accountName),
+        job_name: firstNonempty(row.job_name, row.name, row.jobInfo?.jobName, rawPayload(row).name),
+        job_number: firstNonempty(row.job_number, row.number, row.jobInfo?.jobNumber, rawPayload(row).number),
+        process_name: extractJobProcess(row),
+        status_name: extractJobStatus(row),
+        salesperson_name: firstNonempty(row.salesperson_name, row.sales_rep, row.jobInfo?.salespersonName),
+        created_at_source: toIsoOrNull(row.created_at ?? row.creation_date ?? row.jobInfo?.creationDate),
+        modified_at_source: toIsoOrNull(row.modified_at ?? row.source_modified_at ?? row.jobInfo?.modifiedDate),
+        scheduled_at_source: toIsoOrNull(row.scheduled_at ?? row.schedule_date),
+        completed_at_source: toIsoOrNull(row.completed_at ?? row.complete_date),
+        install_at_source: toIsoOrNull(row.install_at ?? row.install_date),
+        raw_payload: rawPayload(row)
+      },
+      now
+    )
+  );
 }
 
 function normalizeActivities(rows, { organizationId, syncRunId }) {
   const now = new Date().toISOString();
-  return rows.map((row, index) => ({
-    organization_id: organizationId,
-    sync_run_id: syncRunId,
-    source_system: SOURCE_SYSTEM,
-    source_activity_id: sourceId(row, "activity", index),
-    source_job_id: firstNonempty(row.source_job_id, row.job_id, rawPayload(row).jobId),
-    activity_type_name: firstNonempty(row.activity_type_name, row.activity_type, row.type, rawPayload(row).activityType),
-    activity_status_name: firstNonempty(row.activity_status_name, row.activity_status, row.status, rawPayload(row).status),
-    phase_name: firstNonempty(row.phase_name, rawPayload(row).phaseName),
-    scheduled_date: toDateOrNull(row.scheduled_date ?? row.start_date ?? row.date),
-    scheduled_time: firstNonempty(row.scheduled_time, row.sched_time, rawPayload(row).schedTime),
-    duration_minutes: toNumberOrNull(row.duration_minutes ?? row.duration),
-    raw_payload: rawPayload(row),
-    first_seen_at: now,
-    last_seen_at: now,
-    updated_at: now
-  }));
+  return rows.map((row, index) =>
+    withMorawareMirrorObservationTimestamps(
+      {
+        organization_id: organizationId,
+        sync_run_id: syncRunId,
+        source_system: SOURCE_SYSTEM,
+        source_activity_id: sourceId(row, "activity", index),
+        source_job_id: firstNonempty(row.source_job_id, row.job_id, rawPayload(row).jobId),
+        activity_type_name: firstNonempty(row.activity_type_name, row.activity_type, row.type, rawPayload(row).activityType),
+        activity_status_name: firstNonempty(row.activity_status_name, row.activity_status, row.status, rawPayload(row).status),
+        phase_name: firstNonempty(row.phase_name, rawPayload(row).phaseName),
+        scheduled_date: toDateOrNull(row.scheduled_date ?? row.start_date ?? row.date),
+        scheduled_time: firstNonempty(row.scheduled_time, row.sched_time, rawPayload(row).schedTime),
+        duration_minutes: toNumberOrNull(row.duration_minutes ?? row.duration),
+        raw_payload: rawPayload(row)
+      },
+      now
+    )
+  );
 }
 
 function normalizeResources(rows, { organizationId, syncRunId }) {
   const now = new Date().toISOString();
-  return rows.map((row, index) => ({
-    organization_id: organizationId,
-    sync_run_id: syncRunId,
-    source_system: SOURCE_SYSTEM,
-    source_resource_id: sourceId(row, "resource", index),
-    resource_name: firstNonempty(row.resource_name, row.assignee_name, row.name, rawPayload(row).name),
-    resource_type: firstNonempty(row.resource_type, row.assignee_type, row.type, rawPayload(row).type),
-    is_active: row.is_active == null ? null : Boolean(row.is_active),
-    raw_payload: rawPayload(row),
-    first_seen_at: now,
-    last_seen_at: now,
-    updated_at: now
-  }));
+  return rows.map((row, index) =>
+    withMorawareMirrorObservationTimestamps(
+      {
+        organization_id: organizationId,
+        sync_run_id: syncRunId,
+        source_system: SOURCE_SYSTEM,
+        source_resource_id: sourceId(row, "resource", index),
+        resource_name: firstNonempty(row.resource_name, row.assignee_name, row.name, rawPayload(row).name),
+        resource_type: firstNonempty(row.resource_type, row.assignee_type, row.type, rawPayload(row).type),
+        is_active: row.is_active == null ? null : Boolean(row.is_active),
+        raw_payload: rawPayload(row)
+      },
+      now
+    )
+  );
 }
+
+export { withMorawareMirrorObservationTimestamps, normalizeJobs };
 
 function dataQualityFindings({ jobs, activities, accounts, assignees, organizationId, syncRunId }) {
   const now = new Date().toISOString();
@@ -435,6 +461,38 @@ export function attachMorawareSyncRoutes(app, deps) {
     requireAnyHeadAccess(["system_admin", "brain_health"], { getSupabase })
   ];
 
+  app.post("/api/internal/moraware-sync/population-lock", jsonParser, async (req, res) => {
+    if (!requireImportSecret(req, res)) return;
+    const db = getSupabase();
+    const ownerToken = pickMorawarePopulationLockOwnerFromRequest(req) || pickStr(req.body?.owner_token);
+    const action = pickStr(req.body?.action) || "acquire";
+    const ttlMs = Number(req.body?.ttl_ms);
+    try {
+      const result = await handleMorawarePopulationLockAction(db, {
+        action,
+        ownerToken,
+        lockedBy: pickStr(req.body?.locked_by),
+        ttlMs: Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : MORAWARE_POPULATION_LOCK_LEASE_MS,
+        metadata: req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : null
+      });
+      if (result.error && !result.acquired && result.action !== "acquire") {
+        res.status(400).json({ ok: false, ...result });
+        return;
+      }
+      if (action === "acquire" && result.acquired === false) {
+        res.status(409).json({ ok: false, lock_name: "moraware_population", ...result });
+        return;
+      }
+      if ((action === "renew" && result.renewed === false) || (action === "release" && result.released === false)) {
+        res.status(409).json({ ok: false, lock_name: "moraware_population", ...result });
+        return;
+      }
+      res.json({ ok: true, lock_name: "moraware_population", ...result });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   app.post("/api/internal/moraware-sync/import", jsonParser, async (req, res) => {
     if (!requireImportSecret(req, res)) return;
     const startedAt = new Date().toISOString();
@@ -445,6 +503,22 @@ export function attachMorawareSyncRoutes(app, deps) {
     const runner = pickStr(req.body?.runner || req.body?.sync_run?.runner) || "moraware-worker";
     const rowCounts = Object.fromEntries(Object.entries(batches).map(([k, v]) => [k, v.length]));
     let syncRunId = null;
+
+    const ownerToken = pickMorawarePopulationLockOwnerFromRequest(req);
+    const censusScope = req.body?.metadata?.census_scope ?? req.body?.sync_run?.metadata?.census_scope;
+    const populationGuard = await guardLiveMorawarePopulationWrite(db, {
+      ownerToken,
+      censusScope,
+      requireCensusScope: true
+    });
+    if (!populationGuard.ok) {
+      res.status(populationGuard.status || 409).json({
+        ok: false,
+        error: populationGuard.error,
+        code: populationGuard.code
+      });
+      return;
+    }
 
     try {
       const runInsert = await db
@@ -566,6 +640,16 @@ export function attachMorawareSyncRoutes(app, deps) {
     try {
       const { rebuildSalesMorawarePreparedFacts } = await import("../sales/salesHead.js");
       const db = getSupabase();
+      const ownerToken = pickMorawarePopulationLockOwnerFromRequest(req);
+      const populationGuard = await guardLiveMorawarePopulationWrite(db, { ownerToken, requireCensusScope: false });
+      if (!populationGuard.ok) {
+        res.status(populationGuard.status || 409).json({
+          ok: false,
+          error: populationGuard.error,
+          code: populationGuard.code
+        });
+        return;
+      }
       const result = await rebuildSalesMorawarePreparedFacts(db, organizationId);
       try {
         await logAction({

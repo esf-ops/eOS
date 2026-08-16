@@ -5,6 +5,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { CENSUS_SCOPE_FULL, pickCensusScope } from "../../moraware/morawareCurrentPopulation.mjs";
+import {
+  createMorawarePopulationLockOwnerToken,
+  MORAWARE_POPULATION_LOCK_OWNER_ENV,
+  postMorawarePopulationLock,
+  startMorawarePopulationLockHeartbeat
+} from "../../moraware/morawarePopulationLock.mjs";
+
 /** Frozen at module load (after dotenv). Never re-read — child scripts must not change this. */
 const PIPELINE_DRY_RUN_AT_STARTUP = (() => {
   const s = String(process.env.MORAWARE_IMPORT_DRY_RUN ?? "").trim().toLowerCase();
@@ -99,6 +107,9 @@ function applyPipelineDefaults() {
   if (!String(process.env.MORAWARE_BASELINE_END_DATE ?? "").trim()) {
     process.env.MORAWARE_BASELINE_END_DATE = todayYmd();
   }
+  if (!pickCensusScope(process.env.MORAWARE_CENSUS_SCOPE)) {
+    process.env.MORAWARE_CENSUS_SCOPE = CENSUS_SCOPE_FULL;
+  }
   process.env.MORAWARE_SYNC_IMPORT_FILE = process.env.MORAWARE_SYNC_IMPORT_FILE || DEFAULT_SNAPSHOT_FILE;
   process.env.MORAWARE_IMPORT_ALLOW_LARGE_BASELINE = process.env.MORAWARE_IMPORT_ALLOW_LARGE_BASELINE || "1";
   process.env.MORAWARE_IMPORT_CHUNKED = process.env.MORAWARE_IMPORT_CHUNKED || "1";
@@ -190,7 +201,10 @@ async function postRebuildPreparedFacts({ secret, organizationId, pipelineDryRun
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-eos-cron-secret": secret
+      "x-eos-cron-secret": secret,
+      ...(process.env[MORAWARE_POPULATION_LOCK_OWNER_ENV]
+        ? { "x-moraware-population-lock-owner": process.env[MORAWARE_POPULATION_LOCK_OWNER_ENV] }
+        : {})
     },
     body: JSON.stringify({ organization_id: organizationId })
   });
@@ -491,8 +505,51 @@ async function main() {
     return;
   }
 
+  let stopPopulationHeartbeat = null;
+  let populationLockOwner = null;
+
   try {
     const organizationId = requiredEnv("MORAWARE_DEFAULT_ORGANIZATION_ID");
+
+    if (!pipelineDryRun) {
+      requiredEnv("BACKEND_URL");
+      const secret = pickSecret();
+      const ownerToken = createMorawarePopulationLockOwnerToken();
+      const lockUrl = `${backendBase()}/api/internal/moraware-sync/population-lock`;
+      try {
+        const acquired = await postMorawarePopulationLock({
+          url: lockUrl,
+          secret,
+          action: "acquire",
+          ownerToken,
+          lockedBy: `runScheduledMorawarePipeline:${process.pid}`,
+          metadata: {
+            census_scope: pickCensusScope(process.env.MORAWARE_CENSUS_SCOPE) || CENSUS_SCOPE_FULL,
+            runner: "scheduled-pipeline"
+          }
+        });
+        if (!acquired?.acquired) {
+          await logger.log("population_lock_busy", { response: acquired || null });
+          process.exitCode = 0;
+          return;
+        }
+        populationLockOwner = ownerToken;
+        process.env[MORAWARE_POPULATION_LOCK_OWNER_ENV] = ownerToken;
+        stopPopulationHeartbeat = startMorawarePopulationLockHeartbeat({
+          url: lockUrl,
+          secret,
+          ownerToken,
+          logger
+        });
+      } catch (e) {
+        if (e?.status === 409) {
+          await logger.log("population_lock_busy", { error: String(e.message || e) });
+          process.exitCode = 0;
+          return;
+        }
+        throw e;
+      }
+    }
 
     // Auto-resume preflight: detect incomplete latest group and configure resume
     // env vars before shouldSkipGenerate() is evaluated.
@@ -601,6 +658,19 @@ async function main() {
     });
     throw e;
   } finally {
+    if (stopPopulationHeartbeat) stopPopulationHeartbeat();
+    if (populationLockOwner && !pipelineDryRun) {
+      try {
+        await postMorawarePopulationLock({
+          url: `${backendBase()}/api/internal/moraware-sync/population-lock`,
+          secret: pickSecret(),
+          action: "release",
+          ownerToken: populationLockOwner
+        });
+      } catch (e) {
+        await logger.log("population_lock_release_failed", { error: String(e?.message || e) });
+      }
+    }
     await releaseLockFile();
   }
 }
