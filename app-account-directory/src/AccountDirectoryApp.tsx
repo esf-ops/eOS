@@ -1745,6 +1745,7 @@ function ProfilePanel({
   const [financialsBusy, setFinancialsBusy] = useState(false);
   const [financialsError, setFinancialsError] = useState<string | null>(null);
   const [relationship, setRelationship] = useState<AccountRelationship | null>(null);
+  const [relationshipBusy, setRelationshipBusy] = useState(false);
   const [pendingInsightId, setPendingInsightId] = useState<string | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
@@ -1753,6 +1754,7 @@ function ProfilePanel({
     setFinancials(null);
     setFinancialsError(null);
     setRelationship(null);
+    setRelationshipBusy(false);
     setPendingInsightId(null);
   }, [accountId]);
 
@@ -1817,11 +1819,17 @@ function ProfilePanel({
     if (!["Overview", "Relationship"].includes(detailTab)) return;
     if (!sessionToken || !accountId) return;
     let cancelled = false;
+    setRelationshipBusy(true);
     void loadRelationship(sessionToken, accountId)
       .then((rel) => {
         if (!cancelled) setRelationship(rel);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setRelationship(null);
+      })
+      .finally(() => {
+        if (!cancelled) setRelationshipBusy(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -1829,6 +1837,15 @@ function ProfilePanel({
 
   const locationLine = detail ? formatCityState(detail.city, detail.state) : "";
   const qbState = detail?.quickbooksLinked ? "QB Linked" : "QB not linked";
+  const morawareLinks = (detail?.externalLinks || []).filter(
+    (l) => l.isActive !== false && String(l.system || "").toLowerCase() === "moraware"
+  );
+  const morawareBadge =
+    morawareLinks.length > 0
+      ? `Moraware · ${morawareLinks.length} ID${morawareLinks.length === 1 ? "" : "s"}`
+      : relationship?.moraware?.linked
+        ? `Moraware · ${relationship.moraware.accounts?.length || 0} ID${(relationship.moraware.accounts?.length || 0) === 1 ? "" : "s"}`
+        : "Moraware not linked";
 
   return (
     <div className="account-workspace-backdrop" role="presentation">
@@ -1855,11 +1872,15 @@ function ProfilePanel({
               <div className="profile-status-row">
                 <span className={statusPillClass(detail.status)}>{statusLabel(detail.status)}</span>
                 <span className="chip chip-muted">{qbState}</span>
+                <span className="chip chip-muted">{relationshipBusy && !relationship ? "Moraware…" : morawareBadge}</span>
+                {financials?.paymentTerms ? (
+                  <span className="chip chip-muted">Terms {financials.paymentTerms}</span>
+                ) : null}
               </div>
             ) : null}
             {detail ? (
               <p className="profile-subline">
-                {[locationLine !== "—" ? locationLine : null, detail.primaryContact, financials?.paymentTerms]
+                {[locationLine !== "—" ? locationLine : null, detail.primaryContact]
                   .filter(Boolean)
                   .join(" · ")}
               </p>
@@ -1993,6 +2014,7 @@ function ProfilePanel({
                   financials={financials}
                   relationship={relationship}
                   busy={financialsBusy}
+                  relationshipBusy={relationshipBusy}
                   onOpenTab={(tab) => onTabChange(tab as DetailTab)}
                   insightStrip={
                     <OverviewInsightStrip
@@ -2043,6 +2065,7 @@ function ProfilePanel({
                 sessionToken={sessionToken}
                 accountId={accountId}
                 relationship={relationship}
+                relationshipBusy={relationshipBusy}
                 onOpenTab={(tab) => onTabChange(tab as DetailTab)}
                 context={{
                   primaryContact: detail.primaryContact,
@@ -2053,7 +2076,9 @@ function ProfilePanel({
                     : null,
                   lastInvoiceDate: financials?.lastInvoice?.date || null,
                   lastPayment: financials?.lastPayment?.date ? financials.lastPayment.date : null,
-                  lastPaymentDate: financials?.lastPayment?.date || null
+                  lastPaymentDate: financials?.lastPayment?.date || null,
+                  financials,
+                  financialsLoading: financialsBusy
                 }}
               />
               </WorkspaceTabBoundary>
@@ -2088,6 +2113,7 @@ function ProfilePanel({
             {detailTab === "Connections" ? (
               <WorkspaceTabBoundary panel="Connections">
               <ConnectionsWithIdentity
+                accountId={accountId}
                 links={detail.externalLinks}
                 aliases={detail.aliases}
                 auditHistory={detail.auditHistory}

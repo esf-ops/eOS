@@ -563,7 +563,7 @@ export async function getAccountDirectoryInsights(args) {
     throw new AccountDirectoryError("forbidden", "Permission denied.", 403);
   }
   const financials = await getAccountDirectoryFinancials(args);
-  const relationship = await getAccountDirectoryRelationship(args);
+  const relationship = await getAccountDirectoryRelationship({ ...args, financials });
   const period = String(args.period || "ytd").trim() === "available" ? "available" : "ytd";
   const payload = buildAccountInsightsPayload({ financials, relationship, period });
   return scrubAccount360Payload({
@@ -584,7 +584,7 @@ export async function getAccountDirectoryInsightEvidence(args) {
     throw new AccountDirectoryError("not_found", "Unknown insight.", 404);
   }
   const financials = await getAccountDirectoryFinancials(args);
-  const relationship = await getAccountDirectoryRelationship(args);
+  const relationship = await getAccountDirectoryRelationship({ ...args, financials });
   const period = String(args.period || "ytd").trim() === "available" ? "available" : "ytd";
   const payload = buildAccountInsightsPayload({ financials, relationship, period });
   const card = payload.cards.find((c) => c.id === insightId);

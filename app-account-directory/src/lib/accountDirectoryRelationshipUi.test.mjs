@@ -1,18 +1,31 @@
-/**
- * Relationship tab regression: missing/partial payloads must not crash Account 360.
- * Run: node app-account-directory/src/lib/accountDirectoryRelationshipUi.test.mjs
- */
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   buildRelationshipView,
+  enrichRelationshipHealthWithFinancials,
   formatWhen,
   COMMERCIAL_EMPTY,
   RELATIONSHIP_EMPTY_TIMELINE
 } from "./accountDirectoryRelationshipUi.mjs";
 import { panelFromTab, parseUrlState, serializeUrlState, tabFromPanel } from "./accountDirectoryWorkspace.mjs";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import assert from "node:assert/strict";
+
+function formatJobsLabel(value) {
+  if (value == null || !Number.isFinite(Number(value))) return null;
+  const n = Math.round(Number(value));
+  return `${n.toLocaleString("en-US")} ${n === 1 ? "Job" : "Jobs"}`;
+}
+
+function formatSqft(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  const n = Number(value);
+  const text = n.toLocaleString("en-US", {
+    minimumFractionDigits: Number.isInteger(n) ? 0 : 1,
+    maximumFractionDigits: 1
+  });
+  return `${text} SF`;
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 const panels = readFileSync(join(here, "../ui/Account360Panels.tsx"), "utf8");
@@ -144,7 +157,54 @@ assert.equal(morawareDown.morawareJobsState, "unavailable");
 assert.equal(morawareDown.morawareSqftState, "unavailable");
 assert.ok(panels.includes("2026 SqFt"), "2026 SqFt shown in Moraware Operations");
 assert.ok(panels.includes("formatSqft"), "SqFt uses formatSqft");
+assert.ok(panels.includes("formatJobsLabel"), "Jobs uses formatJobsLabel");
+const zeroJobs = buildRelationshipView(
+  {
+    moraware: {
+      linked: true,
+      jobs_state: "available",
+      job_count_2026: 0,
+      sqft_state: "available",
+      sqft_2026: 0,
+      accounts: [{ source_account_id: "1" }]
+    }
+  },
+  { items: [] }
+);
+assert.equal(zeroJobs.jobCount2026, 0);
+assert.equal(zeroJobs.sqft2026, 0);
 console.log("ok: Moraware operations view distinguishes zero jobs from unavailable");
+
+{
+  const enriched = enrichRelationshipHealthWithFinancials(
+    {
+      state: "healthy",
+      label: "Healthy",
+      signals: [{ code: "complete", severity: "healthy", label: "ok", detail: "ok", target: "Overview" }]
+    },
+    {
+      linked: true,
+      status: "ok",
+      summary: { openAr: 500 },
+      collectionAttention: { code: "attention", reason: "Past due" },
+      daysSinceLastPayment: 120,
+      recentActivity: [{ type: "invoice" }]
+    }
+  );
+  assert.ok(enriched.signals.some((s) => s.code === "collection_attention"));
+  assert.ok(enriched.signals.some((s) => s.code === "no_recent_payment"));
+  assert.equal(enriched.state, "attention");
+  console.log("ok: financials enrich relationship health without duplicate API embed");
+}
+
+assert.equal(formatJobsLabel(13), "13 Jobs");
+assert.equal(formatJobsLabel(1), "1 Job");
+assert.equal(formatJobsLabel(0), "0 Jobs");
+assert.equal(formatJobsLabel(null), null);
+assert.equal(formatSqft(1283.5), "1,283.5 SF");
+assert.ok(readFileSync(join(here, "../ui/accountFormat.ts"), "utf8").includes("formatJobsLabel"));
+console.log("ok: jobs + SqFt formatting");
+
 
 const sequence = ["Overview", "Relationship", "Financials"].map((tab) => panelFromTab(tab));
 assert.deepEqual(sequence, ["overview", "relationship", "financials"]);

@@ -149,10 +149,27 @@ assert.ok(panels.includes("Moraware Operations"), "Moraware Operations section p
 assert.ok(panels.includes("2026 Jobs"), "2026 job count label present");
 assert.ok(panels.includes("2026 SqFt"), "2026 SqFt label present");
 assert.ok(panels.includes("formatSqft"), "SqFt uses formatSqft");
+assert.ok(panels.includes("formatJobsLabel"), "Jobs uses formatJobsLabel");
+assert.ok(panels.includes("TrustedKpi") || panels.includes("ad-trusted-kpi"), "trusted KPI semantics present");
+assert.ok(panels.includes("SectionSkeleton") || panels.includes("ad-section-loading"), "progressive loading skeletons");
 assert.ok(panels.includes("Job salesperson"), "salesperson labeled as job fact");
+assert.ok(app.includes("relationshipBusy"), "relationship loads independently of financials busy");
+assert.ok(maintain.includes("Account Directory UUID") || maintain.includes("accountId"), "Connections shows AD UUID");
+assert.ok(maintain.includes("Multiple Moraware Account IDs") || maintain.includes("legitimately map"), "multi-Moraware ID copy");
 assert.equal(panels.includes("Account Owner"), false, "must not treat Moraware salesperson as account owner");
 assert.equal(panels.includes("install completion"), false);
-assert.equal(/material|color|room|edge profile/i.test(panels.slice(panels.indexOf("Moraware Operations"), panels.indexOf("Moraware Operations") + 1200)), false);
+assert.equal(/material|color|room|edge profile/i.test(panels.slice(panels.indexOf("Moraware Operations"), panels.indexOf("Moraware Operations") + 1600)), false);
+const relationshipSrc = readFileSync(join(root, "backend-core/src/accountDirectory/accountDirectory360.mjs"), "utf8");
+assert.ok(
+  relationshipSrc.includes("embedFinancials") || relationshipSrc.includes("params.financials"),
+  "relationship no longer always embeds a second full financials load"
+);
+assert.ok(
+  !/Promise\.all\(\[\s*params\.store\.listContacts[\s\S]*getAccountDirectoryFinancials\(params\)\s*\]\)/.test(
+    relationshipSrc
+  ),
+  "relationship must not Promise.all financials with contacts by default"
+);
 console.log("ok: Phase 5.1 workspace UX + Relationship reliability");
 
 // ── Design tokens ─────────────────────────────────────────────────────────

@@ -2107,3 +2107,48 @@ a.detail-list-title:hover {
   .summary-group-label { display: none; }
   .profile-actions { flex-wrap: wrap; justify-content: flex-end; }
 }
+
+/* Account 360 vNext — progressive loading + scannable hierarchy */
+.ad-trusted-kpi-row { margin-top: 10px; }
+.ad-section-loading { min-height: 72px; }
+.ad-skeleton-block,
+.ad-skeleton-line {
+  margin-top: 10px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--eos-line) 55%, var(--eos-bg-subtle));
+  color: transparent;
+  min-height: 14px;
+  animation: ad-pulse 1.2s ease-in-out infinite;
+}
+.ad-skeleton-block { min-height: 48px; }
+@keyframes ad-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.ad-event-chip {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--eos-line);
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--eos-ink-mid);
+  vertical-align: middle;
+}
+.ad-event-estimate { border-color: color-mix(in srgb, var(--eos-accent) 35%, var(--eos-line)); }
+.ad-event-financial { border-color: color-mix(in srgb, #2f6fed 35%, var(--eos-line)); }
+.ad-event-moraware { border-color: color-mix(in srgb, #0f7b5a 35%, var(--eos-line)); }
+.ad-event-directory { border-color: var(--eos-line-strong); }
+.ad-mono {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  font-weight: 560;
+}
+.ad-recent-jobs li { padding-bottom: 8px; border-bottom: 1px solid var(--eos-line); }
+.ad-recent-jobs li:last-child { border-bottom: 0; padding-bottom: 0; }
+.activity-family-estimate .activity-dot { background: var(--eos-accent); }
+.activity-family-financial .activity-dot { background: #2f6fed; }
+.activity-family-moraware .activity-dot { background: #0f7b5a; }
+.activity-family-directory .activity-dot { background: var(--eos-ink-mid); }
+

@@ -18,3 +18,10 @@ export function formatSqft(value: number | null | undefined): string {
   });
   return `${text} SF`;
 }
+
+/** Job count label: "13 Jobs" / "1 Job" / "0 Jobs". Null when unavailable. */
+export function formatJobsLabel(value: number | null | undefined): string | null {
+  if (value == null || !Number.isFinite(Number(value))) return null;
+  const n = Math.round(Number(value));
+  return `${n.toLocaleString("en-US")} ${n === 1 ? "Job" : "Jobs"}`;
+}

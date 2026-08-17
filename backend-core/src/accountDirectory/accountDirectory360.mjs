@@ -590,12 +590,19 @@ export async function getAccountDirectoryRelationship(params) {
   }
   const account = await params.store.getAccount(params.organizationId, params.accountId);
   if (!account) throw new AccountDirectoryError("not_found", "Account not found.", 404);
-  const [contacts, locations, links, financials] = await Promise.all([
+  // Financials are optional: FE already loads /financials for Overview/Financials.
+  // Skip the expensive embed unless the caller passes financials or embedFinancials:true
+  // (Insights passes preloaded financials so health keeps collection signals without a second load).
+  const [contacts, locations, links] = await Promise.all([
     params.store.listContacts(params.organizationId, params.accountId),
     params.store.listLocations(params.organizationId, params.accountId),
-    params.store.listExternalLinks(params.organizationId, params.accountId),
-    getAccountDirectoryFinancials(params)
+    params.store.listExternalLinks(params.organizationId, params.accountId)
   ]);
+  let financials = params.financials;
+  if (financials === undefined && params.embedFinancials === true) {
+    financials = await getAccountDirectoryFinancials(params);
+  }
+  if (financials === undefined) financials = null;
   const hasPrimaryContact = (contacts || []).some((c) => c.isPrimaryEstimating && c.isActive !== false);
   const hasPrimaryLocation = (locations || []).some((l) => l.isPrimaryAccountLocation && l.isActive !== false);
   const quickbooksLinked = collectActiveQuickbooksRootListIds(links).length > 0;

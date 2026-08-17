@@ -398,7 +398,20 @@ export type AccountRelationship = {
       job_count?: number | null;
     }>;
     total_job_count?: number | null;
+    job_count_2026?: number | null;
     jobs_state?: "available" | "unavailable";
+    sqft_state?: "available" | "unavailable";
+    sqft_2026?: number | null;
+    earliest_job_date?: string | null;
+    latest_job_date?: string | null;
+    recent_jobs?: Array<{
+      source_job_id?: string;
+      job_name?: string | null;
+      job_date?: string | null;
+      status_name?: string | null;
+      salesperson_name?: string | null;
+    }>;
+    job_date_rule?: string | null;
   };
   quoteFlow?: { state: string; notes?: string | null };
 };

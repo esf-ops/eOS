@@ -419,28 +419,51 @@ function LocationEditDialog({
 export function ConnectionsWithIdentity({
   links,
   aliases,
-  auditHistory
+  auditHistory,
+  accountId
 }: {
   links: AccountDetail["externalLinks"];
   aliases: AccountDetail["aliases"];
   auditHistory: AccountDetail["auditHistory"];
+  accountId?: string;
 }) {
+  const qbLinks = (links || []).filter((l) => String(l.system || "").toLowerCase().includes("quickbooks"));
+  const morawareLinks = (links || []).filter((l) => String(l.system || "").toLowerCase() === "moraware");
+  const otherLinks = (links || []).filter((l) => {
+    const s = String(l.system || "").toLowerCase();
+    return !s.includes("quickbooks") && s !== "moraware";
+  });
+
   return (
     <div className="ad-connections">
       <section className="ad-section">
         <header className="ad-section-head">
-          <p className="ad-kicker">QuickBooks</p>
-          <h3>Linkage</h3>
+          <p className="ad-kicker">Identity graph</p>
+          <h3>Account Directory</h3>
+          <p className="muted">Canonical UUID for this customer workspace. Exact external links attach here — never by fuzzy name.</p>
         </header>
-        {!links?.length ? (
+        <ul className="ad-context-list">
+          <li>
+            <span>Account Directory UUID</span>
+            <strong className="ad-mono">{accountId || "Unavailable"}</strong>
+          </li>
+        </ul>
+      </section>
+
+      <section className="ad-section">
+        <header className="ad-section-head">
+          <p className="ad-kicker">QuickBooks</p>
+          <h3>Exact linkage</h3>
+        </header>
+        {!qbLinks.length ? (
           <div className="ad-empty-state">
-            <p>No QuickBooks or external links on file for this account.</p>
+            <p>No QuickBooks root link on file for this account.</p>
           </div>
         ) : (
           <ul className="ad-card-list">
-            {(links || []).map((link) => (
+            {qbLinks.map((link) => (
               <li key={link.id} className="ad-person-card">
-                <strong>{link.system || "External system"}</strong>
+                <strong>{link.system || "QuickBooks"}</strong>
                 <p className="muted">
                   {[link.isActive === false ? "Inactive" : "Linked", link.externalDisplayName].filter(Boolean).join(" · ")}
                 </p>
@@ -449,6 +472,53 @@ export function ConnectionsWithIdentity({
           </ul>
         )}
       </section>
+
+      <section className="ad-section">
+        <header className="ad-section-head">
+          <p className="ad-kicker">Moraware</p>
+          <h3>Exact Account IDs</h3>
+          <p className="muted">
+            Multiple Moraware Account IDs can legitimately map to one Account Directory UUID (for example location-prefixed
+            duplicates).
+          </p>
+        </header>
+        {!morawareLinks.length ? (
+          <div className="ad-empty-state">
+            <p>No Moraware identity is linked.</p>
+          </div>
+        ) : (
+          <ul className="ad-card-list">
+            {morawareLinks.map((link) => (
+              <li key={link.id} className="ad-person-card">
+                <strong>Moraware ID {link.externalId || "—"}</strong>
+                <p className="muted">
+                  {[link.isActive === false ? "Inactive" : "Active", link.externalDisplayName].filter(Boolean).join(" · ")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {otherLinks.length ? (
+        <section className="ad-section">
+          <header className="ad-section-head">
+            <p className="ad-kicker">Other systems</p>
+            <h3>Additional exact links</h3>
+          </header>
+          <ul className="ad-card-list">
+            {otherLinks.map((link) => (
+              <li key={link.id} className="ad-person-card">
+                <strong>{link.system || "External system"}</strong>
+                <p className="muted">
+                  {[link.isActive === false ? "Inactive" : "Linked", link.externalDisplayName].filter(Boolean).join(" · ")}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="ad-section">
         <header className="ad-section-head">
           <p className="ad-kicker">Identity</p>
