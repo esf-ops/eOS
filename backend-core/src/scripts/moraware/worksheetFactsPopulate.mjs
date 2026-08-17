@@ -106,7 +106,10 @@ async function main() {
     liveWrite: true,
     allowLivePopulation: true,
     outerOwnerToken: outerOwnerToken || null,
-    lockedBy: "worksheet-facts-populate-cli"
+    lockedBy: "worksheet-facts-populate-cli",
+    // Live ongoing populate uses reconcile so legitimate CURRENT growth is allowed.
+    // Dry-run still uses foundation absolute controls separately.
+    controlMode: "reconcile"
   });
 
   console.log(JSON.stringify({

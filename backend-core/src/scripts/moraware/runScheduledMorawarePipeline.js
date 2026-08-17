@@ -642,11 +642,15 @@ async function main() {
       account_rollups_upserted: rebuild.account_rollups_upserted,
       query_page_count: rebuild.query_page_count,
       compute_ms: rebuild.compute_ms,
+      worksheet_fact_count: rebuild.worksheet_facts?.worksheet_fact_count ?? null,
+      worksheet_sqft: rebuild.worksheet_facts?.sqft ?? null,
+      worksheet_status: rebuild.worksheet_facts?.status ?? null,
       auto_resumed: autoResumeResult.autoResumed,
       total_duration_ms: Date.now() - pipelineStartedAt,
       verification: {
         prepared_status: rebuild.status,
-        note: "After deploy, confirm GET /api/admin/moraware/health shows prepared_facts.freshness=fresh and Sales Dashboard sync banner is recent."
+        worksheet_facts_status: rebuild.worksheet_facts?.status ?? null,
+        note: "After deploy, confirm GET /api/admin/moraware/health shows prepared_facts.freshness=fresh, worksheet prepared facts present for the current FULL epoch, and Sales Dashboard sync banner is recent."
       }
     });
   } catch (e) {

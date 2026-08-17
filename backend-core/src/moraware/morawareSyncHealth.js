@@ -382,6 +382,38 @@ export async function loadPreparedFactsSummary(db, organizationId, latestComplet
   else if (factsGroupId === completeGroupId) freshness = "fresh";
   else freshness = "stale";
 
+  let worksheetFactsSummary = {
+    table_count: null,
+    source_import_group_id: factsGroupId || null,
+    rows_for_source_group: null,
+    updated_at: null
+  };
+  try {
+    if (factsGroupId) {
+      const { data: wsLatest, error: wsLatestErr } = await db
+        .from("sales_moraware_job_worksheet_facts")
+        .select("updated_at")
+        .eq("organization_id", organizationId)
+        .eq("import_group_id", factsGroupId)
+        .order("updated_at", { ascending: false })
+        .limit(1);
+      if (!wsLatestErr) {
+        worksheetFactsSummary.updated_at = wsLatest?.[0]?.updated_at ?? null;
+      }
+      const { count: wsCount, error: wsCountErr } = await db
+        .from("sales_moraware_job_worksheet_facts")
+        .select("*", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("import_group_id", factsGroupId);
+      if (!wsCountErr) {
+        worksheetFactsSummary.rows_for_source_group = wsCount ?? 0;
+        worksheetFactsSummary.table_count = wsCount ?? 0;
+      }
+    }
+  } catch (e) {
+    worksheetFactsSummary.error = String(e?.message || e);
+  }
+
   return {
     sales_moraware_job_facts: {
       table_count: jobFactsCount.ok ? jobFactsCount.count : null,
@@ -393,11 +425,12 @@ export async function loadPreparedFactsSummary(db, organizationId, latestComplet
       table_count: rollupsCount.ok ? rollupsCount.count : null,
       source_import_group_id: factsGroupId
     },
+    sales_moraware_job_worksheet_facts: worksheetFactsSummary,
     latest_complete_import_group_id: completeGroupId || null,
     freshness,
     rebuild_endpoint: "POST /api/sales/admin/rebuild-moraware-facts",
     internal_rebuild_endpoint: "POST /api/internal/moraware-sync/rebuild-prepared-facts",
-    rebuild_requires: "admin role + sales head access (admin route); cron secret (internal route)"
+    rebuild_requires: "admin role + sales head access (admin route); cron secret + moraware_population owner (internal route; includes worksheet facts)"
   };
 }
 

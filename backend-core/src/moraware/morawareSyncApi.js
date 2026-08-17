@@ -638,7 +638,7 @@ export function attachMorawareSyncRoutes(app, deps) {
       return;
     }
     try {
-      const { rebuildSalesMorawarePreparedFacts } = await import("../sales/salesHead.js");
+      const { rebuildMorawarePreparedFactsBundle } = await import("./rebuildMorawarePreparedFactsBundle.mjs");
       const db = getSupabase();
       const ownerToken = pickMorawarePopulationLockOwnerFromRequest(req);
       const populationGuard = await guardLiveMorawarePopulationWrite(db, { ownerToken, requireCensusScope: false });
@@ -650,7 +650,11 @@ export function attachMorawareSyncRoutes(app, deps) {
         });
         return;
       }
-      const result = await rebuildSalesMorawarePreparedFacts(db, organizationId);
+      const result = await rebuildMorawarePreparedFactsBundle(db, organizationId, {
+        ownerToken,
+        includeWorksheetFacts: true,
+        worksheetControlMode: "reconcile"
+      });
       try {
         await logAction({
           user: null,
@@ -665,7 +669,10 @@ export function attachMorawareSyncRoutes(app, deps) {
             facts_upserted: result.facts_upserted ?? null,
             account_rollups_upserted: result.account_rollups_upserted ?? null,
             query_page_count: result.query_page_count ?? null,
-            compute_ms: result.compute_ms ?? null
+            compute_ms: result.compute_ms ?? null,
+            worksheet_fact_count: result.worksheet_facts?.worksheet_fact_count ?? null,
+            worksheet_sqft: result.worksheet_facts?.sqft ?? null,
+            worksheet_status: result.worksheet_facts?.status ?? result.status ?? null
           },
           req
         });

@@ -26,7 +26,7 @@
     "eos:test:sales-qb-sync-ops": "node quickbooks-sdk-connector/sales-sync/salesQbSyncOps.test.mjs",
     "eos:test:qb-finance-foundation": "node backend-core/src/finance/quickbooksFinanceFoundation/quickbooksFinanceFoundation.test.mjs && node quickbooks-sdk-connector/finance-sync/financeQbSyncOps.test.mjs",
     "eos:test:finance-read": "node backend-core/src/finance/financeRead/freshness.test.mjs && node backend-core/src/finance/financeRead/financeRead.test.mjs && npm test --prefix app-finance",
-    "eos:test:moraware-worksheet-scope": "node backend-core/src/moraware/morawareJobWorksheetScope.test.mjs && node backend-core/src/moraware/morawareJobWorksheetPreparedFacts.test.mjs",
+    "eos:test:moraware-worksheet-scope": "node backend-core/src/moraware/morawareJobWorksheetScope.test.mjs && node backend-core/src/moraware/morawareJobWorksheetPreparedFacts.test.mjs && node backend-core/src/moraware/rebuildMorawarePreparedFactsBundle.test.mjs",
     "eos:test:moraware-current-population": "node backend-core/src/moraware/morawareCurrentPopulation.test.mjs && node backend-core/src/moraware/morawarePopulationLock.test.mjs",
     "eos:moraware:worksheet-facts:dry-run": "node backend-core/src/scripts/moraware/worksheetFactsDryRun.mjs",
     "eos:moraware:worksheet-facts:populate": "node backend-core/src/scripts/moraware/worksheetFactsPopulate.mjs",

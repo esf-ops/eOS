@@ -382,11 +382,50 @@ export function buildBroihahnWorksheetValidation(facts, jobs) {
 
 /**
  * Control gates for a future live write. Fail closed.
+ *
+ * controlMode:
+ *   - "foundation" — exact verified Foundation totals (dry-run / known-epoch checks)
+ *   - "reconcile" — internal consistency for ongoing pipeline refresh (allows legitimate growth)
  */
-export function evaluateWorksheetFactsLiveWriteGates(summary) {
+export function evaluateWorksheetFactsLiveWriteGates(summary, options = {}) {
+  const mode = options.controlMode === "reconcile" ? "reconcile" : "foundation";
   const failures = [];
   if (!summary?.population_available) failures.push("population_unavailable");
   if (!summary?.import_group_id) failures.push("epoch_missing");
+
+  if (mode === "reconcile") {
+    if (!Number.isFinite(Number(summary?.current_job_count)) || summary.current_job_count < 0) {
+      failures.push("job_count_invalid");
+    }
+    if (!Number.isFinite(Number(summary?.worksheet_fact_count)) || summary.worksheet_fact_count < 0) {
+      failures.push("worksheet_count_invalid");
+    }
+    if (summary?.unique_key_count !== summary?.worksheet_fact_count) {
+      failures.push(
+        `unique_key_mismatch: unique ${summary?.unique_key_count} !== facts ${summary?.worksheet_fact_count}`
+      );
+    }
+    if ((summary?.duplicate_key_count ?? 1) !== 0) {
+      failures.push(`duplicate_keys: ${summary?.duplicate_key_count}`);
+    }
+    if (summary?.sqft == null || !Number.isFinite(Number(summary.sqft))) {
+      failures.push("sqft_invalid");
+    }
+    if (
+      summary?.jobs_with_worksheet != null &&
+      summary?.jobs_without_worksheet != null &&
+      summary.jobs_with_worksheet + summary.jobs_without_worksheet !== summary.current_job_count
+    ) {
+      failures.push("jobs_with_without_worksheet_do_not_sum_to_current_jobs");
+    }
+    return {
+      ok: failures.length === 0,
+      failures,
+      can_live_write: failures.length === 0,
+      control_mode: mode
+    };
+  }
+
   if (summary?.current_job_count !== VERIFIED_FOUNDATION_2026_JOB_COUNT) {
     failures.push(
       `job_count_mismatch: got ${summary?.current_job_count}, expected ${VERIFIED_FOUNDATION_2026_JOB_COUNT}`
@@ -419,7 +458,8 @@ export function evaluateWorksheetFactsLiveWriteGates(summary) {
   return {
     ok: failures.length === 0,
     failures,
-    can_live_write: failures.length === 0
+    can_live_write: failures.length === 0,
+    control_mode: mode
   };
 }
 
@@ -443,7 +483,8 @@ export async function writeMorawareJobWorksheetPreparedFacts(supabase, buildResu
   }
 
   const summary = options.summary;
-  const gates = evaluateWorksheetFactsLiveWriteGates(summary);
+  const controlMode = options.controlMode === "reconcile" ? "reconcile" : "foundation";
+  const gates = evaluateWorksheetFactsLiveWriteGates(summary, { controlMode });
   if (!gates.ok) {
     return {
       ok: false,
@@ -805,16 +846,22 @@ export async function dryRunMorawareJobWorksheetPreparedFacts(supabase, organiza
 
 /**
  * Independent post-write verification against sales_moraware_job_worksheet_facts.
+ * controlMode "foundation" uses verified totals; "reconcile" checks consistency only.
  */
-export async function verifyPersistedWorksheetFacts(supabase, organizationId, { importGroupId } = {}) {
+export async function verifyPersistedWorksheetFacts(
+  supabase,
+  organizationId,
+  { importGroupId, controlMode = "foundation" } = {}
+) {
   const org = String(organizationId || "").trim();
   const epoch = String(importGroupId || "").trim();
+  const mode = controlMode === "reconcile" ? "reconcile" : "foundation";
   const { count, error } = await supabase
     .from(WORKSHEET_FACTS_TABLE)
     .select("*", { count: "exact", head: true })
     .eq("organization_id", org)
     .eq("import_group_id", epoch);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: error.message, control_mode: mode };
 
   // Page rows for distinct-key / sqft / broihahn checks (10k is fine).
   const rows = [];
@@ -831,7 +878,7 @@ export async function verifyPersistedWorksheetFacts(supabase, organizationId, { 
       .order("source_job_id", { ascending: true })
       .order("source_form_id", { ascending: true })
       .range(from, from + pageSize - 1);
-    if (pageErr) return { ok: false, error: pageErr.message };
+    if (pageErr) return { ok: false, error: pageErr.message, control_mode: mode };
     if (!data?.length) break;
     rows.push(...data);
     if (data.length < pageSize) break;
@@ -846,10 +893,40 @@ export async function verifyPersistedWorksheetFacts(supabase, organizationId, { 
   const sqft = sumWorksheetScopeSqft(rows);
   const unexpectedEpoch = rows.filter((r) => String(r.import_group_id) !== epoch).length;
   const placeholders = buildPlaceholderColorSummary(rows);
+  const rowCount = count ?? rows.length;
+
+  const base = {
+    control_mode: mode,
+    row_count: rowCount,
+    unique_key_count: keys.unique_key_count,
+    duplicate_key_count: keys.duplicate_key_count,
+    sqft,
+    jobs_with_facts: jobIds.size,
+    unexpected_epoch_rows: unexpectedEpoch,
+    broihahn: {
+      rows: broRows.length,
+      jobs: broJobs.size,
+      sqft: sumWorksheetScopeSqft(broRows)
+    },
+    placeholders
+  };
+
+  if (mode === "reconcile") {
+    return {
+      ...base,
+      ok:
+        rowCount === keys.unique_key_count &&
+        keys.duplicate_key_count === 0 &&
+        unexpectedEpoch === 0 &&
+        Number.isFinite(Number(sqft)),
+      jobs_without_worksheet: null
+    };
+  }
 
   return {
+    ...base,
     ok:
-      (count ?? rows.length) === VERIFIED_FOUNDATION_2026_WORKSHEET_FORM_COUNT &&
+      rowCount === VERIFIED_FOUNDATION_2026_WORKSHEET_FORM_COUNT &&
       keys.unique_key_count === VERIFIED_FOUNDATION_2026_WORKSHEET_FORM_COUNT &&
       keys.duplicate_key_count === 0 &&
       sqft === VERIFIED_FOUNDATION_2026_WORKSHEET_SQFT &&
@@ -858,19 +935,7 @@ export async function verifyPersistedWorksheetFacts(supabase, organizationId, { 
       broRows.length === VERIFIED_BROIHAHN_2026_WORKSHEET_COUNT &&
       broJobs.size === VERIFIED_BROIHAHN_2026_JOB_COUNT &&
       sumWorksheetScopeSqft(broRows) === VERIFIED_BROIHAHN_2026_WORKSHEET_SQFT,
-    row_count: count ?? rows.length,
-    unique_key_count: keys.unique_key_count,
-    duplicate_key_count: keys.duplicate_key_count,
-    sqft,
-    jobs_with_facts: jobIds.size,
-    jobs_without_worksheet: VERIFIED_FOUNDATION_2026_JOB_COUNT - jobIds.size,
-    unexpected_epoch_rows: unexpectedEpoch,
-    broihahn: {
-      rows: broRows.length,
-      jobs: broJobs.size,
-      sqft: sumWorksheetScopeSqft(broRows)
-    },
-    placeholders
+    jobs_without_worksheet: VERIFIED_FOUNDATION_2026_JOB_COUNT - jobIds.size
   };
 }
 
@@ -977,26 +1042,32 @@ export async function populateMorawareJobWorksheetPreparedFacts(supabase, organi
 
     // CRITICAL: CURRENT population resolve + brain load happen AFTER lock ownership.
     eventLog.push({ step: "resolve_and_build_after_lock" });
+    const controlMode = options.controlMode === "foundation" ? "foundation" : "reconcile";
     const reconciled = await buildAndReconcileMorawareJobWorksheetPreparedFacts(supabase, org, {
       pageSize: options.pageSize || 100,
       checkProductionTable: options.checkProductionTable !== false,
       updatedAt: options.updatedAt || new Date().toISOString()
     });
+    const gates = evaluateWorksheetFactsLiveWriteGates(reconciled.summary, { controlMode });
+    const foundationMismatches =
+      controlMode === "foundation" ? reconciled.mismatches || [] : [];
     eventLog.push({
       step: "reconciled",
       ok: reconciled.ok,
+      control_mode: controlMode,
       import_group_id: reconciled.summary?.import_group_id || null,
       worksheet_fact_count: reconciled.summary?.worksheet_fact_count ?? null
     });
 
-    if (!reconciled.ok || reconciled.mismatches?.length || !reconciled.gates?.ok) {
+    if (!gates.ok || foundationMismatches.length) {
       result = {
         ok: false,
         status: "control_gates_failed",
         lock_mode: acquiredStandalone ? "standalone" : "outer",
+        control_mode: controlMode,
         event_log: eventLog,
-        mismatches: reconciled.mismatches,
-        gates: reconciled.gates,
+        mismatches: foundationMismatches,
+        gates,
         summary: reconciled.summary,
         writes: { inserts: 0, updates: 0, deletes: 0, upserts: 0 },
         compute_ms: Date.now() - startedAt
@@ -1022,6 +1093,7 @@ export async function populateMorawareJobWorksheetPreparedFacts(supabase, organi
       allowLivePopulation: true,
       ownerToken,
       summary: reconciled.summary,
+      controlMode,
       chunkSize: options.chunkSize || 100,
       ownershipLostFlag: () => ownershipLost || heartbeat.hasFailed()
     });
@@ -1039,6 +1111,7 @@ export async function populateMorawareJobWorksheetPreparedFacts(supabase, organi
         code: writeResult.code,
         error: writeResult.error,
         lock_mode: acquiredStandalone ? "standalone" : "outer",
+        control_mode: controlMode,
         event_log: eventLog,
         writes: writeResult.writes,
         renewals: writeResult.renewals,
@@ -1052,7 +1125,8 @@ export async function populateMorawareJobWorksheetPreparedFacts(supabase, organi
     let verification = null;
     if (options.verifyAfterWrite !== false) {
       verification = await verifyPersistedWorksheetFacts(supabase, org, {
-        importGroupId: reconciled.summary.import_group_id
+        importGroupId: reconciled.summary.import_group_id,
+        controlMode
       });
       eventLog.push({ step: "post_write_verify", ok: verification.ok, row_count: verification.row_count });
     }
@@ -1061,6 +1135,7 @@ export async function populateMorawareJobWorksheetPreparedFacts(supabase, organi
       ok: verification ? Boolean(verification.ok) : true,
       status: verification && !verification.ok ? "verify_failed" : "populated",
       lock_mode: acquiredStandalone ? "standalone" : "outer",
+      control_mode: controlMode,
       released_standalone_lock: false,
       event_log: eventLog,
       writes: writeResult.writes,
