@@ -21,7 +21,7 @@
  * Live requires explicit gates (same philosophy as worksheet populate).
  */
 
-import { CENSUS_SCOPE_FULL, CENSUS_SCOPE_INCREMENTAL } from "./morawareCurrentPopulation.mjs";
+import { CENSUS_SCOPE_FULL, CENSUS_SCOPE_INCREMENTAL, canAdvanceFullCensusWatermark } from "./morawareCurrentPopulation.mjs";
 import {
   acquireMorawarePopulationLock,
   assertMorawarePopulationLockOwner,
@@ -52,6 +52,9 @@ import {
 } from "./morawareIncrementalStrategy.mjs";
 import { planIncrementalWorksheetFactRefresh } from "./morawareJobWorksheetPreparedFacts.mjs";
 
+/** Conservative first-production live ceiling (distinct from dry-run hard cap of 100). */
+export const MORAWARE_INCREMENTAL_LIVE_CANDIDATE_CEILING_DEFAULT = 150;
+
 function pickStr(v) {
   return v != null ? String(v).trim() : "";
 }
@@ -65,6 +68,180 @@ function pickRollingBatchSize(options = {}) {
     options.rollingBatchSize ?? options.rolling_batch_size ?? process.env.MORAWARE_INCREMENTAL_ROLLING_BATCH_SIZE,
     MORAWARE_INCREMENTAL_DEFAULT_ROLLING_BATCH_SIZE
   );
+}
+
+export function resolveLiveIncrementalCandidateCeiling(raw, fallback = MORAWARE_INCREMENTAL_LIVE_CANDIDATE_CEILING_DEFAULT) {
+  const n = Number(raw);
+  if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+  const envN = Number(process.env.MORAWARE_INCREMENTAL_LIVE_CANDIDATE_CEILING);
+  if (Number.isFinite(envN) && envN >= 1) return Math.floor(envN);
+  return fallback;
+}
+
+/**
+ * Normalize listCandidateRows return value.
+ * Incomplete complete-discovery objects fail closed.
+ * Plain arrays (tests / fixtures) are treated as already-complete list rows.
+ */
+export function normalizeIncrementalListDiscoveryResult(listed) {
+  if (Array.isArray(listed)) {
+    return {
+      ok: true,
+      status: "COMPLETE_LIST_DISCOVERY",
+      pagination_complete: true,
+      list_rows: listed,
+      termination_reason: "injected_array_assumed_complete"
+    };
+  }
+  if (!listed || typeof listed !== "object") {
+    return {
+      ok: false,
+      status: "CREATION_DISCOVERY_INCOMPLETE",
+      pagination_complete: false,
+      list_rows: [],
+      termination_reason: "list_result_missing"
+    };
+  }
+  if (
+    listed.ok === false ||
+    listed.pagination_complete === false ||
+    listed.status === "CREATION_DISCOVERY_INCOMPLETE"
+  ) {
+    return {
+      ok: false,
+      status: listed.status || "CREATION_DISCOVERY_INCOMPLETE",
+      pagination_complete: false,
+      list_rows: [],
+      termination_reason: listed.termination_reason || "incomplete_list_discovery",
+      diagnostics: listed.diagnostics || null
+    };
+  }
+  const rows = listed.list_rows || listed.candidate_rows || [];
+  return {
+    ok: true,
+    status: listed.status || "COMPLETE_LIST_DISCOVERY",
+    pagination_complete: listed.pagination_complete !== false,
+    list_rows: Array.isArray(rows) ? rows : [],
+    termination_reason: listed.termination_reason || null,
+    diagnostics: listed.diagnostics || null
+  };
+}
+
+/**
+ * Post-write validation before cursor advance.
+ */
+export async function validateIncrementalLiveWriteResult({
+  population,
+  parentFullEpochId,
+  discovery,
+  exactJobs,
+  brain,
+  prepared,
+  worksheet,
+  ownerToken,
+  assertOwner = null
+} = {}) {
+  if (typeof assertOwner === "function") {
+    const owned = await assertOwner({ token: ownerToken, renew: true });
+    if (!owned?.ok) {
+      return { ok: false, status: owned?.code || "population_lock_lost", reason: "lock_lost_at_validation" };
+    }
+  }
+
+  const parent = pickStr(parentFullEpochId);
+  const currentParent = pickStr(population?.full_census_import_group_id);
+  if (!parent || parent !== currentParent) {
+    return {
+      ok: false,
+      status: "parent_full_epoch_mismatch",
+      parent_full_epoch_id: parent,
+      resolved_full_epoch_id: currentParent || null
+    };
+  }
+
+  const expected = (discovery?.candidates || []).map((c) => String(c.source_job_id));
+  const exactOkJobs = Array.isArray(exactJobs?.jobs) ? exactJobs.jobs : [];
+  const failures = Array.isArray(exactJobs?.failures) ? exactJobs.failures : [];
+  if (failures.length) {
+    return { ok: false, status: "exact_fetch_had_failures", failures };
+  }
+  if (exactOkJobs.length !== expected.length) {
+    return {
+      ok: false,
+      status: "exact_job_count_mismatch",
+      expected: expected.length,
+      fetched: exactOkJobs.length
+    };
+  }
+
+  const writtenIds = new Set(
+    (brain?.source_job_ids_written || exactOkJobs.map((j) => String(j.source_job_id))).map(String)
+  );
+  for (const id of expected) {
+    if (!writtenIds.has(id) && Number(brain?.jobs_written) !== expected.length) {
+      // Prefer explicit id list; fall back to count match when adapters only return count.
+      if (!brain?.source_job_ids_written) {
+        if (Number(brain?.jobs_written) !== expected.length) {
+          return { ok: false, status: "brain_candidate_write_incomplete", missing: id };
+        }
+      } else {
+        return { ok: false, status: "brain_candidate_write_incomplete", missing: id };
+      }
+    }
+  }
+  if (Array.isArray(brain?.source_job_ids_written)) {
+    for (const id of expected) {
+      if (!writtenIds.has(id)) {
+        return { ok: false, status: "brain_candidate_write_incomplete", missing: id };
+      }
+    }
+  }
+
+  if (!prepared?.ok) return { ok: false, status: "prepared_facts_not_ok" };
+  if (!worksheet?.ok) return { ok: false, status: "worksheet_facts_not_ok" };
+
+  const cross =
+    worksheet?.cross_job_removals ||
+    worksheet?.writes?.cross_job_removals ||
+    worksheet?.projected?.cross_job_worksheet_removals ||
+    [];
+  if (Array.isArray(cross) && cross.length > 0) {
+    return { ok: false, status: "cross_job_worksheet_deletion", cross_job_removals: cross };
+  }
+
+  const currentRemovals =
+    brain?.jobs_removed_from_current ??
+    brain?.current_removals ??
+    discovery?.classification?.jobs_removed_from_current?.length ??
+    0;
+  if (Number(currentRemovals) > 0) {
+    return { ok: false, status: "incremental_current_removals_nonzero", current_removals: currentRemovals };
+  }
+
+  if (brain?.creates_new_full_epoch === true || brain?.watermark_advanced === true) {
+    return { ok: false, status: "full_epoch_or_watermark_mutated" };
+  }
+
+  const watermarkForbidden = canAdvanceFullCensusWatermark({
+    census_scope: CENSUS_SCOPE_INCREMENTAL,
+    complete: true,
+    uncapped: true,
+    importSucceeded: true
+  });
+  if (watermarkForbidden !== false) {
+    return { ok: false, status: "watermark_gate_misconfigured" };
+  }
+
+  return {
+    ok: true,
+    status: "validated",
+    parent_full_epoch_id: parent,
+    current_removals: 0,
+    cross_job_removals: 0,
+    full_epoch_unchanged: true,
+    full_watermark_advanced: false,
+    account_rollups: prepared?.account_rollups || "deferred_remaining_optimization"
+  };
 }
 
 /**
@@ -431,7 +608,25 @@ export async function runMorawareIncrementalPopulation(options = {}) {
       }
     }
 
-    const listRows = await deps.listCandidateRows({ window, dryRun: false });
+    const listedRaw = await deps.listCandidateRows({ window, dryRun: false });
+    const listed = normalizeIncrementalListDiscoveryResult(listedRaw);
+    if (!listed.ok || listed.pagination_complete !== true) {
+      return finishFailure(listed.status || "CREATION_DISCOVERY_INCOMPLETE", {
+        list_discovery: listed,
+        exact_fetch_started: false,
+        mutation_started: false
+      });
+    }
+    const listRows = listed.list_rows;
+    eventLog.push({
+      step: "list_discovery_complete",
+      status: listed.status,
+      rows: listRows.length,
+      termination_reason: listed.termination_reason,
+      rows_scanned: listed.diagnostics?.rows_scanned ?? null,
+      pages_fetched: listed.diagnostics?.pages_fetched ?? null
+    });
+
     const currentIds =
       population.current_source_job_ids ||
       (await deps.listCurrentSourceJobIds?.(organizationId)) ||
@@ -456,6 +651,25 @@ export async function runMorawareIncrementalPopulation(options = {}) {
       additions: discovery.classification.new_job_additions.length
     });
 
+    const liveCeiling = resolveLiveIncrementalCandidateCeiling(
+      options.liveCandidateCeiling ?? options.live_candidate_ceiling
+    );
+    if (discovery.candidates.length > liveCeiling) {
+      return finishFailure("LIVE_CANDIDATE_CEILING_EXCEEDED", {
+        discovery,
+        live_candidate_ceiling: liveCeiling,
+        deduplicated_candidates: discovery.candidates.length,
+        exact_fetch_started: false,
+        mutation_started: false,
+        note: "Deduplicated candidates exceed configured live safety ceiling. No silent truncation."
+      });
+    }
+    eventLog.push({
+      step: "live_candidate_ceiling_ok",
+      candidates: discovery.candidates.length,
+      ceiling: liveCeiling
+    });
+
     const exactJobs = await deps.fetchExactJobs({
       sourceJobIds: discovery.candidates.map((c) => c.source_job_id),
       ownerToken
@@ -470,6 +684,16 @@ export async function runMorawareIncrementalPopulation(options = {}) {
       discovery,
       runId: options.runId || null
     });
+
+    // Ownership check before Brain mutation
+    {
+      const owned = await assertOwner({ token: ownerToken, renew: true });
+      if (!owned?.ok) {
+        stages.lockOwned = false;
+        return finishFailure(owned.code || "population_lock_lost");
+      }
+    }
+    eventLog.push({ step: "assert_owner_before_brain" });
 
     const brain = await deps.importBrain({
       jobs: exactJobs.jobs,
@@ -509,16 +733,29 @@ export async function runMorawareIncrementalPopulation(options = {}) {
     const validation = deps.validate
       ? await deps.validate({
           population,
+          parentFullEpochId,
           discovery,
           exactJobs,
           brain,
           prepared,
           worksheet,
-          ownerToken
+          ownerToken,
+          assertOwner: ({ token, renew }) => assertOwner({ token, renew })
         })
-      : { ok: true };
+      : await validateIncrementalLiveWriteResult({
+          population,
+          parentFullEpochId,
+          discovery,
+          exactJobs,
+          brain,
+          prepared,
+          worksheet,
+          ownerToken,
+          assertOwner: ({ token, renew }) => assertOwner({ token, renew })
+        });
     if (!validation?.ok) return finishFailure(validation?.status || "validation_failed", { validation });
     stages.validationOk = true;
+    eventLog.push({ step: "validation_ok", validation_status: validation.status || "validated" });
 
     const advanceDecision = shouldAdvanceIncrementalCursor({
       ...stages,

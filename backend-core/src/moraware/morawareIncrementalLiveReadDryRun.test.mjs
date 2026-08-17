@@ -333,7 +333,8 @@ console.log("\n=== incremental live-read dry-run adapter ===\n");
   assert.match(liveSrc, /MORAWARE_INCREMENTAL_LIVE/);
   assert.match(liveSrc, /--allow-live-incremental/);
   assert.match(liveSrc, /I_UNDERSTAND_PRODUCTION_WRITES/);
-  assert.match(liveSrc, /live_incremental_not_executed_in_this_task|REFUSED/);
+  assert.match(liveSrc, /evaluateMorawareIncrementalLiveGates|formatLiveIncrementalGateRefusal|REFUSED/);
+  assert.match(liveSrc, /runMorawareIncrementalPopulation/);
   console.log("ok 25: live WRITE command remains separately gated");
 }
 

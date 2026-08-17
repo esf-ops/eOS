@@ -334,23 +334,33 @@ console.log("\n=== moraware incremental population ===\n");
         return [{ id: "100", creationDate: "2026-08-16T12:00:00.000Z" }];
       },
       listCurrentSourceJobIds: async () => ["100", "200", "300"],
-      fetchExactJobs: async ({ ownerToken }) => {
+      fetchExactJobs: async ({ ownerToken, sourceJobIds }) => {
         events.push("exact");
         assert.equal(ownerToken, owner);
-        return { ok: true, jobs: [worksheetJob("100", ["f1"])] };
+        return {
+          ok: true,
+          jobs: (sourceJobIds || ["100"]).map((id) => worksheetJob(id, [`f-${id}`])),
+          failures: []
+        };
       },
-      importBrain: async ({ ownerToken, metadata, censusScope }) => {
+      importBrain: async ({ ownerToken, metadata, censusScope, jobs }) => {
         events.push("brain");
         assert.equal(ownerToken, owner);
         assert.equal(censusScope, CENSUS_SCOPE_INCREMENTAL);
         assert.equal(metadata.parent_full_epoch_id, EPOCH_A);
-        return { ok: true, jobs_written: 1 };
+        return {
+          ok: true,
+          jobs_written: jobs.length,
+          source_job_ids_written: jobs.map((j) => String(j.source_job_id)),
+          creates_new_full_epoch: false,
+          watermark_advanced: false
+        };
       },
-      refreshPreparedJobFacts: async ({ ownerToken, importGroupId }) => {
+      refreshPreparedJobFacts: async ({ ownerToken, importGroupId, jobs }) => {
         events.push("prepared");
         assert.equal(ownerToken, owner);
         assert.equal(importGroupId, EPOCH_A);
-        return { ok: true, facts_upserted: 1 };
+        return { ok: true, facts_upserted: jobs?.length || 1, account_rollups: "deferred_remaining_optimization" };
       },
       refreshWorksheetFacts: async ({ ownerToken, importGroupId }) => {
         events.push("worksheet");
@@ -430,10 +440,24 @@ console.log("\n=== moraware incremental population ===\n");
       assertOwner: async () => ({ ok: true }),
       resolvePopulation: async () => basePopulation(),
       listCandidateRows: async () => [{ id: "100", creationDate: "2026-08-16T12:00:00.000Z" }],
-      listCurrentSourceJobIds: async () => ["100", "200", "300"],
-      fetchExactJobs: async () => ({ ok: true, jobs: [worksheetJob("100", ["f1"])] }),
-      importBrain: async () => ({ ok: true, jobs_written: 1 }),
-      refreshPreparedJobFacts: async () => ({ ok: true, facts_upserted: 1 }),
+      listCurrentSourceJobIds: async () => ["100"],
+      fetchExactJobs: async ({ sourceJobIds }) => ({
+        ok: true,
+        jobs: (sourceJobIds || ["100"]).map((id) => worksheetJob(id, [`f-${id}`])),
+        failures: []
+      }),
+      importBrain: async ({ jobs }) => ({
+        ok: true,
+        jobs_written: jobs.length,
+        source_job_ids_written: jobs.map((j) => String(j.source_job_id)),
+        creates_new_full_epoch: false,
+        watermark_advanced: false
+      }),
+      refreshPreparedJobFacts: async ({ jobs }) => ({
+        ok: true,
+        facts_upserted: jobs?.length || 1,
+        account_rollups: "deferred_remaining_optimization"
+      }),
       refreshWorksheetFacts: async () => ({ ok: true, writes: { upserts: 1, deletes: 0 } })
     }
   });
@@ -465,13 +489,25 @@ console.log("\n=== moraware incremental population ===\n");
       fetchExactJobs: async () =>
         failStep === "fetchExactJobs"
           ? { ok: false, status: "exact_boom" }
-          : { ok: true, jobs: [worksheetJob("100", ["f1"])] },
-      importBrain: async () =>
-        failStep === "importBrain" ? { ok: false, status: "brain_boom" } : { ok: true },
+          : { ok: true, jobs: [worksheetJob("100", ["f1"])], failures: [] },
+      importBrain: async ({ jobs }) =>
+        failStep === "importBrain"
+          ? { ok: false, status: "brain_boom" }
+          : {
+              ok: true,
+              jobs_written: jobs?.length || 1,
+              source_job_ids_written: (jobs || [{ source_job_id: "100" }]).map((j) => String(j.source_job_id)),
+              creates_new_full_epoch: false,
+              watermark_advanced: false
+            },
       refreshPreparedJobFacts: async () =>
-        failStep === "refreshPreparedJobFacts" ? { ok: false, status: "prep_boom" } : { ok: true },
+        failStep === "refreshPreparedJobFacts"
+          ? { ok: false, status: "prep_boom" }
+          : { ok: true, facts_upserted: 1, account_rollups: "deferred_remaining_optimization" },
       refreshWorksheetFacts: async () =>
-        failStep === "refreshWorksheetFacts" ? { ok: false, status: "ws_boom" } : { ok: true }
+        failStep === "refreshWorksheetFacts"
+          ? { ok: false, status: "ws_boom" }
+          : { ok: true, writes: { upserts: 1, deletes: 0 } }
     };
     const result = await runMorawareIncrementalPopulation({
       dryRun: false,
@@ -756,10 +792,21 @@ console.log("\n=== hybrid rolling refresh ===\n");
         listCurrentSourceJobIds: async () => pop.current_source_job_ids,
         fetchExactJobs: async ({ sourceJobIds }) => ({
           ok: true,
-          jobs: sourceJobIds.map((id) => worksheetJob(id, [`f-${id}`]))
+          jobs: sourceJobIds.map((id) => worksheetJob(id, [`f-${id}`])),
+          failures: []
         }),
-        importBrain: async () => ({ ok: true, jobs_written: 2 }),
-        refreshPreparedJobFacts: async () => ({ ok: true, facts_upserted: 2 }),
+        importBrain: async ({ jobs }) => ({
+          ok: true,
+          jobs_written: jobs.length,
+          source_job_ids_written: jobs.map((j) => String(j.source_job_id)),
+          creates_new_full_epoch: false,
+          watermark_advanced: false
+        }),
+        refreshPreparedJobFacts: async ({ jobs }) => ({
+          ok: true,
+          facts_upserted: jobs.length,
+          account_rollups: "deferred_remaining_optimization"
+        }),
         refreshWorksheetFacts: async () => ({ ok: true, writes: { upserts: 2, deletes: 0 } })
       }
     });
