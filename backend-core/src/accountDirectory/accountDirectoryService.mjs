@@ -345,18 +345,33 @@ export function createAccountDirectoryService(deps) {
   }
 
   /**
-   * Load org accounts + related rows once, enrich in memory.
-   * Avoids N+1 contact/location/link lookups per list row.
+   * Search / missing-contact / missing-location need contacts, locations, or aliases
+   * across the org before pagination. Default list pages do not.
+   */
+  function requiresFullSupportIndex({ search, missingContact, missingLocation }) {
+    if (String(search || "").trim()) return true;
+    if (parseBoolQuery(missingContact) === true) return true;
+    if (parseBoolQuery(missingLocation) === true) return true;
+    return false;
+  }
+
+  async function listAccountsScoped(organizationId, { statusIn, includeArchived }) {
+    const listed = await store.listAccounts(organizationId, {
+      statusIn,
+      includeArchived,
+      search: null,
+      limit: 5000,
+      offset: 0
+    });
+    return listed.items || [];
+  }
+
+  /**
+   * Full org support index — used for search, missing-contact/location filters, and summary cards.
    */
   async function buildDirectoryIndex(organizationId, { statusIn, includeArchived }) {
-    const [{ items: accounts }, contacts, locations, aliases, links] = await Promise.all([
-      store.listAccounts(organizationId, {
-        statusIn,
-        includeArchived,
-        search: null,
-        limit: 5000,
-        offset: 0
-      }),
+    const [accounts, contacts, locations, aliases, links] = await Promise.all([
+      listAccountsScoped(organizationId, { statusIn, includeArchived }),
       store.listContactsForOrganization(organizationId),
       store.listLocationsForOrganization(organizationId),
       store.listAliasesForOrganization(organizationId),
@@ -384,6 +399,97 @@ export function createAccountDirectoryService(deps) {
     });
   }
 
+  /**
+   * Light index: accounts + active QuickBooks links only (no org-wide contacts/locations/aliases).
+   * Enough for status/linked/qbEnrichment/sort before paging.
+   */
+  async function buildLightDirectoryIndex(organizationId, { statusIn, includeArchived }) {
+    const [accounts, qbLinks] = await Promise.all([
+      listAccountsScoped(organizationId, { statusIn, includeArchived }),
+      typeof store.listAllActiveExternalLinks === "function"
+        ? store.listAllActiveExternalLinks(organizationId, "quickbooks_desktop")
+        : Promise.resolve([])
+    ]);
+    const linksByAccount = groupByAccountId(qbLinks);
+    return accounts.map((account) => {
+      const lk = linksByAccount.get(account.id) || [];
+      return {
+        account,
+        contacts: [],
+        locations: [],
+        aliases: [],
+        links: lk,
+        item: toListItem(account, [], [], lk, [])
+      };
+    });
+  }
+
+  async function hydrateDirectoryRowsForAccountIds(organizationId, rows) {
+    const accountIds = rows.map((r) => r.account.id);
+    if (!accountIds.length) return rows;
+
+    const listContacts =
+      typeof store.listContactsForAccountIds === "function"
+        ? store.listContactsForAccountIds.bind(store)
+        : async (orgId, ids) => {
+            const all = await store.listContactsForOrganization(orgId);
+            const idSet = new Set(ids.map(String));
+            return all.filter((c) => idSet.has(String(c.accountId)));
+          };
+    const listLocations =
+      typeof store.listLocationsForAccountIds === "function"
+        ? store.listLocationsForAccountIds.bind(store)
+        : async (orgId, ids) => {
+            const all = await store.listLocationsForOrganization(orgId);
+            const idSet = new Set(ids.map(String));
+            return all.filter((l) => idSet.has(String(l.accountId)));
+          };
+    const listAliases =
+      typeof store.listAliasesForAccountIds === "function"
+        ? store.listAliasesForAccountIds.bind(store)
+        : async (orgId, ids) => {
+            const all = await store.listAliasesForOrganization(orgId);
+            const idSet = new Set(ids.map(String));
+            return all.filter((a) => idSet.has(String(a.accountId)));
+          };
+    const listLinks =
+      typeof store.listExternalLinksForAccountIds === "function"
+        ? store.listExternalLinksForAccountIds.bind(store)
+        : async (orgId, ids) => {
+            const all = await store.listExternalLinksForOrganization(orgId);
+            const idSet = new Set(ids.map(String));
+            return all.filter((l) => idSet.has(String(l.accountId)));
+          };
+
+    const [contacts, locations, aliases, links] = await Promise.all([
+      listContacts(organizationId, accountIds),
+      listLocations(organizationId, accountIds),
+      listAliases(organizationId, accountIds),
+      listLinks(organizationId, accountIds)
+    ]);
+
+    const contactsByAccount = groupByAccountId(contacts);
+    const locationsByAccount = groupByAccountId(locations);
+    const aliasesByAccount = groupByAccountId(aliases);
+    const linksByAccount = groupByAccountId(links);
+
+    return rows.map((row) => {
+      const id = row.account.id;
+      const c = contactsByAccount.get(id) || [];
+      const l = locationsByAccount.get(id) || [];
+      const al = aliasesByAccount.get(id) || [];
+      const lk = linksByAccount.get(id) || [];
+      return {
+        account: row.account,
+        contacts: c,
+        locations: l,
+        aliases: al,
+        links: lk,
+        item: toListItem(row.account, c, l, lk, al)
+      };
+    });
+  }
+
   function filterDirectoryRows(rows, { search, linked, missingContact, missingLocation }) {
     const linkedFilter = parseBoolQuery(linked);
     const missingContactFilter = parseBoolQuery(missingContact);
@@ -398,6 +504,37 @@ export function createAccountDirectoryService(deps) {
       if (missingLocationFilter === true && row.item.hasPrimaryLocation) return false;
       return true;
     });
+  }
+
+  async function applyListFinancialIntel(organizationId, filteredRows, workingItems, intelligence) {
+    /** @type {Map<string, object>} */
+    let intelByAccount = new Map();
+    let working = workingItems;
+    if (typeof deps.getSupabase !== "function") {
+      return { working, intelByAccount };
+    }
+    try {
+      const loaded = await loadListFinancialIntel(deps.getSupabase(), {
+        organizationId,
+        directoryRows: filteredRows
+      });
+      intelByAccount = loaded.byAccount || new Map();
+      const intelFilter = String(intelligence || "").trim();
+      if (!loaded.unavailable && intelFilter) {
+        working = working.filter((item) => {
+          const snap = intelByAccount.get(item.id);
+          if (intelFilter === "overdue") return snap?.overdue === true;
+          if (intelFilter === "collection") {
+            return ["watch", "attention", "priority"].includes(String(snap?.collectionAttention || ""));
+          }
+          if (intelFilter === "financially_active") return snap?.financiallyActive === true;
+          return true;
+        });
+      }
+    } catch {
+      intelByAccount = new Map();
+    }
+    return { working, intelByAccount };
   }
 
   async function hydrateDetail(organizationId, account, { includeAudit, role }) {
@@ -501,9 +638,20 @@ export function createAccountDirectoryService(deps) {
       const limit = Math.min(Math.max(Number(pageSize) || DEFAULT_PAGE, 1), MAX_PAGE);
       const pageNum = Math.max(Number(page) || 1, 1);
       const scope = resolveTabScope(tab, status);
-      const rows = await buildDirectoryIndex(organizationId, scope);
+      const searchTrimmed = search ? String(search).trim() : null;
+      const useFullSupport = requiresFullSupportIndex({
+        search: searchTrimmed,
+        missingContact,
+        missingLocation
+      });
+      const intelFilter = String(intelligence || "").trim();
+
+      let rows = useFullSupport
+        ? await buildDirectoryIndex(organizationId, scope)
+        : await buildLightDirectoryIndex(organizationId, scope);
+
       const filtered = filterDirectoryRows(rows, {
-        search: search ? String(search).trim() : null,
+        search: searchTrimmed,
         linked,
         missingContact,
         missingLocation
@@ -513,34 +661,58 @@ export function createAccountDirectoryService(deps) {
         sort
       );
       const suggestionByAccount = await loadSuggestionIndex(organizationId);
-      const enriched = sortedItems.map((item) => attachEnrichment(item, suggestionByAccount));
+      let enriched = sortedItems.map((item) => attachEnrichment(item, suggestionByAccount));
       let working = filterByQbEnrichment(enriched, qbEnrichment);
+
       /** @type {Map<string, object>} */
       let intelByAccount = new Map();
-      if (typeof deps.getSupabase === "function") {
+      const rowById = new Map(filtered.map((r) => [r.account.id, r]));
+
+      // Intelligence filters need financial snapshots before pagination.
+      if (intelFilter) {
+        const filteredWorkingRows = working
+          .map((item) => rowById.get(item.id))
+          .filter(Boolean);
+        const applied = await applyListFinancialIntel(
+          organizationId,
+          filteredWorkingRows,
+          working,
+          intelFilter
+        );
+        working = applied.working;
+        intelByAccount = applied.intelByAccount;
+      }
+
+      const paged = paginationResult(working, pageNum, limit);
+
+      if (!useFullSupport && paged.items.length) {
+        const pageRows = paged.items.map((item) => rowById.get(item.id)).filter(Boolean);
+        const hydrated = await hydrateDirectoryRowsForAccountIds(organizationId, pageRows);
+        const hydratedById = new Map(hydrated.map((r) => [r.account.id, r]));
+        paged.items = paged.items.map((item) => {
+          const row = hydratedById.get(item.id);
+          if (!row) return item;
+          return attachEnrichment(row.item, suggestionByAccount);
+        });
+        // Refresh row map links for page-scoped financial enrichment.
+        for (const row of hydrated) {
+          rowById.set(row.account.id, row);
+        }
+      }
+
+      if (!intelFilter && typeof deps.getSupabase === "function" && paged.items.length) {
+        const pageRows = paged.items.map((item) => rowById.get(item.id)).filter(Boolean);
         try {
           const loaded = await loadListFinancialIntel(deps.getSupabase(), {
             organizationId,
-            directoryRows: filtered
+            directoryRows: pageRows
           });
           intelByAccount = loaded.byAccount || new Map();
-          const intelFilter = String(intelligence || "").trim();
-          if (!loaded.unavailable && intelFilter) {
-            working = working.filter((item) => {
-              const snap = intelByAccount.get(item.id);
-              if (intelFilter === "overdue") return snap?.overdue === true;
-              if (intelFilter === "collection") {
-                return ["watch", "attention", "priority"].includes(String(snap?.collectionAttention || ""));
-              }
-              if (intelFilter === "financially_active") return snap?.financiallyActive === true;
-              return true;
-            });
-          }
         } catch {
           intelByAccount = new Map();
         }
       }
-      const paged = paginationResult(working, pageNum, limit);
+
       return {
         ...paged,
         items: paged.items.map((item) => ({

@@ -793,6 +793,257 @@ async function main() {
     assert.equal(exclusiveNativeReview.total, summary.needsReview);
   }
 
+  // Phase 0B — page-scoped support entity fetches (architecture)
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const service = createAccountDirectoryService({ store });
+    const ORG_B = "00000000-0000-4000-8000-0000000000b0";
+    const ACTOR_B = "00000000-0000-4000-8000-0000000000b9";
+
+    /** @type {{ contacts: string[][], locations: string[][], aliases: string[][], links: string[][] }} */
+    const scoped = { contacts: [], locations: [], aliases: [], links: [] };
+    /** @type {{ contacts: number, locations: number, aliases: number, links: number }} */
+    const orgWide = { contacts: 0, locations: 0, aliases: 0, links: 0 };
+
+    const origContactsOrg = store.listContactsForOrganization.bind(store);
+    const origLocationsOrg = store.listLocationsForOrganization.bind(store);
+    const origAliasesOrg = store.listAliasesForOrganization.bind(store);
+    const origLinksOrg = store.listExternalLinksForOrganization.bind(store);
+    const origContactsIds = store.listContactsForAccountIds.bind(store);
+    const origLocationsIds = store.listLocationsForAccountIds.bind(store);
+    const origAliasesIds = store.listAliasesForAccountIds.bind(store);
+    const origLinksIds = store.listExternalLinksForAccountIds.bind(store);
+
+    store.listContactsForOrganization = async (organizationId) => {
+      orgWide.contacts += 1;
+      return origContactsOrg(organizationId);
+    };
+    store.listLocationsForOrganization = async (organizationId) => {
+      orgWide.locations += 1;
+      return origLocationsOrg(organizationId);
+    };
+    store.listAliasesForOrganization = async (organizationId) => {
+      orgWide.aliases += 1;
+      return origAliasesOrg(organizationId);
+    };
+    store.listExternalLinksForOrganization = async (organizationId) => {
+      orgWide.links += 1;
+      return origLinksOrg(organizationId);
+    };
+    store.listContactsForAccountIds = async (organizationId, accountIds) => {
+      scoped.contacts.push([...(accountIds || [])].map(String).sort());
+      return origContactsIds(organizationId, accountIds);
+    };
+    store.listLocationsForAccountIds = async (organizationId, accountIds) => {
+      scoped.locations.push([...(accountIds || [])].map(String).sort());
+      return origLocationsIds(organizationId, accountIds);
+    };
+    store.listAliasesForAccountIds = async (organizationId, accountIds) => {
+      scoped.aliases.push([...(accountIds || [])].map(String).sort());
+      return origAliasesIds(organizationId, accountIds);
+    };
+    store.listExternalLinksForAccountIds = async (organizationId, accountIds) => {
+      scoped.links.push([...(accountIds || [])].map(String).sort());
+      return origLinksIds(organizationId, accountIds);
+    };
+
+    const createdIds = [];
+    for (let i = 0; i < 60; i += 1) {
+      const acct = await service.createAccount({
+        organizationId: ORG_B,
+        role: "admin",
+        actorUserId: ACTOR_B,
+        payload: {
+          displayName: `Phase0B Account ${String(i).padStart(2, "0")}`,
+          primaryContactName: `Contact ${i}`,
+          primaryEmail: `c${i}@example.com`,
+          city: `City${i}`,
+          state: "WI"
+        }
+      });
+      createdIds.push(acct.id);
+      await service.addAlias({
+        organizationId: ORG_B,
+        role: "admin",
+        actorUserId: ACTOR_B,
+        accountId: acct.id,
+        payload: { alias: `Alias ${i}` }
+      });
+    }
+
+    await service.linkQuickBooks({
+      organizationId: ORG_B,
+      role: "admin",
+      actorUserId: ACTOR_B,
+      accountId: createdIds[0],
+      payload: { externalId: "QB-0B-1", externalDisplayName: "Phase0B Account 00" }
+    });
+
+    orgWide.contacts = 0;
+    orgWide.locations = 0;
+    orgWide.aliases = 0;
+    orgWide.links = 0;
+    scoped.contacts.length = 0;
+    scoped.locations.length = 0;
+    scoped.aliases.length = 0;
+    scoped.links.length = 0;
+
+    const page = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "name_asc"
+    });
+
+    assert.equal(page.pageSize, 50);
+    assert.equal(page.items.length, 50);
+    assert.equal(page.total, 60);
+    assert.equal(orgWide.contacts, 0, "default page must not load org-wide contacts");
+    assert.equal(orgWide.locations, 0, "default page must not load org-wide locations");
+    assert.equal(orgWide.aliases, 0, "default page must not load org-wide aliases");
+    assert.equal(orgWide.links, 0, "default page must not load org-wide external links");
+    assert.equal(scoped.contacts.length, 1);
+    assert.equal(scoped.locations.length, 1);
+    assert.equal(scoped.aliases.length, 1);
+    assert.equal(scoped.links.length, 1);
+    assert.equal(scoped.contacts[0].length, 50);
+    assert.equal(scoped.locations[0].length, 50);
+    assert.equal(scoped.aliases[0].length, 50);
+    assert.equal(scoped.links[0].length, 50);
+    const pageIdSet = new Set(page.items.map((i) => i.id));
+    for (const id of scoped.contacts[0]) {
+      assert.ok(pageIdSet.has(id), "contact fetch scoped to page account ids");
+    }
+    assert.ok(page.items[0].primaryContact, "hydrated primary contact on page row");
+    assert.ok(page.items[0].city, "hydrated city on page row");
+    assert.equal(page.items[0].hasAliases, true);
+
+    // Search still hits contact/location/alias dimensions via full index
+    orgWide.contacts = 0;
+    const searchHit = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      search: "Contact 42",
+      page: 1,
+      pageSize: 50
+    });
+    assert.ok(orgWide.contacts >= 1, "search uses org-wide contacts");
+    assert.equal(searchHit.total, 1);
+    assert.equal(searchHit.items[0].id, createdIds[42]);
+    assert.equal(searchHit.items[0].primaryContact, "Contact 42");
+
+    const linkedOnly = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      linked: "true",
+      page: 1,
+      pageSize: 50
+    });
+    assert.equal(linkedOnly.total, 1);
+    assert.equal(linkedOnly.items[0].id, createdIds[0]);
+    assert.equal(linkedOnly.items[0].quickbooksLinked, true);
+
+    const statusActive = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50
+    });
+    assert.equal(statusActive.total, 60);
+
+    const otherOrg = await service.listAccounts({
+      organizationId: ORG,
+      role: "admin",
+      search: "Phase0B Account",
+      page: 1,
+      pageSize: 50
+    });
+    assert.equal(otherOrg.total, 0);
+
+    /** @type {string[]} */
+    let arRootIds = [];
+    function makeIntelSupabase() {
+      return {
+        from(table) {
+          const state = { table };
+          const api = {
+            select() {
+              return api;
+            },
+            eq() {
+              return api;
+            },
+            in(col, vals) {
+              if (state.table === "sales_quickbooks_open_ar_current" && col === "qb_root_customer_list_id") {
+                arRootIds = [...(vals || [])].map(String);
+              }
+              return api;
+            },
+            order() {
+              return api;
+            },
+            limit() {
+              return api;
+            },
+            range() {
+              return Promise.resolve({ data: [], error: null });
+            },
+            maybeSingle() {
+              if (state.table === "sales_quickbooks_sync_runs") {
+                return Promise.resolve({
+                  data: {
+                    id: "sync-1",
+                    status: "success",
+                    completed_at: "2026-08-01T00:00:00.000Z",
+                    coverage_end_date: "2026-08-01"
+                  },
+                  error: null
+                });
+              }
+              return Promise.resolve({ data: null, error: null });
+            }
+          };
+          return api;
+        }
+      };
+    }
+
+    const serviceIntel = createAccountDirectoryService({
+      store,
+      getSupabase: makeIntelSupabase,
+      loadSuggestionIndex: async () => new Map()
+    });
+
+    arRootIds = [];
+    const pageIntel = await serviceIntel.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "name_asc"
+    });
+    assert.equal(pageIntel.items.length, 50);
+    assert.ok(pageIntel.items.some((i) => i.id === createdIds[0]));
+    assert.deepEqual(arRootIds, ["QB-0B-1"]);
+
+    // With intelligence filter, financial path still runs (roots from filtered set).
+    arRootIds = [];
+    await serviceIntel.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      intelligence: "financially_active",
+      page: 1,
+      pageSize: 50,
+      sort: "name_asc"
+    });
+    assert.deepEqual(arRootIds, ["QB-0B-1"]);
+  }
+
   console.log("accountDirectoryService.test.mjs: ok");
 }
 

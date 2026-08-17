@@ -42,6 +42,96 @@ function ymd(d) {
   return d ? d.toISOString().slice(0, 10) : null;
 }
 
+export const EMPTY_MORAWARE_JOB_STATS = Object.freeze({
+  jobCount: 0,
+  jobs2026: 0,
+  earliestJobDate: null,
+  latestJobDate: null
+});
+
+function jobActivityDate(job) {
+  return (
+    toDate(job?.createdAtSource ?? job?.created_at_source) ||
+    toDate(job?.installAtSource ?? job?.install_at_source) ||
+    toDate(job?.completedAtSource ?? job?.completed_at_source)
+  );
+}
+
+/**
+ * Shared job-stat derivation so array input and compact stats cannot drift.
+ * @param {Array<{ createdAtSource?: string, installAtSource?: string, completedAtSource?: string }>|null|undefined} jobs
+ */
+export function deriveMorawareJobStatsFromJobs(jobs) {
+  const list = Array.isArray(jobs) ? jobs : [];
+  const dates = list.map((j) => jobActivityDate(j)).filter(Boolean).sort((a, b) => a - b);
+  let jobs2026 = 0;
+  for (const d of dates) {
+    if (d.getUTCFullYear() === 2026) jobs2026 += 1;
+  }
+  return {
+    jobCount: list.length,
+    jobs2026,
+    earliestJobDate: ymd(dates[0]),
+    latestJobDate: ymd(dates[dates.length - 1])
+  };
+}
+
+/**
+ * Resolve ranker job fields from precomputed stats or legacy jobs arrays.
+ * @param {{ jobStats?: object|null, jobs?: Array|null|undefined }} input
+ */
+export function resolveMorawareJobStats(input = {}) {
+  if (input.jobStats && typeof input.jobStats === "object") {
+    return {
+      jobCount: Number(input.jobStats.jobCount) || 0,
+      jobs2026: Number(input.jobStats.jobs2026) || 0,
+      earliestJobDate: input.jobStats.earliestJobDate ?? null,
+      latestJobDate: input.jobStats.latestJobDate ?? null
+    };
+  }
+  return deriveMorawareJobStatsFromJobs(input.jobs);
+}
+
+/**
+ * Fold one Brain job row into a mutable accumulator (reconciliation load path).
+ * @param {Map<string, { jobCount: number, jobs2026: number, earliestMs: number|null, latestMs: number|null }>} map
+ * @param {string} sourceAccountId
+ * @param {object} jobRow brain_moraware_jobs-shaped row (snake or camel date fields)
+ */
+export function accumulateMorawareJobStats(map, sourceAccountId, jobRow) {
+  const id = String(sourceAccountId || "");
+  if (!id) return;
+  let acc = map.get(id);
+  if (!acc) {
+    acc = { jobCount: 0, jobs2026: 0, earliestMs: null, latestMs: null };
+    map.set(id, acc);
+  }
+  acc.jobCount += 1;
+  const d = jobActivityDate(jobRow);
+  if (!d) return;
+  const ms = d.getTime();
+  if (d.getUTCFullYear() === 2026) acc.jobs2026 += 1;
+  if (acc.earliestMs == null || ms < acc.earliestMs) acc.earliestMs = ms;
+  if (acc.latestMs == null || ms > acc.latestMs) acc.latestMs = ms;
+}
+
+/**
+ * Finalize mutable accumulators into frozen-shape jobStats maps.
+ * @param {Map<string, { jobCount: number, jobs2026: number, earliestMs: number|null, latestMs: number|null }>} accMap
+ */
+export function finalizeMorawareJobStatsMap(accMap) {
+  const out = new Map();
+  for (const [id, acc] of accMap || []) {
+    out.set(id, {
+      jobCount: acc.jobCount,
+      jobs2026: acc.jobs2026,
+      earliestJobDate: acc.earliestMs != null ? ymd(new Date(acc.earliestMs)) : null,
+      latestJobDate: acc.latestMs != null ? ymd(new Date(acc.latestMs)) : null
+    });
+  }
+  return out;
+}
+
 function indexDirectoryAccountsById(accounts) {
   const map = new Map();
   for (const a of accounts || []) {
@@ -97,6 +187,7 @@ export function collectFuzzyNameAlternatives(nn, ads, options = {}) {
  * @param {{
  *   morawareAccount: { sourceAccountId: string, accountName: string },
  *   jobs?: Array<{ createdAtSource?: string, installAtSource?: string, completedAtSource?: string }>,
+ *   jobStats?: { jobCount?: number, jobs2026?: number, earliestJobDate?: string|null, latestJobDate?: string|null }|null,
  *   directoryAccounts: Array<{ id: string, displayName: string, legalName?: string|null }>,
  *   qbLinksByAccountId?: Map<string, { listId?: string, displayName?: string|null }>,
  *   nameIndex?: Map<string, string[]>,
@@ -107,15 +198,7 @@ export function collectFuzzyNameAlternatives(nn, ads, options = {}) {
 export function rankMorawareDirectoryCandidates(input) {
   const mwName = input.morawareAccount?.accountName || "";
   const mwId = String(input.morawareAccount?.sourceAccountId || "");
-  const jobs = input.jobs || [];
-  const dates = jobs
-    .map((j) => toDate(j.createdAtSource) || toDate(j.installAtSource) || toDate(j.completedAtSource))
-    .filter(Boolean)
-    .sort((a, b) => a - b);
-  const jobs2026 = jobs.filter((j) => {
-    const d = toDate(j.createdAtSource) || toDate(j.installAtSource) || toDate(j.completedAtSource);
-    return d && d.getUTCFullYear() === 2026;
-  }).length;
+  const jobFields = resolveMorawareJobStats(input);
 
   const internal = isInternalMorawareAccountName(mwName);
   const nn = normalizeMorawareAccountKey(mwName);
@@ -129,13 +212,6 @@ export function rankMorawareDirectoryCandidates(input) {
   const uniqueExact = [...new Set(exactIds)];
   const evidence = [];
   const contradictions = [];
-
-  const jobFields = {
-    jobCount: jobs.length,
-    jobs2026,
-    earliestJobDate: ymd(dates[0]),
-    latestJobDate: ymd(dates[dates.length - 1])
-  };
 
   if (internal) {
     return {
@@ -269,7 +345,7 @@ export function rankMorawareDirectoryCandidates(input) {
     morawareName: mwName,
     ...jobFields,
     classification: "UNMATCHED",
-    reason: jobs.length <= 1 ? "insufficient_or_retail_volume" : "no_deterministic_directory_match",
+    reason: jobFields.jobCount <= 1 ? "insufficient_or_retail_volume" : "no_deterministic_directory_match",
     internalBucket: false,
     proposedAccountId: null,
     proposedAccountName: null,

@@ -6,9 +6,13 @@ import { createAccountDirectoryMemoryStore } from "./accountDirectoryMemoryStore
 import { createAccountDirectoryService, AccountDirectoryError } from "./accountDirectoryService.mjs";
 import { listMorawareReconciliationQueue } from "./accountDirectoryMorawareReconciliation.mjs";
 import {
+  accumulateMorawareJobStats,
   buildDirectoryNameIndex,
   buildQbDisplayNameIndex,
-  rankMorawareDirectoryCandidates
+  deriveMorawareJobStatsFromJobs,
+  finalizeMorawareJobStatsMap,
+  rankMorawareDirectoryCandidates,
+  resolveMorawareJobStats
 } from "./accountDirectoryMorawareMatching.mjs";
 import {
   ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
@@ -58,6 +62,7 @@ function svc(opts = {}) {
 function emptyQueueMaps() {
   return {
     jobsByMorawareId: new Map(),
+    jobStatsByMorawareId: new Map(),
     qbLinksByAccountId: new Map(),
     morawareLinksBySourceId: new Map(),
     morawareLinksByAccountId: new Map()
@@ -1387,6 +1392,125 @@ async function main() {
       );
       console.log("ok: Phase0A-1 queue order/classification/pagination/summary regression");
     }
+  }
+
+  // ── Phase 0A-2: compact jobStats ≡ legacy jobs arrays ──
+  {
+    const jobs = [
+      { createdAtSource: "2026-01-10", installAtSource: null, completedAtSource: null },
+      { createdAtSource: "2025-12-01", installAtSource: null, completedAtSource: null },
+      { createdAtSource: null, installAtSource: "2026-06-15", completedAtSource: null },
+      { createdAtSource: null, installAtSource: null, completedAtSource: "2024-01-01" }
+    ];
+    const fromJobs = deriveMorawareJobStatsFromJobs(jobs);
+    const fromStats = resolveMorawareJobStats({ jobStats: fromJobs });
+    assert.deepEqual(fromStats, fromJobs);
+    const rankedJobs = rankMorawareDirectoryCandidates({
+      morawareAccount: { sourceAccountId: "77", accountName: "No Match Co" },
+      jobs,
+      directoryAccounts: [{ id: "ad-x", displayName: "Other Name", legalName: null }],
+      qbLinksByAccountId: new Map()
+    });
+    const rankedStats = rankMorawareDirectoryCandidates({
+      morawareAccount: { sourceAccountId: "77", accountName: "No Match Co" },
+      jobStats: fromJobs,
+      directoryAccounts: [{ id: "ad-x", displayName: "Other Name", legalName: null }],
+      qbLinksByAccountId: new Map()
+    });
+    assert.equal(rankedJobs.jobCount, rankedStats.jobCount);
+    assert.equal(rankedJobs.jobs2026, rankedStats.jobs2026);
+    assert.equal(rankedJobs.earliestJobDate, rankedStats.earliestJobDate);
+    assert.equal(rankedJobs.latestJobDate, rankedStats.latestJobDate);
+    assert.equal(rankedJobs.classification, rankedStats.classification);
+    assert.equal(rankedJobs.reason, rankedStats.reason);
+    assert.equal(rankedJobs.reason, "no_deterministic_directory_match");
+    assert.equal(rankedJobs.jobCount, 4);
+    assert.equal(rankedJobs.jobs2026, 2);
+    assert.equal(rankedJobs.earliestJobDate, "2024-01-01");
+    assert.equal(rankedJobs.latestJobDate, "2026-06-15");
+
+    const volumeJobs = rankMorawareDirectoryCandidates({
+      morawareAccount: { sourceAccountId: "78", accountName: "Tiny Volume Co" },
+      jobs: [{ createdAtSource: "2026-02-01" }],
+      directoryAccounts: [],
+      qbLinksByAccountId: new Map()
+    });
+    const volumeStats = rankMorawareDirectoryCandidates({
+      morawareAccount: { sourceAccountId: "78", accountName: "Tiny Volume Co" },
+      jobStats: deriveMorawareJobStatsFromJobs([{ createdAtSource: "2026-02-01" }]),
+      directoryAccounts: [],
+      qbLinksByAccountId: new Map()
+    });
+    assert.equal(volumeJobs.reason, "insufficient_or_retail_volume");
+    assert.equal(volumeStats.reason, "insufficient_or_retail_volume");
+    assert.equal(volumeJobs.jobCount, volumeStats.jobCount);
+
+    const zeroJobs = rankMorawareDirectoryCandidates({
+      morawareAccount: { sourceAccountId: "79", accountName: "Zero Jobs Co" },
+      jobs: [],
+      directoryAccounts: [],
+      qbLinksByAccountId: new Map()
+    });
+    const zeroStats = rankMorawareDirectoryCandidates({
+      morawareAccount: { sourceAccountId: "79", accountName: "Zero Jobs Co" },
+      jobStats: deriveMorawareJobStatsFromJobs([]),
+      directoryAccounts: [],
+      qbLinksByAccountId: new Map()
+    });
+    assert.equal(zeroJobs.jobCount, 0);
+    assert.equal(zeroStats.jobCount, 0);
+    assert.equal(zeroJobs.jobs2026, 0);
+    assert.equal(zeroJobs.earliestJobDate, null);
+    assert.equal(zeroStats.earliestJobDate, null);
+    assert.equal(zeroJobs.reason, zeroStats.reason);
+
+    // accumulate path matches array derivation (canonical-day semantics exercised in filter before accumulate)
+    const acc = new Map();
+    for (const j of [
+      {
+        source_account_id: "635",
+        created_at_source: "2026-03-01",
+        install_at_source: null,
+        completed_at_source: null,
+        last_seen_at: "2026-08-15"
+      },
+      {
+        source_account_id: "635",
+        created_at_source: "2026-04-01",
+        install_at_source: null,
+        completed_at_source: null,
+        last_seen_at: "2026-08-15"
+      },
+      {
+        source_account_id: "635",
+        created_at_source: "2026-01-01",
+        install_at_source: null,
+        completed_at_source: null,
+        last_seen_at: "2026-08-14"
+      },
+      {
+        source_account_id: "999",
+        created_at_source: "2026-05-01",
+        install_at_source: null,
+        completed_at_source: null,
+        last_seen_at: "2026-08-15"
+      }
+    ]) {
+      const id = String(j.source_account_id);
+      const accountSet = new Set(["635"]);
+      const canonicalDay = "2026-08-15";
+      if (!accountSet.has(id)) continue;
+      if (String(j.last_seen_at || "").slice(0, 10) !== canonicalDay) continue;
+      accumulateMorawareJobStats(acc, id, j);
+    }
+    const finalized = finalizeMorawareJobStatsMap(acc);
+    const expected = deriveMorawareJobStatsFromJobs([
+      { createdAtSource: "2026-03-01" },
+      { createdAtSource: "2026-04-01" }
+    ]);
+    assert.deepEqual(finalized.get("635"), expected);
+    assert.equal(finalized.has("999"), false);
+    console.log("ok: Phase0A-2 jobStats ≡ jobs; stale/wrong-account excluded; volume/zero unchanged");
   }
 
   const apiSrc = readFileSync(fileURLToPath(new URL("./accountDirectoryApi.js", import.meta.url)), "utf8");

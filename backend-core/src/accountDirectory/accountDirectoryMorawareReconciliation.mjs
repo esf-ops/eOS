@@ -10,8 +10,11 @@ import {
   isInternalMorawareAccountName
 } from "./accountDirectoryMorawareLinkage.mjs";
 import {
+  accumulateMorawareJobStats,
   buildDirectoryNameIndex,
-  rankMorawareDirectoryCandidates
+  finalizeMorawareJobStatsMap,
+  rankMorawareDirectoryCandidates,
+  resolveMorawareJobStats
 } from "./accountDirectoryMorawareMatching.mjs";
 import { ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM } from "./accountDirectoryQuickbooksLinkage.mjs";
 
@@ -56,15 +59,21 @@ export async function listMorawareReconciliationQueue(params) {
   const dataset = params.dataset || (await loadLiveDataset(params.supabase, params.store, organizationId));
   const nameIndex = buildDirectoryNameIndex(dataset.directoryAccounts);
   const qbLinksByAccountId = dataset.qbLinksByAccountId;
-  const jobsByMw = dataset.jobsByMorawareId;
+  const jobsByMw = dataset.jobsByMorawareId || new Map();
+  const jobStatsByMw = dataset.jobStatsByMorawareId || new Map();
   const mwLinksById = dataset.morawareLinksBySourceId;
   const mwLinksByAd = dataset.morawareLinksByAccountId;
 
   const items = [];
   for (const mw of dataset.morawareAccounts) {
+    const jobs = jobsByMw.get(mw.sourceAccountId);
+    const jobStats =
+      jobStatsByMw.get(mw.sourceAccountId) ||
+      (jobs ? resolveMorawareJobStats({ jobs }) : null);
     const ranked = rankMorawareDirectoryCandidates({
       morawareAccount: mw,
-      jobs: jobsByMw.get(mw.sourceAccountId) || [],
+      jobStats: jobStats || undefined,
+      jobs: jobStats ? undefined : jobs || [],
       directoryAccounts: dataset.directoryAccounts,
       qbLinksByAccountId,
       nameIndex
@@ -192,18 +201,16 @@ async function loadLiveDataset(supabase, store, organizationId) {
       accountName: a.account_name || ""
     }));
   const accountSet = new Set(accounts.map((a) => a.sourceAccountId));
-  const jobsByMorawareId = new Map();
+  const jobStatsAcc = new Map();
   for (const j of mwJobs) {
     const id = String(j.source_account_id || "");
     if (!accountSet.has(id)) continue;
     if (canonicalDay && String(j.last_seen_at || "").slice(0, 10) !== canonicalDay) continue;
-    if (!jobsByMorawareId.has(id)) jobsByMorawareId.set(id, []);
-    jobsByMorawareId.get(id).push({
-      createdAtSource: j.created_at_source,
-      installAtSource: j.install_at_source,
-      completedAtSource: j.completed_at_source
-    });
+    accumulateMorawareJobStats(jobStatsAcc, id, j);
   }
+  const jobStatsByMorawareId = finalizeMorawareJobStatsMap(jobStatsAcc);
+  // Drop full job payload; ranking uses compact stats only.
+  mwJobs.length = 0;
 
   const listed = await store.listAccounts(organizationId, { includeArchived: true, limit: 5000, offset: 0 });
   const directoryAccounts = (listed.items || []).map((a) => ({
@@ -231,7 +238,8 @@ async function loadLiveDataset(supabase, store, organizationId) {
 
   return {
     morawareAccounts: accounts,
-    jobsByMorawareId,
+    jobStatsByMorawareId,
+    jobsByMorawareId: new Map(),
     directoryAccounts,
     qbLinksByAccountId,
     morawareLinksBySourceId,
@@ -242,6 +250,7 @@ async function loadLiveDataset(supabase, store, organizationId) {
 function emptyDataset() {
   return {
     morawareAccounts: [],
+    jobStatsByMorawareId: new Map(),
     jobsByMorawareId: new Map(),
     directoryAccounts: [],
     qbLinksByAccountId: new Map(),

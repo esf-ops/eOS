@@ -186,6 +186,14 @@ export function createAccountDirectoryMemoryStore() {
         .map(clone);
     },
 
+    async listContactsForAccountIds(organizationId, accountIds) {
+      const idSet = new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+      if (!idSet.size) return [];
+      return Array.from(contacts.values())
+        .filter((c) => c.organizationId === organizationId && idSet.has(String(c.accountId)))
+        .map(clone);
+    },
+
     async insertLocation(row) {
       const id = row.id || randomUUID();
       const record = {
@@ -249,6 +257,14 @@ export function createAccountDirectoryMemoryStore() {
         .map(clone);
     },
 
+    async listLocationsForAccountIds(organizationId, accountIds) {
+      const idSet = new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+      if (!idSet.size) return [];
+      return Array.from(locations.values())
+        .filter((l) => l.organizationId === organizationId && idSet.has(String(l.accountId)))
+        .map(clone);
+    },
+
     async insertAlias(row) {
       const id = row.id || randomUUID();
       const record = {
@@ -297,6 +313,14 @@ export function createAccountDirectoryMemoryStore() {
     async listAliasesForOrganization(organizationId) {
       return Array.from(aliases.values())
         .filter((a) => a.organizationId === organizationId)
+        .map(clone);
+    },
+
+    async listAliasesForAccountIds(organizationId, accountIds) {
+      const idSet = new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+      if (!idSet.size) return [];
+      return Array.from(aliases.values())
+        .filter((a) => a.organizationId === organizationId && idSet.has(String(a.accountId)))
         .map(clone);
     },
 
@@ -438,6 +462,14 @@ export function createAccountDirectoryMemoryStore() {
     async listExternalLinksForOrganization(organizationId) {
       return Array.from(externalLinks.values())
         .filter((l) => l.organizationId === organizationId)
+        .map(clone);
+    },
+
+    async listExternalLinksForAccountIds(organizationId, accountIds) {
+      const idSet = new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+      if (!idSet.size) return [];
+      return Array.from(externalLinks.values())
+        .filter((l) => l.organizationId === organizationId && idSet.has(String(l.accountId)))
         .map(clone);
     },
 

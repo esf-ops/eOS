@@ -367,6 +367,18 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return (data || []).map(mapContact);
     },
 
+    async listContactsForAccountIds(organizationId, accountIds) {
+      const ids = [...new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!ids.length) return [];
+      const { data, error } = await db()
+        .from("account_directory_contacts")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .in("account_id", ids);
+      if (error) throw dbError(error, "Could not list contacts for accounts.");
+      return (data || []).map(mapContact);
+    },
+
     async insertLocation(row) {
       if (row.isPrimaryAccountLocation && row.isActive !== false) {
         await db()
@@ -474,6 +486,18 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return (data || []).map(mapLocation);
     },
 
+    async listLocationsForAccountIds(organizationId, accountIds) {
+      const ids = [...new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!ids.length) return [];
+      const { data, error } = await db()
+        .from("account_directory_locations")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .in("account_id", ids);
+      if (error) throw dbError(error, "Could not list locations for accounts.");
+      return (data || []).map(mapLocation);
+    },
+
     async insertAlias(row) {
       const { data, error } = await db()
         .from("account_directory_aliases")
@@ -540,6 +564,18 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         .select("*")
         .eq("organization_id", organizationId);
       if (error) throw dbError(error, "Could not list organization aliases.");
+      return (data || []).map(mapAlias);
+    },
+
+    async listAliasesForAccountIds(organizationId, accountIds) {
+      const ids = [...new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!ids.length) return [];
+      const { data, error } = await db()
+        .from("account_directory_aliases")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .in("account_id", ids);
+      if (error) throw dbError(error, "Could not list aliases for accounts.");
       return (data || []).map(mapAlias);
     },
 
@@ -726,6 +762,18 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         .select("*")
         .eq("organization_id", organizationId);
       if (error) throw dbError(error, "Could not list organization external links.");
+      return (data || []).map(mapLink);
+    },
+
+    async listExternalLinksForAccountIds(organizationId, accountIds) {
+      const ids = [...new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!ids.length) return [];
+      const { data, error } = await db()
+        .from("account_directory_external_links")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .in("account_id", ids);
+      if (error) throw dbError(error, "Could not list external links for accounts.");
       return (data || []).map(mapLink);
     },
 
