@@ -110,6 +110,8 @@ export async function runMorawareIncrementalLiveReadDryRun(options = {}) {
   const strategy = describeMorawareIncrementalStrategy();
   const organizationId = pickStr(options.organizationId);
   const now = options.now || new Date();
+  const wallClock =
+    typeof options.clock === "function" ? options.clock : () => new Date();
   const eventLog = [];
   const allowMorawareRead = options.allowMorawareRead === true;
   const rollingBatchSize = resolveRollingBatchSize(
@@ -396,7 +398,8 @@ export async function runMorawareIncrementalLiveReadDryRun(options = {}) {
     window,
     parentFullEpochId,
     rollingBatch: discovery.rolling,
-    successAt: now,
+    // Projected completion wall-clock — not frozen window_end (advanced_to still uses window)
+    successAt: wallClock(),
     jobsRefreshed: exactJobs.length
   });
 

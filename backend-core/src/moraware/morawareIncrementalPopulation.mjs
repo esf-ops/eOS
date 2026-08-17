@@ -288,10 +288,12 @@ export function planMorawareIncrementalPopulation({
   exactJobs = [],
   existingWorksheetRowsByJobId = new Map(),
   now = new Date(),
+  clock = null,
   overlapMs = null,
   rollingBatchSize = null
 } = {}) {
   const strategy = describeMorawareIncrementalStrategy();
+  const wallClock = typeof clock === "function" ? clock : () => new Date();
   if (!population?.available || !population?.full_census_import_group_id) {
     return stageFail("full_census_not_ready", {
       strategy,
@@ -360,6 +362,8 @@ export function planMorawareIncrementalPopulation({
 
   const cursorBefore = summarizeIncrementalCursorHealth(normalizedCursor, { now });
   const wouldAdvance = shouldAdvanceIncrementalCursor({ dryRun: true });
+  // Projected last_success_at uses wall-clock (not frozen window). Dry-run never persists.
+  const projectedSuccessAt = wallClock();
   const cursorAfterIfSuccess = wouldAdvance.advance
     ? summarizeIncrementalCursorHealth(
         buildAdvancedCursorState({
@@ -367,7 +371,7 @@ export function planMorawareIncrementalPopulation({
           window,
           parentFullEpochId,
           rollingBatch: discovery.rolling,
-          successAt: now,
+          successAt: projectedSuccessAt,
           jobsRefreshed: discovery.candidates.length
         }),
         { now }
@@ -432,7 +436,20 @@ export async function runMorawareIncrementalPopulation(options = {}) {
   const liveWrite = options.liveWrite === true;
   const allowLivePopulation = options.allowLivePopulation === true;
   const organizationId = pickStr(options.organizationId);
+  /**
+   * Frozen at orchestration entry — ONLY for source coverage:
+   *   creation window end, incremental_cursor_end, projected advanced_to.
+   * Must not be reused for last_failure_at / last_success_at / last_attempt_at.
+   */
   const now = options.now || new Date();
+  /**
+   * Lifecycle wall-clock (injectable for tests). Used for failure/success event times.
+   * Defaults to real `new Date()` at each call — never the frozen window `now`.
+   */
+  const wallClock =
+    typeof options.clock === "function"
+      ? options.clock
+      : () => new Date();
   const eventLog = [];
   const deps = options.deps || {};
 
@@ -763,12 +780,15 @@ export async function runMorawareIncrementalPopulation(options = {}) {
     });
     let cursorWrite = null;
     if (advanceDecision.advance) {
+      // advanced_to stays window.cursor_end (frozen source coverage).
+      // last_success_at / last_attempt_at use actual completion wall-clock.
+      const successAt = wallClock();
       const nextCursor = buildAdvancedCursorState({
         previousCursor,
         window,
         parentFullEpochId,
         rollingBatch: discovery.rolling,
-        successAt: now,
+        successAt,
         runId: options.runId || null,
         jobsRefreshed: exactJobs.jobs?.length || 0
       });
@@ -776,6 +796,8 @@ export async function runMorawareIncrementalPopulation(options = {}) {
       eventLog.push({
         step: "cursor_advanced",
         advanced_to: nextCursor.advanced_to,
+        window_end: window?.cursor_end || null,
+        last_success_at: nextCursor.last_success_at,
         rolling_after_source_job_id: nextCursor.rolling.after_source_job_id,
         rolling_wrapped: Boolean(discovery.rolling?.wrapped),
         rolling_cycle_count: nextCursor.rolling.cycle_count
@@ -840,27 +862,43 @@ export async function runMorawareIncrementalPopulation(options = {}) {
   async function finishFailure(status, extra = {}) {
     stages.lockOwned = stages.lockOwned && Boolean(ownerToken);
     const decision = shouldAdvanceIncrementalCursor({ ...stages, dryRun: false });
+    // Lifecycle failure time — NOT frozen window `now`.
+    const failureAt = wallClock();
     try {
       if (previousCursor || organizationId) {
         const failed = buildFailedCursorAttemptState({
           previousCursor: previousCursor || {},
           failureReason: status,
-          attemptAt: now
+          attemptAt: failureAt
         });
         await cursorStore.writeCursor(organizationId, failed, { advance: false });
+        eventLog.push({
+          step: "cursor_failure_annotated",
+          last_failure_at: failed.last_failure_at,
+          window_end: window?.cursor_end || null,
+          advanced_to_unchanged: previousCursor?.advanced_to ?? null,
+          rolling_after_unchanged: previousCursor?.rolling?.after_source_job_id ?? null
+        });
       }
     } catch (e) {
       eventLog.push({ step: "cursor_failure_annotate_error", error: String(e?.message || e) });
     }
-    eventLog.push({ step: "failed", status, cursor_advance: decision });
+    eventLog.push({
+      step: "failed",
+      status,
+      failure_at: toIsoOrNullLocal(failureAt),
+      window_end: window?.cursor_end || null,
+      cursor_advance: decision
+    });
     return {
       ok: false,
       status,
       strategy: strategy.strategy,
       census_scope: CENSUS_SCOPE_INCREMENTAL,
       window,
+      failure_at: toIsoOrNullLocal(failureAt),
       cursor_advance: decision,
-      cursor: summarizeIncrementalCursorHealth(previousCursor, { now }),
+      cursor: summarizeIncrementalCursorHealth(previousCursor, { now: failureAt }),
       owner_token_redacted: redactToken(ownerToken),
       lock: {
         name: MORAWARE_POPULATION_LOCK_NAME,
@@ -873,6 +911,13 @@ export async function runMorawareIncrementalPopulation(options = {}) {
       ...extra
     };
   }
+}
+
+function toIsoOrNullLocal(v) {
+  if (v == null || v === "") return null;
+  if (v instanceof Date && Number.isFinite(v.getTime())) return v.toISOString();
+  const ms = Date.parse(String(v));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
 function redactToken(token) {

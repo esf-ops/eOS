@@ -244,6 +244,9 @@ export function shouldAdvanceIncrementalCursor({
 
 /**
  * Advance both creation-window and rolling positions after total success.
+ *
+ * advanced_to = window.cursor_end (frozen source coverage boundary)
+ * last_success_at / last_attempt_at = successAt (actual completion wall-clock)
  */
 export function buildAdvancedCursorState({
   previousCursor,
@@ -287,6 +290,11 @@ export function buildAdvancedCursorState({
   });
 }
 
+/**
+ * Annotate a failed attempt without advancing creation or rolling cursors.
+ *
+ * attemptAt must be actual failure wall-clock — never frozen window_end.
+ */
 export function buildFailedCursorAttemptState({
   previousCursor,
   failureReason,

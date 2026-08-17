@@ -221,15 +221,24 @@ function emptyStageCounts(extra = {}) {
  */
 export async function finalizeMorawareSyncRunFailure(
   supabase,
-  { syncRunId, startedAt, errorMessage } = {}
+  { syncRunId, startedAt, errorMessage, clock = null } = {}
 ) {
   const id = pickStr(syncRunId);
   if (!id || !supabase) {
     return { ok: false, skipped: true, reason: "missing_sync_run_id" };
   }
-  const finishedAt = new Date().toISOString();
+  // Lifecycle wall-clock at failure finalize — never frozen window_end
+  const finishedAt =
+    typeof clock === "function"
+      ? new Date(clock()).toISOString()
+      : new Date().toISOString();
   const startedMs = Date.parse(String(startedAt || ""));
-  const durationMs = Number.isFinite(startedMs) ? Math.max(0, Date.parse(finishedAt) - startedMs) : null;
+  const finishedMs = Date.parse(finishedAt);
+  // duration from actual lifecycle clocks only — never window_end / frozen run now
+  const durationMs =
+    Number.isFinite(startedMs) && Number.isFinite(finishedMs)
+      ? Math.max(0, finishedMs - startedMs)
+      : null;
   const patch = {
     status: "failed",
     finished_at: finishedAt,
@@ -365,13 +374,20 @@ export async function importIncrementalMorawareBrainJobs(
 
     counts.failed_stage = null;
 
+    // Lifecycle completion wall-clock — not frozen incremental window_end
     const finishedAt = new Date().toISOString();
+    const startedMs = Date.parse(String(startedAt || ""));
+    const finishedMs = Date.parse(finishedAt);
+    const durationMs =
+      Number.isFinite(startedMs) && Number.isFinite(finishedMs)
+        ? Math.max(0, finishedMs - startedMs)
+        : null;
     await supabase
       .from("moraware_sync_runs")
       .update({
         status: "success",
         finished_at: finishedAt,
-        duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+        ...(durationMs != null ? { duration_ms: durationMs } : {}),
         row_counts: { jobs: jobRows.length, job_activities: activityRows.length }
       })
       .eq("id", syncRunId);
