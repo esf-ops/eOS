@@ -34,6 +34,7 @@ export function ConnectionsWithIdentity({
   sessionToken,
   canLinkQuickBooks,
   canLinkMoraware,
+  canViewAudit,
   onChanged
 }: {
   links: AccountDetail["externalLinks"];
@@ -44,6 +45,7 @@ export function ConnectionsWithIdentity({
   sessionToken?: string | null;
   canLinkQuickBooks?: boolean;
   canLinkMoraware?: boolean;
+  canViewAudit?: boolean;
   onChanged?: (detail: AccountDetail, opts?: { kind?: IdentityKind }) => void;
 }) {
   const { qb, moraware, other } = useMemo(() => partitionConnectionLinks(links || []), [links]);
@@ -384,6 +386,7 @@ export function ConnectionsWithIdentity({
           </ul>
         )}
       </section>
+      {canViewAudit ? (
       <section className="ad-section">
         <header className="ad-section-head">
           <p className="ad-kicker">Audit</p>
@@ -407,6 +410,7 @@ export function ConnectionsWithIdentity({
           </ol>
         )}
       </section>
+      ) : null}
 
       {actionError ? (
         <div className="banner banner-error" role="alert">

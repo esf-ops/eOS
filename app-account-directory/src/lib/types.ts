@@ -119,6 +119,7 @@ export type AccountDirectoryPermissions = {
   canLinkQuickBooks?: boolean;
   canLinkMoraware?: boolean;
   canReviewStatus?: boolean;
+  canViewAudit?: boolean;
 };
 
 export type AccountSummary = {

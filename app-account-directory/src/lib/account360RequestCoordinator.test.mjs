@@ -189,6 +189,28 @@ function counts(store) {
 
 {
   const store = createAccount360SessionStore();
+  store.beginAccount("acct-a");
+  store.setPanel("acct-a", "notes:all", { items: [{ id: "n1" }] });
+  store.setPanel("acct-a", "followups:open", { items: [{ id: "f1" }] });
+  store.setPanel("acct-a", "financials", { openAr: 1 });
+  store.setPanel("acct-a", "insights", { cards: [] });
+  store.setPanel("acct-a", "history:all", { items: [] });
+  store.setPanel("acct-a", "relationship", { linked: true });
+  store.setPanel("acct-a", "timeline:all", { items: [] });
+  store.clearPanelFamily("acct-a", "relationship");
+  store.clearPanelFamily("acct-a", "timeline");
+  assert.equal(store.hasPanel("acct-a", "notes:all"), true);
+  assert.equal(store.hasPanel("acct-a", "followups:open"), true);
+  assert.equal(store.hasPanel("acct-a", "financials"), true);
+  assert.equal(store.hasPanel("acct-a", "insights"), true);
+  assert.equal(store.hasPanel("acct-a", "history:all"), true);
+  assert.equal(store.hasPanel("acct-a", "relationship"), false);
+  assert.equal(store.hasPanel("acct-a", "timeline:all"), false);
+  console.log("ok: contact/location mutation leaves Notes/Follow-ups/financials/history");
+}
+
+{
+  const store = createAccount360SessionStore();
   const a = store.beginAccount("acct-a");
   const page1 = { items: [{ id: "t1" }, { id: "t2" }], pagination: { page: 1, limit: 25, has_more: true } };
   await store.loadResource("acct-a", "history:all", async () => applyHistoryPage(null, page1, 1, historyItemId));
@@ -243,6 +265,15 @@ function counts(store) {
   assert.match(api, /getAccountNotes\([\s\S]*?init: RequestInit/, "notes GET accepts AbortSignal");
 
   const app = readFileSync(join(root, "app-account-directory/src/AccountDirectoryApp.tsx"), "utf8");
+  const bump = app.split("function bumpPanelsAfterMutation")[1].split("function refreshAfterIdentityChange")[0];
+  assert.equal(bump.includes("invalidateAccount"), false);
+  assert.ok(bump.includes('clearPanelFamily(accountId, "relationship")') || bump.includes("clearPanelFamily(accountId, 'relationship')"));
+  assert.ok(bump.includes('clearPanelFamily(accountId, "timeline")') || bump.includes("clearPanelFamily(accountId, 'timeline')"));
+  assert.ok(bump.includes("onDetailChanged"));
+  assert.equal(bump.includes("notes"), false);
+  assert.equal(bump.includes("followups"), false);
+  assert.equal(bump.includes("setPanelEpoch"), false);
+  assert.ok(app.includes("canViewAudit"));
   assert.ok(app.includes("createAccount360SessionStore"));
   assert.ok(app.includes("loadResource"));
   assert.ok(app.includes("clearPanelFamily"));

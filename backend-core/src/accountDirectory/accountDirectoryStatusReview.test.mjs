@@ -12,7 +12,7 @@ import { createAccountDirectoryService, AccountDirectoryError } from "./accountD
 import { permissionsForRole } from "./accountDirectoryAuth.mjs";
 import { attachAccountDirectoryRoutes } from "./accountDirectoryApi.js";
 import { ACCOUNT_DIRECTORY_HEAD_SLUG } from "./accountDirectoryAuth.mjs";
-import { evidenceFingerprint, isExceptionTransition } from "./accountDirectoryStatusReconciliation.mjs";
+import { evidenceFingerprint, isExceptionTransition, STATUS_REVIEW_ACTION } from "./accountDirectoryStatusReconciliation.mjs";
 import { classifyAccountStatus } from "./accountDirectoryStatusReconciliation.mjs";
 import { decideStatusReview, listStatusReviewQueue } from "./accountDirectoryStatusReview.mjs";
 
@@ -475,6 +475,130 @@ async function main() {
     );
 
     console.log("ok: Phase 0C pagination + targeted decide scoping");
+  }
+
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const account = await seedActiveUnlinked(store, "Partial Commit Co");
+    await store.insertContact({
+      organizationId: ORG,
+      accountId: account.id,
+      displayName: "Pat",
+      isPrimaryEstimating: true
+    });
+    const listed = await listStatusReviewQueue({ ...ctx(store), query: { reviewed: "unresolved" } });
+    const item = listed.items.find((row) => row.accountId === account.id);
+    assert.ok(item);
+    const original = await store.getAccount(ORG, account.id);
+    assert.equal(original.status, "active");
+    const recommended = item.recommendedStatus;
+    assert.notEqual(recommended, "active");
+    const origInsert = store.insertAuditEvent.bind(store);
+    store.insertAuditEvent = async (event) => {
+      if (event.action === STATUS_REVIEW_ACTION) return null;
+      return origInsert(event);
+    };
+    await assert.rejects(
+      () =>
+        decideStatusReview({
+          ...ctx(store),
+          accountId: account.id,
+          decision: "accept_recommendation",
+          evidenceFingerprint: item.evidenceFingerprint,
+          rowVersion: account.rowVersion
+        }),
+      (e) => e instanceof AccountDirectoryError && e.code === "audit_write_failed" && e.status === 500
+    );
+    const after = await store.getAccount(ORG, account.id);
+    assert.equal(after.status, "active");
+    const reviews = await store.listAuditEventsByAction(ORG, STATUS_REVIEW_ACTION, { limit: 50 });
+    assert.equal((reviews || []).filter((e) => e.accountId === account.id).length, 0);
+    const audits = await store.listAuditEvents(ORG, account.id, { limit: 100 });
+    const falseStatusAudits = (audits || []).filter(
+      (e) =>
+        e.action === "update_account" &&
+        Array.isArray(e.changedFields) &&
+        e.changedFields.includes("status") &&
+        (e.newValues?.status === recommended || e.oldValues?.status === "active")
+    );
+    assert.equal(falseStatusAudits.length, 0, "failed review must not leave misleading update_account status audit");
+    console.log("ok: Status Review second-stage failure restores status and leaves no false status audit");
+  }
+
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const account = await seedActiveUnlinked(store, "Review Success Co");
+    await store.insertContact({
+      organizationId: ORG,
+      accountId: account.id,
+      displayName: "Pat",
+      isPrimaryEstimating: true
+    });
+    const listed = await listStatusReviewQueue({ ...ctx(store), query: { reviewed: "unresolved" } });
+    const item = listed.items.find((row) => row.accountId === account.id);
+    assert.ok(item);
+    const recommended = item.recommendedStatus;
+    await decideStatusReview({
+      ...ctx(store),
+      accountId: account.id,
+      decision: "accept_recommendation",
+      evidenceFingerprint: item.evidenceFingerprint,
+      rowVersion: account.rowVersion
+    });
+    const after = await store.getAccount(ORG, account.id);
+    assert.equal(after.status, recommended);
+    const reviews = (await store.listAuditEventsByAction(ORG, STATUS_REVIEW_ACTION, { limit: 50 })).filter(
+      (e) => e.accountId === account.id
+    );
+    assert.equal(reviews.length, 1);
+    assert.equal(reviews[0].newValues?.decision, "accept_recommendation");
+    assert.equal(reviews[0].newValues?.recommendedStatus, recommended);
+    const audits = await store.listAuditEvents(ORG, account.id, { limit: 100 });
+    const genericStatusAudits = (audits || []).filter(
+      (e) => e.action === "update_account" && Array.isArray(e.changedFields) && e.changedFields.includes("status")
+    );
+    assert.equal(genericStatusAudits.length, 0, "governed review must not emit duplicate update_account status audit");
+    console.log("ok: successful Status Review writes only status_reconciliation_reviewed");
+  }
+
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const account = await seedActiveUnlinked(store, "Rollback Fail Co");
+    await store.insertContact({
+      organizationId: ORG,
+      accountId: account.id,
+      displayName: "Pat",
+      isPrimaryEstimating: true
+    });
+    const listed = await listStatusReviewQueue({ ...ctx(store), query: { reviewed: "unresolved" } });
+    const item = listed.items.find((row) => row.accountId === account.id);
+    assert.ok(item);
+    const origInsert = store.insertAuditEvent.bind(store);
+    store.insertAuditEvent = async (event) => {
+      if (event.action === STATUS_REVIEW_ACTION) return null;
+      return origInsert(event);
+    };
+    const origUpdate = store.updateAccount.bind(store);
+    let storeUpdates = 0;
+    store.updateAccount = async (...args) => {
+      storeUpdates += 1;
+      const result = await origUpdate(...args);
+      // First update is the reviewed status change; second is rollback — fail it.
+      if (storeUpdates >= 2) return { ok: false, code: "conflict", current: result.account || null };
+      return result;
+    };
+    await assert.rejects(
+      () =>
+        decideStatusReview({
+          ...ctx(store),
+          accountId: account.id,
+          decision: "accept_recommendation",
+          evidenceFingerprint: item.evidenceFingerprint,
+          rowVersion: account.rowVersion
+        }),
+      (e) => e instanceof AccountDirectoryError && e.code === "review_commit_failed" && e.status === 500
+    );
+    console.log("ok: rollback failure surfaces review_commit_failed");
   }
 
   console.log("accountDirectoryStatusReview.test.mjs — all passed");

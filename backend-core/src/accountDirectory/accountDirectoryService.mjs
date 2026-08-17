@@ -25,6 +25,7 @@ import {
   toPublicQuickBooksCustomerSearchItem
 } from "./accountDirectoryQbCustomerSearch.mjs";
 import { listIntelPublic, loadListFinancialIntel } from "./accountDirectory360.mjs";
+import { loadStaffDisplayNames } from "./accountDirectoryNotes.mjs";
 
 export const AD_QB_ENRICHMENT_FILTERS = Object.freeze([
   "suggested_match",
@@ -642,17 +643,19 @@ export function createAccountDirectoryService(deps) {
         };
       })
     };
-    if (includeAudit && roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW)) {
+    if (includeAudit && roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN)) {
       const events = await store.listAuditEvents(organizationId, account.id, { limit: 100 });
-      detail.auditHistory = events.map((e) => ({
-        id: e.id,
-        at: e.createdAt,
-        actor: e.actorUserId,
-        action: e.action,
-        detail: Array.isArray(e.changedFields) ? e.changedFields.join(", ") : null
-      }));
-    } else {
-      detail.auditHistory = undefined;
+      const names = await loadStaffDisplayNames(deps, events.map((e) => e.actorUserId));
+      detail.auditHistory = events.map((e) => {
+        const actorId = String(e.actorUserId || "").trim();
+        return {
+          id: e.id,
+          at: e.createdAt,
+          actor: (actorId && names.get(actorId)) || null,
+          action: e.action,
+          detail: Array.isArray(e.changedFields) ? e.changedFields.join(", ") : null
+        };
+      });
     }
     return detail;
   }
@@ -919,7 +922,7 @@ export function createAccountDirectoryService(deps) {
       return hydrateDetail(organizationId, account, { includeAudit: true, role });
     },
 
-    async updateAccount({ organizationId, role, actorUserId, requestId, accountId, payload }) {
+    async updateAccount({ organizationId, role, actorUserId, requestId, accountId, payload, suppressAudit }) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EDIT);
       const current = await store.getAccount(organizationId, accountId);
       if (!current) throw new AccountDirectoryError("not_found", "Account not found.", 404);
@@ -941,12 +944,23 @@ export function createAccountDirectoryService(deps) {
         changed.push("legalName");
       }
       if (payload?.status != null) {
+        requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN);
         const status = String(payload.status);
         if (!["active", "prospect", "inactive", "needs_review"].includes(status)) {
           throw new AccountDirectoryError("invalid_status", "Invalid account status.");
         }
         if (status === "archived") {
           throw new AccountDirectoryError("use_archive", "Use archive to archive an account.");
+        }
+        if (status === "active") {
+          const links = await store.listExternalLinks(organizationId, accountId);
+          if (!isAccountQuickbooksLinked(links)) {
+            throw new AccountDirectoryError(
+              "fuzzy_active_forbidden",
+              "Active requires an exact QuickBooks customer link. Confirm the match in the QuickBooks workflow first.",
+              400
+            );
+          }
         }
         patch.status = status;
         changed.push("status");
@@ -964,19 +978,22 @@ export function createAccountDirectoryService(deps) {
       }
       if (!result.ok) throw new AccountDirectoryError("not_found", "Account not found.", 404);
 
-      await writeAudit({
-        organizationId,
-        accountId,
-        entityType: "account",
-        entityId: accountId,
-        action: "update_account",
-        actorUserId,
-        changedFields: changed,
-        oldValues: { displayName: current.displayName, status: current.status },
-        newValues: patch,
-        requestId,
-        role
-      });
+      // Internal Status Review option only. Never honor suppressAudit from request JSON payload.
+      if (suppressAudit !== true) {
+        await writeAudit({
+          organizationId,
+          accountId,
+          entityType: "account",
+          entityId: accountId,
+          action: "update_account",
+          actorUserId,
+          changedFields: changed,
+          oldValues: { displayName: current.displayName, status: current.status },
+          newValues: patch,
+          requestId,
+          role
+        });
+      }
 
       return hydrateDetail(organizationId, result.account, { includeAudit: true, role });
     },

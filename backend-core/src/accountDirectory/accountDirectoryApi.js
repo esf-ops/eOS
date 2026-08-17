@@ -793,7 +793,7 @@ export function attachAccountDirectoryRoutes(app, deps) {
 
   app.get("/api/account-directory/qb-enrichment/suggestions", ...guard, async (req, res) => {
     await withOrg(req, res, async (ctx) => {
-      if (!roleHasCapability(ctx.role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW)) {
+      if (!roleHasCapability(ctx.role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK)) {
         return res.status(403).json({ ok: false, error: "Permission denied." });
       }
       const listed = await listAdQbLinkSuggestions(getSupabase(), ctx.organizationId, {

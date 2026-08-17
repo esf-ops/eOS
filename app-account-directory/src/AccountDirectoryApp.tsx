@@ -225,7 +225,8 @@ function defaultPermissions(): AccountDirectoryPermissions {
     canRestore: true,
     canLinkQuickBooks: false,
     canLinkMoraware: false,
-    canReviewStatus: false
+    canReviewStatus: false,
+    canViewAudit: false
   };
 }
 
@@ -412,7 +413,8 @@ export default function AccountDirectoryApp() {
       setPermissions({
         ...defaultPermissions(),
         ...incoming,
-        canReviewStatus: incoming.canReviewStatus ?? Boolean(incoming.canArchive)
+        canReviewStatus: incoming.canReviewStatus ?? Boolean(incoming.canArchive),
+        canViewAudit: incoming.canViewAudit === true
       });
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 403) {
@@ -1930,12 +1932,12 @@ function ProfilePanel({
   }, [sessionToken, accountId, panelEpoch, identityEpoch.insights]);
 
   function bumpPanelsAfterMutation(nextDetail: AccountDetail) {
-    session360Ref.current.invalidateAccount(accountId);
-    setFinancials(null);
-    setRelationship(null);
-    setInsights(null);
-    setPanelEpoch((n) => n + 1);
     onDetailChanged(nextDetail);
+    const store = session360Ref.current;
+    store.clearPanelFamily(accountId, "relationship");
+    store.clearPanelFamily(accountId, "timeline");
+    setRelationship(null);
+    setIdentityEpoch((prev) => ({ ...prev, relationship: prev.relationship + 1 }));
   }
 
   function refreshAfterIdentityChange(nextDetail: AccountDetail, opts?: { kind?: "quickbooks" | "moraware" }) {
@@ -2290,6 +2292,7 @@ function ProfilePanel({
                 links={detail.externalLinks}
                 aliases={detail.aliases}
                 auditHistory={detail.auditHistory}
+                canViewAudit={Boolean(permissions.canViewAudit)}
                 canLinkQuickBooks={Boolean(permissions.canLinkQuickBooks)}
                 canLinkMoraware={Boolean(permissions.canLinkMoraware)}
                 onChanged={refreshAfterIdentityChange}

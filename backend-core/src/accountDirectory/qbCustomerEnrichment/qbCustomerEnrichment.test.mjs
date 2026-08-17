@@ -26,12 +26,18 @@ import {
   getAdQbCustomerEnrichmentFeedStatus,
   indexSuggestionsByAccountId,
   listAllAdQbLinkSuggestionsForIndex,
+  listAdQbLinkSuggestions,
   resolveAccountQbEnrichmentLabel
 } from "./feedStatus.js";
 import { constantTimeEqualString, requireAdQbCustomerSyncToken } from "./syncAuth.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import express from "express";
 import { createAccountDirectoryMemoryStore } from "../accountDirectoryMemoryStore.mjs";
 import { createAccountDirectoryService } from "../accountDirectoryService.mjs";
 import { seedTrustedQuickBooksCustomerFact } from "../accountDirectoryQbLinkValidation.mjs";
+import { attachAccountDirectoryRoutes } from "../accountDirectoryApi.js";
+import { ACCOUNT_DIRECTORY_HEAD_SLUG } from "../accountDirectoryAuth.mjs";
 
 {
   assert.equal(normalizeMatchKey("Fox & Sons, LLC"), "fox and sons llc");
@@ -357,6 +363,145 @@ import { seedTrustedQuickBooksCustomerFact } from "../accountDirectoryQbLinkVali
   const empty = emptyEnrichmentFeedStatus({ status: AD_QB_ENRICHMENT_STATUSES.UNAVAILABLE, reason: "x" });
   assert.equal(empty.status, AD_QB_ENRICHMENT_STATUSES.UNAVAILABLE);
   console.log("ok: feed status fail-soft");
+}
+
+{
+  const SENTINEL = "SENTINEL_RELATION_account_directory_follow_ups";
+  const boom = {
+    from() {
+      throw new Error(SENTINEL);
+    }
+  };
+  const feed = await getAdQbCustomerEnrichmentFeedStatus(boom, "org", {
+    AD_QB_CUSTOMER_ENRICHMENT_ENABLED: "1"
+  });
+  assert.equal(feed.status, AD_QB_ENRICHMENT_STATUSES.UNAVAILABLE);
+  assert.equal(feed.reason, "enrichment_unavailable");
+  assert.equal(JSON.stringify(feed).includes(SENTINEL), false);
+  assert.equal(/account_directory_follow_ups|relation does not exist/i.test(JSON.stringify(feed)), false);
+
+  const listed = await listAdQbLinkSuggestions(boom, "org");
+  assert.equal(listed.unavailable, true);
+  assert.equal(listed.error, undefined);
+  assert.equal(JSON.stringify(listed).includes(SENTINEL), false);
+  console.log("ok: enrichment feed/suggestion errors stay staff-safe");
+}
+
+{
+  const SENTINEL_LIST = "SENTINEL-QB-LISTID-VIEW-LEAK";
+  function thenable(getResult) {
+    const self = {
+      select() {
+        return self;
+      },
+      eq() {
+        return self;
+      },
+      in() {
+        return self;
+      },
+      order() {
+        return self;
+      },
+      limit() {
+        return self;
+      },
+      maybeSingle() {
+        return getResult().then((r) => ({
+          data: Array.isArray(r.data) ? r.data[0] ?? null : r.data,
+          error: r.error ?? null
+        }));
+      },
+      then(onFulfilled, onRejected) {
+        return getResult().then(onFulfilled, onRejected);
+      }
+    };
+    return self;
+  }
+  const supabase = {
+    from(table) {
+      return thenable(async () => {
+        if (table === "organizations") {
+          return {
+            data: [
+              {
+                id: "org-1",
+                organization_key: "elite_stone_fabrication",
+                display_name: "ESF"
+              }
+            ],
+            error: null
+          };
+        }
+        if (table === "user_profiles") {
+          return { data: [{ organization_id: "org-1" }], error: null };
+        }
+        if (table === "ad_qb_link_suggestions") {
+          return {
+            data: [
+              {
+                id: "sug-1",
+                qb_list_id: SENTINEL_LIST,
+                qb_full_name: "Leak Co",
+                qb_name: "Leak Co",
+                status: "open",
+                suggested_account_id: "acct-1",
+                rank_score: 0.9,
+                rank_method: "exact_norm_name",
+                conflict_reason: null,
+                candidate_accounts: [],
+                updated_at: "2026-08-17T00:00:00.000Z"
+              }
+            ],
+            error: null
+          };
+        }
+        return { data: [], error: null };
+      });
+    }
+  };
+  const apiSrc = readFileSync(fileURLToPath(new URL("../accountDirectoryApi.js", import.meta.url)), "utf8");
+  const suggestionsBlock = apiSrc.split("qb-enrichment/suggestions")[1].split("suggestions/:suggestionId")[0];
+  assert.ok(suggestionsBlock.includes("ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK"));
+  assert.equal(suggestionsBlock.includes("ACCOUNT_DIRECTORY_CAPABILITIES.VIEW"), false);
+
+  async function requestSuggestions(role) {
+    const app = express();
+    attachAccountDirectoryRoutes(app, {
+      requireAuth: () => (req, _res, next) => {
+        req.user = { id: "user-1", role };
+        next();
+      },
+      requireHeadAccess: (slug) => {
+        assert.equal(slug, ACCOUNT_DIRECTORY_HEAD_SLUG);
+        return (_req, _res, next) => next();
+      },
+      getSupabase: () => supabase,
+      store: createAccountDirectoryMemoryStore()
+    });
+    const server = await new Promise((resolve) => {
+      const s = app.listen(0, "127.0.0.1", () => resolve(s));
+    });
+    try {
+      const { port } = server.address();
+      const res = await fetch(`http://127.0.0.1:${port}/api/account-directory/qb-enrichment/suggestions`);
+      const body = await res.json();
+      return { status: res.status, body };
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  }
+
+  const asView = await requestSuggestions("sales");
+  assert.equal(asView.status, 403);
+  assert.equal(JSON.stringify(asView.body).includes(SENTINEL_LIST), false);
+  assert.equal(JSON.stringify(asView.body).includes("qbListId"), false);
+
+  const asLink = await requestSuggestions("admin");
+  assert.equal(asLink.status, 200);
+  assert.equal(asLink.body.ok, true);
+  assert.ok((asLink.body.items || []).some((row) => row.qbListId === SENTINEL_LIST));
+  console.log("ok: suggestions ListID requires EXTERNAL_LINK; VIEW cannot obtain it");
 }
 
 {

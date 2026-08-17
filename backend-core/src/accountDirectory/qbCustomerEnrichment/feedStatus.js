@@ -136,9 +136,10 @@ export async function getAdQbCustomerEnrichmentFeedStatus(
       rootsCount: run.roots_count
     });
   } catch (e) {
+    console.warn("[ad-qb-enrichment] feed unavailable:", String(e?.message ?? e).slice(0, 200));
     return emptyEnrichmentFeedStatus({
       status: AD_QB_ENRICHMENT_STATUSES.UNAVAILABLE,
-      reason: String(e?.message ?? e).slice(0, 200),
+      reason: "enrichment_unavailable",
       staleAfterSeconds: getAdQbEnrichmentStaleAfterSeconds(env)
     });
   }
@@ -243,7 +244,8 @@ export async function listAdQbLinkSuggestions(supabase, organizationId, opts = {
       items: (data || []).map(mapSuggestionRow)
     };
   } catch (e) {
-    return { ok: false, unavailable: true, items: [], error: String(e?.message ?? e).slice(0, 200) };
+    console.warn("[ad-qb-enrichment] suggestions unavailable:", String(e?.message ?? e).slice(0, 200));
+    return { ok: false, unavailable: true, items: [] };
   }
 }
 
@@ -295,7 +297,8 @@ export async function listAllAdQbLinkSuggestionsForIndex(supabase, organizationI
     }
     return { ok: true, items, truncated: items.length >= maxRows };
   } catch (e) {
-    return { ok: false, unavailable: true, items: [], error: String(e?.message ?? e).slice(0, 200) };
+    console.warn("[ad-qb-enrichment] suggestion index unavailable:", String(e?.message ?? e).slice(0, 200));
+    return { ok: false, unavailable: true, items: [] };
   }
 }
 

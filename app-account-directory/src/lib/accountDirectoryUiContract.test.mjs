@@ -49,6 +49,7 @@ assert.ok(app.includes("qbEnrichment=needs_review") || app.includes('qbEnrichmen
 assert.ok(app.includes("QB Needs Review"));
 assert.ok(app.includes("Status Review"));
 assert.ok(app.includes("canReviewStatus"));
+assert.ok(app.includes("canViewAudit"));
 assert.ok(app.includes("StatusReviewSurface"));
 assert.ok(api.includes("link-moraware"));
 assert.ok(api.includes("unlinkMoraware") || api.includes("expectedSystem"));
@@ -213,6 +214,7 @@ assert.ok(connLib.includes("current QuickBooks customer details unavailable"));
 assert.ok(connections.includes("Find Moraware connection"));
 assert.ok(connections.includes("canLinkQuickBooks"));
 assert.ok(connections.includes("canLinkMoraware"));
+assert.ok(connections.includes("canViewAudit"));
 assert.ok(connections.includes('kind: "quickbooks"') || connections.includes("kind: \"quickbooks\""));
 assert.ok(app.includes("refreshAfterIdentityChange"));
 assert.ok(app.includes("clearPanel") && app.includes("financials"));

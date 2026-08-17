@@ -228,6 +228,47 @@ async function writeReviewDisposition(args, classified, decision, extra) {
 }
 
 /**
+ * Apply a reviewed status change, then persist the disposition.
+ * If disposition fails, restore the previous status so the review is not
+ * recorded as complete while the account stays mutated.
+ * Rollback uses the store (not updateAccount) so restoring a prior Active
+ * row does not re-run the exact-QB Active gate.
+ * The governed mutation suppresses the ordinary update_account audit —
+ * status_reconciliation_reviewed is the authoritative audit for this path.
+ */
+async function applyReviewedStatusChange(args, classified, decision, newStatus, extra) {
+  const previousStatus = classified.currentStatus;
+  const updated = await args.service.updateAccount({
+    organizationId: args.organizationId,
+    role: args.role,
+    actorUserId: args.actorUserId,
+    requestId: args.requestId,
+    accountId: args.accountId,
+    payload: { status: newStatus, rowVersion: args.rowVersion },
+    suppressAudit: true
+  });
+  try {
+    await writeReviewDisposition(args, classified, decision, extra);
+    return updated;
+  } catch (err) {
+    const rollback = await args.store.updateAccount(
+      args.organizationId,
+      args.accountId,
+      { status: previousStatus, updatedBy: args.actorUserId },
+      updated.rowVersion
+    );
+    if (!rollback?.ok) {
+      throw new AccountDirectoryError(
+        "review_commit_failed",
+        "Status review could not be completed and the account status could not be restored. Reload and retry.",
+        500
+      );
+    }
+    throw err;
+  }
+}
+
+/**
  * Per-account review decision. No bulk path.
  *
  * @param {object} args
@@ -272,28 +313,20 @@ export async function decideStatusReview(args) {
     if (!["prospect", "needs_review", "inactive", "active"].includes(classified.proposedStatus)) {
       throw new AccountDirectoryError("invalid_status", "This recommendation cannot be applied.", 400);
     }
-    const updated = await args.service.updateAccount({
-      organizationId: args.organizationId,
-      role: args.role,
-      actorUserId: args.actorUserId,
-      requestId: args.requestId,
-      accountId: args.accountId,
-      payload: { status: classified.proposedStatus, rowVersion: args.rowVersion }
-    });
-    await writeReviewDisposition(args, classified, decision, { note: args.note });
+    const updated = await applyReviewedStatusChange(
+      args,
+      classified,
+      decision,
+      classified.proposedStatus,
+      { note: args.note }
+    );
     return { ok: true, account: updated, decision };
   }
 
   if (decision === "mark_needs_review") {
-    const updated = await args.service.updateAccount({
-      organizationId: args.organizationId,
-      role: args.role,
-      actorUserId: args.actorUserId,
-      requestId: args.requestId,
-      accountId: args.accountId,
-      payload: { status: "needs_review", rowVersion: args.rowVersion }
+    const updated = await applyReviewedStatusChange(args, classified, decision, "needs_review", {
+      note: args.note
     });
-    await writeReviewDisposition(args, classified, decision, { note: args.note });
     return { ok: true, account: updated, decision };
   }
 

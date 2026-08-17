@@ -96,6 +96,163 @@ async function main() {
     );
   }
 
+  // Direct lifecycle status PATCH is ADMIN-only; ordinary EDIT cannot bypass Status Review.
+  {
+    const { store, service } = svc();
+    const created = await service.createAccount({
+      organizationId: ORG,
+      role: "sales",
+      actorUserId: ACTOR,
+      payload: { displayName: "Status Gate Co", legalName: "Status Gate LLC" }
+    });
+    const renamed = await service.updateAccount({
+      organizationId: ORG,
+      role: "sales",
+      actorUserId: ACTOR,
+      accountId: created.id,
+      payload: { displayName: "Status Gate Co Renamed", legalName: "Status Gate Legal", rowVersion: created.rowVersion }
+    });
+    assert.equal(renamed.name, "Status Gate Co Renamed");
+    assert.equal(renamed.legalName, "Status Gate Legal");
+    assert.equal(renamed.status, created.status);
+    assert.equal(renamed.rowVersion, created.rowVersion + 1);
+    const renameAudits = (await store.listAuditEvents(ORG, created.id, { limit: 50 })).filter(
+      (e) => e.action === "update_account" && Array.isArray(e.changedFields) && e.changedFields.includes("displayName")
+    );
+    assert.ok(renameAudits.length >= 1, "ordinary EDIT field patch must still write update_account");
+
+    const beforeDenied = await store.getAccount(ORG, created.id);
+    await assert.rejects(
+      () =>
+        service.updateAccount({
+          organizationId: ORG,
+          role: "sales",
+          actorUserId: ACTOR,
+          accountId: created.id,
+          payload: {
+            displayName: "Should Not Persist",
+            status: "inactive",
+            rowVersion: renamed.rowVersion
+          }
+        }),
+      (e) => e instanceof AccountDirectoryError && e.status === 403
+    );
+    await assert.rejects(
+      () =>
+        service.updateAccount({
+          organizationId: ORG,
+          role: "estimator",
+          actorUserId: ACTOR,
+          accountId: created.id,
+          payload: { status: "active", rowVersion: renamed.rowVersion }
+        }),
+      (e) => e instanceof AccountDirectoryError && e.status === 403
+    );
+    const afterDenied = await store.getAccount(ORG, created.id);
+    assert.equal(afterDenied.displayName, beforeDenied.displayName);
+    assert.equal(afterDenied.status, beforeDenied.status);
+    assert.equal(afterDenied.rowVersion, beforeDenied.rowVersion);
+
+    await assert.rejects(
+      () =>
+        service.updateAccount({
+          organizationId: ORG,
+          role: "admin",
+          actorUserId: ACTOR,
+          accountId: created.id,
+          payload: { status: "active", rowVersion: renamed.rowVersion }
+        }),
+      (e) => e.code === "fuzzy_active_forbidden" && e.status === 400
+    );
+    const afterFuzzy = await store.getAccount(ORG, created.id);
+    assert.equal(afterFuzzy.status, created.status);
+    assert.equal(afterFuzzy.rowVersion, renamed.rowVersion);
+
+    const asNeedsReview = await service.updateAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      accountId: created.id,
+      payload: { status: "needs_review", rowVersion: renamed.rowVersion }
+    });
+    assert.equal(asNeedsReview.status, "needs_review");
+    const adminStatusAudits = (await store.listAuditEvents(ORG, created.id, { limit: 50 })).filter(
+      (e) => e.action === "update_account" && Array.isArray(e.changedFields) && e.changedFields.includes("status")
+    );
+    assert.ok(adminStatusAudits.some((e) => e.newValues?.status === "needs_review"));
+
+    // Payload suppressAudit is ignored; only the trusted top-level option suppresses.
+    const afterNeedsReview = await store.getAccount(ORG, created.id);
+    await service.updateAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      accountId: created.id,
+      payload: {
+        status: "inactive",
+        rowVersion: afterNeedsReview.rowVersion,
+        suppressAudit: true
+      }
+    });
+    const afterPayloadSuppress = (await store.listAuditEvents(ORG, created.id, { limit: 50 })).filter(
+      (e) => e.action === "update_account" && e.newValues?.status === "inactive"
+    );
+    assert.ok(afterPayloadSuppress.length >= 1, "payload.suppressAudit must not suppress update_account");
+
+    const inactive = await store.getAccount(ORG, created.id);
+    await service.updateAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      accountId: created.id,
+      payload: { status: "prospect", rowVersion: inactive.rowVersion },
+      suppressAudit: true
+    });
+    const afterTrustedSuppress = (await store.listAuditEvents(ORG, created.id, { limit: 50 })).filter(
+      (e) => e.action === "update_account" && e.newValues?.status === "prospect"
+    );
+    assert.equal(afterTrustedSuppress.length, 0, "top-level suppressAudit suppresses update_account");
+    assert.equal((await store.getAccount(ORG, created.id)).status, "prospect");
+
+    await seedQbRoot(store, "STATUS-GATE-QB", ORG, "Status Gate Co");
+    const linked = await service.linkQuickBooks({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      accountId: created.id,
+      payload: { externalId: "STATUS-GATE-QB", externalDisplayName: "Status Gate Co" }
+    });
+    const activated = await service.updateAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      accountId: created.id,
+      payload: { status: "active", rowVersion: linked.rowVersion }
+    });
+    assert.equal(activated.status, "active");
+    assert.ok(
+      (await store.listAuditEvents(ORG, created.id, { limit: 50 })).some(
+        (e) => e.action === "update_account" && e.newValues?.status === "active"
+      ),
+      "ADMIN direct status PATCH still emits update_account"
+    );
+
+    await assert.rejects(
+      () =>
+        service.updateAccount({
+          organizationId: ORG,
+          role: "admin",
+          actorUserId: ACTOR,
+          accountId: created.id,
+          payload: { status: "inactive", rowVersion: renamed.rowVersion }
+        }),
+      (e) => e.code === "conflict" && e.status === 409
+    );
+    const afterStale = await store.getAccount(ORG, created.id);
+    assert.equal(afterStale.status, "active");
+    console.log("ok: EDIT cannot PATCH status; ADMIN status PATCH keeps Active/QB/row_version gates");
+  }
+
   // 6–7. archive preserves; restore works
   {
     const { service, store } = svc();
@@ -312,7 +469,7 @@ async function main() {
 
   // 16. audit history for create/update/archive/restore
   {
-    const { service } = svc();
+    const { service, store } = svc();
     let account = await service.createAccount({
       organizationId: ORG,
       role: "admin",
@@ -345,14 +502,28 @@ async function main() {
     assert.ok(actions.includes("update_account"));
     assert.ok(actions.includes("archive_account"));
     assert.ok(actions.includes("restore_account"));
-    // view-capable roles see friendly activity; no raw JSON payloads
-    const asSales = await service.getAccount({ organizationId: ORG, role: "sales", accountId: account.id });
-    assert.ok(Array.isArray(asSales.auditHistory));
-    assert.ok(asSales.auditHistory.some((e) => e.action === "create_account"));
-    for (const entry of asSales.auditHistory) {
+    for (const entry of account.auditHistory || []) {
+      assert.equal(entry.actor, null);
+      assert.equal(String(JSON.stringify(entry)).includes(ACTOR), false);
       assert.equal(typeof entry.detail === "string" || entry.detail == null, true);
       assert.equal(String(JSON.stringify(entry)).includes("raw_payload"), false);
     }
+    const asSales = await service.getAccount({ organizationId: ORG, role: "sales", accountId: account.id });
+    assert.equal(asSales.auditHistory, undefined);
+    assert.equal(JSON.stringify(asSales).includes("auditHistory"), false);
+    assert.equal(JSON.stringify(asSales).includes(ACTOR), false);
+
+    const named = createAccountDirectoryService({
+      store,
+      resolveStaffDisplayNames: async () => new Map([[ACTOR, "Chris Henely"]])
+    });
+    const asAdminNamed = await named.getAccount({
+      organizationId: ORG,
+      role: "admin",
+      accountId: account.id
+    });
+    assert.ok((asAdminNamed.auditHistory || []).some((e) => e.actor === "Chris Henely"));
+    assert.equal(JSON.stringify(asAdminNamed.auditHistory).includes(ACTOR), false);
   }
 
   // 17. list/search paginated and bounded
@@ -397,7 +568,9 @@ async function main() {
     assert.equal(roleHasCapability("installer", ACCOUNT_DIRECTORY_CAPABILITIES.EDIT), false);
     assert.equal(permissionsForRole("sales").canLinkQuickBooks, false);
     assert.equal(permissionsForRole("sales").canLinkMoraware, false);
+    assert.equal(permissionsForRole("sales").canViewAudit, false);
     assert.equal(permissionsForRole("admin").canLinkMoraware, true);
+    assert.equal(permissionsForRole("admin").canViewAudit, true);
   }
 
   // 19–20. responses contain no raw QB payload / financial fields
