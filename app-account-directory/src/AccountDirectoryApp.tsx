@@ -27,6 +27,7 @@ import { ConnectionsWithIdentity, ContactsMaintain, LocationsMaintain } from "./
 import { QuickBooksCustomerPicker } from "./ui/QuickBooksCustomerPicker";
 import { InsightsPanel, OverviewInsightStrip } from "./ui/AccountInsights";
 import { AccountNotes } from "./ui/AccountNotes";
+import { AccountFollowUps } from "./ui/AccountFollowUps";
 import { WorkspaceTabBoundary } from "./ui/WorkspaceTabBoundary";
 import { StatusReviewSurface } from "./ui/AccountStatusReview";
 import { MorawareReviewSurface } from "./ui/MorawareReview";
@@ -84,6 +85,7 @@ const DETAIL_TABS = [
   "Financials",
   "Relationship",
   "Notes",
+  "Follow-ups",
   "Contacts",
   "Locations",
   "Connections",
@@ -2231,6 +2233,18 @@ function ProfilePanel({
             {detailTab === "Notes" ? (
               <WorkspaceTabBoundary panel="Notes">
               <AccountNotes
+                key={accountId}
+                sessionToken={sessionToken}
+                accountId={accountId}
+                session360={session360Ref.current}
+                canEdit={Boolean(permissions.canEdit)}
+              />
+              </WorkspaceTabBoundary>
+            ) : null}
+
+            {detailTab === "Follow-ups" ? (
+              <WorkspaceTabBoundary panel="Follow-ups">
+              <AccountFollowUps
                 key={accountId}
                 sessionToken={sessionToken}
                 accountId={accountId}

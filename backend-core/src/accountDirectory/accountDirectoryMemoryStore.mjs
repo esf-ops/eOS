@@ -28,6 +28,8 @@ export function createAccountDirectoryMemoryStore() {
   const qbCustomerFacts = new Map();
   /** @type {Map<string, any>} */
   const notes = new Map();
+  /** @type {Map<string, any>} */
+  const followUps = new Map();
   /** @type {any[]} */
   const auditEvents = [];
 
@@ -601,6 +603,99 @@ export function createAccountDirectoryMemoryStore() {
       return { ok: true, note: clone(next) };
     },
 
+    async insertAccountFollowUp(row) {
+      const id = row.id || randomUUID();
+      const record = {
+        id,
+        organizationId: row.organizationId,
+        accountId: row.accountId,
+        title: row.title,
+        details: row.details ?? null,
+        dueAt: row.dueAt,
+        status: row.status || "open",
+        assignedTo: row.assignedTo ?? null,
+        createdAt: row.createdAt ?? nowIso(),
+        createdBy: row.createdBy ?? null,
+        updatedAt: row.updatedAt ?? nowIso(),
+        updatedBy: row.updatedBy ?? null,
+        completedAt: row.completedAt ?? null,
+        completedBy: row.completedBy ?? null,
+        archivedAt: row.archivedAt ?? null,
+        archivedBy: row.archivedBy ?? null,
+        rowVersion: 1
+      };
+      followUps.set(id, record);
+      return clone(record);
+    },
+
+    async getAccountFollowUp(organizationId, followUpId) {
+      return clone(assertOrg(followUps.get(followUpId), organizationId));
+    },
+
+    async listAccountFollowUps(
+      organizationId,
+      accountId,
+      { page = 1, limit = 25, status = "open", includeArchived = false } = {}
+    ) {
+      const safePage = Math.max(1, Number.parseInt(String(page ?? "1"), 10) || 1);
+      const safeLimit = Math.max(1, Number.parseInt(String(limit ?? "25"), 10) || 25);
+      let rows = Array.from(followUps.values()).filter(
+        (n) => n.organizationId === organizationId && n.accountId === accountId
+      );
+      if (!includeArchived) rows = rows.filter((n) => !n.archivedAt);
+      const filter = String(status || "open").toLowerCase();
+      if (filter === "open" || filter === "completed") {
+        rows = rows.filter((n) => n.status === filter);
+      }
+      rows.sort((a, b) => {
+        if (filter === "completed") {
+          return (
+            String(b.completedAt || "").localeCompare(String(a.completedAt || "")) ||
+            String(b.id).localeCompare(String(a.id))
+          );
+        }
+        if (filter === "all") {
+          const rank = (s) => (s === "open" ? 0 : 1);
+          const byStatus = rank(a.status) - rank(b.status);
+          if (byStatus) return byStatus;
+        }
+        return (
+          String(a.dueAt).localeCompare(String(b.dueAt)) ||
+          String(a.createdAt || "").localeCompare(String(b.createdAt || "")) ||
+          String(a.id).localeCompare(String(b.id))
+        );
+      });
+      const offset = (safePage - 1) * safeLimit;
+      const slice = rows.slice(offset, offset + safeLimit);
+      return {
+        items: slice.map(clone),
+        pagination: {
+          page: safePage,
+          limit: safeLimit,
+          has_more: rows.length > offset + safeLimit
+        }
+      };
+    },
+
+    async updateAccountFollowUp(organizationId, followUpId, patch, expectedRowVersion) {
+      const current = assertOrg(followUps.get(followUpId), organizationId);
+      if (!current) return { ok: false, code: "not_found" };
+      if (expectedRowVersion != null && Number(current.rowVersion) !== Number(expectedRowVersion)) {
+        return { ok: false, code: "conflict", current: clone(current) };
+      }
+      const next = {
+        ...current,
+        ...patch,
+        id: current.id,
+        organizationId: current.organizationId,
+        accountId: current.accountId,
+        rowVersion: Number(current.rowVersion) + 1,
+        updatedAt: nowIso()
+      };
+      followUps.set(followUpId, next);
+      return { ok: true, followUp: clone(next) };
+    },
+
     async insertAuditEvent(event) {
       const row = {
         id: randomUUID(),
@@ -636,6 +731,7 @@ export function createAccountDirectoryMemoryStore() {
         aliases: aliases.size,
         externalLinks: externalLinks.size,
         notes: notes.size,
+        followUps: followUps.size,
         auditEvents: auditEvents.length
       };
     }

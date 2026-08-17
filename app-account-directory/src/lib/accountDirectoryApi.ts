@@ -22,6 +22,9 @@ import type {
   AccountInsightEvidenceResponse,
   AccountNotesPage,
   AccountNote,
+  AccountFollowUpsPage,
+  AccountFollowUp,
+  FollowUpAssignee,
   MorawareReconciliationResponse,
   QuickBooksCustomerSearchItem
 } from "./types";
@@ -199,6 +202,94 @@ export async function archiveAccountNote(
 ) {
   return (await apiPost(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/notes/${encodeURIComponent(noteId)}/archive`,
+    token,
+    payload
+  )) as { ok?: boolean; id?: string; archived?: boolean };
+}
+
+export async function getAccountFollowUps(
+  token: string,
+  accountId: string,
+  opts: { page?: number; pageSize?: number; status?: string } = {},
+  init: RequestInit = {}
+) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/follow-ups${qs({
+      page: opts.page,
+      pageSize: opts.pageSize,
+      status: opts.status
+    })}`,
+    token,
+    init
+  )) as AccountFollowUpsPage;
+}
+
+export async function listFollowUpAssignees(token: string, accountId: string, init: RequestInit = {}) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/follow-ups/assignees`,
+    token,
+    init
+  )) as { ok?: boolean; items?: FollowUpAssignee[] };
+}
+
+export async function createAccountFollowUp(
+  token: string,
+  accountId: string,
+  payload: { title: string; details?: string | null; dueAt: string; assignedTo?: string | null }
+) {
+  return (await apiPost(`${BASE}/accounts/${encodeURIComponent(accountId)}/follow-ups`, token, payload)) as {
+    ok?: boolean;
+    followUp?: AccountFollowUp;
+  };
+}
+
+export async function updateAccountFollowUp(
+  token: string,
+  accountId: string,
+  followUpId: string,
+  payload: { title: string; details?: string | null; dueAt: string; assignedTo?: string | null; rowVersion?: number }
+) {
+  return (await apiPatch(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/follow-ups/${encodeURIComponent(followUpId)}`,
+    token,
+    payload
+  )) as { ok?: boolean; followUp?: AccountFollowUp };
+}
+
+export async function completeAccountFollowUp(
+  token: string,
+  accountId: string,
+  followUpId: string,
+  payload: { rowVersion?: number } = {}
+) {
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/follow-ups/${encodeURIComponent(followUpId)}/complete`,
+    token,
+    payload
+  )) as { ok?: boolean; followUp?: AccountFollowUp };
+}
+
+export async function reopenAccountFollowUp(
+  token: string,
+  accountId: string,
+  followUpId: string,
+  payload: { rowVersion?: number } = {}
+) {
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/follow-ups/${encodeURIComponent(followUpId)}/reopen`,
+    token,
+    payload
+  )) as { ok?: boolean; followUp?: AccountFollowUp };
+}
+
+export async function archiveAccountFollowUp(
+  token: string,
+  accountId: string,
+  followUpId: string,
+  payload: { rowVersion?: number } = {}
+) {
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/follow-ups/${encodeURIComponent(followUpId)}/archive`,
     token,
     payload
   )) as { ok?: boolean; id?: string; archived?: boolean };

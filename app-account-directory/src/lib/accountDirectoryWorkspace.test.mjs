@@ -129,12 +129,15 @@ assert.equal(panelFromTab("Overview"), "overview");
 assert.equal(panelFromTab("Relationship"), "relationship");
 assert.equal(panelFromTab("Financials"), "financials");
 assert.equal(panelFromTab("Notes"), "notes");
+assert.equal(panelFromTab("Follow-ups"), "followups");
 assert.equal(tabFromPanel("relationship"), "Relationship");
 assert.equal(tabFromPanel("notes"), "Notes");
+assert.equal(tabFromPanel("followups"), "Follow-ups");
 assert.equal(parseUrlState("?account=abc&panel=relationship").panel, "relationship");
 assert.equal(parseUrlState("?account=abc&panel=financials").panel, "financials");
 assert.equal(parseUrlState("?account=abc&panel=notes").panel, "notes");
-console.log("ok: Overview → Relationship → Financials → Notes URL panel mapping");
+assert.equal(parseUrlState("?account=abc&panel=followups").panel, "followups");
+console.log("ok: Overview → Relationship → Financials → Notes → Follow-ups URL panel mapping");
 
 // round-trip
 const rt = parseUrlState(serializeUrlState(fullState));

@@ -26,6 +26,7 @@ export const ACCOUNT360_COUNT_FAMILIES = Object.freeze([
   "history",
   "timeline",
   "notes",
+  "followups",
   "abort"
 ]);
 
@@ -33,7 +34,7 @@ export const ACCOUNT360_COUNT_FAMILIES = Object.freeze([
  * Surfaces that may be visited in Account 360.
  * Overview always loads compact summary resources (financials/relationship/insights).
  * Deep resources are lazy and keyed separately.
- * @param {"overview"|"connections"|"relationship"|"financials"|"insights"|"notes"} surface
+ * @param {"overview"|"connections"|"relationship"|"financials"|"insights"|"notes"|"followups"} surface
  * @returns {string[]}
  */
 export function account360FetchesForSurface(surface) {
@@ -43,6 +44,7 @@ export function account360FetchesForSurface(surface) {
   if (surface === "financials") return ["history:all"];
   if (surface === "insights") return [];
   if (surface === "notes") return ["notes:all"];
+  if (surface === "followups") return ["followups:open"];
   return [];
 }
 
@@ -79,6 +81,7 @@ export function createAccount360SessionStore() {
     history: 0,
     timeline: 0,
     notes: 0,
+    followups: 0,
     abort: 0
   };
 
@@ -257,6 +260,7 @@ export const ACCOUNT360_DEFAULT_NAV_BUDGET = Object.freeze({
   history: 1,
   timeline: 1,
   notes: 0,
+  followups: 0,
   abort: 0
 });
 

@@ -138,6 +138,29 @@ function mapNote(row) {
   };
 }
 
+function mapFollowUp(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    accountId: row.account_id,
+    title: row.title,
+    details: row.details ?? null,
+    dueAt: row.due_at,
+    status: row.status,
+    assignedTo: row.assigned_to ?? null,
+    createdAt: row.created_at,
+    createdBy: row.created_by ?? null,
+    updatedAt: row.updated_at,
+    updatedBy: row.updated_by ?? null,
+    completedAt: row.completed_at ?? null,
+    completedBy: row.completed_by ?? null,
+    archivedAt: row.archived_at ?? null,
+    archivedBy: row.archived_by ?? null,
+    rowVersion: Number(row.row_version ?? 1)
+  };
+}
+
 function mapAudit(row) {
   if (!row) return null;
   return {
@@ -994,6 +1017,110 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         return { ok: false, code: "conflict", current: again };
       }
       return { ok: true, note: mapNote(data) };
+    },
+
+    async insertAccountFollowUp(row) {
+      const { data, error } = await db()
+        .from("account_directory_follow_ups")
+        .insert({
+          organization_id: row.organizationId,
+          account_id: row.accountId,
+          title: row.title,
+          details: row.details ?? null,
+          due_at: row.dueAt,
+          status: row.status || "open",
+          assigned_to: row.assignedTo ?? null,
+          created_by: row.createdBy ?? null,
+          updated_by: row.updatedBy ?? null
+        })
+        .select("*")
+        .single();
+      if (error) throw dbError(error, "Could not create follow-up.");
+      return mapFollowUp(data);
+    },
+
+    async getAccountFollowUp(organizationId, followUpId) {
+      const { data, error } = await db()
+        .from("account_directory_follow_ups")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", followUpId)
+        .maybeSingle();
+      if (error) throw dbError(error, "Could not load follow-up.");
+      return mapFollowUp(data);
+    },
+
+    async listAccountFollowUps(
+      organizationId,
+      accountId,
+      { page = 1, limit = 25, status = "open", includeArchived = false } = {}
+    ) {
+      const safePage = Math.max(1, Number.parseInt(String(page ?? "1"), 10) || 1);
+      const safeLimit = Math.max(1, Number.parseInt(String(limit ?? "25"), 10) || 25);
+      const from = (safePage - 1) * safeLimit;
+      const to = from + safeLimit - 1;
+      const filter = String(status || "open").toLowerCase();
+      let q = db()
+        .from("account_directory_follow_ups")
+        .select("*", { count: "exact" })
+        .eq("organization_id", organizationId)
+        .eq("account_id", accountId);
+      if (!includeArchived) q = q.is("archived_at", null);
+      if (filter === "open" || filter === "completed") q = q.eq("status", filter);
+      if (filter === "completed") {
+        q = q.order("completed_at", { ascending: false }).order("id", { ascending: false });
+      } else if (filter === "all") {
+        q = q
+          .order("status", { ascending: false })
+          .order("due_at", { ascending: true })
+          .order("id", { ascending: true });
+      } else {
+        q = q.order("due_at", { ascending: true }).order("created_at", { ascending: true }).order("id", { ascending: true });
+      }
+      const { data, error, count } = await q.range(from, to);
+      if (error) throw dbError(error, "Could not list follow-ups.");
+      const total = count ?? (data || []).length;
+      return {
+        items: (data || []).map(mapFollowUp),
+        pagination: {
+          page: safePage,
+          limit: safeLimit,
+          has_more: total > from + safeLimit
+        }
+      };
+    },
+
+    async updateAccountFollowUp(organizationId, followUpId, patch, expectedRowVersion) {
+      const current = await this.getAccountFollowUp(organizationId, followUpId);
+      if (!current) return { ok: false, code: "not_found" };
+      if (expectedRowVersion != null && Number(current.rowVersion) !== Number(expectedRowVersion)) {
+        return { ok: false, code: "conflict", current };
+      }
+      /** @type {Record<string, unknown>} */
+      const update = { updated_by: patch.updatedBy ?? null };
+      if (patch.title !== undefined) update.title = patch.title;
+      if (patch.details !== undefined) update.details = patch.details;
+      if (patch.dueAt !== undefined) update.due_at = patch.dueAt;
+      if (patch.status !== undefined) update.status = patch.status;
+      if (patch.assignedTo !== undefined) update.assigned_to = patch.assignedTo;
+      if (patch.completedAt !== undefined) update.completed_at = patch.completedAt;
+      if (patch.completedBy !== undefined) update.completed_by = patch.completedBy;
+      if (patch.archivedAt !== undefined) update.archived_at = patch.archivedAt;
+      if (patch.archivedBy !== undefined) update.archived_by = patch.archivedBy;
+      let q = db()
+        .from("account_directory_follow_ups")
+        .update(update)
+        .eq("organization_id", organizationId)
+        .eq("id", followUpId);
+      if (expectedRowVersion != null) q = q.eq("row_version", Number(expectedRowVersion));
+      const { data, error } = await q.select("*").maybeSingle();
+      if (error) throw dbError(error, "Could not update follow-up.");
+      if (!data) {
+        const again = await this.getAccountFollowUp(organizationId, followUpId);
+        if (!again) return { ok: false, code: "not_found" };
+        return { ok: false, code: "conflict", current: again };
+      }
+      return { ok: true, followUp: mapFollowUp(data) };
     },
 
     async insertAuditEvent(event) {

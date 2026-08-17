@@ -465,6 +465,34 @@ export type AccountNotesPage = {
   pagination?: { page?: number; limit?: number; has_more?: boolean };
 };
 
+export type FollowUpAssignee = {
+  id: string;
+  displayName: string;
+};
+
+export type AccountFollowUp = {
+  id: string;
+  title: string;
+  details?: string | null;
+  dueAt?: string | null;
+  status?: "open" | "completed" | string;
+  dueState?: "overdue" | "due_today" | "upcoming" | "completed" | string;
+  completedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  assignedTo?: string | null;
+  assignee?: { displayName: string } | null;
+  author?: { displayName: string } | null;
+  rowVersion?: number;
+};
+
+export type AccountFollowUpsPage = {
+  ok?: boolean;
+  items?: AccountFollowUp[];
+  pagination?: { page?: number; limit?: number; has_more?: boolean };
+  status?: string;
+};
+
 export type AccountFinancialsResponse = {
   ok?: boolean;
   financials?: AccountFinancials;

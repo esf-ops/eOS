@@ -42,6 +42,15 @@ import {
   listAccountNotes,
   updateAccountNote
 } from "./accountDirectoryNotes.mjs";
+import {
+  archiveAccountFollowUp,
+  completeAccountFollowUp,
+  createAccountFollowUp,
+  listAccountFollowUps,
+  listAssignableStaff,
+  reopenAccountFollowUp,
+  updateAccountFollowUp
+} from "./accountDirectoryFollowUps.mjs";
 import { listMorawareReconciliationQueue } from "./accountDirectoryMorawareReconciliation.mjs";
 import {
   dismissSuggestion,
@@ -336,6 +345,37 @@ export function attachAccountDirectoryRoutes(app, deps) {
     });
   });
 
+  app.get("/api/account-directory/accounts/:accountId/follow-ups/assignees", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const data = await listAssignableStaff({
+        store,
+        getSupabase,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role
+      });
+      res.json({ ok: true, ...data });
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/follow-ups", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const data = await listAccountFollowUps({
+        store,
+        getSupabase,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        actorUserId: ctx.actorUserId,
+        actorDisplayName: ctx.actorDisplayName,
+        page: req.query?.page,
+        pageSize: req.query?.pageSize ?? req.query?.limit,
+        status: req.query?.status
+      });
+      res.json({ ok: true, ...data });
+    });
+  });
+
   app.get("/api/account-directory/accounts/:accountId/insights", ...guard, async (req, res) => {
     await withOrg(req, res, async (ctx) => {
       const insights = await getAccountDirectoryInsights({
@@ -584,6 +624,121 @@ export function attachAccountDirectoryRoutes(app, deps) {
       ok: false,
       code: "hard_delete_unavailable",
       error: "Hard delete is not available. Archive the note instead."
+    });
+  });
+
+  app.post("/api/account-directory/accounts/:accountId/follow-ups", ...writeGuard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const followUp = await createAccountFollowUp({
+        store,
+        logAction,
+        getSupabase,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        actorUserId: ctx.actorUserId,
+        actorDisplayName: ctx.actorDisplayName,
+        requestId: ctx.requestId,
+        payload: req.body || {}
+      });
+      res.status(201).json({ ok: true, followUp });
+    });
+  });
+
+  app.patch("/api/account-directory/accounts/:accountId/follow-ups/:followUpId", ...writeGuard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const followUp = await updateAccountFollowUp({
+        store,
+        logAction,
+        getSupabase,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        followUpId: String(req.params.followUpId),
+        role: ctx.role,
+        actorUserId: ctx.actorUserId,
+        actorDisplayName: ctx.actorDisplayName,
+        requestId: ctx.requestId,
+        payload: req.body || {}
+      });
+      res.json({ ok: true, followUp });
+    });
+  });
+
+  app.post(
+    "/api/account-directory/accounts/:accountId/follow-ups/:followUpId/complete",
+    ...writeGuard,
+    async (req, res) => {
+      await withOrg(req, res, async (ctx) => {
+        const followUp = await completeAccountFollowUp({
+          store,
+          logAction,
+          getSupabase,
+          organizationId: ctx.organizationId,
+          accountId: String(req.params.accountId),
+          followUpId: String(req.params.followUpId),
+          role: ctx.role,
+          actorUserId: ctx.actorUserId,
+          actorDisplayName: ctx.actorDisplayName,
+          requestId: ctx.requestId,
+          payload: req.body || {}
+        });
+        res.json({ ok: true, followUp });
+      });
+    }
+  );
+
+  app.post(
+    "/api/account-directory/accounts/:accountId/follow-ups/:followUpId/reopen",
+    ...writeGuard,
+    async (req, res) => {
+      await withOrg(req, res, async (ctx) => {
+        const followUp = await reopenAccountFollowUp({
+          store,
+          logAction,
+          getSupabase,
+          organizationId: ctx.organizationId,
+          accountId: String(req.params.accountId),
+          followUpId: String(req.params.followUpId),
+          role: ctx.role,
+          actorUserId: ctx.actorUserId,
+          actorDisplayName: ctx.actorDisplayName,
+          requestId: ctx.requestId,
+          payload: req.body || {}
+        });
+        res.json({ ok: true, followUp });
+      });
+    }
+  );
+
+  app.post(
+    "/api/account-directory/accounts/:accountId/follow-ups/:followUpId/archive",
+    ...writeGuard,
+    async (req, res) => {
+      await withOrg(req, res, async (ctx) => {
+        const result = await archiveAccountFollowUp({
+          store,
+          logAction,
+          getSupabase,
+          organizationId: ctx.organizationId,
+          accountId: String(req.params.accountId),
+          followUpId: String(req.params.followUpId),
+          role: ctx.role,
+          actorUserId: ctx.actorUserId,
+          actorDisplayName: ctx.actorDisplayName,
+          requestId: ctx.requestId,
+          payload: req.body || {}
+        });
+        res.json({ ok: true, ...result });
+      });
+    }
+  );
+
+  app.delete("/api/account-directory/accounts/:accountId/follow-ups/:followUpId", ...guard, async (req, res) => {
+    jsonNoStore(res);
+    res.status(405).json({
+      ok: false,
+      code: "hard_delete_unavailable",
+      error: "Hard delete is not available. Archive the follow-up instead."
     });
   });
 

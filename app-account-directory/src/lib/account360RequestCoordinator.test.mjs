@@ -153,7 +153,9 @@ function counts(store) {
   assert.deepEqual(account360FetchesForSurface("connections"), []);
   assert.deepEqual(account360FetchesForSurface("insights"), []);
   assert.deepEqual(account360FetchesForSurface("notes"), ["notes:all"]);
+  assert.deepEqual(account360FetchesForSurface("followups"), ["followups:open"]);
   assert.equal(result.notes, 0);
+  assert.equal(result.followups, 0);
   assert.equal(store.hasPanel("acct-1", "trend:trailing_12"), true);
   assert.equal(store.hasPanel("acct-1", "invoices"), true);
   assert.equal(needsAccount360Fetch(store, "acct-1", "history:all"), false);

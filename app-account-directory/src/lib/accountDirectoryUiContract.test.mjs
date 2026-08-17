@@ -117,6 +117,8 @@ assert.ok(app.includes("summary-group"), "grouped summary strip present");
 assert.ok(app.includes('"Financials"') || app.includes("Financials"), "Financials profile tab present");
 assert.ok(app.includes('"Notes"') || app.includes("Notes"), "Notes profile tab present");
 assert.ok(app.includes("AccountNotes"), "Notes panel present");
+assert.ok(app.includes('"Follow-ups"') || app.includes("Follow-ups"), "Follow-ups profile tab present");
+assert.ok(app.includes("AccountFollowUps"), "Follow-ups panel present");
 assert.ok(app.includes('"Insights"') || app.includes("Insights"), "Insights tab present");
 assert.ok(app.includes("FinancialsPanel") || app.includes("QuickBooks Financials") || panels.includes("FinancialsPanel"), "Financials panel present");
 assert.ok(panels.includes("Customer performance") || panels.includes("Customer Performance"), "Customer performance section present");
