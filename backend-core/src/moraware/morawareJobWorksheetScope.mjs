@@ -507,14 +507,18 @@ export function assertNoForbiddenWorksheetScopeKeys(value, path = "root") {
 /**
  * Map extracted facts to prepared-table rows for a population epoch.
  */
-export function toPreparedWorksheetFactRows(facts, { organizationId, importGroupId, syncRunId = null } = {}) {
+export function toPreparedWorksheetFactRows(
+  facts,
+  { organizationId, importGroupId, syncRunId = null, updatedAt = null } = {}
+) {
   const org = String(organizationId || "").trim();
   const epoch = String(importGroupId || "").trim();
   if (!org || !epoch) return [];
+  const stamp = updatedAt || new Date().toISOString();
   return (facts || []).map((f) => ({
     organization_id: org,
     import_group_id: epoch,
-    sync_run_id: syncRunId,
+    sync_run_id: syncRunId ?? f.sync_run_id ?? null,
     source_job_id: f.source_job_id,
     source_account_id: f.source_account_id,
     source_form_id: f.source_form_id,
@@ -534,6 +538,7 @@ export function toPreparedWorksheetFactRows(facts, { organizationId, importGroup
     overhang_raw: f.overhang_raw,
     braces_raw: f.braces_raw,
     dry_treat_raw: f.dry_treat_raw,
-    stone_care_kit_raw: f.stone_care_kit_raw
+    stone_care_kit_raw: f.stone_care_kit_raw,
+    updated_at: stamp
   }));
 }
