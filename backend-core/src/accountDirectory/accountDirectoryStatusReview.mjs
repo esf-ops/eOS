@@ -17,10 +17,31 @@ import {
 } from "./accountDirectoryStatusReconciliation.mjs";
 import {
   classifyLoadedEvidence,
-  loadStatusReconciliationEvidence
+  loadStatusReconciliationEvidence,
+  loadStatusReconciliationEvidenceForAccount
 } from "./accountDirectoryStatusReconciliationLoad.mjs";
 
 const DECISIONS = new Set(["accept_recommendation", "keep_current", "mark_needs_review"]);
+const MAX_PAGE = 100;
+const DEFAULT_PAGE = 50;
+
+function paginateItems(items, page, pageSize) {
+  const limit = Math.min(Math.max(Number(pageSize) || DEFAULT_PAGE, 1), MAX_PAGE);
+  const pageNum = Math.max(Number(page) || 1, 1);
+  const total = items.length;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+  const safePage = totalPages === 0 ? 1 : Math.min(pageNum, totalPages);
+  const offset = (safePage - 1) * limit;
+  return {
+    items: items.slice(offset, offset + limit),
+    total,
+    page: safePage,
+    pageSize: limit,
+    totalPages,
+    hasPreviousPage: safePage > 1,
+    hasNextPage: totalPages > 0 && safePage < totalPages
+  };
+}
 
 function requireAdmin(role) {
   if (!roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.ADMIN)) {
@@ -163,11 +184,12 @@ export async function listStatusReviewQueue(args) {
     filtered = filtered.filter((row) => String(row.displayName || "").toLowerCase().includes(search));
   }
 
+  const paged = paginateItems(filtered, q.page, q.pageSize);
   const payload = {
     ok: true,
     classifierVersion: STATUS_RECONCILE_VERSION,
     counts,
-    items: filtered,
+    ...paged,
     databaseWrites: 0
   };
   assertNoSensitivePayload(payload);
@@ -217,14 +239,17 @@ export async function decideStatusReview(args) {
     throw new AccountDirectoryError("invalid_decision", "Unknown status review decision.", 400);
   }
 
-  const loaded = await loadStatusReconciliationEvidence({
+  const loaded = await loadStatusReconciliationEvidenceForAccount({
     store: args.store,
     supabase: args.supabase,
-    organizationId: args.organizationId
+    organizationId: args.organizationId,
+    accountId: args.accountId
   });
   const classifiedWrap = classifyLoadedEvidence(loaded);
-  const classified = classifiedWrap.classified.find((row) => row.accountId === args.accountId);
-  if (!classified) throw new AccountDirectoryError("not_found", "Account not found.", 404);
+  const classified = classifiedWrap.classified[0] || null;
+  if (!classified || classified.accountId !== args.accountId) {
+    throw new AccountDirectoryError("not_found", "Account not found.", 404);
+  }
 
   const fingerprint = evidenceFingerprint(classified);
   if (args.evidenceFingerprint && args.evidenceFingerprint !== fingerprint) {

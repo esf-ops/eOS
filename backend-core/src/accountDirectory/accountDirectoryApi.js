@@ -604,7 +604,9 @@ export function attachAccountDirectoryRoutes(app, deps) {
           reasonCode: req.query?.reasonCode,
           category: req.query?.category,
           qbState: req.query?.qbState,
-          reviewed: req.query?.reviewed
+          reviewed: req.query?.reviewed,
+          page: req.query?.page,
+          pageSize: req.query?.pageSize
         }
       });
       res.json(data);

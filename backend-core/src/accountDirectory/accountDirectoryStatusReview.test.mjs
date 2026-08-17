@@ -346,6 +346,137 @@ async function main() {
     console.log("ok: review routes registered without bulk apply");
   }
 
+  // Phase 0C — pagination + targeted decide scoping
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const seeded = [];
+    for (let i = 0; i < 12; i += 1) {
+      const account = await seedActiveUnlinked(store, `Phase0C Page ${String(i).padStart(2, "0")}`);
+      await store.insertContact({
+        organizationId: ORG,
+        accountId: account.id,
+        displayName: `Contact ${i}`,
+        isPrimaryEstimating: true
+      });
+      seeded.push(account);
+    }
+
+    const page1 = await listStatusReviewQueue({
+      ...ctx(store),
+      query: { reviewed: "unresolved", page: 1, pageSize: 5 }
+    });
+    const page2 = await listStatusReviewQueue({
+      ...ctx(store),
+      query: { reviewed: "unresolved", page: 2, pageSize: 5 }
+    });
+    assert.equal(page1.pageSize, 5);
+    assert.equal(page1.page, 1);
+    assert.equal(page1.items.length, 5);
+    assert.equal(page2.page, 2);
+    assert.equal(page2.items.length, 5);
+    assert.ok(page1.total >= 12);
+    assert.equal(page1.total, page2.total);
+    const page1Ids = new Set(page1.items.map((r) => r.accountId));
+    const page2Ids = page2.items.map((r) => r.accountId);
+    assert.ok(page2Ids.every((id) => !page1Ids.has(id)), "page 2 must not duplicate page 1");
+    assert.equal(page1.hasNextPage, true);
+    assert.equal(page2.hasPreviousPage, true);
+
+    let orgContacts = 0;
+    let orgLocations = 0;
+    let orgLinks = 0;
+    let scopedContactAccountIds = [];
+    const origContactsOrg = store.listContactsForOrganization.bind(store);
+    const origLocationsOrg = store.listLocationsForOrganization.bind(store);
+    const origLinksOrg = store.listExternalLinksForOrganization.bind(store);
+    const origContacts = store.listContacts.bind(store);
+    store.listContactsForOrganization = async (organizationId) => {
+      orgContacts += 1;
+      return origContactsOrg(organizationId);
+    };
+    store.listLocationsForOrganization = async (organizationId) => {
+      orgLocations += 1;
+      return origLocationsOrg(organizationId);
+    };
+    store.listExternalLinksForOrganization = async (organizationId) => {
+      orgLinks += 1;
+      return origLinksOrg(organizationId);
+    };
+    store.listContacts = async (organizationId, accountId) => {
+      scopedContactAccountIds.push(String(accountId));
+      return origContacts(organizationId, accountId);
+    };
+
+    const target = seeded[3];
+    const listed = await listStatusReviewQueue({
+      ...ctx(store),
+      query: { search: target.displayName, page: 1, pageSize: 50 }
+    });
+    const item = listed.items.find((r) => r.accountId === target.id);
+    assert.ok(item);
+
+    orgContacts = 0;
+    orgLocations = 0;
+    orgLinks = 0;
+    scopedContactAccountIds = [];
+    await decideStatusReview({
+      ...ctx(store),
+      accountId: target.id,
+      decision: "keep_current",
+      keepReason: "known_customer_awaiting_qb",
+      evidenceFingerprint: item.evidenceFingerprint,
+      rowVersion: item.rowVersion
+    });
+    assert.equal(orgContacts, 0, "decide must not load org-wide contacts");
+    assert.equal(orgLocations, 0, "decide must not load org-wide locations");
+    assert.equal(orgLinks, 0, "decide must not load org-wide external links");
+    assert.deepEqual(scopedContactAccountIds, [target.id]);
+
+    // Stale fingerprint still rejects
+    await assert.rejects(
+      () =>
+        decideStatusReview({
+          ...ctx(store),
+          accountId: target.id,
+          decision: "keep_current",
+          keepReason: "strategic_manual",
+          evidenceFingerprint: "stale-fingerprint",
+          rowVersion: item.rowVersion
+        }),
+      (e) => e instanceof AccountDirectoryError && e.code === "evidence_changed"
+    );
+
+    // Keep-current suppression still works after reload
+    const afterKeep = await listStatusReviewQueue({
+      ...ctx(store),
+      query: { search: target.displayName, page: 1, pageSize: 50 }
+    });
+    const kept = afterKeep.items.find((r) => r.accountId === target.id);
+    assert.equal(kept?.suppressed, true);
+
+    // Org isolation on decide
+    const other = await store.insertAccount({
+      organizationId: ORG_B,
+      displayName: "Other Org Decide",
+      status: "active",
+      source: "manual",
+      createdBy: ACTOR,
+      updatedBy: ACTOR
+    });
+    await assert.rejects(
+      () =>
+        decideStatusReview({
+          ...ctx(store),
+          accountId: other.id,
+          decision: "mark_needs_review",
+          rowVersion: 1
+        }),
+      (e) => e instanceof AccountDirectoryError && e.status === 404
+    );
+
+    console.log("ok: Phase 0C pagination + targeted decide scoping");
+  }
+
   console.log("accountDirectoryStatusReview.test.mjs — all passed");
 }
 

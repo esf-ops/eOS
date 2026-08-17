@@ -15,21 +15,34 @@ function formatValue(card: AccountInsightCard): string {
 export function InsightsPanel({
   sessionToken,
   accountId,
+  insights,
+  busy: busyProp,
+  error: errorProp,
   pendingInsightId,
   onPendingConsumed
 }: {
   sessionToken: string | null;
   accountId: string;
+  insights?: AccountInsightsResponse | null;
+  busy?: boolean;
+  error?: string | null;
   pendingInsightId?: string | null;
   onPendingConsumed?: () => void;
 }) {
-  const [data, setData] = useState<AccountInsightsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const shared = insights !== undefined;
+  const [data, setData] = useState<AccountInsightsResponse | null>(insights ?? null);
+  const [error, setError] = useState<string | null>(errorProp ?? null);
+  const [busy, setBusy] = useState(Boolean(busyProp));
   const [evidence, setEvidence] = useState<AccountInsightEvidenceResponse | null>(null);
   const gen = useRef(0);
 
   useEffect(() => {
+    if (shared) {
+      setData(insights ?? null);
+      setBusy(Boolean(busyProp));
+      setError(errorProp ?? null);
+      return;
+    }
     if (!sessionToken || !accountId) return;
     const current = ++gen.current;
     setBusy(true);
@@ -47,7 +60,7 @@ export function InsightsPanel({
       .finally(() => {
         if (current === gen.current) setBusy(false);
       });
-  }, [sessionToken, accountId]);
+  }, [sessionToken, accountId, shared, insights, busyProp, errorProp]);
 
   async function openEvidence(id: string) {
     if (!sessionToken) return;
@@ -197,24 +210,31 @@ export function InsightsPanel({
 export function OverviewInsightStrip({
   sessionToken,
   accountId,
+  insights,
   onOpenInsights,
   onOpenEvidence
 }: {
-  sessionToken: string | null;
-  accountId: string;
+  sessionToken?: string | null;
+  accountId?: string;
+  insights?: AccountInsightsResponse | null;
   onOpenInsights: () => void;
   onOpenEvidence: (id: string) => void;
 }) {
-  const [cards, setCards] = useState<AccountInsightCard[]>([]);
+  const shared = insights !== undefined;
+  const [cards, setCards] = useState<AccountInsightCard[]>(insights?.overview || []);
   const gen = useRef(0);
   useEffect(() => {
-    if (!sessionToken) return;
+    if (shared) {
+      setCards(insights?.overview || []);
+      return;
+    }
+    if (!sessionToken || !accountId) return;
     const current = ++gen.current;
     void getAccountInsights(sessionToken, accountId).then((res) => {
       if (current !== gen.current) return;
       setCards(res.overview || []);
     }).catch(() => undefined);
-  }, [sessionToken, accountId]);
+  }, [sessionToken, accountId, shared, insights]);
   if (!cards.length) return null;
   return (
     <section className="ad-insight-strip" aria-label="Account insights">

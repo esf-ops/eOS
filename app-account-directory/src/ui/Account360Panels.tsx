@@ -1256,9 +1256,10 @@ export function ConnectionsSurface({ links }: { links: ExternalLink[] }) {
 
 export function loadRelationship(
   token: string,
-  accountId: string
+  accountId: string,
+  init: RequestInit = {}
 ): Promise<AccountRelationship | null> {
-  return getAccountRelationship(token, accountId).then((res) => res.relationship ?? null);
+  return getAccountRelationship(token, accountId, init).then((res) => res.relationship ?? null);
 }
 
 export { ApiError };

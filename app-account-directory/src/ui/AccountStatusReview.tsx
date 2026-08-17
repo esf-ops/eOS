@@ -56,6 +56,7 @@ export function StatusReviewSurface({
   const [keepReason, setKeepReason] = useState("known_customer_awaiting_qb");
   const [note, setNote] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
+  const [page, setPage] = useState(1);
   const loadGeneration = useRef(0);
 
   const load = useCallback(async () => {
@@ -70,7 +71,9 @@ export function StatusReviewSurface({
         currentStatus,
         category,
         qbState,
-        reviewed
+        reviewed,
+        page,
+        pageSize: 50
       });
       if (generation !== loadGeneration.current) return;
       setQueue(data);
@@ -80,12 +83,16 @@ export function StatusReviewSurface({
     } finally {
       if (generation === loadGeneration.current) setBusy(false);
     }
-  }, [sessionToken, search, proposedStatus, currentStatus, category, qbState, reviewed]);
+  }, [sessionToken, search, proposedStatus, currentStatus, category, qbState, reviewed, page]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setSearch(searchInput), 300);
     return () => window.clearTimeout(t);
   }, [searchInput]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, proposedStatus, currentStatus, category, qbState, reviewed]);
 
   useEffect(() => {
     void load();
@@ -206,6 +213,32 @@ export function StatusReviewSurface({
         </div>
       ) : null}
       {busy && !queue ? <p className="muted">Loading review queue…</p> : null}
+
+      {queue && (queue.totalPages || 0) > 1 ? (
+        <div className="ad-toolbar-row" aria-label="Status review pagination">
+          <p className="muted">
+            Page {queue.page ?? page} of {queue.totalPages} · {queue.total ?? queue.items.length} matching
+          </p>
+          <div className="ad-toolbar-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={!queue.hasPreviousPage || busy}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={!queue.hasNextPage || busy}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="status-review-split">
         <div className="table-wrap">

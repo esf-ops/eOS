@@ -62,21 +62,32 @@ export async function listAccounts(token: string, opts: AccountListParams) {
   )) as AccountListResponse;
 }
 
-export async function getAccount(token: string, accountId: string) {
-  return (await apiGet(`${BASE}/accounts/${encodeURIComponent(accountId)}`, token)) as AccountDetailResponse;
+export async function getAccount(token: string, accountId: string, init: RequestInit = {}) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}`,
+    token,
+    init
+  )) as AccountDetailResponse;
 }
 
-export async function getAccountFinancials(token: string, accountId: string) {
+export async function getAccountFinancials(token: string, accountId: string, init: RequestInit = {}) {
   return (await apiGet(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/financials`,
-    token
+    token,
+    init
   )) as AccountFinancialsResponse;
 }
 
-export async function getAccountFinancialsTrend(token: string, accountId: string, period: string) {
+export async function getAccountFinancialsTrend(
+  token: string,
+  accountId: string,
+  period: string,
+  init: RequestInit = {}
+) {
   return (await apiGet(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/financials/trend${qs({ period })}`,
-    token
+    token,
+    init
   )) as AccountTrendResponse;
 }
 
@@ -109,10 +120,11 @@ export async function getAccountOpenInvoices(
   )) as AccountInvoicePage;
 }
 
-export async function getAccountRelationship(token: string, accountId: string) {
+export async function getAccountRelationship(token: string, accountId: string, init: RequestInit = {}) {
   return (await apiGet(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/relationship`,
-    token
+    token,
+    init
   )) as AccountRelationshipResponse;
 }
 
@@ -336,7 +348,10 @@ export async function fetchAccountStatusReview(
     category?: string;
     qbState?: string;
     reviewed?: string;
-  } = {}
+    page?: number;
+    pageSize?: number;
+  } = {},
+  init: RequestInit = {}
 ) {
   return (await apiGet(
     `${BASE}/status-review${qs({
@@ -346,9 +361,12 @@ export async function fetchAccountStatusReview(
       reasonCode: opts.reasonCode,
       category: opts.category,
       qbState: opts.qbState,
-      reviewed: opts.reviewed
+      reviewed: opts.reviewed,
+      page: opts.page,
+      pageSize: opts.pageSize
     })}`,
-    token
+    token,
+    init
   )) as import("./types").StatusReviewQueueResponse;
 }
 
@@ -370,10 +388,16 @@ export async function decideAccountStatusReview(
   );
 }
 
-export async function getAccountInsights(token: string, accountId: string, period?: string) {
+export async function getAccountInsights(
+  token: string,
+  accountId: string,
+  period?: string,
+  init: RequestInit = {}
+) {
   return (await apiGet(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/insights${qs({ period })}`,
-    token
+    token,
+    init
   )) as AccountInsightsResponse;
 }
 

@@ -11,6 +11,7 @@ import {
   fetchAccountDirectorySummary,
   getAccount,
   getAccountFinancials,
+  getAccountInsights,
   linkQuickBooks,
   listAccounts,
   restoreAccount,
@@ -28,10 +29,16 @@ import { InsightsPanel, OverviewInsightStrip } from "./ui/AccountInsights";
 import { WorkspaceTabBoundary } from "./ui/WorkspaceTabBoundary";
 import { StatusReviewSurface } from "./ui/AccountStatusReview";
 import { MorawareReviewSurface } from "./ui/MorawareReview";
+import {
+  createAccount360SessionStore,
+  isAbortError,
+  needsAccount360Fetch
+} from "./lib/account360RequestCoordinator.mjs";
 import type {
   AccountDetail,
   AccountDirectoryPermissions,
   AccountFinancials,
+  AccountInsightsResponse,
   AccountListItem,
   AccountRelationship,
   AccountSummary
@@ -463,19 +470,21 @@ export default function AccountDirectoryApp() {
   }, [sessionToken, urlState, permissions.canView, permissionsLoaded]); // eslint-disable-line
 
   const loadDetail = useCallback(
-    async (accountId: string) => {
+    async (accountId: string, init: RequestInit = {}) => {
       if (!sessionToken) return;
       setDetailBusy(true);
       setDetailError(null);
       try {
-        const res = await getAccount(sessionToken, accountId);
+        const res = await getAccount(sessionToken, accountId, init);
+        if (init.signal?.aborted) return;
         setDetail(res.account ?? null);
         if (!res.account) setDetailError("Account not found.");
       } catch (e: unknown) {
+        if (isAbortError(e) || init.signal?.aborted) return;
         setDetail(null);
         setDetailError(e instanceof ApiError ? e.message : String(e));
       } finally {
-        setDetailBusy(false);
+        if (!init.signal?.aborted) setDetailBusy(false);
       }
     },
     [sessionToken]
@@ -497,8 +506,13 @@ export default function AccountDirectoryApp() {
       setDetail(null);
       return;
     }
-    void loadDetail(urlState.account);
+    const accountId = urlState.account;
+    const controller = new AbortController();
     setDetailTab(tabFromPanel(urlState.panel) as DetailTab);
+    void loadDetail(accountId, { signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
   }, [urlState.account, sessionToken]); // eslint-disable-line
 
   /* ─── Filter/pagination helpers ─── */
@@ -1746,17 +1760,44 @@ function ProfilePanel({
   const [financialsError, setFinancialsError] = useState<string | null>(null);
   const [relationship, setRelationship] = useState<AccountRelationship | null>(null);
   const [relationshipBusy, setRelationshipBusy] = useState(false);
+  const [insights, setInsights] = useState<AccountInsightsResponse | null>(null);
+  const [insightsBusy, setInsightsBusy] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
   const [pendingInsightId, setPendingInsightId] = useState<string | null>(null);
+  const [panelEpoch, setPanelEpoch] = useState(0);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const session360Ref = useRef(createAccount360SessionStore());
 
   useEffect(() => {
-    setFinancials(null);
+    const session = session360Ref.current.beginAccount(accountId);
+    const cachedFin = session360Ref.current.getPanel(accountId, "financials") as AccountFinancials | null | undefined;
+    const cachedRel = session360Ref.current.getPanel(accountId, "relationship") as
+      | AccountRelationship
+      | null
+      | undefined;
+    const cachedInsights = session360Ref.current.getPanel(accountId, "insights") as
+      | AccountInsightsResponse
+      | null
+      | undefined;
+    setFinancials(cachedFin ?? null);
     setFinancialsError(null);
-    setRelationship(null);
+    setRelationship(cachedRel ?? null);
     setRelationshipBusy(false);
+    setInsights(cachedInsights ?? null);
+    setInsightsError(null);
     setPendingInsightId(null);
+    return () => {
+      // Abort in-flight when leaving this account workspace mount or switching ids (beginAccount aborts prior).
+      void session;
+    };
   }, [accountId]);
+
+  useEffect(() => {
+    return () => {
+      session360Ref.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
@@ -1790,50 +1831,106 @@ function ProfilePanel({
   }, [onClose]);
 
   useEffect(() => {
-    if (!["Overview", "Financials", "Relationship"].includes(detailTab)) return;
     if (!sessionToken || !accountId) return;
+    const store = session360Ref.current;
+    if (!needsAccount360Fetch(store, accountId, "financials")) {
+      const cached = store.getPanel(accountId, "financials") as AccountFinancials | null | undefined;
+      setFinancials(cached ?? null);
+      setFinancialsBusy(false);
+      return;
+    }
 
-    let cancelled = false;
+    const generation = store.getGeneration();
+    const signal = store.getSignal() || undefined;
     setFinancialsBusy(true);
     setFinancialsError(null);
-    void getAccountFinancials(sessionToken, accountId)
+    store.markFetch("financials");
+    void getAccountFinancials(sessionToken, accountId, { signal })
       .then((res) => {
-        if (cancelled) return;
-        setFinancials(res.financials ?? null);
+        if (!store.isCurrent(generation, accountId)) return;
+        const next = res.financials ?? null;
+        store.setPanel(accountId, "financials", next);
+        setFinancials(next);
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (!store.isCurrent(generation, accountId) || isAbortError(err)) return;
         setFinancials(null);
         setFinancialsError(err instanceof ApiError ? err.message : "Could not load financials.");
       })
       .finally(() => {
-        if (!cancelled) setFinancialsBusy(false);
+        if (store.isCurrent(generation, accountId)) setFinancialsBusy(false);
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [detailTab, sessionToken, accountId]);
+  }, [sessionToken, accountId, panelEpoch]);
 
   useEffect(() => {
-    if (!["Overview", "Relationship"].includes(detailTab)) return;
     if (!sessionToken || !accountId) return;
-    let cancelled = false;
+    const store = session360Ref.current;
+    if (!needsAccount360Fetch(store, accountId, "relationship")) {
+      const cached = store.getPanel(accountId, "relationship") as AccountRelationship | null | undefined;
+      setRelationship(cached ?? null);
+      setRelationshipBusy(false);
+      return;
+    }
+
+    const generation = store.getGeneration();
+    const signal = store.getSignal() || undefined;
     setRelationshipBusy(true);
-    void loadRelationship(sessionToken, accountId)
+    store.markFetch("relationship");
+    void loadRelationship(sessionToken, accountId, { signal })
       .then((rel) => {
-        if (!cancelled) setRelationship(rel);
+        if (!store.isCurrent(generation, accountId)) return;
+        store.setPanel(accountId, "relationship", rel);
+        setRelationship(rel);
       })
-      .catch(() => {
-        if (!cancelled) setRelationship(null);
+      .catch((err) => {
+        if (!store.isCurrent(generation, accountId) || isAbortError(err)) return;
+        setRelationship(null);
       })
       .finally(() => {
-        if (!cancelled) setRelationshipBusy(false);
+        if (store.isCurrent(generation, accountId)) setRelationshipBusy(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [detailTab, sessionToken, accountId]);
+  }, [sessionToken, accountId, panelEpoch]);
+
+  useEffect(() => {
+    if (!sessionToken || !accountId) return;
+    // Load insights once per account session for Overview strip + Insights tab.
+    const store = session360Ref.current;
+    if (!needsAccount360Fetch(store, accountId, "insights")) {
+      const cached = store.getPanel(accountId, "insights") as AccountInsightsResponse | null | undefined;
+      setInsights(cached ?? null);
+      setInsightsBusy(false);
+      return;
+    }
+
+    const generation = store.getGeneration();
+    const signal = store.getSignal() || undefined;
+    setInsightsBusy(true);
+    setInsightsError(null);
+    store.markFetch("insights");
+    void getAccountInsights(sessionToken, accountId, undefined, { signal })
+      .then((res) => {
+        if (!store.isCurrent(generation, accountId)) return;
+        store.setPanel(accountId, "insights", res);
+        setInsights(res);
+      })
+      .catch((err) => {
+        if (!store.isCurrent(generation, accountId) || isAbortError(err)) return;
+        setInsights(null);
+        setInsightsError(err instanceof ApiError ? err.message : "Could not load insights.");
+      })
+      .finally(() => {
+        if (store.isCurrent(generation, accountId)) setInsightsBusy(false);
+      });
+  }, [sessionToken, accountId, panelEpoch]);
+
+  function bumpPanelsAfterMutation(nextDetail: AccountDetail) {
+    session360Ref.current.invalidateAccount(accountId);
+    setFinancials(null);
+    setRelationship(null);
+    setInsights(null);
+    setPanelEpoch((n) => n + 1);
+    onDetailChanged(nextDetail);
+  }
 
   const locationLine = detail ? formatCityState(detail.city, detail.state) : "";
   const qbState = detail?.quickbooksLinked ? "QB Linked" : "QB not linked";
@@ -2018,8 +2115,8 @@ function ProfilePanel({
                   onOpenTab={(tab) => onTabChange(tab as DetailTab)}
                   insightStrip={
                     <OverviewInsightStrip
-                      sessionToken={sessionToken}
-                      accountId={accountId}
+                      insights={insights}
+                      busy={insightsBusy}
                       onOpenInsights={() => onTabChange("Insights")}
                       onOpenEvidence={(id) => {
                         setPendingInsightId(id);
@@ -2040,19 +2137,11 @@ function ProfilePanel({
                 sessionToken={sessionToken}
                 accountId={accountId}
                 onRetry={() => {
+                  const store = session360Ref.current;
+                  store.clearPanel(accountId, "financials");
                   setFinancials(null);
                   setFinancialsError(null);
-                  if (sessionToken) {
-                    setFinancialsBusy(true);
-                    void getAccountFinancials(sessionToken, accountId)
-                      .then((res) => setFinancials(res.financials ?? null))
-                      .catch((err) =>
-                        setFinancialsError(
-                          err instanceof ApiError ? err.message : "Could not load financials."
-                        )
-                      )
-                      .finally(() => setFinancialsBusy(false));
-                  }
+                  setPanelEpoch((n) => n + 1);
                 }}
               />
               </WorkspaceTabBoundary>
@@ -2091,7 +2180,7 @@ function ProfilePanel({
                 accountId={accountId}
                 contacts={detail.contacts ?? []}
                 canEdit={Boolean(permissions.canEdit)}
-                onChanged={onDetailChanged}
+                onChanged={bumpPanelsAfterMutation}
                 onAdd={onAddContact}
               />
               </WorkspaceTabBoundary>
@@ -2104,7 +2193,7 @@ function ProfilePanel({
                 accountId={accountId}
                 locations={detail.locations ?? []}
                 canEdit={Boolean(permissions.canEdit)}
-                onChanged={onDetailChanged}
+                onChanged={bumpPanelsAfterMutation}
                 onAdd={onAddLocation}
               />
               </WorkspaceTabBoundary>
@@ -2126,6 +2215,9 @@ function ProfilePanel({
               <InsightsPanel
                 sessionToken={sessionToken}
                 accountId={accountId}
+                insights={insights}
+                busy={insightsBusy}
+                error={insightsError}
                 pendingInsightId={pendingInsightId}
                 onPendingConsumed={() => setPendingInsightId(null)}
               />

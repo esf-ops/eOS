@@ -45,8 +45,8 @@ export async function apiFetch(path: string, token: string, init: RequestInit = 
   return body;
 }
 
-export function apiGet(path: string, token: string) {
-  return apiFetch(path, token, { method: "GET" });
+export function apiGet(path: string, token: string, init: RequestInit = {}) {
+  return apiFetch(path, token, { ...init, method: "GET" });
 }
 
 export function apiPost(path: string, token: string, payload?: unknown) {

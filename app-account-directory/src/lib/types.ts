@@ -574,6 +574,12 @@ export type StatusReviewQueueResponse = {
     reviewed: number;
   };
   items: StatusReviewItem[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  hasPreviousPage?: boolean;
+  hasNextPage?: boolean;
 };
 
 export type MorawareReconciliationItem = {
