@@ -69,16 +69,7 @@ export function available(key, label, value, extra = {}) {
   });
 }
 
-export function applyFreshness(m, freshness) {
-  if (!m || m.value == null) return m;
-  if (freshness === "stale" && m.state === FINANCE_METRIC_STATES.AVAILABLE) {
-    return { ...m, state: FINANCE_METRIC_STATES.STALE };
-  }
-  if (freshness === "warning" && m.state === FINANCE_METRIC_STATES.AVAILABLE) {
-    return { ...m, state: FINANCE_METRIC_STATES.WARNING };
-  }
-  return m;
-}
+export { applyFreshness } from "./freshness.mjs";
 
 export function ratioPct(numerator, denominator) {
   const n = roundMoney(numerator);

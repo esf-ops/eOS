@@ -30,7 +30,10 @@ export const FINANCE_PNL_PRESETS = Object.freeze([
 export const FINANCE_PNL_SOURCE_VIEW = "ProfitAndLossStandard";
 export const FINANCE_BS_SOURCE_VIEW = "BalanceSheetStandard";
 
+/** @deprecated Prefer DEFAULT_FINANCE_INTRADAY_STALE_AFTER_SECONDS from freshness.mjs */
 export const DEFAULT_FINANCE_STALE_AFTER_SECONDS = 4 * 60 * 60;
+export const DEFAULT_FINANCE_INTRADAY_STALE_AFTER_SECONDS = DEFAULT_FINANCE_STALE_AFTER_SECONDS;
+export const DEFAULT_FINANCE_NIGHTLY_STALE_AFTER_SECONDS = 26 * 60 * 60;
 
 export const FINANCE_PAGE_SIZE = 1000;
 export const FINANCE_MAX_PAGES = 20;

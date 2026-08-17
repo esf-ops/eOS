@@ -8,6 +8,9 @@ import {
 import {
   agingRowsFromBuckets,
   cashEventRoleLabel,
+  domainPresentationLabel,
+  financeDomainLabel,
+  FINANCE_DOMAIN_DISPLAY_ORDER,
   formatMoney,
   formatPct,
   formatPeriodCaption,
@@ -47,7 +50,7 @@ function finiteValue(value: unknown): number | null {
 function Pill({ state, children }: { state?: string; children?: ReactNode }) {
   const normalized = String(state || "unavailable").toLowerCase();
   const tone =
-    ["pass", "available", "success"].includes(normalized)
+    ["pass", "available", "success", "fresh", "fresh_nightly"].includes(normalized)
       ? "ok"
       : ["fail", "failed", "unavailable", "missing"].includes(normalized)
         ? "fail"
@@ -55,6 +58,36 @@ function Pill({ state, children }: { state?: string; children?: ReactNode }) {
           ? "stale"
           : "warn";
   return <span className={`fin-pill ${tone}`}>{children || statusLabel(state)}</span>;
+}
+
+function DomainFreshnessStrip({ domains }: { domains?: Record<string, ApiRecord> | null }) {
+  const rows = FINANCE_DOMAIN_DISPLAY_ORDER.map((id) => domains?.[id]).filter(Boolean) as ApiRecord[];
+  if (!rows.length) return null;
+  return (
+    <div className="fin-domain-freshness" aria-label="Finance data freshness by domain">
+      {rows.map((domain) => {
+        const presentation = String(domain.presentation || domain.state || "unavailable");
+        const lastOk = domain.last_success_at || domain.last_completed_at;
+        const staleNote =
+          presentation === "stale" && lastOk
+            ? `Last successful: ${new Date(String(lastOk)).toLocaleString("en-US", {
+                timeZone: "America/Chicago",
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}`
+            : null;
+        return (
+          <div className="fin-domain-freshness-item" key={String(domain.domain)}>
+            <span className="fin-domain-freshness-name">{financeDomainLabel(String(domain.domain))}</span>
+            <Pill state={presentation}>{domainPresentationLabel(domain as { presentation?: string; state?: string; cadence?: string })}</Pill>
+            {staleNote ? <small className="fin-domain-freshness-note">{staleNote}</small> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function MetricCard({
@@ -184,6 +217,7 @@ export function OverviewCommandCenter({
   onNavigate: (tab: FinanceTab) => void;
 }) {
   const metrics = (overview.metrics || {}) as Record<string, FinanceMetric>;
+  const domains = (overview.domains || {}) as Record<string, ApiRecord>;
   const trend = (overview.pnl_trend || {}) as {
     state?: string;
     notes?: string;
@@ -239,6 +273,7 @@ export function OverviewCommandCenter({
           title={`Through ${formatYmdUtc(String((overview.ytd_period as ApiRecord)?.period_end || "")) || "the latest governed period"}`}
           copy="Exact governed values first. Open any card to investigate the monthly path or supporting detail."
         />
+        <DomainFreshnessStrip domains={domains} />
         <div className="fin-kpi-grid fin-kpi-grid-headline">
           <MetricCard metric={metrics.revenue} animationKey="overview-revenue" onOpen={() => onOpen("revenue")} />
           <MetricCard metric={metrics.gross_profit} animationKey="overview-gp" onOpen={() => onOpen("gross_profit")} />
@@ -1164,7 +1199,8 @@ export function CashWorkspace({ data }: { data: ApiRecord }) {
 }
 
 export function ReconciliationWorkspace({ data, token }: { data: ApiRecord; token: string }) {
-  const domains = (data.domains || {}) as Record<string, ApiRecord>;
+  const domainsRaw = (data.domains || {}) as Record<string, ApiRecord>;
+  const domains = FINANCE_DOMAIN_DISPLAY_ORDER.map((id) => domainsRaw[id]).filter(Boolean) as ApiRecord[];
   const results = (data.results || []) as ApiRecord[];
   const [detailView, setDetailView] = useState<"accounts" | "transactions" | "journals">("accounts");
   const [search, setSearch] = useState("");
@@ -1192,21 +1228,37 @@ export function ReconciliationWorkspace({ data, token }: { data: ApiRecord; toke
         <SectionHead
           eyebrow="Data health"
           title="Governed Finance coverage"
-          copy="Freshness, domain coverage, and accounting checks remain visible without competing with the operating views."
+          copy="Each source domain is judged against its own refresh cadence — nightly Accounting and Master stay fresh through the business day after a successful overnight run."
         />
         <div className="fin-domain-grid">
-          {Object.values(domains).map((domain) => (
-            <article className="fin-card fin-domain-card" key={String(domain.domain)}>
-              <div>
-                <strong>{String(domain.domain || "").replace(/_/g, " ")}</strong>
-                <Pill state={String(domain.state || domain.status)} />
-              </div>
-              <p>
-                Coverage {String(domain.coverage_start || "—")} → {String(domain.coverage_end || "—")}
-              </p>
-              <small>{String(domain.last_success_at || domain.notes || "Awaiting first Finance sync")}</small>
-            </article>
-          ))}
+          {domains.map((domain) => {
+            const presentation = String(domain.presentation || domain.state || "unavailable");
+            const lastOk = domain.last_success_at || domain.last_completed_at;
+            return (
+              <article className="fin-card fin-domain-card" key={String(domain.domain)}>
+                <div>
+                  <strong>{financeDomainLabel(String(domain.domain))}</strong>
+                  <Pill state={presentation}>
+                    {domainPresentationLabel(domain as { presentation?: string; state?: string; cadence?: string })}
+                  </Pill>
+                </div>
+                <p>
+                  Coverage {String(domain.coverage_start || "—")} → {String(domain.coverage_end || "—")}
+                </p>
+                <small>
+                  {presentation === "stale" && lastOk
+                    ? `Last successful: ${new Date(String(lastOk)).toLocaleString("en-US", {
+                        timeZone: "America/Chicago",
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}`
+                    : String(domain.last_success_at || domain.notes || "Awaiting first Finance sync")}
+                </small>
+              </article>
+            );
+          })}
         </div>
       </FinanceReveal>
       <FinanceReveal motionKey="recon-checks" className="fin-command-section fin-card fin-panel">

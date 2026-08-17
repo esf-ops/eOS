@@ -746,6 +746,33 @@ button.fin-card {
 .fin-domain-card > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 .fin-domain-card strong { font-size: 0.76rem; text-transform: capitalize; }
 .fin-domain-card p, .fin-domain-card small { display: block; margin: 8px 0 0; color: var(--eos-ink-muted); font-size: 0.65rem; overflow-wrap: anywhere; }
+.fin-domain-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.55);
+}
+.fin-domain-freshness-item {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.fin-domain-freshness-name {
+  color: var(--eos-ink-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.fin-domain-freshness-note {
+  color: var(--eos-ink-faint);
+  font-size: 0.62rem;
+}
 .fin-inline-search { width: min(280px, 100%); }
 
 .fin-banner { padding: 14px 16px; margin-bottom: 16px; border: 1px solid var(--eos-line); border-radius: var(--r-md); background: rgba(255, 255, 255, 0.82); font-size: 0.82rem; }

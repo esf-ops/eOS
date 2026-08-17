@@ -99,6 +99,25 @@ export function createFinanceReadStore(supabase) {
       return { rows: latest, error: null };
     },
 
+    /**
+     * Latest Sales Financial Truth sync run (Finance Open A/R ownership only).
+     * Does not alter Account Directory contracts.
+     */
+    async loadLatestSalesFinancialSyncRun(organizationId) {
+      const { data, error } = await runSelect(
+        supabase
+          .from("sales_quickbooks_sync_runs")
+          .select(
+            "id, status, started_at, completed_at, coverage_start_date, coverage_end_date, warnings, error_summary"
+          )
+          .eq("organization_id", organizationId)
+          .order("started_at", { ascending: false })
+          .limit(1)
+      );
+      if (error) return { row: null, error: storeError(error, "sales_quickbooks_sync_runs") };
+      return { row: data?.[0] || null, error: null };
+    },
+
     async loadReconciliationResults(organizationId) {
       const { data, error } = await runSelect(
         supabase
@@ -311,7 +330,7 @@ export function createFinanceReadStore(supabase) {
       const { data, error } = await runSelect(
         supabase
           .from("qb_finance_account_balances_current")
-          .select("account_name, account_type, balance, account_balance, as_of_captured_at")
+          .select("account_name, account_type, balance, account_balance, as_of_captured_at, synced_at")
           .eq("organization_id", organizationId)
           .limit(500)
       );

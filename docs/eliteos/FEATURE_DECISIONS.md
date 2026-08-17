@@ -4272,10 +4272,20 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Date** | 2026-08-14 |
 | **Decision** | First visible **eliteOS Finance Head** (`app-finance/`, slug **`finance`**) reads **only** through Brain `GET /api/finance/*`. QuickBooks stays read-only. Browser never queries `qb_finance_*`. Official P&L/BS come from stored Accrual `ProfitAndLossStandard` / `BalanceSheetStandard` snapshots. Open A/R reuses Sales Financial Truth current snapshot (DueDate aging only). Open A/P uses `qb_finance_open_ap_current`. Cash keeps receipt vs deposit as separate event roles and never adds them. Missing facts render **unavailable**, never fake $0. Visual language follows the shared eliteOS bright/translucent product system under `EliteosTopbar`; Finance-only visualization and motion tokens do not restyle other heads. **`quickbooks_intelligence` remains a separate head.** |
 | **Auth** | `requireAuth` + `requireRole(["admin","super_admin","executive","finance","accounting"])` + `requireHeadAccess("finance")`. Organization scope is the authenticated user's `organization_id` only (no query-org override, no default-org fallback). |
-| **Env** | Frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_BACKEND_URL`, `VITE_HOME_URL`. Brain: `HEAD_URL_FINANCE` (launcher + CORS). Optional `QB_FINANCE_STALE_AFTER_SECONDS` (default 4h). |
+| **Env** | Frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_BACKEND_URL`, `VITE_HOME_URL`. Brain: `HEAD_URL_FINANCE` (launcher + CORS). Freshness: see §317d. |
 | **Out of scope** | 13-week forecast, collections automation, bill-pay recommendations, credit-risk scoring, Ask Finance, email reminders, bank feeds, isolved, Moraware joins, Customer 360, QuickBooks writeback, extract-pipeline changes, historical backfill, migrations. |
 | **Impacted** | `backend-core/src/finance/financeRead/*`, `app-finance/`, `server.js`, `launcherHeads.js`, SYSTEM_BLUEPRINT, head map. |
 | **Revisit** | Create Vercel project for `app-finance`, set `HEAD_URL_FINANCE`, redeploy Brain, grant head access, then optional DNS `finance.eliteosfab.com` if chosen. |
+
+### 317d. Finance freshness is cadence-aware and metric-owned (2026-08-17)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-17 |
+| **Decision** | Finance domain freshness is **cadence-aware** and **metric-owned**. Intraday domains (`revenue_ar`, `ap`, `cash`) default **4 hours** stale (`QB_FINANCE_STALE_AFTER_SECONDS` fallback). Nightly domains (`accounting`, `master`) default **26 hours** (`QB_FINANCE_NIGHTLY_STALE_AFTER_SECONDS` or per-domain `QB_FINANCE_*_STALE_AFTER_SECONDS`). Overview / tab metrics apply the freshness of the domain that **owns** their prepared facts — never a single global OR that relabels every card. P&L and Balance Sheet → `accounting`; Open A/P → `ap`; bank balances (`qb_finance_account_balances_current`) → `master` (current writer); cash events / undeposited → `cash`; Finance Open A/R → Sales Financial Truth (`sales_quickbooks_*`, separate from Account 360). Overall Finance freshness summarizes each domain against **its own** threshold. UI presents `Fresh` / `Fresh · nightly` / `Stale` / `Unavailable` without implying a uniform 4h QuickBooks cadence. Prepared-fact timestamps may escalate a metric to stale when materially older than the owning domain window. |
+| **Why** | Nightly Accounting/Master runs (~1:10–1:25 AM Central) were incorrectly marking P&L/Overview STALE mid-morning while intraday Revenue/AP/Cash workers were healthy. |
+| **Do not change** | QuickBooks ingestion, Windows tasks, Account 360 Sales financial-truth contract, financial calculations / source amounts. |
+| **Impacted** | `backend-core/src/finance/financeRead/freshness.mjs`, Finance read service/UI, `.env.example`, this doc. |
 
 ### 317a. Finance Head YTD is derived from monthly Accrual snapshots (2026-08-14)
 

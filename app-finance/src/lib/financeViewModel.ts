@@ -61,12 +61,48 @@ export function formatPct(value: number | null | undefined): string {
 
 export function statusLabel(state: string | null | undefined): string {
   const s = String(state || "").toLowerCase();
-  if (s === "pass" || s === "available" || s === "success") return "Pass";
+  if (s === "pass") return "Pass";
+  if (s === "available" || s === "success" || s === "fresh") return "Fresh";
+  if (s === "fresh_nightly") return "Fresh · nightly";
   if (s === "warn" || s === "warning" || s === "partial") return "Warning";
   if (s === "fail" || s === "failed") return "Fail";
   if (s === "stale") return "Stale";
   if (s === "unavailable" || s === "missing") return "Unavailable";
   return state ? String(state) : "Unknown";
+}
+
+export const FINANCE_DOMAIN_DISPLAY_ORDER = [
+  "revenue_ar",
+  "ap",
+  "cash",
+  "accounting",
+  "master",
+] as const;
+
+export function financeDomainLabel(domain: string | null | undefined): string {
+  const d = String(domain || "");
+  if (d === "revenue_ar") return "Revenue / A/R";
+  if (d === "ap") return "A/P";
+  if (d === "cash") return "Cash";
+  if (d === "accounting") return "Accounting";
+  if (d === "master") return "Master";
+  return d.replace(/_/g, " ") || "Domain";
+}
+
+export function domainPresentationLabel(domain: {
+  presentation?: string | null;
+  state?: string | null;
+  cadence?: string | null;
+} | null | undefined): string {
+  const presentation = String(domain?.presentation || "").toLowerCase();
+  if (presentation === "fresh_nightly") return "Fresh · nightly";
+  if (presentation === "fresh") return "Fresh";
+  if (presentation === "stale") return "Stale";
+  if (presentation === "warning") return "Warning";
+  if (presentation === "unavailable") return "Unavailable";
+  const state = String(domain?.state || "").toLowerCase();
+  if (state === "available" && domain?.cadence === "nightly") return "Fresh · nightly";
+  return statusLabel(domain?.state);
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

@@ -1,6 +1,5 @@
 import {
   QB_FINANCE_CASH_EVENT_ROLES,
-  QB_FINANCE_DOMAINS,
   QB_FINANCE_OPENING_AS_OF_DATE,
   QB_FINANCE_REPORT_BASIS_CANONICAL
 } from "../quickbooksFinanceFoundation/constants.js";
@@ -8,7 +7,6 @@ import { detectReceivePaymentDepositDoubleCount } from "../quickbooksFinanceFoun
 import { officialStatementSource } from "../quickbooksFinanceFoundation/reconcileReports.js";
 import {
   BANK_ACCOUNT_TYPES,
-  DEFAULT_FINANCE_STALE_AFTER_SECONDS,
   FINANCE_BILL_LIST_LIMIT,
   FINANCE_DETAIL_DEFAULT_LIMIT,
   FINANCE_DETAIL_MAX_LIMIT,
@@ -17,7 +15,17 @@ import {
   FINANCE_METRIC_STATES,
   FINANCE_PNL_SOURCE_VIEW
 } from "./constants.js";
-import { applyFreshness, available, roundMoney, unavailable } from "./metric.js";
+import {
+  applyFreshness,
+  buildDomainHealthMap,
+  combineFactAndDomainFreshness,
+  FINANCE_METRIC_FRESHNESS_OWNER,
+  maxSyncedAt,
+  ownerFreshnessState,
+  readDomainStaleAfterSeconds,
+  readSalesArStaleAfterSeconds
+} from "./freshness.mjs";
+import { available, roundMoney, unavailable } from "./metric.js";
 import { shiftYears, ymdUtc } from "./periods.js";
 import {
   balanceSheetPresentation,
@@ -48,66 +56,8 @@ export function resolveFinanceOrganizationId(req) {
   return null;
 }
 
-export function readStaleAfterSeconds(env = process.env) {
-  const n = Number.parseInt(String(env.QB_FINANCE_STALE_AFTER_SECONDS ?? ""), 10);
-  if (Number.isFinite(n) && n >= 60) return n;
-  return DEFAULT_FINANCE_STALE_AFTER_SECONDS;
-}
-
-function domainFreshness(run, now, staleAfterSeconds) {
-  if (!run) {
-    return {
-      domain: null,
-      status: "missing",
-      state: "unavailable",
-      last_success_at: null,
-      coverage_start: null,
-      coverage_end: null,
-      stale: false,
-      warning_count: 0,
-      error_summary: null,
-      notes: "Awaiting first Finance sync for this domain."
-    };
-  }
-  const completed = run.completed_at || run.started_at;
-  const ageMs = completed ? now.getTime() - new Date(completed).getTime() : null;
-  const stale = run.status === "success" && ageMs != null && ageMs / 1000 > staleAfterSeconds;
-  let state = "available";
-  if (run.status === "failed") state = "unavailable";
-  else if (run.status === "running") state = "warning";
-  else if (stale) state = "stale";
-  else if (run.status === "partial") state = "warning";
-  const warnings = Array.isArray(run.warnings) ? run.warnings : [];
-  return {
-    domain: run.domain,
-    status: run.status,
-    state,
-    last_success_at: run.status === "success" || run.status === "partial" ? run.completed_at : null,
-    last_completed_at: run.completed_at || null,
-    coverage_start: run.coverage_start_date || null,
-    coverage_end: run.coverage_end_date || null,
-    stale,
-    warning_count: warnings.length,
-    error_summary: run.status === "failed" ? safeErrorSummary(run.error_summary) : null,
-    notes: run.status === "failed" ? "Latest Finance refresh failed." : null
-  };
-}
-
-function safeErrorSummary(value) {
-  const s = String(value ?? "").trim();
-  if (!s) return null;
-  if (/token|secret|password|service.role/i.test(s)) return "Refresh failed. See operator logs.";
-  return s.slice(0, 240);
-}
-
-function overallFreshness(domains) {
-  const values = Object.values(domains || {});
-  if (values.every((d) => d.state === "unavailable")) return "unavailable";
-  if (values.some((d) => d.status === "failed")) return "warning";
-  if (values.some((d) => d.stale)) return "stale";
-  if (values.some((d) => d.state === "warning")) return "warning";
-  return "available";
-}
+/** @deprecated Prefer readIntradayStaleAfterSeconds / readDomainStaleAfterSeconds from freshness.mjs */
+export { readStaleAfterSeconds } from "./freshness.mjs";
 
 function agingBuckets() {
   return {
@@ -118,6 +68,42 @@ function agingBuckets() {
     days_90_plus: 0,
     unknown: 0
   };
+}
+
+const FRESHNESS_RANK = {
+  [FINANCE_METRIC_STATES.AVAILABLE]: 0,
+  [FINANCE_METRIC_STATES.WARNING]: 1,
+  [FINANCE_METRIC_STATES.STALE]: 2,
+  [FINANCE_METRIC_STATES.UNAVAILABLE]: 3
+};
+
+function worseFreshness(a, b) {
+  const ra = FRESHNESS_RANK[a] ?? 0;
+  const rb = FRESHNESS_RANK[b] ?? 0;
+  return ra >= rb ? a : b;
+}
+
+function applyAgingFreshness(aging, freshnessState) {
+  if (!aging || aging.state !== "available") return aging;
+  if (freshnessState === FINANCE_METRIC_STATES.STALE) return { ...aging, state: "stale" };
+  if (freshnessState === FINANCE_METRIC_STATES.WARNING) return { ...aging, state: "warning" };
+  return aging;
+}
+
+function applyEventRoleFreshness(byRole, freshnessState) {
+  if (!byRole) return byRole;
+  const escalate = (role) => {
+    if (!role || role.state !== "available") return role;
+    if (freshnessState === FINANCE_METRIC_STATES.STALE) return { ...role, state: "stale" };
+    if (freshnessState === FINANCE_METRIC_STATES.WARNING) return { ...role, state: "warning" };
+    return role;
+  };
+  if (Array.isArray(byRole)) return byRole.map(escalate);
+  const out = {};
+  for (const [key, role] of Object.entries(byRole)) {
+    out[key] = escalate(role);
+  }
+  return out;
 }
 
 function daysPastDue(dueDate, asOf) {
@@ -231,8 +217,6 @@ function emptyPayload(reason) {
 }
 
 export function createFinanceReadService({ getSupabase, env = process.env, now = () => new Date() } = {}) {
-  const staleAfter = readStaleAfterSeconds(env);
-
   async function context(req) {
     const organizationId = resolveFinanceOrganizationId(req);
     const at = now();
@@ -244,15 +228,13 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
   }
 
   async function loadDomainHealth(store, organizationId, at) {
-    const { rows, error } = await store.loadLatestSyncRuns(organizationId);
-    const domains = {};
-    for (const domain of QB_FINANCE_DOMAINS) {
-      domains[domain] = {
-        ...domainFreshness(rows?.[domain], at, staleAfter),
-        domain
-      };
-    }
-    return { domains, error, freshness: overallFreshness(domains) };
+    const [{ rows, error }, sales] = await Promise.all([
+      store.loadLatestSyncRuns(organizationId),
+      store.loadLatestSalesFinancialSyncRun(organizationId)
+    ]);
+    const salesRun = sales.error ? null : sales.row;
+    const built = buildDomainHealthMap(rows || {}, at, env, salesRun);
+    return { domains: built.domains, error: error || sales.error || null, freshness: built.freshness };
   }
 
   async function loadExactPnlBundle(store, organizationId, period) {
@@ -414,6 +396,7 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     ]);
 
     const freshness = health.freshness;
+    const domains = health.domains;
     const h = pnl.headline;
     const ytdStart = pnl.period_start || ytd.period_start;
     const ytdEnd = pnl.period_end;
@@ -432,18 +415,39 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         : null
     };
 
+    const accountingFresh = ownerFreshnessState(domains, FINANCE_METRIC_FRESHNESS_OWNER.revenue);
+    const apFresh = combineFactAndDomainFreshness(
+      ownerFreshnessState(domains, FINANCE_METRIC_FRESHNESS_OWNER.open_ap),
+      ap.fact_synced_at,
+      ctx.at,
+      readDomainStaleAfterSeconds("ap", env)
+    );
+    const masterFresh = combineFactAndDomainFreshness(
+      ownerFreshnessState(domains, FINANCE_METRIC_FRESHNESS_OWNER.cash),
+      cash.balances_synced_at,
+      ctx.at,
+      readDomainStaleAfterSeconds("master", env)
+    );
+    const cashEventFresh = ownerFreshnessState(domains, FINANCE_METRIC_FRESHNESS_OWNER.cash_events);
+    const salesArFresh = combineFactAndDomainFreshness(
+      ownerFreshnessState(domains, FINANCE_METRIC_FRESHNESS_OWNER.open_ar),
+      ar.fact_synced_at,
+      ctx.at,
+      readSalesArStaleAfterSeconds(env)
+    );
+
     const metrics = {
       revenue: applyFreshness(
         h?.revenue != null
           ? available("revenue", "Revenue", h.revenue, pnlPeriod)
           : unavailable("revenue", "Revenue", pnlNotes, { period_start: ytdStart, period_end: ytdEnd }),
-        freshness
+        accountingFresh
       ),
       gross_profit: applyFreshness(
         h?.gross_profit != null
           ? available("gross_profit", "Gross Profit", h.gross_profit, pnlPeriod)
           : unavailable("gross_profit", "Gross Profit", pnlNotes, { period_start: ytdStart, period_end: ytdEnd }),
-        freshness
+        accountingFresh
       ),
       gross_margin_pct:
         h?.gross_margin_pct != null
@@ -452,7 +456,11 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
               label: "Gross Margin",
               value: h.gross_margin_pct,
               state:
-                freshness === "stale" ? FINANCE_METRIC_STATES.STALE : FINANCE_METRIC_STATES.AVAILABLE,
+                accountingFresh === FINANCE_METRIC_STATES.STALE
+                  ? FINANCE_METRIC_STATES.STALE
+                  : accountingFresh === FINANCE_METRIC_STATES.WARNING
+                    ? FINANCE_METRIC_STATES.WARNING
+                    : FINANCE_METRIC_STATES.AVAILABLE,
               source: "qb_finance_report_snapshots",
               as_of: null,
               period_start: ytdStart,
@@ -473,19 +481,19 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
               period_start: ytdStart,
               period_end: ytdEnd
             }),
-        freshness
+        accountingFresh
       ),
       net_income: applyFreshness(
         h?.net_income != null
           ? available("net_income", "Net Income", h.net_income, pnlPeriod)
           : unavailable("net_income", "Net Income", pnlNotes, { period_start: ytdStart, period_end: ytdEnd }),
-        freshness
+        accountingFresh
       ),
-      cash: cash.position,
-      open_ar: ar.total,
-      overdue_ar: ar.overdue,
-      open_ap: ap.total,
-      overdue_ap: ap.overdue
+      cash: applyFreshness(cash.position, masterFresh),
+      open_ar: applyFreshness(ar.total, salesArFresh),
+      overdue_ar: applyFreshness(ar.overdue, salesArFresh),
+      open_ap: applyFreshness(ap.total, apFresh),
+      overdue_ap: applyFreshness(ap.overdue, apFresh)
     };
 
     const identity = bs.lines.length ? balanceSheetPresentation(bs.lines).identity : null;
@@ -506,19 +514,22 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
       freshness,
       metrics,
       pnl_trend: await monthlyPnlTrend(ctx.store, ctx.organizationId),
-      working_capital: workingCapital(ar.total, ap.total),
+      working_capital: applyFreshness(
+        workingCapital(metrics.open_ar, metrics.open_ap),
+        worseFreshness(apFresh, salesArFresh)
+      ),
       ar_summary: {
-        aging: ar.aging,
+        aging: applyAgingFreshness(ar.aging, salesArFresh),
         customers: ar.customers,
         recent_payments: ar.payments
       },
       ap_summary: {
-        aging: ap.aging,
+        aging: applyAgingFreshness(ap.aging, apFresh),
         vendors: ap.vendors,
         applications: ap.applications
       },
       cash_summary: {
-        by_event_role: cash.by_event_role,
+        by_event_role: applyEventRoleFreshness(cash.by_event_role, cashEventFresh),
         trend: cash.trend
       },
       ar_attention: ar.attention,
@@ -529,11 +540,12 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
             delta: identity.delta,
             total_assets: identity.eliteos_value,
             total_liabilities_and_equity: identity.quickbooks_value,
-            as_of_date: bs.snapshot?.as_of_date || null
+            as_of_date: bs.snapshot?.as_of_date || null,
+            freshness_state: accountingFresh
           }
         : { status: "unavailable", delta: null, notes: "No current Accrual Balance Sheet snapshot." },
       latest_accounting_snapshot_date: bs.snapshot?.as_of_date || pnl.period_end || null,
-      domains: health.domains,
+      domains,
       warnings: collectWarnings(health, pnl, bs, ar, ap, cash)
     };
   }
@@ -660,6 +672,7 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         invoices: [],
         attention: { state: "unavailable", items: [] },
         payments: { state: "unavailable", items: [] },
+        fact_synced_at: null,
         error
       };
     }
@@ -751,6 +764,7 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         items: customers.filter((c) => (c.overdue_amount || 0) > 0).slice(0, 8)
       },
       payments,
+      fact_synced_at: maxSyncedAt(openRows),
       error: null
     };
   }
@@ -766,6 +780,7 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         bills: [],
         applications: { state: "unavailable", items: [] },
         attention: { state: "unavailable", items: [] },
+        fact_synced_at: null,
         error
       };
     }
@@ -867,6 +882,7 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
             }))
           },
       attention: { state: "available", items: vendors.filter((v) => (v.overdue_amount || 0) > 0).slice(0, 8) },
+      fact_synced_at: maxSyncedAt(openRows),
       error: null
     };
   }
@@ -1073,6 +1089,7 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         : { state: "unavailable", points: [], notes: "No cash-event dates available for a trend." },
       recent_activity: recentActivity,
       source_label: "QuickBooks accounting cash",
+      balances_synced_at: maxSyncedAt(bankRows),
       truncated:
         events.truncated === true ||
         deposits.truncated === true ||
@@ -1096,10 +1113,12 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
   async function getPnl(req, query) {
     const ctx = await context(req);
     if (ctx.missingOrg) return { ...emptyPayload("missing_organization"), lines: [], headline: null };
-    const [current, monthlyTrend] = await Promise.all([
+    const [current, monthlyTrend, health] = await Promise.all([
       loadPnlBundle(ctx.store, ctx.organizationId, query.period),
-      monthlyPnlTrend(ctx.store, ctx.organizationId)
+      monthlyPnlTrend(ctx.store, ctx.organizationId),
+      loadDomainHealth(ctx.store, ctx.organizationId, ctx.at)
     ]);
+    const accountingFresh = ownerFreshnessState(health.domains, "accounting");
     const representedStart = current.period_start || query.period?.period_start || null;
     const representedEnd = current.period_end || null;
     let compare = emptyPnlBundle({});
@@ -1163,6 +1182,8 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         is_derived: current.is_derived === true,
         coverage_complete: false,
         state: "unavailable",
+        freshness: accountingFresh,
+        domains: { accounting: health.domains.accounting },
         notes: current.error
           ? "P&L store is unavailable."
           : current.notes || "No Accrual ProfitAndLossStandard snapshot matches this period.",
@@ -1193,6 +1214,13 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
           }))
       : [];
 
+    const pnlState =
+      accountingFresh === FINANCE_METRIC_STATES.STALE
+        ? "stale"
+        : accountingFresh === FINANCE_METRIC_STATES.WARNING
+          ? "warning"
+          : "available";
+
     return {
       ok: true,
       report_basis: QB_FINANCE_REPORT_BASIS_CANONICAL,
@@ -1206,7 +1234,9 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
       comparison_period_end: compareEquivalent ? compare.period_end : comparePayload?.period_end || null,
       is_derived: current.is_derived === true,
       coverage_complete: true,
-      state: "available",
+      state: pnlState,
+      freshness: accountingFresh,
+      domains: { accounting: health.domains.accounting },
       snapshot: snapshotMeta(current.snapshot),
       compare_snapshot: compareEquivalent ? snapshotMeta(compare.snapshot) : null,
       headline: current.headline,
@@ -1224,7 +1254,11 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     const ctx = await context(req);
     if (ctx.missingOrg) return { ...emptyPayload("missing_organization") };
     const asOf = query.as_of;
-    const bundle = await loadBsBundle(ctx.store, ctx.organizationId, asOf);
+    const [bundle, health] = await Promise.all([
+      loadBsBundle(ctx.store, ctx.organizationId, asOf),
+      loadDomainHealth(ctx.store, ctx.organizationId, ctx.at)
+    ]);
+    const accountingFresh = ownerFreshnessState(health.domains, "accounting");
     const historyByDate = new Map();
     for (const snapshot of bundle.snapshots || []) {
       if (snapshot.is_opening === true || !snapshot.as_of_date) continue;
@@ -1251,6 +1285,8 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
         report_basis: QB_FINANCE_REPORT_BASIS_CANONICAL,
         as_of: asOf,
         state: "unavailable",
+        freshness: accountingFresh,
+        domains: { accounting: health.domains.accounting },
         notes: bundle.error
           ? "Balance Sheet store is unavailable."
           : "No current Accrual BalanceSheetStandard snapshot at or before this as-of date. Opening 2024-12-31 is not used as the current statement.",
@@ -1266,11 +1302,19 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
       };
     }
     const presented = balanceSheetPresentation(bundle.lines);
+    const bsState =
+      accountingFresh === FINANCE_METRIC_STATES.STALE
+        ? "stale"
+        : accountingFresh === FINANCE_METRIC_STATES.WARNING
+          ? "warning"
+          : "available";
     return {
       ok: true,
       report_basis: QB_FINANCE_REPORT_BASIS_CANONICAL,
       as_of: asOf,
-      state: "available",
+      state: bsState,
+      freshness: accountingFresh,
+      domains: { accounting: health.domains.accounting },
       snapshot: snapshotMeta(bundle.snapshot),
       opening: snapshotMeta(bundle.opening) || {
         as_of_date: QB_FINANCE_OPENING_AS_OF_DATE,
@@ -1298,16 +1342,26 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     const ctx = await context(req);
     if (ctx.missingOrg) return { ...emptyPayload("missing_organization") };
     const asOf = ymdUtc(ctx.at);
-    const ar = await buildAr(ctx, asOf);
+    const [ar, health] = await Promise.all([
+      buildAr(ctx, asOf),
+      loadDomainHealth(ctx.store, ctx.organizationId, ctx.at)
+    ]);
+    const salesFresh = combineFactAndDomainFreshness(
+      ownerFreshnessState(health.domains, FINANCE_METRIC_FRESHNESS_OWNER.open_ar),
+      ar.fact_synced_at,
+      ctx.at,
+      readSalesArStaleAfterSeconds(env)
+    );
     return {
       ok: true,
       as_of: asOf,
       source: "sales_quickbooks_open_ar_current",
       definition:
         "Open A/R is the current unpaid invoice snapshot from Sales QuickBooks Financial Truth. Overdue and aging use Invoices.DueDate only — never invoice Date.",
-      total: ar.total,
-      overdue: ar.overdue,
-      aging: ar.aging,
+      freshness: salesFresh,
+      total: applyFreshness(ar.total, salesFresh),
+      overdue: applyFreshness(ar.overdue, salesFresh),
+      aging: applyAgingFreshness(ar.aging, salesFresh),
       customers: ar.customers,
       invoices: ar.invoices,
       recent_payments: ar.payments,
@@ -1319,17 +1373,27 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
     const ctx = await context(req);
     if (ctx.missingOrg) return { ...emptyPayload("missing_organization") };
     const asOf = ymdUtc(ctx.at);
-    const ap = await buildAp(ctx, asOf);
+    const [ap, health] = await Promise.all([
+      buildAp(ctx, asOf),
+      loadDomainHealth(ctx.store, ctx.organizationId, ctx.at)
+    ]);
+    const apFresh = combineFactAndDomainFreshness(
+      ownerFreshnessState(health.domains, FINANCE_METRIC_FRESHNESS_OWNER.open_ap),
+      ap.fact_synced_at,
+      ctx.at,
+      readDomainStaleAfterSeconds("ap", env)
+    );
     return {
       ok: true,
       as_of: asOf,
       source: "qb_finance_open_ap_current",
       definition:
         "Open A/P is the current unpaid bill snapshot from Finance A/P prepared facts. Overdue uses bill DueDate when present.",
-      total: ap.total,
-      overdue: ap.overdue,
-      due: ap.due,
-      aging: ap.aging,
+      freshness: apFresh,
+      total: applyFreshness(ap.total, apFresh),
+      overdue: applyFreshness(ap.overdue, apFresh),
+      due: applyFreshness(ap.due, apFresh),
+      aging: applyAgingFreshness(ap.aging, apFresh),
       vendors: ap.vendors,
       bills: ap.bills,
       applications: ap.applications,
@@ -1340,15 +1404,31 @@ export function createFinanceReadService({ getSupabase, env = process.env, now =
   async function getCash(req) {
     const ctx = await context(req);
     if (ctx.missingOrg) return { ...emptyPayload("missing_organization") };
-    const cash = await buildCash(ctx);
+    const [cash, health] = await Promise.all([
+      buildCash(ctx),
+      loadDomainHealth(ctx.store, ctx.organizationId, ctx.at)
+    ]);
+    const masterFresh = combineFactAndDomainFreshness(
+      ownerFreshnessState(health.domains, FINANCE_METRIC_FRESHNESS_OWNER.cash),
+      cash.balances_synced_at,
+      ctx.at,
+      readDomainStaleAfterSeconds("master", env)
+    );
+    const cashEventFresh = ownerFreshnessState(health.domains, FINANCE_METRIC_FRESHNESS_OWNER.cash_events);
+    const undepositedFresh = ownerFreshnessState(health.domains, FINANCE_METRIC_FRESHNESS_OWNER.undeposited);
     return {
       ok: true,
       source_label: cash.source_label,
       definition:
         "QuickBooks accounting cash. Bank-account cash is the sum of Bank-type account balances. Cash events keep customer_receipt and bank_deposit as separate roles and must not be added together.",
-      position: cash.position,
-      undeposited: cash.undeposited,
-      by_event_role: cash.by_event_role,
+      freshness: {
+        position: masterFresh,
+        events: cashEventFresh,
+        undeposited: undepositedFresh
+      },
+      position: applyFreshness(cash.position, masterFresh),
+      undeposited: applyFreshness(cash.undeposited, undepositedFresh),
+      by_event_role: applyEventRoleFreshness(cash.by_event_role, cashEventFresh),
       anti_double_count: cash.anti_double_count,
       recent_deposits: cash.recent_deposits,
       recent_checks: cash.recent_checks,
