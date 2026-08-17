@@ -13,6 +13,10 @@ import {
   markSuggestionLinked,
   resolveAccountQbEnrichmentLabel
 } from "./qbCustomerEnrichment/feedStatus.js";
+import {
+  evaluateQuickBooksLinkCandidate,
+  normalizeQuickBooksListId
+} from "./accountDirectoryQbLinkValidation.mjs";
 import { listIntelPublic, loadListFinancialIntel } from "./accountDirectory360.mjs";
 
 export const AD_QB_ENRICHMENT_FILTERS = Object.freeze([
@@ -1341,9 +1345,21 @@ export function createAccountDirectoryService(deps) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
       const account = await store.getAccount(organizationId, accountId);
       if (!account) throw new AccountDirectoryError("not_found", "Account not found.", 404);
-      const externalId = String(payload?.externalId ?? "").trim();
+      const externalId = normalizeQuickBooksListId(payload?.externalId);
       if (!externalId) {
         throw new AccountDirectoryError("external_id_required", "QuickBooks List ID is required.");
+      }
+      if (typeof store.getQuickBooksCustomerFactByListId !== "function") {
+        throw new AccountDirectoryError(
+          "qb_facts_unavailable",
+          "QuickBooks customer facts are unavailable. The link was not created.",
+          503
+        );
+      }
+      const fact = await store.getQuickBooksCustomerFactByListId(organizationId, externalId);
+      const verdict = evaluateQuickBooksLinkCandidate(fact, { organizationId, listId: externalId });
+      if (!verdict.ok) {
+        throw new AccountDirectoryError(verdict.code, verdict.message, verdict.status);
       }
       const result = await store.insertExternalLink({
         organizationId,

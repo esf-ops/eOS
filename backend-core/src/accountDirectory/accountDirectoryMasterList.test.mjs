@@ -22,6 +22,7 @@ import {
   runMasterListReconcile
 } from "./accountDirectoryMasterList.mjs";
 import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
+import { seedTrustedQuickBooksCustomerFact } from "./accountDirectoryQbLinkValidation.mjs";
 
 const ORG = "00000000-0000-4000-8000-0000000000ml";
 const ACTOR = "00000000-0000-4000-8000-0000000000ac";
@@ -476,6 +477,12 @@ async function seedDirectory(store, service) {
       city: "Cedar Rapids",
       state: "IA"
     }
+  });
+  await seedTrustedQuickBooksCustomerFact(store, {
+    organizationId: ORG,
+    qbListId: "QB-EXACT-1",
+    name: "Exact Match Builders",
+    isJob: false
   });
   await service.linkQuickBooks({
     organizationId: ORG,

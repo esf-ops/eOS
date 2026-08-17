@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createAccountDirectoryMemoryStore } from "./accountDirectoryMemoryStore.mjs";
 import { createAccountDirectoryService, AccountDirectoryError } from "./accountDirectoryService.mjs";
 import { permissionsForRole, ACCOUNT_DIRECTORY_CAPABILITIES, roleHasCapability } from "./accountDirectoryAuth.mjs";
+import { seedTrustedQuickBooksCustomerFact } from "./accountDirectoryQbLinkValidation.mjs";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const ACTOR = "00000000-0000-4000-8000-000000000099";
@@ -9,6 +10,15 @@ const ACTOR = "00000000-0000-4000-8000-000000000099";
 function svc() {
   const store = createAccountDirectoryMemoryStore();
   return { store, service: createAccountDirectoryService({ store }) };
+}
+
+async function seedQbRoot(store, listId, organizationId = ORG, name = null) {
+  await seedTrustedQuickBooksCustomerFact(store, {
+    organizationId,
+    qbListId: listId,
+    name,
+    isJob: false
+  });
 }
 
 async function main() {
@@ -255,7 +265,7 @@ async function main() {
 
   // 14–15. external QB ID unique; external-link permission enforced
   {
-    const { service } = svc();
+    const { store, service } = svc();
     const a = await service.createAccount({
       organizationId: ORG,
       role: "admin",
@@ -268,6 +278,7 @@ async function main() {
       actorUserId: ACTOR,
       payload: { displayName: "QB B" }
     });
+    await seedQbRoot(store, "LIST-1", ORG, "QB A");
     await service.linkQuickBooks({
       organizationId: ORG,
       role: "admin",
@@ -391,13 +402,14 @@ async function main() {
 
   // 19–20. responses contain no raw QB payload / financial fields
   {
-    const { service } = svc();
+    const { store, service } = svc();
     const account = await service.createAccount({
       organizationId: ORG,
       role: "admin",
       actorUserId: ACTOR,
       payload: { displayName: "Clean Response Co" }
     });
+    await seedQbRoot(store, "LIST-CLEAN", ORG, "Clean Response Co");
     await service.linkQuickBooks({
       organizationId: ORG,
       role: "admin",
@@ -420,7 +432,7 @@ async function main() {
 
   // 21–35. premium directory: pagination meta, search fields, filters, summary, sort
   {
-    const { service } = svc();
+    const { store, service } = svc();
     const names = [];
     for (let i = 0; i < 12; i++) {
       const created = await service.createAccount({
@@ -448,6 +460,7 @@ async function main() {
         });
       }
       if (i % 2 === 0) {
+        await seedQbRoot(store, `PREM-${i}`, ORG, created.displayName);
         await service.linkQuickBooks({
           organizationId: ORG,
           role: "admin",
@@ -871,6 +884,7 @@ async function main() {
       });
     }
 
+    await seedQbRoot(store, "QB-0B-1", ORG_B, "Phase0B Account 00");
     await service.linkQuickBooks({
       organizationId: ORG_B,
       role: "admin",

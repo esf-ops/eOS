@@ -31,6 +31,7 @@ import {
 import { constantTimeEqualString, requireAdQbCustomerSyncToken } from "./syncAuth.js";
 import { createAccountDirectoryMemoryStore } from "../accountDirectoryMemoryStore.mjs";
 import { createAccountDirectoryService } from "../accountDirectoryService.mjs";
+import { seedTrustedQuickBooksCustomerFact } from "../accountDirectoryQbLinkValidation.mjs";
 
 {
   assert.equal(normalizeMatchKey("Fox & Sons, LLC"), "fox and sons llc");
@@ -459,6 +460,12 @@ import { createAccountDirectoryService } from "../accountDirectoryService.mjs";
   assert.equal((after.externalLinks || []).filter((l) => l.isActive !== false).length, beforeLinks);
 
   // Explicit confirmation still works and blocks duplicates
+  await seedTrustedQuickBooksCustomerFact(store, {
+    organizationId: org,
+    qbListId: "NEW-LIST",
+    name: "Identity Lock Co",
+    isJob: false
+  });
   const linked = await service.linkQuickBooks({
     organizationId: org,
     role: "admin",

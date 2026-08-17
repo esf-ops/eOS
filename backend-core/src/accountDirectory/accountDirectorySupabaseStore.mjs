@@ -777,6 +777,43 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return (data || []).map(mapLink);
     },
 
+    /**
+     * Exact org-scoped ListID lookup against trusted staged facts.
+     * Does not page the full customer table. Does not mutate existing links.
+     */
+    async getQuickBooksCustomerFactByListId(organizationId, listId) {
+      const id = String(listId || "").trim();
+      if (!organizationId || !id) return null;
+      const { data, error } = await db()
+        .from("ad_qb_customer_facts")
+        .select("organization_id,qb_list_id,parent_list_id,is_job,name,full_name,is_active")
+        .eq("organization_id", organizationId)
+        .eq("qb_list_id", id)
+        .maybeSingle();
+      if (error) {
+        const msg = String(error?.message || "");
+        const code = String(error?.code || "");
+        if (code === "42P01" || /does not exist|relation/i.test(msg)) {
+          throw new AccountDirectoryError(
+            "qb_facts_unavailable",
+            "QuickBooks customer facts are unavailable. The link was not created.",
+            503
+          );
+        }
+        throw dbError(error, "Could not look up QuickBooks customer fact.");
+      }
+      if (!data) return null;
+      return {
+        organizationId: data.organization_id,
+        qbListId: data.qb_list_id,
+        parentListId: data.parent_list_id ?? null,
+        isJob: Boolean(data.is_job),
+        name: data.name ?? null,
+        fullName: data.full_name ?? null,
+        isActive: data.is_active !== false
+      };
+    },
+
     async insertAuditEvent(event) {
       const { data, error } = await db()
         .from("account_directory_audit_events")

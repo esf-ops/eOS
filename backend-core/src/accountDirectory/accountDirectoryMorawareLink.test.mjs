@@ -22,6 +22,7 @@ import {
 } from "./accountDirectoryMorawareLinkage.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { seedTrustedQuickBooksCustomerFact } from "./accountDirectoryQbLinkValidation.mjs";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const ORG_B = "00000000-0000-4000-8000-000000000002";
@@ -251,6 +252,12 @@ async function main() {
       role: "admin",
       actorUserId: ACTOR,
       payload: { displayName: "Stoddard & Jensen Real Estate" }
+    });
+    await seedTrustedQuickBooksCustomerFact(store, {
+      organizationId: ORG,
+      qbListId: "LIST-STODDARD",
+      name: "Stoddard & Jensen Real Estate",
+      isJob: false
     });
     await service.linkQuickBooks({
       organizationId: ORG,
@@ -760,12 +767,18 @@ async function main() {
   }
 
   {
-    const { service } = svc();
+    const { store, service } = svc();
     const a = await service.createAccount({
       organizationId: ORG,
       role: "admin",
       actorUserId: ACTOR,
       payload: { displayName: "QB Stay" }
+    });
+    await seedTrustedQuickBooksCustomerFact(store, {
+      organizationId: ORG,
+      qbListId: "QB-KEEP",
+      name: "QB Stay",
+      isJob: false
     });
     await service.linkQuickBooks({
       organizationId: ORG,

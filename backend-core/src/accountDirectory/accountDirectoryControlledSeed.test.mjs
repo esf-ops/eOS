@@ -5,6 +5,7 @@ import path from "node:path";
 import { createAccountDirectoryMemoryStore } from "./accountDirectoryMemoryStore.mjs";
 import { createAccountDirectoryService } from "./accountDirectoryService.mjs";
 import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
+import { seedTrustedQuickBooksCustomerFact } from "./accountDirectoryQbLinkValidation.mjs";
 import {
   assertAllowedSeedInputPath,
   candidateToWritePayloads,
@@ -71,6 +72,19 @@ function writeTempSeed(candidates) {
   const file = path.join(dir, "account-directory-seed.json");
   fs.writeFileSync(file, JSON.stringify(candidates));
   return { dir, file };
+}
+
+async function seedFactsForCandidates(store, candidates) {
+  for (const c of candidates) {
+    const id = c?.externalLink?.externalId;
+    if (!id) continue;
+    await seedTrustedQuickBooksCustomerFact(store, {
+      organizationId: ORG,
+      qbListId: id,
+      name: c.proposedAccount?.displayName || id,
+      isJob: false
+    });
+  }
 }
 
 async function main() {
@@ -257,6 +271,7 @@ async function main() {
     assert.equal(payloadsBare.wouldCreateContact, false);
     assert.equal(payloadsBare.wouldCreateLocation, false);
 
+    await seedFactsForCandidates(store, [withContact, bare]);
     const result = await runControlledSeedImport({
       store,
       service,
@@ -289,6 +304,7 @@ async function main() {
     const store = createAccountDirectoryMemoryStore();
     const service = createAccountDirectoryService({ store });
     const candidate = makeCandidate();
+    await seedFactsForCandidates(store, [candidate]);
     await runControlledSeedImport({
       store,
       service,
@@ -359,6 +375,12 @@ async function main() {
       { accountId: a.id, organizationId: ORG, externalId: "QB-CONFLICT", isActive: true },
       { accountId: b.id, organizationId: ORG, externalId: "QB-CONFLICT", isActive: true }
     ];
+    await seedFactsForCandidates(store, [
+      makeCandidate({
+        proposedAccount: { displayName: "Conflict Co" },
+        externalLink: { externalId: "QB-CONFLICT" }
+      })
+    ]);
     const result = await runControlledSeedImport({
       store,
       service,
@@ -408,6 +430,7 @@ async function main() {
     const store = createAccountDirectoryMemoryStore();
     const service = createAccountDirectoryService({ store });
     const candidate = makeCandidate({ externalLink: { externalId: "QB-VERIFY-1" } });
+    await seedFactsForCandidates(store, [candidate]);
     await runControlledSeedImport({
       store,
       service,

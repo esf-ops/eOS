@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { createAccountDirectoryMemoryStore } from "../accountDirectory/accountDirectoryMemoryStore.mjs";
 import { createAccountDirectoryService } from "../accountDirectory/accountDirectoryService.mjs";
+import { seedTrustedQuickBooksCustomerFact } from "../accountDirectory/accountDirectoryQbLinkValidation.mjs";
 import { AccountDirectoryError } from "../accountDirectory/accountDirectoryErrors.mjs";
 import {
   createProspectForEstimate,
@@ -92,6 +93,12 @@ async function seedDirectory() {
   });
 
   // Link QuickBooks without exposing ListID through estimate lookup mapper
+  await seedTrustedQuickBooksCustomerFact(store, {
+    organizationId: ORG,
+    qbListId: "QB-LIST-ID-SHOULD-NOT-LEAK",
+    name: "Sentinel Cabinets",
+    isJob: false
+  });
   await service.linkQuickBooks({
     organizationId: ORG,
     role: "admin",

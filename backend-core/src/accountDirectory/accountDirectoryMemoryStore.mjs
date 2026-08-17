@@ -23,6 +23,8 @@ export function createAccountDirectoryMemoryStore() {
   const aliases = new Map();
   /** @type {Map<string, any>} */
   const externalLinks = new Map();
+  /** @type {Map<string, any>} */
+  const qbCustomerFacts = new Map();
   /** @type {any[]} */
   const auditEvents = [];
 
@@ -471,6 +473,37 @@ export function createAccountDirectoryMemoryStore() {
       return Array.from(externalLinks.values())
         .filter((l) => l.organizationId === organizationId && idSet.has(String(l.accountId)))
         .map(clone);
+    },
+
+    async upsertQuickBooksCustomerFact(row) {
+      const qbListId = String(row.qbListId || "").trim();
+      const organizationId = row.organizationId;
+      if (!organizationId || !qbListId) {
+        throw new Error("organizationId and qbListId are required");
+      }
+      const key = `${organizationId}::${qbListId}`;
+      const record = {
+        organizationId,
+        qbListId,
+        parentListId: row.parentListId ?? null,
+        isJob: Boolean(row.isJob),
+        name: row.name ?? null,
+        fullName: row.fullName ?? null,
+        isActive: row.isActive !== false
+      };
+      qbCustomerFacts.set(key, record);
+      return clone(record);
+    },
+
+    /**
+     * Exact org-scoped ListID lookup. Does not scan the full facts table.
+     * Phase 0E does not deactivate existing external links when a fact is absent.
+     */
+    async getQuickBooksCustomerFactByListId(organizationId, listId) {
+      const id = String(listId || "").trim();
+      if (!organizationId || !id) return null;
+      const row = qbCustomerFacts.get(`${organizationId}::${id}`);
+      return row ? clone(row) : null;
     },
 
     async insertAuditEvent(event) {
