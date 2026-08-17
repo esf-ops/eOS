@@ -12,7 +12,6 @@ import {
   getAccount,
   getAccountFinancials,
   getAccountInsights,
-  linkQuickBooks,
   listAccounts,
   restoreAccount,
   updateAccount
@@ -25,6 +24,7 @@ import {
   loadRelationship
 } from "./ui/Account360Panels";
 import { ConnectionsWithIdentity, ContactsMaintain, LocationsMaintain } from "./ui/AccountMaintain";
+import { QuickBooksCustomerPicker } from "./ui/QuickBooksCustomerPicker";
 import { InsightsPanel, OverviewInsightStrip } from "./ui/AccountInsights";
 import { WorkspaceTabBoundary } from "./ui/WorkspaceTabBoundary";
 import { StatusReviewSurface } from "./ui/AccountStatusReview";
@@ -302,6 +302,7 @@ export default function AccountDirectoryApp() {
 
   /* ─── Modals ─── */
   const [modal, setModal] = useState<ModalKind>(null);
+  const [qbLinkNonce, setQbLinkNonce] = useState(0);
   const [form, setForm] = useState<ModalFormState>(emptyForm());
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -647,10 +648,6 @@ export default function AccountDirectoryApp() {
       setFormError("Name is required.");
       return;
     }
-    if (modal === "link-qb" && !form.auxExtra.trim()) {
-      setFormError("QuickBooks List ID is required.");
-      return;
-    }
 
     setFormBusy(true);
     setFormError(null);
@@ -701,13 +698,6 @@ export default function AccountDirectoryApp() {
         });
         await loadDetail(urlState.account);
         setActionMessage("Alias added.");
-      } else if (modal === "link-qb" && urlState.account) {
-        await linkQuickBooks(sessionToken, urlState.account, {
-          externalId: form.auxExtra.trim(),
-          externalDisplayName: form.displayName.trim() || form.auxLabel.trim() || undefined
-        });
-        await loadDetail(urlState.account);
-        setActionMessage("QuickBooks linked.");
       } else if (modal === "archive-confirm" && urlState.account) {
         await archiveAccount(sessionToken, urlState.account);
         selectAccount(null);
@@ -802,7 +792,7 @@ export default function AccountDirectoryApp() {
                 : modal === "archive-confirm"
                   ? "Archive account"
                   : modal === "link-qb"
-                    ? "Link QuickBooks"
+                    ? "Connect QuickBooks"
                     : "";
 
   const showPrimaryNew = urlState.tab !== "archived" && permissions.canCreate;
@@ -1397,6 +1387,11 @@ export default function AccountDirectoryApp() {
                   onLinkQb={() =>
                     openModal("link-qb", { displayName: detail?.name || detail?.displayName || "" })
                   }
+                  qbLinkNonce={qbLinkNonce}
+                  onDirectoryRefresh={() => {
+                    void loadList();
+                    void loadSummary();
+                  }}
                   onArchive={() => openModal("archive-confirm")}
                   onRestore={() => void handleRestore()}
                   onRetry={() => void loadDetail(urlState.account!)}
@@ -1430,25 +1425,25 @@ export default function AccountDirectoryApp() {
                 from the Archived tab.
               </p>
             ) : modal === "link-qb" ? (
-              <div className="field-grid">
-                <label className="field">
-                  Display name (optional)
-                  <input
-                    value={form.displayName}
-                    onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
-                  />
-                </label>
-                <label className="field">
-                  QuickBooks List ID <span style={{ color: "var(--eos-accent)" }}>*</span>
-                  <input
-                    value={form.auxExtra}
-                    onChange={(e) => setForm((f) => ({ ...f, auxExtra: e.target.value }))}
-                    autoFocus
-                    required
-                    placeholder="e.g. 123456"
-                  />
-                </label>
-              </div>
+              sessionToken && urlState.account ? (
+                <QuickBooksCustomerPicker
+                  sessionToken={sessionToken}
+                  accountId={urlState.account}
+                  accountName={detail?.displayName || detail?.name || form.displayName || "This account"}
+                  onLinked={(account) => {
+                    setDetail(account);
+                    setQbLinkNonce((n) => n + 1);
+                    setModal(null);
+                    setForm(emptyForm());
+                    setActionMessage("QuickBooks connected.");
+                    void loadList();
+                    void loadSummary();
+                  }}
+                  onCancel={closeModal}
+                />
+              ) : (
+                <p className="muted">Open an account to connect QuickBooks.</p>
+              )
             ) : (
               <div className="field-grid">
                 <label className="field">
@@ -1531,12 +1526,13 @@ export default function AccountDirectoryApp() {
               </div>
             )}
 
-            {formError ? (
+            {formError && modal !== "link-qb" ? (
               <div className="banner banner-error" role="alert">
                 {formError}
               </div>
             ) : null}
 
+            {modal !== "link-qb" ? (
             <footer className="modal-foot">
               <button type="button" className="btn btn-secondary" disabled={formBusy} onClick={closeModal}>
                 Cancel
@@ -1550,6 +1546,7 @@ export default function AccountDirectoryApp() {
                 {formBusy ? "Saving…" : modal === "archive-confirm" ? "Archive" : "Save"}
               </button>
             </footer>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -1727,7 +1724,9 @@ function ProfilePanel({
   onLinkQb,
   onArchive,
   onRestore,
-  onRetry
+  onRetry,
+  qbLinkNonce = 0,
+  onDirectoryRefresh
 }: {
   accountId: string;
   sessionToken: string | null;
@@ -1750,6 +1749,8 @@ function ProfilePanel({
   onArchive: () => void;
   onRestore: () => void;
   onRetry: () => void;
+  qbLinkNonce?: number;
+  onDirectoryRefresh?: () => void;
 }) {
   const name = detail?.displayName ?? detail?.name ?? "Loading…";
   const legalName = detail?.legalName;
@@ -1765,6 +1766,7 @@ function ProfilePanel({
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [pendingInsightId, setPendingInsightId] = useState<string | null>(null);
   const [panelEpoch, setPanelEpoch] = useState(0);
+  const [identityEpoch, setIdentityEpoch] = useState({ financials: 0, relationship: 0, insights: 0 });
   const workspaceRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const session360Ref = useRef(createAccount360SessionStore());
@@ -1860,7 +1862,7 @@ function ProfilePanel({
       .finally(() => {
         if (store.isCurrent(generation, accountId)) setFinancialsBusy(false);
       });
-  }, [sessionToken, accountId, panelEpoch]);
+  }, [sessionToken, accountId, panelEpoch, identityEpoch.financials]);
 
   useEffect(() => {
     if (!sessionToken || !accountId) return;
@@ -1889,7 +1891,7 @@ function ProfilePanel({
       .finally(() => {
         if (store.isCurrent(generation, accountId)) setRelationshipBusy(false);
       });
-  }, [sessionToken, accountId, panelEpoch]);
+  }, [sessionToken, accountId, panelEpoch, identityEpoch.relationship]);
 
   useEffect(() => {
     if (!sessionToken || !accountId) return;
@@ -1921,7 +1923,7 @@ function ProfilePanel({
       .finally(() => {
         if (store.isCurrent(generation, accountId)) setInsightsBusy(false);
       });
-  }, [sessionToken, accountId, panelEpoch]);
+  }, [sessionToken, accountId, panelEpoch, identityEpoch.insights]);
 
   function bumpPanelsAfterMutation(nextDetail: AccountDetail) {
     session360Ref.current.invalidateAccount(accountId);
@@ -1931,6 +1933,44 @@ function ProfilePanel({
     setPanelEpoch((n) => n + 1);
     onDetailChanged(nextDetail);
   }
+
+  function refreshAfterIdentityChange(nextDetail: AccountDetail, opts?: { kind?: "quickbooks" | "moraware" }) {
+    onDetailChanged(nextDetail);
+    const store = session360Ref.current;
+    if (opts?.kind === "quickbooks") {
+      store.clearPanel(accountId, "financials");
+      store.clearPanel(accountId, "insights");
+      setFinancials(null);
+      setInsights(null);
+      setIdentityEpoch((prev) => ({
+        ...prev,
+        financials: prev.financials + 1,
+        insights: prev.insights + 1
+      }));
+    }
+    if (opts?.kind === "moraware") {
+      store.clearPanel(accountId, "relationship");
+      setRelationship(null);
+      setIdentityEpoch((prev) => ({ ...prev, relationship: prev.relationship + 1 }));
+    }
+    onDirectoryRefresh?.();
+  }
+
+  useEffect(() => {
+    if (!qbLinkNonce) return;
+    const store = session360Ref.current;
+    store.clearPanel(accountId, "financials");
+    store.clearPanel(accountId, "insights");
+    setFinancials(null);
+    setInsights(null);
+    setIdentityEpoch((prev) => ({
+      ...prev,
+      financials: prev.financials + 1,
+      insights: prev.insights + 1
+    }));
+    // accountId is the workspace that was connected when the modal succeeded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qbLinkNonce]);
 
   const locationLine = detail ? formatCityState(detail.city, detail.state) : "";
   const qbState = detail?.quickbooksLinked ? "QB Linked" : "QB not linked";
@@ -2032,7 +2072,7 @@ function ProfilePanel({
                         disabled={formBusy}
                         onClick={onLinkQb}
                       >
-                        Link QB
+                        Connect QuickBooks
                       </button>
                     ) : (
                       <span className="chip chip-muted" title="You do not have permission to link QuickBooks">
@@ -2203,9 +2243,14 @@ function ProfilePanel({
               <WorkspaceTabBoundary panel="Connections">
               <ConnectionsWithIdentity
                 accountId={accountId}
+                accountName={detail.displayName || detail.name}
+                sessionToken={sessionToken}
                 links={detail.externalLinks}
                 aliases={detail.aliases}
                 auditHistory={detail.auditHistory}
+                canLinkQuickBooks={Boolean(permissions.canLinkQuickBooks)}
+                canLinkMoraware={Boolean(permissions.canLinkMoraware)}
+                onChanged={refreshAfterIdentityChange}
               />
               </WorkspaceTabBoundary>
             ) : null}

@@ -135,6 +135,8 @@ const root = join(here, "../../..");
   assert.ok(app.includes("createAccount360SessionStore") || app.includes("account360"), "app wires 360 session store");
   assert.ok(app.includes("isAbortError"), "app handles abort");
   assert.ok(app.includes("needsAccount360Fetch") || app.includes("hasPanel"), "app reuses panel cache");
+  assert.ok(app.includes("refreshAfterIdentityChange"), "identity mutations use targeted panel invalidation");
+  assert.ok(app.includes("clearPanel"), "identity mutations do not require full account cache wipe");
   assert.ok(!/detailTab,\s*sessionToken,\s*accountId/.test(app), "financial/relationship effects must not refetch solely on tab change");
   assert.ok(
     app.includes("controller.abort()") && app.includes("getAccount(sessionToken, accountId"),

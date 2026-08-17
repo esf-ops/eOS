@@ -5,6 +5,16 @@
  */
 
 import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
+import {
+  QB_CUSTOMER_SEARCH_MAX_RESULTS,
+  QB_CUSTOMER_SEARCH_MIN_QUERY,
+  assertSafeQbCustomerSearchItem,
+  isQbCustomerSearchQueryTooShort,
+  normalizeQbCustomerSearchQuery,
+  sanitizeQbCustomerSearchNeedle,
+  sortQbCustomerSearchItems,
+  toPublicQuickBooksCustomerSearchItem
+} from "./accountDirectoryQbCustomerSearch.mjs";
 
 function mapAccount(row) {
   if (!row) return null;
@@ -137,6 +147,25 @@ function dbError(error, fallback = "Account Directory storage failed.") {
     return new AccountDirectoryError("conflict", "That record conflicts with an existing one.", 409);
   }
   return new AccountDirectoryError("storage_error", fallback, 500, { detail: msg.slice(0, 200) });
+}
+
+function isQbFactsRelationMissing(error) {
+  const msg = String(error?.message || "");
+  const code = String(error?.code || "");
+  return code === "42P01" || /does not exist|relation/i.test(msg);
+}
+
+function mapQbCustomerFact(row) {
+  if (!row) return null;
+  return {
+    organizationId: row.organization_id,
+    qbListId: row.qb_list_id,
+    parentListId: row.parent_list_id ?? null,
+    isJob: Boolean(row.is_job),
+    name: row.name ?? null,
+    fullName: row.full_name ?? null,
+    isActive: row.is_active !== false
+  };
 }
 
 /**
@@ -791,9 +820,7 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         .eq("qb_list_id", id)
         .maybeSingle();
       if (error) {
-        const msg = String(error?.message || "");
-        const code = String(error?.code || "");
-        if (code === "42P01" || /does not exist|relation/i.test(msg)) {
+        if (isQbFactsRelationMissing(error)) {
           throw new AccountDirectoryError(
             "qb_facts_unavailable",
             "QuickBooks customer facts are unavailable. The link was not created.",
@@ -802,16 +829,75 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         }
         throw dbError(error, "Could not look up QuickBooks customer fact.");
       }
-      if (!data) return null;
-      return {
-        organizationId: data.organization_id,
-        qbListId: data.qb_list_id,
-        parentListId: data.parent_list_id ?? null,
-        isJob: Boolean(data.is_job),
-        name: data.name ?? null,
-        fullName: data.full_name ?? null,
-        isActive: data.is_active !== false
-      };
+      return mapQbCustomerFact(data);
+    },
+
+    /**
+     * Bounded lookup for Account 360 connection display. Missing facts stay
+     * linked — this never deactivates historical external links.
+     */
+    async listQuickBooksCustomerFactsByListIds(organizationId, listIds) {
+      const ids = [...new Set((listIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!organizationId || !ids.length) return [];
+      const { data, error } = await db()
+        .from("ad_qb_customer_facts")
+        .select("organization_id,qb_list_id,parent_list_id,is_job,name,full_name,is_active")
+        .eq("organization_id", organizationId)
+        .in("qb_list_id", ids);
+      if (error) {
+        if (isQbFactsRelationMissing(error)) return [];
+        throw dbError(error, "Could not look up QuickBooks customer facts.");
+      }
+      return (data || []).map(mapQbCustomerFact).filter(Boolean);
+    },
+
+    /**
+     * Org-scoped root-customer discovery. Jobs/subcustomers excluded.
+     * Bounded ILIKE + optional exact ListID. Never writes to QuickBooks.
+     */
+    async searchQuickBooksRootCustomers(organizationId, { query, limit } = {}) {
+      const q = normalizeQbCustomerSearchQuery(query);
+      if (isQbCustomerSearchQueryTooShort(q)) return [];
+      const max = Math.min(
+        QB_CUSTOMER_SEARCH_MAX_RESULTS,
+        Math.max(1, Number(limit) || QB_CUSTOMER_SEARCH_MAX_RESULTS)
+      );
+      const needle = sanitizeQbCustomerSearchNeedle(q);
+      /** @type {object[]} */
+      const facts = [];
+      if (needle.length >= QB_CUSTOMER_SEARCH_MIN_QUERY) {
+        const term = `%${needle}%`;
+        const { data, error } = await db()
+          .from("ad_qb_customer_facts")
+          .select("organization_id,qb_list_id,parent_list_id,is_job,name,full_name,is_active")
+          .eq("organization_id", organizationId)
+          .eq("is_job", false)
+          .or(`full_name.ilike."${term}",name.ilike."${term}"`)
+          .order("full_name", { ascending: true })
+          .order("qb_list_id", { ascending: true })
+          .limit(max);
+        if (error) {
+          if (isQbFactsRelationMissing(error)) {
+            throw new AccountDirectoryError(
+              "qb_facts_unavailable",
+              "QuickBooks customer facts are unavailable. Search could not be completed.",
+              503
+            );
+          }
+          throw dbError(error, "Could not search QuickBooks customers.");
+        }
+        for (const row of data || []) {
+          const mapped = mapQbCustomerFact(row);
+          if (mapped) facts.push(mapped);
+        }
+      }
+      const exact = await this.getQuickBooksCustomerFactByListId(organizationId, q);
+      if (exact && exact.isJob !== true && !facts.some((f) => f.qbListId === exact.qbListId)) {
+        facts.unshift(exact);
+      }
+      return sortQbCustomerSearchItems(
+        facts.map((fact) => assertSafeQbCustomerSearchItem(toPublicQuickBooksCustomerSearchItem(fact)))
+      ).slice(0, max);
     },
 
     async insertAuditEvent(event) {

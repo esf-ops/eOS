@@ -17,6 +17,9 @@ const install = readFileSync(join(root, "app-install-dashboard/src/InstallDashbo
 const topbar = readFileSync(join(root, "shared/eliteos-ui/EliteosTopbar.tsx"), "utf8");
 const workspace = readFileSync(join(root, "app-account-directory/src/lib/accountDirectoryWorkspace.mjs"), "utf8");
 const maintain = readFileSync(join(root, "app-account-directory/src/ui/AccountMaintain.tsx"), "utf8");
+const connections = readFileSync(join(root, "app-account-directory/src/ui/AccountConnections.tsx"), "utf8");
+const picker = readFileSync(join(root, "app-account-directory/src/ui/QuickBooksCustomerPicker.tsx"), "utf8");
+const connLib = readFileSync(join(root, "app-account-directory/src/lib/accountDirectoryConnections.mjs"), "utf8");
 
 console.log("\naccountDirectoryUiContract.test.mjs\n");
 
@@ -131,7 +134,7 @@ assert.equal(app.includes("qb_root_customer_list_id"), false, "must not expose r
 assert.equal(app.includes("qb_customer_list_id"), false, "must not expose customer ListIDs in UI");
 assert.equal(app.includes("terms_list_id"), false, "must not expose TermsId in UI");
 assert.equal(/profit and loss|P&L|profitability|gross profit|gross margin|COGS/i.test(app + panels), false, "must not advertise company P&L language to staff");
-assert.ok(app.includes("activity-list") || maintain.includes("activityLabel"), "directory activity preserved");
+assert.ok(app.includes("activity-list") || maintain.includes("activityLabel") || connections.includes("activityLabel") || connections.includes("activity-list"), "directory activity preserved");
 assert.ok(app.includes("ContactsMaintain") || maintain.includes("Deactivate"), "contact maintainability present");
 assert.ok(maintain.includes("Former locations") || maintain.includes("Deactivate"), "location maintainability present");
 // Workspace helpers exported
@@ -154,8 +157,13 @@ assert.ok(panels.includes("TrustedKpi") || panels.includes("ad-trusted-kpi"), "t
 assert.ok(panels.includes("SectionSkeleton") || panels.includes("ad-section-loading"), "progressive loading skeletons");
 assert.ok(panels.includes("Job salesperson"), "salesperson labeled as job fact");
 assert.ok(app.includes("relationshipBusy"), "relationship loads independently of financials busy");
-assert.ok(maintain.includes("Account Directory UUID") || maintain.includes("accountId"), "Connections shows AD UUID");
-assert.ok(maintain.includes("Multiple Moraware Account IDs") || maintain.includes("legitimately map"), "multi-Moraware ID copy");
+assert.ok(maintain.includes("Account Directory UUID") || connections.includes("Account Directory UUID") || connections.includes("accountId"), "Connections shows AD UUID");
+assert.ok(
+  connections.includes("several Moraware") ||
+    maintain.includes("Multiple Moraware Account IDs") ||
+    maintain.includes("legitimately map"),
+  "multi-Moraware ID copy"
+);
 assert.equal(panels.includes("Account Owner"), false, "must not treat Moraware salesperson as account owner");
 assert.equal(panels.includes("install completion"), false);
 assert.equal(/material|color|room|edge profile/i.test(panels.slice(panels.indexOf("Moraware Operations"), panels.indexOf("Moraware Operations") + 1600)), false);
@@ -186,5 +194,29 @@ assert.ok(app.includes("aria-label"), "aria-label present");
 assert.ok(app.includes("aria-current"), "aria-current present");
 assert.ok(app.includes('role="dialog"'), "modal has dialog role");
 console.log("ok: accessibility attributes present");
+
+assert.ok(api.includes("quickbooks-customers/search"), "QB customer search client present");
+assert.ok(api.includes("unlinkQuickBooks") || api.includes('expectedSystem: "quickbooks_desktop"'));
+assert.ok(picker.includes("signal") && picker.includes("AbortController"), "QB search uses AbortSignal");
+assert.equal(app.includes("QuickBooks List ID is required."), false, "must not require typed ListID");
+assert.equal(picker.includes("placeholder=\"e.g. 123456\""), false);
+assert.ok(picker.includes("Connect QuickBooks"));
+assert.ok(picker.includes("data-ad-qb-confirm") || picker.includes("Confirm connection"));
+assert.ok(connLib.includes("Disconnect QuickBooks"));
+assert.ok(connLib.includes("does not modify QuickBooks"));
+assert.ok(connLib.includes("Multiple QuickBooks connections"));
+assert.ok(connLib.includes("current QuickBooks customer details unavailable"));
+assert.ok(connections.includes("Find Moraware connection"));
+assert.ok(connections.includes("canLinkQuickBooks"));
+assert.ok(connections.includes("canLinkMoraware"));
+assert.ok(connections.includes('kind: "quickbooks"') || connections.includes("kind: \"quickbooks\""));
+assert.ok(app.includes("refreshAfterIdentityChange"));
+assert.ok(app.includes("clearPanel") && app.includes("financials"));
+assert.ok(app.includes("QuickBooksCustomerPicker"));
+assert.ok(connections.includes("unlinkQuickBooks"));
+assert.ok(connections.includes("linkMoraware"));
+assert.equal(picker.includes("raw_payload"), false);
+assert.equal(connections.includes("raw_payload"), false);
+console.log("ok: Connections workspace picker / unlink / permissions contracts");
 
 console.log("\nAll account directory UI contract checks passed.\n");

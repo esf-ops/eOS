@@ -158,6 +158,20 @@ export function attachAccountDirectoryRoutes(app, deps) {
     res.json({ ok: true, permissions });
   });
 
+  app.get("/api/account-directory/quickbooks-customers/search", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const data = await service.searchQuickBooksCustomers({
+        ...ctx,
+        query: req.query?.q ?? req.query?.query ?? ""
+      });
+      const json = JSON.stringify(data);
+      if (/raw_payload|rawPayload|raw_hash|bill_city|bill_state/i.test(json)) {
+        return res.status(500).json({ ok: false, error: "Unsafe QuickBooks payload blocked." });
+      }
+      res.json(data);
+    });
+  });
+
   app.get("/api/account-directory/summary", ...guard, async (req, res) => {
     await withOrg(req, res, async (ctx) => {
       const summary = await service.getSummary(ctx);

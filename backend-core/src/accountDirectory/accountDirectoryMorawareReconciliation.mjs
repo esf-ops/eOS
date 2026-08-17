@@ -53,6 +53,7 @@ export async function listMorawareReconciliationQueue(params) {
   const classificationFilter = String(params.query?.classification || "").trim().toUpperCase();
   const linkedFilter = String(params.query?.linked || "").trim().toLowerCase();
   const search = String(params.query?.search || "").trim().toLowerCase();
+  const proposedAccountId = String(params.query?.proposedAccountId || params.query?.accountId || "").trim();
   const page = Math.max(1, Number(params.query?.page) || 1);
   const pageSize = Math.min(100, Math.max(10, Number(params.query?.pageSize) || 50));
 
@@ -129,6 +130,9 @@ export async function listMorawareReconciliationQueue(params) {
         String(r.morawareAccountId || "").includes(search) ||
         String(r.proposedAccountName || "").toLowerCase().includes(search)
     );
+  }
+  if (proposedAccountId) {
+    filtered = filtered.filter((r) => String(r.proposedAccountId || "") === proposedAccountId);
   }
 
   const summary = {

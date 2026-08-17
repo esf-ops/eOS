@@ -310,6 +310,61 @@ async function main() {
   }
 
   {
+    const { store, service } = svc();
+    const target = await service.createAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      payload: { displayName: "Stoddard & Jensen Real Estate" }
+    });
+    const other = await service.createAccount({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      payload: { displayName: "Unrelated Cabinets" }
+    });
+    await seedTrustedQuickBooksCustomerFact(store, {
+      organizationId: ORG,
+      qbListId: "LIST-STODDARD-SCOPE",
+      name: "Stoddard & Jensen Real Estate",
+      isJob: false
+    });
+    await service.linkQuickBooks({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      accountId: target.id,
+      payload: { externalId: "LIST-STODDARD-SCOPE", externalDisplayName: "Stoddard & Jensen Real Estate" }
+    });
+    const scoped = await listMorawareReconciliationQueue({
+      organizationId: ORG,
+      role: "admin",
+      store,
+      query: { proposedAccountId: target.id, linked: "false", pageSize: 20 },
+      dataset: {
+        morawareAccounts: [
+          { sourceAccountId: "663", accountName: "Stoddard & Jensen Real Estate" },
+          { sourceAccountId: "999", accountName: "Unrelated Cabinets" }
+        ],
+        jobsByMorawareId: new Map(),
+        directoryAccounts: [
+          { id: target.id, displayName: target.name, legalName: null },
+          { id: other.id, displayName: other.name, legalName: null }
+        ],
+        qbLinksByAccountId: new Map([
+          [target.id, { listId: "LIST-STODDARD-SCOPE", displayName: "Stoddard & Jensen Real Estate" }]
+        ]),
+        morawareLinksBySourceId: new Map(),
+        morawareLinksByAccountId: new Map()
+      }
+    });
+    assert.ok(scoped.items.every((row) => row.proposedAccountId === target.id));
+    assert.ok(scoped.items.some((row) => row.morawareAccountId === "663"));
+    assert.equal(scoped.items.some((row) => row.morawareAccountId === "999"), false);
+    console.log("ok: account-scoped Moraware recon filter reuses governed matcher");
+  }
+
+  {
     const { store } = svc();
     const morawareAccounts = Array.from({ length: 60 }, (_, i) => ({
       sourceAccountId: String(1000 + i),

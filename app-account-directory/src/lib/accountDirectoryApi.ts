@@ -20,7 +20,8 @@ import type {
   UpdateLocationPayload,
   AccountInsightsResponse,
   AccountInsightEvidenceResponse,
-  MorawareReconciliationResponse
+  MorawareReconciliationResponse,
+  QuickBooksCustomerSearchItem
 } from "./types";
 
 const BASE = "/api/account-directory";
@@ -292,9 +293,45 @@ export async function unlinkMoraware(token: string, accountId: string, linkId: s
   )) as AccountDetailResponse;
 }
 
+export async function unlinkQuickBooks(token: string, accountId: string, linkId: string) {
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/external-links/${encodeURIComponent(linkId)}/deactivate`,
+    token,
+    { expectedSystem: "quickbooks_desktop" }
+  )) as AccountDetailResponse;
+}
+
+export async function searchQuickBooksCustomers(
+  token: string,
+  query: string,
+  init: RequestInit = {}
+) {
+  return (await apiGet(
+    `${BASE}/quickbooks-customers/search${qs({ q: query })}`,
+    token,
+    init
+  )) as {
+    ok?: boolean;
+    items?: QuickBooksCustomerSearchItem[];
+    queryTooShort?: boolean;
+    minQueryLength?: number;
+    error?: string;
+    code?: string;
+  };
+}
+
 export async function fetchMorawareReconciliation(
   token: string,
-  opts: { classification?: string; linked?: string; search?: string; page?: number; pageSize?: number }
+  opts: {
+    classification?: string;
+    linked?: string;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+    proposedAccountId?: string;
+    accountId?: string;
+  },
+  init: RequestInit = {}
 ) {
   return (await apiGet(
     `${BASE}/moraware-reconciliation${qs({
@@ -302,9 +339,12 @@ export async function fetchMorawareReconciliation(
       linked: opts.linked,
       search: opts.search,
       page: opts.page,
-      pageSize: opts.pageSize
+      pageSize: opts.pageSize,
+      proposedAccountId: opts.proposedAccountId,
+      accountId: opts.accountId
     })}`,
-    token
+    token,
+    init
   )) as MorawareReconciliationResponse;
 }
 

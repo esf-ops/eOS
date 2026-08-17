@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { selectTrustedQuickBooksRootCustomers } from "./accountDirectoryQbCustomerSearch.mjs";
 
 function nowIso() {
   return new Date().toISOString();
@@ -504,6 +505,33 @@ export function createAccountDirectoryMemoryStore() {
       if (!organizationId || !id) return null;
       const row = qbCustomerFacts.get(`${organizationId}::${id}`);
       return row ? clone(row) : null;
+    },
+
+    /**
+     * Bounded lookup for Account 360 connection display. Does not unlink
+     * historical rows when a fact is missing.
+     */
+    async listQuickBooksCustomerFactsByListIds(organizationId, listIds) {
+      const ids = [...new Set((listIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+      if (!organizationId || !ids.length) return [];
+      const rows = [];
+      for (const id of ids) {
+        const row = qbCustomerFacts.get(`${organizationId}::${id}`);
+        if (row) rows.push(clone(row));
+      }
+      return rows;
+    },
+
+    /**
+     * Org-scoped root-customer name/ListID discovery. Jobs excluded.
+     * Callers must still enforce min-query and max-results.
+     */
+    async searchQuickBooksRootCustomers(organizationId, { query, limit } = {}) {
+      const facts = [];
+      for (const row of qbCustomerFacts.values()) {
+        if (row.organizationId === organizationId) facts.push(row);
+      }
+      return selectTrustedQuickBooksRootCustomers(facts, { query, limit });
     },
 
     async insertAuditEvent(event) {

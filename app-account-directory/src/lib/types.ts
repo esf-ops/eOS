@@ -72,6 +72,7 @@ export type AccountAlias = {
 export type ExternalLink = {
   id: string;
   system: string;
+  externalSystem?: string;
   externalId?: string;
   externalDisplayName?: string | null;
   sourceSnapshotDate?: string | null;
@@ -79,6 +80,17 @@ export type ExternalLink = {
   linkedBy?: string | null;
   isActive?: boolean;
   url?: string | null;
+  qbTrusted?: {
+    available: boolean;
+    displayName?: string | null;
+    active?: boolean | null;
+  };
+};
+
+export type QuickBooksCustomerSearchItem = {
+  listId: string;
+  displayName: string;
+  active: boolean;
 };
 
 export type AuditEntry = {

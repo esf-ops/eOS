@@ -46,7 +46,7 @@ assert.ok(panels.includes("commercialRecencyLabel"), "commercial recency is labe
 const relChunk = panels.slice(panels.indexOf("export function RelationshipWorkspace"));
 assert.equal(relChunk.includes("<RelationshipHealthPanel"), false, "Relationship tab must not duplicate health panel");
 assert.ok(app.includes("profile-more"), "secondary header actions use More overflow");
-assert.ok(app.includes("+ Alias") && app.includes("Link QB") && app.includes("Archive"), "More menu preserves Alias, Link QB, Archive");
+assert.ok(app.includes("+ Alias") && app.includes("Connect QuickBooks") && app.includes("Archive"), "More menu preserves Alias, Connect QuickBooks, Archive");
 console.log("ok: Relationship source no longer accesses unguarded nested fields");
 
 assert.doesNotThrow(() => buildRelationshipView(null, null));

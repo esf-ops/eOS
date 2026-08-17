@@ -17,6 +17,13 @@ import {
   evaluateQuickBooksLinkCandidate,
   normalizeQuickBooksListId
 } from "./accountDirectoryQbLinkValidation.mjs";
+import {
+  QB_CUSTOMER_SEARCH_MAX_RESULTS,
+  assertSafeQbCustomerSearchItem,
+  isQbCustomerSearchQueryTooShort,
+  normalizeQbCustomerSearchQuery,
+  toPublicQuickBooksCustomerSearchItem
+} from "./accountDirectoryQbCustomerSearch.mjs";
 import { listIntelPublic, loadListFinancialIntel } from "./accountDirectory360.mjs";
 
 export const AD_QB_ENRICHMENT_FILTERS = Object.freeze([
@@ -548,6 +555,23 @@ export function createAccountDirectoryService(deps) {
       store.listAliases(organizationId, account.id),
       store.listExternalLinks(organizationId, account.id)
     ]);
+    const qbListIds = links
+      .filter((l) => l.externalSystem === "quickbooks_desktop" && l.isActive !== false)
+      .map((l) => String(l.externalId || "").trim())
+      .filter(Boolean);
+    /** @type {Map<string, object>} */
+    let qbFactsByListId = new Map();
+    if (qbListIds.length && typeof store.listQuickBooksCustomerFactsByListIds === "function") {
+      try {
+        const facts = await store.listQuickBooksCustomerFactsByListIds(organizationId, qbListIds);
+        for (const fact of facts || []) {
+          const id = String(fact.qbListId || fact.qb_list_id || "").trim();
+          if (id) qbFactsByListId.set(id, fact);
+        }
+      } catch {
+        qbFactsByListId = new Map();
+      }
+    }
     const item = toListItem(account, contacts, locations, links, aliases);
     /** @type {any} */
     const detail = {
@@ -589,6 +613,8 @@ export function createAccountDirectoryService(deps) {
       })),
       externalLinks: links.map((l) => {
         const canSeeExternalId = roleHasCapability(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
+        const isQb = l.externalSystem === "quickbooks_desktop";
+        const fact = isQb ? qbFactsByListId.get(String(l.externalId || "").trim()) : null;
         return {
           id: l.id,
           system:
@@ -603,7 +629,16 @@ export function createAccountDirectoryService(deps) {
           sourceSnapshotDate: l.sourceSnapshotDate ?? null,
           linkedAt: l.linkedAt ?? null,
           linkedBy: l.linkedBy ?? null,
-          isActive: l.isActive
+          isActive: l.isActive,
+          qbTrusted: isQb
+            ? fact
+              ? {
+                  available: true,
+                  displayName: String(fact.fullName || fact.name || "").trim() || null,
+                  active: fact.isActive !== false
+                }
+              : { available: false, displayName: null, active: null }
+            : undefined
         };
       })
     };
@@ -773,6 +808,46 @@ export function createAccountDirectoryService(deps) {
       const detail = await hydrateDetail(organizationId, account, { includeAudit: true, role });
       const suggestionByAccount = await loadSuggestionIndex(organizationId);
       return attachEnrichment(detail, suggestionByAccount);
+    },
+
+    /**
+     * Read-only trusted QB root-customer search. Name is discovery only.
+     * Linking still requires an explicit Phase 0E ListID confirmation.
+     */
+    async searchQuickBooksCustomers({ organizationId, role, query }) {
+      requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
+      const q = normalizeQbCustomerSearchQuery(query);
+      if (isQbCustomerSearchQueryTooShort(q)) {
+        return {
+          ok: true,
+          items: [],
+          query: q,
+          queryTooShort: true,
+          minQueryLength: 2
+        };
+      }
+      if (typeof store.searchQuickBooksRootCustomers !== "function") {
+        throw new AccountDirectoryError(
+          "qb_facts_unavailable",
+          "QuickBooks customer facts are unavailable. Search could not be completed.",
+          503
+        );
+      }
+      const rows = await store.searchQuickBooksRootCustomers(organizationId, {
+        query: q,
+        limit: QB_CUSTOMER_SEARCH_MAX_RESULTS
+      });
+      const items = (rows || []).slice(0, QB_CUSTOMER_SEARCH_MAX_RESULTS).map((row) => {
+        if (row && row.listId != null) {
+          return assertSafeQbCustomerSearchItem({
+            listId: String(row.listId).trim(),
+            displayName: String(row.displayName || "").trim() || String(row.listId).trim(),
+            active: row.active !== false
+          });
+        }
+        return assertSafeQbCustomerSearchItem(toPublicQuickBooksCustomerSearchItem(row));
+      });
+      return { ok: true, items, query: q, queryTooShort: false };
     },
 
     async createAccount({ organizationId, role, actorUserId, requestId, payload, asProspect }) {
