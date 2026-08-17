@@ -6,79 +6,81 @@ import {
   linkMoraware,
   linkQuickBooks,
   listAccounts,
+  searchQuickBooksCustomers,
   unlinkMoraware
 } from "../lib/accountDirectoryApi";
 import { buildPageNumbers, formatResultRange } from "../lib/accountDirectoryWorkspace";
+import {
+  WORK_QUEUE_FILTERS,
+  applyNoNextMatch,
+  applySkip,
+  applySuccessfulYes,
+  buildMorawareQueueQuery,
+  buildUnifiedCustomerSearchResults,
+  isUnresolvedWorkRow,
+  operationalBreakdown,
+  remainingFromSummary
+} from "../lib/morawareReviewWorkflow.mjs";
 import type {
-  AccountListItem,
   MorawareCandidate,
   MorawareReconciliationItem,
   MorawareReconciliationResponse
 } from "../lib/types";
 
-const FILTERS = [
-  { id: "", label: "All" },
-  { id: "review:EXISTING_AD_QB_BACKED", label: "QB-backed AD" },
-  { id: "review:EXISTING_AD_QB_LINK_CANDIDATE", label: "Needs QB link" },
-  { id: "review:QB_ROOT_NOT_IN_DIRECTORY", label: "QB not in AD" },
-  { id: "review:EXISTING_AD_PROSPECT", label: "Prospect AD" },
-  { id: "review:POSSIBLE_CANDIDATE", label: "Possible" },
-  { id: "review:NO_CANDIDATE", label: "No candidate" },
-  { id: "review:CONFLICT", label: "Conflicts" },
-  { id: "review:INTERNAL", label: "Internal" },
-  { id: "review:LINKED", label: "Linked" }
-];
+type ViewMode = "hub" | "review" | "browse" | "linked";
 
 const PAGE_SIZE = 100;
 
 function reviewBadge(item: MorawareReconciliationItem): { label: string; tone: string } {
-  // Primary reviewState is mutually exclusive (linked wins over supporting conflict metadata).
   const state = String(item.reviewState || "");
   if (state === "LINKED" || item.currentLink?.linked) return { label: "Linked", tone: "linked" };
   if (state === "INTERNAL" || item.internalBucket) return { label: "Internal", tone: "none" };
   if (state === "CONFLICT") return { label: "Conflict", tone: "conflict" };
-  if (state === "EXISTING_AD_QB_BACKED") return { label: "QB-backed AD", tone: "strong" };
-  if (state === "EXISTING_AD_QB_LINK_CANDIDATE") return { label: "Needs QB link", tone: "possible" };
-  if (state === "QB_ROOT_NOT_IN_DIRECTORY") return { label: "QB not in directory", tone: "possible" };
-  if (state === "EXISTING_AD_PROSPECT") return { label: "Prospect AD", tone: "possible" };
-  if (state === "POSSIBLE_CANDIDATE" || state === "STRONG_CANDIDATE") return { label: "Possible candidate", tone: "possible" };
-  if (state === "NO_CANDIDATE" || state === "NO_DIRECTORY_CANDIDATE") return { label: "No candidate", tone: "none" };
-  return { label: "Unmatched", tone: "none" };
+  if (state === "EXISTING_AD_QB_BACKED") return { label: "Ready", tone: "strong" };
+  if (state === "EXISTING_AD_QB_LINK_CANDIDATE") return { label: "Needs QB connection", tone: "possible" };
+  if (state === "QB_ROOT_NOT_IN_DIRECTORY") return { label: "QB customer found", tone: "possible" };
+  if (state === "EXISTING_AD_PROSPECT") return { label: "Prospect", tone: "possible" };
+  if (state === "POSSIBLE_CANDIDATE" || state === "STRONG_CANDIDATE") return { label: "Possible", tone: "possible" };
+  if (state === "NO_CANDIDATE" || state === "NO_DIRECTORY_CANDIDATE") return { label: "No match", tone: "none" };
+  return { label: "Remaining", tone: "none" };
 }
 
-function formatLocation(city?: string | null, state?: string | null): string {
-  return [city, state].map((x) => String(x || "").trim()).filter(Boolean).join(", ");
-}
-
-function bestCandidate(item: MorawareReconciliationItem | null): MorawareCandidate | null {
-  if (!item) return null;
-  if (item.candidates?.length) return item.candidates[0];
-  if (item.proposedAccountId) {
-    return {
-      accountId: item.proposedAccountId,
-      displayName: item.proposedAccountName || "Directory account",
-      confidence: undefined,
-      evidence: (item.evidence || []).map((type) => ({ type, label: type.replace(/_/g, " ") })),
-      confirmAllowed: Boolean(item.confirmAllowed)
-    };
+function candidateKindLabel(best: MorawareCandidate | null, badgeLabel?: string): string {
+  if (!best) return badgeLabel || "Candidate";
+  if (best.identityKind === "EXISTING_AD_QB_BACKED") {
+    return "Account Directory customer · QuickBooks connected";
   }
-  return null;
+  if (best.identityKind === "EXISTING_AD_QB_LINK_CANDIDATE") {
+    return "Existing Account Directory account · QuickBooks connection requires confirmation";
+  }
+  if (best.identityKind === "QB_ROOT_NOT_IN_DIRECTORY") {
+    return "QuickBooks customer · Not yet in Account Directory";
+  }
+  if (best.identityKind === "EXISTING_AD_PROSPECT") {
+    return "Existing Prospect (not QB-backed)";
+  }
+  return badgeLabel || "Candidate";
 }
 
-function otherCandidates(item: MorawareReconciliationItem | null, best: MorawareCandidate | null): MorawareCandidate[] {
-  if (!item) return [];
-  const bestId = best?.accountId;
-  const fromCandidates = (item.candidates || []).filter((c) => c.accountId !== bestId);
-  if (fromCandidates.length) return fromCandidates.slice(0, 2);
-  return (item.alternatives || [])
-    .filter((a) => a.accountId !== bestId)
-    .slice(0, 2)
-    .map((a) => ({
-      accountId: a.accountId,
-      displayName: a.accountName,
-      evidence: (a.evidence || []).map((type) => ({ type, label: type.replace(/_/g, " ") })),
-      confirmAllowed: false
-    }));
+function pickCandidate(item: MorawareReconciliationItem | null, index: number): MorawareCandidate | null {
+  if (!item) return null;
+  const list = item.candidates?.length
+    ? item.candidates
+    : item.proposedAccountId
+      ? [
+          {
+            accountId: item.proposedAccountId,
+            displayName: item.proposedAccountName || "Directory account",
+            evidence: (item.evidence || []).map((type) => ({ type, label: type.replace(/_/g, " ") })),
+            confirmAllowed: Boolean(item.confirmAllowed),
+            confirmQbLinkAllowed: Boolean(item.confirmQbLinkAllowed),
+            createFromQuickBooksAllowed: Boolean(item.createFromQuickBooksAllowed),
+            qbListId: item.primaryQbListId || null
+          } as MorawareCandidate
+        ]
+      : [];
+  if (!list.length) return null;
+  return list[Math.min(Math.max(index, 0), list.length - 1)] || list[0];
 }
 
 export function MorawareReviewSurface({
@@ -94,6 +96,7 @@ export function MorawareReviewSurface({
   onMessage: (message: string) => void;
   onCreateDirectoryAccount?: (prefill: { displayName: string; morawareAccountId: string }) => void;
 }) {
+  const [mode, setMode] = useState<ViewMode>("hub");
   const [queue, setQueue] = useState<MorawareReconciliationResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,11 +105,18 @@ export function MorawareReviewSurface({
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [chooseFor, setChooseFor] = useState<MorawareReconciliationItem | null>(null);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const [chooseOpen, setChooseOpen] = useState(false);
   const [chooseSearch, setChooseSearch] = useState("");
-  const [chooseHits, setChooseHits] = useState<AccountListItem[]>([]);
+  const [chooseDirectory, setChooseDirectory] = useState<
+    Array<{ kind: string; id: string; displayName: string; subtitle: string; accountId: string | null; qbListId: string | null; active?: boolean }>
+  >([]);
+  const [chooseQb, setChooseQb] = useState<
+    Array<{ kind: string; id: string; displayName: string; subtitle: string; accountId: string | null; qbListId: string | null; active?: boolean }>
+  >([]);
   const [actionBusy, setActionBusy] = useState(false);
   const loadGeneration = useRef(0);
+  const reviewPosition = useRef(0);
 
   const load = useCallback(async () => {
     if (!sessionToken) return;
@@ -114,31 +124,38 @@ export function MorawareReviewSurface({
     setBusy(true);
     setError(null);
     try {
-      const isReview = filter.startsWith("review:");
-      const data = await fetchMorawareReconciliation(sessionToken, {
-        classification: filter === "LINKED" || isReview ? "" : filter,
-        linked: filter === "LINKED" ? "true" : "",
-        search,
-        page,
-        pageSize: PAGE_SIZE,
-        ...(isReview ? { reviewState: filter.slice("review:".length) } : {})
+      const query = buildMorawareQueueQuery({
+        mode: mode === "linked" ? "linked" : "work",
+        filter: mode === "browse" || mode === "review" ? filter : "",
+        search: mode === "linked" || mode === "browse" ? search : "",
+        page: mode === "hub" ? 1 : page,
+        pageSize: mode === "hub" ? 10 : mode === "review" ? PAGE_SIZE : PAGE_SIZE
       });
+      const data = await fetchMorawareReconciliation(sessionToken, query);
       if (generation !== loadGeneration.current) return;
+      // Hard client guard: work modes never keep LINKED rows.
+      if (mode !== "linked") {
+        data.items = (data.items || []).filter(isUnresolvedWorkRow);
+      }
       setQueue(data);
-      if (data.page && data.page !== page) setPage(data.page);
+      if (data.page && data.page !== page && mode !== "hub") setPage(data.page);
     } catch (e: unknown) {
       if (generation !== loadGeneration.current) return;
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
       if (generation === loadGeneration.current) setBusy(false);
     }
-  }, [sessionToken, filter, search, page]);
+  }, [sessionToken, mode, filter, search, page]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const items = queue?.items || [];
+  const items = useMemo(() => {
+    const raw = queue?.items || [];
+    return mode === "linked" ? raw : raw.filter(isUnresolvedWorkRow);
+  }, [queue?.items, mode]);
+
   const selected = useMemo(() => {
     if (!items.length) return null;
     return items.find((row) => row.morawareAccountId === selectedId) || items[0] || null;
@@ -149,146 +166,162 @@ export function MorawareReviewSurface({
     if (selectedId !== selected.morawareAccountId) setSelectedId(selected.morawareAccountId);
   }, [selected, selectedId]);
 
-  const total = queue?.total || 0;
-  const pageSize = queue?.pageSize || PAGE_SIZE;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
-  const rangeLabel =
-    queue?.showingFrom != null
-      ? `Showing ${queue.showingFrom.toLocaleString()}–${(queue.showingTo || 0).toLocaleString()} of ${total.toLocaleString()}`
-      : formatResultRange(page, pageSize, total);
+  useEffect(() => {
+    setCandidateIndex(0);
+  }, [selected?.morawareAccountId]);
 
-  function selectNextAfter(morawareAccountId: string, remaining: MorawareReconciliationItem[]) {
-    const idx = items.findIndex((r) => r.morawareAccountId === morawareAccountId);
-    const nextFromPage = remaining[Math.min(Math.max(idx, 0), Math.max(remaining.length - 1, 0))];
-    if (nextFromPage) {
-      setSelectedId(nextFromPage.morawareAccountId);
-      return;
-    }
+  const summary = queue?.summary;
+  const remaining = remainingFromSummary(summary);
+  const connected = summary?.alreadyLinked ?? 0;
+  const totalMoraware = summary?.totalMorawareAccounts ?? 0;
+  const breakdown = operationalBreakdown(summary);
+  const best = pickCandidate(selected, candidateIndex);
+  const candidateCount = selected?.candidates?.length || (selected?.proposedAccountId ? 1 : 0);
+  const badge = selected ? reviewBadge(selected) : null;
+
+  const browseTotal = mode === "linked" ? queue?.total || 0 : remaining;
+  const pageSize = queue?.pageSize || PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil((queue?.total || 0) / pageSize) || 1);
+  const rangeLabel =
+    mode === "browse"
+      ? `Showing ${queue?.showingFrom?.toLocaleString() ?? "—"}–${(queue?.showingTo || 0).toLocaleString()} of ${(queue?.total || 0).toLocaleString()} unresolved`
+      : mode === "linked"
+        ? `Showing ${queue?.showingFrom?.toLocaleString() ?? "—"}–${(queue?.showingTo || 0).toLocaleString()} of ${(queue?.total || 0).toLocaleString()} linked`
+        : formatResultRange(page, pageSize, queue?.total || 0);
+
+  function enterReview() {
+    setMode("review");
+    setPage(1);
+    setFilter("");
+    setSearch("");
     setSelectedId(null);
+    reviewPosition.current = 0;
   }
 
-  function applyLocalConfirm(row: MorawareReconciliationItem) {
-    const remaining = items.filter((r) => r.morawareAccountId !== row.morawareAccountId);
+  function enterBrowse() {
+    setMode("browse");
+    setPage(1);
+    setFilter("");
+  }
+
+  function enterLinked() {
+    setMode("linked");
+    setPage(1);
+    setFilter("");
+    setSearch("");
+  }
+
+  function applyLocalYes(row: MorawareReconciliationItem) {
+    const result = applySuccessfulYes(items, row.morawareAccountId, summary || {});
     setQueue((prev) => {
       if (!prev) return prev;
-      const summary = { ...(prev.summary || { totalMorawareAccounts: 0, alreadyLinked: 0, highConfidenceUnlinked: 0, reviewRequired: 0, unmatched: 0, conflicts: 0 }) };
-      summary.alreadyLinked = (summary.alreadyLinked || 0) + 1;
-      summary.unresolved = Math.max(0, (summary.unresolved ?? Math.max(0, (summary.totalMorawareAccounts || 0) - (summary.alreadyLinked || 0) + 1)) - 1);
+      const nextSummary = { ...(prev.summary || {}), ...result.summaryPatch };
       const state = String(row.reviewState || "");
       if (state === "EXISTING_AD_QB_BACKED" || state === "STRONG_CANDIDATE") {
-        summary.existingAdQbBacked = Math.max(0, (summary.existingAdQbBacked || 0) - 1);
-        summary.strongCandidates = Math.max(0, (summary.strongCandidates || 0) - 1);
+        nextSummary.existingAdQbBacked = Math.max(0, (nextSummary.existingAdQbBacked || 0) - 1);
       }
       if (state === "EXISTING_AD_QB_LINK_CANDIDATE") {
-        summary.existingAdQbLinkCandidate = Math.max(0, (summary.existingAdQbLinkCandidate || 0) - 1);
+        nextSummary.existingAdQbLinkCandidate = Math.max(0, (nextSummary.existingAdQbLinkCandidate || 0) - 1);
       }
       if (state === "QB_ROOT_NOT_IN_DIRECTORY") {
-        summary.qbRootNotInDirectory = Math.max(0, (summary.qbRootNotInDirectory || 0) - 1);
+        nextSummary.qbRootNotInDirectory = Math.max(0, (nextSummary.qbRootNotInDirectory || 0) - 1);
       }
       if (state === "EXISTING_AD_PROSPECT") {
-        summary.existingAdProspect = Math.max(0, (summary.existingAdProspect || 0) - 1);
-        summary.strongCandidates = Math.max(0, (summary.strongCandidates || 0) - 1);
+        nextSummary.existingAdProspect = Math.max(0, (nextSummary.existingAdProspect || 0) - 1);
       }
       if (state === "POSSIBLE_CANDIDATE") {
-        summary.possibleCandidates = Math.max(0, (summary.possibleCandidates || 0) - 1);
+        nextSummary.possibleCandidates = Math.max(0, (nextSummary.possibleCandidates || 0) - 1);
       }
       if (state === "NO_CANDIDATE" || state === "NO_DIRECTORY_CANDIDATE") {
-        summary.noCandidate = Math.max(0, (summary.noCandidate || 0) - 1);
-        summary.noDirectoryCandidate = Math.max(0, (summary.noDirectoryCandidate || 0) - 1);
+        nextSummary.noCandidate = Math.max(0, (nextSummary.noCandidate || 0) - 1);
       }
-      if (state === "CONFLICT") summary.conflicts = Math.max(0, (summary.conflicts || 0) - 1);
-      if (state === "INTERNAL") summary.internalBuckets = Math.max(0, (summary.internalBuckets || 0) - 1);
-      if (row.classification === "UNMATCHED") summary.unmatched = Math.max(0, (summary.unmatched || 0) - 1);
-      if (row.classification === "REVIEW_REQUIRED") summary.reviewRequired = Math.max(0, (summary.reviewRequired || 0) - 1);
-      if (row.classification === "HIGH_CONFIDENCE_CANDIDATE") {
-        summary.highConfidenceUnlinked = Math.max(0, (summary.highConfidenceUnlinked || 0) - 1);
-      }
-      summary.unresolvedBucketSum =
-        (summary.existingAdQbBacked || 0) +
-        (summary.existingAdQbLinkCandidate || 0) +
-        (summary.qbRootNotInDirectory || 0) +
-        (summary.existingAdProspect || 0) +
-        (summary.possibleCandidates || 0) +
-        (summary.conflicts || 0) +
-        (summary.noCandidate || 0) +
-        (summary.internalBuckets || 0);
+      if (state === "CONFLICT") nextSummary.conflicts = Math.max(0, (nextSummary.conflicts || 0) - 1);
+      if (state === "INTERNAL") nextSummary.internalBuckets = Math.max(0, (nextSummary.internalBuckets || 0) - 1);
       return {
         ...prev,
-        summary,
-        total: Math.max(0, (prev.total || remaining.length) - 1),
-        items: remaining
+        summary: nextSummary,
+        total: Math.max(0, (prev.total || result.remainingItems.length) - 1),
+        items: result.remainingItems
       };
     });
-    selectNextAfter(row.morawareAccountId, remaining);
+    setSelectedId(result.nextId);
+    reviewPosition.current += 1;
+    setChooseOpen(false);
   }
 
-  async function confirmLink(row: MorawareReconciliationItem, accountId: string) {
-    if (!sessionToken || !canLink) return;
+  async function onYes(row: MorawareReconciliationItem, cand: MorawareCandidate | null) {
+    if (!sessionToken || !canLink || !cand) return;
     setActionBusy(true);
     setError(null);
     try {
-      await linkMoraware(sessionToken, accountId, {
-        externalId: row.morawareAccountId,
-        externalDisplayName: row.morawareName
-      });
-      onMessage(
-        `Linked Moraware ${row.morawareAccountId} to the selected account. Confirm was required — nothing auto-linked.`
-      );
-      setChooseFor(null);
-      applyLocalConfirm(row);
-      void load();
-    } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.message : String(e));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function confirmQbThenStay(row: MorawareReconciliationItem, best: MorawareCandidate) {
-    if (!sessionToken || !canLink || !best.accountId || !best.qbListId) return;
-    setActionBusy(true);
-    setError(null);
-    try {
-      await linkQuickBooks(sessionToken, best.accountId, {
-        externalId: best.qbListId,
-        externalDisplayName: best.qbDisplayName || best.displayName
-      });
-      onMessage(
-        `QuickBooks linked to ${best.displayName}. Now confirm the Moraware connection explicitly — nothing auto-linked.`
-      );
-      await load();
-      setSelectedId(row.morawareAccountId);
-    } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.message : String(e));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function createFromQuickBooks(row: MorawareReconciliationItem, best: MorawareCandidate) {
-    if (!sessionToken || !canLink || !best.qbListId) return;
-    setActionBusy(true);
-    setError(null);
-    try {
-      const res = await createAccountFromQuickBooks(sessionToken, {
-        qbListId: best.qbListId,
-        displayName: best.qbDisplayName || best.displayName
-      });
-      if (res.incomplete) {
-        setError(
-          `Account created but QuickBooks link failed: ${res.linkError || "unknown error"}. Fix the QB link, then confirm Moraware.`
-        );
-      } else {
+      if (cand.createFromQuickBooksAllowed && cand.qbListId && !cand.accountId) {
+        const res = await createAccountFromQuickBooks(sessionToken, {
+          qbListId: cand.qbListId,
+          displayName: cand.qbDisplayName || cand.displayName
+        });
+        if (res.incomplete) {
+          setError(
+            `Account created but QuickBooks link failed: ${res.linkError || "unknown error"}. Fix the QB link, then confirm Moraware.`
+          );
+          await load();
+          setSelectedId(row.morawareAccountId);
+          return;
+        }
         onMessage(
-          `QuickBooks-backed Account Directory customer created. Confirm Moraware ${row.morawareAccountId} connection next — Moraware was not auto-linked.`
+          `QuickBooks-backed Account Directory customer created. Confirm Moraware ${row.morawareAccountId} next — Moraware was not auto-linked.`
         );
+        await load();
+        setSelectedId(row.morawareAccountId);
+        return;
       }
-      await load();
-      setSelectedId(row.morawareAccountId);
+      if (cand.confirmQbLinkAllowed && cand.accountId && cand.qbListId) {
+        await linkQuickBooks(sessionToken, cand.accountId, {
+          externalId: cand.qbListId,
+          externalDisplayName: cand.qbDisplayName || cand.displayName
+        });
+        onMessage(
+          `QuickBooks linked to ${cand.displayName}. Confirm Moraware connection next — nothing auto-linked.`
+        );
+        await load();
+        setSelectedId(row.morawareAccountId);
+        return;
+      }
+      if ((cand.confirmAllowed || row.confirmAllowed) && cand.accountId) {
+        await linkMoraware(sessionToken, cand.accountId, {
+          externalId: row.morawareAccountId,
+          externalDisplayName: row.morawareName
+        });
+        onMessage(`Connected Moraware ${row.morawareAccountId}. Confirm was required — nothing auto-linked.`);
+        applyLocalYes(row);
+        void load();
+        return;
+      }
+      setChooseOpen(true);
+      setChooseSearch(row.morawareName || "");
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setActionBusy(false);
+    }
+  }
+
+  function onNo() {
+    const next = applyNoNextMatch(candidateIndex, candidateCount);
+    setCandidateIndex(next.nextIndex);
+    if (!next.cycled) setChooseOpen(true);
+  }
+
+  function onSkip(row: MorawareReconciliationItem) {
+    const result = applySkip(items, row.morawareAccountId);
+    if (result.nextId) {
+      setSelectedId(result.nextId);
+      setCandidateIndex(0);
+      setChooseOpen(false);
+      return;
+    }
+    if (result.needsNextPage && page < totalPages) {
+      setPage((p) => p + 1);
+      setSelectedId(null);
     }
   }
 
@@ -307,203 +340,194 @@ export function MorawareReviewSurface({
     }
   }
 
-  async function runChooseSearch() {
+  async function runUnifiedSearch() {
     if (!sessionToken) return;
-    const listed = await listAccounts(sessionToken, { tab: "accounts", search: chooseSearch, page: 1, pageSize: 25 });
-    setChooseHits(listed.items || []);
+    const q = chooseSearch.trim();
+    const [ad, qb] = await Promise.all([
+      listAccounts(sessionToken, { tab: "accounts", search: q, page: 1, pageSize: 25 }),
+      searchQuickBooksCustomers(sessionToken, q).catch(() => ({ items: [] as Array<{ listId: string; displayName: string; active?: boolean }> }))
+    ]);
+    const merged = buildUnifiedCustomerSearchResults({
+      adItems: ad.items || [],
+      qbItems: qb.items || []
+    });
+    setChooseDirectory(merged.directory);
+    setChooseQb(merged.quickbooks);
   }
 
-  const summary = queue?.summary;
-  const best = bestCandidate(selected);
-  const alts = otherCandidates(selected, best);
-  const badge = selected ? reviewBadge(selected) : null;
+  async function selectSearchHit(
+    row: MorawareReconciliationItem,
+    hit: { accountId: string | null; qbListId: string | null; displayName: string; kind: string }
+  ) {
+    if (!sessionToken || !canLink) return;
+    // Never auto-link — staged governed next step only.
+    if (hit.kind === "quickbooks_root" && hit.qbListId) {
+      setActionBusy(true);
+      setError(null);
+      try {
+        const res = await createAccountFromQuickBooks(sessionToken, {
+          qbListId: hit.qbListId,
+          displayName: hit.displayName
+        });
+        if (res.incomplete) {
+          setError(`Account created but QuickBooks link failed: ${res.linkError || "unknown"}.`);
+        } else {
+          onMessage(
+            `QuickBooks-backed account created for ${hit.displayName}. Confirm Moraware ${row.morawareAccountId} explicitly.`
+          );
+        }
+        setChooseOpen(false);
+        await load();
+        setSelectedId(row.morawareAccountId);
+      } catch (e: unknown) {
+        setError(e instanceof ApiError ? e.message : String(e));
+      } finally {
+        setActionBusy(false);
+      }
+      return;
+    }
+    if (hit.accountId) {
+      setActionBusy(true);
+      setError(null);
+      try {
+        await linkMoraware(sessionToken, hit.accountId, {
+          externalId: row.morawareAccountId,
+          externalDisplayName: row.morawareName
+        });
+        onMessage(`Connected Moraware ${row.morawareAccountId}. Confirm was required — nothing auto-linked.`);
+        applyLocalYes(row);
+        setChooseOpen(false);
+        void load();
+      } catch (e: unknown) {
+        setError(e instanceof ApiError ? e.message : String(e));
+      } finally {
+        setActionBusy(false);
+      }
+    }
+  }
+
+  const yesLabel = (() => {
+    if (!best) return "Search customers";
+    if (best.createFromQuickBooksAllowed && best.qbListId && !best.accountId) return "YES — Create from QuickBooks";
+    if (best.confirmQbLinkAllowed && best.accountId && best.qbListId) return "YES — Confirm QuickBooks";
+    if ((best.confirmAllowed || selected?.confirmAllowed) && best.accountId) return "YES — Connect";
+    return "Search customers";
+  })();
+
+  const reviewOrdinal = Math.min(reviewPosition.current + 1, Math.max(remaining, 1));
 
   return (
     <div className="status-review moraware-review">
       <header className="status-review-head">
         <div>
           <p className="hero-eyebrow">Identity</p>
-          <h2>Moraware links</h2>
+          <h2>Moraware reconciliation</h2>
           <p className="muted">
-            Confirm one Moraware Account ID at a time. Hierarchy: existing QB-backed AD → existing AD needing QB link →
-            trusted QB root (create AD just-in-time) → Prospect AD → no candidate. Exact{" "}
-            <code>source_account_id</code> remains Moraware identity. No bulk confirm and no auto-link.
+            One account at a time. Confirm exact Moraware Account IDs against Account Directory or trusted QuickBooks
+            roots. No bulk confirm. No auto-link.
           </p>
         </div>
       </header>
 
       {summary ? (
-        <div className="moraware-summary">
-          <p className="muted moraware-summary-note">
-            Just-in-time spine: we do not mass-import QuickBooks customers. Review counts show how unlinked Moraware
-            rows map to existing AD vs QB roots not yet in Account Directory.
-          </p>
-          <div className="moraware-summary-groups">
-            <div className="moraware-summary-group" role="group" aria-label="Moraware link status">
-              <span className="moraware-summary-group-label">Link status</span>
-              <ul className="status-review-counts moraware-summary-counts">
-                <li>
-                  <span>Moraware accounts</span>
-                  <strong>{summary.totalMorawareAccounts}</strong>
-                </li>
-                <li>
-                  <span>Already linked</span>
-                  <strong>{summary.alreadyLinked}</strong>
-                </li>
-                <li>
-                  <span>Unresolved</span>
-                  <strong>{summary.unresolved ?? Math.max(0, (summary.totalMorawareAccounts || 0) - (summary.alreadyLinked || 0))}</strong>
-                </li>
-              </ul>
+        <div className="moraware-summary moraware-summary-ops" aria-label="Reconciliation progress">
+          <div className="moraware-hero-counts">
+            <div className="moraware-hero-count">
+              <span className="moraware-hero-label">Connected</span>
+              <strong>{connected.toLocaleString()}</strong>
             </div>
-            <div className="moraware-summary-group" role="group" aria-label="QB-first review accelerator">
-              <span className="moraware-summary-group-label">Unlinked review states (exclusive)</span>
-              <ul className="status-review-counts moraware-summary-counts">
-                <li>
-                  <span>QB-backed AD</span>
-                  <strong>{summary.existingAdQbBacked ?? summary.strongCandidates ?? "—"}</strong>
-                </li>
-                <li>
-                  <span>Needs QB link</span>
-                  <strong>{summary.existingAdQbLinkCandidate ?? "—"}</strong>
-                </li>
-                <li>
-                  <span>QB not in AD</span>
-                  <strong>{summary.qbRootNotInDirectory ?? "—"}</strong>
-                </li>
-                <li>
-                  <span>Prospect AD</span>
-                  <strong>{summary.existingAdProspect ?? "—"}</strong>
-                </li>
-                <li>
-                  <span>Possible</span>
-                  <strong>{summary.possibleCandidates ?? "—"}</strong>
-                </li>
-                <li>
-                  <span>Conflicts</span>
-                  <strong>{summary.conflicts}</strong>
-                </li>
-                <li>
-                  <span>No candidate</span>
-                  <strong>{summary.noCandidate ?? summary.noDirectoryCandidate ?? "—"}</strong>
-                </li>
-                <li>
-                  <span>Internal</span>
-                  <strong>{summary.internalBuckets ?? "—"}</strong>
-                </li>
-              </ul>
+            <div className="moraware-hero-count moraware-hero-count-primary">
+              <span className="moraware-hero-label">Remaining</span>
+              <strong>{remaining.toLocaleString()}</strong>
             </div>
           </div>
+          <p className="muted moraware-summary-meta">
+            {totalMoraware.toLocaleString()} Moraware accounts · {connected.toLocaleString()} connected ·{" "}
+            {remaining.toLocaleString()} remaining
+          </p>
+          <ul className="moraware-ops-breakdown">
+            {breakdown.map((b) => (
+              <li key={b.key} title={b.hint}>
+                <span>{b.label}</span>
+                <strong>{b.count}</strong>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
-      <div className="status-review-toolbar">
-        <label className="field">
-          Search
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                setPage(1);
-                setSearch(searchInput.trim());
-              }
-            }}
-          />
-        </label>
-        <div className="filter-chips" role="group" aria-label="Queue filter">
-          {FILTERS.map((item) => (
-            <button
-              key={item.id || "all"}
-              type="button"
-              className={filter === item.id ? "chip chip-active" : "chip"}
-              onClick={() => {
-                setPage(1);
-                setFilter(item.id);
-              }}
-            >
-              {item.label}
+      {mode === "hub" ? (
+        <div className="moraware-hub">
+          <p className="moraware-hub-remaining">
+            <strong>{remaining.toLocaleString()}</strong> accounts remaining
+          </p>
+          <div className="status-review-actions moraware-hub-actions">
+            <button type="button" className="btn btn-primary" disabled={busy || remaining === 0} onClick={enterReview}>
+              Review one by one
             </button>
-          ))}
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={enterBrowse}>
+              Browse unresolved
+            </button>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={enterLinked}>
+              View linked accounts ({connected.toLocaleString()})
+            </button>
+          </div>
+          {remaining === 0 && !busy ? <p className="muted">All Moraware accounts in the work queue are connected.</p> : null}
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => {
-            setPage(1);
-            setSearch(searchInput.trim());
-          }}
-        >
-          Apply
-        </button>
-      </div>
+      ) : null}
+
+      {mode !== "hub" ? (
+        <div className="moraware-mode-bar">
+          <button type="button" className="btn btn-secondary" onClick={() => setMode("hub")}>
+            ← Overview
+          </button>
+          {mode !== "review" ? (
+            <button type="button" className="btn btn-primary" disabled={remaining === 0} onClick={enterReview}>
+              Review one by one
+            </button>
+          ) : null}
+          {mode !== "browse" ? (
+            <button type="button" className="btn btn-secondary" onClick={enterBrowse}>
+              Browse unresolved
+            </button>
+          ) : null}
+          {mode !== "linked" ? (
+            <button type="button" className="btn btn-secondary" onClick={enterLinked}>
+              Linked history ({connected.toLocaleString()})
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {error ? (
         <div className="banner banner-error" role="alert">
           {error}
         </div>
       ) : null}
-      {busy && !queue ? <p className="muted">Loading Moraware review queue…</p> : null}
+      {busy && !queue ? <p className="muted">Loading…</p> : null}
 
-      <p className="muted" aria-live="polite">
-        {rangeLabel}
-      </p>
-
-      <div className="status-review-split">
-        <ul className="status-review-list" aria-label="Moraware accounts">
-          {items.map((row) => {
-            const rowBadge = reviewBadge(row);
-            return (
-              <li key={row.morawareAccountId}>
-                <button
-                  type="button"
-                  className={
-                    selected?.morawareAccountId === row.morawareAccountId
-                      ? "status-review-row status-review-row-active"
-                      : "status-review-row"
-                  }
-                  onClick={() => setSelectedId(row.morawareAccountId)}
-                >
-                  <strong>{row.morawareName}</strong>
-                  <span className="muted">
-                    Account ID {row.morawareAccountId} · {row.jobs2026 ?? row.jobCount ?? 0} jobs (2026)
-                  </span>
-                  <span className={`moraware-badge moraware-badge-${rowBadge.tone}`}>{rowBadge.label}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-
-        {selected ? (
-          <section className="status-review-card moraware-review-detail" aria-label="Selected Moraware account">
-            <h3>
-              {selected.morawareName}{" "}
-              <span className="muted">Account ID {selected.morawareAccountId}</span>
-            </h3>
+      {mode === "review" && selected && isUnresolvedWorkRow(selected) ? (
+        <section className="moraware-focus" aria-label="Review one Moraware account">
+          <p className="moraware-focus-progress">
+            {reviewOrdinal} of {remaining.toLocaleString()} remaining
+          </p>
+          <div className="moraware-focus-card">
+            <p className="moraware-focus-eyebrow">Moraware</p>
+            <h3>{selected.morawareName}</h3>
             <p className="muted">
-              {selected.jobs2026 ?? selected.jobCount ?? 0} jobs in 2026
-              {selected.earliestJobDate ? ` · ${selected.earliestJobDate}` : ""}
-              {selected.latestJobDate ? ` to ${selected.latestJobDate}` : ""}
+              Account ID {selected.morawareAccountId} · {selected.jobs2026 ?? selected.jobCount ?? 0} jobs in 2026
             </p>
             {badge ? <span className={`moraware-badge moraware-badge-${badge.tone}`}>{badge.label}</span> : null}
 
-            {best && !selected.currentLink?.linked ? (
+            {best ? (
               <div className="moraware-best-candidate">
-                <h4>Suggested customer</h4>
+                <h4>Do you mean this customer?</h4>
+                <p className="moraware-focus-match-label">Best match</p>
                 <p className="moraware-best-name">{best.displayName}</p>
                 <p className="muted">
-                  {best.identityKind === "EXISTING_AD_QB_BACKED"
-                    ? "Already in Account Directory · QuickBooks connected"
-                    : best.identityKind === "EXISTING_AD_QB_LINK_CANDIDATE"
-                      ? "Existing Account Directory account · QuickBooks connection requires confirmation"
-                      : best.identityKind === "QB_ROOT_NOT_IN_DIRECTORY"
-                        ? "QuickBooks customer · Not yet in Account Directory"
-                        : best.identityKind === "EXISTING_AD_PROSPECT"
-                          ? "Existing Prospect (not QB-backed)"
-                          : badge?.label || "Candidate"}
+                  {candidateKindLabel(best, badge?.label)}
                   {best.qbActive === false ? " · Inactive QuickBooks root" : ""}
-                  {best.confidence != null ? ` · confidence ${best.confidence}` : ""}
+                  {candidateCount > 1 ? ` · match ${candidateIndex + 1} of ${candidateCount}` : ""}
                 </p>
                 {best.qbActive === false ? (
                   <p className="banner banner-warn" role="status">
@@ -519,233 +543,303 @@ export function MorawareReviewSurface({
                     {!best.evidence?.length ? <li className="muted">No structured evidence labels</li> : null}
                   </ul>
                 </div>
-                <div className="status-review-actions">
-                  {(selected.confirmQbLinkAllowed || best.confirmQbLinkAllowed) &&
-                  best.accountId &&
-                  best.qbListId &&
-                  canLink ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={actionBusy}
-                      onClick={() => void confirmQbThenStay(selected, best)}
-                    >
-                      Confirm QuickBooks connection
-                    </button>
-                  ) : null}
-                  {(selected.createFromQuickBooksAllowed || best.createFromQuickBooksAllowed) &&
-                  best.qbListId &&
-                  canLink ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={actionBusy}
-                      onClick={() => void createFromQuickBooks(selected, best)}
-                    >
-                      Create Account from QuickBooks
-                    </button>
-                  ) : null}
-                  {(selected.confirmAllowed || best.confirmAllowed) && best.accountId && canLink ? (
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={actionBusy}
-                      onClick={() => void confirmLink(selected, best.accountId as string)}
-                    >
-                      Confirm Moraware connection
-                    </button>
-                  ) : null}
-                  {canLink && !selected.internalBucket ? (
-                    <button type="button" className="btn btn-secondary" onClick={() => setChooseFor(selected)}>
-                      Choose different account
-                    </button>
-                  ) : null}
-                  {best.accountId ? (
-                    <button type="button" className="btn btn-secondary" onClick={() => onOpenAccount(best.accountId as string)}>
-                      View account
-                    </button>
-                  ) : null}
-                </div>
-                <p className="muted">Moraware never auto-links. Create-from-QuickBooks does not write to QuickBooks.</p>
               </div>
-            ) : null}
-
-            {!best && !selected.currentLink?.linked ? (
+            ) : (
               <div className="moraware-best-candidate">
                 <h4>No credible Account Directory or QuickBooks customer found</h4>
                 <p className="muted">
                   {selected.unmatchedReason || selected.reason
                     ? `Reason: ${String(selected.unmatchedReason || selected.reason).replace(/_/g, " ")}`
-                    : "No AD or trusted QB root had compelling evidence for this Moraware ID."}
-                </p>
-                <div className="status-review-actions">
-                  {canLink ? (
-                    <button type="button" className="btn btn-secondary" onClick={() => setChooseFor(selected)}>
-                      Search directory manually
-                    </button>
-                  ) : null}
-                  {onCreateDirectoryAccount && canLink ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() =>
-                        onCreateDirectoryAccount({
-                          displayName: selected.morawareName,
-                          morawareAccountId: selected.morawareAccountId
-                        })
-                      }
-                    >
-                      Create new Account
-                    </button>
-                  ) : null}
-                </div>
-                <p className="muted">
-                  Creating an account does not link Moraware. After create, return here and confirm the connection
-                  explicitly.
+                    : "Search customers (Account Directory + QuickBooks) or create a new account."}
                 </p>
               </div>
-            ) : null}
-
-            {alts.length ? (
-              <div className="moraware-other-candidates">
-                <h4>Other candidates</h4>
-                <ul>
-                  {alts.map((alt) => (
-                    <li key={alt.accountId || alt.qbListId || alt.displayName}>
-                      <div>
-                        <strong>{alt.displayName}</strong>
-                        <span className="muted">
-                          {" "}
-                          {alt.identityKind ? `${alt.identityKind.replace(/_/g, " ")} · ` : ""}
-                          {(alt.evidence || []).map((e) => e.label).join(" · ") || "Alternate"}
-                        </span>
-                      </div>
-                      {canLink && !selected.currentLink?.linked && alt.accountId && alt.confirmAllowed ? (
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          disabled={actionBusy}
-                          onClick={() => void confirmLink(selected, alt.accountId as string)}
-                        >
-                          Confirm Moraware
-                        </button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {selected.currentLink?.linked ? (
-              <div className="moraware-best-candidate">
-                <h4>Already linked</h4>
-                <p>
-                  Directory account: <strong>{selected.currentLink.accountName || selected.currentLink.accountId}</strong>
-                </p>
-                <div className="status-review-actions">
-                  {selected.currentLink.accountId ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => onOpenAccount(String(selected.currentLink?.accountId))}
-                    >
-                      View account
-                    </button>
-                  ) : null}
-                  {canLink ? (
-                    <button type="button" className="btn btn-secondary" disabled={actionBusy} onClick={() => void unlink(selected)}>
-                      Unlink
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {selected.siblingMorawareIds?.length ? (
-              <p className="muted">
-                Other Moraware IDs on this directory account: {selected.siblingMorawareIds.join(", ")}. Multiple IDs on
-                one AD UUID are allowed.
-              </p>
-            ) : null}
-            {selected.internalBucket ? (
-              <p className="banner banner-warn">Internal/house identity. Confirm is disabled.</p>
-            ) : null}
-          </section>
-        ) : (
-          <p className="muted">Select a Moraware account to review.</p>
-        )}
-      </div>
-
-      {totalPages > 1 ? (
-        <div className="pagination moraware-review-pagination" role="navigation" aria-label="Moraware queue pages">
-          <span className="pagination-info">{rangeLabel}</span>
-          <div className="pagination-controls">
-            {(buildPageNumbers(page, totalPages) as (number | string)[]).map((item, idx) =>
-              item === "..." ? (
-                <span key={`e-${idx}`} className="page-ellipsis">
-                  …
-                </span>
-              ) : (
-                <button
-                  key={item}
-                  type="button"
-                  className={item === page ? "page-btn page-btn-active" : "page-btn"}
-                  onClick={() => setPage(Number(item))}
-                >
-                  {item}
-                </button>
-              )
             )}
+
+            <div className="status-review-actions moraware-focus-actions">
+              {canLink && !selected.internalBucket ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={actionBusy}
+                  onClick={() => {
+                    if (!best || yesLabel === "Search customers") {
+                      setChooseOpen(true);
+                      setChooseSearch(selected.morawareName || "");
+                      return;
+                    }
+                    void onYes(selected, best);
+                  }}
+                >
+                  {yesLabel}
+                </button>
+              ) : null}
+              {best && candidateCount > 0 ? (
+                <button type="button" className="btn btn-secondary" disabled={actionBusy} onClick={onNo}>
+                  NO — Show next match
+                </button>
+              ) : null}
+              <button type="button" className="btn btn-secondary" disabled={actionBusy} onClick={() => onSkip(selected)}>
+                SKIP
+              </button>
+            </div>
+            <div className="status-review-actions">
+              {canLink && !selected.internalBucket ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setChooseOpen(true);
+                    setChooseSearch(selected.morawareName || "");
+                  }}
+                >
+                  Search customers
+                </button>
+              ) : null}
+              {onCreateDirectoryAccount && canLink && !selected.internalBucket ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() =>
+                    onCreateDirectoryAccount({
+                      displayName: selected.morawareName,
+                      morawareAccountId: selected.morawareAccountId
+                    })
+                  }
+                >
+                  Create new account
+                </button>
+              ) : null}
+              {best?.accountId ? (
+                <button type="button" className="btn btn-secondary" onClick={() => onOpenAccount(best.accountId as string)}>
+                  View account
+                </button>
+              ) : null}
+            </div>
+            <p className="muted moraware-kbd-hint">Moraware never auto-links. Create-from-QuickBooks does not write to QuickBooks.</p>
           </div>
-        </div>
+        </section>
       ) : null}
 
-      {chooseFor ? (
-        <div className="modal-backdrop" role="dialog" aria-label="Choose Account Directory account">
-          <div className="modal">
-            <h3>Choose directory account</h3>
-            <p className="muted">
-              Link Moraware {chooseFor.morawareAccountId} to an existing Account Directory UUID. Search covers display
-              name, aliases, and contacts. Selecting a result still requires explicit confirmation — nothing auto-links.
-            </p>
+      {mode === "review" && !busy && remaining === 0 ? (
+        <p className="muted">No unresolved Moraware accounts left in this queue.</p>
+      ) : null}
+
+      {mode === "browse" || mode === "linked" ? (
+        <>
+          <div className="status-review-toolbar">
             <label className="field">
-              Search accounts
+              Search
               <input
-                value={chooseSearch}
-                onChange={(e) => setChooseSearch(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void runChooseSearch();
+                  if (e.key === "Enter") {
+                    setPage(1);
+                    setSearch(searchInput.trim());
+                  }
                 }}
               />
             </label>
-            <button type="button" className="btn btn-secondary" onClick={() => void runChooseSearch()}>
+            {mode === "browse" ? (
+              <div className="filter-chips" role="group" aria-label="Unresolved filters">
+                {WORK_QUEUE_FILTERS.map((item) => (
+                  <button
+                    key={item.id || "all"}
+                    type="button"
+                    className={filter === item.id ? "chip chip-active" : "chip"}
+                    onClick={() => {
+                      setPage(1);
+                      setFilter(item.id);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">Linked history — audit, view account, or governed unlink. Not part of the work queue.</p>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setPage(1);
+                setSearch(searchInput.trim());
+              }}
+            >
+              Apply
+            </button>
+          </div>
+          <p className="muted" aria-live="polite">
+            {rangeLabel}
+            {mode === "browse" ? ` · ${browseTotal.toLocaleString()} remaining overall` : ""}
+          </p>
+          <div className="status-review-split">
+            <ul className="status-review-list" aria-label={mode === "linked" ? "Linked Moraware accounts" : "Unresolved Moraware accounts"}>
+              {items.map((row) => {
+                const rowBadge = reviewBadge(row);
+                return (
+                  <li key={row.morawareAccountId}>
+                    <button
+                      type="button"
+                      className={
+                        selected?.morawareAccountId === row.morawareAccountId
+                          ? "status-review-row status-review-row-active"
+                          : "status-review-row"
+                      }
+                      onClick={() => setSelectedId(row.morawareAccountId)}
+                    >
+                      <strong>{row.morawareName}</strong>
+                      <span className="muted">
+                        Account ID {row.morawareAccountId} · {row.jobs2026 ?? row.jobCount ?? 0} jobs (2026)
+                      </span>
+                      <span className={`moraware-badge moraware-badge-${rowBadge.tone}`}>{rowBadge.label}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            {selected ? (
+              <section className="status-review-card moraware-review-detail" aria-label="Selected Moraware account">
+                <h3>
+                  {selected.morawareName}{" "}
+                  <span className="muted">Account ID {selected.morawareAccountId}</span>
+                </h3>
+                <p className="muted">{selected.jobs2026 ?? selected.jobCount ?? 0} jobs in 2026</p>
+                {selected.currentLink?.linked ? (
+                  <div className="moraware-best-candidate">
+                    <h4>Already linked</h4>
+                    <p>
+                      Connected to{" "}
+                      <button type="button" className="linkish" onClick={() => onOpenAccount(selected.currentLink!.accountId!)}>
+                        {selected.currentLink.accountName || selected.currentLink.accountId}
+                      </button>
+                    </p>
+                    {canLink ? (
+                      <button type="button" className="btn btn-danger" disabled={actionBusy} onClick={() => void unlink(selected)}>
+                        Unlink
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="status-review-actions">
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        setMode("review");
+                        setSelectedId(selected.morawareAccountId);
+                      }}
+                    >
+                      Review this account
+                    </button>
+                    {canLink ? (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setChooseOpen(true);
+                          setChooseSearch(selected.morawareName || "");
+                        }}
+                      >
+                        Search customers
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </section>
+            ) : null}
+          </div>
+          {totalPages > 1 ? (
+            <nav className="pager" aria-label="Pagination">
+              <button type="button" className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                Previous
+              </button>
+              {buildPageNumbers(page, totalPages).map((n, i) =>
+                n === "…" ? (
+                  <span key={`e-${i}`} className="muted">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={n}
+                    type="button"
+                    className={n === page ? "btn btn-secondary chip-active" : "btn btn-secondary"}
+                    onClick={() => setPage(Number(n))}
+                  >
+                    {n}
+                  </button>
+                )
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next
+              </button>
+            </nav>
+          ) : null}
+        </>
+      ) : null}
+
+      {chooseOpen && selected && !selected.currentLink?.linked ? (
+        <div className="moraware-choose-panel" role="dialog" aria-label="Search customers">
+          <h4>Search customers</h4>
+          <p className="muted">Account Directory and trusted QuickBooks roots. Selecting a result still requires confirmation — nothing auto-links.</p>
+          <div className="status-review-actions">
+            <input
+              value={chooseSearch}
+              onChange={(e) => setChooseSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void runUnifiedSearch();
+              }}
+              placeholder="Search by name"
+              aria-label="Customer search"
+            />
+            <button type="button" className="btn btn-secondary" onClick={() => void runUnifiedSearch()}>
               Search
             </button>
-            <ul className="ad-card-list moraware-choose-list">
-              {chooseHits.map((hit) => (
+            <button type="button" className="btn btn-secondary" onClick={() => setChooseOpen(false)}>
+              Close
+            </button>
+          </div>
+          <div className="moraware-unified-search">
+            <h5>Account Directory</h5>
+            <ul className="moraware-choose-list">
+              {chooseDirectory.map((hit) => (
                 <li key={hit.id} className="ad-person-card">
                   <div>
-                    <strong>{hit.displayName || hit.name}</strong>
-                    <span className="muted">
-                      {[formatLocation(hit.city, hit.state), hit.primaryContact, hit.quickbooksLinked ? "QB linked" : ""]
-                        .filter(Boolean)
-                        .join(" · ") || "No location/contact on file"}
-                    </span>
+                    <strong>{hit.displayName}</strong>
+                    <span className="muted">{hit.subtitle}</span>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={actionBusy}
-                    onClick={() => void confirmLink(chooseFor, hit.id)}
-                  >
-                    Confirm link here
-                  </button>
+                  {canLink ? (
+                    <button type="button" className="btn btn-primary" disabled={actionBusy} onClick={() => void selectSearchHit(selected, hit)}>
+                      Use account
+                    </button>
+                  ) : null}
                 </li>
               ))}
+              {!chooseDirectory.length ? <li className="muted">No directory hits yet.</li> : null}
             </ul>
-            <button type="button" className="btn btn-secondary" onClick={() => setChooseFor(null)}>
-              Cancel
-            </button>
+            <h5>QuickBooks</h5>
+            <ul className="moraware-choose-list">
+              {chooseQb.map((hit) => (
+                <li key={hit.id} className="ad-person-card">
+                  <div>
+                    <strong>{hit.displayName}</strong>
+                    <span className="muted">{hit.subtitle}</span>
+                  </div>
+                  {canLink ? (
+                    <button type="button" className="btn btn-primary" disabled={actionBusy} onClick={() => void selectSearchHit(selected, hit)}>
+                      Create from QuickBooks
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+              {!chooseQb.length ? <li className="muted">No QuickBooks root hits yet.</li> : null}
+            </ul>
           </div>
         </div>
       ) : null}

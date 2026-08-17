@@ -64,14 +64,25 @@ assert.equal(
   false
 );
 assert.ok(
-  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Create Account from QuickBooks")
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Create Account from QuickBooks") ||
+    readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("YES — Create from QuickBooks") ||
+    readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("createAccountFromQuickBooks")
 );
 assert.ok(
-  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Confirm Moraware connection")
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("YES — Connect") ||
+    readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Confirm Moraware")
+);
+assert.ok(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Review one by one")
+);
+assert.ok(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("linked=false") ||
+    readFileSync(join(root, "app-account-directory/src/lib/morawareReviewWorkflow.mjs"), "utf8").includes('linked: "false"')
 );
 assert.ok(
   readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("no auto-link") ||
-    readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("never auto-links")
+    readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("never auto-link") ||
+    readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("nothing auto-link")
 );
 assert.equal(
   readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Confirm All"),

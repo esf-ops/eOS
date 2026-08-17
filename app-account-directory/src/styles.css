@@ -1901,6 +1901,132 @@ a.detail-list-title:hover {
   background: #e3f2fd;
   color: #0d47a1;
 }
+.moraware-summary-ops {
+  display: grid;
+  gap: 12px;
+}
+.moraware-hero-counts {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.moraware-hero-count {
+  min-width: 140px;
+  padding: 14px 16px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: #fff;
+  display: grid;
+  gap: 4px;
+}
+.moraware-hero-count-primary {
+  border-color: #1b5e20;
+  background: #f3faf3;
+}
+.moraware-hero-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+.moraware-hero-count strong {
+  font-size: 1.75rem;
+  line-height: 1.1;
+}
+.moraware-summary-meta {
+  margin: 0;
+}
+.moraware-ops-breakdown {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+.moraware-ops-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  background: #fafafa;
+  font-size: 0.85rem;
+}
+.moraware-hub {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.moraware-hub-remaining {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.moraware-hub-actions,
+.moraware-mode-bar,
+.moraware-focus-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.moraware-mode-bar {
+  margin: 8px 0 4px;
+}
+.moraware-focus {
+  display: grid;
+  gap: 12px;
+  max-width: 640px;
+}
+.moraware-focus-progress {
+  margin: 0;
+  font-weight: 650;
+  font-size: 0.95rem;
+}
+.moraware-focus-card {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+.moraware-focus-eyebrow,
+.moraware-focus-match-label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+.moraware-focus-card h3 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+.moraware-unified-search {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.moraware-unified-search h5 {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.moraware-choose-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: #fff;
+  display: grid;
+  gap: 10px;
+}
 .moraware-best-candidate,
 .moraware-other-candidates {
   display: grid;
