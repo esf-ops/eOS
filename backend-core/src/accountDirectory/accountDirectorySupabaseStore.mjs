@@ -5,6 +5,7 @@
  */
 
 import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
+import { fetchAllForAccountIdBatches } from "./accountDirectoryAccountIdBatch.mjs";
 import {
   QB_CUSTOMER_SEARCH_MAX_RESULTS,
   QB_CUSTOMER_SEARCH_MIN_QUERY,
@@ -437,15 +438,18 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
     },
 
     async listContactsForAccountIds(organizationId, accountIds) {
-      const ids = [...new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
-      if (!ids.length) return [];
-      const { data, error } = await db()
-        .from("account_directory_contacts")
-        .select("*")
-        .eq("organization_id", organizationId)
-        .in("account_id", ids);
-      if (error) throw dbError(error, "Could not list contacts for accounts.");
-      return (data || []).map(mapContact);
+      return fetchAllForAccountIdBatches({
+        accountIds,
+        fetchBatch: async (chunkIds) => {
+          const { data, error } = await db()
+            .from("account_directory_contacts")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .in("account_id", chunkIds);
+          if (error) throw dbError(error, "Could not list contacts for accounts.");
+          return (data || []).map(mapContact);
+        }
+      });
     },
 
     async insertLocation(row) {
@@ -556,15 +560,18 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
     },
 
     async listLocationsForAccountIds(organizationId, accountIds) {
-      const ids = [...new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
-      if (!ids.length) return [];
-      const { data, error } = await db()
-        .from("account_directory_locations")
-        .select("*")
-        .eq("organization_id", organizationId)
-        .in("account_id", ids);
-      if (error) throw dbError(error, "Could not list locations for accounts.");
-      return (data || []).map(mapLocation);
+      return fetchAllForAccountIdBatches({
+        accountIds,
+        fetchBatch: async (chunkIds) => {
+          const { data, error } = await db()
+            .from("account_directory_locations")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .in("account_id", chunkIds);
+          if (error) throw dbError(error, "Could not list locations for accounts.");
+          return (data || []).map(mapLocation);
+        }
+      });
     },
 
     async insertAlias(row) {
@@ -637,15 +644,18 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
     },
 
     async listAliasesForAccountIds(organizationId, accountIds) {
-      const ids = [...new Set((accountIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
-      if (!ids.length) return [];
-      const { data, error } = await db()
-        .from("account_directory_aliases")
-        .select("*")
-        .eq("organization_id", organizationId)
-        .in("account_id", ids);
-      if (error) throw dbError(error, "Could not list aliases for accounts.");
-      return (data || []).map(mapAlias);
+      return fetchAllForAccountIdBatches({
+        accountIds,
+        fetchBatch: async (chunkIds) => {
+          const { data, error } = await db()
+            .from("account_directory_aliases")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .in("account_id", chunkIds);
+          if (error) throw dbError(error, "Could not list aliases for accounts.");
+          return (data || []).map(mapAlias);
+        }
+      });
     },
 
     async insertExternalLink(row) {

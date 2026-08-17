@@ -1502,6 +1502,96 @@ export function createAccountDirectoryService(deps) {
       return attachEnrichment(detail, await loadSuggestionIndex(organizationId));
     },
 
+    /**
+     * Just-in-time: create AD UUID from a trusted QB ROOT fact, then exact-link ListID.
+     * Never writes to QuickBooks. Never auto-links Moraware.
+     * Not transactional — if link fails after create, returns incomplete state.
+     */
+    async createAccountFromQuickBooks({ organizationId, role, actorUserId, requestId, payload }) {
+      requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EDIT);
+      requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.EXTERNAL_LINK);
+      const externalId = normalizeQuickBooksListId(payload?.qbListId ?? payload?.externalId);
+      if (!externalId) {
+        throw new AccountDirectoryError("external_id_required", "QuickBooks List ID is required.");
+      }
+      if (typeof store.getQuickBooksCustomerFactByListId !== "function") {
+        throw new AccountDirectoryError(
+          "qb_facts_unavailable",
+          "QuickBooks customer facts are unavailable. The account was not created.",
+          503
+        );
+      }
+      const fact = await store.getQuickBooksCustomerFactByListId(organizationId, externalId);
+      const verdict = evaluateQuickBooksLinkCandidate(fact, { organizationId, listId: externalId });
+      if (!verdict.ok) {
+        throw new AccountDirectoryError(verdict.code, verdict.message, verdict.status);
+      }
+      const existing = await store.listActiveExternalLinksByExternalId(
+        organizationId,
+        "quickbooks_desktop",
+        externalId
+      );
+      if (existing?.length) {
+        throw new AccountDirectoryError(
+          "duplicate_external_id",
+          "That QuickBooks identity is already linked to an Account Directory account.",
+          409,
+          { existingAccountId: existing[0].accountId }
+        );
+      }
+
+      const displayName =
+        String(payload?.displayName || "").trim() ||
+        String(fact.fullName || fact.full_name || fact.name || "").trim() ||
+        externalId;
+
+      const account = await this.createAccount({
+        organizationId,
+        role,
+        actorUserId,
+        requestId,
+        payload: {
+          displayName,
+          status: "active",
+          source: "quickbooks_jit"
+        },
+        asProspect: false
+      });
+
+      try {
+        const linked = await this.linkQuickBooks({
+          organizationId,
+          role,
+          actorUserId,
+          requestId,
+          accountId: account.id,
+          payload: {
+            externalId,
+            externalDisplayName: displayName
+          }
+        });
+        return {
+          ok: true,
+          incomplete: false,
+          qbLinked: true,
+          morawareAutoLinked: false,
+          account: linked,
+          qbListId: externalId
+        };
+      } catch (err) {
+        return {
+          ok: true,
+          incomplete: true,
+          qbLinked: false,
+          morawareAutoLinked: false,
+          account,
+          qbListId: externalId,
+          linkError: err instanceof AccountDirectoryError ? err.message : String(err?.message || err),
+          linkCode: err instanceof AccountDirectoryError ? err.code : "qb_link_failed"
+        };
+      }
+    },
+
     async deactivateExternalLink({
       organizationId,
       role,

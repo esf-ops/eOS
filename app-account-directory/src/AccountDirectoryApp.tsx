@@ -311,6 +311,7 @@ export default function AccountDirectoryApp() {
   const [form, setForm] = useState<ModalFormState>(emptyForm());
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [morawareCreateReturnId, setMorawareCreateReturnId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   /* ─── Derived ─── */
@@ -660,11 +661,19 @@ export default function AccountDirectoryApp() {
     try {
       if (modal === "new-account") {
         const res = await createAccount(sessionToken, serializeAccountWritePayload(form));
-        if (res.account?.id) {
+        if (morawareCreateReturnId) {
+          setUrlState((prev) => ({ ...prev, tab: "moraware_review", account: null }));
+          setActionMessage(
+            `Account created. Return to Moraware ID ${morawareCreateReturnId} and confirm the connection explicitly — nothing was auto-linked.`
+          );
+          setMorawareCreateReturnId(null);
+        } else if (res.account?.id) {
           selectAccount(res.account.id);
           setUrlState((prev) => ({ ...prev, tab: "accounts", account: res.account?.id ?? null }));
+          setActionMessage("Account created.");
+        } else {
+          setActionMessage("Account created.");
         }
-        setActionMessage("Account created.");
       } else if (modal === "new-prospect") {
         const res = await createProspect(sessionToken, serializeAccountWritePayload(form));
         if (res.account?.id) {
@@ -980,6 +989,13 @@ export default function AccountDirectoryApp() {
                   onMessage={setActionMessage}
                   onOpenAccount={(accountId) => {
                     updateFilters({ tab: "accounts", account: accountId, page: 1 });
+                  }}
+                  onCreateDirectoryAccount={({ displayName, morawareAccountId }) => {
+                    setMorawareCreateReturnId(morawareAccountId);
+                    openModal("new-account", { displayName: String(displayName || "").trim() });
+                    setActionMessage(
+                      `Prefilling “${String(displayName || "").trim()}”. Creating an account does not link Moraware — confirm afterward.`
+                    );
                   }}
                 />
               ) : (

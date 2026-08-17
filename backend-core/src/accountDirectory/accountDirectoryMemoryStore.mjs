@@ -538,6 +538,17 @@ export function createAccountDirectoryMemoryStore() {
       return selectTrustedQuickBooksRootCustomers(facts, { query, limit });
     },
 
+    /** All trusted ROOT facts for org (reconciliation index). Jobs excluded. */
+    async listQuickBooksRootCustomerFacts(organizationId) {
+      const out = [];
+      for (const row of qbCustomerFacts.values()) {
+        if (row.organizationId !== organizationId) continue;
+        if (row.isJob === true) continue;
+        out.push(clone(row));
+      }
+      return out;
+    },
+
     async insertAccountNote(row) {
       const id = row.id || randomUUID();
       const record = {

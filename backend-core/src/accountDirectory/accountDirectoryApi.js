@@ -742,6 +742,26 @@ export function attachAccountDirectoryRoutes(app, deps) {
     });
   });
 
+  app.post("/api/account-directory/accounts/from-quickbooks", ...writeGuard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const result = await service.createAccountFromQuickBooks({
+        ...ctx,
+        payload: req.body || {}
+      });
+      const status = result.incomplete ? 200 : 201;
+      res.status(status).json({
+        ok: true,
+        incomplete: Boolean(result.incomplete),
+        qbLinked: Boolean(result.qbLinked),
+        morawareAutoLinked: false,
+        account: result.account,
+        qbListId: result.qbListId || null,
+        linkError: result.linkError || null,
+        linkCode: result.linkCode || null
+      });
+    });
+  });
+
   app.post("/api/account-directory/accounts/:accountId/link-quickbooks", ...writeGuard, async (req, res) => {
     await withOrg(req, res, async (ctx) => {
       const account = await service.linkQuickBooks({

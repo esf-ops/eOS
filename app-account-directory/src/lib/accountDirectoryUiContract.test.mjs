@@ -64,10 +64,31 @@ assert.equal(
   false
 );
 assert.ok(
-  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Showing")
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Create Account from QuickBooks")
 );
 assert.ok(
-  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("mutually exclusive")
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Confirm Moraware connection")
+);
+assert.ok(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("no auto-link") ||
+    readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("never auto-links")
+);
+assert.equal(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Confirm All"),
+  false
+);
+assert.ok(api.includes("from-quickbooks") || api.includes("createAccountFromQuickBooks"));
+assert.ok(
+  readFileSync(join(root, "backend-core/src/accountDirectory/accountDirectoryMorawareReconciliation.mjs"), "utf8").includes(
+    "listAliasesForAccountIds"
+  )
+);
+assert.equal(
+  readFileSync(join(root, "backend-core/src/accountDirectory/accountDirectoryMorawareReconciliation.mjs"), "utf8").includes(
+    "listAliasesForOrganization"
+  ),
+  false,
+  "must not org-wide load aliases"
 );
 assert.ok(css.includes(".status-review"));
 assert.equal(app.includes("Apply All"), false, "must not offer Apply All");

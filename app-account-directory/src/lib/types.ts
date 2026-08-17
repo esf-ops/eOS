@@ -643,6 +643,31 @@ export type StatusReviewQueueResponse = {
   hasNextPage?: boolean;
 };
 
+export type MorawareCandidateEvidence = {
+  type: string;
+  label: string;
+  strength?: "very_strong" | "strong" | "supporting" | string;
+};
+
+export type MorawareCandidate = {
+  accountId: string | null;
+  displayName: string;
+  confidence?: number;
+  identityKind?: string | null;
+  evidence?: MorawareCandidateEvidence[];
+  confirmAllowed?: boolean;
+  confirmQbLinkAllowed?: boolean;
+  createFromQuickBooksAllowed?: boolean;
+  city?: string | null;
+  state?: string | null;
+  primaryContact?: string | null;
+  qbLinked?: boolean;
+  qbListId?: string | null;
+  qbDisplayName?: string | null;
+  qbActive?: boolean | null;
+  status?: string | null;
+};
+
 export type MorawareReconciliationItem = {
   morawareAccountId: string;
   morawareName: string;
@@ -651,15 +676,20 @@ export type MorawareReconciliationItem = {
   earliestJobDate?: string | null;
   latestJobDate?: string | null;
   classification: string;
+  reviewState?: string;
+  unmatchedReason?: string | null;
   reason?: string;
   internalBucket?: boolean;
   proposedAccountId?: string | null;
   proposedAccountName?: string | null;
+  primaryQbListId?: string | null;
+  primaryIdentityKind?: string | null;
   qbLinked?: boolean;
   qbDisplayName?: string | null;
   evidence?: string[];
   contradictions?: string[];
   alternatives?: Array<{ accountId: string; accountName: string; evidence?: string[] }>;
+  candidates?: MorawareCandidate[];
   currentLink?: {
     linked?: boolean;
     accountId?: string | null;
@@ -668,6 +698,8 @@ export type MorawareReconciliationItem = {
   };
   siblingMorawareIds?: string[];
   confirmAllowed?: boolean;
+  confirmQbLinkAllowed?: boolean;
+  createFromQuickBooksAllowed?: boolean;
   multipleMorawareIdsExpected?: boolean;
 };
 
@@ -676,11 +708,21 @@ export type MorawareReconciliationResponse = {
   summary?: {
     totalMorawareAccounts: number;
     alreadyLinked: number;
+    unresolved?: number;
+    unresolvedBucketSum?: number;
     highConfidenceUnlinked: number;
     reviewRequired: number;
     unmatched: number;
     conflicts: number;
     internalBuckets?: number;
+    strongCandidates?: number;
+    possibleCandidates?: number;
+    noDirectoryCandidate?: number;
+    existingAdQbBacked?: number;
+    existingAdQbLinkCandidate?: number;
+    qbRootNotInDirectory?: number;
+    existingAdProspect?: number;
+    noCandidate?: number;
   };
   items?: MorawareReconciliationItem[];
   page?: number;

@@ -306,6 +306,26 @@ export async function createAccount(token: string, payload: CreateAccountPayload
   return (await apiPost(`${BASE}/accounts`, token, body)) as AccountDetailResponse;
 }
 
+/** Just-in-time AD create + exact QB root link. Never writes QuickBooks. Never auto-links Moraware. */
+export async function createAccountFromQuickBooks(
+  token: string,
+  payload: { qbListId: string; displayName?: string }
+) {
+  return (await apiPost(`${BASE}/accounts/from-quickbooks`, token, {
+    qbListId: String(payload.qbListId || "").trim(),
+    ...(payload.displayName ? { displayName: String(payload.displayName).trim() } : {})
+  })) as {
+    ok?: boolean;
+    incomplete?: boolean;
+    qbLinked?: boolean;
+    morawareAutoLinked?: boolean;
+    account?: { id?: string; displayName?: string; name?: string };
+    qbListId?: string | null;
+    linkError?: string | null;
+    linkCode?: string | null;
+  };
+}
+
 export async function createProspect(token: string, payload: CreateAccountPayload) {
   const body: CreateAccountPayload = {
     displayName: String(payload.displayName ?? "").trim(),
@@ -481,6 +501,7 @@ export async function fetchMorawareReconciliation(
     pageSize?: number;
     proposedAccountId?: string;
     accountId?: string;
+    reviewState?: string;
   },
   init: RequestInit = {}
 ) {
@@ -492,7 +513,8 @@ export async function fetchMorawareReconciliation(
       page: opts.page,
       pageSize: opts.pageSize,
       proposedAccountId: opts.proposedAccountId,
-      accountId: opts.accountId
+      accountId: opts.accountId,
+      reviewState: opts.reviewState
     })}`,
     token,
     init
