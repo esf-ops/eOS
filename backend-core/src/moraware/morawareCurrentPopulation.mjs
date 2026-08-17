@@ -7,6 +7,9 @@
  * Raw brain_moraware_jobs rows are preserved; membership is last_seen_at >= census start.
  *
  * Does not infer "full" from chunk_count. Does not hardcode production import_group_id.
+ *
+ * Resolver performance: newest-first early exit + short in-process TTL cache.
+ * Membership semantics are unchanged — only how the qualifying census is located.
  */
 
 import {
@@ -22,6 +25,17 @@ export const BLOCKING_CENSUS_CAP_KEYS = Object.freeze(["jobs", "job_activities",
 /** Verified 2026-08-15 Foundation (documentation / regression labels only — not used as a hardcoded group id). */
 export const VERIFIED_FOUNDATION_2026_JOB_COUNT = 4073;
 export const VERIFIED_FOUNDATION_2026_WORKSHEET_SQFT = 271432.5;
+
+/**
+ * In-process cache of the resolved population authority (not membership rows).
+ * Available hits: 60s. Unavailable hits: 10s. Expiry re-resolves authoritatively.
+ * A new FULL census may lag at most one TTL before becoming visible — not a permanent stale state.
+ */
+export const CURRENT_MORAWARE_POPULATION_CACHE_TTL_MS = 60_000;
+export const CURRENT_MORAWARE_POPULATION_UNAVAILABLE_CACHE_TTL_MS = 10_000;
+
+/** @type {Map<string, { expiresAt: number, population: object }>} */
+const populationCache = new Map();
 
 export function pickCensusScope(raw) {
   const s = String(raw ?? "")
@@ -206,112 +220,308 @@ function emptyPopulation(extra = {}) {
 }
 
 const RUN_PAGE = 200;
+const DISCOVERY_SELECT = "id,metadata,finished_at,started_at,status,mode,runner";
+const GROUP_DETAIL_SELECT =
+  "id,status,started_at,finished_at,duration_ms,row_counts,data_quality_counts,metadata,mode,runner";
 
-function uniqueGroupIdsNewestFirst(rows) {
-  const seen = new Set();
-  const ids = [];
-  for (const row of rows || []) {
-    const gid = String(row?.metadata?.import_group_id ?? "").trim();
-    if (!gid || seen.has(gid)) continue;
-    seen.add(gid);
-    ids.push(gid);
-  }
-  return ids;
+function clonePopulation(population) {
+  if (!population || typeof population !== "object") return population;
+  return {
+    ...population,
+    import_group: population.import_group ? { ...population.import_group } : population.import_group,
+    missing_chunk_indices: Array.isArray(population.missing_chunk_indices)
+      ? [...population.missing_chunk_indices]
+      : population.missing_chunk_indices
+  };
 }
 
-async function pageMorawareSyncRuns(db, organizationId, { apply = null, orderColumn = "finished_at", ascending = false } = {}) {
-  const rows = [];
-  let from = 0;
-  for (;;) {
-    let q = db
-      .from("moraware_sync_runs")
-      .select("id,metadata,finished_at,started_at,status,mode,runner")
-      .eq("status", "success")
-      .not("metadata->>import_group_id", "is", null)
-      .eq("organization_id", organizationId);
-    if (apply) q = apply(q);
-    const { data, error } = await q.order(orderColumn, { ascending }).range(from, from + RUN_PAGE - 1);
-    if (error) return { error, rows };
-    if (!data?.length) break;
-    rows.push(...data);
-    if (data.length < RUN_PAGE) break;
-    from += RUN_PAGE;
+/**
+ * Drop cached population authority for one org, or all orgs when omitted.
+ * Call after a successful complete uncapped FULL census lands (optional; TTL also bounds staleness).
+ */
+export function invalidateCurrentMorawarePopulationCache(organizationId = null) {
+  if (organizationId == null || organizationId === "") {
+    populationCache.clear();
+    return;
   }
-  return { error: null, rows };
+  populationCache.delete(String(organizationId));
+}
+
+/** Test helper — clears the in-process cache. */
+export function clearCurrentMorawarePopulationCacheForTests() {
+  populationCache.clear();
+}
+
+function readPopulationCache(organizationId, nowMs) {
+  const key = String(organizationId);
+  const hit = populationCache.get(key);
+  if (!hit) return null;
+  if (nowMs >= hit.expiresAt) {
+    populationCache.delete(key);
+    return null;
+  }
+  return clonePopulation(hit.population);
+}
+
+function writePopulationCache(organizationId, population, nowMs) {
+  const ttl = population?.available
+    ? CURRENT_MORAWARE_POPULATION_CACHE_TTL_MS
+    : CURRENT_MORAWARE_POPULATION_UNAVAILABLE_CACHE_TTL_MS;
+  populationCache.set(String(organizationId), {
+    expiresAt: nowMs + ttl,
+    population: clonePopulation(population)
+  });
+}
+
+function populationFromEvaluation(importGroupId, groupRows, evaluated, latestRun) {
+  return {
+    census_scope: CENSUS_SCOPE_FULL,
+    full_census_import_group_id: importGroupId,
+    full_census_started_at: evaluated.full_census_started_at,
+    full_census_completed_at: evaluated.full_census_completed_at,
+    source_start_date: evaluated.source_start_date,
+    source_end_date: evaluated.source_end_date,
+    complete: true,
+    uncapped: true,
+    available: true,
+    import_group: formatImportGroupForApi(importGroupId, summarizeImportGroupRows(groupRows, latestRun))
+  };
 }
 
 async function loadAllImportGroupRows(db, organizationId, importGroupId) {
   const rows = [];
   let from = 0;
+  let pages = 0;
   for (;;) {
     const { data, error } = await db
       .from("moraware_sync_runs")
-      .select("id,status,started_at,finished_at,duration_ms,row_counts,data_quality_counts,metadata,mode,runner")
+      .select(GROUP_DETAIL_SELECT)
       .filter("metadata->>import_group_id", "eq", importGroupId)
       .eq("organization_id", organizationId)
       .order("started_at", { ascending: true })
       .range(from, from + RUN_PAGE - 1);
-    if (error) return { error, rows };
+    pages += 1;
+    if (error) return { error, rows, pages };
     if (!data?.length) break;
     rows.push(...data);
     if (data.length < RUN_PAGE) break;
     from += RUN_PAGE;
   }
-  return { error: null, rows };
+  return { error: null, rows, pages };
 }
 
-async function firstEligibleFullCensus(db, organizationId, groupIds) {
-  for (const gid of groupIds) {
-    const detail = await loadAllImportGroupRows(db, organizationId, gid);
-    if (detail.error) return { error: detail.error };
-    const groupRows = detail.rows || [];
-    const latestRun = groupRows[groupRows.length - 1] ?? null;
-    const evaluated = evaluateImportGroupAsFullCensus(gid, groupRows, latestRun);
-    if (!evaluated.eligible) continue;
+/**
+ * Newest-first discovery: page successful runs, evaluate each previously unseen
+ * import_group_id immediately, return on first qualifying FULL census.
+ * Does not preload the entire matching history.
+ */
+async function findNewestEligibleFullCensus(db, organizationId, { apply = null, acceptDiscoveryRow = null } = {}) {
+  const seenGroups = new Set();
+  let from = 0;
+  let discoveryPages = 0;
+  let groupDetailPages = 0;
+  let groupsEvaluated = 0;
+
+  for (;;) {
+    let q = db
+      .from("moraware_sync_runs")
+      .select(DISCOVERY_SELECT)
+      .eq("status", "success")
+      .not("metadata->>import_group_id", "is", null)
+      .eq("organization_id", organizationId);
+    if (apply) q = apply(q);
+    const { data, error } = await q.order("finished_at", { ascending: false }).range(from, from + RUN_PAGE - 1);
+    discoveryPages += 1;
+    if (error) {
+      return {
+        error,
+        population: null,
+        stats: { discoveryPages, groupDetailPages, groupsEvaluated, groupsSeen: seenGroups.size }
+      };
+    }
+    const batch = data || [];
+    if (!batch.length) break;
+
+    for (const row of batch) {
+      const gid = String(row?.metadata?.import_group_id ?? "").trim();
+      if (!gid || seenGroups.has(gid)) continue;
+      seenGroups.add(gid);
+      if (acceptDiscoveryRow && !acceptDiscoveryRow(row)) continue;
+
+      const detail = await loadAllImportGroupRows(db, organizationId, gid);
+      groupDetailPages += detail.pages || 0;
+      if (detail.error) {
+        return {
+          error: detail.error,
+          population: null,
+          stats: { discoveryPages, groupDetailPages, groupsEvaluated, groupsSeen: seenGroups.size }
+        };
+      }
+      groupsEvaluated += 1;
+      const groupRows = detail.rows || [];
+      const latestRun = groupRows[groupRows.length - 1] ?? null;
+      const evaluated = evaluateImportGroupAsFullCensus(gid, groupRows, latestRun);
+      if (!evaluated.eligible) continue;
+
+      return {
+        error: null,
+        population: populationFromEvaluation(gid, groupRows, evaluated, latestRun),
+        stats: {
+          discoveryPages,
+          groupDetailPages,
+          groupsEvaluated,
+          groupsSeen: seenGroups.size,
+          qualifyingGroupId: gid,
+          qualifyingChunkRows: groupRows.length
+        }
+      };
+    }
+
+    if (batch.length < RUN_PAGE) break;
+    from += RUN_PAGE;
+  }
+
+  return {
+    error: null,
+    population: null,
+    stats: { discoveryPages, groupDetailPages, groupsEvaluated, groupsSeen: seenGroups.size }
+  };
+}
+
+function emptyStats() {
+  return {
+    cacheHit: false,
+    discoveryPages: 0,
+    groupDetailPages: 0,
+    groupsEvaluated: 0,
+    groupsSeen: 0,
+    path: null,
+    queryEstimate: 0
+  };
+}
+
+async function resolveCurrentMorawarePopulationUncached(db, organizationId) {
+  const stats = emptyStats();
+
+  const explicit = await findNewestEligibleFullCensus(db, organizationId, {
+    apply: (q) => q.eq("metadata->>census_scope", CENSUS_SCOPE_FULL)
+  });
+  if (explicit.error) {
     return {
-      error: null,
-      population: {
-        census_scope: CENSUS_SCOPE_FULL,
-        full_census_import_group_id: gid,
-        full_census_started_at: evaluated.full_census_started_at,
-        full_census_completed_at: evaluated.full_census_completed_at,
-        source_start_date: evaluated.source_start_date,
-        source_end_date: evaluated.source_end_date,
-        complete: true,
-        uncapped: true,
-        available: true,
-        import_group: formatImportGroupForApi(gid, summarizeImportGroupRows(groupRows, latestRun))
+      population: emptyPopulation({ error: explicit.error.message, available: false }),
+      stats: {
+        ...stats,
+        ...explicit.stats,
+        path: "explicit_error",
+        queryEstimate: (explicit.stats?.discoveryPages || 0) + (explicit.stats?.groupDetailPages || 0)
       }
     };
   }
-  return { error: null, population: null };
+  if (explicit.population) {
+    return {
+      population: explicit.population,
+      stats: {
+        ...stats,
+        ...explicit.stats,
+        path: "explicit_full",
+        queryEstimate: (explicit.stats?.discoveryPages || 0) + (explicit.stats?.groupDetailPages || 0)
+      }
+    };
+  }
+
+  const legacy = await findNewestEligibleFullCensus(db, organizationId, {
+    apply: (q) => q.or("mode.ilike.%baseline_2026%,metadata->>snapshot_mode.ilike.%baseline_2026%"),
+    acceptDiscoveryRow: (row) => !pickCensusScope(row?.metadata?.census_scope)
+  });
+  if (legacy.error) {
+    return {
+      population: emptyPopulation({ error: legacy.error.message, available: false }),
+      stats: {
+        ...stats,
+        discoveryPages: (explicit.stats?.discoveryPages || 0) + (legacy.stats?.discoveryPages || 0),
+        groupDetailPages: (explicit.stats?.groupDetailPages || 0) + (legacy.stats?.groupDetailPages || 0),
+        groupsEvaluated: (explicit.stats?.groupsEvaluated || 0) + (legacy.stats?.groupsEvaluated || 0),
+        groupsSeen: (explicit.stats?.groupsSeen || 0) + (legacy.stats?.groupsSeen || 0),
+        path: "legacy_error",
+        queryEstimate:
+          (explicit.stats?.discoveryPages || 0) +
+          (explicit.stats?.groupDetailPages || 0) +
+          (legacy.stats?.discoveryPages || 0) +
+          (legacy.stats?.groupDetailPages || 0)
+      }
+    };
+  }
+  if (legacy.population) {
+    return {
+      population: legacy.population,
+      stats: {
+        ...stats,
+        discoveryPages: (explicit.stats?.discoveryPages || 0) + (legacy.stats?.discoveryPages || 0),
+        groupDetailPages: (explicit.stats?.groupDetailPages || 0) + (legacy.stats?.groupDetailPages || 0),
+        groupsEvaluated: (explicit.stats?.groupsEvaluated || 0) + (legacy.stats?.groupsEvaluated || 0),
+        groupsSeen: (explicit.stats?.groupsSeen || 0) + (legacy.stats?.groupsSeen || 0),
+        qualifyingGroupId: legacy.stats?.qualifyingGroupId,
+        qualifyingChunkRows: legacy.stats?.qualifyingChunkRows,
+        path: "legacy_baseline_2026",
+        queryEstimate:
+          (explicit.stats?.discoveryPages || 0) +
+          (explicit.stats?.groupDetailPages || 0) +
+          (legacy.stats?.discoveryPages || 0) +
+          (legacy.stats?.groupDetailPages || 0)
+      }
+    };
+  }
+
+  return {
+    population: emptyPopulation(),
+    stats: {
+      ...stats,
+      discoveryPages: (explicit.stats?.discoveryPages || 0) + (legacy.stats?.discoveryPages || 0),
+      groupDetailPages: (explicit.stats?.groupDetailPages || 0) + (legacy.stats?.groupDetailPages || 0),
+      groupsEvaluated: (explicit.stats?.groupsEvaluated || 0) + (legacy.stats?.groupsEvaluated || 0),
+      groupsSeen: (explicit.stats?.groupsSeen || 0) + (legacy.stats?.groupsSeen || 0),
+      path: "none",
+      queryEstimate:
+        (explicit.stats?.discoveryPages || 0) +
+        (explicit.stats?.groupDetailPages || 0) +
+        (legacy.stats?.discoveryPages || 0) +
+        (legacy.stats?.groupDetailPages || 0)
+    }
+  };
 }
 
 /**
  * Resolve the current Moraware population boundary for an organization.
  * Watermark = START of the latest successful complete uncapped FULL census.
- * Explicit census_scope=full is searched without a bounded recent-run cutoff.
+ * Explicit census_scope=full is searched newest-first with early exit.
  * Legacy baseline_2026 groups are used only when no explicit full census exists.
+ *
+ * @param {object} db
+ * @param {string} organizationId
+ * @param {{ skipCache?: boolean, nowMs?: number, includeStats?: boolean }} [options]
  */
-export async function resolveCurrentMorawarePopulation(db, organizationId) {
-  if (!db || !organizationId) return emptyPopulation({ error: "missing_db_or_org" });
+export async function resolveCurrentMorawarePopulation(db, organizationId, options = {}) {
+  if (!db || !organizationId) {
+    const population = emptyPopulation({ error: "missing_db_or_org" });
+    return options.includeStats ? { ...population, _resolveStats: emptyStats() } : population;
+  }
 
-  const explicit = await pageMorawareSyncRuns(db, organizationId, {
-    apply: (q) => q.eq("metadata->>census_scope", CENSUS_SCOPE_FULL)
-  });
-  if (explicit.error) return emptyPopulation({ error: explicit.error.message, available: false });
-  const explicitHit = await firstEligibleFullCensus(db, organizationId, uniqueGroupIdsNewestFirst(explicit.rows));
-  if (explicitHit.error) return emptyPopulation({ error: explicitHit.error.message, available: false });
-  if (explicitHit.population) return explicitHit.population;
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  if (!options.skipCache) {
+    const cached = readPopulationCache(organizationId, nowMs);
+    if (cached) {
+      if (options.includeStats) {
+        return {
+          ...cached,
+          _resolveStats: { ...emptyStats(), cacheHit: true, path: "cache" }
+        };
+      }
+      return cached;
+    }
+  }
 
-  const legacy = await pageMorawareSyncRuns(db, organizationId, {
-    apply: (q) => q.or("mode.ilike.%baseline_2026%,metadata->>snapshot_mode.ilike.%baseline_2026%")
-  });
-  if (legacy.error) return emptyPopulation({ error: legacy.error.message, available: false });
-  const legacyRows = (legacy.rows || []).filter((row) => !pickCensusScope(row?.metadata?.census_scope));
-  const legacyHit = await firstEligibleFullCensus(db, organizationId, uniqueGroupIdsNewestFirst(legacyRows));
-  if (legacyHit.error) return emptyPopulation({ error: legacyHit.error.message, available: false });
-  if (legacyHit.population) return legacyHit.population;
-
-  return emptyPopulation();
+  const { population, stats } = await resolveCurrentMorawarePopulationUncached(db, organizationId);
+  writePopulationCache(organizationId, population, nowMs);
+  if (options.includeStats) return { ...population, _resolveStats: { ...stats, cacheHit: false } };
+  return population;
 }

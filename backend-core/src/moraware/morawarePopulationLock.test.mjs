@@ -16,6 +16,7 @@ import {
 } from "./morawarePopulationLock.mjs";
 import {
   canAdvanceFullCensusWatermark,
+  clearCurrentMorawarePopulationCacheForTests,
   CENSUS_SCOPE_FULL,
   CENSUS_SCOPE_INCREMENTAL,
   evaluateImportGroupAsFullCensus,
@@ -400,8 +401,11 @@ function createSyncRunsDb(allRows) {
       chunkCount: 3
     })
   );
+  clearCurrentMorawarePopulationCacheForTests();
   const db = createSyncRunsDb([...incrementals, ...fullChunks]);
-  const pop = await resolveCurrentMorawarePopulation(db, "00000000-0000-4000-8000-000000000001");
+  const pop = await resolveCurrentMorawarePopulation(db, "00000000-0000-4000-8000-000000000001", {
+    skipCache: true
+  });
   assert.equal(pop.available, true);
   assert.equal(pop.full_census_import_group_id, "legacy-or-full-epoch");
   assert.equal(pop.full_census_started_at, "2026-08-15T09:00:00.000Z");
@@ -422,8 +426,9 @@ function createSyncRunsDb(allRows) {
     })
   ];
   legacy[0].metadata.census_scope = undefined;
+  clearCurrentMorawarePopulationCacheForTests();
   const db = createSyncRunsDb(legacy);
-  const pop = await resolveCurrentMorawarePopulation(db, "org");
+  const pop = await resolveCurrentMorawarePopulation(db, "org", { skipCache: true });
   assert.equal(pop.available, true);
   assert.equal(pop.full_census_import_group_id, "prod-foundation");
   assert.notEqual(pop.full_census_import_group_id, "c3a0e6e5-b5af-499c-87a8-73d720d485be");
