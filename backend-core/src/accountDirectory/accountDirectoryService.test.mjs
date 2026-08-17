@@ -810,6 +810,54 @@ async function main() {
     assert.equal(typeof summary.prospects, "number");
   }
 
+  // Summary Total matches default Accounts tab scope (excludes archived)
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const service = createAccountDirectoryService({ store });
+    const ORG_T = "00000000-0000-4000-8000-0000000000c1";
+    const ACTOR_T = "00000000-0000-4000-8000-0000000000c9";
+
+    await service.createAccount({
+      organizationId: ORG_T,
+      role: "admin",
+      actorUserId: ACTOR_T,
+      payload: { displayName: "Active For Total", status: "active" }
+    });
+    const archived = await service.createAccount({
+      organizationId: ORG_T,
+      role: "admin",
+      actorUserId: ACTOR_T,
+      payload: { displayName: "Archived For Total", status: "active" }
+    });
+    await service.archiveAccount({
+      organizationId: ORG_T,
+      role: "admin",
+      actorUserId: ACTOR_T,
+      accountId: archived.id,
+      rowVersion: archived.rowVersion
+    });
+
+    const summary = await service.getSummary({ organizationId: ORG_T, role: "admin" });
+    const accountsTab = await service.listAccounts({
+      organizationId: ORG_T,
+      role: "admin",
+      tab: "accounts",
+      status: "",
+      search: "",
+      linked: "",
+      missingContact: "",
+      missingLocation: "",
+      qbEnrichment: "",
+      page: 1,
+      pageSize: 100
+    });
+
+    assert.equal(summary.archived, 1);
+    assert.equal(summary.total, accountsTab.total);
+    assert.equal(summary.total, summary.active + summary.prospects + summary.needsReview);
+    console.log("ok: summary.total excludes archived and matches default Accounts tab total");
+  }
+
   // qbEnrichment filter aligns with summary counts; native needs_review unchanged
   {
     const store = createAccountDirectoryMemoryStore();

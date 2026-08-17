@@ -237,4 +237,10 @@ assert.equal(parseUrlState(url).account, "acct-1");
 assert.equal(parseUrlState("?account=acct-1&panel=financials").panel, "financials");
 console.log("ok: URL panel state remains correct for Relationship");
 
+const relEffect = panels.split("export function RelationshipWorkspace")[1].split(/^export function /m)[0];
+assert.match(relEffect, /const key = `timeline:\$\{family\}`;/, "Relationship timeline cache key must be defined");
+assert.match(relEffect, /const generation = session360\.getGeneration\(\);/, "Relationship timeline generation guard must be defined");
+assert.match(relEffect, /const signal = session360\.getSignal\(\) \|\| undefined;/, "Relationship timeline abort signal must be defined");
+console.log("ok: Relationship timeline effect binds cache key, generation, and abort signal");
+
 console.log("\nAll Relationship UI regression checks passed.\n");

@@ -772,7 +772,7 @@ export function createAccountDirectoryService(deps) {
       });
       const suggestionByAccount = await loadSuggestionIndex(organizationId);
       const summary = {
-        total: rows.length,
+        total: 0,
         active: 0,
         prospects: 0,
         needsReview: 0,
@@ -801,6 +801,8 @@ export function createAccountDirectoryService(deps) {
         if (!row.item.hasPrimaryContact) summary.missingPrimaryContact += 1;
         if (!row.item.hasPrimaryLocation) summary.missingPrimaryLocation += 1;
       }
+      // Total matches default Accounts tab scope (non-archived lifecycle rows).
+      summary.total = summary.active + summary.prospects + summary.needsReview;
       return summary;
     },
 

@@ -1102,6 +1102,9 @@ export function RelationshipWorkspace({
 
   useEffect(() => {
     if (!session360 || !sessionToken) return;
+    const key = `timeline:${family}`;
+    const generation = session360.getGeneration();
+    const signal = session360.getSignal() || undefined;
     const expectedAccountId = accountId;
     const guard = timelineGuardRef.current;
 

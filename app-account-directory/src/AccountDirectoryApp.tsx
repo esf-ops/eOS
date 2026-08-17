@@ -76,7 +76,7 @@ const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 const NAV_TABS: { id: string; label: string }[] = [
   { id: "accounts", label: "Accounts" },
   { id: "prospects", label: "Prospects" },
-  { id: "needs_review", label: "Account Needs Review" },
+  { id: "needs_review", label: "Needs review status" },
   { id: "archived", label: "Archived" }
 ];
 
@@ -813,8 +813,17 @@ export default function AccountDirectoryApp() {
   }, [urlState.page]);
 
   /* ─── Live region count for accessibility ─── */
+  const isDefaultAccountsList =
+    urlState.tab === "accounts" &&
+    !urlState.status &&
+    !urlState.search &&
+    !urlState.linked &&
+    !urlState.qbEnrichment &&
+    !urlState.missingContact &&
+    !urlState.missingLocation;
+  const pageHeaderTotal = summary && isDefaultAccountsList ? summary.total : total;
   const liveCount =
-    listState === "idle" && total > 0 ? `${total.toLocaleString()} accounts` : "";
+    listState === "idle" && pageHeaderTotal > 0 ? `${pageHeaderTotal.toLocaleString()} accounts` : "";
 
   return (
     <div className="shell">
@@ -903,11 +912,11 @@ export default function AccountDirectoryApp() {
                 <h1 className="page-title">Account Directory</h1>
                 <p className="page-sub">
                   Manage accounts, contacts, locations, and external links.
-                  {total > 0 ? (
+                  {pageHeaderTotal > 0 ? (
                     <>
                       {" "}
                       <span className="page-sub-count" aria-live="polite" aria-atomic="true">
-                        {total.toLocaleString()} total
+                        {pageHeaderTotal.toLocaleString()} total
                       </span>
                     </>
                   ) : null}
@@ -1575,7 +1584,7 @@ function SummaryStrip({
     { key: "total", label: "Total", count: summary.total },
     { key: "active", label: "Active", count: summary.active },
     { key: "prospects", label: "Prospects", count: summary.prospects },
-    { key: "needsReview", label: "Account Needs Review", count: summary.needsReview },
+    { key: "needsReview", label: "Needs review status", count: summary.needsReview },
     { key: "archived", label: "Archived", count: summary.archived },
     { key: "qbLinked", label: "QB linked", count: summary.quickbooksLinked },
     { key: "qbSuggested", label: "Suggested Match", count: summary.qbSuggestedMatch ?? 0 },

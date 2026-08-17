@@ -150,32 +150,50 @@ export function MorawareReviewSurface({
       </header>
 
       {summary ? (
-        <ul className="status-review-counts" aria-label="Moraware reconciliation summary">
-          <li>
-            <span>Moraware accounts</span>
-            <strong>{summary.totalMorawareAccounts}</strong>
-          </li>
-          <li>
-            <span>Already linked</span>
-            <strong>{summary.alreadyLinked}</strong>
-          </li>
-          <li>
-            <span>High-confidence unlinked</span>
-            <strong>{summary.highConfidenceUnlinked}</strong>
-          </li>
-          <li>
-            <span>Review required</span>
-            <strong>{summary.reviewRequired}</strong>
-          </li>
-          <li>
-            <span>Unmatched</span>
-            <strong>{summary.unmatched}</strong>
-          </li>
-          <li>
-            <span>Conflicts</span>
-            <strong>{summary.conflicts}</strong>
-          </li>
-        </ul>
+        <div className="moraware-summary">
+          <p className="muted moraware-summary-note">
+            <strong>Moraware accounts</strong> is the full set. <strong>Already linked</strong> is link status and
+            overlaps with the classification rows below. Each Moraware account has exactly one classification
+            (high-confidence, review required, unmatched, or conflict); linked accounts can still appear in those
+            buckets.
+          </p>
+          <div className="moraware-summary-groups">
+            <div className="moraware-summary-group" role="group" aria-label="Moraware link status">
+              <span className="moraware-summary-group-label">Link status</span>
+              <ul className="status-review-counts moraware-summary-counts">
+                <li>
+                  <span>Moraware accounts</span>
+                  <strong>{summary.totalMorawareAccounts}</strong>
+                </li>
+                <li>
+                  <span>Already linked</span>
+                  <strong>{summary.alreadyLinked}</strong>
+                </li>
+              </ul>
+            </div>
+            <div className="moraware-summary-group" role="group" aria-label="Moraware classification buckets">
+              <span className="moraware-summary-group-label">Classification (mutually exclusive)</span>
+              <ul className="status-review-counts moraware-summary-counts">
+                <li>
+                  <span>High-confidence unlinked</span>
+                  <strong>{summary.highConfidenceUnlinked}</strong>
+                </li>
+                <li>
+                  <span>Review required</span>
+                  <strong>{summary.reviewRequired}</strong>
+                </li>
+                <li>
+                  <span>Unmatched</span>
+                  <strong>{summary.unmatched}</strong>
+                </li>
+                <li>
+                  <span>Conflicts</span>
+                  <strong>{summary.conflicts}</strong>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       <div className="status-review-toolbar">
@@ -258,7 +276,7 @@ export function MorawareReviewSurface({
         </ul>
 
         {selected ? (
-          <section className="status-review-detail" aria-label="Selected Moraware account">
+          <section className="status-review-card moraware-review-detail" aria-label="Selected Moraware account">
             <h3>
               {selected.morawareName}{" "}
               <span className="muted">Account ID {selected.morawareAccountId}</span>

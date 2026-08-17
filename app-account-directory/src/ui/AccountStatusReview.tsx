@@ -134,16 +134,17 @@ export function StatusReviewSurface({
         <div>
           <h2>Status Review</h2>
           <p className="muted">
-            Resolve lifecycle exceptions one account at a time. Consistent Active and Prospect records stay out of
-            this queue.
+            Admin governance queue for lifecycle reconciliation. This is separate from the{" "}
+            <strong>Needs review status</strong> tab, which lists accounts whose lifecycle status is already{" "}
+            <code>needs_review</code>.
           </p>
         </div>
-        <div className="status-review-counts" aria-label="Review counts">
-          <span>
-            Needs decision <strong>{counts?.needsDecision ?? "—"}</strong>
+        <div className="status-review-counts" aria-label="Status review counts">
+          <span title="Unresolved governance or reconciliation decisions">
+            Governance decisions <strong>{counts?.needsDecision ?? "—"}</strong>
           </span>
-          <span>
-            Needs Review <strong>{counts?.needsReview ?? "—"}</strong>
+          <span title="Queue items recommending needs_review lifecycle status">
+            Recommend needs review <strong>{counts?.needsReview ?? "—"}</strong>
           </span>
           <span>
             Prospect recommendations <strong>{counts?.prospectRecommendations ?? "—"}</strong>

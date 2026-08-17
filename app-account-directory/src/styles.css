@@ -1879,6 +1879,75 @@ a.detail-list-title:hover {
   margin-top: 12px;
 }
 
+.moraware-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.moraware-summary-note {
+  margin: 0;
+  max-width: 72ch;
+  line-height: 1.45;
+}
+
+.moraware-summary-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.moraware-summary-group {
+  display: grid;
+  gap: 8px;
+}
+
+.moraware-summary-group-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.moraware-summary-counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.moraware-review .status-review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.moraware-review .status-review-row {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: #fff;
+  cursor: pointer;
+}
+
+.moraware-review .status-review-row:hover {
+  border-color: var(--eos-accent-border);
+}
+
+.moraware-review .status-review-row-active {
+  outline: 2px solid var(--eos-accent-border);
+  background: var(--eos-warn-soft);
+}
+
+.moraware-review-detail p {
+  margin: 0;
+}
+
 .moraware-review-pagination {
   display: flex;
   flex-wrap: wrap;
@@ -2002,6 +2071,14 @@ a.detail-list-title:hover {
 }
 
 @media (min-width: 960px) {
+  .moraware-summary-groups {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+    align-items: start;
+  }
+  .moraware-review .status-review-split {
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+    align-items: start;
+  }
   .status-review-split { grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.9fr); align-items: start; }
 }
 

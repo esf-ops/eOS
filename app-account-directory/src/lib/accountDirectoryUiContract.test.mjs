@@ -39,7 +39,7 @@ console.log("ok: Account Directory uses shared EliteosTopbar / shell tokens");
 assert.ok(app.includes('className="ad-nav"'));
 assert.ok(app.includes("Accounts"));
 assert.ok(app.includes("Prospects"));
-assert.ok(app.includes("Account Needs Review"));
+assert.ok(app.includes("Needs review status"));
 assert.ok(app.includes("Archived"));
 assert.ok(app.includes("New account"));
 assert.ok(app.includes("QuickBooks restricted"));
@@ -65,6 +65,9 @@ assert.equal(
 );
 assert.ok(
   readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Showing")
+);
+assert.ok(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("mutually exclusive")
 );
 assert.ok(css.includes(".status-review"));
 assert.equal(app.includes("Apply All"), false, "must not offer Apply All");
