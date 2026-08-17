@@ -1454,6 +1454,12 @@ export function buildJobQueryByProcessInnerXml(processId, firstRecord, pageSize,
  * Collect job rows using the same process-scoped `jobQuery` paging as `global-sync` (see `runMorawareDiscovery`).
  * Read-only; pass `{ quiet: true, skipProbeArtifacts: true }` (defaults) to avoid console/file spam.
  *
+ * **SAMPLE / CAPPED helper** — default `maxPages` comes from `MORAWARE_MAX_SEARCH_PAGES` (50) ×
+ * `pageSize` (100) ⇒ **5000-row ceiling**. Stopping at `collectCap` or `maxPages` is intentional sampling.
+ *
+ * Do **not** use this as authoritative incremental creation-window discovery.
+ * Use `collectCompleteIncrementalJobList` / `runCompleteProcessPagedListTraversal` instead.
+ *
  * Honors: `MORAWARE_PROCESS_IDS`, `MORAWARE_MAX_PROCESSES`, `MORAWARE_MAX_SEARCH_PAGES`,
  * `MORAWARE_SEARCH_PAGE_SIZE` (fallback `MORAWARE_PAGE_SIZE`), and optional `MORAWARE_SYNC_START_DATE`,
  * `MORAWARE_SYNC_END_DATE`, `MORAWARE_SYNC_YEAR` filters on `creationDate` from list rows.
@@ -1627,6 +1633,411 @@ export async function collectGlobalSyncStyleJobListSample(client, options = {}) 
     diagnostics,
     pagesLog
   };
+}
+
+/** Authoritative complete list traversal succeeded for configured process scope. */
+export const MORAWARE_COMPLETE_LIST_DISCOVERY = "COMPLETE_LIST_DISCOVERY";
+/** Fail-closed: list traversal did not finish; creation discovery must not proceed. */
+export const MORAWARE_CREATION_DISCOVERY_INCOMPLETE = "CREATION_DISCOVERY_INCOMPLETE";
+
+/**
+ * Default safety ceilings for complete incremental list discovery.
+ * Intentionally independent of MORAWARE_MAX_SEARCH_PAGES (sample helper default 50×100=5000).
+ */
+export const MORAWARE_INCREMENTAL_LIST_DEFAULT_SAFETY_MAX_PAGES_PER_PROCESS = 100_000;
+export const MORAWARE_INCREMENTAL_LIST_DEFAULT_SAFETY_MAX_ROWS_SCANNED = 2_000_000;
+
+/**
+ * Pure process-paged traversal used by complete incremental creation discovery.
+ *
+ * Pagination: firstRecord = pageIdx * pageSize (same as Foundation / global-sync).
+ * Natural completion per process: successful page with jobCount < pageSize.
+ * Does NOT early-stop on creationDate (Moraware list ordering is unproven).
+ * Hitting safety ceilings while a page was full ⇒ incomplete (never silent partial success).
+ *
+ * @param {object} options
+ * @param {string[]} options.processIds
+ * @param {number} options.pageSize
+ * @param {number} options.safetyMaxPagesPerProcess
+ * @param {number} options.safetyMaxRowsScanned
+ * @param {(args: {processId:string,pageIdx:number,firstRecord:number,pageSize:number}) => Promise<{ok:boolean,jobs?:any[],error?:string}>} options.fetchPage
+ * @param {number|null} [options.creationWindowStartMs]
+ * @param {number|null} [options.creationWindowEndMs]
+ * @param {(job:any) => ({id:string,creationDate?:string}|null)} [options.toLightweightRow]
+ */
+export async function runCompleteProcessPagedListTraversal(options = {}) {
+  const processIds = (options.processIds || []).map((p) => String(p).trim()).filter(Boolean);
+  const pageSize = Math.max(1, Number(options.pageSize) || 100);
+  const safetyMaxPagesPerProcess = Math.max(
+    1,
+    Number(options.safetyMaxPagesPerProcess) || MORAWARE_INCREMENTAL_LIST_DEFAULT_SAFETY_MAX_PAGES_PER_PROCESS
+  );
+  const safetyMaxRowsScanned = Math.max(
+    1,
+    Number(options.safetyMaxRowsScanned) || MORAWARE_INCREMENTAL_LIST_DEFAULT_SAFETY_MAX_ROWS_SCANNED
+  );
+  const fetchPage = options.fetchPage;
+  if (typeof fetchPage !== "function") {
+    throw new Error("runCompleteProcessPagedListTraversal: fetchPage required");
+  }
+
+  const windowStartMs =
+    options.creationWindowStartMs != null && Number.isFinite(Number(options.creationWindowStartMs))
+      ? Number(options.creationWindowStartMs)
+      : null;
+  const windowEndMs =
+    options.creationWindowEndMs != null && Number.isFinite(Number(options.creationWindowEndMs))
+      ? Number(options.creationWindowEndMs)
+      : null;
+  const windowFilterEnabled = windowStartMs != null || windowEndMs != null;
+
+  const toLightweightRow =
+    typeof options.toLightweightRow === "function"
+      ? options.toLightweightRow
+      : (j) => {
+          const id = String(j?._attributes?.id ?? j?.id ?? "").trim();
+          if (!id) return null;
+          const creationDate = getText(j?.creationDate) || String(j?.creationDate ?? "").trim();
+          return {
+            id,
+            source_job_id: id,
+            creationDate,
+            name: getText(j?.name) || String(j?.name ?? "").trim(),
+            status: getText(j?.jobStatus) || String(j?.jobStatus ?? "").trim(),
+            account_name: getText(j?.account?.name) || "",
+            salesperson_name: getText(j?.salesperson?.name) || ""
+          };
+        };
+
+  let pagesFetched = 0;
+  let rowsScanned = 0;
+  let rowsInCreationWindow = 0;
+  let duplicateSourceIds = 0;
+  let emptyIdRows = 0;
+  const seenIds = new Set();
+  /** Lightweight candidate rows (window match, or all rows if no window). */
+  const candidateRows = [];
+  const pagesLog = [];
+  let terminationReason = null;
+  let paginationComplete = false;
+
+  const inWindow = (creationDateRaw) => {
+    if (!windowFilterEnabled) return true;
+    const ms = parseIsoDateToMsOrNull(creationDateRaw);
+    if (ms == null) return false;
+    if (windowStartMs != null && ms < windowStartMs) return false;
+    if (windowEndMs != null && ms > windowEndMs) return false;
+    return true;
+  };
+
+  if (!processIds.length) {
+    return {
+      ok: false,
+      status: MORAWARE_CREATION_DISCOVERY_INCOMPLETE,
+      pagination_complete: false,
+      termination_reason: "no_process_ids",
+      candidate_rows: [],
+      list_rows: [],
+      diagnostics: {
+        pages_fetched: 0,
+        rows_scanned: 0,
+        rows_in_creation_window: 0,
+        duplicate_source_ids: 0,
+        pagination_complete: false,
+        termination_reason: "no_process_ids",
+        process_ids: [],
+        page_size: pageSize,
+        safety_max_pages_per_process: safetyMaxPagesPerProcess,
+        safety_max_rows_scanned: safetyMaxRowsScanned,
+        creation_date_ordering_relied_upon: false,
+        sample_helper_used: false
+      },
+      pagesLog: []
+    };
+  }
+
+  outer: for (const processId of processIds) {
+    let processComplete = false;
+    for (let pageIdx = 0; pageIdx < safetyMaxPagesPerProcess; pageIdx += 1) {
+      const firstRecord = pageIdx * pageSize;
+      let pageResult;
+      try {
+        pageResult = await fetchPage({ processId, pageIdx, firstRecord, pageSize });
+      } catch (e) {
+        terminationReason = "page_fetch_threw";
+        pagesLog.push({
+          processId,
+          page: pageIdx,
+          firstRecord,
+          ok: false,
+          error: String(e?.message || e),
+          jobCount: 0
+        });
+        break outer;
+      }
+
+      pagesFetched += 1;
+      const pageOk = pageResult?.ok === true;
+      const pageJobs = Array.isArray(pageResult?.jobs) ? pageResult.jobs : [];
+      pagesLog.push({
+        processId,
+        page: pageIdx,
+        firstRecord,
+        ok: pageOk,
+        jobCount: pageJobs.length,
+        error: pageOk ? null : pageResult?.error || "page_fetch_failed"
+      });
+
+      if (!pageOk) {
+        terminationReason = "page_fetch_failed";
+        break outer;
+      }
+
+      for (const j of pageJobs) {
+        rowsScanned += 1;
+        if (rowsScanned > safetyMaxRowsScanned) {
+          terminationReason = "safety_max_rows_scanned";
+          break outer;
+        }
+        const row = toLightweightRow(j);
+        if (!row?.id) {
+          emptyIdRows += 1;
+          continue;
+        }
+        if (seenIds.has(row.id)) {
+          duplicateSourceIds += 1;
+          continue;
+        }
+        seenIds.add(row.id);
+        if (inWindow(row.creationDate)) {
+          rowsInCreationWindow += 1;
+          candidateRows.push(row);
+        }
+      }
+
+      // Natural end of this process's pages
+      if (pageJobs.length < pageSize) {
+        processComplete = true;
+        break;
+      }
+
+      // Full page at last allowed index ⇒ more data may remain
+      if (pageIdx + 1 >= safetyMaxPagesPerProcess) {
+        terminationReason = "safety_max_pages_per_process";
+        break outer;
+      }
+    }
+    if (!processComplete && terminationReason) break;
+    if (!processComplete) {
+      terminationReason = terminationReason || "process_pagination_ambiguous";
+      break;
+    }
+  }
+
+  if (!terminationReason) {
+    paginationComplete = true;
+    terminationReason = "natural_page_end_all_processes";
+  }
+
+  const ok = paginationComplete === true;
+  const status = ok ? MORAWARE_COMPLETE_LIST_DISCOVERY : MORAWARE_CREATION_DISCOVERY_INCOMPLETE;
+
+  return {
+    ok,
+    status,
+    pagination_complete: paginationComplete,
+    termination_reason: terminationReason,
+    /** Authoritative candidate rows only when complete; empty when incomplete. */
+    candidate_rows: ok ? candidateRows : [],
+    list_rows: ok ? candidateRows : [],
+    /** Non-authoritative scan peek (tests/diagnostics); never treat as complete discovery. */
+    partial_candidate_rows_non_authoritative: ok ? null : candidateRows,
+    diagnostics: {
+      pages_fetched: pagesFetched,
+      rows_scanned: rowsScanned,
+      rows_in_creation_window: rowsInCreationWindow,
+      duplicate_source_ids: duplicateSourceIds,
+      empty_id_rows: emptyIdRows,
+      pagination_complete: paginationComplete,
+      termination_reason: terminationReason,
+      process_ids: processIds,
+      page_size: pageSize,
+      safety_max_pages_per_process: safetyMaxPagesPerProcess,
+      safety_max_rows_scanned: safetyMaxRowsScanned,
+      creation_date_ordering_relied_upon: false,
+      sample_helper_used: false,
+      window_filter_enabled: windowFilterEnabled,
+      status
+    },
+    pagesLog
+  };
+}
+
+/**
+ * Complete authoritative process-paged job list for incremental creation discovery.
+ *
+ * Reuses Foundation/global-sync mechanics:
+ *   buildJobQueryByProcessInnerXml + sendMorawareCommand (processIdAttr / processText variants)
+ *
+ * NOT collectGlobalSyncStyleJobListSample (that helper is intentionally capped/sample).
+ * Does not apply MORAWARE_SYNC_* env date filters (caller owns creation-window filtering).
+ * Does not invent XML endpoints. No Moraware writes.
+ */
+export async function collectCompleteIncrementalJobList(client, options = {}) {
+  const {
+    quiet = true,
+    skipProbeArtifacts = true,
+    runDir: runDirOpt,
+    maxProcesses: maxProcessesOpt,
+    pageSize: pageSizeOpt,
+    safetyMaxPagesPerProcess: safetyPagesOpt,
+    safetyMaxRowsScanned: safetyRowsOpt,
+    processIds: processIdsOpt = null,
+    creationWindowStartMs = null,
+    creationWindowEndMs = null,
+    fetchPage: fetchPageOverride = null,
+    toLightweightRow = null
+  } = options;
+
+  const maxProcesses = maxProcessesOpt ?? toNumberOr(process.env.MORAWARE_MAX_PROCESSES, 10);
+  const pageSize =
+    pageSizeOpt ??
+    toNumberOr(process.env.MORAWARE_SEARCH_PAGE_SIZE ?? process.env.MORAWARE_PAGE_SIZE, 100);
+  const safetyMaxPagesPerProcess =
+    safetyPagesOpt ??
+    toNumberOr(
+      process.env.MORAWARE_INCREMENTAL_LIST_MAX_PAGES_PER_PROCESS,
+      MORAWARE_INCREMENTAL_LIST_DEFAULT_SAFETY_MAX_PAGES_PER_PROCESS
+    );
+  const safetyMaxRowsScanned =
+    safetyRowsOpt ??
+    toNumberOr(
+      process.env.MORAWARE_INCREMENTAL_LIST_MAX_ROWS_SCANNED,
+      MORAWARE_INCREMENTAL_LIST_DEFAULT_SAFETY_MAX_ROWS_SCANNED
+    );
+
+  if (typeof fetchPageOverride === "function") {
+    const processIds = Array.isArray(processIdsOpt) && processIdsOpt.length
+      ? processIdsOpt.map(String)
+      : ["1"];
+    return runCompleteProcessPagedListTraversal({
+      processIds: processIds.slice(0, maxProcesses),
+      pageSize,
+      safetyMaxPagesPerProcess,
+      safetyMaxRowsScanned,
+      fetchPage: fetchPageOverride,
+      creationWindowStartMs,
+      creationWindowEndMs,
+      toLightweightRow: toLightweightRow || undefined
+    });
+  }
+
+  if (!client || typeof client.ensureSession !== "function") {
+    return {
+      ok: false,
+      status: MORAWARE_CREATION_DISCOVERY_INCOMPLETE,
+      pagination_complete: false,
+      termination_reason: "client_required",
+      candidate_rows: [],
+      list_rows: [],
+      diagnostics: {
+        pages_fetched: 0,
+        rows_scanned: 0,
+        rows_in_creation_window: 0,
+        duplicate_source_ids: 0,
+        pagination_complete: false,
+        termination_reason: "client_required",
+        sample_helper_used: false,
+        creation_date_ordering_relied_upon: false
+      },
+      pagesLog: []
+    };
+  }
+
+  await client.ensureSession();
+  const sessionId = client.sessionId;
+  const runDir =
+    runDirOpt ||
+    path.join(os.tmpdir(), "eos-moraware-incremental-list", `p${process.pid}-${Date.now()}`);
+  await mkdirp(runDir);
+
+  const ctx = {
+    sessionId,
+    apiUrl: client.baseUrl,
+    timeoutMs: client.timeoutMs,
+    runDir,
+    latestDir: runDir,
+    probeIndex: 0,
+    probes: [],
+    successfulProbeNames: [],
+    failedProbeNames: [],
+    noDataProbeNames: [],
+    partialProbeNames: []
+  };
+
+  const sendOpts = { quiet, skipProbeArtifacts };
+  const processOverride =
+    Array.isArray(processIdsOpt) && processIdsOpt.length
+      ? processIdsOpt.map(String)
+      : parseCsvIdList(process.env.MORAWARE_PROCESS_IDS);
+  let processesUsed = [];
+  let processesSource = "discoverProcesses";
+  if (processOverride.length) {
+    processesUsed = processOverride.slice(0, maxProcesses);
+    processesSource = Array.isArray(processIdsOpt) && processIdsOpt.length ? "options.processIds" : "MORAWARE_PROCESS_IDS";
+  } else {
+    const pd = await discoverProcesses(ctx, sendOpts);
+    processesUsed = (pd.processIds || []).slice(0, maxProcesses);
+  }
+
+  const variants = ["processIdAttr", "processText"];
+
+  const fetchPage = async ({ processId, pageIdx, firstRecord, pageSize: ps }) => {
+    let lastError = "page_fetch_failed";
+    for (const variantId of variants) {
+      const inner = buildJobQueryByProcessInnerXml(processId, firstRecord, ps, variantId);
+      const res = await sendMorawareCommand(ctx, "jobQuery", inner, {
+        probeName: `INCREMENTAL-COMPLETE-${processId}-${variantId}-p${pageIdx}`,
+        ...sendOpts
+      });
+      const pageJobs = asArray(res.parsed?.MorawareResponse?.jobQuery?.job);
+      if (
+        res.httpStatus >= 200 &&
+        res.httpStatus < 300 &&
+        !res.parsed?.parseError &&
+        !hasBlockingMorawareError(res.apiErrors || [])
+      ) {
+        return { ok: true, jobs: pageJobs, variantId };
+      }
+      lastError =
+        res.probeReason ||
+        res.parsed?.parseError ||
+        `http ${res.httpStatus}` ||
+        "page_fetch_failed";
+    }
+    return { ok: false, jobs: [], error: lastError };
+  };
+
+  const result = await runCompleteProcessPagedListTraversal({
+    processIds: processesUsed,
+    pageSize,
+    safetyMaxPagesPerProcess,
+    safetyMaxRowsScanned,
+    fetchPage,
+    creationWindowStartMs,
+    creationWindowEndMs,
+    toLightweightRow: toLightweightRow || undefined
+  });
+
+  result.diagnostics = {
+    ...result.diagnostics,
+    processes_source: processesSource,
+    canonical_path:
+      "collectCompleteIncrementalJobList → buildJobQueryByProcessInnerXml + sendMorawareCommand",
+    sample_helper_used: false,
+    not_used: "collectGlobalSyncStyleJobListSample"
+  };
+  return result;
 }
 
 function evaluateJobDetailProbe(parsed, httpStatus, apiErrors, targetJobId) {

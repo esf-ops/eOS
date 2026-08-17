@@ -1176,6 +1176,295 @@ export async function populateMorawareJobWorksheetPreparedFacts(supabase, organi
   }
 }
 
+/**
+ * Whether a refreshed job payload carries an authoritative COMPLETE forms[] set
+ * safe for per-job obsolete-form reconciliation.
+ *
+ * Conservative: requires Array.isArray(forms) AND an explicit completeness flag.
+ * Missing flag → upsert-only (never delete for that job).
+ */
+export function isAuthoritativeCompleteFormsPayload(job) {
+  const raw =
+    job?.raw_payload && typeof job.raw_payload === "object"
+      ? job.raw_payload
+      : job && typeof job === "object"
+        ? job
+        : {};
+  if (!Array.isArray(raw.forms)) return false;
+  if (raw.forms_authoritative_complete === true) return true;
+  if (raw.forms_complete === true) return true;
+  if (job?.forms_authoritative_complete === true) return true;
+  if (job?.forms_complete === true) return true;
+  if (job?.metadata?.forms_authoritative_complete === true) return true;
+  return false;
+}
+
+/**
+ * Plan incremental worksheet writes for exact refreshed jobs under parent FULL epoch A.
+ * Never plans deletions for jobs absent from the incremental batch.
+ */
+export function planIncrementalWorksheetFactRefresh({
+  organizationId,
+  importGroupId,
+  jobs = [],
+  existingRowsByJobId = new Map(),
+  updatedAt = new Date().toISOString()
+} = {}) {
+  const org = String(organizationId || "").trim();
+  const epoch = String(importGroupId || "").trim();
+  if (!org || !epoch) {
+    return {
+      ok: false,
+      status: "epoch_required",
+      error: "Incremental worksheet refresh requires organizationId + parent FULL import_group_id.",
+      upsert_rows: [],
+      removal_plans: [],
+      jobs_touched: [],
+      jobs_skipped_incomplete_forms: []
+    };
+  }
+
+  const upsertRows = [];
+  const removalPlans = [];
+  const jobsTouched = [];
+  const jobsSkippedIncomplete = [];
+
+  for (const job of jobs || []) {
+    const sourceJobId = String(job?.source_job_id ?? "").trim();
+    if (!sourceJobId) continue;
+    jobsTouched.push(sourceJobId);
+
+    const facts = extractMorawareJobWorksheetScopeFacts(job, { organizationId: org });
+    const rows = toPreparedWorksheetFactRows(facts, {
+      organizationId: org,
+      importGroupId: epoch,
+      syncRunId: job?.sync_run_id ?? null,
+      updatedAt
+    });
+    upsertRows.push(...rows);
+
+    const authoritative = isAuthoritativeCompleteFormsPayload(job);
+    if (!authoritative) {
+      jobsSkippedIncomplete.push(sourceJobId);
+      continue;
+    }
+    const currentFormIds = rows.map((r) => r.source_form_id);
+    const existing = existingRowsByJobId.get(sourceJobId) || existingRowsByJobId.get(String(sourceJobId)) || [];
+    const existingFormIds = (Array.isArray(existing) ? existing : []).map(
+      (r) => String(r.source_form_id ?? r)
+    );
+    const plan = planWorksheetFactRemovalsForAuthoritativeJob({
+      organizationId: org,
+      importGroupId: epoch,
+      sourceJobId,
+      existingFormIds,
+      currentFormIds
+    });
+    removalPlans.push(plan);
+  }
+
+  return {
+    ok: true,
+    status: "planned",
+    import_group_id: epoch,
+    organization_id: org,
+    upsert_rows: upsertRows,
+    removal_plans: removalPlans,
+    jobs_touched: jobsTouched,
+    jobs_skipped_incomplete_forms: jobsSkippedIncomplete,
+    note: "Removals are exact per-job only when forms[] is authoritative+complete. Other jobs untouched."
+  };
+}
+
+/**
+ * Execute planned per-job worksheet removals (exact job scope only).
+ * Guarded by population lock ownership.
+ */
+export async function executeWorksheetFactRemovalsForAuthoritativeJobs(
+  supabase,
+  removalPlans = [],
+  { ownerToken, liveWrite = false } = {}
+) {
+  const writes = { deletes: 0 };
+  if (liveWrite !== true) {
+    return { ok: false, status: "live_write_disabled", writes, would_delete: removalPlans };
+  }
+  const token = String(ownerToken ?? "").trim();
+  if (!token) {
+    return { ok: false, status: "population_lock_required", writes, code: "population_lock_required" };
+  }
+  const guard = await guardLiveMorawarePopulationWrite(supabase, { ownerToken: token });
+  if (!guard.ok) {
+    return {
+      ok: false,
+      status: guard.code || "population_lock_denied",
+      writes,
+      code: guard.code,
+      error: guard.error
+    };
+  }
+
+  for (const plan of removalPlans || []) {
+    const org = String(plan?.organization_id ?? "").trim();
+    const epoch = String(plan?.import_group_id ?? "").trim();
+    const jobId = String(plan?.source_job_id ?? "").trim();
+    const formIds = (plan?.remove_source_form_ids || []).map(String).filter(Boolean);
+    if (!org || !epoch || !jobId || !formIds.length) continue;
+
+    // Exact job scope — never delete by epoch alone.
+    const { error, count } = await supabase
+      .from(WORKSHEET_FACTS_TABLE)
+      .delete({ count: "exact" })
+      .eq("organization_id", org)
+      .eq("import_group_id", epoch)
+      .eq("source_job_id", jobId)
+      .in("source_form_id", formIds);
+    if (error) {
+      return {
+        ok: false,
+        status: "delete_failed",
+        writes,
+        error: error.message || String(error),
+        failed_source_job_id: jobId
+      };
+    }
+    writes.deletes += Number(count) || formIds.length;
+  }
+  return { ok: true, status: "deleted", writes };
+}
+
+/**
+ * Incremental worksheet refresh under parent FULL epoch A for exact jobs only.
+ * Requires outerOwnerToken (incremental outer lock). Does not release the lock.
+ * Does NOT globally rebuild or truncate epoch A.
+ */
+export async function refreshMorawareJobWorksheetFactsForExactJobs(
+  supabase,
+  {
+    organizationId,
+    importGroupId,
+    jobs = [],
+    existingRowsByJobId = new Map(),
+    outerOwnerToken,
+    liveWrite = false,
+    allowLivePopulation = false,
+    updatedAt = new Date().toISOString(),
+    loadExistingRows = null
+  } = {}
+) {
+  const startedAt = Date.now();
+  if (liveWrite !== true || allowLivePopulation !== true) {
+    return {
+      ok: false,
+      status: "live_population_not_enabled",
+      writes: { upserts: 0, deletes: 0 },
+      compute_ms: Date.now() - startedAt
+    };
+  }
+  const token = String(outerOwnerToken ?? "").trim();
+  if (!token) {
+    return {
+      ok: false,
+      status: "population_lock_required",
+      code: "population_lock_required",
+      writes: { upserts: 0, deletes: 0 },
+      compute_ms: Date.now() - startedAt
+    };
+  }
+  const guard = await guardLiveMorawarePopulationWrite(supabase, { ownerToken: token });
+  if (!guard.ok) {
+    return {
+      ok: false,
+      status: guard.code || "population_lock_denied",
+      code: guard.code,
+      error: guard.error,
+      writes: { upserts: 0, deletes: 0 },
+      compute_ms: Date.now() - startedAt
+    };
+  }
+
+  let existing = existingRowsByJobId;
+  if (typeof loadExistingRows === "function") {
+    existing = await loadExistingRows({
+      organizationId,
+      importGroupId,
+      sourceJobIds: (jobs || []).map((j) => String(j?.source_job_id ?? "")).filter(Boolean)
+    });
+  }
+
+  const plan = planIncrementalWorksheetFactRefresh({
+    organizationId,
+    importGroupId,
+    jobs,
+    existingRowsByJobId: existing,
+    updatedAt
+  });
+  if (!plan.ok) {
+    return { ...plan, writes: { upserts: 0, deletes: 0 }, compute_ms: Date.now() - startedAt };
+  }
+
+  assertPreparedWorksheetRowsMatchTableContract(plan.upsert_rows);
+
+  let upserts = 0;
+  const chunkSize = 100;
+  for (let i = 0; i < plan.upsert_rows.length; i += chunkSize) {
+    const midGuard = await guardLiveMorawarePopulationWrite(supabase, { ownerToken: token });
+    if (!midGuard.ok) {
+      return {
+        ok: false,
+        status: midGuard.code || "population_lock_lost",
+        code: midGuard.code,
+        error: midGuard.error,
+        writes: { upserts, deletes: 0 },
+        compute_ms: Date.now() - startedAt
+      };
+    }
+    const chunk = plan.upsert_rows.slice(i, i + chunkSize);
+    const { error } = await supabase.from(WORKSHEET_FACTS_TABLE).upsert(chunk, {
+      onConflict: WORKSHEET_FACTS_UPSERT_ON_CONFLICT
+    });
+    if (error) {
+      return {
+        ok: false,
+        status: "upsert_failed",
+        error: error.message || String(error),
+        writes: { upserts, deletes: 0 },
+        compute_ms: Date.now() - startedAt
+      };
+    }
+    upserts += chunk.length;
+  }
+
+  const del = await executeWorksheetFactRemovalsForAuthoritativeJobs(supabase, plan.removal_plans, {
+    ownerToken: token,
+    liveWrite: true
+  });
+  if (!del.ok) {
+    return {
+      ok: false,
+      status: del.status,
+      code: del.code,
+      error: del.error,
+      writes: { upserts, deletes: del.writes?.deletes || 0 },
+      plan,
+      compute_ms: Date.now() - startedAt
+    };
+  }
+
+  return {
+    ok: true,
+    status: "refreshed",
+    import_group_id: plan.import_group_id,
+    jobs_touched: plan.jobs_touched,
+    jobs_skipped_incomplete_forms: plan.jobs_skipped_incomplete_forms,
+    removal_plans: plan.removal_plans,
+    writes: { upserts, deletes: del.writes.deletes },
+    lock_mode: "outer",
+    released_outer_lock: false,
+    compute_ms: Date.now() - startedAt
+  };
+}
+
 export {
   VERIFIED_FOUNDATION_2026_JOB_COUNT,
   VERIFIED_FOUNDATION_2026_WORKSHEET_SQFT,

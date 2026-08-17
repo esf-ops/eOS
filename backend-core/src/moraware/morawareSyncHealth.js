@@ -468,6 +468,14 @@ export async function buildMorawareAdminHealth(db, organizationId, { countMode =
   const mirrorResolved = await resolveMirrorRowCounts(db, organizationId, { countMode, totalRowCounts });
   const mirrorCounts = mirrorResolved.counts;
 
+  let incremental = null;
+  try {
+    const { buildMorawareIncrementalHealth } = await import("./morawareIncrementalHealth.mjs");
+    incremental = await buildMorawareIncrementalHealth(db, organizationId);
+  } catch {
+    incremental = { available: false, error: "incremental_health_unavailable" };
+  }
+
   const warnings = [];
   if (incompleteLatest) warnings.push("Latest import group is incomplete — heads should use the latest complete group for prepared facts.");
   if (prepared.freshness === "stale") warnings.push("Prepared Sales facts were built for a different import group than the latest complete Moraware import.");
@@ -488,6 +496,7 @@ export async function buildMorawareAdminHealth(db, organizationId, { countMode =
     latest_import_group: latestGroup,
     latest_complete_import_group: latestComplete,
     prepared_facts: prepared,
+    incremental_population: incremental,
     mirror_row_counts: mirrorCounts,
     mirror_count_mode: countMode,
     warnings,
