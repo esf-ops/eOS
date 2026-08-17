@@ -4451,7 +4451,8 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Raw only / pending** | Back Splash Type + Height extracted raw — **no** NONE/STANDARD_4_INCH/FULL_HEIGHT normalization yet. **Material / Stone family unimplemented** (no Job Worksheet Material field; Color→family inference prohibited). **Upgrade score / comment-derived options unimplemented**. Shop Comments are not structured intelligence. |
 | **Controls** | CURRENT set: **4,073** jobs, **10,719** worksheets, **271,432.5** SqFt; **109** jobs without Job Worksheet. Broihahn (553+635): **13** jobs, **39** worksheets, **1,283.5** SqFt. |
 | **Account 360** | Helpers (`buildWorksheetScopeReadModel`) are ready for a future read path. **Not wired into Account 360 UI** in this pass. |
+| **Writer lock** | Live population of `sales_moraware_job_worksheet_facts` is part of the canonical Moraware population critical section. Standalone populate acquires `eos_sync_locks.lock_name = moraware_population` **before** resolving CURRENT jobs / loading `brain_moraware_jobs`; outer FULL/INCREMENTAL passes `outerOwnerToken` (verify/renew only — does not release). Dry-run does not acquire the lock. Fail closed if owner missing/wrong/expired/lost. |
 | **SQL** | Manual: `backend-core/supabase/eliteos_sales_moraware_job_worksheet_facts_v1.sql` — create only; do not apply from app code in this pass. |
-| **Out of scope** | Live rebuild, migration apply, Material Mix, normalized backsplash, upgrades, Moraware crawl/sync. |
-| **Impacted** | `morawareJobWorksheetScope.mjs`, worksheet facts SQL, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
+| **Out of scope** | Account 360 UI wiring, Material Mix, normalized backsplash, upgrades, Moraware crawl/sync from this writer. |
+| **Impacted** | `morawareJobWorksheetScope.mjs`, `morawareJobWorksheetPreparedFacts.mjs`, worksheet facts SQL/CLI, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
 
