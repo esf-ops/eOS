@@ -95,7 +95,8 @@ export async function getAccountFinancialsTrend(
 export async function getAccountHistoryTransactions(
   token: string,
   accountId: string,
-  opts: { page?: number; limit?: number; type?: string }
+  opts: { page?: number; limit?: number; type?: string },
+  init: RequestInit = {}
 ) {
   return (await apiGet(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/financials/transactions${qs({
@@ -103,21 +104,24 @@ export async function getAccountHistoryTransactions(
       limit: opts.limit,
       type: opts.type
     })}`,
-    token
+    token,
+    init
   )) as AccountHistoryTransactionPage;
 }
 
 export async function getAccountOpenInvoices(
   token: string,
   accountId: string,
-  opts: { page?: number; limit?: number }
+  opts: { page?: number; limit?: number },
+  init: RequestInit = {}
 ) {
   return (await apiGet(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/financials/invoices${qs({
       page: opts.page,
       limit: opts.limit
     })}`,
-    token
+    token,
+    init
   )) as AccountInvoicePage;
 }
 
@@ -132,7 +136,8 @@ export async function getAccountRelationship(token: string, accountId: string, i
 export async function getAccountTimeline(
   token: string,
   accountId: string,
-  opts: { family?: string; page?: number; limit?: number }
+  opts: { family?: string; page?: number; limit?: number },
+  init: RequestInit = {}
 ) {
   return (await apiGet(
     `${BASE}/accounts/${encodeURIComponent(accountId)}/timeline${qs({
@@ -140,7 +145,8 @@ export async function getAccountTimeline(
       page: opts.page,
       limit: opts.limit
     })}`,
-    token
+    token,
+    init
   )) as AccountTimelineResponse;
 }
 

@@ -62,6 +62,10 @@ export function InsightsPanel({
       });
   }, [sessionToken, accountId, shared, insights, busyProp, errorProp]);
 
+  useEffect(() => {
+    setEvidence(null);
+  }, [accountId]);
+
   async function openEvidence(id: string) {
     if (!sessionToken) return;
     try {
@@ -97,7 +101,7 @@ export function InsightsPanel({
         Deterministic customer signals for this account. Every card can show its work. These are not forecasts and not
         company-wide rankings.
       </p>
-      {busy ? <p className="muted">Loading insights…</p> : null}
+      {busy && !data ? <p className="muted">Loading insights…</p> : null}
       {error ? (
         <div className="banner banner-error" role="alert">
           {error}

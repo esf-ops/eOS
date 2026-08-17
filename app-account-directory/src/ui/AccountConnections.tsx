@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../lib/api";
 import {
   fetchMorawareReconciliation,
@@ -57,6 +57,24 @@ export function ConnectionsWithIdentity({
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const mwAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    mwAbortRef.current?.abort();
+    setQbPickerOpen(false);
+    setMwFindOpen(false);
+    setMwBusy(false);
+    setMwError(null);
+    setMwCandidates(null);
+    setMwSelected(null);
+    setDisconnect(null);
+    setActionError(null);
+  }, [accountId]);
+
+  useEffect(() => {
+    return () => {
+      mwAbortRef.current?.abort();
+    };
+  }, []);
 
   const directoryName = accountName || "This account";
 

@@ -36,6 +36,16 @@ export function QuickBooksCustomerPicker({
   const debounceRef = useRef<number | null>(null);
 
   useEffect(() => {
+    abortRef.current?.abort();
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    setQuery("");
+    setItems([]);
+    setSelected(null);
+    setStatus("idle");
+    setError(null);
+  }, [accountId]);
+
+  useEffect(() => {
     return () => {
       abortRef.current?.abort();
       if (debounceRef.current) window.clearTimeout(debounceRef.current);

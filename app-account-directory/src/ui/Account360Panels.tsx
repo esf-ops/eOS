@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ApiError } from "../lib/api";
 import {
   getAccountFinancialsTrend,
@@ -12,12 +12,27 @@ import type {
   AccountDetail,
   AccountFinancials,
   AccountHistoryTransactionPage,
+  AccountInvoicePage,
   AccountLocation,
   AccountRelationship,
   AccountSourceFreshness,
   AccountTimelineResponse,
+  AccountTrend,
   ExternalLink
 } from "../lib/types";
+import { isAbortError } from "../lib/account360RequestCoordinator.mjs";
+import {
+  AD_360_HISTORY_PAGE_SIZE,
+  AD_360_INVOICE_PAGE_SIZE,
+  AD_360_TIMELINE_PAGE_SIZE,
+  applyHistoryPage,
+  canLoadMoreHistory,
+  historyExhaustedCopy,
+  historyItemId,
+  invoiceItemId,
+  shouldApplyHistoryPage,
+  timelineItemId
+} from "../lib/account360History.mjs";
 import {
   buildRelationshipView,
   enrichRelationshipHealthWithFinancials,
@@ -43,6 +58,21 @@ function freshnessLine(source?: AccountSourceFreshness | null) {
   if (hours == null) return "Refresh time unavailable";
   if (hours < 2) return "Refreshed recently";
   return `Refreshed ${hours}h ago`;
+}
+
+type Account360SessionStore = {
+  getSignal: () => AbortSignal | null;
+  getGeneration: () => number;
+  isCurrent: (generation: number, accountId: string) => boolean;
+  getPanel: (accountId: string, key: string) => unknown;
+  hasPanel: (accountId: string, key: string) => boolean;
+  setPanel: (accountId: string, key: string, value: unknown) => void;
+  clearPanel: (accountId: string, key: string) => void;
+  loadResource: (accountId: string, key: string, loader: () => Promise<unknown>) => Promise<unknown>;
+};
+
+function financialsDeepReady(financials: AccountFinancials | null) {
+  return financials?.status === "ok" || financials?.status === "stale";
 }
 
 function Metric({
@@ -479,6 +509,7 @@ export function FinancialsPanel({
   onRetry,
   sessionToken,
   accountId,
+  session360,
   onSelectMonth
 }: {
   financials: AccountFinancials | null;
@@ -487,72 +518,185 @@ export function FinancialsPanel({
   onRetry: () => void;
   sessionToken: string | null;
   accountId: string;
+  session360?: Account360SessionStore | null;
   onSelectMonth?: (month: string) => void;
 }) {
   const [period, setPeriod] = useState("trailing_12");
-  const [trend, setTrend] = useState(financials?.monthlyTrend || null);
-  const [invoices, setInvoices] = useState(financials?.openInvoices || null);
+  const [trend, setTrend] = useState<AccountTrend | null>(financials?.monthlyTrend || null);
+  const [trendBusy, setTrendBusy] = useState(false);
+  const [trendError, setTrendError] = useState<string | null>(null);
+  const [invoices, setInvoices] = useState<AccountInvoicePage | null>(financials?.openInvoices || null);
   const [invoicePage, setInvoicePage] = useState(1);
+  const [invoiceMoreBusy, setInvoiceMoreBusy] = useState(false);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [invoiceRetry, setInvoiceRetry] = useState(0);
   const [historyType, setHistoryType] = useState("all");
   const [historyPage, setHistoryPage] = useState(1);
   const [history, setHistory] = useState<AccountHistoryTransactionPage | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyMoreBusy, setHistoryMoreBusy] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyRetry, setHistoryRetry] = useState(0);
+  const [trendRetry, setTrendRetry] = useState(0);
+  const pageGuardRef = useRef(0);
 
   useEffect(() => {
-    setTrend(financials?.monthlyTrend || null);
+    pageGuardRef.current += 1;
+    setPeriod("trailing_12");
+    setHistoryType("all");
+    setHistoryPage(1);
+    setInvoicePage(1);
+    setHistory(null);
+    setHistoryError(null);
+    setInvoiceError(null);
+    setTrendError(null);
+    setTrendBusy(false);
+    setHistoryBusy(false);
+    setInvoiceMoreBusy(false);
+    setHistoryMoreBusy(false);
+  }, [accountId]);
+
+  useEffect(() => {
+    pageGuardRef.current += 1;
+    setTrend((prev) => financials?.monthlyTrend || prev);
     setInvoices(financials?.openInvoices || null);
     setInvoicePage(1);
     setHistoryPage(1);
-  }, [financials]);
+    if (session360 && financials?.monthlyTrend && !session360.hasPanel(accountId, "trend:trailing_12")) {
+      session360.setPanel(accountId, "trend:trailing_12", financials.monthlyTrend);
+    }
+  }, [accountId, financials, session360]);
 
   useEffect(() => {
+    if (!session360 || !financialsDeepReady(financials)) return;
+    const key = `trend:${period}`;
+    if (period === "trailing_12" && financials?.monthlyTrend) {
+      if (!session360.hasPanel(accountId, key)) session360.setPanel(accountId, key, financials.monthlyTrend);
+      setTrend(financials.monthlyTrend);
+      setTrendBusy(false);
+      setTrendError(null);
+      return;
+    }
+    if (session360.hasPanel(accountId, key)) {
+      setTrend((session360.getPanel(accountId, key) as AccountTrend | null) ?? null);
+      setTrendBusy(false);
+      setTrendError(null);
+      return;
+    }
     if (!sessionToken) return;
-    let cancelled = false;
-    void getAccountFinancialsTrend(sessionToken, accountId, period)
-      .then((res) => {
-        if (!cancelled) setTrend(res.trend || null);
+    const generation = session360.getGeneration();
+    const signal = session360.getSignal() || undefined;
+    setTrendBusy(true);
+    setTrendError(null);
+    void session360
+      .loadResource(accountId, key, () =>
+        getAccountFinancialsTrend(sessionToken, accountId, period, { signal }).then((res) => res.trend || null)
+      )
+      .then((next) => {
+        if (!shouldApplyHistoryPage(session360, generation, accountId, accountId)) return;
+        setTrend((next as AccountTrend | null) ?? null);
       })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [accountId, period, sessionToken]);
+      .catch((err) => {
+        if (!shouldApplyHistoryPage(session360, generation, accountId, accountId) || isAbortError(err)) return;
+        setTrendError(err instanceof ApiError ? err.message : "Could not load trend.");
+      })
+      .finally(() => {
+        if (shouldApplyHistoryPage(session360, generation, accountId, accountId)) setTrendBusy(false);
+      });
+  }, [accountId, financials, period, session360, sessionToken, trendRetry]);
 
   useEffect(() => {
-    if (!sessionToken || invoicePage <= 1) return;
-    let cancelled = false;
-    void getAccountOpenInvoices(sessionToken, accountId, { page: invoicePage, limit: 50 })
+    if (!session360 || !sessionToken || !financialsDeepReady(financials) || invoicePage <= 1) return;
+    const generation = session360.getGeneration();
+    const signal = session360.getSignal() || undefined;
+    const expectedAccountId = accountId;
+    const guard = pageGuardRef.current;
+    setInvoiceMoreBusy(true);
+    setInvoiceError(null);
+    void getAccountOpenInvoices(sessionToken, accountId, { page: invoicePage, limit: AD_360_INVOICE_PAGE_SIZE }, { signal })
       .then((res) => {
-        if (cancelled) return;
-        setInvoices((prev) => ({
-          ...res,
-          items: [...(prev?.items || []), ...(res.items || [])]
-        }));
+        if (guard !== pageGuardRef.current) return;
+        if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) return;
+        setInvoices((prev) => applyHistoryPage(prev, res, invoicePage, invoiceItemId) as AccountInvoicePage);
       })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [accountId, invoicePage, sessionToken]);
+      .catch((err) => {
+        if (guard !== pageGuardRef.current) return;
+        if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId) || isAbortError(err)) return;
+        setInvoiceError(err instanceof ApiError ? err.message : "Could not load more invoices.");
+      })
+      .finally(() => {
+        if (guard !== pageGuardRef.current) return;
+        if (shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) setInvoiceMoreBusy(false);
+      });
+  }, [accountId, financials, invoicePage, session360, sessionToken, invoiceRetry]);
 
   useEffect(() => {
-    if (!sessionToken) return;
-    let cancelled = false;
-    void getAccountHistoryTransactions(sessionToken, accountId, {
-      page: historyPage,
-      limit: 25,
-      type: historyType
-    })
+    if (!session360 || !sessionToken || !financialsDeepReady(financials)) return;
+    const key = `history:${historyType}`;
+    const generation = session360.getGeneration();
+    const signal = session360.getSignal() || undefined;
+    const expectedAccountId = accountId;
+    const guard = pageGuardRef.current;
+
+    if (historyPage <= 1) {
+      if (session360.hasPanel(accountId, key)) {
+        setHistory(session360.getPanel(accountId, key) as AccountHistoryTransactionPage);
+        setHistoryBusy(false);
+        setHistoryError(null);
+        return;
+      }
+      setHistoryBusy(true);
+      setHistoryError(null);
+      void session360
+        .loadResource(accountId, key, () =>
+          getAccountHistoryTransactions(
+            sessionToken,
+            accountId,
+            { page: 1, limit: AD_360_HISTORY_PAGE_SIZE, type: historyType },
+            { signal }
+          ).then((res) => applyHistoryPage(null, res, 1, historyItemId) as AccountHistoryTransactionPage)
+        )
+        .then((res) => {
+          if (guard !== pageGuardRef.current) return;
+          if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) return;
+          setHistory(res as AccountHistoryTransactionPage);
+        })
+        .catch((err) => {
+          if (guard !== pageGuardRef.current) return;
+          if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId) || isAbortError(err)) return;
+          setHistory(null);
+          setHistoryError(err instanceof ApiError ? err.message : "Could not load history.");
+        })
+        .finally(() => {
+          if (guard !== pageGuardRef.current) return;
+          if (shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) setHistoryBusy(false);
+        });
+      return;
+    }
+
+    setHistoryMoreBusy(true);
+    setHistoryError(null);
+    void getAccountHistoryTransactions(
+      sessionToken,
+      accountId,
+      { page: historyPage, limit: AD_360_HISTORY_PAGE_SIZE, type: historyType },
+      { signal }
+    )
       .then((res) => {
-        if (cancelled) return;
-        setHistory((prev) =>
-          historyPage === 1 ? res : { ...res, items: [...(prev?.items || []), ...(res.items || [])] }
-        );
+        if (guard !== pageGuardRef.current) return;
+        if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) return;
+        setHistory((prev) => applyHistoryPage(prev, res, historyPage, historyItemId) as AccountHistoryTransactionPage);
       })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [accountId, historyPage, historyType, sessionToken]);
+      .catch((err) => {
+        if (guard !== pageGuardRef.current) return;
+        if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId) || isAbortError(err)) return;
+        setHistoryError(err instanceof ApiError ? err.message : "Could not load more history.");
+      })
+      .finally(() => {
+        if (guard !== pageGuardRef.current) return;
+        if (shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) setHistoryMoreBusy(false);
+      });
+  }, [accountId, financials, historyPage, historyType, session360, sessionToken, historyRetry]);
 
   if (busy && !financials) {
     return <p className="muted">Loading customer financials…</p>;
@@ -723,6 +867,22 @@ export function FinancialsPanel({
                 ))}
               </div>
             </div>
+            {trendBusy && !trend ? <p className="muted">Loading customer trend…</p> : null}
+            {trendError ? (
+              <div className="banner banner-error" role="alert">
+                {trendError}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm banner-dismiss"
+                  onClick={() => {
+                    session360?.clearPanel(accountId, `trend:${period}`);
+                    setTrendRetry((n) => n + 1);
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
             {trend?.status === "ok" || trend?.status === "stale" ? (
               <CustomerTrendChart
                 points={trend.points || []}
@@ -754,8 +914,8 @@ export function FinancialsPanel({
                     </tr>
                   </thead>
                   <tbody>
-                    {invoices?.items.map((row, i) => (
-                      <tr key={`${row.reference_number || "inv"}-${i}`}>
+                    {(invoices?.items || []).map((row, i) => (
+                      <tr key={invoiceItemId(row, i)}>
                         <td>{row.invoice_date || "—"}</td>
                         <td>{row.due_date || "—"}</td>
                         <td>{row.reference_number || "—"}</td>
@@ -771,10 +931,29 @@ export function FinancialsPanel({
             ) : (
               <p className="muted">No open invoices.</p>
             )}
-            {invoices?.pagination?.has_more ? (
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setInvoicePage((p) => p + 1)}>
-                Load more invoices
+            {invoiceError ? (
+              <div className="banner banner-error" role="alert">
+                {invoiceError}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm banner-dismiss"
+                  onClick={() => setInvoiceRetry((n) => n + 1)}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
+            {canLoadMoreHistory(invoices?.pagination, invoices?.items?.length || 0) ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={invoiceMoreBusy}
+                onClick={() => setInvoicePage((p) => p + 1)}
+              >
+                {invoiceMoreBusy ? "Loading…" : "Load more invoices"}
               </button>
+            ) : historyExhaustedCopy(invoices?.pagination, invoices?.items?.length || 0) ? (
+              <p className="muted">{historyExhaustedCopy(invoices?.pagination, invoices?.items?.length || 0)}</p>
             ) : null}
           </section>
           <section className="ad-section">
@@ -793,6 +972,7 @@ export function FinancialsPanel({
                     type="button"
                     className={historyType === value ? "is-on" : ""}
                     onClick={() => {
+                      pageGuardRef.current += 1;
                       setHistoryType(value);
                       setHistoryPage(1);
                     }}
@@ -802,6 +982,23 @@ export function FinancialsPanel({
                 ))}
               </div>
             </div>
+            {historyBusy && !history ? <p className="muted">Loading transaction history…</p> : null}
+            {historyError ? (
+              <div className="banner banner-error" role="alert">
+                {historyError}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm banner-dismiss"
+                  onClick={() => {
+                    session360?.clearPanel(accountId, `history:${historyType}`);
+                    setHistoryPage(1);
+                    setHistoryRetry((n) => n + 1);
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
             {(history?.items || []).length ? (
               <div className="table-wrap">
                 <table className="ad-table">
@@ -815,7 +1012,7 @@ export function FinancialsPanel({
                   </thead>
                   <tbody>
                     {(history?.items || []).map((row, i) => (
-                      <tr key={`${row.type}-${row.date}-${row.referenceNumber || i}`}>
+                      <tr key={historyItemId(row, i)}>
                         <td>{row.date || "—"}</td>
                         <td>
                           {row.type === "sales_order"
@@ -833,13 +1030,20 @@ export function FinancialsPanel({
                   </tbody>
                 </table>
               </div>
-            ) : (
+            ) : historyBusy ? null : (
               <p className="muted">No transactions in available history for this filter.</p>
             )}
-            {history?.pagination?.has_more ? (
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setHistoryPage((p) => p + 1)}>
-                Load more history
+            {canLoadMoreHistory(history?.pagination, history?.items?.length || 0) ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={historyMoreBusy}
+                onClick={() => setHistoryPage((p) => p + 1)}
+              >
+                {historyMoreBusy ? "Loading…" : "Load more history"}
               </button>
+            ) : historyExhaustedCopy(history?.pagination, history?.items?.length || 0) ? (
+              <p className="muted">{historyExhaustedCopy(history?.pagination, history?.items?.length || 0)}</p>
             ) : null}
           </section>
         </>
@@ -855,6 +1059,7 @@ export function RelationshipWorkspace({
   accountId,
   relationship,
   relationshipBusy = false,
+  session360,
   onOpenTab,
   context
 }: {
@@ -862,6 +1067,7 @@ export function RelationshipWorkspace({
   accountId: string;
   relationship: AccountRelationship | null;
   relationshipBusy?: boolean;
+  session360?: Account360SessionStore | null;
   onOpenTab: (tab: string) => void;
   context?: {
     primaryContact?: string | null;
@@ -879,35 +1085,78 @@ export function RelationshipWorkspace({
   const [family, setFamily] = useState("all");
   const [timeline, setTimeline] = useState<AccountTimelineResponse | null>(null);
   const [timelineBusy, setTimelineBusy] = useState(false);
+  const [timelineMoreBusy, setTimelineMoreBusy] = useState(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [timelineRetry, setTimelineRetry] = useState(0);
+  const timelineGuardRef = useRef(0);
 
   useEffect(() => {
+    timelineGuardRef.current += 1;
     setTimeline(null);
     setPage(1);
     setFamily("all");
+    setTimelineError(null);
+    setTimelineMoreBusy(false);
   }, [accountId]);
 
   useEffect(() => {
-    if (!sessionToken) return;
-    let cancelled = false;
-    setTimelineBusy(true);
-    void getAccountTimeline(sessionToken, accountId, { family, page, limit: 25 })
+    if (!session360 || !sessionToken) return;
+    const expectedAccountId = accountId;
+    const guard = timelineGuardRef.current;
+
+    if (page <= 1) {
+      if (session360.hasPanel(accountId, key)) {
+        setTimeline(session360.getPanel(accountId, key) as AccountTimelineResponse);
+        setTimelineBusy(false);
+        setTimelineError(null);
+        return;
+      }
+      setTimelineBusy(true);
+      setTimelineError(null);
+      setTimeline(null);
+      void session360
+        .loadResource(accountId, key, () =>
+          getAccountTimeline(sessionToken, accountId, { family, page: 1, limit: AD_360_TIMELINE_PAGE_SIZE }, { signal }).then(
+            (res) => applyHistoryPage(null, res, 1, timelineItemId) as AccountTimelineResponse
+          )
+        )
+        .then((res) => {
+          if (guard !== timelineGuardRef.current) return;
+          if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) return;
+          setTimeline(res as AccountTimelineResponse);
+        })
+        .catch((err) => {
+          if (guard !== timelineGuardRef.current) return;
+          if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId) || isAbortError(err)) return;
+          setTimeline({ items: [] });
+          setTimelineError(err instanceof ApiError ? err.message : "Could not load timeline.");
+        })
+        .finally(() => {
+          if (guard !== timelineGuardRef.current) return;
+          if (shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) setTimelineBusy(false);
+        });
+      return;
+    }
+
+    setTimelineMoreBusy(true);
+    setTimelineError(null);
+    void getAccountTimeline(sessionToken, accountId, { family, page, limit: AD_360_TIMELINE_PAGE_SIZE }, { signal })
       .then((res) => {
-        if (cancelled) return;
-        setTimeline((prev) =>
-          page === 1 ? res : { ...res, items: [...(prev?.items || []), ...(res.items || [])] }
-        );
+        if (guard !== timelineGuardRef.current) return;
+        if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) return;
+        setTimeline((prev) => applyHistoryPage(prev, res, page, timelineItemId) as AccountTimelineResponse);
       })
-      .catch(() => {
-        if (!cancelled && page === 1) setTimeline({ items: [] });
+      .catch((err) => {
+        if (guard !== timelineGuardRef.current) return;
+        if (!shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId) || isAbortError(err)) return;
+        setTimelineError(err instanceof ApiError ? err.message : "Could not load more timeline.");
       })
       .finally(() => {
-        if (!cancelled) setTimelineBusy(false);
+        if (guard !== timelineGuardRef.current) return;
+        if (shouldApplyHistoryPage(session360, generation, expectedAccountId, accountId)) setTimelineMoreBusy(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [accountId, family, page, sessionToken]);
+  }, [accountId, family, page, session360, sessionToken, timelineRetry]);
 
   const view = buildRelationshipView(relationship, timeline, {
     ...context,
@@ -1119,6 +1368,7 @@ export function RelationshipWorkspace({
           <select
             value={family}
             onChange={(e) => {
+              timelineGuardRef.current += 1;
               setFamily(e.target.value);
               setPage(1);
             }}
@@ -1130,6 +1380,22 @@ export function RelationshipWorkspace({
             <option value="estimate">Estimates</option>
           </select>
         </div>
+        {timelineError ? (
+          <div className="banner banner-error" role="alert">
+            {timelineError}
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm banner-dismiss"
+              onClick={() => {
+                session360?.clearPanel(accountId, `timeline:${family}`);
+                setPage(1);
+                setTimelineRetry((n) => n + 1);
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
         {timelineBusy && !timeline ? (
           <SectionSkeleton label="Loading timeline…" />
         ) : view.emptyTimeline ? (
@@ -1144,7 +1410,7 @@ export function RelationshipWorkspace({
           <ol className="activity-list" aria-label="Account relationship timeline">
             {view.timelineItems.map((entry, i) => (
               <li
-                key={entry.id || `evt-${i}`}
+                key={timelineItemId(entry, i)}
                 className={`activity-item activity-family-${entry.familyClass || "system"}`}
               >
                 <span className="activity-dot" aria-hidden="true" />
@@ -1178,10 +1444,17 @@ export function RelationshipWorkspace({
             ))}
           </ol>
         )}
-        {timeline?.pagination?.has_more ? (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setPage((p) => p + 1)}>
-            Load more
+        {canLoadMoreHistory(timeline?.pagination, timeline?.items?.length || view.timelineItems.length || 0) ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={timelineMoreBusy}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            {timelineMoreBusy ? "Loading…" : "Load more"}
           </button>
+        ) : historyExhaustedCopy(timeline?.pagination, timeline?.items?.length || 0) ? (
+          <p className="muted">{historyExhaustedCopy(timeline?.pagination, timeline?.items?.length || 0)}</p>
         ) : null}
         <p className="ad-footnote">{view.jobsNotes}</p>
         <p className="ad-footnote">{view.quoteFlowNotes}</p>
