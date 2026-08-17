@@ -20,6 +20,8 @@ import type {
   UpdateLocationPayload,
   AccountInsightsResponse,
   AccountInsightEvidenceResponse,
+  AccountNotesPage,
+  AccountNote,
   MorawareReconciliationResponse,
   QuickBooksCustomerSearchItem
 } from "./types";
@@ -148,6 +150,58 @@ export async function getAccountTimeline(
     token,
     init
   )) as AccountTimelineResponse;
+}
+
+export async function getAccountNotes(
+  token: string,
+  accountId: string,
+  opts: { page?: number; pageSize?: number } = {},
+  init: RequestInit = {}
+) {
+  return (await apiGet(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/notes${qs({
+      page: opts.page,
+      pageSize: opts.pageSize
+    })}`,
+    token,
+    init
+  )) as AccountNotesPage;
+}
+
+export async function createAccountNote(
+  token: string,
+  accountId: string,
+  payload: { body: string }
+) {
+  return (await apiPost(`${BASE}/accounts/${encodeURIComponent(accountId)}/notes`, token, {
+    body: payload.body
+  })) as { ok?: boolean; note?: AccountNote };
+}
+
+export async function updateAccountNote(
+  token: string,
+  accountId: string,
+  noteId: string,
+  payload: { body: string; rowVersion?: number }
+) {
+  return (await apiPatch(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/notes/${encodeURIComponent(noteId)}`,
+    token,
+    payload
+  )) as { ok?: boolean; note?: AccountNote };
+}
+
+export async function archiveAccountNote(
+  token: string,
+  accountId: string,
+  noteId: string,
+  payload: { rowVersion?: number } = {}
+) {
+  return (await apiPost(
+    `${BASE}/accounts/${encodeURIComponent(accountId)}/notes/${encodeURIComponent(noteId)}/archive`,
+    token,
+    payload
+  )) as { ok?: boolean; id?: string; archived?: boolean };
 }
 
 export async function createAccount(token: string, payload: CreateAccountPayload) {

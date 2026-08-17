@@ -3,12 +3,13 @@
  * Exported for Node tests and TypeScript re-export shell.
  */
 
-const VALID_PANELS = ["overview", "financials", "relationship", "contacts", "locations", "connections", "insights"];
+const VALID_PANELS = ["overview", "financials", "relationship", "notes", "contacts", "locations", "connections", "insights"];
 
 export const WORKSPACE_PANEL_TABS = Object.freeze({
   overview: "Overview",
   financials: "Financials",
   relationship: "Relationship",
+  notes: "Notes",
   contacts: "Contacts",
   locations: "Locations",
   connections: "Connections",
@@ -327,6 +328,9 @@ export const ACTIVITY_LABELS = {
   add_alias: "Alias added",
   update_alias: "Alias updated",
   remove_alias: "Alias removed",
+  add_note: "Note added",
+  update_note: "Note updated",
+  archive_note: "Note archived"
 };
 
 /**

@@ -6,7 +6,7 @@
  */
 
 const MAX_TEXT = 200;
-const MAX_NOTES_DISCARD = true; // notes are not an account_directory_accounts column
+const MAX_NOTES_DISCARD = true; // account-level `notes` is still discarded; durable notes live on account_directory_notes
 
 /**
  * @param {unknown} value
@@ -65,7 +65,7 @@ export function resolveDisplayNameFromBody(body) {
 
 /**
  * Normalize create/update account body into the service-domain payload.
- * Drops unsupported `notes` (no account notes column in v1).
+ * Account-create `notes` is still discarded; durable notes use account_directory_notes.
  *
  * @param {Record<string, unknown> | null | undefined} body
  * @param {{ requireDisplayName?: boolean }} [opts]
@@ -144,7 +144,7 @@ export function normalizeAccountWritePayload(body, opts = {}) {
     if (pc && typeof pc !== "object") payload.primaryContactName = pc;
   }
 
-  // Explicitly do not forward notes — not persisted on accounts in v1.
+  // Account-create `notes` is still discarded. Internal notes use POST …/accounts/:id/notes.
   if (MAX_NOTES_DISCARD && "notes" in raw) {
     /* discarded */
   }

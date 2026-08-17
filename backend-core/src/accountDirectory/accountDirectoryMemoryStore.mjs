@@ -26,6 +26,8 @@ export function createAccountDirectoryMemoryStore() {
   const externalLinks = new Map();
   /** @type {Map<string, any>} */
   const qbCustomerFacts = new Map();
+  /** @type {Map<string, any>} */
+  const notes = new Map();
   /** @type {any[]} */
   const auditEvents = [];
 
@@ -534,6 +536,71 @@ export function createAccountDirectoryMemoryStore() {
       return selectTrustedQuickBooksRootCustomers(facts, { query, limit });
     },
 
+    async insertAccountNote(row) {
+      const id = row.id || randomUUID();
+      const record = {
+        id,
+        organizationId: row.organizationId,
+        accountId: row.accountId,
+        body: row.body,
+        createdAt: row.createdAt ?? nowIso(),
+        createdBy: row.createdBy ?? null,
+        updatedAt: row.updatedAt ?? nowIso(),
+        updatedBy: row.updatedBy ?? null,
+        archivedAt: row.archivedAt ?? null,
+        archivedBy: row.archivedBy ?? null,
+        rowVersion: 1
+      };
+      notes.set(id, record);
+      return clone(record);
+    },
+
+    async getAccountNote(organizationId, noteId) {
+      return clone(assertOrg(notes.get(noteId), organizationId));
+    },
+
+    async listAccountNotes(organizationId, accountId, { page = 1, limit = 25, includeArchived = false } = {}) {
+      const safePage = Math.max(1, Number.parseInt(String(page ?? "1"), 10) || 1);
+      const safeLimit = Math.max(1, Number.parseInt(String(limit ?? "25"), 10) || 25);
+      let rows = Array.from(notes.values()).filter(
+        (n) => n.organizationId === organizationId && n.accountId === accountId
+      );
+      if (!includeArchived) rows = rows.filter((n) => !n.archivedAt);
+      rows.sort(
+        (a, b) =>
+          String(b.createdAt).localeCompare(String(a.createdAt)) || String(b.id).localeCompare(String(a.id))
+      );
+      const offset = (safePage - 1) * safeLimit;
+      const slice = rows.slice(offset, offset + safeLimit);
+      return {
+        items: slice.map(clone),
+        pagination: {
+          page: safePage,
+          limit: safeLimit,
+          has_more: rows.length > offset + safeLimit
+        }
+      };
+    },
+
+    async updateAccountNote(organizationId, noteId, patch, expectedRowVersion) {
+      const current = assertOrg(notes.get(noteId), organizationId);
+      if (!current) return { ok: false, code: "not_found" };
+      if (expectedRowVersion != null && Number(current.rowVersion) !== Number(expectedRowVersion)) {
+        return { ok: false, code: "conflict", current: clone(current) };
+      }
+      const next = {
+        ...current,
+        ...patch,
+        id: current.id,
+        organizationId: current.organizationId,
+        accountId: current.accountId,
+        rowVersion: Number(current.rowVersion) + 1,
+        updatedAt: nowIso()
+      };
+      notes.set(noteId, next);
+      return { ok: true, note: clone(next) };
+    },
+
     async insertAuditEvent(event) {
       const row = {
         id: randomUUID(),
@@ -568,6 +635,7 @@ export function createAccountDirectoryMemoryStore() {
         locations: locations.size,
         aliases: aliases.size,
         externalLinks: externalLinks.size,
+        notes: notes.size,
         auditEvents: auditEvents.length
       };
     }

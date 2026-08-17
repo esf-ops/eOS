@@ -36,6 +36,12 @@ import {
   listStatusReviewQueue,
   decideStatusReview
 } from "./accountDirectoryStatusReview.mjs";
+import {
+  archiveAccountNote,
+  createAccountNote,
+  listAccountNotes,
+  updateAccountNote
+} from "./accountDirectoryNotes.mjs";
 import { listMorawareReconciliationQueue } from "./accountDirectoryMorawareReconciliation.mjs";
 import {
   dismissSuggestion,
@@ -63,6 +69,10 @@ function actorRole(req) {
 
 function actorUserId(req) {
   return req?.user?.id ? String(req.user.id) : null;
+}
+
+function actorDisplayName(req) {
+  return String(req?.user?.fullName || req?.user?.full_name || "").trim() || null;
 }
 
 /**
@@ -135,6 +145,7 @@ export function attachAccountDirectoryRoutes(app, deps) {
         organizationId,
         role: actorRole(req),
         actorUserId: actorUserId(req),
+        actorDisplayName: actorDisplayName(req),
         requestId: requestId(req)
       });
       return result;
@@ -305,6 +316,23 @@ export function attachAccountDirectoryRoutes(app, deps) {
         family: req.query?.family ?? req.query?.type
       });
       res.json({ ok: true, ...timeline });
+    });
+  });
+
+  app.get("/api/account-directory/accounts/:accountId/notes", ...guard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const data = await listAccountNotes({
+        store,
+        getSupabase,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        actorUserId: ctx.actorUserId,
+        actorDisplayName: ctx.actorDisplayName,
+        page: req.query?.page,
+        pageSize: req.query?.pageSize ?? req.query?.limit
+      });
+      res.json({ ok: true, ...data });
     });
   });
 
@@ -487,6 +515,75 @@ export function attachAccountDirectoryRoutes(app, deps) {
         payload: req.body || {}
       });
       res.json({ ok: true, account });
+    });
+  });
+
+  app.post("/api/account-directory/accounts/:accountId/notes", ...writeGuard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const note = await createAccountNote({
+        store,
+        logAction,
+        getSupabase,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        role: ctx.role,
+        actorUserId: ctx.actorUserId,
+        actorDisplayName: ctx.actorDisplayName,
+        requestId: ctx.requestId,
+        payload: req.body || {}
+      });
+      res.status(201).json({ ok: true, note });
+    });
+  });
+
+  app.patch("/api/account-directory/accounts/:accountId/notes/:noteId", ...writeGuard, async (req, res) => {
+    await withOrg(req, res, async (ctx) => {
+      const note = await updateAccountNote({
+        store,
+        logAction,
+        getSupabase,
+        organizationId: ctx.organizationId,
+        accountId: String(req.params.accountId),
+        noteId: String(req.params.noteId),
+        role: ctx.role,
+        actorUserId: ctx.actorUserId,
+        actorDisplayName: ctx.actorDisplayName,
+        requestId: ctx.requestId,
+        payload: req.body || {}
+      });
+      res.json({ ok: true, note });
+    });
+  });
+
+  app.post(
+    "/api/account-directory/accounts/:accountId/notes/:noteId/archive",
+    ...writeGuard,
+    async (req, res) => {
+      await withOrg(req, res, async (ctx) => {
+        const result = await archiveAccountNote({
+          store,
+          logAction,
+          getSupabase,
+          organizationId: ctx.organizationId,
+          accountId: String(req.params.accountId),
+          noteId: String(req.params.noteId),
+          role: ctx.role,
+          actorUserId: ctx.actorUserId,
+          actorDisplayName: ctx.actorDisplayName,
+          requestId: ctx.requestId,
+          payload: req.body || {}
+        });
+        res.json({ ok: true, ...result });
+      });
+    }
+  );
+
+  app.delete("/api/account-directory/accounts/:accountId/notes/:noteId", ...guard, async (req, res) => {
+    jsonNoStore(res);
+    res.status(405).json({
+      ok: false,
+      code: "hard_delete_unavailable",
+      error: "Hard delete is not available. Archive the note instead."
     });
   });
 

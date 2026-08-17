@@ -152,6 +152,8 @@ function counts(store) {
   assert.deepEqual(result, ACCOUNT360_DEFAULT_NAV_BUDGET);
   assert.deepEqual(account360FetchesForSurface("connections"), []);
   assert.deepEqual(account360FetchesForSurface("insights"), []);
+  assert.deepEqual(account360FetchesForSurface("notes"), ["notes:all"]);
+  assert.equal(result.notes, 0);
   assert.equal(store.hasPanel("acct-1", "trend:trailing_12"), true);
   assert.equal(store.hasPanel("acct-1", "invoices"), true);
   assert.equal(needsAccount360Fetch(store, "acct-1", "history:all"), false);
@@ -236,6 +238,7 @@ function counts(store) {
   );
   assert.match(api, /getAccountOpenInvoices\([\s\S]*?init: RequestInit/, "invoice GET accepts AbortSignal");
   assert.match(api, /getAccountTimeline\([\s\S]*?init: RequestInit/, "timeline GET accepts AbortSignal");
+  assert.match(api, /getAccountNotes\([\s\S]*?init: RequestInit/, "notes GET accepts AbortSignal");
 
   const app = readFileSync(join(root, "app-account-directory/src/AccountDirectoryApp.tsx"), "utf8");
   assert.ok(app.includes("createAccount360SessionStore"));

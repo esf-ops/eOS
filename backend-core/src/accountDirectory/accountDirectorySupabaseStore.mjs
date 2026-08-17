@@ -121,6 +121,23 @@ function mapLink(row) {
   };
 }
 
+function mapNote(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    accountId: row.account_id,
+    body: row.body,
+    createdAt: row.created_at,
+    createdBy: row.created_by ?? null,
+    updatedAt: row.updated_at,
+    updatedBy: row.updated_by ?? null,
+    archivedAt: row.archived_at ?? null,
+    archivedBy: row.archived_by ?? null,
+    rowVersion: Number(row.row_version ?? 1)
+  };
+}
+
 function mapAudit(row) {
   if (!row) return null;
   return {
@@ -898,6 +915,85 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return sortQbCustomerSearchItems(
         facts.map((fact) => assertSafeQbCustomerSearchItem(toPublicQuickBooksCustomerSearchItem(fact)))
       ).slice(0, max);
+    },
+
+    async insertAccountNote(row) {
+      const { data, error } = await db()
+        .from("account_directory_notes")
+        .insert({
+          organization_id: row.organizationId,
+          account_id: row.accountId,
+          body: row.body,
+          created_by: row.createdBy ?? null,
+          updated_by: row.updatedBy ?? null
+        })
+        .select("*")
+        .single();
+      if (error) throw dbError(error, "Could not create note.");
+      return mapNote(data);
+    },
+
+    async getAccountNote(organizationId, noteId) {
+      const { data, error } = await db()
+        .from("account_directory_notes")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("id", noteId)
+        .maybeSingle();
+      if (error) throw dbError(error, "Could not load note.");
+      return mapNote(data);
+    },
+
+    async listAccountNotes(organizationId, accountId, { page = 1, limit = 25, includeArchived = false } = {}) {
+      const safePage = Math.max(1, Number.parseInt(String(page ?? "1"), 10) || 1);
+      const safeLimit = Math.max(1, Number.parseInt(String(limit ?? "25"), 10) || 25);
+      const from = (safePage - 1) * safeLimit;
+      const to = from + safeLimit - 1;
+      let q = db()
+        .from("account_directory_notes")
+        .select("*", { count: "exact" })
+        .eq("organization_id", organizationId)
+        .eq("account_id", accountId);
+      if (!includeArchived) q = q.is("archived_at", null);
+      q = q.order("created_at", { ascending: false }).order("id", { ascending: false });
+      const { data, error, count } = await q.range(from, to);
+      if (error) throw dbError(error, "Could not list notes.");
+      const total = count ?? (data || []).length;
+      return {
+        items: (data || []).map(mapNote),
+        pagination: {
+          page: safePage,
+          limit: safeLimit,
+          has_more: total > from + safeLimit
+        }
+      };
+    },
+
+    async updateAccountNote(organizationId, noteId, patch, expectedRowVersion) {
+      const current = await this.getAccountNote(organizationId, noteId);
+      if (!current) return { ok: false, code: "not_found" };
+      if (expectedRowVersion != null && Number(current.rowVersion) !== Number(expectedRowVersion)) {
+        return { ok: false, code: "conflict", current };
+      }
+      /** @type {Record<string, unknown>} */
+      const update = { updated_by: patch.updatedBy ?? null };
+      if (patch.body !== undefined) update.body = patch.body;
+      if (patch.archivedAt !== undefined) update.archived_at = patch.archivedAt;
+      if (patch.archivedBy !== undefined) update.archived_by = patch.archivedBy;
+      let q = db()
+        .from("account_directory_notes")
+        .update(update)
+        .eq("organization_id", organizationId)
+        .eq("id", noteId);
+      if (expectedRowVersion != null) q = q.eq("row_version", Number(expectedRowVersion));
+      const { data, error } = await q.select("*").maybeSingle();
+      if (error) throw dbError(error, "Could not update note.");
+      if (!data) {
+        const again = await this.getAccountNote(organizationId, noteId);
+        if (!again) return { ok: false, code: "not_found" };
+        return { ok: false, code: "conflict", current: again };
+      }
+      return { ok: true, note: mapNote(data) };
     },
 
     async insertAuditEvent(event) {

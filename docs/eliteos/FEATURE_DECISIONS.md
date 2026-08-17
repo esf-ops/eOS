@@ -4459,3 +4459,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Account 360 UI wiring, Material Mix, normalized backsplash, upgrades, Moraware crawl/sync from this writer. |
 | **Impacted** | `morawareJobWorksheetScope.mjs`, `morawareJobWorksheetPreparedFacts.mjs`, worksheet facts SQL/CLI, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
 
+### 328. Account 360 internal Notes are eliteOS data on the Account Directory UUID (2026-08-17)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-17 |
+| **Decision** | Account 360 Notes are durable **internal eliteOS** staff notes keyed only by `organization_id` + canonical **Account Directory UUID**. They must not write to QuickBooks, Moraware, external CRMs, or customer-facing quote systems. Notes are not associated by customer name or fuzzy identity. Account-create payload `notes` remains discarded; this feature is the `account_directory_notes` child table + nested API. |
+| **Schema** | `public.account_directory_notes` (manual SQL `backend-core/supabase/eliteos_account_directory_notes_v1.sql`, **not applied in this pass**). Columns: id, organization_id, account_id FK, body (trim-nonempty, max 4000), created/updated timestamps and actors, archived_at/archived_by, row_version. Index `(organization_id, account_id, created_at DESC)`. RLS SELECT-org for authenticated; mutations via service_role backend. Soft-archive only; no hard DELETE. |
+| **Permissions** | VIEW list: `account_directory_view` (anyone who can open Account 360). CREATE / EDIT / ARCHIVE: `account_directory_edit` (same as contacts/locations). Not owner-only — current auth data cannot support owner-only cleanly. Account archive remains ADMIN. Backend authorization is authoritative. |
+| **API** | `GET/POST /api/account-directory/accounts/:accountId/notes`, `PATCH …/notes/:noteId`, `POST …/notes/:noteId/archive`. No org-wide notes dump. Page default 25, max 50, newest-first. Public author is `{ displayName }` from `user_profiles.full_name` (fallback `"Staff"`). No email, tokens, or user ids in the note payload. `rowVersion` is included for PATCH. |
+| **Audit** | After successful mutation only: `add_note` / `update_note` / `archive_note` with `{ noteId, bodyLength }` — not the note body. |
+| **UX** | Dedicated Account 360 **Notes** tab. Overview does not load notes history. Page 1 is session-cached; page 2+ appends locally; account switch aborts; create/edit/archive invalidates the Notes family only. |
+| **Out of scope** | Full-text search, mentions, attachments, Overview compact summary, owner-only edit, exposing user ids/emails, account-level `notes` column. |
+| **Impacted** | Account Directory store/API, Account 360 Notes tab, request coordinator, this doc, SYSTEM_BLUEPRINT. |
+

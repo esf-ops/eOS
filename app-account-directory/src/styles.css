@@ -2202,3 +2202,14 @@ a.detail-list-title:hover {
 .ad-qb-picker,
 .ad-mw-find { margin-top: 12px; }
 
+.ad-notes { display: grid; gap: 16px; min-width: 0; }
+.ad-notes-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.ad-note { padding: 14px 0; border-bottom: 1px solid var(--eos-line); }
+.ad-note:last-child { border-bottom: 0; }
+.ad-note-meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--eos-ink-muted); font-size: 0.82rem; }
+.ad-note-meta strong { color: var(--eos-ink); font-weight: 650; }
+.ad-note-body { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--eos-ink); }
+.ad-notes-composer { display: grid; gap: 10px; max-width: 40rem; }
+.ad-notes-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.ad-note-count { margin-left: auto; color: var(--eos-ink-muted); font-size: 0.78rem; font-weight: 500; }
+

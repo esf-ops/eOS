@@ -445,6 +445,26 @@ export type AccountTimelineResponse = {
   pagination?: { page?: number; limit?: number; has_more?: boolean };
 };
 
+export type AccountNoteAuthor = {
+  displayName: string;
+};
+
+export type AccountNote = {
+  id: string;
+  body: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  edited?: boolean;
+  author?: AccountNoteAuthor;
+  rowVersion?: number;
+};
+
+export type AccountNotesPage = {
+  ok?: boolean;
+  items?: AccountNote[];
+  pagination?: { page?: number; limit?: number; has_more?: boolean };
+};
+
 export type AccountFinancialsResponse = {
   ok?: boolean;
   financials?: AccountFinancials;
