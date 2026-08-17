@@ -274,8 +274,9 @@ function wsJob(id, sqft, lastSeen, extra = {}) {
     }
   ], null);
   assert.equal(inc.census_scope, CENSUS_SCOPE_INCREMENTAL);
-  assert.equal(inc.complete, true);
+  assert.equal(inc.complete, false);
   assert.equal(inc.eligible, false);
+  assert.equal(inc.full_census_authority_runs, 0);
   console.log("ok: legacy baseline_2026 qualifies; capped/partial/incremental do not advance watermark");
 }
 
@@ -663,6 +664,145 @@ assert.equal(VERIFIED_FOUNDATION_2026_WORKSHEET_SQFT, 271432.5);
   ];
   assert.equal(sumJobWorksheetCensusSqft(filterCurrentMorawareJobSet(broihahn, POP)), 1283.5);
   console.log("ok: Broihahn 13-job / 1,283.5 SqFt membership math unchanged (2-job fixture sum)");
+}
+
+{
+  // Stuck production shape: incremental running/failed/success sharing FULL epoch A
+  // must not poison FULL A or fall back to older FULL B.
+  clearCurrentMorawarePopulationCacheForTests();
+  const AUG = "c3a0e6e5-b5af-499c-87a8-73d720d485be";
+  const OLD = "ff340b9e-6a4a-4750-aac8-7b741b4e21ab";
+  const augChunks = Array.from({ length: 3 }, (_, i) =>
+    runRow({
+      id: `aug-${i + 1}`,
+      gid: AUG,
+      scope: CENSUS_SCOPE_FULL,
+      mode: "baseline_2026-real-snapshot",
+      started: `2026-08-15T18:${48 + i}:00.000Z`,
+      finished: `2026-08-15T19:0${i}:00.000Z`,
+      chunkIndex: i + 1,
+      chunkCount: 3
+    })
+  );
+  const oldChunks = Array.from({ length: 2 }, (_, i) =>
+    runRow({
+      id: `old-${i + 1}`,
+      gid: OLD,
+      scope: CENSUS_SCOPE_FULL,
+      mode: "baseline_2026-real-snapshot",
+      started: `2026-06-28T07:0${i}:00.000Z`,
+      finished: `2026-06-28T07:1${i}:00.000Z`,
+      chunkIndex: i + 1,
+      chunkCount: 2
+    })
+  );
+
+  for (const overlay of [
+    { id: "stuck-running", status: "running", finished: null },
+    { id: "stuck-failed", status: "failed", finished: "2026-08-17T17:36:05.000Z" },
+    { id: "inc-success", status: "success", finished: "2026-08-17T18:00:00.000Z" }
+  ]) {
+    const stuck = {
+      id: overlay.id,
+      organization_id: "org-1",
+      status: overlay.status,
+      started_at: "2026-08-17T17:36:04.718Z",
+      finished_at: overlay.finished,
+      mode: "incremental-worker-import",
+      runner: "moraware-incremental",
+      metadata: {
+        import_group_id: AUG,
+        census_scope: CENSUS_SCOPE_INCREMENTAL,
+        parent_full_epoch_id: AUG,
+        creates_new_full_epoch: false
+      }
+    };
+    const evaluated = evaluateImportGroupAsFullCensus(AUG, [...augChunks, stuck], stuck);
+    assert.equal(evaluated.eligible, true);
+    assert.equal(evaluated.census_scope, CENSUS_SCOPE_FULL);
+    assert.equal(evaluated.complete, true);
+    assert.equal(evaluated.incremental_overlay_runs, 1);
+    assert.ok(evaluated.full_census_authority_runs >= 3);
+
+    clearCurrentMorawarePopulationCacheForTests();
+    const pop = await resolveCurrentMorawarePopulation(
+      createCountingSyncRunsDb([...oldChunks, ...augChunks, stuck]),
+      "org-1",
+      { skipCache: true }
+    );
+    assert.equal(pop.full_census_import_group_id, AUG, `overlay=${overlay.id}`);
+    assert.match(String(pop.full_census_started_at), /^2026-08-15/);
+    assert.notEqual(pop.full_census_import_group_id, OLD);
+
+    const watermarkPop = { full_census_started_at: pop.full_census_started_at };
+    const foundation = Array.from({ length: 4073 }, (_, i) => ({
+      source_job_id: String(1000 + i),
+      last_seen_at: "2026-08-15T19:00:00.000Z"
+    }));
+    const additions = Array.from({ length: 14 }, (_, i) => ({
+      source_job_id: String(41456 + i),
+      last_seen_at: "2026-08-17T17:36:04.841Z"
+    }));
+    const current = filterCurrentMorawareJobSet([...foundation, ...additions], watermarkPop);
+    assert.equal(current.length, 4087);
+  }
+  console.log("ok: incremental running/failed/success sharing FULL A cannot poison FULL A; CURRENT uses Aug watermark + 14 additions");
+}
+
+{
+  // Later complete FULL B replaces A; incomplete FULL B cannot.
+  clearCurrentMorawarePopulationCacheForTests();
+  const A = "epoch-A";
+  const B = "epoch-B";
+  const aChunks = Array.from({ length: 2 }, (_, i) =>
+    runRow({
+      id: `a${i + 1}`,
+      gid: A,
+      scope: CENSUS_SCOPE_FULL,
+      mode: "baseline_2026-real-snapshot",
+      started: `2026-08-15T10:0${i}:00.000Z`,
+      finished: `2026-08-15T11:0${i}:00.000Z`,
+      chunkIndex: i + 1,
+      chunkCount: 2
+    })
+  );
+  const bIncomplete = [
+    runRow({
+      id: "b1",
+      gid: B,
+      scope: CENSUS_SCOPE_FULL,
+      mode: "baseline_2026-real-snapshot",
+      started: "2026-08-18T10:00:00.000Z",
+      finished: "2026-08-18T10:05:00.000Z",
+      chunkIndex: 1,
+      chunkCount: 2
+    })
+  ];
+  const popIncomplete = await resolveCurrentMorawarePopulation(
+    createCountingSyncRunsDb([...aChunks, ...bIncomplete]),
+    "org-1",
+    { skipCache: true }
+  );
+  assert.equal(popIncomplete.full_census_import_group_id, A);
+
+  const bComplete = Array.from({ length: 2 }, (_, i) =>
+    runRow({
+      id: `b-ok-${i + 1}`,
+      gid: B,
+      scope: CENSUS_SCOPE_FULL,
+      mode: "baseline_2026-real-snapshot",
+      started: `2026-08-18T10:0${i}:00.000Z`,
+      finished: `2026-08-18T11:0${i}:00.000Z`,
+      chunkIndex: i + 1,
+      chunkCount: 2
+    })
+  );
+  clearCurrentMorawarePopulationCacheForTests();
+  const popB = await resolveCurrentMorawarePopulation(createCountingSyncRunsDb([...aChunks, ...bComplete]), "org-1", {
+    skipCache: true
+  });
+  assert.equal(popB.full_census_import_group_id, B);
+  console.log("ok: incomplete FULL B cannot replace A; complete FULL B replaces A");
 }
 
 console.log("morawareCurrentPopulation.test.mjs — all passed");

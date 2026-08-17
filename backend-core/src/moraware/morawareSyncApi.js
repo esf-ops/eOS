@@ -368,13 +368,31 @@ function addRowCounts(a = {}, b = {}) {
 }
 
 function summarizeImportGroupRows(groupRows, latestRun) {
-  const expectedChunkCount = Math.max(
-    0,
-    ...groupRows.map((r) => Number(r?.metadata?.chunk_count) || 0),
-    Number(latestRun?.metadata?.chunk_count) || 0
-  ) || null;
+  const allRows = Array.isArray(groupRows) ? groupRows : [];
+  const isIncrementalOverlay = (run) => {
+    const meta = run?.metadata && typeof run.metadata === "object" ? run.metadata : {};
+    const scope = String(meta.census_scope ?? "")
+      .trim()
+      .toLowerCase();
+    if (scope === "incremental") return true;
+    if (scope === "full") return false;
+    const mode = String(run?.mode ?? "").toLowerCase();
+    const runner = String(run?.runner ?? "").toLowerCase();
+    return mode.includes("incremental") || runner.includes("incremental");
+  };
+  const fullRows = allRows.filter((r) => !isIncrementalOverlay(r));
+  const authorityLatest =
+    (latestRun && !isIncrementalOverlay(latestRun) ? latestRun : null) ||
+    fullRows[fullRows.length - 1] ||
+    null;
+  const expectedChunkCount =
+    Math.max(
+      0,
+      ...fullRows.map((r) => Number(r?.metadata?.chunk_count) || 0),
+      Number(authorityLatest?.metadata?.chunk_count) || 0
+    ) || null;
   const byChunkIndex = new Map();
-  for (const row of groupRows) {
+  for (const row of fullRows) {
     const idx = Number(row?.metadata?.chunk_index) || null;
     if (!idx) continue;
     const prev = byChunkIndex.get(idx);
@@ -392,17 +410,22 @@ function summarizeImportGroupRows(groupRows, latestRun) {
   }
   const successfulChunks = latestChunkRows.filter(([, row]) => row.status === "success").length;
   const failedChunks = latestChunkRows.filter(([, row]) => row.status === "failed").length;
-  const complete = Boolean(expectedChunkCount) && successfulChunks === expectedChunkCount && failedChunks === 0 && missingChunkIndices.length === 0;
+  const complete =
+    Boolean(expectedChunkCount) && successfulChunks === expectedChunkCount && failedChunks === 0 && missingChunkIndices.length === 0;
   return {
     expectedChunkCount,
-    attemptedRuns: groupRows.length,
+    attemptedRuns: allRows.length,
+    full_census_attempted_runs: fullRows.length,
+    incremental_overlay_runs: allRows.length - fullRows.length,
     observedChunkCount: latestChunkRows.length,
     successfulChunks,
     failedChunks,
     missingChunkIndices,
     complete,
     totalRowCounts,
-    latestChunkRows: latestChunkRows.map(([, row]) => row)
+    latestChunkRows: latestChunkRows.map(([, row]) => row),
+    started_at: fullRows[0]?.started_at ?? null,
+    finished_at: fullRows.length ? fullRows[fullRows.length - 1]?.finished_at ?? null : null
   };
 }
 

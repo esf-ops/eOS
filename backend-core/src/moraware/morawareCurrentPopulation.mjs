@@ -67,6 +67,24 @@ export function resolveCensusScopeFromRun(run) {
   return "";
 }
 
+/** True when this sync run is an incremental overlay (never FULL census authority). */
+export function isIncrementalCensusAuthorityRun(run) {
+  return resolveCensusScopeFromRun(run) === CENSUS_SCOPE_INCREMENTAL;
+}
+
+/** True when this sync run participates in FULL census completeness / watermark. */
+export function isFullCensusAuthorityRun(run) {
+  return resolveCensusScopeFromRun(run) === CENSUS_SCOPE_FULL;
+}
+
+/**
+ * FULL epoch completeness must ignore incremental overlay runs that share
+ * parent FULL import_group_id (running / failed / successful).
+ */
+export function filterFullCensusAuthorityRuns(groupRows = []) {
+  return (Array.isArray(groupRows) ? groupRows : []).filter((r) => isFullCensusAuthorityRun(r));
+}
+
 export function blockingCapWarnings(warnings) {
   const list = Array.isArray(warnings) ? warnings : [];
   return list.filter((w) => {
@@ -168,11 +186,50 @@ function representativeRun(groupRows = []) {
   return withMeta || null;
 }
 
+/**
+ * Evaluate whether import_group_id is a qualifying FULL census epoch.
+ *
+ * Incremental overlay runs that reuse parent FULL import_group_id are excluded
+ * from completeness, census_scope, and watermark eligibility — whether running,
+ * failed, or successful. They cannot poison or replace FULL A.
+ */
 export function evaluateImportGroupAsFullCensus(importGroupId, groupRows, latestRun) {
-  const summary = summarizeImportGroupRows(groupRows, latestRun);
-  const run = latestRun || representativeRun(groupRows);
-  const census_scope = resolveCensusScopeFromRun(run);
-  const uncapped = isUncappedCensusMetadata(run);
+  const allRows = Array.isArray(groupRows) ? groupRows : [];
+  const fullRows = filterFullCensusAuthorityRuns(allRows);
+  const overlayCount = allRows.length - fullRows.length;
+
+  if (!fullRows.length) {
+    const anyInc = allRows.some((r) => isIncrementalCensusAuthorityRun(r));
+    return {
+      census_scope: anyInc ? CENSUS_SCOPE_INCREMENTAL : null,
+      full_census_import_group_id: null,
+      full_census_started_at: null,
+      full_census_completed_at: null,
+      source_start_date: null,
+      source_end_date: null,
+      complete: false,
+      uncapped: false,
+      eligible: false,
+      expected_chunk_count: null,
+      successful_chunks: 0,
+      failed_chunks: 0,
+      missing_chunk_indices: [],
+      snapshot_mode: null,
+      mode: allRows[allRows.length - 1]?.mode || null,
+      incremental_overlay_runs: overlayCount,
+      full_census_authority_runs: 0
+    };
+  }
+
+  const authorityLatest =
+    (latestRun && isFullCensusAuthorityRun(latestRun) ? latestRun : null) ||
+    representativeRun(fullRows) ||
+    fullRows[fullRows.length - 1] ||
+    null;
+
+  const summary = summarizeImportGroupRows(fullRows, authorityLatest);
+  const census_scope = resolveCensusScopeFromRun(authorityLatest);
+  const uncapped = isUncappedCensusMetadata(authorityLatest);
   const complete = Boolean(summary.complete);
   const importSucceeded =
     complete &&
@@ -184,7 +241,7 @@ export function evaluateImportGroupAsFullCensus(importGroupId, groupRows, latest
     uncapped,
     importSucceeded
   });
-  const meta = metaOf(run);
+  const meta = metaOf(authorityLatest);
   return {
     census_scope: census_scope || null,
     full_census_import_group_id: eligible ? importGroupId : null,
@@ -200,7 +257,9 @@ export function evaluateImportGroupAsFullCensus(importGroupId, groupRows, latest
     failed_chunks: summary.failedChunks,
     missing_chunk_indices: summary.missingChunkIndices,
     snapshot_mode: meta.snapshot_mode || null,
-    mode: run?.mode || null
+    mode: authorityLatest?.mode || null,
+    incremental_overlay_runs: overlayCount,
+    full_census_authority_runs: fullRows.length
   };
 }
 
@@ -274,6 +333,11 @@ function writePopulationCache(organizationId, population, nowMs) {
 }
 
 function populationFromEvaluation(importGroupId, groupRows, evaluated, latestRun) {
+  const fullRows = filterFullCensusAuthorityRuns(groupRows);
+  const authorityLatest =
+    (latestRun && isFullCensusAuthorityRun(latestRun) ? latestRun : null) ||
+    fullRows[fullRows.length - 1] ||
+    null;
   return {
     census_scope: CENSUS_SCOPE_FULL,
     full_census_import_group_id: importGroupId,
@@ -284,7 +348,10 @@ function populationFromEvaluation(importGroupId, groupRows, evaluated, latestRun
     complete: true,
     uncapped: true,
     available: true,
-    import_group: formatImportGroupForApi(importGroupId, summarizeImportGroupRows(groupRows, latestRun))
+    import_group: formatImportGroupForApi(importGroupId, summarizeImportGroupRows(fullRows, authorityLatest), {
+      incremental_overlay_runs: evaluated.incremental_overlay_runs ?? 0,
+      full_census_authority_runs: evaluated.full_census_authority_runs ?? fullRows.length
+    })
   };
 }
 

@@ -14,8 +14,74 @@ import { MORAWARE_INCREMENTAL_STRATEGY } from "./morawareIncrementalStrategy.mjs
 
 const SOURCE_SYSTEM = "moraware";
 
+/**
+ * Authoritative writable columns for brain_moraware_job_activities
+ * (eliteos_moraware_sync_foundation_v1.sql + canonical normalizeActivities /
+ * withMorawareMirrorObservationTimestamps).
+ * Do not emit invented columns (activity_name, activity_status, start_date, …).
+ * first_seen_at / created_at / id are DB defaults — omitted on upsert.
+ */
+export const BRAIN_MORAWARE_JOB_ACTIVITY_WRITE_COLUMNS = Object.freeze([
+  "organization_id",
+  "sync_run_id",
+  "source_system",
+  "source_activity_id",
+  "source_job_id",
+  "activity_type_name",
+  "activity_status_name",
+  "phase_name",
+  "scheduled_date",
+  "scheduled_time",
+  "duration_minutes",
+  "raw_payload",
+  "last_seen_at",
+  "updated_at"
+]);
+
 function pickStr(v) {
   return v != null ? String(v).trim() : "";
+}
+
+function firstNonempty(...values) {
+  for (const v of values) {
+    const s = pickStr(v);
+    if (s) return s;
+  }
+  return "";
+}
+
+function toIsoOrNull(raw) {
+  const s = pickStr(raw);
+  if (!s) return null;
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
+function toDateOrNull(raw) {
+  const iso = toIsoOrNull(raw);
+  return iso ? iso.slice(0, 10) : null;
+}
+
+function toNumberOrNull(raw) {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function rawPayloadOf(row) {
+  if (row?.raw_payload && typeof row.raw_payload === "object") return row.raw_payload;
+  if (row?.raw && typeof row.raw === "object") return row.raw;
+  return row && typeof row === "object" ? row : {};
+}
+
+/** Sanitize sync-run error text — no credentials / giant dumps. */
+export function sanitizeMorawareSyncRunErrorMessage(raw, { maxLen = 500 } = {}) {
+  let s = String(raw ?? "")
+    .replace(/(Bearer\s+)[A-Za-z0-9._\-]+/gi, "$1[redacted]")
+    .replace(/(api[_-]?key|token|password|secret|service_role)(=+|:\s*)([^\s&]+)/gi, "$1$2[redacted]")
+    .replace(/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted-jwt]")
+    .slice(0, Math.max(1, Number(maxLen) || 500));
+  return s || "unknown_error";
 }
 
 /**
@@ -61,6 +127,7 @@ export function buildIncrementalBrainJobRows(
 
 /**
  * Build brain_moraware_job_activities rows from exact job payloads.
+ * Matches canonical normalizeActivities / foundation schema columns.
  */
 export function buildIncrementalBrainActivityRows(
   jobs = [],
@@ -79,8 +146,16 @@ export function buildIncrementalBrainActivityRows(
         : [];
     for (let i = 0; i < activities.length; i += 1) {
       const a = activities[i] || {};
+      const raw = rawPayloadOf(a);
       const sourceActivityId =
-        pickStr(a.source_activity_id || a.id || a.activityId) || `${sourceJobId}:activity:${i}`;
+        firstNonempty(
+          a.source_activity_id,
+          a.source_record_id,
+          a.activity_id,
+          a.activityId,
+          a.id,
+          sourceJobId ? `${sourceJobId}:activity:${a.activityIndex ?? i}` : ""
+        ) || `${sourceJobId || "job"}:activity:${i}`;
       rows.push(
         withMorawareMirrorObservationTimestamps(
           {
@@ -88,11 +163,36 @@ export function buildIncrementalBrainActivityRows(
             sync_run_id: runId,
             source_system: SOURCE_SYSTEM,
             source_activity_id: sourceActivityId,
-            source_job_id: sourceJobId,
-            activity_name: pickStr(a.activity_name || a.name || a.activityName) || null,
-            activity_status: pickStr(a.activity_status || a.status || a.activityStatus) || null,
-            start_date: pickStr(a.startDate || a.start_date || a.scheduled_date) || null,
-            raw_payload: a
+            source_job_id: firstNonempty(a.source_job_id, a.job_id, a.jobId, raw.jobId, sourceJobId) || null,
+            activity_type_name:
+              firstNonempty(
+                a.activity_type_name,
+                a.activity_type,
+                a.activityTypeName,
+                a.activityType,
+                a.type,
+                a.name,
+                a.activityName,
+                raw.activityType,
+                raw.activity_type_name
+              ) || null,
+            activity_status_name:
+              firstNonempty(
+                a.activity_status_name,
+                a.activity_status,
+                a.activityStatusName,
+                a.activityStatus,
+                a.status,
+                raw.status,
+                raw.activity_status_name
+              ) || null,
+            phase_name: firstNonempty(a.phase_name, a.phaseName, raw.phaseName) || null,
+            scheduled_date: toDateOrNull(
+              a.scheduled_date ?? a.start_date ?? a.startDate ?? a.date ?? raw.scheduled_date ?? raw.startDate
+            ),
+            scheduled_time: firstNonempty(a.scheduled_time, a.sched_time, a.schedTime, raw.schedTime) || null,
+            duration_minutes: toNumberOrNull(a.duration_minutes ?? a.duration ?? raw.duration),
+            raw_payload: raw
           },
           now
         )
@@ -100,6 +200,62 @@ export function buildIncrementalBrainActivityRows(
     }
   }
   return rows;
+}
+
+function emptyStageCounts(extra = {}) {
+  return {
+    jobs_attempted: 0,
+    jobs_written: 0,
+    activities_attempted: 0,
+    activities_written: 0,
+    forms_attempted: 0,
+    forms_written: 0,
+    failed_stage: null,
+    ...extra
+  };
+}
+
+/**
+ * Finalize a moraware_sync_runs row on failure using real columns only.
+ * Never writes error_summary. Never masks the original pipeline error.
+ */
+export async function finalizeMorawareSyncRunFailure(
+  supabase,
+  { syncRunId, startedAt, errorMessage } = {}
+) {
+  const id = pickStr(syncRunId);
+  if (!id || !supabase) {
+    return { ok: false, skipped: true, reason: "missing_sync_run_id" };
+  }
+  const finishedAt = new Date().toISOString();
+  const startedMs = Date.parse(String(startedAt || ""));
+  const durationMs = Number.isFinite(startedMs) ? Math.max(0, Date.parse(finishedAt) - startedMs) : null;
+  const patch = {
+    status: "failed",
+    finished_at: finishedAt,
+    error_message: sanitizeMorawareSyncRunErrorMessage(errorMessage)
+  };
+  if (durationMs != null) patch.duration_ms = durationMs;
+
+  try {
+    const { error } = await supabase.from("moraware_sync_runs").update(patch).eq("id", id);
+    if (error) {
+      return {
+        ok: false,
+        status: "finalize_failed",
+        error: String(error.message || error),
+        attempted_columns: Object.keys(patch)
+      };
+    }
+    return { ok: true, status: "failed", finished_at: finishedAt, duration_ms: durationMs };
+  } catch (e) {
+    return {
+      ok: false,
+      status: "finalize_threw",
+      error: String(e?.message || e),
+      attempted_columns: Object.keys(patch)
+    };
+  }
 }
 
 /**
@@ -120,14 +276,14 @@ export async function importIncrementalMorawareBrainJobs(
   } = {}
 ) {
   if (liveWrite !== true || allowLivePopulation !== true) {
-    return { ok: false, status: "live_population_not_enabled", jobs_written: 0 };
+    return { ok: false, status: "live_population_not_enabled", ...emptyStageCounts() };
   }
   const org = pickStr(organizationId);
   const token = pickStr(ownerToken);
   const parentEpoch = pickStr(parentFullEpochId);
-  if (!org) return { ok: false, status: "organization_required", jobs_written: 0 };
-  if (!token) return { ok: false, status: "population_lock_required", jobs_written: 0 };
-  if (!parentEpoch) return { ok: false, status: "parent_full_epoch_required", jobs_written: 0 };
+  if (!org) return { ok: false, status: "organization_required", ...emptyStageCounts() };
+  if (!token) return { ok: false, status: "population_lock_required", ...emptyStageCounts() };
+  if (!parentEpoch) return { ok: false, status: "parent_full_epoch_required", ...emptyStageCounts() };
 
   const guard = await guardLiveMorawarePopulationWrite(supabase, {
     ownerToken: token,
@@ -139,7 +295,7 @@ export async function importIncrementalMorawareBrainJobs(
       ok: false,
       status: guard.code || "population_lock_denied",
       error: guard.error,
-      jobs_written: 0
+      ...emptyStageCounts()
     };
   }
 
@@ -158,6 +314,8 @@ export async function importIncrementalMorawareBrainJobs(
 
   const startedAt = new Date().toISOString();
   let syncRunId = null;
+  const counts = emptyStageCounts();
+
   try {
     const runInsert = await supabase
       .from("moraware_sync_runs")
@@ -185,18 +343,27 @@ export async function importIncrementalMorawareBrainJobs(
       seenAt
     });
 
+    counts.jobs_attempted = jobRows.length;
     if (jobRows.length) {
+      counts.failed_stage = "brain_jobs";
       const { error } = await supabase
         .from("brain_moraware_jobs")
         .upsert(jobRows, { onConflict: "organization_id,source_job_id" });
       if (error) throw new Error(error.message || String(error));
+      counts.jobs_written = jobRows.length;
     }
+
+    counts.activities_attempted = activityRows.length;
     if (activityRows.length) {
+      counts.failed_stage = "brain_activities";
       const { error } = await supabase
         .from("brain_moraware_job_activities")
         .upsert(activityRows, { onConflict: "organization_id,source_activity_id" });
       if (error) throw new Error(error.message || String(error));
+      counts.activities_written = activityRows.length;
     }
+
+    counts.failed_stage = null;
 
     const finishedAt = new Date().toISOString();
     await supabase
@@ -219,8 +386,7 @@ export async function importIncrementalMorawareBrainJobs(
     return {
       ok: true,
       status: "brain_incremental_upserted",
-      jobs_written: jobRows.length,
-      activities_written: activityRows.length,
+      ...counts,
       source_job_ids_written: jobRows.map((r) => String(r.source_job_id)),
       intended_source_job_ids: intendedIds,
       sync_run_id: syncRunId,
@@ -233,26 +399,20 @@ export async function importIncrementalMorawareBrainJobs(
       absence_establishes_deletion: false
     };
   } catch (e) {
-    if (syncRunId) {
-      try {
-        await supabase
-          .from("moraware_sync_runs")
-          .update({
-            status: "failed",
-            finished_at: new Date().toISOString(),
-            error_summary: String(e?.message || e).slice(0, 500)
-          })
-          .eq("id", syncRunId);
-      } catch {
-        /* ignore secondary */
-      }
-    }
+    const originalError = String(e?.message || e);
+    const finalize = await finalizeMorawareSyncRunFailure(supabase, {
+      syncRunId,
+      startedAt,
+      errorMessage: originalError
+    });
     return {
       ok: false,
       status: "brain_import_failed",
-      error: String(e?.message || e),
-      jobs_written: 0,
+      error: originalError,
+      ...counts,
+      failed_stage: counts.failed_stage || "brain_import",
       sync_run_id: syncRunId,
+      sync_run_finalize: finalize,
       creates_new_full_epoch: false,
       watermark_advanced: false
     };

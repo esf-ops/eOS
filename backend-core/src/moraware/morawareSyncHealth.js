@@ -76,14 +76,39 @@ export function resolveMorawareOrganizationId(req) {
 }
 
 export function summarizeImportGroupRows(groupRows, latestRun) {
+  const allRows = Array.isArray(groupRows) ? groupRows : [];
+  /**
+   * Incremental overlays that share parent FULL import_group_id must not
+   * participate in FULL chunk completeness (running/failed/success).
+   * Detect via explicit census_scope=incremental or incremental mode/runner.
+   */
+  const isIncrementalOverlay = (run) => {
+    const meta = run?.metadata && typeof run.metadata === "object" ? run.metadata : {};
+    const scope = String(meta.census_scope ?? "")
+      .trim()
+      .toLowerCase();
+    if (scope === "incremental") return true;
+    if (scope === "full") return false;
+    const mode = String(run?.mode ?? "").toLowerCase();
+    const runner = String(run?.runner ?? "").toLowerCase();
+    return mode.includes("incremental") || runner.includes("incremental");
+  };
+
+  const fullRows = allRows.filter((r) => !isIncrementalOverlay(r));
+  const overlayRuns = allRows.length - fullRows.length;
+  const authorityLatest =
+    (latestRun && !isIncrementalOverlay(latestRun) ? latestRun : null) ||
+    fullRows[fullRows.length - 1] ||
+    null;
+
   const expectedChunkCount =
     Math.max(
       0,
-      ...groupRows.map((r) => Number(r?.metadata?.chunk_count) || 0),
-      Number(latestRun?.metadata?.chunk_count) || 0
+      ...fullRows.map((r) => Number(r?.metadata?.chunk_count) || 0),
+      Number(authorityLatest?.metadata?.chunk_count) || 0
     ) || null;
   const byChunkIndex = new Map();
-  for (const row of groupRows) {
+  for (const row of fullRows) {
     const idx = Number(row?.metadata?.chunk_index) || null;
     if (!idx) continue;
     const prev = byChunkIndex.get(idx);
@@ -106,7 +131,9 @@ export function summarizeImportGroupRows(groupRows, latestRun) {
     Boolean(expectedChunkCount) && successfulChunks === expectedChunkCount && failedChunks === 0 && missingChunkIndices.length === 0;
   return {
     expectedChunkCount,
-    attemptedRuns: groupRows.length,
+    attemptedRuns: allRows.length,
+    full_census_attempted_runs: fullRows.length,
+    incremental_overlay_runs: overlayRuns,
     observedChunkCount: latestChunkRows.length,
     successfulChunks,
     failedChunks,
@@ -114,8 +141,8 @@ export function summarizeImportGroupRows(groupRows, latestRun) {
     complete,
     totalRowCounts,
     successfulSyncRunIds,
-    started_at: groupRows[0]?.started_at ?? null,
-    finished_at: groupRows[groupRows.length - 1]?.finished_at ?? null
+    started_at: fullRows[0]?.started_at ?? null,
+    finished_at: fullRows.length ? fullRows[fullRows.length - 1]?.finished_at ?? null : null
   };
 }
 
