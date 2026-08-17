@@ -5,7 +5,11 @@ import assert from "node:assert/strict";
 import { createAccountDirectoryMemoryStore } from "./accountDirectoryMemoryStore.mjs";
 import { createAccountDirectoryService, AccountDirectoryError } from "./accountDirectoryService.mjs";
 import { listMorawareReconciliationQueue } from "./accountDirectoryMorawareReconciliation.mjs";
-import { rankMorawareDirectoryCandidates } from "./accountDirectoryMorawareMatching.mjs";
+import {
+  buildDirectoryNameIndex,
+  buildQbDisplayNameIndex,
+  rankMorawareDirectoryCandidates
+} from "./accountDirectoryMorawareMatching.mjs";
 import {
   ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
   buildMorawareRelationship,
@@ -1056,6 +1060,333 @@ async function main() {
     assert.equal(mw?.linkedBy, ACTOR);
     store.insertAuditEvent = origAudit;
     console.log("ok: Moraware audit failure is not presented as success");
+  }
+
+  // ── Phase 0A-1: matcher CPU short-circuit (deterministic before fuzzy) ──
+  {
+    function fuzzyCounter() {
+      let visits = 0;
+      return {
+        get visits() {
+          return visits;
+        },
+        onFuzzyCandidateVisit() {
+          visits += 1;
+        }
+      };
+    }
+
+    const directoryAccounts = [
+      { id: "ad-exact-a", displayName: "Acme Cabinets LLC", legalName: null },
+      { id: "ad-exact-b", displayName: "Acme Cabinets LLC", legalName: null },
+      { id: "ad-unique", displayName: "Stoddard & Jensen Real Estate", legalName: null },
+      { id: "ad-near", displayName: "Stoddard & Jensen Real Estates", legalName: null },
+      { id: "ad-qb-only", displayName: "Directory Label Differs", legalName: null },
+      { id: "ad-fuzzy", displayName: "Heartland Designs", legalName: null },
+      { id: "ad-other", displayName: "Unrelated Millwork", legalName: null }
+    ];
+    const nameIndex = buildDirectoryNameIndex(directoryAccounts);
+    const qbLinksByAccountId = new Map([
+      ["ad-unique", { listId: "QB-U", displayName: "Stoddard & Jensen Real Estate" }],
+      ["ad-qb-only", { listId: "QB-O", displayName: "Premier Stoneworks Inc" }],
+      ["ad-fuzzy", { listId: "QB-F", displayName: "Heartland Designs" }]
+    ]);
+    const qbNameIndex = buildQbDisplayNameIndex(qbLinksByAccountId);
+    const jobsTwo = [{ createdAtSource: "2026-01-01" }, { createdAtSource: "2026-03-01" }];
+
+    // 1) Multi-exact CONFLICT — fuzzy previously discarded → zero fuzzy visits
+    {
+      const c = fuzzyCounter();
+      const ranked = rankMorawareDirectoryCandidates({
+        morawareAccount: { sourceAccountId: "9001", accountName: "Acme Cabinets LLC" },
+        jobs: jobsTwo,
+        directoryAccounts,
+        qbLinksByAccountId,
+        nameIndex,
+        qbNameIndex,
+        onFuzzyCandidateVisit: c.onFuzzyCandidateVisit
+      });
+      assert.equal(ranked.classification, "CONFLICT");
+      assert.equal(ranked.reason, "multiple_exact_directory_names");
+      assert.equal(ranked.proposedAccountId, null);
+      assert.equal(ranked.confidenceScore, 45);
+      assert.deepEqual(ranked.evidence, ["exact_name"]);
+      assert.deepEqual(ranked.contradictions, ["two_or_more_directory_accounts_share_normalized_name"]);
+      assert.equal(ranked.alternatives.length, 2);
+      assert.equal(c.visits, 0);
+      console.log("ok: Phase0A-1 multi-exact conflict skips fuzzy scan");
+    }
+
+    // 2) Unique QB-name — fuzzy previously discarded → zero fuzzy visits; output stable
+    {
+      const c = fuzzyCounter();
+      const ranked = rankMorawareDirectoryCandidates({
+        morawareAccount: { sourceAccountId: "9002", accountName: "Premier Stoneworks Inc" },
+        jobs: jobsTwo,
+        directoryAccounts,
+        qbLinksByAccountId,
+        nameIndex,
+        qbNameIndex,
+        onFuzzyCandidateVisit: c.onFuzzyCandidateVisit
+      });
+      assert.equal(ranked.classification, "HIGH_CONFIDENCE_CANDIDATE");
+      assert.equal(ranked.reason, "unique_exact_quickbooks_customer_name");
+      assert.equal(ranked.proposedAccountId, "ad-qb-only");
+      assert.equal(ranked.proposedAccountName, "Directory Label Differs");
+      assert.equal(ranked.confidenceScore, 70);
+      assert.deepEqual(ranked.evidence, ["exact_qb_name", "quickbooks_linked"]);
+      assert.deepEqual(ranked.contradictions, ["directory_display_name_differs_from_qb"]);
+      assert.deepEqual(ranked.alternatives, []);
+      assert.equal(ranked.qbLinked, true);
+      assert.equal(c.visits, 0);
+      console.log("ok: Phase0A-1 unique QB-name match skips fuzzy scan");
+    }
+
+    // 3) Unique exact — output unchanged; fuzzy still runs for alternatives
+    {
+      const c = fuzzyCounter();
+      const ranked = rankMorawareDirectoryCandidates({
+        morawareAccount: { sourceAccountId: "663", accountName: "Stoddard & Jensen Real Estate" },
+        jobs: jobsTwo,
+        directoryAccounts,
+        qbLinksByAccountId,
+        nameIndex,
+        qbNameIndex,
+        onFuzzyCandidateVisit: c.onFuzzyCandidateVisit
+      });
+      assert.equal(ranked.classification, "HIGH_CONFIDENCE_CANDIDATE");
+      assert.equal(ranked.proposedAccountId, "ad-unique");
+      assert.equal(ranked.confidenceScore, 85);
+      assert.ok(ranked.evidence.includes("exact_name"));
+      assert.ok(ranked.evidence.includes("quickbooks_linked"));
+      assert.ok(ranked.alternatives.some((a) => a.accountId === "ad-near" && a.evidence.includes("fuzzy_name")));
+      assert.ok(c.visits > 0);
+      assert.equal(c.visits, directoryAccounts.length);
+      console.log("ok: Phase0A-1 unique exact preserves fuzzy alternatives");
+    }
+
+    // 4) Fuzzy-only fallback still executes
+    {
+      const c = fuzzyCounter();
+      const ranked = rankMorawareDirectoryCandidates({
+        morawareAccount: { sourceAccountId: "37", accountName: "Heartland Design" },
+        jobs: [{ createdAtSource: "2026-02-01" }],
+        directoryAccounts,
+        qbLinksByAccountId,
+        nameIndex,
+        qbNameIndex,
+        onFuzzyCandidateVisit: c.onFuzzyCandidateVisit
+      });
+      assert.equal(ranked.classification, "UNMATCHED");
+      assert.equal(ranked.proposedAccountId, null);
+      assert.equal(ranked.reason, "fuzzy_name_only_not_identity");
+      assert.ok(ranked.alternatives.some((a) => a.evidence.includes("fuzzy_name")));
+      assert.equal(c.visits, directoryAccounts.length);
+      console.log("ok: Phase0A-1 fuzzy-only path still scans");
+    }
+
+    // 5) Linked conflict overlay (active_link_differs_from_name_candidate)
+    {
+      const linkedAd = "ad-linked";
+      const nameAd = "ad-unique";
+      const queue = await listMorawareReconciliationQueue({
+        organizationId: ORG,
+        role: "admin",
+        store: createAccountDirectoryMemoryStore(),
+        dataset: {
+          morawareAccounts: [{ sourceAccountId: "663", accountName: "Stoddard & Jensen Real Estate" }],
+          jobsByMorawareId: new Map([["663", jobsTwo]]),
+          directoryAccounts: [
+            { id: linkedAd, displayName: "Wrong Linked Account", legalName: null },
+            { id: nameAd, displayName: "Stoddard & Jensen Real Estate", legalName: null }
+          ],
+          qbLinksByAccountId: new Map([
+            [nameAd, { listId: "QB-U", displayName: "Stoddard & Jensen Real Estate" }]
+          ]),
+          morawareLinksBySourceId: new Map([
+            [
+              "663",
+              {
+                id: "link-663",
+                accountId: linkedAd,
+                externalId: "663",
+                externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+                isActive: true
+              }
+            ]
+          ]),
+          morawareLinksByAccountId: new Map([
+            [
+              linkedAd,
+              [
+                {
+                  id: "link-663",
+                  accountId: linkedAd,
+                  externalId: "663",
+                  externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+                  isActive: true
+                }
+              ]
+            ]
+          ])
+        }
+      });
+      assert.equal(queue.items.length, 1);
+      assert.equal(queue.items[0].classification, "CONFLICT");
+      assert.equal(queue.items[0].reason, "active_link_differs_from_name_candidate");
+      assert.ok(queue.items[0].contradictions.includes("linked_account_differs_from_proposed"));
+      assert.equal(queue.items[0].confirmAllowed, false);
+      assert.equal(queue.items[0].currentLink.linked, true);
+      assert.equal(queue.items[0].currentLink.accountId, linkedAd);
+      console.log("ok: Phase0A-1 linked conflict overlay unchanged");
+    }
+
+    // 6) One AD with multiple Moraware siblings
+    {
+      const adId = "ad-bro";
+      const link635 = {
+        id: "l635",
+        accountId: adId,
+        externalId: "635",
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        isActive: true
+      };
+      const link553 = {
+        id: "l553",
+        accountId: adId,
+        externalId: "553",
+        externalSystem: ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+        isActive: true
+      };
+      const queue = await listMorawareReconciliationQueue({
+        organizationId: ORG,
+        role: "admin",
+        store: createAccountDirectoryMemoryStore(),
+        dataset: {
+          morawareAccounts: [
+            { sourceAccountId: "635", accountName: "Dyersville- Broihahn Custom Woodworks" },
+            { sourceAccountId: "553", accountName: "Dyersville - Broihahn Custom Woodworks" }
+          ],
+          jobsByMorawareId: new Map([
+            ["635", jobsTwo],
+            ["553", jobsTwo]
+          ]),
+          directoryAccounts: [{ id: adId, displayName: "Broihahn Custom Woodworks", legalName: null }],
+          qbLinksByAccountId: new Map(),
+          morawareLinksBySourceId: new Map([
+            ["635", link635],
+            ["553", link553]
+          ]),
+          morawareLinksByAccountId: new Map([[adId, [link635, link553]]])
+        }
+      });
+      assert.equal(queue.items.length, 2);
+      for (const row of queue.items) {
+        assert.equal(row.currentLink.linked, true);
+        assert.equal(row.currentLink.accountId, adId);
+        assert.ok(row.siblingMorawareIds.length >= 1);
+        assert.equal(row.multipleMorawareIdsExpected, true);
+        assert.equal(row.confirmAllowed, false);
+      }
+      const siblings635 = queue.items.find((r) => r.morawareAccountId === "635").siblingMorawareIds;
+      const siblings553 = queue.items.find((r) => r.morawareAccountId === "553").siblingMorawareIds;
+      assert.ok(siblings635.includes("553"));
+      assert.ok(siblings553.includes("635"));
+      console.log("ok: Phase0A-1 multi-Moraware siblings unchanged");
+    }
+
+    // 7) Queue regression: order, classification, pagination, summary
+    // pageSize is clamped to min 10 in listMorawareReconciliationQueue.
+    {
+      const morawareAccounts = [
+        { sourceAccountId: "1", accountName: "Alpha Co" },
+        { sourceAccountId: "2", accountName: "Beta Co" },
+        { sourceAccountId: "3", accountName: "Direct" },
+        { sourceAccountId: "4", accountName: "Gamma Designs" },
+        { sourceAccountId: "5", accountName: "Heartland Design" },
+        { sourceAccountId: "6", accountName: "Zeta Millwork" },
+        { sourceAccountId: "7", accountName: "Eta Surfaces" },
+        { sourceAccountId: "8", accountName: "Theta Stone" },
+        { sourceAccountId: "9", accountName: "Iota Granite" },
+        { sourceAccountId: "10", accountName: "Kappa Quartz" },
+        { sourceAccountId: "11", accountName: "Lambda Tile" },
+        { sourceAccountId: "12", accountName: "Mu Cabinets" }
+      ];
+      const directoryAccountsQ = [
+        { id: "ad-a", displayName: "Alpha Co", legalName: null },
+        { id: "ad-g", displayName: "Gamma Designs", legalName: null },
+        { id: "ad-h", displayName: "Heartland Designs", legalName: null }
+      ];
+      const jobsByMorawareId = new Map(
+        morawareAccounts.map((m) => [
+          m.sourceAccountId,
+          m.sourceAccountId === "4" || m.sourceAccountId === "5"
+            ? [{ createdAtSource: "2026-02-01" }]
+            : jobsTwo
+        ])
+      );
+      const dataset = {
+        morawareAccounts,
+        jobsByMorawareId,
+        directoryAccounts: directoryAccountsQ,
+        qbLinksByAccountId: new Map([["ad-a", { listId: "QA", displayName: "Alpha Co" }]]),
+        morawareLinksBySourceId: new Map(),
+        morawareLinksByAccountId: new Map()
+      };
+      const page1 = await listMorawareReconciliationQueue({
+        organizationId: ORG,
+        role: "admin",
+        store: createAccountDirectoryMemoryStore(),
+        query: { page: 1, pageSize: 10 },
+        dataset
+      });
+      const page2 = await listMorawareReconciliationQueue({
+        organizationId: ORG,
+        role: "admin",
+        store: createAccountDirectoryMemoryStore(),
+        query: { page: 2, pageSize: 10 },
+        dataset
+      });
+      const full = await listMorawareReconciliationQueue({
+        organizationId: ORG,
+        role: "admin",
+        store: createAccountDirectoryMemoryStore(),
+        query: { page: 1, pageSize: 50 },
+        dataset
+      });
+      const fullIds = full.items.map((r) => r.morawareAccountId);
+      assert.deepEqual(
+        fullIds,
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+      );
+      assert.equal(full.items[0].classification, "HIGH_CONFIDENCE_CANDIDATE");
+      assert.equal(full.items[1].classification, "UNMATCHED");
+      assert.equal(full.items[2].classification, "UNMATCHED");
+      assert.equal(full.items[2].internalBucket, true);
+      assert.equal(full.items[3].classification, "REVIEW_REQUIRED");
+      assert.equal(full.items[4].classification, "UNMATCHED");
+      assert.equal(full.items[4].reason, "fuzzy_name_only_not_identity");
+      assert.equal(full.summary.totalMorawareAccounts, 12);
+      assert.equal(full.summary.highConfidenceUnlinked, 1);
+      assert.equal(full.summary.reviewRequired, 1);
+      assert.equal(full.summary.internalBuckets, 1);
+      assert.equal(full.summary.alreadyLinked, 0);
+      assert.deepEqual(
+        page1.items.map((r) => r.morawareAccountId),
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+      );
+      assert.deepEqual(
+        page2.items.map((r) => r.morawareAccountId),
+        ["11", "12"]
+      );
+      assert.equal(page1.summary.totalMorawareAccounts, 12);
+      assert.equal(page2.summary.unmatched, full.summary.unmatched);
+      assert.deepEqual(
+        page1.items.map((r) => r.classification),
+        full.items.slice(0, 10).map((r) => r.classification)
+      );
+      console.log("ok: Phase0A-1 queue order/classification/pagination/summary regression");
+    }
   }
 
   const apiSrc = readFileSync(fileURLToPath(new URL("./accountDirectoryApi.js", import.meta.url)), "utf8");

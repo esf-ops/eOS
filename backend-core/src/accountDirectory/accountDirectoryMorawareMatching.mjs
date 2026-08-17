@@ -1,6 +1,10 @@
 /**
  * Read-only Moraware → Account Directory candidate ranking.
  * Fuzzy/history may propose. Never creates links.
+ *
+ * Deterministic exact / multi-exact / QB-name resolution runs before the
+ * expensive fuzzy directory scan. Fuzzy still runs for unique-exact rows so
+ * near-neighbor `alternatives` stay behavior-identical.
  */
 
 import {
@@ -38,13 +42,66 @@ function ymd(d) {
   return d ? d.toISOString().slice(0, 10) : null;
 }
 
+function indexDirectoryAccountsById(accounts) {
+  const map = new Map();
+  for (const a of accounts || []) {
+    if (a?.id != null) map.set(String(a.id), a);
+  }
+  return map;
+}
+
+/**
+ * Normalized QB customer display name → Account Directory account id(s).
+ * @param {Map<string, { listId?: string, displayName?: string|null }>|undefined} qbLinksByAccountId
+ */
+export function buildQbDisplayNameIndex(qbLinksByAccountId) {
+  const map = new Map();
+  for (const [accountId, qb] of qbLinksByAccountId || []) {
+    const qn = normalizeMorawareAccountKey(qb?.displayName);
+    if (!qn) continue;
+    if (!map.has(qn)) map.set(qn, []);
+    map.get(qn).push(String(accountId));
+  }
+  return map;
+}
+
+/**
+ * Full fuzzy directory scan (Levenshtein near-neighbors). Test hook:
+ * `onFuzzyCandidateVisit(ad)` is invoked once per directory account considered.
+ *
+ * @param {string} nn normalized Moraware name key
+ * @param {Array<{ id: string, displayName: string }>} ads
+ * @param {{ onFuzzyCandidateVisit?: (ad: object) => void }} [options]
+ */
+export function collectFuzzyNameAlternatives(nn, ads, options = {}) {
+  const alternatives = [];
+  const onVisit = typeof options.onFuzzyCandidateVisit === "function" ? options.onFuzzyCandidateVisit : null;
+  for (const ad of ads || []) {
+    if (onVisit) onVisit(ad);
+    const adn = normalizeMorawareAccountKey(ad.displayName);
+    if (!nn || !adn || adn === nn) continue;
+    const dist = levenshtein(nn, adn);
+    if (dist > 0 && dist <= 2 && Math.min(nn.length, adn.length) >= 8) {
+      alternatives.push({
+        accountId: ad.id,
+        accountName: ad.displayName,
+        evidence: ["fuzzy_name"],
+        score: 8
+      });
+    }
+  }
+  return alternatives;
+}
+
 /**
  * @param {{
  *   morawareAccount: { sourceAccountId: string, accountName: string },
  *   jobs?: Array<{ createdAtSource?: string, installAtSource?: string, completedAtSource?: string }>,
  *   directoryAccounts: Array<{ id: string, displayName: string, legalName?: string|null }>,
  *   qbLinksByAccountId?: Map<string, { listId?: string, displayName?: string|null }>,
- *   nameIndex?: Map<string, string[]>
+ *   nameIndex?: Map<string, string[]>,
+ *   qbNameIndex?: Map<string, string[]>,
+ *   onFuzzyCandidateVisit?: (ad: object) => void
  * }} input
  */
 export function rankMorawareDirectoryCandidates(input) {
@@ -65,21 +122,26 @@ export function rankMorawareDirectoryCandidates(input) {
   const ads = input.directoryAccounts || [];
   const qbLinks = input.qbLinksByAccountId || new Map();
   const byName = input.nameIndex || buildDirectoryNameIndex(ads);
+  const adsById = indexDirectoryAccountsById(ads);
+  const fuzzyHook = { onFuzzyCandidateVisit: input.onFuzzyCandidateVisit };
 
   const exactIds = nn ? [...(byName.get(nn) || [])] : [];
   const uniqueExact = [...new Set(exactIds)];
-  const alternatives = [];
   const evidence = [];
   const contradictions = [];
+
+  const jobFields = {
+    jobCount: jobs.length,
+    jobs2026,
+    earliestJobDate: ymd(dates[0]),
+    latestJobDate: ymd(dates[dates.length - 1])
+  };
 
   if (internal) {
     return {
       morawareAccountId: mwId,
       morawareName: mwName,
-      jobCount: jobs.length,
-      jobs2026,
-      earliestJobDate: ymd(dates[0]),
-      latestJobDate: ymd(dates[dates.length - 1]),
+      ...jobFields,
       classification: "UNMATCHED",
       reason: "internal_or_house_bucket",
       internalBucket: true,
@@ -94,23 +156,10 @@ export function rankMorawareDirectoryCandidates(input) {
     };
   }
 
-  for (const ad of ads) {
-    const adn = normalizeMorawareAccountKey(ad.displayName);
-    if (!nn || !adn || adn === nn) continue;
-    const dist = levenshtein(nn, adn);
-    if (dist > 0 && dist <= 2 && Math.min(nn.length, adn.length) >= 8) {
-      alternatives.push({
-        accountId: ad.id,
-        accountName: ad.displayName,
-        evidence: ["fuzzy_name"],
-        score: 8
-      });
-    }
-  }
-
+  // Deterministic exact-name paths first (no fuzzy when result discards fuzzy).
   if (uniqueExact.length > 1) {
     const alts = uniqueExact.map((id) => {
-      const ad = ads.find((a) => a.id === id);
+      const ad = adsById.get(String(id));
       const qb = qbLinks.get(id);
       return {
         accountId: id,
@@ -123,10 +172,7 @@ export function rankMorawareDirectoryCandidates(input) {
     return {
       morawareAccountId: mwId,
       morawareName: mwName,
-      jobCount: jobs.length,
-      jobs2026,
-      earliestJobDate: ymd(dates[0]),
-      latestJobDate: ymd(dates[dates.length - 1]),
+      ...jobFields,
       classification: "CONFLICT",
       reason: "multiple_exact_directory_names",
       internalBucket: false,
@@ -142,8 +188,10 @@ export function rankMorawareDirectoryCandidates(input) {
   }
 
   if (uniqueExact.length === 1) {
+    // Preserve prior alternatives: unique-exact still runs fuzzy solely for near-neighbors.
+    const alternatives = collectFuzzyNameAlternatives(nn, ads, fuzzyHook);
     const accountId = uniqueExact[0];
-    const ad = ads.find((a) => a.id === accountId);
+    const ad = adsById.get(String(accountId));
     const qb = qbLinks.get(accountId);
     evidence.push("exact_name");
     if (qb) evidence.push("quickbooks_linked");
@@ -154,10 +202,7 @@ export function rankMorawareDirectoryCandidates(input) {
     return {
       morawareAccountId: mwId,
       morawareName: mwName,
-      jobCount: jobs.length,
-      jobs2026,
-      earliestJobDate: ymd(dates[0]),
-      latestJobDate: ymd(dates[dates.length - 1]),
+      ...jobFields,
       classification,
       reason,
       internalBucket: false,
@@ -172,23 +217,17 @@ export function rankMorawareDirectoryCandidates(input) {
     };
   }
 
-  const qbNameHits = [];
-  for (const [accountId, qb] of qbLinks.entries()) {
-    const qn = normalizeMorawareAccountKey(qb?.displayName);
-    if (qn && nn && qn === nn) qbNameHits.push(accountId);
-  }
-  const uniqueQb = [...new Set(qbNameHits)];
+  // Deterministic unique QB display-name match (fuzzy was previously computed then discarded).
+  const qbNameIndex = input.qbNameIndex || buildQbDisplayNameIndex(qbLinks);
+  const uniqueQb = nn ? [...new Set(qbNameIndex.get(nn) || [])] : [];
   if (uniqueQb.length === 1) {
     const accountId = uniqueQb[0];
-    const ad = ads.find((a) => a.id === accountId);
+    const ad = adsById.get(String(accountId));
     const qb = qbLinks.get(accountId);
     return {
       morawareAccountId: mwId,
       morawareName: mwName,
-      jobCount: jobs.length,
-      jobs2026,
-      earliestJobDate: ymd(dates[0]),
-      latestJobDate: ymd(dates[dates.length - 1]),
+      ...jobFields,
       classification: "HIGH_CONFIDENCE_CANDIDATE",
       reason: "unique_exact_quickbooks_customer_name",
       internalBucket: false,
@@ -203,14 +242,14 @@ export function rankMorawareDirectoryCandidates(input) {
     };
   }
 
+  // Fuzzy fallback only when still unresolved.
+  const alternatives = collectFuzzyNameAlternatives(nn, ads, fuzzyHook);
+
   if (alternatives.length === 1) {
     return {
       morawareAccountId: mwId,
       morawareName: mwName,
-      jobCount: jobs.length,
-      jobs2026,
-      earliestJobDate: ymd(dates[0]),
-      latestJobDate: ymd(dates[dates.length - 1]),
+      ...jobFields,
       classification: "UNMATCHED",
       reason: "fuzzy_name_only_not_identity",
       internalBucket: false,
@@ -228,10 +267,7 @@ export function rankMorawareDirectoryCandidates(input) {
   return {
     morawareAccountId: mwId,
     morawareName: mwName,
-    jobCount: jobs.length,
-    jobs2026,
-    earliestJobDate: ymd(dates[0]),
-    latestJobDate: ymd(dates[dates.length - 1]),
+    ...jobFields,
     classification: "UNMATCHED",
     reason: jobs.length <= 1 ? "insufficient_or_retail_volume" : "no_deterministic_directory_match",
     internalBucket: false,
