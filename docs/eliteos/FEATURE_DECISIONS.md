@@ -4441,3 +4441,17 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope / follow-up reads** | Mac mini incremental schedule, View 222, deleting stale rows. Non-primary consumers not rewritten here: Account Directory Moraware reconciliation latest-day logic; `salesAttributionCoverage` latest-group logic; admin all-job health counts; unused `fetchLatestCompleteMorawareJobs`. |
 | **Impacted** | `morawareCurrentPopulation`, `morawarePopulationLock`, import metadata, Account 360, Sales prepared-fact rebuild/read, scheduled pipeline, this doc, SYSTEM_BLUEPRINT. |
 
+### 327. Moraware Job Worksheet scope-intelligence facts (TRUSTED_NOW raw) (2026-08-17)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-17 |
+| **Decision** | The **Job Worksheet** form instance is the canonical scope-intelligence grain for Color, Sq.Ft., Room, Edge presence, Thickness, Sink Type, and selected raw fabrication fields (Faucet/Stove/Electrical/Overhang/Braces/Dry Treat/Stone Care Kit). Extractor: `extractMorawareJobWorksheetScopeFacts`. Prepared table (manual SQL): `sales_moraware_job_worksheet_facts` — one row per `(organization_id, import_group_id, source_job_id, source_form_id)`. Population epoch = latest successful complete uncapped **FULL** census `import_group_id` (same Option D contract as `sales_moraware_job_facts`). |
+| **Valid aggregations** | SqFt by Color; SqFt by Room; SqFt by Thickness. Edge = worksheet count + distinct job count only (**no** Edge SqFt mix / LF). |
+| **Raw only / pending** | Back Splash Type + Height extracted raw — **no** NONE/STANDARD_4_INCH/FULL_HEIGHT normalization yet. **Material / Stone family unimplemented** (no Job Worksheet Material field; Color→family inference prohibited). **Upgrade score / comment-derived options unimplemented**. Shop Comments are not structured intelligence. |
+| **Controls** | CURRENT set: **4,073** jobs, **10,719** worksheets, **271,432.5** SqFt; **109** jobs without Job Worksheet. Broihahn (553+635): **13** jobs, **39** worksheets, **1,283.5** SqFt. |
+| **Account 360** | Helpers (`buildWorksheetScopeReadModel`) are ready for a future read path. **Not wired into Account 360 UI** in this pass. |
+| **SQL** | Manual: `backend-core/supabase/eliteos_sales_moraware_job_worksheet_facts_v1.sql` — create only; do not apply from app code in this pass. |
+| **Out of scope** | Live rebuild, migration apply, Material Mix, normalized backsplash, upgrades, Moraware crawl/sync. |
+| **Impacted** | `morawareJobWorksheetScope.mjs`, worksheet facts SQL, FEATURE_DECISIONS / SYSTEM_BLUEPRINT. |
+
