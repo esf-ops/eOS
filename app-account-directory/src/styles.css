@@ -2005,6 +2005,22 @@ a.detail-list-title:hover {
   text-transform: uppercase;
   color: var(--eos-ink-muted);
 }
+.moraware-source-stack {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: #fafafa;
+}
+.moraware-source-line {
+  display: grid;
+  gap: 2px;
+}
+.moraware-source-line strong {
+  font-size: 1rem;
+}
 .moraware-focus-card h3 {
   margin: 0;
   font-size: 1.35rem;

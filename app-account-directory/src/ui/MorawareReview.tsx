@@ -45,21 +45,29 @@ function reviewBadge(item: MorawareReconciliationItem): { label: string; tone: s
   return { label: "Remaining", tone: "none" };
 }
 
-function candidateKindLabel(best: MorawareCandidate | null, badgeLabel?: string): string {
-  if (!best) return badgeLabel || "Candidate";
-  if (best.identityKind === "EXISTING_AD_QB_BACKED") {
-    return "Account Directory customer · QuickBooks connected";
+function candidateSourceLines(
+  morawareName: string,
+  best: MorawareCandidate | null
+): Array<{ label: string; value: string }> {
+  const lines: Array<{ label: string; value: string }> = [
+    { label: "Moraware", value: String(morawareName || "").trim() || "—" }
+  ];
+  if (!best) return lines;
+  const adName = String(best.displayName || "").trim();
+  const qbName = String(best.qbDisplayName || "").trim();
+  if (best.accountId || best.identityKind?.startsWith("EXISTING_AD")) {
+    lines.push({ label: "Account Directory", value: adName || "—" });
   }
-  if (best.identityKind === "EXISTING_AD_QB_LINK_CANDIDATE") {
-    return "Existing Account Directory account · QuickBooks connection requires confirmation";
+  if (best.qbListId || qbName) {
+    lines.push({
+      label: "QuickBooks",
+      value: qbName || (best.identityKind === "QB_ROOT_NOT_IN_DIRECTORY" ? adName : "") || "—"
+    });
+  } else if (best.identityKind === "QB_ROOT_NOT_IN_DIRECTORY") {
+    lines.push({ label: "QuickBooks", value: adName || "—" });
   }
-  if (best.identityKind === "QB_ROOT_NOT_IN_DIRECTORY") {
-    return "QuickBooks customer · Not yet in Account Directory";
-  }
-  if (best.identityKind === "EXISTING_AD_PROSPECT") {
-    return "Existing Prospect (not QB-backed)";
-  }
-  return badgeLabel || "Candidate";
+  // Deduplicate identical consecutive labels when AD and QB share the same string still show both when both exist.
+  return lines.filter((l) => l.value && l.value !== "—");
 }
 
 function pickCandidate(item: MorawareReconciliationItem | null, index: number): MorawareCandidate | null {
@@ -87,12 +95,14 @@ export function MorawareReviewSurface({
   sessionToken,
   canLink,
   onOpenAccount,
+  onEditAccount,
   onMessage,
   onCreateDirectoryAccount
 }: {
   sessionToken: string | null;
   canLink?: boolean;
   onOpenAccount: (accountId: string) => void;
+  onEditAccount?: (accountId: string) => void;
   onMessage: (message: string) => void;
   onCreateDirectoryAccount?: (prefill: { displayName: string; morawareAccountId: string }) => void;
 }) {
@@ -521,11 +531,34 @@ export function MorawareReviewSurface({
 
             {best ? (
               <div className="moraware-best-candidate">
+                <div className="moraware-source-stack" aria-label="Source names">
+                  {candidateSourceLines(selected.morawareName, best).map((line) => (
+                    <div key={line.label} className="moraware-source-line">
+                      <span className="moraware-focus-eyebrow">{line.label}</span>
+                      <strong>{line.value}</strong>
+                    </div>
+                  ))}
+                </div>
                 <h4>Do you mean this customer?</h4>
                 <p className="moraware-focus-match-label">Best match</p>
-                <p className="moraware-best-name">{best.displayName}</p>
+                <p className="moraware-best-name">
+                  {best.displayName}
+                  {best.qbDisplayName &&
+                  best.displayName &&
+                  best.qbDisplayName.trim() !== best.displayName.trim()
+                    ? ` · QB: ${best.qbDisplayName}`
+                    : ""}
+                </p>
                 <p className="muted">
-                  {candidateKindLabel(best, badge?.label)}
+                  {best.identityKind === "EXISTING_AD_QB_BACKED"
+                    ? "Account Directory customer · QuickBooks connected"
+                    : best.identityKind === "EXISTING_AD_QB_LINK_CANDIDATE"
+                      ? "Existing Account Directory account · QuickBooks connection requires confirmation"
+                      : best.identityKind === "QB_ROOT_NOT_IN_DIRECTORY"
+                        ? "QuickBooks customer · Not yet in Account Directory"
+                        : best.identityKind === "EXISTING_AD_PROSPECT"
+                          ? "Existing Prospect (not QB-backed)"
+                          : badge?.label || "Candidate"}
                   {best.qbActive === false ? " · Inactive QuickBooks root" : ""}
                   {candidateCount > 1 ? ` · match ${candidateIndex + 1} of ${candidateCount}` : ""}
                 </p>
@@ -612,6 +645,20 @@ export function MorawareReviewSurface({
               {best?.accountId ? (
                 <button type="button" className="btn btn-secondary" onClick={() => onOpenAccount(best.accountId as string)}>
                   View account
+                </button>
+              ) : null}
+              {best?.accountId && onEditAccount ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    onEditAccount(best.accountId as string);
+                    onMessage(
+                      "Opened Account Directory edit. Rename does not connect Moraware — return and click YES — Connect."
+                    );
+                  }}
+                >
+                  Edit account
                 </button>
               ) : null}
             </div>

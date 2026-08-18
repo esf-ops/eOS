@@ -312,6 +312,7 @@ export default function AccountDirectoryApp() {
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [morawareCreateReturnId, setMorawareCreateReturnId] = useState<string | null>(null);
+  const [editAfterOpenId, setEditAfterOpenId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   /* ─── Derived ─── */
@@ -628,6 +629,16 @@ export default function AccountDirectoryApp() {
     setModal(null);
     setFormError(null);
   }, [formBusy]);
+
+  useEffect(() => {
+    if (!editAfterOpenId || !detail || detail.id !== editAfterOpenId) return;
+    if (!permissions.canEdit) {
+      setEditAfterOpenId(null);
+      return;
+    }
+    openModal("edit");
+    setEditAfterOpenId(null);
+  }, [detail, editAfterOpenId, openModal, permissions.canEdit]);
 
   useEffect(() => {
     if (!modal) return;
@@ -989,6 +1000,10 @@ export default function AccountDirectoryApp() {
                   onMessage={setActionMessage}
                   onOpenAccount={(accountId) => {
                     updateFilters({ tab: "accounts", account: accountId, page: 1 });
+                  }}
+                  onEditAccount={(accountId) => {
+                    updateFilters({ tab: "accounts", account: accountId, page: 1 });
+                    setEditAfterOpenId(accountId);
                   }}
                   onCreateDirectoryAccount={({ displayName, morawareAccountId }) => {
                     setMorawareCreateReturnId(morawareAccountId);
@@ -1849,6 +1864,8 @@ function ProfilePanel({
       onClose();
     }
     function onFocus(event: FocusEvent) {
+      // Account write modals render outside this workspace. Do not steal focus from them.
+      if (document.querySelector("[data-ad-modal], [data-ad-child-modal]")) return;
       const root = workspaceRef.current;
       if (!root || root.contains(event.target as Node)) return;
       closeBtnRef.current?.focus();

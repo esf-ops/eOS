@@ -16,6 +16,7 @@ export function emptyAccountWriteDraft() {
 export function validateAccountDisplayName(raw) {
   const displayName = String(raw ?? "").trim();
   if (!displayName) return "Account name is required.";
+  if (displayName.length > 200) return "Account name must be 200 characters or fewer.";
   return null;
 }
 

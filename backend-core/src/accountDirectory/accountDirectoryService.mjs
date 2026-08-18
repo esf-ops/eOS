@@ -938,6 +938,12 @@ export function createAccountDirectoryService(deps) {
       if (payload?.displayName != null) {
         const displayName = String(payload.displayName ?? "").trim();
         if (!displayName) throw new AccountDirectoryError("display_name_required", "Account name is required.");
+        if (displayName.length > 200) {
+          throw new AccountDirectoryError(
+            "display_name_too_long",
+            "Account name must be 200 characters or fewer."
+          );
+        }
         patch.displayName = displayName;
         changed.push("displayName");
       }
@@ -980,6 +986,56 @@ export function createAccountDirectoryService(deps) {
       }
       if (!result.ok) throw new AccountDirectoryError("not_found", "Account not found.", 404);
 
+      // Preserve prior displayName as a same-account alias for search/reconciliation evidence.
+      // Soft-fail: rename already succeeded; alias is discovery-only and never identity.
+      let preservedFormerDisplayNameAlias = false;
+      if (
+        changed.includes("displayName") &&
+        String(current.displayName || "").trim() &&
+        normalizeAliasValue(current.displayName) !== normalizeAliasValue(patch.displayName)
+      ) {
+        try {
+          const existingAliases =
+            typeof store.listAliases === "function"
+              ? await store.listAliases(organizationId, accountId)
+              : [];
+          const former = String(current.displayName).trim();
+          const formerNorm = normalizeAliasValue(former);
+          const alreadyPresent = (existingAliases || []).some(
+            (a) =>
+              a.isActive !== false &&
+              (normalizeAliasValue(a.aliasValue ?? a.alias) === formerNorm ||
+                normalizeAliasValue(a.normalizedMatchValue) === formerNorm)
+          );
+          if (!alreadyPresent && typeof store.insertAlias === "function") {
+            const aliasRow = await store.insertAlias({
+              organizationId,
+              accountId,
+              aliasValue: former,
+              aliasSource: "former_display_name",
+              normalizedMatchValue: formerNorm,
+              createdBy: actorUserId,
+              updatedBy: actorUserId
+            });
+            preservedFormerDisplayNameAlias = true;
+            await writeAudit({
+              organizationId,
+              accountId,
+              entityType: "alias",
+              entityId: aliasRow?.id || accountId,
+              action: "add_alias",
+              actorUserId,
+              changedFields: ["aliasValue"],
+              newValues: { aliasValue: former, aliasSource: "former_display_name" },
+              requestId,
+              role
+            });
+          }
+        } catch {
+          preservedFormerDisplayNameAlias = false;
+        }
+      }
+
       // Internal Status Review option only. Never honor suppressAudit from request JSON payload.
       if (suppressAudit !== true) {
         await writeAudit({
@@ -991,7 +1047,10 @@ export function createAccountDirectoryService(deps) {
           actorUserId,
           changedFields: changed,
           oldValues: { displayName: current.displayName, status: current.status },
-          newValues: patch,
+          newValues: {
+            ...patch,
+            ...(preservedFormerDisplayNameAlias ? { preservedFormerDisplayNameAlias: true } : {})
+          },
           requestId,
           role
         });

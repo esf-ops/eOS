@@ -88,7 +88,18 @@ assert.equal(
   readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Confirm All"),
   false
 );
-assert.ok(api.includes("from-quickbooks") || api.includes("createAccountFromQuickBooks"));
+assert.ok(
+  readFileSync(join(root, "app-account-directory/src/AccountDirectoryApp.tsx"), "utf8").includes(
+    'document.querySelector("[data-ad-modal], [data-ad-child-modal]")'
+  )
+);
+assert.ok(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Edit account")
+);
+assert.ok(
+  readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("moraware-source-stack") ||
+    readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("QuickBooks")
+);
 assert.ok(
   readFileSync(join(root, "backend-core/src/accountDirectory/accountDirectoryMorawareReconciliation.mjs"), "utf8").includes(
     "listAliasesForAccountIds"

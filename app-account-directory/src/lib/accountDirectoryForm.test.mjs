@@ -25,6 +25,8 @@ assert.equal("name" in draft, false);
 
 assert.equal(validateAccountDisplayName(""), "Account name is required.");
 assert.equal(validateAccountDisplayName("   "), "Account name is required.");
+assert.equal(validateAccountDisplayName("x".repeat(201)), "Account name must be 200 characters or fewer.");
+assert.equal(validateAccountDisplayName("x".repeat(200)), null);
 assert.equal(validateAccountDisplayName("TEST ACCOUNT"), null);
 
 const filled = {
