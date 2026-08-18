@@ -8,6 +8,14 @@
       "cwd": "app-home",
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "app-system-admin",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "app-system-admin",
+      "port": 5178,
+      "autoPort": true
     }
   ]
 }

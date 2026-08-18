@@ -134,6 +134,67 @@ body {
   background: transparent;
 }
 
+/* Slim persistent strip — replaces the full-height hero that used to repeat
+   identically on every view. EliteosTopbar already shows workspace identity;
+   this only needs to carry the small "Governance console" label and the
+   canOperate warning banner. */
+.sa-strip {
+  margin: clamp(10px, 1.2vw, 16px) auto 0;
+  padding: 0 clamp(16px, 2.4vw, 28px);
+  width: 100%;
+  max-width: 1480px;
+}
+
+.sa-strip-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sa-strip-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--eos-text);
+}
+
+.sa-strip-sub {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--eos-ink-muted);
+}
+
+/* Grouped nav — two labeled clusters instead of 8 flat pills */
+.sa-subnav-grouped {
+  align-items: flex-start;
+  gap: clamp(20px, 3vw, 32px);
+  padding-top: 14px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.sa-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sa-nav-label {
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--eos-ink-faint);
+}
+
+.sa-nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* Hero (governance console) ------------------------------------------- */
 
 .sa-hero {
@@ -696,6 +757,10 @@ table.simple th {
   text-transform: uppercase;
 }
 
+table.simple tbody tr:nth-child(even) {
+  background: #fafbfd;
+}
+
 table.simple tbody tr:hover {
   background: #f8fafc;
 }
@@ -713,9 +778,42 @@ table.simple tbody tr {
   min-width: 190px;
 }
 
+.user-cell-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.user-cell-text {
+  min-width: 0;
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.01em;
+}
+
+.avatar-navy { background: linear-gradient(155deg, #2c4370, #1c3155); }
+.avatar-burgundy { background: linear-gradient(155deg, #d81f47, #7a0e28); }
+.avatar-gold { background: linear-gradient(155deg, #c99a3f, #a9720f); }
+.avatar-teal { background: linear-gradient(155deg, #18a48d, #0b5a4c); }
+
 .user-cell strong,
 .user-cell span {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .user-cell span,
@@ -726,6 +824,12 @@ table.simple tbody tr {
 
 .tools-cell {
   min-width: 180px;
+  max-width: 260px;
+}
+
+.lastseen-cell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .role-badge {
@@ -749,8 +853,14 @@ table.simple tbody tr {
   max-width: 240px;
 }
 
+.tool-chip-row.nowrap {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
 .tool-chip {
   display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
   border-radius: 999px;
   padding: 3px 8px;
@@ -760,6 +870,14 @@ table.simple tbody tr {
   font-size: 11px;
   font-weight: 650;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+
+.tool-chip-row.nowrap .tool-chip.muted-chip {
+  flex: 0 0 auto;
+  max-width: none;
 }
 
 .tool-chip.muted-chip {

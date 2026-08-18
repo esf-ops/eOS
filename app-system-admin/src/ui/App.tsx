@@ -349,6 +349,34 @@ function lastSignInText(row: AdminRow, auth?: UserAuthSummary | null) {
   return fmtReadableDate(auth?.last_sign_in_at ?? row.last_login_at, "No sign-in recorded");
 }
 
+/** Compact relative time for table density; exact timestamp stays available via title tooltip. */
+function relativeTimeFrom(dt: unknown): string | null {
+  if (!dt) return null;
+  const then = new Date(String(dt));
+  if (Number.isNaN(then.getTime())) return null;
+  const diffMs = Date.now() - then.getTime();
+  if (diffMs < 60_000) return "just now";
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+/** Small deterministic tint so each roster row gets a stable, distinguishable avatar. */
+function avatarTintFor(seed: string): "navy" | "burgundy" | "gold" | "teal" {
+  const tints = ["navy", "burgundy", "gold", "teal"] as const;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return tints[hash % tints.length];
+}
+
 function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDetailResp | null }) {
   const normKind = String(profile.user_kind_normalized ?? "").trim();
   const dbKind = String(profile.user_kind ?? "").trim();
@@ -1496,124 +1524,101 @@ export default function App() {
         onSignOut={() => void handleSignOut()}
       />
 
-      <section className="sa-hero" aria-labelledby="sa-hero-title">
-        <div className="hero-aurora" aria-hidden />
-        <div className="sa-hero-grid">
-          <div className="sa-hero-main">
-            <p className="hero-eyebrow">Internal tool · System Admin</p>
-            <h1 id="sa-hero-title" className="hero-title">Governance console</h1>
-            <p className="hero-sub">
-              Users, roles, head access, invites, lifecycle actions, and platform diagnostics. Backend authorization is the source of truth — every action here calls{" "}
-              <code className="hero-domain-code">{USER_MGMT_API}</code>.
-            </p>
-            {!canOperate && listError ? (
-              <p className="hero-domain muted-note">
-                <span className="hero-warn-pill" aria-hidden /> {listError}
-              </p>
-            ) : null}
-          </div>
-
-          <aside className="hero-workspace" aria-label={`Workspace · ${workspaceName}`}>
-            <p className="hero-workspace-eyebrow">Workspace</p>
-            <div className="hero-workspace-card">
-              <div className="hero-workspace-mark">
-                {workspaceLogoUrl ? (
-                  <img
-                    src={workspaceLogoUrl}
-                    alt=""
-                    loading="lazy"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = "none";
-                      const fallback = (e.currentTarget.parentElement as HTMLElement | null)?.querySelector(
-                        ".hero-workspace-initials"
-                      ) as HTMLElement | null;
-                      if (fallback) fallback.style.display = "flex";
-                    }}
-                  />
-                ) : null}
-                <span
-                  className="hero-workspace-initials"
-                  aria-hidden={workspaceLogoUrl ? "true" : "false"}
-                  style={workspaceLogoUrl ? { display: "none" } : undefined}
-                >
-                  {workspaceInitials}
-                </span>
-              </div>
-              <div className="hero-workspace-text">
-                <p className="hero-workspace-name">{workspaceName}</p>
-                <p className="hero-workspace-meta">
-                  <span>on </span>
-                  <span className="hero-workspace-platform">slabOS</span>
-                  <span className="hero-workspace-sep" aria-hidden>·</span>
-                  <span>{workspaceShortId}</span>
-                </p>
-              </div>
-            </div>
-          </aside>
+      <section className="sa-strip" aria-labelledby="sa-hero-title">
+        <div className="sa-strip-row">
+          <p id="sa-hero-title" className="sa-strip-title">Governance console</p>
+          <p className="sa-strip-sub">
+            Backend authorization is the source of truth — every action here calls{" "}
+            <code className="hero-domain-code">{USER_MGMT_API}</code>.
+          </p>
         </div>
+        {!canOperate && listError ? (
+          <p className="hero-domain muted-note">
+            <span className="hero-warn-pill" aria-hidden /> {listError}
+          </p>
+        ) : null}
       </section>
 
       {canOperate ? (
-        <nav className="sa-subnav" aria-label="System admin">
-          {(
-            [
-              ["people", "People & access"],
-              ["organizations", "Organizations"],
-              ["invite_users", "Invite users"],
-              ["audit", "Audit"],
-              ["diagnostics", "Diagnostics"]
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`nav-pill ${activeView === id ? "nav-pill-active" : ""}`}
-              onClick={() => {
-                if (id === "diagnostics") setDiagnosticsTab("overview");
-                setActiveView(id);
-                if (id !== "people") {
+        <nav className="sa-subnav sa-subnav-grouped" aria-label="System admin">
+          <div className="sa-nav-group">
+            <span className="sa-nav-label">Access &amp; governance</span>
+            <div className="sa-nav-row">
+              {(
+                [
+                  ["people", "People & access"],
+                  ["organizations", "Organizations"],
+                  ["invite_users", "Invite users"],
+                  ["audit", "Audit"]
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`nav-pill ${activeView === id ? "nav-pill-active" : ""}`}
+                  onClick={() => {
+                    setActiveView(id);
+                    if (id !== "people") {
+                      setSelectedId(null);
+                      setDetail(null);
+                    }
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sa-nav-group">
+            <span className="sa-nav-label">Data &amp; integrations</span>
+            <div className="sa-nav-row">
+              <button
+                type="button"
+                className={`nav-pill ${activeView === "diagnostics" ? "nav-pill-active" : ""}`}
+                onClick={() => {
+                  setDiagnosticsTab("overview");
+                  setActiveView("diagnostics");
                   setSelectedId(null);
                   setDetail(null);
-                }
-              }}
-            >
-              {label}
-            </button>
-          ))}
-          <span className="nav-pill-sep" aria-hidden="true" />
-          <button
-            type="button"
-            className={`nav-pill ${activeView === "sales_mapping" ? "nav-pill-active" : ""}`}
-            onClick={() => {
-              setSelectedId(null);
-              setDetail(null);
-              setActiveView("sales_mapping");
-            }}
-          >
-            Sales mapping
-          </button>
-          <button
-            type="button"
-            className={`nav-pill ${activeView === "moraware" ? "nav-pill-active" : ""}`}
-            onClick={() => {
-              setSelectedId(null);
-              setDetail(null);
-              setActiveView("moraware");
-            }}
-          >
-            Moraware
-          </button>
-          <button
-            type="button"
-            className={`nav-pill ${activeView === "identity_resolution" ? "nav-pill-active" : ""}`}
-            onClick={() => {
-              setSelectedId(null);
-              setDetail(null);
-              setActiveView("identity_resolution");
-            }}
-          >
-            Identity resolution
-          </button>
+                }}
+              >
+                Diagnostics
+              </button>
+              <button
+                type="button"
+                className={`nav-pill ${activeView === "sales_mapping" ? "nav-pill-active" : ""}`}
+                onClick={() => {
+                  setSelectedId(null);
+                  setDetail(null);
+                  setActiveView("sales_mapping");
+                }}
+              >
+                Sales mapping
+              </button>
+              <button
+                type="button"
+                className={`nav-pill ${activeView === "moraware" ? "nav-pill-active" : ""}`}
+                onClick={() => {
+                  setSelectedId(null);
+                  setDetail(null);
+                  setActiveView("moraware");
+                }}
+              >
+                Moraware
+              </button>
+              <button
+                type="button"
+                className={`nav-pill ${activeView === "identity_resolution" ? "nav-pill-active" : ""}`}
+                onClick={() => {
+                  setSelectedId(null);
+                  setDetail(null);
+                  setActiveView("identity_resolution");
+                }}
+              >
+                Identity resolution
+              </button>
+            </div>
+          </div>
         </nav>
       ) : null}
 
@@ -1788,11 +1793,18 @@ export default function App() {
                         onClick={() => setSelectedId(String(r.id))}
                       >
                         <td className="user-cell">
-                          <strong>{String(r.full_name || r.email || "Unnamed user")}</strong>
-                          <span>
-                            {String(r.department || "No department")}
-                            {r.organization_id ? ` · org ${String(r.organization_id).slice(0, 8)}...` : ""}
-                          </span>
+                          <div className="user-cell-row">
+                            <span className={`avatar avatar-${avatarTintFor(String(r.full_name || r.email || r.id))}`} aria-hidden>
+                              {userInitialsFor(String(r.full_name || ""), String(r.email || ""))}
+                            </span>
+                            <div className="user-cell-text">
+                              <strong>{String(r.full_name || r.email || "Unnamed user")}</strong>
+                              <span>
+                                {String(r.department || "No department")}
+                                {r.organization_id ? ` · org ${String(r.organization_id).slice(0, 8)}...` : ""}
+                              </span>
+                            </div>
+                          </div>
                         </td>
                         <td>{String(r.email ?? "")}</td>
                         <td>
@@ -1808,9 +1820,9 @@ export default function App() {
                         </td>
                         <td className="tools-cell">
                           {hl.length ? (
-                            <div className="tool-chip-row compact">
+                            <div className="tool-chip-row compact nowrap">
                               {shown.map((h) => (
-                                <span className="tool-chip" key={h}>
+                                <span className="tool-chip" key={h} title={titleizeToken(h)}>
                                   {titleizeToken(h)}
                                 </span>
                               ))}
@@ -1826,11 +1838,17 @@ export default function App() {
                             {r.is_active !== false ? "Active" : "Inactive"}
                           </span>
                         </td>
-                        <td>
-                          {lastSignInText(r, auth)}
-                          {!auth?.last_sign_in_at && !r.last_login_at ? (
-                            <div className="muted table-helper">No tracked session yet</div>
-                          ) : null}
+                        <td className="lastseen-cell">
+                          {relativeTimeFrom(auth?.last_sign_in_at ?? r.last_login_at) ? (
+                            <span title={lastSignInText(r, auth)}>
+                              {relativeTimeFrom(auth?.last_sign_in_at ?? r.last_login_at)}
+                            </span>
+                          ) : (
+                            <>
+                              {lastSignInText(r, auth)}
+                              <div className="muted table-helper">No tracked session yet</div>
+                            </>
+                          )}
                         </td>
                       </tr>
                     );
