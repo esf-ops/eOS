@@ -34,4 +34,7 @@ export {
   panelFromTab,
   tabFromPanel,
   WORKSPACE_PANEL_TABS,
+  toggleColumnSort,
+  sortAriaForColumn,
+  LIST_SORT_COLUMNS
 } from "./accountDirectoryWorkspace.mjs";

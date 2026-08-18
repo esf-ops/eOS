@@ -62,10 +62,13 @@ import {
   isSummaryCardActive,
   parseUrlState,
   serializeUrlState,
+  toggleColumnSort,
+  sortAriaForColumn,
   type UrlState,
   panelFromTab,
   tabFromPanel
 } from "./lib/accountDirectoryWorkspace";
+import { formatAccountDirectoryPhone } from "./lib/accountDirectoryPhoneFormat.mjs";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 
@@ -98,6 +101,17 @@ type DetailTab = (typeof DETAIL_TABS)[number];
 const SORT_OPTIONS = [
   { value: "name_asc", label: "Name A–Z" },
   { value: "name_desc", label: "Name Z–A" },
+  { value: "status_asc", label: "Status" },
+  { value: "connections_desc", label: "Connections" },
+  { value: "ar_desc", label: "A/R high–low" },
+  { value: "ar_asc", label: "A/R low–high" },
+  { value: "ytd_sqft_desc", label: "YTD Sq Ft high–low" },
+  { value: "ytd_sqft_asc", label: "YTD Sq Ft low–high" },
+  { value: "followup_attention", label: "Follow-up attention" },
+  { value: "contact_asc", label: "Primary contact A–Z" },
+  { value: "location_asc", label: "Location A–Z" },
+  { value: "activity_desc", label: "Last activity newest" },
+  { value: "activity_asc", label: "Last activity oldest" },
   { value: "updated_desc", label: "Recently updated" },
   { value: "updated_asc", label: "Oldest updated" }
 ];
@@ -160,11 +174,30 @@ function formatCityState(city?: string | null, state?: string | null): string {
   return [city, state].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ") || "—";
 }
 
-function formatUpdatedAt(iso?: string | null): string {
+function formatLastActivity(iso?: string | null): string {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T12:00:00` : iso);
   if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return d.toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
+function formatYtdActivity(ytd?: AccountListItem["ytdActivity"]): { sqft: string; jobs: string } | null {
+  if (!ytd || ytd.available === false || ytd.jobs == null || ytd.sqft == null) return null;
+  return {
+    sqft: `${Number(ytd.sqft).toLocaleString(undefined, { maximumFractionDigits: 1 })} SF`,
+    jobs: `${Number(ytd.jobs).toLocaleString()} ${Number(ytd.jobs) === 1 ? "job" : "jobs"}`
+  };
+}
+
+function formatFollowUpCell(summary?: AccountListItem["followUpSummary"]): string {
+  if (summary?.available === false) return "";
+  const open = Number(summary?.open || 0);
+  const overdue = Number(summary?.overdue || 0);
+  const dueToday = Number(summary?.dueToday || 0);
+  if (open <= 0) return "";
+  if (overdue > 0) return `${overdue.toLocaleString()} overdue · ${open.toLocaleString()} open`;
+  if (dueToday > 0) return dueToday === open ? "Due today" : `Due today · ${open.toLocaleString()} open`;
+  return `${open.toLocaleString()} open`;
 }
 
 function statusLabel(status: string): string {
@@ -180,33 +213,19 @@ function statusPillClass(status: string): string {
   return "status-pill status-pill-default";
 }
 
-function qbEnrichmentBadge(item: {
-  quickbooksLinked?: boolean;
-  qbEnrichment?: { code?: string; label?: string } | null;
-  qbEnrichmentCode?: string | null;
-  qbEnrichmentLabel?: string | null;
-}) {
-  const code = item.qbEnrichment?.code || item.qbEnrichmentCode || (item.quickbooksLinked ? "linked" : "not_linked");
-  const label =
-    item.qbEnrichment?.label ||
-    item.qbEnrichmentLabel ||
-    (code === "linked"
-      ? "QuickBooks Linked"
-      : code === "suggested_match"
-        ? "Suggested Match"
-        : code === "needs_review"
-          ? "Needs Review"
-          : "QuickBooks Not Linked");
-  if (code === "linked") {
-    return <span className="qb-badge">{label}</span>;
-  }
-  if (code === "suggested_match") {
-    return <span className="chip" title={label}>{label}</span>;
-  }
-  if (code === "needs_review") {
-    return <span className="status-pill status-pill-needs-review">{label}</span>;
-  }
-  return <span className="ad-cell-muted">{label}</span>;
+function ConnectionsBadges(item: AccountListItem) {
+  const qb = Boolean(item.connections?.quickbooks);
+  const mw = Boolean(item.connections?.moraware);
+  const code = item.qbEnrichment?.code || item.qbEnrichmentCode;
+  const qbWarn = !qb && (code === "suggested_match" || code === "needs_review");
+  return (
+    <div className="ad-conn" aria-label={`QuickBooks ${qb ? "connected" : qbWarn ? "needs review" : "not connected"}, Moraware ${mw ? "connected" : "not connected"}`}>
+      <span className={qb ? "ad-conn-on" : qbWarn ? "ad-conn-warn" : "ad-conn-off"}>
+        QB {qb ? "✓" : qbWarn ? "⚠" : "—"}
+      </span>
+      <span className={mw ? "ad-conn-on" : "ad-conn-off"}>Moraware {mw ? "✓" : "—"}</span>
+    </div>
+  );
 }
 
 function monogramClass(status: string): string {
@@ -529,6 +548,23 @@ export default function AccountDirectoryApp() {
   /* ─── Filter/pagination helpers ─── */
   function updateFilters(patch: Partial<UrlState>) {
     setUrlState((prev) => applyToolbarFilterPatch(prev, patch));
+  }
+
+  function renderSortTh(label: string, column: string) {
+    const aria = sortAriaForColumn(urlState.sort, column);
+    return (
+      <th scope="col" aria-sort={aria}>
+        <button
+          type="button"
+          className="ad-sort-btn"
+          onClick={() => updateFilters({ sort: toggleColumnSort(urlState.sort, column), page: 1 })}
+        >
+          {label}
+          {aria === "ascending" ? <span aria-hidden="true"> ↑</span> : null}
+          {aria === "descending" ? <span aria-hidden="true"> ↓</span> : null}
+        </button>
+      </th>
+    );
   }
 
   function selectAccount(id: string | null) {
@@ -960,11 +996,14 @@ export default function AccountDirectoryApp() {
 
             {/* ─── Summary strip ─── */}
             {summary ? (
-              <SummaryStrip
-                summary={summary}
-                urlState={urlState}
-                onApplyCard={applySummaryCard}
-              />
+              <>
+                <OperationalHero summary={summary} />
+                <SummaryStrip
+                  summary={summary}
+                  urlState={urlState}
+                  onApplyCard={applySummaryCard}
+                />
+              </>
             ) : null}
 
             {/* ─── Nav tabs ─── */}
@@ -1277,15 +1316,15 @@ export default function AccountDirectoryApp() {
                       <table className="ad-table" aria-label="Accounts">
                         <thead>
                           <tr>
-                            <th scope="col">Account</th>
-                            <th scope="col">A/R</th>
-                            <th scope="col">Status</th>
-                            <th scope="col">QuickBooks</th>
-                            <th scope="col">Primary contact</th>
-                            <th scope="col">Location</th>
-                            <th scope="col">Email</th>
-                            <th scope="col">Phone</th>
-                            <th scope="col">Last updated</th>
+                            {renderSortTh("Account", "account")}
+                            {renderSortTh("Status", "status")}
+                            {renderSortTh("Connections", "connections")}
+                            {renderSortTh("A/R", "ar")}
+                            {renderSortTh("YTD Activity", "ytd")}
+                            {renderSortTh("Follow-up", "followup")}
+                            {renderSortTh("Primary contact", "contact")}
+                            {renderSortTh("Location", "location")}
+                            {renderSortTh("Last activity", "activity")}
                           </tr>
                         </thead>
                         <tbody>
@@ -1313,39 +1352,69 @@ export default function AccountDirectoryApp() {
                                     {initials(item.displayName ?? item.name)}
                                   </span>
                                   <div className="ad-cell-name-text">
-                                    <div className="ad-cell-primary">{item.displayName ?? item.name}</div>
+                                    <div className="ad-cell-primary">
+                                      {item.displayName ?? item.name}
+                                      {item.notesCount ? (
+                                        <span className="ad-notes-count" title={`${item.notesCount} notes`}>
+                                          Notes {item.notesCount}
+                                        </span>
+                                      ) : null}
+                                    </div>
                                     {item.legalName && item.legalName !== (item.displayName ?? item.name) ? (
                                       <div className="ad-cell-secondary">{item.legalName}</div>
                                     ) : null}
                                   </div>
                                 </div>
                               </td>
+                              <td>
+                                <span className={statusPillClass(item.status)}>{statusLabel(item.status)}</span>
+                              </td>
+                              <td>
+                                <ConnectionsBadges {...item} />
+                              </td>
                               <td className="ad-num">
                                 {item.financialIntel?.openAr != null ? (
                                   <span className={item.financialIntel.overdue ? "ad-overdue" : undefined}>
                                     {formatMoney(item.financialIntel.openAr)}
                                     {item.financialIntel.overdue ? " overdue" : ""}
-                                    {["watch", "attention", "priority"].includes(
-                                      String(item.financialIntel.collectionAttention || "")
-                                    )
-                                      ? ` · ${String(item.financialIntel.collectionAttention).replace(/^./, (c) =>
-                                          c.toUpperCase()
-                                        )}`
-                                      : ""}
                                   </span>
                                 ) : (
                                   <span className="ad-cell-muted">—</span>
                                 )}
                               </td>
                               <td>
-                                <span className={statusPillClass(item.status)}>{statusLabel(item.status)}</span>
+                                {(() => {
+                                  const ytd = formatYtdActivity(item.ytdActivity);
+                                  if (!ytd) return <span className="ad-cell-muted">—</span>;
+                                  return (
+                                    <div className="ad-ytd">
+                                      <strong>{ytd.sqft}</strong>
+                                      <span>{ytd.jobs}</span>
+                                    </div>
+                                  );
+                                })()}
                               </td>
-                              <td>{qbEnrichmentBadge(item)}</td>
-                              <td>{item.primaryContact || <span className="ad-cell-muted">—</span>}</td>
+                              <td>
+                                {formatFollowUpCell(item.followUpSummary) ? (
+                                  <span className={item.followUpSummary?.overdue ? "ad-overdue" : undefined}>
+                                    {formatFollowUpCell(item.followUpSummary)}
+                                  </span>
+                                ) : (
+                                  <span className="ad-cell-muted">—</span>
+                                )}
+                              </td>
+                              <td>
+                                <div>{item.primaryContact || <span className="ad-cell-muted">—</span>}</div>
+                                {item.primaryPhone || item.primaryEmail ? (
+                                  <div className="ad-cell-secondary" title={item.primaryEmail || undefined}>
+                                    {item.primaryPhone
+                                      ? formatAccountDirectoryPhone(item.primaryPhone)
+                                      : item.primaryEmail}
+                                  </div>
+                                ) : null}
+                              </td>
                               <td>{formatCityState(item.city, item.state)}</td>
-                              <td>{item.primaryEmail || <span className="ad-cell-muted">—</span>}</td>
-                              <td>{item.primaryPhone || <span className="ad-cell-muted">—</span>}</td>
-                              <td>{formatUpdatedAt(item.updatedAt)}</td>
+                              <td>{formatLastActivity(item.lastActivityAt)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1385,7 +1454,9 @@ export default function AccountDirectoryApp() {
                                 formatCityState(item.city, item.state),
                                 item.financialIntel?.openAr != null
                                   ? `${formatMoney(item.financialIntel.openAr)}${item.financialIntel.overdue ? " overdue" : ""}`
-                                  : null
+                                  : null,
+                                formatYtdActivity(item.ytdActivity)?.sqft,
+                                formatFollowUpCell(item.followUpSummary) || null
                               ]
                                 .filter((x) => x && x !== "—")
                                 .join(" · ") || formatCityState(item.city, item.state)}
@@ -1623,6 +1694,49 @@ export default function AccountDirectoryApp() {
 
 /* ──────────────── Sub-components ──────────────── */
 
+function OperationalHero({ summary }: { summary: AccountSummary }) {
+  const ops = summary.operational;
+  const ytdUnavailable = ops?.ytdAvailable === false;
+  const arUnavailable = ops?.openArAvailable === false;
+  const cards = [
+    {
+      key: "jobs",
+      label: "YTD Jobs",
+      value: ytdUnavailable ? "—" : ops?.ytdJobs == null ? "—" : Number(ops.ytdJobs).toLocaleString(),
+      hint: ytdUnavailable ? "Moraware YTD activity is temporarily unavailable." : "Distinct current-year Moraware jobs in the governed current set."
+    },
+    {
+      key: "sqft",
+      label: "YTD Sq Ft",
+      value: ytdUnavailable ? "—" : ops?.ytdSqft == null ? "—" : `${Number(ops.ytdSqft).toLocaleString(undefined, { maximumFractionDigits: 1 })} SF`,
+      hint: ytdUnavailable ? "Moraware YTD activity is temporarily unavailable." : "Job Worksheet Sq.Ft. on the same YTD job population."
+    },
+    {
+      key: "customers",
+      label: "Customers with YTD Activity",
+      value: ytdUnavailable ? "—" : ops?.customersWithYtdActivity == null ? "—" : Number(ops.customersWithYtdActivity).toLocaleString(),
+      hint: "Canonical Account Directory UUIDs with at least one linked current-year Moraware job."
+    },
+    {
+      key: "ar",
+      label: "Open A/R",
+      value: arUnavailable ? "—" : ops?.openAr == null ? "—" : formatMoney(ops.openAr),
+      hint: arUnavailable ? "Open A/R is temporarily unavailable." : "Exact QuickBooks-linked open A/R for the organization."
+    }
+  ];
+  return (
+    <div className="ad-ops-hero" aria-label="Organization YTD operations">
+      {cards.map((card) => (
+        <div key={card.key} className="ad-ops-card">
+          <span className="ad-ops-label">{card.label}</span>
+          <strong className="ad-ops-value">{card.value}</strong>
+          <span className="sr-only">{card.hint}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SummaryStrip({
   summary,
   urlState,
@@ -1632,50 +1746,45 @@ function SummaryStrip({
   urlState: UrlState;
   onApplyCard: (cardKey: string) => void;
 }) {
-  const items: { key: string; label: string; count: number }[] = [
-    { key: "total", label: "Total", count: summary.total },
+  const clickable: { key: string; label: string; count: number }[] = [
+    { key: "total", label: "Total Accounts", count: summary.total },
     { key: "active", label: "Active", count: summary.active },
     { key: "prospects", label: "Prospects", count: summary.prospects },
-    { key: "needsReview", label: "Needs review status", count: summary.needsReview },
-    { key: "archived", label: "Archived", count: summary.archived },
-    { key: "qbLinked", label: "QB linked", count: summary.quickbooksLinked },
-    { key: "qbSuggested", label: "Suggested Match", count: summary.qbSuggestedMatch ?? 0 },
-    { key: "qbNeedsReview", label: "QB Needs Review", count: summary.qbNeedsReview ?? 0 },
-    { key: "noContact", label: "No contact", count: summary.missingPrimaryContact },
-    { key: "noLocation", label: "No location", count: summary.missingPrimaryLocation }
+    { key: "needsReview", label: "Needs Review", count: summary.needsReview },
+    { key: "qbLinked", label: "QB Connected", count: summary.quickbooksLinked }
+  ];
+  const facts: { label: string; count: number | null }[] = [
+    { label: "Moraware Connected", count: summary.morawareConnected ?? 0 },
+    { label: "Open Follow-ups", count: summary.openFollowUps ?? null },
+    { label: "Overdue Follow-ups", count: summary.overdueFollowUps ?? null }
   ];
 
   return (
-    <div className="summary-strip" role="list" aria-label="Account directory overview">
-      {[
-        { group: "Total", keys: ["total"] },
-        { group: "Lifecycle", keys: ["active", "prospects", "needsReview", "archived"] },
-        { group: "QuickBooks", keys: ["qbLinked", "qbSuggested", "qbNeedsReview"] },
-        { group: "Completeness", keys: ["noContact", "noLocation"] }
-      ].map((group, gIdx) => (
-        <div key={group.group} className="summary-group" role="group" aria-label={group.group}>
-          {gIdx > 0 ? <div className="summary-sep" aria-hidden="true" /> : null}
-          <span className="summary-group-label">{group.group}</span>
-          {group.keys.map((key) => {
-            const item = items.find((row) => row.key === key);
-            if (!item) return null;
-            const active = isSummaryCardActive(urlState, item.key);
-            return (
-              <button
-                key={item.key}
-                type="button"
-                className={active ? "summary-item summary-item-active" : "summary-item"}
-                role="listitem"
-                aria-pressed={active}
-                onClick={() => onApplyCard(item.key)}
-              >
-                <span className="summary-count">{item.count.toLocaleString()}</span>
-                <span className="summary-label">{item.label}</span>
-              </button>
-            );
-          })}
+    <div className="summary-strip summary-strip-compact" role="list" aria-label="Directory health">
+      <div className="summary-group" role="group" aria-label="Directory health">
+      {clickable.map((item) => {
+        const active = isSummaryCardActive(urlState, item.key);
+        return (
+          <button
+            key={item.key}
+            type="button"
+            className={active ? "summary-item summary-item-active" : "summary-item"}
+            role="listitem"
+            aria-pressed={active}
+            onClick={() => onApplyCard(item.key)}
+          >
+            <span className="summary-count">{item.count.toLocaleString()}</span>
+            <span className="summary-label">{item.label}</span>
+          </button>
+        );
+      })}
+      {facts.map((item) => (
+        <div key={item.label} className="summary-item summary-item-static" role="listitem">
+          <span className="summary-count">{item.count == null ? "—" : item.count.toLocaleString()}</span>
+          <span className="summary-label">{item.label}</span>
         </div>
       ))}
+      </div>
     </div>
   );
 }

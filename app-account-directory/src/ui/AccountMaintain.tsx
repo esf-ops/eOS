@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ApiError } from "../lib/api";
 import { updateContact, updateLocation } from "../lib/accountDirectoryApi";
+import { formatAccountDirectoryPhone } from "../lib/accountDirectoryPhoneFormat.mjs";
 import type { AccountContact, AccountDetail, AccountLocation } from "../lib/types";
 
 const LOCATION_TYPES = ["account", "billing", "shipping", "other"] as const;
@@ -76,7 +77,7 @@ export function ContactsMaintain({
             </div>
             <div className="ad-person-links">
               {c.email ? <a href={`mailto:${c.email}`}>{c.email}</a> : <span className="muted">Email unavailable</span>}
-              {c.phone ? <a href={`tel:${c.phone}`}>{c.phone}</a> : <span className="muted">Phone unavailable</span>}
+              {c.phone ? <a href={`tel:${c.phone}`}>{formatAccountDirectoryPhone(c.phone)}</a> : <span className="muted">Phone unavailable</span>}
             </div>
             {canEdit ? (
               <div className="ad-inline-actions">

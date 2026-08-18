@@ -22,6 +22,7 @@ import type {
 } from "../lib/types";
 import { isAbortError } from "../lib/account360RequestCoordinator.mjs";
 import { customerFinancialsEmptyCopy } from "../lib/accountDirectoryFinancialCopy.mjs";
+import { formatAccountDirectoryPhone } from "../lib/accountDirectoryPhoneFormat.mjs";
 import {
   AD_360_HISTORY_PAGE_SIZE,
   AD_360_INVOICE_PAGE_SIZE,
@@ -1497,7 +1498,7 @@ export function ContactsSurface({ contacts }: { contacts: AccountContact[] }) {
           </div>
           <div className="ad-person-links">
             {c.email ? <a href={`mailto:${c.email}`}>{c.email}</a> : <span className="muted">Email unavailable</span>}
-            {c.phone ? <a href={`tel:${c.phone}`}>{c.phone}</a> : <span className="muted">Phone unavailable</span>}
+            {c.phone ? <a href={`tel:${c.phone}`}>{formatAccountDirectoryPhone(c.phone)}</a> : <span className="muted">Phone unavailable</span>}
           </div>
         </li>
       ))}

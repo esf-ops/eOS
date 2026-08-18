@@ -35,6 +35,24 @@ export type AccountListItem = {
     collectionAttention?: string | null;
     financiallyActive?: boolean;
   } | null;
+  connections?: {
+    quickbooks?: boolean;
+    moraware?: boolean;
+  };
+  ytdActivity?: {
+    available?: boolean;
+    jobs?: number | null;
+    sqft?: number | null;
+  };
+  followUpSummary?: {
+    available?: boolean;
+    open?: number | null;
+    overdue?: number | null;
+    dueToday?: number | null;
+    nextDueAt?: string | null;
+  };
+  notesCount?: number | null;
+  lastActivityAt?: string | null;
 };
 
 export type AccountContact = {
@@ -134,6 +152,19 @@ export type AccountSummary = {
   qbNeedsReview?: number;
   missingPrimaryContact: number;
   missingPrimaryLocation: number;
+  morawareConnected?: number;
+  openFollowUps?: number | null;
+  overdueFollowUps?: number | null;
+  operational?: {
+    year?: number | null;
+    asOfYmd?: string | null;
+    ytdJobs?: number | null;
+    ytdSqft?: number | null;
+    customersWithYtdActivity?: number | null;
+    ytdAvailable?: boolean;
+    openAr?: number | null;
+    openArAvailable?: boolean;
+  };
 };
 
 export type AccountSummaryResponse = {

@@ -16,7 +16,9 @@ import {
   initials,
   ACTIVITY_LABELS,
   panelFromTab,
-  tabFromPanel
+  tabFromPanel,
+  toggleColumnSort,
+  sortAriaForColumn
 } from "./accountDirectoryWorkspace.mjs";
 
 console.log("\naccountDirectoryWorkspace.test.mjs\n");
@@ -325,5 +327,26 @@ assert.equal(initials(""), "?");
 assert.equal(initials(null), "?");
 assert.equal(initials("Elite Stone Fabrication"), "EF");
 console.log("ok: initials");
+
+{
+  const ytd = parseUrlState("?sort=ytd_sqft_desc");
+  assert.equal(ytd.sort, "ytd_sqft_desc");
+  assert.equal(parseUrlState(serializeUrlState(ytd)).sort, "ytd_sqft_desc");
+  const fu = parseUrlState("?sort=followup_attention");
+  assert.equal(fu.sort, "followup_attention");
+  assert.equal(parseUrlState(serializeUrlState(fu)).sort, "followup_attention");
+  const conn = parseUrlState("?sort=connections_desc&search=Acme");
+  assert.equal(conn.sort, "connections_desc");
+  assert.equal(parseUrlState(serializeUrlState(conn)).sort, "connections_desc");
+  assert.equal(parseUrlState(serializeUrlState(conn)).search, "Acme");
+  assert.equal(toggleColumnSort("name_asc", "account"), "name_desc");
+  assert.equal(toggleColumnSort("name_desc", "account"), "name_asc");
+  assert.equal(toggleColumnSort("ytd_sqft_desc", "ytd"), "ytd_sqft_asc");
+  assert.equal(sortAriaForColumn("ytd_sqft_desc", "ytd"), "descending");
+  assert.equal(sortAriaForColumn("name_asc", "account"), "ascending");
+  assert.equal(sortAriaForColumn("followup_attention", "followup"), "descending");
+  assert.equal(sortAriaForColumn("name_asc", "ytd"), "none");
+  console.log("ok: 34) URL sort state round-trips; header toggle/aria-sort stay in sync");
+}
 
 console.log("\nAll workspace tests passed.\n");

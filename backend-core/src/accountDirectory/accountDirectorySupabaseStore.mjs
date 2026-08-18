@@ -234,6 +234,27 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
     return rows;
   }
 
+  async function fetchMatchingUntilCap(table, apply, { select = "*", cap = 20000 } = {}) {
+    const limit = Math.max(1, Number(cap) || 20000);
+    const rows = [];
+    let from = 0;
+    for (;;) {
+      let q = db().from(table).select(select).range(from, from + LINK_PAGE - 1);
+      if (apply) q = apply(q);
+      const { data, error } = await q;
+      if (error) throw error;
+      const batch = data || [];
+      rows.push(...batch);
+      if (rows.length > limit) {
+        return { rows: null, complete: false, truncated: true };
+      }
+      if (batch.length < LINK_PAGE) {
+        return { rows, complete: true, truncated: false };
+      }
+      from += LINK_PAGE;
+    }
+  }
+
   return {
     kind: "supabase",
 
@@ -1215,6 +1236,54 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         .limit(Math.min(Number(limit) || 1000, 5000));
       if (error) throw dbError(error, "Could not list audit history.");
       return (data || []).map(mapAudit);
+    },
+
+    async listNoteHeadsForOrganization(organizationId, { cap = 20000 } = {}) {
+      try {
+        const fetched = await fetchMatchingUntilCap(
+          "account_directory_notes",
+          (q) => q.eq("organization_id", organizationId).is("archived_at", null),
+          { select: "account_id,created_at,updated_at,archived_at", cap }
+        );
+        if (fetched.truncated) return { items: [], complete: false, truncated: true };
+        return {
+          items: (fetched.rows || []).map((row) => ({
+            accountId: row.account_id,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            archivedAt: row.archived_at
+          })),
+          complete: true,
+          truncated: false
+        };
+      } catch (error) {
+        throw dbError(error, "Could not list note heads.");
+      }
+    },
+
+    async listOpenFollowUpHeadsForOrganization(organizationId, { cap = 20000 } = {}) {
+      try {
+        const fetched = await fetchMatchingUntilCap(
+          "account_directory_follow_ups",
+          (q) => q.eq("organization_id", organizationId).is("archived_at", null).eq("status", "open"),
+          { select: "account_id,due_at,status,created_at,updated_at,archived_at", cap }
+        );
+        if (fetched.truncated) return { items: [], complete: false, truncated: true };
+        return {
+          items: (fetched.rows || []).map((row) => ({
+            accountId: row.account_id,
+            dueAt: row.due_at,
+            status: row.status,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            archivedAt: row.archived_at
+          })),
+          complete: true,
+          truncated: false
+        };
+      } catch (error) {
+        throw dbError(error, "Could not list follow-up heads.");
+      }
     }
   };
 }

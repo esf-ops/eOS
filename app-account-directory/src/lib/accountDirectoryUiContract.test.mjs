@@ -278,4 +278,22 @@ assert.equal(picker.includes("raw_payload"), false);
 assert.equal(connections.includes("raw_payload"), false);
 console.log("ok: Connections workspace picker / unlink / permissions contracts");
 
+// ── Landing-page operational table (read-model presentation) ──────────────
+assert.ok(app.includes('renderSortTh("Connections"'), "Connections column present");
+assert.ok(app.includes('renderSortTh("YTD Activity"'), "YTD Activity column present");
+assert.ok(app.includes('renderSortTh("Follow-up"'), "Follow-up column present");
+assert.ok(app.includes('renderSortTh("Last activity"'), "Last activity column present");
+assert.equal(app.includes('renderSortTh("QuickBooks"'), false, "standalone QuickBooks column removed");
+assert.equal(app.includes('renderSortTh("Email"'), false, "standalone Email column removed");
+assert.equal(app.includes('renderSortTh("Phone"'), false, "standalone Phone column removed");
+assert.equal(app.includes('renderSortTh("Last updated"') || app.includes('renderSortTh("Last Updated"'), false);
+assert.ok(app.includes("aria-sort"), "sortable headers expose aria-sort");
+assert.ok(app.includes("OperationalHero") && app.includes("ad-ops-hero"), "operational hero cards present");
+assert.ok(app.includes('ytdUnavailable ? "—"'), "hero cards render unavailable as em dash");
+assert.ok(app.includes('arUnavailable ? "—"'), "open A/R hero renders unavailable as em dash");
+assert.ok(app.includes("formatAccountDirectoryPhone"), "shared phone formatter used on list");
+assert.ok(panels.includes("formatAccountDirectoryPhone"), "shared phone formatter used in Account 360");
+assert.ok(maintain.includes("formatAccountDirectoryPhone"), "shared phone formatter used in maintain");
+console.log("ok: landing-page columns, hero unavailable states, shared phone formatter");
+
 console.log("\nAll account directory UI contract checks passed.\n");

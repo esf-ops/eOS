@@ -4,6 +4,7 @@ import { AccountDirectoryError } from "./accountDirectoryErrors.mjs";
 import { isAccountQuickbooksLinked } from "./accountDirectoryQuickbooksLinkage.mjs";
 import {
   ACCOUNT_DIRECTORY_MORAWARE_SYSTEM,
+  isAccountMorawareLinked,
   isInternalMorawareAccountName,
   loadCanonicalMorawareAccount
 } from "./accountDirectoryMorawareLinkage.mjs";
@@ -27,6 +28,17 @@ import {
 } from "./accountDirectoryQbCustomerSearch.mjs";
 import { listIntelPublic, loadListFinancialIntel } from "./accountDirectory360.mjs";
 import { loadStaffDisplayNames } from "./accountDirectoryNotes.mjs";
+import {
+  DIRECTORY_ACCOUNT_POPULATION_CAP,
+  DIRECTORY_SORT_NEEDS_CONTACTS,
+  attachListIntelligence,
+  companyOperationalPublic,
+  linkSetComplete,
+  loadDirectoryOperationalIntelligence,
+  resolveDirectoryListSort,
+  scopedPopulationOverflow,
+  sortDirectoryListItems
+} from "./accountDirectoryListIntelligence.mjs";
 
 export const AD_QB_ENRICHMENT_FILTERS = Object.freeze([
   "suggested_match",
@@ -79,6 +91,8 @@ function normalizeAliasValue(value) {
 export function createAccountDirectoryService(deps) {
   const store = deps.store;
   if (!store) throw new Error("createAccountDirectoryService: store required");
+  const accountPopulationCap =
+    Number(deps.accountPopulationCap) > 0 ? Number(deps.accountPopulationCap) : DIRECTORY_ACCOUNT_POPULATION_CAP;
 
   async function writeAudit({
     organizationId,
@@ -212,7 +226,11 @@ export function createAccountDirectoryService(deps) {
       hasPrimaryContact: Boolean(primaryContact),
       hasPrimaryLocation: Boolean(primaryLoc),
       hasAliases,
-      qbEnrichment: resolveAccountQbEnrichmentLabel({ quickbooksLinked: qbLinked }, null)
+      qbEnrichment: resolveAccountQbEnrichmentLabel({ quickbooksLinked: qbLinked }, null),
+      connections: {
+        quickbooks: qbLinked,
+        moraware: isAccountMorawareLinked(links)
+      }
     };
   }
 
@@ -311,34 +329,8 @@ export function createAccountDirectoryService(deps) {
     return normalizeAccountDirectorySearch(hay).includes(q);
   }
 
-  function sortDirectoryItems(items, sort) {
-    const key = String(sort || "name_asc").trim();
-    const sorted = [...items];
-    sorted.sort((a, b) => {
-      if (key === "name_desc") {
-        return (
-          String(b.displayName || "").localeCompare(String(a.displayName || "")) ||
-          String(a.id).localeCompare(String(b.id))
-        );
-      }
-      if (key === "updated_desc") {
-        return (
-          String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")) ||
-          String(a.displayName || "").localeCompare(String(b.displayName || ""))
-        );
-      }
-      if (key === "updated_asc") {
-        return (
-          String(a.updatedAt || "").localeCompare(String(b.updatedAt || "")) ||
-          String(a.displayName || "").localeCompare(String(b.displayName || ""))
-        );
-      }
-      return (
-        String(a.displayName || "").localeCompare(String(b.displayName || "")) ||
-        String(a.id).localeCompare(String(b.id))
-      );
-    });
-    return sorted;
+  function sortDirectoryItems(items, sort, intel = {}) {
+    return sortDirectoryListItems(items, resolveDirectoryListSort(sort, intel));
   }
 
   function paginationResult(items, pageNum, limit) {
@@ -361,10 +353,11 @@ export function createAccountDirectoryService(deps) {
    * Search / missing-contact / missing-location need contacts, locations, or aliases
    * across the org before pagination. Default list pages do not.
    */
-  function requiresFullSupportIndex({ search, missingContact, missingLocation }) {
+  function requiresFullSupportIndex({ search, missingContact, missingLocation, sort }) {
     if (String(search || "").trim()) return true;
     if (parseBoolQuery(missingContact) === true) return true;
     if (parseBoolQuery(missingLocation) === true) return true;
+    if (DIRECTORY_SORT_NEEDS_CONTACTS.includes(String(sort || "").trim())) return true;
     return false;
   }
 
@@ -373,10 +366,19 @@ export function createAccountDirectoryService(deps) {
       statusIn,
       includeArchived,
       search: null,
-      limit: 5000,
+      limit: accountPopulationCap + 1,
       offset: 0
     });
-    return listed.items || [];
+    const items = listed.items || [];
+    if (scopedPopulationOverflow({ items, total: listed.total, cap: accountPopulationCap })) {
+      throw new AccountDirectoryError(
+        "directory_population_exceeded",
+        "This organization has more accounts than Account Directory can list safely.",
+        422,
+        { cap: accountPopulationCap }
+      );
+    }
+    return items;
   }
 
   /**
@@ -412,18 +414,33 @@ export function createAccountDirectoryService(deps) {
     });
   }
 
+  async function loadActiveLinksComplete(organizationId, externalSystem) {
+    if (typeof store.listAllActiveExternalLinks !== "function") return [];
+    const links = await store.listAllActiveExternalLinks(organizationId, externalSystem);
+    if (typeof store.countActiveExternalLinks === "function") {
+      const counted = await store.countActiveExternalLinks(organizationId, externalSystem);
+      if (!linkSetComplete(links, counted)) {
+        throw new AccountDirectoryError(
+          "directory_link_population_incomplete",
+          "Account connections could not be loaded completely.",
+          422
+        );
+      }
+    }
+    return links || [];
+  }
+
   /**
    * Light index: accounts + active QuickBooks links only (no org-wide contacts/locations/aliases).
    * Enough for status/linked/qbEnrichment/sort before paging.
    */
   async function buildLightDirectoryIndex(organizationId, { statusIn, includeArchived }) {
-    const [accounts, qbLinks] = await Promise.all([
+    const [accounts, qbLinks, mwLinks] = await Promise.all([
       listAccountsScoped(organizationId, { statusIn, includeArchived }),
-      typeof store.listAllActiveExternalLinks === "function"
-        ? store.listAllActiveExternalLinks(organizationId, "quickbooks_desktop")
-        : Promise.resolve([])
+      loadActiveLinksComplete(organizationId, "quickbooks_desktop"),
+      loadActiveLinksComplete(organizationId, ACCOUNT_DIRECTORY_MORAWARE_SYSTEM)
     ]);
-    const linksByAccount = groupByAccountId(qbLinks);
+    const linksByAccount = groupByAccountId([...(qbLinks || []), ...(mwLinks || [])]);
     return accounts.map((account) => {
       const lk = linksByAccount.get(account.id) || [];
       return {
@@ -685,7 +702,8 @@ export function createAccountDirectoryService(deps) {
       const useFullSupport = requiresFullSupportIndex({
         search: searchTrimmed,
         missingContact,
-        missingLocation
+        missingLocation,
+        sort
       });
       const intelFilter = String(intelligence || "").trim();
 
@@ -699,23 +717,17 @@ export function createAccountDirectoryService(deps) {
         missingContact,
         missingLocation
       });
-      const sortedItems = sortDirectoryItems(
-        filtered.map((r) => r.item),
-        sort
-      );
       const suggestionByAccount = await loadSuggestionIndex(organizationId);
-      let enriched = sortedItems.map((item) => attachEnrichment(item, suggestionByAccount));
-      let working = filterByQbEnrichment(enriched, qbEnrichment);
+      let working = filterByQbEnrichment(
+        filtered.map((r) => attachEnrichment(r.item, suggestionByAccount)),
+        qbEnrichment
+      );
+      const rowById = new Map(filtered.map((r) => [r.account.id, r]));
 
       /** @type {Map<string, object>} */
       let intelByAccount = new Map();
-      const rowById = new Map(filtered.map((r) => [r.account.id, r]));
-
-      // Intelligence filters need financial snapshots before pagination.
-      if (intelFilter) {
-        const filteredWorkingRows = working
-          .map((item) => rowById.get(item.id))
-          .filter(Boolean);
+      const filteredWorkingRows = working.map((item) => rowById.get(item.id)).filter(Boolean);
+      if (intelFilter || working.length) {
         const applied = await applyListFinancialIntel(
           organizationId,
           filteredWorkingRows,
@@ -726,7 +738,44 @@ export function createAccountDirectoryService(deps) {
         intelByAccount = applied.intelByAccount;
       }
 
-      const paged = paginationResult(working, pageNum, limit);
+      const morawareLinks = filteredWorkingRows.flatMap((row) =>
+        (row.links || []).filter(
+          (l) => l?.isActive !== false && String(l.externalSystem || "") === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM
+        )
+      );
+      let operational = null;
+      if (typeof deps.getSupabase === "function" || typeof store.listOpenFollowUpHeadsForOrganization === "function") {
+        try {
+          operational = await loadDirectoryOperationalIntelligence({
+            supabase: typeof deps.getSupabase === "function" ? deps.getSupabase() : null,
+            store,
+            organizationId,
+            morawareLinks
+          });
+        } catch {
+          operational = null;
+        }
+      }
+
+      working = working.map((item) => {
+        const row = rowById.get(item.id);
+        const withIntel = attachListIntelligence(item, {
+          ytd: operational?.ytd,
+          followUp: operational?.followUp,
+          notes: operational?.notes,
+          links: row?.links || []
+        });
+        return {
+          ...withIntel,
+          financialIntel: listIntelPublic(intelByAccount.get(item.id) || null)
+        };
+      });
+
+      const sortedItems = sortDirectoryItems(working, sort, {
+        ytdAvailable: operational?.ytd?.available === true,
+        followUpAvailable: operational?.followUp?.available === true
+      });
+      const paged = paginationResult(sortedItems, pageNum, limit);
 
       if (!useFullSupport && paged.items.length) {
         const pageRows = paged.items.map((item) => rowById.get(item.id)).filter(Boolean);
@@ -735,7 +784,16 @@ export function createAccountDirectoryService(deps) {
         paged.items = paged.items.map((item) => {
           const row = hydratedById.get(item.id);
           if (!row) return item;
-          return attachEnrichment(row.item, suggestionByAccount);
+          const hydratedItem = attachEnrichment(row.item, suggestionByAccount);
+          return {
+            ...hydratedItem,
+            connections: hydratedItem.connections || item.connections,
+            ytdActivity: item.ytdActivity,
+            followUpSummary: item.followUpSummary,
+            notesCount: item.notesCount,
+            lastActivityAt: item.lastActivityAt,
+            financialIntel: item.financialIntel
+          };
         });
         // Refresh row map links for page-scoped financial enrichment.
         for (const row of hydrated) {
@@ -743,25 +801,9 @@ export function createAccountDirectoryService(deps) {
         }
       }
 
-      if (!intelFilter && typeof deps.getSupabase === "function" && paged.items.length) {
-        const pageRows = paged.items.map((item) => rowById.get(item.id)).filter(Boolean);
-        try {
-          const loaded = await loadListFinancialIntel(deps.getSupabase(), {
-            organizationId,
-            directoryRows: pageRows
-          });
-          intelByAccount = loaded.byAccount || new Map();
-        } catch {
-          intelByAccount = new Map();
-        }
-      }
-
       return {
         ...paged,
-        items: paged.items.map((item) => ({
-          ...item,
-          financialIntel: listIntelPublic(intelByAccount.get(item.id) || null)
-        }))
+        items: paged.items
       };
     },
 
@@ -779,11 +821,15 @@ export function createAccountDirectoryService(deps) {
         needsReview: 0,
         archived: 0,
         quickbooksLinked: 0,
+        morawareConnected: 0,
         qbSuggestedMatch: 0,
         qbNeedsReview: 0,
         missingPrimaryContact: 0,
-        missingPrimaryLocation: 0
+        missingPrimaryLocation: 0,
+        openFollowUps: 0,
+        overdueFollowUps: 0
       };
+      const liveRows = [];
       for (const row of rows) {
         const status = row.item.status;
         const isArchived = status === "archived" || Boolean(row.account.archivedAt);
@@ -794,16 +840,63 @@ export function createAccountDirectoryService(deps) {
 
         if (row.item.quickbooksLinked) summary.quickbooksLinked += 1;
         else if (!isArchived) {
-          // Align with tab=accounts + qbEnrichment=* (accounts tab excludes archived).
           const enr = attachEnrichment(row.item, suggestionByAccount).qbEnrichment;
           if (enr.code === "suggested_match") summary.qbSuggestedMatch += 1;
           if (enr.code === "needs_review") summary.qbNeedsReview += 1;
         }
+        if (row.item.connections?.moraware) summary.morawareConnected += 1;
         if (!row.item.hasPrimaryContact) summary.missingPrimaryContact += 1;
         if (!row.item.hasPrimaryLocation) summary.missingPrimaryLocation += 1;
+        if (!isArchived) liveRows.push(row);
       }
       // Total matches default Accounts tab scope (non-archived lifecycle rows).
       summary.total = summary.active + summary.prospects + summary.needsReview;
+
+      const morawareLinks = liveRows.flatMap((row) =>
+        (row.links || []).filter(
+          (l) => l?.isActive !== false && String(l.externalSystem || "") === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM
+        )
+      );
+      let operational = null;
+      try {
+        operational = await loadDirectoryOperationalIntelligence({
+          supabase: typeof deps.getSupabase === "function" ? deps.getSupabase() : null,
+          store,
+          organizationId,
+          morawareLinks
+        });
+      } catch {
+        operational = null;
+      }
+      summary.openFollowUps =
+        operational?.followUp?.available === false ? null : operational?.followUp?.orgOpen || 0;
+      summary.overdueFollowUps =
+        operational?.followUp?.available === false ? null : operational?.followUp?.orgOverdue || 0;
+
+      let openAr = 0;
+      let openArAvailable = false;
+      if (typeof deps.getSupabase === "function") {
+        try {
+          const loaded = await loadListFinancialIntel(deps.getSupabase(), {
+            organizationId,
+            directoryRows: liveRows
+          });
+          openArAvailable = !loaded.unavailable;
+          if (openArAvailable) {
+            for (const snap of loaded.byAccount.values()) {
+              const n = Number(snap?.openAr);
+              if (Number.isFinite(n) && n > 0) openAr += n;
+            }
+            openAr = Math.round(openAr * 100) / 100;
+          }
+        } catch {
+          openArAvailable = false;
+        }
+      }
+      summary.operational = companyOperationalPublic(operational, {
+        openAr,
+        openArAvailable
+      });
       return summary;
     },
 

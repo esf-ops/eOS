@@ -1211,6 +1211,9 @@ async function main() {
             eq() {
               return api;
             },
+            gte() {
+              return api;
+            },
             in(col, vals) {
               if (state.table === "sales_quickbooks_open_ar_current" && col === "qb_root_customer_list_id") {
                 arRootIds = [...(vals || [])].map(String);
@@ -1277,6 +1280,90 @@ async function main() {
       sort: "name_asc"
     });
     assert.deepEqual(arRootIds, ["QB-0B-1"]);
+  }
+
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const service = createAccountDirectoryService({ store, accountPopulationCap: 2 });
+    const ORG_CAP = "00000000-0000-4000-8000-0000000000c8";
+    const ACTOR_CAP = "00000000-0000-4000-8000-0000000000c7";
+    for (const name of ["Cap One", "Cap Two"]) {
+      await service.createAccount({
+        organizationId: ORG_CAP,
+        role: "admin",
+        actorUserId: ACTOR_CAP,
+        payload: { displayName: name, status: "active" }
+      });
+    }
+    const ok = await service.listAccounts({
+      organizationId: ORG_CAP,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "name_asc"
+    });
+    assert.equal(ok.total, 2);
+    await service.createAccount({
+      organizationId: ORG_CAP,
+      role: "admin",
+      actorUserId: ACTOR_CAP,
+      payload: { displayName: "Cap Three", status: "active" }
+    });
+    await assert.rejects(
+      () =>
+        service.listAccounts({
+          organizationId: ORG_CAP,
+          role: "admin",
+          tab: "accounts",
+          page: 1,
+          pageSize: 50,
+          sort: "ytd_sqft_desc"
+        }),
+      (e) => e instanceof AccountDirectoryError && e.code === "directory_population_exceeded" && e.status === 422
+    );
+    console.log("ok: G) filtered account population beyond cap fails closed");
+  }
+
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const origList = store.listAllActiveExternalLinks.bind(store);
+    const origCount = store.countActiveExternalLinks.bind(store);
+    store.listAllActiveExternalLinks = async (organizationId, system) => {
+      const rows = await origList(organizationId, system);
+      return rows.slice(0, Math.max(0, rows.length - 1));
+    };
+    store.countActiveExternalLinks = origCount;
+    const service = createAccountDirectoryService({ store });
+    const ORG_L = "00000000-0000-4000-8000-0000000000d1";
+    const ACTOR_L = "00000000-0000-4000-8000-0000000000d2";
+    const acct = await service.createAccount({
+      organizationId: ORG_L,
+      role: "admin",
+      actorUserId: ACTOR_L,
+      payload: { displayName: "Link Incomplete", status: "active" }
+    });
+    await seedQbRoot(store, "QB-INCOMPLETE-1", ORG_L, "Link Incomplete");
+    await service.linkQuickBooks({
+      organizationId: ORG_L,
+      role: "admin",
+      actorUserId: ACTOR_L,
+      accountId: acct.id,
+      payload: { externalId: "QB-INCOMPLETE-1", externalDisplayName: "Link Incomplete" }
+    });
+    await assert.rejects(
+      () =>
+        service.listAccounts({
+          organizationId: ORG_L,
+          role: "admin",
+          tab: "accounts",
+          page: 1,
+          pageSize: 50,
+          sort: "name_asc"
+        }),
+      (e) => e instanceof AccountDirectoryError && e.code === "directory_link_population_incomplete"
+    );
+    console.log("ok: H) incomplete exact-link population fails closed");
   }
 
   console.log("accountDirectoryService.test.mjs: ok");

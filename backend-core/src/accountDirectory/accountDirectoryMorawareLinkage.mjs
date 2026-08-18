@@ -86,6 +86,60 @@ function roundTrustedSqft(value) {
   return Math.round(n * 10) / 10;
 }
 
+export function isAccountMorawareLinked(links) {
+  if (!Array.isArray(links) || !links.length) return false;
+  return links.some((l) => {
+    if (!l || l.isActive === false) return false;
+    const system = String(l.externalSystem || l.external_system || "").trim();
+    return system === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM;
+  });
+}
+
+function mapSafeJob(job) {
+  return { safe: safeJobRow(job), original: job };
+}
+
+/**
+ * CURRENT_MORAWARE_JOB_SET rows, deduped by source_job_id (newest last_seen_at wins).
+ * Does not year-filter. Never puts raw_payload on the safe row.
+ */
+export function collectCurrentMorawareJobs(jobs, currentPopulation = null) {
+  const mapped = (Array.isArray(jobs) ? jobs : []).map(mapSafeJob).filter((row) => row.safe.source_job_id);
+  const inSet = mapped.filter((row) =>
+    currentPopulation ? jobInCurrentMorawareSet(row.safe, currentPopulation) : true
+  );
+  const byJobId = new Map();
+  for (const row of inSet) {
+    const prev = byJobId.get(row.safe.source_job_id);
+    if (!prev || String(row.safe.last_seen_at || "") > String(prev.safe.last_seen_at || "")) {
+      byJobId.set(row.safe.source_job_id, row);
+    }
+  }
+  return [...byJobId.values()];
+}
+
+/**
+ * Calendar-year window using typed job_date. asOfYmd (YYYY-MM-DD) caps inclusive YTD.
+ */
+export function filterMorawareJobsForCalendarWindow(rows, { year = MORAWARE_TRUSTED_JOB_YEAR, asOfYmd = null } = {}) {
+  const yearPrefix = `${year}-`;
+  const cap = asOfYmd ? String(asOfYmd).slice(0, 10) : null;
+  return (rows || []).filter((row) => {
+    const date = row?.safe?.job_date;
+    if (!date || !date.startsWith(yearPrefix)) return false;
+    if (cap && date > cap) return false;
+    return true;
+  });
+}
+
+export function sumTrustedJobWorksheetSqft(rows) {
+  let total = 0;
+  for (const row of rows || []) {
+    total += extractJobWorksheetCensusSqft(row.original).totalSqft || 0;
+  }
+  return roundTrustedSqft(total);
+}
+
 function unavailableTrustedOps(identity) {
   return {
     ...identity,
@@ -119,22 +173,13 @@ export function buildTrustedMorawareOperations({
   if (jobsState === "unavailable" || jobs == null) return unavailableTrustedOps(identity);
 
   const linkedIds = new Set(identity.accounts.map((a) => a.source_account_id));
-  const mapped = (Array.isArray(jobs) ? jobs : [])
-    .map((job) => ({ safe: safeJobRow(job), original: job }))
-    .filter((row) => row.safe.source_job_id && linkedIds.has(row.safe.source_account_id))
-    .filter((row) => (currentPopulation ? jobInCurrentMorawareSet(row.safe, currentPopulation) : true));
-  // One durable Brain row per (organization_id, source_job_id). Do not cohort-filter
-  // by account-level latest last_seen_at — incremental sync only refreshes changed jobs.
-  const byJobId = new Map();
-  for (const row of mapped) {
-    const prev = byJobId.get(row.safe.source_job_id);
-    if (!prev || String(row.safe.last_seen_at || "") > String(prev.safe.last_seen_at || "")) {
-      byJobId.set(row.safe.source_job_id, row);
-    }
-  }
-  const unique = [...byJobId.values()];
-  const yearPrefix = `${year}-`;
-  const inYear = unique.filter((row) => row.safe.job_date && row.safe.job_date.startsWith(yearPrefix));
+  const unique = collectCurrentMorawareJobs(
+    (Array.isArray(jobs) ? jobs : []).filter((job) =>
+      linkedIds.has(String(job?.source_account_id ?? job?.sourceAccountId ?? "").trim())
+    ),
+    currentPopulation
+  );
+  const inYear = filterMorawareJobsForCalendarWindow(unique, { year });
   const dates = inYear.map((row) => row.safe.job_date).sort();
   const counts = new Map(identity.accounts.map((a) => [a.source_account_id, 0]));
   let sqftTotal = 0;

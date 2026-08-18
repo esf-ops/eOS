@@ -563,6 +563,42 @@ export function createAccountDirectoryMemoryStore() {
       return out;
     },
 
+    async listNoteHeadsForOrganization(organizationId, { cap } = {}) {
+      const items = Array.from(notes.values())
+        .filter((n) => n.organizationId === organizationId && !n.archivedAt)
+        .map((n) => ({
+          accountId: n.accountId,
+          createdAt: n.createdAt,
+          updatedAt: n.updatedAt,
+          archivedAt: n.archivedAt
+        }))
+        .map(clone);
+      const limit = Number(cap) > 0 ? Number(cap) : Infinity;
+      if (Number.isFinite(limit) && items.length > limit) {
+        return { items: [], complete: false, truncated: true };
+      }
+      return { items, complete: true, truncated: false };
+    },
+
+    async listOpenFollowUpHeadsForOrganization(organizationId, { cap } = {}) {
+      const items = Array.from(followUps.values())
+        .filter((n) => n.organizationId === organizationId && !n.archivedAt && n.status === "open")
+        .map((n) => ({
+          accountId: n.accountId,
+          dueAt: n.dueAt,
+          status: n.status,
+          createdAt: n.createdAt,
+          updatedAt: n.updatedAt,
+          archivedAt: n.archivedAt
+        }))
+        .map(clone);
+      const limit = Number(cap) > 0 ? Number(cap) : Infinity;
+      if (Number.isFinite(limit) && items.length > limit) {
+        return { items: [], complete: false, truncated: true };
+      }
+      return { items, complete: true, truncated: false };
+    },
+
     async insertAccountNote(row) {
       const id = row.id || randomUUID();
       const record = {

@@ -4500,3 +4500,19 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Bulk link, auto-confirm, new matching system, Account Owner, mutating QuickBooks or Moraware. |
 | **Impacted** | `accountDirectoryMorawareFinalActionQueue`, plan loader, existing Moraware reconciliation GET + Account Directory Moraware review UI, this doc, SYSTEM_BLUEPRINT. |
 
+### 331. Account Directory landing page is an operational read-model dashboard (2026-08-18)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-18 |
+| **Decision** | The Account Directory **main list** is a staff-safe operational dashboard. New cells are **read-only presentation**. Identity, reconciliation, Final Review Queue, Account 360 contracts, Notes/Follow-up mutations, financial math, RBAC, and external writes are unchanged. Names remain evidence, not durable identity. |
+| **Connections** | QB connected = an exact active `quickbooks_desktop` external link only. Moraware connected = one or more exact active `moraware` links. Suggestions / fuzzy / enrichment candidates never count as connected. Existing `suggested_match` / `needs_review` enrichment may show `QB ⚠` without new matching. |
+| **YTD (list + hero)** | True calendar YTD: current year through **today**, using typed Moraware `job_date` (`created_at_source` else `install_at_source` else `completed_at_source`) on **`CURRENT_MORAWARE_JOB_SET`**, distinct `source_job_id`. Future-dated current-year jobs are excluded. Account 360 Moraware Operations remains **full calendar 2026** (no `asOf`) and is not relabeled YTD. |
+| **Hero cards** | **YTD Jobs** / **YTD Sq Ft** = org-wide governed CURRENT-set YTD jobs (includes unlinked Moraware jobs). **Customers with YTD Activity** = distinct canonical AD UUIDs with ≥1 exact Moraware-linked YTD job (unlinked jobs do not invent a customer). **Open A/R** = sum of existing list financial intel (`sales_quickbooks_open_ar_current` via exact QB root ListIDs) for non-archived accounts. Unavailable → `—`, never a fake zero. Hero totals are **not** summed from table rows. |
+| **Last Activity** | Max of latest CURRENT-set Moraware job date, latest note `created_at`, and latest open follow-up `updated_at`/`created_at`. Not `updated_at`. Null renders `—`. |
+| **Sorting** | Header sorts the **entire filtered population**, then paginates. Safety bounds fail closed: YTD job load, account full-population sort, and note/follow-up heads use cap+1 detection and never present a truncated set as complete. Exact active-link loaders page to completion and are checked against `countActiveExternalLinks`. |
+| **Phone** | Display-only NANP formatter. No historical DB rewrite. Forms still submit stored values. |
+| **Safety bounds** | Job load cap 20,000; in-memory account population cap 5,000; note/follow-up head cap 20,000. Overflow → unavailable/`—` or staff-safe 422, never silent undercount. |
+| **Out of scope** | Schema migration, N+1 per-row Notes/Follow-up/Moraware, raw QB/Moraware payloads in the list JSON, identity/reconciliation changes. |
+| **Impacted** | Account Directory list API + landing UI, `accountDirectoryListIntelligence`, Moraware job-window helpers, this doc, SYSTEM_BLUEPRINT. |
+

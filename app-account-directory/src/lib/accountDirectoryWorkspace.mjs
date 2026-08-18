@@ -28,7 +28,28 @@ export function tabFromPanel(panel) {
 
 const VALID_TABS = ["accounts", "prospects", "needs_review", "archived", "status_review", "moraware_review"];
 const VALID_PAGE_SIZES = [25, 50, 100];
-const VALID_SORTS = ["name_asc", "name_desc", "updated_desc", "updated_asc"];
+const VALID_SORTS = [
+  "name_asc",
+  "name_desc",
+  "status_asc",
+  "status_desc",
+  "connections_desc",
+  "connections_asc",
+  "ar_desc",
+  "ar_asc",
+  "ytd_sqft_desc",
+  "ytd_sqft_asc",
+  "followup_attention",
+  "followup_attention_asc",
+  "contact_asc",
+  "contact_desc",
+  "location_asc",
+  "location_desc",
+  "activity_desc",
+  "activity_asc",
+  "updated_desc",
+  "updated_asc"
+];
 const VALID_QB_ENRICHMENT = ["suggested_match", "needs_review", "not_linked"];
 const VALID_INTELLIGENCE = ["overdue", "collection", "financially_active"];
 
@@ -358,4 +379,37 @@ export function initials(name) {
   const parts = n.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   return n.slice(0, 2).toUpperCase();
+}
+
+export const LIST_SORT_COLUMNS = Object.freeze({
+  account: ["name_asc", "name_desc"],
+  status: ["status_asc", "status_desc"],
+  connections: ["connections_desc", "connections_asc"],
+  ar: ["ar_desc", "ar_asc"],
+  ytd: ["ytd_sqft_desc", "ytd_sqft_asc"],
+  followup: ["followup_attention", "followup_attention_asc"],
+  contact: ["contact_asc", "contact_desc"],
+  location: ["location_asc", "location_desc"],
+  activity: ["activity_desc", "activity_asc"]
+});
+
+export function toggleColumnSort(currentSort, column) {
+  const pair = LIST_SORT_COLUMNS[column];
+  if (!pair) return currentSort || "name_asc";
+  const [primary, secondary] = pair;
+  return currentSort === primary ? secondary : primary;
+}
+
+/**
+ * @returns {"ascending"|"descending"|"none"}
+ */
+export function sortAriaForColumn(currentSort, column) {
+  const pair = LIST_SORT_COLUMNS[column];
+  if (!pair) return "none";
+  if (currentSort === pair[0] || currentSort === pair[1]) {
+    const token = currentSort === pair[0] ? pair[0] : pair[1];
+    if (token.includes("asc")) return "ascending";
+    return "descending";
+  }
+  return "none";
 }
