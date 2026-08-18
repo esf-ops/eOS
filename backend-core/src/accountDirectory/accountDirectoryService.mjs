@@ -17,6 +17,7 @@ import {
   evaluateQuickBooksLinkCandidate,
   normalizeQuickBooksListId
 } from "./accountDirectoryQbLinkValidation.mjs";
+import { resolveActiveQuickBooksAccountsByListIds } from "./accountDirectoryQbLinkResolution.mjs";
 import {
   QB_CUSTOMER_SEARCH_MAX_RESULTS,
   assertSafeQbCustomerSearchItem,
@@ -844,15 +845,30 @@ export function createAccountDirectoryService(deps) {
       });
       const items = (rows || []).slice(0, QB_CUSTOMER_SEARCH_MAX_RESULTS).map((row) => {
         if (row && row.listId != null) {
-          return assertSafeQbCustomerSearchItem({
+          return {
             listId: String(row.listId).trim(),
             displayName: String(row.displayName || "").trim() || String(row.listId).trim(),
-            active: row.active !== false
-          });
+            active: row.active !== false,
+            existingAccountId: null
+          };
         }
-        return assertSafeQbCustomerSearchItem(toPublicQuickBooksCustomerSearchItem(row));
+        return toPublicQuickBooksCustomerSearchItem(row);
       });
-      return { ok: true, items, query: q, queryTooShort: false };
+      const byListId = await resolveActiveQuickBooksAccountsByListIds(store, {
+        organizationId,
+        listIds: items.map((item) => item.listId)
+      });
+      return {
+        ok: true,
+        items: items.map((item) =>
+          assertSafeQbCustomerSearchItem({
+            ...item,
+            existingAccountId: byListId.get(normalizeQuickBooksListId(item.listId)) || null
+          })
+        ),
+        query: q,
+        queryTooShort: false
+      };
     },
 
     async createAccount({ organizationId, role, actorUserId, requestId, payload, asProspect }) {

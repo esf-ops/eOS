@@ -113,8 +113,16 @@ export function buildRelationshipHealth({ account, financials, qbEnrichment }) {
       code: "qb_unlinked",
       severity: "watch",
       label: "QuickBooks not linked",
-      detail: "This account is not linked to QuickBooks yet, so invoices and A/R are not connected.",
+      detail: "Connect QuickBooks to view financial history.",
       target: "Connections"
+    });
+  } else if (financials?.linked && financials?.status === "unavailable") {
+    signals.push({
+      code: "qb_financials_unavailable",
+      severity: "watch",
+      label: "QuickBooks financials unavailable",
+      detail: "QuickBooks is connected, but financial data is currently unavailable.",
+      target: "Financials"
     });
   }
 

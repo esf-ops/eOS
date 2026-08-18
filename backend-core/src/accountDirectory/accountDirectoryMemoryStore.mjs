@@ -372,6 +372,20 @@ export function createAccountDirectoryMemoryStore() {
         .map(clone);
     },
 
+    async listActiveExternalLinksByExternalIds(organizationId, externalSystem, externalIds) {
+      const want = new Set((externalIds || []).map(String).filter(Boolean));
+      if (!want.size) return [];
+      return Array.from(externalLinks.values())
+        .filter(
+          (l) =>
+            l.organizationId === organizationId &&
+            l.isActive &&
+            want.has(String(l.externalId)) &&
+            (externalSystem == null || l.externalSystem === externalSystem)
+        )
+        .map(clone);
+    },
+
     async countAccounts(organizationId) {
       return Array.from(accounts.values()).filter((a) => a.organizationId === organizationId).length;
     },

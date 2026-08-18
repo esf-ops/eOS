@@ -91,6 +91,7 @@ export type QuickBooksCustomerSearchItem = {
   listId: string;
   displayName: string;
   active: boolean;
+  existingAccountId?: string | null;
 };
 
 export type AuditEntry = {

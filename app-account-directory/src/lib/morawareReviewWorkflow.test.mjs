@@ -129,6 +129,27 @@ const ui = readFileSync(path.join(here, "../ui/MorawareReview.tsx"), "utf8");
   assert.equal(merged.directory.length, 1);
   assert.equal(merged.quickbooks.length, 1);
   assert.equal(merged.quickbooks[0].qbListId, "QB-1");
+  assert.equal(merged.quickbooks[0].accountId, null);
+  assert.match(merged.quickbooks[0].subtitle, /Not yet in Account Directory/);
+  const already = buildUnifiedCustomerSearchResults({
+    qbItems: [
+      {
+        listId: "QB-ROB",
+        displayName: "Robertson Manufacturing, Inc.",
+        existingAccountId: "e7632db2-4b92-4b08-8350-1d8ada0100e0",
+        active: true
+      }
+    ]
+  });
+  assert.match(already.quickbooks[0].subtitle, /Already in Account Directory/);
+  assert.equal(already.quickbooks[0].accountId, "e7632db2-4b92-4b08-8350-1d8ada0100e0");
+  assert.equal(already.quickbooks[0].createFromQuickBooksAllowed, false);
+  assert.equal(primaryReviewAction({ reviewState: "QB_ROOT_NOT_IN_DIRECTORY", currentLink: { linked: false } }, {
+    createFromQuickBooksAllowed: true,
+    qbListId: "QB-ROB",
+    accountId: already.quickbooks[0].accountId,
+    existingAccountId: already.quickbooks[0].accountId
+  }).kind, "connect_moraware");
   assert.ok(ui.includes("searchQuickBooksCustomers"));
   assert.ok(ui.includes("Account Directory"));
   assert.ok(ui.includes("QuickBooks"));

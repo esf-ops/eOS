@@ -205,9 +205,9 @@ console.log("\naccountDirectoryMorawareQbSpine.test.mjs\n");
   assert.equal(spine.reviewState, SPINE_REVIEW_STATES.EXISTING_AD_QB_BACKED);
   assert.equal(spine.proposedAccountId, "ad-heart");
   assert.equal(spine.candidates[0].identityKind, "EXISTING_AD_QB_BACKED");
-  assert.equal(spine.candidates[0].confirmMorawareAllowed, false);
-  assert.equal(spine.candidates[0].confirmAllowed, false);
+  assert.equal(spine.candidates[0].createFromQuickBooksAllowed, false);
   assert.equal(spine.candidates[0].qbListId, "QB-HEART");
+  assert.equal(spine.candidates[0].accountId, "ad-heart");
   const queue = await listMorawareReconciliationQueue({
     organizationId: ORG,
     role: "admin",
@@ -227,10 +227,10 @@ console.log("\naccountDirectoryMorawareQbSpine.test.mjs\n");
     }
   });
   assert.equal(queue.items[0].reviewState, SPINE_REVIEW_STATES.EXISTING_AD_QB_BACKED);
-  assert.equal(queue.items[0].confirmAllowed, false);
+  assert.equal(queue.items[0].createFromQuickBooksAllowed, false);
   assert.equal(queue.items[0].candidates[0].accountId, "ad-heart");
-  assert.equal(queue.items[0].candidates[0].confirmAllowed, false);
-  console.log("ok: Heartland production shape — Ready/EXISTING_AD_QB_BACKED with confirmAllowed=false");
+  assert.equal(queue.items[0].candidates[0].createFromQuickBooksAllowed, false);
+  console.log("ok: Heartland QB-backed fuzzy still reuses exact AD UUID; Create from QuickBooks not offered");
 }
 
 {

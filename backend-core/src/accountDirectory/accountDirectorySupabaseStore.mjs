@@ -217,6 +217,22 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
     throw new Error("createAccountDirectorySupabaseStore: getSupabase required");
   }
   const db = () => getSupabase();
+  const LINK_PAGE = 1000;
+
+  async function fetchAllMatching(table, apply) {
+    const rows = [];
+    let from = 0;
+    for (;;) {
+      let q = db().from(table).select("*").range(from, from + LINK_PAGE - 1);
+      if (apply) q = apply(q);
+      const { data, error } = await q;
+      if (error) throw error;
+      rows.push(...(data || []));
+      if ((data || []).length < LINK_PAGE) break;
+      from += LINK_PAGE;
+    }
+    return rows;
+  }
 
   return {
     kind: "supabase",
@@ -704,6 +720,24 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
       return (data || []).map(mapLink);
     },
 
+    async listActiveExternalLinksByExternalIds(organizationId, externalSystem, externalIds) {
+      return fetchAllForAccountIdBatches({
+        accountIds: externalIds,
+        fetchBatch: async (chunkIds) => {
+          let q = db()
+            .from("account_directory_external_links")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .eq("is_active", true)
+            .in("external_id", chunkIds);
+          if (externalSystem) q = q.eq("external_system", externalSystem);
+          const { data, error } = await q;
+          if (error) throw dbError(error, "Could not look up external links.");
+          return (data || []).map(mapLink);
+        }
+      });
+    },
+
     async countAccounts(organizationId) {
       const { count, error } = await db()
         .from("account_directory_accounts")
@@ -744,14 +778,14 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
     },
 
     async listAllActiveExternalLinks(organizationId, externalSystem = "quickbooks_desktop") {
-      const { data, error } = await db()
-        .from("account_directory_external_links")
-        .select("*")
-        .eq("organization_id", organizationId)
-        .eq("external_system", externalSystem)
-        .eq("is_active", true);
-      if (error) throw dbError(error, "Could not list external links.");
-      return (data || []).map(mapLink);
+      try {
+        const data = await fetchAllMatching("account_directory_external_links", (q) =>
+          q.eq("organization_id", organizationId).eq("external_system", externalSystem).eq("is_active", true)
+        );
+        return (data || []).map(mapLink);
+      } catch (error) {
+        throw dbError(error, "Could not list external links.");
+      }
     },
 
     async getExternalLink(organizationId, linkId) {
@@ -836,12 +870,14 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
     },
 
     async listExternalLinksForOrganization(organizationId) {
-      const { data, error } = await db()
-        .from("account_directory_external_links")
-        .select("*")
-        .eq("organization_id", organizationId);
-      if (error) throw dbError(error, "Could not list organization external links.");
-      return (data || []).map(mapLink);
+      try {
+        const data = await fetchAllMatching("account_directory_external_links", (q) =>
+          q.eq("organization_id", organizationId)
+        );
+        return (data || []).map(mapLink);
+      } catch (error) {
+        throw dbError(error, "Could not list organization external links.");
+      }
     },
 
     async listExternalLinksForAccountIds(organizationId, accountIds) {

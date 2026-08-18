@@ -264,6 +264,20 @@ function storeFor(links) {
   });
   assert.equal(reviewHealth.state, "attention");
   assert.ok(reviewHealth.signals.some((s) => s.code === "qb_needs_review"));
+  const missingFinancials = buildRelationshipHealth({
+    account: { status: "active", hasPrimaryContact: true, hasPrimaryLocation: true, quickbooksLinked: true },
+    financials: { linked: true, status: "unavailable" },
+    qbEnrichment: { code: "linked" }
+  });
+  assert.ok(missingFinancials.signals.some((s) => s.code === "qb_financials_unavailable"));
+  assert.equal(missingFinancials.signals.some((s) => s.code === "qb_unlinked"), false);
+  const unlinkedHealth = buildRelationshipHealth({
+    account: { status: "active", hasPrimaryContact: true, hasPrimaryLocation: true, quickbooksLinked: false },
+    financials: { linked: false, status: "unlinked" },
+    qbEnrichment: { code: "not_linked" }
+  });
+  assert.ok(unlinkedHealth.signals.some((s) => s.code === "qb_unlinked"));
+  assert.match(unlinkedHealth.signals.find((s) => s.code === "qb_unlinked").detail, /Connect QuickBooks/);
   console.log("ok: deterministic health ranking");
 }
 

@@ -15,8 +15,10 @@ import {
   applyNoNextMatch,
   applySkip,
   applySuccessfulYes,
+  applyExistingQbAccountToCandidate,
   buildMorawareQueueQuery,
   buildUnifiedCustomerSearchResults,
+  duplicateQbExistingAccountId,
   isUnresolvedWorkRow,
   operationalBreakdown,
   primaryReviewAction,
@@ -250,30 +252,77 @@ export function MorawareReviewSurface({
     setChooseOpen(false);
   }
 
+  function recoverExistingQbAccount(
+    row: MorawareReconciliationItem,
+    existingAccountId: string,
+    displayName: string,
+    qbListId: string | null
+  ) {
+    const nextRow = applyExistingQbAccountToCandidate(row, {
+      accountId: existingAccountId,
+      displayName,
+      qbListId,
+      qbDisplayName: displayName
+    });
+    setQueue((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: (prev.items || []).map((item) =>
+          item.morawareAccountId === row.morawareAccountId ? { ...item, ...nextRow } : item
+        )
+      };
+    });
+    setSelectedId(row.morawareAccountId);
+    setCandidateIndex(0);
+    setChooseOpen(false);
+    onOpenAccount(existingAccountId);
+    onMessage("This QuickBooks customer is already in Account Directory. Confirm Moraware separately.");
+  }
+
   async function onYes(row: MorawareReconciliationItem, cand: MorawareCandidate | null) {
     if (!sessionToken || !canLink || !cand) return;
     setActionBusy(true);
     setError(null);
     try {
-      if (cand.createFromQuickBooksAllowed && cand.qbListId && !cand.accountId) {
-        const res = await createAccountFromQuickBooks(sessionToken, {
-          qbListId: cand.qbListId,
-          displayName: cand.qbDisplayName || cand.displayName
-        });
-        if (res.incomplete) {
-          setError(
-            `Account created but QuickBooks link failed: ${res.linkError || "unknown error"}. Fix the QB link, then confirm Moraware.`
+      if (
+        cand.createFromQuickBooksAllowed &&
+        cand.qbListId &&
+        !cand.accountId &&
+        !(cand as MorawareCandidate & { existingAccountId?: string }).existingAccountId
+      ) {
+        try {
+          const res = await createAccountFromQuickBooks(sessionToken, {
+            qbListId: cand.qbListId,
+            displayName: cand.qbDisplayName || cand.displayName
+          });
+          if (res.incomplete) {
+            setError(
+              `Account created but QuickBooks link failed: ${res.linkError || "unknown error"}. Fix the QB link, then confirm Moraware.`
+            );
+            await load();
+            setSelectedId(row.morawareAccountId);
+            return;
+          }
+          onMessage(
+            `QuickBooks-backed Account Directory customer created. Confirm Moraware ${row.morawareAccountId} next — Moraware was not auto-linked.`
           );
           await load();
           setSelectedId(row.morawareAccountId);
           return;
+        } catch (e: unknown) {
+          const existingId = duplicateQbExistingAccountId(e);
+          if (existingId) {
+            recoverExistingQbAccount(
+              row,
+              existingId,
+              cand.qbDisplayName || cand.displayName,
+              cand.qbListId
+            );
+            return;
+          }
+          throw e;
         }
-        onMessage(
-          `QuickBooks-backed Account Directory customer created. Confirm Moraware ${row.morawareAccountId} next — Moraware was not auto-linked.`
-        );
-        await load();
-        setSelectedId(row.morawareAccountId);
-        return;
       }
       if (cand.confirmQbLinkAllowed && cand.accountId && cand.qbListId) {
         await linkQuickBooks(sessionToken, cand.accountId, {
@@ -363,6 +412,10 @@ export function MorawareReviewSurface({
     if (!sessionToken || !canLink) return;
     // Never auto-link — staged governed next step only.
     if (hit.kind === "quickbooks_root" && hit.qbListId) {
+      if (hit.accountId) {
+        recoverExistingQbAccount(row, hit.accountId, hit.displayName, hit.qbListId);
+        return;
+      }
       setActionBusy(true);
       setError(null);
       try {
@@ -381,7 +434,12 @@ export function MorawareReviewSurface({
         await load();
         setSelectedId(row.morawareAccountId);
       } catch (e: unknown) {
-        setError(e instanceof ApiError ? e.message : String(e));
+        const existingId = duplicateQbExistingAccountId(e);
+        if (existingId) {
+          recoverExistingQbAccount(row, existingId, hit.displayName, hit.qbListId);
+        } else {
+          setError(e instanceof ApiError ? e.message : String(e));
+        }
       } finally {
         setActionBusy(false);
       }

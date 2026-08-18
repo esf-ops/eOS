@@ -54,7 +54,7 @@ async function main() {
     assert.equal(items.length, 1);
     assert.equal(items[0].listId, "ROOT-1");
     assert.equal(items[0].displayName, "Alpha Stone");
-    assert.equal(Object.keys(items[0]).sort().join(","), "active,displayName,listId");
+    assert.equal(Object.keys(items[0]).sort().join(","), "active,displayName,existingAccountId,listId");
     console.log("ok: helper excludes jobs and returns safe fields");
   }
 
@@ -135,6 +135,7 @@ async function main() {
     assert.equal(JSON.stringify(found).includes("raw_hash"), false);
     assert.equal(JSON.stringify(found).includes("bill_city"), false);
     found.items.forEach((item) => assertSafeQbCustomerSearchItem(item));
+    assert.equal(found.items[0].existingAccountId, null);
     console.log("ok: searches root customers, excludes jobs, org-isolated, safe fields");
   }
 
@@ -147,6 +148,25 @@ async function main() {
     assert.equal(exact.items.length, 1);
     assert.equal(exact.items[0].listId, "80000001-ROOT");
     console.log("ok: exact ListID retained in discovery result");
+  }
+
+  {
+    const account = await seedNamedAccount(service, "Robertson Manufacturing, Inc.");
+    await service.linkQuickBooks({
+      organizationId: ORG,
+      role: "admin",
+      actorUserId: ACTOR,
+      accountId: account.id,
+      payload: { externalId: "80000001-ROOT", externalDisplayName: "Robertson Manufacturing, Inc." }
+    });
+    const found = await service.searchQuickBooksCustomers({
+      organizationId: ORG,
+      role: "admin",
+      query: "Stoddard"
+    });
+    assert.equal(found.items[0].existingAccountId, account.id);
+    assertSafeQbCustomerSearchItem(found.items[0]);
+    console.log("ok: QB search hydrates existingAccountId from exact active ListID link");
   }
 
   {

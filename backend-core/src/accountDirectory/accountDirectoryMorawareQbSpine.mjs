@@ -7,7 +7,8 @@
  */
 
 import { normalizeMorawareAccountKey } from "./accountDirectoryMorawareLinkage.mjs";
-import { isAdQbRootCustomerFact } from "./accountDirectoryQbLinkValidation.mjs";
+import { isAdQbRootCustomerFact, normalizeQuickBooksListId } from "./accountDirectoryQbLinkValidation.mjs";
+import { overlayExactQuickBooksLinkOnCandidate } from "./accountDirectoryQbLinkResolution.mjs";
 import {
   REVIEW_STATES as BASE_REVIEW_STATES,
   tokenSortKey,
@@ -128,7 +129,7 @@ const KIND_PRIORITY = Object.freeze({
 });
 
 function factListId(f) {
-  return String(f?.qbListId ?? f?.qb_list_id ?? "").trim();
+  return normalizeQuickBooksListId(f?.qbListId ?? f?.qb_list_id ?? "");
 }
 
 function factDisplayName(f) {
@@ -152,7 +153,7 @@ export function buildQbRootFactIndexes(qbRootFacts = [], qbLinksByAccountId = ne
   const tokenIndex = new Map();
 
   for (const [accountId, qb] of qbLinksByAccountId || []) {
-    const listId = String(qb?.listId || "").trim();
+    const listId = normalizeQuickBooksListId(qb?.listId || qb?.externalId);
     if (listId) accountIdByListId.set(listId, String(accountId));
   }
 
@@ -302,7 +303,7 @@ export function discoverMorawareSpineCandidates(input = {}) {
   // Multiple exact QB roots with same normalized name → conflict signal
   if (exactQb.length > 1) {
     for (const row of exactQb.slice(0, 3)) {
-      const linkedAd = qbIndexes.accountIdByListId.get(row.listId) || null;
+      const linkedAd = qbIndexes.accountIdByListId.get(normalizeQuickBooksListId(row.listId)) || null;
       if (linkedAd) continue; // already covered as AD-backed
       candidates.push({
         accountId: null,
@@ -322,7 +323,7 @@ export function discoverMorawareSpineCandidates(input = {}) {
     }
   } else {
     for (const row of qbHits.slice(0, 3)) {
-      const linkedAd = qbIndexes.accountIdByListId.get(row.listId) || null;
+      const linkedAd = qbIndexes.accountIdByListId.get(normalizeQuickBooksListId(row.listId)) || null;
       if (linkedAd) {
         // Ensure QB-backed AD appears even if AD discovery missed it
         if (!candidates.some((c) => c.accountId === linkedAd)) {
@@ -418,6 +419,12 @@ export function discoverMorawareSpineCandidates(input = {}) {
       });
     }
   }
+
+  const overlaid = candidates.map((c) =>
+    overlayExactQuickBooksLinkOnCandidate(c, qbIndexes.accountIdByListId, directoryById)
+  );
+  candidates.length = 0;
+  candidates.push(...overlaid);
 
   // Sort by operational priority then confidence
   candidates.sort((a, b) => {

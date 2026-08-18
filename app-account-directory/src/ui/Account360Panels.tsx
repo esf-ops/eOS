@@ -21,6 +21,7 @@ import type {
   ExternalLink
 } from "../lib/types";
 import { isAbortError } from "../lib/account360RequestCoordinator.mjs";
+import { customerFinancialsEmptyCopy } from "../lib/accountDirectoryFinancialCopy.mjs";
 import {
   AD_360_HISTORY_PAGE_SIZE,
   AD_360_INVOICE_PAGE_SIZE,
@@ -295,7 +296,11 @@ export function Overview360({
               : null
           ]
             .filter(Boolean)
-            .join(" · ") || "Customer financials appear after this account is linked to QuickBooks."}
+            .join(" · ") ||
+            customerFinancialsEmptyCopy({
+              linked: financials?.linked === true || detail.quickbooksLinked === true,
+              status: financials?.status
+            })}
         </p>
         {financials?.coverage?.historyLabel ? (
           <p className="ad-footnote">
@@ -318,9 +323,11 @@ export function Overview360({
               <p className="muted">
                 {busy && !financials
                   ? "Loading commercial history…"
-                  : financials?.status === "unlinked" || financials?.linked === false
-                    ? "This account is not linked to QuickBooks yet, so commercial history is unavailable — not zero."
-                    : "Commercial activity will appear here when customer history is available."}
+                  : financials?.status === "unlinked" ||
+                      financials?.linked === false ||
+                      (!financials?.linked && detail.quickbooksLinked !== true)
+                    ? "Connect QuickBooks to view financial history."
+                    : "QuickBooks is connected, but financial data is currently unavailable."}
               </p>
             </section>
           )}
@@ -717,7 +724,18 @@ export function FinancialsPanel({
       <div className="financials-panel">
         <h3 className="financials-title">Customer financials</h3>
         <p className="financials-empty ad-empty-state">
-          This account is not linked to QuickBooks yet, so invoices, payments, and A/R are not connected.
+          Connect QuickBooks to view financial history.
+          Unavailable is not the same as zero.
+        </p>
+      </div>
+    );
+  }
+  if (financials.status === "unavailable") {
+    return (
+      <div className="financials-panel">
+        <h3 className="financials-title">Customer financials</h3>
+        <p className="financials-empty ad-empty-state">
+          QuickBooks is connected, but financial data is currently unavailable.
           Unavailable is not the same as zero.
         </p>
       </div>

@@ -325,7 +325,7 @@ async function loadLiveDataset(supabase, store, organizationId) {
   const qbLinksByAccountId = new Map();
   for (const l of qbRows || []) {
     qbLinksByAccountId.set(l.accountId, {
-      listId: l.externalId,
+      listId: String(l.externalId || "").trim(),
       displayName: l.externalDisplayName || null
     });
   }

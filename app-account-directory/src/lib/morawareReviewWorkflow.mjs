@@ -185,15 +185,26 @@ export function buildUnifiedCustomerSearchResults(input = {}) {
   }));
   const quickbooks = (input.qbItems || [])
     .filter((q) => q && q.listId)
-    .map((q) => ({
-      kind: "quickbooks_root",
-      id: `qb:${q.listId}`,
-      displayName: q.displayName || q.listId,
-      subtitle: q.active === false ? "QuickBooks customer · Inactive" : "QuickBooks customer · Not yet in Account Directory",
-      accountId: null,
-      qbListId: q.listId,
-      active: q.active !== false
-    }));
+    .map((q) => {
+      const existingAccountId = String(q.existingAccountId || q.accountId || "").trim() || null;
+      return {
+        kind: "quickbooks_root",
+        id: existingAccountId || `qb:${q.listId}`,
+        displayName: q.displayName || q.listId,
+        subtitle: existingAccountId
+          ? q.active === false
+            ? "QuickBooks customer · Already in Account Directory · Inactive"
+            : "QuickBooks customer · Already in Account Directory"
+          : q.active === false
+            ? "QuickBooks customer · Inactive"
+            : "QuickBooks customer · Not yet in Account Directory",
+        accountId: existingAccountId,
+        qbListId: q.listId,
+        existingAccountId,
+        createFromQuickBooksAllowed: !existingAccountId,
+        active: q.active !== false
+      };
+    });
   return { directory, quickbooks };
 }
 
@@ -218,7 +229,12 @@ export function primaryReviewAction(item, candidate) {
   }
   const state = String(item.reviewState || "");
   if (!candidate) return { kind: "search", label: "Search customers" };
-  if (candidate.createFromQuickBooksAllowed && candidate.qbListId && !candidate.accountId) {
+  if (
+    candidate.createFromQuickBooksAllowed &&
+    candidate.qbListId &&
+    !candidate.accountId &&
+    !candidate.existingAccountId
+  ) {
     return { kind: "create_from_qb", label: "YES — Create from QuickBooks" };
   }
   if (candidate.confirmQbLinkAllowed && candidate.accountId && candidate.qbListId) {
@@ -275,4 +291,50 @@ export function weakSuggestionHint(candidate) {
   if (!candidate?.accountId) return null;
   if (candidate.confirmAllowed || candidate.confirmMorawareAllowed) return null;
   return "Name similarity suggests this customer. Verify before connecting.";
+}
+
+/**
+ * @param {unknown} err
+ * @returns {string|null}
+ */
+export function duplicateQbExistingAccountId(err) {
+  const body = err && typeof err === "object" ? err.body || err : null;
+  if (!body || typeof body !== "object") return null;
+  if (String(body.code || "") !== "duplicate_external_id") return null;
+  const id = String(body.existingAccountId || "").trim();
+  return id || null;
+}
+
+/**
+ * Promote the current Moraware row to an existing QB-backed AD UUID.
+ * Does not create links.
+ *
+ * @param {object} item
+ * @param {{ accountId: string, displayName?: string, qbListId?: string|null, qbDisplayName?: string|null }} existing
+ */
+export function applyExistingQbAccountToCandidate(item, existing) {
+  const accountId = String(existing?.accountId || "").trim();
+  const displayName = String(existing?.displayName || item?.proposedAccountName || "Directory account").trim();
+  const candidate = {
+    accountId,
+    displayName,
+    identityKind: "EXISTING_AD_QB_BACKED",
+    qbListId: existing?.qbListId || null,
+    qbDisplayName: existing?.qbDisplayName || displayName,
+    qbLinked: true,
+    createFromQuickBooksAllowed: false,
+    confirmQbLinkAllowed: false,
+    confirmAllowed: true,
+    confirmMorawareAllowed: true,
+    evidence: [{ type: "qb_linked", label: "Directory account has QuickBooks link", strength: "supporting" }]
+  };
+  return {
+    ...item,
+    reviewState: "EXISTING_AD_QB_BACKED",
+    proposedAccountId: accountId,
+    proposedAccountName: displayName,
+    createFromQuickBooksAllowed: false,
+    confirmAllowed: true,
+    candidates: [candidate, ...((item?.candidates || []).filter((c) => c.accountId !== accountId))].slice(0, 3)
+  };
 }

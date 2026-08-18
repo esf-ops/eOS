@@ -11,7 +11,12 @@ import { isAdQbRootCustomerFact } from "./accountDirectoryQbLinkValidation.mjs";
 
 export const QB_CUSTOMER_SEARCH_MIN_QUERY = 2;
 export const QB_CUSTOMER_SEARCH_MAX_RESULTS = 20;
-export const QB_CUSTOMER_SEARCH_PUBLIC_FIELDS = Object.freeze(["listId", "displayName", "active"]);
+export const QB_CUSTOMER_SEARCH_PUBLIC_FIELDS = Object.freeze([
+  "listId",
+  "displayName",
+  "active",
+  "existingAccountId"
+]);
 
 /**
  * @param {unknown} raw
@@ -48,7 +53,8 @@ export function toPublicQuickBooksCustomerSearchItem(fact) {
   return {
     listId,
     displayName,
-    active: fact?.isActive !== false && fact?.is_active !== false
+    active: fact?.isActive !== false && fact?.is_active !== false,
+    existingAccountId: fact?.existingAccountId ? String(fact.existingAccountId).trim() : null
   };
 }
 
