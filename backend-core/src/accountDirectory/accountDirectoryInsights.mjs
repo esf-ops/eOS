@@ -166,6 +166,66 @@ function publicEstimate(row) {
   };
 }
 
+export function canonicalInternalEstimateIdentity(row) {
+  return String(row?.quote_family_root_id || row?.id || "").trim();
+}
+
+export function estimateActivityYmd(row) {
+  const raw = row?.updated_at || row?.created_at;
+  if (!raw) return null;
+  const s = String(raw).trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+}
+
+export function dedupeInternalEstimatesByCanonicalIdentity(items) {
+  const byKey = new Map();
+  for (const row of items || []) {
+    if (!row || row.is_current_revision === false) continue;
+    const key = canonicalInternalEstimateIdentity(row);
+    if (!key) continue;
+    const prev = byKey.get(key);
+    if (!prev || String(row.updated_at || "") > String(prev.updated_at || "")) {
+      byKey.set(key, row);
+    }
+  }
+  return [...byKey.values()];
+}
+
+export function filterInternalEstimatesForYtdWindow(items, { year, asOfYmd } = {}) {
+  const y = String(year || "");
+  const asOf = asOfYmd ? String(asOfYmd).slice(0, 10) : null;
+  if (!y) return [];
+  return (items || []).filter((row) => {
+    const ymd = estimateActivityYmd(row);
+    if (!ymd || ymd.slice(0, 4) !== y) return false;
+    if (asOf && ymd > asOf) return false;
+    return true;
+  });
+}
+
+/**
+ * Org / landing-page YTD Win Rate using the same Internal Estimate authority as Insights.
+ * Formula: WON / (WON + LOST). OPEN excluded. Unavailable without lost coverage.
+ */
+export function computeOrganizationYtdWinRate({ internalItems = [], year, asOfYmd } = {}) {
+  const deduped = dedupeInternalEstimatesByCanonicalIdentity(internalItems);
+  const inWindow = filterInternalEstimatesForYtdWindow(deduped, { year, asOfYmd });
+  const result = computeEstimateWinRate({ internalItems: inWindow });
+  const included = result.evidence?.included || {};
+  return {
+    year: year ?? null,
+    asOfYmd: asOfYmd ?? null,
+    available: result.card.state === "ok",
+    rate: result.card.state === "ok" ? result.card.value : null,
+    won: included.internalWon ?? 0,
+    lost: included.internalLost ?? 0,
+    closed: included.closedEligible ?? 0,
+    openExcluded: result.evidence?.excluded?.openInternal ?? 0,
+    card: result.card,
+    evidence: result.evidence
+  };
+}
+
 export function computeQuoteToOrderRatio({ estimates, salesOrders, period } = {}) {
   const quoteAmt = money(estimates?.amount);
   const soAmt = money(salesOrders?.amount) ?? 0;

@@ -580,9 +580,53 @@ export function createAccountDirectoryMemoryStore() {
       return { items, complete: true, truncated: false };
     },
 
+    async listNoteHeadsForAccountIds(organizationId, accountIds, { cap } = {}) {
+      const idSet = new Set((accountIds || []).map(String).filter(Boolean));
+      const items = Array.from(notes.values())
+        .filter((n) => n.organizationId === organizationId && !n.archivedAt && idSet.has(String(n.accountId)))
+        .map((n) => ({
+          accountId: n.accountId,
+          createdAt: n.createdAt,
+          updatedAt: n.updatedAt,
+          archivedAt: n.archivedAt
+        }))
+        .map(clone);
+      const limit = Number(cap) > 0 ? Number(cap) : Infinity;
+      if (Number.isFinite(limit) && items.length > limit) {
+        return { items: [], complete: false, truncated: true };
+      }
+      return { items, complete: true, truncated: false };
+    },
+
     async listOpenFollowUpHeadsForOrganization(organizationId, { cap } = {}) {
       const items = Array.from(followUps.values())
         .filter((n) => n.organizationId === organizationId && !n.archivedAt && n.status === "open")
+        .map((n) => ({
+          accountId: n.accountId,
+          dueAt: n.dueAt,
+          status: n.status,
+          createdAt: n.createdAt,
+          updatedAt: n.updatedAt,
+          archivedAt: n.archivedAt
+        }))
+        .map(clone);
+      const limit = Number(cap) > 0 ? Number(cap) : Infinity;
+      if (Number.isFinite(limit) && items.length > limit) {
+        return { items: [], complete: false, truncated: true };
+      }
+      return { items, complete: true, truncated: false };
+    },
+
+    async listOpenFollowUpHeadsForAccountIds(organizationId, accountIds, { cap } = {}) {
+      const idSet = new Set((accountIds || []).map(String).filter(Boolean));
+      const items = Array.from(followUps.values())
+        .filter(
+          (n) =>
+            n.organizationId === organizationId &&
+            !n.archivedAt &&
+            n.status === "open" &&
+            idSet.has(String(n.accountId))
+        )
         .map((n) => ({
           accountId: n.accountId,
           dueAt: n.dueAt,

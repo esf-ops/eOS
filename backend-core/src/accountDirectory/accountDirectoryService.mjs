@@ -27,17 +27,32 @@ import {
   toPublicQuickBooksCustomerSearchItem
 } from "./accountDirectoryQbCustomerSearch.mjs";
 import { listIntelPublic, loadListFinancialIntel } from "./accountDirectory360.mjs";
+import { computeOrganizationYtdWinRate } from "./accountDirectoryInsights.mjs";
 import { loadStaffDisplayNames } from "./accountDirectoryNotes.mjs";
+import { resolveCurrentMorawarePopulation } from "../moraware/morawareCurrentPopulation.mjs";
 import {
   DIRECTORY_ACCOUNT_POPULATION_CAP,
   DIRECTORY_SORT_NEEDS_CONTACTS,
+  DIRECTORY_SUMMARY_CACHE_TTL_MS,
+  activeMorawareLinksFromRows,
   attachListIntelligence,
   companyOperationalPublic,
+  createOrgScopedTtlCache,
+  directorySortNeedsFullAr,
+  directorySortNeedsFullFollowUps,
+  directorySortNeedsFullMwLinks,
+  directorySortNeedsFullNotes,
+  directorySortNeedsFullQbLinks,
+  directorySortNeedsFullYtd,
   linkSetComplete,
+  loadCurrentMorawareJobsForOrg,
   loadDirectoryOperationalIntelligence,
+  loadOrganizationInternalEstimatesForWinRate,
+  morawareSourceIdsFromLinks,
   resolveDirectoryListSort,
   scopedPopulationOverflow,
-  sortDirectoryListItems
+  sortDirectoryListItems,
+  ytdWindowFromNow
 } from "./accountDirectoryListIntelligence.mjs";
 
 export const AD_QB_ENRICHMENT_FILTERS = Object.freeze([
@@ -93,6 +108,11 @@ export function createAccountDirectoryService(deps) {
   if (!store) throw new Error("createAccountDirectoryService: store required");
   const accountPopulationCap =
     Number(deps.accountPopulationCap) > 0 ? Number(deps.accountPopulationCap) : DIRECTORY_ACCOUNT_POPULATION_CAP;
+  const orgReadCache =
+    deps.orgReadCache ||
+    createOrgScopedTtlCache({
+      ttlMs: deps.orgReadCacheTtlMs == null ? DIRECTORY_SUMMARY_CACHE_TTL_MS : deps.orgReadCacheTtlMs
+    });
 
   async function writeAudit({
     organizationId,
@@ -381,35 +401,45 @@ export function createAccountDirectoryService(deps) {
     return items;
   }
 
+  async function buildAccountsIndex(organizationId, { statusIn, includeArchived }) {
+    const accounts = await listAccountsScoped(organizationId, { statusIn, includeArchived });
+    return accounts.map((account) => ({
+      account,
+      contacts: [],
+      locations: [],
+      aliases: [],
+      links: [],
+      item: toListItem(account, [], [], [], [])
+    }));
+  }
+
   /**
-   * Full org support index — used for search, missing-contact/location filters, and summary cards.
+   * Contacts/locations/aliases for search, missing-contact/location, and contact/location sorts.
+   * Exact links are attached separately and only when a filter or derived sort needs them.
    */
-  async function buildDirectoryIndex(organizationId, { statusIn, includeArchived }) {
-    const [accounts, contacts, locations, aliases, links] = await Promise.all([
+  async function buildSupportDirectoryIndex(organizationId, { statusIn, includeArchived }) {
+    const [accounts, contacts, locations, aliases] = await Promise.all([
       listAccountsScoped(organizationId, { statusIn, includeArchived }),
       store.listContactsForOrganization(organizationId),
       store.listLocationsForOrganization(organizationId),
-      store.listAliasesForOrganization(organizationId),
-      store.listExternalLinksForOrganization(organizationId)
+      store.listAliasesForOrganization(organizationId)
     ]);
 
     const contactsByAccount = groupByAccountId(contacts);
     const locationsByAccount = groupByAccountId(locations);
     const aliasesByAccount = groupByAccountId(aliases);
-    const linksByAccount = groupByAccountId(links);
 
     return accounts.map((account) => {
       const c = contactsByAccount.get(account.id) || [];
       const l = locationsByAccount.get(account.id) || [];
       const al = aliasesByAccount.get(account.id) || [];
-      const lk = linksByAccount.get(account.id) || [];
       return {
         account,
         contacts: c,
         locations: l,
         aliases: al,
-        links: lk,
-        item: toListItem(account, c, l, lk, al)
+        links: [],
+        item: toListItem(account, c, l, [], al)
       };
     });
   }
@@ -430,28 +460,76 @@ export function createAccountDirectoryService(deps) {
     return links || [];
   }
 
-  /**
-   * Light index: accounts + active QuickBooks links only (no org-wide contacts/locations/aliases).
-   * Enough for status/linked/qbEnrichment/sort before paging.
-   */
-  async function buildLightDirectoryIndex(organizationId, { statusIn, includeArchived }) {
-    const [accounts, qbLinks, mwLinks] = await Promise.all([
-      listAccountsScoped(organizationId, { statusIn, includeArchived }),
-      loadActiveLinksComplete(organizationId, "quickbooks_desktop"),
-      loadActiveLinksComplete(organizationId, ACCOUNT_DIRECTORY_MORAWARE_SYSTEM)
-    ]);
-    const linksByAccount = groupByAccountId([...(qbLinks || []), ...(mwLinks || [])]);
-    return accounts.map((account) => {
-      const lk = linksByAccount.get(account.id) || [];
+  function mergeLinks(existing, extra) {
+    const out = [...(existing || [])];
+    const seen = new Set(out.map((link) => link.id || `${link.externalSystem}:${link.externalId}`));
+    for (const link of extra || []) {
+      const key = link.id || `${link.externalSystem}:${link.externalId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(link);
+    }
+    return out;
+  }
+
+  async function attachCompleteLinksToRows(organizationId, rows, systems) {
+    const uniqueSystems = [...new Set((systems || []).filter(Boolean))];
+    if (!uniqueSystems.length) return rows;
+    const bundles = await Promise.all(uniqueSystems.map((sys) => loadActiveLinksComplete(organizationId, sys)));
+    const byAccount = groupByAccountId(bundles.flat());
+    return rows.map((row) => {
+      const lk = mergeLinks(row.links, byAccount.get(row.account.id) || []);
       return {
-        account,
-        contacts: [],
-        locations: [],
-        aliases: [],
+        ...row,
         links: lk,
-        item: toListItem(account, [], [], lk, [])
+        item: toListItem(row.account, row.contacts || [], row.locations || [], lk, row.aliases || [])
       };
     });
+  }
+
+  async function loadCachedOrgJobBundle(organizationId) {
+    const hit = orgReadCache.get(organizationId, "current_moraware_jobs");
+    if (hit) return hit;
+    const supabase = typeof deps.getSupabase === "function" ? deps.getSupabase() : null;
+    let population = { available: false };
+    if (supabase) {
+      try {
+        population = await resolveCurrentMorawarePopulation(supabase, organizationId);
+      } catch {
+        population = { available: false };
+      }
+    }
+    const loaded = await loadCurrentMorawareJobsForOrg(supabase, organizationId, population);
+    const value = { ...loaded, population };
+    if (!loaded.unavailable && !loaded.truncated) {
+      orgReadCache.set(organizationId, "current_moraware_jobs", value);
+    }
+    return value;
+  }
+
+  async function loadCachedOrgWinRate(organizationId, now = new Date()) {
+    const hit = orgReadCache.get(organizationId, "ytd_win_rate");
+    if (hit) return hit;
+    const window = ytdWindowFromNow(now);
+    const supabase = typeof deps.getSupabase === "function" ? deps.getSupabase() : null;
+    const loaded = await loadOrganizationInternalEstimatesForWinRate(supabase, organizationId);
+    const value = loaded.available
+      ? computeOrganizationYtdWinRate({
+          internalItems: loaded.items,
+          year: window.year,
+          asOfYmd: window.asOfYmd
+        })
+      : {
+          available: false,
+          rate: null,
+          year: window.year,
+          asOfYmd: window.asOfYmd,
+          won: 0,
+          lost: 0,
+          closed: 0
+        };
+    orgReadCache.set(organizationId, "ytd_win_rate", value);
+    return value;
   }
 
   async function hydrateDirectoryRowsForAccountIds(organizationId, rows) {
@@ -699,17 +777,37 @@ export function createAccountDirectoryService(deps) {
       const pageNum = Math.max(Number(page) || 1, 1);
       const scope = resolveTabScope(tab, status);
       const searchTrimmed = search ? String(search).trim() : null;
+      const intelFilter = String(intelligence || "").trim();
+      const qbFilter = String(qbEnrichment || "").trim();
+      const sortKey = resolveDirectoryListSort(sort, { ytdAvailable: true, followUpAvailable: true });
       const useFullSupport = requiresFullSupportIndex({
         search: searchTrimmed,
         missingContact,
         missingLocation,
-        sort
+        sort: sortKey
       });
-      const intelFilter = String(intelligence || "").trim();
+      const linkedFilter = parseBoolQuery(linked);
+      const needsFullQbLinks =
+        linkedFilter != null ||
+        Boolean(qbFilter) ||
+        Boolean(intelFilter) ||
+        directorySortNeedsFullQbLinks(sortKey);
+      const needsFullMwLinks = directorySortNeedsFullMwLinks(sortKey);
+      const needsFullYtd = directorySortNeedsFullYtd(sortKey);
+      const needsFullFollowUps = directorySortNeedsFullFollowUps(sortKey);
+      const needsFullNotes = directorySortNeedsFullNotes(sortKey);
+      const needsFullAr = directorySortNeedsFullAr(sortKey) || Boolean(intelFilter);
 
       let rows = useFullSupport
-        ? await buildDirectoryIndex(organizationId, scope)
-        : await buildLightDirectoryIndex(organizationId, scope);
+        ? await buildSupportDirectoryIndex(organizationId, scope)
+        : await buildAccountsIndex(organizationId, scope);
+
+      const linkSystems = [];
+      if (needsFullQbLinks) linkSystems.push("quickbooks_desktop");
+      if (needsFullMwLinks) linkSystems.push(ACCOUNT_DIRECTORY_MORAWARE_SYSTEM);
+      if (linkSystems.length) {
+        rows = await attachCompleteLinksToRows(organizationId, rows, linkSystems);
+      }
 
       const filtered = filterDirectoryRows(rows, {
         search: searchTrimmed,
@@ -726,11 +824,10 @@ export function createAccountDirectoryService(deps) {
 
       /** @type {Map<string, object>} */
       let intelByAccount = new Map();
-      const filteredWorkingRows = working.map((item) => rowById.get(item.id)).filter(Boolean);
-      if (intelFilter || working.length) {
+      if (needsFullAr) {
         const applied = await applyListFinancialIntel(
           organizationId,
-          filteredWorkingRows,
+          working.map((item) => rowById.get(item.id)).filter(Boolean),
           working,
           intelFilter
         );
@@ -738,31 +835,91 @@ export function createAccountDirectoryService(deps) {
         intelByAccount = applied.intelByAccount;
       }
 
-      const morawareLinks = filteredWorkingRows.flatMap((row) =>
-        (row.links || []).filter(
-          (l) => l?.isActive !== false && String(l.externalSystem || "") === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM
-        )
-      );
       let operational = null;
-      if (typeof deps.getSupabase === "function" || typeof store.listOpenFollowUpHeadsForOrganization === "function") {
+      if (needsFullYtd || needsFullFollowUps || needsFullNotes) {
+        const filteredWorkingRows = working.map((item) => rowById.get(item.id)).filter(Boolean);
+        const morawareLinks = activeMorawareLinksFromRows(filteredWorkingRows);
+        let jobBundle = { jobs: null, unavailable: true, truncated: false, population: undefined };
+        if (needsFullYtd) {
+          jobBundle = await loadCachedOrgJobBundle(organizationId);
+        }
         try {
           operational = await loadDirectoryOperationalIntelligence({
             supabase: typeof deps.getSupabase === "function" ? deps.getSupabase() : null,
             store,
             organizationId,
-            morawareLinks
+            morawareLinks,
+            currentPopulation: jobBundle.population,
+            jobs: needsFullYtd ? jobBundle.jobs : undefined,
+            jobsTruncated: needsFullYtd ? Boolean(jobBundle.truncated) : false,
+            jobScope: needsFullYtd ? "org" : "none",
+            followUpScope: needsFullFollowUps ? "org" : "none",
+            noteScope: needsFullNotes ? "org" : "none"
           });
         } catch {
           operational = null;
         }
+        working = working.map((item) => {
+          const row = rowById.get(item.id);
+          return attachListIntelligence(item, {
+            ytd: needsFullYtd ? operational?.ytd : null,
+            followUp: needsFullFollowUps
+              ? operational?.followUp
+              : { byAccount: new Map(), available: true },
+            notes: needsFullNotes ? operational?.notes : new Map(),
+            links: row?.links || []
+          });
+        });
       }
 
-      working = working.map((item) => {
-        const row = rowById.get(item.id);
-        const withIntel = attachListIntelligence(item, {
-          ytd: operational?.ytd,
-          followUp: operational?.followUp,
-          notes: operational?.notes,
+      const sortedItems = sortDirectoryItems(working, sort, {
+        ytdAvailable: !needsFullYtd || operational?.ytd?.available === true,
+        followUpAvailable: !needsFullFollowUps || operational?.followUp?.available === true
+      });
+      const paged = paginationResult(sortedItems, pageNum, limit);
+
+      if (!paged.items.length) {
+        return { ...paged, items: [] };
+      }
+
+      const pageRows = paged.items.map((item) => rowById.get(item.id)).filter(Boolean);
+      const hydrated = await hydrateDirectoryRowsForAccountIds(organizationId, pageRows);
+      const hydratedById = new Map(hydrated.map((r) => [r.account.id, r]));
+      for (const row of hydrated) {
+        rowById.set(row.account.id, row);
+      }
+
+      const pageAccountIds = hydrated.map((r) => r.account.id);
+      const pageMwLinks = activeMorawareLinksFromRows(hydrated);
+      let pageOperational = null;
+      try {
+        pageOperational = await loadDirectoryOperationalIntelligence({
+          supabase: typeof deps.getSupabase === "function" ? deps.getSupabase() : null,
+          store,
+          organizationId,
+          morawareLinks: pageMwLinks,
+          jobScope: needsFullYtd ? "none" : "sources",
+          sourceAccountIds: morawareSourceIdsFromLinks(pageMwLinks),
+          followUpScope: needsFullFollowUps ? "none" : "accounts",
+          noteScope: needsFullNotes ? "none" : "accounts",
+          accountIds: pageAccountIds
+        });
+      } catch {
+        pageOperational = null;
+      }
+
+      if (!needsFullAr) {
+        const applied = await applyListFinancialIntel(organizationId, hydrated, paged.items, "");
+        intelByAccount = applied.intelByAccount;
+      }
+
+      paged.items = paged.items.map((item) => {
+        const row = hydratedById.get(item.id);
+        const base = attachEnrichment(row ? row.item : item, suggestionByAccount);
+        const withIntel = attachListIntelligence(base, {
+          ytd: needsFullYtd ? operational?.ytd : pageOperational?.ytd,
+          followUp: needsFullFollowUps ? operational?.followUp : pageOperational?.followUp,
+          notes: needsFullNotes ? operational?.notes : pageOperational?.notes,
           links: row?.links || []
         });
         return {
@@ -770,36 +927,6 @@ export function createAccountDirectoryService(deps) {
           financialIntel: listIntelPublic(intelByAccount.get(item.id) || null)
         };
       });
-
-      const sortedItems = sortDirectoryItems(working, sort, {
-        ytdAvailable: operational?.ytd?.available === true,
-        followUpAvailable: operational?.followUp?.available === true
-      });
-      const paged = paginationResult(sortedItems, pageNum, limit);
-
-      if (!useFullSupport && paged.items.length) {
-        const pageRows = paged.items.map((item) => rowById.get(item.id)).filter(Boolean);
-        const hydrated = await hydrateDirectoryRowsForAccountIds(organizationId, pageRows);
-        const hydratedById = new Map(hydrated.map((r) => [r.account.id, r]));
-        paged.items = paged.items.map((item) => {
-          const row = hydratedById.get(item.id);
-          if (!row) return item;
-          const hydratedItem = attachEnrichment(row.item, suggestionByAccount);
-          return {
-            ...hydratedItem,
-            connections: hydratedItem.connections || item.connections,
-            ytdActivity: item.ytdActivity,
-            followUpSummary: item.followUpSummary,
-            notesCount: item.notesCount,
-            lastActivityAt: item.lastActivityAt,
-            financialIntel: item.financialIntel
-          };
-        });
-        // Refresh row map links for page-scoped financial enrichment.
-        for (const row of hydrated) {
-          rowById.set(row.account.id, row);
-        }
-      }
 
       return {
         ...paged,
@@ -809,10 +936,14 @@ export function createAccountDirectoryService(deps) {
 
     async getSummary({ organizationId, role }) {
       requireCap(role, ACCOUNT_DIRECTORY_CAPABILITIES.VIEW);
-      const rows = await buildDirectoryIndex(organizationId, {
-        statusIn: null,
-        includeArchived: true
-      });
+      const rows = await attachCompleteLinksToRows(
+        organizationId,
+        await buildSupportDirectoryIndex(organizationId, {
+          statusIn: null,
+          includeArchived: true
+        }),
+        ["quickbooks_desktop", ACCOUNT_DIRECTORY_MORAWARE_SYSTEM]
+      );
       const suggestionByAccount = await loadSuggestionIndex(organizationId);
       const summary = {
         total: 0,
@@ -852,18 +983,21 @@ export function createAccountDirectoryService(deps) {
       // Total matches default Accounts tab scope (non-archived lifecycle rows).
       summary.total = summary.active + summary.prospects + summary.needsReview;
 
-      const morawareLinks = liveRows.flatMap((row) =>
-        (row.links || []).filter(
-          (l) => l?.isActive !== false && String(l.externalSystem || "") === ACCOUNT_DIRECTORY_MORAWARE_SYSTEM
-        )
-      );
+      const morawareLinks = activeMorawareLinksFromRows(liveRows);
       let operational = null;
       try {
+        const jobBundle = await loadCachedOrgJobBundle(organizationId);
         operational = await loadDirectoryOperationalIntelligence({
           supabase: typeof deps.getSupabase === "function" ? deps.getSupabase() : null,
           store,
           organizationId,
-          morawareLinks
+          morawareLinks,
+          currentPopulation: jobBundle.population,
+          jobs: jobBundle.jobs,
+          jobsTruncated: Boolean(jobBundle.truncated),
+          jobScope: "org",
+          followUpScope: "org",
+          noteScope: "none"
         });
       } catch {
         operational = null;
@@ -873,30 +1007,8 @@ export function createAccountDirectoryService(deps) {
       summary.overdueFollowUps =
         operational?.followUp?.available === false ? null : operational?.followUp?.orgOverdue || 0;
 
-      let openAr = 0;
-      let openArAvailable = false;
-      if (typeof deps.getSupabase === "function") {
-        try {
-          const loaded = await loadListFinancialIntel(deps.getSupabase(), {
-            organizationId,
-            directoryRows: liveRows
-          });
-          openArAvailable = !loaded.unavailable;
-          if (openArAvailable) {
-            for (const snap of loaded.byAccount.values()) {
-              const n = Number(snap?.openAr);
-              if (Number.isFinite(n) && n > 0) openAr += n;
-            }
-            openAr = Math.round(openAr * 100) / 100;
-          }
-        } catch {
-          openArAvailable = false;
-        }
-      }
-      summary.operational = companyOperationalPublic(operational, {
-        openAr,
-        openArAvailable
-      });
+      const winRate = await loadCachedOrgWinRate(organizationId);
+      summary.operational = companyOperationalPublic(operational, { winRate });
       return summary;
     },
 

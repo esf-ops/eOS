@@ -9,11 +9,14 @@ import {
   connectionSortRank,
   connectionsFromLinks,
   countNotesByAccount,
+  createOrgScopedTtlCache,
   followUpSortRank,
   lastActivityAtForAccount,
   linkSetComplete,
   loadCurrentMorawareJobsForOrg,
+  loadCurrentMorawareJobsForSourceAccountIds,
   loadDirectoryOperationalIntelligence,
+  loadOrganizationInternalEstimatesForWinRate,
   readRowsUntilCap,
   resolveDirectoryListSort,
   scopedPopulationOverflow,
@@ -263,8 +266,9 @@ function qbLink(accountId, listId) {
   const src = readFileSync(path.join(here, "accountDirectoryListIntelligence.mjs"), "utf8");
   assert.equal(src.includes("listAccountFollowUps("), false);
   assert.equal(src.includes("for (const accountId of accountIds)"), false);
-  assert.ok(src.includes("listOpenFollowUpHeadsForOrganization"));
-  console.log("ok: 26) follow-up path is org batch, not N+1");
+  assert.ok(src.includes("listOpenFollowUpHeadsForAccountIds"));
+  assert.ok(src.includes("listNoteHeadsForAccountIds"));
+  console.log("ok: 26) follow-up/note path is batched, not N+1");
 }
 
 {
@@ -370,15 +374,21 @@ function qbLink(accountId, listId) {
         company: { jobs: 12, sqft: 100, customersWithActivity: 4 }
       }
     },
-    { openAr: 250, openArAvailable: true }
+    { winRate: { available: true, rate: 33.3, year: 2026, asOfYmd: "2026-08-18" } }
   );
   assert.equal(ops.ytdJobs, 12);
   assert.equal(ops.ytdSqft, 100);
   assert.equal(ops.customersWithYtdActivity, 4);
-  assert.equal(ops.openAr, 250);
-  const down = companyOperationalPublic({ ytd: { available: false, company: { jobs: 0, sqft: 0, customersWithActivity: 0 } } }, { openArAvailable: false });
+  assert.equal(ops.winRate, 33.3);
+  assert.equal(ops.winRateAvailable, true);
+  assert.equal(ops.openAr, undefined);
+  const down = companyOperationalPublic(
+    { ytd: { available: false, company: { jobs: 0, sqft: 0, customersWithActivity: 0 } } },
+    { winRate: { available: false, rate: null } }
+  );
   assert.equal(down.ytdJobs, null);
-  assert.equal(down.openAr, null);
+  assert.equal(down.winRate, null);
+  assert.equal(down.winRateAvailable, false);
 }
 
 {
@@ -413,18 +423,36 @@ function qbLink(accountId, listId) {
 function makeRangeClient(rows) {
   return {
     from() {
+      const filters = { org: null, inCol: null, inVals: null };
       const api = {
         select() {
           return api;
         },
-        eq() {
+        eq(col, val) {
+          if (col === "organization_id") filters.org = val;
           return api;
         },
         gte() {
           return api;
         },
+        in(col, vals) {
+          filters.inCol = col;
+          filters.inVals = vals;
+          return api;
+        },
+        is() {
+          return api;
+        },
         async range(from, to) {
-          return { data: rows.slice(from, to + 1), error: null };
+          let data = rows;
+          if (filters.org) {
+            data = data.filter((r) => !r.organization_id || r.organization_id === filters.org);
+          }
+          if (filters.inCol === "source_account_id") {
+            const set = new Set((filters.inVals || []).map(String));
+            data = data.filter((r) => set.has(String(r.source_account_id)));
+          }
+          return { data: data.slice(from, to + 1), error: null };
         }
       };
       return api;
@@ -549,7 +577,68 @@ function makeRangeClient(rows) {
   assert.equal(lightLoader.includes("slice(0, cap)"), false);
   assert.equal(lightLoader.includes("rows.length >= cap"), false);
   assert.ok(storeSrc.includes("fetchAllMatching(\"account_directory_external_links\""));
+  assert.ok(storeSrc.includes("async listNoteHeadsForAccountIds"));
+  assert.ok(storeSrc.includes("async listOpenFollowUpHeadsForAccountIds"));
   console.log("ok: H) active link loader is not a silent 20k slice");
+}
+
+{
+  const jobs = [
+    job({ id: "keep", account: "101", date: "2026-01-01", sqft: 10 }),
+    job({ id: "skip", account: "202", date: "2026-02-01", sqft: 99 })
+  ];
+  const loaded = await loadCurrentMorawareJobsForSourceAccountIds(
+    makeRangeClient(jobs),
+    ORG,
+    CURRENT,
+    ["101"]
+  );
+  assert.equal(loaded.unavailable, false);
+  assert.equal(loaded.jobs.length, 1);
+  assert.equal(loaded.jobs[0].source_job_id, "keep");
+  const empty = await loadCurrentMorawareJobsForSourceAccountIds(makeRangeClient(jobs), ORG, CURRENT, []);
+  assert.equal(empty.unavailable, false);
+  assert.deepEqual(empty.jobs, []);
+  console.log("ok: page-scoped YTD jobs filter by linked source IDs");
+}
+
+{
+  const quotes = [
+    {
+      id: "q1",
+      organization_id: ORG,
+      quote_status: "sold",
+      updated_at: "2026-03-01",
+      quote_family_root_id: "fam-1"
+    },
+    {
+      id: "q2",
+      organization_id: ORG_B,
+      quote_status: "lost",
+      updated_at: "2026-03-01",
+      quote_family_root_id: "fam-2"
+    }
+  ];
+  const loaded = await loadOrganizationInternalEstimatesForWinRate(makeRangeClient(quotes), ORG);
+  assert.equal(loaded.available, true);
+  assert.equal(loaded.items.length, 1);
+  assert.equal(loaded.items[0].id, "q1");
+  console.log("ok: win-rate quote loader is organization isolated");
+}
+
+{
+  const cache = createOrgScopedTtlCache({ ttlMs: 60_000 });
+  cache.set(ORG, "jobs", { n: 1 });
+  cache.set(ORG_B, "jobs", { n: 2 });
+  assert.equal(cache.get(ORG, "jobs").n, 1);
+  assert.equal(cache.get(ORG_B, "jobs").n, 2);
+  cache.invalidateOrganization(ORG);
+  assert.equal(cache.get(ORG, "jobs"), null);
+  assert.equal(cache.get(ORG_B, "jobs").n, 2);
+  const off = createOrgScopedTtlCache({ ttlMs: 0 });
+  off.set(ORG, "jobs", { n: 9 });
+  assert.equal(off.get(ORG, "jobs"), null);
+  console.log("ok: summary cache is org-scoped and disabled at ttl 0");
 }
 
 console.log("\naccountDirectoryListIntelligence.test.mjs — all passed\n");

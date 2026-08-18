@@ -162,8 +162,8 @@ export type AccountSummary = {
     ytdSqft?: number | null;
     customersWithYtdActivity?: number | null;
     ytdAvailable?: boolean;
-    openAr?: number | null;
-    openArAvailable?: boolean;
+    winRate?: number | null;
+    winRateAvailable?: boolean;
   };
 };
 

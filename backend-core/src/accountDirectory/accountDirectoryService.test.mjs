@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createAccountDirectoryMemoryStore } from "./accountDirectoryMemoryStore.mjs";
 import { createAccountDirectoryService, AccountDirectoryError } from "./accountDirectoryService.mjs";
 import { permissionsForRole, ACCOUNT_DIRECTORY_CAPABILITIES, roleHasCapability } from "./accountDirectoryAuth.mjs";
 import { seedTrustedQuickBooksCustomerFact } from "./accountDirectoryQbLinkValidation.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const ACTOR = "00000000-0000-4000-8000-000000000099";
@@ -808,6 +813,8 @@ async function main() {
     assert.ok(summary.missingPrimaryLocation >= 1);
     assert.equal(typeof summary.active, "number");
     assert.equal(typeof summary.prospects, "number");
+    assert.equal(summary.operational?.openAr, undefined);
+    assert.equal(typeof summary.operational?.winRateAvailable, "boolean");
   }
 
   // Summary Total matches default Accounts tab scope (excludes archived)
@@ -1047,6 +1054,11 @@ async function main() {
     const origLocationsIds = store.listLocationsForAccountIds.bind(store);
     const origAliasesIds = store.listAliasesForAccountIds.bind(store);
     const origLinksIds = store.listExternalLinksForAccountIds.bind(store);
+    const origNotesOrg = store.listNoteHeadsForOrganization.bind(store);
+    const origNotesIds = store.listNoteHeadsForAccountIds.bind(store);
+    const origFollowOrg = store.listOpenFollowUpHeadsForOrganization.bind(store);
+    const origFollowIds = store.listOpenFollowUpHeadsForAccountIds.bind(store);
+    const origCompleteLinks = store.listAllActiveExternalLinks.bind(store);
 
     store.listContactsForOrganization = async (organizationId) => {
       orgWide.contacts += 1;
@@ -1079,6 +1091,34 @@ async function main() {
     store.listExternalLinksForAccountIds = async (organizationId, accountIds) => {
       scoped.links.push([...(accountIds || [])].map(String).sort());
       return origLinksIds(organizationId, accountIds);
+    };
+    /** @type {string[][]} */
+    const pageNotes = [];
+    /** @type {string[][]} */
+    const pageFollowUps = [];
+    let orgNotes = 0;
+    let orgFollowUps = 0;
+    /** @type {string[]} */
+    const completeLinkSystems = [];
+    store.listNoteHeadsForOrganization = async (organizationId, opts) => {
+      orgNotes += 1;
+      return origNotesOrg(organizationId, opts);
+    };
+    store.listNoteHeadsForAccountIds = async (organizationId, accountIds, opts) => {
+      pageNotes.push([...(accountIds || [])].map(String).sort());
+      return origNotesIds(organizationId, accountIds, opts);
+    };
+    store.listOpenFollowUpHeadsForOrganization = async (organizationId, opts) => {
+      orgFollowUps += 1;
+      return origFollowOrg(organizationId, opts);
+    };
+    store.listOpenFollowUpHeadsForAccountIds = async (organizationId, accountIds, opts) => {
+      pageFollowUps.push([...(accountIds || [])].map(String).sort());
+      return origFollowIds(organizationId, accountIds, opts);
+    };
+    store.listAllActiveExternalLinks = async (organizationId, system) => {
+      completeLinkSystems.push(String(system || ""));
+      return origCompleteLinks(organizationId, system);
     };
 
     const createdIds = [];
@@ -1122,6 +1162,11 @@ async function main() {
     scoped.locations.length = 0;
     scoped.aliases.length = 0;
     scoped.links.length = 0;
+    pageNotes.length = 0;
+    pageFollowUps.length = 0;
+    orgNotes = 0;
+    orgFollowUps = 0;
+    completeLinkSystems.length = 0;
 
     const page = await service.listAccounts({
       organizationId: ORG_B,
@@ -1154,6 +1199,84 @@ async function main() {
     assert.ok(page.items[0].primaryContact, "hydrated primary contact on page row");
     assert.ok(page.items[0].city, "hydrated city on page row");
     assert.equal(page.items[0].hasAliases, true);
+    assert.equal(orgNotes, 0, "default list does not require full-org notes");
+    assert.equal(orgFollowUps, 0, "default list does not require full-org follow-ups");
+    assert.equal(pageNotes.length, 1, "default notes are page-scoped");
+    assert.equal(pageFollowUps.length, 1, "default follow-ups are page-scoped");
+    assert.equal(pageNotes[0].length, 50);
+    assert.equal(completeLinkSystems.length, 0, "default Name sort does not load complete org link population");
+
+    orgNotes = 0;
+    orgFollowUps = 0;
+    pageNotes.length = 0;
+    pageFollowUps.length = 0;
+    completeLinkSystems.length = 0;
+    const statusPage = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "status_asc"
+    });
+    assert.equal(statusPage.items.length, 50);
+    assert.equal(orgNotes, 0, "status sort does not require full-org notes");
+    assert.equal(completeLinkSystems.length, 0, "status sort does not load complete org link population");
+
+    completeLinkSystems.length = 0;
+    orgFollowUps = 0;
+    pageFollowUps.length = 0;
+    const ytdSort = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "ytd_sqft_desc"
+    });
+    assert.equal(ytdSort.items.length, 50);
+    assert.ok(completeLinkSystems.includes("moraware"), "YTD sort uses complete exact Moraware links");
+
+    completeLinkSystems.length = 0;
+    orgFollowUps = 0;
+    pageFollowUps.length = 0;
+    const followSort = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "followup_attention"
+    });
+    assert.equal(followSort.items.length, 50);
+    assert.equal(orgFollowUps, 1, "follow-up sort uses full filtered population heads");
+    assert.equal(pageFollowUps.length, 0);
+
+    completeLinkSystems.length = 0;
+    const connSort = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "connections_desc"
+    });
+    assert.equal(connSort.items.length, 50);
+    assert.ok(completeLinkSystems.includes("quickbooks_desktop"));
+    assert.ok(completeLinkSystems.includes("moraware"), "connections sort uses complete exact-link population");
+
+    completeLinkSystems.length = 0;
+    const arSort = await service.listAccounts({
+      organizationId: ORG_B,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "ar_desc"
+    });
+    assert.equal(arSort.items.length, 50);
+    assert.ok(completeLinkSystems.includes("quickbooks_desktop"), "A/R sort needs complete QB links");
+    assert.equal(completeLinkSystems.includes("moraware"), false);
 
     // Search still hits contact/location/alias dimensions via full index
     orgWide.contacts = 0;
@@ -1351,6 +1474,15 @@ async function main() {
       accountId: acct.id,
       payload: { externalId: "QB-INCOMPLETE-1", externalDisplayName: "Link Incomplete" }
     });
+    const nameOk = await service.listAccounts({
+      organizationId: ORG_L,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "name_asc"
+    });
+    assert.equal(nameOk.items.length, 1);
     await assert.rejects(
       () =>
         service.listAccounts({
@@ -1359,11 +1491,165 @@ async function main() {
           tab: "accounts",
           page: 1,
           pageSize: 50,
-          sort: "name_asc"
+          sort: "connections_desc"
         }),
       (e) => e instanceof AccountDirectoryError && e.code === "directory_link_population_incomplete"
     );
-    console.log("ok: H) incomplete exact-link population fails closed");
+    console.log("ok: H) incomplete exact-link population fails closed on connections sort");
+  }
+
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const service = createAccountDirectoryService({ store, orgReadCacheTtlMs: 0 });
+    const ORG_F = "00000000-0000-4000-8000-0000000000e1";
+    const ACTOR_F = "00000000-0000-4000-8000-0000000000e2";
+    const alpha = await service.createAccount({
+      organizationId: ORG_F,
+      role: "admin",
+      actorUserId: ACTOR_F,
+      payload: { displayName: "Alpha Follow", status: "active" }
+    });
+    const zulu = await service.createAccount({
+      organizationId: ORG_F,
+      role: "admin",
+      actorUserId: ACTOR_F,
+      payload: { displayName: "Zulu Follow", status: "active" }
+    });
+    await store.insertAccountFollowUp({
+      organizationId: ORG_F,
+      accountId: zulu.id,
+      title: "Overdue check-in",
+      dueAt: "2020-01-01T12:00:00.000Z",
+      status: "open"
+    });
+    const page1 = await service.listAccounts({
+      organizationId: ORG_F,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 1,
+      sort: "followup_attention"
+    });
+    assert.equal(page1.total, 2);
+    assert.equal(page1.items[0].id, zulu.id, "follow-up sort ranks full population before pagination");
+    const page2 = await service.listAccounts({
+      organizationId: ORG_F,
+      role: "admin",
+      tab: "accounts",
+      page: 2,
+      pageSize: 1,
+      sort: "followup_attention"
+    });
+    assert.equal(page2.items[0].id, alpha.id);
+    assert.equal(page1.items[0].id === page2.items[0].id, false);
+    console.log("ok: follow-up derived sort is stable across pages");
+  }
+
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const ORG_W = "00000000-0000-4000-8000-0000000000f1";
+    const ORG_X = "00000000-0000-4000-8000-0000000000f2";
+    const quotes = [
+      {
+        id: "w1",
+        organization_id: ORG_W,
+        quote_status: "sold",
+        updated_at: "2026-03-01",
+        quote_family_root_id: "fam-w"
+      },
+      {
+        id: "l1",
+        organization_id: ORG_W,
+        quote_status: "lost",
+        updated_at: "2026-04-01",
+        quote_family_root_id: "fam-l"
+      },
+      {
+        id: "l-other",
+        organization_id: ORG_X,
+        quote_status: "lost",
+        updated_at: "2026-04-01",
+        quote_family_root_id: "fam-x"
+      }
+    ];
+    const service = createAccountDirectoryService({
+      store,
+      orgReadCacheTtlMs: 0,
+      getSupabase: () => ({
+        from(table) {
+          const filters = { org: null };
+          const api = {
+            select() {
+              return api;
+            },
+            eq(col, val) {
+              if (col === "organization_id") filters.org = val;
+              return api;
+            },
+            is() {
+              return api;
+            },
+            gte() {
+              return api;
+            },
+            in() {
+              return api;
+            },
+            order() {
+              return api;
+            },
+            limit() {
+              return api;
+            },
+            maybeSingle() {
+              return Promise.resolve({ data: null, error: null });
+            },
+            async range(from, to) {
+              if (table !== "quote_headers") return { data: [], error: null };
+              const data = quotes.filter((row) => row.organization_id === filters.org);
+              return { data: data.slice(from, to + 1), error: null };
+            }
+          };
+          return api;
+        }
+      })
+    });
+    await service.createAccount({
+      organizationId: ORG_W,
+      role: "admin",
+      actorUserId: ACTOR,
+      payload: { displayName: "Win Rate Co", status: "active" }
+    });
+    const summary = await service.getSummary({ organizationId: ORG_W, role: "admin" });
+    assert.equal(summary.operational.winRateAvailable, true);
+    assert.equal(summary.operational.winRate, 50);
+    assert.equal(summary.operational.openAr, undefined);
+    const listed = await service.listAccounts({
+      organizationId: ORG_W,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "name_asc"
+    });
+    assert.equal(listed.items.length, 1);
+    console.log("ok: summary YTD win rate is org-isolated; list does not need quote_headers");
+  }
+
+  {
+    const src = readFileSync(join(here, "accountDirectoryService.mjs"), "utf8");
+    const listSrc = src.slice(src.indexOf("async listAccounts"), src.indexOf("async getSummary"));
+    const summarySrc = src.slice(src.indexOf("async getSummary"), src.indexOf("async getAccount"));
+    assert.equal(listSrc.includes("loadCachedOrgWinRate"), false, "default/list path does not compute hero win rate");
+    assert.ok(summarySrc.includes("loadCachedOrgWinRate"));
+    assert.equal(summarySrc.includes("loadListFinancialIntel"), false, "summary no longer loads org-wide A/R");
+    assert.ok(src.includes("async linkQuickBooks"));
+    assert.ok(src.includes("async deactivateExternalLink"));
+    const recon = readFileSync(join(here, "accountDirectoryMorawareFinalActionQueue.mjs"), "utf8");
+    assert.ok(recon.includes("READY_CONNECT_EXISTING_AD"));
+    const reconLoad = readFileSync(join(here, "accountDirectoryMorawareReconciliation.mjs"), "utf8");
+    assert.ok(reconLoad.includes("listContactsForAccountIds"));
+    console.log("ok: governance surfaces unchanged; summary/list work is split");
   }
 
   console.log("accountDirectoryService.test.mjs: ok");

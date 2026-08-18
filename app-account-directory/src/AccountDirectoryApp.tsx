@@ -314,6 +314,7 @@ export default function AccountDirectoryApp() {
 
   /* ─── Summary ─── */
   const [summary, setSummary] = useState<AccountSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   /* ─── Permissions ─── */
   const [permissions, setPermissions] = useState<AccountDirectoryPermissions>(defaultPermissions());
@@ -450,11 +451,14 @@ export default function AccountDirectoryApp() {
 
   const loadSummary = useCallback(async () => {
     if (!sessionToken) return;
+    setSummaryLoading(true);
     try {
       const res = await fetchAccountDirectorySummary(sessionToken);
       if (res.summary) setSummary(res.summary);
     } catch {
       /* summary is enhancement-only, ignore errors */
+    } finally {
+      setSummaryLoading(false);
     }
   }, [sessionToken]);
 
@@ -528,8 +532,12 @@ export default function AccountDirectoryApp() {
   useEffect(() => {
     if (!sessionToken || !permissionsLoaded) return;
     void loadList();
-    void loadSummary();
   }, [filterKey, permissionsLoaded, sessionToken]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!sessionToken || !permissionsLoaded) return;
+    void loadSummary();
+  }, [permissionsLoaded, sessionToken]); // eslint-disable-line
 
   useEffect(() => {
     if (!urlState.account || !sessionToken) {
@@ -550,10 +558,10 @@ export default function AccountDirectoryApp() {
     setUrlState((prev) => applyToolbarFilterPatch(prev, patch));
   }
 
-  function renderSortTh(label: string, column: string) {
+  function renderSortTh(label: string, column: string, className?: string) {
     const aria = sortAriaForColumn(urlState.sort, column);
     return (
-      <th scope="col" aria-sort={aria}>
+      <th scope="col" aria-sort={aria} className={className}>
         <button
           type="button"
           className="ad-sort-btn"
@@ -995,16 +1003,18 @@ export default function AccountDirectoryApp() {
             </header>
 
             {/* ─── Summary strip ─── */}
+            <OperationalHero summary={summary} loading={summaryLoading && !summary} />
             {summary ? (
-              <>
-                <OperationalHero summary={summary} />
-                <SummaryStrip
-                  summary={summary}
-                  urlState={urlState}
-                  onApplyCard={applySummaryCard}
-                />
-              </>
-            ) : null}
+              <SummaryStrip
+                summary={summary}
+                urlState={urlState}
+                onApplyCard={applySummaryCard}
+              />
+            ) : (
+              <div className="summary-strip summary-strip-compact summary-strip-loading" aria-hidden="true">
+                <span className="ad-cell-muted">—</span>
+              </div>
+            )}
 
             {/* ─── Nav tabs ─── */}
             <nav className="ad-nav" aria-label="Account views">
@@ -1323,8 +1333,11 @@ export default function AccountDirectoryApp() {
                             {renderSortTh("YTD Activity", "ytd")}
                             {renderSortTh("Follow-up", "followup")}
                             {renderSortTh("Primary contact", "contact")}
-                            {renderSortTh("Location", "location")}
-                            {renderSortTh("Last activity", "activity")}
+                            <th scope="col" className="ad-col-email">
+                              Email
+                            </th>
+                            {renderSortTh("Location", "location", "ad-col-location")}
+                            {renderSortTh("Last activity", "activity", "ad-col-activity")}
                           </tr>
                         </thead>
                         <tbody>
@@ -1405,16 +1418,23 @@ export default function AccountDirectoryApp() {
                               </td>
                               <td>
                                 <div>{item.primaryContact || <span className="ad-cell-muted">—</span>}</div>
-                                {item.primaryPhone || item.primaryEmail ? (
-                                  <div className="ad-cell-secondary" title={item.primaryEmail || undefined}>
-                                    {item.primaryPhone
-                                      ? formatAccountDirectoryPhone(item.primaryPhone)
-                                      : item.primaryEmail}
+                                {item.primaryPhone ? (
+                                  <div className="ad-cell-secondary">
+                                    {formatAccountDirectoryPhone(item.primaryPhone)}
                                   </div>
                                 ) : null}
                               </td>
-                              <td>{formatCityState(item.city, item.state)}</td>
-                              <td>{formatLastActivity(item.lastActivityAt)}</td>
+                              <td className="ad-col-email">
+                                {item.primaryEmail ? (
+                                  <span className="ad-email" title={item.primaryEmail}>
+                                    {item.primaryEmail}
+                                  </span>
+                                ) : (
+                                  <span className="ad-cell-muted">—</span>
+                                )}
+                              </td>
+                              <td className="ad-col-location">{formatCityState(item.city, item.state)}</td>
+                              <td className="ad-col-activity">{formatLastActivity(item.lastActivityAt)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1694,42 +1714,52 @@ export default function AccountDirectoryApp() {
 
 /* ──────────────── Sub-components ──────────────── */
 
-function OperationalHero({ summary }: { summary: AccountSummary }) {
-  const ops = summary.operational;
+function OperationalHero({
+  summary,
+  loading
+}: {
+  summary: AccountSummary | null;
+  loading?: boolean;
+}) {
+  const ops = summary?.operational;
   const ytdUnavailable = ops?.ytdAvailable === false;
-  const arUnavailable = ops?.openArAvailable === false;
+  const winUnavailable = !ops || ops.winRateAvailable === false || ops.winRate == null;
   const cards = [
     {
       key: "jobs",
       label: "YTD Jobs",
-      value: ytdUnavailable ? "—" : ops?.ytdJobs == null ? "—" : Number(ops.ytdJobs).toLocaleString(),
+      value: ytdUnavailable || ops?.ytdJobs == null ? "—" : Number(ops.ytdJobs).toLocaleString(),
       hint: ytdUnavailable ? "Moraware YTD activity is temporarily unavailable." : "Distinct current-year Moraware jobs in the governed current set."
     },
     {
       key: "sqft",
       label: "YTD Sq Ft",
-      value: ytdUnavailable ? "—" : ops?.ytdSqft == null ? "—" : `${Number(ops.ytdSqft).toLocaleString(undefined, { maximumFractionDigits: 1 })} SF`,
+      value: ytdUnavailable || ops?.ytdSqft == null ? "—" : `${Number(ops.ytdSqft).toLocaleString(undefined, { maximumFractionDigits: 1 })} SF`,
       hint: ytdUnavailable ? "Moraware YTD activity is temporarily unavailable." : "Job Worksheet Sq.Ft. on the same YTD job population."
     },
     {
       key: "customers",
       label: "Customers with YTD Activity",
-      value: ytdUnavailable ? "—" : ops?.customersWithYtdActivity == null ? "—" : Number(ops.customersWithYtdActivity).toLocaleString(),
+      value: ytdUnavailable || ops?.customersWithYtdActivity == null ? "—" : Number(ops.customersWithYtdActivity).toLocaleString(),
       hint: "Canonical Account Directory UUIDs with at least one linked current-year Moraware job."
     },
     {
-      key: "ar",
-      label: "Open A/R",
-      value: arUnavailable ? "—" : ops?.openAr == null ? "—" : formatMoney(ops.openAr),
-      hint: arUnavailable ? "Open A/R is temporarily unavailable." : "Exact QuickBooks-linked open A/R for the organization."
+      key: "winrate",
+      label: "YTD Estimate Win Rate",
+      value: winUnavailable ? "—" : `${Number(ops.winRate).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`,
+      hint: "Won ÷ (Won + Lost) · Internal Estimate"
     }
   ];
   return (
-    <div className="ad-ops-hero" aria-label="Organization YTD operations">
+    <div className="ad-ops-hero" aria-label="Organization YTD operations" aria-busy={Boolean(loading)}>
       {cards.map((card) => (
-        <div key={card.key} className="ad-ops-card">
+        <div
+          key={card.key}
+          className={loading ? "ad-ops-card ad-ops-card-loading" : "ad-ops-card"}
+          title={card.key === "winrate" ? card.hint : undefined}
+        >
           <span className="ad-ops-label">{card.label}</span>
-          <strong className="ad-ops-value">{card.value}</strong>
+          <strong className="ad-ops-value">{loading ? "—" : card.value}</strong>
           <span className="sr-only">{card.hint}</span>
         </div>
       ))}

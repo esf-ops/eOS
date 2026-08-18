@@ -10,7 +10,10 @@ import {
   computeAccountOutlook,
   computeEstimateWinRate,
   computeOpenOpportunity,
+  computeOrganizationYtdWinRate,
   computeQuoteToOrderRatio,
+  dedupeInternalEstimatesByCanonicalIdentity,
+  filterInternalEstimatesForYtdWindow,
   INSIGHT_IDS
 } from "./accountDirectoryInsights.mjs";
 import { ACCOUNT_360_FORBIDDEN_SENTINEL_KEYS } from "./accountDirectoryStaffSafeFinancials.mjs";
@@ -41,6 +44,51 @@ const here = dirname(fileURLToPath(import.meta.url));
   assert.equal(subset.evidence.included.closedEligible, 3);
   assert.equal(subset.evidence.excluded.openInternal, 1);
   console.log("ok: win rate unavailable without lost; open estimates excluded; subset math");
+}
+
+{
+  const openExcluded = computeOrganizationYtdWinRate({
+    internalItems: [
+      { id: "w", quote_status: "sold", updated_at: "2026-03-01", quote_family_root_id: "fam-w" },
+      { id: "l", quote_status: "lost", updated_at: "2026-04-01", quote_family_root_id: "fam-l" },
+      { id: "o", quote_status: "sent", updated_at: "2026-05-01", quote_family_root_id: "fam-o" }
+    ],
+    year: 2026,
+    asOfYmd: "2026-08-18"
+  });
+  assert.equal(openExcluded.available, true);
+  assert.equal(openExcluded.closed, 2);
+  assert.equal(openExcluded.openExcluded, 1);
+  assert.equal(openExcluded.rate, 50);
+
+  const dupes = dedupeInternalEstimatesByCanonicalIdentity([
+    { id: "old", quote_family_root_id: "fam-1", quote_status: "lost", updated_at: "2026-01-01", is_current_revision: false },
+    { id: "new", quote_family_root_id: "fam-1", quote_status: "sold", updated_at: "2026-06-01", is_current_revision: true }
+  ]);
+  assert.equal(dupes.length, 1);
+  assert.equal(dupes[0].id, "new");
+
+  const windowed = filterInternalEstimatesForYtdWindow(
+    [
+      { id: "prior", quote_status: "sold", updated_at: "2025-12-31" },
+      { id: "future", quote_status: "lost", updated_at: "2026-12-01" },
+      { id: "now", quote_status: "lost", updated_at: "2026-08-18" }
+    ],
+    { year: 2026, asOfYmd: "2026-08-18" }
+  );
+  assert.deepEqual(
+    windowed.map((r) => r.id),
+    ["now"]
+  );
+
+  const noLost = computeOrganizationYtdWinRate({
+    internalItems: [{ id: "w", quote_status: "sold", updated_at: "2026-03-01" }],
+    year: 2026,
+    asOfYmd: "2026-08-18"
+  });
+  assert.equal(noLost.available, false);
+  assert.equal(noLost.rate, null);
+  console.log("ok: YTD win rate WON/(WON+LOST), OPEN excluded, deduped, insufficient coverage unavailable");
 }
 
 {

@@ -122,6 +122,26 @@ function mapLink(row) {
   };
 }
 
+function mapNoteHead(row) {
+  return {
+    accountId: row.account_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    archivedAt: row.archived_at
+  };
+}
+
+function mapFollowUpHead(row) {
+  return {
+    accountId: row.account_id,
+    dueAt: row.due_at,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    archivedAt: row.archived_at
+  };
+}
+
 function mapNote(row) {
   if (!row) return null;
   return {
@@ -1247,17 +1267,32 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         );
         if (fetched.truncated) return { items: [], complete: false, truncated: true };
         return {
-          items: (fetched.rows || []).map((row) => ({
-            accountId: row.account_id,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-            archivedAt: row.archived_at
-          })),
+          items: (fetched.rows || []).map(mapNoteHead),
           complete: true,
           truncated: false
         };
       } catch (error) {
         throw dbError(error, "Could not list note heads.");
+      }
+    },
+
+    async listNoteHeadsForAccountIds(organizationId, accountIds, { cap = 20000 } = {}) {
+      const ids = [...new Set((accountIds || []).map(String).filter(Boolean))];
+      if (!ids.length) return { items: [], complete: true, truncated: false };
+      try {
+        const fetched = await fetchMatchingUntilCap(
+          "account_directory_notes",
+          (q) => q.eq("organization_id", organizationId).is("archived_at", null).in("account_id", ids),
+          { select: "account_id,created_at,updated_at,archived_at", cap }
+        );
+        if (fetched.truncated) return { items: [], complete: false, truncated: true };
+        return {
+          items: (fetched.rows || []).map(mapNoteHead),
+          complete: true,
+          truncated: false
+        };
+      } catch (error) {
+        throw dbError(error, "Could not list note heads for accounts.");
       }
     },
 
@@ -1270,19 +1305,37 @@ export function createAccountDirectorySupabaseStore(getSupabase) {
         );
         if (fetched.truncated) return { items: [], complete: false, truncated: true };
         return {
-          items: (fetched.rows || []).map((row) => ({
-            accountId: row.account_id,
-            dueAt: row.due_at,
-            status: row.status,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-            archivedAt: row.archived_at
-          })),
+          items: (fetched.rows || []).map(mapFollowUpHead),
           complete: true,
           truncated: false
         };
       } catch (error) {
         throw dbError(error, "Could not list follow-up heads.");
+      }
+    },
+
+    async listOpenFollowUpHeadsForAccountIds(organizationId, accountIds, { cap = 20000 } = {}) {
+      const ids = [...new Set((accountIds || []).map(String).filter(Boolean))];
+      if (!ids.length) return { items: [], complete: true, truncated: false };
+      try {
+        const fetched = await fetchMatchingUntilCap(
+          "account_directory_follow_ups",
+          (q) =>
+            q
+              .eq("organization_id", organizationId)
+              .is("archived_at", null)
+              .eq("status", "open")
+              .in("account_id", ids),
+          { select: "account_id,due_at,status,created_at,updated_at,archived_at", cap }
+        );
+        if (fetched.truncated) return { items: [], complete: false, truncated: true };
+        return {
+          items: (fetched.rows || []).map(mapFollowUpHead),
+          complete: true,
+          truncated: false
+        };
+      } catch (error) {
+        throw dbError(error, "Could not list follow-up heads for accounts.");
       }
     }
   };
