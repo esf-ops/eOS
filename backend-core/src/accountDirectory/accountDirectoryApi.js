@@ -219,6 +219,34 @@ export function attachAccountDirectoryRoutes(app, deps) {
     });
   });
 
+  function parseListIntelligenceAccountIds(req) {
+    const fromBody = req.body?.accountIds ?? req.body?.accountId;
+    const fromQuery = req.query?.accountIds ?? req.query?.accountId;
+    const raw = fromBody != null && fromBody !== "" ? fromBody : fromQuery;
+    if (Array.isArray(raw)) return raw.map(String);
+    if (raw == null || raw === "") return [];
+    return String(raw)
+      .split(/[,\s]+/)
+      .filter(Boolean);
+  }
+
+  async function handleListIntelligence(req, res) {
+    await withOrg(req, res, async (ctx) => {
+      const data = await service.listAccountPageIntelligence({
+        ...ctx,
+        accountIds: parseListIntelligenceAccountIds(req)
+      });
+      const json = JSON.stringify(data);
+      if (/raw_payload|rawPayload/i.test(json)) {
+        return res.status(500).json({ ok: false, error: "Unsafe operational payload blocked." });
+      }
+      res.json({ ok: true, ...data });
+    });
+  }
+
+  app.get("/api/account-directory/accounts/list-intelligence", ...guard, handleListIntelligence);
+  app.post("/api/account-directory/accounts/list-intelligence", ...writeGuard, handleListIntelligence);
+
   app.get("/api/account-directory/accounts/:accountId", ...guard, async (req, res) => {
     await withOrg(req, res, async (ctx) => {
       const account = await service.getAccount({

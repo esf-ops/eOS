@@ -49,8 +49,9 @@ export function apiGet(path: string, token: string, init: RequestInit = {}) {
   return apiFetch(path, token, { ...init, method: "GET" });
 }
 
-export function apiPost(path: string, token: string, payload?: unknown) {
+export function apiPost(path: string, token: string, payload?: unknown, init: RequestInit = {}) {
   return apiFetch(path, token, {
+    ...init,
     method: "POST",
     body: payload === undefined ? undefined : JSON.stringify(payload)
   });

@@ -4,6 +4,7 @@ import type {
   AccountFinancialsResponse,
   AccountListParams,
   AccountListResponse,
+  AccountListIntelligenceResponse,
   AccountRelationshipResponse,
   AccountSummaryResponse,
   AccountTimelineResponse,
@@ -66,6 +67,19 @@ export async function listAccounts(token: string, opts: AccountListParams) {
     })}`,
     token
   )) as AccountListResponse;
+}
+
+export async function listAccountsPageIntelligence(
+  token: string,
+  accountIds: string[],
+  init: RequestInit = {}
+) {
+  return (await apiPost(
+    `${BASE}/accounts/list-intelligence`,
+    token,
+    { accountIds },
+    init
+  )) as AccountListIntelligenceResponse;
 }
 
 export async function getAccount(token: string, accountId: string, init: RequestInit = {}) {

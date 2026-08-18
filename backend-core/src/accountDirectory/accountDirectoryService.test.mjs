@@ -1180,6 +1180,8 @@ async function main() {
     assert.equal(page.pageSize, 50);
     assert.equal(page.items.length, 50);
     assert.equal(page.total, 60);
+    assert.equal(page.directoryHealth?.total, 60);
+    assert.equal(page.directoryHealth?.active, 60);
     assert.equal(orgWide.contacts, 0, "default page must not load org-wide contacts");
     assert.equal(orgWide.locations, 0, "default page must not load org-wide locations");
     assert.equal(orgWide.aliases, 0, "default page must not load org-wide aliases");
@@ -1187,7 +1189,7 @@ async function main() {
     assert.equal(scoped.contacts.length, 1);
     assert.equal(scoped.locations.length, 1);
     assert.equal(scoped.aliases.length, 1);
-    assert.equal(scoped.links.length, 1);
+    assert.equal(scoped.links.length, 1, "default Name sort loads page-scoped exact links only");
     assert.equal(scoped.contacts[0].length, 50);
     assert.equal(scoped.locations[0].length, 50);
     assert.equal(scoped.aliases[0].length, 50);
@@ -1199,12 +1201,39 @@ async function main() {
     assert.ok(page.items[0].primaryContact, "hydrated primary contact on page row");
     assert.ok(page.items[0].city, "hydrated city on page row");
     assert.equal(page.items[0].hasAliases, true);
+    assert.equal(page.items[0].connections?.quickbooks, true, "page-scoped exact QB link is available on base rows");
+    assert.equal(page.items[0].financialIntel, null, "base list leaves A/R pending");
+    assert.equal(page.intelligencePending, true);
     assert.equal(orgNotes, 0, "default list does not require full-org notes");
     assert.equal(orgFollowUps, 0, "default list does not require full-org follow-ups");
-    assert.equal(pageNotes.length, 1, "default notes are page-scoped");
-    assert.equal(pageFollowUps.length, 1, "default follow-ups are page-scoped");
-    assert.equal(pageNotes[0].length, 50);
+    assert.equal(pageNotes.length, 0, "default Name sort does not load page notes");
+    assert.equal(pageFollowUps.length, 0, "default Name sort does not load page follow-ups");
     assert.equal(completeLinkSystems.length, 0, "default Name sort does not load complete org link population");
+
+    const pageIntel = await service.listAccountPageIntelligence({
+      organizationId: ORG_B,
+      role: "admin",
+      accountIds: page.items.map((item) => item.id)
+    });
+    assert.equal(pageIntel.items.length, 50);
+    assert.equal(scoped.links.length, 2, "page intelligence reloads exact links for visible ids only");
+    assert.equal(scoped.links[0].length, 50);
+    for (const id of scoped.links[0]) {
+      assert.ok(pageIdSet.has(id), "page intelligence links scoped to visible ids");
+    }
+    assert.equal(pageNotes.length, 1, "page notes are batched for visible ids");
+    assert.equal(pageFollowUps.length, 1, "page follow-ups are batched for visible ids");
+    assert.equal(pageNotes[0].length, 50);
+    assert.equal(orgNotes, 0);
+    assert.equal(orgFollowUps, 0);
+    const linkedIntel = pageIntel.byAccount[createdIds[0]];
+    assert.equal(linkedIntel.connections.quickbooks, true);
+    assert.equal(linkedIntel.connections.moraware, false);
+    assert.equal(
+      pageIntel.items.some((row) => !pageIdSet.has(row.accountId)),
+      false,
+      "page intelligence does not return accounts outside the requested page"
+    );
 
     orgNotes = 0;
     orgFollowUps = 0;
@@ -1379,7 +1408,7 @@ async function main() {
     });
 
     arRootIds = [];
-    const pageIntel = await serviceIntel.listAccounts({
+    const namePage = await serviceIntel.listAccounts({
       organizationId: ORG_B,
       role: "admin",
       tab: "accounts",
@@ -1387,9 +1416,19 @@ async function main() {
       pageSize: 50,
       sort: "name_asc"
     });
-    assert.equal(pageIntel.items.length, 50);
-    assert.ok(pageIntel.items.some((i) => i.id === createdIds[0]));
+    assert.equal(namePage.items.length, 50);
+    assert.ok(namePage.items.some((i) => i.id === createdIds[0]));
+    assert.deepEqual(arRootIds, [], "default Name sort does not load A/R");
+
+    arRootIds = [];
+    const visibleIntel = await serviceIntel.listAccountPageIntelligence({
+      organizationId: ORG_B,
+      role: "admin",
+      accountIds: namePage.items.map((item) => item.id)
+    });
+    assert.equal(visibleIntel.items.length, 50);
     assert.deepEqual(arRootIds, ["QB-0B-1"]);
+    assert.equal(JSON.stringify(visibleIntel).includes("raw_payload"), false);
 
     // With intelligence filter, financial path still runs (roots from filtered set).
     arRootIds = [];
@@ -1403,6 +1442,297 @@ async function main() {
       sort: "name_asc"
     });
     assert.deepEqual(arRootIds, ["QB-0B-1"]);
+  }
+
+  {
+    const store = createAccountDirectoryMemoryStore();
+    const ORG_AR = "00000000-0000-4000-8000-0000000000e1";
+    const ORG_OTHER = "00000000-0000-4000-8000-0000000000e2";
+    const ACTOR_AR = "00000000-0000-4000-8000-0000000000e9";
+    /** @type {string[]} */
+    let arRootIds = [];
+    const balances = {
+      "QB-B-1370": 1370,
+      "QB-C-ZERO": 0,
+      "QB-D-250": 250,
+      "QB-Z-25000": 25000,
+      "QB-OTHER": 99999
+    };
+    const service = createAccountDirectoryService({
+      store,
+      loadSuggestionIndex: async () => new Map(),
+      getSupabase() {
+        return {
+          from(table) {
+            const state = { table, listIds: [] };
+            const api = {
+              select() {
+                return api;
+              },
+              eq() {
+                return api;
+              },
+              gte() {
+                return api;
+              },
+              is() {
+                return api;
+              },
+              in(col, vals) {
+                if (state.table === "sales_quickbooks_open_ar_current" && col === "qb_root_customer_list_id") {
+                  state.listIds = [...(vals || [])].map(String);
+                  arRootIds = state.listIds;
+                }
+                return api;
+              },
+              order() {
+                return api;
+              },
+              limit() {
+                return api;
+              },
+              range() {
+                if (state.table === "sales_quickbooks_open_ar_current") {
+                  const data = [];
+                  for (const listId of state.listIds) {
+                    if (!Object.prototype.hasOwnProperty.call(balances, listId)) continue;
+                    const bal = Number(balances[listId]);
+                    if (!Number.isFinite(bal) || bal === 0) continue;
+                    data.push({
+                      balance: bal,
+                      due_date: "2026-09-01",
+                      qb_root_customer_list_id: listId
+                    });
+                  }
+                  return Promise.resolve({ data, error: null });
+                }
+                return Promise.resolve({ data: [], error: null });
+              },
+              maybeSingle() {
+                if (state.table === "sales_quickbooks_sync_runs") {
+                  return Promise.resolve({
+                    data: {
+                      id: "sync-1",
+                      status: "success",
+                      completed_at: "2026-08-01T00:00:00.000Z",
+                      coverage_end_date: "2026-08-01"
+                    },
+                    error: null
+                  });
+                }
+                return Promise.resolve({ data: null, error: null });
+              }
+            };
+            return api;
+          }
+        };
+      }
+    });
+
+    const a = await service.createAccount({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      payload: { displayName: "1SW Design", status: "active" }
+    });
+    const b = await service.createAccount({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      payload: { displayName: "319 Decor + Design", status: "active" }
+    });
+    const c = await service.createAccount({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      payload: { displayName: "380 Companies", status: "active" }
+    });
+    const d = await service.createAccount({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      payload: { displayName: "5 Seasons Home", status: "active" }
+    });
+    const z = await service.createAccount({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      payload: { displayName: "Zulu High", status: "active" }
+    });
+    const other = await service.createAccount({
+      organizationId: ORG_OTHER,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      payload: { displayName: "Other Org Huge AR", status: "active" }
+    });
+    await seedQbRoot(store, "QB-B-1370", ORG_AR, "319 Decor + Design");
+    await seedQbRoot(store, "QB-C-ZERO", ORG_AR, "380 Companies");
+    await seedQbRoot(store, "QB-D-250", ORG_AR, "5 Seasons Home");
+    await seedQbRoot(store, "QB-Z-25000", ORG_AR, "Zulu High");
+    await seedQbRoot(store, "QB-OTHER", ORG_OTHER, "Other Org Huge AR");
+    await service.linkQuickBooks({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      accountId: b.id,
+      payload: { externalId: "QB-B-1370", externalDisplayName: "319 Decor + Design" }
+    });
+    await service.linkQuickBooks({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      accountId: c.id,
+      payload: { externalId: "QB-C-ZERO", externalDisplayName: "380 Companies" }
+    });
+    await service.linkQuickBooks({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      accountId: d.id,
+      payload: { externalId: "QB-D-250", externalDisplayName: "5 Seasons Home" }
+    });
+    await service.linkQuickBooks({
+      organizationId: ORG_AR,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      accountId: z.id,
+      payload: { externalId: "QB-Z-25000", externalDisplayName: "Zulu High" }
+    });
+    await service.linkQuickBooks({
+      organizationId: ORG_OTHER,
+      role: "admin",
+      actorUserId: ACTOR_AR,
+      accountId: other.id,
+      payload: { externalId: "QB-OTHER", externalDisplayName: "Other Org Huge AR" }
+    });
+
+    arRootIds = [];
+    const byName = await service.listAccounts({
+      organizationId: ORG_AR,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "name_asc"
+    });
+    assert.deepEqual(
+      byName.items.map((item) => item.id),
+      [a.id, b.id, c.id, d.id, z.id]
+    );
+    assert.deepEqual(arRootIds, [], "default Name sort does not trigger full-population A/R");
+    assert.equal(byName.sort, "name_asc");
+
+    arRootIds = [];
+    const arDesc = await service.listAccounts({
+      organizationId: ORG_AR,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "ar_desc"
+    });
+    assert.equal(arDesc.sort, "ar_desc", "no silent fallback to name sort while UI says ar_desc");
+    assert.deepEqual(
+      arDesc.items.map((item) => item.id),
+      [z.id, b.id, d.id, c.id, a.id]
+    );
+    assert.equal(arDesc.items[0].financialIntel.openAr, 25000);
+    assert.equal(arDesc.items[1].financialIntel.openAr, 1370);
+    assert.equal(arDesc.items[2].financialIntel.openAr, 250);
+    assert.equal(arDesc.items[3].financialIntel.openAr, 0);
+    assert.equal(arDesc.items[4].financialIntel.openAr, null);
+    assert.ok(arRootIds.includes("QB-B-1370"));
+    assert.ok(arRootIds.includes("QB-C-ZERO"));
+    assert.ok(arRootIds.includes("QB-D-250"));
+    assert.ok(arRootIds.includes("QB-Z-25000"));
+    assert.equal(arRootIds.includes("QB-OTHER"), false, "A/R sort is organization-isolated");
+
+    const arAsc = await service.listAccounts({
+      organizationId: ORG_AR,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 50,
+      sort: "ar_asc"
+    });
+    assert.deepEqual(
+      arAsc.items.map((item) => item.id),
+      [c.id, d.id, b.id, z.id, a.id]
+    );
+    assert.equal(arAsc.items[arAsc.items.length - 1].financialIntel.openAr, null);
+    assert.equal(arDesc.items[arDesc.items.length - 1].financialIntel.openAr, null);
+
+    const page1 = await service.listAccounts({
+      organizationId: ORG_AR,
+      role: "admin",
+      tab: "accounts",
+      page: 1,
+      pageSize: 2,
+      sort: "ar_desc"
+    });
+    assert.deepEqual(
+      page1.items.map((item) => item.id),
+      [z.id, b.id],
+      "pagination happens AFTER A/R sorting; page 1 is the highest A/R"
+    );
+    const page2 = await service.listAccounts({
+      organizationId: ORG_AR,
+      role: "admin",
+      tab: "accounts",
+      page: 2,
+      pageSize: 2,
+      sort: "ar_desc"
+    });
+    assert.deepEqual(
+      page2.items.map((item) => item.id),
+      [d.id, c.id]
+    );
+
+    const filtered = await service.listAccounts({
+      organizationId: ORG_AR,
+      role: "admin",
+      tab: "accounts",
+      search: "Design",
+      page: 1,
+      pageSize: 50,
+      sort: "ar_desc"
+    });
+    assert.deepEqual(
+      filtered.items.map((item) => item.id),
+      [b.id, a.id]
+    );
+
+    const fixtureOnly = [a, b, c, d];
+    const fixtureDesc = arDesc.items.filter((item) => fixtureOnly.some((row) => row.id === item.id));
+    assert.deepEqual(
+      fixtureDesc.map((item) => item.id),
+      [b.id, d.id, c.id, a.id]
+    );
+    const fixtureAsc = arAsc.items.filter((item) => fixtureOnly.some((row) => row.id === item.id));
+    assert.deepEqual(
+      fixtureAsc.map((item) => item.id),
+      [c.id, d.id, b.id, a.id]
+    );
+
+    let n1Links = 0;
+    const origLink = store.listExternalLinks.bind(store);
+    store.listExternalLinks = async (...args) => {
+      n1Links += 1;
+      return origLink(...args);
+    };
+    const pageIntel = await service.listAccountPageIntelligence({
+      organizationId: ORG_AR,
+      role: "admin",
+      accountIds: [a.id, b.id, other.id]
+    });
+    assert.equal(n1Links, 0, "page intelligence is batched, not N+1");
+    assert.equal(pageIntel.items.some((row) => row.accountId === other.id), false);
+    assert.equal(pageIntel.byAccount[other.id], undefined);
+    assert.equal(pageIntel.byAccount[a.id].financialIntel.openAr, null);
+    assert.equal(pageIntel.byAccount[b.id].financialIntel.openAr, 1370);
+    assert.equal(pageIntel.byAccount[a.id].connections.quickbooks, false);
+    assert.equal(pageIntel.byAccount[b.id].connections.quickbooks, true);
+    console.log("ok: A/R derived sort + page intelligence identity/null semantics");
   }
 
   {
@@ -1638,9 +1968,15 @@ async function main() {
 
   {
     const src = readFileSync(join(here, "accountDirectoryService.mjs"), "utf8");
-    const listSrc = src.slice(src.indexOf("async listAccounts"), src.indexOf("async getSummary"));
+    const listSrc = src.slice(src.indexOf("async listAccounts"), src.indexOf("async listAccountPageIntelligence"));
     const summarySrc = src.slice(src.indexOf("async getSummary"), src.indexOf("async getAccount"));
+    const pageIntelSrc = src.slice(
+      src.indexOf("async listAccountPageIntelligence"),
+      src.indexOf("async getSummary")
+    );
     assert.equal(listSrc.includes("loadCachedOrgWinRate"), false, "default/list path does not compute hero win rate");
+    assert.equal(listSrc.includes("loadDirectoryOperationalIntelligence"), true);
+    assert.ok(pageIntelSrc.includes("listExternalLinksForAccountIds") || pageIntelSrc.includes("includeLinks: true"));
     assert.ok(summarySrc.includes("loadCachedOrgWinRate"));
     assert.equal(summarySrc.includes("loadListFinancialIntel"), false, "summary no longer loads org-wide A/R");
     assert.ok(src.includes("async linkQuickBooks"));

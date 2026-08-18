@@ -61,6 +61,7 @@ export const DIRECTORY_JOB_CAP = 20000;
 export const DIRECTORY_ACCOUNT_POPULATION_CAP = 5000;
 export const DIRECTORY_HEAD_CAP = 20000;
 
+/** raw_payload is required for Job Worksheet Sq.Ft. extraction; it never leaves list JSON. */
 const JOB_SELECT =
   "source_job_id,source_account_id,job_name,status_name,salesperson_name,created_at_source,install_at_source,completed_at_source,last_seen_at,raw_payload";
 
@@ -313,9 +314,19 @@ function locationKey(item) {
   return [item?.city, item?.state].map((x) => String(x || "").trim()).filter(Boolean).join(", ");
 }
 
-function nullLastNumber(value, dir) {
-  if (value == null || !Number.isFinite(Number(value))) return dir === "desc" ? -Infinity : Infinity;
-  return Number(value);
+/**
+ * Numeric compare with unavailable/null last in BOTH directions.
+ * Governed A/R sums positive invoice balances only (credits never become list zeros).
+ */
+export function compareNullableNumberLast(aVal, bVal, direction) {
+  const aOk = aVal != null && aVal !== "" && Number.isFinite(Number(aVal));
+  const bOk = bVal != null && bVal !== "" && Number.isFinite(Number(bVal));
+  if (!aOk && !bOk) return 0;
+  if (!aOk) return 1;
+  if (!bOk) return -1;
+  const a = Number(aVal);
+  const b = Number(bVal);
+  return direction === "desc" ? b - a : a - b;
 }
 
 /**
@@ -338,16 +349,18 @@ export function sortDirectoryListItems(items, sort) {
       return ordered || cmpText(a.displayName, b.displayName) || cmpId(a, b);
     }
     if (key === "ar_desc" || key === "ar_asc") {
-      const va = nullLastNumber(a.financialIntel?.openAr, key === "ar_desc" ? "desc" : "asc");
-      const vb = nullLastNumber(b.financialIntel?.openAr, key === "ar_desc" ? "desc" : "asc");
-      const by = key === "ar_desc" ? vb - va : va - vb;
+      const by = compareNullableNumberLast(
+        a.financialIntel?.openAr,
+        b.financialIntel?.openAr,
+        key === "ar_desc" ? "desc" : "asc"
+      );
       return by || cmpText(a.displayName, b.displayName) || cmpId(a, b);
     }
     if (key === "ytd_sqft_desc" || key === "ytd_sqft_asc") {
       const dir = key === "ytd_sqft_desc" ? "desc" : "asc";
       const va = a.ytdActivity?.available === false ? null : a.ytdActivity?.sqft;
       const vb = b.ytdActivity?.available === false ? null : b.ytdActivity?.sqft;
-      const by = dir === "desc" ? nullLastNumber(vb, dir) - nullLastNumber(va, dir) : nullLastNumber(va, dir) - nullLastNumber(vb, dir);
+      const by = compareNullableNumberLast(va, vb, dir);
       return by || cmpText(a.displayName, b.displayName) || cmpId(a, b);
     }
     if (key === "followup_attention" || key === "followup_attention_asc") {

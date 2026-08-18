@@ -147,38 +147,6 @@ body {
   box-shadow: none;
 }
 
-.ad-ops-hero {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0 0 10px;
-}
-
-.ad-ops-card {
-  padding: 10px 12px;
-  background: var(--eos-surface);
-  border: 1px solid var(--eos-line-strong);
-  border-radius: var(--r-lg);
-}
-
-.ad-ops-label {
-  display: block;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--eos-ink-mid);
-}
-
-.ad-ops-value {
-  display: block;
-  margin-top: 4px;
-  font-size: 1.35rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--eos-ink);
-}
-
 .summary-group {
   display: flex;
   flex-wrap: wrap;
@@ -527,6 +495,17 @@ body {
 .ad-conn-on { color: var(--eos-ink); }
 .ad-conn-off { color: var(--eos-ink-muted); }
 .ad-conn-warn { color: var(--eos-ink); }
+
+.ad-conn-pending,
+.ad-cell-pending {
+  min-height: 1.15em;
+  animation: ad-cell-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ad-cell-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.75; }
+}
 
 .ad-ytd {
   display: grid;
@@ -1829,12 +1808,6 @@ a.detail-list-title:hover {
   }
 }
 
-@media (max-width: 1280px) {
-  .ad-ops-hero {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 1020px) {
   .ad-layout-split {
     grid-template-columns: 1fr;
@@ -1886,10 +1859,6 @@ a.detail-list-title:hover {
 
   .account-cards {
     display: flex;
-  }
-
-  .ad-ops-hero {
-    grid-template-columns: 1fr 1fr;
   }
 
   .summary-count {

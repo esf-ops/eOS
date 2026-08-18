@@ -8,11 +8,11 @@ import {
   createAccount,
   createProspect,
   fetchAccountDirectoryPermissions,
-  fetchAccountDirectorySummary,
   getAccount,
   getAccountFinancials,
   getAccountInsights,
   listAccounts,
+  listAccountsPageIntelligence,
   restoreAccount,
   updateAccount
 } from "./lib/accountDirectoryApi";
@@ -43,8 +43,9 @@ import type {
   AccountFinancials,
   AccountInsightsResponse,
   AccountListItem,
+  AccountListPageIntel,
   AccountRelationship,
-  AccountSummary
+  DirectoryHealth
 } from "./lib/types";
 import {
   draftFromAccountDetail,
@@ -214,6 +215,14 @@ function statusPillClass(status: string): string {
 }
 
 function ConnectionsBadges(item: AccountListItem) {
+  if (item.connections == null) {
+    return (
+      <div className="ad-conn ad-conn-pending" aria-busy="true" aria-label="Connections loading">
+        <span className="ad-conn-off">QB —</span>
+        <span className="ad-conn-off">Moraware —</span>
+      </div>
+    );
+  }
   const qb = Boolean(item.connections?.quickbooks);
   const mw = Boolean(item.connections?.moraware);
   const code = item.qbEnrichment?.code || item.qbEnrichmentCode;
@@ -226,6 +235,31 @@ function ConnectionsBadges(item: AccountListItem) {
       <span className={mw ? "ad-conn-on" : "ad-conn-off"}>Moraware {mw ? "✓" : "—"}</span>
     </div>
   );
+}
+
+function DirectoryPendingCell() {
+  return (
+    <span className="ad-cell-muted ad-cell-pending" aria-busy="true">
+      —
+    </span>
+  );
+}
+
+function mergePageIntelligence(
+  item: AccountListItem,
+  intel: AccountListPageIntel | undefined
+): AccountListItem {
+  if (!intel) return item;
+  return {
+    ...item,
+    connections: intel.connections ?? item.connections,
+    financialIntel: intel.financialIntel ?? item.financialIntel,
+    ytdActivity: intel.ytdActivity ?? item.ytdActivity,
+    followUpSummary: intel.followUpSummary ?? item.followUpSummary,
+    notesCount: intel.notesCount ?? item.notesCount,
+    lastActivityAt: intel.lastActivityAt ?? item.lastActivityAt,
+    intelligencePending: false
+  };
 }
 
 function monogramClass(status: string): string {
@@ -311,10 +345,9 @@ export default function AccountDirectoryApp() {
   const [total, setTotal] = useState(0);
   const [listState, setListState] = useState<ListState>("idle");
   const [listError, setListError] = useState<string | null>(null);
-
-  /* ─── Summary ─── */
-  const [summary, setSummary] = useState<AccountSummary | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [directoryHealth, setDirectoryHealth] = useState<DirectoryHealth | null>(null);
+  const [pageIntelById, setPageIntelById] = useState<Record<string, AccountListPageIntel>>({});
+  const intelAbortRef = useRef<AbortController | null>(null);
 
   /* ─── Permissions ─── */
   const [permissions, setPermissions] = useState<AccountDirectoryPermissions>(defaultPermissions());
@@ -449,23 +482,11 @@ export default function AccountDirectoryApp() {
     }
   }, [sessionToken]);
 
-  const loadSummary = useCallback(async () => {
-    if (!sessionToken) return;
-    setSummaryLoading(true);
-    try {
-      const res = await fetchAccountDirectorySummary(sessionToken);
-      if (res.summary) setSummary(res.summary);
-    } catch {
-      /* summary is enhancement-only, ignore errors */
-    } finally {
-      setSummaryLoading(false);
-    }
-  }, [sessionToken]);
-
   const loadList = useCallback(async () => {
     if (!sessionToken) return;
     setListState((prev) => (prev === "idle" || prev === "no-results" || prev === "empty" ? "loading" : "loading"));
     setListError(null);
+    intelAbortRef.current?.abort();
     try {
       const res = await listAccounts(sessionToken, {
         tab: urlState.tab,
@@ -483,6 +504,8 @@ export default function AccountDirectoryApp() {
       const next = res.items ?? [];
       setItems(next);
       setTotal(res.total ?? next.length);
+      if (res.directoryHealth) setDirectoryHealth(res.directoryHealth);
+      setPageIntelById({});
       if (!permissions.canView && permissionsLoaded) {
         setListState("permission-denied");
       } else if (!next.length) {
@@ -490,9 +513,26 @@ export default function AccountDirectoryApp() {
       } else {
         setListState("idle");
       }
+      const ids = next.map((item) => item.id);
+      if (ids.length) {
+        const controller = new AbortController();
+        intelAbortRef.current = controller;
+        try {
+          const intel = await listAccountsPageIntelligence(sessionToken, ids, { signal: controller.signal });
+          if (controller.signal.aborted) return;
+          const map: Record<string, AccountListPageIntel> = { ...(intel.byAccount || {}) };
+          for (const row of intel.items || []) {
+            if (row?.accountId && !map[row.accountId]) map[row.accountId] = row;
+          }
+          setPageIntelById(map);
+        } catch (e: unknown) {
+          if (isAbortError(e) || controller.signal.aborted) return;
+        }
+      }
     } catch (e: unknown) {
       setItems([]);
       setTotal(0);
+      setPageIntelById({});
       if (e instanceof ApiError && e.status === 403) {
         setListState("permission-denied");
         setListError(e.message);
@@ -533,11 +573,6 @@ export default function AccountDirectoryApp() {
     if (!sessionToken || !permissionsLoaded) return;
     void loadList();
   }, [filterKey, permissionsLoaded, sessionToken]); // eslint-disable-line
-
-  useEffect(() => {
-    if (!sessionToken || !permissionsLoaded) return;
-    void loadSummary();
-  }, [permissionsLoaded, sessionToken]); // eslint-disable-line
 
   useEffect(() => {
     if (!urlState.account || !sessionToken) {
@@ -779,13 +814,12 @@ export default function AccountDirectoryApp() {
       setModal(null);
       setForm(emptyForm());
       await loadList();
-      await loadSummary();
     } catch (e: unknown) {
       setFormError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setFormBusy(false);
     }
-  }, [detail, form, formBusy, loadDetail, loadList, loadSummary, modal, urlState.account, sessionToken]); // eslint-disable-line
+  }, [detail, form, formBusy, loadDetail, loadList, modal, urlState.account, sessionToken]); // eslint-disable-line
 
   const handleRestore = useCallback(async () => {
     if (!sessionToken || !urlState.account) return;
@@ -796,13 +830,12 @@ export default function AccountDirectoryApp() {
       setActionMessage("Account restored.");
       await loadList();
       await loadDetail(urlState.account);
-      await loadSummary();
     } catch (e: unknown) {
       setFormError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setFormBusy(false);
     }
-  }, [loadDetail, loadList, loadSummary, urlState.account, sessionToken]); // eslint-disable-line
+  }, [loadDetail, loadList, urlState.account, sessionToken]); // eslint-disable-line
 
   /* ─── Topbar ─── */
   const navTabs = useMemo(() => {
@@ -887,9 +920,10 @@ export default function AccountDirectoryApp() {
     !urlState.qbEnrichment &&
     !urlState.missingContact &&
     !urlState.missingLocation;
-  const pageHeaderTotal = summary && isDefaultAccountsList ? summary.total : total;
+  const pageHeaderTotal = directoryHealth && isDefaultAccountsList ? directoryHealth.total : total;
   const liveCount =
     listState === "idle" && pageHeaderTotal > 0 ? `${pageHeaderTotal.toLocaleString()} accounts` : "";
+  const visibleItems = items.map((item) => mergePageIntelligence(item, pageIntelById[item.id]));
 
   return (
     <div className="shell">
@@ -1002,19 +1036,13 @@ export default function AccountDirectoryApp() {
               </div>
             </header>
 
-            {/* ─── Summary strip ─── */}
-            <OperationalHero summary={summary} loading={summaryLoading && !summary} />
-            {summary ? (
+            {directoryHealth ? (
               <SummaryStrip
-                summary={summary}
+                health={directoryHealth}
                 urlState={urlState}
                 onApplyCard={applySummaryCard}
               />
-            ) : (
-              <div className="summary-strip summary-strip-compact summary-strip-loading" aria-hidden="true">
-                <span className="ad-cell-muted">—</span>
-              </div>
-            )}
+            ) : null}
 
             {/* ─── Nav tabs ─── */}
             <nav className="ad-nav" aria-label="Account views">
@@ -1341,7 +1369,7 @@ export default function AccountDirectoryApp() {
                           </tr>
                         </thead>
                         <tbody>
-                          {items.map((item) => (
+                          {visibleItems.map((item) => (
                             <tr
                               key={item.id}
                               data-account-row={item.id}
@@ -1386,7 +1414,9 @@ export default function AccountDirectoryApp() {
                                 <ConnectionsBadges {...item} />
                               </td>
                               <td className="ad-num">
-                                {item.financialIntel?.openAr != null ? (
+                                {item.intelligencePending && item.financialIntel == null ? (
+                                  <DirectoryPendingCell />
+                                ) : item.financialIntel?.openAr != null ? (
                                   <span className={item.financialIntel.overdue ? "ad-overdue" : undefined}>
                                     {formatMoney(item.financialIntel.openAr)}
                                     {item.financialIntel.overdue ? " overdue" : ""}
@@ -1396,19 +1426,25 @@ export default function AccountDirectoryApp() {
                                 )}
                               </td>
                               <td>
-                                {(() => {
-                                  const ytd = formatYtdActivity(item.ytdActivity);
-                                  if (!ytd) return <span className="ad-cell-muted">—</span>;
-                                  return (
-                                    <div className="ad-ytd">
-                                      <strong>{ytd.sqft}</strong>
-                                      <span>{ytd.jobs}</span>
-                                    </div>
-                                  );
-                                })()}
+                                {item.intelligencePending && item.ytdActivity == null ? (
+                                  <DirectoryPendingCell />
+                                ) : (
+                                  (() => {
+                                    const ytd = formatYtdActivity(item.ytdActivity);
+                                    if (!ytd) return <span className="ad-cell-muted">—</span>;
+                                    return (
+                                      <div className="ad-ytd">
+                                        <strong>{ytd.sqft}</strong>
+                                        <span>{ytd.jobs}</span>
+                                      </div>
+                                    );
+                                  })()
+                                )}
                               </td>
                               <td>
-                                {formatFollowUpCell(item.followUpSummary) ? (
+                                {item.intelligencePending && item.followUpSummary == null ? (
+                                  <DirectoryPendingCell />
+                                ) : formatFollowUpCell(item.followUpSummary) ? (
                                   <span className={item.followUpSummary?.overdue ? "ad-overdue" : undefined}>
                                     {formatFollowUpCell(item.followUpSummary)}
                                   </span>
@@ -1434,7 +1470,13 @@ export default function AccountDirectoryApp() {
                                 )}
                               </td>
                               <td className="ad-col-location">{formatCityState(item.city, item.state)}</td>
-                              <td className="ad-col-activity">{formatLastActivity(item.lastActivityAt)}</td>
+                              <td className="ad-col-activity">
+                                {item.intelligencePending && item.lastActivityAt == null ? (
+                                  <DirectoryPendingCell />
+                                ) : (
+                                  formatLastActivity(item.lastActivityAt)
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1443,7 +1485,7 @@ export default function AccountDirectoryApp() {
 
                     {/* Mobile cards */}
                     <div className="account-cards" role="list" aria-label="Accounts">
-                      {items.map((item) => (
+                      {visibleItems.map((item) => (
                         <div
                           key={item.id}
                           data-account-row={item.id}
@@ -1529,7 +1571,6 @@ export default function AccountDirectoryApp() {
                   qbLinkNonce={qbLinkNonce}
                   onDirectoryRefresh={() => {
                     void loadList();
-                    void loadSummary();
                   }}
                   onArchive={() => openModal("archive-confirm")}
                   onRestore={() => void handleRestore()}
@@ -1595,7 +1636,6 @@ export default function AccountDirectoryApp() {
                     setForm(emptyForm());
                     setActionMessage("QuickBooks connected.");
                     void loadList();
-                    void loadSummary();
                   }}
                   onCancel={closeModal}
                 />
@@ -1714,79 +1754,20 @@ export default function AccountDirectoryApp() {
 
 /* ──────────────── Sub-components ──────────────── */
 
-function OperationalHero({
-  summary,
-  loading
-}: {
-  summary: AccountSummary | null;
-  loading?: boolean;
-}) {
-  const ops = summary?.operational;
-  const ytdUnavailable = ops?.ytdAvailable === false;
-  const winUnavailable = !ops || ops.winRateAvailable === false || ops.winRate == null;
-  const cards = [
-    {
-      key: "jobs",
-      label: "YTD Jobs",
-      value: ytdUnavailable || ops?.ytdJobs == null ? "—" : Number(ops.ytdJobs).toLocaleString(),
-      hint: ytdUnavailable ? "Moraware YTD activity is temporarily unavailable." : "Distinct current-year Moraware jobs in the governed current set."
-    },
-    {
-      key: "sqft",
-      label: "YTD Sq Ft",
-      value: ytdUnavailable || ops?.ytdSqft == null ? "—" : `${Number(ops.ytdSqft).toLocaleString(undefined, { maximumFractionDigits: 1 })} SF`,
-      hint: ytdUnavailable ? "Moraware YTD activity is temporarily unavailable." : "Job Worksheet Sq.Ft. on the same YTD job population."
-    },
-    {
-      key: "customers",
-      label: "Customers with YTD Activity",
-      value: ytdUnavailable || ops?.customersWithYtdActivity == null ? "—" : Number(ops.customersWithYtdActivity).toLocaleString(),
-      hint: "Canonical Account Directory UUIDs with at least one linked current-year Moraware job."
-    },
-    {
-      key: "winrate",
-      label: "YTD Estimate Win Rate",
-      value: winUnavailable ? "—" : `${Number(ops.winRate).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`,
-      hint: "Won ÷ (Won + Lost) · Internal Estimate"
-    }
-  ];
-  return (
-    <div className="ad-ops-hero" aria-label="Organization YTD operations" aria-busy={Boolean(loading)}>
-      {cards.map((card) => (
-        <div
-          key={card.key}
-          className={loading ? "ad-ops-card ad-ops-card-loading" : "ad-ops-card"}
-          title={card.key === "winrate" ? card.hint : undefined}
-        >
-          <span className="ad-ops-label">{card.label}</span>
-          <strong className="ad-ops-value">{loading ? "—" : card.value}</strong>
-          <span className="sr-only">{card.hint}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function SummaryStrip({
-  summary,
+  health,
   urlState,
   onApplyCard
 }: {
-  summary: AccountSummary;
+  health: DirectoryHealth;
   urlState: UrlState;
   onApplyCard: (cardKey: string) => void;
 }) {
   const clickable: { key: string; label: string; count: number }[] = [
-    { key: "total", label: "Total Accounts", count: summary.total },
-    { key: "active", label: "Active", count: summary.active },
-    { key: "prospects", label: "Prospects", count: summary.prospects },
-    { key: "needsReview", label: "Needs Review", count: summary.needsReview },
-    { key: "qbLinked", label: "QB Connected", count: summary.quickbooksLinked }
-  ];
-  const facts: { label: string; count: number | null }[] = [
-    { label: "Moraware Connected", count: summary.morawareConnected ?? 0 },
-    { label: "Open Follow-ups", count: summary.openFollowUps ?? null },
-    { label: "Overdue Follow-ups", count: summary.overdueFollowUps ?? null }
+    { key: "total", label: "Total Accounts", count: health.total },
+    { key: "active", label: "Active", count: health.active },
+    { key: "prospects", label: "Prospects", count: health.prospects },
+    { key: "needsReview", label: "Needs Review", count: health.needsReview }
   ];
 
   return (
@@ -1808,12 +1789,6 @@ function SummaryStrip({
           </button>
         );
       })}
-      {facts.map((item) => (
-        <div key={item.label} className="summary-item summary-item-static" role="listitem">
-          <span className="summary-count">{item.count == null ? "—" : item.count.toLocaleString()}</span>
-          <span className="summary-label">{item.label}</span>
-        </div>
-      ))}
       </div>
     </div>
   );

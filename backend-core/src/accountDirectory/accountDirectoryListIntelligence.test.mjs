@@ -303,6 +303,30 @@ function qbLink(accountId, listId) {
   assert.ok(arAsc[0].financialIntel.openAr <= arAsc[1].financialIntel.openAr);
   console.log("ok: 28) A/R descending/ascending");
 
+  const arFixture = [
+    { id: "a", displayName: "Account A", financialIntel: { openAr: null } },
+    { id: "b", displayName: "Account B", financialIntel: { openAr: 1370 } },
+    { id: "c", displayName: "Account C", financialIntel: { openAr: 0 } },
+    { id: "d", displayName: "Account D", financialIntel: { openAr: 250 } }
+  ];
+  assert.deepEqual(
+    sortDirectoryListItems(arFixture, "ar_desc").map((row) => row.id),
+    ["b", "d", "c", "a"]
+  );
+  assert.deepEqual(
+    sortDirectoryListItems(arFixture, "ar_asc").map((row) => row.id),
+    ["c", "d", "b", "a"]
+  );
+  const missingIntel = [
+    { id: "a", displayName: "Account A" },
+    { id: "b", displayName: "Account B", financialIntel: { openAr: 1370 } }
+  ];
+  assert.deepEqual(
+    sortDirectoryListItems(missingIntel, "ar_desc").map((row) => row.id),
+    ["b", "a"],
+    "missing financialIntel is unavailable, last in ar_desc"
+  );
+
   const ytdDesc = sortDirectoryListItems(items, "ytd_sqft_desc");
   assert.ok(ytdDesc[0].ytdActivity.sqft >= ytdDesc[1].ytdActivity.sqft);
   const ytdAsc = sortDirectoryListItems(items, "ytd_sqft_asc");

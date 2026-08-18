@@ -136,6 +136,7 @@ console.log("ok: nav tabs, qbEnrichment filter, exclusive summary presets, and A
 // ── API client ─────────────────────────────────────────────────────────────
 assert.ok(api.includes('const BASE = "/api/account-directory"'));
 assert.ok(api.includes("${BASE}/accounts"));
+assert.ok(api.includes("list-intelligence"));
 assert.ok(api.includes("${BASE}/prospects"));
 assert.ok(api.includes("link-quickbooks"));
 assert.ok(api.includes("displayName"));
@@ -289,17 +290,18 @@ assert.equal(app.includes('renderSortTh("QuickBooks"'), false, "standalone Quick
 assert.equal(app.includes('renderSortTh("Phone"'), false, "standalone Phone column removed");
 assert.equal(app.includes('renderSortTh("Last updated"') || app.includes('renderSortTh("Last Updated"'), false);
 assert.ok(app.includes("aria-sort"), "sortable headers expose aria-sort");
-assert.ok(app.includes("OperationalHero") && app.includes("ad-ops-hero"), "operational hero cards present");
-assert.ok(app.includes('ytdUnavailable || ops?.ytdJobs == null ? "—"'), "hero cards render unavailable as em dash");
-assert.ok(app.includes('label: "YTD Estimate Win Rate"'), "YTD Estimate Win Rate hero present");
-assert.ok(app.includes("Won ÷ (Won + Lost) · Internal Estimate"), "win-rate hero names Internal Estimate authority");
-assert.equal(app.includes('label: "YTD Win Rate"'), false, "generic YTD Win Rate hero label removed");
-assert.equal(app.includes('label: "Open A/R"'), false, "Open A/R hero removed");
+assert.equal(app.includes("OperationalHero"), false, "hero cards removed");
+assert.equal(app.includes("ad-ops-hero"), false, "hero markup removed");
+assert.equal(app.includes('label: "YTD Estimate Win Rate"'), false, "YTD Estimate Win Rate hero removed");
+assert.equal(app.includes('label: "YTD Jobs"'), false, "YTD Jobs hero removed");
+assert.equal(app.includes('label: "Open A/R"'), false, "Open A/R hero remains removed");
 assert.ok(app.includes("void loadList();"), "list loads independently");
-assert.ok(app.includes("void loadSummary();"), "summary loads independently");
+assert.equal(app.includes("fetchAccountDirectorySummary"), false, "Account Directory mount must not request /summary");
+assert.equal(app.includes("void loadSummary();"), false, "summary is not fetched from the landing page");
+assert.ok(app.includes("listAccountsPageIntelligence"), "page intelligence is a second request");
+assert.ok(app.includes("DirectoryPendingCell") || app.includes("ad-cell-pending"), "intelligence pending does not blank rows");
+assert.ok(app.includes("visibleItems"), "base table renders independently from intelligence merge");
 assert.ok(app.includes("}, [filterKey, permissionsLoaded, sessionToken]"));
-assert.ok(app.includes("void loadSummary();\n  }, [permissionsLoaded, sessionToken]"));
-assert.ok(app.includes("<OperationalHero summary={summary}"), "hero renders without waiting for summary");
 assert.ok(css.includes("ad-col-activity") && css.includes("max-width: 1400px"));
 assert.ok(css.includes("ad-col-location") && css.includes("max-width: 1220px"));
 assert.ok(css.includes("ad-col-email") && css.includes("max-width: 1080px"));
@@ -310,6 +312,6 @@ assert.ok(hideActivity > 0 && hideLocation > hideActivity && hideEmail > hideLoc
 assert.ok(app.includes("formatAccountDirectoryPhone"), "shared phone formatter used on list");
 assert.ok(panels.includes("formatAccountDirectoryPhone"), "shared phone formatter used in Account 360");
 assert.ok(maintain.includes("formatAccountDirectoryPhone"), "shared phone formatter used in maintain");
-console.log("ok: landing-page columns, hero unavailable states, shared phone formatter");
+console.log("ok: landing-page columns, two-stage list, shared phone formatter");
 
 console.log("\nAll account directory UI contract checks passed.\n");

@@ -38,21 +38,22 @@ export type AccountListItem = {
   connections?: {
     quickbooks?: boolean;
     moraware?: boolean;
-  };
+  } | null;
   ytdActivity?: {
     available?: boolean;
     jobs?: number | null;
     sqft?: number | null;
-  };
+  } | null;
   followUpSummary?: {
     available?: boolean;
     open?: number | null;
     overdue?: number | null;
     dueToday?: number | null;
     nextDueAt?: string | null;
-  };
+  } | null;
   notesCount?: number | null;
   lastActivityAt?: string | null;
+  intelligencePending?: boolean;
 };
 
 export type AccountContact = {
@@ -186,6 +187,23 @@ export type AccountListParams = {
   intelligence?: string;
 };
 
+export type DirectoryHealth = {
+  total: number;
+  active: number;
+  prospects: number;
+  needsReview: number;
+};
+
+export type AccountListPageIntel = {
+  accountId: string;
+  connections?: AccountListItem["connections"];
+  financialIntel?: AccountListItem["financialIntel"];
+  ytdActivity?: AccountListItem["ytdActivity"];
+  followUpSummary?: AccountListItem["followUpSummary"];
+  notesCount?: number | null;
+  lastActivityAt?: string | null;
+};
+
 export type AccountListResponse = {
   ok?: boolean;
   items?: AccountListItem[];
@@ -195,6 +213,15 @@ export type AccountListResponse = {
   totalPages?: number;
   hasPreviousPage?: boolean;
   hasNextPage?: boolean;
+  sort?: string;
+  intelligencePending?: boolean;
+  directoryHealth?: DirectoryHealth | null;
+};
+
+export type AccountListIntelligenceResponse = {
+  ok?: boolean;
+  items?: AccountListPageIntel[];
+  byAccount?: Record<string, AccountListPageIntel>;
 };
 
 export type AccountDetailResponse = {
