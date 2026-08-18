@@ -42,13 +42,6 @@ function ymd(d) {
   return d ? d.toISOString().slice(0, 10) : null;
 }
 
-export const EMPTY_MORAWARE_JOB_STATS = Object.freeze({
-  jobCount: 0,
-  jobs2026: 0,
-  earliestJobDate: null,
-  latestJobDate: null
-});
-
 function jobActivityDate(job) {
   return (
     toDate(job?.createdAtSource ?? job?.created_at_source) ||

@@ -1,6 +1,10 @@
 /**
  * Account Directory master-list reconciliation.
  *
+ * CLI/offline profiling and gated apply only. Not the live Account Directory
+ * HTTP/list-serving path — that is accountDirectoryService listAccounts +
+ * list-intelligence.
+ *
  * extract → normalize → compare → classify → review artifacts → dry-run → gated apply
  *
  * Does NOT replace the QuickBooks seed import.
