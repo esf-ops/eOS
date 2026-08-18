@@ -1228,6 +1228,14 @@ export default function App() {
                 </span>
               </div>
             </section>
+            <div className="slab-hero" aria-hidden>
+              <div className="slab-hero-stack">
+                <span className="slab-hero-bar slab-hero-bar-1" />
+                <span className="slab-hero-bar slab-hero-bar-2" />
+                <span className="slab-hero-bar slab-hero-bar-3" />
+                <span className="slab-hero-bar slab-hero-bar-4" />
+              </div>
+            </div>
             <section className="auth-panel" aria-label="Sign in">
               {urlFlowError ? (
                 <div className="banner banner-error" role="alert" style={{ marginBottom: 16 }}>
