@@ -13,7 +13,11 @@ import {
   buildMorawareQueueQuery,
   buildUnifiedCustomerSearchResults,
   isUnresolvedWorkRow,
-  remainingFromSummary
+  primaryReviewAction,
+  readyHasActionablePrimaryPath,
+  remainingFromSummary,
+  reviewBadgeForItem,
+  weakSuggestionHint
 } from "./morawareReviewWorkflow.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -136,6 +140,80 @@ const ui = readFileSync(path.join(here, "../ui/MorawareReview.tsx"), "utf8");
   assert.equal(ui.includes("Confirm All"), false);
   assert.ok(ui.includes("Unlink"));
   console.log("ok: 16–18) no auto-link on search alone; no bulk confirm; unlink/history preserved");
+}
+
+{
+  const heartland = {
+    reviewState: "EXISTING_AD_QB_BACKED",
+    confirmAllowed: false,
+    proposedAccountId: "ad-heart",
+    morawareName: "Heartland Design",
+    currentLink: { linked: false },
+    candidates: [
+      {
+        accountId: "ad-heart",
+        displayName: "Heartland Designs",
+        qbDisplayName: "Heartland Designs",
+        identityKind: "EXISTING_AD_QB_BACKED",
+        confirmAllowed: false,
+        qbListId: "QB-HEART",
+        evidence: [
+          { type: "name_fuzzy", label: "Near business-name match" },
+          { type: "qb_linked", label: "Directory account has QuickBooks link" }
+        ]
+      }
+    ]
+  };
+  const cand = heartland.candidates[0];
+  const action = primaryReviewAction(heartland, cand);
+  const badge = reviewBadgeForItem(heartland, cand);
+  assert.equal(badge.label, "Ready");
+  assert.equal(action.kind, "connect_moraware");
+  assert.equal(action.label, "YES — Connect");
+  assert.equal(readyHasActionablePrimaryPath(heartland, cand), true);
+  assert.equal(Boolean(cand.confirmAllowed), false);
+  assert.ok(weakSuggestionHint(cand));
+  console.log("ok: Heartland Ready + YES — Connect even when confirmAllowed=false");
+}
+
+{
+  const readyNoUuid = {
+    reviewState: "EXISTING_AD_QB_BACKED",
+    confirmAllowed: false,
+    currentLink: { linked: false },
+    candidates: [{ accountId: null, confirmAllowed: false, identityKind: "EXISTING_AD_QB_BACKED" }]
+  };
+  assert.equal(reviewBadgeForItem(readyNoUuid, readyNoUuid.candidates[0]).label, "Possible match");
+  assert.notEqual(primaryReviewAction(readyNoUuid, readyNoUuid.candidates[0]).kind, "connect_moraware");
+  assert.equal(readyHasActionablePrimaryPath(readyNoUuid, readyNoUuid.candidates[0]), true);
+  console.log("ok: 1–2) Ready never renders without an actionable YES/create/confirm path");
+}
+
+{
+  const possible = {
+    reviewState: "POSSIBLE_CANDIDATE",
+    confirmAllowed: false,
+    currentLink: { linked: false },
+    candidates: [{ accountId: "ad-p", confirmAllowed: false, identityKind: "POSSIBLE_CANDIDATE" }]
+  };
+  assert.equal(reviewBadgeForItem(possible, possible.candidates[0]).label, "Possible");
+  assert.equal(primaryReviewAction(possible, possible.candidates[0]).kind, "connect_moraware");
+  assert.ok(weakSuggestionHint(possible.candidates[0]));
+  console.log("ok: 3) Possible stays distinct; UUID still offers explicit YES — Connect");
+}
+
+{
+  const onYes = ui.split("async function onYes")[1]?.split("function onNo")[0] || "";
+  assert.ok(onYes.includes("linkMoraware"));
+  assert.equal(onYes.includes("confirmAllowed"), false, "human YES on exact UUID does not require confirmAllowed");
+  assert.equal(ui.includes("Confirm All"), false);
+  assert.equal(/useEffect\(\(\) => \{\s*void linkMoraware/.test(ui), false);
+  const onNo = ui.split("function onNo")[1]?.split("function onSkip")[0] || "";
+  const onSkip = ui.split("function onSkip")[1]?.split("async function unlink")[0] || "";
+  assert.equal(onNo.includes("linkMoraware"), false);
+  assert.equal(onSkip.includes("linkMoraware"), false);
+  assert.ok(ui.includes("applySuccessfulYes"));
+  console.log("ok: 4–10) fuzzy never auto-links; YES uses governed link; NO/SKIP do not write; no bulk; success removes row");
 }
 
 console.log("\nmorawareReviewWorkflow.test.mjs — all passed\n");

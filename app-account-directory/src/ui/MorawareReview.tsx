@@ -19,7 +19,10 @@ import {
   buildUnifiedCustomerSearchResults,
   isUnresolvedWorkRow,
   operationalBreakdown,
-  remainingFromSummary
+  primaryReviewAction,
+  remainingFromSummary,
+  reviewBadgeForItem,
+  weakSuggestionHint
 } from "../lib/morawareReviewWorkflow.mjs";
 import type {
   MorawareCandidate,
@@ -30,20 +33,6 @@ import type {
 type ViewMode = "hub" | "review" | "browse" | "linked";
 
 const PAGE_SIZE = 100;
-
-function reviewBadge(item: MorawareReconciliationItem): { label: string; tone: string } {
-  const state = String(item.reviewState || "");
-  if (state === "LINKED" || item.currentLink?.linked) return { label: "Linked", tone: "linked" };
-  if (state === "INTERNAL" || item.internalBucket) return { label: "Internal", tone: "none" };
-  if (state === "CONFLICT") return { label: "Conflict", tone: "conflict" };
-  if (state === "EXISTING_AD_QB_BACKED") return { label: "Ready", tone: "strong" };
-  if (state === "EXISTING_AD_QB_LINK_CANDIDATE") return { label: "Needs QB connection", tone: "possible" };
-  if (state === "QB_ROOT_NOT_IN_DIRECTORY") return { label: "QB customer found", tone: "possible" };
-  if (state === "EXISTING_AD_PROSPECT") return { label: "Prospect", tone: "possible" };
-  if (state === "POSSIBLE_CANDIDATE" || state === "STRONG_CANDIDATE") return { label: "Possible", tone: "possible" };
-  if (state === "NO_CANDIDATE" || state === "NO_DIRECTORY_CANDIDATE") return { label: "No match", tone: "none" };
-  return { label: "Remaining", tone: "none" };
-}
 
 function candidateSourceLines(
   morawareName: string,
@@ -187,7 +176,9 @@ export function MorawareReviewSurface({
   const breakdown = operationalBreakdown(summary);
   const best = pickCandidate(selected, candidateIndex);
   const candidateCount = selected?.candidates?.length || (selected?.proposedAccountId ? 1 : 0);
-  const badge = selected ? reviewBadge(selected) : null;
+  const action = selected ? primaryReviewAction(selected, best) : { kind: "search", label: "Search customers" };
+  const badge = selected ? reviewBadgeForItem(selected, best) : null;
+  const suggestionHint = weakSuggestionHint(best);
 
   const browseTotal = mode === "linked" ? queue?.total || 0 : remaining;
   const pageSize = queue?.pageSize || PAGE_SIZE;
@@ -296,7 +287,7 @@ export function MorawareReviewSurface({
         setSelectedId(row.morawareAccountId);
         return;
       }
-      if ((cand.confirmAllowed || row.confirmAllowed) && cand.accountId) {
+      if (cand.accountId) {
         await linkMoraware(sessionToken, cand.accountId, {
           externalId: row.morawareAccountId,
           externalDisplayName: row.morawareName
@@ -416,13 +407,7 @@ export function MorawareReviewSurface({
     }
   }
 
-  const yesLabel = (() => {
-    if (!best) return "Search customers";
-    if (best.createFromQuickBooksAllowed && best.qbListId && !best.accountId) return "YES — Create from QuickBooks";
-    if (best.confirmQbLinkAllowed && best.accountId && best.qbListId) return "YES — Confirm QuickBooks";
-    if ((best.confirmAllowed || selected?.confirmAllowed) && best.accountId) return "YES — Connect";
-    return "Search customers";
-  })();
+  const yesLabel = action.label || "Search customers";
 
   const reviewOrdinal = Math.min(reviewPosition.current + 1, Math.max(remaining, 1));
 
@@ -562,6 +547,7 @@ export function MorawareReviewSurface({
                   {best.qbActive === false ? " · Inactive QuickBooks root" : ""}
                   {candidateCount > 1 ? ` · match ${candidateIndex + 1} of ${candidateCount}` : ""}
                 </p>
+                {suggestionHint ? <p className="muted">{suggestionHint}</p> : null}
                 {best.qbActive === false ? (
                   <p className="banner banner-warn" role="status">
                     This QuickBooks root is inactive. Linking does not reactivate QuickBooks.
@@ -595,7 +581,7 @@ export function MorawareReviewSurface({
                   className="btn btn-primary"
                   disabled={actionBusy}
                   onClick={() => {
-                    if (!best || yesLabel === "Search customers") {
+                    if (!best || action.kind === "search" || action.kind === "review" || action.kind === "none") {
                       setChooseOpen(true);
                       setChooseSearch(selected.morawareName || "");
                       return;

@@ -94,6 +94,11 @@ assert.ok(
   )
 );
 assert.ok(
+  readFileSync(join(root, "app-account-directory/src/AccountDirectoryApp.tsx"), "utf8").includes(
+    "shouldDismissModalOnBackdropClick"
+  )
+);
+assert.ok(
   readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Edit account")
 );
 assert.ok(

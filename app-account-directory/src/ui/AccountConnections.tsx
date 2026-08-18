@@ -20,6 +20,7 @@ import {
   safeIdentityErrorMessage
 } from "../lib/accountDirectoryConnections.mjs";
 import { activityLabel } from "../lib/accountDirectoryWorkspace";
+import { shouldDismissModalOnBackdropClick } from "../lib/accountDirectoryModalDismiss.mjs";
 import type { AccountDetail, ExternalLink, MorawareReconciliationItem } from "../lib/types";
 import { QuickBooksCustomerPicker } from "./QuickBooksCustomerPicker";
 
@@ -59,6 +60,7 @@ export function ConnectionsWithIdentity({
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const mwAbortRef = useRef<AbortController | null>(null);
+  const disconnectBackdropPointerRef = useRef(false);
 
   useEffect(() => {
     mwAbortRef.current?.abort();
@@ -419,7 +421,26 @@ export function ConnectionsWithIdentity({
       ) : null}
 
       {disconnect ? (
-        <div className="modal-backdrop" data-ad-modal="true" role="presentation" onClick={() => setDisconnect(null)}>
+        <div
+          className="modal-backdrop"
+          data-ad-modal="true"
+          role="presentation"
+          onPointerDown={(event) => {
+            disconnectBackdropPointerRef.current = event.target === event.currentTarget;
+          }}
+          onClick={(event) => {
+            const clickOnBackdrop = event.target === event.currentTarget;
+            if (
+              shouldDismissModalOnBackdropClick({
+                pointerDownOnBackdrop: disconnectBackdropPointerRef.current,
+                clickOnBackdrop
+              })
+            ) {
+              setDisconnect(null);
+            }
+            disconnectBackdropPointerRef.current = false;
+          }}
+        >
           <div
             className="modal-panel"
             role="dialog"

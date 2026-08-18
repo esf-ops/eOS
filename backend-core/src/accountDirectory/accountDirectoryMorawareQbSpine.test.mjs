@@ -186,6 +186,54 @@ console.log("\naccountDirectoryMorawareQbSpine.test.mjs\n");
 }
 
 {
+  const directoryAccounts = [{ id: "ad-heart", displayName: "Heartland Designs", legalName: null, status: "active" }];
+  const qbLinksByAccountId = new Map([
+    ["ad-heart", { listId: "QB-HEART", displayName: "Heartland Designs" }]
+  ]);
+  const evidence = buildMorawareEvidenceIndexes({ directoryAccounts, qbLinksByAccountId });
+  for (const a of directoryAccounts) evidence.byId.get(a.id).status = a.status;
+  const qbRootIndexes = buildQbRootFactIndexes(
+    [{ qb_list_id: "QB-HEART", full_name: "Heartland Designs", is_job: false, is_active: true }],
+    qbLinksByAccountId
+  );
+  const spine = discoverMorawareSpineCandidates({
+    morawareAccount: { sourceAccountId: "37", accountName: "Heartland Design" },
+    indexes: evidence,
+    qbRootIndexes,
+    directoryById: evidence.byId
+  });
+  assert.equal(spine.reviewState, SPINE_REVIEW_STATES.EXISTING_AD_QB_BACKED);
+  assert.equal(spine.proposedAccountId, "ad-heart");
+  assert.equal(spine.candidates[0].identityKind, "EXISTING_AD_QB_BACKED");
+  assert.equal(spine.candidates[0].confirmMorawareAllowed, false);
+  assert.equal(spine.candidates[0].confirmAllowed, false);
+  assert.equal(spine.candidates[0].qbListId, "QB-HEART");
+  const queue = await listMorawareReconciliationQueue({
+    organizationId: ORG,
+    role: "admin",
+    store: createAccountDirectoryMemoryStore(),
+    dataset: {
+      morawareAccounts: [{ sourceAccountId: "37", accountName: "Heartland Design" }],
+      jobsByMorawareId: new Map(),
+      jobStatsByMorawareId: new Map([["37", { jobCount: 19, jobs2026: 19 }]]),
+      directoryAccounts,
+      aliases: [],
+      contacts: [],
+      locations: [],
+      qbLinksByAccountId,
+      qbRootFacts: [{ qbListId: "QB-HEART", fullName: "Heartland Designs", isJob: false, isActive: true }],
+      morawareLinksBySourceId: new Map(),
+      morawareLinksByAccountId: new Map()
+    }
+  });
+  assert.equal(queue.items[0].reviewState, SPINE_REVIEW_STATES.EXISTING_AD_QB_BACKED);
+  assert.equal(queue.items[0].confirmAllowed, false);
+  assert.equal(queue.items[0].candidates[0].accountId, "ad-heart");
+  assert.equal(queue.items[0].candidates[0].confirmAllowed, false);
+  console.log("ok: Heartland production shape — Ready/EXISTING_AD_QB_BACKED with confirmAllowed=false");
+}
+
+{
   const store = createAccountDirectoryMemoryStore();
   const service = createAccountDirectoryService({ store });
   await seedTrustedQuickBooksCustomerFact(store, {

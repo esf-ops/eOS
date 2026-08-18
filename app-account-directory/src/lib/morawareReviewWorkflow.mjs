@@ -196,3 +196,83 @@ export function buildUnifiedCustomerSearchResults(input = {}) {
     }));
   return { directory, quickbooks };
 }
+
+const ACTIONABLE_READY_KINDS = new Set(["connect_moraware", "confirm_qb", "create_from_qb"]);
+
+/**
+ * Primary reviewer action for the current candidate card.
+ *
+ * `confirmAllowed` is algorithmic confidence, not a permission to confirm.
+ * The governed Moraware link endpoint accepts an explicit human confirmation
+ * of an exact Account Directory UUID (same as Search → select).
+ *
+ * @param {object|null|undefined} item
+ * @param {object|null|undefined} candidate
+ */
+export function primaryReviewAction(item, candidate) {
+  if (!item || item.currentLink?.linked || String(item.reviewState || "") === "LINKED") {
+    return { kind: "none", label: "" };
+  }
+  if (item.internalBucket || String(item.reviewState || "") === "INTERNAL") {
+    return { kind: "none", label: "" };
+  }
+  const state = String(item.reviewState || "");
+  if (!candidate) return { kind: "search", label: "Search customers" };
+  if (candidate.createFromQuickBooksAllowed && candidate.qbListId && !candidate.accountId) {
+    return { kind: "create_from_qb", label: "YES — Create from QuickBooks" };
+  }
+  if (candidate.confirmQbLinkAllowed && candidate.accountId && candidate.qbListId) {
+    return { kind: "confirm_qb", label: "YES — Confirm QuickBooks" };
+  }
+  if (candidate.accountId && state !== "CONFLICT") {
+    return { kind: "connect_moraware", label: "YES — Connect" };
+  }
+  if (state === "CONFLICT") return { kind: "review", label: "Review this account" };
+  return { kind: "search", label: "Search customers" };
+}
+
+/**
+ * Badge copy must match the available primary action.
+ * Never label Ready unless YES / create / confirm-QB is available.
+ *
+ * @param {object|null|undefined} item
+ * @param {object|null|undefined} candidate
+ */
+export function reviewBadgeForItem(item, candidate) {
+  const state = String(item?.reviewState || "");
+  if (state === "LINKED" || item?.currentLink?.linked) return { label: "Linked", tone: "linked" };
+  if (state === "INTERNAL" || item?.internalBucket) return { label: "Internal", tone: "none" };
+  if (state === "CONFLICT") return { label: "Conflict", tone: "conflict" };
+
+  const action = primaryReviewAction(item, candidate);
+  if (state === "EXISTING_AD_QB_BACKED") {
+    if (ACTIONABLE_READY_KINDS.has(action.kind)) return { label: "Ready", tone: "strong" };
+    return { label: "Possible match", tone: "possible" };
+  }
+  if (state === "EXISTING_AD_QB_LINK_CANDIDATE") return { label: "Needs QB connection", tone: "possible" };
+  if (state === "QB_ROOT_NOT_IN_DIRECTORY") return { label: "QB customer found", tone: "possible" };
+  if (state === "EXISTING_AD_PROSPECT") return { label: "Prospect", tone: "possible" };
+  if (state === "POSSIBLE_CANDIDATE" || state === "STRONG_CANDIDATE") return { label: "Possible", tone: "possible" };
+  if (state === "NO_CANDIDATE" || state === "NO_DIRECTORY_CANDIDATE") return { label: "No match", tone: "none" };
+  return { label: "Remaining", tone: "none" };
+}
+
+/**
+ * @param {object|null|undefined} item
+ * @param {object|null|undefined} candidate
+ */
+export function readyHasActionablePrimaryPath(item, candidate) {
+  const badge = reviewBadgeForItem(item, candidate);
+  if (badge.label !== "Ready") return true;
+  return ACTIONABLE_READY_KINDS.has(primaryReviewAction(item, candidate).kind);
+}
+
+/**
+ * Weak name similarity copy — shown when a UUID is suggested without strong evidence.
+ * @param {object|null|undefined} candidate
+ */
+export function weakSuggestionHint(candidate) {
+  if (!candidate?.accountId) return null;
+  if (candidate.confirmAllowed || candidate.confirmMorawareAllowed) return null;
+  return "Name similarity suggests this customer. Verify before connecting.";
+}

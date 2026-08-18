@@ -36,6 +36,7 @@ import {
   isAbortError,
   needsAccount360Fetch
 } from "./lib/account360RequestCoordinator.mjs";
+import { shouldDismissModalOnBackdropClick } from "./lib/accountDirectoryModalDismiss.mjs";
 import type {
   AccountDetail,
   AccountDirectoryPermissions,
@@ -314,6 +315,7 @@ export default function AccountDirectoryApp() {
   const [morawareCreateReturnId, setMorawareCreateReturnId] = useState<string | null>(null);
   const [editAfterOpenId, setEditAfterOpenId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const modalBackdropPointerRef = useRef(false);
 
   /* ─── Derived ─── */
   const totalPages = Math.max(Math.ceil(total / urlState.pageSize), 1);
@@ -1450,7 +1452,26 @@ export default function AccountDirectoryApp() {
 
       {/* ─── Modal ─── */}
       {modal ? (
-        <div className="modal-backdrop" data-ad-modal="true" role="presentation" onClick={closeModal}>
+        <div
+          className="modal-backdrop"
+          data-ad-modal="true"
+          role="presentation"
+          onPointerDown={(event) => {
+            modalBackdropPointerRef.current = event.target === event.currentTarget;
+          }}
+          onClick={(event) => {
+            const clickOnBackdrop = event.target === event.currentTarget;
+            if (
+              shouldDismissModalOnBackdropClick({
+                pointerDownOnBackdrop: modalBackdropPointerRef.current,
+                clickOnBackdrop
+              })
+            ) {
+              closeModal();
+            }
+            modalBackdropPointerRef.current = false;
+          }}
+        >
           <div
             className="modal-panel"
             role="dialog"
