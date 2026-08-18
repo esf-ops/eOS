@@ -58,6 +58,8 @@ assert.ok(app.includes("MorawareReviewSurface"));
 assert.ok(app.includes("moraware_review"));
 assert.ok(api.includes("/status-review"));
 assert.ok(api.includes("moraware-reconciliation"));
+assert.equal(api.includes("bulk-confirm"), false);
+assert.ok(readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Final review queue"));
 assert.equal(app.includes("Confirm All"), false, "must not offer Confirm All for Moraware");
 assert.equal(
   readFileSync(join(root, "app-account-directory/src/ui/MorawareReview.tsx"), "utf8").includes("Confirm All"),

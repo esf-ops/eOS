@@ -44,7 +44,7 @@ export function isUnresolvedWorkRow(row) {
  * @param {{ filter?: string, search?: string, page?: number, pageSize?: number, mode?: "work"|"linked" }} opts
  */
 export function buildMorawareQueueQuery(opts = {}) {
-  const mode = opts.mode === "linked" ? "linked" : "work";
+  const mode = opts.mode === "linked" ? "linked" : opts.mode === "final" ? "final" : "work";
   const page = Math.max(1, Number(opts.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(opts.pageSize) || 100));
   const search = String(opts.search || "").trim();
@@ -56,6 +56,17 @@ export function buildMorawareQueueQuery(opts = {}) {
       reviewState: "LINKED",
       classification: "",
       search,
+      page,
+      pageSize
+    };
+  }
+  if (mode === "final") {
+    return {
+      queue: "final-action",
+      linked: "false",
+      reviewState: "",
+      classification: "",
+      search: "",
       page,
       pageSize
     };
@@ -227,6 +238,23 @@ export function primaryReviewAction(item, candidate) {
   if (item.internalBucket || String(item.reviewState || "") === "INTERNAL") {
     return { kind: "none", label: "" };
   }
+  if (item.finalActionQueue) {
+    if (item.stagedAfterCreate && candidate?.accountId) {
+      return { kind: "connect_moraware", label: "YES — CONNECT MORAWARE" };
+    }
+    if (
+      item.finalActionKind === "READY_CREATE_FROM_QB_THEN_CONNECT" &&
+      candidate?.createFromQuickBooksAllowed &&
+      candidate?.qbListId &&
+      !candidate?.accountId
+    ) {
+      return { kind: "create_from_qb", label: "YES — CREATE ACCOUNT FROM QUICKBOOKS" };
+    }
+    if (candidate?.accountId) {
+      return { kind: "connect_moraware", label: "YES — CONNECT" };
+    }
+    return { kind: "none", label: "" };
+  }
   const state = String(item.reviewState || "");
   if (!candidate) return { kind: "search", label: "Search customers" };
   if (
@@ -336,5 +364,25 @@ export function applyExistingQbAccountToCandidate(item, existing) {
     createFromQuickBooksAllowed: false,
     confirmAllowed: true,
     candidates: [candidate, ...((item?.candidates || []).filter((c) => c.accountId !== accountId))].slice(0, 3)
+  };
+}
+
+/**
+ * After create-from-QB, restage the same Moraware row for explicit CONNECT.
+ * Does not create a Moraware link.
+ */
+export function stageMorawareConnectAfterQbCreate(item, created) {
+  const next = applyExistingQbAccountToCandidate(item, {
+    accountId: created?.accountId || created?.id,
+    displayName: created?.displayName || created?.name,
+    qbListId: created?.qbListId || item?.primaryQbListId,
+    qbDisplayName: created?.qbDisplayName
+  });
+  return {
+    ...next,
+    finalActionQueue: true,
+    finalActionKind: "READY_CONNECT_EXISTING_AD",
+    stagedAfterCreate: true,
+    primaryQbListId: created?.qbListId || item?.primaryQbListId || null
   };
 }

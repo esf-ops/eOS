@@ -30,6 +30,14 @@ import {
 } from "./accountDirectoryMorawareQbSpine.mjs";
 import { ACCOUNT_DIRECTORY_QUICKBOOKS_SYSTEM } from "./accountDirectoryQuickbooksLinkage.mjs";
 import { isAdQbRootCustomerFact } from "./accountDirectoryQbLinkValidation.mjs";
+import {
+  buildFinalActionQueueSummary,
+  buildFinalActionReadiness,
+  finalActionRowToReviewItem,
+  paginateFinalActionItems,
+  toFastFinalActionQueue
+} from "./accountDirectoryMorawareFinalActionQueue.mjs";
+import { loadFinalActionPlan } from "./accountDirectoryMorawareFinalActionPlanLoad.mjs";
 
 const PAGE = 1000;
 const CANONICAL_ID_RE = /^\d+$/;
@@ -71,6 +79,11 @@ export async function listMorawareReconciliationQueue(params) {
   const pageSize = Math.min(100, Math.max(10, Number(params.query?.pageSize) || 50));
 
   const dataset = params.dataset || (await loadLiveDataset(params.supabase, params.store, organizationId));
+  const queueMode = String(params.query?.queue || params.query?.finalAction || "").trim().toLowerCase();
+  if (queueMode === "final-action" || queueMode === "final_action" || queueMode === "1") {
+    return listFinalActionReconciliationQueue(params, dataset);
+  }
+
   const nameIndex = buildDirectoryNameIndex(dataset.directoryAccounts);
   const qbLinksByAccountId = dataset.qbLinksByAccountId;
   const qbNameIndex = buildQbDisplayNameIndex(qbLinksByAccountId);
@@ -254,6 +267,78 @@ export async function listMorawareReconciliationQueue(params) {
     showingFrom: total === 0 ? 0 : safeStart + 1,
     showingTo: Math.min(safeStart + pageSize, total),
     items: filtered.slice(safeStart, safeStart + pageSize)
+  };
+}
+
+function linksFromDataset(dataset) {
+  const morawareLinks = [];
+  for (const [externalId, link] of dataset.morawareLinksBySourceId || []) {
+    morawareLinks.push({
+      externalId: link?.externalId || externalId,
+      accountId: link?.accountId,
+      isActive: link?.isActive !== false,
+      externalSystem: "moraware"
+    });
+  }
+  const qbLinks = [];
+  for (const [accountId, rec] of dataset.qbLinksByAccountId || []) {
+    const listId = rec?.listId || rec?.externalId;
+    if (!listId) continue;
+    qbLinks.push({
+      externalId: listId,
+      accountId,
+      isActive: true,
+      externalSystem: "quickbooks_desktop",
+      externalDisplayName: rec?.displayName || null
+    });
+  }
+  return { morawareLinks, qbLinks };
+}
+
+async function listFinalActionReconciliationQueue(params, dataset) {
+  const plan =
+    params.finalActionPlan && typeof params.finalActionPlan === "object"
+      ? params.finalActionPlan
+      : loadFinalActionPlan();
+  if (!plan?.available || !plan.actions?.length) {
+    return {
+      ok: true,
+      finalActionAvailable: false,
+      summary: {
+        totalMorawareAccounts: 0,
+        alreadyLinked: 0,
+        unresolved: 0,
+        unresolvedBucketSum: 0,
+        highConfidenceUnlinked: 0,
+        reviewRequired: 0,
+        unmatched: 0,
+        conflicts: 0,
+        finalActionAvailable: false
+      },
+      page: 1,
+      pageSize: 50,
+      total: 0,
+      showingFrom: 0,
+      showingTo: 0,
+      items: []
+    };
+  }
+
+  const { morawareLinks, qbLinks } = linksFromDataset(dataset);
+  const readiness = buildFinalActionReadiness({
+    actions: plan.actions,
+    sourceAccounts: dataset.morawareAccounts || [],
+    morawareLinks,
+    qbLinks,
+    directoryAccounts: dataset.directoryAccounts || []
+  });
+  const ready = toFastFinalActionQueue(readiness).map((row) => finalActionRowToReviewItem(row));
+  const page = paginateFinalActionItems(ready, params.query?.page, params.query?.pageSize);
+  return {
+    ok: true,
+    finalActionAvailable: true,
+    summary: buildFinalActionQueueSummary(readiness, page.items),
+    ...page
   };
 }
 

@@ -17,6 +17,7 @@ import {
   readyHasActionablePrimaryPath,
   remainingFromSummary,
   reviewBadgeForItem,
+  stageMorawareConnectAfterQbCreate,
   weakSuggestionHint
 } from "./morawareReviewWorkflow.mjs";
 
@@ -235,6 +236,47 @@ const ui = readFileSync(path.join(here, "../ui/MorawareReview.tsx"), "utf8");
   assert.equal(onSkip.includes("linkMoraware"), false);
   assert.ok(ui.includes("applySuccessfulYes"));
   console.log("ok: 4–10) fuzzy never auto-links; YES uses governed link; NO/SKIP do not write; no bulk; success removes row");
+}
+
+{
+  const q = buildMorawareQueueQuery({ mode: "final", page: 1, pageSize: 100 });
+  assert.equal(q.queue, "final-action");
+  assert.equal(q.linked, "false");
+  const connect = primaryReviewAction(
+    {
+      finalActionQueue: true,
+      finalActionKind: "READY_CONNECT_EXISTING_AD",
+      currentLink: { linked: false }
+    },
+    { accountId: "ad-1", confirmAllowed: true }
+  );
+  assert.equal(connect.label, "YES — CONNECT");
+  const create = primaryReviewAction(
+    {
+      finalActionQueue: true,
+      finalActionKind: "READY_CREATE_FROM_QB_THEN_CONNECT",
+      currentLink: { linked: false }
+    },
+    { createFromQuickBooksAllowed: true, qbListId: "QB-1", accountId: null }
+  );
+  assert.equal(create.label, "YES — CREATE ACCOUNT FROM QUICKBOOKS");
+  const staged = stageMorawareConnectAfterQbCreate(
+    {
+      morawareAccountId: "9",
+      finalActionQueue: true,
+      finalActionKind: "READY_CREATE_FROM_QB_THEN_CONNECT",
+      createFromQuickBooksAllowed: true
+    },
+    { accountId: "ad-new", displayName: "New Co", qbListId: "QB-1" }
+  );
+  assert.equal(staged.stagedAfterCreate, true);
+  assert.equal(staged.createFromQuickBooksAllowed, false);
+  assert.equal(primaryReviewAction(staged, staged.candidates[0]).label, "YES — CONNECT MORAWARE");
+  assert.ok(ui.includes("Final review queue"));
+  assert.ok(ui.includes("stageMorawareConnectAfterQbCreate"));
+  assert.equal(ui.includes("Confirm All"), false);
+  assert.equal(ui.includes("bulk-confirm"), false);
+  console.log("ok: final-action queue labels + create restages explicit Moraware connect");
 }
 
 console.log("\nmorawareReviewWorkflow.test.mjs — all passed\n");

@@ -702,10 +702,14 @@ export type MorawareReconciliationItem = {
   confirmQbLinkAllowed?: boolean;
   createFromQuickBooksAllowed?: boolean;
   multipleMorawareIdsExpected?: boolean;
+  finalActionQueue?: boolean;
+  finalActionKind?: string;
+  stagedAfterCreate?: boolean;
 };
 
 export type MorawareReconciliationResponse = {
   ok?: boolean;
+  finalActionAvailable?: boolean;
   summary?: {
     totalMorawareAccounts: number;
     alreadyLinked: number;
@@ -724,6 +728,12 @@ export type MorawareReconciliationResponse = {
     qbRootNotInDirectory?: number;
     existingAdProspect?: number;
     noCandidate?: number;
+    alreadyLinkedExact?: number;
+    readyConnectExistingAd?: number;
+    readyCreateFromQb?: number;
+    blockedMorawareSourceId?: number;
+    nonExecutableByPlan?: number;
+    finalActionAvailable?: boolean;
   };
   items?: MorawareReconciliationItem[];
   page?: number;

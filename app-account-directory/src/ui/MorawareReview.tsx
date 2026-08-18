@@ -16,6 +16,7 @@ import {
   applySkip,
   applySuccessfulYes,
   applyExistingQbAccountToCandidate,
+  stageMorawareConnectAfterQbCreate,
   buildMorawareQueueQuery,
   buildUnifiedCustomerSearchResults,
   duplicateQbExistingAccountId,
@@ -32,7 +33,7 @@ import type {
   MorawareReconciliationResponse
 } from "../lib/types";
 
-type ViewMode = "hub" | "review" | "browse" | "linked";
+type ViewMode = "hub" | "review" | "browse" | "linked" | "final";
 
 const PAGE_SIZE = 100;
 
@@ -126,11 +127,11 @@ export function MorawareReviewSurface({
     setError(null);
     try {
       const query = buildMorawareQueueQuery({
-        mode: mode === "linked" ? "linked" : "work",
+        mode: mode === "linked" ? "linked" : mode === "final" ? "final" : "work",
         filter: mode === "browse" || mode === "review" ? filter : "",
         search: mode === "linked" || mode === "browse" ? search : "",
         page: mode === "hub" ? 1 : page,
-        pageSize: mode === "hub" ? 10 : mode === "review" ? PAGE_SIZE : PAGE_SIZE
+        pageSize: mode === "hub" ? 10 : mode === "review" || mode === "final" ? PAGE_SIZE : PAGE_SIZE
       });
       const data = await fetchMorawareReconciliation(sessionToken, query);
       if (generation !== loadGeneration.current) return;
@@ -214,6 +215,15 @@ export function MorawareReviewSurface({
     setSearch("");
   }
 
+  function enterFinalReview() {
+    setMode("final");
+    setPage(1);
+    setFilter("");
+    setSearch("");
+    setSelectedId(null);
+    reviewPosition.current = 0;
+  }
+
   function applyLocalYes(row: MorawareReconciliationItem) {
     const result = applySuccessfulYes(items, row.morawareAccountId, summary || {});
     setQueue((prev) => {
@@ -258,12 +268,22 @@ export function MorawareReviewSurface({
     displayName: string,
     qbListId: string | null
   ) {
-    const nextRow = applyExistingQbAccountToCandidate(row, {
-      accountId: existingAccountId,
-      displayName,
-      qbListId,
-      qbDisplayName: displayName
-    });
+    const nextRow: MorawareReconciliationItem = {
+      ...applyExistingQbAccountToCandidate(row, {
+        accountId: existingAccountId,
+        displayName,
+        qbListId,
+        qbDisplayName: displayName
+      }),
+      ...(row.finalActionQueue
+        ? {
+            finalActionQueue: true,
+            finalActionKind: "READY_CONNECT_EXISTING_AD",
+            stagedAfterCreate: false,
+            createFromQuickBooksAllowed: false
+          }
+        : {})
+    };
     setQueue((prev) => {
       if (!prev) return prev;
       return {
@@ -302,6 +322,30 @@ export function MorawareReviewSurface({
             );
             await load();
             setSelectedId(row.morawareAccountId);
+            return;
+          }
+          if (row.finalActionQueue) {
+            const account = (res as { account?: { id?: string; displayName?: string; name?: string } }).account;
+            const staged = stageMorawareConnectAfterQbCreate(row, {
+              accountId: account?.id,
+              displayName: account?.displayName || account?.name || cand.qbDisplayName || cand.displayName,
+              qbListId: cand.qbListId,
+              qbDisplayName: cand.qbDisplayName || cand.displayName
+            });
+            setQueue((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                items: (prev.items || []).map((item) =>
+                  item.morawareAccountId === row.morawareAccountId ? { ...item, ...staged } : item
+                )
+              };
+            });
+            setSelectedId(row.morawareAccountId);
+            setCandidateIndex(0);
+            onMessage(
+              `Created Account Directory customer from QuickBooks. Confirm Moraware ${row.morawareAccountId} next — Moraware was not auto-linked.`
+            );
             return;
           }
           onMessage(
@@ -499,7 +543,7 @@ export function MorawareReviewSurface({
             {remaining.toLocaleString()} remaining
           </p>
           <ul className="moraware-ops-breakdown">
-            {breakdown.map((b) => (
+            {(mode === "final" ? breakdown.filter((b) => b.count > 0) : breakdown).map((b) => (
               <li key={b.key} title={b.hint}>
                 <span>{b.label}</span>
                 <strong>{b.count}</strong>
@@ -518,6 +562,9 @@ export function MorawareReviewSurface({
             <button type="button" className="btn btn-primary" disabled={busy || remaining === 0} onClick={enterReview}>
               Review one by one
             </button>
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={enterFinalReview}>
+              Final review queue
+            </button>
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={enterBrowse}>
               Browse unresolved
             </button>
@@ -534,9 +581,14 @@ export function MorawareReviewSurface({
           <button type="button" className="btn btn-secondary" onClick={() => setMode("hub")}>
             ← Overview
           </button>
-          {mode !== "review" ? (
+          {mode !== "review" && mode !== "final" ? (
             <button type="button" className="btn btn-primary" disabled={remaining === 0} onClick={enterReview}>
               Review one by one
+            </button>
+          ) : null}
+          {mode !== "final" ? (
+            <button type="button" className="btn btn-primary" onClick={enterFinalReview}>
+              Final review queue
             </button>
           ) : null}
           {mode !== "browse" ? (
@@ -559,7 +611,7 @@ export function MorawareReviewSurface({
       ) : null}
       {busy && !queue ? <p className="muted">Loading…</p> : null}
 
-      {mode === "review" && selected && isUnresolvedWorkRow(selected) ? (
+      {(mode === "review" || mode === "final") && selected && isUnresolvedWorkRow(selected) ? (
         <section className="moraware-focus" aria-label="Review one Moraware account">
           <p className="moraware-focus-progress">
             {reviewOrdinal} of {remaining.toLocaleString()} remaining
@@ -568,7 +620,8 @@ export function MorawareReviewSurface({
             <p className="moraware-focus-eyebrow">Moraware</p>
             <h3>{selected.morawareName}</h3>
             <p className="muted">
-              Account ID {selected.morawareAccountId} · {selected.jobs2026 ?? selected.jobCount ?? 0} jobs in 2026
+              Account ID {selected.morawareAccountId}
+              {mode === "final" ? "" : ` · ${selected.jobs2026 ?? selected.jobCount ?? 0} jobs in 2026`}
             </p>
             {badge ? <span className={`moraware-badge moraware-badge-${badge.tone}`}>{badge.label}</span> : null}
 
@@ -582,8 +635,32 @@ export function MorawareReviewSurface({
                     </div>
                   ))}
                 </div>
-                <h4>Do you mean this customer?</h4>
-                <p className="moraware-focus-match-label">Best match</p>
+                <h4>{mode === "final" ? (selected.stagedAfterCreate ? "Connect Moraware to the new account" : selected.finalActionKind === "READY_CREATE_FROM_QB_THEN_CONNECT" ? "Create Account Directory account from QuickBooks" : "Connect to existing Account Directory account") : "Do you mean this customer?"}</h4>
+                {mode === "final" ? (
+                  <dl className="moraware-final-ids">
+                    <div>
+                      <dt>Moraware source_account_id</dt>
+                      <dd>{selected.morawareAccountId}</dd>
+                    </div>
+                    {best.accountId ? (
+                      <div>
+                        <dt>Account Directory UUID</dt>
+                        <dd>{best.accountId}</dd>
+                      </div>
+                    ) : null}
+                    {best.qbListId ? (
+                      <div>
+                        <dt>QuickBooks ListID</dt>
+                        <dd>
+                          {best.qbListId}
+                          {best.qbActive === false ? " · inactive" : " · active"}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                ) : (
+                  <p className="moraware-focus-match-label">Best match</p>
+                )}
                 <p className="moraware-best-name">
                   {best.displayName}
                   {best.qbDisplayName &&
@@ -650,7 +727,7 @@ export function MorawareReviewSurface({
                   {yesLabel}
                 </button>
               ) : null}
-              {best && candidateCount > 0 ? (
+              {best && candidateCount > 0 && mode !== "final" ? (
                 <button type="button" className="btn btn-secondary" disabled={actionBusy} onClick={onNo}>
                   NO — Show next match
                 </button>
@@ -672,7 +749,7 @@ export function MorawareReviewSurface({
                   Search customers
                 </button>
               ) : null}
-              {onCreateDirectoryAccount && canLink && !selected.internalBucket ? (
+              {onCreateDirectoryAccount && canLink && !selected.internalBucket && mode !== "final" ? (
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -711,8 +788,14 @@ export function MorawareReviewSurface({
         </section>
       ) : null}
 
-      {mode === "review" && !busy && remaining === 0 ? (
-        <p className="muted">No unresolved Moraware accounts left in this queue.</p>
+      {(mode === "review" || mode === "final") && !busy && remaining === 0 ? (
+        <p className="muted">
+          {mode === "final"
+            ? queue?.finalActionAvailable === false
+              ? "Final review plan is not loaded on this host. Normal reconciliation remains available."
+              : "No ready final-action items left in this queue."
+            : "No unresolved Moraware accounts left in this queue."}
+        </p>
       ) : null}
 
       {mode === "browse" || mode === "linked" ? (

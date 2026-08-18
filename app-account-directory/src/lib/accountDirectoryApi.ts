@@ -502,6 +502,7 @@ export async function fetchMorawareReconciliation(
     proposedAccountId?: string;
     accountId?: string;
     reviewState?: string;
+    queue?: string;
   },
   init: RequestInit = {}
 ) {
@@ -514,7 +515,8 @@ export async function fetchMorawareReconciliation(
       pageSize: opts.pageSize,
       proposedAccountId: opts.proposedAccountId,
       accountId: opts.accountId,
-      reviewState: opts.reviewState
+      reviewState: opts.reviewState,
+      queue: opts.queue
     })}`,
     token,
     init

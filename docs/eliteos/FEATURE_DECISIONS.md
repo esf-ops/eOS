@@ -4489,3 +4489,14 @@ The ownership boundaries, current repository scaffold, migration/retirement maps
 | **Out of scope** | Global My Follow-ups / All Follow-ups dashboard, recurring, snooze/blocked/in_progress statuses, priority, notifications, email/calendar, AI-generated follow-ups, attachments, mentions, Overview compact next/overdue summary, owner-only edit. |
 | **Impacted** | Account Directory store/API, Account 360 Follow-ups tab, request coordinator, this doc, SYSTEM_BLUEPRINT. |
 
+### 330. Moraware final-action review queue is operator-local, not identity authority (2026-08-18)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-08-18 |
+| **Decision** | The completed Moraware/QB/Account Directory reconciliation action plan is **temporary operator input**. It is not production identity. Canonical identity remains Account Directory UUID + exact QuickBooks ListID + exact Moraware `source_account_id` (Option B). Names are evidence only. Runtime always re-resolves Moraware `source_account_id` from Brain `brain_moraware_accounts` (same latest-`last_seen_at` day set as the existing reconciliation queue). Zero matches, multiple plausible source IDs, or a contradictory current Moraware link → `BLOCKED_MORAWARE_SOURCE_ID` (excluded from the fast queue). Display-name “already linked” is **not** `ALREADY_LINKED` unless the exact current `source_account_id` → AD UUID link exists. If a planned CREATE ListID is already linked to an AD UUID, reclassify to CONNECT that UUID (existing AD wins; no duplicate). |
+| **Execution** | Fast queue is CONNECT then CREATE only. Human YES is mandatory for each new Moraware relationship. CREATE from QuickBooks rechecks the ListID is still unlinked, creates the AD UUID + exact QB link, and **does not** auto-connect Moraware; the same row restages for an explicit YES — CONNECT MORAWARE. No bulk confirm. No QuickBooks writes. No Moraware writes. Non-executable plan classes (`MANUAL_QB_ROOT_SELECTION`, `KEEP_UNRESOLVED`, `IGNORE_LEGACY`, `INTERNAL_BUCKET`, `REVIEW_REQUIRED`) and blocked rows stay out of the fast queue (normal reconciliation views remain). |
+| **Plan loading** | Never ship or default to `local-imports/` CSV. Operator artifact is gitignored JSON. Load only via `ACCOUNT_DIRECTORY_MORAWARE_FINAL_ACTIONS_PATH`, or non-production `ACCOUNT_DIRECTORY_MORAWARE_FINAL_ACTIONS_ALLOW_LOCAL=1`. Do **not** set the path on the production web host. If a deploy would require shipping the CSV or hard-coding customer decisions, do not ship the queue. |
+| **Out of scope** | Bulk link, auto-confirm, new matching system, Account Owner, mutating QuickBooks or Moraware. |
+| **Impacted** | `accountDirectoryMorawareFinalActionQueue`, plan loader, existing Moraware reconciliation GET + Account Directory Moraware review UI, this doc, SYSTEM_BLUEPRINT. |
+
