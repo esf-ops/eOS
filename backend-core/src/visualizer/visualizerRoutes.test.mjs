@@ -46,13 +46,14 @@ assert.equal(VISUALIZER_DISCLAIMER.includes("pricing may vary"), true);
 console.log("ok: prompt + disclaimer");
 
 const entries = loadCatalogEntries();
-assert.equal(entries.length, 14, "catalog JSON should list 14 textures");
-assert.ok(findCatalogTexture("charcoal-vein"));
+assert.equal(entries.length, 11, "catalog JSON should list 11 preview textures (demo materials excluded)");
+assert.ok(findCatalogTexture("carrara-royale"));
+assert.equal(findCatalogTexture("charcoal-vein"), null, "demo charcoal-vein excluded from catalog");
 assert.equal(findCatalogTexture("missing"), null);
 
 const { textures, meta } = listTexturesForApi();
-assert.equal(textures.length, 14, "all 14 texture files should exist on disk");
-assert.equal(meta.totalAvailable, 14);
+assert.equal(textures.length, 11, "all 11 preview texture files should exist on disk");
+assert.equal(meta.totalAvailable, 11);
 assert.ok(meta.groups.includes("Preview Collection"));
 assert.ok(meta.colorFamilies.includes("White"));
 assert.ok(meta.colorFamilies.includes("Beige"));
@@ -209,12 +210,44 @@ assert.ok(built.textures.every((t) => t.fullUrl && t.thumbUrl));
 assert.ok(built.skipped.slab_photo >= 1);
 assert.ok(built.skipped.rejected >= 1);
 
+const leatheredAssets = [
+  ...sampleAssets,
+  {
+    catalog_item_id: "cat-1",
+    product_slug: "carrara-royale--leathered-a",
+    source_color_name: "Carrara Royale - Leathered",
+    texture_url_1024: "https://cdn.example/royale-leathered-1024.jpg",
+    texture_url_600: "https://cdn.example/royale-leathered-600.jpg",
+    asset_kind: "manual_upload",
+    review_status: "approved",
+    is_primary: false,
+    is_active: true,
+    raw: {
+      display_variant: true,
+      variant_key: "leathered-a",
+      finish: "Leathered",
+      proposed_display_name: "Carrara Royale - Leathered",
+      base_catalog_color_name: "Carrara Royale",
+    },
+  },
+];
+const withVariants = buildElite100PublicTextures(sampleCatalog, leatheredAssets);
+assert.equal(withVariants.textures.length, 3, "base + leathered variant should both appear");
+assert.ok(withVariants.textures.some((t) => t.displayName === "Carrara Royale"));
+assert.ok(withVariants.textures.some((t) => t.displayName === "Carrara Royale - Leathered"));
+assert.ok(withVariants.textures.some((t) => t.finish === "Leathered" && t.baseColorName === "Carrara Royale"));
+assert.ok(withVariants.textures.some((t) => t.id.includes("leathered")));
+const bestBase = chooseBestAssetsByCatalogId(leatheredAssets);
+assert.equal(bestBase.get("cat-1")?.texture_url_1024, "https://cdn.example/royale-1024.jpg");
+assert.notEqual(bestBase.get("cat-1")?.product_slug, "carrara-royale--leathered-a");
+
 const forbidden = findForbiddenPublicFields({
-  textures: built.textures,
-  meta: { skippedAssets: built.skipped },
+  textures: withVariants.textures,
+  meta: { skippedAssets: withVariants.skipped },
 });
 assert.equal(forbidden.length, 0, `forbidden fields leaked: ${forbidden.join(", ")}`);
 console.log("ok: elite100 visual asset filter/dedupe");
+console.log("ok: elite100 leathered finish variants emit as distinct textures");
 
 resetPublicMaterialRegistryForTests();
 const staticOnly = await listPublicVisualizerTextures({ getSupabase: () => null });

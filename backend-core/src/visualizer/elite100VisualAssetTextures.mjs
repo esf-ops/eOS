@@ -45,6 +45,66 @@ export function priceGroupCollectionLabel(priceGroup) {
 }
 
 /**
+ * True when asset is a finish/display variant (e.g. leathered) of a base catalog color.
+ * Variants share catalog_item_id with the base color and must not replace the base texture.
+ * @param {object|null|undefined} asset
+ */
+export function isElite100DisplayVariantAsset(asset) {
+  if (!asset) return false;
+  const raw = asset.raw && typeof asset.raw === "object" ? asset.raw : {};
+  if (raw.display_variant === true) return true;
+  if (raw.variant_key) return true;
+  const slug = String(asset.product_slug ?? "");
+  // Manual importer uses `${baseSlug}--${variantKey}` for finish variants.
+  if (slug.includes("--")) return true;
+  return false;
+}
+
+/**
+ * Public-safe finish / label metadata for a display variant asset.
+ * @param {object|null|undefined} asset
+ * @param {object|null|undefined} catalogItem
+ * @returns {{ variantKey: string|null, finish: string|null, displayName: string, slug: string, baseColorName: string }}
+ */
+export function elite100DisplayVariantMeta(asset, catalogItem) {
+  const raw = asset?.raw && typeof asset.raw === "object" ? asset.raw : {};
+  const baseColorName = String(
+    raw.base_catalog_color_name ?? catalogItem?.color_name ?? catalogItem?.display_name ?? "Color",
+  ).trim();
+
+  const variantKey = raw.variant_key
+    ? String(raw.variant_key)
+    : String(asset?.product_slug ?? "").includes("--")
+      ? String(asset.product_slug).split("--").slice(1).join("--")
+      : null;
+
+  const finishRaw = raw.finish ?? (variantKey ? String(variantKey).split("-")[0] : null);
+  const finish = finishRaw ? String(finishRaw).trim() : null;
+  const finishLabel = finish
+    ? finish.charAt(0).toUpperCase() + finish.slice(1).toLowerCase()
+    : null;
+
+  const proposed = String(raw.proposed_display_name ?? asset?.source_color_name ?? "").trim();
+  let displayName = proposed;
+  if (!displayName) {
+    if (finishLabel) displayName = `${baseColorName} - ${finishLabel}`;
+    else displayName = `${baseColorName} - Alternate Finish`;
+  }
+
+  const slug =
+    slugifyVisualizerKey(asset?.product_slug) ||
+    slugifyVisualizerKey(`${baseColorName}-${variantKey || finishLabel || "variant"}`);
+
+  return {
+    variantKey,
+    finish: finishLabel,
+    displayName,
+    slug,
+    baseColorName,
+  };
+}
+
+/**
  * @param {object|null|undefined} asset
  */
 export function scoreElite100VisualAsset(asset) {
@@ -111,7 +171,8 @@ export function skipReasonForAsset(asset) {
 }
 
 /**
- * Choose best asset per catalog_item_id from raw rows.
+ * Choose best *base* (non-variant) asset per catalog_item_id from raw rows.
+ * Finish variants are excluded so they can be emitted as separate texture options.
  * @param {Array<object>} assets
  * @returns {Map<string, object>}
  */
@@ -119,6 +180,7 @@ export function chooseBestAssetsByCatalogId(assets) {
   /** @type {Map<string, { asset: object, score: number }>} */
   const best = new Map();
   for (const asset of Array.isArray(assets) ? assets : []) {
+    if (isElite100DisplayVariantAsset(asset)) continue;
     const catalogId = String(asset.catalog_item_id ?? "").trim();
     if (!catalogId) continue;
     const score = scoreElite100VisualAsset(asset);
@@ -146,12 +208,60 @@ export function chooseBestAssetsByCatalogId(assets) {
 }
 
 /**
+ * Collect eligible finish/display variant assets (deduped by product_slug / variant key).
+ * @param {Array<object>} assets
+ * @returns {object[]}
+ */
+export function collectElite100DisplayVariantAssets(assets) {
+  /** @type {Map<string, { asset: object, score: number }>} */
+  const best = new Map();
+  for (const asset of Array.isArray(assets) ? assets : []) {
+    if (!isElite100DisplayVariantAsset(asset)) continue;
+    if (skipReasonForAsset(asset)) continue;
+    const catalogId = String(asset.catalog_item_id ?? "").trim();
+    if (!catalogId) continue;
+    const raw = asset.raw && typeof asset.raw === "object" ? asset.raw : {};
+    const variantKey = String(raw.variant_key ?? asset.product_slug ?? asset.id ?? "").trim();
+    const dedupeKey = `${catalogId}::${variantKey}`;
+    const score = scoreElite100VisualAsset(asset);
+    if (score <= 0) continue;
+    const prev = best.get(dedupeKey);
+    if (!prev || score > prev.score) {
+      best.set(dedupeKey, { asset, score });
+    }
+  }
+  return [...best.values()].map((e) => e.asset);
+}
+
+/**
  * @param {object} catalogItem
  * @param {object} asset
+ * @param {{ isVariant?: boolean }} [opts]
  */
-export function buildElite100PublicTexture(catalogItem, asset) {
+export function buildElite100PublicTexture(catalogItem, asset, opts = {}) {
   const { fullUrl, thumbUrl } = pickElite100TextureUrls(asset);
   if (!fullUrl || !thumbUrl) return null;
+
+  const isVariant = opts.isVariant === true || isElite100DisplayVariantAsset(asset);
+  const baseColorName = String(catalogItem.color_name ?? catalogItem.display_name ?? "Color").trim();
+
+  if (isVariant) {
+    const meta = elite100DisplayVariantMeta(asset, catalogItem);
+    const id = `e100-${meta.slug || "variant"}`;
+    return {
+      id,
+      slug: meta.slug,
+      displayName: meta.displayName,
+      baseColorName: meta.baseColorName || baseColorName,
+      finish: meta.finish,
+      collection: priceGroupCollectionLabel(catalogItem.price_group),
+      colorFamily: inferColorFamily(meta.baseColorName || baseColorName),
+      patternType: inferPatternType(meta.baseColorName || baseColorName),
+      thumbUrl,
+      fullUrl,
+      source: "elite100_visual_asset",
+    };
+  }
 
   const colorName = String(catalogItem.display_name ?? catalogItem.color_name ?? "Color").trim();
   const slug = slugifyVisualizerKey(
@@ -163,6 +273,8 @@ export function buildElite100PublicTexture(catalogItem, asset) {
     id,
     slug,
     displayName: catalogItem.color_name ?? colorName,
+    baseColorName,
+    finish: null,
     collection: priceGroupCollectionLabel(catalogItem.price_group),
     colorFamily: inferColorFamily(catalogItem.color_name),
     patternType: inferPatternType(catalogItem.color_name),
@@ -223,6 +335,8 @@ export function buildElite100PublicTextures(catalogItems, assets) {
   const bestByCatalog = chooseBestAssetsByCatalogId(assets);
   /** @type {Array<object>} */
   const textures = [];
+  /** @type {Set<string>} */
+  const seenIds = new Set();
 
   for (const [catalogId, asset] of bestByCatalog.entries()) {
     const catalogItem = catalogById.get(catalogId);
@@ -230,11 +344,36 @@ export function buildElite100PublicTextures(catalogItems, assets) {
       bump("missing_catalog_item");
       continue;
     }
-    const row = buildElite100PublicTexture(catalogItem, asset);
+    const row = buildElite100PublicTexture(catalogItem, asset, { isVariant: false });
     if (!row) {
       bump("missing_url");
       continue;
     }
+    if (seenIds.has(row.id)) {
+      bump("duplicate_texture_id");
+      continue;
+    }
+    seenIds.add(row.id);
+    textures.push(row);
+  }
+
+  for (const asset of collectElite100DisplayVariantAssets(assets)) {
+    const catalogId = String(asset.catalog_item_id ?? "").trim();
+    const catalogItem = catalogById.get(catalogId);
+    if (!catalogItem) {
+      bump("missing_catalog_item");
+      continue;
+    }
+    const row = buildElite100PublicTexture(catalogItem, asset, { isVariant: true });
+    if (!row) {
+      bump("missing_url");
+      continue;
+    }
+    if (seenIds.has(row.id)) {
+      bump("duplicate_texture_id");
+      continue;
+    }
+    seenIds.add(row.id);
     textures.push(row);
   }
 

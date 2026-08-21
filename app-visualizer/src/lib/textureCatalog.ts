@@ -19,6 +19,8 @@ export type VisualizerTexture = {
   slug: string;
   name: string;
   displayName: string;
+  /** Base Elite 100 color name when this option is a finish variant. */
+  baseColorName?: string | null;
   collection?: string | null;
   group: string | null;
   colorFamily: string | null;
@@ -110,7 +112,7 @@ export function filterTextures(textures: VisualizerTexture[], filters: TextureFi
       return false;
     }
     if (!q) return true;
-    const hay = `${t.displayName} ${t.colorFamily ?? ""} ${t.patternType ?? ""} ${t.finish ?? ""}`.toLowerCase();
+    const hay = `${t.displayName} ${t.baseColorName ?? ""} ${t.colorFamily ?? ""} ${t.patternType ?? ""} ${t.finish ?? ""}`.toLowerCase();
     return hay.includes(q);
   });
 }
@@ -124,6 +126,7 @@ export function mergeApiTextures(apiTextures: VisualizerTexture[]): VisualizerTe
       slug: t.slug,
       name: t.name ?? t.displayName,
       displayName: t.displayName,
+      baseColorName: t.baseColorName ?? null,
       collection: t.collection ?? t.group ?? null,
       group: t.group ?? t.collection ?? null,
       colorFamily: t.colorFamily ?? localById.get(t.id)?.colorFamily ?? null,

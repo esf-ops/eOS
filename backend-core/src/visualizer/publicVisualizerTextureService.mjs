@@ -83,7 +83,7 @@ export async function fetchElite100CatalogAndAssets(supabase, organizationId) {
     const { data: assets, error: assetErr } = await supabase
       .from("slab_color_visual_assets")
       .select(
-        "catalog_item_id,texture_url_600,texture_url_1024,hero_url,original_image_url,asset_kind,review_status,is_primary,is_active,product_slug,source_color_name",
+        "catalog_item_id,texture_url_600,texture_url_1024,hero_url,original_image_url,asset_kind,review_status,is_primary,is_active,product_slug,source_color_name,raw",
       )
       .eq("organization_id", organizationId)
       .eq("is_active", true)
