@@ -218,6 +218,7 @@ export const ELITE100_PHOTO_FILENAME_COLOR_ALIASES = Object.freeze([
   { source_color_name: "Calacatta Athena", catalog_color_name: "Athena" },
   { source_color_name: "Aura Taj", catalog_color_name: "Aurataj" },
   { source_color_name: "Granda Beige", catalog_color_name: "Granada Beige" },
+  { source_color_name: "Delgatie", catalog_color_name: "Delgatie Satin" },
 ]);
 
 /**

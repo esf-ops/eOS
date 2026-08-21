@@ -511,6 +511,14 @@ test("duplicate base files skip when color already has primary asset", () => {
   }
 });
 
+test("Delgatie filename alias resolves to Delgatie Satin catalog color", () => {
+  const m = matchPhotoToCatalogItem("7. Delgatie_07.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.matchMethod, "photo_filename_alias");
+  assert.equal(m.catalogItem.color_name, "Delgatie Satin");
+  assert.equal(m.parsed.globalIndex, 7);
+});
+
 test("Calacatta Athena filename alias resolves to Athena catalog color", () => {
   const m = matchPhotoToCatalogItem("20. Calacatta_Athena_20.jpg", fullCatalog, flat);
   assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
