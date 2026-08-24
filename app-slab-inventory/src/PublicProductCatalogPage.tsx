@@ -17,8 +17,8 @@ import {
   isKioskOrArreyaMode,
   parsePublicCatalogTabQuery,
   publicCatalogTabQueryValue,
+  publicProductsProgramsLandingUrl,
 } from "./lib/publicProductCatalogRoute";
-import { PUBLIC_SHOWER_PROGRAM_PATH } from "./lib/publicShowerProgramRoute";
 import {
   ProductCatalogCard,
   ProductCatalogModal,
@@ -50,9 +50,9 @@ function readInitialCategory(tabs: ProductCatalogCategory[]): ProductCatalogCate
 export default function PublicProductCatalogPage({
   lockedCategory,
   hideCategoryTabs = false,
-  pageTitle = "Products & Programs",
-  pageSubtitle = "Explore sinks, faucets, shower systems, and accessories.",
-  metaDescription = "Elite Stone Fabrication products and programs — sinks, faucets, shower systems, and accessories.",
+  pageTitle = "Fixtures & Accessories",
+  pageSubtitle = "Browse sinks, faucets, and specialty items.",
+  metaDescription = "Elite Stone Fabrication fixtures and accessories — sinks, faucets, and specialty items showroom.",
   rootClassName,
 }: PublicProductCatalogPageProps = {}) {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
@@ -73,7 +73,7 @@ export default function PublicProductCatalogPage({
   useEffect(() => {
     document.title = lockedCategory === "faucet"
       ? "Faucets · Elite Stone Fabrication"
-      : "Products & Programs · Elite Stone Fabrication";
+      : "Fixtures & Accessories · Elite Stone Fabrication";
 
     let meta = document.querySelector('meta[name="robots"]');
     if (!meta) {
@@ -146,44 +146,29 @@ export default function PublicProductCatalogPage({
   return (
     <div className={rootClass}>
       <header className="pc-public-header">
-        <div className="pc-public-brand">
-          {EOS_LOGO_URL ? (
-            <img src={EOS_LOGO_URL} alt="" className="pc-public-logo" />
-          ) : (
-            <span className="pc-public-logo-mark" aria-hidden>ESF</span>
-          )}
-          <div className="pc-public-brand-text">
-            <h1 className="pc-public-title">{pageTitle}</h1>
-            <p className="pc-public-subtitle">{pageSubtitle}</p>
+        <div className="pc-public-header-row">
+          <div className="pc-public-brand">
+            {EOS_LOGO_URL ? (
+              <img src={EOS_LOGO_URL} alt="" className="pc-public-logo" />
+            ) : (
+              <span className="pc-public-logo-mark" aria-hidden>ESF</span>
+            )}
+            <div className="pc-public-brand-text">
+              <h1 className="pc-public-title">{pageTitle}</h1>
+              <p className="pc-public-subtitle">{pageSubtitle}</p>
+            </div>
           </div>
+          {kiosk && !lockedCategory ? (
+            <nav className="pp-catalog-nav" aria-label="Catalog navigation">
+              <a href={publicProductsProgramsLandingUrl(true)} className="pp-catalog-back">
+                ← Products & Programs
+              </a>
+            </nav>
+          ) : null}
         </div>
       </header>
 
       <main className="pc-public-main">
-        {!lockedCategory && !hideCategoryTabs ? (
-          <section className="pc-programs-strip" aria-label="Programs">
-            <a
-              href={`${PUBLIC_SHOWER_PROGRAM_PATH}${kiosk ? "?kiosk=1" : ""}`}
-              className="pc-program-card pc-program-card--shower"
-            >
-              <div className="pc-program-card-copy">
-                <p className="pc-program-eyebrow">Shower Program</p>
-                <h2 className="pc-program-title">The Groutless Stone Shower</h2>
-                <p className="pc-program-body">
-                  Stocked bases, curated wall surfaces, and real ESF installations.
-                </p>
-                <span className="pc-program-cta">Explore Shower Program →</span>
-              </div>
-              <img
-                src="/shower-program/inspiration/pro-veMrdtPQ.jpeg"
-                alt=""
-                className="pc-program-card-img"
-                loading="lazy"
-              />
-            </a>
-          </section>
-        ) : null}
-
         {!hideCategoryTabs ? (
           <nav className="pc-tab-bar pc-public-tabs" aria-label="Product categories">
             {tabs.map((cat) => (

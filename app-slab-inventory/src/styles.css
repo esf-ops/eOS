@@ -4481,6 +4481,43 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   backdrop-filter: blur(8px);
 }
 
+.pc-public-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.pc-public-header-row .pc-public-brand {
+  max-width: none;
+  margin: 0;
+  min-width: 0;
+}
+
+.pp-catalog-nav {
+  flex-shrink: 0;
+}
+
+.pp-catalog-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--eos-line);
+  background: #fff;
+  color: var(--eos-ink);
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pp-catalog-back:active {
+  background: #f4f6f9;
+}
+
 .pc-public-brand {
   display: flex;
   align-items: center;
@@ -6825,6 +6862,144 @@ body.cambria-kiosk-body {
   .sp-detail-list div {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .pc-public-header-row {
+    flex-direction: column;
+  }
+}
+
+/* ── Products & Programs landing (two-card chooser) ─────────────────────── */
+
+.pp-landing-main {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.pp-landing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(16px, 2.5vw, 24px);
+  width: 100%;
+}
+
+.pp-landing-card {
+  display: flex;
+  flex-direction: column;
+  min-height: clamp(280px, 36vh, 420px);
+  border-radius: 20px;
+  border: 1.5px solid var(--eos-line);
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+  text-decoration: none;
+  color: inherit;
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pp-landing-card:active {
+  transform: scale(0.995);
+}
+
+.pp-landing-card-media {
+  flex: 1 1 auto;
+  min-height: clamp(140px, 22vh, 220px);
+  background: #f4f6f9;
+}
+
+.pp-landing-card-media--fixtures {
+  display: grid;
+  grid-template-columns: 1.15fr 1px 0.85fr;
+  align-items: stretch;
+}
+
+.pp-fixtures-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: #fff;
+}
+
+.pp-fixtures-panel--sinks {
+  background: #f7f7f5;
+}
+
+.pp-fixtures-divider {
+  width: 1px;
+  background: var(--eos-line);
+}
+
+.pp-fixtures-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.pp-landing-card-media--shower {
+  display: flex;
+  align-items: stretch;
+}
+
+.pp-landing-shower-img {
+  width: 100%;
+  height: 100%;
+  min-height: clamp(140px, 22vh, 220px);
+  object-fit: cover;
+}
+
+.pp-landing-card-body {
+  padding: clamp(18px, 2.5vw, 26px);
+  border-top: 1px solid var(--eos-line);
+  background: #fff;
+}
+
+.pp-landing-card-title {
+  margin: 0 0 8px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.25rem, 2.2vw, 1.65rem);
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.pp-landing-card-copy {
+  margin: 0 0 12px;
+  color: var(--eos-ink-mid);
+  font-size: clamp(0.95rem, 1.4vw, 1.05rem);
+  line-height: 1.5;
+}
+
+.pp-landing-card-cta {
+  font-weight: 700;
+  color: var(--eos-red, #c8102e);
+  font-size: 0.95rem;
+}
+
+.pp-landing-kiosk .pp-landing-grid {
+  gap: clamp(20px, 3vw, 28px);
+}
+
+.pp-landing-kiosk .pp-landing-card {
+  min-height: clamp(320px, 40vh, 480px);
+}
+
+.pp-landing-kiosk .pp-landing-card-title {
+  font-size: clamp(1.45rem, 2.8vw, 2rem);
+}
+
+.pp-landing-kiosk .pp-landing-card-copy {
+  font-size: clamp(1rem, 1.6vw, 1.15rem);
+}
+
+.pp-landing-kiosk .pp-catalog-back {
+  min-height: 52px;
+  font-size: 1.05rem;
+}
+
+@media (max-width: 900px) {
+  .pp-landing-grid {
+    grid-template-columns: 1fr;
   }
 }
 

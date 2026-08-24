@@ -7,7 +7,8 @@ import PublicElite100Page from "./PublicElite100Page";
 import PublicCambriaPage from "./PublicCambriaPage";
 import PublicFaucetsPage from "./PublicFaucetsPage";
 import PublicShowerProgramPage from "./PublicShowerProgramPage";
-import { isPublicProductCatalogPath } from "./lib/publicProductCatalogRoute";
+import PublicProductsProgramsPage from "./PublicProductsProgramsPage";
+import { isPublicProductCatalogPath, isPublicProductsProgramsLandingPath } from "./lib/publicProductCatalogRoute";
 import { isPublicProductCatalogInfoPath } from "./lib/productCatalogDocuments";
 import { isPublicElite100Path } from "./lib/publicElite100Route";
 import { isPublicCambriaPath } from "./lib/publicCambriaRoute";
@@ -18,6 +19,9 @@ import "./styles.css";
 function AppRoot() {
   if (isPublicProductCatalogInfoPath()) {
     return <PublicProductCatalogInfoPage />;
+  }
+  if (isPublicProductsProgramsLandingPath()) {
+    return <PublicProductsProgramsPage />;
   }
   if (isPublicProductCatalogPath()) {
     return <PublicProductCatalogPage />;

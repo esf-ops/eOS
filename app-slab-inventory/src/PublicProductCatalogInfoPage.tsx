@@ -30,7 +30,7 @@ export default function PublicProductCatalogInfoPage() {
 
   const goBackToCatalog = () => {
     const url = new URL(window.location.href);
-    url.pathname = "/public/product-catalog";
+    url.pathname = "/public/product-catalog/fixtures";
     // keep kiosk/arreya flags
     window.location.assign(url.toString());
   };
